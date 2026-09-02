@@ -4260,6 +4260,14 @@ a.viewer-actions__btn {
   font-size: 10px;
   color: var(--text-muted);
 }
+/*
+ * Element-qualified, because this class is worn by two different things: a line under a field,
+ * which wants to sit against it, and the sign-in status *inside* a flex actions row, where a
+ * bottom margin would lift it off the centre line it shares with the button beside it.
+ */
+p.sources__hint {
+  margin: -2px 0 10px;
+}
 .sources__hint code {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -4313,6 +4321,33 @@ a.viewer-actions__btn {
 .sources__row .sources__field:last-of-type {
   margin-bottom: 6px;
 }
+/*
+ * The `?` that holds a row's explanation.
+ *
+ * Small and quiet on purpose: it sits at the end of a sentence, so anything with weight would
+ * read as punctuation somebody meant. `cursor: help` is the affordance — there is nothing to
+ * click, and a pointer promising a navigation that never happens is worse than no promise.
+ */
+.sources__why {
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  margin-left: 4px;
+  vertical-align: 1px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1;
+  cursor: help;
+}
+.sources__why:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
 .sources__more {
   margin: 0 0 8px;
 }

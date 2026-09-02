@@ -242,6 +242,35 @@ times smaller. `synapseTotalsCypher` therefore falls back `coalesce(n.upstream, 
 incoming side, where the two are measured equal, and has deliberately **no** fallback on the
 outgoing one.
 
+### Why there is no neuPrint sign-in, where CAVE has one
+
+Both services log their users in with Google, and only one of them can hand a token to a page
+nobody registered. Recorded here because the obvious reading — "we did CAVE, do the same for
+neuPrint" — costs a day before it hits the wall.
+
+neuPrint moved to Janelia's **DatasetGateway** in August 2026 (`neuprint.janelia.org/login` now
+redirects to `dataset-gateway.janelia.org/api/v1/authorize`, and `/api/serverinfo` carries an
+announcement saying every token issued before it stopped working). DSG's browser auth is
+modelled on middle_auth's and keeps its endpoint names, but not the part that matters:
+
+  - `REDIRECT_ALLOWED_DOMAIN = "janelia.org"` in `dsg/cave_api/oauth_views.py`, and
+    `validate_redirect_url` silently rewrites anything else to `/`. So a return URL on Coda's
+    origin is not refused, it is *ignored*.
+  - There is no `postMessage` delivery at all. The token is never in the redirect either — the
+    callback sets it as an `HttpOnly`, `SameSite=Lax` `dsg_token` cookie on the janelia.org
+    origin and redirects with nothing in the URL.
+  - `neuprint.janelia.org` answers `Access-Control-Allow-Origin: *` with no
+    `Access-Control-Allow-Credentials`, so its `/token` endpoint — which would read that cookie
+    — cannot be called with credentials cross-origin even if the cookie were `SameSite=None`.
+
+Three independent closures, so this is not a gap to work around from the client. What would open
+it is a change to DatasetGateway itself, which is public: an origin-allowlisted `postMessage`
+delivery on the authorize flow, tightened rather than copied — `dsg/core/origins.py` already
+holds the origin validation such a thing would use. Widening the redirect domain alone does
+**not** work, because DSG puts no token in the redirect.
+
+Until then neuPrint stays paste, and the paste field's help says where to get one.
+
 ## CAVE
 
 `src/data/cave/`, and the second backend. FlyWire and everything else served by CAVE — the
@@ -253,6 +282,101 @@ ones are.
 **Everything below was probed live against `global.daf-apis.com` and `prod.flywire-daf.com`
 rather than recalled**, and `live.test.ts` is that pass institutionalised — skipped without
 `CAVE_TOKEN`, the standing `scripts/check-export.py` has when navis is absent.
+
+### Signing in, and why a static page can
+
+`data/cave/oauth.ts` plus `ui/panels/caveSignIn.ts`. CAVE's auth is seung-lab's `middle_auth`,
+and it answers the question a page with no server has to ask: **how do you get a token without a
+client secret and without an origin somebody had to approve?** The answer is that middle_auth is
+itself the OAuth client — it holds Google's secret, it owns the redirect URI — and its callback
+page hands the result to whoever opened the window:
+
+```
+window.opener.postMessage({token, app_urls}, "*")
+```
+
+There is no allowlist on that `"*"`. So the flow works from `localhost`, from a Pages deploy and
+from a fork, with nothing registered and nothing to ship. Neuroglancer, a static app in the same
+position, does exactly this; the shape below is its shape.
+
+Measured live, September 2026, and each one decides a line of code:
+
+  - **The prefix is per deployment.** `global.daf-apis.com` serves middle_auth under
+    `/sticky_auth` — `/auth/api/v1/authorize` is a 404 there, while `/auth/api/v1/create_token`
+    redirects into `/sticky_auth/…`, which is why the panel's long-standing help link still
+    works and reading a path off it would not. So the prefix is read from `GET {server}/auth_info`
+    (`{"login_url": "…/sticky_auth"}`, `ACAO: *`, no token needed), never assumed. A 401's
+    `WWW-Authenticate` realm names the same URL and is exposed cross-origin, so there is a second
+    source — deliberately unused, because signing in must be reachable *before* anything fails.
+  - **Every auth endpoint reflects an arbitrary `Origin`** with `Access-Control-Allow-Credentials`
+    and `WWW-Authenticate` exposed. Confirmed with a preflight from a github.io origin. That is
+    what makes `fetchIdentity` a plain cross-origin GET.
+  - **What comes back is a login token, not an API key**, and middle_auth issues those with a
+    seven-day life (`DEFAULT_LOGIN_TOKEN_DURATION`). Coda stores it as it arrives and signs in
+    again when it is refused. The alternative was `create_token`, which mints a key that never
+    expires: a permanent credential in `localStorage`, and a row on the user's CAVE account that
+    Coda would then own. Nothing is created on their account by signing in here.
+
+**The failure modes are the feature.** The happy path is nine lines; the rest of
+`caveSignIn.ts` is that a login window has four ways to end and three are silent.
+
+  1. **The browser refuses to open it.** `window.open` answers `null`, which is not an error
+     anywhere. Hence also the ordering: the popup is opened on `about:blank` *first* and
+     navigated after `auth_info` lands, because a window opened after an `await` is no longer
+     inside the click that asked for it and is blocked.
+  2. **The user closes it.** Nothing is raised and the promise would never settle, so the handle
+     is polled — the same answer neuroglancer's `monitorAuthPopupWindow` reaches.
+  3. **The flow ends somewhere that posts nothing.** middle_auth delivers from its callback
+     page, and three exits never reach it: a missing session cookie ("Invalid Request, are
+     third-party cookies enabled?"), a state that has expired, and an OAuth error — each renders
+     a page and stops. At the moment it happens this is indistinguishable from (2), so the
+     closed-window message names it, and it is part of why the paste field stays on the panel.
+  **What is *not* a dead end, though it was written up as one.** A **first-ever login** is
+  diverted to a "choose a username" form before it finishes — and that form delivers: it posts
+  back to a URL still carrying `new_account=true`, and `register_choose_username_post` sets
+  `template_name = None` for precisely that case ("don't show template during new account flow"),
+  so the flow falls through `maybe_handle_tos` to the `postMessage`. Signing in also *creates*
+  the account, into the group literally named `default`; what that group may read is deployment
+  data, so the realistic first-run failure is a 403 on a datastack **after** a sign-in that
+  worked, not a sign-in that hangs. A pending terms-of-service is not a dead end here either:
+  that diversion fires only when `/authorize` is called with an explicit `tos_id`, which Coda
+  never passes. Both were read as dead ends on the first pass and the shipped copy said so; the
+  message a user sees was corrected to name the error pages instead.
+
+  4. **Something else posts a message.** `"*"` cuts both ways. Two checks, neither sufficient
+     alone: the event's `source` must be the window we opened (identity survives the navigation
+     through Google), and its `origin` must be the service discovered *before* it was opened.
+     `readAuthMessage` is the third check, and it is not decoration — middle_auth's TOS
+     acceptance posts the bare string `"success"`, which stored as a credential gives somebody a
+     session that fails on its first query with nothing to say why.
+
+Two smaller decisions. A sign-in **commits**, where everything else in that dialog is a draft
+until Save: the user has already confirmed it at Google in a window of its own, and leaving the
+result unsaved in a textarea means closing the panel undoes the ceremony they just completed. And
+what is stored beside the token is a **label, not an expiry** — the account it was issued to, and
+the date. The seven days is a server-side default no response states, so a countdown computed
+from a copied constant would keep claiming a token was good after the deployment shortened it;
+the 401 is the only thing that knows. The account is worth the extra request because a token is
+32 characters that look like every other token, and one person's CAVE account and neuPrint
+account are routinely two different Google identities.
+
+**What the panel does with it.** Three arrangements, and each replaced something that had grown
+wrong. The tab is **one line per point with the paragraph on a `?`** (`Why`, a `title` — the
+tooltip every other explain-this in this app already uses), because four paragraphs of copy in
+front of a button somebody was going to press anyway *is* the interface, and it was this feature
+that pushed it over. The paste field sits behind a **disclosure** — still reachable, since the
+two arms above are the only way to meet it, but no longer the first thing on the tab. And the
+**alert that opened the panel is dismissed by the tab that answered it**: "No CAVE token" is a
+fact about the moment it opened, so leaving it above a tab now reading "Signed in as …" is the
+dialog contradicting itself. `Dialog` holds the reason in state and `onResolved` carries the
+*tab's* id, because two sources fail independently and answering neuPrint must not clear a
+warning about CAVE — a new failure re-states it either way.
+
+The split follows invariant 1. `data/cave/oauth.ts` is what is true about CAVE — where a
+deployment logs in, what counts as a token arriving, whose it is — and holds no reference to a
+window; `ui/panels/caveSignIn.ts` is what is true about a browser. Nothing in the second is
+reachable from jsdom, so `openWindow` is a seam and the gesture itself was walked in a real
+browser against `global.daf-apis.com`.
 
 ### neuPrint is queried; CAVE is downloaded
 

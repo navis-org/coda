@@ -370,6 +370,26 @@ Area-specific — the rule, then the doc that holds why:
   **volume**, not the mesh directory: `optic-lobe:v1.1` keeps its meshes in a sibling, so the mesh
   answer looks one level too deep and concludes there are no skeletons.
   See [docs/backends.md](docs/backends.md) and [docs/nodes.md](docs/nodes.md).
+- **A CAVE sign-in is a popup and a `postMessage`, and every hard part is a silent ending.**
+  `middle_auth` is itself the OAuth client — it holds Google's secret and owns the redirect URI —
+  so its callback page posts `{token, app_urls}` to `window.opener` with target origin `"*"`:
+  nothing to register, no secret to ship, and a static deploy can therefore sign somebody in.
+  Neuroglancer does the same. Four consequences. The login prefix is **read from `/auth_info`**
+  and never assumed — `global.daf-apis.com` serves middle_auth under `/sticky_auth`, where
+  `/auth/api/v1/authorize` is a 404. The window is opened **blank, before** the lookup that points
+  it, because one opened after an `await` is outside the click and gets blocked. A message is a
+  token only when `source` is the window we opened **and** `origin` is the service discovered
+  before opening it — the terms-of-service arm posts the bare string `"success"`, and `"*"` cuts
+  both ways. And **the paste field stays**, for the exits that hand nothing back — a blocked
+  pop-up, and middle_auth's own error pages (no session cookie, expired state, OAuth error). A
+  **first login is not one of them**: it is diverted to a "choose a username" form that *does*
+  deliver, and it creates the account as it goes, so the first-run failure to expect is a 403 on
+  a datastack after a sign-in that worked. That pair was documented backwards once, in the copy a
+  user reads. What is stored is the seven-day login token plus a **label, not an expiry** — the 401 is the only thing
+  that knows, and `create_token` would instead put a permanent credential in `localStorage` and a
+  row on the user's CAVE account. **neuPrint cannot do any of this**, which is a fact about
+  DatasetGateway rather than a gap to work around: `REDIRECT_ALLOWED_DOMAIN` is `janelia.org` and
+  the token is delivered as an `HttpOnly` cookie. See [docs/backends.md](docs/backends.md).
 - **CAVE's row cap is a per-deployment number, and a reference table has no root id.**
   `CAVE_MAX_ROWS` is one server's `QUERY_LIMIT_SIZE`, so truncation is tested against the
   server's own `COUNT` (`countTable`), never the constant and never with `>=`. A

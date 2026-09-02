@@ -15,6 +15,17 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+/*
+ * The one thing in this dialog that cannot happen in jsdom: a sign-in is a popup and a
+ * cross-document message, and neither exists here. What is under test is not that flow — it has
+ * its own suite — but what the *panel* does when it lands, so the flow is stood in for.
+ */
+const signIn = vi.hoisted(() => ({ toCave: vi.fn() }))
+vi.mock('./caveSignIn', async (importOriginal) => ({
+  ...(await importOriginal<typeof CaveSignIn>()),
+  signInToCave: signIn.toCave,
+}))
+
 import {
   reportAuthFailure as reportAiAuthFailure,
   resetCredentials as resetAiCredentials,
@@ -39,6 +50,7 @@ import { registerSource } from '../../data/source'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { useGraphStore } from '../../store/graphStore'
 import { setTourHandle } from '../tour/tourState'
+import type * as CaveSignIn from './caveSignIn'
 import { SourcesPanel } from './SourcesPanel'
 
 beforeAll(() => {
@@ -77,6 +89,20 @@ const section = (name: string) =>
 const keyField = () => screen.queryByLabelText('API key')
 const tokenField = () => screen.queryByRole('textbox', { name: /Token/ })
 const privacy = () => document.querySelector('.sources__privacy')
+/*
+ * Everything the promise says — the line on screen plus what its `?` holds.
+ *
+ * The panel's copy moved behind `?` buttons when four paragraphs of it turned out to be the
+ * first thing between a reader and the button they came to press. These tests are about which
+ * claims are *made*, not where they render (`is above the tabs` is the one that pins position),
+ * so they read both halves. It matters most for the negative ones: "does not claim a proxy" has
+ * to keep meaning "nowhere in this section", tooltip included.
+ */
+const promise = () => {
+  const el = privacy()
+  const behind = el?.querySelector('.sources__why')?.getAttribute('title') ?? ''
+  return `${el?.textContent ?? ''} ${behind}`
+}
 
 describe('source tabs', () => {
   it('shows one tab per source and opens on neuPrint', () => {
@@ -138,6 +164,77 @@ describe('source tabs', () => {
     expect(screen.getByText(/global.daf-apis.com/)).not.toBeNull()
   })
 
+  /*
+   * Signing in is what the CAVE tab leads with now, and the field beneath it is not a leftover:
+   * a pop-up the browser blocks and middle_auth's own error pages both end a sign-in with
+   * nothing handed back, and anybody already using CAVE from Python has a token to paste.
+   */
+  it('leads with a CAVE sign-in and folds the paste field behind a toggle', () => {
+    render(<SourcesPanel />)
+    open()
+    fireEvent.click(tab('CAVE'))
+
+    expect(screen.getByRole('button', { name: 'Sign in with Google' })).not.toBeNull()
+    // Still there — a sign-in has exits that hand nothing back — but closed, since it is the
+    // second way in rather than the only one.
+    const disclosure = tokenField()?.closest('details')
+    expect(disclosure?.open).toBe(false)
+    expect(within(disclosure!).getByText(/paste a token manually/)).not.toBeNull()
+  })
+
+  /*
+   * The copy was the interface: four paragraphs to get past to reach a button you were going to
+   * press anyway. What keeps that from growing back is that the explanations have somewhere else
+   * to be — so this asserts both halves, that the paragraph is *not* on screen and that it is
+   * still reachable.
+   */
+  it('keeps the CAVE explanations on the ? rather than in the panel', () => {
+    render(<SourcesPanel />)
+    open()
+    fireEvent.click(tab('CAVE'))
+
+    expect(screen.getByRole('tabpanel').textContent).not.toMatch(/never sees your password/)
+    expect(screen.getByLabelText(/never sees your password/)).not.toBeNull()
+  })
+
+  /*
+   * The alert that opened the panel is a fact about the moment it opened, and the panel exists
+   * to make it false. Leaving "No CAVE token" above a tab that now says "Signed in as …" is the
+   * dialog contradicting itself.
+   */
+  it('drops the "no token" alert once a sign-in lands', async () => {
+    signIn.toCave.mockResolvedValue({ token: 'tok-1', email: 'a@example.org' })
+    // The confirmation probe that follows: it has no bearing on the alert, and a real request
+    // from a test that is not about one is worse than a refused one.
+    vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')))
+    render(<SourcesPanel />)
+
+    act(() => reportCaveAuthFailure('No CAVE token. Add one in Connections.'))
+    expect(screen.getByText(/No CAVE token/)).not.toBeNull()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in with Google' }))
+    })
+
+    expect(screen.queryByText(/No CAVE token/)).toBeNull()
+    expect(screen.getByRole('tabpanel').textContent).toMatch(/Signed in as a@example.org/)
+  })
+
+  it('leaves an alert about another source standing', async () => {
+    signIn.toCave.mockResolvedValue({ token: 'tok-1' })
+    vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')))
+    render(<SourcesPanel />)
+
+    act(() => reportAuthFailure('neuPrint rejected the token (401)'))
+    fireEvent.click(tab('CAVE'))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in with Google' }))
+    })
+
+    // Two sources fail independently: answering one says nothing about the other.
+    expect(screen.getByText(/neuPrint rejected the token/)).not.toBeNull()
+  })
+
   it('opens itself on an auth failure', () => {
     render(<SourcesPanel />)
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -180,10 +277,13 @@ describe('the credential promise', () => {
     render(<SourcesPanel />)
     open()
 
-    const text = privacy()?.textContent ?? ''
+    const text = promise()
     expect(text).toMatch(/local storage/i)
     expect(text).toMatch(/never written into a saved graph/i)
     expect(text).toMatch(/third party/i)
+    // The headline itself stays on screen: a promise entirely behind a tooltip is one nobody
+    // reading the panel has been told.
+    expect(privacy()?.textContent ?? '').toMatch(/stay in this browser/i)
   })
 
   it('is above the tabs, so it is read before a source is chosen', () => {
@@ -347,11 +447,11 @@ describe('what each half promises about a credential', () => {
      */
     render(<SourcesPanel />)
     open()
-    const forData = privacy()?.textContent ?? ''
+    const forData = promise()
     expect(forData).toMatch(/same-origin (relay|proxy)/i)
 
     fireEvent.click(section('AI assistant'))
-    const forAi = privacy()?.textContent ?? ''
+    const forAi = promise()
     expect(forAi).not.toMatch(/proxy/i)
     expect(forAi).toMatch(/straight from this page/i)
   })
@@ -362,6 +462,7 @@ describe('what each half promises about a credential', () => {
     open()
     fireEvent.click(section('AI assistant'))
 
+    // On screen rather than behind the `?`, deliberately: see the section's own comment.
     expect(privacy()?.textContent ?? '').toMatch(/graph on your canvas/i)
   })
 
@@ -467,7 +568,7 @@ describe('choosing a provider', () => {
     render(<SourcesPanel />)
     openAi()
 
-    const text = privacy()?.textContent ?? ''
+    const text = promise()
     expect(text).not.toMatch(/\bAnthropic\b/)
     expect(text).toMatch(/sends nothing off the machine/i)
   })
@@ -706,7 +807,7 @@ describe('the CATMAID tab', () => {
   it('starts empty and says reading still works without a credential', () => {
     openCatmaid()
     expect(screen.queryAllByLabelText('Server')).toHaveLength(0)
-    expect(screen.getByText(/No instances configured/)).toBeTruthy()
+    expect(screen.getByText(/None configured/)).toBeTruthy()
   })
 
   it('adds a row prefilled with the instance Coda ships a node for', () => {

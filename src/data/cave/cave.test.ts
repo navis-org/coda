@@ -44,6 +44,7 @@ import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { MESH_WARN_NEURONS, decimateGridFor, fragmentConcurrencyFor } from './meshes'
 import { quoteWideIntegers, parseCaveJson } from './json'
 import {
+  getSession,
   reportAuthFailure,
   resetCredentials,
   setToken,
@@ -1579,6 +1580,27 @@ describe('credentials', () => {
     // verified live, and the whole reason this channel works at all.
     expect(seen).toHaveLength(1)
     stop()
+  })
+
+  /*
+   * A sign-in's only visible difference from a paste is the label it carries, and the label is
+   * how somebody sees they signed in with the wrong one of two Google accounts. So the half
+   * worth pinning is the *clearing*: a token typed into the field must not inherit the last
+   * sign-in's address, which would put a name on a credential that is not that account's.
+   */
+  it('labels a token that was signed in for, and drops the label when one is pasted', () => {
+    resetCredentials()
+    expect(getSession()).toBeUndefined()
+
+    setToken('signed-in', { email: 'a@example.org', at: 1_700_000_000_000 })
+    expect(getSession()).toEqual({ email: 'a@example.org', at: 1_700_000_000_000 })
+
+    setToken('pasted-by-hand')
+    expect(getSession()).toBeUndefined()
+
+    setToken('signed-in-again', { at: 2 })
+    setToken(undefined)
+    expect(getSession()).toBeUndefined()
   })
 
   it('explains a validator refusal rather than printing its JSON at somebody', async () => {

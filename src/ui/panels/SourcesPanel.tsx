@@ -70,11 +70,13 @@ import { listDatastacks } from '../../data/cave/api'
 import {
   DEFAULT_CAVE_SERVER,
   getServer as getCaveServer,
+  getSession as getCaveSession,
   getToken as getCaveToken,
   setServer as setCaveServer,
   setToken as setCaveToken,
   subscribeAuthFailure as subscribeCaveAuthFailure,
 } from '../../data/cave/credentials'
+import { CaveSignInError, signInToCave } from './caveSignIn'
 import { fetchDatasets, forgetRoutes } from '../../data/neuprint/client'
 import {
   forgetToken,
@@ -157,7 +159,7 @@ interface SourceTab {
    * Deliberately not the whole `SectionProps`: a tab has no business reading `tabId`/`setTabId`,
    * which are the bar's own state and belong to the thing drawing it.
    */
-  render: (props: SourceTabProps & { onClose: () => void }) => ReactNode
+  render: (props: SourceTabProps & { onClose: () => void; onResolved: () => void }) => ReactNode
   /**
    * The auth-failure channel for *this* tab's credential store.
    *
@@ -182,7 +184,7 @@ const SOURCE_TABS: readonly [SourceTab, ...SourceTab[]] = [
   {
     id: 'cave',
     label: 'CAVE',
-    render: ({ onClose }) => <CaveTab onSaved={onClose} />,
+    render: ({ onClose, onResolved }) => <CaveTab onSaved={onClose} onResolved={onResolved} />,
     subscribe: subscribeCaveAuthFailure,
   },
   {
@@ -297,6 +299,30 @@ interface SectionProps extends SourceTabProps {
   tabId: string
   setTabId: (id: string) => void
   onClose: () => void
+  /** See `Dialog`: the alert that opened this panel, dismissed by the tab that answered it. */
+  onResolved: (tab: string) => void
+}
+
+/**
+ * The explanation behind a `?`, for a row whose one line is the whole of what most people need.
+ *
+ * This panel had grown to the point where the copy *was* the interface: four paragraphs a reader
+ * has to get past to reach a button they were going to press anyway. The rule this restores is
+ * one line per point, with the paragraph a click away — and a `title` is the tooltip, because it
+ * is what every other explain-this in this app already uses (`LayoutControls`, `Inspector`,
+ * `GroupContextMenu`) and a second mechanism would be a second thing to style and dismiss.
+ *
+ * A button rather than a `<span>`, so it can be reached by keyboard; `aria-label` carries the
+ * text, because a control announced as "question mark" tells a screen reader nothing. It is
+ * deliberately **outside** every `<label>`: nested in one, the paragraph would be read as part
+ * of the field's own name.
+ */
+function Why({ children }: { children: string }) {
+  return (
+    <button type="button" className="sources__why" title={children} aria-label={children}>
+      ?
+    </button>
+  )
 }
 
 const SECTIONS: readonly [Section, ...Section[]] = [
@@ -307,13 +333,15 @@ const SECTIONS: readonly [Section, ...Section[]] = [
     tabs: SOURCE_TABS,
     privacy: (
       <>
-        <strong>Credentials stay in this browser.</strong> Tokens — and a CATMAID
-        instance&rsquo;s HTTP basic password, if you set one — are held in this browser&rsquo;s
-        local storage on this machine only, in the clear. They are never written into a saved
-        graph or an export, never sent to us, and never shared with any third party: each goes
-        only to the deployment it belongs to, directly where that deployment allows a browser to
-        reach it and otherwise through a same-origin relay. A password is worth more care than a
-        scoped API token, so prefer a token where the instance offers one.
+        <strong>Credentials stay in this browser.</strong>
+        <Why>
+          {"Tokens — and a CATMAID instance's HTTP basic password, if you set one — are held in " +
+            "this browser's local storage on this machine only, in the clear. They are never " +
+            'written into a saved graph or an export, never sent to us, and never shared with ' +
+            'any third party: each goes only to the deployment it belongs to, directly where ' +
+            'that deployment allows a browser to reach it and otherwise through a same-origin ' +
+            'relay.'}
+        </Why>
       </>
     ),
   },
@@ -322,14 +350,22 @@ const SECTIONS: readonly [Section, ...Section[]] = [
     label: 'AI assistant',
     subscribe: subscribeAiAuthFailure,
     render: ({ onClose }) => <AssistantTab onSaved={onClose} />,
+    /*
+     * The one section that keeps a second sentence on screen. Where a key is kept is a promise
+     * about us, and a reader who does not open the `?` has lost nothing; that the question and
+     * the *graph* leave the machine is a consequence for them, and it is the thing nobody can
+     * infer from a key field. A consent line behind a tooltip is not a consent line.
+     */
     privacy: (
       <>
-        <strong>Your key, your account, your bill.</strong> Keys are held in this
-        browser&rsquo;s local storage on this machine only, are never written into a saved graph
-        or an export, and are never sent to us — requests go straight from this page to the
-        provider you pick, with no server of ours in between. Whatever you ask the assistant,
-        and the graph on your canvas when you ask, are sent to that provider as part of the
-        request. A local provider sends nothing off the machine at all.
+        <strong>Your key, your account, your bill.</strong> Your question and the graph on your
+        canvas go to the provider you pick.
+        <Why>
+          {"Keys are held in this browser's local storage on this machine only, are never " +
+            'written into a saved graph or an export, and are never sent to us — requests go ' +
+            'straight from this page to the provider you pick, with no server of ours in ' +
+            'between. A local provider sends nothing off the machine at all.'}
+        </Why>
       </>
     ),
   },
@@ -345,11 +381,14 @@ const SECTIONS: readonly [Section, ...Section[]] = [
     tabs: ANNOTATION_TABS,
     privacy: (
       <>
-        <strong>One token per deployment, kept in this browser.</strong> FlyTable and
-        cloud.seatable.io run the same software with unrelated accounts, so each needs its own.
-        Tokens are held in this browser&rsquo;s local storage on this machine only, are never
-        written into a saved graph or an export, and are never sent to us — each goes only to
-        the deployment it belongs to. Coda reads bases; it never writes to one.
+        <strong>One token per deployment, kept in this browser.</strong>
+        <Why>
+          {'FlyTable and cloud.seatable.io run the same software with unrelated accounts, so ' +
+            "each needs its own. Tokens are held in this browser's local storage on this " +
+            'machine only, are never written into a saved graph or an export, and are never ' +
+            'sent to us — each goes only to the deployment it belongs to. Coda reads bases; it ' +
+            'never writes to one.'}
+        </Why>
       </>
     ),
   },
@@ -360,12 +399,14 @@ const SECTIONS: readonly [Section, ...Section[]] = [
     render: ({ onClose }) => <SharingTab onSaved={onClose} />,
     privacy: (
       <>
-        <strong>Only needed to make a short link.</strong> The token is held in this
-        browser&rsquo;s local storage on this machine only, is never written into a saved graph
-        or an export, and is never sent to us — it goes straight from this page to
-        <code> api.github.com</code>. Reading a shared gist needs no token at all, so a link you
-        send works for anybody. A workflow you upload becomes a gist on your own account, which
-        you can delete from GitHub at any time.
+        <strong>Only needed to make a short link.</strong>
+        <Why>
+          {"The token is held in this browser's local storage on this machine only, is never " +
+            'written into a saved graph or an export, and is never sent to us — it goes ' +
+            'straight from this page to api.github.com. Reading a shared gist needs no token at ' +
+            'all, so a link you send works for anybody. A workflow you upload becomes a gist on ' +
+            'your own account, which you can delete from GitHub at any time.'}
+        </Why>
       </>
     ),
   },
@@ -500,6 +541,7 @@ function TabBar({
   label,
   tabId,
   setTabId,
+  onResolved,
   ...tabProps
 }: SectionProps & { tabs: readonly [SourceTab, ...SourceTab[]]; label: string }) {
   const active = tabs.find((tab) => tab.id === tabId) ?? tabs[0]
@@ -520,7 +562,7 @@ function TabBar({
         ))}
       </div>
       <div key={active.id} className="sources__body" role="tabpanel" aria-label={active.label}>
-        {active.render(tabProps)}
+        {active.render({ ...tabProps, onResolved: () => onResolved(active.id) })}
       </div>
     </>
   )
@@ -538,9 +580,25 @@ function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
   const section = SECTIONS.find((s) => s.id === sectionId) ?? SECTIONS[0]
   const [tabId, setTabId] = useState(reason?.tab ?? SOURCE_TABS[0].id)
 
+  /*
+   * The alert is the *reason*, held locally so that it can stop being true.
+   *
+   * "No CAVE token" is a fact about the moment the panel opened, and the whole point of the
+   * panel is to make it false — leaving it on screen above a tab that now says "Signed in as
+   * …" is the panel contradicting itself. So a tab that obtains a credential dismisses it, and
+   * only its own: two sources fail independently, and answering neuPrint must not clear a
+   * warning about CAVE. A *new* failure re-states it, which is what the effect below is for.
+   */
+  const [alert, setAlert] = useState(reason)
+  const onResolved = useCallback(
+    (tab: string) => setAlert((current) => (current?.tab === tab ? undefined : current)),
+    [],
+  )
+
   // A failure arriving while the dialog is already open would otherwise leave the reason
   // stated above a section that has nothing to do with it.
   useEffect(() => {
+    setAlert(reason)
     if (!reason) return
     setSectionId(reason.section)
     if (reason.tab) setTabId(reason.tab)
@@ -566,7 +624,7 @@ function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
           </button>
         </header>
 
-        {reason && <p className="sources__alert">{reason.message}</p>}
+        {alert && <p className="sources__alert">{alert.message}</p>}
 
         <div className="sources__sections" role="tablist" aria-label="Connection kind">
           {SECTIONS.map((entry) => (
@@ -591,7 +649,7 @@ function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
          */}
         <p className="sources__privacy">{section.privacy}</p>
 
-        {renderSection(section, { ...tabProps, tabId, setTabId, onClose })}
+        {renderSection(section, { ...tabProps, tabId, setTabId, onClose, onResolved })}
       </div>
     </div>
   )
@@ -629,7 +687,7 @@ function NeuPrintTab({
   return (
     <section className="sources__source">
       <p className="sources__note">
-        Janelia&rsquo;s connectome server. Get a token from{' '}
+        Janelia&rsquo;s connectome server (hemibrain, MANC, maleCNS, etc). Get a token from{' '}
         <a href="https://neuprint.janelia.org/account" target="_blank" rel="noreferrer">
           neuprint.janelia.org/account
         </a>{' '}
@@ -658,14 +716,16 @@ function NeuPrintTab({
           onChange={(e) => onServer(e.target.value)}
         />
       </label>
-      <p className="sources__note sources__note--tight">
-        <strong>Leave this empty unless you run your own proxy.</strong> Empty means work it
-        out: the deployment is tried directly, and where it sends no CORS headers the
-        same-origin <code>{DEFAULT_PROXY_PATH}</code> path is used instead — served in
-        development by <code>vite.config.ts</code>, and by nothing at all in a static deploy.
-        Naming a URL here overrides both, with no fallback, and applies to the default
-        deployment only. Not the same thing as a dataset node&rsquo;s <em>Server</em>, which
-        names which neuPrint <em>deployment</em> to ask.
+      <p className="sources__hint">
+        Leave this empty unless you run your own proxy.
+        <Why>
+          {'Empty means work it out: the deployment is tried directly, and where it sends no ' +
+            `CORS headers the same-origin ${DEFAULT_PROXY_PATH} path is used instead — served ` +
+            'in development by vite.config.ts, and by nothing at all in a static deploy. Naming ' +
+            'a URL here overrides both, with no fallback, and applies to the default deployment ' +
+            "only. Not the same thing as a dataset node's Server, which names which neuPrint " +
+            'deployment to ask.'}
+        </Why>
       </p>
 
       <div className="sources__actions">
@@ -931,19 +991,24 @@ function CatmaidTab({ onSaved }: { onSaved: () => void }) {
   return (
     <section className="sources__source">
       <p className="sources__note">
-        CATMAID instances. Reading a public one needs no credentials at all — every{' '}
-        <code>GET</code> is answered anonymously — but connectivity and neuron names go over{' '}
-        <code>POST</code>, which a browser cannot send anonymously, so those need a token. Get
-        one from your instance: hover your name, then <em>Get API token</em>.
+        Configure per-CATMAID instances credentials. Access to public instances (e.g. VFB) needs
+        no credentials.
+        <Why>
+          {'Every GET is answered anonymously, but connectivity and neuron names go over POST, ' +
+            'which a browser cannot send anonymously, so those need a token. Get one from your ' +
+            'instance: hover your name, then “Get API token”.'}
+        </Why>
       </p>
 
       {rows.length === 0 ? (
         <p className="sources__hint">
-          No instances configured, and Virtual Fly Brain&rsquo;s servers need none: they publish
-          a read-only token per instance and Coda carries it, so{' '}
-          <code>{hostPattern(DEFAULT_CATMAID_SERVER)}</code> and the other seven work as they
-          are. Add a row for an instance that asks for a credential — or to use your own account
-          on one of theirs, which takes precedence over the published token.
+          None configured — Virtual Fly Brain&rsquo;s servers need none.
+          <Why>
+            {'They publish a read-only token per instance and Coda carries it, so ' +
+              `${hostPattern(DEFAULT_CATMAID_SERVER)} and the other seven work as they are. Add ` +
+              'a row for an instance that asks for a credential — or to use your own account on ' +
+              'one of theirs, which takes precedence over the published token.'}
+          </Why>
         </p>
       ) : null}
 
@@ -1080,56 +1145,181 @@ function CatmaidTab({ onSaved }: { onSaved: () => void }) {
   )
 }
 
-function CaveTab({ onSaved }: { onSaved: () => void }) {
+/**
+ * What the server field means, in the one form both things that read it need.
+ *
+ * Written twice, it decides *both* which deployment is probed and which one is signed in to, and
+ * the two disagreeing would be silent: a token minted at one server, tested against another.
+ * `setServer` performs the same normalisation on the way to storage.
+ */
+function resolveServer(raw: string): string {
+  return raw.trim().replace(/\/+$/, '') || DEFAULT_CAVE_SERVER
+}
+
+function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () => void }) {
   const [token, setTokenField] = useState(() => getCaveToken() ?? '')
   const [server, setServerField] = useState(() => getCaveServer())
+  const [session, setSession] = useState(() => getCaveSession())
   const [probe, setProbe] = useState<Probe>({ state: 'idle' })
+  const [signing, setSigning] = useState(false)
+  /*
+   * A second failure channel beside `probe`, and it renders the same markup — kept apart for
+   * where it renders rather than for what it says. "Your browser blocked the sign-in window"
+   * belongs beside the button that was blocked; drawn where a failed Test lands, under the
+   * server field, it reads as a report about the token below it. It also clears differently, and
+   * deliberately: a failed `probe` survives an edit to the field, while typing a token is a
+   * visible decision to stop signing in, which makes the sign-in's complaint stale.
+   */
+  const [signInError, setSignInError] = useState<string | undefined>(undefined)
   const fieldRef = useRef<HTMLTextAreaElement>(null)
   useEffect(() => fieldRef.current?.focus(), [])
   const notify = useGraphStore((s) => s.setNotice)
 
-  const test = useCallback(async () => {
+  /*
+   * A sign-in outlives the click that started it, and can outlive the dialog: closing the panel
+   * unmounts this tab while the popup is still open, and the poll and the `message` listener
+   * inside `signInToCave` would then run until that window happened to be closed — which for an
+   * abandoned sign-in is never. Aborting on unmount is what ends them, and aborting *first* in
+   * `signIn` is what stops a second click running a second flow beside the first.
+   */
+  const attempt = useRef<AbortController | undefined>(undefined)
+  useEffect(() => () => attempt.current?.abort(), [])
+
+  // With the values it is handed rather than the stored ones, so a token can be checked before
+  // committing to it — `NeuPrintTab`'s rule, reached the same way. Taking them as arguments is
+  // what lets the sign-in run the same check on a token that is not in the field yet: a
+  // `useState` setter a line earlier has not reached this closure.
+  const probeWith = useCallback(async (candidate: string, deployment: string) => {
     setProbe({ state: 'testing' })
     try {
-      // With the values in the fields rather than the stored ones, so a token can be checked
-      // before committing to it — `NeuPrintTab`'s rule, reached the same way.
-      const base = server.trim().replace(/\/+$/, '') || DEFAULT_CAVE_SERVER
+      const base = resolveServer(deployment)
       const names = await listDatastacks(base, {
-        token: token.trim().replace(/^Bearer\s+/i, ''),
+        token: candidate.trim().replace(/^Bearer\s+/i, ''),
       })
       setProbe({ state: 'ok', datasets: names.length, names: names.sort().slice(0, 6) })
     } catch (error) {
       setProbe({ state: 'failed', message: errorMessage(error) })
     }
-  }, [token, server])
+  }, [])
+
+  /**
+   * Sign in, and — unlike anything typed into this dialog — **commit what comes back**.
+   *
+   * Every other field here is a draft until Save, which is right for text somebody is still
+   * editing. A sign-in is not that: the user has already confirmed it at Google, in a window of
+   * its own, and leaving the result sitting unsaved in a textarea means the ceremony they just
+   * completed is undone by closing the panel. So the token and the deployment it belongs to are
+   * stored together, and the same check the Test button runs is run on them, so that "it
+   * worked" is on screen rather than assumed. The panel deliberately stays open to show it.
+   */
+  const signIn = useCallback(() => {
+    setSignInError(undefined)
+    setSigning(true)
+    attempt.current?.abort()
+    const cancel = (attempt.current = new AbortController())
+    const base = resolveServer(server)
+    // Not awaited before the call: `signInToCave` opens its window as its first act, and an
+    // `await` between the click and that is exactly what a pop-up blocker looks for.
+    signInToCave({ server: base, signal: cancel.signal })
+      .then(async ({ token: granted, email }) => {
+        const signedIn = { at: Date.now(), ...(email ? { email } : {}) }
+        setTokenField(granted)
+        setCaveToken(granted, signedIn)
+        setCaveServer(base)
+        setServerField(base)
+        setSession(signedIn)
+        // The panel may have opened *because* there was no token. There is one now, so the
+        // banner saying there is not stops being true at this line rather than at the next reload.
+        onResolved()
+        await probeWith(granted, base)
+      })
+      .catch((error: unknown) => {
+        // A cancellation is this component's own doing — an unmount, or a second click — so
+        // there is either nobody to tell or a fresh attempt already saying what it is doing.
+        if (error instanceof CaveSignInError && error.kind === 'cancelled') return
+        setSignInError(errorMessage(error))
+      })
+      .finally(() => setSigning(false))
+  }, [server, probeWith, onResolved])
 
   return (
     <section className="sources__source">
       <p className="sources__note">
-        FlyWire and other CAVE-hosted connectomes. Get a token from{' '}
-        <a
-          href="https://global.daf-apis.com/auth/api/v1/create_token"
-          target="_blank"
-          rel="noreferrer"
-        >
-          global.daf-apis.com
-        </a>{' '}
-        — the same token <code>caveclient</code> stores in <code>~/.cloudvolume/secrets</code>,
-        so if you already use CAVE from Python you have one.
+        CAVE hosts e.g. FlyWire, BANC and Minnie. If you already have an CAVE account, make sure
+        to use the Google account it is linked to. Signing in for the first time will create a
+        new account.
+        <Why>
+          {'Sign in with the Google account you use for CAVE. The window that opens belongs to ' +
+            "CAVE's own auth service, so Coda never sees your password — what comes back is a " +
+            'token for CAVE and nothing else. This is a separate sign-in from neuPrint\u2019s, ' +
+            'because the two can be different accounts. Signing in for the first time creates a ' +
+            'CAVE account and asks you to choose a username before it finishes: that step is ' +
+            'part of it, and the sign-in completes when you submit the form. Which datasets the ' +
+            'new account may read is CAVE\u2019s to grant, so a query can still be refused ' +
+            'after a sign-in that worked.'}
+        </Why>
       </p>
 
-      <label className="sources__field">
-        <span>Token</span>
-        <textarea
-          ref={fieldRef}
-          className="field field--area field--mono"
-          rows={2}
-          value={token}
-          spellCheck={false}
-          placeholder="a1b2c3d4…"
-          onChange={(e) => setTokenField(e.target.value)}
-        />
-      </label>
+      <div className="sources__actions">
+        <button type="button" className="btn btn--primary" onClick={signIn} disabled={signing}>
+          {signing ? 'Signing in…' : 'Sign in with Google'}
+        </button>
+        {session && (
+          <span className="sources__hint">
+            Signed in{session.email ? ` as ${session.email}` : ''}
+            <Why>
+              {`Signed in on ${new Date(session.at).toLocaleDateString()}. A CAVE sign-in lasts ` +
+                'about a week; when it stops being accepted, sign in again.'}
+            </Why>
+          </span>
+        )}
+      </div>
+
+      {signInError && (
+        <p className="sources__result" data-tone="error">
+          {signInError}
+        </p>
+      )}
+
+      {/*
+       * Behind a disclosure, because it is now the second way in rather than the only one — and
+       * it stays reachable rather than being dropped, since a sign-in has exits that hand
+       * nothing back (a blocked pop-up, and middle_auth's own error pages), and since anybody
+       * already using CAVE from Python has a token in `~/.cloudvolume/secrets` to paste.
+       */}
+      <details className="sources__more">
+        <summary>… or paste a token manually</summary>
+        <label className="sources__field">
+          <span>Token</span>
+          <textarea
+            ref={fieldRef}
+            className="field field--area field--mono"
+            rows={2}
+            value={token}
+            spellCheck={false}
+            placeholder="a1b2c3d4…"
+            onChange={(e) => {
+              setTokenField(e.target.value)
+              setSignInError(undefined)
+            }}
+          />
+        </label>
+        <p className="sources__hint">
+          From{' '}
+          <a
+            href="https://global.daf-apis.com/auth/api/v1/create_token"
+            target="_blank"
+            rel="noreferrer"
+          >
+            global.daf-apis.com
+          </a>
+          <Why>
+            {'The same token caveclient stores in ~/.cloudvolume/secrets, so if you already use ' +
+              'CAVE from Python you have one. Pasting is also the way through if your browser ' +
+              'blocks the sign-in window, or if that window ends on an error page.'}
+          </Why>
+        </p>
+      </details>
 
       <label className="sources__field">
         <span>Global server</span>
@@ -1141,18 +1331,21 @@ function CaveTab({ onSaved }: { onSaved: () => void }) {
           onChange={(e) => setServerField(e.target.value)}
         />
       </label>
-      <p className="sources__note sources__note--tight">
-        <strong>Leave this alone unless you use a different CAVE deployment.</strong> It is the
-        service that lists datastacks and says which server holds each one; the server that
-        answers the actual queries is read from that listing rather than named here. Not the
-        same thing as a dataset node&rsquo;s version, which names a <em>materialization</em>.
+      <p className="sources__hint">
+        Leave this alone unless you use a different CAVE deployment.
+        <Why>
+          {'It is the service that lists datastacks and says which server holds each one; the ' +
+            'server that answers the actual queries is read from that listing rather than named ' +
+            'here. It is also what says where to sign in, which is why signing in saves it. Not ' +
+            "the same thing as a dataset node's version, which names a materialization."}
+        </Why>
       </p>
 
       <div className="sources__actions">
         <button
           type="button"
           className="btn btn--ghost"
-          onClick={() => void test()}
+          onClick={() => void probeWith(token, server)}
           disabled={!token.trim() || probe.state === 'testing'}
         >
           {probe.state === 'testing' ? 'Testing…' : 'Test'}
@@ -1163,7 +1356,9 @@ function CaveTab({ onSaved }: { onSaved: () => void }) {
           onClick={() => {
             setCaveToken(undefined)
             setTokenField('')
+            setSession(undefined)
             setProbe({ state: 'idle' })
+            setSignInError(undefined)
           }}
           disabled={!token}
         >
@@ -1174,8 +1369,13 @@ function CaveTab({ onSaved }: { onSaved: () => void }) {
           type="button"
           className="btn btn--primary"
           onClick={() => {
+            // A typed token is somebody else's, so whatever the last sign-in was labelled with
+            // goes with it — `setToken` clears the session unless one is handed over, which is
+            // why this is `undefined` rather than a read-back.
             setCaveToken(token)
             setCaveServer(server)
+            setSession(undefined)
+            if (token.trim()) onResolved()
             // Re-list so the dataset picker fills in without a reload, exactly as saving a
             // neuPrint token does. Swallowed: the 401 has its own channel back to this panel.
             void getSource('cave')

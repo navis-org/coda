@@ -541,6 +541,19 @@ fetches, and the assistant sends the graph to a third party. A privacy notice th
 *reassuring* direction is worse than none, because it is believed. Hence assertions that fetching
 and the assistant are both still disclosed, rather than a snapshot of the copy.
 
+**Each of those notes is now one line and a `?`.** The dialog had accumulated a paragraph per
+section plus a paragraph per field, and a reader met four of them before the button they came to
+press — the copy had become the interface. `Why` (a `title`, the tooltip every other explain-this
+in this app uses) holds the rest, and the rule is one line per point. Two things it must not do.
+The **headline stays on screen**: a promise entirely behind a tooltip is one nobody reading the
+panel has been told, and `sources.test.tsx` pins that half separately from the claim itself. And
+the AI section keeps a **second** visible sentence, because where a key is kept is a promise about
+us that costs a reader nothing to skip, while the question and the *graph* leaving the machine is a
+consequence for them that no key field implies — a consent line behind a tooltip is not a consent
+line. The tests read both halves through a `promise()` helper, since what they are about is which
+claims are made rather than where; the negative ones ("does not claim a proxy") then mean nowhere
+in the section, tooltip included.
+
 **It repeats what `SourcesPanel`'s four `sources__privacy` notes say about credentials**, on
 purpose. Those are read by somebody already in Connections configuring a token; this is read by
 somebody who has never opened it. A reader who must find the other surface to learn whether their

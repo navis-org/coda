@@ -12,6 +12,12 @@
  * subset, which is all anything outside `src/data/cave` needs.
  *
  * Every fixture it serves is a real trimmed reply from `flywire_fafb_public` v783.
+ *
+ * `installRouteFetch` beside it is the *bare* version of the same matcher — routes in, replies
+ * out, with a status apiece — for a suite whose subject is a request that has no fixture and
+ * whose interesting cases are refusals. It exists because the auth endpoints arrived with two
+ * more hand-rolled copies of this matcher, and copies of it drifting is the whole reason this
+ * file does.
  */
 
 import { readFileSync } from 'node:fs'
@@ -62,7 +68,11 @@ export function installCaveFetch(options: CaveStubOptions = {}): CaveCall[] {
       : undefined
     calls.push({ url: text, ...(body ? { body } : {}) })
     const answer = (payload: string) =>
-      Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(payload) } as Response)
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(payload),
+      } as Response)
 
     for (const [fragment, payload] of Object.entries(options.overrides ?? {})) {
       if (text.includes(fragment)) return answer(payload)
@@ -98,4 +108,44 @@ export function installCaveFetch(options: CaveStubOptions = {}): CaveCall[] {
     } as Response)
   })
   return calls
+}
+
+/** One route: what to answer, and with what status. A body alone means 200. */
+export interface StubRoute {
+  status?: number
+  body: string
+}
+
+/**
+ * Answer a fixed set of URL substrings, and 404 everything else.
+ *
+ * The status lives **on the route** rather than in an option beside it, for the reason
+ * `CaveStubOptions.overrides` gives for refusing to hold one at all: a test about an error path
+ * should say which request fails, at its own call site, rather than flipping a flag whose name
+ * has to be read somewhere else to find out what it does.
+ *
+ * Returns the URLs asked for, in order — the assertion "and nothing else was fetched" is
+ * otherwise unavailable, and it is the whole of some cases.
+ */
+export function installRouteFetch(routes: Record<string, StubRoute>): string[] {
+  const seen: string[] = []
+  vi.stubGlobal('fetch', (url: string) => {
+    const text = String(url)
+    seen.push(text)
+    for (const [fragment, route] of Object.entries(routes)) {
+      if (!text.includes(fragment)) continue
+      const status = route.status ?? 200
+      return Promise.resolve({
+        ok: status >= 200 && status < 300,
+        status,
+        text: () => Promise.resolve(route.body),
+      } as Response)
+    }
+    return Promise.resolve({
+      ok: false,
+      status: 404,
+      text: () => Promise.resolve('{"message":"unexpected request"}'),
+    } as Response)
+  })
+  return seen
 }

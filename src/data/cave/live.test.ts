@@ -37,6 +37,7 @@ import { countTable, queryTable, queryTableChecked, tableMetadata } from './api'
 import { resetCaveTables, tableColumnsFor, tableFactsFor, tableListFor } from './tables'
 import { caveScene } from './scene'
 import { flatUrlFor, probeFlat } from './flat'
+import { discoverLoginService } from './oauth'
 import { existingSkeletons, serviceLooksEmpty, skeletonServiceFor } from './skeletonService'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { registerDatastackSpec, specFor } from './spec'
@@ -64,6 +65,29 @@ afterAll(() => {
 
 live('CAVE, live', () => {
   const source = new CaveSource()
+
+  /*
+   * The sign-in's one live dependency, and it fails silently: `auth_info` is what says where a
+   * deployment logs in, so if `login_url` moved or the document went away the button would open
+   * a window at a 404 and nothing else would notice. **No token is needed to ask** — the
+   * property that makes signing in possible at all — which makes this the cheapest check in the
+   * file and the only one guarding a path no unit test can reach.
+   */
+  it('says where it signs in, without being asked for a token', async () => {
+    const service = await discoverLoginService('https://global.daf-apis.com')
+
+    // Not the prefix: today's deployment serves middle_auth under `/sticky_auth` and the point
+    // of reading `auth_info` is that the next one need not. What must hold is that a login
+    // service was named, on the same origin, at middle_auth's endpoint.
+    expect(service.origin).toBe('https://global.daf-apis.com')
+    expect(service.authorizeUrl.startsWith(`${service.origin}/`)).toBe(true)
+    expect(service.authorizeUrl.endsWith('/api/v1/authorize')).toBe(true)
+
+    // And that Google is what is behind it, which is what the panel's copy promises.
+    const response = await fetch(service.authorizeUrl, { redirect: 'manual' })
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toMatch(/accounts\.google\.com/)
+  })
 
   it('lists FlyWire public with its materializations', async () => {
     const datasets = await source.listDatasets()

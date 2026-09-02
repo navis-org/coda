@@ -24,6 +24,14 @@ export interface FetchTextMessages {
   hint?: string
   /** Replaces the generic status message for a 404, which usually has a specific meaning. */
   notFound?: string
+  /**
+   * Cancellation, for a caller that can be given up on.
+   *
+   * An `AbortError` is deliberately re-thrown as itself rather than folded into the message
+   * above: the standing rule everywhere else here is that a cancellation must stay a
+   * cancellation, or giving up on something reads downstream as the host being unreachable.
+   */
+  signal?: AbortSignal
 }
 
 export async function fetchText(
@@ -32,8 +40,13 @@ export async function fetchText(
 ): Promise<string> {
   let response: Response
   try {
-    response = await fetch(url, { credentials: 'omit', redirect: 'follow' })
-  } catch {
+    response = await fetch(url, {
+      credentials: 'omit',
+      redirect: 'follow',
+      ...(messages.signal ? { signal: messages.signal } : {}),
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new Error(
       `Could not fetch ${url}. The host may be unreachable, or it may not allow cross-origin reads — a browser refuses those without saying so.${messages.hint ? ` ${messages.hint}` : ''}`,
     )
