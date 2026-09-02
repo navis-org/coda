@@ -348,6 +348,35 @@ Area-specific — the rule, then the doc that holds why:
   set **removes** both capabilities where it *adds* `paths`: a file of `pre, post, weight` has no
   regions, and its weights are not the population the backend's totals count.
   See [docs/nodes.md](docs/nodes.md) and [docs/backends.md](docs/backends.md).
+- **A bounded influence score is the published one truncated, not an approximation of it — and the
+  gain is the published `lambda_max` exactly.** `r = (I - gW)^-1 s` is the series `s + gWs + g²W²s
+  + …`, so walking *H* hops and adding the terms *is* Bates et al.'s score stopped early. Every
+  term is non-negative, which makes the answer a strict lower bound and turns all three losses —
+  the unwalked tail, the frontier limit, the drive that reached a fragment — into numbers rather
+  than caveats. With input-fraction weights W is row-stochastic, measured at `lambda_max(W) =
+  1.0000000000` on `InfluenceCalculator`'s own C. elegans matrix, so the package's rescale *is* a
+  per-hop factor and `Gain` is the same knob. **Which is why the default is 0.5 and not their
+  0.99**: a budget of *H* hops covers `1 - g^(H+1)`, and against the exact solve four hops keeps
+  97% of the score and 19 of the top 20 at 0.5 against 6.5% and 6 of 20 at 0.99 — their own
+  docstring says 0.99 amplifies the leading eigenmode a hundredfold, and that eigenmode belongs to
+  the connectome rather than to anybody's seed. `syn_weight_measure='count'`, their default, is not
+  implementable here at all: its scale factor is spectral. Four more rules. **The directions are
+  not symmetric and the cheap one is the one people ask for** — `inputs` fetches an input list,
+  which is the edges *and* their denominator, and conserves mass exactly, so a discarded fraction
+  is a discarded fraction of the answer; `outputs` needs a second `synapseTotals` lookup and has no
+  mass bound, and `propagate` throws rather than out-normalising. **It is not a BFS**: `W^k s` needs
+  every neuron holding mass at hop *k* to spread it whether or not it spread at *k-1*, which is what
+  puts recurrent loops in at all — so a neuron is *fetched* once and propagated from every hop,
+  where `traverseConnectivity` skips an expanded node. **`Denominator` gates the modes** rather than
+  being swapped per backend (two real Ws under one column name is `Normalize`'s refusal one layer
+  up), and defaults to the traversal sum because `synapseTotals` is false on three of five sources.
+  **Meeting in the middle buys fetch count, not depth** — unlike `pathOps`, a one-ended run is
+  already the whole answer, so the split is for `ball(A)+ball(B) << ball(A+B)`; `combineHalves`
+  takes `(channelled, pooled, scored)` because the scored set is presynaptic upstream and
+  postsynaptic downstream, and it reports no truncation bound, since each half bounds its own
+  series and the combined tail is neither. The Python helper is checked by **running** it — the
+  probe execs it out of the golden against a stubbed neuprint and matches the canvas over 277
+  neurons to 3.8e-16. See [docs/nodes.md](docs/nodes.md) and `src/help/nodes/neuron.influence.md`.
 - **The Heatmap's row and column filters are one term each, and a pattern is opted into with `/`.**
   Explore's grammar, narrowed: a plain term is a case-insensitive substring, `/^LC[0-9]+$` (closing
   slash optional) is a regex, `!` or `-` negates. `bareRegex` is **imported** from

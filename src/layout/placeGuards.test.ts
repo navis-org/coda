@@ -88,4 +88,35 @@ describe('the generated graphs', () => {
       expect(clashes).toEqual([])
     })
   }
+
+  /*
+   * `everyCombination` walks one viewer at a time, which is right for what it is for — a second
+   * viewer is the same chain with another card on the same port. The influence arm is the one
+   * place that is not true: ticking a heatmap *and* a table builds a Group By and a Sort on a
+   * second row that neither singleton has, so the shape nobody enumerated is the one to place.
+   */
+  it('lays the two-viewer influence chain out with no card on top of another', () => {
+    const nodes = buildWorkflow({
+      dataset: DEMO_DATASET,
+      start: 'search',
+      analysis: 'influence',
+      visualisations: ['heatmap', 'table'],
+      notes: true,
+      dashboard: false,
+    }).nodes
+    const clashes: string[] = []
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i]!
+        const b = nodes[j]!
+        if (!sharesRow(a, b)) continue
+        const [left, right] = a.position.x <= b.position.x ? [a, b] : [b, a]
+        const gap = right.position.x - (left.position.x + widthOf(left))
+        if (gap < MIN_GAP) {
+          clashes.push(`${left.type} (${widthOf(left)}px) → ${right.type}: ${Math.round(gap)}px gap`)
+        }
+      }
+    }
+    expect(clashes).toEqual([])
+  })
 })

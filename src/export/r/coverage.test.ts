@@ -81,6 +81,17 @@ const NO_EMITTER: Record<string, string> = {
   'dataset.minnie65':
     'A third CAVE datastack \u2014 see `dataset.flywire`. Mouse cortex rather than a fly brain, ' +
     'which is not the obstacle: the obstacle is that this document is built on neuprintr.',
+  'neuron.influence':
+    'The bounded influence score, and the refusal is about what could be *checked* rather than ' +
+    'about what R can do \u2014 the same split `neuron.connectivity`\u2019s region options are ' +
+    'on. The walk maps onto neuprintr and base R matrix algebra perfectly well, and the Python ' +
+    'side now emits a `coda_influence` helper to translate from. What makes that helper ' +
+    'trustworthy is that `pnpm probe:influence` **runs** it against the canvas over a real ' +
+    'connectome and gets the same numbers to 4e-16; the R twin would have no such check, ' +
+    'because neuprintr is not installed here (`export:check` says so on every run) and its ' +
+    'argument names would therefore be recalled rather than read \u2014 which this repository ' +
+    'has already paid for once, in `neuprint/roiHierarchy.ts`. A hundred lines of unrun matrix ' +
+    'algebra that fails at the reader\u2019s console is worse than a cell saying what to write.',
   'note.text': 'An annotation. It becomes a markdown block, which the walk does directly.',
   'flow.forEach':
     'A loop, and the one refusal here that is about the *shape* of the output rather than about ' +

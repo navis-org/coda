@@ -163,6 +163,34 @@ export function everythingGraph(): CodaGraph {
       params: { maxHops: 3, minWeight: 10, topN: 20, collapseTypes: false },
     },
 
+    /*
+     * Two Influence nodes, for the reason there are two NBLAST nodes: the emitter branches on
+     * whether `Candidates` is wired, and one node would record only the branch it happened to
+     * be. The second also carries a published denominator, which is the arm that emits a
+     * `fetch_neurons` divisor rather than summing the fetched input list.
+     */
+    {
+      id: 'infl',
+      type: 'neuron.influence',
+      col: 2,
+      row: 10,
+      params: { maxHops: 3, minWeight: 5, gain: 0.5 },
+    },
+    {
+      id: 'inflPerQuery',
+      type: 'neuron.influence',
+      col: 2,
+      row: 12,
+      params: { maxHops: 2, perQuery: true },
+    },
+    {
+      id: 'inflCand',
+      type: 'neuron.influence',
+      col: 2,
+      row: 11,
+      params: { maxHops: 4, gain: 0.75, denominator: 'all', frontierLimit: 500 },
+    },
+
     { id: 'skel', type: 'neuron.skeletons', col: 2, row: 5, params: { limit: 20 } },
     { id: 'mesh', type: 'neuron.meshes', col: 2, row: 6, params: { limit: 10 } },
     { id: 'syn', type: 'neuron.synapses', col: 2, row: 7, params: { polarity: 'pre' } },
@@ -1140,6 +1168,13 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'adj', 'sources'],
     ['labels', 'neurons', 'adj', 'targets'],
     ['find', 'neurons', 'roi', 'neurons'],
+    ['ds', 'dataset', 'infl', 'dataset'],
+    ['ds', 'dataset', 'inflCand', 'dataset'],
+    ['ds', 'dataset', 'inflPerQuery', 'dataset'],
+    ['find', 'neurons', 'infl', 'neurons'],
+    ['find', 'neurons', 'inflPerQuery', 'neurons'],
+    ['find', 'neurons', 'inflCand', 'neurons'],
+    ['labels', 'neurons', 'inflCand', 'candidates'],
     ['find', 'neurons', 'paths', 'sources'],
     ['labels', 'neurons', 'paths', 'targets'],
     ['find', 'neurons', 'skel', 'neurons'],

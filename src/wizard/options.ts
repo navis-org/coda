@@ -55,6 +55,7 @@ export type StartId = 'search' | 'browse' | 'ids'
 export type AnalysisId =
   | 'partners'
   | 'matrix'
+  | 'influence'
   | 'paths'
   | 'network'
   | 'cluster'
@@ -245,6 +246,12 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     note: 'Adjacency between the same set on both axes. Row-normalising makes each row sum to 1, so rows with very different totals can still be compared.',
   },
   {
+    id: 'influence',
+    label: 'Influence score',
+    blurb: 'Influence → Pivot: how strongly every neuron drives your set, summed over every path rather than along one route.',
+    note: 'The influence score of Bates et al., bounded to a few hops around your neurons. `Gain` is how much of a signal survives each further synapse; `Max hops` is how far to look. Scores are a lower bound — the node says how much it left out. Press `?` on the card for what the number means.',
+  },
+  {
     id: 'paths',
     requires: 'paths',
     label: 'Shortest paths',
@@ -391,6 +398,16 @@ export const VIEWS: Record<AnalysisId, Partial<Record<VisualisationId, ViewSpec>
     heatmap: { type: 'out.heatmap', params: { scale: 'sequential', showValues: true } },
     // Off `adj.links` rather than the matrix — see `bodyOf`. A matrix is not a table.
     table: { type: 'out.table' },
+  },
+  /*
+   * The heatmap is the reason `Per query neuron` exists: it needs the scores *before* they are
+   * summed over the neurons somebody wired in, which is one row per (query, influencer) and a
+   * `Pivot` away from a matrix. The table takes the ranking — off a `Group By` when the heatmap
+   * has already turned the pairs on, and off the node itself when it has not. See `bodyOf`.
+   */
+  influence: {
+    table: { type: 'out.table' },
+    heatmap: { type: 'out.heatmap', params: { scale: 'sequential' } },
   },
   /*
    * A paths query answers with a network *and a layout for it* — the one place a viewer is handed

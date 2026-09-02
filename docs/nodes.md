@@ -2229,6 +2229,174 @@ to the _first_ output — where "24 nodes · 31 links" is the right thing to say
 body can say "not run yet" in its own words. Not `expandable`: there is nothing here that
 benefits from room, and the routes themselves are a table.
 
+## Influence: how much of this is attributable to that?
+
+`neuron.influence`, added from `Add ▸ Query ▸ Influence`. `Paths` ranks whole routes; this sums
+over *every* route at once, which is the question people mostly have and which no ranking of
+chains answers. It is the influence score of Bates et al. (2026,
+[doi:10.1038/s41586-026-10735-w](https://doi.org/10.1038/s41586-026-10735-w)), bounded to a ball
+instead of solved over a connectome. The arithmetic is `nodes/lib/influenceOps.ts`, headless with
+the fetch as a callback; the node is the wiring and the gates.
+
+**A bounded walk is not a different metric.** The published score is `r = (I - gW)^-1 s`; that
+inverse is the series `s + gWs + g^2 W^2 s + …`, so walking *H* hops and adding the terms computes
+the same quantity truncated. Every term is non-negative, so the answer is a strict lower bound and
+more hops can only raise a score. That property is what the whole design leans on: three separate
+losses — the unwalked tail, the frontier limit, the drive that reached a fragment — all subtract
+and none add, so each can be reported as a number rather than a caveat.
+
+### The gain is the published `lambda_max`, and its default here deliberately is not
+
+With input-fraction weights (`count / sum(count) per post`, the reference implementation's `norm`)
+W is row-stochastic, so `lambda_max(W)` is 1 and the package's rescale by `lambda_max /
+lambda_max(W)` **is** a per-hop factor of `lambda_max`. Measured rather than argued: on
+`InfluenceCalculator`'s own C. elegans matrix, `lambda_max(W) = 1.0000000000`. So `Gain` is the
+same knob and not an analogue of one.
+
+Which is what makes the default a decision. A budget of *H* hops covers `1 - g^(H+1)` of the
+series, and the package's own docstring says 0.99 amplifies the leading eigenmode a hundredfold —
+an eigenmode belonging to the whole connectome rather than to anybody's seed, i.e. exactly the
+part a ball can neither see nor should want to. `pnpm probe:influence` measures the consequence
+against the exact solve on 300 neurons:
+
+| gain | hops | mass kept | top-20 agree | rank corr |
+| ---- | ---- | --------- | ------------ | --------- |
+| 0.5  | 4    | 97.0%     | 19/20        | 0.9980    |
+| 0.75 | 4    | 76.8%     | 18/20        | 0.9855    |
+| 0.9  | 4    | 42.2%     | 13/20        | 0.9433    |
+| 0.99 | 4    | 6.5%      | 6/20         | 0.8605    |
+
+Hence 0.5 and four hops. The probe asserts both ends of that — the defaults recovering the score
+*and* the 0.99 counterpart failing to — so moving a default fails the probe rather than passing
+quietly. **The package's own default (`syn_weight_measure='count'`) is not implementable here at
+all**: its scale factor is a spectral property of the whole matrix, which is precisely what a ball
+cannot know.
+
+### The two directions are not symmetric, and the cheap one is the one people ask for
+
+Travelling `inputs` — "which neurons influence this set" — fetches each carrying neuron's **input
+list**, which is simultaneously the edges *and* their denominator. And because a post's input
+fractions sum to one, mass is conserved per hop: the propagating vector is a distribution over
+where the drive came from, so a discarded fraction is literally a discarded fraction of the
+answer. One query per hop, every backend.
+
+Travelling `outputs` fetches an output list, whose denominators belong to the *far* end — a second
+lookup, gated on `synapseTotals` — and nothing bounds the total mass. `propagate` throws rather
+than falling back to an out-normalisation, which would be a different quantity under the same
+column name.
+
+The demand is for the first one, which is the cheap one. That is luck, but it is load-bearing luck.
+
+### This is not a breadth-first search
+
+`W^k s` requires **every** neuron holding mass at hop *k* to spread it, whether or not it also
+spread at hop *k-1* — that is what puts recurrent loops into the score at all. So a neuron is
+*fetched* once and cached, then propagated from on every later hop.
+`traverseConnectivity` does the opposite and skips an expanded node; doing that here returns
+plausible scores with every recurrent contribution missing. `influenceOps.test.ts` pins it on a
+two-cycle.
+
+### `Denominator` gates the modes rather than being swapped underneath anybody
+
+Two real definitions of W, differing by the input mass below `Min synapses`. A node that picked
+one per backend would compute two different matrices under one column name — the substitution
+`Connectivity`'s `Normalize` already refuses one layer down. So it is a control, and it decides
+what the node can do:
+
+- *summed within the traversal* — free, every backend, bit-for-bit the reference implementation
+  (which computes `norm` after its `count_thresh`). Computable only from the postsynaptic end, so
+  **upstream single-pass only**.
+- *published totals* (`connected` or `all`) — one query per hop, `synapseTotals` only, and both
+  `Downstream` and the meet-in-the-middle become available.
+
+**The default is `traversal`**, because `synapseTotals` is true on neuPrint and the mock and false
+on CAVE, CATMAID and precomputed: defaulting the other way would put a validate issue on the node
+the moment a CAVE user created it. The price is that the two things it cannot do have to say so,
+which `validate` does at edit time, each naming the fix.
+
+One interaction worth keeping: a fragment dropped by `Include fragments` still counts in the
+denominator. Its share of the drive is **lost**, not redistributed — reassigning it would invent
+input nobody reconstructed. That is a deliberate departure from the reference implementation,
+whose denominator is the sum over whatever edge list it was handed.
+
+### What meeting in the middle buys, and what it does not
+
+**Not what the equivalent in `pathOps.ts` buys, and the difference is worth knowing before
+changing it.** A route has to be searched from both ends because it is only a route once both
+endpoints are pinned. Influence is not like that: the per-source ranking is `sum_k g^k z_k[j]`
+where `z` is the backward walk, so with only the readout set named there is nothing for a second
+walk to halve. A one-ended run therefore gets `{ forward: 0, backward: hops }` and no split at all.
+
+What the split buys when both ends *are* named is **fetch count**, which is the real cost: a ball
+grows multiplicatively, so `ball(A) + ball(B)` is far smaller than `ball(A + B)`. The price is that
+the answer is restricted to the named candidates, since the forward half must keep them in separate
+channels to say anything per source. The deeper half goes to the smaller set.
+
+`combineHalves` takes `(channelled, pooled, scored)` and **not** `(forward, backward)`, which is a
+correctness matter rather than taste: the scored set is presynaptic travelling upstream and
+postsynaptic travelling downstream, so a signature naming the directions is right for one and
+silently returns the seed set's scores for the other. Both orientations are tested.
+
+The identity `z' W^k s = z_b' W^a s` holds for one decomposition per *k*, and `a = min(k, A)` is
+what keeps it legal. It is checked three ways: against a fixture, against the mock source end to
+end, and in the probe over a real connectome (worst relative difference 3.25e-16).
+
+**No truncation bound is reported under a split.** Each half's bound covers its own series, and the
+combined tail is neither of them — a precise-looking number bounding the wrong quantity is worse
+than no number. The `hops` column is empty there for the same reason: two distances, neither of
+them *the* distance.
+
+### One port whose shape follows its control
+
+`Per query neuron` turns one row per influencer into one row per (query neuron, influencer),
+which is what a `Pivot` needs to build a queries x influencers matrix for a Heatmap. It is the
+same port, not a second one — `Connectivity`'s `Split by region` arrangement — because the totals
+are a `Group By` away from the pairs and a port that is empty on most runs is worse than a shape
+that follows what the card says.
+
+**The `kind` changes with it.** Off it is a `Neurons` value; on, `neuronId` repeats once per query
+neuron, which is not a neuron set however much it looks like one, so `inferOutputs` declares a
+plain table and a wire into a Neurons-only input goes red. Louder than a picker clearing, and
+correct: the alternative is Skeletons silently fetching one body a hundred times.
+
+The mechanism is `propagate`'s `perSeedChannels`, already built for the forward half of a
+meet-in-the-middle — this points it at the other end. Which is also why the two cannot both run:
+the channels index one set, and asking for both would be an outer product per reached neuron
+rather than a vector. With both asked for, the node walks the full depth and filters, and says so
+at edit time.
+
+Two properties are pinned rather than assumed, because a channel written at one index and read at
+another still produces a full and plausible heatmap: the pairs summed over `queryId` equal the
+plain ranking exactly (asserted through the mock source, and again in the probe against the
+generated helper), and the guard is made against the *measured* reached set rather than an
+estimate — `Frontier limit` bounds what carries onwards per hop, not what has accumulated, so the
+product of the query set and the ball is only knowable after the walk.
+
+### Neuron level, always
+
+Unlike `Paths`, this never collapses to cell types. The model is linear over neurons, and influence
+is linear, so a per-type total is a downstream `Aggregate` on the result — exactly right, where a
+type-level *walk* would be a different quantity.
+
+### The exporters
+
+The Python emitter is one generated helper, `coda_influence`: `fetch_adjacencies` per hop with the
+propagation over it. `ConnectomeInfluenceCalculator` is deliberately **not** the route — it solves
+seed-to-all over a whole edge list and needs petsc4py and slepc4py, so it is both a fourth
+dependency and the problem the node exists to avoid.
+
+It is checked by **running it**. `probe-influence.py` execs the helper out of the golden notebook
+against a stubbed neuprint over the same C. elegans graph and compares with the canvas: 277
+neurons, worst relative difference 3.8e-16, under both denominators. The one thing the cell does
+not reproduce is *how* a `Candidates` run got there — it walks the full depth and filters, which is
+the same number by the identity above, written into the cell as a `NOTE`.
+
+R is refused, and the reason is the export doctrine's rather than a gap in the language: neuprintr
+is not installed here, so its argument names would be recalled rather than read (the
+`fetch_roi_hierarchy` incident), and the R twin would have no counterpart to the probe that makes
+the Python helper trustworthy. A hundred lines of unrun matrix algebra failing at the reader's
+console is worse than a cell saying what to write.
+
 ## Find Neurons: a filter builder, not a form
 
 `neuron.findNeurons`, the workhorse entry query. It used to be five fixed boxes — `Type`,

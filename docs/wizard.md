@@ -123,9 +123,9 @@ way *out* of the state rather than as a repair on the way in, so no path can for
 set of viewers states the same rule for itself (drop what the new analysis does not offer; never
 end up with none).
 
-## Three arms that are not a straight chain
+## Four arms that are not a straight chain
 
-Most analyses are a line of nodes from the head to the viewers. Three are not, and each departs
+Most analyses are a line of nodes from the head to the viewers. Four are not, and each departs
 in its own way.
 
 **A paths query has two ends, so it gets a second head** — the same kind of card as the first,
@@ -143,6 +143,21 @@ vectors and a similarity metric for the wiring, an all-by-all NBLAST over skelet
 and Linkage reads exactly that. The dendrogram then reads the tree and the heatmap reads the
 matrix *reordered by* that tree, which is the pairing that makes a cluster visible as a block
 rather than a scatter.
+
+**The influence arm is the only one where a viewer's upstream depends on *another* viewer.**
+`Per query neuron` belongs to the heatmap — a queries x influencers picture needs the scores
+before they are summed across the neurons somebody wired in — which is `matrix`'s row-normalise
+rule and nothing new. What is new is the knock-on: once that control is on the node emits one row
+per (query, influencer), so the **table** no longer reads the ranking off it, and a `Group By` and
+a `Sort` put it back. Ticked alone the table wires straight to the node and neither of those exists.
+
+So the same viewer has two different upstreams depending on what else is ticked, which is the one
+thing in this file worth reading twice. It is also the round trip the Influence node's single port
+is designed for: the totals are a `Group By` away from the pairs, which is why they are not a
+second output. One Influence node feeds both halves — two would be two walks over the same
+connectome. `everyCombination` walks one viewer at a time, so this shape is pinned directly in
+both `wizard.test.ts` and `placeGuards.test.ts`, the second because the Group By and the Sort land
+on a row neither singleton has.
 
 **Neither clustering can be run outside a browser**, and that is a fact about the runner: both
 `neuron.nblast` and `cluster.linkage` do their arithmetic in Pyodide, which is loaded into a

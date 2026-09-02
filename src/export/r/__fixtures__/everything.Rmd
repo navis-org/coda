@@ -1337,6 +1337,20 @@ roi_counts <- neuprint_get_roiInfo(find_neurons$neuronId, conn = hemibrain_neupr
   coda_neurons()
 ```
 
+```{r influence}
+# ── Influence ──
+# TODO: "Influence" has no notebook equivalent yet, so this step is missing
+# from the translation. Everything downstream of it refers to variables that
+# were never bound.
+```
+
+```{r influence-2}
+# ── Influence ──
+# TODO: "Influence" has no notebook equivalent yet, so this step is missing
+# from the translation. Everything downstream of it refers to variables that
+# were never bound.
+```
+
 ```{r skeletons}
 # ── Skeletons ──
 skeletons <- neuprint_read_neurons(head(find_neurons$neuronId, 20), conn = hemibrain_neuprint)
@@ -1523,6 +1537,13 @@ names(adjacency_links) <- c("source", "target", "weight")
 adjacency_links <- adjacency_links[adjacency_links$weight != 0, ]
 # NOTE: Coda groups this matrix by cell type. neuprint_get_adjacency_matrix
 # is per body, so the roll-up is done here rather than in the query.
+```
+
+```{r influence-3}
+# ── Influence ──
+# TODO: "Influence" has no notebook equivalent yet, so this step is missing
+# from the translation. Everything downstream of it refers to variables that
+# were never bound.
 ```
 
 ```{r paths}

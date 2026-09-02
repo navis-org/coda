@@ -297,10 +297,41 @@ describe('several viewers', () => {
     )
   })
 
+  /*
+   * The influence arm is the third of those and the only one where a viewer's upstream depends on
+   * *another* viewer: `Per query neuron` belongs to the heatmap, and once it is on the node emits
+   * one row per (query, influencer) — so the table, which wants the ranking, needs a Group By to
+   * put it back. Ticked alone it reads the node directly and no such node exists.
+   */
+  it('turns Per query neuron on for the heatmap, and regroups for the table beside it', () => {
+    const tableOnly = both('influence', ['table'])
+    expect(tableOnly.nodes.find((n) => n.id === 'inf')?.params.perQuery).toBe(false)
+    expect(tableOnly.nodes.map((n) => n.id)).not.toContain('group')
+    // Straight off the node: the ranking is what it already emits.
+    expect(tableOnly.edges.find((e) => e.target === 'view')?.source).toBe('inf')
+
+    const heatOnly = both('influence', ['heatmap'])
+    expect(heatOnly.nodes.find((n) => n.id === 'inf')?.params.perQuery).toBe(true)
+    expect(heatOnly.nodes.map((n) => n.id)).not.toContain('group')
+
+    const bothViews = both('influence', ['heatmap', 'table'])
+    expect(bothViews.nodes.find((n) => n.id === 'inf')?.params.perQuery).toBe(true)
+    // One Influence node feeding both halves — the pairs to the pivot, and back through a Group
+    // By for the ranking. Two Influence nodes would be two walks over the same connectome.
+    expect(bothViews.nodes.filter((n) => n.type === 'neuron.influence')).toHaveLength(1)
+    expect(bothViews.edges.filter((e) => e.source === 'inf').map((e) => e.target).sort()).toEqual([
+      'group',
+      'piv',
+    ])
+    expect(bothViews.edges.find((e) => e.target === 'view')?.source).toBe('piv')
+    expect(bothViews.edges.find((e) => e.target === 'view2')?.source).toBe('sort')
+  })
+
   it('is still inference-clean with two viewers on the end', () => {
     for (const [analysis, views] of [
       ['partners', ['table', 'bar', 'pie']],
       ['matrix', ['heatmap', 'table']],
+      ['influence', ['heatmap', 'table']],
       ['network', ['network', 'metrics']],
       ['morphology', ['viewer3d', 'neuroglancer']],
       ['neurons', ['table', 'neuroglancer']],

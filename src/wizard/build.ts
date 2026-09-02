@@ -467,6 +467,89 @@ function bodyOf(
       }
     }
 
+    case 'influence': {
+      /*
+       * `Per query neuron` belongs to the **heatmap**, which is `matrix`'s row-normalise rule one
+       * arm over: a queries x influencers picture needs the scores before they are summed across
+       * the neurons somebody wired in, and a reader who only ticked the table has no use for one
+       * row per pair. So the control follows the viewer rather than the analysis.
+       *
+       * Which makes the table's own upstream conditional on the *other* viewer, and that is the
+       * one thing here worth reading twice. Ticked alone, the table reads the ranking straight
+       * off the node. Ticked beside a heatmap, the node is emitting pairs, so a `Group By` puts
+       * it back — the round trip the port is designed for, and the reason the totals are not a
+       * second output.
+       */
+      const perQuery = chosen.includes('heatmap')
+      const regroup = perQuery && chosen.includes('table')
+      const viewCol = 3 + (perQuery ? 1 : 0) + (regroup ? 2 : 0)
+      const tail = views(viewCol, 0, (visualisation, id) =>
+        visualisation === 'heatmap'
+          ? [['piv', 'matrix', id, 'in']]
+          : [regroup ? ['sort', 'out', id, 'in'] : ['inf', 'influence', id, 'in']],
+      )
+      return {
+        nodes: [
+          {
+            id: 'inf',
+            type: 'neuron.influence',
+            col: 2,
+            params: { perQuery },
+          },
+          ...(perQuery
+            ? [
+                {
+                  id: 'piv',
+                  type: 'core.pivot',
+                  col: 3,
+                  // Type against type: a search over a whole dataset returns a mix, so this is
+                  // the picture somebody can read. `queryId` on the columns keeps every query
+                  // neuron as its own column, which is one edit away on the card.
+                  params: {
+                    rows: 'type',
+                    columns: 'queryType',
+                    value: 'influence',
+                    agg: 'sum',
+                  },
+                },
+              ]
+            : []),
+          ...(regroup
+            ? [
+                {
+                  id: 'group',
+                  type: 'core.groupBy',
+                  col: 3,
+                  row: 1,
+                  params: { by: ['neuronId', 'type'], agg: 'sum', value: 'influence' },
+                },
+                {
+                  id: 'sort',
+                  type: 'core.sort',
+                  col: 4,
+                  row: 1,
+                  params: { column: 'sum_influence', descending: true, limit: 0 },
+                },
+              ]
+            : []),
+          ...tail.nodes,
+        ],
+        links: [
+          ['ds', 'dataset', 'inf', 'dataset'],
+          neurons('inf', 'neurons'),
+          ...(perQuery ? ([['inf', 'influence', 'piv', 'in']] as Link[]) : []),
+          ...(regroup
+            ? ([
+                ['inf', 'influence', 'group', 'in'],
+                ['group', 'out', 'sort', 'in'],
+              ] as Link[])
+            : []),
+          ...tail.links,
+        ],
+        viewColumn: tail.viewColumn,
+      }
+    }
+
     case 'paths': {
       /*
        * The one arm with two heads. `paths` answers with a network *and* a layout for it, and the
