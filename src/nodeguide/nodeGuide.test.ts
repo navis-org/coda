@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { guideData } from './data'
 import '../nodes'
 import { listableNodeDefs } from '../core/registry'
+import { familyForNodeType } from '../nodes/lib/datasetFamilies'
 import { DEMO_DATASET, buildWorkflow } from '../wizard/build'
 import { analysisOption, everyCombination } from '../wizard/options'
 
@@ -20,6 +21,22 @@ const DATA = guideData()
 const byType = new Map(DATA.nodes.map((n) => [n.type, n]))
 
 describe('coverage', () => {
+  it('carries the family silhouette for every dataset node that has one', () => {
+    /*
+     * The page cannot look this up — reading the family table in the browser would put every
+     * blurb and version list behind a static document — so it travels in this JSON. Without it
+     * `glyphShapes` falls through to the generic disc stack and every published connectome on
+     * `nodes.html` draws the same picture, which is a regression nothing else would catch.
+     */
+    const datasets = DATA.nodes.filter((n) => familyForNodeType(n.type))
+    expect(datasets.length).toBeGreaterThan(0)
+    for (const node of datasets) {
+      expect(node.datasetGlyph, node.type).toBe(familyForNodeType(node.type)?.glyph)
+    }
+    // And nothing else carries the key, which is what keeps it out of the inlined JSON.
+    expect(DATA.nodes.filter((n) => n.datasetGlyph && !familyForNodeType(n.type))).toEqual([])
+  })
+
   it('has an entry for every listable node, and only those', () => {
     expect(DATA.nodes.map((n) => n.type).sort()).toEqual(
       listableNodeDefs()

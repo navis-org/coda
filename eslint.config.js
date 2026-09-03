@@ -107,6 +107,46 @@ export default tseslint.config(
   },
 
   {
+    /*
+     * `nodes.html` is a vite entry with no React in it, and it imports this table — that is the
+     * whole reason the drawings are primitives rather than JSX. A React import here would pull
+     * the app's chunks in behind a static page without breaking anything visible, and the only
+     * other thing watching for it is a manual `pnpm build` check named in `nodeguide/main.ts`.
+     * Same shape as the boundary rule above, and the same reasoning: the property is real, so
+     * the rule should be too.
+     */
+    files: ['src/ui/glyphs.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'react',
+              message: 'ui/glyphs.ts is drawn by nodes.html, which has no React.',
+            },
+            {
+              name: 'react-dom',
+              message: 'ui/glyphs.ts is drawn by nodes.html, which has no React.',
+            },
+            {
+              name: '@xyflow/react',
+              message: 'A drawing table must not know about the editor.',
+            },
+            { name: 'zustand', message: 'A drawing table has no state.' },
+          ],
+          patterns: [
+            {
+              group: ['**/store/*', '@/store/*'],
+              message: 'A drawing table has no state.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  {
     files: ['**/*.test.ts', '**/*.test.tsx'],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',

@@ -6,20 +6,27 @@
  * and shape grammar as sockets on the canvas. So a node added next year gets a correct
  * thumbnail for free, and the browser doubles as a way to learn the socket language.
  *
- * The centre glyph is keyed to the **category**, which is why six drawings cover every
- * node. `NODE_GLYPHS` overrides that for the viewers, whose identity genuinely *is* a visual
- * form (rows / grid / bars / node-link / skeleton) — a new visualisation node without an
- * override still gets the generic chart glyph rather than an empty box.
+ * The centre glyph is one drawing **per node type**, from `ui/glyphs.ts` — which is also where
+ * the grammar behind them is written down, and why the table is data rather than JSX. This file
+ * only renders it: `glyphShapes` picks the drawing, falling back to the node's dataset
+ * silhouette and then to its category, so a node added next month still gets a picture and the
+ * browser never has a blank row.
  *
- * All five overrides exist because the start page derives an example's tile art from the
- * graph's terminal viewer node: without them two of the four examples showed the same
- * generic bars.
+ * The dataset silhouette is asked for by *family*, not by node type. That is the one place this
+ * component reaches past `NodeDefinition`, and it is the same rule the card body follows — see
+ * `DatasetPreview.tsx` for why a glyph is a species and a coarse anatomical kind.
  */
 
 import type { NodeCategory, NodeDefinition, PortDef } from '../../core/node'
 
 import type { DatasetBackend } from '../../nodes/lib/datasetFamilies'
-import { BACKENDS, backendForNodeType } from '../../nodes/lib/datasetFamilies'
+import {
+  BACKENDS,
+  backendForNodeType,
+  familyForNodeType,
+} from '../../nodes/lib/datasetFamilies'
+import { GLYPH_BOX, GLYPH_STROKE_WIDTH, glyphShapes } from '../glyphs'
+import { glyphElements } from '../glyphElements'
 import { nodeTintVar, socketStyle } from '../socketStyle'
 import type { SocketShape } from '../socketStyle'
 import { plural } from '../format'
@@ -192,164 +199,12 @@ function renderShape(shape: SocketShape, x: number, y: number, color: string) {
 // ---------------------------------------------------------------------------
 
 /**
- * Per-node overrides, used only where the node's whole point is a visual form. Anything
- * without an entry falls back to its category glyph, so this map is optional by design.
- */
-const NODE_GLYPHS: Record<string, () => React.ReactElement> = {
-  // Lines of prose, the last one short. A note's identity is a visual form too, and the utility
-  // category's three dots would say "some tool" about the one node that is plainly not one.
-  'note.text': () => (
-    <>
-      <line x1={4} y1={7} x2={20} y2={7} />
-      <line x1={4} y1={12} x2={20} y2={12} />
-      <line x1={4} y1={17} x2={13} y2={17} />
-    </>
-  ),
-  'out.table': () => (
-    <>
-      <line x1={5} y1={7} x2={19} y2={7} />
-      <line x1={5} y1={12} x2={19} y2={12} />
-      <line x1={5} y1={17} x2={19} y2={17} />
-    </>
-  ),
-  'out.heatmap': () => (
-    <>
-      {[0, 1, 2].map((row) =>
-        [0, 1, 2].map((col) => (
-          <rect
-            key={`${row}-${col}`}
-            x={5 + col * 5}
-            y={5 + row * 5}
-            width={4}
-            height={4}
-            fill="currentColor"
-            fillOpacity={0.25 + ((row + col) % 3) * 0.3}
-            stroke="none"
-          />
-        )),
-      )}
-    </>
-  ),
-  'out.barChart': () => (
-    <>
-      <line x1={5} y1={5} x2={5} y2={19} />
-      <line x1={7} y1={8} x2={19} y2={8} />
-      <line x1={7} y1={12} x2={15} y2={12} />
-      <line x1={7} y1={16} x2={11} y2={16} />
-    </>
-  ),
-  // Vertical bars over a baseline, in a bell: what distinguishes a histogram from the bar
-  // chart above it is which axis carries the numbers, so the glyphs run the other way too.
-  'out.histogram': () => (
-    <>
-      <line x1={4} y1={19} x2={20} y2={19} />
-      <rect x={5} y={14} width={3} height={5} fill="currentColor" stroke="none" />
-      <rect x={8.5} y={9} width={3} height={10} fill="currentColor" stroke="none" />
-      <rect x={12} y={6} width={3} height={13} fill="currentColor" stroke="none" />
-      <rect x={15.5} y={12} width={3} height={7} fill="currentColor" stroke="none" />
-    </>
-  ),
-  // A ring with one segment filled: the hole is what says donut, and the segment is what says
-  // this is a share of a whole rather than a target.
-  'out.pie': () => (
-    <>
-      <circle cx={12} cy={12} r={7} />
-      <circle cx={12} cy={12} r={3} />
-      <path d="M12 5 A7 7 0 0 1 19 12 L15 12 A3 3 0 0 0 12 8 Z" fill="currentColor" stroke="none" />
-    </>
-  ),
-  // Two boxes with whiskers, horizontal, which is the orientation the viewer actually draws.
-  'out.distribution': () => (
-    <>
-      <line x1={4} y1={8} x2={20} y2={8} />
-      <rect x={8} y={5} width={7} height={6} />
-      <line x1={11} y1={5} x2={11} y2={11} />
-      <line x1={6} y1={16} x2={19} y2={16} />
-      <rect x={9} y={13} width={6} height={6} />
-      <line x1={12} y1={13} x2={12} y2={19} />
-    </>
-  ),
-  // Axes with a cloud of marks, one of them square: a scatter's identity is the scatter of
-  // points, and the odd mark is the shape channel saying it exists.
-  'out.scatter': () => (
-    <>
-      <line x1={5} y1={5} x2={5} y2={19} />
-      <line x1={5} y1={19} x2={19} y2={19} />
-      <circle cx={9} cy={15} r={1.4} fill="currentColor" stroke="none" />
-      <circle cx={12} cy={11} r={1.4} fill="currentColor" stroke="none" />
-      <circle cx={11} cy={16} r={1.4} fill="currentColor" stroke="none" />
-      <circle cx={16} cy={8} r={1.4} fill="currentColor" stroke="none" />
-      <rect x={13.6} y={13.6} width={2.6} height={2.6} fill="currentColor" stroke="none" />
-    </>
-  ),
-  'out.network': () => (
-    <>
-      <circle cx={6} cy={7} r={2.2} />
-      <circle cx={18} cy={6} r={2.2} />
-      <circle cx={12} cy={13} r={2.2} />
-      <circle cx={6} cy={19} r={2.2} />
-      <circle cx={18} cy={18} r={2.2} />
-      <path d="M8 8l2.3 3.3M16 7.4l-2.4 3.9M10.2 14.4L7.6 17.4M13.9 14.5l2.6 2.4" />
-    </>
-  ),
-  'out.viewer3d': () => (
-    <>
-      <path d="M12 21V9" />
-      <path d="M12 12L7 7M12 15l5-4M12 9l-3-4M12 11l4-6" />
-      <circle cx={7} cy={7} r={1.3} />
-      <circle cx={17} cy={11} r={1.3} />
-      <circle cx={9} cy={5} r={1.3} />
-      <circle cx={16} cy={5} r={1.3} />
-    </>
-  ),
-}
-
-const CATEGORY_GLYPHS: Record<NodeCategory, () => React.ReactElement> = {
-  // A stack of discs: a dataset.
-  dataset: () => (
-    <>
-      <ellipse cx={12} cy={7} rx={7} ry={2.6} />
-      <path d="M5 7v10c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V7" />
-      <path d="M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6" />
-    </>
-  ),
-  // A magnifier: a search.
-  query: () => (
-    <>
-      <circle cx={10.5} cy={10.5} r={5.5} />
-      <line x1={14.5} y1={14.5} x2={19} y2={19} />
-    </>
-  ),
-  // A funnel: rows in, fewer rows out.
-  transform: () => <path d="M4 5h16l-6 7v7h-4v-7z" />,
-  // A trend line: a computed result.
-  analysis: () => <polyline points="4,18 9,11 14,14 20,5" />,
-  // Generic chart, for a viewer with no specific glyph.
-  visualisation: () => (
-    <>
-      <line x1={5} y1={19} x2={19} y2={19} />
-      <rect x={6} y={11} width={3.5} height={8} fill="currentColor" stroke="none" />
-      <rect x={11} y={7} width={3.5} height={12} fill="currentColor" stroke="none" />
-      <rect x={16} y={14} width={3.5} height={5} fill="currentColor" stroke="none" />
-    </>
-  ),
-  utility: () => (
-    <>
-      <circle cx={7} cy={12} r={1.6} fill="currentColor" stroke="none" />
-      <circle cx={12} cy={12} r={1.6} fill="currentColor" stroke="none" />
-      <circle cx={17} cy={12} r={1.6} fill="currentColor" stroke="none" />
-    </>
-  ),
-}
-
-/**
- * The glyph a node type draws, unpositioned, so another surface can render it at its own
- * size. Exported rather than duplicated: tile art that gets redrawn per surface is art that
+ * The glyph a node type draws, unpositioned, so another surface can render it at its own size.
+ * Exported rather than duplicated: tile art that gets redrawn per surface is art that
  * eventually disagrees with itself. The start page's example tiles use this.
  */
 export function nodeGlyph(type: string, category: NodeCategory): React.ReactElement {
-  const draw = NODE_GLYPHS[type] ?? CATEGORY_GLYPHS[category]
-  return draw()
+  return <>{glyphElements(glyphShapes(type, category, familyForNodeType(type)?.glyph))}</>
 }
 
 function CategoryGlyph({ def }: { def: NodeDefinition }) {
@@ -361,10 +216,10 @@ function CategoryGlyph({ def }: { def: NodeDefinition }) {
 
   return (
     <g
-      transform={`translate(${x} ${y}) scale(${size / 24})`}
+      transform={`translate(${x} ${y}) scale(${size / GLYPH_BOX})`}
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.6}
+      strokeWidth={GLYPH_STROKE_WIDTH}
       strokeLinecap="round"
       strokeLinejoin="round"
       className="node-thumb__glyph"

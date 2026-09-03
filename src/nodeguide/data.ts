@@ -34,6 +34,8 @@ import { registerBuiltinSources } from '../data/builtins'
 import { DEMO_DATASET, buildWorkflow } from '../wizard/build'
 import { analysisOption, analysisOptions, everyCombination } from '../wizard/options'
 import type { NodeCategory, NodeDefinition, ParamDef, ResolvedPort } from '../core/node'
+import type { DatasetGlyph } from '../nodes/lib/datasetFamilies'
+import { familyForNodeType } from '../nodes/lib/datasetFamilies'
 import { listableNodeDefs } from '../core/registry'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 /*
@@ -85,6 +87,15 @@ export interface GuideNode {
   params: GuideParam[]
   /** Wizard workflows whose graph contains this type, by the question they answer. */
   workflows: string[]
+  /**
+   * Which specimen silhouette a dataset node's family declares, for the nodes that have one.
+   *
+   * Registry data rather than a drawing decision — `glyph` is a field on `DatasetFamily` — which
+   * is what lets it travel in this JSON while `main.ts` keeps deciding what to do with it. The
+   * page cannot look it up for itself: reading the family table in the browser would put every
+   * blurb and version list behind a document that needs one field.
+   */
+  datasetGlyph?: DatasetGlyph
 }
 
 export interface GuideData {
@@ -167,6 +178,16 @@ function workflowNames(): string[] {
   return analysisOptions(DEMO_DATASET).map((option) => option.label)
 }
 
+/**
+ * Spread rather than assigned, so a node with no family carries no key at all. The JSON is
+ * inlined into the page, and 90-odd `"datasetGlyph": undefined` entries are bytes every reader
+ * downloads to learn nothing.
+ */
+function glyphOf(type: string): { datasetGlyph?: DatasetGlyph } {
+  const glyph = familyForNodeType(type)?.glyph
+  return glyph ? { datasetGlyph: glyph } : {}
+}
+
 export function guideData(): GuideData {
   registerBuiltinSources()
   const usedIn = workflowIndex()
@@ -185,6 +206,7 @@ export function guideData(): GuideData {
       outputs: portsOf(defaultOutputPorts(def)),
       params: paramsOf(def),
       workflows: def.annotation ? [] : [...(usedIn.get(def.type) ?? [])],
+      ...glyphOf(def.type),
     }))
     .sort((a, b) => a.label.localeCompare(b.label))
 

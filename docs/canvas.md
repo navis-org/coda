@@ -1028,10 +1028,11 @@ bottom-right corner, half under the thing that made it. So `canvasAnchor` is spl
 button asks for it directly.
 
 `NodeThumbnail` derives everything from the `NodeDefinition` — header tint from category,
-dots from real ports. The centre glyph is keyed to the **category** so six drawings cover
-every node; `NODE_GLYPHS` overrides that only for the three viewers, whose identity is a
-visual form. Never make thumbnails require per-node artwork: a future node would ship with a
-blank preview. A test renders one for every registered node to enforce that.
+dots from real ports. The centre glyph is **one drawing per node type**, from `ui/glyphs.ts`;
+see [glyphs](#the-glyph-table) below for the grammar and for why the table is data rather than
+JSX. Never make a thumbnail *require* per-node artwork: the category fallback is what keeps a
+future node from shipping a blank preview, and a test renders one for every registered node to
+enforce it.
 
 In `NodeBrowser`, chips and search are mutually exclusive — typing clears the chip, a chip
 clears the query. Don't "fix" this into chip-as-hard-filter: that reintroduces empty results
@@ -1053,6 +1054,52 @@ the new prefill instead of keeping the previous query.
 Both store-driven open signals (`paletteRequest`, `browserRequest`) are guarded by a ref
 seeded at mount, because the store outlives the component: without it, any remount after an
 earlier request re-fires it and the widget pops open unprompted.
+
+### The glyph table
+
+One drawing per node type, in `src/ui/glyphs.ts`. **A base shape names the material and the
+drawing on top names the operation** — Filter, Sort and Sample are all a table with something
+happening inside it; Mirror, Transform and Clean Skeletons are all an arbour — which is what
+makes a family legible before the label is read. Eleven base shapes cover 101 nodes. Colour is
+not part of it: every shape inherits `currentColor`, because the category tint is already spent
+on the header strip and the backend pip, and a second colour channel here would compete with
+the socket palette's three-hue budget.
+
+Four marks are shared across families and each is load-bearing. **The funnel** is filtering, on
+`core.filterTable` and on `net.filter`; reusing it is what says the two nodes are the same verb
+on different material. **A dashed outline** is a selection the user made, never an edge. **The
+four-point spark** is "cleaned", on both Clean nodes. **Weight says role** in a node-link
+drawing: the larger or filled disc is the node the question is about.
+
+**It is data, not JSX, and that is about the third surface.** Three things draw these: the
+browser thumbnail and the start page's tile art (React, via `glyphElements`), and `nodes.html`
+(plain strings, via `glyphMarkup`) — a separate vite entry with no React in it, which is why it
+carried a hand-kept transcription of the six category glyphs instead. Fine at six; 101 chances
+to drift once every node had one of its own. So the shapes are primitives and each surface has
+its own six-line renderer, which is the arrangement `markGeometry.ts` already arrived at for
+GLSL. The page pays 8.6 kB gzipped for the table, measured, in a chunk it shares with the app —
+that is its own content, since it draws 101 tiles.
+
+Three failure modes, all silent:
+
+- **A mistyped key still compiles and still lints.** It hands that node the category fallback,
+  which looks like a node nobody drew rather than like a bug. `glyphs.test.ts` asserts every key
+  is a registered type, and that the fallback is currently reachable but unused.
+- **Scaling a silhouette scales its stroke.** The twelve published connectomes reuse the card's
+  specimen art, authored in a `0 0 52 46` box, so `specimenShapes` wraps it in a group that
+  scales it *and* puts the weight back — 1.6 would land at 0.74 and every dataset tile would
+  draw faint, which reads as a paint bug rather than as arithmetic. Both numbers are derived
+  from `GLYPH_STROKE_WIDTH`, never transcribed.
+- **The two renderers can disagree about an attribute name.** `strokeWidth` against
+  `stroke-width`: the app draws it correctly and `nodes.html` draws it at the wrong weight, and
+  nobody sees that without opening both. `glyphMarkup` hyphenates in one place and the test
+  pins it.
+
+`dataset.fib19` is the only entry that draws a mark on top of a dataset silhouette — a crop
+edge, because it is a partial reconstruction of the structure Optic Lobe covers whole and the
+two are the same backend, so the header pip cannot separate them. An **addition**, not a
+replacement, which is what keeps the "a dataset added tomorrow is never blank" rule intact. Do
+not turn it into per-dataset artwork.
 
 Note `fuzzyMatch` tries every occurrence of the query's first character as an anchor rather
 than scanning greedily once — without that, "res" ranks "Clear Results" below an item whose

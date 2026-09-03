@@ -154,6 +154,26 @@ Cross-cutting — these bite in code that is not obviously "about" the area:
 
 Area-specific — the rule, then the doc that holds why:
 
+- **A node's glyph is one drawing per type, and the table is data because a third surface has no
+  React.** `ui/glyphs.ts` is 101 drawings on eleven base shapes — *a base shape names the
+  material, the drawing on top names the operation*, which is what makes Filter, Sort and Sample
+  read as one family before the label does. Four marks are shared and load-bearing: the **funnel**
+  is filtering (`core.filterTable` **and** `net.filter` — same verb, different material), a
+  **dashed outline** is a selection the user made, the **four-point spark** is "cleaned", and
+  **weight says role** in a node-link drawing. Colour is *not* a channel here; `currentColor`
+  only, because the category tint is already spent on the header strip and the pip. It is
+  primitives rather than JSX because `nodes.html` draws the same set as strings and has no React
+  in its bundle — it kept a hand-written copy of the six category glyphs, which was fine at six
+  and 101 chances to drift at one per node, the arrangement `markGeometry.ts` refused once
+  already. Three silent failures: a **mistyped key** compiles, lints and quietly serves the
+  category fallback; **scaling a dataset silhouette scales its stroke**, so `specimenShapes` puts
+  it back from `GLYPH_STROKE_WIDTH` rather than a transcribed constant, or every dataset tile
+  draws faint; and the two renderers can disagree on `strokeWidth` vs `stroke-width`, which is
+  visible only by opening both pages. `glyphs.test.ts` pins all three. The category glyphs stay
+  as a **fallback**, so adding a node is still free — and `dataset.fib19` is the only entry that
+  marks a silhouette (a crop edge), an *addition* to it rather than a replacement, which is what
+  keeps "a dataset added tomorrow is never blank" true.
+  See [docs/canvas.md](docs/canvas.md).
 - **`defaultSize` sizes React Flow's _wrapper_, and only a viewer's card fills one**
   (`category: 'visualisation'`). Elsewhere it leaves the state bar hanging below the card. A
   node that only wants to be wider sets `NODE_BODIES[type].width`.

@@ -5,8 +5,9 @@
  * reaching into the editor would put the whole app bundle behind a document that draws none of
  * it. The node cards here are CSS, not React Flow, and their tokens come from `theme.css`, so
  * the two cannot drift on what a Dataset socket looks like. Same construction as the tutorial
- * page, and the same rule: verify with `pnpm build` that `nodeguide-*.js` stays a few kB and
- * that `nodes.html` references no `main-*` chunk.
+ * page, and the same rule: verify with `pnpm build` that `nodes.html` references no `main-*`
+ * chunk. It does carry `ui/glyphs.ts` — 8.6 kB gzipped, measured, in a chunk it shares with the
+ * app — which is the page's own content rather than a leak: it draws 101 node tiles.
  *
  * Everything below the control bar is rendered from `virtual:node-guide-data`, which is the
  * node registry read at build time — see `vite/nodeGuideData.ts` for why it arrives that way
@@ -19,6 +20,13 @@ import './nodeguide.css'
 import NODE_DATA from 'virtual:node-guide-data'
 import type { GuideData, GuideNode, GuideParam, GuidePort } from './data'
 import { CAT_LABEL, SECTIONS } from './sections'
+/*
+ * The one import that reaches into the editor, and it is affordable because it reaches into
+ * a table: `ui/glyphs.ts` is drawing data with no React, no store and no registry behind it.
+ * Before this the page kept its own transcription of the six category glyphs — fine at six,
+ * and 101 chances to drift once every node had one of its own.
+ */
+import { GLYPH_STROKE_WIDTH, GLYPH_VIEWBOX, glyphMarkup, glyphShapes } from '../ui/glyphs'
 
 /* Asserted rather than declared: see `virtual.d.ts` for why the ambient declaration cannot
    carry the type itself, and `nodeGuide.test.ts` for where the shape is actually checked. */
@@ -41,55 +49,6 @@ const LEGEND: ReadonlyArray<[fam: string, shape: string, name: string, why: stri
   ['geometry', 'circle', 'Geometry', 'skeletons, meshes, synapse points'],
 ]
 
-/**
- * Glyphs, transcribed from the editor's own `ui/panels/NodeThumbnail.tsx` — one per category,
- * overridden only where a node's identity genuinely *is* a visual form. Not imported, because
- * that module is React and this page has none; kept in the same order and shape as the original
- * so the two read as copies rather than as two designs.
- */
-const CAT_GLYPH: Record<GuideNode['category'], string> = {
-  dataset:
-    '<ellipse cx="12" cy="7" rx="7" ry="2.6"/><path d="M5 7v10c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V7"/><path d="M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6"/>',
-  query: '<circle cx="10.5" cy="10.5" r="5.5"/><line x1="14.5" y1="14.5" x2="19" y2="19"/>',
-  transform: '<path d="M4 5h16l-6 7v7h-4v-7z"/>',
-  analysis: '<polyline points="4,18 9,11 14,14 20,5"/>',
-  visualisation:
-    '<line x1="5" y1="19" x2="19" y2="19"/><rect x="6" y="11" width="3.5" height="8" fill="currentColor" stroke="none"/><rect x="11" y="7" width="3.5" height="12" fill="currentColor" stroke="none"/><rect x="16" y="14" width="3.5" height="5" fill="currentColor" stroke="none"/>',
-  utility:
-    '<circle cx="7" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="17" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
-}
-
-const NODE_GLYPH: Record<string, string> = {
-  'note.text':
-    '<line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="13" y2="17"/>',
-  'out.table':
-    '<line x1="5" y1="7" x2="19" y2="7"/><line x1="5" y1="12" x2="19" y2="12"/><line x1="5" y1="17" x2="19" y2="17"/>',
-  'out.heatmap': [0, 1, 2]
-    .map((r) =>
-      [0, 1, 2]
-        .map(
-          (c) =>
-            `<rect x="${5 + c * 5}" y="${5 + r * 5}" width="4" height="4" fill="currentColor" stroke="none" fill-opacity="${0.25 + ((r + c) % 3) * 0.3}"/>`,
-        )
-        .join(''),
-    )
-    .join(''),
-  'out.barChart':
-    '<line x1="5" y1="5" x2="5" y2="19"/><line x1="7" y1="8" x2="19" y2="8"/><line x1="7" y1="12" x2="15" y2="12"/><line x1="7" y1="16" x2="11" y2="16"/>',
-  'out.histogram':
-    '<line x1="4" y1="19" x2="20" y2="19"/><rect x="5" y="14" width="3" height="5" fill="currentColor" stroke="none"/><rect x="8.5" y="9" width="3" height="10" fill="currentColor" stroke="none"/><rect x="12" y="6" width="3" height="13" fill="currentColor" stroke="none"/><rect x="15.5" y="12" width="3" height="7" fill="currentColor" stroke="none"/>',
-  'out.pie':
-    '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/><path d="M12 5 A7 7 0 0 1 19 12 L15 12 A3 3 0 0 0 12 8 Z" fill="currentColor" stroke="none"/>',
-  'out.distribution':
-    '<line x1="4" y1="8" x2="20" y2="8"/><rect x="8" y="5" width="7" height="6"/><line x1="11" y1="5" x2="11" y2="11"/><line x1="6" y1="16" x2="19" y2="16"/><rect x="9" y="13" width="6" height="6"/><line x1="12" y1="13" x2="12" y2="19"/>',
-  'out.scatter':
-    '<line x1="5" y1="5" x2="5" y2="19"/><line x1="5" y1="19" x2="19" y2="19"/><circle cx="9" cy="15" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="11" r="1.4" fill="currentColor" stroke="none"/><circle cx="11" cy="16" r="1.4" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.4" fill="currentColor" stroke="none"/><rect x="13.6" y="13.6" width="2.6" height="2.6" fill="currentColor" stroke="none"/>',
-  'out.network':
-    '<circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="13" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="18" r="2.2"/><path d="M8 8l2.3 3.3M16 7.4l-2.4 3.9M10.2 14.4L7.6 17.4M13.9 14.5l2.6 2.4"/>',
-  'out.viewer3d':
-    '<path d="M12 21V9"/><path d="M12 12L7 7M12 15l5-4M12 9l-3-4M12 11l4-6"/><circle cx="7" cy="7" r="1.3"/><circle cx="17" cy="11" r="1.3"/><circle cx="9" cy="5" r="1.3"/><circle cx="16" cy="5" r="1.3"/>',
-}
-
 // ---------------------------------------------------------------------------
 // Rendering helpers
 // ---------------------------------------------------------------------------
@@ -103,10 +62,10 @@ const ESCAPES: Record<string, string> = {
 const esc = (s: string): string => s.replace(/[&<>"]/g, (c) => ESCAPES[c] ?? c)
 
 function glyph(node: GuideNode, size: number): string {
-  const d = NODE_GLYPH[node.type] ?? CAT_GLYPH[node.category]
-  return `<svg class="tile__glyph" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"
-    aria-hidden="true">${d}</svg>`
+  const d = glyphMarkup(glyphShapes(node.type, node.category, node.datasetGlyph))
+  return `<svg class="tile__glyph" width="${size}" height="${size}" viewBox="${GLYPH_VIEWBOX}" fill="none"
+    stroke="currentColor" stroke-width="${GLYPH_STROKE_WIDTH}" stroke-linecap="round"
+    stroke-linejoin="round" aria-hidden="true">${d}</svg>`
 }
 
 const pip = (p: GuidePort): string =>

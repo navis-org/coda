@@ -288,7 +288,10 @@ The preview at the top of a dataset node is a **placeholder** — a specimen sil
 rendering of the data — but it occupies the space a real one will take. Six drawings cover every
 dataset and a seventh is never required: the glyph is keyed to a coarse anatomical kind declared
 in the family table, with `specimen` as the fallback, so a dataset added tomorrow is never blank.
-Same rule as `NodeThumbnail`, same reason.
+Same rule as the node glyphs, same reason — and the paths now live beside them in
+`ui/glyphs.ts`, because the browser thumbnail and `nodes.html` draw the same silhouettes. The
+design record for *why* a glyph is a species and a coarse anatomical kind stayed in
+`DatasetPreview.tsx`; only the coordinates moved.
 
 ## A datasource is not a dataset
 

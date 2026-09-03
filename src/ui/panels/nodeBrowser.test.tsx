@@ -333,6 +333,17 @@ describe('NodeThumbnail', () => {
     expect(screen.getByLabelText('Join: 2 inputs, 1 output')).toBeTruthy()
   })
 
+  it('scales a dataset silhouette into the glyph box, stroke and all', () => {
+    // The silhouettes are authored in a 52x46 box, so the thumbnail wraps them in a group that
+    // scales them down and puts the stroke weight back. Flattened, every dataset tile would
+    // draw at 0.74 against every other node's 1.6 — faint, and easy to read as a paint bug.
+    const { container } = render(<NodeThumbnail def={requireNodeDef('dataset.malecns')} />)
+    const group = container.querySelector('.node-thumb__glyph > g')
+    expect(group?.getAttribute('transform')).toContain('scale(')
+    expect(Number(group?.getAttribute('stroke-width'))).toBeGreaterThan(3)
+    expect(group?.querySelectorAll('path').length).toBeGreaterThan(0)
+  })
+
   it('renders for every registered node, so no node ships without a preview', () => {
     // This is the point of deriving thumbnails from metadata: adding a node cannot leave a
     // blank row behind, and no per-node artwork is required.
