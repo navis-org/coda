@@ -104,8 +104,10 @@ the rule and `.toolbar__brand span` went with the words. The descriptor still le
 in the toolbar it was a subtitle shown only to people already inside.
 
 **Two buttons left the toolbar, and only one of them moved.** `+ Add Tab` became the round **+**
-in the canvas's bottom-right corner (see [canvas.md](canvas.md) for why it asks for the canvas
-anchor rather than the pointer); `Commands Space` was deleted outright, keeping the key. Both were
+in the canvas's bottom-right corner — which now unfolds into the six node categories rather than
+opening the browser outright (see [canvas.md](canvas.md) for that menu, and for why the button
+asks for the canvas anchor rather than the pointer); `Commands Space` was deleted outright,
+keeping the key. Both were
 wide word-plus-shortcut buttons for things the status bar's hint strip already advertises, and
 `Commands` in particular offered a beginner a choice between two doors into the same room.
 

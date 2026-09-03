@@ -378,10 +378,12 @@ describe('browser entry points', () => {
     await waitFor(() => expect(screen.getByRole('dialog', { name: 'Add a node' })).toBeTruthy())
   })
 
-  it('the canvas Add button opens the browser', async () => {
+  it('the canvas Add button opens the browser, one rail button in', async () => {
     render(<App />)
     await waitFor(() => expect(screen.getByText('Find Neurons')).toBeTruthy())
+    // The + opens the category rail now — see `AddMenu`; the browser is its bottom button.
     fireEvent.click(screen.getByRole('button', { name: 'Add a node' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Browse all nodes' }))
     await waitFor(() => expect(screen.getByRole('dialog', { name: 'Add a node' })).toBeTruthy())
   })
 

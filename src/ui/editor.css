@@ -281,19 +281,52 @@
  * -------------------------------------------------------------------------- */
 
 /*
+ * The container is the whole canvas and catches nothing: the menu's two surfaces are anchored
+ * against opposite parts of it — a column in the corner and a band along the bottom — and a
+ * wrapper sized to either of them cannot hold the other. `pointer-events: none` is therefore
+ * load-bearing rather than tidy, since this element lies over every card on the canvas.
+ */
+.fab-menu {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+.fab-menu > * {
+  pointer-events: auto;
+}
+
+/*
  * The bottom-right corner the minimap left, and the one place on the canvas that is reliably
  * empty: the rail and the map are down the other side, the dock is a grid column outside this
  * element, and a card dropped here is a card somebody put here.
  *
+ * `column-reverse`, so the DOM reads bottom-to-top the way the rail does: the **+** is first in
+ * the source and drawn *last*, at the bottom — get that backwards and the whole stack hangs off
+ * the wrong end of the corner, which is what it did the first time. The rail is in normal flow rather than absolutely positioned, which is
+ * what lets the stack's own box grow to cover it: `data-tour="add"` is on this element, and a
+ * tour step's spotlight is a rectangle around the anchor's rect.
+ */
+.fab-menu__stack,
+.fab-menu__rail {
+  display: flex;
+  /* `rows[0]`, and the **+**, are written first and drawn last — see `AddMenu`. */
+  flex-direction: column-reverse;
+  align-items: center;
+}
+.fab-menu__stack {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  gap: 10px;
+}
+
+/*
  * A circle, and the only accented round control in the app — that is what makes it findable
  * without a word beside it, which is the whole trade a wordless button makes. Sized past the
  * 26px rail buttons on purpose: this is the one control a first-time canvas needs.
  */
 .add-fab {
-  position: absolute;
-  right: 20px;
-  bottom: 20px;
-  z-index: 5;
   width: 42px;
   height: 42px;
   display: inline-flex;
@@ -323,6 +356,213 @@
 .add-fab:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* The + and the × are one drawing: 45° apart, and the turn says so. */
+.add-fab svg {
+  transition: transform 180ms ease;
+}
+.add-fab[data-open='true'] svg {
+  transform: rotate(45deg);
+}
+
+/* --- the category rail --- */
+
+.fab-menu__rail {
+  gap: 8px;
+}
+
+/*
+ * A rail button is the same circle as the **+** in neutral dress, tinted by category — the tint
+ * `--cat-*` a card of that category already wears in its header strip, so the rail and the
+ * canvas name the same six families in the same six colours. The glyph itself stays
+ * `currentColor`: `ui/glyphs.ts` records why colour is not a channel inside a drawing.
+ */
+.fab-menu__cat {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--tint, var(--text-secondary));
+  box-shadow: var(--shadow-panel);
+  cursor: pointer;
+}
+.fab-menu__cat:hover {
+  background: color-mix(in srgb, var(--tint, var(--text-secondary)) 12%, var(--surface-2));
+}
+.fab-menu__cat[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--tint, var(--text-secondary)) 18%, var(--surface-2));
+  border-color: var(--tint, var(--border-strong));
+}
+.fab-menu__cat:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* --- the node band --- */
+
+/*
+ * Along the bottom rather than beside the button it came from: Transform holds 25 nodes, which
+ * is wider than any window as a single row. Rows grow upward from a bottom anchor, so a narrow
+ * window gets more rows rather than a scroll with no visible end.
+ *
+ * **No panel.** The buttons sit straight on the canvas — each disc carries its own fill, which
+ * is what makes them readable without a backdrop, and the labels take a `text-shadow` in the
+ * canvas's own colour for the case a card is behind one.
+ *
+ * `--band-bottom` is measured, not written here: the bottom row lines its discs up with the
+ * category button the band came out of, and that button's position is the stack's arithmetic
+ * above. See `AddMenu`. `left` clears the controls rail (15px margin + 26px of buttons) and is
+ * only a wrapping bound now; `right` clears the stack.
+ */
+.fab-menu__band {
+  position: absolute;
+  left: 56px;
+  right: 76px;
+  /* The fallback is the frame before the layout effect paints the measured value onto this
+     element — not a spare copy of a number TypeScript owns. */
+  bottom: var(--band-bottom, 20px);
+  display: flex;
+  /* `rows[0]` is the bottom row — see the snake note in `AddMenu`. */
+  flex-direction: column-reverse;
+  gap: 2px;
+}
+
+/*
+ * The snake. Every other row is drawn right-to-left, and `justify-content: flex-start` in a
+ * `row-reverse` packs to the *right* — which is what makes a partial row continue the row below
+ * it from the side that one ended on, rather than floating in the middle.
+ */
+.fab-menu__row {
+  display: flex;
+  gap: var(--node-gap);
+}
+.fab-menu__row[data-reverse='true'] {
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+}
+
+/*
+ * Fixed height, not natural: a label runs to one line or two, and a row sized by its content
+ * would put the discs of a one-line row and a two-line row at different heights — which the
+ * measured alignment, taken from the row's bottom edge, cannot then be right about for both.
+ * The numbers come from `AddMenu`'s `BAND`, handed over as custom properties.
+ */
+.fab-menu__node {
+  width: var(--node-w);
+  height: var(--node-h);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: var(--node-pad) 2px 0;
+  background: none;
+  /* No border, not a transparent one: it would sit inside the fixed height and push the disc
+     a pixel below the button the row is aligned with. Hover is a background, focus an outline. */
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.fab-menu__node:hover {
+  background: var(--surface-hover);
+}
+.fab-menu__node:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* `GlyphSvg` takes its size from the class — see `startGlyphs.tsx`. */
+.fab-menu__glyph {
+  width: 20px;
+  height: 20px;
+}
+.fab-menu__disc .fab-menu__glyph {
+  width: 22px;
+  height: 22px;
+}
+.fab-menu__disc {
+  width: var(--disc);
+  height: var(--disc);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--tint) 14%, var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--tint) 45%, var(--border));
+  color: var(--tint);
+}
+/* Two lines, then an ellipsis: the tooltip carries the description in full. */
+.fab-menu__name {
+  font-size: 10px;
+  line-height: 1.25;
+  color: var(--text-muted);
+  text-align: center;
+  /* The band has no panel behind it, so a card can be. */
+  text-shadow:
+    0 0 3px var(--canvas),
+    0 0 6px var(--canvas);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* --- appearing and disappearing --- */
+
+/*
+ * Keyframes rather than transitions, and the reason is not taste: these elements are *mounting*
+ * (see `usePresence`), so there is no previous computed style for a transition to run from —
+ * every button would simply appear, delay and all. `backwards` is what holds one at its start
+ * state through its own stagger.
+ */
+@keyframes fab-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.8);
+  }
+}
+@keyframes fab-menu-out {
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.85);
+  }
+}
+.fab-menu__rail > *,
+.fab-menu__node {
+  animation: fab-menu-in var(--fab-in, 170ms) cubic-bezier(0.2, 0.9, 0.3, 1.2) backwards;
+  /* `--i` is the button's place in the fill order, so the stagger travels along the snake. */
+  animation-delay: calc(var(--i, 0) * var(--fab-step, 28ms));
+}
+/*
+ * Twice the speed of the rail, in both halves: a rail is seven buttons, where a band is up to
+ * twenty-five, and it is the *stagger* that a long one is spent on — at the rail's step the last
+ * Transform node lands 700ms after the first, which is a wait rather than a flourish. Halving the
+ * duration with it keeps each button's own arrival in proportion to its place in the cascade.
+ */
+.fab-menu__node {
+  --fab-in: 85ms;
+  --fab-step: 14ms;
+}
+/* `--fab-out` is `EXIT_MS`, handed over by `AddMenu` — the timer that keeps a closing surface
+   mounted and the animation it is mounted for are one number, in one language. */
+.fab-menu__rail[data-open='false'] > *,
+.fab-menu__band[data-open='false'] .fab-menu__node {
+  animation: fab-menu-out var(--fab-out) ease-in forwards;
+  animation-delay: 0ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .add-fab svg,
+  .fab-menu__rail > *,
+  .fab-menu__node {
+    animation: none;
+    transition: none;
+  }
 }
 .react-flow__minimap-mask {
   fill: color-mix(in srgb, var(--canvas) 70%, transparent);

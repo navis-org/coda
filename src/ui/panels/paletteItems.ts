@@ -25,6 +25,7 @@ import { plural } from '../format'
 import { shortcutKeys } from '../shortcuts'
 import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
 import { WIZARD_BLURB, WIZARD_LABEL } from '../../wizard/options'
+import { CATEGORY_LABELS } from './categoryLabels'
 
 /**
  * Actions double as the palette's filter prefixes: typing `Add:` narrows the list to node
@@ -136,7 +137,7 @@ export function buildNodeItems(
       items.push({
         id: `node:${def.type}`,
         action: 'Add',
-        group: categoryLabel(category),
+        group: CATEGORY_LABELS[category],
         label: def.label,
         ...(locked
           ? { hint: LOCKED_HINT, disabled: true }
@@ -702,6 +703,3 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
   return items
 }
 
-function categoryLabel(category: string): string {
-  return category.charAt(0).toUpperCase() + category.slice(1)
-}

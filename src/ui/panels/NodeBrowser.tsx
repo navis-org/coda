@@ -21,20 +21,12 @@ import { useListNav } from '../useListNav'
 import { fuzzyRank } from './fuzzy'
 import { NodeThumbnail } from './NodeThumbnail'
 import { Highlight } from './Highlight'
+import { CATEGORY_LABELS } from './categoryLabels'
 import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
 
 export interface NodeBrowserProps {
   onPick: (nodeType: string) => void
   onClose: () => void
-}
-
-const CATEGORY_LABELS: Record<NodeCategory, string> = {
-  dataset: 'Dataset',
-  query: 'Query',
-  transform: 'Transform',
-  analysis: 'Analysis',
-  visualisation: 'Visualisation',
-  utility: 'Utility',
 }
 
 export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {

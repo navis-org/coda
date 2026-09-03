@@ -35,7 +35,7 @@ import { getToken } from '../../data/neuprint/credentials'
 import { useGraphStore } from '../../store/graphStore'
 import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
-import { BUILD_SPEC, LEARN_TO_BUILD, PARAMS } from './build'
+import { BUILD_SPEC, FIND, LEARN_TO_BUILD, PARAMS } from './build'
 import { BUILD_A_DASHBOARD, DASHBOARD_SPEC } from './dashboard'
 import { GUIDED_TOUR, TOUR_ANCHORS, byTour } from './steps'
 
@@ -334,6 +334,55 @@ describe('Learn to Build', () => {
     expect(graph.edges.filter((e) => e.target === connectivity?.id)).toHaveLength(2)
   })
 
+  /**
+   * The three add-menu steps, done the way a reader does them.
+   *
+   * This is the failure the previous version shipped with, and it is invisible to every other
+   * assertion here: the step's anchor resolved, its copy read correctly, and the move it asked
+   * for could not be made. driver hands pointer events to the spotlit element **and its subtree**
+   * and to nothing else, so an interactive step whose anchor does not *contain* the control the
+   * sentence names is a step the reader cannot complete — one that waits for an `advanceWhen`
+   * that will never fire. The **+** opening a rail rather than the browser turned one step into
+   * three, and nothing failed.
+   *
+   * So each step is walked in order: run its `before`, find the control inside its anchor, click
+   * it, and require the predicate that moves the tour on to be satisfied. jsdom hit-tests
+   * nothing, which is why the containment is asserted rather than assumed.
+   */
+  it('can be completed by pressing what each step points at', () => {
+    render(<App />)
+    const step = (id: string) => {
+      const found = LEARN_TO_BUILD.find((s) => s.id === id)
+      if (!found) throw new Error(`no step "${id}"`)
+      return found
+    }
+    /** Click one control, having first insisted it is inside the step's spotlight. */
+    const press = (id: string, within: (root: Element) => Element | null | undefined) => {
+      const current = step(id)
+      act(() => current.before?.())
+      const anchor = current.anchor?.()
+      expect(anchor, `step "${id}" has nothing to point at`).toBeTruthy()
+      const control = within(anchor!)
+      expect(control, `step "${id}" points somewhere its own control is not`).toBeTruthy()
+      act(() => {
+        ;(control as HTMLElement).click()
+      })
+      expect(current.advanceWhen?.(), `pressing it does not satisfy "${id}"`).toBe(true)
+    }
+
+    press('open-menu', (root) => root.querySelector('.add-fab'))
+    press('pick-category', (root) => root.querySelector('[data-cat="query"]'))
+    press('pick-find', (root) =>
+      [...root.querySelectorAll('.fab-menu__node')].find(
+        (button) => button.textContent === requireNodeDef(FIND).label,
+      ),
+    )
+    // And the band's own step puts the menu away, so it is not left over the card the next
+    // step is about.
+    act(() => step('pick-find').after?.())
+    expect(useGraphStore.getState().addMenuOpen).toBe(false)
+  })
+
   it('empties the canvas through history, so the reader can undo back to their work', () => {
     render(<App />)
     const before = useGraphStore.getState().graph
@@ -412,7 +461,7 @@ describe('Learn to Build', () => {
 
     // Only the dataset exists at this point: the step that adds Find Neurons has not run.
     for (const step of LEARN_TO_BUILD.slice(0, LEARN_TO_BUILD.indexOf(wired!))) {
-      if (step.id === 'pick-find' || step.id === 'open-browser') continue
+      if (step.id.startsWith('pick-') || step.id === 'open-menu') continue
       act(() => step.before?.())
     }
     expect(wired?.anchor?.()).toBeNull()

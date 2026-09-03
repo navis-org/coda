@@ -174,6 +174,46 @@ Area-specific — the rule, then the doc that holds why:
   marks a silhouette (a crop edge), an *addition* to it rather than a replacement, which is what
   keeps "a dataset added tomorrow is never blank" true.
   See [docs/canvas.md](docs/canvas.md).
+- **The canvas **+** unfolds rather than opening the browser, and every button in it is derived.**
+  `AddMenu` is a rail of seven wordless circles up the corner — the node browser, then the six
+  categories — and a **band** of that category's nodes along the bottom, each with its name in
+  small muted text. Nothing here is a second table: `nodeDefsByCategory` decides membership and
+  order, `glyphs.ts` draws every button (`CATEGORY_GLYPHS` on the rail, one drawing per type in
+  the band, the same call `NodeThumbnail` makes), so a node registered next month appears with no
+  edit. Five rules. **A wrapping band, not a row out from the button** — Transform holds 25 nodes,
+  which is wider than any window, and wrapping degrades by getting taller where a scroll or a cap
+  hides nodes. What keeps it attached to the button is the next rule: **the bottom row is aligned
+  to that button by measurement**, because where the button sits is the stack's arithmetic and all
+  of that lives in `editor.css` — so the button is asked for its rect (in a `useLayoutEffect`,
+  before the unmeasured first render can paint), and the few numbers *both* languages need go the
+  other way, from `BAND` into custom properties. Two silent costs: a node button's height is fixed,
+  since a one- and a two-line label would otherwise sit their discs at different heights above the
+  row bottom the alignment measures from; and it carries **no** border, not even a transparent one,
+  which inside that height pushes the disc a pixel off. **The fill snakes and a partial row keeps
+  its own direction** — bottom row right-to-left from the button, the next left-to-right — which is
+  what makes an unfinished top row continue the row below it rather than float; `snakeRows` chunks
+  the list *in order*, so the DOM order stays alphabetical whatever the drawing does, and jsdom
+  lays nothing out so the rows are pinned as arithmetic rather than through the DOM. **A closed
+  surface is unmounted, not hidden**: `visibility: hidden`
+  drops a button from the tab order in a browser and from nothing under jsdom, which computes no
+  styles, so the test would pass while asserting the opposite of what ships. **The animation is
+  `@keyframes`, not a transition**, because a mounting element has no previous computed style to
+  animate from and every stagger delay would be spent on nothing. And **`column-reverse` draws the
+  first child last** — the **+** is written first and drawn at the bottom; backwards, the whole
+  stack hangs off the wrong end of the corner, which is what it did until a browser showed it. Two
+  more that only bite from outside: the class prefix is `fab-menu` because `add-menu` is the
+  *command palette's*, down to `add-menu__name`; and `data-tour="add"` is on the stack rather than
+  the button, since `tour.css` restores pointer events to the spotlit element **and its subtree**,
+  so anchoring on the **+** makes the rail it opens inert for the step that asks a reader to open
+  it — and the band is a *sibling* of that stack, which is why "Learn to Build" walks the menu in
+  **three** steps anchored on three surfaces: a step spotlighting one surface while asking for a
+  click on another cannot be completed, which is what the old single "open the node browser" step
+  silently became. Its steps drive the menu through `setAddMenu` on the store, `sourcesOpen`'s
+  lift exactly — a tour has to be able to put back what it opens. The feedback nudge parks in exactly the gap the rail unfolds into, so it
+  **withholds itself** off an `addMenuOpen` store flag, the way it already does for
+  `startPageOpen` — where a `:has()` rule in this menu's stylesheet would put one component's
+  visibility policy in another component's file, and jsdom computes no styles, so that version
+  was the one that could not be tested. See [docs/canvas.md](docs/canvas.md).
 - **`defaultSize` sizes React Flow's _wrapper_, and only a viewer's card fills one**
   (`category: 'visualisation'`). Elsewhere it leaves the state bar hanging below the card. A
   node that only wants to be wider sets `NODE_BODIES[type].width`.

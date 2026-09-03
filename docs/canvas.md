@@ -1002,16 +1002,18 @@ every card re-renders whenever the inspector is toggled from anywhere; and it ch
 `panels.inspector` before flipping it, because `togglePanel` is the only setter there is and a
 button meaning "show me" must not close an inspector that is already open.
 
-There are **two** add-node surfaces, on purpose:
+There are **three** add-node surfaces, on purpose:
 
+- `AddMenu` — the round **+** in the canvas's bottom-right corner, which unfolds into the six
+  categories and then into a band of that category's nodes. The shortest route in, and the
+  only one that leaves the graph on screen.
 - `NodeBrowser` — big centred modal with thumbnails and category chips, for browsing. Opened
-  by Tab / ⇧A / the round **+** button in the canvas's bottom-right corner / the
-  `Add ▶ Browse All Nodes…` command.
+  by Tab / ⇧A / the **+** menu's bottom button / the `Add ▶ Browse All Nodes…` command.
 - `CommandPalette` — compact keyboard list, for people who know the name. Opened by Space
   (everything), by canvas double-click / pane right-click (prefilled `Add:`), and by
   dragging a link into empty canvas (filtered to compatible types, and it wires the pick up).
 
-**Only one of the two has a button, and that is the split.** Both had one in the toolbar — a
+**Only one of the two keyboard surfaces has a button, and that is the split.** Both had one in the toolbar — a
 `+ Add Tab` and a `Commands Space` — which spent two of the toolbar's widest slots saying what
 the status bar's hint strip already says, and offered a beginner a choice between two doors into
 the same room. The browser is the one worth pointing at, so it became the round **+** on the
@@ -1026,6 +1028,111 @@ canvas's upper-middle when the pointer is outside the pane), and moving the butt
 pane is the same bug with the inside-the-bounds test now passing — the card would land in the
 bottom-right corner, half under the thing that made it. So `canvasAnchor` is split out and the
 button asks for it directly.
+
+### The **+** menu
+
+`AddMenu` (`src/ui/panels/AddMenu.tsx`) is the button plus two surfaces it unfolds: a **rail**
+of seven round, wordless buttons going up the corner — the node browser, then Utility, Dataset,
+Query, Transform, Analysis, Visualisation — and, when one of those is pressed, a **band** of that
+category's nodes across the canvas, each a circle with the node's name in small muted text under
+it. The band has no panel behind it: the discs carry their own fill, and the labels take a
+`text-shadow` in the canvas's own colour for the case a card is behind one.
+
+**Why a rail rather than one more door into the browser.** The **+** used to open `NodeBrowser`
+outright: one modal, a search box and 91 rows. That is the right surface for *what can I add?*
+and the wrong one for *add a Filter*, which is most of what the button is pressed for — a modal
+takes the canvas away, and the node being added is almost always one of a handful in a category
+the reader already has in mind. Two clicks with the graph still on screen is the shorter route,
+and the browser is still the rail's bottom button for everything else.
+
+Nothing here is a second table. `nodeDefsByCategory` decides what is in a category and in what
+order; `ui/glyphs.ts` draws every button — `CATEGORY_GLYPHS` on the rail, one drawing per node
+type in the band, the same call `NodeThumbnail` makes. A node registered next month appears in
+both with no edit, which is the property the thumbnail already had and the reason `nodeGlyph` is
+exported rather than re-implemented. The one drawing that is *not* in that table is the browser's
+own four-tile mark, which lives in `AddMenu`: the table is one glyph per node type and per
+category, and a button that opens a dialog is neither.
+
+Four rules, each of which the obvious version gets wrong:
+
+- **The band wraps upward, rather than running out from the button in one row.** Transform holds
+  25 nodes and Visualisation 18; a single row runs off the left edge of every window narrower
+  than about 2,000px, and the fix for that is either a scroll with no visible end or a cap that
+  hides nodes. Wrapping shows the whole category at once and degrades by getting taller, which is
+  visible. It clears the controls rail on the left (`left: 56px`) and the stack on the right.
+- **The bottom row is aligned with the button it came out of, by measurement.** Where a category
+  button sits is the stack's arithmetic — an inset, the **+**, a gap, and *n* buttons of whatever
+  size — and all of it lives in `editor.css`; restating it in TypeScript would be a second
+  spelling that agrees until somebody changes a gap. So the button is asked for its rect, against
+  the container both are inside, in a `useLayoutEffect` — before paint, so the first render's
+  unmeasured band (every button on a row of its own) is never on screen. `BAND` is the converse
+  and the same rule: the few numbers *both* languages need are declared in the module and handed
+  to the stylesheet as custom properties on the band. Two consequences: `nodeHeight` is fixed
+  rather than natural, because a one-line label and a two-line one would otherwise put their
+  discs at different heights above a row bottom that the alignment is measured from; and
+  `.fab-menu__node` carries **no** border, not even a transparent one, since a border inside that
+  fixed height pushes the disc a pixel below the button it is aligned with (measured in Chrome).
+  The lookup is `.fab-menu__cat[data-cat=…]` and not the bare attribute: the band is written
+  *before* the stack, so a root-scoped attribute lookup answers in document order, and the day
+  the band gained a category attribute of its own — for the tour — the measurement started
+  lining the band up against itself. No error, no failing test, just a band sitting somewhere
+  else; the band says `data-band` now, and `addMenu.test.tsx` pins that one element per category
+  answers `[data-cat]` and that it is a button.
+  The measured offset is painted **straight onto the element** as `--band-bottom` rather than
+  routed through React state — `DashboardView`'s rule for `--dash-row`, and for its reason: the
+  observer fires on every frame of a resize, React never reads the number, and a `setState` per
+  frame re-renders every button in the band. What *is* state is the row capacity, a small integer,
+  so a drag re-renders only when it crosses a column boundary.
+- **The fill snakes, and a partial row keeps its own direction.** The bottom row fills
+  right-to-left from the button, the row above it left-to-right, and so on — `snakeRows` chunks
+  the alphabetical list and marks alternate rows `reverse`, which is a `flex-direction:
+  row-reverse` whose `justify-content: flex-start` packs to the *right*. That last bit is what
+  makes an unfinished top row continue the row below it from the side that one ended on rather
+  than float in the middle. The chunks stay in list order, so the DOM order is alphabetical
+  whatever the drawing does — the tab order, a screen reader and every `getAllByRole` read the
+  list rather than the shape. jsdom lays nothing out, so the rows are pinned as arithmetic
+  (`snakeRows`, `rowCapacity`) rather than through the DOM.
+- **A closed surface is unmounted, not hidden.** `usePresence` keeps it mounted for exactly the
+  length of its exit animation. `visibility: hidden` would take it out of the tab order and the
+  accessibility tree *in a browser* and out of neither under jsdom, which computes no styles — so
+  the test would pass while asserting the opposite of what ships.
+- **The animation is `@keyframes`, not a transition.** A transition needs a previous computed
+  style to animate from, and these elements are mounting: every button would simply appear, its
+  stagger delay wasted. `animation-fill-mode: backwards` is what holds one at its start state
+  until its turn.
+- **`column-reverse` draws the first child last.** The **+** is written first in the source and
+  drawn at the bottom, and the rail's browser button is written first and drawn nearest the
+  **+**. Getting that backwards hangs the whole stack off the wrong end of the corner, which is
+  what it did the first time it was rendered in a browser.
+
+Two things it borrows from elsewhere and one it has to defend. Dismissal is `useDismissOnOutside`
+with `onEscape` — a pointer anywhere else, the canvas included, closes it and adds nothing. The
+class prefix is `fab-menu`, **not** `add-menu`: the command palette has owned that namespace,
+`add-menu__name` included, since it was the `+ Add` menu, and two blocks under one prefix is one
+stylesheet edit reaching a surface nobody was looking at — a test's `.add-menu` had already
+resolved to the wrong element once. And `data-tour="add"` sits on the *stack*, not on the button,
+because `tour.css` restores pointer events to the spotlit element **and its subtree**: anchored on
+the **+** alone, the rail it opens would be inert for the length of the step that asks the reader
+to open it. The band is a *sibling* of the stack and therefore outside that subtree, which is why
+"Learn to Build" walks the menu in **three** steps — press the **+**, choose Queries, pick Find
+Neurons — each anchored on the surface its own sentence names. A step that spotlights the rail
+while asking for a click on the band is a step nobody can complete, and that is exactly what the
+single "open the node browser" step became on the day the **+** stopped opening the browser: the
+anchor resolved, the copy read correctly, and the `advanceWhen` waited for a modal nothing was
+going to open. `tour.test.tsx` now presses each step's own control, *from inside its own anchor*,
+and requires the predicate to fire — the containment is the assertion, since jsdom hit-tests
+nothing. The steps drive the menu through `setAddMenu` on the store rather than a component's
+state, which is the same lift `sourcesOpen` records: a tour has to be able to put back whatever it
+opens. The feedback nudge parks itself in the gap above
+the closed button — precisely where the rail unfolds, and where a low category's band lands
+outright — so it **withholds itself while the menu is open**, off an `addMenuOpen` flag on the
+store, exactly as it already does for `startPageOpen`. Not a `:has()` rule in this stylesheet
+reaching across the app to hide somebody else's component: that puts one component's visibility
+policy in another component's file, keyed on an ancestry neither owns, and jsdom computes no
+styles, so it was the one version of this that could not be tested. A `z-index` bump was the other
+half of that attempt and is gone with it — with the card withheld there is nothing left in the
+corner to out-stack, and `51` was the first off-scale number in a file whose layers otherwise go
+by tens.
 
 `NodeThumbnail` derives everything from the `NodeDefinition` — header tint from category,
 dots from real ports. The centre glyph is **one drawing per node type**, from `ui/glyphs.ts`;

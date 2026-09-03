@@ -293,6 +293,9 @@ describe('every store action is on one side of the lock', () => {
     'closeGuides',
     'beginGuide',
     'finishGuide',
+    // The canvas's **+** menu. Live, because unfolding a menu is not an edit — and the menu
+    // closes itself when the lock arrives, so on a frozen canvas this only ever runs to shut it.
+    'setAddMenu',
     // Opening a *browser* of workflows is a panel. Opening one of them is `loadGraph`, which
     // is a document load and is on the same side as opening a file.
     'openZoo',

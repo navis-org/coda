@@ -28,11 +28,21 @@ import type { ReactNode } from 'react'
 export function GlyphSvg({
   viewBox,
   className,
+  strokeWidth = 1.4,
   children,
 }: {
   viewBox: string
   /** Sizing is the caller's — a start card's tile and a wizard row's glyph are different sizes. */
   className: string
+  /**
+   * A parameter with a default rather than a second component, because the alternative was a
+   * fourth `<svg>` transcribing the other six attributes to change this one. Every door and
+   * dataset row takes 1.4; the surfaces that draw a *node* glyph beside `NodeThumbnail`'s
+   * pass `GLYPH_STROKE_WIDTH`, which is what a dataset silhouette's own scaling group already
+   * puts back — so a band of node glyphs drawn at 1.4 would have its twelve connectomes come
+   * out heavier than everything beside them.
+   */
+  strokeWidth?: number
   children: ReactNode
 }) {
   return (
@@ -43,7 +53,7 @@ export function GlyphSvg({
       focusable="false"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.4}
+      strokeWidth={strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"
     >

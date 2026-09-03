@@ -46,10 +46,26 @@
  */
 
 import { emptyGraph } from '../../core/graph'
+import type { NodeCategory } from '../../core/node'
 import { useGraphStore } from '../../store/graphStore'
 import { hasNode, makeBuilder, ranClean, runIfStale } from './builder'
 import type { TourSpec, TourStep } from './steps'
 import { byTour } from './steps'
+
+/**
+ * The add menu's band for one category, or null.
+ *
+ * By attribute rather than by the accessible name, for `byTour`'s reason: an attribute nothing
+ * else reads cannot be reworded out from under a step. Asking for the *category* and not just
+ * "a band" is deliberate — a reader who opens Analysis has not done what the step asked, and
+ * the next step's spotlight would land on the wrong row of buttons.
+ *
+ * `data-band` and not `data-cat`, which is the rail *button's*: two elements answering the same
+ * attribute made `AddMenu`'s alignment measure the band against itself, since the band is
+ * written first and `querySelector` answers in document order.
+ */
+const bandFor = (category: NodeCategory): Element | null =>
+  document.querySelector(`.fab-menu__band[data-band="${category}"]`)
 
 /**
  * The chain, in the order it gets built. Types are the wizard's connectivity workflow's, which is
@@ -57,7 +73,8 @@ import { byTour } from './steps'
  * what keeps the two in step.
  */
 const DATASET = 'dataset.mock.opticlobe'
-const FIND = 'neuron.findNeurons'
+/** Exported for the test that walks the add-menu steps the way a reader does. */
+export const FIND = 'neuron.findNeurons'
 const CONNECTIVITY = 'neuron.connectivity'
 const TABLE = 'out.table'
 const GROUP = 'core.groupBy'
@@ -140,29 +157,60 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     side: 'right',
     align: 'start',
   },
+  /*
+   * Three steps for three clicks, and each one's **anchor is the thing to press**.
+   *
+   * driver gives pointer events back to the spotlit element *and its subtree* and to nothing
+   * else, so a step that spotlights one surface while asking the reader to press another is a
+   * step that cannot be completed — which is what a single "open the browser" step became the
+   * day the **+** stopped opening the browser and started unfolding a rail. Splitting it is
+   * cheaper than teaching the tour to hold two elements live at once, and it spotlights exactly
+   * what the sentence is about at each stage.
+   *
+   * Each `before` puts the menu into the state its step describes, so Next skips forward without
+   * wedging — the tour's standing rule, and what `setAddMenu` was lifted to the store for. The
+   * band's own step closes the menu again on the way out: the reader who pressed Next through it
+   * gets the node from `auto-wire`'s `b.ensure`, and a menu left standing would be over the card
+   * that step is about.
+   */
   {
-    id: 'open-browser',
-    title: 'Your turn: open the node browser',
-    body: 'Press `+ Add` — or hit `Tab`. (If you would rather watch, Next does it for you.)',
+    id: 'open-menu',
+    title: 'Your turn: open the add menu',
+    body:
+      'Press the **+** button in the corner. It fans out into the node categories. (If you ' +
+      'would rather watch, Next does it for you.)',
+    // The stack, so the **+** and the rail it unfolds are both inside the live subtree.
     anchor: () => byTour('add'),
-    // See the `add` step in `steps.ts`: the button is at the bottom of the canvas now.
+    // `top`: the anchor is at the bottom of the canvas.
     side: 'top',
     align: 'end',
     interactive: true,
-    advanceWhen: () => Boolean(document.querySelector('.node-browser')),
+    advanceWhen: () => Boolean(document.querySelector('.fab-menu__rail')),
+  },
+  {
+    id: 'pick-category',
+    title: 'Your turn: choose Queries',
+    body:
+      'Each circle is a category. Pick **Queries** — the magnifier — and its nodes appear along ' +
+      'the bottom. The bottom button opens the full browser instead, which is also what `Tab` ' +
+      'does.',
+    before: () => useGraphStore.getState().setAddMenu(true),
+    anchor: () => document.querySelector('.fab-menu__rail'),
+    side: 'left',
+    align: 'end',
+    interactive: true,
+    advanceWhen: () => Boolean(bandFor('query')),
   },
   {
     id: 'pick-find',
     title: 'Your turn: add Find Neurons',
     body:
-      'Type `find` and pick **Find Neurons**. It is the node that turns a search into a set of ' +
-      'neurons — nearly every pipeline starts with one.',
-    before: () => {
-      if (!document.querySelector('.node-browser'))
-        useGraphStore.getState().requestNodeBrowser()
-    },
-    anchor: () => document.querySelector('.node-browser'),
-    side: 'left',
+      'Pick **Find Neurons**. It is the node that turns a search into a set of neurons — nearly ' +
+      'every pipeline starts with one.',
+    before: () => useGraphStore.getState().setAddMenu(true, 'query'),
+    anchor: () => bandFor('query'),
+    after: () => useGraphStore.getState().setAddMenu(false),
+    side: 'top',
     align: 'center',
     interactive: true,
     advanceWhen: () => hasNode(FIND),
@@ -234,8 +282,8 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'too-much',
     title: 'That is a lot of rows',
     body:
-      'One row per neuron-to-neuron connection: thousands of them, which is more than anybody ' +
-      'can read as a list. The rest of the graph reduces it to something you can.',
+      'Note the footer of the node: 278 rows - each representing a neuron-to-neuron connection. ' +
+      'Did you spot the download (⤓) button? It lets you save the table to disk if you want.',
     before: () => {
       runIfStale()
       b.reveal(CONNECTIVITY)
@@ -248,10 +296,10 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'table',
     title: 'Look at what came out',
     body:
-      'A Table, so you can actually read the rows: one per connected pair, with the partner and ' +
-      'the synapse count. Viewers pass their input straight through, so this one sits in the ' +
-      'middle of the chain rather than ending it — which is how you check a step before the ' +
-      'next one eats it.',
+      'A Table, so you can actually read the rows: one per connected pair, including columns with ' +
+      'the partner type and the synapse count. Viewer node such as this one pass their input straight ' +
+      'through, so they can sit in the middle of a chain. Note that this Table also allows you to sort ' +
+      'and apply filters. Like many other nodes, double clicking the body expands it.',
     before: () => {
       b.ensure(TABLE)
       b.wire(CONNECTIVITY, 'connections', TABLE, 'in')
@@ -265,10 +313,8 @@ export const LEARN_TO_BUILD: readonly TourStep[] = [
     id: 'group',
     title: 'Sum by partner type',
     body:
-      'Group By collapses every row onto its partner type and adds up the weight — so thousands ' +
-      'of neuron-to-neuron rows become one row per cell type. That is the shape we came for. ' +
-      'Small nodes rather than one big one, so each can be read, re-ordered and re-run on its ' +
-      'own — and the Table is still there showing you what went in.',
+      'Group By collapses every row onto its partner type and adds up the weight. This gives ' +
+      'us the type-to-type connectivity which is usually more manageable.',
     before: () => {
       b.ensure(GROUP)
       b.wire(TABLE, 'out', GROUP, 'in')

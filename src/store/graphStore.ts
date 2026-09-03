@@ -14,6 +14,7 @@
 import { create } from 'zustand'
 
 import type { CodaGraph, GraphEdge, GraphGroup, GraphNode } from '../core/graph'
+import type { NodeCategory } from '../core/node'
 import type { FeedbackCategory } from '../data/feedback'
 import type { ApplyResult } from '../assistant/apply'
 import { applyPlan } from '../assistant/apply'
@@ -496,6 +497,27 @@ export interface GraphState {
    * menu too; the return to the dialog is not, and hangs on `beginGuide` having run.
    */
   finishGuide(id: TourId, completed: boolean): void
+  /**
+   * The canvas's **+** menu: whether the rail is unfolded, and which category's band is out.
+   *
+   * Here rather than in `AddMenu`'s own `useState`, for `sourcesOpen`'s two reasons exactly.
+   * **A second reader**: the feedback nudge parks in the gap above the closed button, which is
+   * the space the rail unfolds into and where a low category's band lands outright, so it
+   * withholds itself the way it already does for `startPageOpen` — where the alternative was a
+   * `:has()` rule in the menu's stylesheet reaching across the app to hide somebody else's
+   * component, keyed on an ancestry neither owns and untestable, since jsdom computes no styles.
+   * **And a third way in**: "Learn to Build" asks the reader to open the menu and pick a node out
+   * of it, and every interactive step in that tour has a successor that does the move if it was
+   * skipped — which is a `before` with nothing to call on a component's state. A tour that could
+   * open this and not close it again is the same wedge `sourcesOpen` was lifted to fix.
+   *
+   * Two primitives rather than one object, per invariant 7: the store is read through
+   * `useSyncExternalStore` and a `{ open, category }` field would be a fresh identity per write.
+   * Not persisted, and not a mode — nothing else reads it.
+   */
+  addMenuOpen: boolean
+  addMenuCategory: NodeCategory | null
+  setAddMenu(open: boolean, category?: NodeCategory | null): void
   /**
    * Whether the Zoo browser is up.
    *
@@ -1901,6 +1923,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
     zooOpen: false,
     // Closes the start page on the way in: both are full-screen modals, and the New menu
     // is reachable from behind one.
+    addMenuOpen: false,
+    addMenuCategory: null,
+    // A closed menu has no band, so the category is cleared rather than remembered: reopening
+    // onto the last category would be a menu that answers a question nobody asked twice.
+    setAddMenu: (open, category = null) =>
+      set({ addMenuOpen: open, addMenuCategory: open ? category : null }),
     openZoo: () => set({ zooOpen: true, startPageOpen: false }),
     closeZoo: () => set({ zooOpen: false }),
 

@@ -59,6 +59,7 @@ import { MinimapControl } from './panels/MinimapControl'
 import { ViewControls } from './panels/ViewControls'
 import { WorkflowTabs } from './panels/WorkflowTabs'
 import { EdgeContextMenu } from './panels/EdgeContextMenu'
+import { AddMenu } from './panels/AddMenu'
 import { NodeBrowser } from './panels/NodeBrowser'
 import { GroupContextMenu } from './panels/GroupContextMenu'
 import { NodeContextMenu } from './panels/NodeContextMenu'
@@ -72,7 +73,7 @@ import { isTourActive, refreshTour } from './tour/tourState'
 // do. Both listeners share the two guards below.
 import { TOUR_DECLINES, isTypingTarget } from './appShortcuts'
 import { useClipboardShortcuts } from './clipboard'
-import { LOCKED_HINT, LOCKED_NOTICE } from './lockCopy'
+import { LOCKED_NOTICE } from './lockCopy'
 import { typeColorVar } from './socketStyle'
 import { useArrange } from './useArrange'
 import { useDownloads } from './useDownloads'
@@ -643,6 +644,44 @@ function EditorCanvas() {
   )
 
   /**
+   * Insert a node at a flow point — the one place a node is added from a menu.
+   *
+   * All four routes in land here: the palette, `NodeBrowser`, the **+** menu's band, and the
+   * button's own "browse everything". So the drop offset and the lock backstop are written once;
+   * they were three copies of both, and the add menu's promise to put a card where the browser
+   * would have was a comment rather than a shared line. Returns the new id, empty while locked,
+   * because the palette wires the node it just made to the link that was dragged out.
+   */
+  const insertNodeAt = useCallback(
+    (nodeType: string, flow: { x: number; y: number }): string => {
+      // The one that matters: `addNode` answers a locked canvas with an empty id, and the
+      // palette's auto-wire would then blame the *link* for a node that was never added.
+      if (refuseIfLocked()) return ''
+      // Drop the node so its top-left lands near the point rather than under it.
+      return useGraphStore.getState().addNode(nodeType, { x: flow.x - 12, y: flow.y - 18 })
+    },
+    [refuseIfLocked],
+  )
+
+  /**
+   * Where the **+** menu's own insertions land: the canvas's upper-middle, never the pointer.
+   *
+   * Stable, so `AddMenu` — which is rendered by a canvas that re-renders on every graph mutation
+   * and on every pointer move of a drag — can be `memo`ised past all of it.
+   */
+  const addAtCanvasAnchor = useCallback(
+    (nodeType: string) => {
+      insertNodeAt(nodeType, screenToFlowPosition(canvasAnchor(wrapperRef.current)))
+    },
+    [screenToFlowPosition, insertNodeAt],
+  )
+
+  /** The rail's bottom button, for the same reason. */
+  const browseAtCanvasAnchor = useCallback(() => {
+    openBrowser(canvasAnchor(wrapperRef.current))
+  }, [openBrowser])
+
+  /**
    * Items for the open palette. Commands are only offered for a bare Space — a
    * drag-into-space is unambiguously "insert a node here", and mixing "Undo" into that
    * list would be noise.
@@ -713,17 +752,13 @@ function EditorCanvas() {
         return
       }
 
-      // The palette's node rows are disabled while locked, so this is the backstop — and the
-      // one that matters, because `addNode` answers a locked canvas with an empty id and the
-      // auto-wire below would then blame the *link* for a node that was never added.
-      if (refuseIfLocked()) {
+      // The palette's node rows are disabled while locked; `insertNodeAt` carries the backstop
+      // and answers with an empty id, which the auto-wire below must not be handed.
+      const newId = insertNodeAt(item.nodeType, menu.flowPosition)
+      if (!newId) {
         setMenu(null)
         return
       }
-
-      // Drop the node so its top-left lands near the pointer rather than under it.
-      const position = { x: menu.flowPosition.x - 12, y: menu.flowPosition.y - 18 }
-      const newId = useGraphStore.getState().addNode(item.nodeType, position)
 
       const origin = menu.connectFrom
       if (origin && item.portId) {
@@ -745,7 +780,7 @@ function EditorCanvas() {
       }
       setMenu(null)
     },
-    [menu, refuseIfLocked, setNotice],
+    [menu, insertNodeAt, setNotice],
   )
 
   /*
@@ -1212,37 +1247,19 @@ function EditorCanvas() {
        *
        * A circle in the corner rather than a word in the toolbar, and outside `<ReactFlow>` for
        * the reason the minimap's toggle used to be: a control that has to keep its corner
-       * whatever the pane is doing. `nodrag` and the stopped pointer event keep the click off
-       * the pane behind it.
+       * whatever the pane is doing. It opens onto the six categories and then onto their nodes;
+       * `AddMenu` holds the design record for why that beat opening the browser outright.
        *
-       * **It asks for `canvasAnchor`, not the pointer.** Every other route in — Tab, ⇧A, a
-       * drag into space — is a gesture *at* a point, and the node lands there. This one is a
-       * button, and the pointer is on the button: `anchorPoint` would find it inside the canvas
-       * bounds and drop the card in the bottom-right corner, under the thing that made it.
+       * **Both routes ask for `canvasAnchor`, not the pointer.** Every other route in — Tab,
+       * ⇧A, a drag into space — is a gesture *at* a point, and the node lands there. This one is
+       * a button, and the pointer is on the button: `anchorPoint` would find it inside the
+       * canvas bounds and drop the card in the bottom-right corner, under the thing that made
+       * it — or, now, under the band of buttons it was picked from.
        *
        * Gone with the canvas while the dashboard is up, which the toolbar version was not — and
        * there it was a dead control, since `NodeBrowser` and the Tab binding both live here.
        */}
-      <button
-        type="button"
-        className="add-fab nodrag"
-        data-tour="add"
-        onClick={() => openBrowser(canvasAnchor(wrapperRef.current))}
-        disabled={locked}
-        title={locked ? LOCKED_HINT : 'Add a node — browse everything (Tab)'}
-        aria-label="Add a node"
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true" focusable="false">
-          <path
-            d="M12 5v14M5 12h14"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-          />
-        </svg>
-      </button>
+      <AddMenu locked={locked} onBrowse={browseAtCanvasAnchor} onAdd={addAtCanvasAnchor} />
 
       {menu && (
         <CommandPalette
@@ -1261,12 +1278,8 @@ function EditorCanvas() {
         <NodeBrowser
           onPick={(nodeType) => {
             // `openBrowser` refuses to open while locked, so reaching here means the lock came
-            // on with the browser already up. Same backstop as `handlePick`.
-            if (!refuseIfLocked()) {
-              useGraphStore
-                .getState()
-                .addNode(nodeType, { x: browserAt.x - 12, y: browserAt.y - 18 })
-            }
+            // on with the browser already up. `insertNodeAt` is the backstop.
+            insertNodeAt(nodeType, browserAt)
             setBrowserAt(null)
           }}
           onClose={() => setBrowserAt(null)}

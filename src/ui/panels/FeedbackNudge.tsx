@@ -24,6 +24,7 @@ const SHOW_DELAY_MS = 4000
 export function FeedbackNudge() {
   const requestFeedback = useGraphStore((s) => s.requestFeedback)
   const startPageOpen = useGraphStore((s) => s.startPageOpen)
+  const addMenuOpen = useGraphStore((s) => s.addMenuOpen)
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
@@ -40,8 +41,10 @@ export function FeedbackNudge() {
   }
 
   // Withheld rather than stacked behind the start page: it is not the most specific thing on
-  // screen while somebody is still deciding what to open.
-  if (!visible || startPageOpen) return null
+  // screen while somebody is still deciding what to open. And withheld under the canvas's **+**
+  // menu, which unfolds into exactly this corner — the rail through the gap this card sits in,
+  // and a low category's band of nodes straight over it.
+  if (!visible || startPageOpen || addMenuOpen) return null
 
   return (
     <div className="feedback-nudge" role="note">
