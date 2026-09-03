@@ -24,6 +24,7 @@
 
 import { describe, expect, it } from 'vitest'
 
+import type { CodaGraph } from '../core/graph'
 import { deserializeGraph, serializeGraph } from '../core/graph'
 import { inferGraph } from '../core/inference'
 import { isAnnotation, requireNodeDef } from '../core/registry'
@@ -134,9 +135,10 @@ describe('the option space', () => {
     expect(cave.length, 'no CAVE family to check the gate against').toBeGreaterThan(0)
     for (const { key } of cave) {
       const analyses = analysisOptions(key).map((o) => o.id)
-      expect(analyses, `${key}: skeletons are per dataset, and every CAVE family has them`).toEqual(
-        expect.arrayContaining(['morphology', 'nblast']),
-      )
+      expect(
+        analyses,
+        `${key}: skeletons are per dataset, and every CAVE family has them`,
+      ).toEqual(expect.arrayContaining(['morphology', 'nblast']))
       expect(analyses, `${key}: CAVE aggregates no hop server-side`).not.toContain('paths')
     }
   })
@@ -204,7 +206,10 @@ describe.each(RUNNABLE.map((a) => [label(a), a] as const))('runs: %s', (_name, a
         expect(value.length, `${node.id} returned an empty table`).toBeGreaterThan(0)
       } else if (isMatrixValue(value)) {
         expect(value.rowLabels.length, `${node.id} returned an empty matrix`).toBeGreaterThan(0)
-        expect([...value.values].some((v) => v > 0), `${node.id} matrix is all zeros`).toBe(true)
+        expect(
+          [...value.values].some((v) => v > 0),
+          `${node.id} matrix is all zeros`,
+        ).toBe(true)
       }
     }
   })
@@ -290,11 +295,16 @@ describe('several viewers', () => {
 
     const drawn = both('morphology', ['viewer3d', 'neuroglancer'])
     expect(drawn.nodes.filter((n) => n.type === 'neuron.skeletons')).toHaveLength(1)
-    expect(drawn.edges.filter((e) => e.source === 'skel').map((e) => e.target)).toEqual(['view'])
+    expect(drawn.edges.filter((e) => e.source === 'skel').map((e) => e.target)).toEqual([
+      'view',
+    ])
     // The scene takes the dataset and the ids, never the geometry.
-    expect(drawn.edges.filter((e) => e.target === 'view2').map((e) => e.sourceHandle).sort()).toEqual(
-      ['dataset', 'neurons'],
-    )
+    expect(
+      drawn.edges
+        .filter((e) => e.target === 'view2')
+        .map((e) => e.sourceHandle)
+        .sort(),
+    ).toEqual(['dataset', 'neurons'])
   })
 
   /*
@@ -319,10 +329,12 @@ describe('several viewers', () => {
     // One Influence node feeding both halves — the pairs to the pivot, and back through a Group
     // By for the ranking. Two Influence nodes would be two walks over the same connectome.
     expect(bothViews.nodes.filter((n) => n.type === 'neuron.influence')).toHaveLength(1)
-    expect(bothViews.edges.filter((e) => e.source === 'inf').map((e) => e.target).sort()).toEqual([
-      'group',
-      'piv',
-    ])
+    expect(
+      bothViews.edges
+        .filter((e) => e.source === 'inf')
+        .map((e) => e.target)
+        .sort(),
+    ).toEqual(['group', 'piv'])
     expect(bothViews.edges.find((e) => e.target === 'view')?.source).toBe('piv')
     expect(bothViews.edges.find((e) => e.target === 'view2')?.source).toBe('sort')
   })
@@ -372,7 +384,11 @@ describe('opening as a dashboard', () => {
 
   it('places the control and the viewers, in that order, and says it is the view', () => {
     const graph = built('partners', ['table', 'bar'], true)
-    expect(graph.dashboard?.cells.map((cell) => cell.nodeId)).toEqual(['explore', 'view', 'view2'])
+    expect(graph.dashboard?.cells.map((cell) => cell.nodeId)).toEqual([
+      'explore',
+      'view',
+      'view2',
+    ])
     // The flag `loadGraph` reads to land in the grid rather than on the canvas.
     expect(graph.dashboard?.open).toBe(true)
     // Everything between the control and the viewers is plumbing, and a grid of plumbing is a
@@ -407,7 +423,12 @@ describe('the notes it writes', () => {
     const notes = demoWorkflow('partners')
       .nodes.filter((n) => isAnnotation(n.type))
       .map((n) => String(n.params.text ?? ''))
-    expect(notes.length).toBeGreaterThan(1)
+    /*
+     * One, and it used to be four. The three stage notes are hints docked to their cards now —
+     * see the block below — and the overview is the only thing left that is *about the graph*
+     * rather than about a card, which is what a note is for.
+     */
+    expect(notes).toHaveLength(1)
 
     for (const text of notes) {
       const blocks = parseMarkdown(text)
@@ -429,8 +450,108 @@ describe('the notes it writes', () => {
   it('leaves the canvas clean when they are turned off', () => {
     const graph = demoWorkflow('partners', false)
     expect(graph.nodes.filter((n) => isAnnotation(n.type))).toEqual([])
+    expect(graph.nodes.flatMap((n) => n.hints ?? [])).toEqual([])
     // And the pipeline is otherwise the same graph.
-    expect(graph.nodes.map((n) => n.id)).toEqual(['ds', 'find', 'conn', 'group', 'sort', 'view'])
+    expect(graph.nodes.map((n) => n.id)).toEqual([
+      'ds',
+      'find',
+      'conn',
+      'group',
+      'sort',
+      'view',
+    ])
+  })
+})
+
+/**
+ * The hints, which is where the three stage notes went.
+ *
+ * What is worth pinning is the *anchoring*, because that is the whole of what the move bought and
+ * none of it type-checks: a hint on the wrong card is prose pointing at a node it is not about,
+ * which reads as a wizard bug and is a one-line arithmetic slip in `bodyOf`.
+ */
+describe('the hints it docks', () => {
+  /*
+   * Every graph the wizard can build, on every family, built **once** for the whole block.
+   *
+   * Every family rather than the synthetic one alone, for the reason the type-error test above
+   * gives: the arms differ by what the source can do, and the anchor `bodyOf` hands back is the
+   * first node of whatever was actually built. Hoisted because two of the cases below walk the
+   * same set, and building each workflow twice is the wizard's whole option space run twice.
+   */
+  const graphs: CodaGraph[] = starterFamilies()
+    .flatMap((family) => everyCombination(family.key))
+    .map(buildWorkflow)
+
+  /** Every hint in a graph, as `nodeId → texts`. */
+  function docked(graph: CodaGraph): Record<string, string[]> {
+    const out: Record<string, string[]> = {}
+    for (const node of graph.nodes) {
+      if (node.hints?.length) out[node.id] = node.hints.map((h) => h.text)
+    }
+    return out
+  }
+
+  it('puts one on the head, one on the analysis and one on the first viewer', () => {
+    const graph = demoWorkflow('partners')
+    expect(Object.keys(docked(graph))).toEqual(['find', 'conn', 'view'])
+    expect(graph.nodes.find((n) => n.id === 'find')?.hints?.[0]?.tone).toBe('tip')
+  })
+
+  it('names a node that exists, on every combination the wizard can build', () => {
+    for (const graph of graphs) {
+      const ids = new Set(graph.nodes.map((n) => n.id))
+      for (const id of Object.keys(docked(graph))) expect(ids.has(id)).toBe(true)
+      /*
+       * Never on a note or on the dataset card. The dataset is column 0 and no question is about
+       * it; a note carrying a hint would be a box docked to a box.
+       */
+      for (const node of graph.nodes) {
+        if (node.hints?.length) expect(isAnnotation(node.type)).toBe(false)
+        if (node.hints?.length) expect(node.id).not.toBe('ds')
+      }
+    }
+  })
+
+  it('stacks both on one card where the analysis and the viewer are the same node', () => {
+    /*
+     * Morphology with only a Neuroglancer cell ticked builds no geometry queries at all, so the
+     * viewer *is* the column-2 node. Two notes sharing a column used to be stacked by arithmetic
+     * in `assemble`; two hints on one card stack because they are a list on that card.
+     */
+    const graph = buildWorkflow({
+      dataset: DEMO_DATASET,
+      start: 'search',
+      analysis: 'morphology',
+      visualisations: ['neuroglancer'],
+      notes: true,
+      dashboard: false,
+    })
+    const stacked = Object.values(docked(graph)).filter((texts) => texts.length > 1)
+    expect(stacked).toHaveLength(1)
+    expect(stacked[0]).toHaveLength(2)
+  })
+
+  it('parses as markdown and stays short enough for a card-width box', () => {
+    const seen = new Set<string>()
+    for (const graph of graphs) {
+      for (const node of graph.nodes) {
+        for (const hint of node.hints ?? []) {
+          if (seen.has(hint.text)) continue
+          seen.add(hint.text)
+          expect(parseMarkdown(hint.text).length).toBeGreaterThan(0)
+          /*
+           * A ceiling rather than a style rule. The box is the card's width and sits over bare
+           * canvas; past roughly this length it is a Text note that has been drawn in the wrong
+           * place, which is exactly what these replaced. Measured against the longest that read
+           * well in a browser, with room to spare.
+           */
+          expect(hint.text.length).toBeLessThanOrEqual(220)
+        }
+      }
+    }
+    // Every option's hint is reachable, so nothing above passed by never being built.
+    expect(seen.size).toBeGreaterThan(12)
   })
 })
 

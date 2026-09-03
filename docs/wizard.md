@@ -226,25 +226,64 @@ ergonomics. **Two columns unless there is one cell**, and cells that fit on a si
 whole height — one rule rather than a table of compositions, so a fourth viewer cannot land
 somewhere nobody has looked at.
 
-## Notes are the examples' teaching job, kept
+## The examples' teaching job, kept — one note and three hints
 
-An overview above the chain and one note per stage, written from the same option copy the dialog
-showed — so the canvas repeats the answers the reader gave rather than describing them again in
-different words. The checkbox is on the summary and the answer is remembered
-(`coda.wizardNotes.v1`), because whether you want commentary on your canvas is a statement about
-you and not about the workflow.
+An overview note above the chain, and a **hint docked to each of the three cards the questions
+were about**, written from the same option copy the dialog showed — so the canvas repeats the
+answers the reader gave rather than describing them again in different words. The checkbox is on
+the summary and the answer is remembered (`coda.wizardNotes.v1`), because whether you want
+commentary on your canvas is a statement about you and not about the workflow. It governs both
+kinds: one checkbox, because a reader ticking it off is saying "no commentary", not "commentary of
+one shape only".
 
-**Notes stack when two want the same column.** A chain can be short enough for the analysis and
-the viewer to be one stage — morphology drawn in Neuroglancer is a single node — and without
-stacking the two notes are drawn on top of each other. Their ids come from the note's index for
-the same reason: a column is not unique and an id has to be.
+### Why three of the four moved off the canvas
+
+It was four Text notes: the overview plus one under the head, the analysis and the viewer. The
+three stage notes said things like *type in the search box, tick a few neurons, then Run* — a
+sentence whose subject is **one card**, printed on a card of its own some distance below it. Three
+costs followed from that, and all three are gone rather than reduced.
+
+**A note has to be matched to its card by horizontal position**, which is a thing the reader does
+rather than a thing the layout says. `stageNote(col, …)` placed one per column and the columns are
+adjacent, so the notes were narrower than a column purely to stop them overlapping each other —
+a geometric constraint on *prose*, which is how copy ends up written to fit a box.
+
+**Their vertical placement was arithmetic, and it had already been wrong once.** The `y` was a
+constant chosen when every chain was a single row; a paths query stacks a second head and landed
+on top of it. The fix derived the height from the deepest row the cards were placed at — correct,
+and still a calculation that a future arm could break in silence. A hint has no placement: it is
+docked to the card's own border by CSS, so a card that moves, grows a result or is dragged
+somewhere else takes its guidance with it.
+
+**Dismissing one meant deleting a node.** So the reader's choice was between prose they had
+finished with and an edit to their own document — and the edit is in the undo stack, the saved
+file and the share link. Dismissing a hint is none of those things (see `docs/canvas.md`), and it
+is remembered by *text*, so a second generated workflow does not re-teach the same sentence.
+
+**The overview stayed a note**, and the split is not about length. It is about what the sentence
+points at: the overview is about the *graph* — which four answers built it, how to run it — and
+there is no one card to dock that to. It is also a paragraph with a heading, which is the shape a
+note is for.
+
+**One hint per stage even when several viewers were ticked**, on the first of them, for the reason
+the note had: a stack of boxes down the side of a row of cards is not three times as useful.
+
+**Two hints on one card is the case the notes had to stack for.** A chain can be short enough for
+the analysis and the viewer to be one stage — morphology drawn in Neuroglancer is a single node —
+and where two notes had to be moved apart by arithmetic, two hints are a list on one card that the
+stack lays out. `wizard.test.ts` pins that combination directly.
+
+**Every wizard hint docks to the bottom**, and that is a real constraint rather than a default
+taken. `NodeHint.side` allows `top`, and a top-docked hint on the head card is drawn straight into
+the overview note, which sits above the chain and is opaque — seen in Chrome, not reasoned about.
 
 ## The rough edge, and where the fix belongs
 
 **A `browse` or `ids` workflow with a query in it lands with a red card**, saying
 `No neuronIds in the incoming neuron table`. Nothing has gone wrong: Explore's `selected` is
 empty until somebody ticks a row, and auto-run — on by default — fires the chain immediately.
-The notes for both starts say so in as many words.
+The hints on both start cards say so in as many words, which is a job they do better than the
+notes did: the sentence is now beside the card the reader has to act on.
 
 The honest fix is not in the wizard. `neuron.connectivity` (and its neighbours in
 `query/morphology.ts`, `query/roiCounts.ts`) treat an empty neuron table as an error, and an

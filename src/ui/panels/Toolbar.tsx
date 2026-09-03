@@ -36,6 +36,7 @@ import { EdgeSetPanel } from './EdgeSetPanel'
 import { SourcesPanel } from './SourcesPanel'
 import type { TourAnchor } from '../tour/steps'
 import { TOURS, startTour } from '../tour/tourState'
+import { restoreHints, useDismissedHints } from '../hints'
 import { useDismissOnOutside } from '../useDismiss'
 
 /*
@@ -62,6 +63,9 @@ export function Toolbar() {
   const openStartPage = useGraphStore((s) => s.openStartPage)
   const requestShare = useGraphStore((s) => s.requestShare)
   const requestShortcuts = useGraphStore((s) => s.requestShortcuts)
+  // The set itself rather than a boolean: `useSyncExternalStore` compares snapshots by identity
+  // and the set is replaced on every write, so this is one subscription and no allocation.
+  const dismissedHints = useDismissedHints()
   const requestPrivacy = useGraphStore((s) => s.requestPrivacy)
   const requestFeedback = useGraphStore((s) => s.requestFeedback)
   const undo = useGraphStore((s) => s.undo)
@@ -190,6 +194,28 @@ export function Toolbar() {
               <strong>Welcome Dialog</strong>
               <span>Quick start plus a few useful links.</span>
             </button>
+            {/*
+             * Beside it for the same reason it is first: this is the other way back to something
+             * a reader put away, and a hint is dismissed **for good** — keyed on its own text so
+             * a new workflow does not re-teach the same sentence (`ui/hints.ts`). Without a row
+             * here, tidying up a canvas is irreversible; the node menu has the per-card version.
+             *
+             * Rendered only when there is something to restore, so it is not a permanent row
+             * advertising a feature the reader has never met.
+             */}
+            {dismissedHints.size > 0 && (
+              <button
+                type="button"
+                className="dropdown__item"
+                onClick={() => {
+                  restoreHints()
+                  close()
+                }}
+              >
+                <strong>Show Hints Again</strong>
+                <span>Bring back every guidance box you have dismissed.</span>
+              </button>
+            )}
             {/*
              * The two "teach me" groups, adjacent and in the order somebody meets them: the
              * tours happen on this canvas, the documents open a tab and go wider.

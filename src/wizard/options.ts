@@ -31,6 +31,7 @@
  * the same thing, which is the drift `TOURS` was introduced to stop.
  */
 
+import type { NodeHint } from '../core/graph'
 import type { SourceCapabilities } from '../data/source'
 import { capabilityAnywhere, getSource } from '../data/source'
 import type { DatasetFamily } from '../nodes/lib/datasetFamilies'
@@ -106,13 +107,40 @@ export interface WizardAnswers {
   dashboard: boolean
 }
 
+/**
+ * A hint an answer docks to the card it built.
+ *
+ * **Derived from `NodeHint` rather than declared beside it**, which is what actually stops the
+ * two drifting — an independent interface with the same three fields is exactly how `tone` comes
+ * to be optional in one place and required in the other, and it also forces `build.ts` to rebuild
+ * the object field by field on the way out. `Omit` states the one real difference: the wizard
+ * never picks a `side`, because the overview note sits above the chain and a top-docked hint on
+ * the head card is drawn into it.
+ */
+export type WizardHint = Omit<NodeHint, 'side'>
+
 export interface WizardOption<Id extends string> {
   id: Id
   label: string
   /** One line, shown under the label in the dialog. */
   blurb: string
-  /** The sentence that goes on the canvas beside what this answer built. */
-  note: string
+  /**
+   * The box docked to the card this answer built — see `NodeHint`.
+   *
+   * It replaced a Text note placed under the same stage, and the move is what set the length: a
+   * note is a card of its own and could be a paragraph, where a hint is the width of the card it
+   * points at and goes away once it has been read. So the copy leads with what to *do* here and
+   * keeps one caveat, and anything longer than that belongs in the node's `?` document, which is
+   * one press away on the same card.
+   *
+   * `tone` defaults to `note`. `tip` is for the three head cards, which are the only answers here
+   * that ask the reader to do something before anything will run; `warning` is for the one that
+   * costs real time if it is widened without thinking.
+   *
+   * No `side`: every wizard hint docks under its card, because the overview note sits above the
+   * chain and a top-docked hint on the head would land in it.
+   */
+  hint: WizardHint
   /**
    * The source capability this answer needs, if any.
    *
@@ -194,20 +222,31 @@ const STARTS: WizardOption<StartId>[] = [
     // Needs a source whose whole neuron table can be fetched and searched locally.
     requires: 'neuronIndex',
     label: 'Interactive Search with Thumbnails',
-    blurb: 'Uses the `Explore Dataset` node: free-form search the full neuron table in the browser, tick the ones you want.',
-    note: 'Type in the search box, tick a few neurons, then Run. Everything downstream reads the ticked set, so the graph follows what you pick — and until you tick something, a query card further along will say it has no neurons. That is the graph waiting for you rather than a mistake.',
+    blurb:
+      'Uses the `Explore Dataset` node: free-form search the full neuron table in the browser, tick the ones you want.',
+    hint: {
+      text: '**Search and tick neurons here**, then Run. Everything downstream reads the ticked set — a card further along saying it has no neurons is the graph waiting for you, not a mistake.',
+      tone: 'tip',
+    },
   },
   {
     id: 'search',
     label: 'Structured Search',
-    blurb: 'Uses the `Find Neurons` node: filter by type, status or region. Best when you already know what to ask for.',
-    note: 'Set a filter here — type matching `LC.*`, say — then Run. The pattern is a regex, anchored the way the backend anchors it.',
+    blurb:
+      'Uses the `Find Neurons` node: filter by type, status or region. Best when you already know what to ask for.',
+    hint: {
+      text: '**Set a filter here**, then Run. A type like `LC.*` is a regex, anchored the way the backend anchors it.',
+      tone: 'tip',
+    },
   },
   {
     id: 'ids',
     label: 'Paste IDs',
     blurb: 'Copy a list of body or root ids you already have into Coda.',
-    note: 'Paste body ids here, one per line, then Run. Ids are text, never numbers — an 18-digit root id does not survive being parsed as one. Until you paste some, a query card further along will say it has no neurons; that is the graph waiting for you rather than a mistake.',
+    hint: {
+      text: '**Paste body ids here**, one per line, then Run. Ids are text, never numbers — an 18-digit root id does not survive being parsed as one.',
+      tone: 'tip',
+    },
   },
 ]
 
@@ -229,66 +268,88 @@ export function startOptions(dataset: string): WizardOption<StartId>[] {
  * is one more thing to decode rather than a way in. So the label is the term and the blurb is the
  * chain it builds, which is the other thing that reader wants to know before choosing.
  *
- * The notes on the canvas are unchanged: those are read *after* the choice, beside the nodes they
- * are about, which is where the prose belongs.
+ * The guidance on the canvas is unchanged in kind: it is read *after* the choice, beside the node
+ * it is about, which is where the prose belongs. Where it *sits* did change — see `hint`.
  */
 const ANALYSES: WizardOption<AnalysisId>[] = [
   {
     id: 'partners',
     label: 'Connectivity partners',
-    blurb: 'Fetch up- and/or downstream partners → aggregate by type and sort such that strongest partners appear first.',
-    note: 'Connectivity → group → sort: the chain most connectivity questions are built from. `Min weight` drops the weak pairs at the server rather than after the download.',
+    blurb:
+      'Fetch up- and/or downstream partners → aggregate by type and sort such that strongest partners appear first.',
+    hint: {
+      text: 'Connectivity → group → sort, the chain most connectivity questions are built from. `Min weight` drops the weak pairs at the server rather than after the download.',
+    },
   },
   {
     id: 'matrix',
     label: 'Adjacency matrix',
-    blurb: 'All-by-all connectivity. Can feed into heatmap, clustering or network visualization/analysis.',
-    note: 'Adjacency between the same set on both axes. Row-normalising makes each row sum to 1, so rows with very different totals can still be compared.',
+    blurb:
+      'All-by-all connectivity. Can feed into heatmap, clustering or network visualization/analysis.',
+    hint: {
+      text: 'Adjacency between the same set on both axes. Row-normalising makes each row sum to 1, so rows with very different totals can still be compared.',
+    },
   },
   {
     id: 'influence',
     label: 'Influence score',
-    blurb: 'Influence → Pivot: how strongly every neuron drives your set, summed over every path rather than along one route.',
-    note: 'The influence score of Bates et al., bounded to a few hops around your neurons. `Gain` is how much of a signal survives each further synapse; `Max hops` is how far to look. Scores are a lower bound — the node says how much it left out. Press `?` on the card for what the number means.',
+    blurb:
+      'Influence → Pivot: how strongly every neuron drives your set, summed over every path rather than along one route.',
+    hint: {
+      text: 'The influence score of Bates et al., bounded to a few hops. Scores are a lower bound and the card says how much it left out. Press `?` for what the number means.',
+    },
   },
   {
     id: 'paths',
     requires: 'paths',
     label: 'Shortest paths',
     blurb: 'Paths from one neuron set to another, a few hops deep. Two searches.',
-    note: 'Two searches, because a path has two ends — the second card is where the *targets* go. `Max hops` and `Min weight` are what keep the traversal from opening out into the whole connectome.',
+    hint: {
+      text: 'Two searches, because a path has two ends — the second card is where the *targets* go. `Max hops` and `Min weight` are what keep the traversal bounded.',
+    },
   },
   {
     id: 'network',
     label: 'Network graph + stats',
     blurb: 'Type-level edges as a node-link network graph and/or the graph metrics over it.',
-    note: 'Grouping by both ends turns neuron-to-neuron rows into a type-level edge list, which is what a network is built from.',
+    hint: {
+      text: 'Grouping by both ends turns neuron-to-neuron rows into the type-level edge list a network is built from.',
+    },
   },
   {
     id: 'cluster',
     label: 'Connectivity similarity',
     blurb: 'Partner Vectors → Similarity Matrix → Linkage, over the shared partners.',
-    note: 'Partner Vectors turns the edge list into one vector per neuron — there is deliberately no Pivot in this chain, which is what keeps it from being a hundred million cells. Add a `Cut Tree` after the linkage to turn the dendrogram into cluster labels.',
+    hint: {
+      text: 'Partner Vectors makes one vector per neuron. There is deliberately no Pivot in this chain — that is what keeps it from being a hundred million cells.',
+    },
   },
   {
     id: 'morphology',
     requires: 'skeletons',
     label: 'View morphology in 3D',
     blurb: 'Skeletons and synapse locations, drawn in one scene.',
-    note: 'Two queries off one search: the arbours and the synapse points, drawn in the same scene.',
+    hint: {
+      text: 'Two queries off one search: the arbours and the synapse points, drawn in the same scene.',
+    },
   },
   {
     id: 'nblast',
     requires: 'skeletons',
     label: 'NBLAST clustering',
     blurb: 'All-by-all NBLAST over their skeletons → Linkage.',
-    note: 'NBLAST is all-by-all, so the work grows with the *square* of the set — the search above is capped for that reason, and raising it is the one edit here worth thinking about before you press Run. Add a `Cut Tree` after the linkage to turn the dendrogram into cluster labels.',
+    hint: {
+      text: 'NBLAST is all-by-all, so the work grows with the **square** of the set. The search above is capped for that reason; widen it deliberately.',
+      tone: 'warning',
+    },
   },
   {
     id: 'neurons',
     label: 'Neuron table only',
     blurb: 'No analysis, just the data. Build on it with your own queries and viewers.',
-    note: 'No analysis yet. Add nodes to the right of this one — press Tab for the node browser.',
+    hint: {
+      text: 'No analysis yet. Add nodes to the right of this one — press Tab for the node browser.',
+    },
   },
 ]
 
@@ -305,56 +366,72 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     id: 'table',
     label: 'A table',
     blurb: 'Rows and columns, sortable and filterable in place.',
-    note: 'A viewer passes its input straight through, so it can sit in the middle of a chain rather than only ending one.',
+    hint: {
+      text: 'A viewer passes its input straight through, so it can sit in the middle of a chain rather than only ending one.',
+    },
   },
   {
     id: 'bar',
     label: 'A bar chart',
     blurb: 'One bar per partner type, tallest first.',
-    note: 'The bars read the grouped table: one category column, one value column.',
+    hint: { text: 'The bars read the grouped table: one category column, one value column.' },
   },
   {
     id: 'pie',
     label: 'A pie chart',
     blurb: 'Shares of the total, with the tail folded into one slice.',
-    note: 'Everything past the eighth slice folds into “Other” — a pie with forty slices is a colour key, not a chart.',
+    hint: {
+      text: 'Everything past the eighth slice folds into “Other” — a pie with forty slices is a colour key, not a chart.',
+    },
   },
   {
     id: 'dendrogram',
     label: 'A dendrogram',
     blurb: 'The clustering as a tree, with every neuron on a leaf.',
-    note: 'Click a branch to select what is under it — the selection is an output, so it can feed the rest of the graph.',
+    hint: {
+      text: 'Click a branch to select what is under it. The selection is an output, so it can feed the rest of the graph.',
+    },
   },
   {
     id: 'heatmap',
     label: 'A heatmap',
     blurb: 'The matrix drawn as cells, one colour ramp.',
-    note: 'Sequential colour, because these values have a zero and only go up. Turn values on to read the numbers off the cells.',
+    hint: {
+      text: 'Sequential colour, because these values have a zero and only go up. Turn values on to read the numbers off the cells.',
+    },
   },
   {
     id: 'network',
     label: 'A network diagram',
     blurb: 'Nodes and links, laid out feed-forward.',
-    note: 'Node colour is the type, size is total outgoing weight, link width is the synapse count. Drag a node to move it; right-click for the neighbourhood.',
+    hint: {
+      text: 'Node colour is the type, size is total outgoing weight, link width is the synapse count. Drag a node to move it; right-click for the neighbourhood.',
+    },
   },
   {
     id: 'metrics',
     label: 'Graph metrics',
     blurb: 'Density, components, degree distribution — the numbers rather than the picture.',
-    note: 'Every measure here is O(V + E), so the card is live as you edit. Centrality is a separate node, because it is not.',
+    hint: {
+      text: 'Every measure here is O(V + E), so the card is live as you edit. Centrality is a separate node, because it is not.',
+    },
   },
   {
     id: 'viewer3d',
     label: 'A 3D scene',
     blurb: 'Skeletons and synapses, rendered in the browser.',
-    note: 'Skeletons coloured by type, synapse points by polarity. Scroll to zoom, drag to orbit.',
+    hint: {
+      text: 'Skeletons coloured by type, synapse points by polarity. Scroll to zoom, drag to orbit.',
+    },
   },
   {
     id: 'neuroglancer',
     requires: 'viewerScene',
     label: 'Neuroglancer',
     blurb: 'The published scene, with the chosen neurons loaded.',
-    note: 'The dataset’s own published scene with the selection loaded into it — the segmentation as its authors serve it.',
+    hint: {
+      text: 'The dataset’s own published scene with the selection loaded into it — the segmentation as its authors serve it.',
+    },
   },
 ]
 

@@ -6,6 +6,7 @@ import { getNodeDef, isAnnotation } from '../../core/registry'
 import { hasHelp } from '../../help/registry'
 import { useGraphStore } from '../../store/graphStore'
 import { copySelectionToSystem, cutSelectionToSystem, pasteFromClipboard } from '../clipboard'
+import { restoreHints, splitHints, useDismissedHints } from '../hints'
 import { LOCKED_HINT } from '../lockCopy'
 import { shortcutKeys } from '../shortcuts'
 import { useDismissOnOutside } from '../useDismiss'
@@ -37,8 +38,23 @@ export function NodeContextMenu({
   const node = store.graph.nodes.find((n) => n.id === nodeId)
 
   useDismissOnOutside(ref, onClose, { onEscape: true })
+  const seenHints = useDismissedHints()
 
   if (!node) return null
+
+  /*
+   * The hints on this card that have been put away — the only route back for one node.
+   *
+   * A hint is dismissed for good and keyed on its text (`ui/hints.ts`), so without a row here the
+   * reader's own act of tidying up is irreversible from the canvas. The `?` menu has the global
+   * version; this one is deliberately narrower, because a right-click on one card is not a
+   * request to bring back guidance on a card three columns over.
+   *
+   * Through `splitHints`, the same partition the card draws from, so this row offers back exactly
+   * what the card is not showing — the two spelling `hintKey` and `seen.has` for themselves is
+   * how they come to disagree about what "read" means.
+   */
+  const putAway = splitHints(node, seenHints).dismissed
 
   // The selection is what bulk actions apply to; a right-click on an unselected node
   // acts on that node alone.
@@ -140,6 +156,21 @@ export function NodeContextMenu({
           >
             {node.paramsCollapsed ? 'Show parameters & ports' : 'Hide parameters & ports'}
           </button>
+          {/*
+           * Only when there is something to bring back, so the row is not a permanent reminder
+           * that a feature nobody used exists. Not disabled by the lock, and not an undo step —
+           * dismissing changes nothing about the document, so neither can undoing it.
+           */}
+          {putAway.length > 0 && (
+            <button
+              type="button"
+              className="context-menu__item"
+              title="Show the guidance boxes dismissed on this card"
+              onClick={act(() => restoreHints(putAway))}
+            >
+              Show Hints
+            </button>
+          )}
           {/*
            * Not disabled by the lock, unlike every structural row below. A dashboard is the
            * other *view* rather than a change to the canvas, and freezing the canvas so it can

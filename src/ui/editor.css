@@ -1163,6 +1163,118 @@ select.field {
   border-top-color: color-mix(in srgb, var(--status-stale) 32%, transparent);
 }
 
+/*
+ * Node hints: an author's guidance, docked to a card's edge.
+ *
+ * A sibling of the card inside React Flow's wrapper, so `bottom: 100%` / `top: 100%` resolve
+ * against the node's own box — the same arrangement the run ring uses, and for the same reason
+ * (`.coda-node` clips with `overflow: hidden`). Absolutely positioned, so the stack contributes
+ * nothing to what React Flow measures and a hint cannot move a wire.
+ *
+ * **The width is the card's, not the content's.** `left: 0; right: 0` rather than a width of its
+ * own: a hint that was wider than the card it points at would reach into the next column, and
+ * `placeGuards.test.ts` only knows about cards. Two sentences is the ceiling this implies, which
+ * is the constraint the copy is written to.
+ *
+ * The tone is carried by a left rule **plus** the words, never by the background — the same rule
+ * `.markdown__callout` states and the same tokens, so an admonition in the help documents and one
+ * on a card are the same object in two places rather than two colour schemes.
+ */
+.node-hints {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /*
+   * Over the card's own selection outline and under nothing in particular. A hint belongs to one
+   * node, so it rides that node's stacking context; a card in the next row can paint over the
+   * bottom of it, which is the same bargain the run ring makes and is why hints are short.
+   */
+  z-index: 2;
+}
+.node-hints[data-side='top'] {
+  bottom: 100%;
+  padding-bottom: 6px;
+  /* Nearest the card first, reading outwards, so a second hint does not push the first away. */
+  flex-direction: column-reverse;
+}
+.node-hints[data-side='bottom'] {
+  top: 100%;
+  padding-top: 6px;
+}
+
+.node-hint {
+  /*
+   * `--cal`, the same custom property `.markdown__callout` carries, and the two tone rules are a
+   * shared selector list down beside it. The comment here used to assert that an admonition in
+   * the help documents and one on a card were "the same object in two places" — with a private
+   * `--hint` nothing enforced that, so a change to the callout palette would have left hints
+   * behind in silence. What stays per-class is what genuinely differs: the opaque background,
+   * the padding and the size.
+   */
+  --cal: var(--text-muted);
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 5px 4px 5px 8px;
+  border-left: 3px solid var(--cal);
+  border-radius: 0 4px 4px 0;
+  /*
+   * Opaque rather than a tint of `transparent`: the box sits over bare canvas and, at the bottom
+   * of a chain, over whatever wire runs beneath it. A 9% wash of the accent over a routed edge is
+   * a hint nobody can read.
+   */
+  background: color-mix(in srgb, var(--cal) 12%, var(--surface-2));
+  box-shadow: var(--shadow-node);
+  color: var(--text-primary);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.node-hint__text {
+  flex: 1;
+  min-width: 0;
+}
+/* The markdown renderer's own block spacing is for a document; this is two sentences. */
+.node-hint__text > *:first-child {
+  margin-top: 0;
+}
+.node-hint__text > *:last-child {
+  margin-bottom: 0;
+}
+.node-hint__text p {
+  margin: 0 0 4px;
+}
+.node-hint__text ul,
+.node-hint__text ol {
+  margin: 0 0 4px;
+  padding-left: 16px;
+}
+
+.node-hint__close {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.node-hint__close:hover {
+  background: color-mix(in srgb, var(--cal) 22%, transparent);
+  color: var(--text-primary);
+}
+.node-hint__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* Progress hairline while a node runs. */
 /*
  * Run indicator: a gold stroke traced around the *outside* of the node.
@@ -5727,10 +5839,16 @@ p.sources__hint {
   background: color-mix(in srgb, var(--cal) 9%, transparent);
   --cal: var(--text-muted);
 }
-.markdown__callout[data-tone='warning'] {
+/*
+ * Shared with `.node-hint`, which carries the same `--cal`. One tone table, so a hint on a card
+ * and an admonition in a help document cannot come to mean different colours.
+ */
+.markdown__callout[data-tone='warning'],
+.node-hint[data-tone='warning'] {
   --cal: var(--status-stale);
 }
-.markdown__callout[data-tone='tip'] {
+.markdown__callout[data-tone='tip'],
+.node-hint[data-tone='tip'] {
   --cal: var(--accent);
 }
 .markdown__callout-title {

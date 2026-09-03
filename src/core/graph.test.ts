@@ -376,6 +376,63 @@ describe('serialisation', () => {
     expect(sizes['junk']).toBeUndefined()
     expect(sizes['none']).toBeUndefined()
   })
+
+  /**
+   * Hints, which arrive in files somebody was mailed exactly as group colours do.
+   *
+   * Two of the three checks here are about that provenance rather than about tidiness. A **tone
+   * is a name** off `HINT_TONES` and an unknown one falls back rather than reaching a stylesheet
+   * — see the note on the constant, which is the same safety property `GROUP_COLORS` has. And the
+   * **cap is a refusal**, the one in this file that is: a hint stack is docked to a card's border,
+   * so a file claiming forty of them papers the canvas around one node with boxes the reader has
+   * to dismiss individually.
+   *
+   * The third is that an **empty hint is dropped**, because the box it would draw is a bar with a
+   * × on it and no way to tell what it was meant to say.
+   */
+  it('round-trips hints, and repairs a file that made one up', () => {
+    const node = (id: string, hints: unknown) => ({
+      id,
+      type: 'out.table',
+      position: { x: 0, y: 0 },
+      params: {},
+      hints,
+    })
+    const json = JSON.stringify({
+      version: 1,
+      nodes: [
+        node('good', [{ text: 'Tick a few neurons here.', tone: 'tip', side: 'top' }]),
+        node('tone', [{ text: 'Kept, minus the tone.', tone: 'url(evil.css)' }]),
+        node('empty', [{ text: '   ' }, { text: 'Survives.' }]),
+        node('junk', [null, 'a string', { tone: 'tip' }]),
+        node(
+          'many',
+          Array.from({ length: 9 }, (_, i) => ({ text: `Hint ${i}` })),
+        ),
+        node('none', undefined),
+      ],
+      edges: [],
+    })
+    const { graph, warnings } = deserializeGraph(json)
+    const hints = Object.fromEntries(graph.nodes.map((n) => [n.id, n.hints]))
+
+    expect(hints['good']).toEqual([
+      { text: 'Tick a few neurons here.', tone: 'tip', side: 'top' },
+    ])
+    expect(hints['tone']).toEqual([{ text: 'Kept, minus the tone.' }])
+    expect(hints['empty']).toEqual([{ text: 'Survives.' }])
+    // Nothing survived, so the key is absent rather than an empty array — a `hints: []` is a
+    // field that says nothing, and the share link pays for it in the fragment.
+    expect(hints['junk']).toBeUndefined()
+    expect(hints['none']).toBeUndefined()
+    expect(hints['many']).toHaveLength(4)
+    // Decoration, like a stale group membership: the document still means what it said.
+    expect(warnings).toEqual([])
+
+    // And back out through the writer the download and the shelf both use.
+    const again = deserializeGraph(serializeGraph(graph)).graph
+    expect(again.nodes.find((n) => n.id === 'good')?.hints).toEqual(hints['good'])
+  })
 })
 
 describe('meta on load', () => {

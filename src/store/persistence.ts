@@ -63,6 +63,14 @@ const WIZARD_DASHBOARD_KEY = 'coda.wizardDashboard.v1'
 const GUIDES_SEEN_KEY = 'coda.guidesSeen.v1'
 const GUIDES_DONE_KEY = 'coda.guidesDone.v1'
 const LAYOUT_KEY = 'coda.layout.v1'
+/**
+ * The hints a reader has dismissed, as content digests — see `ui/hints.ts`.
+ *
+ * `localStorage` and not the document, which is the whole design of a hint: dismissing is not an
+ * edit, so it takes no undo step, does not mark the file dirty, and cannot ride down a share link
+ * and arrive pre-dismissed for the person being shown the workflow.
+ */
+const HINTS_KEY = 'coda.hintsDismissed.v1'
 /** When the feedback nudge was last shown or dismissed, so it can wait a week before the next. */
 const FEEDBACK_NUDGE_KEY = 'coda.feedbackNudge.v1'
 
@@ -114,6 +122,32 @@ function writeLocal(name: string, value: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * A stored list of strings, or none.
+ *
+ * Both keys shaped this way — the guides a reader has finished and the hints they have dismissed
+ * — want the identical repair policy, and had it written out twice: anything that is not an array
+ * of strings reads as *none*, because for both of them the recoverable failure is showing
+ * something the reader had put away, and the other direction is a reader who never learns the
+ * thing exists. Non-string members are dropped rather than failing the whole read, so one bad
+ * entry in a hand-edited key does not lose the rest.
+ */
+function readStringArray(name: string): string[] {
+  const raw = readLocal(name)
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((value): value is string => typeof value === 'string')
+  } catch {
+    return []
+  }
+}
+
+function writeStringArray(name: string, values: readonly string[]): void {
+  writeLocal(name, JSON.stringify(values))
 }
 
 function removeLocal(name: string): void {
@@ -845,19 +879,36 @@ export function saveGuidesSeen(): void {
  * checkmarks, which is a cosmetic loss; throwing here would take the store's creation with it.
  */
 export function loadGuidesDone(): string[] {
-  const raw = readLocal(GUIDES_DONE_KEY)
-  if (!raw) return []
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((id): id is string => typeof id === 'string')
-  } catch {
-    return []
-  }
+  return readStringArray(GUIDES_DONE_KEY)
 }
 
 export function saveGuidesDone(ids: readonly string[]): void {
-  writeLocal(GUIDES_DONE_KEY, JSON.stringify(ids))
+  writeStringArray(GUIDES_DONE_KEY, ids)
+}
+
+// ---------------------------------------------------------------------------
+// Node hints
+// ---------------------------------------------------------------------------
+
+/**
+ * The hints this reader has already dismissed, by digest.
+ *
+ * Keyed on the hint's **text** rather than on a (document, node, hint) address, which is what
+ * makes "once ever" mean what it says: the Workflow Wizard mints a fresh graph every time it is
+ * used and the same sentence is docked to the same kind of card in it, so an address-keyed
+ * dismissal would re-teach a returning reader on every new workflow. `ui/hints.ts` owns the
+ * digest and records the one thing this trades away.
+ *
+ * Anything that is not an array of strings reads as none — a corrupt key shows a hint somebody
+ * had put away, which is the recoverable direction. The other way round is a reader who is never
+ * shown a hint and has no idea one exists.
+ */
+export function loadDismissedHints(): string[] {
+  return readStringArray(HINTS_KEY)
+}
+
+export function saveDismissedHints(keys: readonly string[]): void {
+  writeStringArray(HINTS_KEY, keys)
 }
 
 /**

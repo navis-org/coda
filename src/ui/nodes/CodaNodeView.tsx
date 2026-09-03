@@ -42,6 +42,7 @@ import { CacheAge } from './CacheAge'
 import { DatasetCacheAge } from './DatasetCacheAge'
 import { nodeBody } from './nodeBodies'
 import { nodeIssues } from './nodeIssues'
+import { NodeHints } from './NodeHints'
 import { NodeRunRing } from './NodeRunRing'
 import { ResultDownload } from './ResultDownload'
 import { firstOutputPort, inputPorts, outputPorts } from '../../core/ports'
@@ -467,6 +468,17 @@ function CodaNodeViewImpl({
        * ancestor, so an outset absolute box resolves against the node's own bounds.
        */}
       {info.state === 'running' && <NodeRunRing progress={info.progress} />}
+      {/*
+       * A sibling for the same reason, and the component says at length why hints are drawn
+       * outside the card rather than in the issue band.
+       *
+       * **Guarded, and the guard is the point.** `NodeHints` subscribes to which hints this
+       * reader has dismissed, and this component is mounted once per card — the note on
+       * `draggable` above states the rule that follows: a subscription here costs a call on
+       * every write, per card. Almost no node carries a hint (a wizard graph has three), so
+       * mounting it everywhere would buy a live subscription per card to render nothing.
+       */}
+      {node.hints?.length ? <NodeHints node={node} /> : null}
       {/*
        * A sibling for the same reason the ring is: `.coda-node` clips with
        * `overflow: hidden`, and the resize handles straddle the card's edge. Inside, they

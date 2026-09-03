@@ -449,6 +449,81 @@ Positions are rounded to whole flow units. A centre line lands on a half-pixel a
 and a file people read and diff has no use for `412.5117`; two cards of the same width still get
 identical coordinates, since each is `round(centre − width / 2)` of one shared centre.
 
+## Hints on a card
+
+A small dismissable box docked to a card's top or bottom border, carrying guidance somebody wrote
+*about that card*: "search and tick neurons here". The document side is `NodeHint` on `GraphNode`
+(`core/graph.ts`), the box is `ui/nodes/NodeHints.tsx`, and what has been read is `ui/hints.ts`.
+The Workflow Wizard writes them (`docs/wizard.md`), and nothing in the app adds one by hand — see
+below for why that is a decision rather than a gap.
+
+**A hint is a field on the node, not a document-level list.** `GraphGroup` has to be a document
+object because a frame spans several cards; a hint belongs to exactly one. Putting it on the node
+is what makes duplicate, copy/paste, `subgraphOf` and delete carry it for free, and it is why
+there is no alive/claimed pass on load of the kind `validGroups` needs.
+
+**It draws as a sibling of the card, and that is inherited from the run ring.** `.coda-node` is
+`overflow: hidden`, so anything drawn beyond its border from inside it is simply cut off —
+`NodeRunRing` and `NodeResizer` are siblings for the same reason. React Flow's wrapper is the
+positioned ancestor and is sized by the card alone, so `bottom: 100%` and `top: 100%` put a stack
+immediately above and below it with **no measurement, no `ResizeObserver` and no
+`ViewportPortal`**. A Table card that grows from 130px to 387px on its first Run takes its hint
+down with it, and because the stack is absolutely positioned it contributes nothing to what the
+library measures — a hint cannot move a wire or change what `layout/placeGuards.test.ts` checks.
+Both halves were seen in Chrome; jsdom performs no layout, so the test can only assert that the
+box is *outside* `.coda-node`, which is the relationship that would make it invisible if it broke.
+
+**Width is the card's, `left: 0; right: 0`.** A box wider than the card it points at reaches into
+the next column, where nothing knows about it. That sets the length of the copy — two sentences —
+and `wizard.test.ts` holds the wizard's own hints to a ceiling for it.
+
+**Dismissing is not an edit, and nothing about that is cosmetic.** A `dismissed` flag on the node
+would take an undo step, mark a clean file dirty, and ride down a share link — so the colleague
+being *shown* a workflow would open it with the guidance already put away by somebody else. What
+has been read is a fact about the reader, so it lives in `localStorage`
+(`coda.hintsDismissed.v1`, a list of digests). Two consequences worth knowing:
+
+- **The key is the hint's text**, not a (document, node, hint) address. That is what makes "once
+  ever" true: the wizard mints a fresh graph every time it is used, with the same sentence on the
+  same kind of card, and an address-keyed dismissal would re-teach a returning reader in every
+  workflow they generate. The trade is that two hints saying exactly the same words are one hint —
+  right, since the reader has in fact read it, but it makes reworded copy come back for everybody.
+- **Nothing is ever forgotten, so both ways back matter.** The node menu's **Show Hints** restores
+  the clicked card's; the `?` menu's **Show Hints Again** restores the lot. Each row appears only
+  when there is something to bring back. A box dismissed for good with no route back is the
+  failure this feature is one deleted row away from at all times.
+
+Both are live under the lock, and neither is an undo step — freezing the canvas changes nothing
+about what a reader has read.
+
+**Outside the card rather than inside it**, which is the distinction the design is defending. The
+card already draws a band for what the *machine* has to say: `ui/nodes/nodeIssues.ts` ranks an
+inference error over a run warning over a type warning and shows one at a time, inside the border.
+A hint is what an *author* has to say. Sharing a band would make "the graph is broken" and "here is
+where to start" the same kind of object, and a reader who cannot tell them apart acts on neither.
+
+**The tone is a name off `HINT_TONES`, never a colour.** A `.coda.json` arrives from a gist, from
+the Zoo, from a mailed file, and a tone spent into an inline `style` is a CSS injection — the same
+reasoning `GROUP_COLORS` records, and `deserializeGraph` drops an unknown one rather than passing
+it through. The vocabulary is `markdown.ts`'s `CalloutTone` deliberately (`note` / `tip` /
+`warning`), because the help documents already draw admonitions in exactly those three and a
+second three-word list is how "tip" comes to be blue in one place and green in another.
+
+**Stated twice rather than imported, and the headless rule is only half of why.** It stops `core`
+importing from `ui`; it says nothing about the reverse, which is allowed and used everywhere. What
+stops the reverse is that `ui/markdown.ts` has **no imports at all** and feeds `help/registry.ts`,
+the `nodes.html` entry — importing `core/graph.ts` there would drag the node registry and the
+dashboard model into a page bundle `docs/pages.md` requires to stay out of the main chunk, to save
+three words. So the lists are held together by a type-level assertion in
+`ui/nodes/nodeHints.test.tsx`, which stops compiling the moment either gains a tone the other
+lacks, and the stylesheet agrees by sharing `.markdown__callout`'s own `--cal` token and its tone
+table rather than carrying a second one.
+
+**There is no in-app way to write one, and that is the current scope.** A hint is authored by
+whatever generated the document. Anything a user wants to say about their own graph is a Text
+note, which is a card they position, keep, and edit — the two are different objects, and a
+right-click "Add hint" would immediately raise the question of which one a sentence belongs in.
+
 ## Groups
 
 One box around a set of cards, with an optional title above its top-left corner. Made from the

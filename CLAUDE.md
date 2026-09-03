@@ -173,6 +173,27 @@ Area-specific — the rule, then the doc that holds why:
   away in another graph; and a repeat at that same point **steps**, since ⌘D cascades off its own
   selection and a paste does not. **Copy is live under the lock** where cut and paste are not.
   See [docs/canvas.md](docs/canvas.md).
+- **A hint is docked to a card and dismissing it is not an edit**, and both halves are the design.
+  `NodeHint` is a field on `GraphNode`, not a document-level list, because a hint belongs to
+  exactly one card where a frame spans several — so duplicate, copy/paste, `subgraphOf` and delete
+  carry it for free. It draws as a **sibling of `.coda-node`**, which clips with
+  `overflow: hidden`, so `bottom: 100%` / `top: 100%` against React Flow's wrapper dock it with no
+  measurement and no `ViewportPortal` — a Table card growing to 387px on its first Run takes its
+  hint with it, seen in Chrome. Absolutely positioned, so it moves no wire and `placeGuards` never
+  sees it; width is the card's, which is what sets the copy at two sentences. **Dismissal is
+  `localStorage` and never the document** — a `dismissed` flag would be an undo step, a dirty file,
+  and a share link that arrives pre-dismissed for the person being *shown* the workflow — and it is
+  keyed on the hint's **text**, so a wizard that mints a fresh graph every time does not re-teach
+  the same sentence; the cost is that reworded copy comes back for everybody, and that nothing is
+  ever forgotten, which is why **Show Hints** (node menu) and **Show Hints Again** (`?` menu) both
+  exist. Outside the card rather than in the issue band, because `nodeIssues` is what the *machine*
+  has to say and a reader who cannot tell that from an author's aside acts on neither. The tone is
+  a **name** off `HINT_TONES`, `GROUP_COLORS`' reasoning exactly, and the vocabulary is
+  `markdown.ts`'s `CalloutTone` — held together by a type-level assertion, since `core` cannot
+  import it. Three of the wizard's four Text notes are hints now; the overview stayed a note
+  because it is about the *graph* and has no card to point at, and every wizard hint docks
+  **bottom** because a top one is drawn into that note. See [docs/canvas.md](docs/canvas.md) and
+  [docs/wizard.md](docs/wizard.md).
 - **A group frame is not a React Flow node**, and three viewport properties keep it honest:
   `ViewportPortal` at `z-index: -1`, `pointer-events: stroke` on the rect alone (the interior
   must stay click-through), and `nopan`, because panning is d3-zoom's *native* listener and
@@ -221,8 +242,9 @@ Area-specific — the rule, then the doc that holds why:
   dataset because auto-run is on by default, and `GEOMETRY_LIMIT` on the *search* of a morphology
   workflow because a skeleton node's `Limit` is a warn-above threshold and not a cap. And the
   examples' fixture standing moved with them: `demoWorkflow()` is what the tour's empty canvas and
-  thirty test files load, so the graph the suites exercise is the graph the app ships. See
-  [docs/wizard.md](docs/wizard.md).
+  thirty test files load, so the graph the suites exercise is the graph the app ships. And **three
+  of its four notes are now hints** docked to the cards they were about — see the hint rule above.
+  See [docs/wizard.md](docs/wizard.md).
 - **The launch sequence is one boolean and a stage, and the guides dialog is the first stop.** A
   first visit opens on `GuidesDialog` — the three `TOURS`, first one badged — and the start page
   waits behind it. `startPageOpen` means the sequence is showing, `guidesOpen` that it is still at

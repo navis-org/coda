@@ -41,6 +41,77 @@ export interface GraphNode {
    * saved file unless it carries a decision.
    */
   size?: { width: number; height: number }
+  /**
+   * Guidance docked to the card's edge, authored by whoever generated the graph.
+   *
+   * On the node rather than in a document-level list, which is the whole reason there is nothing
+   * to keep in step: duplicate, copy/paste, `subgraphOf` and delete carry a hint with its card
+   * for free, where `GraphGroup`'s membership needs an alive/claimed pass on every load. A group
+   * spans nodes and has to be a document object; a hint belongs to exactly one card.
+   *
+   * Absent on almost every node, and that is the point — a hint is written by the Workflow
+   * Wizard, a starter or a Zoo entry, never by an ordinary edit, so it stays out of a saved file
+   * unless somebody put it there.
+   */
+  hints?: NodeHint[]
+}
+
+/**
+ * The tones a hint may be drawn in, by name.
+ *
+ * **A name and not a colour**, for the reason `GROUP_COLORS` is: a `.coda.json` arrives from a
+ * gist, from the Zoo, from a mailed file, and a tone spent straight into an inline `style` is a
+ * CSS injection with a `--var` and a `url()` in it. These resolve to tokens in `theme.css` at
+ * render time.
+ *
+ * The vocabulary is `markdown.ts`'s `CalloutTone` deliberately — the help documents already draw
+ * admonitions in exactly these three, and a second three-word list meaning the same thing is how
+ * "tip" comes to be blue in one place and green in another.
+ *
+ * **Stated twice rather than imported, and `src/core` being headless is only half the reason.**
+ * That rules out `core` importing from `ui`; it does not rule out the reverse, which is allowed
+ * and used everywhere. What rules the reverse out is that `markdown.ts` has **no imports at all**
+ * and feeds `src/help/registry.ts`, which is the `nodes.html` entry — pulling `core/graph.ts` in
+ * would drag the node registry and the dashboard model into a page bundle that `docs/pages.md`
+ * requires to stay out of the main chunk, to save three words. So the two lists are held together
+ * by a type-level assertion in `ui/nodes/nodeHints.test.tsx` instead, which fails to compile the
+ * moment either gains a tone the other lacks. The stylesheet agrees by sharing one `--cal`.
+ */
+export const HINT_TONES = ['note', 'tip', 'warning'] as const
+export type HintTone = (typeof HINT_TONES)[number]
+
+/** Which border a hint docks to. */
+export const HINT_SIDES = ['top', 'bottom'] as const
+export type HintSide = (typeof HINT_SIDES)[number]
+
+/**
+ * A dismissable box docked to a node's top or bottom border.
+ *
+ * **Not a Text note, and the difference is what it is anchored to.** A note is a card of its own
+ * that somebody positions; it survives being read, and it is the right home for a paragraph
+ * about why a threshold is 10. A hint points at *one card* — "search for and select neurons
+ * here" — so it moves when the card moves, and it goes away once it has been read. Two sentences
+ * is the ceiling in practice: the box is the card's width.
+ *
+ * **There is no `dismissed` field, and its absence is load-bearing.** Dismissing is not an edit:
+ * it must not enter the undo stack, must not mark the file dirty, and must not ride down a share
+ * link and arrive pre-dismissed for the person being shown the workflow. What has been read is a
+ * fact about the reader, so it lives in `localStorage` keyed on the hint's own text — see
+ * `ui/hints.ts`.
+ */
+export interface NodeHint {
+  /**
+   * The prose, in the `markdown.ts` subset the Text note and the dataset blurb already render.
+   *
+   * The same subset rather than plain text because the copy this replaced had inline code in it
+   * — `Min weight`, `LC.*` — and a hint that spelled a param name as bare prose would be naming
+   * a control the reader then has to find by guessing which words were literal.
+   */
+  text: string
+  /** Default `note`. */
+  tone?: HintTone
+  /** Default `bottom` — under the card, where the wire out of it is not. */
+  side?: HintSide
 }
 
 export interface GraphEdge {
@@ -764,6 +835,42 @@ function validSize(raw: unknown): { width: number; height: number } | undefined 
 }
 
 /**
+ * Stored hints, with anything malformed dropped.
+ *
+ * The same lenient-but-checked pass `validSize` and `validGroups` give the rest of the file, and
+ * the two checks here are the ones that matter for a document somebody was mailed. A **tone is a
+ * name off `HINT_TONES`** and an unknown one falls back to the default rather than reaching a
+ * stylesheet — the note on the constant says why that is a safety property and not a theming
+ * convenience. And an **empty hint is dropped**, because a box with nothing in it is a bar across
+ * a card with a × on it and no way to tell what it was for.
+ *
+ * Capped at `MAX_HINTS`, which is the one thing here that is a refusal rather than a repair: the
+ * stack is docked to a card's edge and a file claiming forty of them papers the canvas around a
+ * node with boxes the reader has to dismiss one at a time. Silent, like a dropped group
+ * membership — the document still means what it said, minus decoration.
+ */
+const MAX_HINTS = 4
+
+function validHints(raw: unknown): NodeHint[] {
+  if (!Array.isArray(raw)) return []
+  const hints: NodeHint[] = []
+  for (const h of raw) {
+    if (!h || typeof h !== 'object') continue
+    const { text, tone, side } = h as Record<string, unknown>
+    if (typeof text !== 'string' || !text.trim()) continue
+    const named = HINT_TONES.find((t) => t === tone)
+    const docked = HINT_SIDES.find((s) => s === side)
+    hints.push({
+      text,
+      ...(named ? { tone: named } : {}),
+      ...(docked ? { side: docked } : {}),
+    })
+    if (hints.length === MAX_HINTS) break
+  }
+  return hints
+}
+
+/**
  * A stored `meta` block, with anything malformed dropped.
  *
  * `meta` used to be a name and two timestamps that nothing did anything with but display, so
@@ -896,6 +1003,10 @@ export function deserializeGraph(json: string): LoadResult {
       warnings.push(`Dropped unknown node type "${n.type}" (${n.id})`)
       continue
     }
+    // Both hoisted: each validator allocates, and the `...(f(x) ? { k: f(x) } : {})` shape pays
+    // for it twice per node on every load and every paste.
+    const size = validSize(n.size)
+    const hints = validHints(n.hints)
     nodes.push({
       id: n.id,
       type: n.type,
@@ -908,7 +1019,8 @@ export function deserializeGraph(json: string): LoadResult {
       ...(n.collapsed ? { collapsed: true } : {}),
       ...(n.paramsCollapsed ? { paramsCollapsed: true } : {}),
       ...(n.disabled ? { disabled: true } : {}),
-      ...(validSize(n.size) ? { size: validSize(n.size) } : {}),
+      ...(size ? { size } : {}),
+      ...(hints.length ? { hints } : {}),
     })
   }
 

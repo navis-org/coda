@@ -32,7 +32,7 @@
  * the failure this project keeps recording.
  */
 
-import type { CodaGraph, GraphNode } from '../core/graph'
+import type { CodaGraph, GraphNode, NodeHint } from '../core/graph'
 import {
   DEFAULT_COLUMNS,
   MIN_COLUMNS,
@@ -48,7 +48,7 @@ import { COL_WIDTH, GRID_ORIGIN, ROW_HEIGHT } from '../layout/place'
 import { NODE_BODIES, cardWidth } from '../ui/nodes/nodeBodies'
 import { noteNode } from '../examples/notes'
 import { datasetFamily } from '../nodes/lib/datasetFamilies'
-import type { AnalysisId, VisualisationId, WizardAnswers } from './options'
+import type { AnalysisId, VisualisationId, WizardAnswers, WizardHint } from './options'
 import { VIEWS, analysisOption, familyCan, startOption, visualisationOption } from './options'
 
 /**
@@ -84,16 +84,6 @@ interface Placement {
    */
   dx?: number
   params?: Record<string, unknown>
-}
-
-interface Note {
-  /** Column the note lines up with. */
-  col: number
-  /** Absolute y — notes sit above and below the pipeline, not in its rows. */
-  y: number
-  width: number
-  height: number
-  text: string
 }
 
 /**
@@ -141,7 +131,6 @@ export function buildWorkflow(answers: WizardAnswers): CodaGraph {
 
   const nodes: Placement[] = [{ id: 'ds', type: `dataset.${answers.dataset}`, col: 0 }]
   const links: Link[] = []
-  const notes: Note[] = []
 
   // --- the head: whichever way the neurons are chosen ------------------------
   const head = headOf(answers, synthetic)
@@ -164,28 +153,46 @@ export function buildWorkflow(answers: WizardAnswers): CodaGraph {
   nodes.push(...body.nodes)
   links.push(...body.links)
 
+  /*
+   * The three stage hints, each docked to the card it is about.
+   *
+   * **Anchored to a node id rather than to a column**, which is the whole of what moving them off
+   * the canvas bought: the old stage notes were placed at `stageNote(col, …)` and had to be kept
+   * clear of each other and of the deepest row of cards, and the arithmetic for that had already
+   * been wrong once — the y was a constant chosen when every chain was a single row, and a paths
+   * query's second head landed on top of it.
+   *
+   * `nodes[0]` is the analysis head at column 2 in every arm that has one. Two arms make that
+   * read oddly and both are right: `neurons` has no analysis and is skipped, and morphology with
+   * only a Neuroglancer cell ticked has the *viewer* as its column-2 node — so the analysis hint
+   * and the view hint land on the same card and stack, which is what the two notes did when they
+   * shared a column, minus the stacking arithmetic.
+   *
+   * One hint per stage even when several viewers were ticked: the first of them, for the reason
+   * the note had — a stack of boxes down the side of a row of cards is not three times as useful.
+   */
+  const hints = new Map<string, NodeHint[]>()
+  let overview: GraphNode | undefined
   if (answers.notes) {
-    /*
-     * Under the deepest row of cards, rather than at a fixed height. The chains are not all one
-     * row: morphology stacks its two geometry queries, and a paths query stacks a second head —
-     * which landed exactly on the notes when this was a constant, because the constant had been
-     * chosen when every chain was a single row. Derived from the same row numbers the cards were
-     * placed at, so a future arm that stacks something takes the notes down with it.
-     */
-    const notesY =
-      GRID_ORIGIN.y + (Math.max(...nodes.map((node) => node.row ?? 0)) + 1.2) * ROW_HEIGHT
-    notes.push(overviewNote(answers), stageNote(1, startOption(answers.start)?.note, notesY))
-    if (answers.analysis !== 'neurons') {
-      notes.push(stageNote(2, analysisOption(answers.analysis)?.note, notesY))
+    overview = overviewNote(answers)
+    const dock = (nodeId: string | undefined, hint: WizardHint | undefined) => {
+      if (!nodeId || !hint?.text.trim()) return
+      // Spread, not rebuilt field by field: `WizardHint` is `NodeHint` minus `side`, so a field
+      // added to one arrives here rather than being silently dropped by a hand-written copy.
+      hints.set(nodeId, [...(hints.get(nodeId) ?? []), { ...hint }])
     }
-    // One note per column, so several viewers stacked in one column get the first one's note
-    // rather than a stack of notes down the side of a stack of cards.
-    notes.push(
-      stageNote(body.viewColumn, visualisationOption(answers.visualisations[0] ?? 'table')?.note, notesY),
-    )
+    dock(head.node.id, startOption(answers.start)?.hint)
+    if (answers.analysis !== 'neurons') {
+      dock(body.nodes[0]?.id, analysisOption(answers.analysis)?.hint)
+    }
+    dock(body.viewId, visualisationOption(answers.visualisations[0] ?? 'table')?.hint)
   }
 
-  return dashboardFor(assemble(answers, nodes, links, notes, shift), answers, head.node.id)
+  return dashboardFor(
+    assemble(answers, nodes, overview, links, shift, hints),
+    answers,
+    head.node.id,
+  )
 }
 
 /**
@@ -330,7 +337,6 @@ function viewNode(
   }
 }
 
-
 /**
  * Everything downstream of the head: the analysis, and every viewer that was ticked.
  *
@@ -339,14 +345,14 @@ function viewNode(
  * chart of the same ranked partners is two nodes on one port, not two workflows. They stack down
  * the same column, `VIEW_PITCH` apart.
  *
- * `viewColumn` comes back because the closing note lines up with the viewers, and only the arm
- * knows how long its chain is.
+ * `viewId` comes back because the closing hint docks to the first viewer, and only the arm knows
+ * which node that is.
  */
 function bodyOf(
   answers: WizardAnswers,
   [from, port]: [string, string],
   targets?: [string, string],
-): { nodes: Placement[]; links: Link[]; viewColumn: number } {
+): { nodes: Placement[]; links: Link[]; viewId: string | undefined } {
   const neurons = (to: string, toPort: string): Link => [from, port, to, toPort]
   /** The far end of a paths query, which is the only analysis that has one. */
   const targetNeurons = (to: string, toPort: string): Link =>
@@ -364,7 +370,7 @@ function bodyOf(
     col: number,
     baseRow: number,
     wire: (visualisation: VisualisationId, id: string) => Link[],
-  ): { nodes: Placement[]; links: Link[]; viewColumn: number } => {
+  ): { nodes: Placement[]; links: Link[]; viewId: string | undefined } => {
     /*
      * **Side by side, and stepped by each card's real width** rather than stacked.
      *
@@ -384,7 +390,13 @@ function bodyOf(
     return {
       nodes,
       links: nodes.flatMap((node, index) => wire(chosen[index]!, node.id)),
-      viewColumn: col,
+      /*
+       * The first viewer's id rather than the column. The closing hint docks to that card, and a
+       * column no longer says which node it is — several viewers share one column, stepped by
+       * `dx`, and the arm is the only thing that knows their ids. Singular because only the first
+       * is ever docked to: one hint per stage, for the reason the note it replaced had.
+       */
+      viewId: nodes[0]?.id,
     }
   }
 
@@ -431,7 +443,7 @@ function bodyOf(
           ['group', 'out', 'sort', 'in'],
           ...tail.links,
         ],
-        viewColumn: tail.viewColumn,
+        viewId: tail.viewId,
       }
     }
 
@@ -463,7 +475,7 @@ function bodyOf(
           ...(normalised ? ([['adj', 'matrix', 'norm', 'in']] as Link[]) : []),
           ...tail.links,
         ],
-        viewColumn: tail.viewColumn,
+        viewId: tail.viewId,
       }
     }
 
@@ -546,7 +558,7 @@ function bodyOf(
             : []),
           ...tail.links,
         ],
-        viewColumn: tail.viewColumn,
+        viewId: tail.viewId,
       }
     }
 
@@ -573,7 +585,7 @@ function bodyOf(
           targetNeurons('paths', 'targets'),
           ...tail.links,
         ],
-        viewColumn: tail.viewColumn,
+        viewId: tail.viewId,
       }
     }
 
@@ -658,7 +670,7 @@ function bodyOf(
               ['sim', 'matrix', 'linkage', 'in'],
               ...tail.links,
             ],
-        viewColumn: tail.viewColumn,
+        viewId: tail.viewId,
       }
     }
 
@@ -701,7 +713,7 @@ function bodyOf(
           ['group', 'out', 'net', 'edges'],
           ...tail.links,
         ],
-        viewColumn: tail.viewColumn,
+        viewId: tail.viewId,
       }
     }
 
@@ -759,7 +771,11 @@ function bodyOf(
                   params: {
                     ...(node.params ?? {}),
                     ...(withSynapses
-                      ? { pointColorMode: 'categorical', pointColorBy: 'polarity', pointSize: 90 }
+                      ? {
+                          pointColorMode: 'categorical',
+                          pointColorBy: 'polarity',
+                          pointSize: 90,
+                        }
                       : {}),
                   },
                 }
@@ -775,7 +791,7 @@ function bodyOf(
             : []),
           ...tail.links,
         ],
-        viewColumn: tail.viewColumn,
+        viewId: tail.viewId,
       }
     }
 
@@ -829,19 +845,32 @@ function answered(answers: WizardAnswers): {
 }
 
 /**
- * The note above the chain: what this workflow does, and how to run it.
+ * The one Text note a generated workflow still carries: the overview, above the chain.
+ *
+ * There used to be three more — one per stage, under the head, the analysis and the viewer. They
+ * are hints now, docked to the cards they were about (`NodeHint`), which is where a sentence
+ * saying "search and tick neurons **here**" always wanted to be: a note under column 2 has to be
+ * read, matched to a card by its horizontal position, and then dismissed by deleting it. The
+ * overview stays a note because it is about the *graph* rather than about any one card, and
+ * because it is a paragraph with a heading — the length a note is for and a hint is not.
+ *
+ * So it is placed here rather than through a `Note` record and a stacking pass: with one note
+ * left there is no column to line up, nothing to stack against and no id to derive from an index.
+ * Its four numbers are literals because they always were — the geometry that had to be computed
+ * belonged to the stage notes, and went with them.
  *
  * Built from the same option copy the dialog showed, so the canvas repeats the answers the reader
  * gave rather than describing them again in different words.
  */
-function overviewNote(answers: WizardAnswers): Note {
+function overviewNote(answers: WizardAnswers): GraphNode {
   const { dataset, start, analysis, view } = answered(answers)
   const family = datasetFamily(answers.dataset)
   const synthetic = family?.synthetic
     ? '\n\n*The dataset is synthetic, generated in your browser from a seed. The pipeline is the point; the numbers are not a finding.*'
     : ''
-  return {
-    col: 0,
+  return noteNode({
+    id: 'note-overview',
+    x: xOf(0, 0),
     y: GRID_ORIGIN.y - 230,
     width: 720,
     height: 200,
@@ -850,24 +879,15 @@ function overviewNote(answers: WizardAnswers): Note {
     Built by the Workflow Wizard from four answers: **${dataset}**, neurons chosen by **${start}**, showing **${analysis}** as **${view}**.
 
     Read it left to right — each node takes what is on its left and hands something new to its right. Press Run, or ⇧R, to evaluate the chain. Every node here is an ordinary one: change anything, add anything, delete what you do not need.${synthetic}`,
-  }
-}
-
-/**
- * A one-paragraph note under the stage it is about. Skipped when the option carries none.
- *
- * **Narrower than a column**, which is the one geometric constraint on it: stage notes sit at
- * adjacent columns — the head, the analysis and the viewer can be columns 1, 2 and 3 — so a note
- * as wide as the 540px ones the examples used would overlap its neighbour. `placeGuards.test.ts`
- * walks every combination for exactly this.
- */
-function stageNote(col: number, text: string | undefined, y: number): Note {
-  return { col, y, width: COL_WIDTH - 60, height: 150, text: text ?? '' }
+  })
 }
 
 // ---------------------------------------------------------------------------
 
-function place({ id, type, col, row = 0, dx = 0, params }: Placement, shift: number): GraphNode {
+function place(
+  { id, type, col, row = 0, dx = 0, params }: Placement,
+  shift: number,
+): GraphNode {
   return graphNode(
     id,
     type,
@@ -877,46 +897,35 @@ function place({ id, type, col, row = 0, dx = 0, params }: Placement, shift: num
 }
 
 /**
- * Nodes, notes and wires into a graph.
+ * Nodes, the overview note and wires into a graph.
  *
- * The graph itself is `assembleGraph`, shared with the starters — see `assemble.ts`. What is
- * here is the wizard's own layout: placing a `Placement` on the grid, and stacking the notes.
+ * The graph itself is `assembleGraph`, shared with the starters — see `assemble.ts`. What is here
+ * is the wizard's own layout: placing a `Placement` on the grid, and docking each card's hints.
+ *
+ * **The hints are applied here rather than inside `place`**, which stays a pure Placement → grid
+ * coordinates function. Two concerns threaded through one helper is how the second one comes to
+ * be passed down two levels to be used once.
  */
 function assemble(
   answers: WizardAnswers,
   nodes: Placement[],
+  overview: GraphNode | undefined,
   links: Link[],
-  notes: Note[],
   shift: number,
+  hints: ReadonlyMap<string, NodeHint[]>,
 ): CodaGraph {
   const { dataset, start, analysis, view } = answered(answers)
   const name = `${dataset} · ${analysis}`
   const description = `Built by the Workflow Wizard: ${dataset}, neurons chosen by ${start}, showing ${analysis} as ${view}.`
 
-  const placed: GraphNode[] = nodes.map((spec) => place(spec, shift))
-  /*
-   * Stacked when two notes want the same column, which happens where a chain is short enough for
-   * the analysis and the viewer to be the same stage — morphology drawn in Neuroglancer is one
-   * node, not three. Without this the two notes are drawn on top of each other, and since both
-   * are `note-<col>` they would also be one id twice. Ids come from the index for the same
-   * reason: a note's column is not unique and an id has to be.
-   */
-  const perColumn = new Map<number, number>()
-  notes.forEach((note, index) => {
-    if (!note.text.trim()) return
-    const stacked = perColumn.get(note.col) ?? 0
-    perColumn.set(note.col, stacked + 1)
-    placed.push(
-      noteNode({
-        id: `note-${index}`,
-        x: xOf(note.col, shift),
-        y: note.y + stacked * (note.height + 20),
-        width: note.width,
-        height: note.height,
-        text: note.text,
-      }),
-    )
+  const placed: GraphNode[] = nodes.map((spec) => {
+    const node = place(spec, shift)
+    const docked = hints.get(node.id)
+    // Absent rather than empty, like every other optional field on a node: a `hints: []` in a
+    // saved file is a key that says nothing, and a share link pays for it in the fragment.
+    return docked?.length ? { ...node, hints: docked } : node
   })
+  if (overview) placed.push(overview)
   return assembleGraph(name, description, placed, links)
 }
 
@@ -949,5 +958,3 @@ export function demoWorkflow(analysis: AnalysisId = 'partners', notes = true): C
     dashboard: false,
   })
 }
-
-
