@@ -317,3 +317,49 @@ describe('the population filters', () => {
     expect(source).not.toContain('Traced')
   })
 })
+
+/**
+ * The four aggregations whose R spelling is not the bare function name, each because base R
+ * answers something Coda does not once a null is in the column.
+ *
+ * `min` reaches the golden through the fixture's own Group By, and `probe-r-helpers.R` runs the
+ * emitted `coda_min` against an all-absent group. `max` is that helper's mirror and gets no node
+ * of its own — two adjacent Group By cells differing only in an enum is noise in a document
+ * somebody reads — so it is pinned here, where what matters is that the emitter reaches for the
+ * helper at all rather than for `max()`.
+ */
+describe('the aggregations R spells differently', () => {
+  /** The whole fixture with its Group By re-aggregated, so the graph stays a valid one. */
+  const emitted = (agg: string): string => {
+    const base = everythingGraph()
+    const graph = {
+      ...base,
+      nodes: base.nodes.map((n) =>
+        n.id === 'extremes' ? { ...n, params: { ...n.params, agg } } : n,
+      ),
+    }
+    const result = exportRmd(graph, OPTIONS)
+    if (!result.ok) throw new Error(`refused: ${result.detail}`)
+    return result.source
+  }
+
+  it('reaches for coda_max rather than max, and generates it', () => {
+    const source = emitted('max')
+    expect(source).toContain('`max_size` = coda_max(`size`)')
+    // The helper has to travel with the call, or the document stops at an undefined function.
+    expect(source).toContain('coda_max <- function(x)')
+    // …and its mirror does not come along for the ride.
+    expect(source).not.toContain('coda_min <- function(x)')
+  })
+
+  it('drops absences from sum, mean and countDistinct rather than propagating them', () => {
+    // Without `na.rm` a single null answers NA for the whole group, which is the
+    // one-null-takes-out-the-row failure; `n_distinct` counts NA as an answer where Coda and
+    // `nunique` do not.
+    expect(emitted('sum')).toContain('`sum_size` = sum(`size`, na.rm = TRUE)')
+    expect(emitted('mean')).toContain('`mean_size` = mean(`size`, na.rm = TRUE)')
+    expect(emitted('countDistinct')).toContain(
+      '`countDistinct_size` = n_distinct(`size`, na.rm = TRUE)',
+    )
+  })
+})

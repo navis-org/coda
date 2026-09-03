@@ -683,18 +683,45 @@ registerEmitter('core.normalize', (ctx) => {
   const out = ctx.output('out')
   const mode = String(ctx.params.mode ?? 'none')
 
+  /*
+   * The totals are masked rather than filled, and an empty line is put back afterwards.
+   *
+   * `.fillna(0)` was the old ending and it reproduced Coda's old bug: a line that holds values and
+   * still totals zero or less has no fraction — `+5` against `-5` divides to `±inf` — and
+   * answering 0 puts a stripe of manufactured measurements across the picture.
+   * `.where(total > 0)` makes such a total `NaN`, dividing by it gives `NaN`, and seaborn draws
+   * that as blank, which is what the card does.
+   *
+   * The `mask` is the other half and it is not symmetric with it: a line of pure zeroes is
+   * *measured* — that neuron has no partners in this set — so it stays zero rather than becoming a
+   * hole in the picture. `0 / 0` is `NaN` in pandas, so it has to be put back explicitly.
+   */
+  const emptyLines = (axis: 0 | 1): string => `(${src} == 0).all(axis=${axis})`
   switch (mode) {
     case 'none':
       return [`${out} = ${src}`]
     case 'row':
-      // `.where(total > 0, 0)` rather than leaving NaN: an all-zero row normalises to zeros
-      // in Coda, and a NaN row would blank that stripe of the heatmap instead.
-      return [`${out} = ${src}.div(${src}.sum(axis=1), axis=0).fillna(0)`]
+      return [
+        `_totals = ${src}.sum(axis=1)`,
+        `${out} = ${src}.div(_totals.where(_totals > 0), axis=0).mask(${emptyLines(1)}, 0.0)`,
+      ]
     case 'column':
-      return [`${out} = ${src}.div(${src}.sum(axis=0), axis=1).fillna(0)`]
+      return [
+        `_totals = ${src}.sum(axis=0)`,
+        `${out} = ${src}.div(_totals.where(_totals > 0), axis=1)`,
+        `${out}.loc[:, ${emptyLines(0)}] = 0.0`,
+      ]
     case 'max':
-      return [`${out} = (${src} / ${src}.to_numpy().max()).fillna(0)`]
+      // The largest *magnitude*, so a matrix of signed scores keeps its sign and lands in
+      // [-1, 1]; identical to `.max()` whenever nothing is negative.
+      ctx.require('numpy')
+      return [
+        `_scale = float(np.nanmax(np.abs(${src}.to_numpy())))`,
+        `${out} = ${src} / _scale if _scale > 0 else ${src} * 0`,
+      ]
     case 'log':
+      // `np.log10` of a non-positive argument is NaN with a RuntimeWarning, which is the same
+      // answer Coda gives for a cell at or below -1.
       ctx.require('numpy')
       return [`${out} = np.log10(1 + ${src})`]
     default:

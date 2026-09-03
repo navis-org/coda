@@ -377,6 +377,35 @@ Area-specific — the rule, then the doc that holds why:
   series and the combined tail is neither. The Python helper is checked by **running** it — the
   probe execs it out of the golden against a stubbed neuprint and matches the canvas over 277
   neurons to 3.8e-16. See [docs/nodes.md](docs/nodes.md) and `src/help/nodes/neuron.influence.md`.
+- **An aggregation's null rule is one decision made in three implementations, and they had
+  drifted.** `Group By`'s `mean` divided by `bucket.n` — the *row* count — so a single null pulled
+  it towards zero: on `[10, null, 20]` the canvas said 10, the exported notebook 15 and the knitted
+  document `NA`, while `pivotTable` in the same file has always kept its own `counts` array and
+  said 15. `mean`/`min`/`max` now answer **null** for a group holding no number, where `0` was a
+  manufactured measurement among real ones; `sum` still answers 0, which is the identity rather
+  than a value. `countDistinct` no longer counts an absence, which is `join`'s rule a few lines
+  away and `nunique`'s. The export half is not symmetric: pandas skips nulls by default and base R
+  propagates them, so four of the seven need `na.rm = TRUE` in R — and `min`/`max` cannot use it,
+  because over an all-absent group it answers **`Inf`** with a warning, a value that survives
+  `is.na` and plots off the axis. Those two are generated helpers. The goldens compare emitted
+  *text*, so nothing in the suite could see any of this; the fixture now carries a second Group By
+  purely so `probe-r-helpers.R` runs one of them. See [docs/nodes.md](docs/nodes.md).
+- **`Normalize`'s guards were assumptions, and an empty line is not an unusable one.** `total > 0`
+  and a maximum accumulated from `0` are correct for synapse counts and wrong for every signed
+  matrix — and NBLAST calls its scores "the value the Heatmap and Normalize already understand",
+  while cosine and Pearson similarity are the other route. An all-negative matrix normalised to a
+  grid of zeroes. The distinction that fixes it is between a line of *zeroes*, which is measured
+  and stays zero, and a line that **holds values** and still totals zero or less, which has no
+  fraction and comes out empty with a count said out loud. `max` takes the largest *magnitude*,
+  identical wherever nothing is negative. See [docs/nodes.md](docs/nodes.md).
+- **A per-seed channel is indexed by position, so the node deduplicates before anything reads it.**
+  `propagate` sizes its channel array from `[...new Set(seeds)]` while `Influence` handed
+  `influencePairs` and `combineHalves` the raw `idColumn`, so a `Neurons` table with a repeat in it
+  — `Stack Tables` over two overlapping searches, or either import node — shifted every channel
+  past the first duplicate: one neuron's influencers filed under another's name, the last query
+  missing, and the surplus candidates `NaN`. A test has to use an **interleaved** repeat, because a
+  set stacked onto itself is already aligned in its first *n* entries and hides it.
+  See [docs/nodes.md](docs/nodes.md).
 - **The Heatmap's row and column filters are one term each, and a pattern is opted into with `/`.**
   Explore's grammar, narrowed: a plain term is a case-insensitive substring, `/^LC[0-9]+$` (closing
   slash optional) is a regex, `!` or `-` negates. `bareRegex` is **imported** from

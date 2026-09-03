@@ -310,8 +310,46 @@ registerEmitter('core.relabel', (ctx) => {
 // Group By
 // ---------------------------------------------------------------------------
 
-/** `coda_join` is generated: `paste(collapse=)` alone keeps NAs and empty strings. */
-const AGG_FUNCS: Record<AggFn, string> = {
+/**
+ * Coda's aggregations as R expressions over one column, `x`.
+ *
+ * Expressions rather than bare function names, because **four of the seven need an argument to
+ * mean what Coda means** and writing that argument at the call site put it three lines from the
+ * name it belongs to. Every one of these differences is a wrong number rather than an error:
+ *
+ *  - `sum`/`mean` without `na.rm` answer **`NA` for a group with a single null in it**, so one
+ *    missing weight takes out the whole row.
+ *  - `n_distinct` counts `NA` as a distinct value where Coda and `nunique` do not.
+ *  - `min`/`max` answer `Inf`/`-Inf` with a warning for a group holding no value at all, which is
+ *    why those two are generated helpers — see `coda_min`.
+ */
+const AGG_EXPRESSIONS: Record<AggFn, (x: string) => string> = {
+  sum: (x) => `sum(${x}, na.rm = TRUE)`,
+  mean: (x) => `mean(${x}, na.rm = TRUE)`,
+  min: (x) => `coda_min(${x})`,
+  max: (x) => `coda_max(${x})`,
+  count: () => 'n()',
+  countDistinct: (x) => `n_distinct(${x}, na.rm = TRUE)`,
+  join: (x) => `coda_join(${x})`,
+}
+
+/** The generated helpers an aggregation needs, so the emitter requests exactly those. */
+const AGG_HELPERS: Partial<Record<AggFn, readonly string[]>> = {
+  min: ['coda_min'],
+  max: ['coda_max'],
+  join: ['coda_join'],
+}
+
+/**
+ * The same aggregations as bare function *names*, for `pivot_wider`'s `values_fn`.
+ *
+ * A separate table rather than a second use of `AGG_EXPRESSIONS`, because the two arguments are
+ * different things: `summarise` takes a call over a named column, and `values_fn` takes a function
+ * value. Deliberately not switched to the `na.rm` forms above — `core.pivot` is a different node
+ * with its own null contract (an absent cell reads as 0 on both sides, which is what
+ * `values_fill` reproduces), and changing what it emits is not this table's business.
+ */
+const PIVOT_AGG_FUNCS: Record<AggFn, string> = {
   sum: 'sum',
   mean: 'mean',
   min: 'min',
@@ -333,15 +371,16 @@ registerEmitter('core.groupBy', (ctx) => {
   if (agg !== 'count' && values.length === 0) {
     return ctx.todo(`"${agg}" needs at least one value column.`)
   }
-  if (agg === 'join') ctx.helper('coda_join')
+  for (const helper of AGG_HELPERS[agg] ?? []) ctx.helper(helper)
 
   // `n` rides along with every aggregation, exactly as the node emits it, and one summary per
   // value column beside it. Written out rather than reached through `across()`: the names Coda
   // publishes are `<agg>_<column>`, which is `.names = "{.fn}_{.col}"` only as long as the
-  // function is passed under exactly that name — a spelling `across` would silently vary.
+  // function is passed under exactly that name — a spelling `across` would silently vary, and
+  // half of these are not a bare name at all (see `AGG_EXPRESSIONS`).
   const aggs = ['n = n()']
   for (const value of values) {
-    aggs.push(`${col(aggColumnName(agg, value))} = ${AGG_FUNCS[agg]}(${col(value)})`)
+    aggs.push(`${col(aggColumnName(agg, value))} = ${AGG_EXPRESSIONS[agg](col(value))}`)
   }
 
   return [
@@ -539,7 +578,7 @@ registerEmitter('core.pivot', (ctx) => {
     `    id_cols = ${col(rows)},`,
     `    names_from = ${col(cols)},`,
     ...(value ? [`    values_from = ${col(value)},`] : []),
-    `    values_fn = ${AGG_FUNCS[agg] === 'n' ? 'length' : AGG_FUNCS[agg]},`,
+    `    values_fn = ${PIVOT_AGG_FUNCS[agg] === 'n' ? 'length' : PIVOT_AGG_FUNCS[agg]},`,
     `    values_fill = 0`,
     `  )`,
     ``,
@@ -612,17 +651,45 @@ registerEmitter('core.normalize', (ctx) => {
   const out = ctx.output('out')
   const mode = String(ctx.params.mode ?? 'none')
 
+  /*
+   * `[!is.finite()] <- 0` was the old ending and it reproduced Coda's old bug: a line that holds
+   * values and still totals zero or less has no fraction — `+5` against `-5` divides to `±Inf` —
+   * and zero there is a manufactured measurement rather than the answer. The totals are masked to
+   * `NA` instead, so an unusable line divides to `NA` and `geom_tile` leaves it blank.
+   *
+   * `empty_` is the other half and it is not symmetric with it: a line of pure zeroes is
+   * *measured*, so it stays zero rather than becoming a hole in the picture.
+   *
+   * `m / v` recycles `v` down each column, so a row-total vector applies per row; the column arm
+   * transposes for the same reason it always did.
+   */
   switch (mode) {
     case 'none':
       return [`${out} <- ${src}`]
     case 'row':
-      // An all-zero row normalises to zeros in Coda, where dividing by zero gives NaN here.
-      return [`${out} <- ${src} / rowSums(${src})`, `${out}[!is.finite(${out})] <- 0`]
+      return [
+        `totals_ <- rowSums(${src})`,
+        `empty_ <- rowSums(${src} != 0, na.rm = TRUE) == 0`,
+        `${out} <- ${src} / ifelse(totals_ > 0, totals_, NA_real_)`,
+        `${out}[empty_, ] <- 0`,
+      ]
     case 'column':
-      return [`${out} <- t(t(${src}) / colSums(${src}))`, `${out}[!is.finite(${out})] <- 0`]
+      return [
+        `totals_ <- colSums(${src})`,
+        `empty_ <- colSums(${src} != 0, na.rm = TRUE) == 0`,
+        `${out} <- t(t(${src}) / ifelse(totals_ > 0, totals_, NA_real_))`,
+        `${out}[, empty_] <- 0`,
+      ]
     case 'max':
-      return [`${out} <- ${src} / max(${src}, na.rm = TRUE)`, `${out}[!is.finite(${out})] <- 0`]
+      // The largest *magnitude*, so a matrix of signed scores keeps its sign; identical to
+      // `max()` whenever nothing is negative.
+      return [
+        `scale_ <- max(abs(${src}), na.rm = TRUE)`,
+        `${out} <- if (is.finite(scale_) && scale_ > 0) ${src} / scale_ else ${src} * 0`,
+      ]
     case 'log':
+      // `log10` of a non-positive argument is NaN with a warning, which is the same answer Coda
+      // gives for a cell at or below -1.
       return [`${out} <- log10(1 + ${src})`]
     default:
       return ctx.todo(`Unknown normalize mode "${mode}".`)

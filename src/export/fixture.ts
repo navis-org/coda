@@ -422,6 +422,21 @@ export function everythingGraph(): CodaGraph {
       row: 1,
       params: { by: ['type'], agg: 'join', value: ['instance', 'status'] },
     },
+    /*
+     * `min`, which is here for the same reason `join` is: it is the other aggregation whose R form
+     * is a generated helper rather than a function name. `min(x, na.rm = TRUE)` answers `Inf` for
+     * a group holding nothing but absences — with a warning, once per group — where Coda answers
+     * null, so `coda_min` is what the document has to call. Without a node reaching it, the helper
+     * ships in the registry and never appears in a golden or under `check-export.R`, which is an
+     * emitter nobody exercises.
+     */
+    {
+      id: 'extremes',
+      type: 'core.groupBy',
+      col: 4,
+      row: 2,
+      params: { by: ['type'], agg: 'min', value: ['size'] },
+    },
     {
       id: 'group',
       type: 'core.groupBy',
@@ -1198,6 +1213,7 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'scatter', 'in'],
     ['find', 'neurons', 'combine', 'in'],
     ['find', 'neurons', 'joined', 'in'],
+    ['find', 'neurons', 'extremes', 'in'],
     ['find', 'neurons', 'profile', 'neurons'],
     ['ds', 'dataset', 'profile', 'dataset'],
     ['ds', 'dataset', 'summary', 'dataset'],

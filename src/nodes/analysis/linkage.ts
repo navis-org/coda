@@ -32,6 +32,7 @@ import {
   linkageValueFrom,
   orderedMatrix,
   transformFor,
+  warnUnrecordedCells,
 } from '../lib/linkageOps'
 
 export const linkageNode = registerNode({
@@ -115,6 +116,11 @@ export const linkageNode = registerNode({
     // Before anything is marshalled: a matrix of counts turned into negative distances
     // clusters perfectly happily and draws nowhere. See `checkLinkageDistances`.
     checkLinkageDistances(matrix, transform)
+    // The third of this module's three before-you-cluster guards, and it was the one this
+    // node did not call: the Python side substitutes zero for a cell nobody recorded, and
+    // `out.heatmap` has always said so where reaching the same clustering through here did
+    // not. One substitution, admitted on both surfaces.
+    warnUnrecordedCells(ctx, matrix)
 
     ctx.progress(0.01, `${matrix.rowLabels.length} observations`)
     const result = await runLinkage(

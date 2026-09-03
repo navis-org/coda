@@ -373,13 +373,45 @@ export const influenceNode = registerNode({
     const dataset = requireDataset(ctx.input('dataset'))
     const source = ctx.resolveSource(dataset.sourceId)
 
+    /*
+     * **Both lists are deduplicated here, and that is load-bearing rather than tidy.**
+     *
+     * `propagate` gives each seed a channel of its own under `perSeedChannels`, and it sizes
+     * that channel array from `[...new Set(opts.seeds)]`. Two readers then index those channels
+     * *by position* — `influencePairs`' `queries` and `combineHalves`' `scored` — so a repeated
+     * id shifted every channel after the first duplicate onto the wrong neuron: neuron 3's
+     * influencers came back filed under neuron 1, and neuron 3 vanished from the table. Past the
+     * channel count the read ran off the end of the `Float64Array` and scored `NaN`, which the
+     * `score > floor` filter then dropped in silence.
+     *
+     * A `Neurons` table is free to repeat an id — `Stack Tables` over two overlapping searches
+     * keeps the kind and the duplicates, and so do both import nodes — so the fix belongs at the
+     * one point that turns a table into a list rather than at each of the readers.
+     *
+     * It also fixes `seedMass` below, which divided one unit of drive by the *raw* length and so
+     * started a `share` run with less than a whole unit in it.
+     */
     const neurons = ctx.input('neurons')
     if (!isTableValue(neurons)) throw new Error('Neurons input is not a table')
-    const seeds = idColumn(neurons, 'neuronId')
+    const seedColumn = idColumn(neurons, 'neuronId')
+    const seeds = [...new Set(seedColumn)]
     if (seeds.length === 0) throw new Error('No neuronIds in the incoming Neurons table')
 
     const wired = ctx.input('candidates')
-    const candidates = isTableValue(wired) ? idColumn(wired, 'neuronId') : []
+    const candidateColumn = isTableValue(wired) ? idColumn(wired, 'neuronId') : []
+    const candidates = [...new Set(candidateColumn)]
+
+    // Said rather than done quietly: a set the user believes is 400 neurons and is really 380 is
+    // a fact about their wiring, and the scores are per *neuron* either way.
+    const repeated =
+      seedColumn.length - seeds.length + (candidateColumn.length - candidates.length)
+    if (repeated > 0) {
+      ctx.warn(
+        `${repeated.toLocaleString()} repeated ${repeated === 1 ? 'id was' : 'ids were'} folded ` +
+          `away — an influence score is per neuron, so listing one twice cannot mean anything ` +
+          `here. Check the Neurons wire if you expected them to be distinct.`,
+      )
+    }
 
     const settings = influenceParamsFrom(ctx.params)
     const { denominator, gain, frontierLimit, minWeight } = settings

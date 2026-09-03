@@ -199,6 +199,38 @@ describe('the Linkage node', () => {
     expect(mockedRun).not.toHaveBeenCalled()
   })
 
+  it('says how many cells the clustering will read as zero', async () => {
+    /*
+     * `warnUnrecordedCells` is the third of `linkageOps`' three before-you-cluster guards and this
+     * node called only the other two, so the same NaN → 0 substitution was admitted when
+     * clustering was reached through the Heatmap's Order tab and silent when reached here.
+     *
+     * NaN cells arrive by ordinary routes — `Normalize`'s log arm on a matrix that goes below -1,
+     * a similarity nobody could compute — and zero is not a neutral stand-in for one: it is the
+     * *closest* two observations can be once a similarity has been inverted.
+     */
+    mockedRun.mockResolvedValue(linkageResult())
+    const warnings: string[] = []
+    const scores = scoreMatrix()
+    const holed = makeMatrix(
+      scores.rowLabels,
+      scores.colLabels,
+      Float64Array.from(scores.values, (v, i) => (i === 1 ? Number.NaN : v)),
+      scores.valueLabel,
+      scores.measure,
+    )
+    await requireNodeDef('cluster.linkage').evaluate!({
+      params: {},
+      input: () => holed,
+      column: () => undefined,
+      columns: () => [],
+      progress: () => {},
+      warn: (message: string) => warnings.push(message),
+      signal: undefined,
+    } as never)
+    expect(warnings.join(' ')).toMatch(/1 cells? (are|is) empty or not a number/)
+  })
+
   it('is expensive, because a first run downloads a Python runtime', () => {
     expect(requireNodeDef('cluster.linkage').cost).toBe('expensive')
   })

@@ -298,3 +298,108 @@ describe('Influence candidates', () => {
     expect(getColumn(single, 'hops').some((cell) => typeof cell === 'number')).toBe(true)
   })
 })
+
+/**
+ * A `Neurons` table is free to repeat an id, and the channels are indexed by position.
+ *
+ * `propagate` gives each seed a channel and sizes that array from the *deduplicated* seeds, while
+ * the node used to hand the raw column to the two readers that index those channels by position —
+ * `influencePairs`' `queries` and `combineHalves`' `scored`. Past the first duplicate every
+ * channel shifted: one neuron's influencers came back filed under another's name, the last query
+ * vanished from the table entirely, and the surplus candidates read off the end of a
+ * `Float64Array` as `NaN` and were dropped by the score filter.
+ */
+describe('Influence over a Neurons table that repeats an id', () => {
+  /*
+   * `find(LC4)` stacked on top of `find(LC4|LC6)`, which is two overlapping searches — the
+   * ordinary way somebody builds a set out of two questions.
+   *
+   * The overlap has to be **interleaved** to expose anything, and that is worth stating because
+   * the obvious construction does not: a set stacked onto *itself* gives `[a, b, a, b]`, whose
+   * first two entries are already the unique ones in order, so every channel still lands on the
+   * right neuron and the bug hides. Overlapping searches give `[a, b, a, b, c, d]` against a
+   * unique `[a, b, c, d]`, where position 2 is `a` on one list and `c` on the other.
+   */
+  function doubled(params: Record<string, unknown> = {}): CodaGraph {
+    let g = pipeline(params)
+    g = addNode(g, node('wider', 'neuron.findNeurons', { typePattern: 'LC[46]', status: 'Traced' }))
+    g = addNode(g, node('twice', 'core.stack'))
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'wider',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'twice', targetHandle: 'top' })
+    g = addEdge(g, {
+      source: 'wider',
+      sourceHandle: 'neurons',
+      target: 'twice',
+      targetHandle: 'bottom',
+    })
+    g = {
+      ...g,
+      edges: g.edges.filter((e) => !(e.target === 'inf' && e.targetHandle === 'neurons')),
+    }
+    return addEdge(g, {
+      source: 'twice',
+      sourceHandle: 'out',
+      target: 'inf',
+      targetHandle: 'neurons',
+    })
+  }
+
+  /** The same seed set with no repeats in it — the answer `doubled` has to agree with. */
+  function widerOnly(params: Record<string, unknown> = {}): CodaGraph {
+    const g = pipeline(params)
+    return {
+      ...g,
+      nodes: g.nodes.map((n) =>
+        n.id === 'find' ? { ...n, params: { ...n.params, typePattern: 'LC[46]' } } : n,
+      ),
+    }
+  }
+
+  async function run(graph: CodaGraph, port = 'influence'): Promise<TableValue> {
+    const sched = scheduler()
+    await sched.run(graph, { mode: 'full' })
+    const table = sched.output('inf', port)
+    if (!isTableValue(table)) {
+      throw new Error(`expected a table, got ${sched.info('inf').error ?? 'nothing'}`)
+    }
+    return table
+  }
+
+  it('scores every neuron exactly as the un-repeated set does', async () => {
+    const once = scoresOf(await run(widerOnly(COMPARABLE)))
+    const twice = scoresOf(await run(doubled(COMPARABLE)))
+    expect([...twice.keys()].sort()).toEqual([...once.keys()].sort())
+    for (const [id, score] of once) expect(twice.get(id)).toBeCloseTo(score, 12)
+  })
+
+  /** The load-bearing one: the pooled walk above sums over channels and cannot see a shift. */
+  it('keeps every query neuron, and files each influencer under the right one', async () => {
+    const params = { ...COMPARABLE, perQuery: true }
+    const pairs = (table: TableValue) =>
+      Array.from({ length: table.length }, (_, i) =>
+        [
+          String(getColumn(table, 'queryId')[i]),
+          String(getColumn(table, 'neuronId')[i]),
+          Number(getColumn(table, 'influence')[i]).toFixed(9),
+        ].join('/'),
+      ).sort()
+
+    const once = pairs(await run(widerOnly(params)))
+    const twice = pairs(await run(doubled(params)))
+    // Not merely the same length: the same (query, influencer, score) triples. A shifted channel
+    // keeps the count and moves the names, which is the shape the bug had.
+    expect(twice).toEqual(once)
+    expect(new Set(once.map((row) => row.split('/')[0])).size).toBeGreaterThan(1)
+  })
+
+  it('says that it folded the repeats away rather than doing it quietly', async () => {
+    const sched = scheduler()
+    await sched.run(doubled(COMPARABLE), { mode: 'full' })
+    expect(sched.warning('inf') ?? '').toMatch(/repeated ids? (was|were) folded away/)
+  })
+})

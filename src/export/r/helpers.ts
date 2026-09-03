@@ -356,6 +356,41 @@ registerHelper({
 })
 
 /**
+ * Coda's `min` and `max` aggregations, in R.
+ *
+ * `min(x, na.rm = TRUE)` is the obvious spelling and it answers **`Inf`** for a group whose every
+ * value is missing — with a warning, once per group, so a knit over a sparse column fills the
+ * console with them. `Inf` is not an absence: it survives `is.na`, it is not dropped by a
+ * `filter`, and it plots off the end of an axis. Coda answers null there, and so does its
+ * neighbour `mean`, which needs no helper because R already gives `NaN`.
+ *
+ * Two named functions rather than one taking a comparator, on `coda_join`'s terms: the name is
+ * what appears in the `summarise` call somebody reads, and `coda_extreme(x, min)` says less about
+ * what the column holds than `coda_min(x)` does.
+ */
+registerHelper({
+  name: 'coda_min',
+  source: [
+    "#' Coda's `min` aggregation: NA rather than Inf for a group with no values.",
+    'coda_min <- function(x) {',
+    '  kept <- x[!is.na(x)]',
+    '  if (length(kept) == 0) NA_real_ else min(kept)',
+    '}',
+  ],
+})
+
+registerHelper({
+  name: 'coda_max',
+  source: [
+    "#' Coda's `max` aggregation: NA rather than -Inf for a group with no values.",
+    'coda_max <- function(x) {',
+    '  kept <- x[!is.na(x)]',
+    '  if (length(kept) == 0) NA_real_ else max(kept)',
+    '}',
+  ],
+})
+
+/**
  * Coda's names for an annotation table's columns.
  *
  * `annotationColumn` in `data/annotations/types.ts`: two renames and no more. The id column

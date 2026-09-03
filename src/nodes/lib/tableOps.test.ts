@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { compareIds, idText, isNeuronId } from '../../core/ids'
 import { CRASH_FLOOR_CELLS, SILENT } from '../../core/limits'
 import { column, columnNames, tableSchema } from '../../core/types'
-import type { ColumnData, TableValue } from '../../core/values'
+import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { makeMatrix, makeTable, tableFromRows, JOIN_SEPARATOR } from '../../core/values'
 import {
   AGG_OPTIONS,
@@ -442,8 +442,7 @@ describe('groupBy', () => {
   })
 
   it('keeps each column independent, which is what a mean over ragged absences shows', () => {
-    // `mean` divides by the group size rather than by the count of finite values, which is the
-    // node's existing rule — the point here is that one column's nulls cannot reach another's.
+    // One column's nulls cannot reach another's: each has its own slot in every accumulator.
     const schema = tableSchema(column('k', 'str'), column('a', 'f64'), column('b', 'f64'))
     const table = tableFromRows(schema, [
       { k: 'x', a: 2, b: null },
@@ -452,6 +451,61 @@ describe('groupBy', () => {
     const out = groupByTable(table, ['k'], ['a', 'b'], 'min')
     expect((out.data.min_a as number[])[0]).toBe(2)
     expect((out.data.min_b as number[])[0]).toBe(6)
+  })
+
+  /*
+   * The null rules, which is where this used to disagree with `pivotTable` in the same file and
+   * with both of its own exporters.
+   *
+   * `mean` divided by `bucket.n` — the *row* count — so a single null pulled the answer towards
+   * zero without appearing anywhere; `min`/`max` answered 0 for a group holding no number, which
+   * is a manufactured measurement in a column of real ones. Every expectation below is what pandas
+   * answers for the same frame, checked against it.
+   */
+  describe('nulls in the value column', () => {
+    const ragged = () =>
+      tableFromRows(tableSchema(column('k', 'str'), column('w', 'f64')), [
+        { k: 'a', w: 10 },
+        { k: 'a', w: null },
+        { k: 'a', w: 20 },
+        { k: 'b', w: null },
+        { k: 'b', w: null },
+      ])
+    const at = (out: TableValue, name: string, key: string) =>
+      (out.data[name] as CellValue[])[(out.data.k as string[]).indexOf(key)]
+
+    it('divides a mean by the values, not by the rows', () => {
+      const out = groupByTable(ragged(), ['k'], ['w'], 'mean')
+      // 30 / 2, not 30 / 3. `n` still counts rows, which is what it is for.
+      expect(at(out, 'mean_w', 'a')).toBe(15)
+      expect(at(out, 'n', 'a')).toBe(3)
+    })
+
+    it('answers null, never zero, for a group with no values in it', () => {
+      for (const agg of ['mean', 'min', 'max'] as const) {
+        expect(at(groupByTable(ragged(), ['k'], ['w'], agg), `${agg}_w`, 'b')).toBeNull()
+      }
+    })
+
+    it('still answers zero for a sum over nothing, which is the identity not a value', () => {
+      // pandas and R agree: `sum` of an empty group is 0. Only the three that divide by or pick
+      // from the values can fail to have an answer.
+      expect(at(groupByTable(ragged(), ['k'], ['w'], 'sum'), 'sum_w', 'b')).toBe(0)
+    })
+
+    it('does not count an absence as a distinct value, but does count an empty string', () => {
+      const table = tableFromRows(tableSchema(column('k', 'str'), column('t', 'str')), [
+        { k: 'a', t: 'x' },
+        { k: 'a', t: null },
+        { k: 'a', t: 'x' },
+        { k: 'b', t: '' },
+        { k: 'b', t: null },
+      ])
+      const out = groupByTable(table, ['k'], ['t'], 'countDistinct')
+      // `nunique`'s answers. Somebody typed the empty string; nobody typed the null.
+      expect(at(out, 'countDistinct_t', 'a')).toBe(1)
+      expect(at(out, 'countDistinct_t', 'b')).toBe(1)
+    })
   })
 
   it('folds a repeated value column away rather than emitting the name twice', () => {
@@ -1163,26 +1217,72 @@ describe('normalizeMatrix', () => {
     makeMatrix(['a', 'b'], ['x', 'y'], Float64Array.from([1, 3, 0, 0]), 'synapses')
 
   it('normalises by row and leaves all-zero rows at zero', () => {
-    const out = normalizeMatrix(m(), 'row')
+    const out = normalizeMatrix(m(), 'row', SILENT)
     expect([...out.values]).toEqual([0.25, 0.75, 0, 0])
   })
 
   it('normalises by column', () => {
-    const out = normalizeMatrix(m(), 'column')
+    const out = normalizeMatrix(m(), 'column', SILENT)
     expect([...out.values]).toEqual([1, 1, 0, 0])
   })
 
   it('normalises by global max', () => {
-    expect([...normalizeMatrix(m(), 'max').values]).toEqual([1 / 3, 1, 0, 0])
+    expect([...normalizeMatrix(m(), 'max', SILENT).values]).toEqual([1 / 3, 1, 0, 0])
   })
 
   it('passes through unchanged for mode none', () => {
-    expect([...normalizeMatrix(m(), 'none').values]).toEqual([1, 3, 0, 0])
+    expect([...normalizeMatrix(m(), 'none', SILENT).values]).toEqual([1, 3, 0, 0])
   })
 
   it('applies log10(1+x)', () => {
-    const out = normalizeMatrix(m(), 'log')
+    const out = normalizeMatrix(m(), 'log', SILENT)
     expect(out.values[0]).toBeCloseTo(Math.log10(2))
+  })
+
+  /*
+   * Signed matrices, which reach this node routinely — NBLAST calls its scores "the value the
+   * Heatmap and Normalize already understand", and a mean NBLAST score is negative between two
+   * arbors that are not alike. Every mode here used to answer a grid of zeroes for them.
+   */
+  describe('a matrix that goes negative', () => {
+    // Row a holds values and totals -0.6; row b is measured and empty; row c is ordinary.
+    const signed = () =>
+      makeMatrix(
+        ['a', 'b', 'c'],
+        ['x', 'y'],
+        Float64Array.from([-0.8, 0.2, 0, 0, 3, 1]),
+        'NBLAST score',
+        'similarity',
+      )
+
+    it('empties a line that holds values and still totals zero or less, and says so', () => {
+      const warnings: string[] = []
+      const out = normalizeMatrix(signed(), 'row', { warn: (message) => warnings.push(message) })
+      expect([...out.values].slice(0, 2).every(Number.isNaN)).toBe(true)
+      // The empty row is *measured* and keeps its zeroes; only the unusable one goes blank.
+      expect([...out.values].slice(2, 4)).toEqual([0, 0])
+      expect([...out.values].slice(4)).toEqual([0.75, 0.25])
+      expect(warnings.join(' ')).toMatch(/1 of 3 rows/)
+    })
+
+    it('takes the largest magnitude, so the sign survives and nothing collapses to zero', () => {
+      // The extreme has to be on the *negative* side for this to say anything: with the largest
+      // magnitude positive, `abs` and a bare `>` pick the same number and the old code looks
+      // right. All-negative is where `let max = 0` produced a grid of zeroes.
+      const down = makeMatrix(['a'], ['x', 'y', 'z'], Float64Array.from([-4, -1, 2]), 'score')
+      expect([...normalizeMatrix(down, 'max', SILENT).values]).toEqual([-1, -0.25, 0.5])
+
+      // And a matrix of counts is untouched: `abs` is the identity where nothing is negative.
+      expect([...normalizeMatrix(m(), 'max', SILENT).values]).toEqual([1 / 3, 1, 0, 0])
+    })
+
+    it('says how many cells a log cannot be taken of', () => {
+      const warnings: string[] = []
+      const below = makeMatrix(['a'], ['x', 'y'], Float64Array.from([-3, 1]), 'score')
+      const out = normalizeMatrix(below, 'log', { warn: (message) => warnings.push(message) })
+      expect(Number.isNaN(out.values[0]!)).toBe(true)
+      expect(warnings.join(' ')).toMatch(/1 of 2 cells/)
+    })
   })
 })
 

@@ -690,6 +690,63 @@ Coda's naming only as long as the function is passed under exactly that name. Th
 node carries two value columns for this reason — the shape that needed checking is the second
 argument, not the first.
 
+### A null is skipped, and a group with no values has no answer
+
+The rules for an absence in the *value* column, which used to be three different answers from one
+node and its two exporters over the same data.
+
+**`mean` divides by the values, not by the rows.** `n` counts rows and always did; the denominator
+is the count of finite values beside it. Dividing by `n` meant one null pulled the mean towards
+zero without appearing anywhere — on `[10, null, 20]` the canvas said 10, the notebook said 15 and
+the knitted document said `NA`. `pivotTable` in the same file has always kept its own `counts`
+array, so Group By and Pivot could quote different means of one column.
+
+**`min`, `max` and `mean` answer null for a group holding no number**, where they used to answer
+`0`: a manufactured measurement sitting in a column of real ones, and indistinguishable from one.
+`sum` still answers 0 there, which is not an inconsistency — a sum over nothing is the identity,
+and pandas and R agree.
+
+**`countDistinct` does not count an absence**, which brings it into line with `join` a few lines
+away in the same function — that one has always skipped absences — and with `nunique`. An empty
+string *is* counted: somebody typed it, and folding it into null would be the editorial decision
+`join` declines to make about `DA?` and `da?`.
+
+Four of the seven aggregations therefore need an argument in R that they do not need in Python,
+because base R propagates an `NA` where pandas skips it. `sum`, `mean` and `n_distinct` take
+`na.rm = TRUE`; `min` and `max` cannot, because `min(x, na.rm = TRUE)` over an all-absent group
+answers **`Inf`** with a warning — a value that survives `is.na`, is not dropped by a `filter` and
+plots off the end of an axis. Those two are generated helpers (`coda_min`, `coda_max`), and the
+golden's second Group By node exists to reach one of them so `probe-r-helpers.R` can run it; the
+other is pinned at the emitter in `export.test.ts`.
+
+## Normalize
+
+`core.normalize`, `Add ▸ Analysis ▸ Normalize`. Rescale a matrix by row, by column, against the
+global maximum, or logarithmically.
+
+**Every mode was written for synapse counts, and signed matrices reach it routinely.** NBLAST
+describes its scores as "the value the Heatmap and Normalize already understand" and a mean NBLAST
+score is negative between two arbors that are not alike; `Similarity Matrix` under cosine or
+Pearson is the other route. `total > 0` and an accumulator starting at `0` read as guards and were
+really assumptions, so an all-negative matrix normalised to a grid of zeroes and a row summing to
+`-0.6` did too.
+
+**An empty line and an unusable one are different, and only the second has no answer.** A row of
+zeroes is *measured* — that neuron has no partners in this set — so it stays zero and draws at the
+bottom of the ramp, which is what a reader of a connectivity heatmap already understands it to
+mean, and is what this node has always done. A line that *holds values* and still totals zero or
+less is the other thing: `+5` against `-5` divides to `±Infinity`, and a negative total inverts
+every sign. Those cells come out empty, which `heatmapPlot`'s fold already routes to bucket `-1`
+and draws as unrecorded, and the count is warned about.
+
+**`max` takes the largest magnitude**, which is the same number as the largest value whenever
+nothing is negative — so a matrix of counts is untouched — and keeps the sign and the [-1, 1]
+range on one that is signed.
+
+Both emitters follow, and the shape is the same in each: mask the total rather than filling the
+quotient, then put an all-zero line back. `.fillna(0)` and `[!is.finite()] <- 0` were the old
+endings and each reproduced the bug faithfully.
+
 ## Deduplicate
 
 `core.dedupe`, `Add ▸ Transform ▸ Deduplicate`. `pandas.drop_duplicates`: name the columns to
@@ -2395,6 +2452,31 @@ end, and in the probe over a real connectome (worst relative difference 3.25e-16
 combined tail is neither of them — a precise-looking number bounding the wrong quantity is worse
 than no number. The `hops` column is empty there for the same reason: two distances, neither of
 them *the* distance.
+
+### The seeds are deduplicated at the node, because the channels are positional
+
+`propagate` gives each seed a channel of its own under `perSeedChannels` and sizes that array from
+`[...new Set(opts.seeds)]`. Two readers then index those channels **by position** —
+`influencePairs`' `queries` and `combineHalves`' `scored` — so the node has to hand them a list
+whose order matches, and it used to hand them `idColumn`'s raw column.
+
+A `Neurons` table is free to repeat an id: `Stack Tables` over two overlapping searches keeps both
+the kind and the duplicates, and both import nodes carry whatever is in the file. Past the first
+repeat every channel shifted by one, and the failure was silent in three directions at once — one
+neuron's influencers came back filed under another's name, the last query vanished from the table,
+and a surplus candidate read off the end of a `Float64Array`, scored `NaN`, and was dropped by the
+`score > floor` filter that follows.
+
+Worth knowing for anyone writing a test against it: the overlap has to be **interleaved** to show
+anything. A set stacked onto *itself* gives `[a, b, a, b]`, whose first two entries are already the
+unique ones in order, so every channel still lands correctly and the bug hides. Two overlapping
+searches give `[a, b, a, b, c, d]` against a unique `[a, b, c, d]`, which is the fixture
+`influence.test.ts` builds.
+
+The fix is one dedupe at the point a table becomes a list rather than a guard in each reader, and
+it fixes `seedMass` on the way: `1 / seeds.length` over the raw column started a `share` run with
+less than one whole unit of drive in it. `combineHalves` now also throws when the two lists differ
+in length, because that is the only way a second route to the same mistake can announce itself.
 
 ### One port whose shape follows its control
 

@@ -1219,6 +1219,15 @@ export function groupByTable(
   const sum: number[] = []
   const min: number[] = []
   const max: number[] = []
+  /**
+   * How many rows of this group actually carried a number, which is **not** `bucket.n`.
+   *
+   * `n` counts rows; this counts values. They differ by exactly the nulls, the blanks and the
+   * non-numeric text, and the difference is what `mean` divides by — see the emit loop. Kept as
+   * a fourth flat array on the accumulators' own terms: one more double per group per column,
+   * against the alternative of not being able to tell "summed nothing" from "summed to zero".
+   */
+  const finite: number[] = []
   const sets: Array<Set<string>> = []
   const needsSets = agg === 'countDistinct' || agg === 'join'
 
@@ -1234,6 +1243,7 @@ export function groupByTable(
         sum.push(0)
         min.push(Number.POSITIVE_INFINITY)
         max.push(Number.NEGATIVE_INFINITY)
+        finite.push(0)
         if (needsSets) sets.push(new Set<string>())
       }
     }
@@ -1243,7 +1253,17 @@ export function groupByTable(
       const raw = valueData[v]![i]
       const slot = base + v
       if (agg === 'countDistinct') {
-        sets[slot]!.add(raw === null || raw === undefined ? '\u0000' : String(raw))
+        /*
+         * **An absence is not a distinct value.** A null used to take a sentinel of its own
+         * and count as one more answer, which made this the only aggregation here that
+         * disagreed with `join` a few lines down — that one has always skipped absences —
+         * and with `nunique`, which the notebook emits.
+         *
+         * An empty string is deliberately *not* folded in with it: somebody typed that,
+         * `nunique` counts it, and reading it as an absence would be the editorial decision
+         * `join` declines to make about `DA?` and `da?`.
+         */
+        if (raw !== null && raw !== undefined) sets[slot]!.add(String(raw))
       } else if (agg === 'join') {
         /*
          * **Distinct**, in first-appearance order, absences skipped.
@@ -1263,6 +1283,7 @@ export function groupByTable(
         const value = Number(raw)
         if (Number.isFinite(value)) {
           sum[slot]! += value
+          finite[slot]! += 1
           if (value < min[slot]!) min[slot] = value
           if (value > max[slot]!) max[slot] = value
         }
@@ -1293,19 +1314,34 @@ export function groupByTable(
         data[outNames[v]!]!.push(texts.size ? [...texts].join(JOIN_SEPARATOR) : null)
         continue
       }
-      let value: number
+      /*
+       * **`finite` is the denominator, and absence of one is null rather than zero.**
+       *
+       * `mean` divided by `bucket.n` — the *row* count — so one null in a value column pulled
+       * the mean towards zero without appearing anywhere, and `min`/`max` answered `0` for a
+       * group that held no number at all: a manufactured measurement in a column of real ones.
+       * Both are the rule `pivotTable` already follows with its own `counts` array, and the rule
+       * `normalizeConnectivity` states in prose ("a zero *result* would read as 'this connection
+       * is a negligible fraction' when what happened is that nothing was measured").
+       *
+       * `sum` keeps answering **0** for an empty group, which is not an inconsistency: a sum
+       * over nothing is zero in pandas and in R alike, and it is the identity rather than a
+       * measurement. Only the three that have to *divide by* or *pick from* the values can fail
+       * to have an answer.
+       */
+      let value: number | null
       switch (agg) {
         case 'sum':
           value = sum[slot]!
           break
         case 'mean':
-          value = bucket.n > 0 ? sum[slot]! / bucket.n : 0
+          value = finite[slot]! > 0 ? sum[slot]! / finite[slot]! : null
           break
         case 'min':
-          value = Number.isFinite(min[slot]!) ? min[slot]! : 0
+          value = finite[slot]! > 0 ? min[slot]! : null
           break
         case 'max':
-          value = Number.isFinite(max[slot]!) ? max[slot]! : 0
+          value = finite[slot]! > 0 ? max[slot]! : null
           break
         case 'countDistinct':
           value = sets[slot]?.size ?? 0
@@ -1313,7 +1349,9 @@ export function groupByTable(
         default:
           value = 0
       }
-      data[outNames[v]!]!.push(outDtypes[v] === 'i64' ? Math.round(value) : value)
+      data[outNames[v]!]!.push(
+        value !== null && outDtypes[v] === 'i64' ? Math.round(value) : value,
+      )
     }
   }
 
@@ -2339,42 +2377,154 @@ export const NORMALIZE_OPTIONS: Array<{ value: NormalizeMode; label: string }> =
   { value: 'log', label: 'log10(1 + x)' },
 ]
 
-export function normalizeMatrix(matrix: MatrixValue, mode: NormalizeMode): MatrixValue {
-  // Note what is deliberately not carried: `measure`. A fraction of a row is no longer the
-  // quantity that went in — a normalised count is a proportion, not a count — so the honest
-  // answer downstream is "nobody said" rather than the old claim restated about new numbers.
+/**
+ * Rescale a matrix, saying out loud wherever it could not.
+ *
+ * ## A line that has no fraction gets `NaN`, never 0
+ *
+ * Every mode here was written for synapse counts, where a total is positive and a maximum is
+ * above zero. **Signed matrices reach it routinely** — `nblastOps.ts` describes its scores as
+ * "the value the Heatmap and Normalize already understand" and a mean NBLAST score is negative
+ * between two arbors that are not alike, while `Similarity Matrix` under cosine or Pearson is
+ * the other route — and there the guards read as measurements. A row summing to `-0.6` is not a
+ * row of zeroes; a column summing to exactly zero has no fraction at all rather than a fraction
+ * of nothing. Both used to answer `0`, which is the failure `normalizeConnectivity` states in
+ * prose one file over: "a zero *result* would read as 'this connection is a negligible fraction'
+ * when what happened is that nothing was measured".
+ *
+ * So a line with no usable total yields `NaN` — which `heatmapPlot`'s fold already routes to
+ * bucket `-1` and draws as unrecorded rather than as a value — and the count is warned about.
+ * All-positive matrices, which is nearly all of them, come out byte-identical to before.
+ *
+ * ## `max` is the largest **magnitude**
+ *
+ * `let max = 0` meant an all-negative matrix normalised to a grid of zeroes. Taking the largest
+ * absolute value instead keeps the sign, puts every cell in `[-1, 1]`, and is *the same number*
+ * whenever the matrix is non-negative — so this generalises the old behaviour rather than
+ * replacing it.
+ *
+ * ## `measure` is deliberately not carried
+ *
+ * A fraction of a row is no longer the quantity that went in — a normalised count is a
+ * proportion, not a count — so the honest answer downstream is "nobody said" rather than the old
+ * claim restated about new numbers.
+ */
+export function normalizeMatrix(
+  matrix: MatrixValue,
+  mode: NormalizeMode,
+  /** Where a line that could not be normalised goes. `SILENT` for a caller with nobody to tell. */
+  ctx: Warner,
+): MatrixValue {
   if (mode === 'none') return matrix
   const rows = matrix.rowLabels.length
   const cols = matrix.colLabels.length
   const out = new Float64Array(matrix.values.length)
 
-  if (mode === 'row') {
-    for (let r = 0; r < rows; r++) {
+  /**
+   * Lines (or cells, under `log`) that have no answer.
+   *
+   * The caller supplies the clause naming *why*, because that is the whole of what differs
+   * between the two — the shared half is the count and what was done about it, and a reader acts
+   * on the second sentence either way.
+   */
+  const undefinable = (count: number, of: number, unit: string, why: string): void => {
+    if (count === 0) return
+    ctx.warn(
+      `${count.toLocaleString()} of ${of.toLocaleString()} ${unit} ${why}. ` +
+        `Those cells are left empty rather than set to zero, which would read as a measurement ` +
+        `of nearly nothing — a heatmap draws an empty cell as unrecorded.`,
+    )
+  }
+
+  if (mode === 'row' || mode === 'column') {
+    const down = mode === 'row'
+    const lines = down ? rows : cols
+    const along = down ? cols : rows
+    const at = (line: number, step: number): number =>
+      down ? line * cols + step : step * cols + line
+    let skipped = 0
+    for (let line = 0; line < lines; line++) {
       let total = 0
-      for (let c = 0; c < cols; c++) total += matrix.values[r * cols + c] ?? 0
-      for (let c = 0; c < cols; c++) {
-        out[r * cols + c] = total > 0 ? (matrix.values[r * cols + c] ?? 0) / total : 0
+      let anyValue = false
+      for (let step = 0; step < along; step++) {
+        const v = matrix.values[at(line, step)] ?? 0
+        total += v
+        if (v !== 0) anyValue = true
+      }
+      /*
+       * **An empty line and an unusable one are different, and only the second has no answer.**
+       *
+       * A row of zeroes is *measured*: that neuron has no partners in this set, and zero is what
+       * every cell of it holds — so it stays zero and draws as the bottom of the ramp, which is
+       * what a reader of a connectivity heatmap already understands it to mean. That is the
+       * common case in a connectome and the behaviour this node has always had.
+       *
+       * A line that holds values and still totals zero or less is the other thing. `+5` against
+       * `-5` divides to `±Infinity`; a row summing to `-0.6` divides to fractions whose sign is
+       * inverted. Neither is "a negligible fraction", which is what a zero there would say.
+       */
+      if (total > 0) {
+        for (let step = 0; step < along; step++) {
+          const i = at(line, step)
+          out[i] = (matrix.values[i] ?? 0) / total
+        }
+      } else if (!anyValue) {
+        for (let step = 0; step < along; step++) out[at(line, step)] = 0
+      } else {
+        skipped++
+        for (let step = 0; step < along; step++) out[at(line, step)] = Number.NaN
       }
     }
-    return makeMatrix(matrix.rowLabels, matrix.colLabels, out, 'fraction of row')
+    undefinable(
+      skipped,
+      lines,
+      down ? 'rows' : 'columns',
+      'hold values and still total zero or less, so there is no total to be a fraction of',
+    )
+    return makeMatrix(
+      matrix.rowLabels,
+      matrix.colLabels,
+      out,
+      down ? 'fraction of row' : 'fraction of column',
+    )
   }
-  if (mode === 'column') {
-    for (let c = 0; c < cols; c++) {
-      let total = 0
-      for (let r = 0; r < rows; r++) total += matrix.values[r * cols + c] ?? 0
-      for (let r = 0; r < rows; r++) {
-        out[r * cols + c] = total > 0 ? (matrix.values[r * cols + c] ?? 0) / total : 0
-      }
-    }
-    return makeMatrix(matrix.rowLabels, matrix.colLabels, out, 'fraction of column')
-  }
+
   if (mode === 'max') {
-    let max = 0
-    for (const v of matrix.values) if (v > max) max = v
-    for (let i = 0; i < out.length; i++) out[i] = max > 0 ? (matrix.values[i] ?? 0) / max : 0
+    /*
+     * The largest **magnitude**, which is the same number as the largest value whenever nothing
+     * is negative — so every matrix of counts comes out exactly as it always did, and a matrix of
+     * signed scores keeps its sign and lands in [-1, 1] instead of being flattened to zeroes by
+     * an accumulator that started at 0.
+     *
+     * Non-finite cells are skipped for `matrixExtent`'s reason: a cell nobody recorded must not
+     * set the scale everything else is read against. With no scale to take, each cell is handed
+     * back unchanged — which leaves a zero a zero and an unrecorded cell unrecorded.
+     */
+    let scale = 0
+    for (const v of matrix.values) {
+      if (!Number.isFinite(v)) continue
+      const magnitude = Math.abs(v)
+      if (magnitude > scale) scale = magnitude
+    }
+    for (let i = 0; i < out.length; i++) {
+      const v = matrix.values[i] ?? 0
+      out[i] = scale > 0 ? v / scale : v
+    }
     return makeMatrix(matrix.rowLabels, matrix.colLabels, out, 'fraction of max')
   }
-  for (let i = 0; i < out.length; i++) out[i] = Math.log10(1 + (matrix.values[i] ?? 0))
+
+  let below = 0
+  for (let i = 0; i < out.length; i++) {
+    const v = matrix.values[i] ?? 0
+    if (v <= -1) below++
+    out[i] = Math.log10(1 + v)
+  }
+  undefinable(
+    below,
+    out.length,
+    'cells',
+    'are at or below −1, where log10(1 + x) does not exist',
+  )
   return makeMatrix(matrix.rowLabels, matrix.colLabels, out, 'log10(1 + synapses)')
 }
 

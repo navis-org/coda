@@ -256,6 +256,35 @@ check("counts: a neuron at both ends is counted once",
       cnt2$nNeurons[cnt2$label == "LC4" & cnt2$dataset == "A"] == 1,
       cnt2$nNeurons[cnt2$label == "LC4" & cnt2$dataset == "A"])
 
+# ---- coda_join, coda_min ----------------------------------------------------
+#
+# Two of the three aggregations whose R form is a generated helper rather than a function name,
+# and both exist because base R answers something that is not Coda's answer for a group holding no
+# value: `paste(collapse=)` keeps the two letters "NA", and `min` answers `Inf` with a warning.
+# `Inf` is the one worth running rather than reading — it survives `is.na`, it is not dropped by a
+# `filter`, and it plots off the end of an axis, so a document that produced it would look
+# finished and read wrong.
+#
+# `coda_min` alone, because the helper chunk carries only what the fixture reaches and the
+# fixture's second Group By aggregates with `min`. `coda_max` is its mirror to the character and
+# is pinned in `export.test.ts` instead, at the emitter — what needs *running* is the pattern, and
+# there is one of it.
+check("join: distinct, first-appearance order, absences skipped",
+      identical(coda_join(c("b", NA, "a", "b", "")), "b; a"),
+      coda_join(c("b", NA, "a", "b", "")))
+check("join: a group with nothing in it is NA, not an empty string",
+      is.na(coda_join(c(NA, ""))), coda_join(c(NA, "")))
+check("min: absences skipped rather than propagated",
+      identical(coda_min(c(10, NA, 20)), 10), coda_min(c(10, NA, 20)))
+check("min: a group with no values is NA, never Inf",
+      is.na(coda_min(c(NA_real_, NA_real_))), coda_min(c(NA_real_, NA_real_)))
+# The warning is half of what base `min` gets wrong here: one per empty group, so a knit over a
+# sparse column fills the console with them.
+check("min: and it does not warn on the way",
+      length(withCallingHandlers(
+        { coda_min(c(NA_real_, NA_real_)); character(0) },
+        warning = function(w) invokeRestart("muffleWarning"))) == 0L)
+
 # ---- coda_qualify_ids -------------------------------------------------------
 #
 # The same three rules one language over. R turns an NA into the string "NA" through `paste0`,

@@ -322,6 +322,13 @@ coda_join_annotations <- function(left, right) {
 }
 
 
+#' Coda's `min` aggregation: NA rather than Inf for a group with no values.
+coda_min <- function(x) {
+  kept <- x[!is.na(x)]
+  if (length(kept) == 0) NA_real_ else min(kept)
+}
+
+
 coda_natural_order <- function(labels) {
   # Positions that put the labels in Coda's order: LC4 before LC10, case ignored.
   key <- vapply(as.character(labels), function(label) {
@@ -1399,6 +1406,13 @@ group_by_df <- find_neurons |>
   summarise(n = n(), `join_instance` = coda_join(`instance`), `join_status` = coda_join(`status`), .groups = "drop")
 ```
 
+```{r group-by-df-2}
+# ── Group By ──
+group_by_df_2 <- find_neurons |>
+  group_by(`type`) |>
+  summarise(n = n(), `min_size` = coda_min(`size`), .groups = "drop")
+```
+
 ```{r neuron-profile}
 # ── Neuron Profile ──
 neuron_profile_out <- find_neurons
@@ -1967,11 +1981,11 @@ clusters_to_neurons <- find_neurons |>
   select(-key_)
 ```
 
-```{r group-by-df-2}
+```{r group-by-df-3}
 # ── Group By ──
-group_by_df_2 <- deduplicate |>
+group_by_df_3 <- deduplicate |>
   group_by(`preType`, `postType`) |>
-  summarise(n = n(), `sum_weight` = sum(`weight`), .groups = "drop")
+  summarise(n = n(), `sum_weight` = sum(`weight`, na.rm = TRUE), .groups = "drop")
 ```
 
 ```{r relabel-2}
@@ -1993,12 +2007,12 @@ selected_to_neurons <- dendrogram_selected |>
 
 ```{r select-columns}
 # ── Select Columns ──
-select_columns <- group_by_df_2 |> select(all_of(c("preType", "postType", "sum_weight")))
+select_columns <- group_by_df_3 |> select(all_of(c("preType", "postType", "sum_weight")))
 ```
 
 ```{r bar-chart}
 # ── Bar Chart ──
-bar_chart <- group_by_df_2
+bar_chart <- group_by_df_3
 
 ggplot(bar_chart, aes(x = `preType`, y = `sum_weight`)) +
   geom_col() +
@@ -2009,7 +2023,7 @@ ggplot(bar_chart, aes(x = `preType`, y = `sum_weight`)) +
 
 ```{r pie-chart}
 # ── Pie Chart ──
-pie_chart_out <- group_by_df_2
+pie_chart_out <- group_by_df_3
 pie_chart_selected <- pie_chart_out |> filter(as.character(`preType`) %in% c("LC4"))
 
 pie_chart_totals <- pie_chart_out |>
@@ -2030,7 +2044,7 @@ ggplot(pie_chart_slices, aes(x = 2, y = value, fill = `preType`)) +
 
 ```{r table-df}
 # ── Table ──
-table_df_out <- group_by_df_2
+table_df_out <- group_by_df_3
 table_df_filtered <- dplyr::filter(
   table_df_out,
   (!is.na(.data[["sum_weight"]]) & .data[["sum_weight"]] >= 10),
@@ -2046,14 +2060,14 @@ table_df_filtered
 
 ```{r describe-table}
 # ── Describe Table ──
-describe_table_out <- group_by_df_2
+describe_table_out <- group_by_df_3
 describe_table_summary <- coda_describe(describe_table_out)
 describe_table_summary
 ```
 
 ```{r build-network}
 # ── Build Network ──
-links <- group_by_df_2 |>
+links <- group_by_df_3 |>
   group_by(`preType`, `postType`) |>
   summarise(weight = sum(`sum_weight`), edges = n(), .groups = "drop")
 links <- links |> filter(weight >= 5)
@@ -2071,7 +2085,7 @@ build_network <- graph_from_data_frame(
 # reproduces that — without it the join returns every matching pair.
 join <- select_columns |>
   left_join(
-    group_by_df_2 |> distinct(`preType`, .keep_all = TRUE),
+    group_by_df_3 |> distinct(`preType`, .keep_all = TRUE),
     by = join_by(`preType` == `preType`),
     suffix = c("", "_r")
   )
@@ -2084,7 +2098,7 @@ join <- select_columns |>
 # reproduces that — without it the join returns every matching pair.
 join_2 <- select_columns |>
   full_join(
-    group_by_df_2 |> distinct(`postType`, .keep_all = TRUE),
+    group_by_df_3 |> distinct(`postType`, .keep_all = TRUE),
     by = join_by(`preType` == `postType`),
     suffix = c("", "_r")
   )
@@ -2103,7 +2117,7 @@ join_2 <- select_columns |>
 # the order.
 join_3 <- select_columns |> distinct(`preType`, .keep_all = TRUE) |>
   right_join(
-    group_by_df_2,
+    group_by_df_3,
     by = join_by(`preType` == `postType`),
     suffix = c("", "_r")
   )
@@ -2223,8 +2237,10 @@ rownames(pivot_matrix_df) <- pivot_table_df[[1]]
 
 ```{r normalize}
 # ── Normalize ──
-normalize <- pivot_matrix_df / rowSums(pivot_matrix_df)
-normalize[!is.finite(normalize)] <- 0
+totals_ <- rowSums(pivot_matrix_df)
+empty_ <- rowSums(pivot_matrix_df != 0, na.rm = TRUE) == 0
+normalize <- pivot_matrix_df / ifelse(totals_ > 0, totals_, NA_real_)
+normalize[empty_, ] <- 0
 ```
 
 ```{r heatmap}
