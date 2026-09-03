@@ -5281,6 +5281,88 @@ p.sources__hint {
 }
 
 /* --------------------------------------------------------------------------
+ * Small-screen notice
+ * -------------------------------------------------------------------------- */
+
+/*
+ * The one opaque backdrop in the app, and the exception is the point. Every other dialog tints
+ * the canvas because the canvas is context; this one is *about* the canvas not fitting, and a
+ * wrapped toolbar showing round the edges of the sentence explaining it reads as the same bug
+ * rather than as the subject. `backdrop-filter` off with it: there is nothing behind to blur, and
+ * it is the expensive part of the rule on exactly the hardware this appears on.
+ *
+ * Above the start page's 70, which is the only other thing that can be up on a first visit.
+ */
+.small-screen {
+  z-index: 80;
+  padding: 20px;
+  background: var(--canvas);
+  backdrop-filter: none;
+}
+
+/*
+ * Hugs its content, like the share gate. `max-height` plus a scroll rather than `height: auto`
+ * alone: a phone held in landscape has ~330px of viewport to give, which this does not fit in,
+ * and `.overlay__panel`'s `overflow: hidden` would take the button off the bottom rather than
+ * letting it be reached.
+ */
+.small-screen__panel {
+  max-width: 420px;
+  height: auto;
+  max-height: 100%;
+  padding: 18px 20px;
+  gap: 0;
+  overflow-y: auto;
+}
+/*
+ * Larger than the app's own type, which is the only place in the stylesheet that goes the other
+ * way. The editor is drawn at 11px for a reader a keyboard's distance from a large display; this
+ * is read at arm's length on a handset, and the whole content is four sentences.
+ */
+.small-screen__panel h2 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.small-screen__panel p {
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.small-screen__quiet {
+  margin-bottom: 6px !important;
+  color: var(--text-muted) !important;
+}
+.small-screen__links {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+.small-screen__links li {
+  margin-bottom: 4px;
+}
+.small-screen__links a {
+  color: var(--accent);
+  font-weight: 600;
+}
+/*
+ * A touch target, not a toolbar button. `.btn` is 24px tall — fine for a mouse, under every
+ * platform's 44px minimum for a finger, and this is the one control on the screen.
+ */
+.small-screen__actions {
+  display: flex;
+  margin-top: 16px;
+}
+.small-screen__actions .btn {
+  height: 44px;
+  padding: 0 20px;
+  font-size: 14px;
+}
+
+/* --------------------------------------------------------------------------
  * Feedback nudge
  * -------------------------------------------------------------------------- */
 

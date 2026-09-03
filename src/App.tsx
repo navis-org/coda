@@ -17,6 +17,7 @@ import { SharedLinkGate } from './ui/panels/SharedLinkGate'
 import { GuidesDialog } from './ui/panels/GuidesDialog'
 import { WizardDialog } from './ui/panels/WizardDialog'
 import { StartPage } from './ui/panels/StartPage'
+import { SmallScreenGate } from './ui/panels/SmallScreenGate'
 import { ZooGate } from './ui/panels/ZooGate'
 import { StatusBar } from './ui/panels/StatusBar'
 import { Toolbar } from './ui/panels/Toolbar'
@@ -123,6 +124,12 @@ export function App() {
        * never competes with the one modal that already asks for attention on load.
        */}
       <FeedbackNudge />
+      {/*
+       * Last of all, and over every other dialog including the share gate: on a viewport this
+       * small nothing behind it can be used, so anything drawn on top of it would be a question
+       * asked through a window the reader cannot see out of. Draws nothing at any ordinary size.
+       */}
+      <SmallScreenGate />
     </div>
   )
 }

@@ -874,6 +874,75 @@ loads. The full loop (first visit → Guided Tour → Done → dialog back with 
 `coda.guidesDone.v1` written) was walked in headless Chrome over CDP, which is the only place
 `onDestroyed` and the real library are in the picture at all.
 
+## The small-screen notice
+
+The one thing Coda says on a phone. `src/ui/smallScreen.ts` decides when, `SmallScreenGate.tsx`
+says what, the `.small-screen*` block in `editor.css` draws it, and
+`src/store/persistence.ts` keeps the answer.
+
+**It is a notice, not the first step of a responsive layout.** Coda is a node-graph editor: a
+canvas of cards you place and wire, an inspector, a dock, and viewers that want every pixel.
+None of that has a phone-sized form, and a workflow you cannot see the shape of is not a
+workflow you can reason about — so the position taken here is that small screens are not
+supported, said once, plainly, with a way through. What was there before was worse than either
+answer: a shell that laid out at whatever width it was given, which on a handset is a toolbar
+wrapped onto three rows and a canvas the reader cannot tell is broken from being empty.
+
+**A media query, not the user agent, and both axes.** What makes the shell unusable is the
+viewport, and a phone is only the commonest way to have a small one — a desktop window dragged
+to a third of the screen is the same problem, and no UA string can see it, while a tablet is a
+UA string away from being called a phone. `SMALL_SCREEN_QUERY` is
+`(max-width: 720px), (max-height: 560px)`, and the second half is not decoration: a phone in
+landscape is *wide*. The numbers come from the gap between the two populations rather than from
+a round figure — every phone is at most 440 CSS px on its short axis, the narrowest tablet meant
+to keep working is the iPad mini's 744, and both thresholds sit in between with room for the
+browser chrome that eats into height. A threshold raised to a tidy 768 takes every tablet with
+it. `smallScreen.test.tsx` pins them against a table of real device viewports, through a parser
+that understands exactly this query's shape and **throws** on any other — a query rewritten into
+a form it cannot read has to fail loudly rather than answer `false` and turn the table green.
+
+**The one opaque backdrop in the app.** Every other dialog tints the canvas, because the canvas
+behind it is context. This one is *about* the canvas not fitting, and a wrapped toolbar showing
+round the edges of the sentence explaining it reads as the same bug rather than as the subject.
+`backdrop-filter` goes off with it — nothing behind to blur, and it is the expensive half of the
+rule on exactly the hardware this appears on. The type is also the only place in `editor.css`
+that goes *up* from the app's 11px: this is read at arm's length on a handset, and it is four
+sentences.
+
+**It stands the guides dialog down, and that is the silent failure.** `coda.guidesSeen.v1` is
+written the moment `GuidesDialog` mounts — on *sight*, which is what makes it a first-run dialog
+— so mounting it behind an opaque backdrop would spend the single appearance it gets on a modal
+the reader never saw, and they would never be offered the guides at all. `GuidesDialog` asks
+`useSmallScreenNotice()` and returns null, rather than the write moving: "shown" is the honest
+key, and a dialog underneath this one was not shown. Nothing else in the suite could see it,
+because jsdom's `matchMedia` answers `false` to everything and every other `App` test therefore
+renders at desktop size — which is also the property that keeps this out of the other three
+dozen of them.
+
+**The acknowledgement is `localStorage`, and it does not record the size.** `coda.smallScreen.v1`
+— see `loadSmallScreenAck` for why it is kept for good rather than for the session: the condition
+is not transient, a phone is still a phone next week, and a notice that comes back every visit is
+one somebody learns to tap through without reading, at which point it has stopped being a warning
+and is only a delay. What is stored is *that the reader answered*, never the viewport they
+answered at, so a smaller screen later is not a new question. The store is `hints.ts`'s shape and
+for its reasons — nothing here is about the graph, and a boolean about the viewport in
+`useGraphStore` would wake 1,204 call sites for a tap on a button.
+
+**Growing the viewport dismisses it and writes nothing.** A window pulled back out is somebody
+fixing the condition rather than accepting it, and asking them to acknowledge a state that no
+longer holds would be the wrong question; storing it would then silence the notice on the phone
+they pick up later. Narrowing again brings it back.
+
+**The links are the useful half.** The overview, the field guide and the node guide are separate
+vite entries, already responsive, and carry the prose. A reader who arrived on a phone from a
+link very often wanted one of those, and offering them beats both "sorry" and a canvas they
+cannot use. Through `import.meta.env.BASE_URL`, like every other in-app link to them, because
+`base` is `'./'` and an absolute path 404s off the domain root on GitHub Pages.
+
+**Not driven in a real browser yet.** The logic is covered; the *look* at 390×844 is not, and
+jsdom performs no layout. Check it with `pnpm dev` and a device emulation preset before trusting
+the padding.
+
 ## Start page
 
 The second thing a first-time visitor sees and the first thing everyone else does: a modal over

@@ -38,6 +38,13 @@ const AUTORUN_KEY = 'coda.autorun.v1'
 const NOTIFY_KEY = 'coda.notify.v1'
 const START_PAGE_KEY = 'coda.startPage.v1'
 /**
+ * The small-screen notice, once somebody has said "carry on anyway".
+ *
+ * Not versioned by screen size: the answer is about this reader on this device, and asking a
+ * second time is asking somebody to re-decide something they already decided.
+ */
+const SMALL_SCREEN_KEY = 'coda.smallScreen.v1'
+/**
  * The first-run guides dialog: whether it has ever been shown, and which guides were finished.
  *
  * Two keys rather than one object, because the two have nothing to do with each other's
@@ -806,6 +813,32 @@ export function saveStartPageDismissed(dismissed: boolean): void {
   } catch {
     /* ignore */
   }
+}
+
+// ---------------------------------------------------------------------------
+// The small-screen notice
+// ---------------------------------------------------------------------------
+
+/**
+ * Has this reader been told the app wants a bigger screen, and carried on regardless?
+ *
+ * `localStorage` rather than the session, which is the opposite of what a transient condition
+ * usually deserves and is right here for one reason: the condition is not transient. A phone is
+ * still a phone next week, and a notice that comes back on every visit is a notice somebody
+ * learns to tap through without reading — at which point it has stopped being a warning and is
+ * only a delay. The one visitor it costs is the one who narrowed a desktop window once; they
+ * get the layout they asked for, which is what they were choosing anyway.
+ *
+ * Storage disabled reads as *not* acknowledged, so the notice appears every time rather than
+ * never. Same bargain as `loadStartPageDismissed`, same direction: showing something somebody
+ * has already read is recoverable, and silently dropping a warning is not.
+ */
+export function loadSmallScreenAck(): boolean {
+  return readLocal(SMALL_SCREEN_KEY) === 'proceed'
+}
+
+export function saveSmallScreenAck(): void {
+  writeLocal(SMALL_SCREEN_KEY, 'proceed')
 }
 
 // ---------------------------------------------------------------------------

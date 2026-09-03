@@ -37,10 +37,19 @@ import { saveGuidesSeen } from '../../store/persistence'
 import { useDismissOnOutside } from '../useDismiss'
 import { TOURS, startTour } from '../tour/tourState'
 import { useLaunchStage } from './launchStage'
+import { useSmallScreenNotice } from '../smallScreen'
 
 export function GuidesDialog() {
   const stage = useLaunchStage()
-  if (stage !== 'guides') return null
+  /*
+   * The one other thing that can be in front of a first visit. `coda.guidesSeen.v1` is written on
+   * *sight*, so mounting behind the small-screen notice would spend the single appearance this
+   * dialog gets on a modal the reader never saw — and they would then never be offered the guides
+   * at all. Standing down here rather than moving the write, because "shown" is the honest key
+   * and a dialog underneath an opaque backdrop was not shown.
+   */
+  const smallScreen = useSmallScreenNotice()
+  if (stage !== 'guides' || smallScreen) return null
   return <Dialog />
 }
 
@@ -91,7 +100,9 @@ function Dialog() {
         aria-labelledby="guides-title"
       >
         <header className="sources__header">
-          <h2 id="guides-title">Hi there 👋 Looks like you're new here! Care for a quick tour?</h2>
+          <h2 id="guides-title">
+            Hi there 👋 Looks like you're new here! Care for a quick tour?
+          </h2>
           <button
             type="button"
             className="btn btn--ghost"

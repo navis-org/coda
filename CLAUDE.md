@@ -279,6 +279,23 @@ Area-specific — the rule, then the doc that holds why:
   sets it, since ×, Escape and every other `destroy` reach the same hook. And the tick is green
   where the word beside it is not — `--status-ok` clears 3:1 for a mark and misses 4.5:1 for 11px
   prose. See [docs/ui-shell.md](docs/ui-shell.md).
+- **Small screens get a notice, not a layout, and it stands the guides dialog down.** Coda is a
+  canvas of cards, an inspector and a dock; there is no phone-sized form of that, so
+  `smallScreen.ts` says so once over an **opaque** backdrop — the one in the app, because every
+  other dialog tints the canvas *as context* and this one is about the canvas not fitting. It is a
+  media query and not a UA string (a narrowed desktop window is the same problem, a tablet is a
+  string away from being called a phone) and it asks **both axes**, since a phone in landscape is
+  wide: `(max-width: 720px), (max-height: 560px)`, both sitting in the gap between every phone's
+  440 short axis and the iPad mini's 744 — a tidy 768 takes every tablet with it, which is why the
+  test pins the numbers against real device viewports through a parser that **throws** on a query
+  shape it cannot read. The silent half is `GuidesDialog`: `coda.guidesSeen.v1` is written on
+  *sight*, so mounting behind this would spend a first visit's one appearance on a modal nobody
+  saw — it returns null instead, because "shown" is the honest key. Invisible to every other `App`
+  suite, since jsdom's `matchMedia` answers `false` to everything. The acknowledgement is
+  `localStorage` and records **that** the reader answered, never the size: a phone is still a phone
+  next week, and a warning that recurs is one you learn to tap through. Growing the viewport
+  dismisses it and writes **nothing** — that is somebody fixing the condition, not accepting it.
+  See [docs/ui-shell.md](docs/ui-shell.md).
 - **A run notification is opt-in, but the tab title is not, and the fallback is the feature.**
   `Notification.requestPermission()` is refused outside a user gesture, so the bell's *click* is
   the prompt — there is nowhere else to ask. **`denied` is terminal**: a page can never ask twice
