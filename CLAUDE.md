@@ -248,6 +248,55 @@ Area-specific — the rule, then the doc that holds why:
   Away is `visibilityState` **or** `!hasFocus()`, because a covered window is still `visible`.
   A floor, not a manual/automatic test: what says somebody left is how long the run took.
   See [docs/ui-shell.md](docs/ui-shell.md).
+- **A second workflow is a second `Scheduler`, and a switch is `loadGraph` keeping the half it used
+  to throw away** (*prototype*). The switcher is a canvas panel in the top-left corner; `tabs` is an
+  id and a name per row, and the documents live in a `Map` beside the Scheduler on the Scheduler's
+  terms. Nothing else changed — 1,204 `useGraphStore` references across 125 files, none of them
+  touched, because the document was already a value the store swapped. Four rules. **A Scheduler
+  each, not one shared**: `newId` is unique within a *session* and `deserializeGraph` does not
+  remap, so two documents opened from one file carry the same node ids *and* the same provenance
+  keys — one cache would report the second copy as already run. **Freshness is derived**, so
+  `refreshStates` on arrival recovers every badge with no run and no fetch, which is what makes a
+  switch free in both directions. **The viewport is captured on `onMove`, not `onMoveEnd`** — a
+  gesture-end never fires for a document that was only ever `fitView`ed, i.e. every document nobody
+  has panned, and switching to one then leaves the outgoing document's transform on screen. And
+  **every open route mints a document** (`openDocument` = `beginDocument` + `loadGraph`), reusing a
+  blank *and historyless* canvas so a fresh visit strands no empty tab. That retired the
+  replace-confirm outright — `replaceConfirm.ts`, the `confirm-replace` share state and three
+  inline prompts are **deleted**, because what the hook was is a guard plus a sentence and the
+  guard is what stopped being true; a neutered `ask` would have left four surfaces rendering a
+  flow no code path can reach. **`newGraph` stays the in-place reset** it always was — twenty-three
+  suites reset with it — and `newWorkflow` is the one that mints a document; overloading the one
+  name on hidden state was a silent behaviour change for all of them. Not built:
+  closing asks nothing, and `DashboardView` unmounts the canvas and the switcher with it.
+  See [docs/ui-shell.md](docs/ui-shell.md).
+- **The open set survives a reload in two stores, and the split is about *when* the answer is
+  needed rather than about what the data is.** The active document stays in the `localStorage`
+  slot, because `loadAutosave` is read synchronously in the store's initialiser and `initialGraph`
+  decides the first paint — an IndexedDB read there boots every visitor onto a blank canvas to
+  serve the ones with four workflows open. Every *other* open document is `store/session.ts`, in
+  IndexedDB, because the ceiling is real at the tail: three documents each carrying a warned
+  Explore selection is 2.3 MB of a **5 MiB** quota and `writeLocal` swallows the overflow, so the
+  failure is an open set that silently does not persist. Four rules. **`loadActiveDocId` is
+  `sessionStorage` and synchronous** — it gives the slot's graph its *identity* in the same tick, so
+  the session records restore around an id that already exists; without it a second `createDoc`
+  **replaces** the live record rather than adding one, which keeps the row count right and stops
+  a rename reaching the switcher, so the test asserts the rename. **The restore is additive and
+  never activates**, so a share link followed before it lands is safe. **A document is written at
+  the two moments its content can change** — its own autosave debounce, and once as it is switched
+  away from, because only the document on screen is on that debounce. And **a duplicated tab takes
+  the whole set with it**: `watchTabIdentity`'s reclaim writes every open document under the new
+  identity, or the original reloads with one where it had four — the single-slot bug one layer up.
+  Fifth, because the two bounds differ: past `MAX_SLOTS` (6) a tab loses its slot and keeps its
+  session (12), and `loadAutosave`'s shared-key fallback then hands over another tab's graph — a
+  recognisable degradation for one workflow and a *coherent-looking set with one foreign workflow
+  in it* for several, so `fromSlot` says which answered and the restore takes its own copy back.
+  Only when the slot missed (where it answered it is the fresher copy) and only while the boot
+  graph is still on screen. Found at eight open tabs in a browser, not by reading the code.
+  The autosave is also the one `serializeGraph` caller that passes **`compact`** (34% of the
+  output, measured); byte-identity across paths was never a property, since every call stamps a
+  fresh `modifiedAt`. Numbers: `pnpm probe:autosave-budget`.
+  See [docs/persistence.md](docs/persistence.md).
 - **A pinned viewer is a grid column, and one node is never live in two full-size surfaces.** `⇥`
   docks a viewer down the right of `.app` beside the canvas rather than over it, so `showPreview`
   stands the card down for `pinnedNodeId` exactly as it does for `expandedNodeId` — the same three

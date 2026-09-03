@@ -20,9 +20,12 @@ import { applyPlan } from '../assistant/apply'
 import type { AssistantPlan } from '../assistant/planShape'
 import {
   addEdge as addGraphEdge,
+  deserializeGraph,
+  graphName,
   edgeInto,
   emptyGraph,
   newId,
+  serializeGraph,
   reconnectEdge,
   removeEdges,
   removeNodes,
@@ -68,6 +71,7 @@ import { subscribeRootCheck } from '../data/cave/rootIds'
 import type { StarterSpec } from '../examples/starters'
 import { buildStarter } from '../examples/starters'
 import type { WorkflowSummary } from './library'
+import { deleteSessionDoc, loadSession, saveSessionDoc, saveSessionMeta } from './session'
 import {
   deleteWorkflow,
   findByName,
@@ -94,6 +98,8 @@ import {
   loadAutoRun,
   loadDockFraction,
   loadNotifyRuns,
+  tabId,
+  loadActiveDocId,
   loadAutosave,
   loadLayoutPrefs,
   loadPanels,
@@ -108,6 +114,7 @@ import {
   saveLayoutPrefs,
   savePanels,
   saveDockFraction,
+  saveActiveDocId,
   saveAutosave,
   saveGuidesDone,
   saveStartPageDismissed,
@@ -144,6 +151,99 @@ interface HistoryEntry {
   /** Identifies coalescable edits: `param:<nodeId>:<paramId>`. */
   tag?: string
   at: number
+}
+
+/**
+ * The canvas transform. Shaped like `CodaGraph.viewport` rather than imported from React Flow,
+ * which `src/store` has no business depending on.
+ */
+export interface CanvasViewport {
+  x: number
+  y: number
+  zoom: number
+}
+
+/**
+ * One row in the workflow switcher — see `ui/panels/WorkflowTabs.tsx`.
+ *
+ * Deliberately *not* the document itself. The switcher needs a name and an id; the graph behind
+ * it changes on every keystroke, and putting it in a snapshot the tab bar subscribes to would
+ * re-render the list for edits it cannot show. Rebuilt by `syncTabs`, which compares before it
+ * writes, so the array's identity moves only when a name or the set of documents does.
+ */
+export interface WorkflowTab {
+  id: string
+  /** Already defaulted — `'Untitled'` for a graph nobody has named. */
+  name: string
+}
+
+/**
+ * Everything about a document that is *live in the store* while it is the one on screen.
+ *
+ * Set aside on the way out and put back on the way in, which is what makes a switch cost nothing
+ * and lose nothing.
+ *
+ * **Three functions and no fourth spelling.** `stashOf` reads the slice off the store, `blankDoc`
+ * says what it is for a document nobody has touched, and `activate` spreads one or the other back
+ * — so adding a per-document field is a type error in `DocStash` and one edit in each of the two,
+ * rather than a field that silently leaks across a switch because one of six object literals
+ * forgot it. `loadGraph` and `newGraph` are deliberately *not* in that set: they reset the live
+ * store rather than build a stash, and `inference` is `afterGraphChange`'s there.
+ *
+ * Note what is **not** here: `locked` is a canvas mode rather than a fact about a document, and
+ * follows the reader between them on purpose — every reload starts unlocked.
+ */
+interface DocStash {
+  graph: CodaGraph
+  /**
+   * Undefined where it has not been computed yet — a document restored from the session store,
+   * which nobody is looking at. `activate` computes it on the switch that needs it, so a reload
+   * with five workflows open does not walk five graphs on the boot path to fill in a field no
+   * surface reads until it is on screen.
+   */
+  inference: InferenceResult | undefined
+  past: HistoryEntry[]
+  future: HistoryEntry[]
+  selection: string[]
+  notice: string | undefined
+  lastRun: RunSummary | undefined
+  expandedNodeId: string | undefined
+  pinnedNodeId: string | undefined
+  dashboardOpen: boolean
+  edgePanelNode: string | undefined
+  autoLayout: boolean
+}
+
+/**
+ * One open workflow, held outside the store for the reason the Scheduler already is: these are
+ * mutable objects owning caches of potentially large tables, and copying references to them
+ * through immutable state updates on every tick buys nothing.
+ *
+ * **A Scheduler each, rather than one shared.** Two documents opened from the same file carry
+ * the same node ids — `deserializeGraph` does not remap them and `newId` is only unique within a
+ * session — so a single cache keyed by node id would have two copies of one workflow thrashing
+ * each other's entries. An instance each also makes closing a document a single `invalidateAll`,
+ * which is the only thing that returns its results to the heap.
+ *
+ * `lastObserved` is per document for the same reason it exists at all: it is the answer to
+ * "did a finished run change a shape inference could not see statically", and that question is
+ * about one graph.
+ */
+interface DocRecord {
+  id: string
+  scheduler: Scheduler
+  lastObserved: Record<string, TableSchema | undefined>
+  /**
+   * Where the canvas was left. Captured from React Flow's `onMoveEnd` rather than restored from
+   * `CodaGraph.viewport`, which is a fact about the *file* and is never written back.
+   *
+   * Not in `DocStash`, because it is written continuously by a pan rather than at the moment of
+   * a switch — a stash captured 800ms ago would put the canvas back where it was two gestures
+   * before you left.
+   */
+  viewport: CanvasViewport | undefined
+  /** Set aside while another document is active; `undefined` for the one on screen. */
+  stash: DocStash | undefined
 }
 
 export interface GraphState {
@@ -544,12 +644,74 @@ export interface GraphState {
   helpType: string | undefined
   openHelp(type: string | undefined): void
 
+  // --- open workflows ------------------------------------------------------
+  /**
+   * Every workflow open in this tab, in the order they were opened. Never empty.
+   *
+   * A name and an id per row and nothing else — see `WorkflowTab`. The documents themselves live
+   * outside the store beside their Schedulers, and only the active one's state is in the fields
+   * above.
+   */
+  tabs: WorkflowTab[]
+  activeTabId: string
+  /**
+   * Show a different open workflow.
+   *
+   * The outgoing document's state is set aside whole, so coming back finds the same undo stack,
+   * the same selection, the same run results and the same viewport. What does *not* survive is a
+   * run in flight: only the document on screen runs, so switching cancels rather than leaving a
+   * query landing into a canvas nobody is looking at. A no-op for the active id or an unknown one.
+   */
+  switchDocument(id: string): void
+  /**
+   * Close one. The last document is never closed — closing it leaves a fresh empty one, because
+   * a canvas with no document is a state nothing else in the app knows how to draw.
+   *
+   * Nothing is asked first. The autosave holds the *active* document only, so closing an
+   * unsaved one really does lose it; a prototype-stage gap, noted rather than hidden.
+   */
+  closeDocument(id: string): void
+  /**
+   * Open a graph in a document of its own — what every route that used to replace the canvas
+   * now calls. See `loadGraph` for the in-place version, which is still what a tour restores
+   * through.
+   *
+   * A blank, untouched document is reused rather than left behind, so opening a workflow on a
+   * fresh visit does not strand an empty tab beside it.
+   */
+  openDocument(graph: CodaGraph, warnings?: string[]): void
+  /**
+   * Remember where the canvas was left, so a switch back puts it there.
+   *
+   * Deliberately writes no store state: nothing renders from it, it fires at the end of every
+   * pan and zoom, and invariant 7 would have every card re-render for a fact no card shows.
+   */
+  recordViewport(viewport: CanvasViewport): void
+  /**
+   * Asks the canvas to put the viewport back where the incoming document left it.
+   *
+   * A request counter for `fitRequest`'s reason — the transform belongs to React Flow and the
+   * switch is raised from outside the provider — and a *separate* one from `fitRequest` because
+   * the two answers are exclusive: a document being seen for the first time is framed, and one
+   * being returned to is restored. `viewport` is undefined for the first case.
+   */
+  viewportRequest: { seq: number; viewport: CanvasViewport | undefined }
+
   // --- document ------------------------------------------------------------
   setGraph(graph: CodaGraph, options?: { history?: boolean; tag?: string }): void
   setGraphName(name: string): void
   /** Record (or clear) the gist this workflow was last shared to. See `CodaGraph.meta.gist`. */
   setGraphGist(gist: { id: string; owner?: string } | undefined): void
+  /**
+   * Empty *this* document, in place.
+   *
+   * The reset it has always been, and deliberately not "start a new workflow" — see
+   * `newWorkflow`, which is what every surface offering that now calls. Overloading this one on
+   * hidden state was a silent behaviour change for the twenty-three suites that reset with it.
+   */
   newGraph(): void
+  /** A blank workflow in a document of its own. What the New menu and the switcher's + offer. */
+  newWorkflow(): void
   loadGraph(graph: CodaGraph, warnings?: string[]): void
   /** New graph pre-wired to browse one dataset. What the New menu's dataset entries build. */
   loadStarter(spec: StarterSpec): void
@@ -814,45 +976,97 @@ export const useGraphStore = create<GraphState>((set, get) => {
    */
   let guidesReturn = false
 
-  const scheduler = new Scheduler({
-    resolveSource: (id) => requireSource(id),
-    onPreview: () => set((s) => ({ previewVersion: s.previewVersion + 1 })),
-    onStateChange: () =>
-      set((s) => {
-        /*
-         * A finished run can reveal the shape of a node nothing could infer statically
-         * (Raw Cypher). Re-infer only when that shape actually changed — this fires on
-         * every node state transition, and inference walks the whole graph.
-         *
-         * Skipped outright while a loop is running, and that is a measured saving rather than
-         * a tidy-up: a four-hundred-element loop over a ten-node region fires this eight
-         * thousand times, and no pass of a loop can change an *observed schema* — the region is
-         * the same nodes producing the same shape with different rows in it. Left in, the walk
-         * cost more than the work.
-         */
-        if (looping) return { runVersion: s.runVersion + 1 }
-        const next = observedSchemas(s.graph)
-        if (sameObserved(next)) return { runVersion: s.runVersion + 1 }
-        lastObserved = next
-        return {
-          runVersion: s.runVersion + 1,
-          inference: inferGraph(s.graph, { observedSchemas: next }),
-        }
-      }),
+  /**
+   * Every open workflow, keyed by id and in the order they were opened.
+   *
+   * Outside the store on the Scheduler's terms — see `DocRecord`. `activeDoc` names the one
+   * whose state is live in the fields the rest of this file reads; `sched()` is the only way
+   * anything here reaches a Scheduler, so nothing can go on holding the one it captured before
+   * a switch.
+   */
+  const docs = new Map<string, DocRecord>()
+  let activeDoc = ''
+
+  function record(): DocRecord {
     /*
-     * One pass of a `For Each` has finished. See `ui/useForEach.ts` for why this cannot be done
-     * after the run instead — in short, `executed` is a set of node ids and a picture only
-     * exists while it is on screen.
-     *
-     * The store is the right place for the wiring and the wrong place for the work: it holds the
-     * graph and the values, and `runIteration` holds everything about files and canvases, which
-     * `src/store` has no business knowing.
+     * Non-null by construction: a record is created before `activeDoc` is ever assigned, and
+     * `closeDocument` mints a replacement before dropping the last one. The `!` is the assertion
+     * that says so rather than a hope — a missing record here is a programming error, and an
+     * `undefined` Scheduler quietly doing nothing is the failure it would otherwise become.
      */
-    onIteration: async (info) => {
-      looping = true
-      await iterationHandler?.(info)
-    },
-  })
+    return docs.get(activeDoc)!
+  }
+
+  function sched(): Scheduler {
+    return record().scheduler
+  }
+
+  /**
+   * Mint a document and the Scheduler it owns.
+   *
+   * Every host callback is gated on this document still being the active one. That is a
+   * **backstop rather than the mechanism** — `switchDocument` cancels the outgoing run before it
+   * moves, so nothing should arrive from a background document — but a run's `finally`, an
+   * aborted fetch's rejection and a preview already in flight all land a tick later, and each
+   * would otherwise publish a background workflow's state into the canvas on screen.
+   */
+  function createDoc(id: string): DocRecord {
+    const rec: DocRecord = {
+      id,
+      lastObserved: {},
+      viewport: undefined,
+      stash: undefined,
+      // Assigned on the next line; the field is not read before then.
+      scheduler: undefined as unknown as Scheduler,
+    }
+    rec.scheduler = new Scheduler({
+      resolveSource: (sourceId) => requireSource(sourceId),
+      onPreview: () => {
+        if (activeDoc !== id) return
+        set((s) => ({ previewVersion: s.previewVersion + 1 }))
+      },
+      onStateChange: () => {
+        if (activeDoc !== id) return
+        set((s) => {
+          /*
+           * A finished run can reveal the shape of a node nothing could infer statically
+           * (Raw Cypher). Re-infer only when that shape actually changed — this fires on
+           * every node state transition, and inference walks the whole graph.
+           *
+           * Skipped outright while a loop is running, and that is a measured saving rather than
+           * a tidy-up: a four-hundred-element loop over a ten-node region fires this eight
+           * thousand times, and no pass of a loop can change an *observed schema* — the region is
+           * the same nodes producing the same shape with different rows in it. Left in, the walk
+           * cost more than the work.
+           */
+          if (looping) return { runVersion: s.runVersion + 1 }
+          const next = observedSchemas(s.graph, rec.scheduler)
+          if (sameObserved(rec, next)) return { runVersion: s.runVersion + 1 }
+          rec.lastObserved = next
+          return {
+            runVersion: s.runVersion + 1,
+            inference: inferGraph(s.graph, { observedSchemas: next }),
+          }
+        })
+      },
+      /*
+       * One pass of a `For Each` has finished. See `ui/useForEach.ts` for why this cannot be done
+       * after the run instead — in short, `executed` is a set of node ids and a picture only
+       * exists while it is on screen.
+       *
+       * The store is the right place for the wiring and the wrong place for the work: it holds the
+       * graph and the values, and `runIteration` holds everything about files and canvases, which
+       * `src/store` has no business knowing.
+       */
+      onIteration: async (info) => {
+        if (activeDoc !== id) return
+        looping = true
+        await iterationHandler?.(info)
+      },
+    })
+    docs.set(id, rec)
+    return rec
+  }
 
   /**
    * Table schemas that nodes with `observesOutputSchema` actually produced.
@@ -861,11 +1075,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * usually has none. Comparing the result is what decides whether a finished run has to
    * trigger a re-inference — see `onStateChange`.
    */
-  function observedSchemas(graph: CodaGraph): Record<string, TableSchema | undefined> {
+  function observedSchemas(
+    graph: CodaGraph,
+    from: Scheduler,
+  ): Record<string, TableSchema | undefined> {
     const observed: Record<string, TableSchema | undefined> = {}
     for (const node of graph.nodes) {
       if (!getNodeDef(node.type)?.observesOutputSchema) continue
-      const outputs = scheduler.outputs(node.id)
+      const outputs = from.outputs(node.id)
       if (!outputs) continue
       for (const value of Object.values(outputs)) {
         if (isTableValue(value)) {
@@ -877,15 +1094,16 @@ export const useGraphStore = create<GraphState>((set, get) => {
     return observed
   }
 
-  let lastObserved: Record<string, TableSchema | undefined> = {}
-
-  function sameObserved(next: Record<string, TableSchema | undefined>): boolean {
-    const a = Object.keys(lastObserved)
+  function sameObserved(
+    rec: DocRecord,
+    next: Record<string, TableSchema | undefined>,
+  ): boolean {
+    const a = Object.keys(rec.lastObserved)
     const b = Object.keys(next)
     if (a.length !== b.length) return false
     // Schemas are rebuilt per run, so compare by column names rather than identity.
     return b.every((id) => {
-      const before = lastObserved[id]?.columns.map((c) => `${c.name}:${c.dtype}`).join(',')
+      const before = rec.lastObserved[id]?.columns.map((c) => `${c.name}:${c.dtype}`).join(',')
       const after = next[id]?.columns.map((c) => `${c.name}:${c.dtype}`).join(',')
       return before === after
     })
@@ -909,15 +1127,23 @@ export const useGraphStore = create<GraphState>((set, get) => {
    */
   function afterSourceLearned(): void {
     const { graph } = get()
-    set({ inference: inferGraph(graph, { observedSchemas: lastObserved }) })
+    set({ inference: inferGraph(graph, { observedSchemas: record().lastObserved }) })
   }
 
-  /** Re-infer, refresh badges, schedule an auto pass and an autosave. */
+  /** Re-infer, refresh badges, keep the switcher's names current, schedule a run and a save. */
   function afterGraphChange(graph: CodaGraph, options: { autoRun?: boolean } = {}): void {
-    lastObserved = observedSchemas(graph)
-    const inference = inferGraph(graph, { observedSchemas: lastObserved })
+    const rec = record()
+    rec.lastObserved = observedSchemas(graph, rec.scheduler)
+    const inference = inferGraph(graph, { observedSchemas: rec.lastObserved })
     set({ inference })
-    scheduler.refreshStates(graph, inference)
+    rec.scheduler.refreshStates(graph, inference)
+    /*
+     * Here rather than in `setGraphName` alone, because a name is not the only way a row's label
+     * moves — an undo, a paste of a whole graph and a load all reach it too, and each of those
+     * forgetting would leave the switcher naming a workflow that no longer exists. `syncTabs`
+     * compares before it writes, so the ordinary keystroke costs one array and no render.
+     */
+    syncTabs()
 
     if (options.autoRun !== false) {
       if (autoRunTimer) clearTimeout(autoRunTimer)
@@ -935,20 +1161,20 @@ export const useGraphStore = create<GraphState>((set, get) => {
            * hundred queries and four hundred files, 700ms after a keystroke. See `RunOptions`.
            */
           if (get().autoRun) void runFull(undefined, { automatic: true })
-          else void scheduler.run(get().graph, { mode: 'auto' })
+          else void sched().run(get().graph, { mode: 'auto' })
         },
         full ? AUTO_FULL_RUN_DELAY_MS : AUTO_RUN_DELAY_MS,
       )
     }
 
     if (autosaveTimer) clearTimeout(autosaveTimer)
-    autosaveTimer = setTimeout(() => saveAutosave(get().graph), AUTOSAVE_DELAY_MS)
+    autosaveTimer = setTimeout(persistActive, AUTOSAVE_DELAY_MS)
   }
 
   /**
    * Run everything stale, and own `busy` while doing it.
    *
-   * The token is what makes overlapping runs safe. `scheduler.run` supersedes an in-flight run by
+   * The token is what makes overlapping runs safe. `Scheduler.run` supersedes an in-flight run by
    * aborting it, so the *superseded* call's `finally` lands after the newer one has already set
    * `busy: true` — clearing it there would leave the UI idle with a run still going, no Cancel
    * button and an enabled Run. Only the newest run touches the shared state.
@@ -961,7 +1187,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     const token = ++runToken
     set({ busy: true })
     try {
-      const summary = await scheduler.run(get().graph, {
+      const summary = await sched().run(get().graph, {
         mode: 'full',
         ...(targets ? { targets } : {}),
         ...(options.automatic ? { automatic: true } : {}),
@@ -1108,6 +1334,313 @@ export const useGraphStore = create<GraphState>((set, get) => {
     })
   }
 
+  // --- open workflows ------------------------------------------------------
+
+  /**
+   * Rebuild the switcher's rows, and write them only if something a row shows has moved.
+   *
+   * The comparison is the point. This runs from `afterGraphChange`, so it fires on every
+   * keystroke; returning a fresh array each time would re-render the switcher — and, because
+   * `tabs` is an ordinary snapshot field, everything else selecting it — for an edit no row
+   * displays.
+   */
+  function syncTabs(): void {
+    const live = get().graph
+    const next = [...docs.values()].map((rec) => ({
+      id: rec.id,
+      // The active record has no stash: its graph is the one live in the store.
+      name: graphName(rec.stash?.graph ?? live),
+    }))
+    const now = get().tabs
+    const same =
+      now.length === next.length &&
+      now.every((tab, i) => tab.id === next[i]?.id && tab.name === next[i]?.name)
+    if (!same) set({ tabs: next })
+  }
+
+  // --- the open set, across a reload ---------------------------------------
+
+  /**
+   * Where the open documents are written, and the one rule about which half answers.
+   *
+   * The **active** document is the `localStorage` slot's, unchanged: `loadAutosave` is read
+   * synchronously in this initialiser and decides the first paint, so it cannot become an
+   * IndexedDB read. Every open document, active one included, is *also* a session record —
+   * `saveAutosave` hands back the string it wrote, so the two copies are one serialisation and
+   * cannot drift.
+   *
+   * Both are per tab, and for one reason rather than two: two tabs on two workflows clobbered a
+   * single autosave key, and two tabs' *open sets* would clobber each other exactly the same way.
+   * `tabId` is the one answer to which tab this is.
+   *
+   * Every call is fire-and-forget. A session write that fails is the standing `saveAutosave`
+   * already has — a failure to remember is not a failure to compute — and the fallback is the one
+   * document the slot holds, which is what the app did before any of this.
+   */
+  function persistActive(): void {
+    const json = saveAutosave(get().graph)
+    const tab = tabId()
+    if (!tab) return
+    void saveSessionDoc(tab, activeDoc, json)
+  }
+
+  /**
+   * Write the document being switched away from, and the order and active id that just moved.
+   *
+   * The outgoing document is written here rather than left to its next autosave, because it will
+   * not get one: only the document on screen is on the debounce.
+   */
+  function persistShape(outgoing?: DocRecord): void {
+    saveActiveDocId(activeDoc)
+    const tab = tabId()
+    if (!tab) return
+    if (outgoing) writeDoc(tab, outgoing)
+    void saveSessionMeta(tab, [...docs.keys()])
+  }
+
+  /**
+   * One stashed document to the session store.
+   *
+   * Extracted because `persistShape` and `reclaimSession` had it spelled out twice, and the
+   * `{ compact: true }` in it is load-bearing — `saveAutosave` writes the same form, so a change
+   * here that missed the other copy would put two serialisations of one document in two stores.
+   * The active document has no stash and is `persistActive`'s.
+   */
+  function writeDoc(tab: string, rec: DocRecord): void {
+    if (!rec.stash) return
+    void saveSessionDoc(tab, rec.id, serializeGraph(rec.stash.graph, { compact: true }))
+  }
+
+  /**
+   * Take the whole open set to a new tab identity, after a duplicated tab turned out to be
+   * holding this one's.
+   *
+   * `watchTabIdentity`'s `reclaim`, and the session half of it is not optional for the reason the
+   * autosave half was not: the re-mint happens *after* the copy has already written, so a tab that
+   * only re-keyed would be pointing at an empty session and would come back from a reload with one
+   * document where it had four. Every open document is written, not only the active one, because
+   * the identity they were all filed under is the thing that just moved.
+   */
+  function reclaimSession(): void {
+    persistActive()
+    const tab = tabId()
+    if (!tab) return
+    // The active one is `persistActive`'s, and is the only one with no stash to read.
+    for (const rec of docs.values()) if (rec.id !== activeDoc) writeDoc(tab, rec)
+    persistShape()
+  }
+
+  /**
+   * Bring back the documents this tab had open, around the one the autosave already restored.
+   *
+   * Asynchronous and deliberately *additive*: it never activates anything and never touches the
+   * graph on screen, so the first paint is the autosave's and stays the autosave's. A share link
+   * or a New pressed before this lands is therefore safe — the restored documents slot in around
+   * whatever is there.
+   *
+   * The active document is skipped by id, which is why `loadActiveDocId` is read synchronously at
+   * boot: the record and the already-created document have to be the *same* document, and there
+   * is no chance to agree on that after the fact without re-keying a live Scheduler.
+   */
+  async function restoreSession(): Promise<void> {
+    const tab = tabId()
+    if (!tab) return
+    const stored = await loadSession(tab)
+    if (stored.length === 0) return
+
+    /*
+     * Take back the active document where the shared key stood in for an evicted slot.
+     *
+     * `loadAutosave` falls back to "the most recent graph from any tab" when this tab's own slot
+     * is gone, which is a complete answer only while a tab holds one workflow. Past `MAX_SLOTS`
+     * it hands over somebody else's work — and the session store, whose bound is twice as
+     * generous, may still hold this tab's own copy of the very document standing on screen. The
+     * result without this is a coherent-looking set with one foreign workflow in it: measured at
+     * eight open tabs as `['T0-A', 'T7-B']`, under T0's own document id.
+     *
+     * Through `loadGraph` rather than by hand, so the fit request, the load warnings and the
+     * autosave that reclaims a slot are the ones every other open gets. Guarded on the graph
+     * still being the one the boot put there, because a share link or a New pressed while
+     * IndexedDB was opening is a deliberate act and outranks a recovery.
+     */
+    if (!bootedFromSlot && get().graph === bootGraph) {
+      const own = stored.find((entry) => entry.docId === activeDoc)
+      if (own) {
+        try {
+          const read = deserializeGraph(own.json)
+          get().loadGraph(read.graph, read.warnings)
+        } catch {
+          /* Unreadable: the foreign graph is a worse answer than nothing, but it is an answer. */
+        }
+      }
+    }
+
+    let restored = 0
+    for (const entry of stored) {
+      if (entry.docId === activeDoc || docs.has(entry.docId)) continue
+      let read
+      try {
+        read = deserializeGraph(entry.json)
+      } catch {
+        // A record this build cannot read is dropped, not faulted: the rest of the session is
+        // still worth having, and the alternative is a reload that comes back with nothing.
+        continue
+      }
+      createDoc(entry.docId).stash = blankDoc(read.graph)
+      restored += 1
+    }
+    if (restored === 0) return
+
+    /*
+     * Put them back in the stored order rather than in the order they were read.
+     * `docs` is a `Map`, and its insertion order is what the switcher draws — appending the
+     * restored documents after the active one would silently rearrange somebody's tabs on every
+     * reload. Rebuilt in place, since `docs` is what every other function here closes over.
+     */
+    const rank = new Map(stored.map((entry, i) => [entry.docId, i]))
+    const ranked = [...docs.values()].sort(
+      (a, b) => (rank.get(a.id) ?? rank.size) - (rank.get(b.id) ?? rank.size),
+    )
+    docs.clear()
+    for (const rec of ranked) docs.set(rec.id, rec)
+    syncTabs()
+  }
+
+  /** The per-document slice as it stands on screen. One of the two definitions — see `DocStash`. */
+  function stashOf(s: GraphState): DocStash {
+    return {
+      graph: s.graph,
+      inference: s.inference,
+      past: s.past,
+      future: s.future,
+      selection: s.selection,
+      notice: s.notice,
+      lastRun: s.lastRun,
+      expandedNodeId: s.expandedNodeId,
+      pinnedNodeId: s.pinnedNodeId,
+      dashboardOpen: s.dashboardOpen,
+      edgePanelNode: s.edgePanelNode,
+      autoLayout: s.autoLayout,
+    }
+  }
+
+  /**
+   * The slice for a document nobody has touched yet: a restored one, or a brand new record.
+   *
+   * `dashboardOpen` is the one field read *from* the graph rather than defaulted, which is
+   * `loadGraph`'s rule — a workflow saved from the grid opens into the grid.
+   */
+  function blankDoc(graph: CodaGraph): DocStash {
+    return {
+      graph,
+      inference: undefined,
+      past: [],
+      future: [],
+      selection: [],
+      notice: undefined,
+      lastRun: undefined,
+      expandedNodeId: undefined,
+      pinnedNodeId: undefined,
+      dashboardOpen: graph.dashboard?.open === true,
+      edgePanelNode: undefined,
+      autoLayout: false,
+    }
+  }
+
+  /** Set the on-screen document's state aside, whole, so coming back finds it unchanged. */
+  function stashActive(): void {
+    const rec = docs.get(activeDoc)
+    if (rec) rec.stash = stashOf(get())
+  }
+
+  /**
+   * Stop everything the outgoing document had in flight.
+   *
+   * Only the document on screen runs. The alternative — letting a background workflow finish —
+   * needs a `busy` per document, a status bar that reports somebody else's run, and an
+   * `onIteration` writing files for a canvas nobody is looking at; none of that is worth a
+   * prototype's first pass, and cancelling is the honest version of not having it.
+   *
+   * `runToken` is bumped rather than the abort being awaited: `runFull`'s `finally` lands a tick
+   * later and would otherwise clear `busy` out from under the document that has arrived since.
+   * The same guard already protects two overlapping runs on one document.
+   */
+  function cancelActiveWork(): void {
+    if (autoRunTimer) {
+      clearTimeout(autoRunTimer)
+      autoRunTimer = undefined
+    }
+    if (autosaveTimer) {
+      clearTimeout(autosaveTimer)
+      autosaveTimer = undefined
+    }
+    runToken += 1
+    docs.get(activeDoc)?.scheduler.cancel()
+    looping = false
+    set({ busy: false })
+  }
+
+  /**
+   * Put a document on screen: its stash back into the store, its badges recomputed, its viewport
+   * requested.
+   *
+   * The badges are recomputed rather than stashed, and that is what makes a switch cheap.
+   * Freshness is derived — `refreshStates` compares each cache entry's key against the one the
+   * graph implies — so a Scheduler that has been sitting idle answers exactly what it answered
+   * before, with no run and no fetch.
+   */
+  function activate(rec: DocRecord): void {
+    /*
+     * Captured before `activeDoc` moves: the document being left is the one whose final state has
+     * to reach the session store, because only the document on screen is on the autosave debounce.
+     * Undefined when the outgoing document was just closed, which `persistShape` reads as "meta
+     * only" — its record is already deleted and must not be written back.
+     */
+    const outgoing = docs.get(activeDoc)
+    activeDoc = rec.id
+    const stash = rec.stash ?? blankDoc(emptyGraph())
+    rec.stash = undefined
+    /*
+     * Computed here rather than carried, for a document restored from the session store: nothing
+     * reads a background document's inference, so walking its graph at boot was work for a field
+     * that would be recomputed anyway if it ever went stale. `stashOf` still keeps the live one.
+     */
+    const inference = stash.inference ?? inferGraph(stash.graph)
+    set((s) => ({
+      activeTabId: rec.id,
+      ...stash,
+      inference,
+      viewportRequest: { seq: s.viewportRequest.seq + 1, viewport: rec.viewport },
+    }))
+    rec.scheduler.refreshStates(stash.graph, inference)
+    syncTabs()
+    /*
+     * The autosave holds whichever document is on screen, so a switch has to move it — otherwise
+     * a reload comes back to the workflow you switched *away* from. Scheduled rather than
+     * written, on `afterGraphChange`'s terms: a run of switches costs one write.
+     */
+    autosaveTimer = setTimeout(persistActive, AUTOSAVE_DELAY_MS)
+    persistShape(outgoing)
+  }
+
+  /**
+   * Make whatever comes next land in a document of its own.
+   *
+   * A blank, untouched one is reused rather than left behind: a fresh visit opens on an empty
+   * canvas, and every route through here would otherwise strand it beside the workflow the user
+   * actually asked for. "Untouched" is the history rather than the name — a graph somebody has
+   * typed a name into and then emptied still has a past, and is theirs.
+   */
+  function beginDocument(): void {
+    const s = get()
+    const disposable =
+      s.graph.nodes.length === 0 && s.past.length === 0 && s.future.length === 0
+    if (disposable) return
+    stashActive()
+    cancelActiveWork()
+    activate(createDoc(newId('doc')))
+  }
+
   const initial = loadAutosave()
   /*
    * A fresh visit opens on the start page, so the canvas behind it starts empty. It used to
@@ -1116,6 +1649,32 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * card click trip the replace-confirm.
    */
   const initialGraph = initial?.graph.nodes.length ? initial.graph : emptyGraph()
+  /*
+   * The document the session starts on. Created before `activeDoc` names it, which is safe
+   * because every host callback on it is asked at run time and nothing has run yet.
+   *
+   * It takes the id the last visit was on where `sessionStorage` remembers one, so the session
+   * record for the graph `loadAutosave` just handed over is *this* document's rather than a
+   * fourth copy of it — see `loadActiveDocId`. A fresh tab mints one, which is every case that
+   * has no session to restore anyway.
+   */
+  const rootDoc = createDoc(loadActiveDocId() ?? newId('doc'))
+  activeDoc = rootDoc.id
+  saveActiveDocId(rootDoc.id)
+  /*
+   * Whether the graph above is this tab's own, and the object it came back as.
+   *
+   * `restoreSession` needs both: the flag to know the shared key stood in for an evicted slot,
+   * and the identity to know nothing has replaced it since — a share link resolving first, or a
+   * New pressed while IndexedDB was still opening.
+   */
+  const bootedFromSlot = initial?.fromSlot === true
+  const bootGraph = initialGraph
+  /*
+   * The rest of the open set, an await later — additive, never activating, so the first paint
+   * stays the autosave's. See `restoreSession`.
+   */
+  void restoreSession()
   const startDismissed = loadStartPageDismissed()
   const layoutPrefs = loadLayoutPrefs()
   /*
@@ -1135,7 +1694,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * `sessionStorage`, so the two share an autosave slot and clobber each other. Same terms as
    * the subscriptions below: registered once, never unsubscribed. See `watchTabIdentity`.
    */
-  watchTabIdentity(() => saveAutosave(get().graph))
+  watchTabIdentity(reclaimSession)
   subscribeSourceLearned(afterSourceLearned)
   /*
    * An upload's schema arrives the same way a dataset listing does — asynchronously, into
@@ -1426,6 +1985,69 @@ export const useGraphStore = create<GraphState>((set, get) => {
     helpType: undefined,
     openHelp: (type) => set({ helpType: type }),
 
+    // --- open workflows ----------------------------------------------------
+
+    tabs: [{ id: rootDoc.id, name: graphName(initialGraph) }],
+    activeTabId: rootDoc.id,
+    viewportRequest: { seq: 0, viewport: undefined },
+
+    recordViewport: (viewport) => {
+      const rec = docs.get(activeDoc)
+      if (rec) rec.viewport = viewport
+    },
+
+    switchDocument: (id) => {
+      if (id === get().activeTabId) return
+      const rec = docs.get(id)
+      if (!rec) return
+      stashActive()
+      cancelActiveWork()
+      activate(rec)
+    },
+
+    closeDocument: (id) => {
+      const rec = docs.get(id)
+      if (!rec) return
+      const wasActive = id === get().activeTabId
+      // Where it sat, so the neighbour that takes its place is the one under the cursor.
+      const order = [...docs.keys()]
+      const at = order.indexOf(id)
+
+      if (wasActive) cancelActiveWork()
+      /*
+       * The only thing that returns this document's results to the heap. A Scheduler's cache
+       * holds whole tables and whole scenes, and dropping the record alone would leave them
+       * reachable from the abort controller and the host closures until the page went away.
+       */
+      rec.scheduler.invalidateAll()
+      docs.delete(id)
+      // Closed means closed: a record left behind would come back as a tab on the next reload,
+      // which is the one thing a close has to be trusted not to do.
+      const tab = tabId()
+      if (tab) void deleteSessionDoc(tab, id)
+
+      if (!wasActive) {
+        syncTabs()
+        persistShape()
+        return
+      }
+      const remaining = [...docs.keys()]
+      const nextId = remaining[Math.min(at, remaining.length - 1)]
+      // Never zero documents: a canvas with nothing behind it is a state nothing else can draw.
+      activate(nextId ? docs.get(nextId)! : createDoc(newId('doc')))
+    },
+
+    newWorkflow: () => {
+      get().openDocument(emptyGraph('Untitled'))
+    },
+
+    openDocument: (graph, warnings = []) => {
+      beginDocument()
+      // Through `loadGraph`, so the history reset, the load warnings, the auto-layout stand-down
+      // and the fit-on-load request are the ones every other open has always got.
+      get().loadGraph(graph, warnings)
+    },
+
     // --- document ----------------------------------------------------------
 
     setGraph: (graph, options = {}) => {
@@ -1466,7 +2088,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         // Nothing to show in a grid, so the canvas whatever the last graph was seen through.
         dashboardOpen: false,
       })
-      scheduler.invalidateAll()
+      sched().invalidateAll()
       afterGraphChange(graph, { autoRun: false })
     },
 
@@ -1499,7 +2121,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
          */
         dashboardOpen: graph.dashboard?.open === true,
       })
-      scheduler.invalidateAll()
+      sched().invalidateAll()
       afterGraphChange(graph)
       /*
        * Frame what was just opened. Not done for `newGraph`, which has nothing to frame — and a
@@ -1510,7 +2132,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     loadStarter: (spec) => {
-      get().loadGraph(buildStarter(spec))
+      get().openDocument(buildStarter(spec))
     },
 
     // --- library -----------------------------------------------------------
@@ -1547,9 +2169,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
     openFromLibrary: async (id) => {
       try {
         const result = await loadWorkflow(id)
-        // Through `loadGraph` like every other open, so the history reset, the load warnings
-        // and the fit-on-load request all behave exactly as they do for a file.
-        get().loadGraph(result.graph, result.warnings)
+        // Through `openDocument` like every other open, so the new document, the history reset,
+        // the load warnings and the fit-on-load request behave exactly as they do for a file.
+        get().openDocument(result.graph, result.warnings)
       } catch (err) {
         set({ notice: (err as Error).message })
         await get().refreshLibrary()
@@ -2006,19 +2628,19 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     cancelRun: () => {
-      scheduler.cancel()
+      sched().cancel()
     },
 
     invalidateNode: (nodeId) => {
-      scheduler.invalidateNode(get().graph, nodeId)
+      sched().invalidateNode(get().graph, nodeId)
     },
 
     clearNodeCache: (nodeId) => {
-      scheduler.clearNodeCache(get().graph, nodeId)
+      sched().clearNodeCache(get().graph, nodeId)
     },
 
     clearResults: () => {
-      scheduler.invalidateAll()
+      sched().invalidateAll()
       afterGraphChange(get().graph, { autoRun: false })
       set({ lastRun: undefined })
     },
@@ -2033,24 +2655,24 @@ export const useGraphStore = create<GraphState>((set, get) => {
       // 'idle' below would otherwise read as "never evaluated", which is true and useless.
       const node = get().graph.nodes.find((n) => n.id === nodeId)
       if (node && isAnnotation(node.type)) return false
-      const state = scheduler.info(nodeId).state
+      const state = sched().info(nodeId).state
       return state === 'stale' || state === 'blocked' || state === 'error' || state === 'idle'
     },
 
-    nodeInfo: (nodeId) => scheduler.info(nodeId),
+    nodeInfo: (nodeId) => sched().info(nodeId),
     nodeInputs: (nodeId) => {
       const graph = get().graph
       const node = graph.nodes.find((n) => n.id === nodeId)
       const out: Record<string, Value | undefined> = {}
       for (const port of node ? nodePorts(node, 'input') : []) {
         const edge = edgeInto(graph, nodeId, port.id)
-        out[port.id] = edge ? scheduler.output(edge.source, edge.sourceHandle) : undefined
+        out[port.id] = edge ? sched().output(edge.source, edge.sourceHandle) : undefined
       }
       return out
     },
-    nodeOutput: (nodeId, portId) => scheduler.output(nodeId, portId),
-    nodeFetchedAt: (nodeId) => scheduler.fetchedAt(nodeId),
-    nodeWarning: (nodeId) => scheduler.warning(nodeId),
+    nodeOutput: (nodeId, portId) => sched().output(nodeId, portId),
+    nodeFetchedAt: (nodeId) => sched().fetchedAt(nodeId),
+    nodeWarning: (nodeId) => sched().warning(nodeId),
     setNotice: (notice) => set({ notice }),
   }
 })

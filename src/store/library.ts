@@ -11,7 +11,9 @@
  *
  * 1. **IndexedDB, not `localStorage`.** The autosave in `persistence.ts` already keeps a full
  *    copy of the working graph inside the ~5 MB origin budget, and a graph can be big — an
- *    Explore select-all is capped at 10,000 neuron ids, which is ~110 kB of params in one node.
+ *    Explore select-all is *not* capped — `SELECT_ALL_WARN` warns at 25,000 and selects anyway —
+ *    and a CAVE root id costs ~32 characters of serialised param, so 25,000 of them is 782 kB in
+ *    one node (measured; `scripts/probe-autosave-budget.ts`).
  *    A handful of saved workflows would hit quota, and `saveAutosave` swallows that failure by
  *    design. IndexedDB has no such ceiling.
  *
@@ -38,7 +40,7 @@
  */
 
 import type { CodaGraph } from '../core/graph'
-import { deserializeGraph, newId, serializeGraph } from '../core/graph'
+import { deserializeGraph, graphName, newId, serializeGraph } from '../core/graph'
 
 const DB_NAME = 'coda-library'
 const DB_VERSION = 1
@@ -233,7 +235,7 @@ export async function saveWorkflow(
   graph: CodaGraph,
   options: { id?: string } = {},
 ): Promise<WorkflowSummary> {
-  const name = (graph.meta?.name ?? '').trim() || 'Untitled'
+  const name = graphName(graph)
   const json = serializeGraph(graph)
   const previous = options.id ? await getWorkflow(options.id) : undefined
   const now = Date.now()

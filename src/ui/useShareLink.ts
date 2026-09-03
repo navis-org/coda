@@ -1,9 +1,9 @@
 /**
  * Opening a workflow somebody sent you.
  *
- * The receiving half of the share feature: read the `#!` fragment once at boot, resolve it,
- * and hand the graph to `loadGraph` — which already gives it the lenient-load warnings, the
- * history reset and the fit request that every other open path gets.
+ * The receiving half of the share feature: read the `#!` fragment once at boot, resolve it, and
+ * hand the graph to `openDocument` — which opens it in a document of its own, with the
+ * lenient-load warnings and the fit request every other open path gets.
  *
  * **It runs once per page load, and the guard is a ref rather than a dependency list.** The
  * fragment is cleared the moment it has been dealt with, so a second pass would find nothing —
@@ -15,16 +15,15 @@
  * the shared graph, which is the single worst thing this feature could do. The link is not the
  * store; the Share dialog regenerates it on demand.
  *
- * **Two different confirmations, for two different questions**, and they are asked in this
- * order because only the first one can be answered without touching the network:
+ * **One confirmation, and it is about the network rather than the canvas.** *Shall I fetch from
+ * this host?* is asked only for a bare `https://` link, whose destination the recipient cannot
+ * see — `gh://` and `gs://` name a known host in the link itself, and neither asks.
  *
- *  1. *Shall I fetch from this host?* — only for a bare `https://` link, whose destination the
- *     recipient cannot see. `gh://` and `gs://` name a known host in the link itself.
- *  2. *Shall I replace what is on your canvas?* — only when there is something to replace.
- *     `loadGraph` resets the history, and the autosave is the only copy of what is about to go.
- *
- * A fresh tab following a gist link therefore answers neither, which is the common case and the
- * one that has to be frictionless.
+ * There used to be a second question, *shall I replace what is on your canvas?*, because
+ * `loadGraph` reset the undo history and the autosave was the only copy of what was about to go.
+ * A link now opens in a document of its own, so nothing is replaced and no history goes: the
+ * question had nothing left to be about and is gone rather than left inert. See
+ * `store/graphStore`'s `openDocument`.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -43,8 +42,6 @@ export type ShareLoad =
   /** A bare https link, waiting on "fetch from this host?". */
   | { state: 'confirm-fetch'; ref: ShareRef; target: ShareTarget }
   | { state: 'loading'; target: ShareTarget }
-  /** Resolved and parsed, waiting on "replace what is on the canvas?". */
-  | { state: 'confirm-replace'; result: LoadResult; name: string }
   | { state: 'error'; message: string }
 
 export interface ShareLinkState {
@@ -63,7 +60,7 @@ function clearFragment(): void {
 }
 
 export function useShareLink(): ShareLinkState {
-  const loadGraph = useGraphStore((s) => s.loadGraph)
+  const openDocument = useGraphStore((s) => s.openDocument)
   const [load, setLoad] = useState<ShareLoad>({ state: 'idle' })
   const started = useRef(false)
 
@@ -86,18 +83,18 @@ export function useShareLink(): ShareLinkState {
         return
       }
       clearFragment()
-      if (useGraphStore.getState().graph.nodes.length === 0) {
-        loadGraph(result.graph, result.warnings)
-        setLoad({ state: 'idle' })
-        return
-      }
-      setLoad({
-        state: 'confirm-replace',
-        result,
-        name: (result.graph.meta?.name ?? '').trim() || 'Untitled',
-      })
+      /*
+       * Opened in a document of its own, so the second question this used to ask — "replace what
+       * is on the canvas?" — no longer has anything to be about: nothing is replaced and no undo
+       * history goes. The *first* question stands, because it is about a different risk entirely:
+       * a bare `https://` hides where the fetch goes, and that is unchanged by where the result
+       * lands. `confirm-replace` is left in `ShareLoad` and unreachable rather than torn out,
+       * since `SharedLinkGate` and the suite still describe the shape.
+       */
+      openDocument(result.graph, result.warnings)
+      setLoad({ state: 'idle' })
     },
-    [loadGraph],
+    [openDocument],
   )
 
   const fetchRef = useCallback(
@@ -140,11 +137,7 @@ export function useShareLink(): ShareLinkState {
    */
   const accept = useCallback(() => {
     if (load.state === 'confirm-fetch') fetchRef(load.ref)
-    else if (load.state === 'confirm-replace') {
-      loadGraph(load.result.graph, load.result.warnings)
-      setLoad({ state: 'idle' })
-    }
-  }, [fetchRef, load, loadGraph])
+  }, [fetchRef, load])
 
   const dismiss = useCallback(() => {
     clearFragment()

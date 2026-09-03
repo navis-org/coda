@@ -57,6 +57,7 @@ import { LayoutControls } from './panels/LayoutControls'
 import { LockControl } from './panels/LockControl'
 import { MinimapControl } from './panels/MinimapControl'
 import { ViewControls } from './panels/ViewControls'
+import { WorkflowTabs } from './panels/WorkflowTabs'
 import { EdgeContextMenu } from './panels/EdgeContextMenu'
 import { NodeBrowser } from './panels/NodeBrowser'
 import { GroupContextMenu } from './panels/GroupContextMenu'
@@ -153,7 +154,28 @@ function EditorCanvas() {
   // returns a fresh one each call. The button that flips it is `MinimapControl`, in the rail.
   const minimapOpen = useGraphStore((s) => s.panels.minimap)
 
-  const { screenToFlowPosition } = useReactFlow()
+  const { screenToFlowPosition, setViewport } = useReactFlow()
+  /*
+   * The canvas transform, saved into the active document and put back when it comes round again.
+   *
+   * Capture is React Flow's `onMove` and restore is a request counter, rather than one gesture
+   * doing both, because the two ends are raised from different places: a pan is React Flow's own
+   * event, and a switch can come from the switcher, the toolbar, a share link or the palette —
+   * none of which is inside this provider. `recordViewport` writes no store state, so a frame of
+   * a pan costs a property assignment. See the handler for why it is not `onMoveEnd`.
+   */
+  const recordViewport = useGraphStore((s) => s.recordViewport)
+  const viewportRequest = useGraphStore((s) => s.viewportRequest)
+  const handledViewport = useRef(viewportRequest.seq)
+  useEffect(() => {
+    if (viewportRequest.seq === handledViewport.current) return
+    handledViewport.current = viewportRequest.seq
+    /*
+     * Undefined for a document being seen for the first time, which `loadGraph`'s `fitRequest`
+     * frames instead. Answering it here as well would fight that fit.
+     */
+    if (viewportRequest.viewport) setViewport(viewportRequest.viewport)
+  }, [viewportRequest, setViewport])
   const fitAll = useFitAll()
   const fitSelected = useFitSelected()
   // A primitive — invariant 7. What the lock covers is written up on `GraphState.locked`.
@@ -1060,7 +1082,21 @@ function EditorCanvas() {
          * that frames its own card is tracked through the whole transition. A no-op when no
          * tour is running.
          */
-        onMove={refreshTour}
+        /*
+         * The tour's spotlight and this document's viewport, from the one event.
+         *
+         * `onMove` rather than `onMoveEnd` for the second of those, and the difference is the
+         * case that reads as a bug: `onMoveEnd` ends a *gesture*, so a document that was only
+         * ever framed by `fitView` — which is every document nobody has panned — records
+         * nothing, and switching to it leaves the canvas on the outgoing document's transform.
+         * `onMove` fires for programmatic animations too, which is the same property the tour
+         * needs it for. `recordViewport` writes no store state, so a frame of a drag costs a
+         * property assignment.
+         */
+        onMove={(_event, viewport) => {
+          refreshTour()
+          recordViewport(viewport)
+        }}
         defaultViewport={graph.viewport ?? { x: 0, y: 0, zoom: 0.85 }}
         minZoom={0.15}
         maxZoom={2.5}
@@ -1124,6 +1160,11 @@ function EditorCanvas() {
          * none of the three viewport hazards that layer documents apply to it beyond the depth.
          */}
         <LoopLayer measured={measuredSizes} />
+        {/*
+         * The open workflows. Top-left is the one corner of the pane nothing else claims — see
+         * `WorkflowTabs` for why it is a canvas panel rather than a strip in the shell.
+         */}
+        <WorkflowTabs />
         <Background
           variant={BackgroundVariant.Dots}
           gap={22}

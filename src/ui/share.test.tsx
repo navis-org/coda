@@ -34,6 +34,7 @@ import { shareAdvisories } from './shareAdvisories'
 import { useGraphStore } from '../store/graphStore'
 import { demoWorkflow } from '../wizard/build'
 import { clearStorage, installJsdomStubs } from '../test/jsdomStubs'
+import { resetDocuments } from '../test/storeReset'
 
 beforeAll(() => {
   installJsdomStubs({ width: 1000, height: 700 })
@@ -45,6 +46,7 @@ beforeEach(() => {
   resetGithubCredentials()
   window.history.replaceState(null, '', '/')
   act(() => {
+    resetDocuments()
     useGraphStore.getState().closeStartPage()
     useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
@@ -346,10 +348,12 @@ describe('the gist half', () => {
 
 describe('opening a link somebody sent', () => {
   /**
-   * The destructive one. `loadGraph` resets the history, so the autosave is the only copy of
-   * what is about to go — which is why this asks and the empty-canvas case does not.
+   * This used to be the destructive one, and the gate asked about it. A link now opens in a
+   * document of its own, so nothing is replaced and no history is reset — the second of the two
+   * questions has nothing left to be about. The *first* one is unaffected and still asked: see
+   * "asks before fetching from a host the recipient cannot see" below.
    */
-  it('asks before replacing a canvas that has work on it', async () => {
+  it('opens beside a canvas that has work on it, without asking', async () => {
     const shared = emptyGraph('Their sweep')
     shared.nodes.push({
       id: 'x1',
@@ -357,17 +361,21 @@ describe('opening a link somebody sent', () => {
       position: { x: 0, y: 0 },
       params: {},
     })
+    const mine = useGraphStore.getState().activeTabId
+    const before = useGraphStore.getState().graph.nodes.length
     window.history.replaceState(null, '', `/#!${encodeURIComponent(JSON.stringify(shared))}`)
 
     render(<App />)
-    const gate = await screen.findByRole('dialog', { name: 'Shared workflow' })
-    expect(within(gate).getByText(/Open “Their sweep”\?/)).toBeTruthy()
-
-    // Declining keeps the canvas — and takes the link out of the address bar, or a reload
-    // after ten minutes of editing would silently revert to it.
-    fireEvent.click(within(gate).getByRole('button', { name: 'Keep what I have' }))
+    await waitFor(() => expect(useGraphStore.getState().graph.meta?.name).toBe('Their sweep'))
+    // The link still leaves the address bar, or a reload after ten minutes of editing would
+    // silently open it again over whatever was done since.
     await waitFor(() => expect(window.location.hash).toBe(''))
-    expect(useGraphStore.getState().graph.meta?.name).not.toBe('Their sweep')
+
+    const { tabs, activeTabId, switchDocument } = useGraphStore.getState()
+    expect(tabs).toHaveLength(2)
+    expect(activeTabId).not.toBe(mine)
+    act(() => switchDocument(mine))
+    expect(useGraphStore.getState().graph.nodes).toHaveLength(before)
   })
 
   it('opens without asking when there is nothing to lose', async () => {

@@ -146,6 +146,125 @@ check when adding a fifth.
 dialog. It sat under `Save ▸` first; the menu entry is gone rather than duplicated, because two
 routes to one dialog is two places for the wording to drift.
 
+## More than one workflow open in one tab
+
+**Prototype.** A collapsible box in the canvas's top-left corner (`ui/panels/WorkflowTabs.tsx`)
+lists what is open and switches between them. Everything below is built and tested; what is
+deliberately *not* built is at the end.
+
+### Why it was cheap, which is also the design
+
+The store already had the switch. `loadGraph` replaces the graph, resets `past`/`future`/
+`selection`/`lastRun`, drops the expanded node and the pin, reads `dashboardOpen` back off the
+document and re-derives every badge. A tab switch is that, with the outgoing half kept instead of
+thrown away — so `DocStash` is exactly the list `loadGraph` resets, and that is not a coincidence.
+
+The blast radius is what makes it a prototype rather than a rewrite: **1,204 `useGraphStore`
+references across 125 files, and none of them changed.** The document was already a value the
+store swapped; multi-document is a change to the store's interior, not to its interface.
+
+### Where a document lives
+
+`GraphState` holds one row per open workflow — `tabs: WorkflowTab[]`, an id and a name and
+nothing else — plus `activeTabId`. The documents themselves are a `Map<string, DocRecord>` in the
+store's closure, beside the Scheduler and for its reason: they own caches of potentially large
+tables, and copying references to them through immutable state updates on every tick buys nothing.
+
+`tabs` is rebuilt by `syncTabs` from `afterGraphChange`, so it fires on **every keystroke** — and
+therefore compares before it writes. A fresh array each time would re-render the switcher, and
+everything else selecting it, for an edit no row displays.
+
+### A Scheduler per document, not one shared
+
+The tempting cheap version is one Scheduler with `pruneCache` widened to the union of open graphs.
+Freshness is derived (`cached.key === desiredKey`), so switching back and calling `refreshStates`
+recovers every badge with no run and no fetch — which is what makes a switch cost nothing either
+way, and is worth knowing on its own.
+
+It is wrong for one reason: **`newId` is unique within a session and `deserializeGraph` does not
+remap**, so two documents opened from the same file carry the *same node ids* — and the same
+provenance keys, since the graphs are byte-identical. One cache keyed by node id would report the
+second copy as already run, and the reader would be looking at another document's results with
+nothing on screen to say so. `documents.test.ts` opens one file twice and asserts exactly that.
+
+An instance each also makes closing a document a single `invalidateAll`, which is the only thing
+that returns its results to the heap.
+
+### The three things a switch does beyond swapping state
+
+- **It cancels.** Only the document on screen runs. The alternative needs a `busy` per document, a
+  status bar reporting somebody else's run, and an `onIteration` writing files for a canvas nobody
+  is looking at. `cancelActiveWork` bumps `runToken` rather than awaiting the abort, because
+  `runFull`'s `finally` lands a tick later and would otherwise clear `busy` out from under the
+  document that has arrived since — the same guard two overlapping runs on one document already use.
+- **It moves the autosave**, which holds whichever document is on screen. Without that, a reload
+  comes back to the workflow you switched *away* from.
+- **It restores the viewport**, through `viewportRequest` — a counter for `fitRequest`'s reason,
+  and a separate one from it because the two answers are exclusive: a document seen for the first
+  time is framed, one being returned to is restored.
+
+Two rules about that viewport, both of which read as a bug when broken. It is captured on React
+Flow's **`onMove`, not `onMoveEnd`**: `onMoveEnd` ends a *gesture*, so a document that was only
+ever framed by `fitView` — every document nobody has panned — records nothing, and switching to it
+leaves the canvas on the outgoing document's transform. And it lives on the `DocRecord` rather than
+in `DocStash`, because it is written continuously by a pan: a stash captured at the moment of the
+switch is fine for a selection and wrong for a transform two gestures old. Verified in a real
+browser by comparing `.react-flow__viewport`'s `transform` across a switch, since jsdom performs
+no layout.
+
+### Every open route mints a document, and the replace-confirm is gone
+
+`openDocument` is `loadGraph` with `beginDocument` in front of it, and it is what the New menu, the
+file picker, the palette, the Zoo, the wizard, a share link, the start page's cards and the browser
+shelf all call now. `loadGraph` itself is unchanged and still replaces in place — the tour restores
+through it.
+
+**A blank, untouched document is reused rather than left behind**, or a fresh visit strands an
+empty tab beside the workflow the user actually asked for. "Untouched" is the *history*, not the
+node count: a graph somebody built and then emptied has a past they can undo into.
+
+So the replace-confirm no longer has anything to be about — nothing is replaced and no undo
+history goes — and it is **deleted** rather than neutered: `replaceConfirm.ts`, the
+`confirm-replace` arm of `ShareLoad`, `SharedLinkGate`'s dialog for it, and the inline prompts in
+the Zoo, the wizard and the start page's cards. Keeping the hook with a pass-through `ask` was
+tried and is the worse answer, because what the hook *was* is a guard (`hasWork`) plus a sentence:
+the guard is the half that stopped being true, so a fourth destructive route would have to write
+it from scratch anyway and would meanwhile inherit four surfaces rendering a flow nothing can
+produce. Git history is the record of how the question was worded.
+
+The share link's *first* question is untouched and still asked — "fetch from this host?" is about
+a bare `https://` hiding where it goes, which is unaffected by where the result lands.
+
+**`newGraph` and `newWorkflow` are two operations, not one with a mode.** `newGraph` empties the
+current document in place, which is what it has always meant and what twenty-three test suites
+reset with; `newWorkflow` is `openDocument(emptyGraph())` and is what the New menu, the palette
+and the switcher's `+` call. Folding the second into the first made the first depend on hidden
+state and silently changed every one of those suites — they accumulated a document and a live
+Scheduler per case, with nothing failing.
+
+### The open set survives a reload
+
+Built, and split across two stores along a line drawn by *when the answer is needed*: the active
+document stays in the `localStorage` slot and is read synchronously in the store's initialiser, so
+the first paint is unchanged; every other open document lives in IndexedDB and arrives an await
+later. The whole design, the measurements that settled it and the three failures that live in the
+join are in [persistence.md](persistence.md).
+
+Two consequences that belong here rather than there. A reload comes back to **the document that
+was on screen**, not to the first in the list, because `loadActiveDocId` is read in the same tick
+as the graph. And the restore is **additive and never activates**, so a share link followed before
+it lands is safe — the recovered workflows slot in around it.
+
+### What is deliberately not built
+
+- **Closing asks nothing**, and an unsaved document really is lost. Now that the open set is
+  persisted, the honest version of this is an undo rather than a confirm — a closed workflow could
+  be recoverable for the rest of the session — and neither is built.
+- **There is no switcher in the dashboard.** `DashboardView` replaces `Editor` in the same grid
+  area, so React Flow — and the canvas panel this lives in — unmounts with it. `← Canvas` is the
+  way back.
+- **No keyboard shortcut.** `src/ui/shortcuts.ts` is the one table and nothing has been added to it.
+
 ## Pinning a viewer beside the graph
 
 `⇥` on a viewer card, `P`, or the palette's *Pin Selected Output to the Side*. The result is

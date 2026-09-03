@@ -362,6 +362,21 @@ describe('every store action is on one side of the lock', () => {
     'nodeWarning',
     'setNotice',
     'copySelection',
+    /*
+     * The workflow switcher, all on this side. The lock freezes edits landing on *this* graph;
+     * looking at a different one, opening another beside it or closing one is not an edit to the
+     * locked canvas at all — the same call `addToDashboard` makes, and for the same reason.
+     * `loadGraph` is already LIVE, and `openDocument` is `loadGraph` with a document minted first.
+     */
+    'switchDocument',
+    'closeDocument',
+    'openDocument',
+    // `newGraph` is the in-place reset and is already above; this is the one that mints a
+    // document, and it is `openDocument` with a blank graph.
+    'newWorkflow',
+    // Where the canvas was left. Not an edit to anything: it writes no store state and nothing in
+    // the document moves — see `recordViewport`.
+    'recordViewport',
   ]
 
   it('is classified, so a new one cannot slip past the lock unnoticed', () => {

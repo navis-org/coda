@@ -389,11 +389,157 @@ variable, so tabs drift rather than losing anything. Three are worth knowing abo
   `refreshLibrary` resolves can mint a second entry under a name that already exists — which
   `library.ts`'s own header says cannot happen.
 
-And one that is inert today and will not stay that way: **no IndexedDB opener installs
-`onversionchange`**, so the first `DB_VERSION` bump with an old tab open has the old tab block the
+And one that is inert today and will not stay that way: **only `session.ts` installs
+`onversionchange`** — the other four openers still do not, so the first `DB_VERSION` bump with an old tab open has the old tab block the
 upgrade while the new one degrades — permanently in `cache.ts`, which memoises the failed
 `dbPromise`, and as "this browser has no storage" in the three that reject. Cheap insurance to add
 before the schema moves.
+
+## What the budget actually is
+
+Restated here because the numbers were being quoted from a comment rather than measured, and the
+comment was stale. `pnpm probe:autosave-budget` re-measures the graph sizes; the quota half was
+driven over Playwright against the dev origin, filling `localStorage` until the write was refused.
+
+**The quota is exactly 5 MiB** — 5,242,880 code units, reached within a kilobyte on Chromium,
+Firefox and WebKit alike. What it is *counted in* differs, and only one of the three is what the
+old comment assumed:
+
+| engine | ASCII | the same run as surrogate pairs | charged in |
+| --- | --- | --- | --- |
+| Chromium | 5,242,262 | 5,177,571 | UTF-16 code units |
+| Firefox | 5,242,262 | 5,177,571 | UTF-16 code units |
+| WebKit | 5,242,262 | 2,556,011 | **bytes**, Latin-1 stored one each |
+
+So a graph whose names are not Latin-1 gets half the room in Safari. Graph JSON is ASCII apart
+from what somebody types into a name or a note, which is why this has never been felt.
+
+**Coda at rest holds 12.4 kB of it — 0.24%** (one ordinary workflow: the slot, the shared key, the
+slot index, a theme and a guides flag). An ordinary workflow is **3–6 kB**; the nine the wizard
+builds measure 2,984 to 6,279 characters. Ten of those open at once is 1% of the quota.
+
+**One thing gets big, and it is not the graph.** A CAVE root id costs ~32 characters of serialised
+param, so an Explore selection is 32 kB per thousand: 313 kB at ten thousand, **782 kB** at
+`SELECT_ALL_WARN`'s 25,000, 3.1 MB at a hundred thousand. Note that select-all is *not capped* —
+it warns and selects anyway, deliberately — so this end is unbounded. Two comments said "capped at
+10,000, ~110 kB" and both were wrong in both halves.
+
+The write cost is nothing and was checked rather than assumed: serialise plus two `setItem`s is
+0.5 ms at ten thousand ids and 1.5 ms at twenty-five thousand, on the main thread, once per
+autosave tick.
+
+### The autosave is `compact`, and it is the only caller that is
+
+`serializeGraph` writes two-space JSON unless asked otherwise, and the indentation is **34% of the
+output** — measured on both an ordinary workflow and the 25,000-id one, which come out the same
+percentage. That is worth reading in a file somebody opens and worth nothing in a storage slot:
+everything that reads the slot goes through `deserializeGraph`, which is `JSON.parse`.
+
+So `saveAutosave` and the session store pass `{ compact: true }`; `Download .coda.json`, the gist
+and the browser shelf stay pretty, because a human reads all three.
+
+**Byte-identity across those paths was never a property**, which is what makes this safe. Every
+call to `serializeGraph` stamps a fresh wall-clock `meta.modifiedAt`, so two calls a millisecond
+apart already differ — `core/clipboard.ts` avoids the function *for that reason* and
+`graph.test.ts` strips the field before comparing. What the one function protects is that a format
+change lands in every path at once, and passing it an option does not weaken that. Nothing reads
+the bytes as bytes: the only value derived from the string rather than from the document is
+`WorkflowSummary.size`, and no surface renders it.
+
+## The open workflows, across a reload
+
+More than one workflow can be open in one tab (see [ui-shell.md](ui-shell.md)), and the set
+survives a reload. `store/session.ts` is that store, and it is **split from the autosave along a
+line drawn by when the answer is needed** rather than by what the data is.
+
+**The active document stays in `localStorage`.** `loadAutosave` runs synchronously in the graph
+store's initialiser, and `initialGraph` decides the first paint, `dashboardOpen` and the first row
+in the switcher. IndexedDB is asynchronous, so moving that read would boot the app onto a blank
+canvas and swap a tick later — a flash charged to every visitor, most of whom have one workflow
+open, to serve the case where they have four.
+
+**Everything else goes to IndexedDB**, and the ceiling is the whole reason. Three documents each
+carrying a warned Explore selection is 2.3 MB, five is 3.9 MB, and the shared key holds one more
+copy of the active graph on top — so the tail case genuinely exhausts 5 MiB, and `writeLocal`
+**swallows** the quota error by design. A silently unpersisted open set is precisely the failure
+this feature would be judged on. IndexedDB has no such ceiling.
+
+### Four decisions, each easy to get backwards
+
+1. **Its own database**, not `library.ts`'s and not `data/cache.ts`'s. The shelf is where a
+   workflow goes when somebody *asks* for it to be kept; this is a crash net that clears itself.
+   Sharing would also mean the two racing on a version bump, which is `library.ts`'s own reason
+   for not sharing `cache.ts`'s.
+2. **Writes swallow, reads resolve** — the inverse of `library.ts`, and deliberately. There the
+   user asked for their work to be kept and reporting success would lose it silently; here nobody
+   asked, which is `saveAutosave`'s standing, and the fallback is the one document the slot holds.
+3. **Keyed by tab and document together.** Slots are per tab for a measured reason — two tabs on
+   two workflows clobbered one key — and the open *set* is per tab for exactly the same one. A
+   compound key lets a whole session be read with one cursor over a key range, with no index to
+   keep. The separator is `\u0000`, so a tab whose id prefixes another's cannot be swept up.
+4. **Order is stored, not derived.** `docs` is a `Map` and its insertion order is what the
+   switcher draws, so a restore that appended documents in whatever order IndexedDB handed back
+   would rearrange somebody's tabs on every reload for no reason they could see.
+
+### The join, which is where the failures are
+
+**`loadActiveDocId` is read synchronously at boot, from `sessionStorage`** beside the tab id and
+for its three properties — per tab, survives a reload, restored with the tab after a crash. That
+is what gives the graph the slot just handed over its *identity* in the same tick, so the session
+records restore *around* an id that already exists.
+
+Without it the active document is in both halves with no way to match them, and the failure is not
+the obvious one: a second `createDoc` under the same id **replaces** the live record in the `Map`
+rather than adding to it, so the switcher still shows the right number of rows. What it replaces
+it with is a record carrying a stash — the one thing that must never be true of the document on
+screen — and the visible symptom is that renaming the active workflow stops updating its row.
+`documents.test.ts` asserts the rename, not the row count, for that reason.
+
+**The restore is additive and never activates.** A share link or a New pressed before it lands is
+therefore safe: the restored documents slot in around whatever is there, and the first paint stays
+the autosave's.
+
+**A document is written at the two moments its content can have changed**: on the autosave's own
+debounce while it is on screen, and once as it is switched away from — because only the document
+on screen is on that debounce. Not on every commit for every open document, which would be N
+serialisations per keystroke for N−1 graphs nobody touched.
+
+**A duplicated tab takes its whole open set with it.** `watchTabIdentity`'s `reclaim` writes
+*every* open document under the new identity, not only the active one, because the identity they
+were all filed under is the thing that just moved. Leaving that out is the original single-slot
+bug one layer up: the re-mint happens after the copy has written, so a tab that only re-keyed
+would come back from a reload with one document where it had four.
+
+### The two bounds do not match, and the gap is a real case
+
+`MAX_SLOTS` is 6 and `MAX_SESSIONS` is 12, so past six tabs a tab loses its `localStorage` slot
+while keeping its session. `loadAutosave` then falls back to the shared key — "the most recent
+graph from any tab" — which is somebody else's work.
+
+That fallback was a complete answer while a tab held one workflow: the whole tab came back showing
+a foreign graph, which is at least recognisable, and is what this file already documented. With an
+open set it is not, and the failure is worse than what it replaced: the set restores correctly
+around a *foreign* graph standing in for one of its own documents, under this tab's own document
+id. Measured with eight tabs open rather than reasoned about — `['T0-A', 'T7-B']`, and the session
+store had T0-B sitting right there, shadowed.
+
+So **`loadAutosave` reports which of the two answered** (`fromSlot`), and where the shared key
+stood in, `restoreSession` takes the session's own copy of the active document back — through
+`loadGraph`, so the fit request, the load warnings and the autosave that reclaims a slot are the
+ones every other open gets. Two guards, and both directions are pinned by a test:
+
+- **Only when the slot missed.** Where the slot answered it is the *fresher* copy — it is written
+  on every autosave tick, where a session record for a document only moves while it is on screen
+  or as it is left. Preferring the record would quietly roll the active workflow back to whatever
+  it looked like at the last switch.
+- **Only while the boot graph is still on screen.** A share link resolving first, or a New pressed
+  while IndexedDB was opening, is a deliberate act and outranks a recovery.
+
+**Sessions are bounded, not cleaned up.** Nothing deletes a session when a tab closes, because a
+closed tab is exactly the case this exists for. `pruneSessions` keeps the twelve most recently
+written and never evicts the one writing; a live tab that loses its session falls back to the slot,
+which is one document rather than none — `pruneSlots`' shape of degradation, where getting the
+eviction wrong costs the newer half of the feature rather than the work.
 
 ## The workflow library
 

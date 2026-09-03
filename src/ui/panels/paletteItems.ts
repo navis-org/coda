@@ -387,7 +387,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       label: 'New Graph',
       action: 'Graph',
       hint: 'Start from an empty canvas',
-      perform: () => store.newGraph(),
+      perform: () => store.newWorkflow(),
     },
     {
       id: 'cmd:open',
@@ -396,7 +396,7 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       hint: 'Load a .coda.json file',
       perform: () => {
         void pickGraphFile().then((result) => {
-          if (result) store.loadGraph(result.graph, result.warnings)
+          if (result) store.openDocument(result.graph, result.warnings)
         })
       },
     },

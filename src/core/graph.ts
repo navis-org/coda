@@ -61,14 +61,7 @@ export interface GraphEdge {
  * time, so the document carries a choice rather than a value, and the two themes each get the
  * hue that was validated for them (`ui/colors.ts`).
  */
-export const GROUP_COLORS = [
-  'grey',
-  'blue',
-  'orange',
-  'green',
-  'pink',
-  'violet',
-] as const
+export const GROUP_COLORS = ['grey', 'blue', 'orange', 'green', 'pink', 'violet'] as const
 export type GroupColor = (typeof GROUP_COLORS)[number]
 
 /**
@@ -549,6 +542,17 @@ export function newId(prefix = 'n'): string {
   return `${prefix}${idCounter.toString(36)}_${Math.random().toString(36).slice(2, 7)}`
 }
 
+/**
+ * A graph's name as every surface spells it, with the default filled in.
+ *
+ * One definition rather than five: the toolbar, the share dialog, the browser shelf, the workflow
+ * switcher and `saveWorkflow` each had `(graph.meta?.name ?? '').trim() || 'Untitled'` written
+ * out, agreeing by luck. `emptyGraph`'s own default is the same word, and lives next door.
+ */
+export function graphName(graph: CodaGraph): string {
+  return (graph.meta?.name ?? '').trim() || 'Untitled'
+}
+
 export function addNode(graph: CodaGraph, node: GraphNode): CodaGraph {
   return { ...graph, nodes: [...graph.nodes, node] }
 }
@@ -581,10 +585,7 @@ export function updateNode(
  * `registry.ts` already imports it, and the cycle would be real. `graph.ts` imports both
  * already.
  */
-export function nodePorts(
-  node: GraphNode,
-  side: 'input' | 'output',
-): readonly ResolvedPort[] {
+export function nodePorts(node: GraphNode, side: 'input' | 'output'): readonly ResolvedPort[] {
   const def = getNodeDef(node.type)
   if (!def) return NO_PORTS
   return side === 'output' ? outputPorts(def, node.params) : inputPorts(def, node.params)

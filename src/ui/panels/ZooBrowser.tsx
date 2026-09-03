@@ -38,7 +38,6 @@ import { backendName } from '../../nodes/lib/datasetFamilies'
 import { useGraphStore } from '../../store/graphStore'
 import { formatAgo, plural } from '../format'
 import { MarkdownView } from '../MarkdownView'
-import { REPLACE_GRAPH_QUESTION, useReplaceConfirm } from '../replaceConfirm'
 import { useListNav } from '../useListNav'
 import { Highlight } from './Highlight'
 import { fuzzyRank } from './fuzzy'
@@ -85,8 +84,7 @@ export function ZooBrowser({ onClose }: ZooBrowserProps) {
   const [opening, setOpening] = useState<string | undefined>()
   const [openError, setOpenError] = useState<string | undefined>()
 
-  const loadGraph = useGraphStore((s) => s.loadGraph)
-  const confirm = useReplaceConfirm()
+  const openDocument = useGraphStore((s) => s.openDocument)
 
   const fetchIndex = useCallback((force: boolean) => {
     setRefreshing(true)
@@ -174,23 +172,20 @@ export function ZooBrowser({ onClose }: ZooBrowserProps) {
   /**
    * Fetch, validate, and put it on the canvas.
    *
-   * The replace-what-is-here question is asked on the button rather than through
-   * `window.confirm`, matching the start page's cards — jsdom does not implement the browser
-   * dialog, and a chrome prompt in front of a modal reads as a different application.
+   * Nothing is asked first: a Zoo workflow opens in a document of its own, so the canvas the
+   * reader came from is still open beside it. This used to arm a replace-confirm on the button.
    */
   const open = (entry: ZooEntry) => {
-    confirm.ask(entry.slug, () => {
-      setOpening(entry.slug)
-      setOpenError(undefined)
-      void loadZooGraph(entry)
-        .then((text) => {
-          const { graph, warnings } = deserializeGraph(text)
-          loadGraph(graph, warnings)
-          onClose()
-        })
-        .catch((err: unknown) => setOpenError((err as Error).message))
-        .finally(() => setOpening(undefined))
-    })
+    setOpening(entry.slug)
+    setOpenError(undefined)
+    void loadZooGraph(entry)
+      .then((text) => {
+        const { graph, warnings } = deserializeGraph(text)
+        openDocument(graph, warnings)
+        onClose()
+      })
+      .catch((err: unknown) => setOpenError((err as Error).message))
+      .finally(() => setOpening(undefined))
   }
 
   /**
@@ -393,32 +388,14 @@ export function ZooBrowser({ onClose }: ZooBrowserProps) {
               {openError && <p className="zoo__error">{openError}</p>}
 
               <div className="zoo__actions">
-                {confirm.confirming === selected.slug ? (
-                  <>
-                    {/* One sentence for all three surfaces that replace the canvas. This copy
-                        had lost the undo clause, which is the only fact it exists to carry. */}
-                    <span className="zoo__confirm-text">{REPLACE_GRAPH_QUESTION}</span>
-                    <button type="button" className="btn" onClick={confirm.cancel}>
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--primary"
-                      onClick={() => open(selected)}
-                    >
-                      Replace
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn btn--primary"
-                    disabled={opening === selected.slug}
-                    onClick={() => open(selected)}
-                  >
-                    {opening === selected.slug ? 'Opening…' : 'Open on the canvas'}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  disabled={opening === selected.slug}
+                  onClick={() => open(selected)}
+                >
+                  {opening === selected.slug ? 'Opening…' : 'Open on the canvas'}
+                </button>
                 <a
                   className="zoo__source-link"
                   href={zooEntryUrl(selected)}

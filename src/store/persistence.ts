@@ -30,6 +30,8 @@ const SLOT_PREFIX = `${AUTOSAVE_KEY}.tab.`
 const SLOT_INDEX_KEY = `${AUTOSAVE_KEY}.index`
 /** This tab's identity, in `sessionStorage` rather than `localStorage` — see `tabId`. */
 const TAB_KEY = 'coda.tab.v1'
+/** Which of this tab's open workflows was on screen — see `loadActiveDocId`. */
+const ACTIVE_DOC_KEY = 'coda.doc.v1'
 const THEME_KEY = 'coda.theme.v1'
 const PANELS_KEY = 'coda.panels.v1'
 const AUTORUN_KEY = 'coda.autorun.v1'
@@ -67,13 +69,24 @@ const FEEDBACK_NUDGE_KEY = 'coda.feedbackNudge.v1'
 /**
  * How many slots may exist at once, and the total they may occupy between them.
  *
- * Both bounds rather than one, because the two failure shapes are different: six slots of a
- * four-kilobyte example is nothing, and six of a graph carrying a 10,000-neuron Explore
- * selection is most of the origin's budget. `localStorage` is around 5 MB for everything, and
- * the shared key already holds one copy of a graph, so the slots get a fraction of it.
+ * Both bounds rather than one, because the two failure shapes are different, and the gap between
+ * them is four orders of magnitude. An ordinary workflow is **3–6 kB** — the nine the wizard
+ * builds measure 2,984 to 6,279 characters — so six of those is nothing. A graph carrying an
+ * Explore selection is the other end: a CAVE root id costs ~32 characters of serialised param, so
+ * 25,000 of them (`SELECT_ALL_WARN`, which warns rather than capping) is **782 kB in one node**
+ * and two such slots are the whole allowance.
  *
- * Counted in UTF-16 code units, which is both what `String.length` answers and what browsers
- * charge the quota in.
+ * The origin's budget is **exactly 5 MiB**, measured rather than assumed — 5,242,880, reached
+ * within a kilobyte on Chromium, Firefox and WebKit alike. The shared key holds one more copy of
+ * the active graph on top of the slots, which is why they get a fraction rather than all of it.
+ *
+ * Counted in UTF-16 code units, which is what `String.length` answers and what Chromium and
+ * Firefox charge. WebKit charges *bytes* and stores Latin-1 in one each, so an ASCII graph gets
+ * the same room there and a graph whose names are not Latin-1 gets half. Graph JSON is ASCII
+ * apart from what a user types into a name or a note.
+ *
+ * All of the above: `scripts/probe-autosave-budget.ts` for the graph sizes, and the quota probe
+ * written up in [docs/persistence.md](../../docs/persistence.md).
  */
 const MAX_SLOTS = 6
 const MAX_SLOT_BYTES = 2_000_000
@@ -129,8 +142,12 @@ function removeLocal(name: string): void {
  *
  * `undefined` where storage is unavailable: a private mode, or a suite under plain Node. Every
  * caller then falls back to the shared key, which is what this file did before slots existed.
+ *
+ * Exported rather than wrapped, because "which tab am I" has to have exactly one *spelling* as
+ * well as one answer — the session store in `session.ts` keys its records by this, and the two
+ * are halves of one crash net. A shim is how a symbol acquires a second name.
  */
-function tabId(): string | undefined {
+export function tabId(): string | undefined {
   try {
     const held = sessionStorage.getItem(TAB_KEY)
     if (held) return held
@@ -139,6 +156,37 @@ function tabId(): string | undefined {
     return minted
   } catch {
     return undefined
+  }
+}
+
+/**
+ * Which document was on screen, so a reload comes back to it rather than to whichever one the
+ * session store happens to list first.
+ *
+ * In `sessionStorage` beside the tab id and for its three properties — per tab, survives a
+ * reload, restored with the tab after a crash — and **synchronous**, which is the whole reason it
+ * is not simply a field on the session record. `loadAutosave` gives the boot its graph in the
+ * store's initialiser; this gives that graph its *identity* in the same tick, so the document the
+ * session store restores around it a moment later slots in beside an id that already exists
+ * rather than replacing one that was minted fresh.
+ *
+ * A duplicated tab copies this along with the tab id, exactly as it copies everything else in
+ * `sessionStorage`. That is harmless: session records are keyed by tab *and* document, and
+ * `watchTabIdentity` is what moves the tab half apart.
+ */
+export function loadActiveDocId(): string | undefined {
+  try {
+    return sessionStorage.getItem(ACTIVE_DOC_KEY) ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function saveActiveDocId(id: string): void {
+  try {
+    sessionStorage.setItem(ACTIVE_DOC_KEY, id)
+  } catch {
+    /* Private mode, or a suite under plain Node. A reload then starts on a fresh id. */
   }
 }
 
@@ -294,22 +342,33 @@ function pruneSlots(mine: string, mySize: number): SlotIndex {
  * of the last one touched silently owning both.
  *
  * The serialisation happens once and the string is written twice; it is by far the expensive
- * half.
+ * half. It is **returned**, so the session store can put the same string in IndexedDB without
+ * serialising a second time — and, more to the point, so the two copies of a document cannot be
+ * two different serialisations of it.
+ *
+ * **`compact`, unlike every other caller of `serializeGraph`.** The default two-space indentation
+ * is 34% of the output (measured on both an ordinary workflow and a 25,000-id selection —
+ * `scripts/probe-autosave-budget.ts`) and is worth exactly nothing in a storage slot: everything
+ * that reads this goes through `deserializeGraph`, which is `JSON.parse`. The paths where a human
+ * reads the file — `Download .coda.json`, the gist, the shelf — stay pretty. What the one function
+ * protects is that a format change lands in every path at once, and passing an option to it does
+ * not weaken that; byte-identity across paths was never a property anyway, since `serializeGraph`
+ * stamps a fresh wall-clock `modifiedAt` on every call.
  */
-export function saveAutosave(graph: CodaGraph): void {
-  const json = serializeGraph(graph)
+export function saveAutosave(graph: CodaGraph): string {
+  const json = serializeGraph(graph, { compact: true })
   // Quota, or a privacy mode that blocks storage. Losing the autosave is survivable; breaking
   // the editor over it is not.
   writeLocal(AUTOSAVE_KEY, json)
 
   const id = tabId()
-  if (!id) return
+  if (!id) return json
 
   // Prune *before* writing, or the save that overruns the budget is the one nothing made room
   // for.
   const index = pruneSlots(id, json.length)
   writeLocal(SLOT_INDEX_KEY, JSON.stringify(index))
-  if (writeLocal(slotKey(id), json)) return
+  if (writeLocal(slotKey(id), json)) return json
 
   // The slot was refused where the shared key was not — a graph over the remaining quota. Take
   // the claim back rather than leaving the index asserting bytes that do not exist. The shared
@@ -317,6 +376,7 @@ export function saveAutosave(graph: CodaGraph): void {
   delete index[id]
   removeLocal(slotKey(id))
   writeLocal(SLOT_INDEX_KEY, JSON.stringify(index))
+  return json
 }
 
 /**
@@ -327,12 +387,25 @@ export function saveAutosave(graph: CodaGraph): void {
  * `sessionStorage`, an evicted slot, and an autosave written by a build from before slots
  * existed all land on it, and every one of them gets exactly the behaviour this file had then.
  */
-export function loadAutosave(): { graph: CodaGraph; warnings: string[] } | undefined {
+export function loadAutosave():
+  { graph: CodaGraph; warnings: string[]; fromSlot: boolean } | undefined {
   const id = tabId()
-  const raw = (id ? readLocal(slotKey(id)) : undefined) ?? readLocal(AUTOSAVE_KEY)
+  const own = id ? readLocal(slotKey(id)) : undefined
+  const raw = own ?? readLocal(AUTOSAVE_KEY)
   if (!raw) return undefined
   try {
-    return deserializeGraph(raw)
+    /*
+     * **Which of the two answered is part of the answer**, and it is not bookkeeping.
+     *
+     * `false` means this tab's own slot was gone — evicted past `MAX_SLOTS`, or never written —
+     * and what came back is the most recent graph from *some* tab, which may be somebody else's
+     * work. That was a complete answer while a tab held one workflow. It is not one now: the
+     * session store may still hold this tab's own copy of the very document being restored, and
+     * without this flag the store would boot the right *set* of workflows around a foreign graph
+     * standing in for one of them. Measured in a browser with eight tabs open, which is the
+     * threshold: `['T0-A', 'T7-B']`, under T0's own document id. See `restoreSession`.
+     */
+    return { ...deserializeGraph(raw), fromSlot: own !== undefined }
   } catch {
     return undefined
   }
@@ -421,6 +494,15 @@ export interface PanelState {
    * is a fraction of an overlay and most of a dock somebody has dragged narrow.
    */
   style: boolean
+  /**
+   * The workflow switcher in the canvas's top-left corner.
+   *
+   * Defaults **open**, unlike the inspector and the minimap, and for `style`'s reason inverted:
+   * those two take a column or a corner from the canvas before anybody has asked for anything,
+   * where this is a single row naming the workflow you are looking at — and it is the only thing
+   * on screen that says a second one can be open at all. Collapsing it is one click, and sticks.
+   */
+  workflows: boolean
 }
 
 export const DEFAULT_PANELS: PanelState = {
@@ -428,6 +510,7 @@ export const DEFAULT_PANELS: PanelState = {
   minimap: false,
   assistant: false,
   style: true,
+  workflows: true,
 }
 
 export function loadPanels(): PanelState {
@@ -441,9 +524,10 @@ export function loadPanels(): PanelState {
       inspector: held.inspector === true,
       minimap: held.minimap === true,
       assistant: held.assistant === true,
-      // Note the inverted test: absent means open for this one, and a build written before
+      // Note the inverted test: absent means open for these two, and a build written before
       // the key existed must not read as "the user closed it".
       style: held.style !== false,
+      workflows: held.workflows !== false,
     }
   } catch {
     // Storage disabled, or a value written by an older build. Closed is the safe answer.

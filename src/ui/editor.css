@@ -4819,16 +4819,6 @@ p.sources__hint {
   color: var(--text-muted);
 }
 
-.wizard__confirm {
-  margin: 12px 0 0;
-  padding: 8px 10px;
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--text-primary);
-  background: var(--accent-soft);
-  border-radius: var(--radius-sm);
-}
-
 /*
  * The first-run guides dialog.
  *
@@ -4852,7 +4842,6 @@ p.sources__hint {
   line-height: 1.55;
   color: var(--text-secondary);
 }
-
 
 /* The step number, and the slot the checkmark takes over once the guide is finished. */
 .guides__mark {
@@ -4878,7 +4867,6 @@ p.sources__hint {
   color: var(--status-ok);
   font-size: 13px;
 }
-
 
 .guides__name {
   display: flex;
@@ -4906,14 +4894,12 @@ p.sources__hint {
   color: var(--text-secondary);
 }
 
-
 .guides__go {
   flex: none;
   font-size: 11px;
   font-weight: 600;
   color: var(--accent);
 }
-
 
 /*
  * `columns` rather than a grid, so the groups flow into whichever column has room. A grid would
@@ -5620,7 +5606,6 @@ p.sources__hint {
   overflow-wrap: anywhere;
 }
 
-
 /* --------------------------------------------------------------------------
  * Markdown
  * -------------------------------------------------------------------------- */
@@ -6185,33 +6170,6 @@ p.sources__hint {
   line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-
-.start-card__confirm {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 9px;
-  padding: 12px;
-  background: color-mix(in srgb, var(--surface-2) 94%, transparent);
-  backdrop-filter: blur(3px);
-}
-.start-card__confirm p {
-  margin: 0;
-  font-size: 11.5px;
-  line-height: 1.4;
-  color: var(--text-secondary);
-}
-.start-card__confirm div {
-  display: flex;
-  gap: 6px;
-}
-.start-card__confirm .btn {
-  height: 24px;
-  font-size: 11px;
 }
 
 /* --- footer -------------------------------------------------------------- */
@@ -8540,10 +8498,6 @@ details[open] > summary.tile__label {
   padding: 12px 0;
   background: var(--surface-2);
 }
-.zoo__confirm-text {
-  font-size: 11.5px;
-  color: var(--text-secondary);
-}
 .zoo__source-link {
   margin-left: auto;
   font-size: 11.5px;
@@ -8814,7 +8768,9 @@ details[open] > summary.tile__label {
 /* The chosen one wears a ring rather than a tick: a 16px circle has no room for a glyph. */
 .context-menu__swatch[data-current] {
   background: var(--swatch-color);
-  box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3.5px var(--swatch-color);
+  box-shadow:
+    0 0 0 2px var(--surface-1),
+    0 0 0 3.5px var(--swatch-color);
 }
 
 /*
@@ -9087,11 +9043,180 @@ details[open] > summary.tile__label {
   touch-action: none;
   z-index: 4;
   background:
-    linear-gradient(135deg, transparent 50%, var(--border-strong) 50%, var(--border-strong) 62%, transparent 62%),
-    linear-gradient(135deg, transparent 74%, var(--border-strong) 74%, var(--border-strong) 86%, transparent 86%);
+    linear-gradient(
+      135deg,
+      transparent 50%,
+      var(--border-strong) 50%,
+      var(--border-strong) 62%,
+      transparent 62%
+    ),
+    linear-gradient(
+      135deg,
+      transparent 74%,
+      var(--border-strong) 74%,
+      var(--border-strong) 86%,
+      transparent 86%
+    );
   border-bottom-right-radius: var(--radius);
   opacity: 0.6;
 }
 .dash-cell__resize:hover {
   opacity: 1;
+}
+
+/* --- the workflow switcher, top-left of the pane --------------------------- */
+
+/*
+ * A card rather than a row of browser-style tabs. Tabs across the top would be a shell element
+ * competing with the toolbar directly above them, and they scale badly in the direction this
+ * actually goes: a workflow's name is a sentence more often than a word, and four of them across
+ * a pane truncate to nothing. A list truncates one axis only.
+ *
+ * `max-width` rather than a fixed width so a single short name takes a short box — the collapsed
+ * state has to read as a label, not as an empty panel.
+ */
+.wf-tabs {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-node);
+  padding: 3px;
+  min-width: 132px;
+  max-width: 232px;
+  font-size: 11.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wf-tabs__header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 3px 5px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+.wf-tabs__header:hover {
+  background: var(--surface-hover);
+}
+
+/* Rotated rather than swapped for a second glyph, so the state reads as one control moving. */
+.wf-tabs__chevron {
+  flex: none;
+  transition: transform 120ms ease;
+}
+.wf-tabs__chevron[data-open] {
+  transform: rotate(90deg);
+}
+
+.wf-tabs__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* Only drawn past one document, where it is the whole reason to open the list. */
+.wf-tabs__count {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.wf-tabs__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-top: 1px solid var(--border);
+  padding-top: 3px;
+}
+
+.wf-tabs__row {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+}
+.wf-tabs__row:hover {
+  background: var(--surface-hover);
+}
+.wf-tabs__row[data-active] {
+  background: var(--accent-soft);
+}
+
+.wf-tabs__pick {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 4px 3px 7px;
+  background: none;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wf-tabs__row[data-active] .wf-tabs__pick {
+  color: var(--text-primary);
+}
+
+/*
+ * Always occupying its slot rather than appearing on hover: a row that grows a button under the
+ * cursor moves the name out from under the click that was already on its way.
+ */
+.wf-tabs__close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  margin-right: 3px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.55;
+}
+.wf-tabs__close:hover {
+  background: var(--surface-active);
+  color: var(--text-primary);
+  opacity: 1;
+}
+
+.wf-tabs__new {
+  padding: 3px 7px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+.wf-tabs__new:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* The header is a label rather than the active name once the list carries the name itself. */
+.wf-tabs__title[data-generic] {
+  color: var(--text-secondary);
+  font-weight: 400;
 }

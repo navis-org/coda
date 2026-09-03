@@ -31,7 +31,6 @@ import lmbDark from '../logos/lmb-dark.png?url'
 import lmbLight from '../logos/lmb-light.png?url'
 import { datasetGlyph } from '../nodes/DatasetPreview'
 import { nodeGlyph } from './NodeThumbnail'
-import { REPLACE_GRAPH_QUESTION } from '../replaceConfirm'
 import type { DatasetCard, StartCard, WorkflowCard } from './startCards'
 import { DOOR_CARDS, datasetCards, isDoor, workflowCards } from './startCards'
 import { GlyphSvg, doorGlyph } from './startGlyphs'
@@ -73,7 +72,6 @@ const OVERVIEW_URL = `${import.meta.env.BASE_URL}overview.html`
  */
 const ANALYTICS_URL = 'https://coda-science.goatcounter.com/'
 
-
 export function StartPage() {
   /*
    * `'welcome'` rather than `startPageOpen`: on the first visit the sequence is open and it is
@@ -91,11 +89,7 @@ export function StartPage() {
   const openFromLibrary = useGraphStore((s) => s.openFromLibrary)
   const library = useGraphStore((s) => s.library)
   const refreshLibrary = useGraphStore((s) => s.refreshLibrary)
-  // A primitive, so the snapshot identity check is satisfied — see invariant 7.
-  const hasWork = useGraphStore((s) => s.graph.nodes.length > 0)
 
-  /** Card awaiting a "replace the current graph?" answer, if any. */
-  const [confirming, setConfirming] = useState<string | undefined>(undefined)
   const closeRef = useRef<HTMLButtonElement>(null)
 
   const datasets = useMemo(() => datasetCards(), [])
@@ -103,7 +97,6 @@ export function StartPage() {
 
   useEffect(() => {
     if (!open) return
-    setConfirming(undefined)
     closeRef.current?.focus()
     // Read the shelf when the page opens rather than at store load: someone who has never
     // saved anything should not pay an IndexedDB open for a rail they will never see.
@@ -154,13 +147,12 @@ export function StartPage() {
       void startTour(card.tour)
       return
     }
-    if (hasWork && confirming !== card.id) {
-      setConfirming(card.id)
-      return
-    }
+    /*
+     * No confirmation: both routes below open into a document of their own, so the card takes
+     * nothing away from whatever is already on the canvas.
+     */
     if (card.kind === 'workflow') void openFromLibrary(card.id)
     else loadStarter(card.starter)
-    setConfirming(undefined)
     closeStartPage()
   }
 
@@ -211,8 +203,10 @@ export function StartPage() {
               <span className="start__version">v{__APP_VERSION__}</span>
             </div>
             <p className="start__lede">
-              Next-Generation <strong style={{ color: '#ffffff' }}>Co</strong>nnectome <strong style={{ color: '#ffffff' }}>D</strong>ata <strong style={{ color: '#ffffff' }}>A</strong>nalysis.{' '}
-              Build a workflow out of nodes, wire them up, and inspect the results.
+              Next-Generation <strong style={{ color: '#ffffff' }}>Co</strong>nnectome{' '}
+              <strong style={{ color: '#ffffff' }}>D</strong>ata{' '}
+              <strong style={{ color: '#ffffff' }}>A</strong>nalysis. Build a workflow out of
+              nodes, wire them up, and inspect the results.
             </p>
             <p className="start__stage">
               Coda is in beta. Expect the odd rough edge. Feedback & feature requests are very
@@ -231,9 +225,7 @@ export function StartPage() {
               label="Your workflows"
               note="saved in this browser · not synced, and cleared with the site data"
               cards={workflows}
-              confirming={confirming}
               onPick={pick}
-              onCancel={() => setConfirming(undefined)}
             />
           )}
 
@@ -247,18 +239,14 @@ export function StartPage() {
             label="Start & learn"
             note="the wizard builds a graph to your question · tours run in place · the Zoo fetches what others shared"
             cards={DOOR_CARDS}
-            confirming={confirming}
             onPick={pick}
-            onCancel={() => setConfirming(undefined)}
           />
 
           <Deck
             label="Preconfigured Datasets"
             note="real data · add credentials under Connections, the branch icon in the toolbar"
             cards={datasets}
-            confirming={confirming}
             onPick={pick}
-            onCancel={() => setConfirming(undefined)}
           />
         </div>
 
@@ -327,7 +315,7 @@ export function StartPage() {
                 <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
                   github.com/navis-org/coda
                 </a>
-                <br/>
+                <br />
                 <button
                   type="button"
                   className="start__link-button"
@@ -426,9 +414,7 @@ interface DeckProps {
   label: string
   note: string
   cards: StartCard[]
-  confirming: string | undefined
   onPick: (card: StartCard) => void
-  onCancel: () => void
 }
 
 /**
@@ -438,7 +424,7 @@ interface DeckProps {
  * dead controls. Left/right walk the row because a rail that can only be reached by tabbing
  * through every card is a rail a keyboard user will not use.
  */
-function Deck({ label, note, cards, confirming, onPick, onCancel }: DeckProps) {
+function Deck({ label, note, cards, onPick }: DeckProps) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [scroll, setScroll] = useState({ overflows: false, atStart: true, atEnd: false })
 
@@ -503,13 +489,7 @@ function Deck({ label, note, cards, confirming, onPick, onCancel }: DeckProps) {
         )}
         <div className="start__track" ref={trackRef} onKeyDown={onKeyDown}>
           {cards.map((card) => (
-            <Card
-              key={card.id}
-              card={card}
-              confirming={confirming === card.id}
-              onPick={onPick}
-              onCancel={onCancel}
-            />
+            <Card key={card.id} card={card} onPick={onPick} />
           ))}
         </div>
         {scroll.overflows && !scroll.atEnd && (
@@ -530,12 +510,10 @@ function Deck({ label, note, cards, confirming, onPick, onCancel }: DeckProps) {
 
 interface CardProps {
   card: StartCard
-  confirming: boolean
   onPick: (card: StartCard) => void
-  onCancel: () => void
 }
 
-function Card({ card, confirming, onPick, onCancel }: CardProps) {
+function Card({ card, onPick }: CardProps) {
   /*
    * A door takes the accent rather than a category tint: it stands for a surface, not for a kind
    * of node, and there is no category that would not be a claim about what is behind it. It is
@@ -549,8 +527,6 @@ function Card({ card, confirming, onPick, onCancel }: CardProps) {
 
   return (
     <div className="start-card" style={{ ['--tint' as string]: tint }}>
-      {/* A separate element from the card so the confirm buttons are siblings rather than
-          buttons nested inside a button. */}
       <button type="button" className="start-card__main" onClick={() => onPick(card)}>
         <span className="start-card__tile">
           <CardTile card={card} />
@@ -560,20 +536,6 @@ function Card({ card, confirming, onPick, onCancel }: CardProps) {
           <span className="start-card__blurb">{card.blurb}</span>
         </span>
       </button>
-
-      {confirming && (
-        <div className="start-card__confirm">
-          <p>{REPLACE_GRAPH_QUESTION}</p>
-          <div>
-            <button type="button" className="btn btn--primary" onClick={() => onPick(card)}>
-              Replace
-            </button>
-            <button type="button" className="btn" onClick={onCancel}>
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -591,14 +553,18 @@ function CardTile({ card }: { card: StartCard }) {
     )
   }
   if (card.kind === 'dataset') {
-    return <GlyphSvg className="start-card__glyph" viewBox="0 0 52 46">{datasetGlyph((card as DatasetCard).glyph)}</GlyphSvg>
+    return (
+      <GlyphSvg className="start-card__glyph" viewBox="0 0 52 46">
+        {datasetGlyph((card as DatasetCard).glyph)}
+      </GlyphSvg>
+    )
   }
   // A saved workflow stands for a graph, so it takes the art of its own terminal viewer node —
   // the same drawing that node wears on the canvas.
   const graphCard = card as WorkflowCard
   return (
-    <GlyphSvg className="start-card__glyph" viewBox="0 0 24 24">{nodeGlyph(graphCard.nodeType, graphCard.category)}</GlyphSvg>
+    <GlyphSvg className="start-card__glyph" viewBox="0 0 24 24">
+      {nodeGlyph(graphCard.nodeType, graphCard.category)}
+    </GlyphSvg>
   )
 }
-
-

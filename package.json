@@ -17,6 +17,7 @@
     "probe:nblast": "node scripts/probe-nblast.mjs",
     "probe:netexport": "vite-node scripts/probe-network-export.ts && python3 scripts/probe-network-export.py && Rscript scripts/probe-network-export.R",
     "probe:influence": "vite-node scripts/probe-influence.ts /tmp/coda-influence-probe.json && python3 scripts/probe-influence.py /tmp/coda-influence-probe.json",
+    "probe:autosave-budget": "vite-node scripts/probe-autosave-budget.ts",
     "probe:linkage": "node scripts/probe-linkage.mjs",
     "probe:heatmap-order": "python3 scripts/probe-heatmap-order.py",
     "probe:transform": "node scripts/probe-transform.mjs",

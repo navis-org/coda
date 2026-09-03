@@ -211,11 +211,15 @@ describe('workflow library', () => {
       expect(card?.querySelector('.start-card__glyph')).toBeTruthy()
     })
 
-    it('asks before replacing a graph that has work in it', async () => {
+    // Was "asks before replacing a graph that has work in it". A shelf entry now opens in a
+    // document of its own, on the same route the example cards take — nothing is replaced, so
+    // what is asserted is that the graph already on the canvas is still open beside it.
+    it('opens beside a graph that has work in it', async () => {
       await saveWorkflow({ ...useGraphStore.getState().graph, meta: { name: 'Shelf copy' } })
       act(() => {
         useGraphStore.getState().openStartPage()
       })
+      const mine = useGraphStore.getState().activeTabId
       render(<App />)
 
       const dialog = await screen.findByRole('dialog')
@@ -223,9 +227,9 @@ describe('workflow library', () => {
         expect(within(dialog).getByText('Shelf copy')).toBeTruthy()
       })
       fireEvent.click(within(dialog).getByText('Shelf copy'))
-      // Loading clears the undo history, so the same confirm the example cards get applies.
-      expect(within(dialog).getByText(/Replace the current graph\?/)).toBeTruthy()
-      expect(useGraphStore.getState().startPageOpen).toBe(true)
+      expect(within(dialog).queryByText(/Replace the current graph\?/)).toBeNull()
+      await waitFor(() => expect(useGraphStore.getState().tabs).toHaveLength(2))
+      expect(useGraphStore.getState().activeTabId).not.toBe(mine)
     })
   })
 })

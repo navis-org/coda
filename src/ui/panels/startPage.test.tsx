@@ -23,6 +23,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { demoWorkflow } from '../../wizard/build'
 import { loadStartPageDismissed } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
+import { resetDocuments } from '../../test/storeReset'
 import { StartPage } from './StartPage'
 import { buildCommandItems } from './paletteItems'
 import { DOOR_CARDS, WIZARD_CARD, ZOO_CARD, datasetCards } from './startCards'
@@ -73,7 +74,7 @@ beforeEach(() => {
       // without this the next case renders with a dialog nobody in it asked for.
       wizardOpen: false,
     })
-    useGraphStore.getState().newGraph()
+    resetDocuments()
   })
 })
 
@@ -408,39 +409,44 @@ describe('Start page', () => {
       expect(useGraphStore.getState().startPageOpen).toBe(false)
     })
 
-    it('asks before replacing a graph that has nodes', () => {
+    /*
+     * Both of these used to be about the "replace the current graph?" prompt. A starter now
+     * opens in a document of its own, so the prompt is gone and what is worth asserting is what
+     * it was protecting: the graph that was on the canvas is still open, one switch away.
+     */
+    it('opens beside a graph that has nodes rather than replacing it', () => {
       act(() => {
         useGraphStore.getState().loadGraph(demoWorkflow('partners'))
         useGraphStore.getState().openStartPage()
       })
+      const mine = useGraphStore.getState().activeTabId
       render(<StartPage />)
 
       fireEvent.click(card('Hemibrain'))
-      expect(screen.getByText(/Replace the current graph/)).toBeTruthy()
-      // Nothing has happened yet — the question is the whole point.
-      expect(useGraphStore.getState().graph.nodes.some((n) => n.id === 'conn')).toBe(true)
-      expect(useGraphStore.getState().startPageOpen).toBe(true)
-
-      fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
+      expect(screen.queryByText(/Replace the current graph/)).toBeNull()
       expect(useGraphStore.getState().graph.nodes.map((n) => n.type)).toContain(
         'dataset.hemibrain',
       )
       expect(useGraphStore.getState().startPageOpen).toBe(false)
+
+      const { tabs, activeTabId, switchDocument } = useGraphStore.getState()
+      expect(tabs).toHaveLength(2)
+      expect(activeTabId).not.toBe(mine)
+      act(() => switchDocument(mine))
+      expect(useGraphStore.getState().graph.nodes.some((n) => n.id === 'conn')).toBe(true)
     })
 
-    it('cancel leaves the graph and the page alone', () => {
-      act(() => {
-        useGraphStore.getState().loadGraph(demoWorkflow('partners'))
-        useGraphStore.getState().openStartPage()
-      })
+    it('reuses a blank untouched canvas rather than stranding an empty document beside it', () => {
+      act(() => useGraphStore.getState().openStartPage())
+      const mine = useGraphStore.getState().activeTabId
       render(<StartPage />)
 
       fireEvent.click(card('Hemibrain'))
-      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
-      expect(screen.queryByText(/Replace the current graph/)).toBeNull()
-      expect(useGraphStore.getState().graph.nodes.some((n) => n.id === 'conn')).toBe(true)
-      expect(useGraphStore.getState().startPageOpen).toBe(true)
+      // The common case, and the reason `beginDocument` asks about the history rather than
+      // only about the nodes: a fresh visit must not end up with an empty tab it never asked for.
+      expect(useGraphStore.getState().tabs).toHaveLength(1)
+      expect(useGraphStore.getState().activeTabId).toBe(mine)
     })
   })
 

@@ -19,6 +19,7 @@ import type { WorkflowSummary } from '../../store/library'
 import { findByName } from '../../store/library'
 import { useErrorCount, useGraphStore, useStaleCount } from '../../store/graphStore'
 import { pickGraphFile } from '../../store/persistence'
+import { graphName } from '../../core/graph'
 import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
 import { formatAgo, plural } from '../format'
 import { lockedTitle } from '../lockCopy'
@@ -51,7 +52,7 @@ export function Toolbar() {
   const setTheme = useGraphStore((s) => s.setTheme)
   const clearResults = useGraphStore((s) => s.clearResults)
   const setGraphName = useGraphStore((s) => s.setGraphName)
-  const newGraph = useGraphStore((s) => s.newGraph)
+  const newWorkflow = useGraphStore((s) => s.newWorkflow)
   const openWizard = useGraphStore((s) => s.openWizard)
   const openZoo = useGraphStore((s) => s.openZoo)
   const refreshLibrary = useGraphStore((s) => s.refreshLibrary)
@@ -122,7 +123,7 @@ export function Toolbar() {
         {(close) => (
           <NewMenu
             onEmpty={() => {
-              newGraph()
+              newWorkflow()
               close()
             }}
             onDataset={(spec) => {
@@ -821,7 +822,7 @@ function OpenMenu({ close }: { close: () => void }) {
   const library = useGraphStore((s) => s.library)
   const loaded = useGraphStore((s) => s.libraryLoaded)
   const openFromLibrary = useGraphStore((s) => s.openFromLibrary)
-  const loadGraph = useGraphStore((s) => s.loadGraph)
+  const openDocument = useGraphStore((s) => s.openDocument)
 
   return (
     <>
@@ -852,7 +853,7 @@ function OpenMenu({ close }: { close: () => void }) {
           onClick={async () => {
             close()
             const result = await pickGraphFile()
-            if (result) loadGraph(result.graph, result.warnings)
+            if (result) openDocument(result.graph, result.warnings)
           }}
         >
           <strong>Open a .coda.json file…</strong>
@@ -989,7 +990,7 @@ function SaveMenu({ close }: { close: () => void }) {
   useExportWarnings()
   useEffect(() => requestExportWarnings(graph), [graph])
 
-  const name = (graph.meta?.name ?? '').trim() || 'Untitled'
+  const name = graphName(graph)
   const conflict = findByName(library, name)
 
   const save = () => {

@@ -21,8 +21,8 @@ import type { ZooEntry } from '../../data/zoo/format'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
 import { demoWorkflow } from '../../wizard/build'
-import { REPLACE_GRAPH_QUESTION } from '../replaceConfirm'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
+import { resetDocuments } from '../../test/storeReset'
 import { ZooBrowser } from './ZooBrowser'
 
 beforeAll(() => {
@@ -33,7 +33,7 @@ beforeAll(() => {
 beforeEach(() => {
   clearStorage()
   resetCache()
-  act(() => useGraphStore.getState().newGraph())
+  act(() => resetDocuments())
 })
 
 afterEach(() => {
@@ -207,19 +207,29 @@ describe('opening one', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  it('asks before replacing work already there', async () => {
+  /*
+   * This used to ask "replace the current graph?" and wait. A Zoo workflow now opens in a
+   * document of its own, so there is nothing to replace and nothing to ask — the assertion that
+   * matters is that the work already on the canvas is still open beside it, which is the whole
+   * of what the question was protecting.
+   */
+  it('opens beside work already there rather than replacing it', async () => {
     zoo()
     act(() => useGraphStore.getState().loadGraph(demoWorkflow('partners')))
     const before = useGraphStore.getState().graph.nodes.length
+    const mine = useGraphStore.getState().activeTabId
     open()
     await listed('LC circuit network')
 
     fireEvent.click(screen.getByRole('button', { name: 'Open on the canvas' }))
-    expect(screen.getByText(REPLACE_GRAPH_QUESTION)).toBeTruthy()
-    expect(useGraphStore.getState().graph.nodes).toHaveLength(before)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Replace' }))
     await waitFor(() => expect(useGraphStore.getState().graph.nodes).toHaveLength(3))
+
+    const { tabs, activeTabId, switchDocument } = useGraphStore.getState()
+    expect(tabs).toHaveLength(2)
+    expect(activeTabId).not.toBe(mine)
+    // And the graph it opened over is intact, undo stack and all, one switch away.
+    act(() => switchDocument(mine))
+    expect(useGraphStore.getState().graph.nodes).toHaveLength(before)
   })
 
   it('keeps the canvas when the fetch fails, and says why', async () => {

@@ -22,7 +22,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { encodeShareFragment, isLocalOrigin, shareUrl } from '../../data/share/fragment'
 import { GIST_EXTENSION, createGist, githubLogin, updateGist } from '../../data/share/gist'
 import { getGithubToken } from '../../data/share/credentials'
-import { serializeGraph } from '../../core/graph'
+import { graphName, serializeGraph } from '../../core/graph'
 import { errorMessage } from '../../core/errors'
 import { useGraphStore } from '../../store/graphStore'
 import { LONG_LINK_CHARS, shareAdvisories } from '../shareAdvisories'
@@ -80,7 +80,7 @@ function Dialog({ onClose }: { onClose: () => void }) {
   // sixth hand-rolled `keydown` listener. Without it this dialog had no Escape at all.
   useDismissOnOutside(panelRef, onClose, { onEscape: true })
 
-  const name = (graph.meta?.name ?? '').trim() || 'Untitled'
+  const name = graphName(graph)
   const stored = graph.meta?.gist
   const hasToken = Boolean(getGithubToken())
 

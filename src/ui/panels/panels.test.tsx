@@ -309,17 +309,27 @@ describe('the stored preference', () => {
       inspector: false,
       minimap: false,
       assistant: false,
+      // The two whose absence means *open* — see `PanelState`. A build predating either key
+      // must not read as "the user closed it".
       style: true,
+      workflows: true,
     })
   })
 
   it('round-trips', () => {
-    savePanels({ inspector: true, minimap: false, assistant: true, style: false })
+    savePanels({
+      inspector: true,
+      minimap: false,
+      assistant: true,
+      style: false,
+      workflows: false,
+    })
     expect(loadPanels()).toEqual({
       inspector: true,
       minimap: false,
       assistant: true,
       style: false,
+      workflows: false,
     })
   })
 

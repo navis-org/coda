@@ -1,10 +1,13 @@
 /**
  * Opening a workflow somebody sent you — everything the receiver sees.
  *
- * `useShareLink` does the reading and the fetching; this is the four things it can have to say.
- * Three of them are transient and one is a question, and the question is the reason this is a
- * component rather than a line in the status bar: `loadGraph` resets the undo history, and the
- * autosave is the only copy of whatever is on the canvas.
+ * `useShareLink` does the reading and the fetching; this is the three things it can have to say.
+ * Two of them are transient and one is a question — *fetch from this host?*, asked only for a
+ * bare `https://` link whose destination the recipient cannot see, which is the reason this is a
+ * component rather than a line in the status bar.
+ *
+ * It used to have a fourth state and a second question, *replace what is on your canvas?*. A link
+ * now opens in a document of its own, so there is nothing to replace; see `useShareLink`.
  *
  * Nothing is rendered at all on the common path — a fresh tab following a gist link answers no
  * questions and sees only the "opening" note for as long as the fetch takes.
@@ -12,7 +15,6 @@
 
 import { useRef } from 'react'
 
-import { plural } from '../format'
 import { useDismissOnOutside } from '../useDismiss'
 import { useShareLink } from '../useShareLink'
 
@@ -77,30 +79,6 @@ export function SharedLinkGate() {
               </button>
               <button type="button" className="btn" onClick={dismiss}>
                 Cancel
-              </button>
-            </div>
-          </>
-        ) : null}
-
-        {load.state === 'confirm-replace' ? (
-          <>
-            <h2>Open “{load.name}”?</h2>
-            <p>
-              This replaces the graph on your canvas, and undo will not bring it back. Save it
-              first if you want to keep it.
-            </p>
-            {load.result.warnings.length > 0 ? (
-              <p className="share-gate__quiet">
-                {plural(load.result.warnings.length, 'warning')} on load:{' '}
-                {load.result.warnings.join(' · ')}
-              </p>
-            ) : null}
-            <div className="share-gate__actions">
-              <button type="button" className="btn btn--primary" onClick={accept}>
-                Open it
-              </button>
-              <button type="button" className="btn" onClick={dismiss}>
-                Keep what I have
               </button>
             </div>
           </>

@@ -123,7 +123,7 @@ beforeEach(() => {
     past: [],
     future: [],
     selection: [],
-    panels: { inspector: false, minimap: false, assistant: true, style: true },
+    panels: { inspector: false, minimap: false, assistant: true, style: true, workflows: true },
   })
 })
 

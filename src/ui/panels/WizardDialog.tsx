@@ -35,7 +35,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useGraphStore } from '../../store/graphStore'
-import { REPLACE_GRAPH_QUESTION, useReplaceConfirm } from '../replaceConfirm'
 import { useDismissOnOutside } from '../useDismiss'
 import { datasetGlyph } from '../nodes/DatasetPreview'
 import { BACKENDS } from '../../nodes/lib/datasetFamilies'
@@ -65,7 +64,7 @@ const QUESTIONS = 4
 
 function Dialog() {
   const close = useGraphStore((s) => s.closeWizard)
-  const loadGraph = useGraphStore((s) => s.loadGraph)
+  const openDocument = useGraphStore((s) => s.openDocument)
   const notes = useGraphStore((s) => s.wizardNotes)
   const setNotes = useGraphStore((s) => s.setWizardNotes)
   const dashboard = useGraphStore((s) => s.wizardDashboard)
@@ -90,10 +89,6 @@ function Dialog() {
 
   const panelRef = useRef<HTMLDivElement>(null)
   useDismissOnOutside(panelRef, close, { onEscape: true })
-  // The shared guard and the shared wording — see `replaceConfirm.ts`, which exists because
-  // three surfaces had each written the question themselves.
-  const replace = useReplaceConfirm()
-
   const starts = useMemo(() => startOptions(dataset), [dataset])
   const analyses = useMemo(() => analysisOptions(dataset), [dataset])
 
@@ -176,13 +171,14 @@ function Dialog() {
     [dataset, start, analysis, viewKey, notes, dashboard],
   )
 
-  const create = () => replace.ask('wizard', () => {
-    loadGraph(graph)
+  // Nothing is asked first: a generated workflow opens in a document of its own, so whatever was
+  // on the canvas is still open beside it. This used to arm a replace-confirm on the summary.
+  const create = () => {
+    openDocument(graph)
     close()
-  })
+  }
 
   const back = () => {
-    replace.cancel()
     if (step === 0) close()
     else setStep(step - 1)
   }
@@ -253,7 +249,10 @@ function Dialog() {
           )}
 
           {step === 2 && (
-            <Question title="What do you want to know or do?" hint="The question the workflow is supposed to answer.">
+            <Question
+              title="What do you want to know or do?"
+              hint="The question the workflow is supposed to answer."
+            >
               {analyses.map((option) => (
                 <Option
                   key={option.id}
@@ -291,7 +290,6 @@ function Dialog() {
               onNotes={setNotes}
               dashboard={dashboard}
               onDashboard={setDashboard}
-              confirming={replace.confirming !== undefined}
             />
           )}
         </div>
@@ -306,13 +304,17 @@ function Dialog() {
           </button>
           {/* The multi-select question is the one that cannot advance on a click — see `pick`. */}
           {step === QUESTIONS - 1 && (
-            <button type="button" className="btn btn--primary" onClick={() => setStep(QUESTIONS)}>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => setStep(QUESTIONS)}
+            >
               Continue
             </button>
           )}
           {step === QUESTIONS && (
             <button type="button" className="btn btn--primary" onClick={create}>
-              {replace.confirming ? 'Replace the graph' : 'Create workflow'}
+              Create workflow
             </button>
           )}
         </div>
@@ -385,7 +387,12 @@ function Option({
             {label}
             {/* A real space, not a margin: the margin is what the eye reads, and the space is
                 what a screen reader and a copy-paste read. */}
-            {where ? <> <span className="wizard__where">({where})</span></> : null}
+            {where ? (
+              <>
+                {' '}
+                <span className="wizard__where">({where})</span>
+              </>
+            ) : null}
           </span>
           <span className="wizard__blurb">{blurb}</span>
         </span>
@@ -415,14 +422,12 @@ function Summary({
   onNotes,
   dashboard,
   onDashboard,
-  confirming,
 }: {
   graph: CodaGraph
   notes: boolean
   onNotes: (enabled: boolean) => void
   dashboard: boolean
   onDashboard: (enabled: boolean) => void
-  confirming: boolean
 }) {
   const chain = useMemo(
     () =>
@@ -486,8 +491,6 @@ function Summary({
           </em>
         </span>
       </label>
-
-      {confirming && <p className="wizard__confirm">{REPLACE_GRAPH_QUESTION}</p>}
     </section>
   )
 }
