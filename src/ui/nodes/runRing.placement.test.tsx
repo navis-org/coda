@@ -47,18 +47,31 @@ describe('run outline placement', () => {
     // does the act() wrapping, so this must not be wrapped again here.
     const running = useGraphStore.getState().runAll()
 
-    const ring = await waitFor(() => {
+    /*
+     * Read *inside* the callback, and assert on the readings afterwards. `waitFor` resolves
+     * from within an `act()` that flushes on the way out, so a ring found on the last poll
+     * before the run settles is detached by the time an assertion outside can look at it —
+     * and a detached element answers `null` to both `closest` and `parentElement`, which
+     * reads as the ring having moved back inside the card. That fails on a slow machine
+     * (it did, on CI) and passes on every fast one. Nothing here is about timing, so the
+     * facts are taken while the element is still in the document.
+     */
+    const seen = await waitFor(() => {
       const found = document.querySelector('.coda-node__ring')
       if (!found) throw new Error('no ring while running')
-      return found
+      return {
+        card: found.closest('.coda-node'),
+        inWrapper: found.parentElement?.classList.contains('react-flow__node'),
+        mode: found.getAttribute('data-mode'),
+      }
     })
 
     // The load-bearing assertion: not a descendant of the clipping card.
-    expect(ring.closest('.coda-node')).toBeNull()
+    expect(seen.card).toBeNull()
     // And it does live inside React Flow's wrapper, which is the positioned ancestor the
     // negative inset resolves against.
-    expect(ring.parentElement?.classList.contains('react-flow__node')).toBe(true)
-    expect(ring.getAttribute('data-mode')).toMatch(/progress|indeterminate/)
+    expect(seen.inWrapper).toBe(true)
+    expect(seen.mode).toMatch(/progress|indeterminate/)
 
     await running
   })
