@@ -1168,6 +1168,18 @@ export function everythingGraph(): CodaGraph {
       col: 13,
       params: { filename: 'partners', format: 'csv' },
     },
+    /*
+     * Deliberately **not** on its defaults. A separator and a quote are what the two emitters
+     * write into the joined line, and a fixture sitting on `newline` + unquoted would compare
+     * the one combination whose Python is a bare `join` — the branch that cannot be wrong.
+     */
+    {
+      id: 'copyIds',
+      type: 'out.copyIds',
+      col: 13,
+      row: 1,
+      params: { separator: 'commaSpace', quoted: true },
+    },
 
     {
       id: 'note',
@@ -1294,6 +1306,7 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'unpivot', 'in'],
     ['pivot', 'table', 'unpivotWide', 'in'],
     ['table', 'out', 'dl', 'in'],
+    ['find', 'neurons', 'copyIds', 'neurons'],
 
     ['group', 'out', 'bar', 'in'],
     ['group', 'out', 'pie', 'in'],

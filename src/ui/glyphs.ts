@@ -766,6 +766,16 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M12 4v9.4M8.6 10 12 13.4 15.4 10' }],
     ['path', { d: 'M4.6 15.4V18a1.5 1.5 0 0 0 1.5 1.5h11.8A1.5 1.5 0 0 0 19.4 18v-2.6' }],
   ],
+  // A clipboard with a list of ids on it. Its sibling in this pair is Download's tray, and the
+  // two are drawn as *destinations* rather than as actions for that reason: both nodes are taps
+  // that pass their input on, so what distinguishes them is where the copy of it ends up. The
+  // rows inside are `neuron.inputIds`' rows at the same pitch, which is what says the material
+  // is a list of ids and not a table.
+  'out.copyIds': [
+    ['rect', { x: '5.4', y: '5.6', width: '13.2', height: '13.9', rx: '1.6' }],
+    ['rect', { x: '9.2', y: '3.4', width: '5.6', height: '3.6', rx: '1.2' }],
+    ['path', { d: 'M8.6 11.6h6.8M8.6 15h4.6' }],
+  ],
 
   // --- Kept as they are ---------------------------------------------------------------
   // The ten drawings already in NODE_GLYPHS, reproduced here so the sheet is the whole set.

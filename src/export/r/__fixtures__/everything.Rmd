@@ -1474,6 +1474,18 @@ unpivot <- unpivot |>
   filter(!is.na(`synapses`), `synapses` != "")
 ```
 
+```{r copy-ids}
+# ── Copy IDs ──
+copy_ids <- find_neurons
+copy_ids_vec <- as.character(copy_ids$neuronId)
+copy_ids_vec <- unique(copy_ids_vec)
+copy_ids_vec <- paste0('"', copy_ids_vec, '"')
+# NOTE: In Coda this button puts the ids on the clipboard. A document has
+# none, so they are printed here — copy them from the output, or use the
+# vector directly.
+writeLines(paste(copy_ids_vec, collapse = ", "))
+```
+
 ```{r histogram}
 # ── Histogram ──
 histogram_out <- find_neurons

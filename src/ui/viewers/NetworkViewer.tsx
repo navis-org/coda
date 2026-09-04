@@ -26,6 +26,7 @@ import type { NetworkValue } from '../../core/values'
 import { getColumn } from '../../core/values'
 import type { ColorSpec, ShapeSpec, SizeSpec } from '../../nodes/lib/encodingParams'
 import { writeOverrides } from '../../nodes/lib/encodingParams'
+import { joinIds } from '../../nodes/lib/copyIds'
 import type { Mode } from '../colors'
 import { CHART_INK, chartSurface, currentMode, withAlpha } from '../colors'
 import type { MarkerShape, ResolvedColor, ResolvedShape, ResolvedSize } from '../encoding'
@@ -1588,7 +1589,7 @@ export function NetworkViewer({
             // into a segmentation viewer should not depend on which node they clicked first.
             const ids =
               menu.seeds.length > 0 ? orderByNode(network, new Set(menu.seeds)) : nodeIds
-            void copyText(ids.join('\n')).catch((error) =>
+            void copyText(joinIds(ids)).catch((error) =>
               onErrorRef.current?.(errorMessage(error)),
             )
           }}

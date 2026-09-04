@@ -1774,6 +1774,62 @@ input is the point. `any` on an input means "I accept whatever you have", which 
 was given": a pass-through cannot _originate_ a Dataset, so offering it when dragging back from a
 Dataset socket answers the question with a node that needs the same question asked again behind it.
 
+## Copy IDs: the second side effect, and the one that cannot ride a run
+
+`out.copyIds`, `Add ▸ Utility ▸ Copy IDs`. Takes **Neurons**, passes them straight through, and
+puts their ids on the clipboard when the card's button is pressed. Download's shape, because the
+constraints are Download's — `evaluate` does not copy (`src/nodes` is headless, and a cache hit
+means it never runs at all), the write lives in the UI, and the card is a body rather than param
+rows because the two things worth saying — *how many ids* and *whether a press would do anything*
+— are decided from the **value**, which `validate` never sees.
+
+Three places it departs from Download, each because the destination differs:
+
+- **There is no `On run`, and the omission is the design.** A file can be written whenever the
+  graph runs; a clipboard write cannot. Every engine but Chrome refuses `clipboard.writeText`
+  outside a user gesture, so a run-triggered copy would work on one browser and fail on the
+  others — and the failure is *silent in the worst direction*: the clipboard still holds whatever
+  was there before, so the paste succeeds, with the wrong ids in it. The button is the only
+  trigger.
+- **`cheap`, where Download is `expensive`.** Download's cost is a safety property: it writes on
+  run, and `cheap` would have it write a file per keystroke. Nothing here fires off a run at all,
+  so the only thing cost decides is whether a node *downstream* of this tap gets its value without
+  a Run — and a pass-through that made a chain need a Run it did not need before would be a tax
+  charged for dropping a copy button onto it.
+- **A `Neurons` port, not `any`.** Download takes anything because it writes the value; this node
+  reads one column out of it. The question that settled it is the same one the `any`-output rule
+  above asks: an `any` input here would advertise that a Network or a set of Skeletons could feed
+  it, and neither has ids to copy.
+
+The three settings — `Separator`, `Deduplicate`, `Quote ids` — are all `presentational` in the
+strict sense invariant 4 requires: `evaluate` returns its input unchanged whatever they say, so
+they decide the *text* and never the value. Leaving them in the provenance key would make changing
+a comma re-run the node and invalidate everything below it, which on a chain fed by a connectome
+query is minutes of refetching.
+
+**The separator vocabulary and the joining rule are one table** (`nodes/lib/copyIds.ts`), and
+**every reader comes through `copyIdsSettings`** — the node for its enum options, the card for its
+button, and both exporters for the text they emit. That is `heatmapPaletteOf`'s arrangement, which
+sits two imports away in the same emitter files: a headless `*Of(params)` resolver rather than a
+table each surface indexes for itself. The failure it rules out is a separator the card offers and
+a notebook does not honour; the two exporters are where that is silent, since their goldens compare
+emitted text and would keep passing on either answer. It is keyed by a **name** rather than holding
+the character, because the character is what the param would then store: `'\n'` in a saved graph
+file, where a reader has to work out which control an escape belongs to. `joinIds` takes the ids
+rather than the table, which is what lets the Network viewer's own **Copy ids** — a list in hand,
+no table anywhere — use the same joiner. Two more rules live there and both are silent when wrong: deduplication keeps **first-seen
+order** rather than sorting, since a Sort upstream is a decision; and `idColumn` is what reads the
+column, so an 18-digit CAVE root id is copied exactly and a null — a left-joined `Neuron Set` row
+— is dropped rather than pasted as a blank line.
+
+**Both exporters emit a note, not a TODO**, which is the distinction `dataset.description` makes
+for the opposite reason. `ctx.todo` means "no code came out of this" *and* "this step is missing":
+the first is false, because withholding a tap's binding leaves every cell below a mid-chain Copy
+IDs unbound, and the second is not the right reading either — the ids translate exactly. What a
+notebook has no equivalent for is the *clipboard*, so the cell builds the same text, prints it,
+and says why. It honours all three settings, because the emitted line is the one thing a reader
+compares against the card.
+
 ## Skeletons: which copy, and saying which one answered
 
 A dataset does not have *a* skeleton source. It has however many its publishers happened to put

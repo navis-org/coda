@@ -131,7 +131,7 @@ export function DownloadBody({ node, ctx, compact, setParam, onError }: NodeBody
 
       <button
         type="button"
-        className="download-body__go"
+        className="list-body__go"
         onClick={() => void download()}
         disabled={busy || !preview.ready}
         title={

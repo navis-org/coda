@@ -13,6 +13,7 @@ import {
   readSizeSpec,
 } from '../../../nodes/lib/encodingParams'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
+import { copyIdsSettings } from '../../../nodes/lib/copyIds'
 import {
   heatmapLogColor,
   heatmapPaletteOf,
@@ -30,7 +31,7 @@ import { R_METHODS } from './analysis'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
 import { decodeRanges } from '../../../nodes/lib/chartSelection'
-import { selectionIds, selectionLabels } from './common'
+import { neuronIds, selectionIds, selectionLabels } from './common'
 import { filterPredicates } from './tableFilters'
 
 registerEmitter('out.table', (ctx) => {
@@ -763,6 +764,38 @@ registerEmitter('out.viewer3d', (ctx) => {
       `${selected} <- tibble(neuronId = numeric(0))`,
     )
   }
+  return lines
+})
+
+/**
+ * The clipboard's R half. See the Python emitter for why this is a note rather than a TODO:
+ * the node is a tap, so withholding its binding would unbind every chunk below it, and the ids
+ * themselves translate exactly — it is only the *destination* that a document does not have.
+ */
+registerEmitter('out.copyIds', (ctx) => {
+  const src = ctx.wired('neurons')
+  const out = ctx.output('neurons')
+  // The card's own reader — see the Python emitter for why this is not resolved per surface.
+  const { separator, dedupe, quoted } = copyIdsSettings(ctx.params)
+
+  // `as.character` before anything else, and it is load-bearing rather than tidy: R's numeric is
+  // a double, so an 18-digit CAVE root id printed from one is a different id (invariant 8).
+  // neuprintr hands back a `bodyid` that is already numeric, which is exactly the case this
+  // catches — the digits are wrong before `paste` ever sees them, but only once.
+  // R's own word for it, and Python's is `_list` — a `list` in R is the other data structure,
+  // so one shared suffix would have to be wrong in one of the two languages.
+  const ids = `${ctx.name}_vec`
+  const lines = [`${out} <- ${src}`, `${ids} <- as.character(${neuronIds(out)})`]
+  // `unique` keeps first occurrence, which is the card's rule — a Sort upstream is a decision.
+  if (dedupe) lines.push(`${ids} <- unique(${ids})`)
+  if (quoted) lines.push(`${ids} <- paste0('"', ${ids}, '"')`)
+  lines.push(
+    ...ctx.note(
+      'In Coda this button puts the ids on the clipboard. A document has none, so they are ' +
+        'printed here — copy them from the output, or use the vector directly.',
+    ),
+    `writeLines(paste(${ids}, collapse = ${rStr(separator)}))`,
+  )
   return lines
 })
 

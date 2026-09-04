@@ -7727,6 +7727,20 @@ details[open] > summary.tile__label {
   resize: vertical;
 }
 
+/*
+ * A body's action, which is a verb rather than a setting and so does not belong in the field
+ * grid above it. Full width because it is the only thing on the card anyone presses.
+ *
+ * Part of the `.list-body` family rather than named after the card that got it first: Download
+ * and Copy IDs draw the same button with the same neighbours, and a per-card name makes the
+ * third one either a third selector on a rule four hundred lines from here or an auto-width
+ * button that looks wrong with nothing failing. `rename-body__remove`, reused verbatim by
+ * `EditTableBody` and `FindNeuronsBody`, is the same call made the other way round.
+ */
+.list-body__go {
+  width: 100%;
+}
+
 .list-body__foot {
   display: flex;
   flex-wrap: wrap;
@@ -8097,14 +8111,6 @@ details[open] > summary.tile__label {
 .upload-body__schema td:last-child {
   font-family: var(--font-mono);
   color: var(--text-muted);
-}
-
-/*
- * The Download card's action, which is a verb rather than a setting and so does not belong in
- * the field grid above it. Full width because it is the only thing on the card anyone presses.
- */
-.download-body__go {
-  width: 100%;
 }
 
 /* ---------------------------------------------------------------------------

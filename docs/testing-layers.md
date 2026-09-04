@@ -279,6 +279,8 @@ Moved verbatim out of `CLAUDE.md`.
 | `ui/nodes/resultDownload.test.tsx`       | the card foot's ⤓: absent before a run, withheld on a viewer card, the formats offered, and the dataset card the one rule reaches |
 | `nodes/output/download.test.ts`          | the tap: identity pass-through, deferred by the auto pass, and settings re-running nothing                                       |
 | `ui/useDownloads.test.tsx`               | the side effect: written on an executing run, not on an unchanged one, and the auto-run warning                                  |
+| `nodes/lib/copyIds.test.ts`              | what Copy IDs would put on the clipboard: dedupe in first-seen order, a null dropped rather than pasted blank, an 18-digit id exact, each id quoted rather than the joined line, and every offered separator honoured |
+| `ui/nodes/copyIdsBody.test.tsx`          | the card: every non-advanced param drawn, the press refused before a run, the count and the clipboard text agreeing with the settings, and the neurons still passed through |
 | `ui/panels/startPage.test.tsx`           | (also) the field-guide links, in the welcome bar and the Help menu, composed against `BASE_URL`                                  |
 | `nodes/lib/datasetStats.test.ts`         | the dataset roll-ups: null-vs-empty as one absence, absence counted apart, the residual fold, and one walk serving every cap        |
 | `nodes/lib/datasetStats.test.ts`         | (also) which fields get a chart: the priority order, one slot per fact, numeric columns out, a chosen list taken literally, and `add` appending without the cap, the family rule, or a second copy of a name |

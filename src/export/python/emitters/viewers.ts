@@ -18,6 +18,7 @@ import {
   readSizeSpec,
 } from '../../../nodes/lib/encodingParams'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
+import { copyIdsSettings } from '../../../nodes/lib/copyIds'
 import {
   heatmapLogColor,
   heatmapPaletteOf,
@@ -34,7 +35,7 @@ import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
 import { decodeRanges } from '../../../nodes/lib/chartSelection'
-import { codaNeurons, pySelection, selectionIds } from './common'
+import { codaNeurons, neuronIds, pySelection, selectionIds } from './common'
 import { filterMasks } from './tableFilters'
 
 // ---------------------------------------------------------------------------
@@ -813,6 +814,53 @@ registerEmitter('out.download', (ctx) => {
     default:
       lines.push(`${out}.to_csv(${pyStr(`${filename}.csv`)}, index=False)`)
   }
+  return lines
+})
+
+// ---------------------------------------------------------------------------
+// Copy IDs
+// ---------------------------------------------------------------------------
+
+/**
+ * A **note**, not a TODO, and the distinction is the whole of the decision here.
+ *
+ * `ctx.todo` means "no code came out of this" *and* "this step is missing from the
+ * translation". The first would be false — the node is a tap, and a notebook that dropped it
+ * would leave every cell below a mid-chain Copy IDs unbound — and the second is not the right
+ * reading either: the ids are what the node is about, and a notebook can produce them exactly.
+ * What it cannot produce is a **clipboard**, which is a fact about the destination rather than a
+ * gap in the translation, so the cell prints them and says so.
+ *
+ * The three settings are honoured rather than defaulted, because the emitted text is the one
+ * thing a reader compares against the card: a notebook printing bare newline-separated ids
+ * beside a card set to quoted-and-comma-separated reads as the exporter ignoring controls.
+ */
+registerEmitter('out.copyIds', (ctx) => {
+  const src = ctx.wired('neurons')
+  const out = ctx.output('neurons')
+  // The card's own reader, so a separator this notebook joins with cannot be one the card
+  // would not offer — and the fallback for a name nobody has any more is written once.
+  const { separator, dedupe, quoted } = copyIdsSettings(ctx.params)
+
+  // `str(i)` rather than a dtype cast: an 18-digit CAVE root id is exact in pandas' int64 and
+  // in Python's int, and `astype` is the one step of the three that has an opinion about a
+  // column that arrived as text (invariant 8).
+  // `_list` rather than `_ids`: a node on its default title is already called `copy_ids`, and
+  // `copy_ids_ids` is a name a reader reads twice.
+  const ids = `${ctx.name}_list`
+  const lines = [
+    `${out} = ${src}`,
+    `${ids} = [str(i) for i in ${neuronIds(out)}]`,
+  ]
+  // `dict.fromkeys` rather than `set`, because the card deduplicates in first-seen order — a
+  // Sort upstream is a decision, and `set` discards it silently.
+  if (dedupe) lines.push(`${ids} = list(dict.fromkeys(${ids}))`)
+  const each = quoted ? `[f'"{i}"' for i in ${ids}]` : ids
+  lines.push(
+    ...ctx.note('In Coda this button puts the ids on the clipboard. A notebook has none, so ' +
+      'they are printed here — copy them from the output, or use the list directly.'),
+    `print(${pyStr(separator)}.join(${each}))`,
+  )
   return lines
 })
 

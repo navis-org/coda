@@ -27,6 +27,7 @@ import { ExploreBody } from '../explore/ExploreBody'
 import { CaveTableInfoBody } from './CaveTableInfoBody'
 import { DatasetBody } from './DatasetBody'
 import { DescriptionBody } from './DescriptionBody'
+import { CopyIdsBody } from './CopyIdsBody'
 import { DownloadBody } from './DownloadBody'
 import { IdsFromLabelBody } from './IdsFromLabelBody'
 import { InputIdsBody } from './InputIdsBody'
@@ -150,6 +151,12 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * four fields, a button and a line of filenames gain nothing from a fullscreen panel.
    */
   'out.download': { Component: DownloadBody, width: 300 },
+  /*
+   * Narrower than Download's card: three settings, a button and a count, with no sentence on it
+   * — the auto-run warning that sets Download's width has no counterpart here, because nothing
+   * about this node fires on a run. Not `expandable`, for Download's reason.
+   */
+  'out.copyIds': { Component: CopyIdsBody, width: 260 },
   // Every dataset node draws the same body; they differ only in the family table's data. Built
   // from that table rather than listed, so adding a dataset stays a one-line change there.
   ...Object.fromEntries(
