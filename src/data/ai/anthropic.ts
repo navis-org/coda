@@ -77,7 +77,6 @@ export const anthropic: AiProvider = {
   ],
   defaultModel: 'claude-sonnet-5',
   defaultBaseUrl: BASE_URL,
-  schemaSupport: 'native',
 
   async verify({ apiKey, model, baseUrl, signal }) {
     /*

@@ -22,7 +22,13 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 import { countPlanParams } from '../../assistant/planShape'
-import { isConfigured, subscribeCredentials } from '../../data/ai/credentials'
+import {
+  getModel,
+  getProviderId,
+  isConfigured,
+  subscribeCredentials,
+} from '../../data/ai/credentials'
+import { providerFor } from '../../data/ai/providers'
 import { errorMessage } from '../../core/errors'
 import { useGraphStore } from '../../store/graphStore'
 import type { ChatEntry } from '../assistantChat'
@@ -56,6 +62,38 @@ const NARRATE_AFTER_MS = 4000
  * Thinking and never returns anything", against a request that would have answered.
  */
 const SLOW_AFTER_MS = 45_000
+
+/**
+ * Who is about to answer, as one line.
+ *
+ * **A string rather than an object, which is what makes one subscription enough.** Invariant 7
+ * is about *identity*: `useSyncExternalStore` compares snapshots with `Object.is`, so a getter
+ * returning `{provider, model}` allocates a fresh object every render and never settles. A
+ * string is compared by value, so composing it here is free — where reading the three parts
+ * through three separate subscriptions and joining them in the component was three listeners
+ * and three locals kept in step to reach the same sentence.
+ *
+ * **Generic until something can actually answer, because a declared default is not a decision**
+ * — `resolveColumn`'s rule, and the one the model picker two panels over already follows when
+ * it refuses to swap a name somebody chose. `getProviderId` never answers "none": it falls back
+ * to `DEFAULT_PROVIDER`, so a browser that has never been configured reports Anthropic just as
+ * loudly as one where it was picked. An earlier version printed that — `Anthropic — needs a key`
+ * on a first-ever visit, which reads as a choice the reader made and now has to undo, and
+ * quietly recommends one of four providers to somebody who has not been shown the other three.
+ *
+ * Nor can the store tell the two apart, and that is not an oversight to route around:
+ * `setProviderId` deliberately stores *nothing* for a value equal to the default, so choosing
+ * Anthropic on purpose and never opening the panel are the same bytes. Any attempt to name the
+ * provider here would be right for three providers and wrong for the default one, which is a
+ * worse failure than saying less — the fix is identical in every case, and the drawer's empty
+ * state names all four.
+ */
+function describeSelection(): string {
+  if (!isConfigured()) return 'No provider set'
+  const id = getProviderId()
+  // `providerFor` cannot miss: `getProviderId` resolves an unknown stored id to the default.
+  return `${providerFor(id)!.label} · ${getModel(id)}`
+}
 
 export function AssistantPanel() {
   const open = useGraphStore((s) => s.panels.assistant)
@@ -150,6 +188,7 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
           removed: outcome.plan.remove.length,
           warnings: outcome.applied.warnings,
           graph: outcome.applied.graph,
+          model: outcome.model,
         })
       } else {
         appendChat({
@@ -178,6 +217,16 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
 
   const ready = useSyncExternalStore(subscribeCredentials, isConfigured)
   /*
+   * Who is about to answer, read as two primitives rather than one object.
+   *
+   * Invariant 7: `useSyncExternalStore` compares snapshots by identity, so a getter returning
+   * `{provider, model}` would allocate a fresh object on every render and never settle. Both of
+   * these are strings out of module state, so they are stable between real changes — and
+   * `getModel()` defaults its argument to the selected provider, which is what keeps the two
+   * from disagreeing about *whose* model is being named.
+   */
+  const using = useSyncExternalStore(subscribeCredentials, describeSelection)
+  /*
    * A locked canvas refuses a plan at `applyAssistantPlan`, which is the right backstop and the
    * wrong place to *first* find out: the request has been to the model and back by then, and the
    * answer was knowable before it was sent. So the composer stands down the way it does with no
@@ -189,8 +238,17 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
     <aside className="assistant" aria-label="Assistant">
       <header className="assistant__header">
         <h2 className="assistant__title">Assistant</h2>
-        <span className="assistant__hint">
-          {ready ? 'Describe a change to the graph.' : 'Needs a provider.'}
+        {/*
+         * What is answering, in the slot that used to say "Describe a change to the graph." —
+         * which the empty state and the input's own placeholder both already say, so the line
+         * was spending the one piece of always-visible chrome on a restatement.
+         *
+         * `title` carries it in full because the header truncates: a model id is as long as
+         * whoever named it felt like (`deepseek-v4-flash:0731-cloud`), and this sits in a flex
+         * row with Clear and ✕ on the other side of a spacer.
+         */}
+        <span className="assistant__hint" title={using}>
+          {using}
         </span>
         <div className="toolbar__spacer" />
         {entries.length > 0 && (
@@ -224,7 +282,8 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
             ) : (
               <>
                 Pick a provider under <strong>Connections</strong> — the branch icon in the
-                toolbar — Anthropic, OpenAI, Gemini, or a model running locally under Ollama.
+                toolbar — Anthropic, OpenAI, Gemini, or Ollama, which runs a model on your own
+                machine or fronts a free one in its cloud.
                 Nothing else in Coda needs one.
               </>
             )}
@@ -337,6 +396,12 @@ function Applied({ entry }: { entry: Extract<ChatEntry, { kind: 'done' }> }) {
       <p className="assistant__summary">{entry.summary}</p>
       <div className="assistant__meta">
         {tally.length > 0 && <span className="assistant__tally">{tally.join(' · ')}</span>}
+        {/*
+         * Which model made *this* edit. Worth its own element rather than another item in the
+         * tally: the tally counts what changed, and a model name joined into that list with the
+         * same separator would read as a fifth quantity.
+         */}
+        <span className="assistant__by">{entry.model}</span>
         <div className="toolbar__spacer" />
         {undoable && (
           <button type="button" className="btn btn--ghost" onClick={undo}>

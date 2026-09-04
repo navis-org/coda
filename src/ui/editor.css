@@ -8445,6 +8445,26 @@ details[open] > summary.tile__label {
   font-weight: 600;
   margin: 0;
 }
+/*
+ * Both of these used to be fixed strings and now carry a provider and a model name, which are as
+ * long as whoever named them felt like (`deepseek-v4-flash:0731-cloud`) — so they truncate, and
+ * they truncate together.
+ *
+ * A **guard, not a repair**: no overflow has been observed. A flex item defaults to
+ * `min-width: auto` and so refuses to shrink below its own text, which would push Clear and ✕ out
+ * of the header rather than truncating; but the drawer is at least ~720px wide (below that
+ * `smallScreen` takes the whole app), which leaves ~550px and needs a ~90-character model id to
+ * reach. Kept because it costs nothing and the failure it prevents is a header with its buttons
+ * off the edge. The header's full text is on its `title` regardless, which is the half that earns
+ * its place today.
+ */
+.assistant__hint,
+.assistant__by {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .assistant__hint {
   font-size: 11px;
   color: var(--text-muted);
@@ -8495,11 +8515,15 @@ details[open] > summary.tile__label {
   margin-top: 2px;
   min-height: 22px;
 }
-.assistant__tally {
+.assistant__tally,
+.assistant__by {
   font-size: 10.5px;
   color: var(--text-muted);
+}
+.assistant__tally {
   font-variant-numeric: tabular-nums;
 }
+
 .assistant__detail,
 .assistant__warnings {
   margin: 4px 0 0;

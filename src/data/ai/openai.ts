@@ -44,7 +44,6 @@ export const openai: AiProvider = {
   ],
   defaultModel: 'gpt-4o',
   defaultBaseUrl: BASE_URL,
-  schemaSupport: 'native',
 
   async verify({ apiKey, model, baseUrl, signal }) {
     // `GET /v1/models/{id}` costs nothing and checks the key and the id together, the same

@@ -20,7 +20,12 @@ import { inferGraph } from '../../core/inference'
 import type { StubbedCall } from '../../data/ai/fixture'
 import { messagesReply, stubFetch } from '../../data/ai/fixture'
 import { pivotGraph, pivotObserved } from '../../assistant/fixture'
-import { resetCredentials, setKey } from '../../data/ai/credentials'
+import {
+  resetCredentials,
+  setKey,
+  setModel,
+  setProviderId,
+} from '../../data/ai/credentials'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
@@ -151,6 +156,111 @@ describe('the drawer', () => {
 
     expect(screen.getByText(/Connections/)).not.toBeNull()
     expect(screen.getByRole('textbox').hasAttribute('disabled')).toBe(true)
+  })
+})
+
+describe('which model is answering', () => {
+  /*
+   * The panel spent its one piece of always-visible chrome on "Describe a change to the graph."
+   * — a sentence the empty state and the input's own placeholder both already carry — while the
+   * thing nobody could see from the drawer was who was about to answer it. That matters more
+   * than it used to: there are four providers now, one of them fronts models that run on
+   * somebody else's servers, and the bill is per model.
+   */
+  it('names the provider and the model in the header', () => {
+    setProviderId('anthropic')
+    setModel('anthropic', 'claude-opus-5')
+    render(<AssistantPanel />)
+
+    expect(screen.getByText('Anthropic · claude-opus-5')).not.toBeNull()
+  })
+
+  it('names nobody until something can answer, since a default is not a choice', () => {
+    /*
+     * Reported from a private window: the drawer opened saying `Anthropic — needs a key` on a
+     * browser where nothing had ever been configured. `getProviderId` falls back to
+     * `DEFAULT_PROVIDER` rather than answering "none", so a fresh visit is indistinguishable
+     * from a deliberate one — and naming Anthropic there reads as a choice the reader made, and
+     * recommends one of four providers to somebody who has not been shown the other three.
+     *
+     * `setProviderId` stores nothing for a value equal to the default, so the store cannot tell
+     * them apart either. Saying less is the only answer that is right in both cases.
+     */
+    resetCredentials()
+    const { container } = render(<AssistantPanel />)
+
+    // Asserted on the header itself, not on the drawer: the empty state below *does* say
+    // "Anthropic", along with the other three, which is the whole difference — a list of four
+    // is an offer where a lone name in the status line is a report.
+    expect(container.querySelector('.assistant__hint')?.textContent).toBe('No provider set')
+  })
+
+  it('says the same of a provider that was chosen and has no key, deliberately', () => {
+    /*
+     * The cost of the rule above, pinned rather than left to look like a bug. Gemini here really
+     * was picked, so "No provider set" under-reports it — but the alternative names the provider
+     * in *every* unconfigured case, including the fresh browser where nothing was picked at all,
+     * and the store cannot separate the two (`setProviderId` writes nothing for the default). One
+     * of the two readings has to be wrong; this is the one whose wrongness costs nothing, since
+     * the action is "open Connections" either way and the panel opens on the provider anyway.
+     */
+    resetCredentials()
+    act(() => setProviderId('gemini'))
+    const { container } = render(<AssistantPanel />)
+
+    expect(container.querySelector('.assistant__hint')?.textContent).toBe('No provider set')
+  })
+
+  it('follows a provider chosen elsewhere, without the drawer being reopened', () => {
+    // Connections is a different panel, so the header has to be reading the credential store
+    // rather than a value captured when the drawer mounted.
+    render(<AssistantPanel />)
+    expect(screen.getByText(/^Anthropic/)).not.toBeNull()
+
+    act(() => setProviderId('ollama'))
+    expect(screen.getByText(/^Ollama/)).not.toBeNull()
+  })
+
+  it('shows a local provider as ready on a store with nothing in it', () => {
+    // The one provider where `isConfigured` is true with no credential stored at all, so the
+    // header names it where every other provider on an empty store says "No provider set".
+    resetCredentials()
+    act(() => setProviderId('ollama'))
+    render(<AssistantPanel />)
+
+    expect(screen.getByText(/^Ollama · /)).not.toBeNull()
+    expect(screen.getByRole('textbox').hasAttribute('disabled')).toBe(false)
+  })
+
+  it('records the model that answered on the edit it made', async () => {
+    // Reported by the provider rather than requested, which is the ground truth: an alias
+    // resolves, and Ollama answers `gemma4:31b` to a request naming `gemma4:31b-cloud`.
+    stubReplies(PIPELINE)
+    const { container } = render(<AssistantPanel />)
+    await ask('chart the LC4 neurons')
+
+    // Its own element rather than a fifth item joined into the tally, which counts what the
+    // edit changed — a model name in that list would read as another quantity.
+    await waitFor(() =>
+      expect(container.querySelector('.assistant__by')?.textContent).toBe('claude-opus-5'),
+    )
+    expect(container.querySelector('.assistant__tally')?.textContent).not.toContain('claude')
+  })
+
+  it('does not re-attribute an old edit to a provider picked afterwards', async () => {
+    /*
+     * The reason the model is stored on the entry instead of read from the credentials when it
+     * renders. Switching provider mid-conversation would otherwise rewrite the whole transcript
+     * to claim the newest choice made every edit in it.
+     */
+    stubReplies(PIPELINE)
+    render(<AssistantPanel />)
+    await ask('chart the LC4 neurons')
+
+    act(() => setProviderId('ollama'))
+
+    expect(screen.getByText('claude-opus-5')).not.toBeNull()
+    expect(screen.getByText(/^Ollama · /)).not.toBeNull()
   })
 })
 

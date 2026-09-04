@@ -36,6 +36,19 @@ export type ChatEntry =
       removed: number
       warnings: ApplyWarning[]
       /**
+       * The model that answered, as the *provider* named it — not as it was asked for.
+       *
+       * A fact about this turn rather than about the current setting, which is why it is stored
+       * here and not read from the credentials at render time: the header says who will answer
+       * next, and switching provider mid-conversation would otherwise silently re-attribute
+       * every edit already in the transcript to whoever was picked last.
+       *
+       * Reported rather than requested because the two genuinely differ and the reported one is
+       * the ground truth: Ollama answers `gemma4:31b` for a request naming `gemma4:31b-cloud`,
+       * and a cloud provider resolves an alias to the dated snapshot that really ran.
+       */
+      model: string
+      /**
        * The graph this edit produced, held by identity so the panel can tell whether its Undo
        * is still the thing that would come off the stack. Anything the user does afterwards
        * replaces the object, and the button stands down rather than undoing someone else's

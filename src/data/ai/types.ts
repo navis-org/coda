@@ -90,17 +90,6 @@ export class AiError extends Error {
   }
 }
 
-/** How a provider can be made to return JSON. */
-export type SchemaSupport =
-  /** Takes a JSON Schema and enforces it. */
-  | 'native'
-  /**
-   * Can be told to answer in JSON, but not which JSON. The provider renders the schema into
-   * the prompt instead — `parsePlan` is lenient and the panel reports a reply that is not a
-   * plan, so this degrades to a worse success rate rather than to a broken feature.
-   */
-  | 'json-mode'
-
 export interface ModelOption {
   id: string
   label: string
@@ -157,7 +146,6 @@ export interface AiProvider {
    * minutes go.
    */
   thinkingSwitch?: boolean
-  schemaSupport: SchemaSupport
   /**
    * What is *actually* available, asked of the provider.
    *

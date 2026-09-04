@@ -20,7 +20,7 @@
  * broken feature.
  */
 
-import { declined, noText, postJson, raiseHttpError, truncated } from './http'
+import { declined, noText, postJson, raiseHttpError, truncated, withSchema } from './http'
 import type { AiProvider, CompletionRequest, CompletionResult } from './types'
 
 const BASE_URL = 'https://generativelanguage.googleapis.com'
@@ -58,21 +58,6 @@ function raise(status: number, payload: unknown): never {
   raiseHttpError('Google', key ? 401 : status, payload, 'Wait a moment, or check your quota.')
 }
 
-/**
- * Ask for JSON in the prompt, since the request cannot carry the schema itself.
- *
- * Appended to the *system* text rather than to the user turn, so it is a standing instruction
- * rather than something restated per question. Nothing is lost by appending: this provider has
- * no prompt caching to invalidate, which is the only reason the prefix is otherwise sacred.
- */
-function withSchema(system: string, schema: object | undefined): string {
-  if (!schema) return system
-  return (
-    `${system}\n\n---\n\nAnswer with a single JSON object and nothing else — no prose, no code ` +
-    `fence. It must satisfy this JSON Schema:\n\n${JSON.stringify(schema)}`
-  )
-}
-
 export const gemini: AiProvider = {
   id: 'gemini',
   label: 'Google Gemini',
@@ -86,7 +71,6 @@ export const gemini: AiProvider = {
   ],
   defaultModel: 'gemini-2.5-flash',
   defaultBaseUrl: BASE_URL,
-  schemaSupport: 'json-mode',
 
   async verify({ apiKey, model, baseUrl, signal }) {
     /*

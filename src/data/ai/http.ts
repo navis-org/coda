@@ -95,6 +95,33 @@ export function messageIn(payload: unknown, fallback: string): string {
 }
 
 /**
+ * Ask for JSON in words, for a model that will not be told it in a field.
+ *
+ * Two providers need this and they arrive at it from opposite directions, which is why it is
+ * here rather than in either of them. Gemini cannot express the plan schema at all — its
+ * `responseSchema` is an OpenAPI subset with no `anyOf`. Ollama can express it for a local GGUF
+ * build and *silently cannot* for anything else: a cloud model accepts `format` and ignores it,
+ * and so does an MLX build. Same remedy, same words, and a second copy would be a second thing
+ * to keep in step — `raiseHttpError`'s reasoning one function down, for the same reason.
+ *
+ * Appended to the *system* text rather than to the user turn, so it is a standing instruction
+ * rather than something restated per question. That also keeps it inside the cached prefix:
+ * appending a constant leaves the prefix byte-identical between turns, which is what Anthropic's
+ * cache breakpoint and llama.cpp's KV reuse both need.
+ *
+ * Measured against `gemma4:31b-cloud` on Coda's real prompt, five reps each: the schema sent as
+ * `format` alone parsed **1/5**, and described here **5/5**, applying a six-node graph every
+ * time. It costs 632 prompt tokens. See `ollama.ts`.
+ */
+export function withSchema(system: string, schema: object | undefined): string {
+  if (!schema) return system
+  return (
+    `${system}\n\n---\n\nAnswer with a single JSON object and nothing else — no prose, no code ` +
+    `fence. It must satisfy this JSON Schema:\n\n${JSON.stringify(schema)}`
+  )
+}
+
+/**
  * The failure ladder every provider walks, and the verdicts they all reach.
  *
  * Shared even though `complete` deliberately is not — the header above argues against a common

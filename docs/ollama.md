@@ -1,8 +1,11 @@
 # Ollama — running the assistant on your own machine
 
-Coda's assistant (the robot icon in the toolbar, or `/`) describes a change and builds it on the canvas. It normally talks to a cloud provider with an API key. **Ollama** is the other option: a model running on your own computer, with no key, no account, and nothing leaving the machine.
+Coda's assistant (the robot icon in the toolbar, or `/`) describes a change and builds it on the canvas. It normally talks to a cloud provider with an API key. **Ollama** is the other option, and it comes in two forms:
 
-This guide is the whole setup, in four steps — install, pull a model, let the browser in, point Coda at it. Budget twenty minutes, most of it waiting for a download.
+- **A model on your own computer** — no key, no account, nothing leaving the machine. This is the one the guide is mostly about, and it needs a reasonable amount of RAM.
+- **A model in Ollama's cloud** — names ending `-cloud`, reached *through* the same local server. No GPU of your own, no API key, and three of them are free; the trade is that it needs a free ollama.com account and your question and graph go to their servers. See [cloud models](#cloud-models-no-gpu-required).
+
+This guide is the whole setup, in four steps — install, pull a model, let the browser in, point Coda at it. Budget twenty minutes, most of it waiting for a download. If you only want the cloud models, it is much shorter: [skip ahead](#cloud-models-no-gpu-required).
 
 Three things worth knowing before you spend the disk space:
 
@@ -57,7 +60,7 @@ The second should answer `Ollama is running`. That endpoint is exactly what Coda
 | Requirement | Why | What happens if it is not met |
 | --- | --- | --- |
 | **≥ 32k context** | The catalogue is ~9k tokens, ~10k with the plan schema, and your canvas is described on top of that — ~12k on a 37-node graph, before the answer. Coda asks for `num_ctx: 32768` on every request | The prompt is **truncated from the front** — and since your question is the *last* thing in it, that is what falls off. Ollama then refuses a conversation with no question in it, `no user query found in messages`, several minutes in. Coda translates that one; see [troubleshooting](#troubleshooting) |
-| **A GGUF build** | Coda sends its plan schema as `format`, which becomes a compiled grammar in llama.cpp. Other engines accept the field and ignore it | Plans come back in the wrong shape — valid JSON, so nothing raises, with no actions in it |
+| **Ideally a GGUF build** | Coda sends its plan schema as `format`, which becomes a compiled grammar in llama.cpp. Other engines accept the field and ignore it. Coda now compensates where it can tell — an `-mlx` or `-cloud` tag also gets the schema written out in the prompt | Only where neither applies: a converted build under a name that gives no hint. Plans come back in the wrong shape — valid JSON, so nothing raises, with no actions in it |
 | **Fits in memory** | The weights plus a 32k KV cache have to sit in RAM or VRAM | It spills to CPU and a single plan takes minutes |
 
 Coda asks for 32k rather than something tighter because the catalogue is only the fixed part of the prompt: the canvas grows it, and the failure when the total overruns is the stall in [troubleshooting](#troubleshooting) rather than a graceful degradation. Coda handles the Ollama default by asking for 32k explicitly, which is why the Ollama default of 4k on a
@@ -95,11 +98,13 @@ ollama list
 
 Personally, I'm using `qwen3.8:27b` on a 32 GB MacBook M3 Max. It is not among the default models but Coda will happily list it if it's available in your Ollama.
 
-> [!CAUTION]
-> **The Apple Silicon trap**
-> Several models publish MLX builds beside the GGUF ones — `gemma4:12b-mlx` next to `gemma4:12b`. The MLX build is faster on a Mac but it *quietly ignore Coda's plan schema*. This is a known Ollama bug - until this is fixed, pull the plain tag.
+> [!NOTE]
+> **The Apple Silicon trap, now handled**
+> Several models publish MLX builds beside the GGUF ones — `gemma4:12b-mlx` next to `gemma4:12b`. The MLX build is faster on a Mac but it *quietly ignores Coda's plan schema*: the field is accepted and dropped, so plans come back as valid JSON in somebody else's shape.
 >
-> Coda detects MLX builds and warns, twice: the model's row in the dropdown reads `… — ignores JSON schema`, and **Test** returns the success line with a warning beside it.
+> This guide used to say "pull the plain tag". It no longer has to. Coda writes the schema out in the prompt for any model tagged `-mlx` (and for every `-cloud` model, which has the same problem for a different reason), which measured 8 plans out of 8 parsed and applied against the shape the field alone produced. The GGUF build is still the more certain one — a grammar cannot be ignored — so prefer it where you have the choice.
+>
+> A build that ignores the schema under a name that says nothing about it is the case left over. Coda reads `details.format` from `/api/tags`, so that one still gets marked `… — ignores JSON schema` in the dropdown and a warning under **Test**.
 
 ### Check what actually got allocated
 
@@ -115,6 +120,69 @@ qwen2.5-coder:14b        …               10 GB     100% GPU     32768      4 m
 ```
 
 `CONTEXT` should read `32768`. Less than that is a model clamping to its own trained window, which is the truncation case above. `PROCESSOR` should say `100% GPU`, or be CPU-only knowingly — a split means the model did not fit and every plan will crawl.
+
+---
+
+## Cloud models (no GPU required)
+
+Everything above asks you to have the memory for a 9 GB model. Ollama's own answer to that is
+**cloud models**: big models running on their servers, reached through the *same* local Ollama you
+already installed. From Coda's side nothing changes — it still talks to `http://localhost:11434`,
+which forwards the request.
+
+Three of them are free, and all three were run against Coda's own assistant test suite:
+
+| Model | Suite | Whole suite |
+| --- | --- | --- |
+| `gemma4:31b-cloud` | **5/5** | 16 s |
+| `gpt-oss:120b-cloud` | **5/5** | 41 s |
+| `gpt-oss:20b-cloud` | **5/5** | 90 s |
+
+That is five questions each, including the hard one — "how do the LC4 neurons reach DNp01?",
+which is only answered properly by finding the `Paths` node rather than chaining Connectivity
+nodes by hand. For comparison, a local 27B model takes 14–83 s for a *single* question. Cloud is
+not merely a fallback for a small laptop.
+
+### Setup
+
+```shell
+ollama signin          # opens a browser; free, and creates the account if you have none
+ollama pull gemma4:31b-cloud
+```
+
+The pull downloads **no weights** — the manifest is about 300 bytes, it just registers the name
+locally. You can skip it and select the model in Coda directly, but pulling is what makes it show
+up under **On this machine** in the dropdown.
+
+Then [step 3](#3-let-the-browser-in) and [step 4](#4-point-coda-at-ollama) exactly as written: the
+browser still has to be allowed to talk to `localhost`, because that is still where the request
+goes.
+
+### What you give up
+
+> [!IMPORTANT]
+> A `-cloud` model is **not local**, and the guarantee at the top of this page does not cover it.
+> Your question, the node catalogue and **the graph on your canvas** go to ollama.com under your
+> account. If the reason you are here is that the data must not leave the machine, pull a real
+> local model instead.
+
+Coda does not bury this. Every cloud model's row in the dropdown reads
+`cloud · runs on ollama.com` — pulled or merely offered — so it is in front of you at the moment
+you pick one, rather than behind a button you may never press. The provider note and the
+Connections privacy note say it too.
+
+### Two failures worth recognising
+
+Both come back quickly and both are about your account rather than your setup:
+
+| What you see | What it is |
+| --- | --- |
+| `… runs on ollama.com, and this machine is not signed in` | No `ollama signin`. Coda asks the local server's `/api/me` before it asks anything else, so **Test** catches this without spending a question |
+| `… is not included in this ollama.com account` | The model is real and your plan does not cover it. The published catalogue at [ollama.com/search?c=cloud](https://ollama.com/search?c=cloud) is *wider* than what a free account can run — `qwen3.5:397b-cloud` answers `402` on the free tier — so pick one of the three above, or upgrade |
+
+A third one is worth knowing because it looks like a typo and is not: several names listed on
+ollama.com answer `model not found` through the local router, which serves a narrower set than the
+site publishes. Coda only offers names that have actually replied.
 
 ---
 
@@ -222,9 +290,9 @@ Several origins are comma-separated: `OLLAMA_ORIGINS="https://navis-org.github.i
 
 1. Open **Connections** — the branch icon in the toolbar.
 2. Choose the **AI assistant** section.
-3. **Provider** → `Ollama (local)`. The key field disappears; there is nothing to paste.
+3. **Provider** → `Ollama`. The key field disappears; there is nothing to paste.
 4. **Server** → `http://localhost:11434` (already filled in; change it only if you moved the port with `OLLAMA_HOST`).
-5. **Model** → the dropdown separates **On this machine** from **Available to pull**. Yours is in the first group. If the list looks stale, press **↻** beside it — that asks the server what is installed rather than guessing.
+5. **Model** → the dropdown separates **On this machine** from **Available to pull**. Yours is in the first group. If the list looks stale, press **↻** beside it — that asks the server what is installed rather than guessing. A cloud model is marked `cloud · runs on ollama.com` in either group; the free ones are offered under **Available to pull** whether or not you have run `ollama pull` for them.
 6. **Let the model reason before answering** → leave it off unless you have a reason. See [reasoning](#reasoning-and-why-it-is-off) below.
 7. Press **Test**.
 8. Press **Save**. The assistant does not use the new provider until you do.
@@ -237,7 +305,17 @@ Works — qwen2.5-coder:14b — 3 models installed, 32k context
 
 The `32k context` is what Coda is going to ask for, not what the model can do — so it says the same thing for every model. What the *model* can do is the amber line below it, when there is something to say.
 
-That amber line carries the two caveats from step 2, and a model can earn both at once: the MLX/GGUF warning, and a trained window too small for the prompt. Neither replaces the success line. The first means the connection works and the answers may be malformed; the second means asking will fail rather than answer badly, and names the fix.
+That amber line carries the two caveats from step 2, and a model can earn both at once: the "ignores JSON schema" warning, and a trained window too small for the prompt. Neither replaces the success line. The first means the connection works and the answers may be malformed; the second means asking will fail rather than answer badly, and names the fix.
+
+A cloud model reads differently, because the question it answers is a different one — there is no
+model list to count and no window to check, only an account:
+
+```
+Works — gemma4:31b-cloud — signed in as you, free plan, 32k context
+```
+
+and no amber line, because for a cloud model there is nothing wrong to report. Where the request
+goes is on the model's own row in the dropdown above, which you have already read to get here.
 
 ---
 
@@ -340,8 +418,17 @@ Linux `journalctl -u ollama -f`.
 ## What is sent where
 
 Every request the assistant makes carries the node catalogue, **the graph on your canvas**, and
-what you typed. With Ollama that goes to `localhost` and no further — no account, no key, no
-third party, and it works with no network at all once the model is pulled.
+what you typed. Where that goes depends on the model, and only on the model:
+
+- **A local model** — to `localhost` and no further. No account, no key, no third party, and it
+  works with no network at all once the model is pulled.
+- **A `-cloud` model** — through `localhost` and on to **ollama.com**, which runs it. The
+  catalogue, your graph and your question all go with it, under your ollama.com account. This is
+  the same bargain as Anthropic or OpenAI, minus the API key.
+
+Coda says so in three places rather than only here, because the setting is one dropdown entry
+away from the other: the model's row reads `cloud · runs on ollama.com`, the provider note says
+it, and **Test** returns it as a warning beside the success line.
 
 The connectome data itself is a separate question and unaffected by any of this: that still comes
 from neuPrint over the network, with its own token, configured in the same **Connections** dialog
@@ -357,3 +444,6 @@ under *Data sources*.
   the 4k / 32k / 256k defaults by VRAM, and `ollama ps`
 - [Chrome Local Network Access](https://developer.chrome.com/blog/local-network-access)
 - [ollama.com/search](https://ollama.com/search) — the current model library
+- [ollama.com/search?c=cloud](https://ollama.com/search?c=cloud) — the cloud models, and which
+  ones a free account includes
+- [Ollama Cloud](https://docs.ollama.com/cloud) — `ollama signin`, and what runs where

@@ -364,7 +364,9 @@ const SECTIONS: readonly [Section, ...Section[]] = [
           {"Keys are held in this browser's local storage on this machine only, are never " +
             'written into a saved graph or an export, and are never sent to us — requests go ' +
             'straight from this page to the provider you pick, with no server of ours in ' +
-            'between. A local provider sends nothing off the machine at all.'}
+            'between. A model running on your own machine under Ollama sends nothing off it ' +
+            'at all — but an Ollama model whose name ends in -cloud runs on ollama.com, and ' +
+            'is no more local than the rest.'}
         </Why>
       </>
     ),

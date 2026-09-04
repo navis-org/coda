@@ -504,7 +504,7 @@ describe('choosing a provider', () => {
       'Anthropic',
       'OpenAI',
       'Google Gemini',
-      'Ollama (local)',
+      'Ollama',
     ])
     expect(providerPicker().value).toBe('anthropic')
   })
@@ -563,14 +563,23 @@ describe('choosing a provider', () => {
     expect(screen.getByRole('button', { name: 'Test' }).hasAttribute('disabled')).toBe(false)
   })
 
-  it('keeps the promise provider-neutral, since a local model sends nothing anywhere', () => {
-    // Naming one provider in the panel's single security claim would make it wrong for three.
+  it('keeps the promise provider-neutral, and names the one model that is not local', () => {
+    /*
+     * Naming one provider in the panel's single security claim would make it wrong for three —
+     * hence no `Anthropic`. The second half is the newer trap: "a local provider sends nothing
+     * off the machine" was flatly true until an Ollama model whose name ends in `-cloud` could
+     * be picked from the same dropdown, and a privacy claim that is right about the default and
+     * wrong about one setting is worse than no claim, because it is the one people quote. So the
+     * exception has to be *in* the promise, not a footnote in a guide.
+     */
     render(<SourcesPanel />)
     openAi()
 
     const text = promise()
     expect(text).not.toMatch(/\bAnthropic\b/)
-    expect(text).toMatch(/sends nothing off the machine/i)
+    expect(text).toMatch(/sends nothing off it at all/i)
+    expect(text).toMatch(/-cloud/)
+    expect(text).toMatch(/ollama\.com/)
   })
 })
 

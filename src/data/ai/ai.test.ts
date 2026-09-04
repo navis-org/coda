@@ -592,8 +592,16 @@ describe('a model that accepts the schema and ignores it', () => {
     models: models.map((m) => ({ name: m.name, details: { format: m.format } })),
   })
 
+  /*
+   * The example is a safetensors build under a name that does *not* say so, and that is now the
+   * whole point of it. `qwen3:27b-mlx` used to stand here and no longer can: an `-mlx` tag is
+   * one of the two spellings `ignoresSchemaField` recognises, so Coda describes the schema in
+   * the prompt for it and the caveat below stops being true. What is left is the case nothing
+   * can reach — an unstructured engine behind a name that gives no hint — which is exactly the
+   * one still worth marking.
+   */
   it('marks a build whose engine will not apply the schema', async () => {
-    respond(tags({ name: 'qwen3:27b-mlx', format: 'safetensors' }))
+    respond(tags({ name: 'my-conversion:latest', format: 'safetensors' }))
     expect((await ollama.listModels!({}))[0]!.label).toContain('ignores JSON schema')
   })
 
@@ -603,10 +611,18 @@ describe('a model that accepts the schema and ignores it', () => {
   })
 
   it('warns on Test rather than refusing, because the model does answer', async () => {
-    respond(tags({ name: 'qwen3:27b-mlx', format: 'safetensors' }))
-    const check = await ollama.verify({ model: 'qwen3:27b-mlx' })
-    expect(check.model).toBe('qwen3:27b-mlx')
+    respond(tags({ name: 'my-conversion:latest', format: 'safetensors' }))
+    const check = await ollama.verify({ model: 'my-conversion:latest' })
+    expect(check.model).toBe('my-conversion:latest')
     expect(check.warning).toMatch(/GGUF/)
+  })
+
+  it('says nothing about a build whose schema Coda already describes in the prompt', async () => {
+    // An `-mlx` tag is compensated for, so marking it would be warning about a problem this
+    // provider fixes on the way out. Both surfaces have to agree, or Test contradicts the list.
+    respond(tags({ name: 'qwen3:27b-mlx', format: 'safetensors' }))
+    expect((await ollama.listModels!({}))[0]!.label).not.toContain('ignores')
+    expect((await ollama.verify({ model: 'qwen3:27b-mlx' })).warning).toBeUndefined()
   })
 
   it('says nothing about a gguf build', async () => {
@@ -627,6 +643,152 @@ describe('a model that accepts the schema and ignores it', () => {
     const found = await ollama.listModels!({})
     expect(found[0]!.label).not.toContain('ignores')
     expect((await ollama.verify({ model: 'llama3.1:8b' })).warning).toBeUndefined()
+  })
+})
+
+describe('a cloud model, served through the local server', () => {
+  /*
+   * Ollama runs big models on its own servers and fronts them from `localhost:11434`, so the
+   * transport is unchanged and two other things are not: a cloud model accepts the JSON schema
+   * and ignores it, and the promise "nothing leaves this machine" stops holding.
+   *
+   * Measured rather than assumed, on a free account: asked for `{summary, count}`,
+   * `gemma4:31b-cloud` and `gpt-oss:120b-cloud` both answered prose where a GGUF build answered
+   * the schema. On Coda's real prompt that took the plan from 1/5 parsed to 5/5 once the schema
+   * was described in words instead.
+   */
+  const ask = { ...ASK, model: 'gemma4:31b-cloud', schema: { type: 'object' } }
+  const systemOf = (call: StubbedCall): string =>
+    ((call.body as { messages: Array<{ role: string; content: string }> }).messages.find(
+      (m) => m.role === 'system',
+    )?.content ?? '')
+
+  it('describes the schema in the prompt, since the field will be ignored', async () => {
+    respond({ message: { content: '{}' } })
+    await ollama.complete(ask)
+    expect(systemOf(calls[0]!)).toContain('JSON Schema')
+  })
+
+  it('sends the schema as a field as well, so a build that starts honouring it simply wins', async () => {
+    // Costs nothing on an engine that ignores it — `prompt_eval_count` is identical either way
+    // — and removes the need for a release of ours in between.
+    respond({ message: { content: '{}' } })
+    await ollama.complete(ask)
+    expect((calls[0]!.body as { format?: unknown }).format).toEqual({ type: 'object' })
+  })
+
+  it('leaves a local model’s prompt alone, which is what keeps the KV cache warm', async () => {
+    /*
+     * The regression this guards is a quiet one: describing the schema for everybody costs 632
+     * tokens on every request and would be invisible except on the bill and the first-token
+     * latency. A GGUF build gets grammar-constrained decoding, which is exact, so the words
+     * would be saying it twice.
+     */
+    respond({ message: { content: '{}' } })
+    await ollama.complete({ ...ASK, model: 'qwen2.5-coder:14b', schema: { type: 'object' } })
+    expect(systemOf(calls[0]!)).toBe('the catalogue')
+  })
+
+  it('says where a cloud model runs rather than how big it is', async () => {
+    /*
+     * `/api/tags` reports a pulled cloud model at 312 bytes — a pointer, not weights — which
+     * `sizeLabel` renders as `0 MB` and reads as a broken download.
+     */
+    respond({ models: [{ name: 'gemma4:31b-cloud', size: 312, details: { format: '' } }] })
+    const found = await ollama.listModels!({})
+    expect(found[0]!.label).toContain('cloud · runs on ollama.com')
+    expect(found[0]!.label).not.toContain('0 MB')
+    expect(found[0]!.label).not.toContain('ignores')
+  })
+
+  it('says the same of a cloud model whether or not it has been pulled', async () => {
+    /*
+     * The row is where the disclosure lives, so it has to be there in both halves of the
+     * dropdown: a model pulled onto the machine comes from `/api/tags` above, and one merely
+     * offered comes from the declared shortlist. Written as two spellings of one sentence, the
+     * one nobody has pulled yet — the case where somebody is *choosing* — is the one that would
+     * have gone quiet.
+     */
+    for (const option of ollama.models.filter((m) => m.id.endsWith('-cloud'))) {
+      expect(option.label).toContain('cloud · runs on ollama.com')
+    }
+  })
+
+  it('asks who is signed in rather than whether the model is pulled', async () => {
+    /*
+     * A cloud model answers unpulled — measured — so the local "not pulled, run `ollama pull`"
+     * refusal would fail a setting that works. What can actually be wrong is the account.
+     */
+    respond({ name: 'someone', plan: 'free' })
+    const check = await ollama.verify({ model: 'gemma4:31b-cloud' })
+    expect(calls[0]!.url).toBe('http://localhost:11434/api/me')
+    expect(check.label).toContain('someone')
+    /*
+     * And carries no `warning`. That field is contracted as a quality caveat, it renders in the
+     * amber `warn` tone, and it is only seen if somebody presses Test — which this panel's own
+     * privacy note rules out as a place for a disclosure ("a consent line behind a tooltip is
+     * not a consent line"). Where the request goes is said on the model row instead, which is
+     * unconditional and read at the moment the choice is made — asserted below.
+     */
+    expect(check.warning).toBeUndefined()
+  })
+
+  it('never repeats the email /api/me also returns', async () => {
+    // The question is whether a request will be accepted; an address is not part of that answer.
+    respond({ name: 'someone', email: 'someone@example.com', plan: 'free' })
+    const check = await ollama.verify({ model: 'gemma4:31b-cloud' })
+    expect(JSON.stringify(check)).not.toContain('example.com')
+  })
+
+  it('sends somebody to `ollama signin` when nobody is', async () => {
+    respond({ error: 'Unauthorized' }, 401)
+    await expect(ollama.verify({ model: 'gemma4:31b-cloud' })).rejects.toThrow(/ollama signin/)
+  })
+
+  it('reads a rejected cloud request as an account, not as a key', async () => {
+    // `needsKey` is false, so there is no key field for a bare `Unauthorized` to point at.
+    respond({ error: 'Unauthorized' }, 401)
+    await expect(ollama.complete(ask)).rejects.toThrow(/ollama signin/)
+  })
+
+  it('tells a paid-only model apart from a broken setup', async () => {
+    /*
+     * 402, which no other provider here uses: the account is fine and this model is not in it.
+     * Measured — `qwen3.5:397b-cloud` answers 402 on a free account while three others answer
+     * normally, so "pick another" is real advice rather than a shrug.
+     */
+    respond({ error: 'this model requires a subscription, upgrade at https://ollama.com/upgrade' }, 402)
+    const error = await ollama.complete({ ...ask, model: 'qwen3.5:397b-cloud' }).catch((e) => e)
+    expect((error as AiError).status).toBe(402)
+    expect((error as AiError).message).toMatch(/not included in this ollama\.com account/)
+    expect((error as AiError).message).toMatch(/free cloud models/)
+  })
+
+  it('does not tell somebody to pull a cloud model that does not exist', async () => {
+    /*
+     * The local router serves a narrower set than `ollama.com/api/tags` publishes — four listed
+     * names answered 404 — and `ollama pull` fixes none of them.
+     */
+    respond({ error: "model 'kimi-k2.6-cloud' not found" }, 404)
+    const error = await ollama.complete({ ...ask, model: 'kimi-k2.6-cloud' }).catch((e) => e)
+    expect((error as AiError).message).not.toContain('ollama pull')
+  })
+
+  it('no longer calls itself local, and offers cloud models that were actually run', async () => {
+    /*
+     * The parenthesis was the claim a reader checks against the privacy note, and it stopped
+     * being true for every name in the list once one of them could be a cloud model.
+     *
+     * Every cloud entry replied on a free account. The published catalogue is not the offer:
+     * two of the nine tried answered 402 and four answered 404.
+     */
+    const cloud = ollama.models.filter((m) => m.id.endsWith('-cloud'))
+    expect(cloud.map((m) => m.id)).toEqual([
+      'gemma4:31b-cloud',
+      'gpt-oss:120b-cloud',
+      'gpt-oss:20b-cloud',
+    ])
+    expect(ollama.note).toMatch(/ollama signin/)
   })
 })
 
