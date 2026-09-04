@@ -60,7 +60,9 @@ export const MAX_NEURONS = 10000
  * An empty input still throws. That is not a guard rail: there is nothing to fetch, so there
  * is no result to warn about.
  */
-function neuronIdsFrom(
+// Exported for `out.topology`, which fetches the same two things for the same reason and would
+// otherwise carry a second copy of the ceiling, the message and the empty-input rule.
+export function neuronIdsFrom(
   ctx: Warner,
   value: Value | undefined,
   limit: number,

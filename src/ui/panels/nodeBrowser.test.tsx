@@ -174,12 +174,13 @@ describe('NodeBrowser filtering', () => {
       'Network Viewer',
       'Neuroglancer',
       'Neuron Profile',
+      'Neuron Topology',
       'Pie Chart',
       'ROI Viewer',
       'Scatter Plot',
       'Table',
     ])
-    expect(screen.getByText('16 nodes')).toBeTruthy()
+    expect(screen.getByText('17 nodes')).toBeTruthy()
   })
 
   it('fuzzy-searches across every category, best match first', () => {

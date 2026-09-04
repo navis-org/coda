@@ -481,6 +481,21 @@ export interface GeometryRequest {
   signal?: AbortSignal
 }
 
+/**
+ * One neuron set's synapses, with the partner on the far side of each named.
+ *
+ * `SynapseRequest` minus `unit`, which has no meaning here: a row is a connection by
+ * construction, so there is nothing for the caller to choose. Deliberately not a subtype of it
+ * either — an optional `unit` that was ignored would be a field a reader could reasonably set
+ * and then be wrong about.
+ */
+export interface SynapseLinksRequest extends GeometryRequest {
+  /** Restrict to synapses of this polarity on the *queried* neuron. Undefined returns both. */
+  polarity?: 'pre' | 'post'
+  /** Drop synapses below this per-synapse confidence — `SynapseRequest.minConfidence`'s scale. */
+  minConfidence?: number
+}
+
 export interface SynapseRequest extends GeometryRequest {
   /** Restrict to synapses of this polarity. Undefined returns both. */
   polarity?: 'pre' | 'post'
@@ -884,6 +899,27 @@ export interface DataSource {
    */
   readonly synapseUnits?: SynapseUnits
   fetchSynapses?(req: SynapseRequest): Promise<PointsValue>
+  /**
+   * The same synapses, each one naming the partner across the cleft.
+   *
+   * **A second method rather than a widened `fetchSynapses`**, which is `fetchGroupTotals`'
+   * arrangement and for the same two reasons. The unit differs — a row here is a *connection*,
+   * where `fetchSynapses` under `sites` is a de-duplicated point — so one call cannot answer
+   * both without the caller having to know which it got. And it is separately optional: most
+   * sources need no implementation at all, because their `fetchSynapses` already carries
+   * `partnerId`/`partnerType` from `CANONICAL_SCHEMAS`. Only neuPrint drops them (see
+   * `neuprint/schema.ts`), and only neuPrint therefore implements this.
+   *
+   * The returned attributes are the **canonical** synapse schema — `neuronId`, `type`,
+   * `partnerId`, `partnerType`, `polarity`, `weight` — so a consumer reads one shape whichever
+   * route answered.
+   *
+   * Note what it costs, because it is not free and the caller should defer it: a presynaptic
+   * site appears once per partner it drives, which on `male-cns:v1.0` body 10001 is 4,491 rows
+   * against 1,015 sites. That is the *point* here — each row is a connection — but it means this
+   * is the wrong cloud to measure a neuron with.
+   */
+  fetchSynapseLinks?(req: SynapseLinksRequest): Promise<PointsValue>
 
   rawQuery?(req: RawQueryRequest): Promise<TableValue>
 }
@@ -1428,6 +1464,43 @@ export function canTotalGroups(
   hasEdgeSet: boolean,
 ): boolean {
   return canTotal(source, datasetId, hasEdgeSet, 'fetchGroupTotals')
+}
+
+/**
+ * Whether this dataset can name the partner across each synapse.
+ *
+ * `canTotalGroups`' arrangement — the capability *and* the method, since a source may publish
+ * synapses and still not resolve their partners, and neuPrint is the only one that does resolve
+ * them. Here rather than in the widget that consumes it, which is the half the first version got
+ * wrong: asked as `source.fetchSynapseLinks !== undefined` alone, a neuPrint dataset that
+ * publishes no synapses at all reported that highlighting was available, and the click then met
+ * an empty query.
+ *
+ * An unresolved source refuses nothing, `canTotal`'s rule and for its reason: a cold Dataset
+ * socket is invariant 2's ordinary state, not an answer.
+ */
+export function canFetchSynapseLinks(
+  source: DataSource | undefined,
+  datasetId: string | undefined,
+): boolean {
+  if (!source) return true
+  return Boolean(source.fetchSynapseLinks) && capabilityOf(source, datasetId, 'synapses')
+}
+
+/**
+ * Whether this source can hand back a neuron mesh for this dataset.
+ *
+ * `canFetchSynapseLinks`' sibling, and here for its reason: the method being optional and the
+ * capability being per-dataset are two different facts, and a caller that asks only one of them
+ * is wrong on some backend. Written in the widget instead, it was the same expression at a layer
+ * that has no business knowing how a source declares itself.
+ */
+export function canFetchMeshes(
+  source: DataSource | undefined,
+  datasetId: string | undefined,
+): boolean {
+  if (!source) return false
+  return Boolean(source.fetchMeshes) && capabilityOf(source, datasetId, 'meshes')
 }
 
 export function reportSourceLearned(sourceId: string): void {

@@ -29,6 +29,7 @@
 
 import { afterAll, describe, expect, it } from 'vitest'
 
+import { getColumn } from '../../core/values'
 import { NeuPrintSource } from './NeuPrintSource'
 import { resetCredentials, setToken } from './credentials'
 
@@ -325,4 +326,63 @@ live('neuPrint, live — what a weight is a fraction of', () => {
     ])
     expect(total(connectedIn)).toBeGreaterThan(total(allIn) * 0.95)
   }, 180_000)
+})
+
+/**
+ * Partner-resolved synapses, checked against the server's own connection weights.
+ *
+ * `fetchSynapseLinks` exists because neuPrint drops `partnerId`/`partnerType` from the synapse
+ * schema, and the query behind it is transcribed from neuprint-python's `fetch_synapse_connections`
+ * — a `SynapseSet` pair to pin which two *neurons*, then a `SynapsesTo` pair to pin which two
+ * *synapses*. Both halves are easy to get subtly wrong in ways that still return a plausible
+ * table, so what is asserted here is the one thing that cannot be fudged: every returned row is
+ * one connection, and grouping them by partner must reproduce `ConnectsTo.weight` exactly.
+ *
+ * Measured when this was written, on `male-cns:v1.0` body 10003 (VCH): 57,034 rows in 2.7 s —
+ * exactly `n.synweight` — being 30,020 outgoing over 14,983 partners and 27,014 incoming over
+ * 3,016, with per-partner weights identical to `ConnectsTo` on both arms.
+ *
+ * The **shape** of the query is load-bearing and is not visible in its results: written as
+ * `MATCH (n:Neuron), (pattern)` with the `WHERE` afterwards, Neo4j expands every neuron in the
+ * dataset before filtering and the query does not return inside two minutes. Binding and
+ * filtering `n` first is what makes it 2.7 s. A regression there reads as a hang, not an error.
+ */
+live('partner-resolved synapses, live', () => {
+  const DATASET = 'male-cns:v1.0'
+  const BODY = '10003'
+
+  it('returns one row per connection, agreeing with ConnectsTo per partner', async () => {
+    setToken(TOKEN!)
+    const source = new NeuPrintSource()
+    const points = await source.fetchSynapseLinks!({
+      datasetId: DATASET,
+      neuronIds: [BODY],
+    })
+
+    const partners = getColumn(points.attributes, 'partnerId')!
+    const polarity = getColumn(points.attributes, 'polarity')!
+    expect(points.attributes.length).toBeGreaterThan(0)
+    // Three coordinates per row, or the cloud and the table have come apart.
+    expect(points.positions.length).toBe(points.attributes.length * 3)
+
+    const outgoing = new Map<string, number>()
+    for (let i = 0; i < points.attributes.length; i++) {
+      if (polarity[i] !== 'pre') continue
+      const key = String(partners[i])
+      outgoing.set(key, (outgoing.get(key) ?? 0) + 1)
+    }
+
+    const reference = await source.fetchConnectivity({
+      datasetId: DATASET,
+      neuronIds: [BODY],
+      direction: 'outputs',
+    })
+    const refPartner = getColumn(reference, 'partnerId')!
+    const refWeight = getColumn(reference, 'weight')!
+
+    expect(outgoing.size).toBe(reference.length)
+    for (let i = 0; i < reference.length; i++) {
+      expect(outgoing.get(String(refPartner[i]))).toBe(Number(refWeight[i]))
+    }
+  }, 120_000)
 })

@@ -48,6 +48,7 @@ import type {
   ThinMethod,
 } from '../../pyodide/skeletons'
 import { NM_PER_UM } from './nblastOps'
+import { packSkeletons } from './skeletonPacking'
 import { geometryPointCount } from './transformOps'
 
 /**
@@ -136,25 +137,20 @@ export function cleanRequestFrom(
   skeletons: SkeletonsValue,
   params: SkeletonCleanParams,
 ): CleanSkeletonsRequest {
-  const total = skeletonPointCount(skeletons)
+  // `parents` and `offsets` are `packSkeletons`' — that layout and both of its rules are shared
+  // with every other Pyodide skeleton call. What is local here is the two buffers this request
+  // adds on top of them.
+  const { parents, offsets, total } = packSkeletons(skeletons)
 
   const points = new Float32Array(total * 3)
-  const parents = new Int32Array(total)
   const radii = new Float32Array(total)
-  const offsets = new Int32Array(skeletons.items.length + 1)
 
-  let at = 0
   for (let n = 0; n < skeletons.items.length; n++) {
     const item = skeletons.items[n]!
+    const at = offsets[n]!
     const count = item.parents.length
     points.set(item.positions.subarray(0, count * 3), at * 3)
     radii.set(item.radii.subarray(0, count), at)
-    // Parent indices stay neuron-local: `skeletons.py` slices each neuron out and hands
-    // fastcore row numbers as node ids, so a global offset here would be a forest of
-    // dangling references rather than a tree.
-    parents.set(item.parents.subarray(0, count), at)
-    at += count
-    offsets[n + 1] = at
   }
 
   return {

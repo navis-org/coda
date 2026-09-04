@@ -9685,3 +9685,558 @@ details[open] > summary.tile__label {
   color: var(--text-secondary);
   font-weight: 400;
 }
+
+/* ============================================================================
+ * Neuron Topology — the Stage layout.
+ *
+ * The 3D view is the surface; the data rail floats over it and folds away. Two rules carry the
+ * whole layout and both were found by looking at the mock at dock width rather than at overlay
+ * width, which is where every one of these degrades first.
+ *
+ * 1. `--topo-rail-space` is the width the rail takes, and the stage's own controls are held
+ *    inside what is left. Without it the Skeleton/Synapses/Colour cluster sits *under* the rail
+ *    at any width where the rail is a large fraction of the surface — which is every dock and
+ *    every dashboard cell, i.e. most of the places this node is actually used.
+ * 2. The rail is a percentage with a px ceiling, not a fixed width. At 1100px it is 340px and
+ *    leaves the picture dominant; at 400px it is 60% and still leaves a strip of neuron, which
+ *    is what tells you the fold button is worth pressing.
+ * ========================================================================== */
+
+.topo {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  --topo-rail-width: min(340px, 60%);
+  --topo-rail-space: calc(var(--topo-rail-width) + 14px);
+}
+.topo[data-rail='closed'] {
+  --topo-rail-space: 0px;
+}
+
+/* --- the identity bar above the stage --- */
+
+.topo__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.topo__page {
+  border: 1px solid transparent;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 1px 5px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+.topo__page:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.topo__page:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.topo__count {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.topo__name {
+  font-size: 11.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.topo__id {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.topo__spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.topo__pin {
+  border: 1px solid transparent;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 1px 7px;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.topo__pin:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.topo__pin[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--text-primary);
+}
+
+/* --- the stage --- */
+
+.topo__stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.topo__scene {
+  position: absolute;
+  inset: 0;
+}
+.topo__scene > .viewer {
+  height: 100%;
+  background: none;
+  border-radius: 0;
+}
+
+/*
+ * The stage controls. `right` is the rail's own space, which is the whole point — see the note
+ * at the top of this block. They wrap rather than scroll, because a control that has scrolled out
+ * of a 200px strip is a control nobody knows exists.
+ */
+.topo__tools {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: var(--topo-rail-space);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  z-index: 2;
+  pointer-events: none;
+}
+.topo__tools > * {
+  pointer-events: auto;
+}
+.topo__group {
+  display: inline-flex;
+  gap: 1px;
+  padding: 1px;
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(6px);
+}
+.topo__group button {
+  border: 0;
+  background: none;
+  border-radius: 3px;
+  padding: 3px 7px;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.topo__group button:hover {
+  background: var(--surface-hover);
+}
+.topo__group button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+/*
+ * After the pressed rule, not before: the two have equal specificity, so source order is what
+ * decides. A disabled Mesh button whose param is still `true` would otherwise draw in the pressed
+ * accent — a layer that looks switched on and is not on screen, which is the one appearance a
+ * layer toggle must never have. The `aria-pressed` it reports is corrected in the component too;
+ * this is the half that survives somebody changing that back.
+ */
+.topo__group button:disabled {
+  background: none;
+  color: var(--text-muted);
+  font-weight: 400;
+  cursor: not-allowed;
+}
+.topo__select {
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  max-width: 100%;
+}
+.topo__note {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.topo__note--block {
+  display: block;
+  margin: 0;
+  padding: 7px 9px;
+  line-height: 1.45;
+}
+
+.topo__legend {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  right: var(--topo-rail-space);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  padding: 4px 8px;
+  width: fit-content;
+  max-width: calc(100% - var(--topo-rail-space) - 16px);
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(6px);
+  font-size: 10px;
+  color: var(--text-secondary);
+  z-index: 2;
+}
+.topo__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.topo__key i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+/* --- the rail --- */
+
+.topo__rail {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  bottom: 8px;
+  width: var(--topo-rail-width);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: color-mix(in srgb, var(--surface-2) 93%, transparent);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+  z-index: 3;
+}
+.topo__tabs {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.topo__tabs button {
+  border: 0;
+  background: none;
+  border-bottom: 2px solid transparent;
+  padding: 6px 9px 5px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.topo__tabs button:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+.topo__tabs button[aria-selected='true'] {
+  color: var(--text-primary);
+  border-bottom-color: var(--cat-visualisation);
+  font-weight: 600;
+}
+.topo__close {
+  color: var(--text-muted);
+  padding: 0 8px;
+}
+.topo__panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.topo__seg {
+  display: flex;
+  align-items: center;
+  padding: 7px 9px;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+}
+.topo__seg button {
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  padding: 3px 10px;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.topo__seg button:first-child {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+.topo__seg button:last-child {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  border-left: 0;
+}
+.topo__seg button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.topo__partners {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.topo__partner {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) 52px auto;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  text-align: left;
+  padding: 4px 9px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  cursor: pointer;
+}
+.topo__partner:hover {
+  background: var(--surface-hover);
+}
+.topo__partner[data-on] {
+  background: var(--accent-soft);
+}
+.topo__partner > i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+}
+.topo__partner[data-on] > i {
+  border-color: transparent;
+}
+.topo__partner-name {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.topo__partner-track {
+  height: 6px;
+  background: var(--surface-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.topo__partner-track > span {
+  display: block;
+  height: 100%;
+}
+.topo__partner-weight {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.topo__pending {
+  padding: 10px 9px;
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.topo__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10.5px;
+}
+.topo__table th,
+.topo__table td {
+  padding: 4px 9px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.topo__table th {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+  background: var(--surface-3);
+}
+.topo__table th:first-child,
+.topo__table td:first-child {
+  text-align: left;
+}
+.topo__swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
+
+.topo__panel-foot {
+  border-top: 1px solid var(--border);
+}
+/*
+ * The two split knobs need a wider label column than the Visuals tab's: "Linker threshold" is
+ * fifteen characters where "Line width" is ten, and at 6.4em it wrapped to two lines and pulled
+ * its own track out of line with the one below it. The readout shrinks to pay for it — these are
+ * two decimals where a colour row prints seven characters of hex.
+ */
+.topo__slider--tune {
+  grid-template-columns: 8.4em minmax(0, 1fr) 3.4em;
+}
+/*
+ * "Back to navis defaults", which sits inline at the end of the note rather than as a row of its
+ * own: it appears only once something has been moved, and a control that materialises as a new
+ * row shifts everything under it — here, the checkbox somebody may be reaching for.
+ */
+.topo__reset {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.topo__check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 9px 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+/*
+ * The tile grid inside the rail is one column whatever the auto-fit would do: the rail is 340px
+ * at its widest and a two-column grid there puts a Strahler bar chart in 160px.
+ */
+.topo__panel .tiles {
+  grid-template-columns: minmax(0, 1fr);
+}
+.topo__panel .tile__facts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  margin: 0;
+}
+.topo__panel .tile__fact {
+  display: contents;
+}
+.topo__panel .tile__fact dt {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+.topo__panel .tile__fact dd {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The Visuals tab's rows.
+ *
+ * A grid rather than a flex row so the three columns line up down the panel — a label, the track,
+ * and the readout — which is what makes two sliders read as one control group rather than as two
+ * unrelated widgets that happen to be adjacent.
+ */
+.topo__slider {
+  display: grid;
+  /*
+   * Sized to the widest of each column's real content: "Synapse size" wrapped to two lines at
+   * 5.5em, and "#000000" was clipped to "#" at 4.2em — both only visible once the colour row
+   * joined the two sliders in the same grid. Widened twice since: 7.6em for "Unlit synapses",
+   * which is what the row that used to say "Others" is called now that its label says what it
+   * does, and 8.6em for "Skeleton opacity". The track keeps `minmax(0, 1fr)`, so the squeeze
+   * lands there rather than on a label wrapping to two lines and pulling its own row out of
+   * line with the one below it.
+   */
+  grid-template-columns: 8.6em minmax(0, 1fr) 5.4em;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.topo__slider-label {
+  color: var(--text-secondary);
+}
+.topo__slider input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+  min-width: 0;
+}
+.topo__slider-value {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  text-align: right;
+  font-weight: 600;
+}
+
+/*
+ * The partner filter box. Sits in the same row as the direction toggle, taking whatever is left
+ * — a fixed width would either crowd the toggle in the dock or leave a gap in the overlay.
+ */
+.topo__search {
+  flex: 1 1 90px;
+  min-width: 0;
+  margin-left: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 7px;
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.topo__search::placeholder {
+  color: var(--text-muted);
+}
+.topo__note--warn {
+  color: var(--status-warn);
+}
+
+/*
+ * The colour picker in the Visuals tab. Sized to the slider track it replaces so the three rows
+ * keep one grid, and with the browser's default swatch padding removed — otherwise it draws a
+ * white inset that reads as part of the chosen colour.
+ */
+.topo__color {
+  width: 100%;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+.topo__color::-webkit-color-swatch-wrapper {
+  padding: 1px;
+}
+.topo__color::-webkit-color-swatch {
+  border: none;
+  border-radius: 2px;
+}

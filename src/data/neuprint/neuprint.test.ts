@@ -56,6 +56,7 @@ import {
   groupTotalsCypher,
   idList,
   pathStepCypher,
+  synapseLinksCypher,
   synapsesCypher,
 } from './cypher'
 import type { DatasetInfo } from '../source'
@@ -2149,5 +2150,63 @@ describe('neuPrint region meshes', () => {
     const result = await fetchRoiMeshSet('hemibrain:v1.2.1', [], IDENTITY_SCALE)
     expect(result.items).toHaveLength(0)
     expect(asked).toEqual([])
+  })
+})
+
+describe('synapseLinksCypher', () => {
+  /*
+   * The partner-resolved walk. Its correctness was checked live (`live.test.ts`, and the numbers
+   * are in `useSynapseLinks`); what is checked here is the shape, which the results cannot show.
+   */
+  it('binds and filters the neuron before expanding anything', () => {
+    /*
+     * The load-bearing line. Written as `MATCH (n:Neuron), (pattern)` with the `WHERE` after it,
+     * Neo4j reads the comma as two patterns to join and expands SynapseSets for *every* neuron in
+     * the dataset before discovering which body was asked for — on male-CNS that does not return
+     * inside two minutes. It never errors; it hangs, which reads as a network problem.
+     */
+    const cypher = synapseLinksCypher({ datasetId: 'd', neuronIds: ['10003'] })
+    const lines = cypher.split('\n')
+    expect(lines[0]).toBe('MATCH (n:Neuron)')
+    expect(lines[1]).toBe('WHERE n.bodyId IN [10003]')
+    expect(cypher).not.toContain('MATCH (n:Neuron),')
+  })
+
+  it('walks the SynapseSet pair and the SynapsesTo pair, as neuprint-python does', () => {
+    // The SynapseSet pair pins which two *neurons*; the SynapsesTo pair pins which two
+    // *synapses*, and so which end the returned coordinate belongs to. Dropping either returns a
+    // table that still looks right.
+    const cypher = synapseLinksCypher({ datasetId: 'd', neuronIds: ['1'] })
+    expect(cypher).toContain('(n)-[:Contains]->(nss:SynapseSet)-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m)')
+    expect(cypher).toContain('(nss)-[:Contains]->(ns:Synapse)-[:SynapsesTo]->(ms:Synapse)<-[:Contains]-(mss)')
+  })
+
+  it('asks each direction separately so the partner is never the wrong end', () => {
+    /*
+     * Two arms unioned, not one undirected match. Undirected, `ns.type` would still give the
+     * right polarity while `m` bound to whichever end Neo4j reached first — a table with half its
+     * partners silently wrong.
+     */
+    const both = synapseLinksCypher({ datasetId: 'd', neuronIds: ['1'] })
+    expect(both).toContain('UNION ALL')
+    const pre = synapseLinksCypher({ datasetId: 'd', neuronIds: ['1'], polarity: 'pre' })
+    expect(pre).not.toContain('UNION ALL')
+    // On the incoming arm the partner is the presynaptic side, so the walk is mirrored.
+    const post = synapseLinksCypher({ datasetId: 'd', neuronIds: ['1'], polarity: 'post' })
+    expect(post).toContain('(m)-[:Contains]->(mss:SynapseSet)-[:ConnectsTo]->(nss:SynapseSet)')
+  })
+
+  it('never de-duplicates, unlike the site walk', () => {
+    /*
+     * `synapsesCypher` collapses a T-bar repeated once per partner. Here that repetition *is* the
+     * answer — a T-bar driving four partners is four connections — and a `DISTINCT` would delete
+     * three of the four partner labels the query exists to produce.
+     */
+    expect(synapseLinksCypher({ datasetId: 'd', neuronIds: ['1'] })).not.toContain('DISTINCT')
+  })
+
+  it('applies a confidence floor to the queried neuron’s own synapse', () => {
+    const cypher = synapseLinksCypher({ datasetId: 'd', neuronIds: ['1'], minConfidence: 0.5 })
+    expect(cypher).toContain('ns.confidence >= 0.5')
   })
 })

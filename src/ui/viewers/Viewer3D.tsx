@@ -25,7 +25,15 @@
 import { Canvas, useThree } from '@react-three/fiber'
 import type { ThreeEvent } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, TrackballControls } from '@react-three/drei'
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import type { RefObject } from 'react'
 import * as THREE from 'three'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
@@ -59,6 +67,7 @@ import {
   buildSkeletonSegments,
   compassLayout,
   detailNote,
+  emphasisSizes,
   framingFor,
   hiddenCount,
   labelIndex,
@@ -141,6 +150,39 @@ export interface Viewer3DProps {
    * of 0 is the off state and does not mount it either.
    */
   ambientOcclusion: number
+  /**
+   * A colour per skeleton *node*, overriding the neuron's own where it answers.
+   *
+   * Neuron Topology's compartment and Strahler channels: a colour that varies *along* one
+   * arbour, which `skeletonColor` cannot express — a `ColorSpec` resolves against the attribute
+   * table, and that has one row per neuron. Undefined for a node falls back to the ordinary
+   * encoding, so a partly-labelled arbour draws the rest normally.
+   */
+  skeletonNodeColor?: (itemIndex: number, nodeIndex: number) => string | undefined
+  /**
+   * Whether `pointSize` is nanometres (the default) or screen pixels.
+   *
+   * See `PointCloud`'s own note. Opt-in, so every existing caller keeps world-space dots.
+   */
+  pointSizeAttenuation?: boolean
+  /**
+   * Which synapse rows are the subject right now — drawn larger and opaque, the rest pushed back.
+   *
+   * Opt-in, so a scene that has not asked for it draws one uniform cloud as before. Used by
+   * `out.topology` to make a lit partner findable: on a dense cell the lit set is tens of dots
+   * among tens of thousands, and colour alone does not separate them.
+   */
+  pointEmphasis?: ((rowIndex: number) => boolean) | undefined
+  /** How faint the un-emphasised synapses go. Only read when `pointEmphasis` is given. */
+  pointDimOpacity?: number
+  /**
+   * How solid the skeleton is drawn, 0..1. Opaque unless a caller says otherwise.
+   *
+   * Both line paths honour it — the hairline through `lineBasicMaterial` and the fat one through
+   * `LineMaterial.opacity`, which is a setter onto the shader's own uniform (`float alpha =
+   * opacity` in three's fragment source, a line `flexLineMaterial`'s patches do not touch).
+   */
+  skeletonOpacity?: number
   onSelectionChange?: (ids: string[]) => void
   /**
    * Legend keys hidden per channel, by the param prefix that stores them.
@@ -307,7 +349,9 @@ export function Viewer3D(props: Viewer3DProps) {
   const visible: SceneVisibility = {
     skeletons: useMemo(
       () =>
-        shown.skeletons ? visibilityFor(colors.skeletons.labelAt, new Set(hidden.skeleton)) : NEVER,
+        shown.skeletons
+          ? visibilityFor(colors.skeletons.labelAt, new Set(hidden.skeleton))
+          : NEVER,
       [colors.skeletons, hidden.skeleton, shown.skeletons],
     ),
     meshes: useMemo(
@@ -315,11 +359,13 @@ export function Viewer3D(props: Viewer3DProps) {
       [colors.meshes, hidden.mesh, shown.meshes],
     ),
     points: useMemo(
-      () => (shown.points ? visibilityFor(colors.points.labelAt, new Set(hidden.point)) : NEVER),
+      () =>
+        shown.points ? visibilityFor(colors.points.labelAt, new Set(hidden.point)) : NEVER,
       [colors.points, hidden.point, shown.points],
     ),
     volumes: useMemo(
-      () => (shown.volumes ? visibilityFor(colors.volumes.labelAt, new Set(hidden.volume)) : NEVER),
+      () =>
+        shown.volumes ? visibilityFor(colors.volumes.labelAt, new Set(hidden.volume)) : NEVER,
       [colors.volumes, hidden.volume, shown.volumes],
     ),
   }
@@ -358,7 +404,16 @@ export function Viewer3D(props: Viewer3DProps) {
       (meshes ? hiddenCount(meshes.items.length, visible.meshes) : 0) +
       (points ? hiddenCount(points.attributes.length, visible.points) : 0) +
       (volumes ? hiddenCount(volumes.items.length, visible.volumes) : 0),
-    [skeletons, meshes, points, volumes, visible.skeletons, visible.meshes, visible.points, visible.volumes],
+    [
+      skeletons,
+      meshes,
+      points,
+      volumes,
+      visible.skeletons,
+      visible.meshes,
+      visible.points,
+      visible.volumes,
+    ],
   )
 
   /*
@@ -488,9 +543,10 @@ export function Viewer3D(props: Viewer3DProps) {
     prefix: 'skeleton' | 'mesh' | 'point' | 'volume',
   ): LegendControls {
     const resolved = colors[key]
-    const labels = resolved.legend?.kind === 'categorical'
-      ? resolved.legend.entries.map((entry) => entry.label)
-      : []
+    const labels =
+      resolved.legend?.kind === 'categorical'
+        ? resolved.legend.entries.map((entry) => entry.label)
+        : []
     /** Undefined where a channel's keys address no selection — see below. */
     const ids = key === 'skeletons' || key === 'meshes' ? keyIds[key] : undefined
 
@@ -527,15 +583,18 @@ export function Viewer3D(props: Viewer3DProps) {
           return !!held?.length && held.every((id) => chosen.has(id))
         }),
       ),
-      onSelect: (label) => onSelectionChange(toggleLabelSelection(selection, ids.get(label) ?? [])),
+      onSelect: (label) =>
+        onSelectionChange(toggleLabelSelection(selection, ids.get(label) ?? [])),
     }
   }
 
   const resetAll = (what: 'hidden' | 'colors') => {
     if (!onParamChange) return
     for (const channel of CHANNELS) {
-      onParamChange(`${channel.prefix}${what === 'hidden' ? 'Hidden' : 'ColorOverrides'}`,
-        what === 'hidden' ? [] : '')
+      onParamChange(
+        `${channel.prefix}${what === 'hidden' ? 'Hidden' : 'ColorOverrides'}`,
+        what === 'hidden' ? [] : '',
+      )
     }
   }
 
@@ -1068,9 +1127,14 @@ function SceneContents({
   skeletonWidthMode,
   skeletonRadiusWidth,
   skeletonWorldWidth,
+  skeletonNodeColor,
+  skeletonOpacity,
   selectByClick,
   meshOpacity,
   pointSize,
+  pointSizeAttenuation,
+  pointEmphasis,
+  pointDimOpacity,
   volumeOpacity,
   selection,
   onSelectionChange,
@@ -1099,6 +1163,8 @@ function SceneContents({
         <SkeletonLines
           skeletons={skeletons}
           colorAt={colors.skeletons.at}
+          nodeColorAt={skeletonNodeColor}
+          {...(skeletonOpacity === undefined ? {} : { opacity: skeletonOpacity })}
           visible={visible.skeletons}
           selected={selected}
           width={skeletonWidth}
@@ -1125,6 +1191,9 @@ function SceneContents({
           colorAt={colors.points.at}
           visible={visible.points}
           size={pointSize}
+          {...(pointSizeAttenuation === false ? { attenuate: false } : {})}
+          emphasis={pointEmphasis}
+          {...(pointDimOpacity === undefined ? {} : { dimOpacity: pointDimOpacity })}
         />
       )}
       {/*
@@ -1212,6 +1281,8 @@ function MeshChannel({
 function SkeletonLines({
   skeletons,
   colorAt,
+  nodeColorAt,
+  opacity = 1,
   visible,
   selected,
   width,
@@ -1224,6 +1295,9 @@ function SkeletonLines({
 }: {
   skeletons: SkeletonsValue
   colorAt: (index: number) => string
+  nodeColorAt?: ((itemIndex: number, nodeIndex: number) => string | undefined) | undefined
+  /** 0..1. Passed to whichever of the two line paths draws. */
+  opacity?: number
   visible: (itemIndex: number) => boolean
   selected: Set<string>
   width: number
@@ -1248,8 +1322,8 @@ function SkeletonLines({
 
   /** Colour is a separate memo, so restyling does not rebuild positions. */
   const colors = useMemo(
-    () => skeletonSegmentColors(built, skeletons, colorAt, selected),
-    [built, skeletons, colorAt, selected],
+    () => skeletonSegmentColors(built, skeletons, colorAt, selected, nodeColorAt),
+    [built, skeletons, colorAt, selected, nodeColorAt],
   )
 
   /**
@@ -1292,6 +1366,7 @@ function SkeletonLines({
       <FatSkeletonLines
         built={built}
         colors={colors}
+        opacity={opacity}
         width={plan.uniform}
         widths={plan.widths}
         worldUnits={plan.worldUnits}
@@ -1308,8 +1383,11 @@ function SkeletonLines({
     <ThinSkeletonLines
       built={built}
       colors={colors}
+      opacity={opacity}
       onPick={
-        pickable ? (event) => pick(neuronAtVertex(built, skeletons, event.index), event) : undefined
+        pickable
+          ? (event) => pick(neuronAtVertex(built, skeletons, event.index), event)
+          : undefined
       }
     />
   )
@@ -1325,10 +1403,12 @@ function SkeletonLines({
 function ThinSkeletonLines({
   built,
   colors,
+  opacity,
   onPick,
 }: {
   built: SkeletonSegments
   colors: Float32Array
+  opacity: number
   /** Absent when `Select by clicking` is off, which takes the object out of the raycast. */
   onPick?: ((event: ThreeEvent<MouseEvent>) => void) | undefined
 }) {
@@ -1349,7 +1429,17 @@ function ThinSkeletonLines({
 
   return (
     <lineSegments geometry={geometry} onClick={onPick}>
-      <lineBasicMaterial vertexColors />
+      {/*
+       * `depthWrite` off once it is faded, `PointSprites`' rule and for its reason: a see-through
+       * skeleton that still writes depth hides the synapses behind it, so the arbour would be
+       * transparent to the background and opaque to the very cloud somebody faded it to see.
+       */}
+      <lineBasicMaterial
+        vertexColors
+        transparent={opacity < 1}
+        opacity={opacity}
+        depthWrite={opacity >= 1}
+      />
     </lineSegments>
   )
 }
@@ -1374,6 +1464,7 @@ function ThinSkeletonLines({
 function FatSkeletonLines({
   built,
   colors,
+  opacity,
   width,
   widths,
   worldUnits,
@@ -1381,6 +1472,7 @@ function FatSkeletonLines({
 }: {
   built: SkeletonSegments
   colors: Float32Array
+  opacity: number
   width: number
   /**
    * A width per endpoint, or `undefined` for one width across the scene.
@@ -1458,6 +1550,25 @@ function FatSkeletonLines({
     invalidate()
   }, [material, width, invalidate])
 
+  /*
+   * In an effect rather than in the material memo, `linewidth`'s reasoning: opacity is scrubbed,
+   * and rebuilding a patched `LineMaterial` per pointermove would recompile a shader sixty times
+   * a second. `LineMaterial.opacity` is a setter onto `uniforms.opacity`, so this is a uniform
+   * write like the one above.
+   *
+   * `needsUpdate` only when `transparent` actually flips, which happens at most once per drag —
+   * three lists `transparent` among the properties a material has to be recompiled for, and the
+   * program cache keys by shader source, so the rebuild reuses the compiled program anyway.
+   */
+  useEffect(() => {
+    const faded = opacity < 1
+    if (material.transparent !== faded) material.needsUpdate = true
+    material.transparent = faded
+    material.depthWrite = !faded
+    material.opacity = opacity
+    invalidate()
+  }, [material, opacity, invalidate])
+
   useEffect(() => {
     material.resolution.set(size.width, size.height)
     invalidate()
@@ -1513,16 +1624,28 @@ function MeshItem({
   )
 }
 
-function PointCloud({
+/**
+ * One `<points>` object: the rows a predicate admits, at one size and one opacity.
+ *
+ * Split out because a `PointsMaterial` has exactly one size and one opacity for every vertex it
+ * draws, so "these dots bigger and those dots fainter" is two draw calls and cannot be anything
+ * else. `buildPoints` already filters by a predicate, so the two are complementary halves of the
+ * same cloud rather than two clouds.
+ */
+function PointSprites({
   points,
   colorAt,
   visible,
   size,
+  attenuate,
+  opacity,
 }: {
   points: PointsValue
   colorAt: (index: number) => string
   visible: (rowIndex: number) => boolean
   size: number
+  attenuate: boolean
+  opacity: number
 }) {
   const invalidate = useThree((state) => state.invalidate)
 
@@ -1540,10 +1663,113 @@ function PointCloud({
     return () => geometry.dispose()
   }, [geometry, invalidate])
 
+  const faded = opacity < 1
   return (
     <points geometry={geometry}>
-      <pointsMaterial vertexColors size={size} sizeAttenuation />
+      <pointsMaterial
+        vertexColors
+        size={size}
+        sizeAttenuation={attenuate}
+        transparent={faded}
+        opacity={opacity}
+        /*
+         * A faded cloud must not write depth. With it on, a dimmed dot in front of an emphasised
+         * one occludes it — so the thirty-eight points somebody is looking for disappear behind
+         * the fourteen thousand they asked to be pushed back, which is worse than not fading at
+         * all. The emphasised half stays opaque and keeps its depth, so it still sits correctly
+         * against the skeleton.
+         */
+        depthWrite={!faded}
+      />
     </points>
+  )
+}
+
+function PointCloud({
+  points,
+  colorAt,
+  visible,
+  size,
+  attenuate = true,
+  emphasis,
+  dimOpacity = 1,
+}: {
+  points: PointsValue
+  colorAt: (index: number) => string
+  visible: (rowIndex: number) => boolean
+  size: number
+  /**
+   * Whether `size` is world space (nanometres, shrinking with distance) or screen space (pixels).
+   *
+   * World space is the default and is what `out.viewer3d` wants: there a synapse cloud sits in a
+   * scene of neurons, and a dot that stayed the same size while the neuron receded would stop
+   * being part of the anatomy.
+   *
+   * Screen space exists for a card where the cloud is the *subject* rather than a decoration. A
+   * nanometre size cannot have one good default there: 250 nm is a legible dot on a 15 µm optic
+   * lobe cell and is sub-pixel on a 250 µm descending neuron, so the same setting is right and
+   * then invisible depending on which neuron you paged to. See `out.topology`.
+   */
+  attenuate?: boolean
+  /**
+   * Which rows to draw larger and at full opacity, everything else being pushed back.
+   *
+   * Absent means one cloud drawn one way, which is every existing caller. Present splits the draw
+   * in two — see `PointSprites` for why that is forced rather than chosen.
+   */
+  emphasis?: ((rowIndex: number) => boolean) | undefined
+  /** Opacity of the un-emphasised half. Only consulted when `emphasis` is given. */
+  dimOpacity?: number
+}) {
+  /*
+   * Two predicates over one cloud rather than two clouds: `buildPoints` already filters, so the
+   * halves cannot drift apart or double-count a row. Memoised because they are the identity
+   * `buildPoints`' own memo is keyed on — inline arrows would rebuild both buffers every frame.
+   */
+  const lit = useMemo(
+    () => (emphasis ? (i: number) => visible(i) && emphasis(i) : undefined),
+    [visible, emphasis],
+  )
+  const dim = useMemo(
+    () => (emphasis ? (i: number) => visible(i) && !emphasis(i) : undefined),
+    [visible, emphasis],
+  )
+  // Both halves, from one place: the dim one is scaled *down* as well as faded, because alpha
+  // alone saturates on a dense cloud. `emphasisSizes` carries the measurement.
+  const sizes = emphasisSizes(size)
+
+  if (!lit || !dim) {
+    return (
+      <PointSprites
+        points={points}
+        colorAt={colorAt}
+        visible={visible}
+        size={size}
+        attenuate={attenuate}
+        opacity={1}
+      />
+    )
+  }
+
+  return (
+    <>
+      <PointSprites
+        points={points}
+        colorAt={colorAt}
+        visible={dim}
+        size={sizes.dim}
+        attenuate={attenuate}
+        opacity={dimOpacity}
+      />
+      <PointSprites
+        points={points}
+        colorAt={colorAt}
+        visible={lit}
+        size={sizes.lit}
+        attenuate={attenuate}
+        opacity={1}
+      />
+    </>
   )
 }
 

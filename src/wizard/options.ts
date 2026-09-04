@@ -74,6 +74,7 @@ export type VisualisationId =
   | 'network'
   | 'metrics'
   | 'viewer3d'
+  | 'topology'
   | 'neuroglancer'
 
 /**
@@ -425,6 +426,23 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     },
   },
   {
+    id: 'topology',
+    /*
+     * `skeletons`, where the 3D scene above it needs none — and that is not an oversight in the
+     * other entry. `viewer3d` draws whatever the *arm* fetched for it, so the analysis is what
+     * carries the requirement; this node fetches for itself off nothing but the neuron table, so
+     * the requirement travels with the viewer. That is what lets it be offered under `neurons`,
+     * where there is no geometry arm to gate.
+     */
+    requires: 'skeletons',
+    label: 'Neuron Topology',
+    blurb:
+      'One neuron at a time: its arbour in 3D, its morphometrics, and where a chosen partner synapses onto it.',
+    hint: {
+      text: 'Page through the neurons with ‹ ›. Pick a partner in the rail to light up exactly where it connects. The Morphometrics port carries the numbers for the whole set.',
+    },
+  },
+  {
     id: 'neuroglancer',
     requires: 'viewerScene',
     label: 'Neuroglancer',
@@ -536,10 +554,24 @@ export const VIEWS: Record<AnalysisId, Partial<Record<VisualisationId, ViewSpec>
       type: 'out.viewer3d',
       params: { skeletonColorMode: 'categorical', skeletonColorBy: 'type' },
     },
+    /*
+     * A whole set in one scene, or one neuron examined closely — the two halves of "look at the
+     * morphology", which is why they sit under the same analysis rather than needing a fifth
+     * question. Ticking both is the useful combination: the scene for where the cells are, the
+     * Topology card for what one of them measures.
+     */
+    topology: { type: 'out.topology' },
     neuroglancer: { type: 'out.neuroglancer' },
   },
   neurons: {
     table: { type: 'out.table' },
+    /*
+     * Offered with no analysis at all, because it *is* one: it takes the neuron table and the
+     * dataset and does its own fetching, so `dataset → search → Neuron Topology` is a complete
+     * workflow. `requires: 'skeletons'` on the option is what keeps it off a source that has
+     * none — there is no arm here to carry that gate.
+     */
+    topology: { type: 'out.topology' },
     neuroglancer: { type: 'out.neuroglancer' },
   },
 }

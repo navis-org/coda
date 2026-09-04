@@ -25,6 +25,8 @@ import { getEmitter, registeredEmitterTypes } from './registry'
  * of a long list is that the exporter is unfinished.
  */
 const NO_EMITTER: Record<string, string> = {
+  'out.topology':
+    'Neuron Topology, and this is a prototype rather than an absence nobody noticed. Every number on the card has a navis counterpart \u2014 `navis.strahler_index`, `navis.split_axon_dendrite`, `cable_length` \u2014 so the emitter is writable and worth writing. What stops it being written *now* is that the split is the one thing here somebody will compare against a paper, and both exporters have silently disagreed with the canvas before (Connectivity\u2019s far-end match, Paths\u2019 missing floor). An emitter for this has to be checked by running it against the node, the way `pnpm probe:split` already checks the node against navis \u2014 and until it is, no emitter is a better answer than one that looks right.',
   'compare.matchTypes':
     'The cross-dataset cell-type mapper. `cocoa` is the faithful route and is the package this ' +
     'node was ported from, but it is a *fourth* dependency \u2014 this exporter is built on ' +

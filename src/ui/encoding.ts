@@ -311,6 +311,19 @@ function constantColor(spec: ColorSpec, mode: Mode): string {
   if (spec.constant === 'muted') return MUTED
   const fixed = FIXED_CONSTANTS[spec.constant]
   if (fixed) return fixed
+  /*
+   * A literal hex is itself.
+   *
+   * The palette slots above are the vocabulary a *param* offers, and they stay the default answer
+   * — `colorParams`' enum is nine validated choices and picking a tenth by eye is what
+   * `colors.ts` refuses. But a colour the user typed into an `<input type="color">` is not a
+   * palette choice, it is their lab's convention or an existing figure's key, which is exactly
+   * the case `LegendKeys`' own override already serves. Without this a stored `#3b7a2f` parsed as
+   * `NaN` and came back as slot 0 — a plausible blue, and no way to tell it from a colour that
+   * had been chosen.
+   */
+  const literal = literalColor(spec.constant)
+  if (literal) return literal
   const slot = Number(spec.constant)
   return seriesColor(Number.isFinite(slot) ? slot : 0, mode)
 }

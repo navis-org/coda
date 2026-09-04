@@ -14,6 +14,8 @@ import './exporter'
 import { getEmitter, registeredEmitterTypes } from './registry'
 
 const NO_EMITTER: Record<string, string> = {
+  'out.topology':
+    'Neuron Topology \u2014 see the Python note. The natverse has the pieces (`nat::strahler_order`, `nat::seglengths`), but the axon/dendrite split is navis\u2019s synapse flow centrality with a branch-point correction and a fragment-stitching pass, and R has no counterpart that agrees with it node for node. Emitting an R split that quietly differs from the card is the failure this entry exists to avoid.',
   'compare.matchTypes':
     'The cross-dataset cell-type mapper. There is no R counterpart at all \u2014 `cocoa` is a ' +
     'Python package and nothing in the natverse builds a label graph across connectomes \u2014 ' +

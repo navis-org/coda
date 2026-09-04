@@ -498,7 +498,7 @@ actually bites, and the `Ordered` matrix beside a Heatmap at a size where the bl
 
 `nblast` → `linkage` → `warp` → **`skeletons`, `meshes`, `matches`**, plus `synblast` inside
 `nblast.py`. The claim `runtime.ts` makes about the second capability being nearly free has now
-been tested five times, and it holds: `MODULES` is six identical rows, because everything Coda
+been tested five times, and it holds: `MODULES` is seven identical rows, because everything Coda
 asks Python for lives in the one 1.1 MB wheel it already pins. A graph that resamples skeletons
 without ever scoring anything pays the same ten megabytes the first NBLAST would have; a graph
 that does both pays it once.

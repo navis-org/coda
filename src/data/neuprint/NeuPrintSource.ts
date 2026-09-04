@@ -53,6 +53,7 @@ import type {
   SourceCapabilities,
   SourceSchemas,
   GroupTotalsRequest,
+  SynapseLinksRequest,
   SynapseRequest,
   SynapseTotalsRequest,
   ViewerSceneRequest,
@@ -106,6 +107,7 @@ import {
   sampleNeuronsCypher,
   sampleStatusesCypher,
   synapseTotalsCypher,
+  synapseLinksCypher,
   synapsesCypher,
 } from './cypher'
 import type { CypherResponse } from './decode'
@@ -1262,6 +1264,88 @@ export class NeuPrintSource implements DataSource {
       data['type']!.push(row[1] === null || row[1] === undefined ? null : String(row[1]))
       data['polarity']!.push(row[2] === null || row[2] === undefined ? null : String(row[2]))
       data['confidence']!.push(Number(row[6]))
+    })
+
+    return {
+      kind: 'points',
+      positions,
+      attributes: makeTable(schema, data),
+      bounds: boundsOf([positions]),
+      ...this.frame(req.datasetId),
+    }
+  }
+
+  /**
+   * The same synapses, each naming the partner across the cleft.
+   *
+   * neuPrint is the only source that needs this: `schemasFor` drops `partnerId`/`partnerType`
+   * from the canonical synapse schema because resolving them turns one walk into a join, so a
+   * caller that wants a partner has to ask for it explicitly and pay for it. Every other backend
+   * carries the columns already.
+   *
+   * The attributes are the **canonical** schema rather than this source's narrowed one, which is
+   * the whole point of the method — a consumer reads one shape whichever route answered.
+   */
+  async fetchSynapseLinks(req: SynapseLinksRequest): Promise<PointsValue> {
+    await this.discover(req.datasetId, req.signal)
+    const scale = this.scaleFor(req.datasetId)
+    const schema = CANONICAL_SCHEMAS.synapses
+    if (req.neuronIds.length === 0) {
+      return {
+        kind: 'points',
+        positions: new Float32Array(0),
+        attributes: emptyTable(schema),
+        bounds: EMPTY_BOUNDS,
+        ...this.frame(req.datasetId),
+      }
+    }
+
+    req.onProgress?.(0.15, 'querying')
+    const response = await runCypher(
+      synapseLinksCypher(req),
+      req.datasetId,
+      this.options(req.signal),
+    )
+    req.onProgress?.(0.7, `${response.data.length} connections`)
+
+    // RETURN order: neuronId, type, polarity, x, y, z, confidence, partnerId, partnerType.
+    const positions = new Float32Array(response.data.length * 3)
+    const data: Record<string, ColumnData> = {
+      neuronId: [],
+      type: [],
+      partnerId: [],
+      partnerType: [],
+      polarity: [],
+      weight: [],
+    }
+    /*
+     * The six columns hoisted into locals before the loop rather than reached for through `data`
+     * inside it. This is the method that exists to return large clouds — 57,034 rows on male-cns
+     * body 10003 — and `data['neuronId']!` is a hash lookup plus a non-null assertion per column
+     * per row, so the indexed form was ~342,000 property lookups to fill six arrays.
+     */
+    const neuronIds = data['neuronId']!
+    const types = data['type']!
+    const polarities = data['polarity']!
+    const partnerIds = data['partnerId']!
+    const partnerTypeCol = data['partnerType']!
+    const weights = data['weight']!
+    response.data.forEach((row, i) => {
+      positions[i * 3] = (Number(row[3]) || 0) * scale[0]
+      positions[i * 3 + 1] = (Number(row[4]) || 0) * scale[1]
+      positions[i * 3 + 2] = (Number(row[5]) || 0) * scale[2]
+      neuronIds.push(Number(row[0]))
+      types.push(row[1] === null || row[1] === undefined ? null : String(row[1]))
+      polarities.push(row[2] === null || row[2] === undefined ? null : String(row[2]))
+      partnerIds.push(Number(row[7]))
+      partnerTypeCol.push(row[8] === null || row[8] === undefined ? null : String(row[8]))
+      /*
+       * One. A row here *is* one connection between two synapses, so the canonical `weight`
+       * column — which counts synapses in a connectivity table — is 1 by construction. Summing
+       * it over a partner gives that partner's weight, which is the number the card's list shows
+       * and is what makes the two agree.
+       */
+      weights.push(1)
     })
 
     return {

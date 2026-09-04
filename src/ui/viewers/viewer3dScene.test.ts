@@ -15,6 +15,8 @@ import type { Bounds3, MeshesValue, PointsValue, SkeletonsValue } from '../../co
 import { makeTable } from '../../core/values'
 import { CHART_INK, chartSurface } from '../colors'
 import {
+  DIM_SCALE,
+  emphasisSizes,
   AMBIENT_INTENSITY,
   buildPoints,
   buildSkeletonSegments,
@@ -103,7 +105,12 @@ describe('buildSkeletonSegments', () => {
     const empty: SkeletonsValue = {
       ...skeletons(),
       items: [
-        { id: '1', positions: new Float32Array(), radii: new Float32Array(), parents: new Int32Array() },
+        {
+          id: '1',
+          positions: new Float32Array(),
+          radii: new Float32Array(),
+          parents: new Int32Array(),
+        },
       ],
     }
     expect(buildSkeletonSegments(empty).segments).toBe(0)
@@ -224,9 +231,9 @@ describe('line widths from radii', () => {
     })
 
     it('multiplies rather than targeting a width', () => {
-      expect([...skeletonSegmentWorldWidths(buildSkeletonSegments(chain([1, 2])), 3)!]).toEqual([
-        12, 6,
-      ])
+      expect([...skeletonSegmentWorldWidths(buildSkeletonSegments(chain([1, 2])), 3)!]).toEqual(
+        [12, 6],
+      )
     })
 
     it('does not ceiling the tail, because a wide neurite really is wide', () => {
@@ -245,9 +252,9 @@ describe('line widths from radii', () => {
        * one zoom level and nothing at any other. `MIN_WORLD_PIXELS` applies it per vertex in
        * the shader, where the projection is known.
        */
-      expect([...skeletonSegmentWorldWidths(buildSkeletonSegments(chain([0, 2])), 1)!]).toEqual([
-        4, 0,
-      ])
+      expect([...skeletonSegmentWorldWidths(buildSkeletonSegments(chain([0, 2])), 1)!]).toEqual(
+        [4, 0],
+      )
     })
 
     it('never returns a negative width, because CATMAID writes −1 for unmeasured', () => {
@@ -317,9 +324,9 @@ describe('line widths from radii', () => {
       const none = buildSkeletonSegments(chain([0, 0, 0]))
       expect(skeletonWidthPlan(none, 'uniform', scales).fat).toBe(false)
       expect(skeletonWidthPlan(none, 'uniform', { ...scales, uniform: 2 }).fat).toBe(true)
-      expect(skeletonWidthPlan(buildSkeletonSegments(chain([1, 2])), 'radius', scales).fat).toBe(
-        true,
-      )
+      expect(
+        skeletonWidthPlan(buildSkeletonSegments(chain([1, 2])), 'radius', scales).fat,
+      ).toBe(true)
     })
   })
 })
@@ -566,7 +573,10 @@ describe('skeletonNote', () => {
   })
 
   it('names the control that changes it', () => {
-    const note = skeletonNote({ ...base, provenance: { id: 'neuprint', label: 'neuPrint SWC' } })
+    const note = skeletonNote({
+      ...base,
+      provenance: { id: 'neuprint', label: 'neuPrint SWC' },
+    })
     expect(note?.title).toContain('Skeletons node')
   })
 
@@ -739,5 +749,43 @@ describe('compassLayout', () => {
     // drei's default is a flat 80px from each edge, which on a 90px-tall canvas is the centre.
     const short = compassLayout(true, { width: 200, height: 90 })
     expect(short.margin[1]).toBeLessThan(45)
+  })
+})
+
+describe('the two sizes a split synapse cloud is drawn at', () => {
+  /*
+   * These numbers are a measurement, and the measurement is the reason the test exists.
+   *
+   * Fading the un-emphasised half was reported as broken three times — "fully opaque, and the
+   * slider has no effect" — and each time the wiring was correct. Alpha *accumulates*: k
+   * overlapping dots at alpha `a` composite to `1 - (1 - a)^k`, so at twenty deep a nominal 0.2
+   * reaches 99% coverage and every slider position above it renders the same slab. Rendered at
+   * 20,000 points in a real browser, alpha 0.2, 0.5 and 1.0 were indistinguishable.
+   *
+   * Shrinking the dim half is what gives alpha something to work with, and it is invisible to
+   * every other kind of check: `DIM_SCALE` back at 1 draws a picture that is wrong only when you
+   * look at a dense neuron, which is why it is pinned here as arithmetic rather than left to the
+   * browser pass that found it.
+   */
+  it('draws the dim half smaller, not merely fainter', () => {
+    expect(DIM_SCALE).toBeLessThan(1)
+    expect(emphasisSizes(10).dim).toBeLessThan(10)
+  })
+
+  it('keeps the lit half larger than the base size, and both apart', () => {
+    const { lit, dim } = emphasisSizes(10)
+    expect(lit).toBeGreaterThan(10)
+    // The ratio is what the eye searches on. 1.5 against 0.6 is 2.5x, well past the ~1.2x that
+    // reads as "the same dot, slightly nearer".
+    expect(lit / dim).toBeGreaterThan(2)
+  })
+
+  it('scales both halves from the caller’s size', () => {
+    // Doubling `pointSize` must double both, or the Visuals slider changes the *relationship*
+    // between lit and unlit rather than the size of the dots.
+    const a = emphasisSizes(6)
+    const b = emphasisSizes(12)
+    expect(b.lit).toBeCloseTo(a.lit * 2)
+    expect(b.dim).toBeCloseTo(a.dim * 2)
   })
 })

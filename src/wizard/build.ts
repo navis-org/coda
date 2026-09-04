@@ -48,7 +48,15 @@ import { COL_WIDTH, GRID_ORIGIN, ROW_HEIGHT } from '../layout/place'
 import { NODE_BODIES, cardWidth } from '../ui/nodes/nodeBodies'
 import { noteNode } from '../examples/notes'
 import { datasetFamily } from '../nodes/lib/datasetFamilies'
-import type { AnalysisId, VisualisationId, WizardAnswers, WizardHint } from './options'
+import { inputPorts } from '../core/ports'
+import { getNodeDef } from '../core/registry'
+import type {
+  AnalysisId,
+  ViewSpec,
+  VisualisationId,
+  WizardAnswers,
+  WizardHint,
+} from './options'
 import { VIEWS, analysisOption, familyCan, startOption, visualisationOption } from './options'
 
 /**
@@ -70,6 +78,44 @@ const SEARCH_LIMIT = 100
  * somebody widens the search themselves.
  */
 const GEOMETRY_LIMIT = 30
+
+/**
+ * Whether a viewer fetches its own geometry, asked of the node rather than listed by id.
+ *
+ * The give-away is a `dataset` input: a viewer that takes one is a card that goes and gets what
+ * it draws — Neuroglancer's published scene, Neuron Topology's one skeleton — where an ordinary
+ * viewer reads whatever the arm upstream produced. That difference decides which wires it gets,
+ * and it was a `visualisation === 'neuroglancer'` test until there were two of them.
+ *
+ * Derived, because the alternative is a list that has to be remembered: a self-fetching viewer
+ * added without its id in that test is wired to a port it does not have, which `inferGraph`
+ * catches in the wizard's own suite — but only because that suite walks every pair. Asking the
+ * registry means there is nothing to forget.
+ */
+function selfFetching(visualisation: VisualisationId): boolean {
+  const view = VIEWS_BY_ID.get(visualisation)
+  if (!view) return false
+  const def = getNodeDef(view.type)
+  // Through `inputPorts` rather than `def.inputs`, which may hold a `PortGroupDef` that expands
+  // to a run — the one reader in the codebase that iterates the raw list is the one that gets a
+  // group's template where a port was meant.
+  // Empty params: no viewer here sizes a port group off one, and passing the spec's own params
+  // would mean typing them as `ParamValues` for a question that does not read them.
+  return def ? inputPorts(def, {}).some((port) => port.id === 'dataset') : false
+}
+
+/**
+ * Every viewer's node spec, by id — `VIEWS` inverted once rather than searched per lookup.
+ *
+ * A viewer means the same node whichever analysis offers it, which is the property that makes
+ * this safe to flatten: `out.neuroglancer` under `morphology` and under `neurons` are the same
+ * entry. Built at module scope because the answer is a fact about the tables, not about a graph.
+ */
+const VIEWS_BY_ID: ReadonlyMap<VisualisationId, ViewSpec> = new Map(
+  Object.values(VIEWS).flatMap(
+    (byView) => Object.entries(byView) as [VisualisationId, ViewSpec][],
+  ),
+)
 
 interface Placement {
   id: string
@@ -401,10 +447,11 @@ function bodyOf(
   }
 
   /*
-   * A Neuroglancer cell draws the *published scene*, so it takes the dataset and the neuron ids
-   * and nothing else — the same two wires wherever it is offered, and never a reason to fetch
-   * geometry nobody looks at. `VIEWS` is what stops it being reachable from an analysis that does
-   * not offer it.
+   * The two wires a **self-fetching** viewer takes: the dataset and the neuron ids, and nothing
+   * else. A Neuroglancer cell draws the published scene; a Neuron Topology card pulls the one
+   * skeleton it is showing. Neither wants geometry an arm fetched for somebody else.
+   *
+   * `VIEWS` is what stops either being reachable from an analysis that does not offer it.
    */
   const scene = (id: string): Link[] => [
     ['ds', 'dataset', id, 'dataset'],
@@ -797,9 +844,11 @@ function bodyOf(
 
     case 'neurons':
     default: {
-      // No analysis: the neuron table straight into whatever was ticked.
+      // No analysis: the neuron table straight into whatever was ticked, except the viewers that
+      // fetch for themselves — those take the dataset too. Asked of the node rather than listed
+      // by id; see `selfFetching`.
       const tail = views(2, 0, (visualisation, id) =>
-        visualisation === 'neuroglancer' ? scene(id) : [neurons(id, 'in')],
+        selfFetching(visualisation) ? scene(id) : [neurons(id, 'in')],
       )
       return tail
     }

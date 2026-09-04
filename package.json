@@ -22,6 +22,7 @@
     "probe:heatmap-order": "python3 scripts/probe-heatmap-order.py",
     "probe:transform": "node scripts/probe-transform.mjs",
     "probe:skeletons": "node scripts/probe-skeletons.mjs",
+    "probe:split": "python3 scripts/probe-split.py",
     "probe:meshes": "node scripts/probe-meshes.mjs",
     "probe:matches": "node scripts/probe-matches.mjs",
     "check:mirror": "python3 scripts/check-mirror.py",

@@ -34,6 +34,7 @@ import MATCHES_PY from './matches.py?raw'
 import MESHES_PY from './meshes.py?raw'
 import NBLAST_PY from './nblast.py?raw'
 import SKELETONS_PY from './skeletons.py?raw'
+import TOPOLOGY_PY from './topology.py?raw'
 import WARP_PY from './warp.py?raw'
 import sources from './sources.json'
 import type { PyArg, PyResult } from './types'
@@ -88,7 +89,7 @@ const MODULES: Record<string, PyModule> = {
    * Three more, and the same two packages every time — which by now is the finding rather
    * than a coincidence. Everything Coda asks Python for lives in one 1.1 MB wheel, so the
    * download that a first NBLAST pays is the download for all of them, and the table below
-   * is six identical rows because a capability that declared *fewer* packages would still
+   * is seven identical rows because a capability that declared *fewer* packages would still
    * pay the same first-use cost the moment anything else in the graph needed the wheel.
    *
    * They stay six rows rather than becoming one shared constant: `MODULES` is the place a
@@ -107,6 +108,15 @@ const MODULES: Record<string, PyModule> = {
   },
   matches: {
     source: MATCHES_PY,
+    packages: ['numpy', sources.fastcoreWheel],
+    label: `numpy · navis-fastcore ${sources.fastcoreVersion}`,
+  },
+  // The seventh, and the same two packages — which by now is load-bearing rather than merely
+  // repeated: Neuron Topology shows its cheap morphometrics with no Python at all, so the wheel
+  // is downloaded only when somebody asks for the axon/dendrite split, and on a graph that has
+  // already cleaned or NBLASTed anything it is not downloaded then either.
+  topology: {
+    source: TOPOLOGY_PY,
     packages: ['numpy', sources.fastcoreWheel],
     label: `numpy · navis-fastcore ${sources.fastcoreVersion}`,
   },

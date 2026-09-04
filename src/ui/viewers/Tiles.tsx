@@ -140,6 +140,14 @@ export interface BarRow {
   key: string
   /** What to print, where that is not the key. */
   label?: string
+  /**
+   * This bar's own colour, overriding the set's.
+   *
+   * For a series whose colour carries meaning rather than identity — Neuron Topology's cable per
+   * Strahler order, where the ramp *is* the order. Absent, every bar takes the shared `color`,
+   * which is what every other caller wants.
+   */
+  color?: string
   title?: string
   /** 0..1 of the tile's width. */
   fraction: number
@@ -159,7 +167,7 @@ export function Bars({ rows, color }: { rows: BarRow[]; color: string }) {
               className="tile__bar-fill"
               style={{
                 width: `${Math.max(0, Math.min(1, row.fraction)) * 100}%`,
-                background: color,
+                background: row.color ?? color,
               }}
             />
           </span>

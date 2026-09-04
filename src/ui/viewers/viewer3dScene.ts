@@ -152,6 +152,20 @@ export interface SkeletonSegments {
   segmentRadii: Float32Array
   /** Which item each segment belongs to, for picking and for colouring. */
   segmentItem: Int32Array
+  /**
+   * Which *node* of that item each segment runs from — the child end.
+   *
+   * Carried for the same reason `segmentRadii` is: this walk is the only place that knows the
+   * index, and recovering it afterwards from a flattened soup means storing it anyway. It exists
+   * for per-node colour channels (Neuron Topology's compartment and Strahler), where a colour is
+   * a fact about a point on the arbour rather than about the neuron — `segmentItem` can only
+   * answer the latter.
+   *
+   * The child end rather than the parent, which is `compartmentStats`' rule too: attributing an
+   * edge to its child is what makes a compartment's cable and its drawn extent the same set of
+   * edges. Attributing to the parent would draw a boundary edge in the wrong compartment.
+   */
+  segmentNode: Int32Array
   segments: number
 }
 
@@ -202,6 +216,7 @@ export function buildSkeletonSegments(
   const positions = new Float32Array(segments * 6)
   const segmentRadii = new Float32Array(segments * 2)
   const segmentItem = new Int32Array(segments)
+  const segmentNode = new Int32Array(segments)
   let cursor = 0
   let segmentIndex = 0
 
@@ -218,11 +233,12 @@ export function buildSkeletonSegments(
       positions[cursor++] = item.positions[parent * 3 + 2]!
       segmentRadii[segmentIndex * 2] = item.radii[i] ?? 0
       segmentRadii[segmentIndex * 2 + 1] = item.radii[parent] ?? 0
+      segmentNode[segmentIndex] = i
       segmentItem[segmentIndex++] = itemIndex
     }
   })
 
-  return { positions, segmentRadii, segmentItem, segments }
+  return { positions, segmentRadii, segmentItem, segmentNode, segments }
 }
 
 /**
@@ -236,6 +252,16 @@ export function skeletonSegmentColors(
   skeletons: SkeletonsValue,
   colorAt: (index: number) => string,
   selected: ReadonlySet<string>,
+  /**
+   * A colour per *node*, taking precedence over `colorAt` where it answers.
+   *
+   * Optional because it defeats the per-item cache below — a compartment colour changes along
+   * one neuron, so there is nothing to cache — and every existing caller wants the cheap path.
+   * Returning `undefined` for a node falls back to the neuron's own colour, which is what lets a
+   * partly-labelled arbour (a split that reached only some nodes) draw the rest normally rather
+   * than in a colour that means "unlabelled" and looks like a decision.
+   */
+  nodeColorAt?: (itemIndex: number, nodeIndex: number) => string | undefined,
 ): Float32Array {
   const buffer = new Float32Array(built.segments * 6)
   const dimming = selected.size > 0
@@ -245,15 +271,42 @@ export function skeletonSegmentColors(
    * item turns 40k string parses per restyle into 100.
    */
   const cache = new Map<number, [number, number, number]>()
+  /** Parsed hexes for the per-node channel, keyed by the colour rather than by the item. */
+  const byColor = new Map<string, readonly [number, number, number]>()
 
   for (let s = 0; s < built.segments; s++) {
     const itemIndex = built.segmentItem[s]!
-    let rgb = cache.get(itemIndex)
-    if (!rgb) {
-      const neuronId = skeletons.items[itemIndex]?.id ?? ''
-      rgb =
-        dimming && !selected.has(neuronId) ? DIMMED_RGB : hexToRgbFloat(colorAt(itemIndex))
-      cache.set(itemIndex, rgb)
+    /*
+     * The per-node channel first, the per-item one as the fallback — resolved into one `rgb`
+     * rather than into two branches that each dim and each write. Written as an early `continue`
+     * the dimming rule and the two-vertex write both appeared twice in this one function, which
+     * is two chances for a per-node scene and a per-neuron scene to disagree about what
+     * "deselected" looks like.
+     *
+     * `byColor` parses once per *distinct* colour rather than once per segment — the trick
+     * `buildPoints` documents below, needed here for the same reason. A per-node channel answers
+     * three colours (compartment) or `maxStrahler` of them (order) across seventeen thousand
+     * segments, so the uncached form was 17,000 `replace`/`parseInt` passes to produce a handful
+     * of answers.
+     */
+    const own = nodeColorAt?.(itemIndex, built.segmentNode[s]!)
+    let rgb: readonly [number, number, number]
+    if (own !== undefined) {
+      let parsed = byColor.get(own)
+      if (!parsed) {
+        parsed = hexToRgbFloat(own)
+        byColor.set(own, parsed)
+      }
+      rgb = dimming && !selected.has(skeletons.items[itemIndex]?.id ?? '') ? DIMMED_RGB : parsed
+    } else {
+      let parsed = cache.get(itemIndex)
+      if (!parsed) {
+        const neuronId = skeletons.items[itemIndex]?.id ?? ''
+        parsed =
+          dimming && !selected.has(neuronId) ? DIMMED_RGB : hexToRgbFloat(colorAt(itemIndex))
+        cache.set(itemIndex, parsed)
+      }
+      rgb = parsed
     }
     for (let v = 0; v < 2; v++) {
       buffer[s * 6 + v * 3] = rgb[0]
@@ -567,6 +620,33 @@ export function buildPoints(
   return { positions, colors, count }
 }
 
+/**
+ * The two sizes a split synapse cloud is drawn at, relative to the caller's `pointSize`.
+ *
+ * **Both halves are scaled, and the dim one is the half that matters** — which was measured, not
+ * reasoned. Fading alone does not work on a dense cloud, because normal blending *accumulates*:
+ * k overlapping dots at alpha `a` composite to `1 - (1 - a)^k`, so at the shipped default of 0.2
+ * and a local overlap of twenty the "faded" sea reaches 99% coverage. Rendered at 20,000 points
+ * in a real browser (headless Chrome, SwiftShader) the panels for alpha 0.2, 0.5 and 1.0 were
+ * indistinguishable slabs of white with the lit dots invisible inside them — which is exactly the
+ * reported symptom, three times over: "fully opaque, and the slider has no effect".
+ *
+ * The plumbing was right every time. What was wrong is that alpha saturates and area is what
+ * feeds it, so the lever has to be size. At 0.6 the dim half covers 36% of the area, the
+ * accumulation drops by the same factor, and the same four alphas render as four visibly
+ * different pictures with the lit dots findable in all of them.
+ *
+ * Here rather than in `Viewer3D.tsx` because this is arithmetic and that file needs WebGL: jsdom
+ * can assert the numbers, and only a browser can assert the picture. `EMPHASIS_SCALE` moved for
+ * the same reason — the two are one decision and belong under one test.
+ */
+export const EMPHASIS_SCALE = 1.5
+export const DIM_SCALE = 0.6
+
+export function emphasisSizes(size: number): { lit: number; dim: number } {
+  return { lit: size * EMPHASIS_SCALE, dim: size * DIM_SCALE }
+}
+
 // ---------------------------------------------------------------------------
 // The interactive legend
 
@@ -593,10 +673,7 @@ export function visibilityFor(
 }
 
 /** How many of `count` rows the hidden set removes, for the caption to admit. */
-export function hiddenCount(
-  count: number,
-  visible: (rowIndex: number) => boolean,
-): number {
+export function hiddenCount(count: number, visible: (rowIndex: number) => boolean): number {
   let n = 0
   for (let i = 0; i < count; i++) if (!visible(i)) n++
   return n
@@ -682,9 +759,7 @@ export function toggleHiddenLabel(
       hidden.length === others.length && others.every((other) => hidden.includes(other))
     return isSoloed ? [] : others
   }
-  return hidden.includes(label)
-    ? hidden.filter((other) => other !== label)
-    : [...hidden, label]
+  return hidden.includes(label) ? hidden.filter((other) => other !== label) : [...hidden, label]
 }
 
 // ---------------------------------------------------------------------------

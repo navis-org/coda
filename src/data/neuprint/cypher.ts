@@ -21,6 +21,7 @@ import type {
   LabelMatch,
   PathStepRequest,
   RoiCountsRequest,
+  SynapseLinksRequest,
   SynapseRequest,
   SynapseTotalsRequest,
 } from '../source'
@@ -645,6 +646,74 @@ export function synapsesCypher(req: SynapseRequest): string {
     ...(req.unit === SYNAPSE_UNITS.sites ? ['WITH DISTINCT n, s'] : []),
     'RETURN n.bodyId, n.type, s.type, s.location.x, s.location.y, s.location.z, s.confidence',
   ].join('\n')
+}
+
+/**
+ * One neuron set's synapses, each naming the partner across the cleft.
+ *
+ * The pattern is **neuprint-python's own** (`queries/synapses.py`, `fetch_synapse_connections`):
+ *
+ * ```
+ * (n)-[:Contains]->(nss:SynapseSet)-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m),
+ * (nss)-[:Contains]->(ns:Synapse)-[:SynapsesTo]->(ms:Synapse)<-[:Contains]-(mss)
+ * ```
+ *
+ * Both halves are load-bearing and neither is obvious. The `SynapseSet` pair pins *which* two
+ * neurons this connection is between — a `SynapseSet` is per partner, which is the same fact
+ * that makes `synapsesCypher` duplicate a T-bar and is here the thing being asked for. The
+ * `SynapsesTo` pair then pins which two *synapses*, so the coordinate returned belongs to the
+ * queried neuron rather than to its partner.
+ *
+ * **Two statements unioned, not one**, because the direction decides which end is ours. On the
+ * outgoing arm the queried neuron is presynaptic and `ns` is its T-bar; on the incoming arm it is
+ * postsynaptic and `ns` is its density. Written as a single undirected match, the polarity column
+ * would be `ns.type` either way — correct — but the *partner* would be whichever end Neo4j bound
+ * first, which is a plausible-looking table with half its partners wrong.
+ *
+ * **No `WITH DISTINCT`**, deliberately, and this is where it parts company with `synapsesCypher`.
+ * There a repeated T-bar is an artefact to collapse; here a T-bar driving four partners genuinely
+ * is four connections, and collapsing them would delete three of the four partner labels the
+ * query exists to produce. It is why this cloud must not be used to *measure* a neuron — see
+ * `DataSource.fetchSynapseLinks`.
+ */
+export function synapseLinksCypher(req: SynapseLinksRequest): string {
+  const ids = idList(req.neuronIds)
+  const min = req.minConfidence ?? 0
+
+  const arm = (outgoing: boolean): string => {
+    const where = [`n.bodyId IN ${ids}`]
+    // `polarity` names the side the *queried* neuron is on, so it selects an arm rather than
+    // filtering rows within one.
+    if (min > 0) where.push(`ns.confidence >= ${min}`)
+    const sets = outgoing
+      ? '(n)-[:Contains]->(nss:SynapseSet)-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m)'
+      : '(m)-[:Contains]->(mss:SynapseSet)-[:ConnectsTo]->(nss:SynapseSet)<-[:Contains]-(n)'
+    const synapses = outgoing
+      ? '(nss)-[:Contains]->(ns:Synapse)-[:SynapsesTo]->(ms:Synapse)<-[:Contains]-(mss)'
+      : '(mss)-[:Contains]->(ms:Synapse)-[:SynapsesTo]->(ns:Synapse)<-[:Contains]-(nss)'
+    /*
+     * **The neuron is bound and filtered before anything is expanded**, which is the difference
+     * between 0.3 s and a query that does not return. Written as `MATCH (n:Neuron), (pattern)`
+     * with the `WHERE` after it — the shape that reads most naturally — Neo4j takes the comma as
+     * two patterns to join and expands `SynapseSet`s for *every* neuron in the dataset before
+     * discovering which body was wanted. On male-CNS that timed out at two minutes; it does not
+     * fail, it simply never finishes.
+     */
+    const filters = where.length > 1 ? [`WHERE ${where.slice(1).join(' AND ')}`] : []
+    return [
+      'MATCH (n:Neuron)',
+      `WHERE ${where[0]}`,
+      `MATCH ${sets}`,
+      `MATCH ${synapses}`,
+      ...filters,
+      'RETURN n.bodyId, n.type, ns.type, ns.location.x, ns.location.y, ns.location.z,',
+      '       ns.confidence, m.bodyId, m.type',
+    ].join('\n')
+  }
+
+  if (req.polarity === 'pre') return arm(true)
+  if (req.polarity === 'post') return arm(false)
+  return `${arm(true)}\nUNION ALL\n${arm(false)}`
 }
 
 /**

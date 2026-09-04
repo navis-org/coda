@@ -39,9 +39,11 @@ import '../nodes'
 import { DEMO_DATASET, buildWorkflow, demoWorkflow } from './build'
 import type { AnalysisId, VisualisationId, WizardAnswers } from './options'
 import {
+  analysisOption,
   analysisOptions,
   everyCombination,
   startOptions,
+  visualisationOption,
   visualisationOptions,
 } from './options'
 
@@ -365,6 +367,84 @@ describe('several viewers', () => {
  * layout: which nodes got cells, that the flag saying it is the view rode along with them, and
  * that a graph nobody asked this of carries nothing at all.
  */
+/**
+ * The Neuron Topology card, which is the wizard's first **self-fetching** viewer that is not
+ * Neuroglancer — and the reason `selfFetching` in `build.ts` asks the registry rather than
+ * testing an id.
+ */
+describe('the Neuron Topology viewer', () => {
+  const build = (analysis: AnalysisId, visualisations: VisualisationId[]) =>
+    buildWorkflow({
+      dataset: DEMO_DATASET,
+      start: 'search',
+      analysis,
+      visualisations,
+      notes: false,
+      dashboard: false,
+    })
+
+  /** Which port on `target` each incoming wire lands on, sorted. */
+  const portsInto = (graph: CodaGraph, target: string) =>
+    graph.edges
+      .filter((e) => e.target === target)
+      .map((e) => e.targetHandle)
+      .sort()
+
+  it('takes the dataset and the neuron table, and no geometry', () => {
+    /*
+     * Wired like an ordinary viewer — one link into a port called `in` — this card has no such
+     * port. Checked by reverting `selfFetching` to the id test it replaced: three tests fail,
+     * this one and the two blanket sweeps (`no type errors, for every reachable combination` and
+     * the runnable pass). So the sweeps do cover it, which makes this one about *saying which
+     * wires are right* rather than about catching the break — the sweeps report a broken arm of
+     * the builder without saying what the arm was supposed to produce.
+     */
+    const graph = build('neurons', ['topology'])
+    expect(portsInto(graph, 'view')).toEqual(['dataset', 'neurons'])
+    // And nothing was fetched on its behalf: it does its own.
+    expect(graph.nodes.map((n) => n.type)).not.toContain('neuron.skeletons')
+    expect(graph.nodes.map((n) => n.type)).not.toContain('neuron.synapses')
+  })
+
+  it('sits beside the 3D scene rather than replacing it, each fed from its own place', () => {
+    const graph = build('morphology', ['viewer3d', 'topology'])
+    // The scene reads the arm's geometry…
+    expect(portsInto(graph, 'view').sort()).toEqual(['points', 'skeletons'])
+    // …and the Topology card reads the search, which is what makes ticking both worth doing.
+    expect(portsInto(graph, 'view2')).toEqual(['dataset', 'neurons'])
+    expect(graph.nodes.filter((n) => n.type === 'neuron.skeletons')).toHaveLength(1)
+  })
+
+  it('is offered wherever a neuron table survives to the end of the chain', () => {
+    // Under `morphology` because it is a way of looking at morphology, and under `neurons`
+    // because it needs no analysis at all — those are the two chains that still carry neurons.
+    expect(visualisationOptions(DEMO_DATASET, 'morphology').map((o) => o.id)).toContain('topology')
+    expect(visualisationOptions(DEMO_DATASET, 'neurons').map((o) => o.id)).toContain('topology')
+    // Not off a chain that has turned neurons into something else.
+    expect(visualisationOptions(DEMO_DATASET, 'partners').map((o) => o.id)).not.toContain(
+      'topology',
+    )
+  })
+
+  it('carries the skeleton requirement on the viewer, because `neurons` cannot carry it', () => {
+    /*
+     * The gate travels with the *viewer* here rather than with the analysis, which is the one
+     * structural thing about this option: `morphology` already declares `skeletons`, but
+     * `neurons` declares nothing, so without it a source with no skeletons would be offered a
+     * Topology card that can never draw.
+     *
+     * Asserted on the declaration rather than by building a graph, and that is a limitation
+     * worth stating: every family in `starterFamilies` currently answers `true` for `skeletons`,
+     * so there is no dataset here that would exercise the filter. A test that looked for one
+     * would pass by finding nothing, which is the vacuous shape this file's own header warns
+     * about. What is checked is that the requirement exists and that `available` reads it —
+     * `offers only what the source can do` covers the reading itself.
+     */
+    expect(visualisationOption('topology')?.requires).toBe('skeletons')
+    expect(analysisOption('morphology')?.requires).toBe('skeletons')
+  })
+})
+
 describe('opening as a dashboard', () => {
   const built = (analysis: AnalysisId, visualisations: VisualisationId[], dashboard: boolean) =>
     buildWorkflow({

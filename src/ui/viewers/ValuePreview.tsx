@@ -45,6 +45,7 @@ import { RoisViewer } from './RoisViewer'
 import type { RoiColorMode, RoiLabelMode } from './RoisViewer'
 import type { RoiView } from './roiProjection'
 import { ProfileViewer } from './ProfileViewer'
+import { TopologyViewer } from './TopologyViewer'
 import { ExportNodeContext } from './exportRegistry'
 import { ScatterViewer } from './ScatterViewer'
 import { DendrogramViewer } from './DendrogramViewer'
@@ -249,63 +250,64 @@ function ValuePreviewInner({
     const meshes = inputValues?.meshes
     const points = inputValues?.points
     const volumes = inputValues?.volumes
-    if (skeletons || meshes || points || volumes) return (
-      <LazyViewer3D
-        skeletons={isSkeletonsValue(skeletons) ? skeletons : undefined}
-        meshes={isMeshesValue(meshes) ? meshes : undefined}
-        points={isPointsValue(points) ? points : undefined}
-        volumes={isMeshesValue(volumes) ? volumes : undefined}
-        skeletonColor={readColorSpec('skeleton', node.params, ctx.column)}
-        meshColor={readColorSpec('mesh', node.params, ctx.column)}
-        pointColor={readColorSpec('point', node.params, ctx.column)}
-        volumeColor={readColorSpec('volume', node.params, ctx.column)}
-        skeletonWidth={Number(node.params.skeletonWidth ?? 1)}
-        skeletonWidthMode={skeletonWidthMode(node.params.skeletonWidthMode)}
-        skeletonRadiusWidth={Number(node.params.skeletonRadiusWidth ?? 4)}
-        skeletonWorldWidth={Number(node.params.skeletonWorldWidth ?? 1)}
-        lightIntensity={Number(node.params.lightIntensity ?? 1)}
-        // Defaults to false, so a graph saved before this param existed opens with the
-        // scene unpickable — which is the new default rather than a migration.
-        selectByClick={node.params.selectByClick === true}
-        // `Number` rather than a cast, and it covers the alpha graphs that stored this as a
-        // boolean before it became a strength: `true` is 1 and `false` is 0, which is exactly
-        // what those two meant.
-        ambientOcclusion={Number(node.params.ambientOcclusion ?? 1)}
-        // Every fallback here has to equal the node's declared default: a graph saved before a
-        // param existed has no key for it, and this is the value it then gets.
-        meshOpacity={Number(node.params.meshOpacity ?? 1)}
-        pointSize={Number(node.params.pointSize ?? 60)}
-        volumeOpacity={Number(node.params.volumeOpacity ?? 0.12)}
-        // The node id, so the card and the overlay share one camera instead of resetting each
-        // other — the same prop the network viewer takes for its layout and camera.
-        viewerId={node.id}
-        background={String(node.params.background ?? 'theme') as BackgroundChoice}
-        refit={node.params.refit === true}
-        // Read defensively rather than cast: these three are written by the legend, so a graph
-        // saved before it existed has no key for them at all.
-        // Through the reader beside `readColorSpec`, because `colorParams({ legend })` is what
-        // names these params — spelling `skeletonHidden` here is a fifth place that has to agree
-        // with the factory that generates it and the viewer that writes it back.
-        hidden={{
-          skeleton: readHiddenKeys('skeleton', node.params),
-          mesh: readHiddenKeys('mesh', node.params),
-          point: readHiddenKeys('point', node.params),
-          volume: readHiddenKeys('volume', node.params),
-        }}
-        // `!== false`, so a graph saved before these existed draws everything — which is what
-        // it did. Reading them as `=== true` would open every old file with an empty scene.
-        shown={{
-          skeletons: node.params.showSkeletons !== false,
-          meshes: node.params.showMeshes !== false,
-          points: node.params.showPoints !== false,
-          volumes: node.params.showVolumes !== false,
-        }}
-        selection={selection}
-        onSelectionChange={onSelectionChange}
-        {...(onParamChange ? { onParamChange } : {})}
-        {...shared}
-      />
-    )
+    if (skeletons || meshes || points || volumes)
+      return (
+        <LazyViewer3D
+          skeletons={isSkeletonsValue(skeletons) ? skeletons : undefined}
+          meshes={isMeshesValue(meshes) ? meshes : undefined}
+          points={isPointsValue(points) ? points : undefined}
+          volumes={isMeshesValue(volumes) ? volumes : undefined}
+          skeletonColor={readColorSpec('skeleton', node.params, ctx.column)}
+          meshColor={readColorSpec('mesh', node.params, ctx.column)}
+          pointColor={readColorSpec('point', node.params, ctx.column)}
+          volumeColor={readColorSpec('volume', node.params, ctx.column)}
+          skeletonWidth={Number(node.params.skeletonWidth ?? 1)}
+          skeletonWidthMode={skeletonWidthMode(node.params.skeletonWidthMode)}
+          skeletonRadiusWidth={Number(node.params.skeletonRadiusWidth ?? 4)}
+          skeletonWorldWidth={Number(node.params.skeletonWorldWidth ?? 1)}
+          lightIntensity={Number(node.params.lightIntensity ?? 1)}
+          // Defaults to false, so a graph saved before this param existed opens with the
+          // scene unpickable — which is the new default rather than a migration.
+          selectByClick={node.params.selectByClick === true}
+          // `Number` rather than a cast, and it covers the alpha graphs that stored this as a
+          // boolean before it became a strength: `true` is 1 and `false` is 0, which is exactly
+          // what those two meant.
+          ambientOcclusion={Number(node.params.ambientOcclusion ?? 1)}
+          // Every fallback here has to equal the node's declared default: a graph saved before a
+          // param existed has no key for it, and this is the value it then gets.
+          meshOpacity={Number(node.params.meshOpacity ?? 1)}
+          pointSize={Number(node.params.pointSize ?? 60)}
+          volumeOpacity={Number(node.params.volumeOpacity ?? 0.12)}
+          // The node id, so the card and the overlay share one camera instead of resetting each
+          // other — the same prop the network viewer takes for its layout and camera.
+          viewerId={node.id}
+          background={String(node.params.background ?? 'theme') as BackgroundChoice}
+          refit={node.params.refit === true}
+          // Read defensively rather than cast: these three are written by the legend, so a graph
+          // saved before it existed has no key for them at all.
+          // Through the reader beside `readColorSpec`, because `colorParams({ legend })` is what
+          // names these params — spelling `skeletonHidden` here is a fifth place that has to agree
+          // with the factory that generates it and the viewer that writes it back.
+          hidden={{
+            skeleton: readHiddenKeys('skeleton', node.params),
+            mesh: readHiddenKeys('mesh', node.params),
+            point: readHiddenKeys('point', node.params),
+            volume: readHiddenKeys('volume', node.params),
+          }}
+          // `!== false`, so a graph saved before these existed draws everything — which is what
+          // it did. Reading them as `=== true` would open every old file with an empty scene.
+          shown={{
+            skeletons: node.params.showSkeletons !== false,
+            meshes: node.params.showMeshes !== false,
+            points: node.params.showPoints !== false,
+            volumes: node.params.showVolumes !== false,
+          }}
+          selection={selection}
+          onSelectionChange={onSelectionChange}
+          {...(onParamChange ? { onParamChange } : {})}
+          {...shared}
+        />
+      )
   }
 
   /*
@@ -447,6 +449,58 @@ function ValuePreviewInner({
     )
   }
 
+  if (node.type === 'out.topology') {
+    // Drawn from the *input*, like Profile and the 3D viewer: this node's own `out` port is a
+    // pass-through, so keying the card on it would show the same table twice over.
+    const neurons = inputValues?.neurons
+    const dataset = inputValues?.dataset
+    return (
+      <TopologyViewer
+        neurons={isTableValue(neurons) ? neurons : undefined}
+        sourceId={isDatasetValue(dataset) ? dataset.sourceId : undefined}
+        datasetId={isDatasetValue(dataset) ? dataset.datasetId : undefined}
+        annotations={isDatasetValue(dataset) ? dataset.annotations : undefined}
+        edges={isDatasetValue(dataset) ? dataset.edges : undefined}
+        page={Number(node.params.page ?? 0)}
+        onPage={(next) => onParamChange?.('page', next)}
+        pinned={selection}
+        onPin={(ids) => onParamChange?.('selection', ids)}
+        colorBy={String(node.params.colorBy ?? 'compartment')}
+        onColorBy={(value) => onParamChange?.('colorBy', value)}
+        showMesh={node.params.showMesh !== false}
+        showSkeleton={node.params.showSkeleton !== false}
+        showSynapses={node.params.showSynapses !== false}
+        onLayer={(id, on) => onParamChange?.(id, on)}
+        partners={idList(node.params.partners)}
+        onPartners={(next) => onParamChange?.('partners', next)}
+        direction={String(node.params.direction ?? 'outputs')}
+        onDirection={(value) => onParamChange?.('direction', value)}
+        partnerQuery={String(node.params.partnerQuery ?? '')}
+        onPartnerQuery={(value) => onParamChange?.('partnerQuery', value)}
+        tab={String(node.params.tab ?? 'partners')}
+        onTab={(value) => onParamChange?.('tab', value)}
+        railOpen={node.params.railOpen !== false}
+        onRailOpen={(open) => onParamChange?.('railOpen', open)}
+        // The one control here that is data rather than presentation: it adds columns to the
+        // Morphometrics port, so writing it marks the graph stale.
+        split={node.params.split === true}
+        onSplit={(on) => onParamChange?.('split', on)}
+        flowThresh={Number(node.params.flowThresh ?? 0.9)}
+        splitVal={Number(node.params.splitVal ?? 1)}
+        onSplitParam={(id, value) => onParamChange?.(id, value)}
+        pointSize={Number(node.params.pointSize ?? 6)}
+        skeletonWidth={Number(node.params.skeletonWidth ?? 2)}
+        skeletonOpacity={Number(node.params.skeletonOpacity ?? 1)}
+        dimOpacity={Number(node.params.dimOpacity ?? 0.1)}
+        meshOpacity={Number(node.params.meshOpacity ?? 0.05)}
+        skeletonColor={String(node.params.skeletonColor ?? '#000000')}
+        onSkeletonColor={(hex) => onParamChange?.('skeletonColor', hex)}
+        onVisual={(id, value) => onParamChange?.(id, value)}
+        {...shared}
+      />
+    )
+  }
+
   if (node.type === 'out.neuroglancer') {
     // The scene, the segments and the colours are all in the URL the node emitted; the
     // neuron table comes along only so the legend can be drawn beside the frame.
@@ -508,7 +562,8 @@ function ValuePreviewInner({
     const y = ctx.column('y')
     // "Not known yet" and "nothing to pick" are different states and want different words —
     // see `NoColumns`, which is where that distinction now lives for every chart here.
-    if (!x || !y) return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="two numeric columns" />
+    if (!x || !y)
+      return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="two numeric columns" />
     const label = ctx.column('labelBy')
     const id = ctx.column('idColumn')
     return (
@@ -594,7 +649,8 @@ function ValuePreviewInner({
 
   if (node.type === 'out.pie' && isTableValue(value)) {
     const category = ctx.column('category')
-    if (!category) return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="a category column" />
+    if (!category)
+      return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="a category column" />
     const valueColumn = ctx.column('value')
     return (
       <PieViewer
@@ -731,7 +787,9 @@ function ValuePreviewInner({
     value.kind === 'layers'
   return (
     <div className="viewer">
-      <div className="viewer__empty">{summarised ? describeValue(value) : String(value.value)}</div>
+      <div className="viewer__empty">
+        {summarised ? describeValue(value) : String(value.value)}
+      </div>
     </div>
   )
 }

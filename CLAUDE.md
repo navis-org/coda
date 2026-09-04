@@ -998,7 +998,7 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
 - [docs/export.md](docs/export.md) — the notebook and R Markdown exporters, the refusal
   policy, the emitter registry, the goldens.
 - [docs/python-pyodide.md](docs/python-pyodide.md) — the Pyodide bridge and the six
-  capabilities on it. Read before adding a Python-backed one: all six declare the same two
+  capabilities on it. Read before adding a Python-backed one: all seven declare the same two
   packages, which is the finding rather than a coincidence.
 - [docs/persistence.md](docs/persistence.md) — share links, the autosave across tabs, the
   browser shelf.
