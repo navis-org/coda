@@ -18,7 +18,7 @@ import type { ParamValues } from '../../core/node'
 import { allNodeDefs, requireNodeDef } from '../../core/registry'
 import '../../nodes'
 import { exportNotebook } from './exporter'
-import { caveGraph, everythingGraph, twoNodeGraph } from '../fixture'
+import { caveGraph, everythingGraph, pathsGraph, twoNodeGraph } from '../fixture'
 import { getEmitter } from './registry'
 import { serializeNotebook } from './notebook'
 import { inputPorts, outputPorts } from '../../core/ports'
@@ -415,6 +415,26 @@ describe('the region and normalisation options', () => {
     expect(text).toMatch(/no neuprint-python equivalent/)
     // The refusal has to say what to write instead, or it reads as the feature being broken.
     expect(text).toContain('upstream/downstream')
+  })
+})
+
+
+/**
+ * The Paths node's own refusal, which is one reason past `Connectivity`'s.
+ *
+ * Neither library has a group-level denominator, and neither has anything for `Min fraction` —
+ * which prunes the frontier as the search grows. So an export without them would not be the same
+ * routes missing two columns; it would be a different walk. Asserted at **neuron level**, so what
+ * is being pinned is the normalisation refusal rather than the collapse one that would fire first.
+ */
+describe('a normalised Paths node', () => {
+  it('is refused, because an export without it walks a different graph', () => {
+    const text = notebookText(pathsGraph({ collapseTypes: false, normalize: true }))
+    expect(text).toContain('TODO')
+    expect(text).toMatch(/no neuprint-python equivalent/)
+    expect(text).toContain('Min fraction')
+    // The neuron-level node without it still emits, or the test above says nothing.
+    expect(notebookText(pathsGraph({ collapseTypes: false }))).toContain('fetch_paths(')
   })
 })
 

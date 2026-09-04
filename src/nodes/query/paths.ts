@@ -22,8 +22,8 @@
  * picture is what the Network node's presentational params are for.
  */
 
-import { canTracePaths } from '../../data/source'
-import { pathStepFor } from '../../data/queries'
+import { canTotalGroups, canTracePaths, groupTotalsRefusal } from '../../data/source'
+import { groupTotalsFor, pathStepFor } from '../../data/queries'
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { TableValue } from '../../core/values'
@@ -35,13 +35,18 @@ import {
   MAX_PATH_STEPS,
   PATH_NETWORK_TYPE,
   PATH_TABLE_SCHEMA,
+  groupTotalsLookup,
+  pathNetworkType,
   pathStats,
+  pathTableSchema,
   pathsTable,
   pathsToNetwork,
   prunePathGraph,
   rankPaths,
+  scoredEnd,
   traversePaths,
 } from '../lib/pathOps'
+import { normalizeSide, readBasis, readNormalizeBy } from '../lib/connectivityOps'
 import {
   connectivityRequest,
   requireDataset,
@@ -145,15 +150,97 @@ export const pathsNode = registerNode({
       help: 'Trace the circuit between cell types rather than between individual neurons. This changes what is searched, not only what is drawn: a pathway through a population is found even when no single neuron carries the whole route.',
       default: true,
     },
+    {
+      id: 'normalize',
+      kind: 'boolean',
+      label: 'Normalize',
+      /*
+       * `Connectivity`'s control, and the same two output columns — but the denominator here
+       * belongs to a **group**. With `Collapse types` on, `LC4 → PLP1` is divided by everything
+       * every PLP1 neuron receives, which is what `GroupTotalsRequest` exists to answer: the
+       * frontier carries a type name and a per-neuron total cannot be asked about one.
+       */
+      help: 'Add weightNorm, each connection as a fraction of one group\u2019s total synapses, and weightTotal, the denominator it was divided by. With Collapse types on the denominator is the whole population\u2019s total, not one neuron\u2019s.',
+      default: false,
+    },
+    {
+      id: 'normalizeBy',
+      kind: 'enum',
+      label: 'Normalize by',
+      help: 'Which end of the connection the denominator belongs to. These are different questions, not two views of one number.',
+      default: 'postsynaptic',
+      options: [
+        { value: 'postsynaptic', label: 'the target\u2019s total input' },
+        { value: 'presynaptic', label: 'the source\u2019s total output' },
+      ],
+      visibleIf: (params) => params.normalize === true,
+    },
+    {
+      id: 'normalizeBasis',
+      kind: 'enum',
+      label: 'Denominator',
+      help: 'All synapses counts everything the group makes, including synapses onto fragments nobody reconstructed. Reconstructed partners only counts synapses onto partners the dataset calls neurons, which is the denominator to use when comparing routes across connectomes proofread to different depths.',
+      default: 'all',
+      options: [
+        { value: 'all', label: 'all synapses' },
+        { value: 'connected', label: 'reconstructed partners only' },
+      ],
+      visibleIf: (params) => params.normalize === true,
+    },
+    {
+      id: 'rankBy',
+      kind: 'enum',
+      label: 'Rank by',
+      /*
+       * The reason both numbers are emitted rather than one being swapped for the other. A
+       * route's weakest link in synapses and its weakest link as a share of what the next
+       * population receives are **different steps** as soon as the populations differ in size:
+       * ranking by synapses prefers the route through the biggest population, which is the
+       * failure normalising is usually reached for in the first place.
+       */
+      help: 'Which weakest link decides the ranking, and so which routes N strongest keeps. The two are different steps of the route as soon as the populations differ in size \u2014 synapses prefers a route through a large population, fraction prefers one that is a large share of what the next population receives.',
+      default: 'synapses',
+      options: [
+        { value: 'synapses', label: 'synapses (weakest link)' },
+        { value: 'fraction', label: 'fraction of the total' },
+      ],
+      visibleIf: (params) => params.normalize === true,
+    },
+    {
+      id: 'minFraction',
+      kind: 'number',
+      label: 'Min fraction',
+      /*
+       * A second threshold rather than a replacement for `Min synapses`, because the two are
+       * applied in different places and only one of them can be pushed down: the backend cuts
+       * on the aggregated weight inside the hop's own query, where a fraction needs a
+       * denominator that arrives a round trip later. So this prunes here, per hop, after the
+       * totals for that hop have landed — an edge below it is neither an edge nor a reason to
+       * expand, which is `minWeight`'s rule one layer out.
+       *
+       * No `max`: `connected` denominators can produce a fraction above 1, legitimately, for
+       * `normalizeConnectivity`'s recorded reason.
+       */
+      help: 'Discard connections carrying less than this share of the denominator, and do not follow them. Applied per hop as the search grows, so it bounds the frontier the way Min synapses does. 0 is off, and a connection whose denominator the dataset does not publish is never dropped by it.',
+      default: 0,
+      min: 0,
+      step: 0.01,
+      visibleIf: (params) => params.normalize === true,
+    },
   ],
 
-  inferOutputs: () => ({
+  inferOutputs: (ctx) => {
     // Fixed rather than derived from the dataset's neuron schema: a row here can stand for a
-    // whole cell type, so there is nowhere to put a per-neuron column such as `status`.
-    network: PATH_NETWORK_TYPE,
-    layout: T.layout(),
-    paths: T.table(PATH_TABLE_SCHEMA),
-  }),
+    // whole cell type, so there is nowhere to put a per-neuron column such as `status`. The one
+    // thing that does move is the pair of normalisation columns, and it moves with the control
+    // that produces them — `connectivityOutputSchema`'s split, for its reason.
+    const normalize = ctx.params.normalize === true
+    return {
+      network: pathNetworkType(normalize),
+      layout: T.layout(),
+      paths: T.table(pathTableSchema(normalize)),
+    }
+  },
 
   validate: (ctx) => {
     const issues: string[] = []
@@ -183,6 +270,20 @@ export const pathsNode = registerNode({
         `At neuron level, ${hops} hops is a very large expansion — the frontier is inlined into each query. Collapse types keeps it to a few hundred nodes per hop.`,
       )
     }
+    /*
+     * Said at edit time for the `paths` refusal's reason, and it is the same shape: a dataset
+     * answering from an attached edge set reaches here too, because `canTotalGroups`
+     * refuses one — a file's weights over the server's totals is one connectome divided by
+     * another. The fix is named, since `Normalize` is a switch on this card rather than
+     * something about the dataset the reader has to go and change.
+     */
+    if (
+      ctx.params.normalize === true &&
+      ctx.inputs.dataset &&
+      !sourceSupports(ctx.inputs.dataset, 'groupTotals')
+    ) {
+      issues.push(groupTotalsRefusal(sourceLabel(ctx.inputs.dataset) ?? 'This source'))
+    }
     return issues
   },
 
@@ -203,6 +304,22 @@ export const pathsNode = registerNode({
     const maxHops = Math.max(1, Math.floor(Number(ctx.params.maxHops ?? 3)))
     const minWeight = Math.max(1, Math.floor(Number(ctx.params.minWeight ?? 10)))
     const topN = Math.max(0, Math.floor(Number(ctx.params.topN ?? 25)))
+
+    const normalize = ctx.params.normalize === true
+    const by = readNormalizeBy(ctx.params.normalizeBy)
+    const basis = readBasis(ctx.params.normalizeBasis)
+    // Only meaningful while normalising, and only then read: `Rank by` is `visibleIf`-hidden
+    // with `Normalize` off, so it is out of the provenance key there as well.
+    const rankBy = normalize && ctx.params.rankBy === 'fraction' ? 'norm' : 'weight'
+    const minFraction = normalize ? Math.max(0, Number(ctx.params.minFraction ?? 0)) : 0
+    /*
+     * The same predicate `validate` asks and the funnel asks again, said here so the message
+     * names this node's own switch. `groupTotalsFor` would refuse anyway, one hop in — after a
+     * round trip and with the reason attached to a query rather than to a control.
+     */
+    if (normalize && !canTotalGroups(source, dataset.datasetId, dataset.edges !== undefined)) {
+      throw new Error(groupTotalsRefusal(source.label))
+    }
 
     const sources = seedNodes(sourceTable, collapseTypes)
     const targets = seedNodes(targetTable, collapseTypes)
@@ -232,22 +349,80 @@ export const pathsNode = registerNode({
           minWeight,
           signal: ctx.signal,
         }),
+      /*
+       * A second query per hop, asked about the keys that hop returned. Not one query at the
+       * end, because `Min fraction` prunes the frontier *as it grows* — a denominator that
+       * arrives after the search is over can rank what was found and cannot change what was
+       * followed.
+       *
+       * `connectivityRequest` rather than `datasetRequest`, so the edge set travels with it and
+       * `groupTotalsFor` can refuse a dataset answering from a file.
+       */
+      normalize: normalize
+        ? {
+            by,
+            minFraction,
+            totals: async (frontier) =>
+              groupTotalsLookup(
+                await groupTotalsFor(source, {
+                  ...connectivityRequest(dataset),
+                  types: frontier.types,
+                  neuronIds: frontier.neuronIds,
+                  side: normalizeSide(by),
+                  basis,
+                  signal: ctx.signal,
+                }),
+              ),
+          }
+        : undefined,
     })
 
     ctx.progress(0.85, 'ranking routes')
     const sourceKeys = sources.map((n) => n.key)
     const targetKeys = targets.map((n) => n.key)
     const pruned = prunePathGraph(graph, sourceKeys, targetKeys, maxHops)
-    const ranked = rankPaths(pruned, sourceKeys, targetKeys, maxHops, topN)
+    const ranked = rankPaths(pruned, sourceKeys, targetKeys, maxHops, topN, rankBy)
 
-    const network = pathsToNetwork(pruned, ranked.paths, sourceKeys, targetKeys)
+    const network = pathsToNetwork(pruned, ranked.paths, sourceKeys, targetKeys, normalize)
     const stats = pathStats(ranked.paths)
     if (stats.count === 0) {
       // Not an error: "these two are not connected within N hops at this threshold" is a real
       // and useful answer, and throwing would block everything downstream from ever drawing
       // the empty result that says so.
       ctx.progress(1, `no route within ${maxHops} hops`)
-      return { network, layout: makeLayout({}, 'ELK layered'), paths: pathsTable([]) }
+      return {
+        network,
+        layout: makeLayout({}, 'ELK layered'),
+        paths: pathsTable([], normalize),
+      }
+    }
+
+    /*
+     * The groups the dataset published no denominator for, counted off the pruned graph rather
+     * than off the totals cache — what matters is how much of *this result* is unmeasured, and
+     * the search asked about a great deal it then threw away.
+     *
+     * Said out loud for `normalizeConnectivity`'s reason, plus one this node adds: under
+     * `Rank by: fraction` a route with an unscored step cannot be scored at all, so it sorts
+     * below every route that can be — which is a silent demotion rather than a blank cell.
+     */
+    if (normalize) {
+      const unmeasured = new Set<string>()
+      for (const edge of pruned.edges.values()) {
+        // `scoredEnd`, shared with the traversal that wrote these — which end owns a denominator
+        // is one decision, and counting it against the other end is a plausible wrong number.
+        if (edge.norm === null) unmeasured.add(scoredEnd(edge, by))
+      }
+      if (unmeasured.size > 0) {
+        ctx.warn(
+          `${unmeasured.size.toLocaleString()} ${collapseTypes ? 'groups' : 'neurons'} on the ` +
+            `${by === 'postsynaptic' ? 'receiving' : 'sending'} end of a connection have no ` +
+            `published total, so weightNorm is empty there` +
+            (rankBy === 'norm'
+              ? ' — and any route through one of them ranks below every route that could be scored.'
+              : '.'),
+        )
+      }
     }
 
     /*
@@ -270,13 +445,13 @@ export const pathsNode = registerNode({
     ctx.progress(
       1,
       `${stats.count} route${stats.count === 1 ? '' : 's'} · min ${stats.minHops} hops${
-        ranked.truncated ? ' · search truncated' : ''
-      }`,
+        rankBy === 'norm' ? ' · ranked by fraction' : ''
+      }${ranked.truncated ? ' · search truncated' : ''}`,
     )
     return {
       network,
       layout: makeLayout(positions, 'ELK layered'),
-      paths: pathsTable(ranked.paths),
+      paths: pathsTable(ranked.paths, normalize),
     }
   },
 })

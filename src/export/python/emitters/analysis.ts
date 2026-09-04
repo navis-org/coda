@@ -389,6 +389,22 @@ registerEmitter('neuron.paths', (ctx) => {
     )
   }
 
+  /*
+   * Refused for `Connectivity`'s `Normalize` reason and one more of this node's own. Its
+   * denominator is a *group's* total — every neuron of a cell type summed — which
+   * `fetch_paths` has no notion of, and `Min fraction` prunes the frontier as the search grows,
+   * so a notebook without it does not merely lack two columns: it walks a different graph and
+   * returns different routes. That is the substitution the node refuses to make, one layer out.
+   */
+  if (ctx.params.normalize === true) {
+    return ctx.todo(
+      'Paths with Normalize on has no neuprint-python equivalent. The denominator is a whole ' +
+        "group's synapse total and Min fraction prunes the search as it grows, so an export " +
+        'without them would follow different connections and return different routes — not the ' +
+        'same routes missing two columns. Turn Normalize off to export this node.',
+    )
+  }
+
   ctx.require('neuprint', 'fetch_paths')
   const out = ctx.output('paths')
 

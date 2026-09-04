@@ -59,7 +59,7 @@ import { useMemo } from 'react'
 
 import { CHART_INK, currentMode, seriesColor } from '../colors'
 import { tableToCsvParts } from '../export'
-import { formatCompact, formatNumber } from '../format'
+import { formatCompact, formatNumber, formatShare } from '../format'
 import type { CellValue, NetworkValue, TableValue } from '../../core/values'
 import { column, isNumericDType, tableSchema } from '../../core/types'
 import { getRow, makeTable } from '../../core/values'
@@ -71,7 +71,7 @@ import {
   parseHistogramChoice,
 } from '../../nodes/lib/networkMetrics'
 import type { BarRow } from './Tiles'
-import { Bars, Columns, Facts, Tile, formatShare } from './Tiles'
+import { Bars, Columns, Facts, Tile } from './Tiles'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import type { Histogram } from './histogramBins'

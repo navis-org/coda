@@ -94,6 +94,19 @@ export function formatMeasure(value: number, unit: string | undefined): string {
   return `${scaled.toLocaleString(undefined, { maximumFractionDigits: digits })} ${step.unit}`
 }
 
+/**
+ * `12%`, or `0.4%` where rounding to a whole number would print a zero for something present.
+ *
+ * Here rather than beside its first caller, because the third one arrived from outside the
+ * viewers: the Paths card reads a normalised bottleneck, and a node body importing a viewer's
+ * tile module to get a percent sign is a dependency in the wrong direction — the same call
+ * `Tiles` itself records about being extracted from `ProfileViewer`.
+ */
+export function formatShare(share: number): string {
+  if (!Number.isFinite(share)) return '—'
+  return share >= 0.1 ? `${Math.round(share * 100)}%` : `${(share * 100).toFixed(1)}%`
+}
+
 /** Full precision with thousands separators, for tables and tooltips. */
 export function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return '—'

@@ -1520,3 +1520,37 @@ export function twoNodeGraph(
     targetHandle: 'dataset',
   })
 }
+
+/**
+ * dataset → find → paths, for the two settings the exporters refuse on.
+ *
+ * Here rather than in one of the two test files because both refuse, in the same two places and
+ * for the same two reasons — and a refusal asserted against a graph each file built for itself is
+ * how the pair comes to disagree about which node was even being exported. Over declared
+ * defaults, `twoNodeGraph`'s rule above and for its reason.
+ */
+export function pathsGraph(params: ParamValues = {}): CodaGraph {
+  let g = emptyGraph('paths')
+  for (const [id, type, nodeParams] of [
+    ['ds', 'dataset.hemibrain', { version: 'v1.2.1' }],
+    ['find', 'neuron.findNeurons', { typePattern: 'LC4' }],
+    ['paths', 'neuron.paths', params],
+  ] as const) {
+    g = addNode(g, {
+      id,
+      type,
+      position: { x: 0, y: 0 },
+      params: { ...defaultParams(requireNodeDef(type)), ...nodeParams } as ParamValues,
+    })
+  }
+  // One neuron set into both ends: what is under test is the node's own settings, and a second
+  // search would only be a second thing for a refusal to be about.
+  const edges: Array<[string, string, string, string]> = [
+    ['ds', 'dataset', 'find', 'dataset'],
+    ['ds', 'dataset', 'paths', 'dataset'],
+    ['find', 'neurons', 'paths', 'sources'],
+    ['find', 'neurons', 'paths', 'targets'],
+  ]
+  for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
+  return g
+}

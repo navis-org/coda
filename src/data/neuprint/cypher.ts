@@ -14,8 +14,10 @@
 
 import type {
   AdjacencyRequest,
+  ConnectionDirection,
   ConnectivityRequest,
   FindNeuronsRequest,
+  GroupTotalsRequest,
   LabelMatch,
   PathStepRequest,
   RoiCountsRequest,
@@ -435,6 +437,20 @@ function roiConnectivityCypher(req: ConnectivityRequest, pattern: string, min: n
 }
 
 /**
+ * The property holding a body's published synapse total on one side.
+ *
+ * Both totals queries read it, so the rule lives here rather than in each. `coalesce(n.upstream,
+ * n.post)`: the two are equal wherever both exist, and a dataset publishing only one of them
+ * should still answer. There is deliberately **no fallback on the outgoing side** — `n.pre` is
+ * the T-bar count rather than the synapses those T-bars drive, 2,837 against 23,423 on male-cns
+ * body 10005, so it would put a plausible fraction eight times too large in the column with
+ * nothing failing.
+ */
+function publishedTotal(side: ConnectionDirection): string {
+  return side === 'inputs' ? 'coalesce(n.upstream, n.post)' : 'n.downstream'
+}
+
+/**
  * How many synapses each of these bodies has, on one side.
  *
  * Two bases, two queries, and the gap between them is the reason the control exists: on
@@ -455,17 +471,63 @@ function roiConnectivityCypher(req: ConnectivityRequest, pattern: string, min: n
 export function synapseTotalsCypher(req: SynapseTotalsRequest): string {
   const ids = idList(req.neuronIds)
   if (req.basis === 'all') {
-    // `coalesce(n.upstream, n.post)`: the two are equal wherever both exist, and a dataset
-    // publishing only one of them should still answer. There is deliberately no fallback on the
-    // outgoing side — see above, `pre` is a different measure and would answer wrongly.
-    const total = req.side === 'inputs' ? 'coalesce(n.upstream, n.post)' : 'n.downstream'
-    return [`MATCH (n:Segment)`, `WHERE n.bodyId IN ${ids}`, `RETURN n.bodyId, ${total}`].join('\n')
+    return [
+      `MATCH (n:Segment)`,
+      `WHERE n.bodyId IN ${ids}`,
+      `RETURN n.bodyId, ${publishedTotal(req.side)}`,
+    ].join('\n')
   }
   const pattern =
     req.side === 'inputs'
       ? 'MATCH (p:Neuron)-[w:ConnectsTo]->(n:Segment)'
       : 'MATCH (n:Segment)-[w:ConnectsTo]->(p:Neuron)'
   return [pattern, `WHERE n.bodyId IN ${ids}`, 'RETURN n.bodyId, sum(w.weight)'].join('\n')
+}
+
+/**
+ * The same totals summed per group key — a cell type, or one neuron on its own.
+ *
+ * One arm per list, and `fetchGroupTotals` sends whichever it has rather than a `UNION`: a
+ * collapsed frontier is usually all types, so the id arm is normally not a query at all, and two
+ * statements are two things to read where a union of an aggregate and a scalar is one thing to
+ * get subtly wrong.
+ *
+ * **The type arm matches `:Neuron` where `synapseTotalsCypher` matches `:Segment`**, and that is
+ * not the inconsistency it looks like. A denominator has to count the same population its
+ * numerator came from, and the numerator is `pathStepCypher`'s, which matches `(a:Neuron)` at
+ * both ends. Summing every `:Segment` carrying the type would put synapses into the denominator
+ * that no hop of this traversal could ever have contributed. The id arm keeps `:Segment` for
+ * `synapseTotalsCypher`'s own reason — a lone untyped neuron in a collapsed frontier is still a
+ * body, and refusing it a denominator reads downstream as "not published".
+ *
+ * **The key comes back as text on both arms** (`toString(n.bodyId)`), because that is the
+ * vocabulary the traversal groups in — `coalesce(n.type, toString(n.bodyId))` is `pathStepCypher`
+ * three functions up, and a key that arrived as a number here would miss every lookup.
+ */
+export function groupTotalsCypher(req: GroupTotalsRequest): string {
+  const byType = Boolean(req.types?.length)
+  const property = publishedTotal(req.side)
+  const key = byType ? 'n.type' : 'toString(n.bodyId)'
+  const where = byType
+    ? `n.type IN ${stringList(req.types ?? [])}`
+    : `n.bodyId IN ${idList(req.neuronIds ?? [])}`
+
+  if (req.basis === 'all') {
+    // The type arm sums over the population; the id arm is one body, so its aggregate is the
+    // property itself. `sum` over a single-row group would answer the same thing and read as
+    // though a body could appear twice.
+    return [
+      `MATCH (n:${byType ? 'Neuron' : 'Segment'})`,
+      `WHERE ${where}`,
+      `RETURN ${key}, ${byType ? `sum(${property})` : property}`,
+    ].join('\n')
+  }
+  const far = byType ? 'Neuron' : 'Segment'
+  const pattern =
+    req.side === 'inputs'
+      ? `MATCH (p:Neuron)-[w:ConnectsTo]->(n:${far})`
+      : `MATCH (n:${far})-[w:ConnectsTo]->(p:Neuron)`
+  return [pattern, `WHERE ${where}`, `RETURN ${key}, sum(w.weight)`].join('\n')
 }
 
 /**

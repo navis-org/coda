@@ -29,6 +29,7 @@ import {
   allSources,
   backendOf,
   canSplitConnectivityByRoi,
+  canTotalGroups,
   canTotalSynapses,
   canTracePaths,
   capabilityOf,
@@ -40,6 +41,18 @@ export function sourceFromType(type: CodaType | undefined): DataSource | undefin
   const ref = datasetRef(type)
   return ref?.sourceId ? getSource(ref.sourceId) : undefined
 }
+
+/**
+ * What `sourceSupports` can be asked.
+ *
+ * Every `SourceCapabilities` key, plus the one question whose answer is not a flag:
+ * `groupTotals` is decided by whether the source implements `fetchGroupTotals`, and there is
+ * nothing per-dataset for a capability table to publish about it. It rides here rather than in
+ * a helper of its own because three of the arms below already do not answer their flag either —
+ * this is a table of *questions*, which happens to spell most of them the way the flags are
+ * spelled.
+ */
+export type SupportedQuestion = keyof SourceCapabilities | 'groupTotals'
 
 /**
  * Edit-time capability check, so a source that cannot do the thing says so on the node rather
@@ -60,7 +73,7 @@ export function sourceFromType(type: CodaType | undefined): DataSource | undefin
  */
 export function sourceSupports(
   type: CodaType | undefined,
-  capability: keyof SourceCapabilities,
+  capability: SupportedQuestion,
 ): boolean {
   const source = sourceFromType(type)
   const datasetId = datasetRef(type)?.datasetId
@@ -75,6 +88,11 @@ export function sourceSupports(
   if (capability === 'connectivityRois')
     return canSplitConnectivityByRoi(source, datasetId, edges)
   if (capability === 'synapseTotals') return canTotalSynapses(source, datasetId, edges)
+  // The one question that is not a flag at all: what decides it is whether the source implements
+  // `fetchGroupTotals`, and there is nothing per-dataset to publish. It is answered here rather
+  // than by a helper beside this one so that every node keeps asking edit-time capability
+  // questions one way — and so the `edges` reading above stays written once.
+  if (capability === 'groupTotals') return canTotalGroups(source, datasetId, edges)
   return capabilityOf(source, datasetId, capability)
 }
 

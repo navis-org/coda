@@ -28,7 +28,7 @@ import { makeTable, tableFromRows } from '../../core/values'
 import { idColumn } from './tableOps'
 import { ID_COLUMN_NAME, compareIds, idText } from '../../core/ids'
 import type { NeuronId } from '../../core/ids'
-import type { ConnectionDirection } from '../../data/source'
+import type { ConnectionDirection, SynapseTotalsBasis } from '../../data/source'
 import { CONNECTIVITY_ROI_COLUMN } from '../../data/source'
 
 /** What the node's `direction` param can be. `both` is not a `ConnectionDirection`. */
@@ -546,6 +546,30 @@ function collect(
  * input and 0.7% of the source's output.
  */
 export type NormalizeBy = 'postsynaptic' | 'presynaptic'
+
+/**
+ * The two normalisation params, decoded once for everyone who asks.
+ *
+ * `regionOptions`' arrangement and its reason: three nodes read these now — `Connectivity`,
+ * `Paths` and, for the vocabulary, the exporters' refusals — and a default written per caller is
+ * how two cards come to mean different things by the same stored value. Both fall back rather
+ * than throwing, because a stored graph may carry any string at all and neither question has an
+ * "invalid" answer worth blocking a run over.
+ */
+export function readNormalizeBy(raw: unknown): NormalizeBy {
+  return raw === 'presynaptic' ? 'presynaptic' : 'postsynaptic'
+}
+
+export function readBasis(raw: unknown): SynapseTotalsBasis {
+  return raw === 'connected' ? 'connected' : 'all'
+}
+
+/** The side of a neuron a denominator counts, given which end it belongs to. */
+export function normalizeSide(by: NormalizeBy): ConnectionDirection {
+  // `postsynaptic` divides by what the receiving neuron takes *in*: the sides are opposite to
+  // the words on the control, and writing that out once is what stops the flip.
+  return by === 'postsynaptic' ? 'inputs' : 'outputs'
+}
 
 /** The id column a denominator is looked up by, for each end. */
 function normalizeIdColumn(by: NormalizeBy): string {

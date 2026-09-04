@@ -242,6 +242,28 @@ times smaller. `synapseTotalsCypher` therefore falls back `coalesce(n.upstream, 
 incoming side, where the two are measured equal, and has deliberately **no** fallback on the
 outgoing one.
 
+### The same totals per group, for a type-collapsed traversal
+
+`groupTotalsCypher` is that query summed over a population, and it exists because the Paths node
+divides a **type-level** weight: a row's numerator is every LC4→PLP1 synapse, so its denominator
+has to be everything every PLP1 neuron receives. `RETURN n.type, sum(coalesce(n.upstream, n.post))`
+over `n.type IN [...]` answers it in one query, where asking per neuron would mean shipping the
+type's whole membership out first — 401 ids for one number on the mock's DNp02, thousands on a
+real hub type.
+
+**The type arm matches `:Neuron` where `synapseTotalsCypher` matches `:Segment`**, and that is a
+decision rather than an oversight. A denominator has to count the population its numerator came
+from, and the numerator is `pathStepCypher`'s, which matches `(a:Neuron)` at both ends — so
+summing every `:Segment` carrying the type would put synapses in the denominator that no hop of
+that traversal could have contributed. The id arm keeps `:Segment` for the reason above: a lone
+untyped neuron standing as its own group in a collapsed frontier is still a body.
+
+The key comes back as **text** on both arms (`toString(n.bodyId)`), because that is the vocabulary
+the traversal groups in — `coalesce(n.type, toString(n.bodyId))` one query over — and a key that
+arrived as a number would miss every lookup while presenting as a dataset with no totals. The two
+arms are two statements rather than a `UNION`, and in the ordinary collapsed case only the type
+one is sent.
+
 ### A `SynapseSet` is per partner, so a T-bar comes back more than once
 
 `(n:Neuron)-[:Contains]->(:SynapseSet)-[:Contains]->(s:Synapse)` is the only way to a neuron's

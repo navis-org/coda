@@ -18,9 +18,11 @@ import { describe, expect, it } from 'vitest'
 import type { TableValue } from '../../core/values'
 import { getColumn, tableFromRows } from '../../core/values'
 import type { ConnectionDirection } from '../../data/source'
-import { PATH_STEP_SCHEMA } from '../../data/source'
+import { GROUP_TOTALS_SCHEMA, PATH_STEP_SCHEMA } from '../../data/source'
+import type { NormalizeBy } from './connectivityOps'
 import {
   MAX_PATH_STEPS,
+  groupTotalsLookup,
   hopSplit,
   pathStats,
   pathsTable,
@@ -30,6 +32,7 @@ import {
   traversePaths,
   type Frontier,
   type PathNode,
+  type RankBy,
 } from './pathOps'
 
 /** A directed edge in the fake connectome: source key, target key, weight. */
@@ -97,6 +100,60 @@ async function findPaths(
   const pruned = prunePathGraph(graph, sources, targets, maxHops)
   const ranked = rankPaths(pruned, sources, targets, maxHops, topN)
   return { graph, pruned, ranked, calls: fake.calls }
+}
+
+/**
+ * A fake `GroupTotalsRequest`, answering from a table of denominators.
+ *
+ * Keyed by group key, like the real one, and a key it has no entry for is simply absent — the
+ * seam's contract, and the state every "unmeasured" assertion below turns on.
+ */
+function fakeTotals(totals: Record<string, number>) {
+  const calls: Frontier[] = []
+  const fetch = async (frontier: Frontier): Promise<ReadonlyMap<string, number>> => {
+    calls.push({ types: [...frontier.types], neuronIds: [...frontier.neuronIds] })
+    const answered = new Map<string, number>()
+    for (const key of frontier.types) {
+      const total = totals[key]
+      if (total !== undefined) answered.set(key, total)
+    }
+    return answered
+  }
+  return { fetch, calls }
+}
+
+/** `findPaths`, normalising. Returns the totals calls as well, since the count is the point. */
+async function findNormalized(
+  edges: Edge[],
+  sources: string[],
+  targets: string[],
+  maxHops: number,
+  totals: Record<string, number>,
+  options: { by?: NormalizeBy; minFraction?: number; rankBy?: RankBy; topN?: number } = {},
+) {
+  const fake = fakeSource(edges)
+  const denominators = fakeTotals(totals)
+  const graph = await traversePaths({
+    sources: sources.map(node),
+    targets: targets.map(node),
+    maxHops,
+    fetch: fake.fetch,
+    normalize: {
+      by: options.by ?? 'postsynaptic',
+      minFraction: options.minFraction ?? 0,
+      totals: denominators.fetch,
+    },
+  })
+  const pruned = prunePathGraph(graph, sources, targets, maxHops)
+  const ranked = rankPaths(
+    pruned,
+    sources,
+    targets,
+    maxHops,
+    options.topN ?? 0,
+    options.rankBy ?? 'weight',
+  )
+  return { graph, pruned, ranked, totalsCalls: denominators.calls }
 }
 
 describe('hopSplit', () => {
@@ -331,6 +388,178 @@ describe('rankPaths', () => {
     const { ranked } = await findPaths(edges, ['S'], ['T'], 9, 5)
     expect(ranked.paths).toHaveLength(5)
     expect(MAX_PATH_STEPS).toBeGreaterThan(0)
+  })
+})
+
+describe('normalising a traversal', () => {
+  /*
+   * Two routes A→D. Through `W` the connection is huge in synapses and a small share of what W
+   * receives; through `Y` it is modest and nearly all of what Y receives. That is the whole
+   * disagreement `Rank by` exists for, and every test here is a form of it.
+   */
+  const populations: Edge[] = [
+    ['A', 'W', 900],
+    ['W', 'D', 900],
+    ['A', 'Y', 60],
+    ['Y', 'D', 60],
+  ]
+  // W is a hub taking 90,000 synapses; Y takes 100. D takes 1,000.
+  const totals = { W: 90_000, Y: 100, D: 1_000, A: 1_000 }
+
+  it('divides by the receiving group’s total, not by the sending one’s', async () => {
+    const { pruned } = await findNormalized(populations, ['A'], ['D'], 2, totals)
+    const edge = (source: string, target: string) =>
+      [...pruned.edges.values()].find((e) => e.source === source && e.target === target)
+    expect(edge('A', 'W')?.norm).toBeCloseTo(900 / 90_000, 10)
+    expect(edge('A', 'W')?.total).toBe(90_000)
+    // The same connection read from the other end is a different number, which is why the
+    // control exists rather than the node picking one.
+    expect(edge('A', 'Y')?.norm).toBeCloseTo(60 / 100, 10)
+  })
+
+  it('divides by the sending group’s output when asked the other question', async () => {
+    const { pruned } = await findNormalized(populations, ['A'], ['D'], 2, totals, {
+      by: 'presynaptic',
+    })
+    const out = [...pruned.edges.values()].find((e) => e.source === 'A' && e.target === 'W')
+    expect(out?.norm).toBeCloseTo(900 / 1_000, 10)
+  })
+
+  it('asks for a group’s denominator once, however many hops reach it', async () => {
+    /*
+     * `H` is reached at hop 1 by the shortcut and again at hop 2 through `V`. A hub type is
+     * reached on most hops of most searches, so a cache that keyed on the hop rather than on the
+     * key would turn one query per hop into one per hop per hub — and the bidirectional search
+     * meets in the middle by construction, which is a second sighting of everything there.
+     */
+    const shortcut: Edge[] = [
+      ['A', 'V', 50],
+      ['A', 'H', 50],
+      ['V', 'H', 50],
+      ['H', 'D', 50],
+    ]
+    const { totalsCalls } = await findNormalized(shortcut, ['A'], ['D'], 3, {
+      V: 100,
+      H: 100,
+      D: 100,
+    })
+    const asked = totalsCalls.flatMap((call) => call.types)
+    expect(asked.filter((key) => key === 'H')).toHaveLength(1)
+    expect(asked).toEqual([...new Set(asked)])
+  })
+
+  it('ranks by synapses or by fraction, and they disagree', async () => {
+    const synapses = await findNormalized(populations, ['A'], ['D'], 2, totals)
+    expect(synapses.ranked.paths[0]?.keys).toEqual(['A', 'W', 'D'])
+
+    const fraction = await findNormalized(populations, ['A'], ['D'], 2, totals, {
+      rankBy: 'norm',
+    })
+    // Y's route is 60/100 at its weakest; W's is 900/90,000. Ten times smaller in synapses and
+    // sixty times larger as a share of what the next population receives.
+    expect(fraction.ranked.paths[0]?.keys).toEqual(['A', 'Y', 'D'])
+    expect(fraction.ranked.paths[0]?.bottleneckNorm).toBeCloseTo(60 / 1_000, 10)
+    // Both numbers ride on every route whichever way it was ranked, so a table can show both.
+    expect(fraction.ranked.paths[0]?.bottleneck).toBe(60)
+  })
+
+  it('keeps N strongest by the ranking that was asked for', async () => {
+    const fraction = await findNormalized(populations, ['A'], ['D'], 2, totals, {
+      rankBy: 'norm',
+      topN: 1,
+    })
+    // The bound and the shortlist read the same metric the result is sorted by. Reading one and
+    // sorting by the other prunes away the answer and still returns a plausible route.
+    expect(fraction.ranked.paths.map((p) => p.keys.join('>'))).toEqual(['A>Y>D'])
+  })
+
+  it('does not follow a connection below the floor', async () => {
+    // W takes 1% of its input from A, so at a 5% floor the whole route through it is gone —
+    // not merely unranked. The frontier is what this bounds, which is the reason the
+    // denominators are fetched per hop rather than once at the end.
+    const { pruned } = await findNormalized(populations, ['A'], ['D'], 2, totals, {
+      minFraction: 0.05,
+    })
+    expect([...pruned.nodes.keys()].sort()).toEqual(['A', 'D', 'Y'])
+  })
+
+  it('never drops a connection it could not measure', async () => {
+    // No denominator for W. A floor that deleted it would report an absence as a decision.
+    const { pruned, ranked } = await findNormalized(
+      populations,
+      ['A'],
+      ['D'],
+      2,
+      { Y: 100, D: 1_000 },
+      { minFraction: 0.05 },
+    )
+    expect([...pruned.nodes.keys()].sort()).toEqual(['A', 'D', 'W', 'Y'])
+    const through = ranked.paths.find((p) => p.keys.includes('W'))
+    expect(through?.bottleneckNorm).toBeNull()
+    // …and it is still a route, with its synapse bottleneck intact.
+    expect(through?.bottleneck).toBe(900)
+  })
+
+  it('ranks an unscored route below every route it could score', async () => {
+    const { ranked } = await findNormalized(
+      populations,
+      ['A'],
+      ['D'],
+      2,
+      { Y: 100, D: 1_000 },
+      { rankBy: 'norm' },
+    )
+    // Below, not dropped: a route nobody could score is still a route, and the null in the
+    // table is what says so.
+    expect(ranked.paths.map((p) => p.keys.join('>'))).toEqual(['A>Y>D', 'A>W>D'])
+    expect(ranked.paths[1]?.bottleneckNorm).toBeNull()
+  })
+
+  it('leaves an unnormalised traversal with no fractions at all', async () => {
+    // Nothing was asked, so there is nothing to divide: the edge carries no `norm` and the route
+    // no fraction. `null` on the route rather than absent, because a route with an unmeasured
+    // step says the same thing and nothing reads the two apart.
+    const { pruned, ranked } = await findPaths(populations, ['A'], ['D'], 2)
+    expect([...pruned.edges.values()][0]?.norm).toBeUndefined()
+    expect(ranked.paths[0]?.bottleneckNorm).toBeNull()
+    // And the column is the switch downstream, so an unnormalised table has no room for one.
+    expect(pathsTable(ranked.paths).schema.columns.map((c) => c.name)).not.toContain(
+      'bottleneckNorm',
+    )
+  })
+
+  it('carries the columns only where there is something to put in them', async () => {
+    const { pruned, ranked } = await findNormalized(populations, ['A'], ['D'], 2, totals)
+    const on = pathsToNetwork(pruned, ranked.paths, ['A'], ['D'], true)
+    expect(on.edges.schema.columns.map((c) => c.name)).toContain('weightNorm')
+    expect(pathsTable(ranked.paths, true).schema.columns.map((c) => c.name)).toContain(
+      'bottleneckNorm',
+    )
+
+    const off = pathsToNetwork(pruned, ranked.paths, ['A'], ['D'])
+    expect(off.edges.schema.columns.map((c) => c.name)).not.toContain('weightNorm')
+    expect(pathsTable(ranked.paths).schema.columns.map((c) => c.name)).not.toContain(
+      'bottleneckNorm',
+    )
+  })
+})
+
+describe('groupTotalsLookup', () => {
+  it('keys by the text it was given, since half of them are type names', () => {
+    const table = tableFromRows(GROUP_TOTALS_SCHEMA, [
+      { key: 'LC4', total: 900 },
+      { key: '10001', total: 40 },
+    ])
+    const lookup = groupTotalsLookup(table)
+    expect(lookup.get('LC4')).toBe(900)
+    // A neuron standing alone is keyed by its id *as text* — reading it as an id would be a
+    // second grammar for something the traversal has only ever spelled one way.
+    expect(lookup.get('10001')).toBe(40)
+  })
+
+  it('drops a total that is not a number, so absent still means not known', () => {
+    const table = tableFromRows(GROUP_TOTALS_SCHEMA, [{ key: 'LC4', total: null }])
+    expect(groupTotalsLookup(table).has('LC4')).toBe(false)
   })
 })
 

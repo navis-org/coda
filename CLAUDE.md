@@ -546,6 +546,38 @@ Area-specific — the rule, then the doc that holds why:
   set **removes** both capabilities where it *adds* `paths`: a file of `pre, post, weight` has no
   regions, and its weights are not the population the backend's totals count.
   See [docs/nodes.md](docs/nodes.md) and [docs/backends.md](docs/backends.md).
+- **A path's denominator belongs to a population, and the floor that uses it has to prune while the
+  search is still running.** `Paths` normalises with `Connectivity`'s vocabulary exactly —
+  `Normalize by`, `Denominator`, `weightNorm` beside `weightTotal` — but a type-collapsed edge's
+  weight is every LC4→PLP1 synapse summed, so its denominator is everything *every* PLP1 neuron
+  receives. The frontier carries the type name, so a per-neuron total cannot answer it without
+  shipping the whole membership back out; hence `fetchGroupTotals` / `GROUP_TOTALS_SCHEMA`
+  (`key, total`, keyed in the traversal's vocabulary where a key is a type name **or** an id as
+  text) — a second method rather than a widened `fetchSynapseTotals`, whose key is an id read
+  through `idText`, and a second predicate `canTotalGroups`, because the *method* is separately
+  optional and a source carrying the flag without it must refuse before the run. Its type arm
+  matches **`:Neuron`** where `synapseTotalsCypher` matches `:Segment`: a denominator counts the
+  population its numerator came from, and the numerator is `pathStepCypher`'s. Four consequences.
+  **Per hop, not once at the end** — that is the whole of what `Min fraction` buys, since a
+  denominator arriving after the search can rank what was found and cannot change what was walked;
+  the cache is asked per key, because a hub type is reached on most hops and the bidirectional walk
+  meets in the middle by construction. **`Rank by` is a control because the two weakest links are
+  different steps**: L1→DNp02 in four hops on the mock optic lobe gives eight LPLC2 routes at 375
+  synapses against the LC4 route's 352, and 15% of LPLC2's input against 61% of LC4's — the
+  ranking inverts, and the bound, the neighbour order and the shortlist therefore read the metric
+  through **one** function, since a search bounded by one number and ranked by another prunes away
+  its own answer and still returns something plausible. **An unmeasured connection is never
+  dropped and never scored** — the floor lets a null fraction through, because a threshold that
+  deleted what it could not measure would report an absence as a decision; such a route ranks
+  below every scored one, counted and warned about, and `RankedPath.bottleneckNorm` is `null`
+  for it exactly as it is for a run that never normalised, since nothing reads those apart and
+  *which question was asked* is the caller's own answer. And the Paths table carries `bottleneckNorm` with
+  **no denominator column**, inverting `weightTotal`'s rule on purpose: a route's two bottlenecks
+  are routinely different steps, so one column could name the denominator of neither — the Network
+  output is where each fraction sits beside its own total. Both exporters refuse it, one reason
+  past `Connectivity`'s: without a group denominator *and* `Min fraction` they walk a different
+  graph, not the same one missing two columns.
+  See [docs/nodes.md](docs/nodes.md) and [docs/backends.md](docs/backends.md).
 - **A bounded influence score is the published one truncated, not an approximation of it — and the
   gain is the published `lambda_max` exactly.** `r = (I - gW)^-1 s` is the series `s + gWs + g²W²s
   + …`, so walking *H* hops and adding the terms *is* Bates et al.'s score stopped early. Every

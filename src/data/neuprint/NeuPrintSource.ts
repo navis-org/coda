@@ -52,6 +52,7 @@ import type {
   RoiSummaryRequest,
   SourceCapabilities,
   SourceSchemas,
+  GroupTotalsRequest,
   SynapseRequest,
   SynapseTotalsRequest,
   ViewerSceneRequest,
@@ -59,6 +60,7 @@ import type {
 import { SYNAPSE_UNITS } from '../synapseUnits'
 import {
   CANONICAL_SCHEMAS,
+  GROUP_TOTALS_SCHEMA,
   PATH_STEP_SCHEMA,
   connectivitySchemaWithRoi,
   synapseTotalsSchema,
@@ -96,6 +98,7 @@ import {
   adjacencyCypher,
   connectivityCypher,
   findNeuronsCypher,
+  groupTotalsCypher,
   idList,
   pathStepCypher,
   metaCypher,
@@ -742,6 +745,43 @@ export class NeuPrintSource implements DataSource {
       }
     }
     return makeTable(schema, { [ID_COLUMN_NAME]: ids, total: totals })
+  }
+
+  /**
+   * The same totals per group key: one query for the types, batched queries for the ids.
+   *
+   * Two statements rather than a `UNION`, and in the ordinary collapsed case only one of them is
+   * sent — a frontier of cell types has no ids to ask about. The id arm reuses
+   * `fetchSynapseTotals`' batch for its measured reason: this is asked about keys that came
+   * *back* from a hop, and a Cypher literal of fifty thousand ids is a third of a megabyte of
+   * query text.
+   *
+   * A `null` total is dropped rather than pushed, `fetchSynapseTotals`' rule and the seam's: an
+   * absent row means "not known", where a zero would divide into an infinity.
+   */
+  async fetchGroupTotals(req: GroupTotalsRequest): Promise<TableValue> {
+    const keys: CellValue[] = []
+    const totals: CellValue[] = []
+    const collect = async (narrowed: GroupTotalsRequest): Promise<void> => {
+      const response = await runCypher(
+        groupTotalsCypher(narrowed),
+        req.datasetId,
+        this.options(req.signal),
+      )
+      for (const row of response.data ?? []) {
+        const total = row[1]
+        if (typeof total !== 'number') continue
+        keys.push(String(row[0]))
+        totals.push(total)
+      }
+    }
+
+    if (req.types?.length) await collect({ ...req, neuronIds: [] })
+    const ids = req.neuronIds ?? []
+    for (let at = 0; at < ids.length; at += SYNAPSE_TOTALS_BATCH) {
+      await collect({ ...req, types: [], neuronIds: ids.slice(at, at + SYNAPSE_TOTALS_BATCH) })
+    }
+    return makeTable(GROUP_TOTALS_SCHEMA, { key: keys, total: totals })
   }
 
   async fetchPathStep(req: PathStepRequest): Promise<TableValue> {

@@ -243,6 +243,67 @@ live('neuPrint, live — what a weight is a fraction of', () => {
     }
   }, 180_000)
 
+  it('sums a type’s denominator over its whole population', async () => {
+    /*
+     * The claim `fetchGroupTotals` rests on, and the only place it can be checked: a Paths row's
+     * weight is every LC4→partner synapse, so its denominator has to be every synapse every LC4
+     * neuron receives — the grouped query and the per-neuron one summed have to be the *same
+     * number*. If they ever differ, `groupTotalsCypher`'s `:Neuron` match and `findNeurons`'
+     * population have parted company, and the fraction on the card would be quietly wrong rather
+     * than missing.
+     */
+    setToken(TOKEN!)
+    const source = new NeuPrintSource()
+    const members = await source.findNeurons({
+      datasetId: DATASET,
+      rows: [{ field: 'type', op: 'is', values: ['LC4'] }],
+    })
+    const ids = (members.data.neuronId ?? []).map(String)
+    expect(ids.length).toBeGreaterThan(10)
+
+    for (const side of ['inputs', 'outputs'] as const) {
+      const perNeuron = await source.fetchSynapseTotals({
+        datasetId: DATASET,
+        neuronIds: ids,
+        side,
+        basis: 'all',
+      })
+      const grouped = await source.fetchGroupTotals({
+        datasetId: DATASET,
+        types: ['LC4'],
+        side,
+        basis: 'all',
+      })
+      const summed = (perNeuron.data.total ?? []).reduce((t: number, v) => t + Number(v), 0)
+      expect(grouped.length).toBe(1)
+      expect(grouped.data.key?.[0]).toBe('LC4')
+      expect(total(grouped)).toBe(summed)
+    }
+  }, 180_000)
+
+  it('keys a lone body by its id as text, which is what the traversal looks up', async () => {
+    // The other arm, and the one a numeric key would break silently: a group key is text
+    // everywhere in `pathOps`, so an id that came back as a number misses every lookup and reads
+    // as a dataset that publishes no totals.
+    setToken(TOKEN!)
+    const source = new NeuPrintSource()
+    const grouped = await source.fetchGroupTotals({
+      datasetId: DATASET,
+      neuronIds: [BODY],
+      side: 'inputs',
+      basis: 'all',
+    })
+    expect(grouped.data.key?.[0]).toBe(BODY)
+    // 31,981 — the same number the per-neuron query answers, since one body is one group.
+    const perNeuron = await source.fetchSynapseTotals({
+      datasetId: DATASET,
+      neuronIds: [BODY],
+      side: 'inputs',
+      basis: 'all',
+    })
+    expect(total(grouped)).toBe(total(perNeuron))
+  }, 120_000)
+
   it('leaves out the fragments for the connected basis, which is most of the outputs', async () => {
     setToken(TOKEN!)
     const source = new NeuPrintSource()

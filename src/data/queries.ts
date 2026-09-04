@@ -42,11 +42,19 @@ import type {
   AdjacencyRequest,
   ConnectivityRequest,
   DataSource,
+  GroupTotalsRequest,
   PathStepRequest,
   SourceSchemas,
   SynapseTotalsRequest,
 } from './source'
-import { canSplitConnectivityByRoi, canTotalSynapses, canTracePaths, capabilityOf } from './source'
+import {
+  canSplitConnectivityByRoi,
+  canTotalGroups,
+  canTotalSynapses,
+  canTracePaths,
+  capabilityOf,
+  groupTotalsRefusal,
+} from './source'
 
 /**
  * The attached set, or a refusal naming it.
@@ -204,14 +212,7 @@ export async function synapseTotalsFor(
   source: DataSource,
   req: SynapseTotalsRequest,
 ): Promise<TableValue> {
-  if (req.edges) {
-    throw new Error(
-      `This dataset's connectivity comes from the edge set "${req.edges.name}", so its weights ` +
-        `are the file's rather than the server's — normalising them against the backend's ` +
-        `published synapse totals would divide one connectome by another. Turn off Normalize, ` +
-        `or detach the edge set under Edge data on the dataset card.`,
-    )
-  }
+  if (req.edges) throw edgeSetDenominator(req.edges.name)
   // The same predicate the node asks, rather than a third spelling — `pathStepFor`'s rule, and
   // it is that function's recorded incident: a funnel checking only that a method existed
   // accepted a source the node had already refused.
@@ -219,6 +220,41 @@ export async function synapseTotalsFor(
     throw new Error(`${source.label} does not publish per-neuron synapse totals`)
   }
   return source.fetchSynapseTotals!(req)
+}
+
+/**
+ * The same totals per group key, or a refusal naming why there are none.
+ *
+ * `synapseTotalsFor` with `canTotalGroups` in place of `canTotalSynapses`, and the second funnel
+ * is the point rather than an oversight: written as one funnel that picked a method, a source
+ * with the flag and no `fetchGroupTotals` would pass the gate the Paths node asks and then fail
+ * on a `!`. Both refusals are shared, since the reason is the same either way.
+ */
+export async function groupTotalsFor(
+  source: DataSource,
+  req: GroupTotalsRequest,
+): Promise<TableValue> {
+  if (req.edges) throw edgeSetDenominator(req.edges.name)
+  if (!canTotalGroups(source, req.datasetId, false)) {
+    throw new Error(groupTotalsRefusal(source.label))
+  }
+  return source.fetchGroupTotals!(req)
+}
+
+/**
+ * Why an attached edge set cannot supply a denominator, said once for both funnels.
+ *
+ * A file's weights over a server's published totals is one connectome divided by another — see
+ * `canTotalSynapses`, which is where the rule lives. The sentence names a control on the dataset
+ * card, which is the half a second copy silently leaves pointing at nothing when it is renamed.
+ */
+function edgeSetDenominator(name: string): Error {
+  return new Error(
+    `This dataset's connectivity comes from the edge set "${name}", so its weights are the ` +
+      `file's rather than the server's — normalising them against the backend's published ` +
+      `synapse totals would divide one connectome by another. Turn off Normalize, or detach ` +
+      `the edge set under Edge data on the dataset card.`,
+  )
 }
 
 export async function adjacencyFor(

@@ -5,7 +5,6 @@ import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { idColumn } from '../lib/tableOps'
 import { unmatchedIds } from '../lib/idList'
-import type { SynapseTotalsBasis } from '../../data/source'
 import {
   datasetRequest,
   publishedNeurons,
@@ -16,14 +15,17 @@ import {
   sourceLabel,
   sourceSupports,
 } from '../lib/datasetParam'
-import type { NormalizeBy, TraversalDirection } from '../lib/connectivityOps'
+import type { TraversalDirection } from '../lib/connectivityOps'
 import {
   connectivityOutputSchema,
   endpointNeurons,
   endpointSchema,
   neuronRowsFor,
   normalizeConnectivity,
+  normalizeSide,
   normalizeTargets,
+  readBasis,
+  readNormalizeBy,
   regionOptions,
   totalsLookup,
   traverseConnectivity,
@@ -35,14 +37,6 @@ const NOISY_HOPS = 3
 
 function readDirection(raw: unknown): TraversalDirection {
   return raw === 'inputs' || raw === 'both' ? raw : 'outputs'
-}
-
-function readNormalizeBy(raw: unknown): NormalizeBy {
-  return raw === 'presynaptic' ? 'presynaptic' : 'postsynaptic'
-}
-
-function readBasis(raw: unknown): SynapseTotalsBasis {
-  return raw === 'connected' ? 'connected' : 'all'
 }
 
 /**
@@ -479,9 +473,7 @@ export const connectivityNode = registerNode({
         // refuse a dataset answering from a file — see its own note.
         ...connectivityRequest(dataset),
         neuronIds: targets,
-        // `postsynaptic` divides by what the receiving neuron takes *in*; the sides are opposite
-        // to the words on the control and writing them out here is what stops the flip.
-        side: by === 'postsynaptic' ? 'inputs' : 'outputs',
+        side: normalizeSide(by),
         basis,
         signal: ctx.signal,
       })

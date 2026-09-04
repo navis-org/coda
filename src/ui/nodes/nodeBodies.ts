@@ -179,9 +179,15 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    */
   'cave.tableInfo': { Component: CaveTableInfoBody, width: 300, expandable: true },
   /*
-   * A caption, not a widget — so no `expandable`. There is nothing here that benefits from
-   * room, and an expand button on a query node would sit exactly where a viewer's does; the
-   * routes themselves are a table, and the Table node is what opens full size.
+   * The search's four settings and a caption under them. The settings are here because a body
+   * replaces the param band outright, and a path query with no reachable `Max hops` is a card
+   * whose own empty readout tells you to raise a control that is not on it. Wide enough for the
+   * `Collapse types` label and a number field to share a line — see `.paths-body` in the
+   * stylesheet, which widens the shared label column for it.
+   *
+   * Not `expandable`: there is nothing here that benefits from room, and an expand button on a
+   * query node would sit exactly where a viewer's does; the routes themselves are a table, and
+   * the Table node is what opens full size.
    */
   'neuron.paths': { Component: PathsBody, width: 260 },
   /*

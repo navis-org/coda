@@ -58,6 +58,11 @@ module-level function, and the obvious spelling is a well-bound name and an `Att
 `neuprint/roiHierarchy.ts`). A cell naming an argument neuprintr does not have fails at the
 reader's console, which is worse than a cell saying what to write.
 
+`Paths` refuses on `Normalize` too, and its reason is a step stronger: the denominator there is a
+whole *group's* total, which neither library has a notion of, and `Min fraction` prunes the
+frontier as the search grows — so an export without them would follow different connections and
+return different routes, not the same routes missing two columns.
+
 `Normalize` is refused in both languages for a different reason, and it is the one the refusal
 policy exists for: neuprint-python has **no equivalent of the reconstructed-partners-only
 denominator**. The `all` basis is reachable — it is the `upstream`/`downstream` columns of

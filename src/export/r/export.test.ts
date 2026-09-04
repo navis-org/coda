@@ -20,12 +20,19 @@ import { addNode, emptyGraph } from '../../core/graph'
 import type { ParamValues } from '../../core/node'
 import { allNodeDefs } from '../../core/registry'
 import '../../nodes'
-import { caveGraph, everythingGraph, twoNodeGraph } from '../fixture'
+import { caveGraph, everythingGraph, pathsGraph, twoNodeGraph } from '../fixture'
 import { exportRmd } from './exporter'
 import { getEmitter } from './registry'
 
 const GOLDEN = new URL('./__fixtures__/everything.Rmd', import.meta.url).pathname
 const OPTIONS = { now: '2026-01-01', appVersion: '0.0.0-test' }
+
+/** The whole document, for the assertions that search it. */
+function rmdText(graph: Parameters<typeof exportRmd>[0]): string {
+  const result = exportRmd(graph, OPTIONS)
+  if (!result.ok) throw new Error(result.reason)
+  return result.source
+}
 
 describe('R Markdown export', () => {
   it('matches the golden document', () => {
@@ -258,6 +265,25 @@ describe('the Neuron Set port', () => {
  * language's test could see. What it would look like is a document that knits cleanly and
  * returns 186,061 neurons where the canvas showed a fraction of them.
  */
+
+/**
+ * The Paths node's own refusal, which is one reason past `Connectivity`'s.
+ *
+ * Neither library has a group-level denominator, and neither has anything for `Min fraction` —
+ * which prunes the frontier as the search grows. So an export without them would not be the same
+ * routes missing two columns; it would be a different walk. Asserted at **neuron level**, so what
+ * is being pinned is the normalisation refusal rather than the collapse one that would fire first.
+ */
+describe('a normalised Paths node', () => {
+  it('is refused, for the Python side’s two reasons', () => {
+    const text = rmdText(pathsGraph({ collapseTypes: false, normalize: true }))
+    expect(text).toContain('TODO')
+    expect(text).toMatch(/no neuprintr equivalent/)
+    expect(text).toContain('Min fraction')
+    expect(rmdText(pathsGraph({ collapseTypes: false }))).toContain('neuprint_get_paths(')
+  })
+})
+
 describe('the population filters', () => {
   const graphWith = (params: ParamValues, query: string, queryParams: ParamValues = {}) =>
     twoNodeGraph('dataset.hemibrain', params, query, queryParams)

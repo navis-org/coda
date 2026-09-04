@@ -7646,30 +7646,25 @@ details[open] > summary.tile__label {
   text-align: right;
 }
 
-/* --- Paths caption ------------------------------------------------------- */
+/* --- Paths card ---------------------------------------------------------- */
 
 /*
- * The readout under a Paths node. Sized and coloured as a caption rather than as content:
- * the params above it are the controls and the network downstream is the result, so this is
- * an annotation on both — the same weight `.viewer__caption` carries in the viewers.
+ * The Paths card: the search's four settings, then a readout of what they found.
+ *
+ * Shares `.list-body` with the paste-target cards and the pager — the fields, their label
+ * column and the foot line are the same object, and the readout wants exactly the weight
+ * `.list-body__foot` already carries: a caption on the controls above it and on the network
+ * downstream, rather than content of its own.
+ *
+ * The one thing it adds is a wider label column. `Collapse types` measures **74.4px** at this
+ * size in Chrome, against the shared column's 72px and `Label column`'s 67px — so it clips on
+ * the card it is the only control anyone reads it from, and a truncated *setting* is worse
+ * than a truncated readout, which says the same thing three ways. 86px rather than 76 for the
+ * platform the measurement was not taken on; what is left is 149px of field inside a 260px
+ * card, which is roomy for a two-digit number.
  */
-.paths-body {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-.paths-body--empty {
-  font-size: 10px;
-  color: var(--text-muted);
-}
-.paths-body__stats {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
-  font-size: 10px;
-  color: var(--text-secondary);
+.paths-body .list-body__field {
+  grid-template-columns: 86px 1fr;
 }
 /*
  * The route itself is monospaced and clipped to one line. It is an identifier chain, not

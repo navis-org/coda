@@ -14,7 +14,7 @@
  * what makes a path query answerable here at all.
  */
 
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
@@ -221,6 +221,188 @@ describe('Collapse types', () => {
     expect(getColumn(network.edges, 'pairs').every((n) => Number(n) === 1)).toBe(true)
     // The type still rides along as an attribute, which is what a label encoding reads.
     expect(getColumn(network.nodes, 'type').map(String)).toContain('LC4')
+  })
+})
+
+describe('Normalize', () => {
+  /*
+   * The half `pathOps.test.ts` cannot cover, for its stated reason: there the denominators are a
+   * hand-written table, and what matters here is that the *source* answers about a group — a
+   * whole cell type, summed — and that the two ends of invariant 3 agree once it does.
+   */
+  it('advertises the two extra columns, and only when it is on', async () => {
+    const columns = (params: Record<string, unknown>) => {
+      const declared = inferGraph(pipeline(params)).nodes.paths?.outputs
+      return declared?.network?.kind === 'network'
+        ? declared.network.edgeSchema?.columns.map((c) => c.name)
+        : undefined
+    }
+    expect(columns({})).not.toContain('weightNorm')
+    expect(columns({ normalize: true })).toEqual([
+      'source',
+      'target',
+      'weight',
+      'pairs',
+      'paths',
+      'hop',
+      'weightNorm',
+      'weightTotal',
+    ])
+
+    const { network, table } = await run({ normalize: true, maxHops: 3, minWeight: 1 })
+    expect(network.edges.schema.columns.map((c) => c.name)).toEqual(columns({ normalize: true }))
+    expect(table.schema.columns.map((c) => c.name)).toContain('bottleneckNorm')
+  })
+
+  it('publishes the denominator it actually divided by', async () => {
+    const { network } = await run({ normalize: true, maxHops: 3, minWeight: 1 })
+    const edges = network.edges
+    expect(edges.length).toBeGreaterThan(0)
+    for (let row = 0; row < edges.length; row++) {
+      const total = Number(edges.data.weightTotal?.[row])
+      const weight = Number(edges.data.weight?.[row])
+      // `Connectivity`'s transparency claim, checkable from the table alone.
+      expect(Number(edges.data.weightNorm?.[row])).toBeCloseTo(weight / total, 12)
+    }
+  })
+
+  it('divides by the whole population, not by one neuron of it', async () => {
+    /*
+     * The reason `GroupTotalsRequest` exists. With `Collapse types` on, a row's weight is every
+     * LC4→DNp02 synapse summed, so its denominator has to be every synapse every DNp02 neuron
+     * receives. Checked against the source's own per-neuron totals rather than against a
+     * constant: one neuron's total would be a plausible fraction several times too large.
+     */
+    const { network } = await run({ normalize: true, maxHops: 3, minWeight: 1 })
+    const source = new MockSource({ latencyMs: 0 })
+    const targets = getColumn(network.edges, 'target').map(String)
+    const totals = getColumn(network.edges, 'weightTotal').map(Number)
+    const at = targets.findIndex((key) => key === 'DNp02')
+    expect(at).toBeGreaterThanOrEqual(0)
+
+    const members = await source.findNeurons({
+      datasetId: DATASET,
+      rows: [{ field: 'type', op: 'is', values: ['DNp02'] }],
+    })
+    const ids = getColumn(members, 'neuronId').map(String)
+    expect(ids.length).toBeGreaterThan(1)
+    const perNeuron = await source.fetchSynapseTotals({
+      datasetId: DATASET,
+      neuronIds: ids,
+      side: 'inputs',
+      basis: 'all',
+    })
+    const summed = getColumn(perNeuron, 'total').reduce<number>((sum, t) => sum + Number(t), 0)
+    expect(totals[at]).toBe(summed)
+  })
+
+  it('asks the source for the side the mode names', async () => {
+    const spy = vi.spyOn(MockSource.prototype, 'fetchGroupTotals')
+    try {
+      await run({ normalize: true, normalizeBy: 'postsynaptic', maxHops: 3, minWeight: 1 })
+      // Dividing by the *target's input* means totalling incoming synapses — the same flip
+      // `Connectivity` pins, through the same shared `normalizeSide`.
+      expect(spy.mock.calls[0]?.[0].side).toBe('inputs')
+      spy.mockClear()
+      await run({ normalize: true, normalizeBy: 'presynaptic', maxHops: 3, minWeight: 1 })
+      expect(spy.mock.calls[0]?.[0].side).toBe('outputs')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('asks about group keys, so a collapsed frontier goes out as types', async () => {
+    const spy = vi.spyOn(MockSource.prototype, 'fetchGroupTotals')
+    try {
+      await run({ normalize: true, maxHops: 3, minWeight: 1 })
+      const asked = spy.mock.calls.flatMap((call) => call[0].types ?? [])
+      expect(asked.length).toBeGreaterThan(0)
+      // Types, not ids — the frontier's own vocabulary. Asked once each, across every hop.
+      expect(asked).toEqual([...new Set(asked)])
+      expect(spy.mock.calls.every((call) => (call[0].neuronIds ?? []).length === 0)).toBe(true)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('asks by id at neuron level, which is the other half of the same request', async () => {
+    // `frontierOf` routes a key by whether it names one neuron, so this is the arm the collapsed
+    // tests never reach — and the arm whose keys have to come back as *text*.
+    const spy = vi.spyOn(MockSource.prototype, 'fetchGroupTotals')
+    try {
+      const { network } = await run({
+        normalize: true,
+        collapseTypes: false,
+        maxHops: 3,
+        minWeight: 1,
+        topN: 5,
+      })
+      expect(spy.mock.calls.length).toBeGreaterThan(0)
+      expect(spy.mock.calls.every((call) => (call[0].types ?? []).length === 0)).toBe(true)
+      expect(spy.mock.calls.flatMap((call) => call[0].neuronIds ?? []).length).toBeGreaterThan(0)
+      const norms = getColumn(network.edges, 'weightNorm').map(Number)
+      expect(norms.length).toBeGreaterThan(0)
+      expect(norms.every((n) => n > 0 && Number.isFinite(n))).toBe(true)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('ranks by the fraction when asked, and the two orders disagree', async () => {
+    /*
+     * The real disagreement in this connectome, and the reason `Rank by` is a control rather
+     * than a decision the node makes. From L1 to DNp02 in four hops there are nine routes: eight
+     * of them run through LPLC2 and carry 375 synapses at their weakest step, and one runs
+     * through LC4 and carries 352. In synapses the LPLC2 routes win by 6%. As a share of what
+     * the next population receives, LPLC2 takes 15% of its input from any one T4 subtype where
+     * LC4 takes 61% from Tm3 — so the ranking inverts, four times over.
+     */
+    const wide = { normalize: true, maxHops: 4, minWeight: 1, topN: 0 }
+    const bySynapses = await run({ ...wide, rankBy: 'synapses' })
+    const byFraction = await run({ ...wide, rankBy: 'fraction' })
+    const order = (table: typeof bySynapses.table) => getColumn(table, 'path').map(String)
+    expect(order(bySynapses.table).length).toBeGreaterThan(1)
+    expect(order(bySynapses.table)[0]).toContain('LPLC2')
+    expect(order(byFraction.table)[0]).toContain('LC4')
+
+    // The same routes either way — only the order moved. Both numbers ride on every row, which
+    // is what lets a reader check one ranking against the other.
+    expect(new Set(order(byFraction.table))).toEqual(new Set(order(bySynapses.table)))
+    const fractions = getColumn(byFraction.table, 'bottleneckNorm').map(Number)
+    expect([...fractions].sort((a, b) => b - a)).toEqual(fractions)
+  })
+
+  it('changes the cache key, so turning it on does not serve the plain result', async () => {
+    const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
+    await sched.run(pipeline({ maxHops: 3, minWeight: 1 }), { mode: 'full' })
+    const plain = sched.output('paths', 'network')
+    await sched.run(pipeline({ maxHops: 3, minWeight: 1, normalize: true }), { mode: 'full' })
+    const scaled = sched.output('paths', 'network')
+    if (!isNetworkValue(plain) || !isNetworkValue(scaled)) throw new Error('expected networks')
+    expect(plain.edges.schema.columns.map((c) => c.name)).not.toContain('weightNorm')
+    expect(scaled.edges.schema.columns.map((c) => c.name)).toContain('weightNorm')
+  })
+
+  it('prunes the search itself, not only the ranking', async () => {
+    /*
+     * `Min fraction` is applied per hop, so a floor removes *nodes* from the network rather than
+     * leaving them in it carrying a low fraction. That is the whole reason the denominators are
+     * fetched during the walk: every T4 subtype gives LPLC2 about 15% of its input, so at 20%
+     * the eight LPLC2 routes are not merely ranked last — LPLC2 was never followed.
+     */
+    const open = await run({ normalize: true, maxHops: 4, minWeight: 1, topN: 0 })
+    const tight = await run({
+      normalize: true,
+      maxHops: 4,
+      minWeight: 1,
+      topN: 0,
+      minFraction: 0.2,
+    })
+    const keys = (run: typeof open) => getColumn(run.network.nodes, 'id').map(String)
+    expect(keys(open)).toContain('LPLC2')
+    expect(keys(tight)).not.toContain('LPLC2')
+    // What survives is the route every step of which clears the floor.
+    expect(getColumn(tight.table, 'path').map(String)).toEqual(['L1 → Tm3 → LC4 → DNp02'])
   })
 })
 

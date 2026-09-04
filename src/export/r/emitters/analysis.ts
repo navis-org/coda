@@ -271,6 +271,17 @@ registerEmitter('neuron.paths', (ctx) => {
     )
   }
 
+  // Same refusal as the Python side, and the same two reasons: a group-level denominator has no
+  // neuprintr equivalent, and `Min fraction` changes which connections the search follows.
+  if (ctx.params.normalize === true) {
+    return ctx.todo(
+      'Paths with Normalize on has no neuprintr equivalent. The denominator is a whole ' +
+        "group's synapse total and Min fraction prunes the search as it grows, so an export " +
+        'without them would follow different connections and return different routes. Turn ' +
+        'Normalize off to export this node.',
+    )
+  }
+
   ctx.library('neuprintr')
   // `neuprint_get_paths` takes a hop budget directly, which `fetch_shortest_paths` does not —
   // one of the few places R gives up less than Python here.

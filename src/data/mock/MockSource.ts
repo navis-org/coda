@@ -25,12 +25,14 @@ import { geometryFrame } from '../transforms/spaces'
 import type {
   AdjacencyRequest,
   CoarseGeometry,
+  ConnectionDirection,
   CoarseGeometryRequest,
   ConnectivityRequest,
   DataSource,
   DatasetInfo,
   FindNeuronsRequest,
   GeometryRequest,
+  GroupTotalsRequest,
   NeuronIndexRequest,
   PathStepRequest,
   RoiCountsRequest,
@@ -39,10 +41,12 @@ import type {
   SourceCapabilities,
   SourceSchemas,
   SynapseRequest,
+  SynapseTotalsBasis,
   SynapseTotalsRequest,
 } from '../source'
 import {
   CANONICAL_SCHEMAS,
+  GROUP_TOTALS_SCHEMA,
   PATH_STEP_SCHEMA,
   ROI_COMPLETENESS_SCHEMA,
   ROI_MESH_SCHEMA,
@@ -357,17 +361,44 @@ export class MockSource implements DataSource {
     for (const neuronId of numericIds(req.neuronIds)) {
       const neuron = connectome.byId.get(neuronId)
       if (!neuron) continue
-      if (req.basis === 'all') {
-        rows.push({ [ID_COLUMN_NAME]: neuronId, total: req.side === 'inputs' ? neuron.post : neuron.pre })
-        continue
-      }
-      const edges = (req.side === 'inputs' ? connectome.in : connectome.out).get(neuronId) ?? []
-      rows.push({
-        [ID_COLUMN_NAME]: neuronId,
-        total: edges.reduce((sum, edge) => sum + edge.weight, 0),
-      })
+      rows.push({ [ID_COLUMN_NAME]: neuronId, total: synapseTotal(connectome, neuronId, req) })
     }
     return tableFromRows(synapseTotalsSchema('i64'), rows)
+  }
+
+  /**
+   * The same totals summed per group key, aggregated exactly as the Cypher does.
+   *
+   * The two arms mirror `groupTotalsCypher`, including the population each sums over: a type's
+   * total is summed across the neurons carrying it, because that is the set `fetchPathStep`
+   * aggregated a weight from, and a denominator counting anything else is a fraction of the
+   * wrong thing. `mock.test.ts` pins that against this source's own path step.
+   *
+   * A group the connectome does not hold contributes **no row** — the seam's contract, and
+   * `fetchSynapseTotals`' note explains what a zero would do instead.
+   */
+  async fetchGroupTotals(req: GroupTotalsRequest): Promise<TableValue> {
+    await delay(this.latencyMs, req.signal)
+    const connectome = this.require(req.datasetId)
+    const rows: Array<Record<string, CellValue>> = []
+
+    const wanted = new Set(req.types ?? [])
+    if (wanted.size > 0) {
+      const summed = new Map<string, number>()
+      for (const [neuronId, neuron] of connectome.byId) {
+        throwIfAborted(req.signal)
+        if (!neuron.type || !wanted.has(neuron.type)) continue
+        const type = neuron.type
+        summed.set(type, (summed.get(type) ?? 0) + synapseTotal(connectome, neuronId, req))
+      }
+      for (const [type, total] of summed) rows.push({ key: type, total })
+    }
+    for (const neuronId of numericIds(req.neuronIds ?? [])) {
+      if (!connectome.byId.has(neuronId)) continue
+      // Keyed by the id as text, which is the traversal's key for a neuron standing alone.
+      rows.push({ key: String(neuronId), total: synapseTotal(connectome, neuronId, req) })
+    }
+    return tableFromRows(GROUP_TOTALS_SCHEMA, rows)
   }
 
   /**
@@ -823,6 +854,30 @@ export class MockSource implements DataSource {
  * measures 91% of presynaptic sites and 39% of postsynaptic ones reconstructed, so a spread
  * this wide is the honest shape for a completeness bar to have.
  */
+/**
+ * One neuron's synapse total on one side, under one basis.
+ *
+ * Shared by `fetchSynapseTotals` and `fetchGroupTotals` because a *test* depends on the two
+ * agreeing: `paths.test.ts` asserts a type's grouped denominator equals the per-neuron totals
+ * summed, and the live neuPrint test asserts the same thing against a real server. With two
+ * copies of this arithmetic that equality is a coincidence being checked rather than a property
+ * being held — and a change to one arm would fail the test as though the *Cypher* had drifted.
+ *
+ * The caller checks the neuron exists: an id the connectome does not hold contributes no row at
+ * all, which is the seam's contract, where a zero would divide into an infinity.
+ */
+function synapseTotal(
+  connectome: MockConnectome,
+  neuronId: number,
+  req: { side: ConnectionDirection; basis: SynapseTotalsBasis },
+): number {
+  const neuron = connectome.byId.get(neuronId)
+  if (!neuron) return 0
+  if (req.basis === 'all') return req.side === 'inputs' ? neuron.post : neuron.pre
+  const edges = (req.side === 'inputs' ? connectome.in : connectome.out).get(neuronId) ?? []
+  return edges.reduce((sum, edge) => sum + edge.weight, 0)
+}
+
 function mockReconstructedFraction(roi: string): number {
   let hash = 0x811c9dc5
   for (let i = 0; i < roi.length; i++) {

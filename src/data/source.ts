@@ -307,6 +307,37 @@ export interface SynapseTotalsRequest extends EdgeAnswerableRequest {
 export type SynapseTotalsBasis = 'all' | 'connected'
 
 /**
+ * The same totals, asked about **group keys** rather than about neurons.
+ *
+ * `PathStepRequest`'s question one query along, and it exists for that request's reason. A path
+ * traversal runs on the collapsed graph, so the denominator that turns one of its weights into a
+ * fraction belongs to a whole population: `LC4 -> PLP1` divided by everything every PLP1 neuron
+ * receives. The frontier carries the type *name*, not its members, so a per-neuron total cannot
+ * answer it without first shipping every member id back out — on male-CNS a type of three
+ * thousand neurons to get one number.
+ *
+ * **A separate method rather than a widened `fetchSynapseTotals`**, because the key column would
+ * otherwise have to mean two things. That one answers in the source's own id dtype and is read
+ * through `idText` (invariant 8); this one answers in the traversal's vocabulary, where a key is
+ * a type name *or* an id-as-text and the two are already one union — `PathNode.key`. Same
+ * capability flag: a source that publishes per-neuron totals can group them, and
+ * `canTotalGroups` is what says whether it has.
+ *
+ * Both lists in one request for `PathStepRequest`'s reason — a collapsed frontier is a mix of
+ * type names and the ids of neurons that have no type, and they arrive together.
+ */
+export interface GroupTotalsRequest extends EdgeAnswerableRequest {
+  /** Cell types. Every neuron carrying one is summed into that type's total. */
+  types?: string[]
+  /** Neuron ids, each its own group. Keyed in the answer by the id as text. */
+  neuronIds?: NeuronId[]
+  /** `inputs` totals incoming synapses, `outputs` outgoing. `SynapseTotalsRequest`'s word. */
+  side: ConnectionDirection
+  basis: SynapseTotalsBasis
+  signal?: AbortSignal
+}
+
+/**
  * One hop of a path traversal, over neurons or over cell types.
  *
  * Separate from `ConnectivityRequest` because the two answer different shapes and the
@@ -698,6 +729,18 @@ export interface DataSource {
    */
   fetchSynapseTotals?(req: SynapseTotalsRequest): Promise<TableValue>
   /**
+   * The same totals summed per group key, to `GROUP_TOTALS_SCHEMA`.
+   *
+   * Optional and gated by `capabilities.synapseTotals` **and** by the method's own presence —
+   * `canTotalGroups`, for the reason `canTracePaths` gives about `fetchPathStep`. A source can
+   * publish per-neuron totals and not have implemented the grouped form; refusing there is what
+   * keeps the Paths node's card and its run agreeing.
+   *
+   * A group with no answer contributes **no row**, `fetchSynapseTotals`' rule and for its
+   * reason: absent means "not known", where a zero divides into an infinity.
+   */
+  fetchGroupTotals?(req: GroupTotalsRequest): Promise<TableValue>
+  /**
    * One hop of a path traversal, aggregated to `PATH_STEP_SCHEMA`.
    *
    * Optional, and gated by `capabilities.paths`. The result is an edge list between *group
@@ -927,6 +970,19 @@ export function connectivitySchemaWithRoi(schema: TableSchema): TableSchema {
 export function synapseTotalsSchema(idDType: 'i64' | 'str'): TableSchema {
   return tableSchema(column(ID_COLUMN_NAME, idDType), column('total', 'i64', 'synapses'))
 }
+
+/**
+ * What `fetchGroupTotals` returns: one row per group that has an answer.
+ *
+ * Fixed rather than a builder, unlike the two above, and the difference is the whole point of
+ * the request. A group key is a type name or an id *as text* — `PathNode.key`'s union, which the
+ * traversal already lives in — so there is no id dtype to vary: the key column is `str` because
+ * half of what it holds was never a number. Read as a lookup, never positionally.
+ */
+export const GROUP_TOTALS_SCHEMA: TableSchema = tableSchema(
+  column('key', 'str'),
+  column('total', 'i64', 'synapses'),
+)
 
 /**
  * What either ROI summary needs: a dataset, and nothing else.
@@ -1317,9 +1373,61 @@ export function canTotalSynapses(
   datasetId: string | undefined,
   hasEdgeSet: boolean,
 ): boolean {
+  return canTotal(source, datasetId, hasEdgeSet, 'fetchSynapseTotals')
+}
+
+/**
+ * The rule both totals predicates apply, in one place.
+ *
+ * The two questions stay two exported names — that is what the three-layer funnel needs, and a
+ * caller passing a method name would be spelling the seam at every call site — but the rule
+ * itself is one sentence: an edge set refuses, an unresolved source refuses nothing, and the
+ * capability and the method must both be there.
+ */
+function canTotal(
+  source: DataSource | undefined,
+  datasetId: string | undefined,
+  hasEdgeSet: boolean,
+  method: 'fetchSynapseTotals' | 'fetchGroupTotals',
+): boolean {
   if (hasEdgeSet) return false
+  // An unresolved source refuses nothing — `capabilityOf`'s rule, applied before the method
+  // check for `canTracePaths`' reason: a cold Dataset socket is invariant 2's ordinary state.
   if (!source) return true
-  return Boolean(source.fetchSynapseTotals) && capabilityOf(source, datasetId, 'synapseTotals')
+  return Boolean(source[method]) && capabilityOf(source, datasetId, 'synapseTotals')
+}
+
+/**
+ * What to say when a dataset cannot supply a denominator.
+ *
+ * One sentence, three throwers: the Paths node says it at edit time and again at the start of a
+ * run, and `groupTotalsFor` says it if anything reaches the funnel without having asked. Written
+ * per site it had already been written three ways, and the point of saying it twice on the node
+ * is that the card and the run agree.
+ */
+export function groupTotalsRefusal(label: string): string {
+  return (
+    `${label} does not publish the synapse totals Normalize divides by. Turn Normalize off, ` +
+    `or point this at a dataset that does.`
+  )
+}
+
+/**
+ * Whether this dataset can supply a denominator for a *group* — a cell type, or a lone neuron.
+ *
+ * `canTotalSynapses` with the method swapped — a second *predicate* rather than a second
+ * spelling of the rule, which they share. The capability flag is shared too (a source that
+ * publishes per-neuron totals can group them), but `fetchGroupTotals` is separately optional, and
+ * a source that has the flag and not the method must refuse *before* the run rather than during
+ * it. That is `canTracePaths`' recorded incident — a funnel that checked only for the method
+ * accepted what the node had refused — with the two halves the other way round.
+ */
+export function canTotalGroups(
+  source: DataSource | undefined,
+  datasetId: string | undefined,
+  hasEdgeSet: boolean,
+): boolean {
+  return canTotal(source, datasetId, hasEdgeSet, 'fetchGroupTotals')
 }
 
 export function reportSourceLearned(sourceId: string): void {

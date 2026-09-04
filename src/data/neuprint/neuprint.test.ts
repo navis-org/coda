@@ -53,6 +53,7 @@ import {
   escapeIdentifier,
   escapeString,
   findNeuronsCypher,
+  groupTotalsCypher,
   idList,
   pathStepCypher,
   synapsesCypher,
@@ -694,6 +695,57 @@ describe('query building', () => {
         basis: 'connected',
       }),
     ).toContain('MATCH (p:Neuron)-[w:ConnectsTo]->(n:Segment)')
+  })
+
+  it('sums a type’s denominator over the population, keyed by the type', () => {
+    const query = groupTotalsCypher({
+      datasetId: 'x',
+      types: ['LC4'],
+      side: 'inputs',
+      basis: 'all',
+    })
+    // The numerator is `pathStepCypher`'s, which aggregates every neuron of the type — so the
+    // denominator has to be summed over the same population. Returning one neuron's total, or
+    // one row per neuron, is a fraction of the wrong thing with the right name on it.
+    expect(query).toContain('RETURN n.type, sum(coalesce(n.upstream, n.post))')
+    expect(query).toContain("WHERE n.type IN ['LC4']")
+  })
+
+  it('matches :Neuron for a type and :Segment for a body', () => {
+    // Not an inconsistency: `pathStepCypher` matches `(a:Neuron)` at both ends, so a type's
+    // denominator must count that population and nothing else. A lone body in a collapsed
+    // frontier is still a body, and `synapseTotalsCypher`'s reason applies to it unchanged.
+    expect(
+      groupTotalsCypher({ datasetId: 'x', types: ['LC4'], side: 'inputs', basis: 'all' }),
+    ).toContain('MATCH (n:Neuron)')
+    expect(
+      groupTotalsCypher({ datasetId: 'x', neuronIds: ['1'], side: 'inputs', basis: 'all' }),
+    ).toContain('MATCH (n:Segment)')
+  })
+
+  it('keys a body by its id as text, which is what the traversal groups by', () => {
+    // `coalesce(n.type, toString(n.bodyId))` is the group key one query over. A key that came
+    // back as a number would miss every lookup while looking like a dataset with no totals.
+    const query = groupTotalsCypher({
+      datasetId: 'x',
+      neuronIds: ['1'],
+      side: 'outputs',
+      basis: 'all',
+    })
+    expect(query).toContain('RETURN toString(n.bodyId), n.downstream')
+    // One body is one row, so its total is the property rather than a `sum` over a single row.
+    expect(query).not.toContain('sum(n.downstream)')
+  })
+
+  it('restricts the partner end for the connected basis, per group', () => {
+    expect(
+      groupTotalsCypher({ datasetId: 'x', types: ['LC4'], side: 'inputs', basis: 'connected' }),
+    ).toContain(
+      "MATCH (p:Neuron)-[w:ConnectsTo]->(n:Neuron)\nWHERE n.type IN ['LC4']\nRETURN n.type, sum(w.weight)",
+    )
+    expect(
+      groupTotalsCypher({ datasetId: 'x', types: ['LC4'], side: 'outputs', basis: 'connected' }),
+    ).toContain('MATCH (n:Neuron)-[w:ConnectsTo]->(p:Neuron)')
   })
 
   it('constrains both ends for adjacency', () => {

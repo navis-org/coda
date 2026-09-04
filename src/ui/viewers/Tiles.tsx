@@ -18,7 +18,7 @@
 import type { ReactNode } from 'react'
 
 import type { CellValue } from '../../core/values'
-import { formatCell } from '../format'
+import { formatCell, formatShare } from '../format'
 
 export function Tile({
   label,
@@ -431,8 +431,3 @@ export function Pager({
   )
 }
 
-/** `12%`, or `0.4%` where rounding to a whole number would print a zero for something present. */
-export function formatShare(share: number): string {
-  if (!Number.isFinite(share)) return '—'
-  return share >= 0.1 ? `${Math.round(share * 100)}%` : `${(share * 100).toFixed(1)}%`
-}

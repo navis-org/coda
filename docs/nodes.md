@@ -2487,13 +2487,91 @@ allowed to make ELK reject the entire graph.
 `runElk` is exported from `engine.ts` for this. Both callers get one lazily-loaded engine, and
 elkjs still never enters the main chunk — verify with `pnpm build`.
 
-### The caption
+### Normalising a route
 
-`PathsBody` reads the node's own `paths` output and shows `N routes · min H hops · W syn
-bottleneck`. A body rather than an entry in `describeValue`, because the footer summary is keyed
-to the _first_ output — where "24 nodes · 31 links" is the right thing to say — and because a
-body can say "not run yet" in its own words. Not `expandable`: there is nothing here that
-benefits from room, and the routes themselves are a table.
+`Normalize` is `Connectivity`'s control with the same two output columns — `weightNorm` and the
+`weightTotal` it was divided by — the same `Normalize by` (the target's input, or the source's
+output) and the same `Denominator` (all synapses, or reconstructed partners only). Four things
+about it are this node's own.
+
+**The denominator belongs to a group, not to a neuron.** With `Collapse types` on, an edge's
+weight is every LC4→PLP1 synapse summed, so the number it is divided by has to be everything every
+PLP1 neuron receives. The frontier carries the type *name*; a per-neuron total cannot answer that
+without first shipping every member id back out — three thousand of them on male-CNS to get one
+number. So the seam has a second method, `fetchGroupTotals`, answering `GROUP_TOTALS_SCHEMA`:
+`key, total`, keyed in the traversal's own vocabulary where a key is a type name or an id as text.
+It is a separate method rather than a widened `fetchSynapseTotals` because that one answers in the
+source's id dtype and is read through `idText`, and one key column meaning both is how the reader
+that arrived second gets the wrong answer. Same capability flag, since a source that publishes
+per-neuron totals can group them; a separate predicate, `canTotalGroups`, because the *method* is
+separately optional and a source with the flag and without it has to refuse before the run rather
+than during it.
+
+**The denominators are fetched per hop, not once at the end.** That is what `Min fraction` buys:
+a connection below it is not followed, so the groups behind it never enter the network. A
+denominator that arrived after the search was over could rank what was found and could not change
+what was walked. The cost is a second query per hop, asked only about keys not already seen — a
+hub type is reached on most hops of most searches, and the bidirectional walk meets in the middle
+by construction, so the cache is doing real work rather than tidying.
+
+**`Rank by` exists because the two weakest links are different steps.** On the bundled optic lobe,
+L1 to DNp02 in four hops: eight routes run through LPLC2 carrying 375 synapses at their narrowest
+step, and one runs through LC4 carrying 352 — so in synapses LPLC2 wins by 6%. But LPLC2 takes
+~15% of its input from any one T4 subtype where LC4 takes 61% from Tm3, so as a share the LC4
+route wins four times over. Both numbers ride on every route whichever ranking ordered it, which
+is what lets one be read against the other; the bound, the neighbour order and the shortlist all
+read the metric through one function, because a search bounded by one number and ranked by another
+prunes away its own answer and still returns something plausible.
+
+**An unmeasured connection is never dropped and never scored.** `PathEdge.norm` is `null` where a
+group's denominator was asked for and not published, which is the state the whole design turns on:
+the floor lets it through, because a threshold that deleted what it could not measure would report
+an absence as a decision, and the ranking sorts it below every route it could score with the node
+saying how many groups that was. `RankedPath.bottleneckNorm` is `null` there — and equally on a run
+that did not normalise at all. One state for both on purpose: nothing reads them apart, and which
+question was asked is the caller's own answer, said once in `pathTableSchema` rather than sniffed
+back off the data.
+
+The Paths table carries `bottleneckNorm` and deliberately **no denominator column**, which inverts
+`weightTotal`'s rule one table over: a denominator belongs to a connection, and a route's two
+bottlenecks are routinely different steps, so one column could name the denominator of neither.
+The Network output is where each fraction sits beside its own total.
+
+Both exporters refuse a normalised Paths node, for `Connectivity`'s reason plus one: `fetch_paths`
+and `neuprint_get_paths` have no group denominator *and* no `Min fraction`, so an export without
+them would walk a different graph and return different routes — not the same routes missing two
+columns.
+
+### The card
+
+`PathsBody` draws the settings and then a caption under them.
+
+The caption is what the body exists for. It reads the node's own `paths` output and shows
+`N routes · min H hops · W syn bottleneck` — the two numbers people actually want from a path
+query are the shortest route and the strongest one's bottleneck, and neither is legible from a
+network of a few dozen nodes. A body rather than an entry in `describeValue`, because the footer
+summary is keyed to the _first_ output — where "24 nodes · 31 links" is the right thing to say —
+and because a body can say "not run yet" in its own words. Not `expandable`: there is nothing
+here that benefits from room, and the routes themselves are a table.
+
+**The settings are on the card because a body replaces the param band outright.** None of them is
+`advanced`, and they are the whole of what the query is — yet for as long as this body
+drew only the caption, the only way to reach one was the inspector, which on screen is
+indistinguishable from a node that has no settings. The sharpest form of it: the empty readout
+says "raise `Max hops` or lower `Min synapses`", and there was nothing on the card to raise. So
+the fields are rendered from the definition, non-advanced and in declaration order, exactly as
+the band would have — `pathsBody.test.tsx` asks the definition rather than a written-out list,
+so a setting cannot arrive drawn nowhere. The four normalisation refinements are `visibleIf`-hidden
+rather than trimmed, so the card is five rows until somebody turns `Normalize` on and nine after;
+that is also what keeps them out of the provenance key while they mean nothing.
+
+Two details it shares with the other bodies. `ParamField` gets `variant="inspector"`, which
+suppresses a checkbox's own label — the row already carries one, and `Collapse types` written
+twice reads as two settings; the generic card solves the same collision in CSS
+(`.param--wide .param__label { display: none }`), which is the wrong half to borrow where the
+fields share a label column. And the card is `.list-body`, adding only a wider label column
+(86px against the shared 72px) because `Collapse types` is longer than anything on the
+paste-target cards.
 
 ## Influence: how much of this is attributable to that?
 
