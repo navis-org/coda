@@ -1376,7 +1376,22 @@ skeletons <- neuprint_read_neurons(head(find_neurons$neuronId, 20), conn = hemib
 # neuronId and polarity ("pre"/"post"). Any cell below that names a synapse
 # column will need one or the other spelling — the notebook export
 # normalises these, this one does not yet.
+# NOTE: neuprint_get_synapses returns a presynaptic site once per partner it
+# drives, where the Synapses node is set to one row per site — so this frame
+# has more rows than the canvas. De-duplicate on the location columns to
+# match. Postsynaptic rows are unaffected.
 synapses <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn = hemibrain_neuprint)
+```
+
+```{r synapses-2}
+# ── Synapses ──
+# NOTE: neuprintr returns bodyid and prepost (0/1) where Coda carries
+# neuronId and polarity ("pre"/"post"). Any cell below that names a synapse
+# column will need one or the other spelling — the notebook export
+# normalises these, this one does not yet.
+# TODO: neuprintr has no confidence argument — filter this frame yourself,
+# e.g. subset(<points>, confidence >= 0.8).
+synapses_2 <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn = hemibrain_neuprint)
 ```
 
 ```{r scatter-plot}

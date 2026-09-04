@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest'
 import { CatmaidSource } from './CatmaidSource'
 import { DEFAULT_CATMAID_SERVER, setInstances } from './credentials'
 import { cableLength } from '../../core/values'
+import { SYNAPSE_UNITS } from '../synapseUnits'
 
 const LIVE = process.env.CATMAID_LIVE === '1'
 const TOKEN = process.env.CATMAID_TOKEN
@@ -94,7 +95,7 @@ live('CATMAID against the real FAFB instance', () => {
     const client = source()
     const [skeletons, synapses] = await Promise.all([
       client.fetchSkeletons({ datasetId: FAFB, neuronIds: ['16'] }),
-      client.fetchSynapses({ datasetId: FAFB, neuronIds: ['16'], polarity: 'pre' }),
+      client.fetchSynapses({ unit: SYNAPSE_UNITS.sites, datasetId: FAFB, neuronIds: ['16'], polarity: 'pre' }),
     ])
     expect(synapses.units).toBe('nm')
     expect(synapses.attributes.length).toBeGreaterThan(100)

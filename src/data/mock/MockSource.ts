@@ -56,6 +56,7 @@ import {
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import { compileLabelMatch, preparedRows } from '../neuronFilter'
 import { SKELETON_ROUTES, route } from '../skeletonRoutes'
+import { SYNAPSE_UNITS, confidenceIgnoredWarning } from '../synapseUnits'
 import { fieldTermsMatch } from '../terms'
 import type { MockConnection, MockConnectome } from './generate'
 import { getConnectome, mockDatasetIds, mockDatasetMeta } from './generate'
@@ -83,6 +84,9 @@ export class MockSource implements DataSource {
   readonly label = 'Mock connectome'
   readonly description =
     'Synthetic, deterministic datasets generated in the browser. No network, no credentials — for developing and demoing the editor.'
+  /** One generated point per edge, so a row is a connection and there is no site to collapse. */
+  readonly synapseUnits = [SYNAPSE_UNITS.links] as const
+
   readonly capabilities: SourceCapabilities = {
     rawQuery: false,
     skeletons: true,
@@ -699,10 +703,23 @@ export class MockSource implements DataSource {
     }
   }
 
+  /**
+   * A point per connection, placed along the same seeded arbor the 3D viewer draws.
+   *
+   * `links` is the unit and the only one: an emitted point *is* an edge, so there is no site to
+   * collapse onto — the same shape CAVE has, arrived at by generating rather than by measuring.
+   *
+   * **`minConfidence` cannot be honoured at all**, because nothing generated here is a confidence.
+   * The `weight` column is the *connection's* weight, and filtering a point cloud by it under a
+   * control labelled confidence is the exact conflation this rename exists to undo — so it warns
+   * and returns everything, which is `CaveSource`'s answer for a table with no score column.
+   */
   async fetchSynapses(req: SynapseRequest): Promise<PointsValue> {
     await delay(this.latencyMs, req.signal)
     const connectome = this.require(req.datasetId)
-    const minWeight = req.minWeight ?? 1
+    if ((req.minConfidence ?? 0) > 0) {
+      req.onWarn?.(confidenceIgnoredWarning('The mock connectome'))
+    }
 
     const positions: number[] = []
     const rows: Array<Record<string, number | string>> = []
@@ -720,7 +737,6 @@ export class MockSource implements DataSource {
 
       let index = 0
       const emit = (partnerId: number, weight: number, polarity: 'pre' | 'post') => {
-        if (weight < minWeight) return
         if (req.polarity && req.polarity !== polarity) return
         const [x, y, z] = synapsePosition(skeleton, index++)
         positions.push(x, y, z)

@@ -18,6 +18,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { addEdge, addNode, emptyGraph, setNodeParam } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { defaultParams, makeInferContext } from '../../core/node'
+import type { NodeDefinition } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { MockSource } from '../../data/mock/MockSource'
@@ -26,12 +27,35 @@ import { registerSource, requireSource } from '../../data/source'
 import { T } from '../../core/types'
 import type { SkeletonProvenance } from '../../core/values'
 import { MAX_NEURONS } from './morphology'
+import { SYNAPSE_UNIT_PARAM } from '../lib/synapseParams'
 
 import '../index'
 
 beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
 })
+
+/**
+ * A dynamic enum param's options, for the two controls that build theirs from the wired source.
+ *
+ * Both `Source` (Skeletons) and `Rows` (Synapses) declare `options` as a function of the
+ * `InferContext`, and asserting on one meant the same four lines each time — find the param,
+ * check it is a function-valued enum, build a context with the chosen value in it.
+ */
+function enumOptions(
+  def: NodeDefinition,
+  paramId: string,
+  type: ReturnType<typeof T.dataset>,
+  chosen = '',
+) {
+  const param = (def.params ?? []).find((p) => p.id === paramId)
+  if (!param || param.kind !== 'enum' || typeof param.options !== 'function') {
+    throw new Error(`${def.type} has no dynamic ${paramId} enum`)
+  }
+  return param.options(
+    makeInferContext(def, { ...defaultParams(def), [paramId]: chosen }, { dataset: type }),
+  )
+}
 
 const MORPHOLOGY_NODES = ['neuron.skeletons', 'neuron.meshes', 'neuron.synapses'] as const
 
@@ -224,19 +248,8 @@ describe('the Source control', () => {
     return T.dataset(id, 'ds:1')
   }
 
-  const optionsFor = (type: ReturnType<typeof T.dataset>, chosen = '') => {
-    const param = (def.params ?? []).find((p) => p.id === 'skeletonSource')
-    if (!param || param.kind !== 'enum' || typeof param.options !== 'function') {
-      throw new Error('Skeletons has no dynamic Source enum')
-    }
-    return param.options(
-      makeInferContext(
-        def,
-        { ...defaultParams(def), skeletonSource: chosen },
-        { dataset: type },
-      ),
-    )
-  }
+  const optionsFor = (type: ReturnType<typeof T.dataset>, chosen = '') =>
+    enumOptions(def, 'skeletonSource', type, chosen)
 
   it('names the route Automatic will take, even where there is only one', () => {
     // This is the whole of what the control does on a single-route dataset, and it is the point:
@@ -349,6 +362,150 @@ describe('the Source control', () => {
      */
     const param = (def.params ?? []).find((p) => p.id === 'skeletonSource')
     expect(param?.presentational).not.toBe(true)
+  })
+})
+
+/**
+ * The Synapses node's two controls, which used to be one and meant something else.
+ *
+ * `Min weight` was an integer floored at 1, and every backend read it as its own per-synapse
+ * confidence column — so the *default* compiled to `s.confidence >= 1` against neuPrint's 0..1
+ * score. On `male-cns:v1.0` body 10001 that returned 13,617 of 19,597 synapses and not one
+ * presynaptic site; on MANC and optic-lobe it returned no presynaptic site anywhere. It is now
+ * `Min confidence`, a float defaulting to 0, which is off.
+ *
+ * `Rows` is the other half. The three backends enumerate synapses differently — see
+ * `data/synapseUnits.ts` for the measurements — and until this control existed the node passed
+ * whichever one along with nothing on the card to say which.
+ */
+describe('the Synapses node’s controls', () => {
+  const def = requireNodeDef('neuron.synapses')
+  const param = (id: string) => (def.params ?? []).find((p) => p.id === id)
+
+  /** A source whose unit list is whatever the test says. */
+  function withUnits(id: string, units: readonly string[] | undefined) {
+    const base = new MockSource({ latencyMs: 0 })
+    registerSource(
+      Object.assign(Object.create(base) as DataSource, { id, synapseUnits: units }),
+    )
+    return T.dataset(id, 'ds:1')
+  }
+
+  const optionsFor = (type: ReturnType<typeof T.dataset>, chosen = '') =>
+    enumOptions(def, SYNAPSE_UNIT_PARAM, type, chosen)
+
+  it('starts Min confidence at zero, which excludes nothing', () => {
+    /*
+     * The number that matters in this file. A default of 1 against a 0..1 score is not a
+     * conservative setting — it is a filter nobody asked for, and it kept a thousandth of the
+     * cloud on hemibrain.
+     */
+    const p = param('minConfidence')
+    expect(p?.kind).toBe('number')
+    expect(p && 'default' in p ? p.default : undefined).toBe(0)
+    expect(p && 'min' in p ? p.min : undefined).toBe(0)
+    // No `max`: the scale is the backend's own and the three do not agree — 0..1 on neuPrint,
+    // a tracer's 1..5 on CATMAID, `cleft_score`'s few hundred on FlyWire.
+    expect(p && 'max' in p ? p.max : undefined).toBeUndefined()
+    expect(p?.advanced).toBe(true)
+  })
+
+  it('no longer carries the control it was renamed from', () => {
+    // Renaming the id is what carries stored graphs across: `normalizeParams` reads only declared
+    // params, so an old `minWeight: 1` leaves the provenance key and the absent `minConfidence`
+    // falls to its default of off. A shim keeping both spellings would have kept the filter.
+    expect(param('minWeight')).toBeUndefined()
+  })
+
+  it('names the unit Automatic will take, even where there is only one', () => {
+    const type = withUnits('links-only', ['links'])
+    expect(optionsFor(type)).toEqual([{ value: '', label: 'Automatic (one row per connection)' }])
+  })
+
+  it('offers both units where the backend has both, in the order the fetch would take them', () => {
+    const type = withUnits('both-units', ['sites', 'links'])
+    expect(optionsFor(type).map((o) => o.value)).toEqual(['', 'sites', 'links'])
+    expect(optionsFor(type)[0]!.label).toBe('Automatic (one row per site)')
+  })
+
+  it('reports a pinned unit this source cannot deliver, rather than substituting one', () => {
+    /*
+     * The substitution is the failure. A CAVE table has no presynaptic-site identity, so
+     * answering `sites` with its links would change what a row counts under a card still saying
+     * "one row per site" — which a syNBLAST and every density measure read.
+     *
+     * Asserted in **labels**, not ids, and that is the point of the shared `synapseUnitRefusal`:
+     * the node's edit-time complaint and the run-time throw were written separately at first and
+     * promptly said `“sites”` and `“one row per site”` about the same refusal, which is
+     * `UNIT_LABELS`' own rule broken between its own two layers.
+     */
+    const type = withUnits('links-only-2', ['links'])
+    const issues =
+      def.validate?.(
+        makeInferContext(def, { ...defaultParams(def), synapseUnit: 'sites' }, { dataset: type }),
+      ) ?? []
+    expect(issues.join(' ')).toContain('cannot return synapses as “one row per site”')
+    expect(issues.join(' ')).toContain('it offers one row per connection')
+  })
+
+  it('keeps its own label for a pinned unit the source serves but did not list', () => {
+    /*
+     * The regression this exists for. A lone unit is never pushed into the options — Automatic
+     * already says the whole of it — so a graph pinned to a single-unit source's *only* unit fell
+     * through to the "chosen but unlisted" branch and was drawn `links (not available here)`,
+     * while `validate` correctly said nothing was wrong. Two halves of one decision disagreeing on
+     * the card, which is exactly what sharing `UNIT_LABELS` is supposed to prevent. Reachable by
+     * picking "one row per connection" on neuPrint and repointing the Dataset node at FlyWire.
+     */
+    const type = withUnits('links-only-3', ['links'])
+    expect(optionsFor(type, 'links')).toEqual([
+      { value: '', label: 'Automatic (one row per connection)' },
+      { value: 'links', label: 'one row per connection' },
+    ])
+    expect(
+      def.validate?.(
+        makeInferContext(def, { ...defaultParams(def), synapseUnit: 'links' }, { dataset: type }),
+      ),
+    ).toEqual([])
+  })
+
+  it('resolves the unit once, at the node, and refuses there rather than in each backend', async () => {
+    /*
+     * `fetchSynapses` has exactly one caller, and a unit varies with nothing — so the check used
+     * to sit in all four backends, three of which discarded its answer. `SynapseRequest.unit` is
+     * required instead, which makes the single door the only way in and a forgotten declaration a
+     * compile error rather than a silent substitution.
+     */
+    const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
+    const graph = setNodeParam(
+      pipeline('neuron.synapses', 10),
+      'geo',
+      SYNAPSE_UNIT_PARAM,
+      'sites',
+    )
+    await sched.run(graph, { mode: 'full' })
+    // The mock serves `links` only, and says so in the same sentence `validate` shows.
+    expect(sched.info('geo').error).toMatch(/cannot return synapses as “one row per site”/)
+  })
+
+  it('keeps a stored choice while nothing is wired, without calling it broken', () => {
+    const type = withUnits('no-units', undefined)
+    expect(optionsFor(type, 'sites')).toEqual([
+      { value: '', label: 'Automatic' },
+      { value: 'sites', label: 'sites' },
+    ])
+    expect(
+      def.validate?.(
+        makeInferContext(def, { ...defaultParams(def), synapseUnit: 'sites' }, { dataset: type }),
+      ),
+    ).toEqual([])
+  })
+
+  it('puts both controls in the provenance key, because both change what comes back', () => {
+    // Not `presentational`. A deduplicated cloud is 1,015 points where the other is 4,491 of
+    // them, and a confidence cut removes rows — invariant 4's failure either way.
+    expect(param('synapseUnit')?.presentational).not.toBe(true)
+    expect(param('minConfidence')?.presentational).not.toBe(true)
   })
 })
 

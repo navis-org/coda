@@ -1825,6 +1825,165 @@ fetches neuPrint's SWC, because the published copy's URL is resolved from the da
 neuroglancer state at run time and the exporter has no network. What differs is said out loud —
 no radii, and its own coverage. Same line the Meshes node's `Detail` draws against navis' `lod`.
 
+## Synapses: what one point counts, and the confidence that was called a weight
+
+Two bugs in one node, and they hid each other. Both were found by pointing Explore Dataset and a
+Synapses node at the same neuron — `male-cns:v1.0` body 10001 — and noticing the numbers disagree:
+Explore reported 1,015 pre and 18,582 post, and the node returned 13,617 points, every one of them
+`post`.
+
+### `Min weight` compiled to a confidence threshold, and its default excluded most of the cloud
+
+`synapsesCypher` wrote `s.confidence >= minWeight`. `s.confidence` on a neuPrint `:Synapse` is a
+predictor score in 0..1; the param was `kind: 'int'`, `default: 1`, `min: 1`. So the default meant
+"keep only perfectly-confident synapses", and there was no value anybody could type that meant
+"keep everything". Measured against the live servers:
+
+| dataset | rows sampled | kept at `confidence >= 1` |
+| --- | --- | --- |
+| `male-cns:v1.0`, body 10001 | 19,597 (1,015 pre / 18,582 post) | 13,617 — **no pre at all** |
+| `manc:v1.2.1` | 200,000 | 14,515, **no pre at all** |
+| `optic-lobe:v1.1` | 200,000 | 12,641, **no pre at all** |
+| `hemibrain:v1.2.1` | 200,000 | **213** |
+
+On hemibrain the node was returning about a thousandth of the cloud. Three of the four datasets
+returned no presynaptic site anywhere, because their pre scores top out below 1 (0.98 on male-CNS,
+0.99 on MANC, 0.986 on optic-lobe).
+
+It is now **`Min confidence`**: `kind: 'number'`, default `0`, which is off, and inspector-only.
+Three consequences worth knowing.
+
+**The type had to change with the name.** An `int` floored at 1 has no spelling for "off", and the
+values that mean anything on neuPrint are all fractions.
+
+**There is no `max`, because there is no shared scale.** neuPrint scores 0..1, CATMAID carries a
+tracer's 1..5, and a CAVE datastack uses its synapse table's own column — FlyWire's `cleft_score`
+runs to a few hundred and is cut by convention at 50. `SynapseRequest.minConfidence` records this;
+the param's help says which scale is in front of you rather than pretending one exists.
+
+**Two sources cannot honour it and now say so.** A CAVE datastack whose synapse table declares no
+score column — which is every one but FlyWire, since Aedes has `size` (a cleft area, not a
+confidence) and a merely *declared* table gets `STANDARD_SYNAPSE_COLUMNS`, which deliberately names
+none — and the mock, which has no confidence at all. Both warn through `onWarn` and return
+everything. Dropping it silently was defensible only while the default was 1 and excluded nothing;
+a control that starts off is one somebody has *set* by the time it reaches a backend.
+
+Nothing needs this most of the time: neuPrint applies the dataset's own floor at ingest.
+`Meta.postHighAccuracyThreshold` is 0.5 on male-CNS, which is why nothing in that cloud scores
+below 0.5004.
+
+### Renaming the id is what carries stored graphs across
+
+`normalizeParams` reads only declared params, so an old document's `minWeight: 1` stops being in
+the provenance key, and the absent `minConfidence` falls to its default of off. That is deliberate
+and it is not `absentMeans`' case: the third state `ParamBase.absentMeans` exists for is a param
+whose absence meant something the default does not. Here absence and the default agree, and what
+the old value meant was a filter nobody asked for.
+
+### The presynaptic duplication the confidence filter was hiding
+
+A neuPrint neuron holds one `SynapseSet` per partner *neuron*, and
+`(n)-[:Contains]->(:SynapseSet)-[:Contains]->(s:Synapse)` therefore returns a presynaptic site once
+per partner it drives. Postsynaptic densities belong to one connection each and are unaffected.
+
+| dataset | pre rows | distinct pre synapses | factor |
+| --- | --- | --- | --- |
+| `male-cns:v1.0`, body 10001 | 4,491 | 1,015 | 4.4× |
+| `hemibrain:v1.2.1` | 135,652 | 18,420 | 7.4× |
+| `manc:v1.2.1` | 117,640 | 15,357 | 7.7× |
+| `optic-lobe:v1.1` | 163,540 | 39,865 | 4.1× |
+
+**The extra rows carry nothing that tells them apart.** `neuprint/schema.ts` drops `partnerId` from
+the synapse schema on purpose — resolving it turns one query into a heavy join — so those rows are
+the same neuron, polarity, confidence *and coordinate*, repeated. They were weighting a
+multi-partner T-bar 4–8× in syNBLAST and in every per-neuron density measure, with nothing anywhere
+looking unusual. neuprint-python hits this too and fixes it the same way, `WITH DISTINCT n, s`,
+carrying the same comment (`queries/synapses.py`).
+
+### `Rows`, and why it is Automatic-plus-two rather than a checkbox
+
+The fix could not be "always deduplicate", because the three backends do not enumerate synapses in
+the same currency, and only one of them has a choice:
+
+| backend | what one row is | `links` | `sites` |
+| --- | --- | --- | --- |
+| neuPrint | site × partner neuron | ✓ | ✓ (`WITH DISTINCT n, s`) |
+| CAVE | one predicted pre→post link | ✓ | ✗ — no site identity exists |
+| CATMAID | one connector | ✗ — needs a second POST | ✓ (already) |
+
+CAVE's synapse table has no key that identifies a presynaptic site: `pre_pt_supervoxel_id` names a
+supervoxel, which is a chunk of segmentation and not a T-bar. CATMAID's
+`connectors/links/?relation_type=presynaptic_to` answers one row per connector — measured on FAFB
+skeleton 16 as 1,709 rows and 1,709 distinct connectors — so its natural unit is *already* the
+site, and `links` is what it cannot answer without asking `connector/skeletons` for each
+connector's postsynaptic partner count.
+
+So **neither unit can be the default everywhere**, and the control is `skeletonParams.ts`' shape:
+`Automatic` plus whichever units the source has, with the same rule that a pinned unit the source
+cannot serve is an **error, never a substitution** — swapping it silently changes what a row counts.
+`DataSource.synapseUnits` is the declaration, best first, and `resolveSynapseUnit` reads both halves
+so the dropdown's `Automatic (…)` label and the branch the fetch takes cannot part company.
+
+**It is resolved once, at the node, and `SynapseRequest.unit` is required.** That is the one place
+this departs from `requireSkeletonRoute`, which each source calls for itself — and it departs
+because the two questions differ in kind. A skeleton route has a live per-*dataset* half each source
+has to answer regardless (CAVE still refuses `published` on an unflattened materialization), so the
+vocabulary check rides along on a check that must be there. A unit varies with nothing, so the same
+arrangement gave three backends a copy that re-derived a static fact the single caller already held
+and **discarded the answer**, plus a fourth place for a new backend to forget — the exact trap
+`requireSkeletonRoute`'s own docstring records. `fetchSynapses` has exactly one caller; making the
+field required means it is the only door, and a source implementing the method without declaring
+units is a compile error rather than a silent substitution.
+
+Two smaller consequences. The refusal is **one sentence two layers render** — `synapseUnitRefusal`,
+shared by the node's `validate` and its `evaluate` — because written separately they promptly said
+`“sites”` and `“one row per site”` about the same refusal, which is `UNIT_LABELS`' own rule broken
+between its own two readers. And `synapseUnits` is a **non-empty tuple**, so `[0]` always has an
+answer: an `[]` a source could otherwise declare read as "nothing has said" to the dropdown and as a
+hard error to the resolver, which is a clean-looking card and a confusing throw.
+
+**Not done: the unit does not ride on the value.** `PointsValue` has no provenance field where
+`SkeletonsValue` has one, so nothing says which unit answered after a run, and syNBLAST — which
+takes two `T.points()` ports — cannot notice it has been handed a `sites` cloud and a `links` cloud.
+That is the same 4.4× inflation this section is about, arriving through a door left open. The fix is
+`PointsValue.unit`, stamped where the unit is resolved and read by the card caption and syNBLAST's
+`validate`.
+
+**`sites` is what Automatic takes wherever it is available**, which means on neuPrint. That is the
+one free variable in the design and it went to `sites` because neuPrint's surplus rows are
+duplicate coordinates rather than per-connection data — see above — and because deduplicated, the
+count agrees with `n.pre`, with Explore Dataset, and with what both exporters emit. `links` stays
+reachable in one click for anyone who wants the cloud weighted by connection.
+
+Two differences from the skeleton control, both because the question is a different kind of
+question. A skeleton route is a live fact about a bucket somebody published, so its list is per
+dataset and grows under the user as probes land; a synapse unit is a property of the backend's
+*transport*, known the moment a source is on the socket — which is why `synapseUnits` is a static
+property rather than a method, and why `synapseUnitProblem` can complain immediately. And the named
+units are listed only where there is a choice: offering CAVE a `sites` entry whose only outcome is
+an error is a control with one working setting.
+
+### The exporters had always disagreed with the canvas, in both directions
+
+Neither emitted `minWeight` at all, so the notebook and the knitted document returned the whole
+cloud where the canvas returned a third of it. The goldens compare emitted *text*, so nothing in
+the suite could see it.
+
+They are asymmetric now, and each says which way it diverges:
+
+- **Python.** `SynapseCriteria` takes `confidence=`, so a set threshold is emitted — and an unset
+  one emits *nothing*, which is not the same as `confidence=0`: the default is `None`, which
+  neuprint-python resolves to the dataset's own `postHighAccuracyThreshold`. Writing `0` would
+  disable a floor the canvas leaves in place. `fetch_synapses` always de-duplicates and there is no
+  argument to stop it, so `sites` needs no emitted argument and `links` gets a note.
+- **R.** `neuprint_get_synapses` has neither: no confidence argument (a TODO naming the `subset()`
+  to write) and no `DISTINCT` in its query, which makes it the `links` unit — so on this side it is
+  the *default* that diverges, and says so.
+
+The fixture carries a **second Synapses node** for the reason it carries two NBLAST nodes: both
+emitters branch on these two controls, and the first node takes neither, so with only it the
+goldens pinned the branch that emits nothing.
+
 ## Connectivity: hops and direction
 
 `Direction` offers `both`, and `Hops` traverses further than one synapse. Both changed what the

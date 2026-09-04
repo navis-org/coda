@@ -305,7 +305,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     label: 'Shortest paths',
     blurb: 'Paths from one neuron set to another, a few hops deep. Two searches.',
     hint: {
-      text: 'Two searches, because a path has two ends — the second card is where the *targets* go. `Max hops` and `Min weight` are what keep the traversal bounded.',
+      text: 'This node needs two inputs - `Sources` & `Targets` - which is why we have two searches on the left. `Max hops` and `Min weight` keep the traversal bounded.',
     },
   },
   {
@@ -367,7 +367,7 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     label: 'A table',
     blurb: 'Rows and columns, sortable and filterable in place.',
     hint: {
-      text: 'A viewer passes its input straight through, so it can sit in the middle of a chain rather than only ending one.',
+      text: 'A table to inspect the data in a familiar way: filter, sort, double click to expand.',
     },
   },
   {
@@ -395,7 +395,7 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
   {
     id: 'heatmap',
     label: 'A heatmap',
-    blurb: 'The matrix drawn as cells, one colour ramp.',
+    blurb: 'The matrix drawn as cells, one colour ramp. Expand for additional options (palette, filters, sorting, etc).',
     hint: {
       text: 'Sequential colour, because these values have a zero and only go up. Turn values on to read the numbers off the cells.',
     },
@@ -430,7 +430,7 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     label: 'Neuroglancer',
     blurb: 'The published scene, with the chosen neurons loaded.',
     hint: {
-      text: 'The dataset’s own published scene with the selection loaded into it — the segmentation as its authors serve it.',
+      text: 'Neuroglancer scene with the selected neurons loaded into it.',
     },
   },
 ]

@@ -63,6 +63,7 @@ import type {
   SynapseRequest,
 } from '../source'
 import { ROI_MESH_SCHEMA, reportSourceLearned, requireSkeletonRoute, throwIfAborted } from '../source'
+import { SYNAPSE_UNITS } from '../synapseUnits'
 import type { AnnotationListResponse, CatmaidProject, CompactSkeleton } from './api'
 import type { SkeletonSummary } from './api'
 import {
@@ -223,6 +224,19 @@ export class CatmaidSource implements DataSource {
   readonly label: string
   readonly description =
     'A CATMAID instance: manually traced skeletons with free-text names and annotations.'
+  /**
+   * Sites only, and it is the *natural* unit here rather than a deduplication anybody applied.
+   *
+   * `connectors/links/?relation_type=presynaptic_to` answers one row per connector — measured on
+   * FAFB skeleton 16: 1,709 rows, 1,709 distinct connectors. A connector is a T-bar, so the cloud
+   * is already one point per site. `links` would need each connector's postsynaptic partner count,
+   * which is a second POST to `connector/skeletons` — a real fetch with a real cost, and the same
+   * one `CATMAID_SYNAPSE_SCHEMA` declines to pay for `partnerId`. So it is refused rather than
+   * approximated — at the node, since `SynapseRequest.unit` is required and `resolveSynapseUnit`
+   * is what fills it, which is why nothing here re-checks.
+   */
+  readonly synapseUnits = [SYNAPSE_UNITS.sites] as const
+
   readonly capabilities = CATMAID_CAPABILITIES
   readonly schemas: SourceSchemas = CATMAID_SCHEMAS
 
@@ -828,10 +842,18 @@ export class CatmaidSource implements DataSource {
 
     const points: number[] = []
     const rows: Array<Record<string, CellValue>> = []
+    const minConfidence = req.minConfidence ?? 0
     responses.forEach(({ links }, at) => {
       const polarity = relations[at] === 'presynaptic_to' ? 'pre' : 'post'
       for (const link of links) {
         const [skeletonId, connectorId, x, y, z, confidence] = link
+        /*
+         * Filtered here rather than in the request, because `connectors/links/` has no confidence
+         * parameter — so this cuts rows and not bandwidth, which is the honest half of what the
+         * control does on this backend. The scale is a *tracer's*, 1..5 with 5 meaning certain,
+         * and nothing like neuPrint's 0..1 fraction; see `SynapseRequest.minConfidence`.
+         */
+        if (minConfidence > 0 && confidence < minConfidence) continue
         points.push(x, y, z)
         rows.push({
           [ID_COLUMN_NAME]: skeletonId,

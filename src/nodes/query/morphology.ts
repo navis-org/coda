@@ -21,6 +21,15 @@ import {
   skeletonSourceProblem,
 } from '../lib/skeletonParams'
 import { asSkeletonRoute } from '../../data/skeletonRoutes'
+import { resolveSynapseUnit } from '../../data/synapseUnits'
+import { synapseUnitsOf } from '../../data/source'
+import {
+  SYNAPSE_UNIT_PARAM,
+  minSynapseConfidence,
+  pinnedSynapseUnit,
+  synapseUnitParam,
+  synapseUnitProblem,
+} from '../lib/synapseParams'
 import { idColumn } from '../lib/tableOps'
 
 /**
@@ -268,7 +277,7 @@ export const synapsesNode = registerNode({
   category: 'query',
   description: 'Fetch synapse locations as a 3D point cloud.',
   guide:
-    'Synapse locations as a 3D point cloud, one point per synapse with its polarity and partner in the attribute table. Drawn in the same space as skeletons and meshes, so a scene can colour neurons by cell type and their synapses by direction at once. This is the node that turns “these two are connected” into “and here is where”.',
+    'Synapse locations as a 3D point cloud, one point per synapse with its polarity in the attribute table — and its partner where the data source carries one. Drawn in the same space as skeletons and meshes, so a scene can colour neurons by cell type and their synapses by direction at once. This is the node that turns “these two are connected” into “and here is where”. Backends count synapses differently, so Rows says whether a point is a connection or a site.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -287,13 +296,41 @@ export const synapsesNode = registerNode({
         { value: 'post', label: 'postsynaptic (inputs)' },
       ],
     },
+    synapseUnitParam(),
+    /*
+     * **A confidence, and it was called a weight until the mistake surfaced in the open.** Every
+     * backend read the old `minWeight` as its own per-synapse confidence column, and the control
+     * was an integer floored at 1 — so the *default* compiled to `s.confidence >= 1` against
+     * neuPrint's 0..1 predictor score. On `male-cns:v1.0` body 10001 that returned 13,617 of
+     * 19,597 synapses and not one presynaptic site; on MANC and optic-lobe it returned no
+     * presynaptic site at all, and on hemibrain about a thousandth of the cloud.
+     *
+     * `0` is off, which is why the type had to change with the name: an `int` floored at 1 has no
+     * spelling for "keep everything", and the values that matter on neuPrint are all fractions.
+     * There is no `max`, because the scale is the backend's own and they do not agree — see
+     * `SynapseRequest.minConfidence`. Renaming the id is what carries stored graphs across:
+     * `normalizeParams` reads only declared params, so an old `minWeight: 1` stops being in the
+     * provenance key, and the absent `minConfidence` falls to this default. That is deliberate.
+     * The old value meant a filter nobody asked for.
+     *
+     * Inspector-only: dataset-level confidence floors are already applied at ingest
+     * (`Meta.postHighAccuracyThreshold` is 0.5 on male-CNS, which is why nothing in that cloud
+     * scores below 0.5004), so this is a control for cutting *further* and not one a card needs
+     * to carry.
+     */
     {
-      id: 'minWeight',
-      kind: 'int',
-      label: 'Min weight',
-      default: 1,
-      min: 1,
-      step: 1,
+      id: 'minConfidence',
+      kind: 'number',
+      label: 'Min confidence',
+      default: 0,
+      min: 0,
+      step: 0.05,
+      advanced: true,
+      help:
+        'Drop synapses scoring below this. 0 keeps every one. The scale belongs to the data ' +
+        'source: neuPrint scores 0–1, CATMAID is a tracer’s 1–5, and a CAVE datastack uses its ' +
+        'synapse table’s own column where it has one (FlyWire’s cleft_score, cut by convention ' +
+        'at 50). Sources without such a column say so and return everything.',
     },
     warnAboveParam({
       threshold: MAX_NEURONS,
@@ -310,7 +347,11 @@ export const synapsesNode = registerNode({
     if (ctx.inputs.dataset && !sourceSupports(ctx.inputs.dataset, 'synapses')) {
       return ['This data source has no synapse locations']
     }
-    return []
+    const pinned = synapseUnitProblem(
+      ctx.inputs.dataset,
+      String(ctx.params[SYNAPSE_UNIT_PARAM] ?? ''),
+    )
+    return pinned ? [pinned] : []
   },
 
   evaluate: async (ctx) => {
@@ -325,6 +366,17 @@ export const synapsesNode = registerNode({
       'These arrive in one query, but it returns a row per synapse — thousands per neuron.',
     )
     const polarity = String(ctx.params.polarity ?? '')
+    /*
+     * **Resolved here, at the one door.** `fetchSynapses` has exactly this caller, and a unit
+     * varies with nothing — so a copy of this inside each backend was three re-derivations of a
+     * static fact, discarding the answer in all three, plus a fourth place for a new backend to
+     * forget. `SynapseRequest.unit` is required instead, which makes "the caller decided" a thing
+     * the type says. A source with no `synapseUnits` at all lands here rather than silently
+     * serving whatever it felt like.
+     */
+    const units = synapseUnitsOf(source)
+    if (!units) throw new Error(`${source.label} does not say what its synapse rows count.`)
+    const unit = resolveSynapseUnit(source.label, pinnedSynapseUnit(ctx.params), units)
     ctx.progress(0.1, `${neuronIds.length} neurons`)
 
     const points = await source.fetchSynapses({
@@ -334,7 +386,8 @@ export const synapsesNode = registerNode({
       // A cost only the backend knows: see `GeometryRequest.onWarn`.
       onWarn: ctx.warn,
       ...(polarity === 'pre' || polarity === 'post' ? { polarity } : {}),
-      minWeight: Number(ctx.params.minWeight ?? 1),
+      minConfidence: minSynapseConfidence(ctx.params),
+      unit,
       signal: ctx.signal,
     })
     return { points }

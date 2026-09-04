@@ -26,6 +26,7 @@ import { DRACO_INFO } from '../../test/precomputedStubs'
 import { resetPrecomputedProbes } from '../precomputed/probe'
 import { resetTransport } from '../precomputed/transport'
 import { CaveSource } from './CaveSource'
+import { SYNAPSE_UNITS } from '../synapseUnits'
 import { CAVE_MAX_ROWS, refuseIfCapped } from './client'
 import {
   peekTableFacts,
@@ -877,6 +878,7 @@ describe('synapses', () => {
   it('asks for nanometres rather than trusting the server default', async () => {
     const captured = installFetch()
     await new CaveSource().fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
       datasetId: DATASET,
       neuronIds: ['720575940628857210'],
       polarity: 'pre',
@@ -897,6 +899,7 @@ describe('synapses', () => {
   it('reads positions as a point cloud in nanometres, one attribute row apiece', async () => {
     installFetch()
     const points = await new CaveSource().fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
       datasetId: DATASET,
       neuronIds: ['720575940628857210'],
       polarity: 'pre',
@@ -916,6 +919,7 @@ describe('synapses', () => {
     installFetch()
     const cave = new CaveSource()
     const pre = await cave.fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
       datasetId: DATASET,
       neuronIds: ['720575940628857210'],
       polarity: 'pre',
@@ -927,6 +931,7 @@ describe('synapses', () => {
     expect(pre.attributes.data.polarity?.[0]).toBe('pre')
 
     const post = await cave.fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
       datasetId: DATASET,
       neuronIds: ['720575940618002747'],
       polarity: 'post',
@@ -935,39 +940,55 @@ describe('synapses', () => {
     expect(post.attributes.data.partnerId?.[0]).toBe('720575940628857210')
   })
 
-  it('applies the weight cut on the server, where it saves the download', async () => {
+  it('applies the confidence cut on the server, where it saves the download', async () => {
     const captured = installFetch()
     await new CaveSource().fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
       datasetId: DATASET,
       neuronIds: ['720575940628857210'],
       polarity: 'pre',
-      minWeight: 50,
+      minConfidence: 50,
     })
 
     // The node has always sent this and both other sources honour it; dropping it left a visible
-    // control doing nothing against the query whose only backstop is the 500,000-row cap.
+    // control doing nothing against the query whose only backstop is the 500,000-row cap. 50 and
+    // not 0.7: the scale is `cleft_score`'s, which runs to a few hundred — see
+    // `SynapseRequest.minConfidence` on why there is no normalising the three backends onto one.
     const query = captured.find((c) => c.url.includes('/table/synapses_nt_v1/query'))!
     expect(query.body).toMatchObject({
       filter_greater_equal_dict: { synapses_nt_v1: { cleft_score: 50 } },
     })
   })
 
-  it('sends no weight clause at the default, which excludes nothing', async () => {
+  it('sends no confidence clause when nobody set one', async () => {
     const captured = installFetch()
     await new CaveSource().fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
       datasetId: DATASET,
       neuronIds: ['720575940628857210'],
       polarity: 'pre',
-      minWeight: 1,
     })
     const query = captured.find((c) => c.url.includes('/table/synapses_nt_v1/query'))!
     expect(query.body).not.toHaveProperty('filter_greater_equal_dict')
+  })
+
+  /*
+   * Links only, and that is what makes a pinned `sites` refusable one layer up.
+   *
+   * A CAVE synapse table is pre→post links with no key identifying a presynaptic site, so `sites`
+   * has no honest answer here. The refusal itself lives at the node — `SynapseRequest.unit` is
+   * required, so the only door into `fetchSynapses` resolves it first — and is pinned in
+   * `nodes/query/morphology.test.ts`. What this asserts is the declaration those two read.
+   */
+  it('declares links as its only synapse unit, which is also its Automatic', () => {
+    expect(new CaveSource().synapseUnits).toEqual([SYNAPSE_UNITS.links])
   })
 
   it('reports progress, so the run ring does not sit at the node’s own 10%', async () => {
     installFetch()
     const seen: number[] = []
     await new CaveSource().fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
       datasetId: DATASET,
       neuronIds: ['720575940628857210'],
       polarity: 'pre',
@@ -979,6 +1000,7 @@ describe('synapses', () => {
   it('advertises only the columns a synapse row can fill', async () => {
     installFetch()
     const points = await new CaveSource().fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
       datasetId: DATASET,
       neuronIds: ['720575940628857210'],
       polarity: 'pre',
@@ -996,6 +1018,7 @@ describe('synapses', () => {
   it('queries both ends when no polarity is named, because CAVE has no either-end filter', async () => {
     const captured = installFetch()
     await new CaveSource().fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
       datasetId: DATASET,
       neuronIds: ['720575940628857210'],
     })

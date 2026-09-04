@@ -40,6 +40,7 @@ import { flatUrlFor, probeFlat } from './flat'
 import { discoverLoginService } from './oauth'
 import { existingSkeletons, serviceLooksEmpty, skeletonServiceFor } from './skeletonService'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
+import { SYNAPSE_UNITS } from '../synapseUnits'
 import { registerDatastackSpec, specFor } from './spec'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { cableLength } from '../../core/values'
@@ -157,6 +158,7 @@ live('CAVE, live', () => {
    */
   it('reads a synapse cloud and a mesh into the same nanometre frame', async () => {
     const points = await source.fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
       datasetId: DATASET,
       neuronIds: [SEED],
       polarity: 'pre',

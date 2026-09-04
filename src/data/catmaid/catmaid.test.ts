@@ -21,6 +21,7 @@ import projectsFixture from './__fixtures__/projects.json'
 import volumeFixture from './__fixtures__/volume-485.json'
 import volumesFixture from './__fixtures__/volumes.json'
 import { resetCache } from '../cache'
+import { SYNAPSE_UNITS } from '../synapseUnits'
 import { resetIndexLoads } from '../neuronIndex'
 import { CatmaidSource } from './CatmaidSource'
 import type { AnnotationListResponse } from './api'
@@ -560,7 +561,7 @@ describe('skeletons', () => {
 describe('synapses', () => {
   it('labels polarity per relation, since a both-ends cloud is two populations', async () => {
     stubFetch(defaultRoutes)
-    const points = await source().fetchSynapses({ datasetId: '1', neuronIds: ['16'] })
+    const points = await source().fetchSynapses({ unit: SYNAPSE_UNITS.sites, datasetId: '1', neuronIds: ['16'] })
     expect(points.units).toBe('nm')
     expect(new Set(points.attributes.data.polarity)).toEqual(new Set(['pre', 'post']))
     expect(points.positions.length).toBe(points.attributes.length * 3)
@@ -568,7 +569,7 @@ describe('synapses', () => {
 
   it('asks for one relation only when a polarity is given', async () => {
     stubFetch(defaultRoutes)
-    await source().fetchSynapses({ datasetId: '1', neuronIds: ['16'], polarity: 'pre' })
+    await source().fetchSynapses({ unit: SYNAPSE_UNITS.sites, datasetId: '1', neuronIds: ['16'], polarity: 'pre' })
     const relations = calls.filter((call) => call.url.includes('connectors/links'))
     expect(relations).toHaveLength(1)
     expect(decodeURIComponent(relations[0]!.url)).toContain('relation_type=presynaptic_to')

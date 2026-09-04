@@ -10,6 +10,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { boundsOf, skeletonPointCount } from '../../core/values'
+import { SYNAPSE_UNITS } from '../synapseUnits'
 import { registerSource } from '../source'
 import { MockSource } from './MockSource'
 import { getConnectome } from './generate'
@@ -176,6 +177,7 @@ describe('MockSource morphology', () => {
 
   it('places synapses with one attribute row per point', async () => {
     const points = await source.fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
       datasetId: 'optic-lobe-mini',
       neuronIds: someNeuronIds(2),
     })
@@ -190,20 +192,29 @@ describe('MockSource morphology', () => {
   it('filters synapses by polarity and weight', async () => {
     const neuronIds = someNeuronIds(2)
     const pre = await source.fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
       datasetId: 'optic-lobe-mini',
       neuronIds,
       polarity: 'pre',
     })
     expect(new Set(pre.attributes.data.polarity as string[])).toEqual(new Set(['pre']))
 
-    const heavy = await source.fetchSynapses({
+    /*
+     * The mock has no per-synapse confidence — its `weight` column is the *connection's* weight —
+     * so the control is unhonourable here and says so instead of filtering by it. Filtering a
+     * point cloud by connection weight under a control labelled confidence is the conflation the
+     * rename exists to undo.
+     */
+    const warnings: string[] = []
+    const all = await source.fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
       datasetId: 'optic-lobe-mini',
       neuronIds,
-      minWeight: 20,
+      minConfidence: 20,
+      onWarn: (message) => warnings.push(message),
     })
-    for (const weight of heavy.attributes.data.weight as number[]) {
-      expect(weight).toBeGreaterThanOrEqual(20)
-    }
+    expect(warnings.join(' ')).toMatch(/no per-synapse confidence/)
+    expect(all.attributes.length).toBeGreaterThan(0)
   })
 
   it('advertises its geometry capabilities', () => {

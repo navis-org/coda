@@ -18,6 +18,8 @@ import {
   resolveDatasetId,
 } from '../../../nodes/lib/datasetFamilies'
 import { parseIdList } from '../../../nodes/lib/idList'
+import { SYNAPSE_UNITS } from '../../../data/synapseUnits'
+import { minSynapseConfidence, synapseUnitFor } from '../../../nodes/lib/synapseParams'
 import { parseTypedLabels } from '../../../nodes/lib/labelLookup'
 import { rLongVector, rStr, rVector } from '../r'
 import { registerEmitter } from '../registry'
@@ -541,6 +543,8 @@ registerEmitter('neuron.synapses', (ctx) => {
   const neurons = ctx.wired('neurons')
   ctx.library('neuprintr')
   const polarity = String(ctx.params.polarity ?? '')
+  const minConfidence = minSynapseConfidence(ctx.params)
+  const unit = synapseUnitFor(ctx.inputType('dataset'), ctx.params)
   const args = [
     neuronIds(neurons),
     ...(polarity ? [`prepost = ${rStr(polarity.toUpperCase())}`] : []),
@@ -559,6 +563,32 @@ registerEmitter('neuron.synapses', (ctx) => {
         '("pre"/"post"). Any cell below that names a synapse column will need one or the ' +
         'other spelling — the notebook export normalises these, this one does not yet.',
     ),
+    /*
+     * **Two of the node's controls have no neuprintr spelling**, and each is a TODO with the gap
+     * named rather than a cell that quietly runs a different query — the rule this emitter
+     * already follows for the column vocabulary above.
+     *
+     * `neuprint_get_synapses` takes no confidence argument: its Cypher returns
+     * `s.confidence` and filters nothing, so a threshold is a `subset()` the reader has to write
+     * against whatever `confidence` column the fetch produced. And its query matches
+     * `(n)-[:Contains]->(:SynapseSet)-[:Contains]->(s:Synapse)` with no `DISTINCT`, which is the
+     * `links` unit — so a node set to `sites` (the default on neuPrint) is the one that diverges
+     * here, in the opposite direction from the notebook export.
+     */
+    ...(minConfidence > 0
+      ? ctx.todo(
+          `neuprintr has no confidence argument — filter this frame yourself, e.g. ` +
+            `subset(<points>, confidence >= ${minConfidence}).`,
+        )
+      : []),
+    ...(unit !== SYNAPSE_UNITS.links
+      ? ctx.note(
+          'neuprint_get_synapses returns a presynaptic site once per partner it drives, where ' +
+            'the Synapses node is set to one row per site — so this frame has more rows than ' +
+            'the canvas. De-duplicate on the location columns to match. Postsynaptic rows are ' +
+            'unaffected.',
+        )
+      : []),
     `${ctx.output('points')} <- neuprint_get_synapses(${args.join(', ')}, conn = ${conn})`,
   ]
 })

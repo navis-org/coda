@@ -56,6 +56,7 @@ import type {
   SynapseTotalsRequest,
   ViewerSceneRequest,
 } from '../source'
+import { SYNAPSE_UNITS } from '../synapseUnits'
 import {
   CANONICAL_SCHEMAS,
   PATH_STEP_SCHEMA,
@@ -259,6 +260,17 @@ export class NeuPrintSource implements DataSource {
   readonly description: string
   /** Deployment this instance talks to, canonicalised. See `servers.ts`. */
   readonly server: string
+  /**
+   * Both units, sites first — the only source in the tree that has a choice.
+   *
+   * `sites` leads because the alternative's extra rows carry nothing: `schemasFor` drops
+   * `partnerId` from the synapse schema on purpose, so a T-bar repeated once per partner comes
+   * back as the same neuron, polarity, confidence *and coordinate*, N times. Deduplicated, the
+   * count is `n.pre` and what Explore Dataset reports. `links` stays offered because the row
+   * count is the connection count and somebody may want it weighted that way.
+   */
+  readonly synapseUnits = [SYNAPSE_UNITS.sites, SYNAPSE_UNITS.links] as const
+
   readonly capabilities: SourceCapabilities = {
     rawQuery: true,
     skeletons: true,
@@ -1166,6 +1178,13 @@ export class NeuPrintSource implements DataSource {
     }
   }
 
+  /**
+   * A neuron set's synapses as a point cloud, in one query.
+   *
+   * The only source with a unit to branch on. `req.unit` is required and already resolved — see
+   * `resolveSynapseUnit`, which is called once by the node so that `synapseUnits[0]` is the sole
+   * thing deciding what "Automatic" means.
+   */
   async fetchSynapses(req: SynapseRequest): Promise<PointsValue> {
     await this.discover(req.datasetId, req.signal)
     const scale = this.scaleFor(req.datasetId)

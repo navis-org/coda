@@ -242,6 +242,37 @@ times smaller. `synapseTotalsCypher` therefore falls back `coalesce(n.upstream, 
 incoming side, where the two are measured equal, and has deliberately **no** fallback on the
 outgoing one.
 
+### A `SynapseSet` is per partner, so a T-bar comes back more than once
+
+`(n:Neuron)-[:Contains]->(:SynapseSet)-[:Contains]->(s:Synapse)` is the only way to a neuron's
+synapses, and a neuron holds one `SynapseSet` **per partner neuron**. A presynaptic site therefore
+appears once per partner it drives. Postsynaptic densities belong to one connection each and are
+unaffected. Measured live:
+
+| dataset | pre rows | distinct pre synapses |
+| --- | --- | --- |
+| `male-cns:v1.0`, body 10001 | 4,491 | 1,015 |
+| `hemibrain:v1.2.1` (200k-row sample) | 135,652 | 18,420 |
+| `manc:v1.2.1` (200k-row sample) | 117,640 | 15,357 |
+| `optic-lobe:v1.1` (200k-row sample) | 163,540 | 39,865 |
+
+`WITH DISTINCT n, s` collapses them — `n` stays in the `WITH` because the `RETURN` reads
+`n.bodyId` and `n.type`. It is neuprint-python's own fix, in `queries/synapses.py`, with the same
+comment. Deduplicated, body 10001 returns 1,015 pre and 18,582 post, which is exactly `n.pre` and
+`n.post` and exactly what Explore Dataset shows.
+
+**Both forms are offered** rather than one being tidied away, because the row count of the
+undeduplicated form is the connection count and `n.synweight` (23,073 on this neuron) is the sum of
+the two. Which one a `PointsValue` holds is `SynapseRequest.unit`; neuPrint is the only source in
+the tree that can answer either. See [nodes.md](nodes.md) for the control and
+`data/synapseUnits.ts` for why `sites` is what Automatic takes.
+
+**`s.confidence` is a fraction, 0..1, and the dataset has usually already cut on it.**
+`Meta.postHighAccuracyThreshold` is 0.5 on male-CNS, which is why nothing in that cloud scores
+below 0.5004 — and why presynaptic scores top out at 0.98 there, 0.99 on MANC, 0.986 on optic-lobe.
+A `>= 1` threshold therefore returns no presynaptic site at all on three of the four datasets,
+which is what the Synapses node's old `Min weight` default did.
+
 ### Why there is no neuPrint sign-in, where CAVE has one
 
 Both services log their users in with Google, and only one of them can hand a token to a page
@@ -551,6 +582,27 @@ it anyone has written down. Neither is wrong; showing one of them without saying
 `tables.ts` reports both side by side and the card labels them, and the notebook exporter does the
 same. Note this changes nothing about `neuronCount`: the annotation count is still not the count
 of *neurons*, since `proofread_neurons` has 139,540 rows and 139,255 distinct root ids.
+
+### A synapse table is pre→post links, so there is no presynaptic site to collapse onto
+
+A CAVE synapse table is a list of predicted clefts, one row per pre→post link with its own
+coordinate. Nothing in it identifies a presynaptic *site*: `pre_pt_supervoxel_id` names a
+supervoxel, which is a chunk of segmentation and not a T-bar. So this source declares
+`synapseUnits = ['links']`, and a pinned `sites` is refused rather than answered with its links
+under that name — see [nodes.md](nodes.md), where the same rule is why the Skeletons node refuses
+a route a dataset lacks. The refusal is at the **node**, not here: `SynapseRequest.unit` is
+required, so the single caller resolves it before asking and this method is handed a decision
+rather than re-deriving one.
+
+The confidence cut goes to the **server**, as an `atLeast` on the table's own score column, which
+is the one filter that reduces the download. **Most tables have no such column.** `spec.ts` names
+one for FlyWire (`cleft_score`) and for nothing else: Aedes has `size`, which is a cleft area
+rather than a confidence, and a datastack whose synapse table is merely *declared* gets
+`STANDARD_SYNAPSE_COLUMNS`, which deliberately names none. Those cases now `onWarn` and return
+everything. Silence was defensible only while the node's default was 1 and excluded nothing; a
+control that starts at off is one somebody has set by the time it arrives here. And the scale is
+the column's own — `cleft_score` runs to a few hundred and is conventionally cut at 50, which is
+why nothing tries to normalise the three backends onto one number.
 
 ### A datastack does not describe itself
 
@@ -1646,6 +1698,15 @@ with the feature absent — comparable to CAVE's +16.4 / +5.2.
 - **CATMAID names a parent by node id, and a skeleton's nodes arrive in no particular order.** The
   tree is rebuilt through an id→index map; emitting ids would satisfy the type and break every
   consumer that walks the array once, the SWC writer included.
+- **A presynaptic connector link is already one row per site, which is the opposite of neuPrint's
+  problem.** `connectors/links/?relation_type=presynaptic_to` answers one row per (skeleton,
+  connector), and a connector *is* a T-bar — measured on FAFB skeleton 16 as 1,709 rows and 1,709
+  distinct connectors. So this source declares `synapseUnits = ['sites']` and refuses a pinned
+  `links`: producing it would mean asking `connector/skeletons` for each connector's postsynaptic
+  partner count, which is the same real fetch `CATMAID_SYNAPSE_SCHEMA` declines to pay for
+  `partnerId`. Its `confidence` is a **tracer's 1..5**, nothing like neuPrint's 0..1 fraction, and
+  the endpoint has no confidence parameter — so `minConfidence` is applied client-side, cutting
+  rows and not bandwidth.
 - **A radius of −1 means unset**, and a negative radius drawn as a tube is a spike.
 - **`/volumes/` answers `{columns, data}`**, a column table rather than records — the obvious
   `VolumeRow[]` reading parses without error and yields `undefined` for every field.

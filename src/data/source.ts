@@ -31,6 +31,7 @@ import type {
   TableValue,
 } from '../core/values'
 import type { SkeletonRouteId } from './skeletonRoutes'
+import type { SynapseUnitId, SynapseUnits } from './synapseUnits'
 import type { NgScene } from './neuroglancer/scene'
 import type { NeuronIndexRequest } from './neuronIndex'
 import type { FilterRow } from './filterRows'
@@ -452,7 +453,38 @@ export interface GeometryRequest {
 export interface SynapseRequest extends GeometryRequest {
   /** Restrict to synapses of this polarity. Undefined returns both. */
   polarity?: 'pre' | 'post'
-  minWeight?: number
+  /**
+   * Drop synapses whose per-synapse confidence is below this, or absent for all of them.
+   *
+   * **Not a weight**, which is what this field was called until the two came apart in the open:
+   * every backend read it as its own confidence column, and the node offered it as an integer
+   * defaulting to 1 — so on neuPrint the default compiled to `s.confidence >= 1` against a score
+   * in 0..1, which on `male-cns:v1.0` body 10001 returned 13,617 of 19,597 synapses and not one
+   * presynaptic site, and on hemibrain returned about a thousandth of the cloud.
+   *
+   * The scale is the backend's own and there is no normalising it: neuPrint's `confidence` is a
+   * predictor score in 0..1, CAVE's is whatever its table's score column holds (FlyWire's
+   * `cleft_score` runs to a few hundred and is conventionally cut at 50), CATMAID's is a tracer's
+   * 1..5. So the node says which scale is in front of you rather than pretending one exists.
+   *
+   * **A source that cannot honour it must say so through `onWarn`**, not drop it quietly. Two do:
+   * a CAVE datastack whose synapse table declares no score column (every one but FlyWire — Aedes
+   * has `size`, which is not a confidence), and the mock, which has none at all.
+   */
+  minConfidence?: number
+  /**
+   * What one returned row must count — see `data/synapseUnits.ts`, which holds the measurements.
+   *
+   * **Required, where `skeletonSource` one field up is optional, and the difference is where the
+   * choice can be made.** A skeleton route is a live question about a bucket, so a source is the
+   * only thing that can settle it and absent means "you decide". A synapse unit varies with
+   * nothing: `DataSource.synapseUnits` is a static list, so the caller can resolve it before
+   * asking, and `resolveSynapseUnit` at that one door is what refuses a unit the source cannot
+   * serve. Making the field required is what keeps the door the only way in — a source is handed
+   * a decision rather than re-deriving one, which is what three of the four were doing while
+   * discarding the answer.
+   */
+  unit: SynapseUnitId
 }
 
 export interface RawQueryRequest {
@@ -789,6 +821,25 @@ export interface DataSource {
    */
   readonly capabilitiesAnywhere?: Partial<SourceCapabilities>
   fetchMeshes?(req: GeometryRequest): Promise<MeshesValue>
+  /**
+   * What one row of this source's synapse clouds counts, best first.
+   *
+   * `skeletonSourcesFor`'s arrangement, minus the dataset — the unit is a property of the
+   * backend's *transport* rather than of a bucket somebody published, so there is nothing for it
+   * to vary with. **Order is the preference `fetchSynapses` applies with no `unit` set**, and it
+   * is what the node's dropdown prints as "Automatic", so a source ordering its list one way and
+   * branching the other would have a control that lies. `resolveSynapseUnit` reads both halves,
+   * which is what keeps them from parting company.
+   *
+   * Required of any source implementing `fetchSynapses`, because "it returns synapses" is not an
+   * answer to what a row of them is — see `data/synapseUnits.ts` for the three measurements that
+   * make that the wrong question to leave unasked. Optional here for the reason
+   * `skeletonSourcesFor` is: most sources answer no synapses at all, and a required field would
+   * make every one of them declare something meaningless. Non-**empty** where it is declared,
+   * though (`SynapseUnits`), so `[0]` always has an answer and there is no third state for two
+   * readers to disagree about.
+   */
+  readonly synapseUnits?: SynapseUnits
   fetchSynapses?(req: SynapseRequest): Promise<PointsValue>
 
   rawQuery?(req: RawQueryRequest): Promise<TableValue>
@@ -1147,6 +1198,24 @@ export function skeletonRoutesOf(
 ): readonly SkeletonProvenance[] | undefined {
   if (!source || !datasetId) return undefined
   return source.skeletonSourcesFor?.(datasetId)
+}
+
+/**
+ * The synapse units a source can deliver, read the way `skeletonRoutesOf` reads a route list.
+ *
+ * The seam, and only the seam: `src/nodes` asks here rather than reaching into
+ * `source.synapseUnits`, which is the rule capabilities follow and for their reason — a fact with
+ * several meanings should have one reader.
+ *
+ * **Two states, not `skeletonRoutesOf`'s three.** `undefined` means "nothing has said" — a Dataset
+ * socket with nothing on it, or a source that serves no synapses — and there is no empty-list
+ * state, because `SynapseUnits` is a non-empty tuple. That is deliberate: an `[]` a source could
+ * declare would read as "offer nothing, say nothing" here and as a hard refusal in
+ * `resolveSynapseUnit`, which is a clean-looking card and a confusing throw. Whether this dataset
+ * has synapses at all is `capabilityOf(…, 'synapses')`.
+ */
+export function synapseUnitsOf(source: DataSource | undefined): SynapseUnits | undefined {
+  return source?.synapseUnits
 }
 
 /**

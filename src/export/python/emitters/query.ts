@@ -14,6 +14,8 @@ import {
   resolveDatasetId,
 } from '../../../nodes/lib/datasetFamilies'
 import { parseIdList } from '../../../nodes/lib/idList'
+import { SYNAPSE_UNITS } from '../../../data/synapseUnits'
+import { minSynapseConfidence, synapseUnitFor } from '../../../nodes/lib/synapseParams'
 import { parseTypedLabels } from '../../../nodes/lib/labelLookup'
 import { pyLongIntList, pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
@@ -732,9 +734,20 @@ registerEmitter('neuron.synapses', (ctx) => {
   ctx.require('neuprint', 'NeuronCriteria', 'SynapseCriteria', 'fetch_synapses')
   const out = ctx.output('points')
   const polarity = String(ctx.params.polarity ?? '')
+  const minConfidence = minSynapseConfidence(ctx.params)
+  const unit = synapseUnitFor(ctx.inputType('dataset'), ctx.params)
 
+  /*
+   * **`confidence` is passed only when the node sets it, and that is not the same as passing 0.**
+   * `SynapseCriteria`'s default is `None`, which it resolves to the dataset's own
+   * `Meta.postHighAccuracyThreshold` — 0.5 on male-CNS. Writing `confidence=0` would emit a
+   * notebook that *disables* a floor the canvas leaves in place, since neuPrint has already
+   * applied it at ingest and nothing in the cloud scores below it. So an unset control emits no
+   * argument, which is the same query the canvas runs.
+   */
   const synCriteria = [
     ...(polarity ? [`type=${pyStr(polarity)}`] : []),
+    ...(minConfidence > 0 ? [`confidence=${minConfidence}`] : []),
     'primary_only=True',
     `client=${c}`,
   ]
@@ -755,6 +768,21 @@ registerEmitter('neuron.synapses', (ctx) => {
         '"type" for the cell type, which this frame does not carry — join it from a neuron ' +
         'table if you need it.',
     ),
+    /*
+     * **`fetch_synapses` deduplicates and there is no argument to stop it.** Its query carries
+     * `WITH DISTINCT n, s` (neuprint-python `queries/synapses.py`) for the reason Coda's does: a
+     * presynaptic site sits in one SynapseSet per partner. So `sites` needs no emitted argument
+     * and `links` cannot be emitted at all — it is a different query, and writing the cell as if
+     * the two agreed is exactly the silent divergence this export exists not to have.
+     */
+    ...(unit === SYNAPSE_UNITS.links
+      ? ctx.note(
+          'The Synapses node is set to one row per connection. fetch_synapses always ' +
+            'de-duplicates (WITH DISTINCT n, s), so this frame has one row per presynaptic ' +
+            'site instead — fewer rows than the canvas, by however many partners each site ' +
+            'drives. Postsynaptic rows are unaffected.',
+        )
+      : []),
   ]
 })
 

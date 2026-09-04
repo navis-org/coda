@@ -23,6 +23,7 @@ import type {
   SynapseTotalsRequest,
 } from '../source'
 import { isNeuronId } from '../../core/ids'
+import { SYNAPSE_UNITS } from '../synapseUnits'
 import type { PopulationFilter, TableSchema } from '../../core/types'
 import {
   STATUS_COLUMN,
@@ -553,13 +554,33 @@ export function roiCountsCypher(req: RoiCountsRequest): string {
   ].join('\n')
 }
 
+/**
+ * One neuron set's synapses as points.
+ *
+ * **`unit` is required, and `sites` is not a tidying pass.** A neuron holds one `SynapseSet` per
+ * partner *neuron*, so the bare walk returns a T-bar once per partner it drives: 4,491 rows for
+ * 1,015 sites on `male-cns:v1.0` body 10001, 135,652 for 18,420 on hemibrain. `WITH DISTINCT n, s`
+ * is what collapses them, and it is neuprint-python's own fix in `queries/synapses.py`, carrying
+ * the same comment. `n` stays in the `WITH` because the `RETURN` reads `n.bodyId` and `n.type`.
+ * Postsynaptic densities belong to one connection each and are unaffected either way.
+ *
+ * **`minConfidence` is a fraction here**, 0..1, and absent means no clause. It used to be spelled
+ * `minWeight` and default to 1, which compiled to `s.confidence >= 1` — a filter that on MANC and
+ * optic-lobe kept no presynaptic site at all and on hemibrain kept 213 rows in 200,000. The
+ * dataset has usually applied its own floor already (`Meta.postHighAccuracyThreshold` is 0.5 on
+ * male-CNS, which is why nothing in that cloud scores below 0.5004), so this is a control for
+ * cutting further, not one anybody needs to set.
+ */
 export function synapsesCypher(req: SynapseRequest): string {
   const where = [`n.bodyId IN ${idList(req.neuronIds)}`]
   if (req.polarity) where.push(`s.type = ${escapeString(req.polarity)}`)
-  if (req.minWeight && req.minWeight > 0) where.push(`s.confidence >= ${req.minWeight}`)
+  const min = req.minConfidence ?? 0
+  if (min > 0) where.push(`s.confidence >= ${min}`)
   return [
     'MATCH (n:Neuron)-[:Contains]->(:SynapseSet)-[:Contains]->(s:Synapse)',
     `WHERE ${where.join(' AND ')}`,
+    // De-duplicate `s`: a pre synapse appears in more than one SynapseSet.
+    ...(req.unit === SYNAPSE_UNITS.sites ? ['WITH DISTINCT n, s'] : []),
     'RETURN n.bodyId, n.type, s.type, s.location.x, s.location.y, s.location.z, s.confidence',
   ].join('\n')
 }

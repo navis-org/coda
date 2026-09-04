@@ -57,6 +57,7 @@ import type {
   ViewerSceneRequest,
 } from '../source'
 import { reportSourceLearned, requireSkeletonRoute } from '../source'
+import { SYNAPSE_UNITS, confidenceIgnoredWarning } from '../synapseUnits'
 import type { NeuronIndexRequest } from '../neuronIndex'
 import type { Edge } from '../connectivity'
 import { matrixFromEdges, typesOf } from '../connectivity'
@@ -334,6 +335,18 @@ export class CaveSource implements DataSource {
   readonly label = 'CAVE'
   readonly description =
     'FlyWire and other CAVE-hosted connectomes. Needs a CAVE token; every dataset is pinned to a materialization.'
+  /**
+   * Links only, and the absence of `sites` is a fact about the data rather than a gap.
+   *
+   * A CAVE synapse table is a list of predicted pre→post links, one row each with its own
+   * coordinate. Nothing in it identifies a presynaptic *site*: `pre_pt_supervoxel_id` names a
+   * supervoxel, which is a chunk of segmentation and not a T-bar, so there is no key to collapse
+   * on and no honest way to answer `sites`. Being the only unit, it is also what Automatic takes —
+   * so by the time `req.unit` arrives it can only be this one: `SynapseRequest.unit` is required
+   * and the refusal happens once, at the node, rather than in each `fetchSynapses`.
+   */
+  readonly synapseUnits = [SYNAPSE_UNITS.links] as const
+
   readonly capabilities = CAVE_CAPABILITIES
   readonly capabilitiesAnywhere = CAVE_CEILING
   readonly schemas: SourceSchemas = defaultSchemas()
@@ -1542,14 +1555,28 @@ export class CaveSource implements DataSource {
     if (synapses.scoreColumn) columns.push(synapses.scoreColumn)
 
     /*
-     * `minWeight` is applied by the *server*, which is the only place it is worth anything: it is
-     * the one filter that cuts the download, against a query whose only other backstop is
+     * `minConfidence` is applied by the *server*, which is the only place it is worth anything:
+     * it is the one filter that cuts the download, against a query whose only other backstop is
      * `refuseIfCapped` — which refuses at whatever the *server* says this query holds, not at a
      * number of ours. The same `atLeast` clause the connection view uses.
-     * It reads the table's confidence column, so a source whose spec names none simply cannot
-     * honour it — and says nothing, because the node's default of 1 excludes nothing anyway.
+     *
+     * **It reads the table's own score column, and most tables have none.** `spec.ts` names one
+     * for FlyWire (`cleft_score`) and for nothing else: Aedes has `size`, which is a cleft area
+     * rather than a confidence, and a datastack whose synapse table is merely *declared* gets
+     * `STANDARD_SYNAPSE_COLUMNS`, which deliberately names no score at all. So the filter is
+     * unhonourable on most of them — and now says so, where it used to drop it in silence. That
+     * silence was defensible only while the node's default was 1 and excluded nothing; a control
+     * that starts at "off" is one somebody has *set* by the time it arrives here.
+     *
+     * The scale is the column's own. FlyWire's `cleft_score` runs to a few hundred and is
+     * conventionally cut at 50 — nothing like neuPrint's 0..1 — which is why `SynapseRequest`
+     * refuses to pretend there is one scale.
      */
-    const cut = req.minWeight && req.minWeight > 1 && synapses.scoreColumn
+    const wanted = req.minConfidence ?? 0
+    const cut = wanted > 0 ? synapses.scoreColumn : undefined
+    if (wanted > 0 && !cut) {
+      req.onWarn?.(confidenceIgnoredWarning(`${spec.label}'s synapse table (${synapses.table})`))
+    }
     req.onProgress?.(0.15, 'querying')
 
     const perSide = await Promise.all(
@@ -1563,7 +1590,7 @@ export class CaveSource implements DataSource {
             table: synapses.table,
             filters: {
               in: { [column]: [...req.neuronIds] },
-              ...(cut ? { atLeast: { [synapses.scoreColumn!]: req.minWeight! } } : {}),
+              ...(cut ? { atLeast: { [cut]: wanted } } : {}),
             },
             columns,
             resolution: NANOMETRES,

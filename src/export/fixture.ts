@@ -194,6 +194,20 @@ export function everythingGraph(): CodaGraph {
     { id: 'skel', type: 'neuron.skeletons', col: 2, row: 5, params: { limit: 20 } },
     { id: 'mesh', type: 'neuron.meshes', col: 2, row: 6, params: { limit: 10 } },
     { id: 'syn', type: 'neuron.synapses', col: 2, row: 7, params: { polarity: 'pre' } },
+    /*
+     * A second Synapses node, for the reason there are two NBLAST nodes: both emitters branch on
+     * this node's two new controls, and the first one takes neither. `synapseUnit` and
+     * `minConfidence` are each a *divergence* note in one export and an argument in the other —
+     * neuprint-python always de-duplicates and takes `confidence=`, neuprintr does neither — so
+     * with only the default node the goldens pinned the branch that emits nothing.
+     */
+    {
+      id: 'synLinks',
+      type: 'neuron.synapses',
+      col: 2,
+      row: 8,
+      params: { polarity: 'pre', synapseUnit: 'links', minConfidence: 0.8 },
+    },
 
     /*
      * Two NBLAST nodes, for the reason there are two Select One nodes: the emitters branch on
@@ -1191,6 +1205,7 @@ export function everythingGraph(): CodaGraph {
     ['ds', 'dataset', 'skel', 'dataset'],
     ['ds', 'dataset', 'mesh', 'dataset'],
     ['ds', 'dataset', 'syn', 'dataset'],
+    ['ds', 'dataset', 'synLinks', 'dataset'],
     ['ds', 'dataset', 'desc', 'dataset'],
 
     ['find', 'neurons', 'conn', 'neurons'],
@@ -1210,6 +1225,7 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'skel', 'neurons'],
     ['find', 'neurons', 'mesh', 'neurons'],
     ['find', 'neurons', 'syn', 'neurons'],
+    ['find', 'neurons', 'synLinks', 'neurons'],
     ['find', 'neurons', 'scatter', 'in'],
     ['find', 'neurons', 'combine', 'in'],
     ['find', 'neurons', 'joined', 'in'],

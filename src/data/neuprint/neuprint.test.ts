@@ -17,6 +17,7 @@ import { cableLength, getColumn } from '../../core/values'
 import type { FilterRow } from '../filterRows'
 
 import { NeuPrintSource } from './NeuPrintSource'
+import { SYNAPSE_UNITS } from '../synapseUnits'
 import { THUMBNAIL_MAX_BYTES } from '../precomputed'
 import {
   datasetSegment,
@@ -701,10 +702,38 @@ describe('query building', () => {
   })
 
   it('filters synapses by polarity', () => {
-    expect(synapsesCypher({ datasetId: 'x', neuronIds: ['1'], polarity: 'pre' })).toContain(
-      "s.type = 'pre'",
-    )
-    expect(synapsesCypher({ datasetId: 'x', neuronIds: ['1'] })).not.toContain('s.type =')
+    const base = { datasetId: 'x', neuronIds: ['1'], unit: SYNAPSE_UNITS.sites }
+    expect(synapsesCypher({ ...base, polarity: 'pre' })).toContain("s.type = 'pre'")
+    expect(synapsesCypher(base)).not.toContain('s.type =')
+  })
+
+  /*
+   * The presynaptic duplication, which is the whole reason `unit` exists.
+   *
+   * A neuron holds one SynapseSet per partner, so the bare walk returns a T-bar once per partner
+   * it drives — measured on `male-cns:v1.0` body 10001 as 4,491 rows for 1,015 sites, and on
+   * hemibrain as 135,652 for 18,420. Asserted as the presence of the clause rather than as a row
+   * count because that is all a query builder can be held to; the counts are in
+   * `data/synapseUnits.ts` and were taken against the live server.
+   */
+  it('de-duplicates presynaptic sites for `sites` and not for `links`', () => {
+    const base = { datasetId: 'x', neuronIds: ['1'] }
+    expect(synapsesCypher({ ...base, unit: SYNAPSE_UNITS.sites })).toContain('WITH DISTINCT n, s')
+    expect(synapsesCypher({ ...base, unit: SYNAPSE_UNITS.links })).not.toContain('DISTINCT')
+  })
+
+  /*
+   * The bug this replaced: `minWeight` defaulted to 1 and compiled to `s.confidence >= 1` against
+   * a score in 0..1. On male-CNS body 10001 that kept 13,617 of 19,597 synapses and no
+   * presynaptic site at all; on MANC and optic-lobe it kept no presynaptic site anywhere; on
+   * hemibrain, 213 rows in a 200,000-row sample. So the assertion that matters is the *absence*
+   * of a clause when nobody set one.
+   */
+  it('writes no confidence clause unless one is asked for', () => {
+    const base = { datasetId: 'x', neuronIds: ['1'], unit: SYNAPSE_UNITS.sites }
+    expect(synapsesCypher(base)).not.toContain('s.confidence >=')
+    expect(synapsesCypher({ ...base, minConfidence: 0 })).not.toContain('s.confidence >=')
+    expect(synapsesCypher({ ...base, minConfidence: 0.7 })).toContain('s.confidence >= 0.7')
   })
 })
 
