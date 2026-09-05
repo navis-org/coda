@@ -297,7 +297,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     description:
       'Whole central nervous system of an adult male fly — brain and ventral nerve cord.',
     guide:
-      'The largest fly connectome published so far: 168k proofread neurons across brain and nerve cord, so a circuit can be followed from a sensory neuron to the motor neurons driving muscles.',
+      'The largest fly connectome published so far: 167k proofread neurons across brain and nerve cord, so a circuit can be followed from a sensory neuron to the motor neurons driving muscles.',
     glyph: 'fly_cns',
   },
   {
