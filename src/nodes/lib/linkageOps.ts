@@ -72,7 +72,7 @@ export const LINKAGE_SYMMETRY_OPTIONS = SYMMETRY_OPTIONS.map((option) =>
  *
  * So it warns, and the dendrogram says its own piece about labels (`MAX_LEAVES_DRAWN`).
  */
-export const LINKAGE_OBSERVATIONS_WARN = 2000
+export const LINKAGE_OBSERVATIONS_WARN = 5000
 
 /**
  * The observation count at which the condensed distance vector — `n(n-1)/2` float64s, in one
@@ -136,9 +136,7 @@ export function checkLinkageInput(ctx: Warner, matrix: MatrixValue): void {
       unit: 'observations',
       control: "this node's warn-above",
       cost:
-        'Linkage is single-threaded and grows with the square of that, and a dendrogram of ' +
-        'that many leaves has no readable labels on it — Cut Tree hands the same clustering ' +
-        'back as a table.',
+        'Linkage is single-threaded and grows with the square of that number.',
     })
   }
 }

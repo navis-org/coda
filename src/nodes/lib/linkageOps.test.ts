@@ -89,9 +89,9 @@ describe('checkLinkageInput', () => {
     expect(() => checkLinkageInput(NO_WARN, square(['a']))).toThrow(/at least 2/)
   })
 
-  it('warns about more observations than a dendrogram could carry labels for, and clusters them', () => {
+  it('warns above the threshold about the cost, and clusters them anyway', () => {
     const many = Array.from({ length: LINKAGE_OBSERVATIONS_WARN + 1 }, (_, i) => `n${i}`)
-    // Not a `makeMatrix`, which would allocate 4 million cells for a message about the count.
+    // Not a `makeMatrix`, which would allocate 25 million cells for a message about the count.
     const shape = {
       kind: 'matrix' as const,
       rowLabels: many,
@@ -100,9 +100,16 @@ describe('checkLinkageInput', () => {
     }
     const said: string[] = []
     checkLinkageInput({ warn: (m: string) => said.push(m) }, shape)
-    // A tree is not a dendrogram: Cut Tree takes the same linkage and hands back a table, and
-    // twenty thousand rows of that is perfectly readable. The drawing says its own piece.
-    expect(said.join(' ')).toMatch(/no readable labels/)
+    /*
+     * The cost this warning is about is **time**, and only time: linkage is single-threaded and
+     * quadratic. It deliberately says nothing about labels any more — a tree is not a dendrogram
+     * (Cut Tree takes the same linkage and hands back a table, which is readable at any size),
+     * and the drawing warns about its own leaves through `MAX_LEAVES_DRAWN`.
+     */
+    expect(said.join(' ')).toMatch(new RegExp(`${LINKAGE_OBSERVATIONS_WARN.toLocaleString()}`))
+    expect(said.join(' ')).toMatch(/square of that number/)
+    expect(said.join(' ')).not.toMatch(/labels/)
+    // A guard rail warns; it does not refuse. See `docs/limits.md`.
     expect(said.join(' ')).toMatch(/Going ahead anyway/)
   })
 
