@@ -52,8 +52,18 @@ function pipeline(): CodaGraph {
     node('net', 'net.build', { source: 'preType', target: 'postType', weight: 'weight' }),
   )
   g = addNode(g, node('metrics', 'net.metrics'))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'conn', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'conn',
+    targetHandle: 'dataset',
+  })
   g = addEdge(g, {
     source: 'find',
     sourceHandle: 'neurons',
@@ -126,10 +136,9 @@ describe('net.metrics — types', () => {
     for (const id of ['plotX', 'plotY']) {
       const param = params.find((p) => p.id === id)
       expect(param?.kind).toBe('column')
-      const schema = (param as { schemaFrom?: (i: unknown, p: unknown) => unknown }).schemaFrom?.(
-        inputs,
-        {},
-      )
+      const schema = (
+        param as { schemaFrom?: (i: unknown, p: unknown) => unknown }
+      ).schemaFrom?.(inputs, {})
       expect(columnNames(schema as never)).toContain('clustering')
     }
   })

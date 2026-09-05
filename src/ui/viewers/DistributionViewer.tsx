@@ -112,7 +112,13 @@ export function DistributionViewer({
   )
   const distributions = useMemo(
     () =>
-      summarise(grouped, { whiskers, maxGroups, sortByMedian, violin: showViolin, swarm: showSwarm }),
+      summarise(grouped, {
+        whiskers,
+        maxGroups,
+        sortByMedian,
+        violin: showViolin,
+        swarm: showSwarm,
+      }),
     [grouped, whiskers, maxGroups, sortByMedian, showViolin, showSwarm],
   )
 
@@ -226,9 +232,11 @@ export function DistributionViewer({
    * so a `600` label landed out in the margin with no gridline under it. `axisTicks` works in
    * transformed space and bounds itself to the domain at both ends.
    */
-  const ticks = axisTicks({ min: domainLo, max: domainHi }, kind, valueExtent > 240 ? 4 : 2).map(
-    (t) => inverse(kind, t),
-  )
+  const ticks = axisTicks(
+    { min: domainLo, max: domainHi },
+    kind,
+    valueExtent > 240 ? 4 : 2,
+  ).map((t) => inverse(kind, t))
   const boxThickness = Math.max(2, Math.min(MAX_BAR_THICKNESS, band - 14))
   const hovered = hover ? groups[hover.group] : undefined
 
@@ -302,12 +310,12 @@ export function DistributionViewer({
                         />
                       ))}
                       {/*
-                        * Three fills for three jobs. Alone, the box is the mark and takes the
-                        * colour. Over a violin it takes the surface, so it reads as a panel on
-                        * top of the shape. Under a swarm it takes **no fill at all** — the
-                        * marks inside the IQR are most of them, and a box painted over them is
-                        * a swarm you cannot see, which is what this drew first.
-                        */}
+                       * Three fills for three jobs. Alone, the box is the mark and takes the
+                       * colour. Over a violin it takes the surface, so it reads as a panel on
+                       * top of the shape. Under a swarm it takes **no fill at all** — the
+                       * marks inside the IQR are most of them, and a box painted over them is
+                       * a swarm you cannot see, which is what this drew first.
+                       */}
                       <rect
                         {...frame.rect(stats.q1, stats.q3, centre - half, centre + half)}
                         rx={2}
@@ -317,7 +325,12 @@ export function DistributionViewer({
                         strokeWidth={1}
                       />
                       <line
-                        {...frame.line(stats.median, centre - half, stats.median, centre + half)}
+                        {...frame.line(
+                          stats.median,
+                          centre - half,
+                          stats.median,
+                          centre + half,
+                        )}
                         stroke={style === 'box' ? ink.primary : color}
                         strokeWidth={1.5}
                       />
@@ -325,9 +338,9 @@ export function DistributionViewer({
                   )}
 
                   {/*
-                    * Last, so the marks sit on top of the box rather than under it — the same
-                    * order `sns.boxplot` then `sns.swarmplot` gives, and the emitters follow.
-                    */}
+                   * Last, so the marks sit on top of the box rather than under it — the same
+                   * order `sns.boxplot` then `sns.swarmplot` gives, and the emitters follow.
+                   */}
                   {showSwarm &&
                     swarmMarks(group, centre, half + 4, frame).map((mark, i) => (
                       <circle
@@ -441,7 +454,10 @@ export function DistributionViewer({
           {showSwarm && thinnedSwarm(groups) ? ' · swarm thinned' : ''}
         </span>
         {marks.size > 0 && (
-          <ClearSelection label={`${plural(marks.size, 'group')} selected`} onClear={marks.clear} />
+          <ClearSelection
+            label={`${plural(marks.size, 'group')} selected`}
+            onClear={marks.clear}
+          />
         )}
         <ViewerActions
           baseName={baseName ?? makeBaseName(undefined, 'distribution')}
@@ -501,7 +517,8 @@ function makeFrame(m: {
   span: number
   kind: ScaleKind
 }): Frame {
-  const { vertical, bandOrigin, leftPad, bottomPad, valueExtent, band, domainLo, span, kind } = m
+  const { vertical, bandOrigin, leftPad, bottomPad, valueExtent, band, domainLo, span, kind } =
+    m
 
   /*
    * The value axis runs left-to-right laid out as rows and **bottom-to-top** as columns, which

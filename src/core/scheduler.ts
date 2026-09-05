@@ -28,13 +28,7 @@ import {
 import { hashValue } from './hash'
 import type { InferenceResult } from './inference'
 import { hasErrors, inferGraph } from './inference'
-import type {
-  EvalContext,
-  LoopIteration,
-  LoopPlan,
-  NodeDefinition,
-  ParamValues,
-} from './node'
+import type { EvalContext, LoopIteration, LoopPlan, NodeDefinition, ParamValues } from './node'
 import { findParam, resolveColumn, resolveColumns } from './node'
 import { getNodeDef } from './registry'
 import { inputPorts, outputPorts } from './ports'
@@ -700,7 +694,8 @@ export class Scheduler {
     }
 
     if (node.disabled) {
-      for (const id of region) this.setState(id, { state: id === beginId ? 'disabled' : 'blocked' })
+      for (const id of region)
+        this.setState(id, { state: id === beginId ? 'disabled' : 'blocked' })
       return 'skipped'
     }
 
@@ -763,7 +758,8 @@ export class Scheduler {
       const empty: LoopIteration = { index: 0, count: 0, label: '', size: 0 }
       const begun = await this.executeNode(pass, beginId, empty)
       if (begun === 'aborted') return 'aborted'
-      if ((await this.runNodes(pass, inner, order, nested, empty)) === 'aborted') return 'aborted'
+      if ((await this.runNodes(pass, inner, order, nested, empty)) === 'aborted')
+        return 'aborted'
       if (this.cache.has(beginId)) {
         this.setState(beginId, { state: 'ok' })
         this.loopDone.add(beginId)

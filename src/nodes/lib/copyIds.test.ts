@@ -31,7 +31,10 @@ function table(ids: Array<number | string | null>): TableValue {
 }
 
 /** The ids of a table, joined the way the given params say. What every reader ends up doing. */
-function copied(ids: Array<number | string | null>, params: Record<string, unknown> = {}): string {
+function copied(
+  ids: Array<number | string | null>,
+  params: Record<string, unknown> = {},
+): string {
   const settings = copyIdsSettings(params)
   return joinIds(copyIds(table(ids), settings.dedupe), settings)
 }

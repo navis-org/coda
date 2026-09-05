@@ -66,7 +66,12 @@ function graphWith(params: Record<string, unknown>, upstream: 'neurons' | 'none'
       target: 'find',
       targetHandle: 'dataset',
     })
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'ed', targetHandle: 'in' })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'ed',
+      targetHandle: 'in',
+    })
   }
   return g as CodaGraph
 }

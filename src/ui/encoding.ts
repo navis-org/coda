@@ -282,7 +282,6 @@ const NULL_KEY = '—'
  */
 export const LEGEND_KEYS = 12
 
-
 /**
  * Read a cell as a number, or undefined when it is absent.
  *
@@ -394,7 +393,8 @@ export function resolveColor(
    * agreeing. An override that is not a colour is ignored — `literalColor` already owns what
    * counts as one, and a second spelling of that rule is a second answer to it.
    */
-  const overrideOf = (label: string): string | undefined => literalColor(spec.overrides?.[label])
+  const overrideOf = (label: string): string | undefined =>
+    literalColor(spec.overrides?.[label])
 
   /** The key a row belongs to before any folding: the cell as text, or the null marker. */
   const cellKey = (rowIndex: number): string => {

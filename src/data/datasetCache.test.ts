@@ -25,14 +25,7 @@ import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import {
-  cacheGet,
-  cacheKeys,
-  cachePeek,
-  cacheSet,
-  onCacheChange,
-  resetCache,
-} from './cache'
+import { cacheGet, cacheKeys, cachePeek, cacheSet, onCacheChange, resetCache } from './cache'
 import {
   NEURON_INDEX_MAX_AGE_MS,
   datasetCacheKey,
@@ -168,7 +161,10 @@ describe('peeking', () => {
     const backfilled = await new Promise((resolve) => {
       const open = indexedDB.open('coda')
       open.onsuccess = () => {
-        const req = open.result.transaction('meta', 'readonly').objectStore('meta').get('legacy')
+        const req = open.result
+          .transaction('meta', 'readonly')
+          .objectStore('meta')
+          .get('legacy')
         req.onsuccess = () => resolve(req.result)
       }
     })

@@ -613,7 +613,6 @@ describe('excluding a column from the free-text haystack', () => {
     expect(hits('/^checked$', ['community'])).toEqual([])
   })
 
-
   it('still answers a field term naming the column', () => {
     /*
      * The exclusion is the *free-text* half only. Asking for a column by name is an explicit

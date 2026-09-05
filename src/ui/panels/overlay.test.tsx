@@ -369,12 +369,16 @@ describe('the styling sidebar', () => {
     const palette = () => within(dialog).getByLabelText('Palette') as HTMLSelectElement
     fireEvent.change(palette(), { target: { value: 'viridis' } })
 
-    fireEvent.change(within(dialog).getByLabelText('Colour scale'), { target: { value: 'diverging' } })
+    fireEvent.change(within(dialog).getByLabelText('Colour scale'), {
+      target: { value: 'diverging' },
+    })
     // A different param now: the diverging list, at its own default.
     expect(palette().value).toBe('coda')
     expect([...palette().options].map((o) => o.value)).toContain('RdBu')
 
-    fireEvent.change(within(dialog).getByLabelText('Colour scale'), { target: { value: 'sequential' } })
+    fireEvent.change(within(dialog).getByLabelText('Colour scale'), {
+      target: { value: 'sequential' },
+    })
     expect(palette().value).toBe('viridis')
     // Restyling never invalidates the result.
     expect(useGraphStore.getState().nodeInfo('view').state).toBe('ok')

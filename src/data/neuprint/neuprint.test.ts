@@ -745,7 +745,12 @@ describe('query building', () => {
       "MATCH (p:Neuron)-[w:ConnectsTo]->(n:Neuron)\nWHERE n.type IN ['LC4']\nRETURN n.type, sum(w.weight)",
     )
     expect(
-      groupTotalsCypher({ datasetId: 'x', types: ['LC4'], side: 'outputs', basis: 'connected' }),
+      groupTotalsCypher({
+        datasetId: 'x',
+        types: ['LC4'],
+        side: 'outputs',
+        basis: 'connected',
+      }),
     ).toContain('MATCH (n:Neuron)-[w:ConnectsTo]->(p:Neuron)')
   })
 
@@ -771,7 +776,9 @@ describe('query building', () => {
    */
   it('de-duplicates presynaptic sites for `sites` and not for `links`', () => {
     const base = { datasetId: 'x', neuronIds: ['1'] }
-    expect(synapsesCypher({ ...base, unit: SYNAPSE_UNITS.sites })).toContain('WITH DISTINCT n, s')
+    expect(synapsesCypher({ ...base, unit: SYNAPSE_UNITS.sites })).toContain(
+      'WITH DISTINCT n, s',
+    )
     expect(synapsesCypher({ ...base, unit: SYNAPSE_UNITS.links })).not.toContain('DISTINCT')
   })
 
@@ -2177,8 +2184,12 @@ describe('synapseLinksCypher', () => {
     // *synapses*, and so which end the returned coordinate belongs to. Dropping either returns a
     // table that still looks right.
     const cypher = synapseLinksCypher({ datasetId: 'd', neuronIds: ['1'] })
-    expect(cypher).toContain('(n)-[:Contains]->(nss:SynapseSet)-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m)')
-    expect(cypher).toContain('(nss)-[:Contains]->(ns:Synapse)-[:SynapsesTo]->(ms:Synapse)<-[:Contains]-(mss)')
+    expect(cypher).toContain(
+      '(n)-[:Contains]->(nss:SynapseSet)-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m)',
+    )
+    expect(cypher).toContain(
+      '(nss)-[:Contains]->(ns:Synapse)-[:SynapsesTo]->(ms:Synapse)<-[:Contains]-(mss)',
+    )
   })
 
   it('asks each direction separately so the partner is never the wrong end', () => {

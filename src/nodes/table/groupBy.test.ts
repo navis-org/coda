@@ -110,18 +110,16 @@ describe('the node', () => {
     const p = { by: ['type'], agg: 'count', value: ['pre', 'post'] }
     expect(columnNames(schemaOf(inferred(p)))).toEqual(['type', 'n'])
     expect(columnNames(run(p).schema)).toEqual(['type', 'n'])
-    expect(def.validate?.(makeInferContext(def, params(p) as never, { in: T.table(CONN) }))).toEqual(
-      [],
-    )
+    expect(
+      def.validate?.(makeInferContext(def, params(p) as never, { in: T.table(CONN) })),
+    ).toEqual([])
   })
 
   it('drops a column the current schema lacks rather than putting the name in the key', () => {
     // Through `ctx.columns`, which is what keeps the provenance key and the values read in step.
-    expect(columnNames(run({ by: ['type'], agg: 'sum', value: ['gone', 'pre'] }).schema)).toEqual([
-      'type',
-      'n',
-      'sum_pre',
-    ])
+    expect(
+      columnNames(run({ by: ['type'], agg: 'sum', value: ['gone', 'pre'] }).schema),
+    ).toEqual(['type', 'n', 'sum_pre'])
   })
 
   it('warns about an unset value picker, naming the aggregation', () => {

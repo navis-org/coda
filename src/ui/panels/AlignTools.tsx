@@ -49,7 +49,10 @@ interface Tool {
   label: string
   hint: string
   icon: React.ReactNode
-  run: (nodes: Parameters<typeof alignNodes>[0], measured: ReturnType<typeof measureCardSizes>) => Move[]
+  run: (
+    nodes: Parameters<typeof alignNodes>[0],
+    measured: ReturnType<typeof measureCardSizes>,
+  ) => Move[]
   /** How many cards it takes to mean anything. */
   min: number
 }

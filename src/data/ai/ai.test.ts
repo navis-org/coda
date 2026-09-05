@@ -659,9 +659,9 @@ describe('a cloud model, served through the local server', () => {
    */
   const ask = { ...ASK, model: 'gemma4:31b-cloud', schema: { type: 'object' } }
   const systemOf = (call: StubbedCall): string =>
-    ((call.body as { messages: Array<{ role: string; content: string }> }).messages.find(
+    (call.body as { messages: Array<{ role: string; content: string }> }).messages.find(
       (m) => m.role === 'system',
-    )?.content ?? '')
+    )?.content ?? ''
 
   it('describes the schema in the prompt, since the field will be ignored', async () => {
     respond({ message: { content: '{}' } })
@@ -757,7 +757,10 @@ describe('a cloud model, served through the local server', () => {
      * Measured — `qwen3.5:397b-cloud` answers 402 on a free account while three others answer
      * normally, so "pick another" is real advice rather than a shrug.
      */
-    respond({ error: 'this model requires a subscription, upgrade at https://ollama.com/upgrade' }, 402)
+    respond(
+      { error: 'this model requires a subscription, upgrade at https://ollama.com/upgrade' },
+      402,
+    )
     const error = await ollama.complete({ ...ask, model: 'qwen3.5:397b-cloud' }).catch((e) => e)
     expect((error as AiError).status).toBe(402)
     expect((error as AiError).message).toMatch(/not included in this ollama\.com account/)

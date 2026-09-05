@@ -57,9 +57,7 @@ function predicateFor(term: FieldTerm, schema: TableSchema | undefined): string 
     // `tolower` on both sides only where the term asks for it; a case-sensitive term compares
     // the characters as they are, which is what Neo4j's `=` does on the same clause.
     const value = rStr(term.ignoreCase ? term.value.toLowerCase() : term.value)
-    const compared = term.ignoreCase
-      ? `tolower(as.character(${c}))`
-      : `as.character(${c})`
+    const compared = term.ignoreCase ? `tolower(as.character(${c}))` : `as.character(${c})`
     predicate =
       term.op === 'ne'
         ? `(is.na(${c}) | ${compared} != ${value})`
@@ -83,4 +81,3 @@ export function filterPredicates(
 ): string[] {
   return terms.map((term) => predicateFor(term, schema))
 }
-

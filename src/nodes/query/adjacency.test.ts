@@ -54,10 +54,25 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   // for why the matching column names do not make that unnecessary.
   g = addNode(g, node('net', 'net.build', { target: 'target', weight: 'weight' }))
   for (const id of ['find', 'all', 'adj']) {
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: id, targetHandle: 'dataset' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: id,
+      targetHandle: 'dataset',
+    })
   }
-  g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'adj', targetHandle: 'sources' })
-  g = addEdge(g, { source: 'all', sourceHandle: 'neurons', target: 'adj', targetHandle: 'targets' })
+  g = addEdge(g, {
+    source: 'find',
+    sourceHandle: 'neurons',
+    target: 'adj',
+    targetHandle: 'sources',
+  })
+  g = addEdge(g, {
+    source: 'all',
+    sourceHandle: 'neurons',
+    target: 'adj',
+    targetHandle: 'targets',
+  })
   g = addEdge(g, { source: 'adj', sourceHandle: 'links', target: 'net', targetHandle: 'edges' })
   return g
 }
@@ -75,7 +90,9 @@ describe('neuron.adjacency — ports', () => {
     // A matrix has two axes and a value, whatever the data — so unlike the wide half this shape
     // is a constant, and a picker downstream fills the moment the wire is drawn.
     const bare = addNode(emptyGraph('bare'), node('adj', 'neuron.adjacency'))
-    expect(schemaOf(inferGraph(bare).nodes['adj']?.outputs['links'])).toEqual(matrixLinksSchema())
+    expect(schemaOf(inferGraph(bare).nodes['adj']?.outputs['links'])).toEqual(
+      matrixLinksSchema(),
+    )
   })
 
   it('names its columns for Build Network, which still does not resolve two of them', () => {
@@ -95,7 +112,12 @@ describe('neuron.adjacency — ports', () => {
     let g = emptyGraph('defaults')
     g = addNode(g, node('adj', 'neuron.adjacency'))
     g = addNode(g, node('net', 'net.build'))
-    g = addEdge(g, { source: 'adj', sourceHandle: 'links', target: 'net', targetHandle: 'edges' })
+    g = addEdge(g, {
+      source: 'adj',
+      sourceHandle: 'links',
+      target: 'net',
+      targetHandle: 'edges',
+    })
     const def = requireNodeDef('net.build')
     const params = defaultParams(def)
     const ctx = makeInferContext(def, params, inferGraph(g).nodes['net']!.inputs)

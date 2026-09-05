@@ -186,9 +186,7 @@ export function GroupLayer({ measured, onContextMenu }: GroupLayerProps) {
                 >
                   ▾
                 </button>
-                {editing && (
-                  <GroupTitleInput group={group} />
-                )}
+                {editing && <GroupTitleInput group={group} />}
                 {!editing && group.title && (
                   <button
                     type="button"

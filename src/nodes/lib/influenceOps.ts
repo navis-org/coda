@@ -127,7 +127,8 @@ export function influenceParamsFrom(params: ParamValues): InfluenceParams {
   return {
     perQuery: params.perQuery === true,
     direction: params.direction === 'outputs' ? 'outputs' : 'inputs',
-    denominator: denominator === 'connected' || denominator === 'all' ? denominator : 'traversal',
+    denominator:
+      denominator === 'connected' || denominator === 'all' ? denominator : 'traversal',
     maxHops: Math.max(1, Math.floor(Number(params.maxHops ?? 4))),
     minWeight: Math.max(1, Math.floor(Number(params.minWeight ?? 5))),
     gain: Number(params.gain ?? 0.5),
@@ -609,8 +610,7 @@ export function splitHops(
   if (!forwardAvailable || sourceCount === 0 || targetCount === 0) {
     return { forward: 0, backward: budget }
   }
-  const forward =
-    sourceCount <= targetCount ? Math.ceil(budget / 2) : Math.floor(budget / 2)
+  const forward = sourceCount <= targetCount ? Math.ceil(budget / 2) : Math.floor(budget / 2)
   return { forward, backward: budget - forward }
 }
 
@@ -767,7 +767,7 @@ export function mergeProvenance(halves: readonly PropagateResult[]): {
 /**
  * A ceiling on everything the unwalked hops could have added, or null when there is none.
  *
-   * Travelling `inputs` a post's input fractions sum to at most one, so no hop can carry more
+ * Travelling `inputs` a post's input fractions sum to at most one, so no hop can carry more
  * mass than the one before it and the tail is bounded by `m_H g / (1 - g)`. Travelling
  * `outputs` there is no such bound — a neuron's outgoing input-fractions sum to whatever they
  * sum to — so this is null and the caller has to say "unknown" rather than a number.

@@ -432,7 +432,9 @@ describe.skipIf(!TOKEN)('CAVE, live — the skeleton service', () => {
     const version = (await materializationsFor('minnie65_public'))[0]
     const dataset = `minnie65_public:${version}`
     const ids = (
-      (await cave.findNeurons({ datasetId: dataset, limit: 3 })).data[ID_COLUMN_NAME] as string[]
+      (await cave.findNeurons({ datasetId: dataset, limit: 3 })).data[
+        ID_COLUMN_NAME
+      ] as string[]
     ).slice(0, 2)
 
     // Every one of them, which is what `automatic` requires before it takes this route: a scene

@@ -250,7 +250,9 @@ describe('Normalize', () => {
     ])
 
     const { network, table } = await run({ normalize: true, maxHops: 3, minWeight: 1 })
-    expect(network.edges.schema.columns.map((c) => c.name)).toEqual(columns({ normalize: true }))
+    expect(network.edges.schema.columns.map((c) => c.name)).toEqual(
+      columns({ normalize: true }),
+    )
     expect(table.schema.columns.map((c) => c.name)).toContain('bottleneckNorm')
   })
 
@@ -339,7 +341,9 @@ describe('Normalize', () => {
       })
       expect(spy.mock.calls.length).toBeGreaterThan(0)
       expect(spy.mock.calls.every((call) => (call[0].types ?? []).length === 0)).toBe(true)
-      expect(spy.mock.calls.flatMap((call) => call[0].neuronIds ?? []).length).toBeGreaterThan(0)
+      expect(spy.mock.calls.flatMap((call) => call[0].neuronIds ?? []).length).toBeGreaterThan(
+        0,
+      )
       const norms = getColumn(network.edges, 'weightNorm').map(Number)
       expect(norms.length).toBeGreaterThan(0)
       expect(norms.every((n) => n > 0 && Number.isFinite(n))).toBe(true)

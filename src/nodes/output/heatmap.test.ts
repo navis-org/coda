@@ -36,7 +36,10 @@ function square(): MatrixValue {
   )
 }
 
-function ctx(matrix: MatrixValue, params: Record<string, unknown>): EvalContext & { warnings: string[] } {
+function ctx(
+  matrix: MatrixValue,
+  params: Record<string, unknown>,
+): EvalContext & { warnings: string[] } {
   const warnings: string[] = []
   return {
     params: { ...defaultParams(def()), ...params } as EvalContext['params'],
@@ -85,7 +88,14 @@ describe('what reaches the provenance key', () => {
     const none = ids(base)
     expect(none).toContain('sortBy')
     expect(none).toContain('palette')
-    for (const id of ['sortAxis', 'sortFollow', 'sortReverse', 'sortKey', 'clusterMethod', 'divergingPalette']) {
+    for (const id of [
+      'sortAxis',
+      'sortFollow',
+      'sortReverse',
+      'sortKey',
+      'clusterMethod',
+      'divergingPalette',
+    ]) {
       expect(none, id).not.toContain(id)
     }
     const clustered = ids({ ...base, scale: 'diverging', sortBy: 'cluster' })
@@ -108,7 +118,9 @@ describe('what reaches the provenance key', () => {
       'sortReverse',
     ])
     // Neither colour end nor the log switch is offered where it would not mean anything.
-    const diverging = configurableParams(def(), { ...base, scale: 'diverging' }).map((p) => p.id)
+    const diverging = configurableParams(def(), { ...base, scale: 'diverging' }).map(
+      (p) => p.id,
+    )
     expect(diverging).not.toContain('colorMin')
     expect(diverging).not.toContain('logColor')
     expect(diverging).toContain('colorMax')
@@ -142,7 +154,11 @@ describe('the filter', () => {
      * they are LC10 3, LC4 2, DNp02 0 — a different order, and the one somebody who filtered to
      * that column asked for.
      */
-    const { out } = await run(square(), { colFilter: 'DNp02', sortBy: 'total', sortFollow: false })
+    const { out } = await run(square(), {
+      colFilter: 'DNp02',
+      sortBy: 'total',
+      sortFollow: false,
+    })
     expect(out.rowLabels).toEqual(['LC10', 'LC4', 'DNp02'])
   })
 
@@ -199,7 +215,12 @@ describe('evaluate', () => {
     })
     const { out } = await run(m, { sortBy: 'cluster', sortAxis: 'both' })
     expect(requests.map((r) => r.axis)).toEqual(['rows', 'columns'])
-    expect(requests[0]).toMatchObject({ method: 'average', metric: 'euclidean', rows: 3, cols: 3 })
+    expect(requests[0]).toMatchObject({
+      method: 'average',
+      metric: 'euclidean',
+      rows: 3,
+      cols: 3,
+    })
     for (const request of requests) {
       // The buffer must not be the upstream value's own: `callPython` transfers it.
       expect(request.values).not.toBe(m.values)

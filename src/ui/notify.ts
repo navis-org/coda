@@ -192,7 +192,8 @@ export function runAnnouncement(
 
   const name = graphName?.trim()
   const where = name ? `${name} · ` : ''
-  const passes = summary.iterations > 0 ? ` · ${plural(summary.iterations, 'pass', 'passes')}` : ''
+  const passes =
+    summary.iterations > 0 ? ` · ${plural(summary.iterations, 'pass', 'passes')}` : ''
   const took = ` · ${formatDuration(summary.durationMs)}`
 
   if (summary.failed.length > 0) {

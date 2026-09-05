@@ -858,7 +858,8 @@ export function everythingGraph(): CodaGraph {
       col: 4,
       row: 4,
       params: {
-        sheet: 'https://docs.google.com/spreadsheets/d/1s0Pl9uTJ7Rl0Q1cQeXsp3s5kCsPRk9dU8jZ6yQnB4Vw/edit#gid=1874360847',
+        sheet:
+          'https://docs.google.com/spreadsheets/d/1s0Pl9uTJ7Rl0Q1cQeXsp3s5kCsPRk9dU8jZ6yQnB4Vw/edit#gid=1874360847',
         idColumn: 'root_id',
         columns: 'cell_type, side',
       },
@@ -1429,7 +1430,12 @@ export function caveGraph(): CodaGraph {
         valueColumn: 'cell_type',
       },
     },
-    { id: 'filter', type: 'core.filterTable', col: 2, params: { column: 'type', op: 'notEmpty' } },
+    {
+      id: 'filter',
+      type: 'core.filterTable',
+      col: 2,
+      params: { column: 'type', op: 'notEmpty' },
+    },
     {
       id: 'repair',
       type: 'cave.updateRootIds',

@@ -166,10 +166,7 @@ export function parseSheetLocation(input: string): SheetLocation {
   }
   // The fragment first: a link copied out of the address bar carries the tab there, and the new
   // Sheets UI writes it into the query as well. Either is the same number.
-  const gid =
-    /[#&?]gid=(\d+)/.exec(url.hash)?.[1] ??
-    url.searchParams.get('gid') ??
-    undefined
+  const gid = /[#&?]gid=(\d+)/.exec(url.hash)?.[1] ?? url.searchParams.get('gid') ?? undefined
   return { documentId, ...(gid ? { gid } : {}) }
 }
 

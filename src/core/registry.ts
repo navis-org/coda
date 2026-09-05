@@ -25,7 +25,7 @@ export function registerNode<P extends ParamValues>(def: NodeDefinition<P>): Nod
    */
   if ((def.loop === 'begin') !== (def.loopPlan !== undefined)) {
     throw new Error(
-      `"${def.type}" declares ${def.loop === 'begin' ? '`loop: \'begin\'` without `loopPlan`' : '`loopPlan` without `loop: \'begin\'`'}. ` +
+      `"${def.type}" declares ${def.loop === 'begin' ? "`loop: 'begin'` without `loopPlan`" : "`loopPlan` without `loop: 'begin'`"}. ` +
         'A loop needs both: the flag is what derives its region, the plan is what says how many passes to make.',
     )
   }
@@ -65,7 +65,9 @@ function checkPortGroups(def: NodeDefinition): void {
         )
       }
       if (param.kind !== 'int') {
-        throw new Error(`${where} names a "${param.kind}" param; the repeat count must be \`int\`.`)
+        throw new Error(
+          `${where} names a "${param.kind}" param; the repeat count must be \`int\`.`,
+        )
       }
       /*
        * Both of these silently break invariant 4. `normalizeParams` drops presentational params
@@ -92,7 +94,9 @@ function checkPortGroups(def: NodeDefinition): void {
        * spinner would run to infinity while `allInputPorts` expanded to one.
        */
       if (typeof param.min !== 'number' || typeof param.max !== 'number') {
-        throw new Error(`${where} names a param with no \`min\`/\`max\`; that pair is the group's arity.`)
+        throw new Error(
+          `${where} names a param with no \`min\`/\`max\`; that pair is the group's arity.`,
+        )
       }
       if (param.min < 1) {
         throw new Error(`${where} has min ${param.min}; a group repeats at least once.`)

@@ -113,7 +113,9 @@ export function untranslatableDatasetNodes(
 ): GraphNode[] {
   return graph.nodes.filter((node) => {
     const family = familyForNodeType(node.type)
-    return family !== undefined && !family.synthetic && family.notebook?.[language] === undefined
+    return (
+      family !== undefined && !family.synthetic && family.notebook?.[language] === undefined
+    )
   })
 }
 

@@ -218,7 +218,11 @@ export function drawScatter(
   for (const tick of spec.yTicks) {
     const y = projectTickY(spec, tick)
     if (y < plot.y - 1 || y > plot.y + plot.height + 1) continue
-    context.fillText(formatCompact(inverse(spec.yScale, tick)), plot.x - (options.compact ? 3 : 5), y)
+    context.fillText(
+      formatCompact(inverse(spec.yScale, tick)),
+      plot.x - (options.compact ? 3 : 5),
+      y,
+    )
   }
 
   // Titles only where there is room below the ticks for them; the card's caption names the

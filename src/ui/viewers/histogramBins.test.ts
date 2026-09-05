@@ -82,9 +82,14 @@ describe('buildHistogram', () => {
   it('drops values at or below zero under a log axis, and counts them', () => {
     // Nothing about flipping a switch suggests rows would leave the picture, which is why the
     // caption reports it.
-    const { used, dropped, lo } = buildHistogram(tableOf([0, -3, 1, 10, 100]), 'pre', undefined, {
-      log: true,
-    })
+    const { used, dropped, lo } = buildHistogram(
+      tableOf([0, -3, 1, 10, 100]),
+      'pre',
+      undefined,
+      {
+        log: true,
+      },
+    )
     expect(used).toBe(3)
     expect(dropped).toBe(2)
     expect(lo).toBeCloseTo(1)
@@ -146,7 +151,15 @@ describe('buildHistogram', () => {
 
   it('folds a ninth series into one achromatic bucket rather than reusing a hue', () => {
     const types = Array.from({ length: 12 }, (_, i) => `t${i}`)
-    const { series } = buildHistogram(tableOf(types.map((_, i) => i + 1), types), 'pre', 'type', {})
+    const { series } = buildHistogram(
+      tableOf(
+        types.map((_, i) => i + 1),
+        types,
+      ),
+      'pre',
+      'type',
+      {},
+    )
     expect(series).toHaveLength(9)
     expect(series[8]).toBe('Other')
   })

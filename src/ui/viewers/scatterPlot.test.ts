@@ -292,7 +292,6 @@ describe('hit testing', () => {
   })
 })
 
-
 describe('scales', () => {
   it('round-trips through the transform', () => {
     expect(inverse('log', forward('log', 1000))).toBeCloseTo(1000)

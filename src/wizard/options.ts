@@ -396,7 +396,8 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
   {
     id: 'heatmap',
     label: 'A heatmap',
-    blurb: 'The matrix drawn as cells, one colour ramp. Expand for additional options (palette, filters, sorting, etc).',
+    blurb:
+      'The matrix drawn as cells, one colour ramp. Expand for additional options (palette, filters, sorting, etc).',
     hint: {
       text: 'Sequential colour, because these values have a zero and only go up. Turn values on to read the numbers off the cells.',
     },

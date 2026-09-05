@@ -52,9 +52,7 @@ function maskFor(frame: string, term: FieldTerm, schema: TableSchema | undefined
     // Lowered on both sides only where the term asks for it; a case-sensitive term compares the
     // characters as they are, which is what Neo4j's `=` does on the same clause.
     const value = pyStr(term.ignoreCase ? term.value.toLowerCase() : term.value)
-    const compared = term.ignoreCase
-      ? `${c}.astype(str).str.lower()`
-      : `${c}.astype(str)`
+    const compared = term.ignoreCase ? `${c}.astype(str).str.lower()` : `${c}.astype(str)`
     mask =
       term.op === 'ne'
         ? `(${c}.isna() | (${compared} != ${value}))`
@@ -79,4 +77,3 @@ export function filterMasks(
 ): string[] {
   return terms.map((term) => maskFor(frame, term, schema))
 }
-

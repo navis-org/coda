@@ -226,9 +226,10 @@ async function resolve(
 
   // The versions endpoint sits above the datastack in the path — one list per deployment.
   const server = base.slice(0, base.indexOf('/skeletoncache/'))
-  const versions = await caveGet<number[]>(`${server}/skeletoncache/api/versions`, options).catch(
-    () => [] as number[],
-  )
+  const versions = await caveGet<number[]>(
+    `${server}/skeletoncache/api/versions`,
+    options,
+  ).catch(() => [] as number[])
   const version = chooseVersion(versions)
   if (version === undefined) return undefined
 

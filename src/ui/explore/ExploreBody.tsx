@@ -331,9 +331,7 @@ export function ExploreBody({
           className="explore__input"
           type="text"
           value={text}
-          placeholder={
-            compact ? 'Search neurons…' : `Search: ${SEARCH_PLACEHOLDER}`
-          }
+          placeholder={compact ? 'Search neurons…' : `Search: ${SEARCH_PLACEHOLDER}`}
           title={SEARCH_SYNTAX_HELP}
           aria-label="Search neurons"
           aria-describedby={listId}

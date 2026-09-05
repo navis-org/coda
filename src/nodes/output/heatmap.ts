@@ -23,15 +23,8 @@ import type { EvalContext, ParamValues } from '../../core/node'
 import type { MatrixValue } from '../../core/values'
 import { isMatrixValue } from '../../core/values'
 import { runClusterOrder } from '../../pyodide/linkage'
-import {
-  DIVERGING_PALETTE_OPTIONS,
-  SEQUENTIAL_PALETTE_OPTIONS,
-} from '../lib/heatmapParams'
-import {
-  LINKAGE_METHODS,
-  checkClusterInput,
-  warnUnrecordedCells,
-} from '../lib/linkageOps'
+import { DIVERGING_PALETTE_OPTIONS, SEQUENTIAL_PALETTE_OPTIONS } from '../lib/heatmapParams'
+import { LINKAGE_METHODS, checkClusterInput, warnUnrecordedCells } from '../lib/linkageOps'
 import type { MatrixAxis, MatrixOrderOptions } from '../lib/matrixShape'
 import {
   CLUSTER_METRIC_OPTIONS,
@@ -336,7 +329,10 @@ export const heatmapNode = registerNode({
  * says "Matrix is empty"; leaving the axis whole there would show a full matrix under a filter
  * that claims to have narrowed it.
  */
-function filterMatrix(ctx: Pick<EvalContext, 'warn' | 'params'>, matrix: MatrixValue): MatrixValue {
+function filterMatrix(
+  ctx: Pick<EvalContext, 'warn' | 'params'>,
+  matrix: MatrixValue,
+): MatrixValue {
   const filters = readFilterOptions(ctx.params)
   const kept: Partial<Record<MatrixAxis, Int32Array>> = {}
 

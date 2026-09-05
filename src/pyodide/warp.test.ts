@@ -61,7 +61,11 @@ describe('warpPoints', () => {
   it('still refuses a result of a different length', async () => {
     mockedCall.mockImplementation(async (call: PyCall) => {
       if (call.fn === 'coda_warp_fit') {
-        return { weights: new Float32Array(PAIRS.count * 3), affine: new Float32Array(12), fitMs: 1 }
+        return {
+          weights: new Float32Array(PAIRS.count * 3),
+          affine: new Float32Array(12),
+          fitMs: 1,
+        }
       }
       const request = call.args[0] as { points: Float32Array }
       detach(request.points)

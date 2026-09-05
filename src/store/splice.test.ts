@@ -47,7 +47,9 @@ const links = () =>
 describe('spliceNode', () => {
   it('rewires and moves in one go', () => {
     const { find, table, loose, edgeId } = setup()
-    useGraphStore.getState().spliceNode(loose, edgeId, [{ id: loose, position: { x: 200, y: 0 } }])
+    useGraphStore
+      .getState()
+      .spliceNode(loose, edgeId, [{ id: loose, position: { x: 200, y: 0 } }])
 
     expect(links()).toContain(`${find}:neurons→${loose}:in`)
     expect(links()).toContain(`${loose}:out→${table}:in`)
@@ -65,7 +67,9 @@ describe('spliceNode', () => {
     // Mid-drag frames, as `onNodesChange` emits them: no history, same gesture tag.
     useGraphStore.getState().moveNodes([{ id: loose, position: { x: 100, y: 100 } }], false)
     useGraphStore.getState().moveNodes([{ id: loose, position: { x: 200, y: 10 } }], false)
-    useGraphStore.getState().spliceNode(loose, edgeId, [{ id: loose, position: { x: 200, y: 0 } }])
+    useGraphStore
+      .getState()
+      .spliceNode(loose, edgeId, [{ id: loose, position: { x: 200, y: 0 } }])
 
     useGraphStore.getState().undo()
     expect(links()).toEqual(before)

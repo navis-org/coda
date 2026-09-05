@@ -23,7 +23,14 @@ import { describe, expect, it } from 'vitest'
 import { column, tableSchema } from '../core/types'
 import { tableFromRows } from '../core/values'
 import type { FilterRow } from './filterRows'
-import { arityOf, decodeRows, encodeRows, resolveRows, rowOpsForDType, toTerm } from './filterRows'
+import {
+  arityOf,
+  decodeRows,
+  encodeRows,
+  resolveRows,
+  rowOpsForDType,
+  toTerm,
+} from './filterRows'
 import { fieldTermsMatch, prepareFieldTerms } from './terms'
 
 const SCHEMA = tableSchema(
@@ -130,9 +137,9 @@ describe('storage', () => {
 
   it('drops an unreadable entry rather than throwing', () => {
     const good = encodeRows([row('type', 'is', 'LC4')])[0]!
-    expect(decodeRows(['not json', '{"f":"type"}', '{"f":"t","op":"nope","v":[]}', good])).toEqual(
-      [{ field: 'type', op: 'is', values: ['LC4'] }],
-    )
+    expect(
+      decodeRows(['not json', '{"f":"type"}', '{"f":"t","op":"nope","v":[]}', good]),
+    ).toEqual([{ field: 'type', op: 'is', values: ['LC4'] }])
     expect(decodeRows('not even an array')).toEqual([])
   })
 

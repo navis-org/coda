@@ -256,7 +256,10 @@ export function collapsedView(
     if (!fromBox && !toBox) continue
     if (fromBox && fromBox === toBox) continue
 
-    const from = { node: fromBox ?? edge.source, handle: fromBox ? COLLAPSED_OUT : edge.sourceHandle }
+    const from = {
+      node: fromBox ?? edge.source,
+      handle: fromBox ? COLLAPSED_OUT : edge.sourceHandle,
+    }
     const to = { node: toBox ?? edge.target, handle: toBox ? COLLAPSED_IN : edge.targetHandle }
     const id = collapsedEdgeId(from, to)
     const origin = { nodeId: edge.source, portId: edge.sourceHandle }

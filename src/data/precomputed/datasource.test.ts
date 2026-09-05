@@ -47,7 +47,11 @@ describe('probing a precomputed directory', () => {
   it('follows a segmentation volume down to the mesh directory it names', async () => {
     const base = 'https://storage.googleapis.com/bucket/seg'
     serve({
-      [`${base}/info`]: volumeInfo({ mesh: 'meshes', skeletons: 'skeletons', segmentProperties: 'props' }),
+      [`${base}/info`]: volumeInfo({
+        mesh: 'meshes',
+        skeletons: 'skeletons',
+        segmentProperties: 'props',
+      }),
       [`${base}/meshes/info`]: DRACO_INFO,
     })
 
@@ -56,7 +60,9 @@ describe('probing a precomputed directory', () => {
     expect(probe.ok && probe.source.meshUrl).toBe(`${base}/meshes`)
     expect(probe.ok && probe.source.skeletonUrl).toBe(`${base}/skeletons`)
     expect(probe.ok && probe.source.segmentPropertiesUrl).toBe(`${base}/props`)
-    expect(probe.ok && probe.source.summary).toBe('segmentation · multi-resolution meshes · skeletons')
+    expect(probe.ok && probe.source.summary).toBe(
+      'segmentation · multi-resolution meshes · skeletons',
+    )
   })
 
   it('distinguishes flat meshes from multi-resolution ones', async () => {
@@ -107,7 +113,11 @@ describe('probing a precomputed directory', () => {
      */
     const base = 'https://storage.googleapis.com/flat/seg'
     serve({
-      [`${base}/info`]: volumeInfo({ typeless: true, mesh: 'mesh_mip_1_err_40', skeletons: 'skeletons_mip_1' }),
+      [`${base}/info`]: volumeInfo({
+        typeless: true,
+        mesh: 'mesh_mip_1_err_40',
+        skeletons: 'skeletons_mip_1',
+      }),
       [`${base}/mesh_mip_1_err_40/info`]: DRACO_INFO,
       [`${base}/skeletons_mip_1/info`]: { '@type': 'neuroglancer_skeletons' },
     })
@@ -115,7 +125,9 @@ describe('probing a precomputed directory', () => {
     expect(probe.ok && probe.source.kind).toBe('volume')
     expect(probe.ok && probe.source.mesh?.format).toBe('multilod-draco')
     expect(probe.ok && probe.source.skeletonUrl).toBe(`${base}/skeletons_mip_1`)
-    expect(probe.ok && probe.source.summary).toBe('segmentation · multi-resolution meshes · skeletons')
+    expect(probe.ok && probe.source.summary).toBe(
+      'segmentation · multi-resolution meshes · skeletons',
+    )
   })
 
   it('opens a named mesh directory that publishes no info of its own', async () => {
@@ -177,11 +189,17 @@ describe('probing a precomputed directory', () => {
   it('names a kind it knows, and the raw @type for one it does not', async () => {
     // The two fallbacks and the order between them: a recognised kind prints its own name, and
     // only a format this build has never met prints the string out of the file.
-    serve({ [`${'https://storage.googleapis.com/ann/x'}/info`]: { '@type': 'neuroglancer_annotations_v1' } })
+    serve({
+      [`${'https://storage.googleapis.com/ann/x'}/info`]: {
+        '@type': 'neuroglancer_annotations_v1',
+      },
+    })
     const annotations = await probePrecomputed('https://storage.googleapis.com/ann/x')
     expect(annotations.ok && annotations.source.summary).toBe('annotations')
 
-    serve({ [`${'https://storage.googleapis.com/odd/x'}/info`]: { '@type': 'neuroglancer_mesh_v9' } })
+    serve({
+      [`${'https://storage.googleapis.com/odd/x'}/info`]: { '@type': 'neuroglancer_mesh_v9' },
+    })
     const odd = await probePrecomputed('https://storage.googleapis.com/odd/x')
     expect(odd.ok && odd.source.kind).toBe('unknown')
     expect(odd.ok && odd.source.summary).toBe('neuroglancer_mesh_v9')
@@ -226,7 +244,10 @@ describe('PrecomputedSource', () => {
     // Invariant 8: a male-CNS or FlyWire root id is eighteen digits, and an `i64` column would
     // hold a rounded copy — a different neuron, with nothing to say so.
     const source = sourceFor('gs://bucket/seg')
-    expect(source.schemas.morphology.columns[0]).toMatchObject({ name: 'neuronId', dtype: 'str' })
+    expect(source.schemas.morphology.columns[0]).toMatchObject({
+      name: 'neuronId',
+      dtype: 'str',
+    })
   })
 
   it('refuses nothing before its probe has landed', async () => {
@@ -306,7 +327,9 @@ describe('PrecomputedSource', () => {
     const base = 'https://storage.googleapis.com/plain/seg'
     serve({ [`${base}/info`]: { '@type': 'neuroglancer_legacy_mesh' } })
     const source = sourceFor('gs://plain/seg')
-    await expect(source.findNeurons({ datasetId: source.datasetId })).rejects.toThrow(/Input IDs/)
+    await expect(source.findNeurons({ datasetId: source.datasetId })).rejects.toThrow(
+      /Input IDs/,
+    )
     await expect(
       source.fetchConnectivity({
         datasetId: source.datasetId,
@@ -320,9 +343,9 @@ describe('PrecomputedSource', () => {
     const base = 'https://storage.googleapis.com/em2/image'
     serve({ [`${base}/info`]: volumeInfo({ type: 'image' }) })
     const source = sourceFor('gs://em2/image')
-    await expect(source.fetchMeshes({ datasetId: source.datasetId, neuronIds: ['1'] })).rejects.toThrow(
-      /publishes no meshes — it is image/,
-    )
+    await expect(
+      source.fetchMeshes({ datasetId: source.datasetId, neuronIds: ['1'] }),
+    ).rejects.toThrow(/publishes no meshes — it is image/)
   })
 
   it('answers an empty id list without touching the network', async () => {
@@ -378,7 +401,10 @@ describe('segment properties', () => {
     // is a table that looks perfectly well-formed and names the wrong neurons.
     const table = tableFrom({
       '@type': 'neuroglancer_segment_properties',
-      inline: { ids: ['1', '2'], properties: [{ id: 'label', type: 'label', values: ['only one'] }] },
+      inline: {
+        ids: ['1', '2'],
+        properties: [{ id: 'label', type: 'label', values: ['only one'] }],
+      },
     })
     expect(table.schema.columns.map((c) => c.name)).toEqual(['neuronId'])
   })
@@ -387,7 +413,10 @@ describe('segment properties', () => {
     // Guessing `f64` would advertise a column whose values may not be numbers at all.
     const table = tableFrom({
       '@type': 'neuroglancer_segment_properties',
-      inline: { ids: ['1'], properties: [{ id: 'n', type: 'number', data_type: 'complex64', values: [1] }] },
+      inline: {
+        ids: ['1'],
+        properties: [{ id: 'n', type: 'number', data_type: 'complex64', values: [1] }],
+      },
     })
     expect(table.schema.columns.map((c) => c.name)).toEqual(['neuronId'])
   })

@@ -231,7 +231,9 @@ export function useNeuronIndexState(
   datasetId: string | undefined,
   annotations?: DatasetAnnotations,
 ): NeuronIndexState {
-  return useEntryState(sourceId && datasetId ? entryKey(sourceId, datasetId, annotations) : undefined)
+  return useEntryState(
+    sourceId && datasetId ? entryKey(sourceId, datasetId, annotations) : undefined,
+  )
 }
 
 export function useNeuronIndex(

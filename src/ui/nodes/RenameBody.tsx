@@ -151,7 +151,9 @@ export function RenameBody({ node, ctx, setParam }: NodeBodyProps) {
         + Add
       </button>
 
-      <div className={`list-body__foot${plan.applied.size === 0 ? ' list-body__foot--empty' : ''}`}>
+      <div
+        className={`list-body__foot${plan.applied.size === 0 ? ' list-body__foot--empty' : ''}`}
+      >
         {!connected ? (
           <span>Connect a table.</span>
         ) : !known ? (

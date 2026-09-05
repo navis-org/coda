@@ -73,7 +73,9 @@ const boxId = collapsedNodeId('g1')
 describe('the view a folded group presents', () => {
   it('is the shared empty answer, by identity, when nothing is folded', () => {
     const g = chain()
-    expect(collapsedView({ ...g, groups: [{ id: 'g1', nodeIds: ['b', 'c'] }] })).toBe(NO_COLLAPSE)
+    expect(collapsedView({ ...g, groups: [{ id: 'g1', nodeIds: ['b', 'c'] }] })).toBe(
+      NO_COLLAPSE,
+    )
     expect(collapsedView({ ...g, groups: undefined })).toBe(NO_COLLAPSE)
   })
 
@@ -123,9 +125,9 @@ describe('the view a folded group presents', () => {
 
   it('draws no box for a frame naming nothing on the canvas', () => {
     const g = chain()
-    expect(collapsedView({ ...g, groups: [{ id: 'g9', nodeIds: ['ghost'], collapsed: true }] })).toBe(
-      NO_COLLAPSE,
-    )
+    expect(
+      collapsedView({ ...g, groups: [{ id: 'g9', nodeIds: ['ghost'], collapsed: true }] }),
+    ).toBe(NO_COLLAPSE)
   })
 })
 
@@ -134,7 +136,11 @@ describe('the wires a folded group is left with', () => {
     const view = collapsedView(chain())
     const into = view.edges.find((e) => e.target === boxId)!
     const out = view.edges.find((e) => e.source === boxId)!
-    expect([into.source, into.sourceHandle, into.targetHandle]).toEqual(['a', 'out', COLLAPSED_IN])
+    expect([into.source, into.sourceHandle, into.targetHandle]).toEqual([
+      'a',
+      'out',
+      COLLAPSED_IN,
+    ])
     expect([out.target, out.targetHandle, out.sourceHandle]).toEqual(['d', 'in', COLLAPSED_OUT])
     expect(into.origins).toEqual([{ nodeId: 'a', portId: 'out' }])
   })
@@ -146,7 +152,11 @@ describe('the wires a folded group is left with', () => {
   it('draws nothing for a wire with both ends inside one box', () => {
     const g = chain()
     const view = collapsedView(g)
-    expect(g.edges.filter((e) => isFolded(view, e)).map((e) => e.id)).toEqual(['ab', 'bc', 'cd'])
+    expect(g.edges.filter((e) => isFolded(view, e)).map((e) => e.id)).toEqual([
+      'ab',
+      'bc',
+      'cd',
+    ])
     // The internal wire is the one with no stand-in: two crossings, two merged edges.
     expect(view.edges.length).toBe(2)
     expect(view.edges.every((e) => e.source === boxId || e.target === boxId)).toBe(true)
@@ -195,7 +205,9 @@ describe('the controls a folded group carries', () => {
     const g = chain()
     return {
       ...g,
-      groups: [{ id: 'g1', nodeIds: ['b', 'c'], collapsed: true, exposed: [{ node: 'b', param }] }],
+      groups: [
+        { id: 'g1', nodeIds: ['b', 'c'], collapsed: true, exposed: [{ node: 'b', param }] },
+      ],
     }
   }
 
@@ -237,7 +249,9 @@ describe('the controls a folded group carries', () => {
 
     const noValue = collapsedView({
       ...g,
-      nodes: g.nodes.map((n) => (n.id === 'b' ? { ...n, params: { ...n.params, op: 'isEmpty' } } : n)),
+      nodes: g.nodes.map((n) =>
+        n.id === 'b' ? { ...n, params: { ...n.params, op: 'isEmpty' } } : n,
+      ),
     })
     expect(noValue.boxes[0]!.exposed).toEqual([])
     expect(noValue.boxes[0]!.size).toEqual(COLLAPSED_SIZE)

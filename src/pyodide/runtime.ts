@@ -129,7 +129,9 @@ const MODULES: Record<string, PyModule> = {
  */
 interface PyProxy {
   (...args: unknown[]): PyProxy
-  toJs(options?: { dict_converter?: (entries: Iterable<[string, unknown]>) => unknown }): unknown
+  toJs(options?: {
+    dict_converter?: (entries: Iterable<[string, unknown]>) => unknown
+  }): unknown
   destroy(): void
 }
 

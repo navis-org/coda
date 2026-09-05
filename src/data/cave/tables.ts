@@ -323,7 +323,10 @@ export function tableListFor(
  * `validate`, and a table name being refused because a *checkbox* is off would be a message about
  * the wrong thing entirely.
  */
-export function peekTableList(datastack: string, version: number): CaveTableEntry[] | undefined {
+export function peekTableList(
+  datastack: string,
+  version: number,
+): CaveTableEntry[] | undefined {
   const key = `${keyFor(datastack, version)}|v`
   const known = listed.get(key)
   if (known || !datastack || listingAsked.has(key)) return known
@@ -396,7 +399,8 @@ async function loadFacts(
   // The listing above already downloaded every view's description, so a view's facts are a map
   // lookup rather than a request. Reaching for `listViews` again here is what the module header
   // means by "one entry of a listing that is very likely already in hand".
-  if (kind === 'view') return viewFacts(name, (await viewsFor(datastack, version, options))[name] ?? {})
+  if (kind === 'view')
+    return viewFacts(name, (await viewsFor(datastack, version, options))[name] ?? {})
   const server = await caveServerFor(datastack, options)
   /*
    * The aligned volume is only needed for the annotation service's count, and the datastack
@@ -632,4 +636,3 @@ export function sampleColumns(rows: readonly CaveRow[]): CaveColumnSample[] {
     example: value === null || value === undefined ? '' : String(value),
   }))
 }
-

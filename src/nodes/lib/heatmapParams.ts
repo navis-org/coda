@@ -20,14 +20,7 @@
 import type { ParamValues } from '../../core/node'
 
 export type SequentialPalette =
-  | 'coda'
-  | 'viridis'
-  | 'magma'
-  | 'inferno'
-  | 'plasma'
-  | 'cividis'
-  | 'rocket'
-  | 'mako'
+  'coda' | 'viridis' | 'magma' | 'inferno' | 'plasma' | 'cividis' | 'rocket' | 'mako'
 
 export type DivergingPalette = 'coda' | 'RdBu' | 'PuOr' | 'BrBG'
 

@@ -17,13 +17,7 @@ import { groupByComponent, shelfPack } from './componentPack'
 import { PREFUSE_DEFAULTS, prefuseLayout, prefuseRun } from './prefuseForce'
 
 export type LayoutName =
-  | 'forceatlas2'
-  | 'prefuse'
-  | 'circular'
-  | 'layered'
-  | 'columns'
-  | 'grouped'
-  | 'spectral'
+  'forceatlas2' | 'prefuse' | 'circular' | 'layered' | 'columns' | 'grouped' | 'spectral'
 
 export type Orientation = 'lr' | 'tb'
 

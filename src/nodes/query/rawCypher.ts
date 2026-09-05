@@ -23,7 +23,8 @@ export const rawCypherNode = registerNode({
   type: 'neuron.rawCypher',
   label: 'Cypher',
   category: 'query',
-  description: 'Run a custom Cypher query against a neuPrint dataset. Returns the results as a table.',
+  description:
+    'Run a custom Cypher query against a neuPrint dataset. Returns the results as a table.',
   guide:
     'Run a custom Cypher against a neuPrint dataset. Data is returned as an ordinary table and ' +
     'everything downstream works normally, with one caveat: the server decides the shape of the ' +

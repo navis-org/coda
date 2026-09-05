@@ -23,7 +23,15 @@
 
 import { addNodeWithCompanion } from '../core/companion'
 import type { CodaGraph, GraphNode } from '../core/graph'
-import { addEdge, edgeInto, newId, nodePorts, removeEdges, removeNodes, updateNode } from '../core/graph'
+import {
+  addEdge,
+  edgeInto,
+  newId,
+  nodePorts,
+  removeEdges,
+  removeNodes,
+  updateNode,
+} from '../core/graph'
 import type { IssueSeverity } from '../core/inference'
 import { checkConnection, inferGraph, nodeTypes } from '../core/inference'
 import type { NodeDefinition, ParamDef, ParamValue, ParamValues } from '../core/node'

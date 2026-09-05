@@ -37,7 +37,9 @@ function recordingSink(): FileSink & { names: string[] } {
   }
 }
 
-const TABLE = tableFromRows(tableSchema(column('neuronId', 'str')), [{ neuronId: '7205759406' }])
+const TABLE = tableFromRows(tableSchema(column('neuronId', 'str')), [
+  { neuronId: '7205759406' },
+])
 
 /** `download` sits in the region; `after` sits outside it. */
 function graphWith(params: Record<string, unknown> = {}): CodaGraph {

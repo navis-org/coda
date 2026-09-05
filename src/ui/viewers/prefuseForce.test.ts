@@ -24,11 +24,8 @@ import {
   spiralSeed,
 } from './prefuseForce'
 
-const distance = (
-  out: { x: Float64Array; y: Float64Array },
-  a: number,
-  b: number,
-): number => Math.hypot(out.x[a]! - out.x[b]!, out.y[a]! - out.y[b]!)
+const distance = (out: { x: Float64Array; y: Float64Array }, a: number, b: number): number =>
+  Math.hypot(out.x[a]! - out.x[b]!, out.y[a]! - out.y[b]!)
 
 describe('the Barnes-Hut approximation', () => {
   /**
@@ -138,7 +135,13 @@ describe('the simulation', () => {
   it('lands in the same place twice', () => {
     // Not a nicety. Positions are recomputed whenever anything presentational changes, so a
     // layout that wandered would reshuffle the picture every time a colour was picked.
-    const edges: Array<[number, number]> = [[0, 1], [1, 2], [2, 3], [3, 0], [0, 2]]
+    const edges: Array<[number, number]> = [
+      [0, 1],
+      [1, 2],
+      [2, 3],
+      [3, 0],
+      [0, 2],
+    ]
     const first = prefuseLayout(4, edges)
     const second = prefuseLayout(4, edges)
     expect([...second.x]).toEqual([...first.x])
@@ -152,7 +155,11 @@ describe('the simulation', () => {
     const chain: Array<[number, number]> = Array.from({ length: 40 }, (_, i) => [i, i + 1])
     const clique: Array<[number, number]> = []
     for (let i = 0; i < 12; i++) for (let j = i + 1; j < 12; j++) clique.push([i, j])
-    for (const [n, edges] of [[21, star], [41, chain], [12, clique]] as const) {
+    for (const [n, edges] of [
+      [21, star],
+      [41, chain],
+      [12, clique],
+    ] as const) {
       const out = prefuseLayout(n, edges)
       for (let i = 0; i < n; i++) {
         expect(Number.isFinite(out.x[i]!)).toBe(true)
@@ -177,14 +184,24 @@ describe('the simulation', () => {
   })
 
   it('ignores self-loops, which have no layout meaning', () => {
-    const withLoop = prefuseLayout(3, [[0, 1], [1, 2], [1, 1]])
-    const without = prefuseLayout(3, [[0, 1], [1, 2]])
+    const withLoop = prefuseLayout(3, [
+      [0, 1],
+      [1, 2],
+      [1, 1],
+    ])
+    const without = prefuseLayout(3, [
+      [0, 1],
+      [1, 2],
+    ])
     expect([...withLoop.x]).toEqual([...without.x])
   })
 
   it('stops when asked, landing on wherever it reached', () => {
     let asked = 0
-    const edges: Array<[number, number]> = [[0, 1], [1, 2]]
+    const edges: Array<[number, number]> = [
+      [0, 1],
+      [1, 2],
+    ]
     const stopped = prefuseLayout(3, edges, PREFUSE_DEFAULTS, () => ++asked > 3)
     const full = prefuseLayout(3, edges)
     expect(asked).toBe(4)

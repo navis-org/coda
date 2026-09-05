@@ -217,7 +217,8 @@ registerEmitter('net.filter', (ctx) => {
   const seedFrame = ctx.input('seed')
   const seedColumn = ctx.column('seedColumn')
   const hasSeedTable = !!seedFrame && !!seedColumn
-  if (!name && !hasSeedTable) return ctx.todo('Nothing selects any nodes on this Filter Network.')
+  if (!name && !hasSeedTable)
+    return ctx.todo('Nothing selects any nodes on this Filter Network.')
 
   ctx.require('networkx')
   ctx.require('pandas')
@@ -543,7 +544,10 @@ registerEmitter('neuron.nblastKnn', (ctx) => {
   const resample = Number(ctx.params.resample ?? 1)
   const symmetry = String(ctx.params.symmetry ?? 'mean')
 
-  const lines: string[] = [...ctx.note(MICRON_NOTE), ...dotpropsLines(query, dots, tangentK, resample)]
+  const lines: string[] = [
+    ...ctx.note(MICRON_NOTE),
+    ...dotpropsLines(query, dots, tangentK, resample),
+  ]
 
   const targetDots = target ? `${ctx.name}_target_dp` : undefined
   if (target && targetDots) lines.push(...dotpropsLines(target, targetDots, tangentK, resample))
@@ -1434,9 +1438,7 @@ registerEmitter('neuron.cleanSkeletons', (ctx) => {
     )
   }
   if (smooth > 0) {
-    body.push(
-      `    coords = fastcore.smooth_skeleton_gaussian(ids, parents, coords, ${smooth})`,
-    )
+    body.push(`    coords = fastcore.smooth_skeleton_gaussian(ids, parents, coords, ${smooth})`)
   }
   if (method === 'resample' && spacing > 0) {
     body.push(
@@ -1488,7 +1490,9 @@ registerEmitter('neuron.cleanMeshes', (ctx) => {
   const p = meshCleanParamsFrom(ctx.params)
   const { dropInternals, fillHoles, ratio, smooth } = p
 
-  const body: string[] = [`    v, f = _neuron.vertices.astype(float), _neuron.faces.astype(np.uint32)`]
+  const body: string[] = [
+    `    v, f = _neuron.vertices.astype(float), _neuron.faces.astype(np.uint32)`,
+  ]
 
   if (dropInternals) {
     body.push(
@@ -1625,7 +1629,9 @@ registerEmitter('core.similarity', (ctx) => {
   // Guards before `ctx.helper`, matching Partner Vectors above: a misconfigured node that emits
   // a TODO should not still pull two hundred lines of helper into the document.
   if (!long && (!idColumn || picked.length === 0)) {
-    return ctx.todo('This Similarity Matrix needs an Id column and at least one feature column.')
+    return ctx.todo(
+      'This Similarity Matrix needs an Id column and at least one feature column.',
+    )
   }
   if (long && (!observations || !features)) {
     return ctx.todo('This Similarity Matrix needs an Observations and a Features column.')
@@ -1681,7 +1687,9 @@ registerEmitter('compare.connectivity', (ctx) => {
   for (const [i, columns] of spec.columns.entries()) {
     const index = i + 1
     if (!columns.pre || !columns.post) {
-      return ctx.todo(`Dataset ${index} of this Compare Connectivity has no pre or post column.`)
+      return ctx.todo(
+        `Dataset ${index} of this Compare Connectivity has no pre or post column.`,
+      )
     }
     const entry = [
       `'name': ${pyStr(spec.names[i]!)}`,

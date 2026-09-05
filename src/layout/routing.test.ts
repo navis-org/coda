@@ -218,7 +218,8 @@ describe('pinned ports', () => {
         const def = requireNodeDef(n.type)
         const offsets = new Map<string, XY>()
         for (const port of defaultInputPorts(def)) offsets.set(port.id, { x: 0, y: 48 })
-        for (const port of defaultOutputPorts(def)) offsets.set(port.id, { x: size.width, y: 48 })
+        for (const port of defaultOutputPorts(def))
+          offsets.set(port.id, { x: size.width, y: 48 })
         return [n.id, offsets]
       }),
     )

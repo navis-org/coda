@@ -125,8 +125,6 @@ const NODE_TYPES = { ...CARD_TYPES, [COLLAPSED_TYPE]: GroupCollapsedCard }
  */
 type CanvasNode = Node<CodaNodeData> | GroupCollapsedNode
 
-
-
 /** Keeps `data` object identity stable per GraphNode so memoised nodes don't re-render. */
 const dataCache = new WeakMap<GraphNode, CodaNodeData>()
 
@@ -292,8 +290,6 @@ function EditorCanvas() {
   /** Which ids on the canvas are boxes rather than cards — see `onNodesChange`. */
   const boxIds = useMemo(() => new Set(collapse.boxes.map((b) => b.id)), [collapse])
 
-
-
   /** The handler the boxes carry in their data, kept stable so they re-render on their own terms. */
   const onGroupContextMenu = useCallback(
     (groupId: string, screenPosition: { x: number; y: number }) => {
@@ -340,41 +336,31 @@ function EditorCanvas() {
     [collapse.boxes, onGroupContextMenu],
   )
 
-  const rfNodes = useMemo<CanvasNode[]>(
-    () => {
-      const cards: CanvasNode[] = graph.nodes.map((node) => {
-        return {
-          id: node.id,
-          // Which renderer and what size — `cardShape`, shared with the group peek.
-          ...cardShape(node),
-          // While an arrange is gliding, the card is drawn from the animation rather than from
-          // the document — the store gets one commit at the end, not one per frame.
-          position: arrangeOverrides?.get(node.id) ?? node.position,
-          data: dataFor(node),
-          selected: selectedSet.has(node.id),
-          // What React Flow itself last measured, handed straight back — see `measuredSizes`.
-          // Without it the minimap cannot see a card that carries no explicit size.
-          ...(measuredSizes.has(node.id) ? { measured: measuredSizes.get(node.id) } : {}),
-          /*
-           * A card inside a folded group is hidden rather than dropped from the list. React Flow
-           * keeps a hidden node's entry — so its measurement, its selection and its handles
-           * survive the fold and come back with it — where an absent one is a node that was
-           * deleted and re-added, and comes back unmeasured.
-           */
-          ...(collapse.hidden.has(node.id) ? { hidden: true } : {}),
-        }
-      })
-      return [...cards, ...boxNodes]
-    },
-    [
-      graph.nodes,
-      selectedSet,
-      arrangeOverrides,
-      measuredSizes,
-      collapse.hidden,
-      boxNodes,
-    ],
-  )
+  const rfNodes = useMemo<CanvasNode[]>(() => {
+    const cards: CanvasNode[] = graph.nodes.map((node) => {
+      return {
+        id: node.id,
+        // Which renderer and what size — `cardShape`, shared with the group peek.
+        ...cardShape(node),
+        // While an arrange is gliding, the card is drawn from the animation rather than from
+        // the document — the store gets one commit at the end, not one per frame.
+        position: arrangeOverrides?.get(node.id) ?? node.position,
+        data: dataFor(node),
+        selected: selectedSet.has(node.id),
+        // What React Flow itself last measured, handed straight back — see `measuredSizes`.
+        // Without it the minimap cannot see a card that carries no explicit size.
+        ...(measuredSizes.has(node.id) ? { measured: measuredSizes.get(node.id) } : {}),
+        /*
+         * A card inside a folded group is hidden rather than dropped from the list. React Flow
+         * keeps a hidden node's entry — so its measurement, its selection and its handles
+         * survive the fold and come back with it — where an absent one is a node that was
+         * deleted and re-added, and comes back unmeasured.
+         */
+        ...(collapse.hidden.has(node.id) ? { hidden: true } : {}),
+      }
+    })
+    return [...cards, ...boxNodes]
+  }, [graph.nodes, selectedSet, arrangeOverrides, measuredSizes, collapse.hidden, boxNodes])
 
   /** Only the `disabled` flag is read per edge, so a set beats a node lookup per edge. */
   const disabledIds = useMemo(
@@ -411,71 +397,68 @@ function EditorCanvas() {
    */
   const foldedSelection = selection.some((id) => collapse.hidden.has(id))
 
-  const rfEdges = useMemo<Edge[]>(
-    () => {
-      const wires: Edge[] = graph.edges.map((edge) => {
-        const sourceType = inference.nodes[edge.source]?.outputs[edge.sourceHandle]
-        const muted = disabledIds.has(edge.source)
+  const rfEdges = useMemo<Edge[]>(() => {
+    const wires: Edge[] = graph.edges.map((edge) => {
+      const sourceType = inference.nodes[edge.source]?.outputs[edge.sourceHandle]
+      const muted = disabledIds.has(edge.source)
+      /*
+       * A route reaches the wire only under `orthogonal`. `curved` withholds it rather than
+       * having the component check the mode: the mode is a fact about the canvas and the route
+       * a fact about one wire, and letting the edge read both is how a wire ends up bent in a
+       * mode that says it should not be.
+       */
+      const orthogonal = edgeRouting === 'orthogonal'
+      const route = orthogonal ? arrangeRoutes?.get(edge.id) : undefined
+      return {
+        id: edge.id,
+        type: 'coda',
+        source: edge.source,
+        sourceHandle: edge.sourceHandle,
+        target: edge.target,
+        targetHandle: edge.targetHandle,
+        data: { route, step: orthogonal },
         /*
-         * A route reaches the wire only under `orthogonal`. `curved` withholds it rather than
-         * having the component check the mode: the mode is a fact about the canvas and the route
-         * a fact about one wire, and letting the edge read both is how a wire ends up bent in a
-         * mode that says it should not be.
+         * Two independent marks, **joined** rather than spread as two `className` keys — the
+         * later spread silently won, so a reference wire that was also the splice candidate
+         * lost its splice highlight with nothing failing. The cost of the shape is not that
+         * one missing mark: it is that the third thing wanting a class would have clobbered
+         * the second the same way.
+         *
+         * `--splice`: the wire a dropped card would be inserted into, marked *during* the drag,
+         * because a drop that rewires the graph with no warning is a surprise whatever it does
+         * afterwards. `--reference`: a wire that names a node rather than carrying its output,
+         * drawn dotted because a wire carrying no data should not look like one that does.
          */
-        const orthogonal = edgeRouting === 'orthogonal'
-        const route = orthogonal ? arrangeRoutes?.get(edge.id) : undefined
-        return {
-          id: edge.id,
-          type: 'coda',
-          source: edge.source,
-          sourceHandle: edge.sourceHandle,
-          target: edge.target,
-          targetHandle: edge.targetHandle,
-          data: { route, step: orthogonal },
-          /*
-           * Two independent marks, **joined** rather than spread as two `className` keys — the
-           * later spread silently won, so a reference wire that was also the splice candidate
-           * lost its splice highlight with nothing failing. The cost of the shape is not that
-           * one missing mark: it is that the third thing wanting a class would have clobbered
-           * the second the same way.
-           *
-           * `--splice`: the wire a dropped card would be inserted into, marked *during* the drag,
-           * because a drop that rewires the graph with no warning is a surprise whatever it does
-           * afterwards. `--reference`: a wire that names a node rather than carrying its output,
-           * drawn dotted because a wire carrying no data should not look like one that does.
-           */
-          className:
-            [
-              edge.id === spliceEdgeId && 'coda-edge--splice',
-              referenceIds.has(edge.id) && 'coda-edge--reference',
-            ]
-              .filter(Boolean)
-              .join(' ') || undefined,
-          style: wireStyle(sourceType, muted),
-          /*
-           * A wire with an end inside a folded group is withheld, and `collapse.edges` draws the
-           * merged stand-in instead. Hidden rather than dropped, for the reason a hidden card is:
-           * React Flow keeps what it knows about it.
-           */
-          ...(isFolded(collapse, edge) ? { hidden: true } : {}),
-        }
-      })
-      for (const edge of collapse.edges) {
-        wires.push(collapsedWire(edge, inference, edgeRouting === 'orthogonal'))
+        className:
+          [
+            edge.id === spliceEdgeId && 'coda-edge--splice',
+            referenceIds.has(edge.id) && 'coda-edge--reference',
+          ]
+            .filter(Boolean)
+            .join(' ') || undefined,
+        style: wireStyle(sourceType, muted),
+        /*
+         * A wire with an end inside a folded group is withheld, and `collapse.edges` draws the
+         * merged stand-in instead. Hidden rather than dropped, for the reason a hidden card is:
+         * React Flow keeps what it knows about it.
+         */
+        ...(isFolded(collapse, edge) ? { hidden: true } : {}),
       }
-      return wires
-    },
-    [
-      graph.edges,
-      disabledIds,
-      inference,
-      edgeRouting,
-      arrangeRoutes,
-      spliceEdgeId,
-      referenceIds,
-      collapse,
-    ],
-  )
+    })
+    for (const edge of collapse.edges) {
+      wires.push(collapsedWire(edge, inference, edgeRouting === 'orthogonal'))
+    }
+    return wires
+  }, [
+    graph.edges,
+    disabledIds,
+    inference,
+    edgeRouting,
+    arrangeRoutes,
+    spliceEdgeId,
+    referenceIds,
+    collapse,
+  ])
 
   // --- change handlers ----------------------------------------------------
 

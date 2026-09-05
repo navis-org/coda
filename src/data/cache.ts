@@ -139,8 +139,10 @@ function write(make: (cache: IDBObjectStore, meta: IDBObjectStore) => void): Pro
 
 function fresh(entry: CacheEntryMeta | undefined, options: CacheGetOptions): boolean {
   if (!entry) return false
-  if (options.fingerprint !== undefined && entry.fingerprint !== options.fingerprint) return false
-  if (options.maxAgeMs !== undefined && Date.now() - entry.savedAt > options.maxAgeMs) return false
+  if (options.fingerprint !== undefined && entry.fingerprint !== options.fingerprint)
+    return false
+  if (options.maxAgeMs !== undefined && Date.now() - entry.savedAt > options.maxAgeMs)
+    return false
   return true
 }
 
@@ -227,21 +229,29 @@ export function cachePeek(
   const held = memory.get(key)
   if (held) {
     return Promise.resolve(
-      fresh(held, options) ? { savedAt: held.savedAt, fingerprint: held.fingerprint } : undefined,
+      fresh(held, options)
+        ? { savedAt: held.savedAt, fingerprint: held.fingerprint }
+        : undefined,
     )
   }
   const existing = peeks.get(key)
   if (existing) return existing.then((entry) => (fresh(entry, options) ? entry : undefined))
 
   const load = (async () => {
-    const meta = await read<CacheEntryMeta>(META, (store) => store.get(key) as IDBRequest<CacheEntryMeta>)
+    const meta = await read<CacheEntryMeta>(
+      META,
+      (store) => store.get(key) as IDBRequest<CacheEntryMeta>,
+    )
     if (meta) return meta
     /*
      * No sidecar: either there is nothing here, or this entry predates the `meta` store. Only a
      * full read can tell the two apart, so pay it once and leave a sidecar behind — the next
      * peek, this session or any later one, takes the cheap path.
      */
-    const stored = await read<Envelope>(STORE, (store) => store.get(key) as IDBRequest<Envelope>)
+    const stored = await read<Envelope>(
+      STORE,
+      (store) => store.get(key) as IDBRequest<Envelope>,
+    )
     if (!stored) return undefined
     const backfilled: CacheEntryMeta = {
       savedAt: stored.savedAt,

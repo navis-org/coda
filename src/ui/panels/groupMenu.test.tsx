@@ -363,15 +363,14 @@ describe('a folded frame', () => {
     render(<App />)
     const id = collapsedFrame()
     // Whichever of the two framed cards offers a control that can be typed into.
-    const target = store()
-      .graph.groups![0]!.nodeIds.flatMap((nodeId) => {
-        const node = store().graph.nodes.find((n) => n.id === nodeId)!
-        const def = requireNodeDef(node.type)
-        const param = configurableParams(def, node.params).find(
-          (p) => p.kind === 'string' || p.kind === 'number' || p.kind === 'int',
-        )
-        return param ? [{ node, def, param }] : []
-      })[0]!
+    const target = store().graph.groups![0]!.nodeIds.flatMap((nodeId) => {
+      const node = store().graph.nodes.find((n) => n.id === nodeId)!
+      const def = requireNodeDef(node.type)
+      const param = configurableParams(def, node.params).find(
+        (p) => p.kind === 'string' || p.kind === 'number' || p.kind === 'int',
+      )
+      return param ? [{ node, def, param }] : []
+    })[0]!
     act(() => store().toggleExposedParam(id, target.node.id, target.param.id))
 
     const row = document.querySelector('.group-collapsed__row')
@@ -384,9 +383,9 @@ describe('a folded frame', () => {
     const typed = target.param.kind === 'string' ? 'typed' : '7'
     fireEvent.change(field, { target: { value: typed } })
     fireEvent.blur(field)
-    expect(String(store().graph.nodes.find((n) => n.id === target.node.id)!.params[target.param.id])).toBe(
-      typed,
-    )
+    expect(
+      String(store().graph.nodes.find((n) => n.id === target.node.id)!.params[target.param.id]),
+    ).toBe(typed)
   })
 
   /* The box's height is what ELK is told, so a row the size did not account for is a row drawn
@@ -394,7 +393,8 @@ describe('a folded frame', () => {
   it('grows when it carries a control', () => {
     render(<App />)
     const id = collapsedFrame()
-    const height = () => (document.querySelector('.group-collapsed') as HTMLElement).style.height
+    const height = () =>
+      (document.querySelector('.group-collapsed') as HTMLElement).style.height
     const bare = height()
     const [a] = nodeIds()
     const def = requireNodeDef(store().graph.nodes.find((n) => n.id === a)!.type)
@@ -415,7 +415,9 @@ describe('a folded frame', () => {
     const param = def.params![0]!
     fireEvent.click(screen.getByRole('button', { name: param.label }))
     expect(store().graph.groups?.[0]?.exposed).toEqual([{ node: a, param: param.id }])
-    expect(screen.getByRole('button', { name: /Controls on the folded box \(1\)/ })).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: /Controls on the folded box \(1\)/ }),
+    ).toBeTruthy()
   })
 
   /*

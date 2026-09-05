@@ -89,7 +89,9 @@ export function parseCaveJson<T>(text: string): T {
  * What is deliberately *not* shared is the all-null policy, because the two genuinely differ:
  * a column listing leaves it blank as an admission, an annotation table widens it to `str`.
  */
-export function caveDType(value: string | number | boolean | null | undefined): DType | undefined {
+export function caveDType(
+  value: string | number | boolean | null | undefined,
+): DType | undefined {
   if (typeof value === 'boolean') return 'bool'
   if (typeof value === 'number') return Number.isInteger(value) ? 'i64' : 'f64'
   if (typeof value === 'string') return 'str'

@@ -284,7 +284,10 @@ export function populationRows(
  * per test; this is one comparison per column with nothing allocated. It reads longer than
  * `tests.some(...)` and is the one place in this file where that trade is worth making.
  */
-function rowsFor(table: TableValue, resolved: readonly PopulationFilter[]): number[] | undefined {
+function rowsFor(
+  table: TableValue,
+  resolved: readonly PopulationFilter[],
+): number[] | undefined {
   if (resolved.length === 0) return undefined
 
   /** Columns tested against `TRACED_STATUS`, and columns tested for a value. */

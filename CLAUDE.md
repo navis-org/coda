@@ -12,6 +12,7 @@ pnpm test           # vitest
 pnpm test:watch
 pnpm typecheck      # tsc -b --noEmit
 pnpm lint           # eslint, includes the core/UI boundary rule
+pnpm format         # prettier, over src/**/*.{ts,tsx,css} and nothing else
 pnpm build          # tsc -b && vite build
 ```
 
@@ -151,6 +152,21 @@ Cross-cutting — these bite in code that is not obviously "about" the area:
   component tests pass `{ hidden: true }`. `installJsdomStubs()` supplies ResizeObserver,
   `getBoundingClientRect`, `matchMedia` and a 2D canvas context. WebGL stays absent on purpose.
 - **`erasableSyntaxOnly` is on**, so no TS parameter properties (`constructor(private x)`).
+- **Prettier owns `src/**/*.{ts,tsx,css}` and nothing else, and what it does *not* own is the
+  half worth knowing.** `pnpm format` is the one declaration of that scope. Every `*.md` is
+  outside it because prettier rewrites `*em*` to `_em_` throughout — 687 diff lines in
+  `docs/nodes.md` alone — which would bury the design records under emphasis-marker churn, and
+  `src/help/nodes/*` is the same prose read by the in-app `?`. The recorded
+  `__fixtures__/*.json` are outside it because they are verbatim wire responses, worth being
+  able to diff against the next recording. So `prettier --write .` is the wrong reflex: it
+  reformats 111 files nobody asked it to, of which the only ones it would help are the ten
+  under `scripts/`. CI enforces the scope by running `pnpm format` and then
+  `git diff --exit-code`, deliberately **not** a second `prettier --check` script: a check
+  script repeats the glob, and two spellings of one scope drift into a guard that passes while
+  `pnpm format` still rewrites the tree — wrong in the passing direction, which is worse than
+  absent. One documented exception lives the other way round, a `<!-- prettier-ignore -->`
+  pinning each `<meta name="description">` onto one line, because a wrapped tag is a tag
+  `grep` reports missing. See [docs/seo.md](docs/seo.md).
 
 Area-specific — the rule, then the doc that holds why:
 

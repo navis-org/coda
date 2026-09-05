@@ -20,7 +20,13 @@ import { useEffect, useRef } from 'react'
 import { errorMessage } from '../core/errors'
 import type { CodaGraph, GraphNode } from '../core/graph'
 import type { Value } from '../core/values'
-import { dataUrlToBlob, downloadFiles, exportBaseName, serializeSvg, svgToPngBlob } from './export'
+import {
+  dataUrlToBlob,
+  downloadFiles,
+  exportBaseName,
+  serializeSvg,
+  svgToPngBlob,
+} from './export'
 import type { ExportFile, ExportFormat } from './exportValue'
 import { planExport } from './exportValue'
 import { useGraphStore } from '../store/graphStore'
@@ -93,7 +99,9 @@ export async function planDownload(
     if (format === 'png' && !source?.svg && source?.png) {
       const dataUrl = source.png()
       if (!dataUrl) return { files: [], error: 'Scene is not rendered yet' }
-      return { files: [{ name: `${base}.png`, parts: [dataUrlToBlob(dataUrl)], mime: PNG_MIME }] }
+      return {
+        files: [{ name: `${base}.png`, parts: [dataUrlToBlob(dataUrl)], mime: PNG_MIME }],
+      }
     }
 
     const svg = source?.svg?.()

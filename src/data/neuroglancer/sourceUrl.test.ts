@@ -66,7 +66,9 @@ describe('parseNgSource', () => {
   it('strips middleauth+, which is an instruction to a viewer rather than an address', () => {
     // Otherwise the same graphene source pasted out of spelunker and out of the Seung-lab fork
     // are two different locations — see `scene.ts`, where the two disagree about the prefix.
-    const ref = parseNgSource('graphene://middleauth+https://cave.example.org/segmentation/table/x')
+    const ref = parseNgSource(
+      'graphene://middleauth+https://cave.example.org/segmentation/table/x',
+    )
     expect(ref?.scheme).toBe('graphene')
     expect(ref?.location).toBe('https://cave.example.org/segmentation/table/x')
   })

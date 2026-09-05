@@ -283,8 +283,7 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
               <>
                 Pick a provider under <strong>Connections</strong> — the branch icon in the
                 toolbar — Anthropic, OpenAI, Gemini, or Ollama, which runs a model on your own
-                machine or fronts a free one in its cloud.
-                Nothing else in Coda needs one.
+                machine or fronts a free one in its cloud. Nothing else in Coda needs one.
               </>
             )}
           </p>

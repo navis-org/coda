@@ -29,7 +29,11 @@
 import { useCallback, useRef } from 'react'
 
 import { useGraphStore } from '../../store/graphStore'
-import { DOCK_MAX_FRACTION, DOCK_MIN_FRACTION, clampDockFraction } from '../../store/persistence'
+import {
+  DOCK_MAX_FRACTION,
+  DOCK_MIN_FRACTION,
+  clampDockFraction,
+} from '../../store/persistence'
 import { ViewerSurface, useViewerNode } from './ViewerSurface'
 
 /** How far one arrow-key press moves the edge. */
@@ -72,7 +76,9 @@ export function ViewerDock() {
    * gesture rather than one of each per sample.
    */
   const paint = useCallback((next: number) => {
-    asideRef.current?.closest<HTMLElement>('.app')?.style.setProperty('--dock-width', `${next * 100}%`)
+    asideRef.current
+      ?.closest<HTMLElement>('.app')
+      ?.style.setProperty('--dock-width', `${next * 100}%`)
   }, [])
 
   const onGripDown = useCallback(
@@ -117,7 +123,8 @@ export function ViewerDock() {
   // reach — and `role="separator"` with `aria-valuenow` promises exactly this.
   const onGripKey = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      const step = event.key === 'ArrowLeft' ? KEY_STEP : event.key === 'ArrowRight' ? -KEY_STEP : 0
+      const step =
+        event.key === 'ArrowLeft' ? KEY_STEP : event.key === 'ArrowRight' ? -KEY_STEP : 0
       if (step === 0) return
       event.preventDefault()
       setDockFraction(fraction + step, document.documentElement.clientWidth)

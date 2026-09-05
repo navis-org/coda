@@ -159,7 +159,9 @@ const BOOL_OPS: Array<{ value: RowOp; label: string }> = [
  * `tableOps.ts`: a schema that has not arrived yet is not a schema saying the column is a
  * number, and offering `≥` for a name is a smaller wrong than offering nothing at all.
  */
-export function rowOpsForDType(dtype: DType | undefined): Array<{ value: RowOp; label: string }> {
+export function rowOpsForDType(
+  dtype: DType | undefined,
+): Array<{ value: RowOp; label: string }> {
   if (!dtype) return TEXT_OPS
   if (isNumericDType(dtype)) return NUMERIC_OPS
   if (dtype === 'bool') return BOOL_OPS
@@ -214,7 +216,8 @@ function keptRows(rows: readonly FilterRow[]): FilterRow[] {
   // Arity decides whether a value is *wanted*, not how many are enough: one is enough for both
   // `one` and `many`, and `none` ignores them. So this asks the only question that differs.
   return rows.filter(
-    (row) => row.field !== '' && (arityOf(row.op) === 'none' || row.values.some((v) => v !== '')),
+    (row) =>
+      row.field !== '' && (arityOf(row.op) === 'none' || row.values.some((v) => v !== '')),
   )
 }
 

@@ -48,6 +48,22 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+
+      # Formatting, phrased as "run the fix and prove it changed nothing" rather than as a
+      # second `prettier --check` script. A check script would have to repeat `format`'s glob,
+      # which is two spellings of one scope: the day they drift this passes while `pnpm format`
+      # still rewrites the tree, and a guard that is wrong in the passing direction is worse
+      # than none. It also fails with the diff rather than a list of filenames.
+      #
+      # `pnpm format` is the single declaration of what prettier owns — `src/**/*.{ts,tsx,css}`
+      # and nothing else. Deliberately outside it: every `*.md` (the design records and
+      # `src/help/nodes/*` are hand-wrapped prose, and prettier rewrites `*em*` to `_em_`
+      # throughout), and the recorded `__fixtures__/*.json`, which are verbatim wire responses
+      # and are worth being able to diff against the next recording.
+      - run: pnpm format
+      - name: Check prettier made no changes
+        run: git diff --exit-code
+
       - run: pnpm test
       # `pnpm build` is `tsc -b && vite build`, so this covers typecheck too.
       #

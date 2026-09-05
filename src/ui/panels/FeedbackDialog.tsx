@@ -228,9 +228,7 @@ function Dialog({
                   className="field feedback__message"
                   value={message}
                   placeholder={copy.placeholder}
-                  onChange={(e) =>
-                    setMessages((m) => ({ ...m, [category]: e.target.value }))
-                  }
+                  onChange={(e) => setMessages((m) => ({ ...m, [category]: e.target.value }))}
                   rows={6}
                 />
               </label>

@@ -100,7 +100,8 @@ export const influenceNode = registerNode({
   type: 'neuron.influence',
   label: 'Influence',
   category: 'query',
-  description: 'Score every neuron by how strongly it drives, or is driven by, a set of neurons.',
+  description:
+    'Score every neuron by how strongly it drives, or is driven by, a set of neurons.',
   /*
    * Under 400 characters, which `help.test.ts` enforces for a node that has a document: the
    * overlay prints this above the document under a `TL;DR` label, and a nine-sentence paragraph
@@ -433,7 +434,10 @@ export const influenceNode = registerNode({
      * own message is correct and says nothing about the control that would make this work, and
      * a refusal arriving from two hops down the stack reads as a broken dataset.
      */
-    if (denominator !== 'traversal' && !canTotalSynapses(source, dataset.datasetId, dataset.edges !== undefined)) {
+    if (
+      denominator !== 'traversal' &&
+      !canTotalSynapses(source, dataset.datasetId, dataset.edges !== undefined)
+    ) {
       throw new Error(
         `${source.label} does not publish the per-neuron synapse totals this denominator ` +
           `divides by. Set Denominator to "summed within the traversal", which divides by the ` +
@@ -601,8 +605,24 @@ export const influenceNode = registerNode({
       // Mass 1 on the channelled half: its channels index *which candidate*, so the seeding is
       // an identity rather than a weighting. `Seed weighting` belongs to the pooled half, which
       // is the one seeded at the neurons somebody wired in.
-      const forward = await run(preSide, 'outputs', split.forward, !downstream, 0.05, 0.5, downstream ? seedMass : 1)
-      const backward = await run(postSide, 'inputs', split.backward, downstream, 0.5, 0.9, downstream ? 1 : seedMass)
+      const forward = await run(
+        preSide,
+        'outputs',
+        split.forward,
+        !downstream,
+        0.05,
+        0.5,
+        downstream ? seedMass : 1,
+      )
+      const backward = await run(
+        postSide,
+        'inputs',
+        split.backward,
+        downstream,
+        0.5,
+        0.9,
+        downstream ? 1 : seedMass,
+      )
       halves = [forward, backward]
       walked = `${split.forward} + ${split.backward} hops`
       scores = downstream
@@ -736,10 +756,7 @@ export const influenceNode = registerNode({
       firstHop,
       seeds,
     })
-    ctx.progress(
-      1,
-      `${table.length.toLocaleString()} neurons · ${walked} · ${route}`,
-    )
+    ctx.progress(1, `${table.length.toLocaleString()} neurons · ${walked} · ${route}`)
     return { influence: table }
   },
 })

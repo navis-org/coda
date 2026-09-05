@@ -700,7 +700,10 @@ describe('prefuse', () => {
   })
 
   it('gives an unlinked node a place of its own rather than the origin', async () => {
-    const isolates = network(['a', 'b', 'c'].map((id) => ({ id })), [])
+    const isolates = network(
+      ['a', 'b', 'c'].map((id) => ({ id })),
+      [],
+    )
     const positions = await computeLayout(isolates, { layout: 'prefuse' })
     expect(new Set([...positions.values()].map((p) => `${p.x},${p.y}`)).size).toBe(3)
   })
@@ -769,7 +772,10 @@ describe('components, as the layout partitions by them', () => {
   })
 
   it('ignores a self-loop, which joins nothing', () => {
-    const looped = network(['a', 'b'].map((id) => ({ id })), [['a', 'a']])
+    const looped = network(
+      ['a', 'b'].map((id) => ({ id })),
+      [['a', 'a']],
+    )
     expect(labelsOf(looped)).toEqual([1, 2])
   })
 
@@ -778,7 +784,10 @@ describe('components, as the layout partitions by them', () => {
     // real graph this was built for has 36,000 nodes.
     const ids = Array.from({ length: 20_000 }, (_, i) => `n${i}`)
     const edges = ids.slice(1).map((id, i) => [ids[i]!, id] as [string, string])
-    const chain = network(ids.map((id) => ({ id })), edges)
+    const chain = network(
+      ids.map((id) => ({ id })),
+      edges,
+    )
     expect(new Set(labelsOf(chain)).size).toBe(1)
   })
 })

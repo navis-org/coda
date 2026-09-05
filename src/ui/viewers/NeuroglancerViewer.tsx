@@ -439,7 +439,10 @@ export function NeuroglancerViewer({
    * node's own default (`resolveColor` early-returns for `default`), which is why it went
    * unnoticed. The deps are exactly what it reads, and neither changes on a hover.
    */
-  const legend = useMemo(() => resolveColor(neurons, color, VIEWER_MODE).legend, [neurons, color])
+  const legend = useMemo(
+    () => resolveColor(neurons, color, VIEWER_MODE).legend,
+    [neurons, color],
+  )
 
   if (!url) {
     return (

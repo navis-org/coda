@@ -323,7 +323,11 @@ describe('updating a viewer someone is already looking through', () => {
 })
 
 describe('layers added on top of what a dataset publishes', () => {
-  const SHELL = { type: 'segmentation', name: 'brain shell', source: 'precomputed://gs://b/shell' }
+  const SHELL = {
+    type: 'segmentation',
+    name: 'brain shell',
+    source: 'precomputed://gs://b/shell',
+  }
 
   it('appends them after the published ones, so a curated order is not reordered', () => {
     const scene = buildScene(MANC, {
@@ -360,7 +364,10 @@ describe('layers added on top of what a dataset publishes', () => {
     const scene = buildScene(MANC, {
       datasetId: 'manc:v1.2.3',
       segments: [1],
-      extraLayers: [{ ...SHELL, name: 'manc:v1.2.3' }, { ...SHELL, name: 'manc:v1.2.3' }],
+      extraLayers: [
+        { ...SHELL, name: 'manc:v1.2.3' },
+        { ...SHELL, name: 'manc:v1.2.3' },
+      ],
     })
     const names = (scene['layers'] as Array<Record<string, unknown>>).map((l) => l['name'])
     // `_2` rather than a space: the suffixing is `uniqueName` from `core/types.ts`, which is the
@@ -569,18 +576,18 @@ describe('editing the selection inside a state the viewer already holds', () => 
       ],
     }
     const next = buildScene(MANC, { datasetId: 'manc:v1.2.3', segments: [2] })
-    const layers = spliceSegments(live, next, ownedLayerNames(next, 'manc:v1.2.3', 0))!['layers'] as Array<Record<string, unknown>>
+    const layers = spliceSegments(live, next, ownedLayerNames(next, 'manc:v1.2.3', 0))![
+      'layers'
+    ] as Array<Record<string, unknown>>
     expect(layers[0]!['segmentDefaultColor']).toBeUndefined()
     expect(layers[0]!['segments']).toEqual(['2'])
   })
 
   it('does not mutate the state it was handed', () => {
     const before = JSON.stringify(LIVE)
-    spliceSegments(
-      LIVE,
-      buildScene(MANC, { datasetId: 'manc:v1.2.3', segments: [9] }),
-      ['manc:v1.2.3'],
-    )
+    spliceSegments(LIVE, buildScene(MANC, { datasetId: 'manc:v1.2.3', segments: [9] }), [
+      'manc:v1.2.3',
+    ])
     expect(JSON.stringify(LIVE)).toBe(before)
   })
 

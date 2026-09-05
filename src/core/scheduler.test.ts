@@ -419,7 +419,11 @@ describe('clearing a node’s data cache', () => {
  */
 describe('publishing a partial result', () => {
   const ROW = tableSchema(column('x', 'i64'))
-  const rows = (n: number) => tableFromRows(ROW, Array.from({ length: n }, (_, x) => ({ x })))
+  const rows = (n: number) =>
+    tableFromRows(
+      ROW,
+      Array.from({ length: n }, (_, x) => ({ x })),
+    )
 
   /** A node that publishes `steps` growing tables, then optionally throws. */
   function register(type: string, steps: number, fail = false) {
@@ -448,7 +452,12 @@ describe('publishing a partial result', () => {
   let seen: number[]
 
   function graphOver(type: string): CodaGraph {
-    return addNode(emptyGraph('publish-test'), { id: 'n', type, position: { x: 0, y: 0 }, params: {} })
+    return addNode(emptyGraph('publish-test'), {
+      id: 'n',
+      type,
+      position: { x: 0, y: 0 },
+      params: {},
+    })
   }
 
   beforeEach(() => {
@@ -635,7 +644,12 @@ describe('For Each', () => {
     g = addEdge(g, { source: 'loop', sourceHandle: 'item', target: 'body', targetHandle: 'in' })
     if (options.collect) {
       g = addNode(g, node('sink', 'flow.collect'))
-      g = addEdge(g, { source: 'body', sourceHandle: 'out', target: 'sink', targetHandle: 'in' })
+      g = addEdge(g, {
+        source: 'body',
+        sourceHandle: 'out',
+        target: 'sink',
+        targetHandle: 'in',
+      })
     }
     return g
   }
@@ -700,7 +714,13 @@ describe('For Each', () => {
     expect(seen).toEqual(['1+2', '3+4', '5'])
     expect(summary.iterations).toBe(3)
     const collected = scheduler.output('sink', 'out')
-    expect(isTableValue(collected) ? collected.data['id'] : []).toEqual(['1', '2', '3', '4', '5'])
+    expect(isTableValue(collected) ? collected.data['id'] : []).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+    ])
   })
 
   it('tells the host how many elements a pass carried', async () => {
@@ -906,15 +926,30 @@ describe('For Each', () => {
     const seen = recorder('test.loop.bodyNest')
 
     let g = emptyGraph('nested')
-    g = addNode(g, { id: 'src', type: 'test.loop.srcNest', position: { x: 0, y: 0 }, params: {} })
+    g = addNode(g, {
+      id: 'src',
+      type: 'test.loop.srcNest',
+      position: { x: 0, y: 0 },
+      params: {},
+    })
     g = addNode(g, node('outer', 'flow.forEach'))
     g = addNode(g, { id: 'fan', type: 'test.loop.fan', position: { x: 0, y: 0 }, params: {} })
     g = addNode(g, node('inner', 'flow.forEach'))
-    g = addNode(g, { id: 'body', type: 'test.loop.bodyNest', position: { x: 0, y: 0 }, params: {} })
+    g = addNode(g, {
+      id: 'body',
+      type: 'test.loop.bodyNest',
+      position: { x: 0, y: 0 },
+      params: {},
+    })
     g = addEdge(g, { source: 'src', sourceHandle: 'out', target: 'outer', targetHandle: 'in' })
     g = addEdge(g, { source: 'outer', sourceHandle: 'item', target: 'fan', targetHandle: 'in' })
     g = addEdge(g, { source: 'fan', sourceHandle: 'out', target: 'inner', targetHandle: 'in' })
-    g = addEdge(g, { source: 'inner', sourceHandle: 'item', target: 'body', targetHandle: 'in' })
+    g = addEdge(g, {
+      source: 'inner',
+      sourceHandle: 'item',
+      target: 'body',
+      targetHandle: 'in',
+    })
 
     const summary = await makeScheduler().run(g, { mode: 'full' })
     /*
@@ -995,7 +1030,8 @@ describe('For Each', () => {
       evaluate: (ctx) => {
         const item = ctx.input('item')
         const side = ctx.input('side')
-        if (!isTableValue(side) || side.length !== 1) throw new Error('side branch was not ready')
+        if (!isTableValue(side) || side.length !== 1)
+          throw new Error('side branch was not ready')
         seen.push(isTableValue(item) ? String(item.data['id']?.[0]) : '?')
         return { out: item! }
       },
@@ -1004,13 +1040,33 @@ describe('For Each', () => {
     let g = emptyGraph('join-test')
     g = addNode(g, { id: 'src', type: 'test.loop.srcJ', position: { x: 0, y: 0 }, params: {} })
     g = addNode(g, node('loop', 'flow.forEach'))
-    g = addNode(g, { id: 'join', type: 'test.loop.joinJ', position: { x: 0, y: 0 }, params: {} })
+    g = addNode(g, {
+      id: 'join',
+      type: 'test.loop.joinJ',
+      position: { x: 0, y: 0 },
+      params: {},
+    })
     // Added *after* the join, so the naive topological position of the loop's begin node comes
     // before this branch has run.
-    g = addNode(g, { id: 'side', type: 'test.loop.sideJ', position: { x: 0, y: 0 }, params: {} })
+    g = addNode(g, {
+      id: 'side',
+      type: 'test.loop.sideJ',
+      position: { x: 0, y: 0 },
+      params: {},
+    })
     g = addEdge(g, { source: 'src', sourceHandle: 'out', target: 'loop', targetHandle: 'in' })
-    g = addEdge(g, { source: 'loop', sourceHandle: 'item', target: 'join', targetHandle: 'item' })
-    g = addEdge(g, { source: 'side', sourceHandle: 'out', target: 'join', targetHandle: 'side' })
+    g = addEdge(g, {
+      source: 'loop',
+      sourceHandle: 'item',
+      target: 'join',
+      targetHandle: 'item',
+    })
+    g = addEdge(g, {
+      source: 'side',
+      sourceHandle: 'out',
+      target: 'join',
+      targetHandle: 'side',
+    })
 
     await makeScheduler().run(g, { mode: 'full' })
     expect(seen).toEqual(['1', '2'])

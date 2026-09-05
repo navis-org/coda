@@ -57,7 +57,9 @@ async function cachedDaysAgo(key: string, days: number): Promise<void> {
 }
 
 function draw() {
-  return render(<DatasetCacheAge sourceId={source.id} datasetId={DATASET} annotations={undefined} />)
+  return render(
+    <DatasetCacheAge sourceId={source.id} datasetId={DATASET} annotations={undefined} />,
+  )
 }
 
 describe('what it says', () => {
@@ -113,7 +115,9 @@ describe('the ⟳', () => {
     // to have refreshed a dataset while a summary counted the old release.
     expect(fetching.mock.calls[0]?.[0]?.refresh).toBe(true)
     await waitFor(async () =>
-      expect(await cacheKeys()).not.toContain(datasetSummaryKey('roi-completeness', source.id, DATASET)),
+      expect(await cacheKeys()).not.toContain(
+        datasetSummaryKey('roi-completeness', source.id, DATASET),
+      ),
     )
   })
 

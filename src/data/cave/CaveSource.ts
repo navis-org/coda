@@ -466,7 +466,8 @@ export class CaveSource implements DataSource {
      */
     const parsed = splitDatasetId(datasetId)
     const spec = parsed ? specFor(parsed.datastack) : undefined
-    if (spec && parsed && peekFlat(spec, parsed.version)?.skeletonUrl) return { skeletons: true }
+    if (spec && parsed && peekFlat(spec, parsed.version)?.skeletonUrl)
+      return { skeletons: true }
 
     const routes = this.skeletonSourcesFor(datasetId)
     return routes === undefined ? undefined : { skeletons: routes.length > 0 }
@@ -1040,7 +1041,11 @@ export class CaveSource implements DataSource {
     const assemble = (meshes: readonly MeshResult[], detail?: MeshesValue['detail']) =>
       this.meshValue(
         req,
-        meshes.map((mesh) => ({ id: mesh.neuronId, positions: mesh.positions, indices: mesh.indices })),
+        meshes.map((mesh) => ({
+          id: mesh.neuronId,
+          positions: mesh.positions,
+          indices: mesh.indices,
+        })),
         types,
         detail,
       )
@@ -1094,7 +1099,10 @@ export class CaveSource implements DataSource {
    * goes and does it, with `MESH_CONCURRENCY` and the session geometry cache doing the actual
    * work of making that survivable.
    */
-  private async grapheneMeshes(req: GeometryRequest, spec: DatastackSpec): Promise<MeshesValue> {
+  private async grapheneMeshes(
+    req: GeometryRequest,
+    spec: DatastackSpec,
+  ): Promise<MeshesValue> {
     // No materialization here, deliberately: a graphene mesh is keyed by root id, and a root id
     // names one immutable agglomeration — an edit mints a new one — so the mesh for an id from
     // v783 is the same mesh whichever version named it. The flat route above is the opposite
@@ -1452,7 +1460,10 @@ export class CaveSource implements DataSource {
    * The chunk graph, then the cache's representative coordinates — about 1.6 s. See `l2.ts` for
    * why this rather than the skeleton service several datastacks also publish.
    */
-  private async l2Skeletons(req: GeometryRequest, spec: DatastackSpec): Promise<SkeletonsValue> {
+  private async l2Skeletons(
+    req: GeometryRequest,
+    spec: DatastackSpec,
+  ): Promise<SkeletonsValue> {
     const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
 
     if (req.neuronIds.length > L2_SKELETON_WARN) {
@@ -1575,7 +1586,9 @@ export class CaveSource implements DataSource {
     const wanted = req.minConfidence ?? 0
     const cut = wanted > 0 ? synapses.scoreColumn : undefined
     if (wanted > 0 && !cut) {
-      req.onWarn?.(confidenceIgnoredWarning(`${spec.label}'s synapse table (${synapses.table})`))
+      req.onWarn?.(
+        confidenceIgnoredWarning(`${spec.label}'s synapse table (${synapses.table})`),
+      )
     }
     req.onProgress?.(0.15, 'querying')
 
@@ -1720,7 +1733,9 @@ export class CaveSource implements DataSource {
     if (!flat?.skeletonUrl) return undefined
     return (
       flat.skeletons ??
-      (await openSkeletonSource(flat.skeletonUrl, signal ? { signal } : {}).catch(() => undefined))
+      (await openSkeletonSource(flat.skeletonUrl, signal ? { signal } : {}).catch(
+        () => undefined,
+      ))
     )
   }
 
@@ -1774,7 +1789,9 @@ export class CaveSource implements DataSource {
    * and publish once it lands, rather than either blocking the download on it or publishing a
    * scene whose every `type` is null and then restyling it wholesale.
    */
-  private async morphologyTypes(req: GeometryRequest): Promise<Map<string, string> | undefined> {
+  private async morphologyTypes(
+    req: GeometryRequest,
+  ): Promise<Map<string, string> | undefined> {
     return req.annotations ? undefined : await this.typeLookup(req)
   }
 

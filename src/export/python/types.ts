@@ -117,7 +117,10 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
    * resolves the name out of that registry. Without the import the call raises about an unknown
    * template — a failure a golden-file snapshot cannot see, because the text reads perfectly.
    */
-  flybrains: { statement: 'import flybrains  # noqa: F401  (registers the fly templates)', pip: 'flybrains' },
+  flybrains: {
+    statement: 'import flybrains  # noqa: F401  (registers the fly templates)',
+    pip: 'flybrains',
+  },
   neuprint: { from: 'neuprint', pip: 'neuprint-python' },
   /*
    * The CAVE client, for a datastack rather than a connectome server. `CAVEclient` is the only

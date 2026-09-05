@@ -79,7 +79,17 @@ function statsColumn(net: NetworkValue, name: string): unknown[] {
 
 describe('the undirected projection', () => {
   it('folds a reciprocal pair into one neighbour relationship', () => {
-    const p = projectUndirected(indexNetwork(network(['a', 'b'], [['a', 'b'], ['b', 'a']])))
+    const p = projectUndirected(
+      indexNetwork(
+        network(
+          ['a', 'b'],
+          [
+            ['a', 'b'],
+            ['b', 'a'],
+          ],
+        ),
+      ),
+    )
     expect(p.neighbour.length / 2).toBe(1)
     expect([...p.neighbour]).toEqual([1, 0])
     // Both directions survive as *directed* pairs, which is what reciprocity is counted over.
@@ -87,13 +97,30 @@ describe('the undirected projection', () => {
   })
 
   it('drops self-loops, which cannot close a triangle', () => {
-    const p = projectUndirected(indexNetwork(network(['a', 'b'], [['a', 'a'], ['a', 'b']])))
+    const p = projectUndirected(
+      indexNetwork(
+        network(
+          ['a', 'b'],
+          [
+            ['a', 'a'],
+            ['a', 'b'],
+          ],
+        ),
+      ),
+    )
     expect(p.neighbour.length / 2).toBe(1)
     expect(p.ordered.size).toBe(1)
   })
 
   it('counts each triangle once and credits all three corners', () => {
-    const triangle = network(['a', 'b', 'c'], [['a', 'b'], ['b', 'c'], ['c', 'a']])
+    const triangle = network(
+      ['a', 'b', 'c'],
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+        ['c', 'a'],
+      ],
+    )
     const { perNode, total } = countTriangles(projectUndirected(indexNetwork(triangle)))
     expect(total).toBe(1)
     expect([...perNode]).toEqual([1, 1, 1])
@@ -103,7 +130,16 @@ describe('the undirected projection', () => {
     // Σ over pairs (u, v), u < v, of d(v). On a triangle every node has degree 2 and there are
     // three forward pairs, so the walk is six steps — the number the warn threshold compares.
     const p = projectUndirected(
-      indexNetwork(network(['a', 'b', 'c'], [['a', 'b'], ['b', 'c'], ['c', 'a']])),
+      indexNetwork(
+        network(
+          ['a', 'b', 'c'],
+          [
+            ['a', 'b'],
+            ['b', 'c'],
+            ['c', 'a'],
+          ],
+        ),
+      ),
     )
     expect(triangleWork(p)).toBe(6)
   })
@@ -124,21 +160,41 @@ describe('the undirected projection', () => {
   })
 
   it('scores a star as perfectly disassortative', () => {
-    const star = network(['c', 'x', 'y', 'z'], [['c', 'x'], ['c', 'y'], ['c', 'z']])
+    const star = network(
+      ['c', 'x', 'y', 'z'],
+      [
+        ['c', 'x'],
+        ['c', 'y'],
+        ['c', 'z'],
+      ],
+    )
     expect(degreeAssortativity(projectUndirected(indexNetwork(star)))).toBeCloseTo(-1, 12)
   })
 
   it('has no assortativity to report on a regular graph', () => {
     // Every link has identical ends, so the correlation is 0/0. Null says the question does not
     // apply; zero would say "no preference", which is a different and wrong claim.
-    const ring = network(['a', 'b', 'c'], [['a', 'b'], ['b', 'c'], ['c', 'a']])
+    const ring = network(
+      ['a', 'b', 'c'],
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+        ['c', 'a'],
+      ],
+    )
     expect(degreeAssortativity(projectUndirected(indexNetwork(ring)))).toBeNull()
   })
 })
 
 describe('self-loops and dangling links', () => {
   it('counts a self-loop in both degrees and in nothing else', () => {
-    const net = network(['a', 'b'], [['a', 'a', 5], ['a', 'b', 1]])
+    const net = network(
+      ['a', 'b'],
+      [
+        ['a', 'a', 5],
+        ['a', 'b', 1],
+      ],
+    )
     const stats = networkMetrics(net).nodeStats
     expect(getColumn(stats, 'degreeOut')[0]).toBe(2)
     expect(getColumn(stats, 'degreeIn')[0]).toBe(1)
@@ -152,7 +208,13 @@ describe('self-loops and dangling links', () => {
   })
 
   it('drops a link naming a node the network does not hold', () => {
-    const net = network(['a', 'b'], [['a', 'b'], ['a', 'ghost']])
+    const net = network(
+      ['a', 'b'],
+      [
+        ['a', 'b'],
+        ['a', 'ghost'],
+      ],
+    )
     expect(indexNetwork(net).dangling).toBe(1)
     expect(summaryOf(net)['links']).toBe(1)
   })
@@ -167,7 +229,12 @@ describe('self-loops and dangling links', () => {
      */
     const net = network(
       ['a', 'b', 'c'],
-      [['a', 'b'], ['b', 'c'], ['c', 'a'], ['a', 'ghost']],
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+        ['c', 'a'],
+        ['a', 'ghost'],
+      ],
     )
     const card = networkMetrics(net)
     const evaluated = networkMetrics(net)
@@ -189,15 +256,36 @@ describe('self-loops and dangling links', () => {
 
 describe('the summary row', () => {
   it('reports reciprocity over unique directed pairs, and nothing on an undirected graph', () => {
-    const directed = network(['a', 'b', 'c'], [['a', 'b'], ['b', 'a'], ['a', 'c']])
+    const directed = network(
+      ['a', 'b', 'c'],
+      [
+        ['a', 'b'],
+        ['b', 'a'],
+        ['a', 'c'],
+      ],
+    )
     expect(summaryOf(directed)['reciprocity']).toBeCloseTo(2 / 3, 12)
 
-    const undirected = network(['a', 'b', 'c'], [['a', 'b'], ['a', 'c']], false)
+    const undirected = network(
+      ['a', 'b', 'c'],
+      [
+        ['a', 'b'],
+        ['a', 'c'],
+      ],
+      false,
+    )
     expect(summaryOf(undirected)['reciprocity']).toBeNull()
   })
 
   it('counts parallel links without letting them inflate density', () => {
-    const net = network(['a', 'b'], [['a', 'b'], ['a', 'b'], ['a', 'b']])
+    const net = network(
+      ['a', 'b'],
+      [
+        ['a', 'b'],
+        ['a', 'b'],
+        ['a', 'b'],
+      ],
+    )
     const row = summaryOf(net)
     expect(row['links']).toBe(3)
     expect(row['parallelLinks']).toBe(2)
@@ -236,7 +324,11 @@ describe('the summary row', () => {
 
 describe('the two halves agree', () => {
   it('writes over a metric column the node table already had', () => {
-    const schema = tableSchema(column('id', 'str'), column('degreeIn', 'i64'), column('type', 'str'))
+    const schema = tableSchema(
+      column('id', 'str'),
+      column('degreeIn', 'i64'),
+      column('type', 'str'),
+    )
     const net: NetworkValue = {
       kind: 'network',
       directed: true,
@@ -276,7 +368,6 @@ describe('the two halves agree', () => {
 // Against networkx
 // ---------------------------------------------------------------------------
 
-
 function fixtureNetwork(directed: boolean): NetworkValue {
   return network(
     networkxFixture.nodes,
@@ -284,7 +375,6 @@ function fixtureNetwork(directed: boolean): NetworkValue {
     directed,
   )
 }
-
 
 describe('agreement with networkx', () => {
   it('matches its density and reciprocity', () => {

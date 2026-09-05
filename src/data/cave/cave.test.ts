@@ -336,7 +336,8 @@ function installFetch(
      * cache is not a hypothetical — `flywire_fafb_public` and BANC are both exactly that — so
      * `'empty'` is a case the automatic route has to survive rather than an edge one.
      */
-    if (options.service && url.includes('/skeletoncache/api/versions')) return answer('[-1,0,1,2,3,4]')
+    if (options.service && url.includes('/skeletoncache/api/versions'))
+      return answer('[-1,0,1,2,3,4]')
     if (options.service && url.includes('/skeletoncache/') && url.endsWith('/info'))
       return answer(JSON.stringify(SERVICE_INFO))
     if (options.service && url.endsWith('/precomputed/skeleton/exists')) {
@@ -1945,7 +1946,10 @@ describe('where a CAVE skeleton comes from', () => {
      * would mean a build-time list of which deployments have generated anything, which goes stale
      * in the direction of concealing a route that works.
      */
-    expect(source.skeletonSourcesFor!(DATASET)?.map((r) => r.id)).toEqual(['published', 'service'])
+    expect(source.skeletonSourcesFor!(DATASET)?.map((r) => r.id)).toEqual([
+      'published',
+      'service',
+    ])
   })
 
   it('reads a middleauth-prefixed service URL as an ordinary one', () => {
@@ -1955,7 +1959,9 @@ describe('where a CAVE skeleton comes from', () => {
       skeletonServiceUrl(
         'precomputed://middleauth+https://minnie.microns-daf.com/skeletoncache/api/v1/minnie65_public/precomputed/skeleton/',
       ),
-    ).toBe('https://minnie.microns-daf.com/skeletoncache/api/v1/minnie65_public/precomputed/skeleton')
+    ).toBe(
+      'https://minnie.microns-daf.com/skeletoncache/api/v1/minnie65_public/precomputed/skeleton',
+    )
     expect(skeletonServiceUrl(null)).toBeUndefined()
     expect(skeletonServiceUrl('gs://a-bucket/skeletons')).toBeUndefined()
   })
@@ -1979,7 +1985,10 @@ describe('where a CAVE skeleton comes from', () => {
      * taken: a scene mixing a real reconstruction with a chunk decomposition is one where cable
      * length silently means two things, which is worse than the coarse answer taken whole.
      */
-    const full = installFetch({ '/l2cache/api/v1/table_mapping': L2_MAPPING }, { service: 'full' })
+    const full = installFetch(
+      { '/l2cache/api/v1/table_mapping': L2_MAPPING },
+      { service: 'full' },
+    )
     const answered = await new CaveSource().fetchSkeletons!({
       datasetId: DATASET,
       neuronIds: ['720575940628857210'],
@@ -1994,7 +2003,11 @@ describe('where a CAVE skeleton comes from', () => {
     // `flywire_fafb_public` and BANC both declare a service with an empty cache, so this is the
     // ordinary case rather than an edge one — and it must not surface as an error.
     const captured = installFetch(
-      { '/l2cache/api/v1/table_mapping': L2_MAPPING, '/lvl2_graph': CHAIN, '/attributes': COORDS },
+      {
+        '/l2cache/api/v1/table_mapping': L2_MAPPING,
+        '/lvl2_graph': CHAIN,
+        '/attributes': COORDS,
+      },
       { service: 'empty' },
     )
     const answered = await new CaveSource().fetchSkeletons!({
@@ -2011,7 +2024,11 @@ describe('where a CAVE skeleton comes from', () => {
      * the published bucket is absent would silently change what every cable length downstream
      * means, under a card that still said "published skeletons".
      */
-    installFetch({ '/l2cache/api/v1/table_mapping': L2_MAPPING, '/lvl2_graph': CHAIN, '/attributes': COORDS })
+    installFetch({
+      '/l2cache/api/v1/table_mapping': L2_MAPPING,
+      '/lvl2_graph': CHAIN,
+      '/attributes': COORDS,
+    })
     await expect(
       new CaveSource().fetchSkeletons!({
         datasetId: DATASET,

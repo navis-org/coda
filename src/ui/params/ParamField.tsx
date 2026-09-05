@@ -483,7 +483,14 @@ export interface SelectFieldProps {
   onChange: (value: string) => void
 }
 
-export function SelectField({ label, value, options, empty, title, onChange }: SelectFieldProps) {
+export function SelectField({
+  label,
+  value,
+  options,
+  empty,
+  title,
+  onChange,
+}: SelectFieldProps) {
   if (options.length === 0) {
     return (
       <select className="field nodrag" aria-label={label} title={title} disabled>

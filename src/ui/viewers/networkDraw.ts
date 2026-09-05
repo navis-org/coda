@@ -298,7 +298,11 @@ export function networkToSvg(spec: NetworkSvgSpec): SVGSVGElement {
      */
     discs.append(
       node.shape && node.shape !== 'circle'
-        ? element('path', { d: markPath(node.shape, node.x, node.y, radius), fill: node.color, ...border })
+        ? element('path', {
+            d: markPath(node.shape, node.x, node.y, radius),
+            fill: node.color,
+            ...border,
+          })
         : element('circle', { cx: node.x, cy: node.y, r: radius, fill: node.color, ...border }),
     )
     if (node.label) {

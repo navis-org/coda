@@ -86,7 +86,9 @@ registerEmitter(
         ]
     if (!cave) ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
     // No length guard: `pyPopulationMask` answers an empty population with no lines.
-    lines.push(...pyPopulationMask(all, population, schemasFromType(ctx.inputType('dataset')).neurons))
+    lines.push(
+      ...pyPopulationMask(all, population, schemasFromType(ctx.inputType('dataset')).neurons),
+    )
 
     if (query) {
       ctx.helper('coda_search')
@@ -131,7 +133,7 @@ registerEmitter(
          */
         cave
           ? `${selected} = ${all}[${all}['neuronId'].astype(str).isin(` +
-            `[str(_i) for _i in _selected_ids])]`
+              `[str(_i) for _i in _selected_ids])]`
           : `${selected} = ${all}[${all}['neuronId'].isin(_selected_ids)]`,
       )
     }

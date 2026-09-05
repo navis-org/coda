@@ -294,13 +294,23 @@ describe('updating a viewer the user has edited', () => {
     // The complaint this answers: every update used to restore *our* layer list, so layers the
     // user hid came back and layers they added disappeared.
     const { container, rerender } = render(
-      <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} datasetId={OWNED} />,
+      <NeuroglancerViewer
+        url={URL_A}
+        neurons={NEURONS}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+      />,
     )
     frameLoaded(container)
     frameShowing(container, live)
 
     rerender(
-      <NeuroglancerViewer url={URL_B} neurons={NEURONS} color={CATEGORICAL} datasetId={OWNED} />,
+      <NeuroglancerViewer
+        url={URL_B}
+        neurons={NEURONS}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+      />,
     )
     flushMerge()
 
@@ -326,10 +336,7 @@ describe('updating a viewer the user has edited', () => {
 
     const patch = parseSceneUrl(frame(container)?.getAttribute('src') ?? '')!
     // Our list, not theirs: `mine` is gone, which is the merge tier's documented cost.
-    expect(layersOf(patch).map((l) => l['name'])).toEqual([
-      'em',
-      'hemibrain:v1.2.1',
-    ])
+    expect(layersOf(patch).map((l) => l['name'])).toEqual(['em', 'hemibrain:v1.2.1'])
   })
 
   it('sends the frame to the proxied path, and the link stays absolute', () => {
@@ -376,7 +383,9 @@ describe('where the proxy is actually served', () => {
     const { container } = render(
       <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} />,
     )
-    expect(frameSrc(container).startsWith('https://neuroglancer-demo.appspot.com/#!')).toBe(true)
+    expect(frameSrc(container).startsWith('https://neuroglancer-demo.appspot.com/#!')).toBe(
+      true,
+    )
     // Still the same scene — this is about *which host*, not about what is shown.
     expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
   })
@@ -386,11 +395,21 @@ describe('where the proxy is actually served', () => {
     // reading the live state, so no preserving their layer edits — but the camera still
     // survives, because that is the merge form rather than the splice.
     const { container, rerender } = render(
-      <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} datasetId={OWNED} />,
+      <NeuroglancerViewer
+        url={URL_A}
+        neurons={NEURONS}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+      />,
     )
     frameLoaded(container)
     rerender(
-      <NeuroglancerViewer url={URL_B} neurons={NEURONS} color={CATEGORICAL} datasetId={OWNED} />,
+      <NeuroglancerViewer
+        url={URL_B}
+        neurons={NEURONS}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+      />,
     )
     flushMerge()
 
@@ -417,7 +436,9 @@ describe('holding an update back while the pointer is in the frame', () => {
   const leave = (container: HTMLElement) => fireEvent.mouseLeave(scaleBox(container)!)
   /** The state every hold starts from: a loaded frame with the pointer inside it. */
   const hovered = () => {
-    const view = render(<NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} />)
+    const view = render(
+      <NeuroglancerViewer url={URL_A} neurons={NEURONS} color={CATEGORICAL} />,
+    )
     frameLoaded(view.container)
     enter(view.container)
     return view
@@ -443,7 +464,10 @@ describe('holding an update back while the pointer is in the frame', () => {
     // rebuild when they look away, not one per scene that arrived meanwhile.
     const { container, rerender } = hovered()
 
-    for (const segments of [['1', '2'], ['1', '2', '3']]) {
+    for (const segments of [
+      ['1', '2'],
+      ['1', '2', '3'],
+    ]) {
       rerender(
         <NeuroglancerViewer
           url={sceneUrl(undefined, sceneWith(segments))}
@@ -458,11 +482,7 @@ describe('holding an update back while the pointer is in the frame', () => {
     leave(container)
     flushMerge()
     const patch = parseSceneUrl(frameSrc(container))!
-    expect(layersOf(patch)[1]!['segments']).toEqual([
-      '1',
-      '2',
-      '3',
-    ])
+    expect(layersOf(patch)[1]!['segments']).toEqual(['1', '2', '3'])
   })
 
   it('holds a replacement too, since that rebuilds the layers as well', () => {
@@ -514,7 +534,12 @@ describe('resuming across a remount', () => {
   /** A mount that loaded, was read, and went away — the card handing the node to the overlay. */
   function handOff(url = URL_A, viewerId = 'ng1'): void {
     const first = render(
-      <NeuroglancerViewer url={url} color={CATEGORICAL} datasetId={OWNED} viewerId={viewerId} />,
+      <NeuroglancerViewer
+        url={url}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+        viewerId={viewerId}
+      />,
     )
     frameLoaded(first.container)
     frameShowing(first.container, live)
@@ -550,7 +575,9 @@ describe('resuming across a remount', () => {
 
   it('remembers nothing for a frame with no viewerId', () => {
     // A frame with no identity of its own — the profile tile — has nothing to be handed to.
-    const first = render(<NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} />)
+    const first = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} />,
+    )
     frameLoaded(first.container)
     frameShowing(first.container, live)
     first.unmount()
@@ -566,7 +593,12 @@ describe('resuming across a remount', () => {
     // the same gate a merge goes through, and for the same reason.
     handOff()
     const { container } = render(
-      <NeuroglancerViewer url={URL_OTHER} color={CATEGORICAL} datasetId={OWNED} viewerId="ng1" />,
+      <NeuroglancerViewer
+        url={URL_OTHER}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+        viewerId="ng1"
+      />,
     )
     expect(frameScene(container)).toEqual(parseSceneUrl(URL_OTHER))
   })

@@ -39,7 +39,11 @@ function square() {
 
 describe('the criteria', () => {
   it('totals each axis over the finite cells', () => {
-    const m = makeMatrix(['a', 'b'], ['x', 'y', 'z'], Float64Array.from([1, 2, Number.NaN, 4, 5, 6]))
+    const m = makeMatrix(
+      ['a', 'b'],
+      ['x', 'y', 'z'],
+      Float64Array.from([1, 2, Number.NaN, 4, 5, 6]),
+    )
     expect([...axisTotals(m, 'rows')]).toEqual([3, 15])
     expect([...axisTotals(m, 'columns')]).toEqual([5, 7, 6])
   })
@@ -76,8 +80,14 @@ describe('the criteria', () => {
 
 describe('the plan', () => {
   it('leads with the chosen axis and lets the other follow, unless both', () => {
-    expect(orderPlan({ axis: 'rows', follow: true })).toEqual({ lead: ['rows'], follower: 'columns' })
-    expect(orderPlan({ axis: 'columns', follow: true })).toEqual({ lead: ['columns'], follower: 'rows' })
+    expect(orderPlan({ axis: 'rows', follow: true })).toEqual({
+      lead: ['rows'],
+      follower: 'columns',
+    })
+    expect(orderPlan({ axis: 'columns', follow: true })).toEqual({
+      lead: ['columns'],
+      follower: 'rows',
+    })
     expect(orderPlan({ axis: 'rows', follow: false })).toEqual({ lead: ['rows'] })
     // Independent, so nothing follows even when asked to.
     expect(orderPlan({ axis: 'both', follow: true })).toEqual({ lead: ['rows', 'columns'] })
@@ -93,7 +103,9 @@ describe('the plan', () => {
       method: 'average',
       metric: 'euclidean',
     })
-    expect(readOrderOptions({ sortBy: 'value', sortKey: '  LC4 ', sortAxis: 'both' })).toMatchObject({
+    expect(
+      readOrderOptions({ sortBy: 'value', sortKey: '  LC4 ', sortAxis: 'both' }),
+    ).toMatchObject({
       by: 'value',
       key: 'LC4',
       axis: 'both',
@@ -225,7 +237,12 @@ describe('the whole thing on an adjacency', () => {
 
   it('sorts columns by one row and leaves the rows alone when asked to', () => {
     const m = square()
-    const options = readOrderOptions({ sortBy: 'value', sortKey: 'LC4', sortAxis: 'columns', sortFollow: false })
+    const options = readOrderOptions({
+      sortBy: 'value',
+      sortKey: 'LC4',
+      sortAxis: 'columns',
+      sortFollow: false,
+    })
     const cols = orderAxis(m, 'columns', options)
     // LC4's row is [1, 9, 2] → LC10, DNp02, LC4.
     expect(cols.order && [...cols.order]).toEqual([1, 2, 0])
@@ -240,7 +257,9 @@ describe('the whole thing on an adjacency', () => {
       order: undefined,
       problem: expect.stringContaining('needs its label'),
     })
-    expect(orderAxis(m, 'rows', readOrderOptions({ sortBy: 'value', sortKey: 'nope' }))).toMatchObject({
+    expect(
+      orderAxis(m, 'rows', readOrderOptions({ sortBy: 'value', sortKey: 'nope' })),
+    ).toMatchObject({
       order: undefined,
       problem: expect.stringContaining('"nope"'),
     })

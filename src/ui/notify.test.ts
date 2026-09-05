@@ -47,7 +47,9 @@ describe('runAnnouncement', () => {
   it('says nothing about a run that finished quickly', () => {
     // The floor is the whole reason auto-run does not have to be excluded: what decides whether
     // somebody switched away is the duration, not which button started the run.
-    expect(runAnnouncement(summary({ durationMs: NOTIFY_AFTER_MS - 1 }), 'Graph')).toBeUndefined()
+    expect(
+      runAnnouncement(summary({ durationMs: NOTIFY_AFTER_MS - 1 }), 'Graph'),
+    ).toBeUndefined()
     expect(runAnnouncement(summary({ durationMs: NOTIFY_AFTER_MS }), 'Graph')).toBeDefined()
   })
 

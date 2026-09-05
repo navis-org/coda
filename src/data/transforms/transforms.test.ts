@@ -45,13 +45,11 @@ describe('the generated manifest', () => {
      * and the failure this should catch is a space silently *dropping out* of the manifest
      * because its landmark file went missing, which a count would only catch by luck.
      */
-    expect(allSpaces().map((s) => s.id).sort()).toEqual([
-      'FAFB14',
-      'FLYWIRE',
-      'JRCFIB2018F',
-      'JRCFIB2022M',
-      'MANC',
-    ])
+    expect(
+      allSpaces()
+        .map((s) => s.id)
+        .sort(),
+    ).toEqual(['FAFB14', 'FLYWIRE', 'JRCFIB2018F', 'JRCFIB2022M', 'MANC'])
   })
 
   it('names JRC2018U as the common space, in micrometres', () => {
@@ -266,7 +264,11 @@ describe('reading a landmark file', () => {
   }
 
   it('reads pairs into interleaved buffers', () => {
-    const pairs = parseLandmarks('x,y,z,tx,ty,tz\n1,2,3,4,5,6\n7,8,9,10,11,12\n', spec, 'test.csv')
+    const pairs = parseLandmarks(
+      'x,y,z,tx,ty,tz\n1,2,3,4,5,6\n7,8,9,10,11,12\n',
+      spec,
+      'test.csv',
+    )
     expect(pairs.count).toBe(2)
     expect([...pairs.source]).toEqual([1, 2, 3, 7, 8, 9])
     expect([...pairs.target]).toEqual([4, 5, 6, 10, 11, 12])
@@ -274,7 +276,11 @@ describe('reading a landmark file', () => {
 
   it('reads columns by name rather than by position', () => {
     // The generator writes source-then-target; nothing guarantees a hand-made file will.
-    const pairs = parseLandmarks('tz,z,ty,y,tx,x\n6,3,5,2,4,1\n', { ...spec, landmarks: 1 }, 'f')
+    const pairs = parseLandmarks(
+      'tz,z,ty,y,tx,x\n6,3,5,2,4,1\n',
+      { ...spec, landmarks: 1 },
+      'f',
+    )
     expect([...pairs.source]).toEqual([1, 2, 3])
     expect([...pairs.target]).toEqual([4, 5, 6])
   })
@@ -301,9 +307,9 @@ describe('reading a landmark file', () => {
 
   it('refuses a file that disagrees with the manifest about its own size', () => {
     // A stale CSV against a fresh manifest still fits and still runs — on the wrong landmarks.
-    expect(() =>
-      parseLandmarks('x,y,z,tx,ty,tz\n1,2,3,4,5,6\n', spec, 'test.csv'),
-    ).toThrow(/1 landmarks; the manifest says 2/)
+    expect(() => parseLandmarks('x,y,z,tx,ty,tz\n1,2,3,4,5,6\n', spec, 'test.csv')).toThrow(
+      /1 landmarks; the manifest says 2/,
+    )
   })
 
   it('refuses a non-numeric cell rather than writing a NaN into a coordinate', () => {

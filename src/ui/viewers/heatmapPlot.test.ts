@@ -11,7 +11,10 @@ import { describe, expect, it } from 'vitest'
 
 import { makeMatrix } from '../../core/values'
 import { heatmapPaletteStops, sequentialColor } from '../colors'
-import { DIVERGING_PALETTE_OPTIONS, SEQUENTIAL_PALETTE_OPTIONS } from '../../nodes/lib/heatmapParams'
+import {
+  DIVERGING_PALETTE_OPTIONS,
+  SEQUENTIAL_PALETTE_OPTIONS,
+} from '../../nodes/lib/heatmapParams'
 import {
   HEATMAP_CELLS_WARN,
   axisMarks,
@@ -63,9 +66,7 @@ function spec(
     height: over.height ?? BOX.height,
     showLabels: true,
     ...(over.window ? { window: over.window } : {}),
-    ...(over.log
-      ? { domain: colorDomain(matrixExtent(values), scale, { log: true }) }
-      : {}),
+    ...(over.log ? { domain: colorDomain(matrixExtent(values), scale, { log: true }) } : {}),
   })
 }
 
@@ -225,7 +226,12 @@ describe('axis labels', () => {
   it('names a line part way off the plot over the part that is on it', () => {
     // Four lines in 400px, the window starting 0.4 of a line in: line 40 has 60px on screen and
     // is named over those 60px, not at its own centre 10px above the plot.
-    const { ticks, thinned } = labelTicks(names('r', 100), axisMap(100, 0, 400, 40.4, 4), 0, 400)
+    const { ticks, thinned } = labelTicks(
+      names('r', 100),
+      axisMap(100, 0, 400, 40.4, 4),
+      0,
+      400,
+    )
     expect(ticks[0]).toMatchObject({ index: 40, label: 'r40' })
     expect(ticks[0]!.center).toBeCloseTo(30, 6)
     expect(ticks.every((t) => t.center >= 0 && t.center <= 400)).toBe(true)
@@ -235,7 +241,12 @@ describe('axis labels', () => {
   it('names every k-th interior line, whatever the rounding of its edges', () => {
     // 95 lines over 700px: 7.37px each, every second one named. The interior lines' visible
     // extent is their own pitch computed two ways, and an exact comparison lost 29 of 47.
-    const { ticks, thinned } = labelTicks(names('r', 401), axisMap(401, 0, 700, 150.3, 95), 0, 700)
+    const { ticks, thinned } = labelTicks(
+      names('r', 401),
+      axisMap(401, 0, 700, 150.3, 95),
+      0,
+      700,
+    )
     const gaps = ticks.slice(1).map((t, i) => t.index - ticks[i]!.index)
     expect(new Set(gaps)).toEqual(new Set([2]))
     // Lines 150 and 245 are slivers (0.7 and 0.3 of a line on screen); of the 94 between them
@@ -256,7 +267,12 @@ describe('axis labels', () => {
     // 0.95 of a line in on a 20px pitch: line 40 has 1px on screen, less than a label's pitch,
     // so it is not named — and not reported as a dropped label either, which at ×15 on three
     // visible lines read as "labels thinned" over a plot showing every name it could.
-    const { ticks, thinned } = labelTicks(names('r', 100), axisMap(100, 0, 200, 40.95, 10), 0, 200)
+    const { ticks, thinned } = labelTicks(
+      names('r', 100),
+      axisMap(100, 0, 200, 40.95, 10),
+      0,
+      200,
+    )
     expect(ticks[0]!.index).toBe(41)
     expect(thinned).toBe(0)
   })
@@ -286,7 +302,12 @@ describe('the window', () => {
   it('pans, clamped', () => {
     const half = { row0: 25, col0: 12.5, rows: 50, cols: 25 }
     expect(panWindow(half, full, 10, -5)).toEqual({ row0: 35, col0: 7.5, rows: 50, cols: 25 })
-    expect(panWindow(half, full, 1000, -1000)).toEqual({ row0: 50, col0: 0, rows: 50, cols: 25 })
+    expect(panWindow(half, full, 1000, -1000)).toEqual({
+      row0: 50,
+      col0: 0,
+      rows: 50,
+      cols: 25,
+    })
   })
 
   it('is what the fold reads: zoomed in, a folded matrix shows its real cells', () => {
@@ -327,7 +348,9 @@ describe('the window', () => {
     const zoomed = spec(rows, cols, new Float64Array(rows * cols), { window })
     expect(zoomed.folded).toBe(true)
     expect(zoomed.rowMap.visible).toBe(2000)
-    expect(zoomed.foldFactor).toBeLessThan(spec(rows, cols, new Float64Array(rows * cols)).foldFactor)
+    expect(zoomed.foldFactor).toBeLessThan(
+      spec(rows, cols, new Float64Array(rows * cols)).foldFactor,
+    )
     // The last visible line lands in the last grid cell, never past it.
     expect(cellRect(zoomed, 2999, 2999).x + zoomed.cellWidth).toBeLessThanOrEqual(
       zoomed.plot.x + zoomed.plot.width + 1e-6,
@@ -353,7 +376,11 @@ describe('the colour domain', () => {
   it('takes its ends from the data by default', () => {
     expect(colorDomain(extent, 'sequential')).toEqual({ lo: -4, hi: 20, neutral: -4 })
     // An all-positive matrix reads against a baseline of nothing, not its own smallest cell.
-    expect(colorDomain({ min: 3, max: 20 }, 'sequential')).toEqual({ lo: 0, hi: 20, neutral: 0 })
+    expect(colorDomain({ min: 3, max: 20 }, 'sequential')).toEqual({
+      lo: 0,
+      hi: 20,
+      neutral: 0,
+    })
     expect(colorDomain(extent, 'diverging')).toEqual({ lo: -20, hi: 20, neutral: 0 })
   })
 
@@ -557,7 +584,11 @@ describe('the published palettes', () => {
   })
 
   it('falls back to Coda’s ramp for a name from the other scale’s list', () => {
-    expect(rampColors('sequential', 'dark', 9, 'RdBu')).toEqual(rampColors('sequential', 'dark', 9))
-    expect(rampColors('diverging', 'dark', 9, 'viridis')).toEqual(rampColors('diverging', 'dark', 9))
+    expect(rampColors('sequential', 'dark', 9, 'RdBu')).toEqual(
+      rampColors('sequential', 'dark', 9),
+    )
+    expect(rampColors('diverging', 'dark', 9, 'viridis')).toEqual(
+      rampColors('diverging', 'dark', 9),
+    )
   })
 })

@@ -113,14 +113,7 @@ const GLYPHS: Record<string, ReactNode> = {
       <rect x={14.6} y={5.6} width={6.8} height={4.8} rx={1.2} />
       <path d="M9.4 8 H14.6" />
       <path d="M12 8 V15.4" />
-      <rect
-        x={8.6}
-        y={15.4}
-        width={6.8}
-        height={4.8}
-        rx={1.2}
-        strokeDasharray="2.2 2"
-      />
+      <rect x={8.6} y={15.4} width={6.8} height={4.8} rx={1.2} strokeDasharray="2.2 2" />
     </>
   ),
   /*

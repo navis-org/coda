@@ -77,8 +77,7 @@ function draw(options: {
 
 const defaults = () => defaultParams(requireNodeDef(TYPE))
 
-const labels = () =>
-  [...document.querySelectorAll('.param__label')].map((el) => el.textContent)
+const labels = () => [...document.querySelectorAll('.param__label')].map((el) => el.textContent)
 
 describe('the Paths card', () => {
   /** What the definition says belongs on the card, given these values. `visibleIf` included. */
@@ -116,7 +115,12 @@ describe('the Paths card', () => {
     // the literal above cannot see, since it is a list somebody has to remember to extend.
     expect(labels()).toEqual(declared({ normalize: true }))
     expect(labels()).toHaveLength(9)
-    expect(labels().slice(5)).toEqual(['Normalize by', 'Denominator', 'Rank by', 'Min fraction'])
+    expect(labels().slice(5)).toEqual([
+      'Normalize by',
+      'Denominator',
+      'Rank by',
+      'Min fraction',
+    ])
   })
 
   it('labels the Collapse types checkbox once', () => {

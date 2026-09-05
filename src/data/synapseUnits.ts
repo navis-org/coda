@@ -82,7 +82,9 @@ export function synapseUnitLabel(id: SynapseUnitId): string {
  */
 export function asSynapseUnit(raw: unknown): SynapseUnitId | undefined {
   const id = String(raw ?? '')
-  return (Object.values(SYNAPSE_UNITS) as string[]).includes(id) ? (id as SynapseUnitId) : undefined
+  return (Object.values(SYNAPSE_UNITS) as string[]).includes(id)
+    ? (id as SynapseUnitId)
+    : undefined
 }
 
 /**

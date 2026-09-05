@@ -106,7 +106,10 @@ export function copyIds(table: TableValue, dedupe: boolean): string[] {
  */
 export function joinIds(
   ids: readonly string[],
-  { separator = SEPARATORS[DEFAULT_SEPARATOR].text, quoted = false }: Partial<CopyIdsSettings> = {},
+  {
+    separator = SEPARATORS[DEFAULT_SEPARATOR].text,
+    quoted = false,
+  }: Partial<CopyIdsSettings> = {},
 ): string {
   return (quoted ? ids.map((id) => `"${id}"`) : ids).join(separator)
 }

@@ -190,7 +190,10 @@ export function HeatmapViewer({
     [drawable, matrix, scale, size.width, size.height, compact, domain, view],
   )
 
-  const ramp = useMemo(() => rampColors(scale, mode, RAMP_STEPS, palette), [scale, mode, palette])
+  const ramp = useMemo(
+    () => rampColors(scale, mode, RAMP_STEPS, palette),
+    [scale, mode, palette],
+  )
   // Sampled out of the cells' own ramp rather than resolved a second time, so the bar cannot
   // come to describe a scale the cells are not drawn in.
   const barRamp = useMemo(

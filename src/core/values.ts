@@ -97,7 +97,6 @@ export interface DatasetValue {
   readonly population?: readonly PopulationFilter[]
 }
 
-
 /**
  * An attached edge set, by identity.
  *

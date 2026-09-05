@@ -93,7 +93,9 @@ export function foldNodeColumns(
 ): TableSchema {
   if (!nodes) return tableSchema(column('id', 'str'), ...wanted)
   return tableSchema(
-    ...nodes.columns.map((existing) => wanted.find((c) => c.name === existing.name) ?? existing),
+    ...nodes.columns.map(
+      (existing) => wanted.find((c) => c.name === existing.name) ?? existing,
+    ),
     ...wanted.filter((c) => !findColumn(nodes, c.name)),
   )
 }

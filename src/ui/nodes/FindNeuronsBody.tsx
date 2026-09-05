@@ -199,7 +199,9 @@ export function FindNeuronsBody({ node, ctx, compact, setParam }: NodeBodyProps)
                   // being reported as broken by the row somebody just fixed.
                   const dtype = resolveColumn(schema, field)?.dtype
                   const allowed = rowOpsForDType(dtype)
-                  const op = allowed.some((o) => o.value === row.op) ? row.op : allowed[0]!.value
+                  const op = allowed.some((o) => o.value === row.op)
+                    ? row.op
+                    : allowed[0]!.value
                   edit(i, { field, op })
                 }}
               />

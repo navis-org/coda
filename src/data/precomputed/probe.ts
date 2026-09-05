@@ -32,12 +32,7 @@ import { fetchInfo } from './transport'
 
 /** What a precomputed directory turned out to be. */
 export type PrecomputedKind =
-  | 'volume'
-  | 'meshes'
-  | 'skeletons'
-  | 'annotations'
-  | 'segment-properties'
-  | 'unknown'
+  'volume' | 'meshes' | 'skeletons' | 'annotations' | 'segment-properties' | 'unknown'
 
 export interface PrecomputedDescription {
   kind: PrecomputedKind
@@ -108,7 +103,10 @@ export interface ProbeOptions {
  * URL until the next explicit Run. It is also the scheduler's own rule that an aborted run
  * rejects rather than resolving with something partial.
  */
-export function probePrecomputed(url: string, options: ProbeOptions = {}): Promise<PrecomputedProbe> {
+export function probePrecomputed(
+  url: string,
+  options: ProbeOptions = {},
+): Promise<PrecomputedProbe> {
   const base = url.replace(/\/+$/, '')
   const existing = probes.get(base)
   if (existing && !(options.retry && existing.settled?.ok === false)) return existing.promise
@@ -205,7 +203,11 @@ async function classify(
 
   switch (info['@type']) {
     case 'neuroglancer_skeletons':
-      return { kind: 'skeletons', skeletonUrl: base, ...spread('skeletons', await tryOpen(base, openSkeletonSource, signal)) }
+      return {
+        kind: 'skeletons',
+        skeletonUrl: base,
+        ...spread('skeletons', await tryOpen(base, openSkeletonSource, signal)),
+      }
     case 'neuroglancer_annotations_v1':
       return { kind: 'annotations' }
     case 'neuroglancer_segment_properties':
@@ -219,7 +221,11 @@ async function classify(
        * `openMeshSource` because the question is already settled — and because it is the opener
        * that forgives a directory with no `info` at all, which is what most legacy ones are.
        */
-      return { kind: 'meshes', meshUrl: base, ...spread('mesh', await tryOpen(base, openMeshDir, signal)) }
+      return {
+        kind: 'meshes',
+        meshUrl: base,
+        ...spread('mesh', await tryOpen(base, openMeshDir, signal)),
+      }
     default:
       return { kind: 'unknown' }
   }

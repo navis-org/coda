@@ -69,7 +69,9 @@ live('neuPrint, live — where a skeleton comes from', () => {
     for (let i = 0; i < 100 && !source.skeletonSourcesFor!('hemibrain:v1.2.1'); i++) {
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
-    expect(source.skeletonSourcesFor!('hemibrain:v1.2.1')?.map((r) => r.id)).toEqual(['neuprint'])
+    expect(source.skeletonSourcesFor!('hemibrain:v1.2.1')?.map((r) => r.id)).toEqual([
+      'neuprint',
+    ])
   }, 120_000)
 
   it('reads the same neuron down both routes, in the same nanometres', async () => {
@@ -164,7 +166,6 @@ live('neuPrint, live — what a weight is a fraction of', () => {
       rois: primaryRois!,
       splitByRoi: true,
     })
-
 
     /*
      * The decomposition promise, and the only place it can actually be tested. 23,423 either

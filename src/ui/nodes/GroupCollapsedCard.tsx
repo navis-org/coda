@@ -328,7 +328,10 @@ function GroupMiniMap({ box }: { box: CollapsedBox }) {
   const span = { width: Math.max(bounds.width, 1), height: Math.max(bounds.height, 1) }
 
   // The drawing area, in card pixels: everything below the header.
-  const area = { width: width - MAP_PAD * 2, height: height - COLLAPSED_HEADER_HEIGHT - MAP_PAD }
+  const area = {
+    width: width - MAP_PAD * 2,
+    height: height - COLLAPSED_HEADER_HEIGHT - MAP_PAD,
+  }
   /*
    * The cap is applied by *widening the box*, not by scaling the drawing: `preserveAspectRatio`
    * fits whatever the `viewBox` says, so a view larger than the members is the same statement as
@@ -371,4 +374,3 @@ function GroupMiniMap({ box }: { box: CollapsedBox }) {
     </svg>
   )
 }
-

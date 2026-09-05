@@ -318,7 +318,10 @@ interface Account {
  * the caller's own message covers both. An unreachable server still raises from `postJson`,
  * which is the one failure that is genuinely about something else.
  */
-async function account(base: string, signal?: AbortSignal | undefined): Promise<Account | undefined> {
+async function account(
+  base: string,
+  signal?: AbortSignal | undefined,
+): Promise<Account | undefined> {
   const { ok, payload } = await postJson(`${base}/api/me`, {}, {}, signal)
   if (!ok) return undefined
   const body = payload as Account
@@ -341,7 +344,7 @@ export const ollama: AiProvider = {
    * telling somebody on a dev server to go and set an environment variable sends them to fix
    * the one thing that was never broken. It is the hosted origin that has to be named.
    */
-  note: 'Your own Ollama server, at localhost. A model on this machine needs no key and no account, and nothing leaves the computer — pick one with a context window of at least 32k, since the prompt is ~10k tokens before your canvas is described. Names ending -cloud are different: they run on Ollama\'s servers, so they need a free ollama.com account (`ollama signin`) and your question and graph are sent there, but they need no GPU of your own. Served from localhost this works as it stands; the hosted app additionally needs OLLAMA_ORIGINS set so the browser is allowed to call it, and some browsers block an https page from reaching a plain-http local server at all.',
+  note: "Your own Ollama server, at localhost. A model on this machine needs no key and no account, and nothing leaves the computer — pick one with a context window of at least 32k, since the prompt is ~10k tokens before your canvas is described. Names ending -cloud are different: they run on Ollama's servers, so they need a free ollama.com account (`ollama signin`) and your question and graph are sent there, but they need no GPU of your own. Served from localhost this works as it stands; the hosted app additionally needs OLLAMA_ORIGINS set so the browser is allowed to call it, and some browsers block an https page from reaching a plain-http local server at all.",
   guideUrl: 'https://github.com/navis-org/coda/blob/main/docs/ollama.md',
   models: [
     { id: 'qwen2.5-coder:14b', label: 'Qwen2.5 Coder 14B' },
@@ -582,7 +585,7 @@ export const ollama: AiProvider = {
         throw new AiError(
           isCloudModel(model)
             ? `${message} — cloud models are served by name and this one is not among them, ` +
-              `whatever ollama.com may list. Pick another from the dropdown.`
+                `whatever ollama.com may list. Pick another from the dropdown.`
             : `${message} — is the model pulled? Try \`ollama pull ${model}\`.`,
           404,
         )

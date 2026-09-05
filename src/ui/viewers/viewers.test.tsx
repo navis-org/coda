@@ -303,7 +303,9 @@ describe('HeatmapViewer', () => {
     const box = container.querySelector('.heatmap-plot')!
     // The magnification note, as distinct from the "2 × 3" shape the caption always prints.
     const zoomNote = () =>
-      [...container.querySelectorAll('.viewer__note')].find((n) => n.textContent?.startsWith('×'))
+      [...container.querySelectorAll('.viewer__note')].find((n) =>
+        n.textContent?.startsWith('×'),
+      )
     expect(screen.getByLabelText('Fit to view')).toBeTruthy()
     expect(zoomNote()).toBeUndefined()
 

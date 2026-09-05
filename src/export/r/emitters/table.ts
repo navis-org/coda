@@ -65,8 +65,7 @@ function dtypeOf(ctx: EmitContext, portId: string, name: string | undefined) {
  * regex needed a warning.
  */
 export type FilterPredicate =
-  | { predicate: string; notes: readonly string[] }
-  | { predicate?: undefined; reason: string }
+  { predicate: string; notes: readonly string[] } | { predicate?: undefined; reason: string }
 
 export function rFilterPredicate(
   name: string,
@@ -805,7 +804,9 @@ registerEmitter('core.qualifyIds', (ctx) => {
     src,
     rStr(name),
     `direction = ${rStr(direction)}`,
-    ...(direction === 'add' ? [`prefix = ${rStr(String(ctx.params.prefix ?? '').trim())}`] : []),
+    ...(direction === 'add'
+      ? [`prefix = ${rStr(String(ctx.params.prefix ?? '').trim())}`]
+      : []),
     ...(direction === 'remove' && into ? [`into = ${rStr(into)}`] : []),
   ]
   return [`${ctx.output('out')} <- coda_qualify_ids(${args.join(', ')})`]
@@ -881,7 +882,9 @@ registerEmitter('core.editTable', (ctx) => {
   const steps: Array<{ comment?: string; lines: string[] }> = []
 
   for (const entry of plan.widened) {
-    steps.push({ lines: [`  mutate(${rStr(entry.column)} := ${R_CAST[entry.to]}(${col(entry.column)}))`] })
+    steps.push({
+      lines: [`  mutate(${rStr(entry.column)} := ${R_CAST[entry.to]}(${col(entry.column)}))`],
+    })
   }
   for (const entry of plan.added) {
     steps.push({ lines: [`  mutate(${rStr(entry.column)} := ${R_NA[entry.dtype]})`] })
@@ -891,7 +894,9 @@ registerEmitter('core.editTable', (ctx) => {
     // text compares as text on both sides, and a column an earlier rule added exists on both.
     const predicates = filterPredicates(target.terms, plan.schema)
     const value = rCell(target.cell, target.dtype)
-    const comment = target.setter.where.trim() ? `where ${target.setter.where.trim()}` : undefined
+    const comment = target.setter.where.trim()
+      ? `where ${target.setter.where.trim()}`
+      : undefined
     if (predicates.length === 0) {
       steps.push({ comment, lines: [`  mutate(${rStr(target.column)} := ${value})`] })
       continue
@@ -910,7 +915,9 @@ registerEmitter('core.editTable', (ctx) => {
       lines: [
         `  mutate(${rStr(target.column)} := replace(`,
         `    .data[[${rStr(target.column)}]],`,
-        ...predicates.map((predicate, i) => `    ${predicate}${i < predicates.length - 1 ? ' &' : ','}`),
+        ...predicates.map(
+          (predicate, i) => `    ${predicate}${i < predicates.length - 1 ? ' &' : ','}`,
+        ),
         `    ${value}`,
         `  ))`,
       ],

@@ -149,7 +149,10 @@ type SkeletonBody = Omit<SkeletonGeometry, 'id'>
  * guaranteed to be 4-byte aligned once a Range request hands back a slice — and a misaligned
  * typed-array view throws. `legacy.ts` records the same trap for the same reason.
  */
-export function parseSkeleton(bytes: ArrayBuffer, source: SkeletonSource): SkeletonBody | undefined {
+export function parseSkeleton(
+  bytes: ArrayBuffer,
+  source: SkeletonSource,
+): SkeletonBody | undefined {
   if (bytes.byteLength < 8) return undefined
   const view = new DataView(bytes)
   const vertexCount = view.getUint32(0, true)
@@ -171,7 +174,10 @@ export function parseSkeleton(bytes: ArrayBuffer, source: SkeletonSource): Skele
 
   const edges: Array<readonly [number, number]> = []
   for (let i = 0; i < edgeCount; i++) {
-    edges.push([view.getUint32(edgesAt + i * 8, true), view.getUint32(edgesAt + i * 8 + 4, true)])
+    edges.push([
+      view.getUint32(edgesAt + i * 8, true),
+      view.getUint32(edgesAt + i * 8 + 4, true),
+    ])
   }
   return spanningForest(points, edges)
 }
@@ -211,7 +217,11 @@ function readRadii(
     const width = WIDTHS[attribute.data_type]
     if (width === undefined) return undefined // Unknown width: every later offset is a guess.
     const bytes = vertexCount * attribute.num_components * width
-    if (attribute.id === 'radius' && attribute.data_type === 'float32' && attribute.num_components === 1) {
+    if (
+      attribute.id === 'radius' &&
+      attribute.data_type === 'float32' &&
+      attribute.num_components === 1
+    ) {
       if (view.byteLength < at + bytes) return undefined
       const radii = new Float32Array(vertexCount)
       for (let i = 0; i < vertexCount; i++) radii[i] = view.getFloat32(at + i * 4, true)

@@ -307,8 +307,7 @@ export function colorDomain(
 ): ColorDomain {
   const { limits = {}, log } = options
   if (scale === 'diverging') {
-    const magnitude =
-      limits.max ?? (Math.max(Math.abs(extent.min), Math.abs(extent.max)) || 1)
+    const magnitude = limits.max ?? (Math.max(Math.abs(extent.min), Math.abs(extent.max)) || 1)
     return { lo: -magnitude, hi: magnitude, neutral: 0 }
   }
   const lo = limits.min ?? Math.min(0, extent.min)
@@ -349,7 +348,9 @@ export function bucketOf(value: number, domain: ColorDomain): number {
 /** The smallest span a zoom may reach on either axis: one line filling the plot. */
 const MIN_SPAN = 1
 
-export function fullWindow(matrix: Pick<MatrixValue, 'rowLabels' | 'colLabels'>): HeatmapWindow {
+export function fullWindow(
+  matrix: Pick<MatrixValue, 'rowLabels' | 'colLabels'>,
+): HeatmapWindow {
   return { row0: 0, col0: 0, rows: matrix.rowLabels.length, cols: matrix.colLabels.length }
 }
 
@@ -360,7 +361,10 @@ export function isFullWindow(window: HeatmapWindow, full: HeatmapWindow): boolea
 
 /** How far in, as the caption says it: the larger of the two axes' magnifications. */
 export function windowScale(window: HeatmapWindow, full: HeatmapWindow): number {
-  return Math.max(full.rows / Math.max(MIN_SPAN, window.rows), full.cols / Math.max(MIN_SPAN, window.cols))
+  return Math.max(
+    full.rows / Math.max(MIN_SPAN, window.rows),
+    full.cols / Math.max(MIN_SPAN, window.cols),
+  )
 }
 
 /** Keep a window inside the matrix and above the one-line floor, on both axes. */
@@ -408,7 +412,11 @@ export function panWindow(
 }
 
 /** The matrix coordinate under a plot pixel, fractional and unclamped. */
-export function pointToMatrix(spec: HeatmapSpec, x: number, y: number): { row: number; col: number } {
+export function pointToMatrix(
+  spec: HeatmapSpec,
+  x: number,
+  y: number,
+): { row: number; col: number } {
   const { plot, window } = spec
   return {
     row: window.row0 + ((y - plot.y) / Math.max(1, plot.height)) * window.rows,

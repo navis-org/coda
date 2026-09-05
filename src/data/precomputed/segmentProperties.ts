@@ -129,7 +129,10 @@ function decode(
       dtype: 'str',
       values: values.map((entry) =>
         Array.isArray(entry)
-          ? entry.map((at) => vocabulary[Number(at)] ?? '').filter(Boolean).join(JOIN_SEPARATOR)
+          ? entry
+              .map((at) => vocabulary[Number(at)] ?? '')
+              .filter(Boolean)
+              .join(JOIN_SEPARATOR)
           : null,
       ),
     }

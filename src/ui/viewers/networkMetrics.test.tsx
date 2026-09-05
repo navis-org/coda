@@ -87,9 +87,7 @@ function draw(
   const inputs = { in: T.network(NODE_SCHEMA, EDGE_SCHEMA) }
   return render(
     <ValuePreview
-      node={
-        { id: 'm', type: 'net.metrics', position: { x: 0, y: 0 }, params: merged } as never
-      }
+      node={{ id: 'm', type: 'net.metrics', position: { x: 0, y: 0 }, params: merged } as never}
       // Deliberately `undefined`: the card has to draw before this node's own output exists,
       // which is the whole reason its branch sits above `ValuePreview`'s `!value` guard.
       value={undefined}
@@ -149,7 +147,16 @@ describe('the Network Metrics card', () => {
   it('drops the tiles that would say nothing on an undirected graph', () => {
     // `reciprocity` is 1 by construction without arrows, so the Structure tile shows the facts
     // that apply rather than an em-dash where a number would be.
-    draw(network(['a', 'b', 'c'], [['a', 'b', 1], ['b', 'c', 1]], false))
+    draw(
+      network(
+        ['a', 'b', 'c'],
+        [
+          ['a', 'b', 1],
+          ['b', 'c', 1],
+        ],
+        false,
+      ),
+    )
     expect(screen.getByText('undirected')).toBeTruthy()
     expect(screen.queryByText('reciprocity')).toBeNull()
   })
@@ -258,6 +265,8 @@ describe('the controls on the tiles', () => {
     // The dashboard and the inspector both pass a writer; a surface that does not still has to
     // show which column is on screen.
     draw(sample())
-    expect((screen.getByLabelText('Distribution column') as HTMLSelectElement).disabled).toBe(true)
+    expect((screen.getByLabelText('Distribution column') as HTMLSelectElement).disabled).toBe(
+      true,
+    )
   })
 })

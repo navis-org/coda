@@ -69,7 +69,10 @@ function only(...on: Array<keyof typeof CENTRALITY_DEFAULTS>) {
   }
 }
 
-function firstRow(table: { schema: { columns: Array<{ name: string }> }; data: Record<string, unknown[]> }) {
+function firstRow(table: {
+  schema: { columns: Array<{ name: string }> }
+  data: Record<string, unknown[]>
+}) {
   const row: Record<string, unknown> = {}
   for (const col of table.schema.columns) row[col.name] = table.data[col.name]![0]
   return row
@@ -79,14 +82,27 @@ describe('betweenness', () => {
   it('gives the middle of a three-node path the whole of it', () => {
     // n = 3, so networkx's scale is 1/((n-1)(n-2)) = 1/2 and the raw Brandes sum for the middle
     // node is 2 — one from each end. Undirected, so both directions count.
-    const path = network(['a', 'b', 'c'], [['a', 'b'], ['b', 'c']], false)
+    const path = network(
+      ['a', 'b', 'c'],
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+      ],
+      false,
+    )
     return networkCentrality(path, only('betweenness')).then((result) => {
       expect(getColumn(result.nodeStats, 'betweenness')).toEqual([0, 1, 0])
     })
   })
 
   it('follows arrows on a directed graph', async () => {
-    const path = network(['a', 'b', 'c'], [['a', 'b'], ['b', 'c']])
+    const path = network(
+      ['a', 'b', 'c'],
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+      ],
+    )
     const result = await networkCentrality(path, only('betweenness'))
     // Only a → c passes through b, and the directed scale is the same 1/((n-1)(n-2)) = 1/2.
     expect(getColumn(result.nodeStats, 'betweenness')).toEqual([0, 0.5, 0])
@@ -95,7 +111,14 @@ describe('betweenness', () => {
   it('makes a heavy link a short one when paths are weighted', async () => {
     // Unweighted, a → c is one hop and b is on nothing. Weighted, a → b → c is 1/10 + 1/10 and
     // the direct link is 1/1, so the detour is the shortest path and b carries it.
-    const net = network(['a', 'b', 'c'], [['a', 'b', 10], ['b', 'c', 10], ['a', 'c', 1]])
+    const net = network(
+      ['a', 'b', 'c'],
+      [
+        ['a', 'b', 10],
+        ['b', 'c', 10],
+        ['a', 'c', 1],
+      ],
+    )
     const hops = await networkCentrality(net, only('betweenness'))
     expect(getColumn(hops.nodeStats, 'betweenness')).toEqual([0, 0, 0])
 
@@ -104,10 +127,22 @@ describe('betweenness', () => {
   })
 
   it('is not inflated by parallel links between the same pair', async () => {
-    const once = network(['a', 'b', 'c'], [['a', 'b'], ['b', 'c']])
+    const once = network(
+      ['a', 'b', 'c'],
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+      ],
+    )
     const four = network(
       ['a', 'b', 'c'],
-      [['a', 'b'], ['a', 'b'], ['a', 'b'], ['a', 'b'], ['b', 'c']],
+      [
+        ['a', 'b'],
+        ['a', 'b'],
+        ['a', 'b'],
+        ['a', 'b'],
+        ['b', 'c'],
+      ],
     )
     const a = await networkCentrality(once, only('betweenness'))
     const b = await networkCentrality(four, only('betweenness'))
@@ -117,7 +152,14 @@ describe('betweenness', () => {
 
 describe('the sweep`s graph-level numbers', () => {
   it('reports mean path length over reachable pairs and refuses a sampled diameter', async () => {
-    const path = network(['a', 'b', 'c'], [['a', 'b'], ['b', 'c']], false)
+    const path = network(
+      ['a', 'b', 'c'],
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+      ],
+      false,
+    )
     const exact = firstRow((await networkCentrality(path, only('closeness'))).summary)
     // Six ordered pairs, four at distance 1 and two at distance 2.
     expect(exact['meanPathLength']).toBeCloseTo((4 * 1 + 2 * 2) / 6, 12)
@@ -136,7 +178,9 @@ describe('the sweep`s graph-level numbers', () => {
   })
 
   it('says nothing about paths when no path metric was asked for', async () => {
-    const row = firstRow((await networkCentrality(network(['a'], []), only('pagerank'))).summary)
+    const row = firstRow(
+      (await networkCentrality(network(['a'], []), only('pagerank'))).summary,
+    )
     expect(row['sources']).toBeNull()
     expect(row['meanPathLength']).toBeNull()
     expect(row['diameter']).toBeNull()
@@ -145,7 +189,14 @@ describe('the sweep`s graph-level numbers', () => {
 
 describe('pagerank', () => {
   it('sums to one and splits a cycle evenly', () => {
-    const cycle = network(['a', 'b', 'c'], [['a', 'b'], ['b', 'c'], ['c', 'a']])
+    const cycle = network(
+      ['a', 'b', 'c'],
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+        ['c', 'a'],
+      ],
+    )
     const rank = pagerank(indexNetwork(cycle), 0.85)
     expect([...rank].reduce((a, b) => a + b, 0)).toBeCloseTo(1, 10)
     for (const value of rank) expect(value).toBeCloseTo(1 / 3, 10)
@@ -155,7 +206,13 @@ describe('pagerank', () => {
     // `c` has no outgoing links. Dropping its rank instead of redistributing it makes the
     // vector stop summing to one, and then every score is scaled by however much of the graph
     // happened to be a sink — which after a filter is a lot of it.
-    const sink = network(['a', 'b', 'c'], [['a', 'c'], ['b', 'c']])
+    const sink = network(
+      ['a', 'b', 'c'],
+      [
+        ['a', 'c'],
+        ['b', 'c'],
+      ],
+    )
     const rank = pagerank(indexNetwork(sink), 0.85)
     expect([...rank].reduce((a, b) => a + b, 0)).toBeCloseTo(1, 10)
     expect(rank[2]!).toBeGreaterThan(rank[0]!)
@@ -164,7 +221,16 @@ describe('pagerank', () => {
 
 describe('eigenvector centrality', () => {
   it('is uniform on a ring and unit length', () => {
-    const ring = network(['a', 'b', 'c', 'd'], [['a', 'b'], ['b', 'c'], ['c', 'd'], ['d', 'a']], false)
+    const ring = network(
+      ['a', 'b', 'c', 'd'],
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+        ['c', 'd'],
+        ['d', 'a'],
+      ],
+      false,
+    )
     const x = eigenvector(indexNetwork(ring))
     for (const value of x) expect(value).toBeCloseTo(0.5, 8)
   })
@@ -205,7 +271,15 @@ describe('communities', () => {
   it('gives the same answer twice, because the seed is ours rather than Math.random', async () => {
     const net = network(
       ['a', 'b', 'c', 'd', 'e', 'f'],
-      [['a', 'b'], ['b', 'c'], ['a', 'c'], ['d', 'e'], ['e', 'f'], ['d', 'f'], ['c', 'd']],
+      [
+        ['a', 'b'],
+        ['b', 'c'],
+        ['a', 'c'],
+        ['d', 'e'],
+        ['e', 'f'],
+        ['d', 'f'],
+        ['c', 'd'],
+      ],
       false,
     )
     const one = await networkCentrality(net, only('communities'))
@@ -251,14 +325,12 @@ describe('the schema follows the switches', () => {
 // Against networkx
 // ---------------------------------------------------------------------------
 
-
 const fixtureNetwork = (directed: boolean) =>
   network(
     networkxFixture.nodes,
     networkxFixture.links.map(([a, b, w]) => [a, b, w] as [string, string, number]),
     directed,
   )
-
 
 describe('agreement with networkx', () => {
   it('matches its normalised betweenness on a directed graph', async () => {
@@ -291,7 +363,9 @@ describe('agreement with networkx', () => {
   })
 
   it('matches its mean path length and diameter over reachable pairs', async () => {
-    const row = firstRow((await networkCentrality(fixtureNetwork(true), only('closeness'))).summary)
+    const row = firstRow(
+      (await networkCentrality(fixtureNetwork(true), only('closeness'))).summary,
+    )
     expect(row['meanPathLength']).toBeCloseTo(networkxValue('directed', 'meanPathLength'), 12)
     expect(row['diameter']).toBe(networkxValue('directed', 'diameter'))
     expect(row['reachable']).toBeCloseTo(networkxValue('directed', 'reachable'), 12)

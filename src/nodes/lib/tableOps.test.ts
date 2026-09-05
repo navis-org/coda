@@ -525,15 +525,13 @@ describe('groupBy', () => {
   it('names a value column the table does not have, rather than dropping it', () => {
     // `resolveColumns` drops a name a *known* schema lacks, so this is reachable only where the
     // schema never arrived — and there the honest answer is the sentence naming the column.
-    expect(() => groupByTable(conn(), ['partnerType'], ['weight', 'nope'], 'sum')).toThrow(/nope/)
+    expect(() => groupByTable(conn(), ['partnerType'], ['weight', 'nope'], 'sum')).toThrow(
+      /nope/,
+    )
   })
 
   it('joins several text columns at once', () => {
-    const schema = tableSchema(
-      column('k', 'str'),
-      column('tag', 'str'),
-      column('side', 'str'),
-    )
+    const schema = tableSchema(column('k', 'str'), column('tag', 'str'), column('side', 'str'))
     const table = tableFromRows(schema, [
       { k: 'a', tag: 'big', side: 'L' },
       { k: 'a', tag: 'big', side: 'R' },
@@ -1257,7 +1255,9 @@ describe('normalizeMatrix', () => {
 
     it('empties a line that holds values and still totals zero or less, and says so', () => {
       const warnings: string[] = []
-      const out = normalizeMatrix(signed(), 'row', { warn: (message) => warnings.push(message) })
+      const out = normalizeMatrix(signed(), 'row', {
+        warn: (message) => warnings.push(message),
+      })
       expect([...out.values].slice(0, 2).every(Number.isNaN)).toBe(true)
       // The empty row is *measured* and keeps its zeroes; only the unusable one goes blank.
       expect([...out.values].slice(2, 4)).toEqual([0, 0])

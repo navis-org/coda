@@ -173,7 +173,10 @@ export async function warpPoints(
   const request: ApplyRequest = {
     key: pairs.id,
     source: copyOf(pairs.source),
-    coefficients: { weights: copyOf(coefficients.weights), affine: copyOf(coefficients.affine) },
+    coefficients: {
+      weights: copyOf(coefficients.weights),
+      affine: copyOf(coefficients.affine),
+    },
     // Not copied. Every caller builds this for the call — `gatherPositions` concatenates into
     // a fresh buffer, and a multi-leg warp passes the previous leg's *result* — so the
     // transfer costs nothing and the copy was a second full-size allocation per hop: about
@@ -195,7 +198,11 @@ export async function warpPoints(
     // wrong point, which is a neuron that still draws.
     throw new Error(`Warp returned ${count} points for ${expected / 3}`)
   }
-  return { positions, fitMs: numberFrom(result, 'fitMs'), applyMs: numberFrom(result, 'applyMs') }
+  return {
+    positions,
+    fitMs: numberFrom(result, 'fitMs'),
+    applyMs: numberFrom(result, 'applyMs'),
+  }
 }
 
 /** Forget the stored coefficients for a landmark set. Tests; a wheel bump does it by fingerprint. */

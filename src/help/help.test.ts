@@ -129,10 +129,15 @@ describe('the documents in src/help/nodes', () => {
    * holds the floor (120) for every node; this holds the ceiling for the handful that get read
    * twice. NBLAST's was 830 characters before its document existed.
    */
-  it.each(TYPES)('%s: its guide is short enough to be the TL;DR the overlay calls it', (type) => {
-    const guide = getNodeDef(type)?.guide ?? ''
-    expect(guide.length, `${type}'s guide is ${guide.length} characters`).toBeLessThanOrEqual(400)
-  })
+  it.each(TYPES)(
+    '%s: its guide is short enough to be the TL;DR the overlay calls it',
+    (type) => {
+      const guide = getNodeDef(type)?.guide ?? ''
+      expect(guide.length, `${type}'s guide is ${guide.length} characters`).toBeLessThanOrEqual(
+        400,
+      )
+    },
+  )
 
   /*
    * The overlay draws the node's name in its own header, so a document opening with one would

@@ -47,8 +47,18 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
     node('net', 'net.build', { source: 'preType', target: 'postType', weight: 'weight' }),
   )
   g = addNode(g, node('central', 'net.centrality', params))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'conn', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'conn',
+    targetHandle: 'dataset',
+  })
   g = addEdge(g, {
     source: 'find',
     sourceHandle: 'neurons',
@@ -78,7 +88,9 @@ describe('net.centrality — types', () => {
   })
 
   it('offers only the columns its switches asked for', () => {
-    const types = inferGraph(pipeline({ eigenvector: false, communities: false })).nodes['central']
+    const types = inferGraph(pipeline({ eigenvector: false, communities: false })).nodes[
+      'central'
+    ]
     expect(columnNames(attributeSchema(types?.outputs['nodes']))).toEqual([
       'id',
       'betweenness',
@@ -94,7 +106,11 @@ describe('net.centrality — types', () => {
     // The asymmetry with the node half is deliberate: the summary's use is being stacked across
     // runs, and a Collect of five summaries whose columns depend on each run's settings is five
     // different tables. See `centralitySummarySchema`.
-    for (const params of [{}, { betweenness: false, closeness: false }, { eigenvector: true }]) {
+    for (const params of [
+      {},
+      { betweenness: false, closeness: false },
+      { eigenvector: true },
+    ]) {
       const types = inferGraph(pipeline(params)).nodes['central']
       expect(types?.outputs['summary']).toEqual({
         kind: 'table',

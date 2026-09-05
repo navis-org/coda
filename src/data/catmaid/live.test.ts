@@ -95,7 +95,12 @@ live('CATMAID against the real FAFB instance', () => {
     const client = source()
     const [skeletons, synapses] = await Promise.all([
       client.fetchSkeletons({ datasetId: FAFB, neuronIds: ['16'] }),
-      client.fetchSynapses({ unit: SYNAPSE_UNITS.sites, datasetId: FAFB, neuronIds: ['16'], polarity: 'pre' }),
+      client.fetchSynapses({
+        unit: SYNAPSE_UNITS.sites,
+        datasetId: FAFB,
+        neuronIds: ['16'],
+        polarity: 'pre',
+      }),
     ])
     expect(synapses.units).toBe('nm')
     expect(synapses.attributes.length).toBeGreaterThan(100)

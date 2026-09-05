@@ -51,7 +51,14 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import { boundsOf, cableLength, emptyTable, getRow, makeTable, selectRows } from '../../core/values'
+import {
+  boundsOf,
+  cableLength,
+  emptyTable,
+  getRow,
+  makeTable,
+  selectRows,
+} from '../../core/values'
 import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type {
@@ -160,7 +167,10 @@ const PRECOMPUTED_CAPABILITIES: SourceCapabilities = {
 
 /** `gs://flyem-male-cns/v1.0/segmentation` → `flyem-male-cns/segmentation`. */
 export function datasourceLabel(location: string): string {
-  const parts = location.replace(/^[a-z0-9+-]+:\/\//i, '').split('/').filter(Boolean)
+  const parts = location
+    .replace(/^[a-z0-9+-]+:\/\//i, '')
+    .split('/')
+    .filter(Boolean)
   if (parts.length <= 1) return parts[0] ?? location
   return `${parts[0]}/${parts[parts.length - 1]}`
 }
@@ -367,7 +377,9 @@ export class PrecomputedSource implements DataSource {
    * Coda cannot fetch from, and a location it could not read. `retry` comes only from an explicit
    * Run; see `ProbeOptions`.
    */
-  async describe(options: { signal?: AbortSignal; retry?: boolean } = {}): Promise<PrecomputedDescription> {
+  async describe(
+    options: { signal?: AbortSignal; retry?: boolean } = {},
+  ): Promise<PrecomputedDescription> {
     if (!this.ref.url) {
       throw new Error(
         `${this.ref.canonical} is not a location Coda can fetch from. Object stores (gs://, ` +
@@ -545,7 +557,8 @@ export class PrecomputedSource implements DataSource {
         // Region shells are few and large, and the whole point is to draw them together — so no
         // budget-driven coarsening beyond the default the mesh reader already applies.
         onProgress: (_at, total, phase) => {
-          if (phase === 'fragments') req.onProgress?.(++done / Math.max(1, total), `${done}/${total} regions`)
+          if (phase === 'fragments')
+            req.onProgress?.(++done / Math.max(1, total), `${done}/${total} regions`)
         },
       },
     )
@@ -594,7 +607,9 @@ export class PrecomputedSource implements DataSource {
   /** One message for the two calls that ask the same impossible question. */
   private noConnectivity<T>(): Promise<T> {
     return Promise.reject(
-      new Error(`${this.label} publishes geometry, not connectivity. Wire a Dataset node for that.`),
+      new Error(
+        `${this.label} publishes geometry, not connectivity. Wire a Dataset node for that.`,
+      ),
     )
   }
 
@@ -628,7 +643,9 @@ export class PrecomputedSource implements DataSource {
       triangleBudget: req.triangleBudget ?? DEFAULT_TRIANGLE_BUDGET,
       // No `detail` on a partial: the caption's triangle count is only true of the whole batch,
       // and a growing one reads as the level changing under the viewer.
-      ...(req.onPartial ? { onPartial: (meshes) => req.onPartial?.(this.assemble(meshes)) } : {}),
+      ...(req.onPartial
+        ? { onPartial: (meshes) => req.onPartial?.(this.assemble(meshes)) }
+        : {}),
     })
 
     return this.assemble(

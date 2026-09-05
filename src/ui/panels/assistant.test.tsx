@@ -20,12 +20,7 @@ import { inferGraph } from '../../core/inference'
 import type { StubbedCall } from '../../data/ai/fixture'
 import { messagesReply, stubFetch } from '../../data/ai/fixture'
 import { pivotGraph, pivotObserved } from '../../assistant/fixture'
-import {
-  resetCredentials,
-  setKey,
-  setModel,
-  setProviderId,
-} from '../../data/ai/credentials'
+import { resetCredentials, setKey, setModel, setProviderId } from '../../data/ai/credentials'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'

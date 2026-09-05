@@ -171,7 +171,9 @@ describe('buildDistributions', () => {
 
   it('drops non-positive values under a log axis and counts them', () => {
     const rows = [{ pre: 0 }, { pre: -1 }, { pre: 10 }, { pre: null }]
-    const { groups, dropped } = buildDistributions(tableOf(rows), 'pre', undefined, { log: true })
+    const { groups, dropped } = buildDistributions(tableOf(rows), 'pre', undefined, {
+      log: true,
+    })
     expect(dropped).toBe(3)
     expect(groups[0]!.stats.n).toBe(1)
   })

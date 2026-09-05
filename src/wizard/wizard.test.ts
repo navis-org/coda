@@ -418,7 +418,9 @@ describe('the Neuron Topology viewer', () => {
   it('is offered wherever a neuron table survives to the end of the chain', () => {
     // Under `morphology` because it is a way of looking at morphology, and under `neurons`
     // because it needs no analysis at all — those are the two chains that still carry neurons.
-    expect(visualisationOptions(DEMO_DATASET, 'morphology').map((o) => o.id)).toContain('topology')
+    expect(visualisationOptions(DEMO_DATASET, 'morphology').map((o) => o.id)).toContain(
+      'topology',
+    )
     expect(visualisationOptions(DEMO_DATASET, 'neurons').map((o) => o.id)).toContain('topology')
     // Not off a chain that has turned neurons into something else.
     expect(visualisationOptions(DEMO_DATASET, 'partners').map((o) => o.id)).not.toContain(

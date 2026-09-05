@@ -62,13 +62,15 @@ export function shelfPack(boxes: readonly Box[], gap: number): Packing {
   // the end of each row. A single box wider than that still gets its own shelf.
   const target = Math.max(widest, Math.sqrt(area) * 1.1)
 
-  const order = boxes.map((_, i) => i).sort((a, b) => {
-    const byHeight = boxes[b]!.height - boxes[a]!.height
-    if (byHeight !== 0) return byHeight
-    const byWidth = boxes[b]!.width - boxes[a]!.width
-    // Index last, so the packing cannot depend on anything but the boxes themselves.
-    return byWidth !== 0 ? byWidth : a - b
-  })
+  const order = boxes
+    .map((_, i) => i)
+    .sort((a, b) => {
+      const byHeight = boxes[b]!.height - boxes[a]!.height
+      if (byHeight !== 0) return byHeight
+      const byWidth = boxes[b]!.width - boxes[a]!.width
+      // Index last, so the packing cannot depend on anything but the boxes themselves.
+      return byWidth !== 0 ? byWidth : a - b
+    })
 
   let cursorX = 0
   let cursorY = 0

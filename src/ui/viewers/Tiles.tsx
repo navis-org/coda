@@ -438,4 +438,3 @@ export function Pager({
     </span>
   )
 }
-

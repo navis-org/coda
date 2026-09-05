@@ -211,7 +211,11 @@ describe('resolveColor — legend keys and overrides', () => {
   ])
 
   it('says which key a row belongs to, which is what an interactive legend needs', () => {
-    const result = resolveColor(data, { mode: 'categorical', column: 'type', constant: '0' }, 'dark')
+    const result = resolveColor(
+      data,
+      { mode: 'categorical', column: 'type', constant: '0' },
+      'dark',
+    )
     expect([0, 1, 2].map((i) => result.labelAt?.(i))).toEqual(['LC4', 'LC4', 'LC6'])
   })
 
@@ -222,7 +226,11 @@ describe('resolveColor — legend keys and overrides', () => {
     const many = table(
       Array.from({ length: 9 }, (_, i) => ({ id: String(i), type: `T${i}`, weight: i })),
     )
-    const result = resolveColor(many, { mode: 'categorical', column: 'type', constant: '0' }, 'dark')
+    const result = resolveColor(
+      many,
+      { mode: 'categorical', column: 'type', constant: '0' },
+      'dark',
+    )
     const labels = Array.from({ length: 9 }, (_, i) => result.labelAt?.(i))
     expect(labels).toEqual(Array.from({ length: 9 }, (_, i) => `T${i}`))
     expect(labels).not.toContain(OTHER_LABEL)
@@ -293,7 +301,11 @@ describe('resolveColor — hash', () => {
       Array.from({ length: 20 }, (_, i) => ({ id: `n${i}`, type: `T${i}`, weight: i })),
     )
     const hashed = resolveColor(many, { mode: 'hash', column: 'id', constant: '0' }, 'dark')
-    const cycled = resolveColor(many, { mode: 'categorical', column: 'id', constant: '0' }, 'dark')
+    const cycled = resolveColor(
+      many,
+      { mode: 'categorical', column: 'id', constant: '0' },
+      'dark',
+    )
 
     const hashedColors = new Set(Array.from({ length: 20 }, (_, i) => hashed.at(i)))
     const cycledColors = new Set(Array.from({ length: 20 }, (_, i) => cycled.at(i)))
@@ -340,7 +352,11 @@ describe('resolveColor — hash', () => {
 
   it('paints a null grey rather than hashing the word for it', () => {
     const withNull = table([{ id: 'a', type: null, weight: 1 }])
-    const result = resolveColor(withNull, { mode: 'hash', column: 'type', constant: '0' }, 'dark')
+    const result = resolveColor(
+      withNull,
+      { mode: 'hash', column: 'type', constant: '0' },
+      'dark',
+    )
     expect(result.at(0)).toBe(CHART_INK.dark.muted)
   })
 
@@ -355,7 +371,11 @@ describe('resolveColor — hash', () => {
   })
 
   it('falls back to the constant when there is no column to hash', () => {
-    const result = resolveColor(data, { mode: 'hash', column: undefined, constant: '1' }, 'dark')
+    const result = resolveColor(
+      data,
+      { mode: 'hash', column: undefined, constant: '1' },
+      'dark',
+    )
     expect(result.at(0)).toBe(seriesColor(1, 'dark'))
     expect(result.legend).toBeUndefined()
   })
@@ -596,7 +616,9 @@ describe('foldByRank', () => {
   })
 
   it('gives a folded name the achromatic residual slot rather than a ninth hue', () => {
-    const fold = foldByRank(totals(...Array.from({ length: 12 }, (_, i): [string, number] => [`t${i}`, 12 - i])))
+    const fold = foldByRank(
+      totals(...Array.from({ length: 12 }, (_, i): [string, number] => [`t${i}`, 12 - i])),
+    )
     expect(fold.kept).toHaveLength(MAX_SERIES)
     expect(fold.slotOf('t11')).toBe(MAX_SERIES)
     expect(seriesColor(fold.slotOf('t11'), 'dark')).toBe(seriesColor(99, 'dark'))
@@ -647,7 +669,9 @@ describe('categorical palettes', () => {
   it('puts tab20’s saturated half first, which is tableau10 exactly', () => {
     // Published interleaved, so the two commonest categories would otherwise land on two
     // shades of one blue. Rotating it makes the two palettes agree for the first ten.
-    expect(paletteColors('tab20', 'dark').slice(0, 10)).toEqual(paletteColors('tableau10', 'dark'))
+    expect(paletteColors('tab20', 'dark').slice(0, 10)).toEqual(
+      paletteColors('tableau10', 'dark'),
+    )
   })
 
   it('reads an unknown or missing name as the default rather than throwing', () => {
@@ -759,5 +783,4 @@ describe('resolveShape', () => {
     expect(resolveShape(table(['a', 'b']), spec({ mode: 'constant' })).legend).toBeUndefined()
     expect(resolveShape(undefined, spec()).at(0)).toBe('circle')
   })
-
 })

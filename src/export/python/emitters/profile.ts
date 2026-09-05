@@ -12,7 +12,7 @@
  * a plausible wrong number rather than an error, so each is called out where it is applied.
  */
 
-import {  } from '../py'
+import {} from '../py'
 import { registerEmitter, registerHelper } from '../registry'
 import { neuronIds, pySelection, selectionIds } from './common'
 

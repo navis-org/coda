@@ -12,11 +12,7 @@
  */
 
 import { datasetRef } from '../../../core/types'
-import {
-  readColorSpec,
-  readShapeSpec,
-  readSizeSpec,
-} from '../../../nodes/lib/encodingParams'
+import { readColorSpec, readShapeSpec, readSizeSpec } from '../../../nodes/lib/encodingParams'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
 import { copyIdsSettings } from '../../../nodes/lib/copyIds'
 import {
@@ -46,7 +42,10 @@ registerEmitter('out.table', (ctx) => {
   const src = ctx.wired('in')
   const out = ctx.output('out')
   const filtered = ctx.output('filtered')
-  const { terms, problems } = resolveFilters(ctx.schema('in'), decodeClauses(ctx.params.filters))
+  const { terms, problems } = resolveFilters(
+    ctx.schema('in'),
+    decodeClauses(ctx.params.filters),
+  )
   const masks = filterMasks(out, terms, ctx.schema('in'))
 
   const lines = [`${out} = ${src}`]
@@ -66,7 +65,11 @@ registerEmitter('out.table', (ctx) => {
     ctx.require('pandas')
     // Inside the subscript brackets, so the continuation needs no backslashes and a reader can
     // comment one clause out without touching the others.
-    lines.push(`${filtered} = ${out}[`, ...masks.map((mask, i) => `    ${i === 0 ? ' ' : '&'} ${mask}`), ']')
+    lines.push(
+      `${filtered} = ${out}[`,
+      ...masks.map((mask, i) => `    ${i === 0 ? ' ' : '&'} ${mask}`),
+      ']',
+    )
   }
 
   if (usesRegex(terms)) {
@@ -331,9 +334,7 @@ registerEmitter('out.distribution', (ctx) => {
   if (grouped) {
     // The cap is part of the picture, not a detail of the widget: without the `order` the
     // notebook draws every group and the two documents disagree about what is on screen.
-    lines.push(
-      `_order = ${out}[${pyStr(group)}].value_counts().head(${maxGroups}).index`,
-    )
+    lines.push(`_order = ${out}[${pyStr(group)}].value_counts().head(${maxGroups}).index`)
   }
   /*
    * The value axis is `x` laid out as rows and `y` as columns — seaborn reads the orientation
@@ -404,7 +405,11 @@ registerEmitter('out.heatmap', (ctx) => {
   const diverging = ctx.params.scale === 'diverging'
   const palette = heatmapPaletteOf(ctx.params)
 
-  const lines = [`${out} = ${src}`, ...heatmapFilterLines(ctx, out), ...heatmapOrderLines(ctx, out)]
+  const lines = [
+    `${out} = ${src}`,
+    ...heatmapFilterLines(ctx, out),
+    ...heatmapOrderLines(ctx, out),
+  ]
 
   /*
    * Coda's own ramps have no matplotlib name, so the nearest published ones stand in: `Blues`
@@ -520,7 +525,8 @@ function heatmapFilterLines(ctx: Parameters<Emitter>[0], out: string): string[] 
     masks[axis] = name
   }
 
-  if (masks.rows && masks.columns) lines.push(`${out} = ${out}.loc[${masks.rows}, ${masks.columns}]`)
+  if (masks.rows && masks.columns)
+    lines.push(`${out} = ${out}.loc[${masks.rows}, ${masks.columns}]`)
   else if (masks.rows) lines.push(`${out} = ${out}.loc[${masks.rows}]`)
   else if (masks.columns) lines.push(`${out} = ${out}.loc[:, ${masks.columns}]`)
   return lines
@@ -610,7 +616,8 @@ function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
     chosen[plan.follower] = name
   }
 
-  if (chosen.rows && chosen.columns) lines.push(`${out} = ${out}.loc[${chosen.rows}, ${chosen.columns}]`)
+  if (chosen.rows && chosen.columns)
+    lines.push(`${out} = ${out}.loc[${chosen.rows}, ${chosen.columns}]`)
   else if (chosen.rows) lines.push(`${out} = ${out}.loc[${chosen.rows}]`)
   else if (chosen.columns) lines.push(`${out} = ${out}.loc[:, ${chosen.columns}]`)
   return lines
@@ -635,7 +642,9 @@ registerEmitter('out.scatter', (ctx) => {
   const selection = selectionIds(ctx)
   const idColumn = ctx.column('idColumn')
   if (selection.length > 0 && idColumn) {
-    lines.push(`${selected} = ${out}[${out}[${pyStr(idColumn)}].isin(${pySelection(selection)})]`)
+    lines.push(
+      `${selected} = ${out}[${out}[${pyStr(idColumn)}].isin(${pySelection(selection)})]`,
+    )
   } else {
     lines.push(
       ...ctx.note('Nothing is lassoed on the canvas, so Selected is empty.'),
@@ -848,17 +857,16 @@ registerEmitter('out.copyIds', (ctx) => {
   // `_list` rather than `_ids`: a node on its default title is already called `copy_ids`, and
   // `copy_ids_ids` is a name a reader reads twice.
   const ids = `${ctx.name}_list`
-  const lines = [
-    `${out} = ${src}`,
-    `${ids} = [str(i) for i in ${neuronIds(out)}]`,
-  ]
+  const lines = [`${out} = ${src}`, `${ids} = [str(i) for i in ${neuronIds(out)}]`]
   // `dict.fromkeys` rather than `set`, because the card deduplicates in first-seen order — a
   // Sort upstream is a decision, and `set` discards it silently.
   if (dedupe) lines.push(`${ids} = list(dict.fromkeys(${ids}))`)
   const each = quoted ? `[f'"{i}"' for i in ${ids}]` : ids
   lines.push(
-    ...ctx.note('In Coda this button puts the ids on the clipboard. A notebook has none, so ' +
-      'they are printed here — copy them from the output, or use the list directly.'),
+    ...ctx.note(
+      'In Coda this button puts the ids on the clipboard. A notebook has none, so ' +
+        'they are printed here — copy them from the output, or use the list directly.',
+    ),
     `print(${pyStr(separator)}.join(${each}))`,
   )
   return lines

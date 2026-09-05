@@ -86,8 +86,7 @@ function dtypeOf(ctx: EmitContext, portId: string, name: string | undefined) {
  * the reason is carried rather than re-derived.
  */
 export type FilterMask =
-  | { mask: string; notes: readonly string[] }
-  | { mask?: undefined; reason: string }
+  { mask: string; notes: readonly string[] } | { mask?: undefined; reason: string }
 
 export function pyFilterMask(
   frame: string,
@@ -486,7 +485,9 @@ registerEmitter('core.join', (ctx) => {
     `    suffixes=('', ${pyStr(suffix)}),`,
     `)`,
     ...(!sameKey && fillsKey
-      ? [`${out}[${pyStr(leftKey)}] = ${out}[${pyStr(leftKey)}].fillna(${out}[${pyStr(SCRATCH_KEY)}])`]
+      ? [
+          `${out}[${pyStr(leftKey)}] = ${out}[${pyStr(leftKey)}].fillna(${out}[${pyStr(SCRATCH_KEY)}])`,
+        ]
       : []),
     ...(sameKey ? [] : [`${out} = ${out}.drop(columns=[${pyStr(SCRATCH_KEY)}])`]),
   ]
@@ -893,7 +894,9 @@ registerEmitter('core.editTable', (ctx) => {
   const lines = [`${out} = ${src}.copy()`]
 
   for (const entry of plan.widened) {
-    lines.push(`${col(out, entry.column)} = ${col(out, entry.column)}.astype(${pyStr(PY_DTYPE[entry.to])})`)
+    lines.push(
+      `${col(out, entry.column)} = ${col(out, entry.column)}.astype(${pyStr(PY_DTYPE[entry.to])})`,
+    )
   }
   for (const entry of plan.added) {
     lines.push(

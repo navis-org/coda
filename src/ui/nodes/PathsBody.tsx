@@ -89,7 +89,8 @@ export function PathsBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   }, [paths])
 
   /** Which end of a connection the fractions are a share of. One reading, two renderings. */
-  const sharedEnd = readNormalizeBy(node.params.normalizeBy) === 'presynaptic' ? 'output' : 'input'
+  const sharedEnd =
+    readNormalizeBy(node.params.normalizeBy) === 'presynaptic' ? 'output' : 'input'
 
   // The same set the generic band draws, and in the same order — a control a body forgets is
   // reachable only from the inspector, which on screen looks like one that was never added.
@@ -158,7 +159,10 @@ export function PathsBody({ node, ctx, compact, setParam }: NodeBodyProps) {
             )}
           </div>
           {!compact && summary.best && (
-            <div className="paths-body__best" title={`Strongest route${PATH_ARROW}by bottleneck`}>
+            <div
+              className="paths-body__best"
+              title={`Strongest route${PATH_ARROW}by bottleneck`}
+            >
               {summary.best}
             </div>
           )}

@@ -123,7 +123,8 @@ const MAX_POINTS = 3000
  * function, and two tile grids disagreeing about how many decimal places a percentage has is
  * exactly the kind of difference nobody files and everybody notices.
  */
-const reading = <T,>(format: (value: number) => T) =>
+const reading =
+  <T,>(format: (value: number) => T) =>
   (value: CellValue | undefined): T | undefined =>
     typeof value === 'number' ? format(value) : undefined
 
@@ -305,7 +306,12 @@ function Distribution({
       wide
       action={
         <>
-          <Picker label="Distribution column" value={choice} options={options} onChange={onChoose} />
+          <Picker
+            label="Distribution column"
+            value={choice}
+            options={options}
+            onChange={onChoose}
+          />
           {/*
            * A number rather than a second `<select>` of preset counts: the useful range is 4 to
            * about 40 and somebody comparing two graphs wants the same count on both, which a
@@ -322,7 +328,9 @@ function Distribution({
             aria-label="Bin count"
             title="Bars in the histogram — 0 for the automatic rule"
             disabled={!onBins}
-            onChange={(event) => onBins?.(Math.max(0, Math.round(Number(event.target.value) || 0)))}
+            onChange={(event) =>
+              onBins?.(Math.max(0, Math.round(Number(event.target.value) || 0)))
+            }
           />
           {/*
            * A checkbox rather than a two-option `<select>`, because the two shapes are one
@@ -623,7 +631,10 @@ export function NetworkMetricsViewer({
               ['self-loops', count(row['selfLoops'])],
               // Only when there are some: a `0` here is a row spent saying nothing, and a
               // network out of Build Network with merging on can never have any.
-              ['parallel', Number(row['parallelLinks']) > 0 ? count(row['parallelLinks']) : undefined],
+              [
+                'parallel',
+                Number(row['parallelLinks']) > 0 ? count(row['parallelLinks']) : undefined,
+              ],
             ]}
           />
         </Tile>

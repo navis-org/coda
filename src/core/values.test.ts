@@ -72,11 +72,15 @@ describe('describeValue — geometry', () => {
     // coordinates are still voxels; nobody knows how big one is. NBLAST refuses on this.
     // A space cannot be claimed without the scale either — see `geometryFrame` — so the two
     // unknowns arrive together, which is what this pairing is here to keep visible.
-    expect(describeValue(skeletons('voxels'))).toBe('1 skeleton · 2 pts · space unknown · voxels')
+    expect(describeValue(skeletons('voxels'))).toBe(
+      '1 skeleton · 2 pts · space unknown · voxels',
+    )
   })
 
   it('distinguishes unknown from both of them', () => {
-    expect(describeValue(skeletons())).toBe('1 skeleton · 2 pts · space unknown · units unknown')
+    expect(describeValue(skeletons())).toBe(
+      '1 skeleton · 2 pts · space unknown · units unknown',
+    )
     expect(unitsLabel(undefined)).toBe('units unknown')
     expect(spaceLabel(undefined)).toBe('space unknown')
   })

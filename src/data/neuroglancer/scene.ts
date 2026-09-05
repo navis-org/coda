@@ -606,7 +606,8 @@ export function spliceSegments(
   if (owned.length === 0) return undefined
   const ours = new Map<string, NgLayer>()
   for (const layer of layerList(next)) {
-    if (typeof layer.name === 'string' && owned.includes(layer.name)) ours.set(layer.name, layer)
+    if (typeof layer.name === 'string' && owned.includes(layer.name))
+      ours.set(layer.name, layer)
   }
   if (ours.size !== owned.length) return undefined
 

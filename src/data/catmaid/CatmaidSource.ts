@@ -62,7 +62,12 @@ import type {
   SourceSchemas,
   SynapseRequest,
 } from '../source'
-import { ROI_MESH_SCHEMA, reportSourceLearned, requireSkeletonRoute, throwIfAborted } from '../source'
+import {
+  ROI_MESH_SCHEMA,
+  reportSourceLearned,
+  requireSkeletonRoute,
+  throwIfAborted,
+} from '../source'
 import { SYNAPSE_UNITS } from '../synapseUnits'
 import type { AnnotationListResponse, CatmaidProject, CompactSkeleton } from './api'
 import type { SkeletonSummary } from './api'
@@ -752,7 +757,13 @@ export class CatmaidSource implements DataSource {
       onPartial: req.onPartial && ((pairs) => req.onPartial?.(assemble(pairs))),
       fetch: async (missing, deliver) => {
         await mapWithConcurrency(missing, SKELETON_CONCURRENCY, async (id) => {
-          const skeleton = await compactSkeleton(this.server, projectId, Number(id), false, options)
+          const skeleton = await compactSkeleton(
+            this.server,
+            projectId,
+            Number(id),
+            false,
+            options,
+          )
           done += 1
           req.onProgress?.(done / missing.length, 'skeletons')
           deliver(id, decodeCompactSkeleton(id, skeleton))

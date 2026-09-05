@@ -66,7 +66,9 @@ registerNode({
     Object.fromEntries(ctx.outputPorts().map((port) => [port.id, T.table(SCHEMA)])),
   evaluate: (ctx) =>
     Object.fromEntries(
-      ctx.outputPorts().map((port) => [port.id, tableFromRows(SCHEMA, [{ x: port.group!.index }])]),
+      ctx
+        .outputPorts()
+        .map((port) => [port.id, tableFromRows(SCHEMA, [{ x: port.group!.index }])]),
     ),
 })
 
@@ -155,7 +157,11 @@ describe('expanding a port group', () => {
 
 describe('resolving the count', () => {
   it('falls back to the param default when no params are given — a fresh node’s shape', () => {
-    expect(defaultInputPorts(match()).map((p) => p.id)).toEqual(['dataset1', 'dataset2', 'extra'])
+    expect(defaultInputPorts(match()).map((p) => p.id)).toEqual([
+      'dataset1',
+      'dataset2',
+      'extra',
+    ])
   })
 
   /*
@@ -291,7 +297,11 @@ describe('what registration refuses', () => {
 
   it('a repeat count behind visibleIf, which the provenance key drops while hidden', () => {
     expect(() =>
-      registerNode({ ...base, type: 'test.ports.bad9', params: [count({ visibleIf: () => true })] }),
+      registerNode({
+        ...base,
+        type: 'test.ports.bad9',
+        params: [count({ visibleIf: () => true })],
+      }),
     ).toThrow(/visibleIf/)
   })
 
@@ -317,13 +327,38 @@ describe('what registration refuses', () => {
  */
 function wired(count: number, withSinks = false) {
   let g = emptyGraph('variadic')
-  g = addNode(g, { id: 'm', type: 'test.ports.match', position: { x: 0, y: 0 }, params: { count } })
+  g = addNode(g, {
+    id: 'm',
+    type: 'test.ports.match',
+    position: { x: 0, y: 0 },
+    params: { count },
+  })
   for (let i = 1; i <= count; i++) {
-    g = addNode(g, { id: `s${i}`, type: 'test.ports.plain', position: { x: 0, y: 0 }, params: {} })
-    g = addEdge(g, { source: `s${i}`, sourceHandle: 'out', target: 'm', targetHandle: `dataset${i}` })
+    g = addNode(g, {
+      id: `s${i}`,
+      type: 'test.ports.plain',
+      position: { x: 0, y: 0 },
+      params: {},
+    })
+    g = addEdge(g, {
+      source: `s${i}`,
+      sourceHandle: 'out',
+      target: 'm',
+      targetHandle: `dataset${i}`,
+    })
     if (!withSinks) continue
-    g = addNode(g, { id: `d${i}`, type: 'test.ports.plain', position: { x: 0, y: 0 }, params: {} })
-    g = addEdge(g, { source: 'm', sourceHandle: `labels${i}`, target: `d${i}`, targetHandle: 'in' })
+    g = addNode(g, {
+      id: `d${i}`,
+      type: 'test.ports.plain',
+      position: { x: 0, y: 0 },
+      params: {},
+    })
+    g = addEdge(g, {
+      source: 'm',
+      sourceHandle: `labels${i}`,
+      target: `d${i}`,
+      targetHandle: 'in',
+    })
   }
   return g
 }
@@ -337,7 +372,11 @@ describe('inference over a variadic node', () => {
       'dataset3',
       'extra',
     ])
-    expect(Object.keys(result.nodes['m']!.outputs).sort()).toEqual(['labels1', 'labels2', 'labels3'])
+    expect(Object.keys(result.nodes['m']!.outputs).sort()).toEqual([
+      'labels1',
+      'labels2',
+      'labels3',
+    ])
   })
 
   it('reports an unconnected repeated input, so a raised count is visible rather than silent', () => {
@@ -437,7 +476,12 @@ describe('the prune reaches every path that writes params', () => {
 describe('loading a file whose handles the node no longer has', () => {
   function stored(count: number, handle: string) {
     let g = emptyGraph('file')
-    g = addNode(g, { id: 'm', type: 'test.ports.match', position: { x: 0, y: 0 }, params: { count } })
+    g = addNode(g, {
+      id: 'm',
+      type: 'test.ports.match',
+      position: { x: 0, y: 0 },
+      params: { count },
+    })
     g = addNode(g, { id: 's', type: 'test.ports.plain', position: { x: 0, y: 0 }, params: {} })
     g = addEdge(g, { source: 's', sourceHandle: 'out', target: 'm', targetHandle: handle })
     return serializeGraph(g)
@@ -522,7 +566,12 @@ describe('auto-wiring a repeated Dataset input', () => {
    */
   it('fills only the first port of the group', () => {
     let g = emptyGraph('autowire')
-    g = addNode(g, { id: 'ds', type: 'test.ports.source', position: { x: 0, y: 0 }, params: {} })
+    g = addNode(g, {
+      id: 'ds',
+      type: 'test.ports.source',
+      position: { x: 0, y: 0 },
+      params: {},
+    })
     const node = {
       id: 'c',
       type: 'test.ports.compare',

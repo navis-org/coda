@@ -29,7 +29,6 @@ const SHAPE_CHOICES = ALL_SHAPES.map((shape) => (
   </option>
 ))
 
-
 export interface SizeChannel {
   spec: SizeSpec
   resolved: ResolvedSize
@@ -353,7 +352,9 @@ export function ShapeKey({
                   value={entry.shape}
                   title={`Mark for ${entry.label}`}
                   aria-label={`Mark for ${entry.label}`}
-                  onChange={(event) => onReshape(entry.label, event.target.value as MarkerShape)}
+                  onChange={(event) =>
+                    onReshape(entry.label, event.target.value as MarkerShape)
+                  }
                 >
                   {SHAPE_CHOICES}
                 </select>

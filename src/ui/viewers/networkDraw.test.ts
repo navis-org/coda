@@ -351,12 +351,24 @@ describe('networkToSvg draws the shape a node was rendered with', () => {
   it('keeps the outline eating inward, as the shader does', () => {
     const svg = networkToSvg(
       spec({
-        nodes: [{ id: 'a', x: 20, y: 40, radius: 6, color: '#3987e5', shape: 'square', borderWidth: 2 }],
+        nodes: [
+          {
+            id: 'a',
+            x: 20,
+            y: 40,
+            radius: 6,
+            color: '#3987e5',
+            shape: 'square',
+            borderWidth: 2,
+          },
+        ],
         edges: [],
         nodeBorderColor: '#000',
       }),
     )
-    const path = [...svg.querySelectorAll('path')].find((p) => p.getAttribute('stroke') === '#000')
+    const path = [...svg.querySelectorAll('path')].find(
+      (p) => p.getAttribute('stroke') === '#000',
+    )
     expect(path?.getAttribute('d')).toBe(markPath('square', 20, 40, 5))
   })
 })

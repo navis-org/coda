@@ -702,4 +702,3 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
 
   return items
 }
-

@@ -57,14 +57,24 @@ describe('flexLineVertexShader', () => {
 
   it('extrudes the world-units box per vertex, with a pixel floor under it', () => {
     const patched = flexLineVertexShader()
-    expect(patched).toContain('float hw = ( ( position.y < 0.5 ) ? vWidthStart : vWidthEnd ) * 0.5;')
+    expect(patched).toContain(
+      'float hw = ( ( position.y < 0.5 ) ? vWidthStart : vWidthEnd ) * 0.5;',
+    )
     expect(patched).not.toContain('float hw = linewidth * 0.5;')
     // Both cameras through one expression: `clip.w` is the view depth under a perspective
     // projection and 1 under an orthographic one.
-    expect(patched).toContain('float worldPerPixel = 2.0 / ( projectionMatrix[ 1 ][ 1 ] * resolution.y );')
-    expect(patched).toContain(`float minWidth = ${MIN_WORLD_PIXELS.toFixed(1)} * worldPerPixel;`)
-    expect(patched).toContain('vWidthStart = max( instanceWidthStart, minWidth * abs( clipStart.w ) );')
-    expect(patched).toContain('vWidthEnd = max( instanceWidthEnd, minWidth * abs( clipEnd.w ) );')
+    expect(patched).toContain(
+      'float worldPerPixel = 2.0 / ( projectionMatrix[ 1 ][ 1 ] * resolution.y );',
+    )
+    expect(patched).toContain(
+      `float minWidth = ${MIN_WORLD_PIXELS.toFixed(1)} * worldPerPixel;`,
+    )
+    expect(patched).toContain(
+      'vWidthStart = max( instanceWidthStart, minWidth * abs( clipStart.w ) );',
+    )
+    expect(patched).toContain(
+      'vWidthEnd = max( instanceWidthEnd, minWidth * abs( clipEnd.w ) );',
+    )
   })
 
   it('leaves the rest of three’s shader alone', () => {

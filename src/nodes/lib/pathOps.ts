@@ -608,7 +608,10 @@ function compareKeys(a: readonly string[], b: readonly string[]): number {
  * strong routes survives eviction is decided by the same rule that would have ordered them —
  * not by whichever happened to arrive first.
  */
-function makeShortlist(capacity: number, comparePaths: (a: RankedPath, b: RankedPath) => number) {
+function makeShortlist(
+  capacity: number,
+  comparePaths: (a: RankedPath, b: RankedPath) => number,
+) {
   const items: RankedPath[] = []
   const worse = (i: number, j: number): boolean => {
     const a = items[i]
@@ -725,9 +728,8 @@ export function rankPaths(
   // many times over and re-sorting its out-edges at each visit is the difference between this
   // being linear in the edge count and quadratic in it. The branch is spent here rather than
   // per comparison, `pathComparator`'s rule and for its measured reason.
-  const byEdge =
-    byNorm(by) ?
-      (a: PathEdge, b: PathEdge) =>
+  const byEdge = byNorm(by)
+    ? (a: PathEdge, b: PathEdge) =>
         (b.norm ?? UNSCORED) - (a.norm ?? UNSCORED) || a.target.localeCompare(b.target)
     : (a: PathEdge, b: PathEdge) => b.weight - a.weight || a.target.localeCompare(b.target)
   const ordered = new Map<string, PathEdge[]>()

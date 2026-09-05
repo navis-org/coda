@@ -119,8 +119,17 @@ export function boxStats(sorted: number[], rule: WhiskerRule = 'tukey'): BoxStat
   const n = sorted.length
   if (n === 0) {
     return {
-      n: 0, min: NaN, max: NaN, q1: NaN, median: NaN, q3: NaN, mean: NaN,
-      lower: NaN, upper: NaN, outliers: [], outlierCount: 0,
+      n: 0,
+      min: NaN,
+      max: NaN,
+      q1: NaN,
+      median: NaN,
+      q3: NaN,
+      mean: NaN,
+      lower: NaN,
+      upper: NaN,
+      outliers: [],
+      outlierCount: 0,
     }
   }
   const min = sorted[0]!
@@ -144,11 +153,17 @@ export function boxStats(sorted: number[], rule: WhiskerRule = 'tukey'): BoxStat
     const loFence = q1 - fence
     const hiFence = q3 + fence
     for (const value of sorted) {
-      if (value >= loFence) { lower = value; break }
+      if (value >= loFence) {
+        lower = value
+        break
+      }
     }
     for (let i = n - 1; i >= 0; i--) {
       const value = sorted[i]!
-      if (value <= hiFence) { upper = value; break }
+      if (value <= hiFence) {
+        upper = value
+        break
+      }
     }
   } else if (rule === 'p5p95') {
     lower = quantileSorted(sorted, 0.05)
@@ -159,7 +174,15 @@ export function boxStats(sorted: number[], rule: WhiskerRule = 'tukey'): BoxStat
   for (const value of sorted) if (value < lower || value > upper) beyond.push(value)
 
   return {
-    n, min, max, q1, median, q3, mean, lower, upper,
+    n,
+    min,
+    max,
+    q1,
+    median,
+    q3,
+    mean,
+    lower,
+    upper,
     outliers: strideValues(beyond, OUTLIER_DRAW_CAP),
     outlierCount: beyond.length,
   }

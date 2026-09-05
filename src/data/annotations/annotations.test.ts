@@ -35,7 +35,10 @@ import type { CaveTableConfig } from './caveTable'
 import { CAVE_TABLE_PROVIDER, pivotRows, resetCaveTableState, wideRows } from './caveTable'
 import { resetCaveState } from '../cave/tables'
 import type { CaveCall } from '../../test/caveStubs'
-import { setToken as setCaveToken, resetCredentials as resetCaveCredentials } from '../cave/credentials'
+import {
+  setToken as setCaveToken,
+  resetCredentials as resetCaveCredentials,
+} from '../cave/credentials'
 import type { GoogleSheetConfig } from './googleSheet'
 import {
   GOOGLE_SHEET_PROVIDER,
@@ -497,7 +500,10 @@ describe('what a CAVE reference table needs', () => {
         } as Response)
 
       if (text.includes('/info/api/v2/datastack/full/'))
-        return answer({ local_server: SERVER, aligned_volume: { name: 'brain_and_nerve_cord' } })
+        return answer({
+          local_server: SERVER,
+          aligned_volume: { name: 'brain_and_nerve_cord' },
+        })
       if (text.endsWith('/table/codex_annotations/metadata'))
         return answer({
           table_name: 'codex_annotations',
@@ -509,7 +515,13 @@ describe('what a CAVE reference table needs', () => {
       // A one-row sample, for the wide read that has to learn this table's own columns.
       if (body?.limit === 1)
         return answer([
-          { id: 1, valid: 't', target_id: 25908, classification_system: 'side', cell_type: 'L' },
+          {
+            id: 1,
+            valid: 't',
+            target_id: 25908,
+            classification_system: 'side',
+            cell_type: 'L',
+          },
         ])
       const rows = [joined('720575941626190282', 'L'), joined('720575941559989796', 'R')]
       // The count is derived from the rows it is a count *of*, as `cave.test.ts`' stub argues at
@@ -526,7 +538,10 @@ describe('what a CAVE reference table needs', () => {
   it('joins through the referenced table rather than asking a table for a column it has not got', async () => {
     const calls = installBancFetch()
     const table = await provider().fetch(
-      { provider: CAVE_TABLE_PROVIDER, config: config({ pivotOn: 'classification_system', valueColumn: 'cell_type' }) },
+      {
+        provider: CAVE_TABLE_PROVIDER,
+        config: config({ pivotOn: 'classification_system', valueColumn: 'cell_type' }),
+      },
       {},
     )
 
@@ -558,7 +573,10 @@ describe('what a CAVE reference table needs', () => {
   it('counts the base table, because the join endpoint answers rows to count=true', async () => {
     const calls = installBancFetch()
     await provider().fetch(
-      { provider: CAVE_TABLE_PROVIDER, config: config({ pivotOn: 'classification_system', valueColumn: 'cell_type' }) },
+      {
+        provider: CAVE_TABLE_PROVIDER,
+        config: config({ pivotOn: 'classification_system', valueColumn: 'cell_type' }),
+      },
       {},
     )
     const counts = calls.filter((c) => c.url.includes('count=true'))
@@ -1079,8 +1097,9 @@ describe('the Google Sheet link grammar', () => {
   it('takes the document and the tab out of a pasted address bar', () => {
     // The whole point of parsing rather than asking for two fields: this is the string somebody
     // already has, and it names both.
-    expect(parseSheetLocation(`https://docs.google.com/spreadsheets/d/${ID}/edit#gid=1874360847`))
-      .toEqual({ documentId: ID, gid: '1874360847' })
+    expect(
+      parseSheetLocation(`https://docs.google.com/spreadsheets/d/${ID}/edit#gid=1874360847`),
+    ).toEqual({ documentId: ID, gid: '1874360847' })
   })
 
   it('reads the tab out of the query too, which is where the current UI puts it', () => {
@@ -1229,7 +1248,9 @@ describe('reading a Google Sheet', () => {
       return Promise.resolve({ type: 'opaqueredirect', status: 0 } as Response)
     })
 
-    await expect(provider().fetch(sheetRef(), {})).rejects.toThrow(/not readable without signing in/)
+    await expect(provider().fetch(sheetRef(), {})).rejects.toThrow(
+      /not readable without signing in/,
+    )
     // One extra request, and only on the failure path.
     expect(calls.map((c) => c?.redirect)).toEqual(['follow', 'manual'])
   })
@@ -1238,7 +1259,9 @@ describe('reading a Google Sheet', () => {
     // The other half of the classification. `docs.google.com` is the only host this provider
     // talks to and it demonstrably sends CORS headers, so there is no third case to confuse.
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('Failed to fetch')))
-    await expect(provider().fetch(sheetRef(), {})).rejects.toThrow(/Could not reach docs.google.com/)
+    await expect(provider().fetch(sheetRef(), {})).rejects.toThrow(
+      /Could not reach docs.google.com/,
+    )
   })
 
   it('keeps a cancelled run cancelled rather than reporting an unreachable host', async () => {

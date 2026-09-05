@@ -311,7 +311,8 @@ export class MockSource implements DataSource {
          * decomposition of whatever the unsplit query would have returned, so turning the
          * toggle on cannot change which partners a traversal goes on to expand.
          */
-        const parts = restrictTo || split ? connectionRoiSplit(connectome, edge, restrictTo) : []
+        const parts =
+          restrictTo || split ? connectionRoiSplit(connectome, edge, restrictTo) : []
         const weight =
           restrictTo || split ? parts.reduce((sum, part) => sum + part.weight, 0) : edge.weight
         if (weight < minWeight) continue

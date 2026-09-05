@@ -79,7 +79,9 @@ export async function runNblast(
   const cols = numberFrom(result, 'cols')
   const scores = float64From(result, 'scores')
   if (scores.length !== rows * cols) {
-    throw new Error(`NBLAST returned ${scores.length} scores for a ${rows} x ${cols} comparison`)
+    throw new Error(
+      `NBLAST returned ${scores.length} scores for a ${rows} x ${cols} comparison`,
+    )
   }
   return { scores, rows, cols }
 }
@@ -198,7 +200,9 @@ export async function runSynblast(
   const cols = numberFrom(result, 'cols')
   const scores = float64From(result, 'scores')
   if (scores.length !== rows * cols) {
-    throw new Error(`syNBLAST returned ${scores.length} scores for a ${rows} x ${cols} comparison`)
+    throw new Error(
+      `syNBLAST returned ${scores.length} scores for a ${rows} x ${cols} comparison`,
+    )
   }
   return { scores, rows, cols }
 }

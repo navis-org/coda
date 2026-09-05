@@ -527,7 +527,6 @@ export function parseHistogramChoice(value: unknown): HistogramChoice {
   return parseHistogramChoice(DEFAULT_HISTOGRAM_CHOICE)
 }
 
-
 // ---------------------------------------------------------------------------
 // Values — the half that runs on data
 // ---------------------------------------------------------------------------
@@ -735,7 +734,9 @@ function computeMetrics(network: NetworkValue): NetworkMetrics {
     // Undirected reciprocity is 1 by construction — every link is its own reverse — so
     // reporting it would be reporting the value of `directed`, in a column nobody would read
     // that way. Null says the question does not apply, which is what it does elsewhere here.
-    reciprocity: [index.directed && orderedPairs.size > 0 ? reciprocated / orderedPairs.size : null],
+    reciprocity: [
+      index.directed && orderedPairs.size > 0 ? reciprocated / orderedPairs.size : null,
+    ],
     components: [components],
     largestComponent: [largestComponent],
     meanClustering: [clusteringCount > 0 ? clusteringSum / clusteringCount : null],

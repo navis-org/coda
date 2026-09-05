@@ -171,7 +171,8 @@ function rowClause(row: FilterRow): string {
     `${prop} =~ ${escapeString(row.ignoreCase ? `(?i)${pattern}` : pattern)}`
   // Each pair is built once and negated by the operator, the way `toTerm` takes one `negate`
   // argument rather than writing the positive form out twice.
-  const orNull = (clause: string, negate: boolean) => (negate ? nullSafeNot(clause, prop) : clause)
+  const orNull = (clause: string, negate: boolean) =>
+    negate ? nullSafeNot(clause, prop) : clause
 
   switch (row.op) {
     case 'is':
@@ -298,9 +299,7 @@ export function populationCypher(
     for (const name of populationColumns(filter, schema)) {
       const prop = `n.${escapeIdentifier(neuprintProperty(name))}`
       parts.push(
-        filter === 'traced'
-          ? `${prop} = ${escapeString(TRACED_STATUS)}`
-          : notEmptyClause(prop),
+        filter === 'traced' ? `${prop} = ${escapeString(TRACED_STATUS)}` : notEmptyClause(prop),
       )
     }
   }

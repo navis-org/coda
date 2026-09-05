@@ -14,7 +14,12 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { byteLengthOf, cachedGeometry, geometryCacheStats, resetGeometryCache } from './geometryCache'
+import {
+  byteLengthOf,
+  cachedGeometry,
+  geometryCacheStats,
+  resetGeometryCache,
+} from './geometryCache'
 
 interface Body {
   positions: Float32Array

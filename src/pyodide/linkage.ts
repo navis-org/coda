@@ -112,7 +112,9 @@ export async function runClusterOrder(
   const count = numberFrom(result, 'count')
   const order = int32From(result, 'order')
   if (order.length !== count) {
-    throw new Error(`Cluster order returned ${order.length} positions for ${count} observations`)
+    throw new Error(
+      `Cluster order returned ${order.length} positions for ${count} observations`,
+    )
   }
   return order
 }

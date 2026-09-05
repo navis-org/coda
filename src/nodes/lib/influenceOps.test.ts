@@ -201,7 +201,13 @@ describe('propagate', () => {
 
   it('reads the same denominator from a lookup as it sums from a complete input list', async () => {
     const { fetch } = fakeSource()
-    const summed = await propagate({ seeds: ['C'], direction: 'inputs', hops: 3, gain: 0.5, fetch })
+    const summed = await propagate({
+      seeds: ['C'],
+      direction: 'inputs',
+      hops: 3,
+      gain: 0.5,
+      fetch,
+    })
     const looked = await propagate({
       seeds: ['C'],
       direction: 'inputs',
@@ -219,16 +225,35 @@ describe('propagate', () => {
     const { fetch } = fakeSource()
     const scores: number[] = []
     for (const hops of [1, 2, 3, 4, 5, 6]) {
-      const result = await propagate({ seeds: ['C'], direction: 'inputs', hops, gain: 0.5, fetch })
+      const result = await propagate({
+        seeds: ['C'],
+        direction: 'inputs',
+        hops,
+        gain: 0.5,
+        fetch,
+      })
       scores.push(summedVector(result.total).get('A') ?? 0)
     }
-    for (let i = 1; i < scores.length; i++) expect(scores[i]!).toBeGreaterThanOrEqual(scores[i - 1]!)
+    for (let i = 1; i < scores.length; i++)
+      expect(scores[i]!).toBeGreaterThanOrEqual(scores[i - 1]!)
   })
 
   it('bounds what the unwalked hops could have added, and refuses to bound the other direction', async () => {
     const { fetch } = fakeSource()
-    const short = await propagate({ seeds: ['C'], direction: 'inputs', hops: 2, gain: 0.5, fetch })
-    const long = await propagate({ seeds: ['C'], direction: 'inputs', hops: 20, gain: 0.5, fetch })
+    const short = await propagate({
+      seeds: ['C'],
+      direction: 'inputs',
+      hops: 2,
+      gain: 0.5,
+      fetch,
+    })
+    const long = await propagate({
+      seeds: ['C'],
+      direction: 'inputs',
+      hops: 20,
+      gain: 0.5,
+      fetch,
+    })
     const bound = truncation(short)
     expect(bound).not.toBeNull()
 
@@ -269,7 +294,9 @@ describe('propagate', () => {
     // Hop 1 reaches B (5/7) and A (2/7); a limit of one keeps B and reports A's mass.
     expect(first.droppedMass[0]).toBeCloseTo(2 / 7, 12)
     expect(summedVector(first.terms[1]!).has('A')).toBe(false)
-    expect([...summedVector(second.total).keys()]).toEqual([...summedVector(first.total).keys()])
+    expect([...summedVector(second.total).keys()]).toEqual([
+      ...summedVector(first.total).keys(),
+    ])
   })
 
   it('loses the drive that went to a fragment rather than reassigning it', async () => {
@@ -346,7 +373,10 @@ describe('combineHalves', () => {
       })
       const combined = combineHalves(forward, backward, sources)
       for (const source of sources) {
-        expect(combined.get(source) ?? 0).toBeCloseTo(summedVector(single.total).get(source) ?? 0, 12)
+        expect(combined.get(source) ?? 0).toBeCloseTo(
+          summedVector(single.total).get(source) ?? 0,
+          12,
+        )
       }
     }
   })
@@ -401,7 +431,13 @@ describe('combineHalves', () => {
       fetch,
       denominators: totalsOf(),
     })
-    const backward = await propagate({ seeds: ['C'], direction: 'inputs', hops: 1, gain: 0.5, fetch })
+    const backward = await propagate({
+      seeds: ['C'],
+      direction: 'inputs',
+      hops: 1,
+      gain: 0.5,
+      fetch,
+    })
     const combined = combineHalves(forward, backward, ['A', 'D'])
     expect(combined.get('A')).not.toBeCloseTo(combined.get('D')!, 6)
   })

@@ -66,9 +66,7 @@ function threeNodes() {
   })
   return {
     ...g,
-    edges: [
-      { id: 'e1', source: 'a', sourceHandle: 'out', target: 'b', targetHandle: 'in' },
-    ],
+    edges: [{ id: 'e1', source: 'a', sourceHandle: 'out', target: 'b', targetHandle: 'in' }],
   }
 }
 
@@ -376,7 +374,9 @@ describe('a frame in the file', () => {
       ],
     })
     const { graph: loaded } = deserializeGraph(file)
-    expect(loaded.groups).toEqual([{ id: 'g1', nodeIds: ['a', 'b'], exposed: [{ node: 'a', param }] }])
+    expect(loaded.groups).toEqual([
+      { id: 'g1', nodeIds: ['a', 'b'], exposed: [{ node: 'a', param }] },
+    ])
   })
 
   it('leaves a graph nobody grouped anything in without the key at all', () => {

@@ -75,7 +75,13 @@ registerEmitter('neuron.influence', (ctx) => {
 
   ctx.require('pandas')
   ctx.require('numpy')
-  ctx.require('neuprint', 'NeuronCriteria', 'fetch_adjacencies', 'fetch_neurons', 'merge_neuron_properties')
+  ctx.require(
+    'neuprint',
+    'NeuronCriteria',
+    'fetch_adjacencies',
+    'fetch_neurons',
+    'merge_neuron_properties',
+  )
   ctx.helper('coda_influence')
 
   const seeds = neuronIds(neurons)
@@ -115,7 +121,13 @@ registerHelper({
   requires: [
     ['pandas'],
     ['numpy'],
-    ['neuprint', 'NeuronCriteria', 'fetch_adjacencies', 'fetch_neurons', 'merge_neuron_properties'],
+    [
+      'neuprint',
+      'NeuronCriteria',
+      'fetch_adjacencies',
+      'fetch_neurons',
+      'merge_neuron_properties',
+    ],
   ],
   source: [
     'def coda_influence(seed_ids, direction, hops, min_weight, gain, denominator,',
@@ -124,7 +136,7 @@ registerHelper({
     '    """Coda\'s Influence node: the bounded influence score of Bates et al. (2026).',
     '',
     '    The exact score solves r = (I - gW)^-1 s over the whole connectome, where W[post, pre]',
-    '    is a connection as a fraction of the postsynaptic neuron\'s total input. That inverse is',
+    "    is a connection as a fraction of the postsynaptic neuron's total input. That inverse is",
     '    the series s + gWs + g^2 W^2 s + ..., so walking k hops and adding the terms computes',
     '    the same quantity truncated at k. Every term is non-negative, so the result is a strict',
     '    lower bound: more hops can only raise a score.',
@@ -151,7 +163,7 @@ registerHelper({
     '    ranked, strongest first. per_query=True keeps the seeds in separate channels and',
     '    returns one row per (queryId, neuronId) pair instead, before the scores are summed',
     '    across the seeds; grouping that by neuronId and summing gives the same frame back.',
-    '    influenceLog is the reference implementation\'s log compression,',
+    "    influenceLog is the reference implementation's log compression,",
     '    sign(x)*(log(max(|x|, e^-24)) + 24), which is what its own figures plot.',
     '    """',
     '    far = NeuronCriteria(label="Segment", client=client) if all_segments else None',

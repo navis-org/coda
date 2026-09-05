@@ -114,7 +114,8 @@ function folderSink(dir: DirectoryHandleLike): FileSink {
         const segments = file.name.split('/').filter(Boolean).map(safeFileName)
         const leaf = segments.pop() ?? 'file'
         let at = dir
-        for (const segment of segments) at = await at.getDirectoryHandle(segment, { create: true })
+        for (const segment of segments)
+          at = await at.getDirectoryHandle(segment, { create: true })
         const handle = await at.getFileHandle(leaf, { create: true })
         const writable = await handle.createWritable()
         try {

@@ -56,8 +56,7 @@ const lockButton = () => button('Lock canvas')
 // By its exact accessible name rather than by prefix: a node card can carry its own "+ Add"
 // button — Rename's rows, Find Neurons' filters — and a pattern matches those too. The button
 // itself is wordless (a circle in the canvas corner), so the label is all there is to match.
-const addButton = () =>
-  screen.getByRole('button', { name: 'Add a node' }) as HTMLButtonElement
+const addButton = () => screen.getByRole('button', { name: 'Add a node' }) as HTMLButtonElement
 const browser = () => screen.queryByRole('dialog', { name: 'Add a node' })
 const lock = () => act(() => useGraphStore.setState({ locked: true }))
 

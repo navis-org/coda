@@ -189,7 +189,10 @@ export function exposedControls(
 ): ExposedControl[] {
   if (!group.exposed?.length) return []
   const controls: ExposedControl[] = []
-  const offered = new Map<string, { node: GraphNode; def: NodeDefinition; params: ParamDef[] }>()
+  const offered = new Map<
+    string,
+    { node: GraphNode; def: NodeDefinition; params: ParamDef[] }
+  >()
   for (const { node: nodeId, param: paramId } of group.exposed) {
     let entry = offered.get(nodeId)
     if (!entry) {

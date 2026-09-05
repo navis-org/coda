@@ -133,8 +133,9 @@ function Dialog({ onClose }: { onClose: () => void }) {
               <strong>
                 The datasets Coda ships are public, but they are not unattributed.
               </strong>{' '}
-              Each represents years of effort (sample prep, imaging, reconstruction, proofreading, curation, etc)
-              by the group that published it, released on the understanding that work built on it says so.
+              Each represents years of effort (sample prep, imaging, reconstruction,
+              proofreading, curation, etc) by the group that published it, released on the
+              understanding that work built on it says so.
             </p>
             <p>
               <strong>If a dataset informs your publication, cite its original sources.</strong>{' '}
@@ -143,8 +144,9 @@ function Dialog({ onClose }: { onClose: () => void }) {
             </p>
             <p className="privacy__where">
               The <strong>Description</strong> node should point you to the original sources: it
-              contains the publisher&rsquo;s own text that often includes the project name and the
-              papers it asks for. If it does not, it is your responsibility to find the right citation.
+              contains the publisher&rsquo;s own text that often includes the project name and
+              the papers it asks for. If it does not, it is your responsibility to find the
+              right citation.
             </p>
           </section>
         </div>

@@ -32,7 +32,12 @@ function draw(
   params: Record<string, unknown>,
   options: { dataset?: CodaType; compact?: boolean } = {},
 ) {
-  const node = { id: 'n1', type: 'cave.tableInfo', position: { x: 0, y: 0 }, params } as GraphNode
+  const node = {
+    id: 'n1',
+    type: 'cave.tableInfo',
+    position: { x: 0, y: 0 },
+    params,
+  } as GraphNode
   const ctx = {
     params,
     inputs: options.dataset ? { dataset: options.dataset } : {},

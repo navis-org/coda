@@ -80,7 +80,12 @@ function graphWith(params: Record<string, unknown>, wired: boolean): CodaGraph {
   if (!wired) return g
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
   g = addNode(g, node('find', 'neuron.findNeurons', { limit: 3 }))
-  g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
+  g = addEdge(g, {
+    source: 'ds',
+    sourceHandle: 'dataset',
+    target: 'find',
+    targetHandle: 'dataset',
+  })
   g = addEdge(g, {
     source: 'find',
     sourceHandle: 'neurons',

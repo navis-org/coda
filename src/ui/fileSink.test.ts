@@ -120,7 +120,8 @@ describe('choosing a route', () => {
    * `undefined`; answering with a zip sink instead would quietly do the thing that was declined.
    */
   it('answers undefined when the picker is dismissed', async () => {
-    fakeWindow.showDirectoryPicker = () => Promise.reject(new Error('The user aborted a request.'))
+    fakeWindow.showDirectoryPicker = () =>
+      Promise.reject(new Error('The user aborted a request.'))
     expect(await chooseSink('run')).toBeUndefined()
   })
 })

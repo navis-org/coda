@@ -418,7 +418,6 @@ describe('the region and normalisation options', () => {
   })
 })
 
-
 /**
  * The Paths node's own refusal, which is one reason past `Connectivity`'s.
  *

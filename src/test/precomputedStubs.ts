@@ -39,7 +39,8 @@ export function serveJson(docs: Readonly<Record<string, unknown>>): {
      * so a test about a *transient* blip has to be able to serve one — served as an unregistered
      * URL it would be testing the forgiven case instead.
      */
-    if (typeof body === 'number') return Promise.resolve({ ok: false, status: body } as Response)
+    if (typeof body === 'number')
+      return Promise.resolve({ ok: false, status: body } as Response)
     const bytes = new TextEncoder().encode(JSON.stringify(body))
     return Promise.resolve({
       ok: true,

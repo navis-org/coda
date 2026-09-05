@@ -7,11 +7,7 @@
  * silently ignored is worse than a knob visibly not translated.
  */
 
-import {
-  readColorSpec,
-  readShapeSpec,
-  readSizeSpec,
-} from '../../../nodes/lib/encodingParams'
+import { readColorSpec, readShapeSpec, readSizeSpec } from '../../../nodes/lib/encodingParams'
 import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
 import { copyIdsSettings } from '../../../nodes/lib/copyIds'
 import {
@@ -38,7 +34,10 @@ registerEmitter('out.table', (ctx) => {
   const src = ctx.wired('in')
   const out = ctx.output('out')
   const filtered = ctx.output('filtered')
-  const { terms, problems } = resolveFilters(ctx.schema('in'), decodeClauses(ctx.params.filters))
+  const { terms, problems } = resolveFilters(
+    ctx.schema('in'),
+    decodeClauses(ctx.params.filters),
+  )
   const predicates = filterPredicates(terms, ctx.schema('in'))
 
   const lines = [`${out} <- ${src}`]
@@ -165,9 +164,7 @@ registerEmitter('out.heatmap', (ctx) => {
    * for. Under the log they are in the *transformed* units the fill is drawn in.
    */
   const scaled = diverging || manual || log
-  const ends = scaled
-    ? `, limits = ${log ? 'c(0, log10(1 + hi_ - lo_))' : 'c(lo_, hi_)'}`
-    : ''
+  const ends = scaled ? `, limits = ${log ? 'c(0, log10(1 + hi_ - lo_))' : 'c(lo_, hi_)'}` : ''
   const fill = diverging
     ? palette === 'coda'
       ? `scale_fill_distiller(palette = "RdBu", direction = -1${ends})`
@@ -578,9 +575,7 @@ registerEmitter('out.pie', (ctx) => {
     `  mutate(${col(category)} = ifelse(row_number() <= ${maxSlices}, as.character(${col(category)}), "Other")) |>`,
     `  group_by(${col(category)}) |>`,
     `  summarise(value = sum(value), .groups = "drop") |>`,
-    ctx.params.sortSlices !== false
-      ? `  arrange(desc(value))`
-      : `  arrange(${col(category)})`,
+    ctx.params.sortSlices !== false ? `  arrange(desc(value))` : `  arrange(${col(category)})`,
   )
   lines.push(
     ``,
@@ -662,7 +657,8 @@ registerEmitter('out.distribution', (ctx) => {
     : `${valueAxis} = ${col(value)}, ${groupAxis} = ""`
   lines.push(`ggplot(${plot}, aes(${aes})) +`)
   if (style === 'box') {
-    const outliers = ctx.params.points === 'none' ? ', outlier.shape = NA' : ', outlier.size = 0.8'
+    const outliers =
+      ctx.params.points === 'none' ? ', outlier.shape = NA' : ', outlier.size = 0.8'
     lines.push(`  geom_boxplot(coef = ${coefFor(whiskers)}${outliers}) +`)
   } else if (style === 'violin') {
     lines.push(`  geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +`)
@@ -678,7 +674,9 @@ registerEmitter('out.distribution', (ctx) => {
      * a jitter answer the same question; only the second is reproducible from a seed.
      */
     if (style === 'swarmBox') {
-      lines.push(`  geom_boxplot(alpha = 0.35, coef = ${coefFor(whiskers)}, outlier.shape = NA) +`)
+      lines.push(
+        `  geom_boxplot(alpha = 0.35, coef = ${coefFor(whiskers)}, outlier.shape = NA) +`,
+      )
     }
     lines.push(`  geom_jitter(width = 0.15, height = 0, size = 0.8, alpha = 0.7) +`)
   }
@@ -751,9 +749,7 @@ registerEmitter('out.viewer3d', (ctx) => {
      * is a list of `mesh3d` and `plot3d` has no method for one. The alpha is the card's own
      * default: a neuropil is drawn so that something else can be seen inside it.
      */
-    lines.push(
-      `for (.mesh in ${volumes}) rgl::shade3d(.mesh, alpha = 0.12, col = "grey70")`,
-    )
+    lines.push(`for (.mesh in ${volumes}) rgl::shade3d(.mesh, alpha = 0.12, col = "grey70")`)
   }
   lines.push('')
   if (selection.length > 0) {

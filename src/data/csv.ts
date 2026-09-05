@@ -427,7 +427,9 @@ export async function readDelimitedResponse(
      * column. Saying what arrived is what turns "no rows" into something actionable.
      */
     const head = text.trim().slice(0, 60)
-    throw fail(`${subject} had no rows to read.${head ? ` It starts: ${JSON.stringify(head)}` : ''}`)
+    throw fail(
+      `${subject} had no rows to read.${head ? ` It starts: ${JSON.stringify(head)}` : ''}`,
+    )
   }
   return parsed
 }

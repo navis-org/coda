@@ -113,7 +113,9 @@ describe('the generated graphs', () => {
         const [left, right] = a.position.x <= b.position.x ? [a, b] : [b, a]
         const gap = right.position.x - (left.position.x + widthOf(left))
         if (gap < MIN_GAP) {
-          clashes.push(`${left.type} (${widthOf(left)}px) → ${right.type}: ${Math.round(gap)}px gap`)
+          clashes.push(
+            `${left.type} (${widthOf(left)}px) → ${right.type}: ${Math.round(gap)}px gap`,
+          )
         }
       }
     }

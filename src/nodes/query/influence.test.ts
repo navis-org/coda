@@ -194,9 +194,18 @@ describe('Influence per query neuron', () => {
     // A table, not a neurons value: `neuronId` repeats once per query neuron, so a wire into
     // Skeletons has to break rather than silently fetch the same body a hundred times.
     expect(pairs?.kind).toBe('table')
-    expect(pairs && 'schema' in pairs ? pairs.schema?.columns.map((c) => c.name) : undefined).toEqual(
-      ['queryId', 'queryType', 'neuronId', 'type', 'influence', 'influenceLog', 'hops', 'isSeed'],
-    )
+    expect(
+      pairs && 'schema' in pairs ? pairs.schema?.columns.map((c) => c.name) : undefined,
+    ).toEqual([
+      'queryId',
+      'queryType',
+      'neuronId',
+      'type',
+      'influence',
+      'influenceLog',
+      'hops',
+      'isSeed',
+    ])
   })
 
   it('builds the columns it advertised', async () => {
@@ -206,7 +215,9 @@ describe('Influence per query neuron', () => {
     const declared = inferGraph(pipeline({ ...COMPARABLE, perQuery: true })).nodes.inf?.outputs
       .influence
     expect(table.schema.columns.map((c) => c.name)).toEqual(
-      declared && 'schema' in declared ? declared.schema?.columns.map((c) => c.name) : undefined,
+      declared && 'schema' in declared
+        ? declared.schema?.columns.map((c) => c.name)
+        : undefined,
     )
     // More than one query neuron, and each contributes its own rows.
     expect(new Set(getColumn(table, 'queryId')).size).toBeGreaterThan(1)
@@ -244,7 +255,8 @@ describe('Influence per query neuron', () => {
     const key = (t: TableValue, i: number) =>
       `${String(getColumn(t, 'queryId')[i])}→${String(getColumn(t, 'neuronId')[i])}`
     const before = new Map<string, number>()
-    for (let i = 0; i < all.length; i++) before.set(key(all, i), Number(getColumn(all, 'influence')[i]))
+    for (let i = 0; i < all.length; i++)
+      before.set(key(all, i), Number(getColumn(all, 'influence')[i]))
     for (let i = 0; i < some.length; i++) {
       expect(before.get(key(some, i))).toBeCloseTo(Number(getColumn(some, 'influence')[i]), 12)
     }
@@ -322,7 +334,10 @@ describe('Influence over a Neurons table that repeats an id', () => {
    */
   function doubled(params: Record<string, unknown> = {}): CodaGraph {
     let g = pipeline(params)
-    g = addNode(g, node('wider', 'neuron.findNeurons', { typePattern: 'LC[46]', status: 'Traced' }))
+    g = addNode(
+      g,
+      node('wider', 'neuron.findNeurons', { typePattern: 'LC[46]', status: 'Traced' }),
+    )
     g = addNode(g, node('twice', 'core.stack'))
     g = addEdge(g, {
       source: 'ds',
@@ -330,7 +345,12 @@ describe('Influence over a Neurons table that repeats an id', () => {
       target: 'wider',
       targetHandle: 'dataset',
     })
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'twice', targetHandle: 'top' })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'twice',
+      targetHandle: 'top',
+    })
     g = addEdge(g, {
       source: 'wider',
       sourceHandle: 'neurons',

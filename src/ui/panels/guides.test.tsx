@@ -75,7 +75,9 @@ const rows = () => [...document.querySelectorAll<HTMLElement>('.guides__row')]
 
 /** One guide's row, found by the name it shows — the label `TOURS` carries. */
 function row(label: string): HTMLElement {
-  const found = rows().find((el) => el.querySelector('.guides__name')?.textContent?.includes(label))
+  const found = rows().find((el) =>
+    el.querySelector('.guides__name')?.textContent?.includes(label),
+  )
   if (!found) throw new Error(`No row for "${label}"`)
   return found
 }

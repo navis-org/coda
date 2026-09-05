@@ -170,7 +170,10 @@ describe('the region options against a source that cannot answer them', () => {
     await expect(
       synapseTotalsFor(
         stubSource({
-          capabilities: { neuronIndex: true, synapseTotals: true } as DataSource['capabilities'],
+          capabilities: {
+            neuronIndex: true,
+            synapseTotals: true,
+          } as DataSource['capabilities'],
         }),
         { datasetId: 'd', neuronIds: ['1'], side: 'inputs', basis: 'all' },
       ),

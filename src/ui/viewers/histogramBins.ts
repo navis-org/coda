@@ -307,7 +307,8 @@ export function binScan(scan: ValueScan, options: HistogramOptions = {}): Histog
     const raw: { series: string; count: number; colorIndex: number }[] = []
     for (const name of fold.kept) {
       const n = bucket.get(name) ?? 0
-      if (n > 0 || cumulative) raw.push({ series: name, count: n, colorIndex: fold.slotOf(name) })
+      if (n > 0 || cumulative)
+        raw.push({ series: name, count: n, colorIndex: fold.slotOf(name) })
     }
     if (fold.folded) {
       let other = 0
@@ -368,6 +369,7 @@ function scale(count: number, normalize: Normalize, total: number, width: number
 
 /** Axis label for the plotted quantity, so the caption and the tick labels cannot disagree. */
 export function normalizeLabel(normalize: Normalize, cumulative: boolean): string {
-  const base = normalize === 'percent' ? '% of rows' : normalize === 'density' ? 'density' : 'rows'
+  const base =
+    normalize === 'percent' ? '% of rows' : normalize === 'density' ? 'density' : 'rows'
   return cumulative && normalize !== 'density' ? `cumulative ${base}` : base
 }

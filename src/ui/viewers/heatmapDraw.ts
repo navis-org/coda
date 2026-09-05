@@ -147,9 +147,7 @@ function scratchContext(
   if (scratch.width !== width) scratch.width = width
   if (scratch.height !== height) scratch.height = height
   return scratch.getContext('2d') as
-    | CanvasRenderingContext2D
-    | OffscreenCanvasRenderingContext2D
-    | null
+    CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null
 }
 
 export interface HeatmapCanvasOptions {

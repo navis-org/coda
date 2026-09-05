@@ -107,7 +107,12 @@ describe('pieSlices', () => {
   })
 
   it('drops a zero-valued category, which has no arc to draw', () => {
-    const { slices } = pieSlices(new Map([['a', 5], ['b', 0]]))
+    const { slices } = pieSlices(
+      new Map([
+        ['a', 5],
+        ['b', 0],
+      ]),
+    )
     expect(slices.map((s) => s.label)).toEqual(['a'])
   })
 

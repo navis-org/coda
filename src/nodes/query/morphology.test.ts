@@ -419,7 +419,9 @@ describe('the Synapses node’s controls', () => {
 
   it('names the unit Automatic will take, even where there is only one', () => {
     const type = withUnits('links-only', ['links'])
-    expect(optionsFor(type)).toEqual([{ value: '', label: 'Automatic (one row per connection)' }])
+    expect(optionsFor(type)).toEqual([
+      { value: '', label: 'Automatic (one row per connection)' },
+    ])
   })
 
   it('offers both units where the backend has both, in the order the fetch would take them', () => {
@@ -442,7 +444,11 @@ describe('the Synapses node’s controls', () => {
     const type = withUnits('links-only-2', ['links'])
     const issues =
       def.validate?.(
-        makeInferContext(def, { ...defaultParams(def), synapseUnit: 'sites' }, { dataset: type }),
+        makeInferContext(
+          def,
+          { ...defaultParams(def), synapseUnit: 'sites' },
+          { dataset: type },
+        ),
       ) ?? []
     expect(issues.join(' ')).toContain('cannot return synapses as “one row per site”')
     expect(issues.join(' ')).toContain('it offers one row per connection')
@@ -464,7 +470,11 @@ describe('the Synapses node’s controls', () => {
     ])
     expect(
       def.validate?.(
-        makeInferContext(def, { ...defaultParams(def), synapseUnit: 'links' }, { dataset: type }),
+        makeInferContext(
+          def,
+          { ...defaultParams(def), synapseUnit: 'links' },
+          { dataset: type },
+        ),
       ),
     ).toEqual([])
   })
@@ -496,7 +506,11 @@ describe('the Synapses node’s controls', () => {
     ])
     expect(
       def.validate?.(
-        makeInferContext(def, { ...defaultParams(def), synapseUnit: 'sites' }, { dataset: type }),
+        makeInferContext(
+          def,
+          { ...defaultParams(def), synapseUnit: 'sites' },
+          { dataset: type },
+        ),
       ),
     ).toEqual([])
   })

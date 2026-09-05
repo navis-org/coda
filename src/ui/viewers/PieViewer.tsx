@@ -112,7 +112,9 @@ export function PieViewer({
    * tick and every pan.
    */
   const isSelected = useMemo(() => {
-    const flags = new Map(layout.slices.map((slice) => [slice.label, marks.has(labelsOf(slice))]))
+    const flags = new Map(
+      layout.slices.map((slice) => [slice.label, marks.has(labelsOf(slice))]),
+    )
     return (slice: PieSlice) => flags.get(slice.label) ?? false
   }, [layout, marks])
 
@@ -244,10 +246,10 @@ export function PieViewer({
                   dominantBaseline="central"
                 >
                   {/*
-                    * "total" rather than "rows" when nothing is summed: the number in the hole
-                    * is the whole the slices are shares *of*, and naming the unit invites it to
-                    * be read as one more count beside the per-slice ones.
-                    */}
+                   * "total" rather than "rows" when nothing is summed: the number in the hole
+                   * is the whole the slices are shares *of*, and naming the unit invites it to
+                   * be read as one more count beside the per-slice ones.
+                   */}
                   {valueColumn ? `${valueColumn} total` : 'total'}
                 </text>
               </>

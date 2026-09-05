@@ -107,7 +107,11 @@ export function DatasetCacheAge({ sourceId, datasetId, annotations }: DatasetCac
    * second download.
    */
   if (index.status === 'loading') {
-    return <span className="coda-node__cache coda-node__cache--busy">{index.note ?? 'fetching…'}</span>
+    return (
+      <span className="coda-node__cache coda-node__cache--busy">
+        {index.note ?? 'fetching…'}
+      </span>
+    )
   }
 
   return (

@@ -153,7 +153,11 @@ export function pyPopulationMask(
  * and stops doing so the first time somebody edits a clause — and in a notebook nobody
  * re-derives operator precedence before trusting a row count.
  */
-export function pyMaskFrame(frame: string, masks: readonly string[], join: '&' | '|'): string[] {
+export function pyMaskFrame(
+  frame: string,
+  masks: readonly string[],
+  join: '&' | '|',
+): string[] {
   if (masks.length === 0) return []
   if (masks.length === 1) return [`${frame} = ${frame}[${masks[0]}]`]
   return [

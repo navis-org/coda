@@ -263,13 +263,10 @@ describe('PieViewer', () => {
 })
 
 describe('DistributionViewer', () => {
-  const table = tableFromRows(
-    SCHEMA,
-    [
-      ...[1, 2, 3, 4, 5, 60].map((pre) => ({ pre, type: 'LC4' })),
-      ...[10, 20, 30].map((pre) => ({ pre, type: 'LPLC2' })),
-    ],
-  )
+  const table = tableFromRows(SCHEMA, [
+    ...[1, 2, 3, 4, 5, 60].map((pre) => ({ pre, type: 'LC4' })),
+    ...[10, 20, 30].map((pre) => ({ pre, type: 'LPLC2' })),
+  ])
 
   it('draws one box per group and labels each one', () => {
     const { container } = render(
@@ -298,7 +295,9 @@ describe('DistributionViewer', () => {
   })
 
   it('draws a violin outline only when one was asked for', () => {
-    const box = render(<DistributionViewer table={table} valueColumn="pre" groupColumn="type" />)
+    const box = render(
+      <DistributionViewer table={table} valueColumn="pre" groupColumn="type" />,
+    )
     expect(box.container.querySelectorAll('svg path')).toHaveLength(0)
     cleanup()
     const violin = render(
@@ -403,13 +402,10 @@ describe('DistributionViewer', () => {
 
   it('keeps a swarm inside its own band', () => {
     // Packed wider than the band it belongs to, a dense group would spill into its neighbours.
-    const dense = tableFromRows(
-      SCHEMA,
-      [
-        ...Array.from({ length: 120 }, () => ({ pre: 50, type: 'LC4' })),
-        ...Array.from({ length: 5 }, () => ({ pre: 50, type: 'LPLC2' })),
-      ],
-    )
+    const dense = tableFromRows(SCHEMA, [
+      ...Array.from({ length: 120 }, () => ({ pre: 50, type: 'LC4' })),
+      ...Array.from({ length: 5 }, () => ({ pre: 50, type: 'LPLC2' })),
+    ])
     const { container } = render(
       <DistributionViewer table={dense} valueColumn="pre" groupColumn="type" style="swarm" />,
     )
@@ -420,7 +416,9 @@ describe('DistributionViewer', () => {
       top: Number(r.getAttribute('y')),
       bottom: Number(r.getAttribute('y')) + Number(r.getAttribute('height')),
     }))
-    const ys = [...container.querySelectorAll('circle')].map((c) => Number(c.getAttribute('cy')))
+    const ys = [...container.querySelectorAll('circle')].map((c) =>
+      Number(c.getAttribute('cy')),
+    )
     // Every mark of the crowded group is inside the band it belongs to.
     const inFirst = ys.filter((y) => y >= first!.top - 3 && y <= first!.bottom + 3)
     expect(inFirst.length).toBeGreaterThan(100)

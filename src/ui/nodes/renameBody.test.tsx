@@ -63,8 +63,18 @@ function graphWith(params: Record<string, unknown>, upstream: 'neurons' | 'url' 
   if (upstream === 'neurons') {
     g = addNode(g, node('ds', 'neuron.dataset', 0, { dataset: DATASET }))
     g = addNode(g, node('find', 'neuron.findNeurons', 320, { typePattern: 'LC.*' }))
-    g = addEdge(g, { source: 'ds', sourceHandle: 'dataset', target: 'find', targetHandle: 'dataset' })
-    g = addEdge(g, { source: 'find', sourceHandle: 'neurons', target: 'rn', targetHandle: 'in' })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'find',
+      targetHandle: 'dataset',
+    })
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'rn',
+      targetHandle: 'in',
+    })
   } else if (upstream === 'url') {
     g = addNode(g, node('url', 'core.tableFromUrl', 320, { url: 'https://example.org/a.csv' }))
     g = addEdge(g, { source: 'url', sourceHandle: 'out', target: 'rn', targetHandle: 'in' })
@@ -72,7 +82,10 @@ function graphWith(params: Record<string, unknown>, upstream: 'neurons' | 'url' 
   return g as CodaGraph
 }
 
-async function open(params: Record<string, unknown> = {}, upstream: 'neurons' | 'url' | 'none' = 'neurons') {
+async function open(
+  params: Record<string, unknown> = {},
+  upstream: 'neurons' | 'url' | 'none' = 'neurons',
+) {
   render(<App />)
   act(() => {
     useGraphStore.getState().closeStartPage()
@@ -191,7 +204,9 @@ describe('Rename Columns card', () => {
     const select = rows(body)[0]!.querySelector('select')!
     expect(select.disabled).toBe(false)
     // Offered plainly, never as "(missing)": unknown is not missing.
-    expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toContain('root_id')
+    expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toContain(
+      'root_id',
+    )
     expect(body.textContent).not.toContain('(missing)')
     expect(body.textContent).toContain('Columns are not known until this has run')
   })

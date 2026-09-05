@@ -13,7 +13,13 @@ import { defaultParams } from '../../core/node'
 import { listableNodeDefs, requireNodeDef } from '../../core/registry'
 import '../../nodes'
 import type { CompositeRow, ParamRow } from './paramGroups'
-import { UNGROUPED_TAB, bucketParams, facetLabel, groupParams, paramsForPanel } from './paramGroups'
+import {
+  UNGROUPED_TAB,
+  bucketParams,
+  facetLabel,
+  groupParams,
+  paramsForPanel,
+} from './paramGroups'
 
 const def = requireNodeDef('out.network')
 const base = defaultParams(def)

@@ -37,7 +37,6 @@ function scheduler(): Scheduler {
   return new Scheduler({ resolveSource: (id) => requireSource(id) })
 }
 
-
 describe('starters', () => {
   const spec = { nodeType: 'dataset.mock.opticlobe', label: 'Demo Data' }
 

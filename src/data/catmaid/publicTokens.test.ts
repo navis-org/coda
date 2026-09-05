@@ -15,7 +15,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { clearStorage, installStorageStub } from '../../test/jsdomStubs'
 import { catmaidGet, catmaidPost, forgetCatmaidRoutes } from './client'
-import { DEFAULT_CATMAID_SERVER, L1_CATMAID_SERVER, resetCredentials, setInstances } from './credentials'
+import {
+  DEFAULT_CATMAID_SERVER,
+  L1_CATMAID_SERVER,
+  resetCredentials,
+  setInstances,
+} from './credentials'
 import {
   MANIFEST_URL,
   publicTokenFor,
@@ -26,7 +31,12 @@ import {
 
 const FAFB_MANIFEST_HOST = 'https://fafb.catmaid.virtualflybrain.org'
 
-let calls: { url: string; method: string; headers: Record<string, string>; init?: RequestInit }[] = []
+let calls: {
+  url: string
+  method: string
+  headers: Record<string, string>
+  init?: RequestInit
+}[] = []
 
 /** `route` answers with a body, or a `Response` when a test needs a specific status. */
 function stubFetch(route: (url: string) => unknown): void {
@@ -35,7 +45,9 @@ function stubFetch(route: (url: string) => unknown): void {
     vi.fn((input: string, init?: RequestInit) => {
       const url = String(input)
       const headers: Record<string, string> = {}
-      for (const [key, value] of Object.entries((init?.headers ?? {}) as Record<string, string>)) {
+      for (const [key, value] of Object.entries(
+        (init?.headers ?? {}) as Record<string, string>,
+      )) {
         headers[key.toLowerCase()] = value
       }
       calls.push({ url, method: init?.method ?? 'GET', headers, ...(init ? { init } : {}) })
@@ -158,7 +170,10 @@ describe('the background refresh', () => {
   })
 
   it('survives the fetch throwing, because nothing waits for it', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('offline'))))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new TypeError('offline'))),
+    )
     await expect(startPublicTokenRefresh()).resolves.toBeUndefined()
     expect(publicTokenFor(FAFB_MANIFEST_HOST)).toMatch(/^[a-f0-9]{40}$/)
   })
@@ -256,7 +271,9 @@ describe('a rotated token', () => {
 
   it('falls back to the relay for a POST, which is what a dev server serves', async () => {
     stubFetch((url) =>
-      url.startsWith('/cm/') ? { ok: true } : new Response('{"detail":"Invalid token."}', { status: 401 }),
+      url.startsWith('/cm/')
+        ? { ok: true }
+        : new Response('{"detail":"Invalid token."}', { status: 401 }),
     )
     await catmaidPost(L1_CATMAID_SERVER, '/1/skeleton/neuronnames', { skids: [16] })
     expect(wire()[0]?.url.startsWith('/cm/')).toBe(false)
@@ -278,7 +295,9 @@ describe('a rotated token', () => {
   it('does not drop a token the user configured', async () => {
     setInstances([{ server: '*.virtualflybrain.org', token: 'mine' }])
     stubFetch(() => new Response('{"detail":"Invalid token."}', { status: 401 }))
-    await expect(catmaidGet(L1_CATMAID_SERVER, '/projects/')).rejects.toThrow(/rejected the token/i)
+    await expect(catmaidGet(L1_CATMAID_SERVER, '/projects/')).rejects.toThrow(
+      /rejected the token/i,
+    )
     expect(wire()).toHaveLength(1)
   })
 })

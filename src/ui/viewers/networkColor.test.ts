@@ -80,7 +80,11 @@ describe('colour by connected component', () => {
   it('ignores the column picker, which has nothing to offer it', () => {
     // `component` is dataless: the mode derives its own values, so a stale column left in the
     // params from a previous mode must not reach the answer.
-    const other = resolveNetworkNodeColor(NET, spec({ mode: 'component', column: 'type' }), 'dark')
+    const other = resolveNetworkNodeColor(
+      NET,
+      spec({ mode: 'component', column: 'type' }),
+      'dark',
+    )
     expect(other.at(0)).toBe(other.at(1))
     // …which `type` would not give, since a and b are LC4 but c is DNp02.
     expect(other.at(1)).toBe(other.at(2))
@@ -131,12 +135,7 @@ describe('colour a link by the node at one of its ends', () => {
       spec({ overrides: { LC4: '#123456' } }),
       'dark',
     )
-    const edges = resolveNetworkEdgeColor(
-      NET,
-      spec({ mode: 'sourceNode' }),
-      'dark',
-      overridden,
-    )
+    const edges = resolveNetworkEdgeColor(NET, spec({ mode: 'sourceNode' }), 'dark', overridden)
     expect(edges.at(0)).toBe('#123456')
   })
 
@@ -145,12 +144,7 @@ describe('colour a link by the node at one of its ends', () => {
       ...NET,
       edges: makeTable(EDGE_SCHEMA, { source: ['gone'], target: ['a'] }),
     }
-    const edges = resolveNetworkEdgeColor(
-      orphaned,
-      spec({ mode: 'sourceNode' }),
-      'dark',
-      nodes,
-    )
+    const edges = resolveNetworkEdgeColor(orphaned, spec({ mode: 'sourceNode' }), 'dark', nodes)
     expect(edges.at(0)).toBe(CHART_INK.dark.muted)
   })
 

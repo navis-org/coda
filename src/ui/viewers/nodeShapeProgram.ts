@@ -222,7 +222,10 @@ export class NodeShapeProgram extends NodeProgram<(typeof UNIFORMS)[number]> {
 
   setUniforms(
     params: RenderParams,
-    { gl, uniformLocations }: { gl: WebGLRenderingContext; uniformLocations: Record<string, WebGLUniformLocation> },
+    {
+      gl,
+      uniformLocations,
+    }: { gl: WebGLRenderingContext; uniformLocations: Record<string, WebGLUniformLocation> },
   ): void {
     const { u_sizeRatio, u_correctionRatio, u_matrix } = uniformLocations
     gl.uniform1f(u_sizeRatio!, params.sizeRatio)

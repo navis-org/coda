@@ -123,7 +123,11 @@ describe('resolveSize', () => {
 
 describe('arrangeable', () => {
   it('drops text notes and keeps everything else', () => {
-    const nodes = [node('a', 'core.filterTable'), node('n', 'note.text'), node('t', 'out.table')]
+    const nodes = [
+      node('a', 'core.filterTable'),
+      node('n', 'note.text'),
+      node('t', 'out.table'),
+    ]
     expect(arrangeable(nodes).map((n) => n.id)).toEqual(['a', 't'])
   })
 
@@ -404,11 +408,17 @@ describe('structureKey', () => {
     const framed = { ...graph, groups: [{ id: 'g1', nodeIds: ids.slice(0, 2) }] }
     expect(structureKey(framed)).toBe(base)
 
-    const folded = { ...graph, groups: [{ id: 'g1', nodeIds: ids.slice(0, 2), collapsed: true }] }
+    const folded = {
+      ...graph,
+      groups: [{ id: 'g1', nodeIds: ids.slice(0, 2), collapsed: true }],
+    }
     expect(structureKey(folded)).not.toBe(base)
 
     // Membership decides which cards the box stands for, so it is part of the arrangement.
-    const wider = { ...graph, groups: [{ id: 'g1', nodeIds: ids.slice(0, 3), collapsed: true }] }
+    const wider = {
+      ...graph,
+      groups: [{ id: 'g1', nodeIds: ids.slice(0, 3), collapsed: true }],
+    }
     expect(structureKey(wider)).not.toBe(structureKey(folded))
 
     /*

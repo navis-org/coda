@@ -237,7 +237,6 @@ function buildTree(n: number, x: Float64Array, y: Float64Array, mass: number): Q
    * from a function the comment above notes runs four times per iteration.
    */
   for (let node = tree.size - 1; node >= 0; node--) {
-
     let m = 0
     let cx = 0
     let cy = 0

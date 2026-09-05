@@ -39,7 +39,9 @@ export function CaveTableInfoBody({ node, ctx, compact }: NodeBodyProps) {
 
   const facts = where ? peekTableFacts(where.datastack, where.version, name) : undefined
   if (!facts) {
-    return <p className="cave-info__empty">{absence(ctx.inputs.dataset, params, where, name)}</p>
+    return (
+      <p className="cave-info__empty">{absence(ctx.inputs.dataset, params, where, name)}</p>
+    )
   }
 
   return (

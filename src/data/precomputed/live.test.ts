@@ -105,7 +105,7 @@ live('precomputed datasources, live', () => {
     expect(meshes.detail?.levels).toBeGreaterThan(1)
   }, 120_000)
 
-it('reads male-CNS skeletons as trees, in the same nanometres as its meshes', async () => {
+  it('reads male-CNS skeletons as trees, in the same nanometres as its meshes', async () => {
     /*
      * Two facts that no fixture can establish. **The coordinates are already nanometres** —
      * around 3.6e5 for a volume ~93,800 voxels of 8 nm across — so a reader that scaled them by
@@ -115,7 +115,10 @@ it('reads male-CNS skeletons as trees, in the same nanometres as its meshes', as
      */
     const source = sourceFor(MALECNS)
     const ids = ['100000', '100003']
-    const skeletons = await source.fetchSkeletons({ datasetId: source.datasetId, neuronIds: ids })
+    const skeletons = await source.fetchSkeletons({
+      datasetId: source.datasetId,
+      neuronIds: ids,
+    })
 
     expect(skeletons.items.map((s) => s.id)).toEqual(ids)
     expect(skeletons.units).toBe('nm')
@@ -152,7 +155,11 @@ it('reads male-CNS skeletons as trees, in the same nanometres as its meshes', as
     const id = '100000'
     const [skeletons, meshes] = await Promise.all([
       source.fetchSkeletons({ datasetId: source.datasetId, neuronIds: [id] }),
-      source.fetchMeshes({ datasetId: source.datasetId, neuronIds: [id], triangleBudget: 150_000 }),
+      source.fetchMeshes({
+        datasetId: source.datasetId,
+        neuronIds: [id],
+        triangleBudget: 150_000,
+      }),
     ])
     if (meshes.items.length === 0) return // No mesh for this body; the skeleton case still ran.
 
@@ -169,7 +176,8 @@ it('reads male-CNS skeletons as trees, in the same nanometres as its meshes', as
      * shells, so "no source in use is built this way" stopped being true the moment ROI Meshes
      * had to work on a precomputed source.
      */
-    const base = 'https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/v1.2/rois/mesh'
+    const base =
+      'https://storage.googleapis.com/neuroglancer-janelia-flyem-hemibrain/v1.2/rois/mesh'
     const source = await openMeshSource(base)
     expect(source.format).toBe('multilod-draco')
     expect(source.info?.sharding).toBeUndefined()

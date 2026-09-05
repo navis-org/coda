@@ -72,9 +72,6 @@ function asStrings(value: unknown): string[] {
 /** Whether the app draws this param as a dropdown or a picker, so a figure can give it a ▾. */
 export function paramIsPicker(p: ParamDef): boolean {
   return (
-    p.kind === 'enum' ||
-    p.kind === 'multiEnum' ||
-    p.kind === 'column' ||
-    p.kind === 'columns'
+    p.kind === 'enum' || p.kind === 'multiEnum' || p.kind === 'column' || p.kind === 'columns'
   )
 }

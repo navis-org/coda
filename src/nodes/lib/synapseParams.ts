@@ -104,7 +104,11 @@ function synapseUnitOptions(type: CodaType | undefined, chosen: string): EnumOpt
     const served = units?.find((u) => u === chosen)
     options.push({
       value: chosen,
-      label: served ? synapseUnitLabel(served) : units ? `${chosen} (not available here)` : chosen,
+      label: served
+        ? synapseUnitLabel(served)
+        : units
+          ? `${chosen} (not available here)`
+          : chosen,
     })
   }
   return options
@@ -139,5 +143,7 @@ export function synapseUnitProblem(
   chosen: string,
 ): string | undefined {
   const units = unitsFromType(type)
-  return units ? synapseUnitRefusal('This data source', asSynapseUnit(chosen), units) : undefined
+  return units
+    ? synapseUnitRefusal('This data source', asSynapseUnit(chosen), units)
+    : undefined
 }

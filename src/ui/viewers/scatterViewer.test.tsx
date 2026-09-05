@@ -137,7 +137,9 @@ describe('the legend', () => {
   })
 
   it('keys the shape channel with the marks themselves', () => {
-    const { container } = draw(neurons(20), { shape: { mode: 'categorical' as const, column: 'side', constant: 'circle' } })
+    const { container } = draw(neurons(20), {
+      shape: { mode: 'categorical' as const, column: 'side', constant: 'circle' },
+    })
     expect(screen.getByText('side')).toBeTruthy()
     expect(container.querySelectorAll('svg.legend__mark').length).toBe(2)
   })

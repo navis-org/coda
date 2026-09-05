@@ -85,7 +85,10 @@ describe('MockSource', () => {
   })
 
   it('returns the canonical neuron schema', async () => {
-    const table = await source.findNeurons({ datasetId: 'optic-lobe-mini', rows: [{ field: 'type', op: 'matches', values: ['LC4'] }] })
+    const table = await source.findNeurons({
+      datasetId: 'optic-lobe-mini',
+      rows: [{ field: 'type', op: 'matches', values: ['LC4'] }],
+    })
     expect(table.kind).toBe('neurons')
     expect(table.schema.columns.map((c) => c.name)).toEqual([
       'neuronId',
@@ -114,7 +117,10 @@ describe('MockSource', () => {
   })
 
   it('fetches downstream partners sorted by weight', async () => {
-    const lc4 = await source.findNeurons({ datasetId: 'optic-lobe-mini', rows: [{ field: 'type', op: 'matches', values: ['LC4'] }] })
+    const lc4 = await source.findNeurons({
+      datasetId: 'optic-lobe-mini',
+      rows: [{ field: 'type', op: 'matches', values: ['LC4'] }],
+    })
     const conn = await source.fetchConnectivity({
       datasetId: 'optic-lobe-mini',
       neuronIds: lc4.data.neuronId!.map(String),
@@ -130,7 +136,10 @@ describe('MockSource', () => {
   })
 
   it('honours minWeight', async () => {
-    const lc4 = await source.findNeurons({ datasetId: 'optic-lobe-mini', rows: [{ field: 'type', op: 'matches', values: ['LC4'] }] })
+    const lc4 = await source.findNeurons({
+      datasetId: 'optic-lobe-mini',
+      rows: [{ field: 'type', op: 'matches', values: ['LC4'] }],
+    })
     const conn = await source.fetchConnectivity({
       datasetId: 'optic-lobe-mini',
       neuronIds: lc4.data.neuronId!.map(String),
@@ -141,8 +150,14 @@ describe('MockSource', () => {
   })
 
   it('builds a type-level adjacency matrix', async () => {
-    const lc = await source.findNeurons({ datasetId: 'optic-lobe-mini', rows: [{ field: 'type', op: 'matches', values: ['LC.*'] }] })
-    const dn = await source.findNeurons({ datasetId: 'optic-lobe-mini', rows: [{ field: 'type', op: 'matches', values: ['DNp.*'] }] })
+    const lc = await source.findNeurons({
+      datasetId: 'optic-lobe-mini',
+      rows: [{ field: 'type', op: 'matches', values: ['LC.*'] }],
+    })
+    const dn = await source.findNeurons({
+      datasetId: 'optic-lobe-mini',
+      rows: [{ field: 'type', op: 'matches', values: ['DNp.*'] }],
+    })
     const m = await source.fetchAdjacency({
       datasetId: 'optic-lobe-mini',
       sourceIds: lc.data.neuronId!.map(String),

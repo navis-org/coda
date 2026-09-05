@@ -65,7 +65,8 @@ async function compareCard(datasetCount = 2): Promise<HTMLElement> {
   act(() => {
     id = useGraphStore.getState().addNode('compare.connectivity', { x: 400, y: 400 })
   })
-  if (datasetCount !== 2) act(() => useGraphStore.getState().setParam(id, 'datasetCount', datasetCount))
+  if (datasetCount !== 2)
+    act(() => useGraphStore.getState().setParam(id, 'datasetCount', datasetCount))
   return cardFor(id)
 }
 

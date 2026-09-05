@@ -2573,7 +2573,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
     toggleGroupCollapsed: (groupId) => {
       const group = groupById(get().graph, groupId)
       if (!group) return
-      commit((g) => updateGroup(g, groupId, { collapsed: !group.collapsed }), { autoRun: false })
+      commit((g) => updateGroup(g, groupId, { collapsed: !group.collapsed }), {
+        autoRun: false,
+      })
     },
 
     deleteNodes: (nodeIds) => {

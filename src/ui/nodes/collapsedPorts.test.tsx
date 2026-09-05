@@ -95,7 +95,9 @@ describe('the sockets survive the collapse', () => {
     )
     expect(new Set(ids).size).toBe(ids.length)
     expect(ids).toEqual(
-      expect.arrayContaining(defaultInputPorts(requireNodeDef('out.viewer3d')).map((p) => p.id)),
+      expect.arrayContaining(
+        defaultInputPorts(requireNodeDef('out.viewer3d')).map((p) => p.id),
+      ),
     )
   })
 

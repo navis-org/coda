@@ -188,7 +188,13 @@ export function ForEachBody({ node, ctx, setParam }: NodeBodyProps) {
         deciding whether to press Cancel is reading.
       */}
       {running && (
-        <div className="loop-body__progress" role="progressbar" aria-valuenow={Math.round(fraction * 100)} aria-valuemin={0} aria-valuemax={100}>
+        <div
+          className="loop-body__progress"
+          role="progressbar"
+          aria-valuenow={Math.round(fraction * 100)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
           <div className="loop-body__bar" style={{ width: `${Math.round(fraction * 100)}%` }} />
           <span className="loop-body__note">{info.note ?? 'starting…'}</span>
         </div>
@@ -251,7 +257,9 @@ export function ForEachBody({ node, ctx, setParam }: NodeBodyProps) {
                 : 'This browser cannot write to a folder, so every file is held until the end and handed over as one zip.'
             }
           >
-            {bestSinkMode() === 'folder' ? 'writes to a folder you pick' : 'collects into one zip'}
+            {bestSinkMode() === 'folder'
+              ? 'writes to a folder you pick'
+              : 'collects into one zip'}
             {' · use Run loop, not Run'}
           </span>
         ) : (

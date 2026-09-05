@@ -148,8 +148,7 @@ registerEmitter('net.centrality', (ctx) => {
      * the trailing comma has to go on the last one only, which is what the index test is for.
      */
     ...passed.map(
-      ([key, value], i) =>
-        `  ${key} = ${rValue(value)}${i === passed.length - 1 ? '' : ','}`,
+      ([key, value], i) => `  ${key} = ${rValue(value)}${i === passed.length - 1 ? '' : ','}`,
     ),
     `)`,
     `${nodes} <- .central$nodes`,
@@ -186,7 +185,8 @@ registerEmitter('net.filter', (ctx) => {
   const seedFrame = ctx.input('seed')
   const seedColumn = ctx.column('seedColumn')
   const hasSeedTable = !!seedFrame && !!seedColumn
-  if (!name && !hasSeedTable) return ctx.todo('Nothing selects any nodes on this Filter Network.')
+  if (!name && !hasSeedTable)
+    return ctx.todo('Nothing selects any nodes on this Filter Network.')
 
   ctx.library('igraph')
   ctx.library('dplyr')
@@ -999,7 +999,7 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
       ...ctx.note(
         'No neuron table is wired on the canvas, so the labels are read as neuron ids. They stay ' +
           '`numeric` rather than becoming `integer`: R integers are 32-bit and a neuron id can ' +
-          'exceed that, where a double is exact to 2^53 — which is Coda\'s own representation.',
+          "exceed that, where a double is exact to 2^53 — which is Coda's own representation.",
       ),
       `${out} <- ${labels} |>`,
       `  mutate(neuronId = suppressWarnings(as.numeric(${col(labelColumn)}))) |>`,
@@ -1211,7 +1211,9 @@ registerEmitter('neuron.nblastMatches', (ctx) => {
   }
   if (lower) {
     lines.push(
-      ...ctx.note('This is a distance matrix, so the sign is flipped and lower scores rank first.'),
+      ...ctx.note(
+        'This is a distance matrix, so the sign is flipped and lower scores rank first.',
+      ),
       `m_ <- -m_`,
     )
   }
@@ -1373,7 +1375,9 @@ registerEmitter('core.similarity', (ctx) => {
   // a TODO should not still pull two hundred lines of helper — and, here, an `install.packages`
   // line for Matrix — into the document.
   if (!long && (!idColumn || picked.length === 0)) {
-    return ctx.todo('This Similarity Matrix needs an Id column and at least one feature column.')
+    return ctx.todo(
+      'This Similarity Matrix needs an Id column and at least one feature column.',
+    )
   }
   if (long && (!observations || !features)) {
     return ctx.todo('This Similarity Matrix needs an Observations and a Features column.')
@@ -1423,7 +1427,9 @@ registerEmitter('compare.connectivity', (ctx) => {
   for (const [i, columns] of spec.columns.entries()) {
     const index = i + 1
     if (!columns.pre || !columns.post) {
-      return ctx.todo(`Dataset ${index} of this Compare Connectivity has no pre or post column.`)
+      return ctx.todo(
+        `Dataset ${index} of this Compare Connectivity has no pre or post column.`,
+      )
     }
     const entry = [
       `name = ${rStr(spec.names[i]!)}`,

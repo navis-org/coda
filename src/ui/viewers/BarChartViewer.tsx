@@ -99,7 +99,10 @@ export function BarChartViewer({
   }
 
   const showLegend = series.length >= 2
-  const labelWidth = labelGutter(bars.map((b) => b.category), compact)
+  const labelWidth = labelGutter(
+    bars.map((b) => b.category),
+    compact,
+  )
   const axisHeight = compact ? 0 : 16
   const rightPad = 40
 

@@ -3,13 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from 'react'
 
 import type { TableValue } from '../../core/values'
 import { encodeRange } from '../../nodes/lib/chartSelection'
-import {
-  CHART_INK,
-  SURFACE_GAP,
-  chartSurface,
-  currentMode,
-  seriesColor,
-} from '../colors'
+import { CHART_INK, SURFACE_GAP, chartSurface, currentMode, seriesColor } from '../colors'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
 import { formatCompact, formatNumber, labelStep, niceTicks, plural } from '../format'
 import { ClearSelection } from './LegendKeys'
@@ -181,7 +175,8 @@ export function HistogramViewer({
                   key={key}
                   {...(marks.writable
                     ? {
-                        onClick: (event: ReactMouseEvent) => marks.toggle([key], isAdditive(event)),
+                        onClick: (event: ReactMouseEvent) =>
+                          marks.toggle([key], isAdditive(event)),
                         style: { cursor: 'pointer' },
                       }
                     : {})}
@@ -196,10 +191,10 @@ export function HistogramViewer({
                   onMouseLeave={() => setHover(null)}
                 >
                   {/*
-                    * A full-height hit area under each bar, so a short bar in a long tail is
-                    * still clickable. Without it the tail — which is what somebody clicking a
-                    * histogram is nearly always after — is a two-pixel target.
-                    */}
+                   * A full-height hit area under each bar, so a short bar in a long tail is
+                   * still clickable. Without it the tail — which is what somebody clicking a
+                   * histogram is nearly always after — is a two-pixel target.
+                   */}
                   <rect
                     x={x}
                     y={topPad}
@@ -270,9 +265,9 @@ export function HistogramViewer({
             ))}
 
             {/*
-              * Edge labels rather than one per bar: the ticks of a histogram are the *edges*,
-              * and a label under the middle of a bar names a value the bar does not start at.
-              */}
+             * Edge labels rather than one per bar: the ticks of a histogram are the *edges*,
+             * and a label under the middle of a bar names a value the bar does not start at.
+             */}
             {bars.map((bar, index) =>
               index % edgeStep === 0 ? (
                 <text
@@ -331,7 +326,10 @@ export function HistogramViewer({
         <div className="legend">
           {series.map((name, index) => (
             <span key={name} className="legend__item">
-              <span className="legend__swatch" style={{ background: seriesColor(index, mode) }} />
+              <span
+                className="legend__swatch"
+                style={{ background: seriesColor(index, mode) }}
+              />
               {name}
             </span>
           ))}
@@ -348,7 +346,10 @@ export function HistogramViewer({
           {dropped > 0 ? ` · ${dropped} unplottable` : ''}
         </span>
         {marks.size > 0 && (
-          <ClearSelection label={`${plural(marks.size, 'bin')} selected`} onClear={marks.clear} />
+          <ClearSelection
+            label={`${plural(marks.size, 'bin')} selected`}
+            onClear={marks.clear}
+          />
         )}
         <ViewerActions
           baseName={baseName ?? makeBaseName(undefined, 'histogram')}

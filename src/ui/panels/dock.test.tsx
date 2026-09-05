@@ -18,7 +18,15 @@
  * a grid column and belongs to a browser. What is checkable is the number the column is given.
  */
 
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
