@@ -160,6 +160,81 @@ Presentational params only, so restyling from a cell re-renders instantly and st
 (invariant 4). That is what makes the grid usable as an inspection surface rather than a thing you
 are afraid to touch.
 
+## A run that happens underneath the grid
+
+The dashboard is the surface that made a mount-time read visible, and the bug is worth the space
+because the mechanism is general and the symptom points nowhere near it.
+
+A viewer draws from one of two places. Most draw their **own output** — a Table, a Heatmap, a
+Network — which `ViewerSurface` selects through `runVersion` like every other scheduler-backed
+read. A handful draw from their **inputs** instead, because their own `out` port is a pass-through
+and keying the card on it would show the same table twice: Explore Dataset, Neuron Profile, Neuron
+Topology, the 3D scene, the Neuroglancer cell, Graph Metrics, the dendrogram's annotations port.
+Those read `nodeInputs(id)`.
+
+That read was memoised on `[found, previewVersion]` — the graph object, and the streaming-preview
+tick — which are the two things a *run* does not move. A run changes no node's position or params,
+so `s.graph` is the same object; a table raises no preview. So the values were whatever the
+component read on its first render, for the life of the mount.
+
+Three surfaces share `ViewerSurface` and only one of them could show it:
+
+- the **card** on the canvas is `CodaNodeView`, which reads `nodeInputs(id)` unmemoised during
+  render and so has always been correct;
+- the **overlay** and the **dock** are opened by hand, which in practice is after the run;
+- a **cell** is on screen before the run, and `DashboardLayout.open` means a share link puts the
+  whole grid up before the recipient has pressed anything.
+
+So: open a shared workflow that saved itself from the grid, press Run, and the Explore cell says
+*Connect a Dataset to browse its neurons* and the Topology cell *Connect a table of neurons to
+measure them* — beside their own headers reporting `401 rows × 7 col · 37ms`. Leaving the mode and
+coming back fixed it, which is the tell: it remounts the cells.
+
+**The fix is not a better dep, and it is not a memo either.** Adding `runVersion` fixes this case
+and buys back the same class of bug — a fourth tick nobody has thought of yet. So the read simply
+happens every render, which is what `CodaNodeView` and `Inspector` have always done with the same
+call.
+
+Nothing replaced the memo, because there was nothing for it to save. It was written on the
+reasoning that a fresh record per render re-reconciles the viewer inside every cell — but no
+consumer of that prop is identity-sensitive: `ValuePreview` and every node body is a plain function
+rather than `memo`, and the record appears in no dependency array anywhere in `src/ui`. What the
+viewers key on is the individual `Value` inside it, and those are stable either way — a `Value` is
+produced by an `evaluate` and replaced wholesale, never mutated, so the provenance cache hands back
+the same object for a re-run that genuinely produced the same table. That is the contract
+`networkRebuild.test.tsx` already states and tests, for the one viewer that *does* memoise on its
+input: *"`nodeInputs` mints a fresh record on every store tick, and only the value inside it is
+stable."*
+
+The walk it costs is one `find` over the nodes plus one over the edges per input port, and viewer
+nodes have a median of one input port (mean 1.53, max 4). Measured: 0.24 µs on a seven-node graph,
+1.29 µs at sixty, 2.85 µs at two hundred — against a re-render three to four orders of magnitude
+dearer. A twelve-cell dashboard on a sixty-node graph during a mesh stream (4 publishes a second)
+spends about 66 µs per second on it.
+
+One thing not to *undo* while here: `previewVersion` is subscribed ungated, where `CodaNodeView`
+gates it on `isViewer`. Porting that gate would be wrong. `canHaveCell` refuses only annotations, so
+a **non-viewer** node can hold a cell, and this component draws such a node as a full-size
+`ValuePreview` of its own output — which for the nodes that publish previews, Skeletons and Meshes,
+is the streaming value itself. `onPreview` bumps `previewVersion` alone and never `runVersion`, so
+the gate would freeze exactly that cell mid-stream. On the canvas it is safe because a non-viewer
+card shows a one-line summary.
+
+**What this does not reach**, and it is a bound worth knowing rather than a loose end here: a
+viewer only refreshes on a render something else schedules, and `runNode` on an *upstream* card
+schedules none. `resolveScope` (`core/scheduler.ts`) takes the target plus its **ancestors** —
+descendants are excluded — so a downstream viewer is not re-run, its `NodeRunInfo` and its own
+output are untouched by identity, and every run-coupled selector in `ViewerSurface` returns what it
+returned before. The full-graph Run in the test works because the viewer node is itself in scope.
+This is not a property of the memo that was removed and not one of the read that replaced it: the
+canvas card has it identically, since `CodaNodeView` also renders on its *own* node's state. It is
+the scheduler's scope rule meeting a card that draws somebody else's value, and moving it belongs
+with `resolveScope`, not here.
+
+The regression test is in `dashboard.test.tsx`, and its shape is the point — every other test in
+that file runs first and enters the grid second, which is the one order that cannot see this. It
+loads a wizard graph with `dashboard: true`, renders, and runs *underneath* the mounted grid.
+
 ## The two gestures
 
 Both are in `DashboardCellView`; the arithmetic is in `gridGeometry.ts`, headless, on

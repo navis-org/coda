@@ -130,11 +130,19 @@ export function ViewerSurface({
   const setParam = useGraphStore((s) => s.setParam)
   const setNotice = useGraphStore((s) => s.setNotice)
   const nodeInputs = useGraphStore((s) => s.nodeInputs)
-  // Subscribed to *and* read, for `CodaNodeView`'s reason: `nodeInputs(id)` is called during
-  // render, so a scene streaming in behind a full-size viewer moves nothing this component
-  // selects. Without it the card fills in and the surface over it does not. It is also what
-  // tells the memo below that the inputs may have changed.
-  const previewVersion = useGraphStore((s) => s.previewVersion)
+  /*
+   * Subscribed to, not read — the tick that makes a streamed scene appear, `CodaNodeView`'s
+   * reason exactly: `nodeInputs(id)` is called during render, so a mesh filling in behind a
+   * full-size viewer moves nothing else this component selects, and without this the card fills
+   * in and the surface over it does not.
+   *
+   * **Ungated, where the card gates on `isViewer`.** A cell may hold a node that is not a viewer
+   * at all (`canHaveCell` refuses only annotations), and this component draws such a node as a
+   * full-size `ValuePreview` of its own output — which for the nodes that *publish* previews,
+   * Skeletons and Meshes, is the streaming value itself. `onPreview` bumps this counter alone and
+   * never `runVersion`, so the card's gate ported here would freeze exactly that cell mid-stream.
+   */
+  void useGraphStore((s) => s.previewVersion)
   // A primitive, not `s.panels` — that object is minted fresh on every toggle, so selecting
   // the whole thing would change identity on every unrelated tick. See invariant 7.
   const styleOpen = useGraphStore((s) => s.panels.style)
@@ -157,22 +165,34 @@ export function ViewerSurface({
     return port ? s.nodeOutput(nodeId, port.id) : undefined
   })
   /*
-   * The values on this node's input ports, memoised.
+   * The values on this node's input ports, read fresh on every render.
    *
-   * `nodeInputs` walks the node list and then the edge list once per input port, and mints a
-   * fresh object — so calling it in the body meant every viewer re-reconciled on every render
-   * even when nothing it draws had moved. That was affordable while at most one of these was
-   * mounted; the dashboard mounts one per cell, and `previewVersion` ticks per streaming mesh
-   * fragment. `found` stands in for the graph here: it is re-derived whenever `s.graph` changes.
+   * The same call `CodaNodeView` and `Inspector` make, and deliberately the same *shape* of call:
+   * no memo. It was a `useMemo` over `[found, previewVersion]` — the graph object and the
+   * streaming tick — and **that was wrong in the direction that shows nothing**, because a run
+   * moves neither. A run changes no node's position or params, so `s.graph` is the same object,
+   * and a table raises no preview. The values were therefore whatever the component read on its
+   * first render, for the life of the mount.
+   *
+   * It only bites the viewers that draw from their *inputs* rather than from their own output —
+   * Explore, Profile, Topology, the 3D scene, Neuroglancer, Metrics — whose `out` port is a
+   * pass-through, so keying the card on it would show the same table twice. And of the three
+   * frames sharing this component only a dashboard cell is reliably on screen *before* the run:
+   * `DashboardLayout.open` means a share link puts the grid up before the recipient has pressed
+   * anything, and the cell then said "connect a table of neurons" beside its own header reporting
+   * 401 rows until the mode was toggled, which remounts it.
+   *
+   * Nothing replaced the memo, because there was nothing for it to save. It was written on the
+   * reasoning that a fresh record per render re-reconciles the viewer in every cell — but no
+   * consumer of this prop is identity-sensitive: `ValuePreview` and every node body is a plain
+   * function rather than `memo`, and the record appears in no dependency array. What the viewers
+   * key on is the individual `Value` inside, which the provenance cache keeps stable either way —
+   * the contract `networkRebuild.test.tsx` already states and tests for the one viewer that does
+   * memoise on its input. The walk is one `find` over the nodes plus one over the edges per input
+   * port, and viewer nodes have a median of one: 0.24 µs on a seven-node graph, 2.85 µs on two
+   * hundred, against a re-render three orders of magnitude dearer.
    */
-  const inputValues = useMemo(() => {
-    // Read, not just listed: `nodeInputs` closes over mutable scheduler state, so these two are
-    // the only things that say the answer may have moved — and a dep nothing in the body touches
-    // is a dep the next person deletes. The same `void` idiom the store selectors above use.
-    void found
-    void previewVersion
-    return nodeInputs(nodeId)
-  }, [nodeInputs, nodeId, found, previewVersion])
+  const inputValues = nodeInputs(nodeId)
   const types = inference.nodes[nodeId]
   // Memoised, and every hook here runs before the guard below — a fresh `ctx` on each render
   // re-renders the body it is handed to, which for a 3D scene is the frame budget.

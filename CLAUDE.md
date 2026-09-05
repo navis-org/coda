@@ -502,7 +502,25 @@ Area-specific — the rule, then the doc that holds why:
   scrollbar it had not earned with the bottom row's grip behind the status bar. `DashboardView`
   observes the grid's content box and paints `--dash-row` straight onto the element, never into
   state. Note **absence means a different number on each axis** — `w` 1, `h` half — because a row
-  track is not a natural unit. See [docs/dashboard.md](docs/dashboard.md).
+  track is not a natural unit. And **a cell is on screen before the run, which is what made a
+  mount-time read visible**: the handful of viewers that draw from their *inputs* rather than from
+  their own output (Explore, Profile, Topology, 3D, Neuroglancer, Metrics) read `nodeInputs` in
+  `ViewerSurface`, and that read was memoised on the graph object and `previewVersion` — the two
+  things a *run* does not move. A shared workflow saved from the grid then said "connect a table of
+  neurons" beside a header reporting 401 rows until the mode was toggled. **Not a better dep and
+  not a memo**: `runVersion` fixes the case and buys back the same class of bug, and nothing
+  replaced the memo because it was saving nothing — no consumer of that prop is identity-sensitive
+  (`ValuePreview` and every node body is a plain function, and the record is in no dep array), and
+  the `Value` *inside* is stable either way, which is the contract `networkRebuild.test.tsx`
+  already pins. So it is the plain read `CodaNodeView` and `Inspector` have always made: measured
+  0.24 µs on a seven-node graph and 2.85 µs at two hundred, against a re-render three orders dearer.
+  Two things not to undo — `previewVersion` is subscribed **ungated** here, where the card gates on
+  `isViewer`, because a non-viewer node *can* hold a cell and the preview publishers are exactly
+  those nodes; and the test has to run **underneath** a mounted grid, every other dashboard test
+  running first and entering second, which is the one order that cannot see it. The bound it does
+  not reach is `resolveScope`'s, not this file's: `runNode` on an *upstream* card scopes to the
+  target and its ancestors, so no downstream viewer re-renders at all — the canvas card identically.
+  See [docs/dashboard.md](docs/dashboard.md).
 - **A published token is not a credential, and shipping one makes a rotation a new failure mode.**
   Virtual Fly Brain publishes an `AnonymousUser` token per instance because CATMAID's query endpoints
   are POST-only and a browser satisfies neither of Django's CSRF gates: it cannot set `Referer`, and it

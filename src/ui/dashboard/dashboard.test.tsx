@@ -36,7 +36,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
-import { demoWorkflow } from '../../wizard/build'
+import { DEMO_DATASET, buildWorkflow, demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 
 beforeAll(() => {
@@ -185,6 +185,53 @@ describe('entering the dashboard', () => {
       store().setDashboardOpen(false)
     })
     expect(store().past.length).toBe(depth)
+  })
+})
+
+/**
+ * A run that happens while the grid is *already* up.
+ *
+ * Every other test in this file runs first and enters the dashboard second, which is the one
+ * order that cannot see this: a cell mounted after the run reads its inputs once and they are
+ * already there. The order a share link produces is the opposite — `dashboard.open` puts the
+ * grid on screen and the reader presses Run underneath it — and a viewer drawing from its
+ * **inputs** rather than from its own output then sat on its empty state until the mode was
+ * toggled, because `ViewerSurface` memoised `nodeInputs` on the graph object and
+ * `previewVersion`, neither of which a run moves.
+ *
+ * The wizard is the graph rather than a hand-written one because it is the route that produces
+ * this: `dashboard: true` is an answer somebody can give, and the first Run of that workflow is
+ * the moment the bug appeared.
+ *
+ * Both assertions are positive. `not.toContain` alone would also pass for a cell that rendered
+ * nothing at all, which is the other way this can break.
+ */
+describe('a cell whose node is run underneath it', () => {
+  it('fills in without the mode being toggled', async () => {
+    act(() =>
+      store().loadGraph(
+        buildWorkflow({
+          dataset: DEMO_DATASET,
+          start: 'search',
+          analysis: 'neurons',
+          visualisations: ['topology'],
+          notes: false,
+          dashboard: true,
+        }),
+      ),
+    )
+    await renderRun(false)
+    expect(document.querySelector('.dashboard__grid')).not.toBeNull()
+    // `ValuePreview`'s unrun state: the node's own output is what is missing, not its inputs.
+    expect(cellFor('view')?.textContent).toContain('No result yet')
+
+    await act(async () => {
+      await store().runAll()
+    })
+    // The pager, which exists only once the viewer has the table on its `neurons` input — where
+    // the stale read left `TopologyViewer`'s "Connect a table of neurons to measure them."
+    await waitFor(() => expect(cellFor('view')?.textContent).toMatch(/1 \/ \d+/))
+    expect(cellFor('view')?.textContent).not.toContain('Connect a table of neurons')
   })
 })
 
