@@ -389,3 +389,34 @@ describe('the aggregations R spells differently', () => {
     )
   })
 })
+
+describe('Table from URL', () => {
+  // The Python half's reason, verbatim: `read_csv` on a github.com file page reads its HTML
+  // rather than failing, so the document has to carry the raw address.
+  function urlChunk(url: string): string {
+    let g = emptyGraph('from-url')
+    g = addNode(g, {
+      id: 'u',
+      type: 'core.tableFromUrl',
+      position: { x: 0, y: 0 },
+      params: { url },
+    })
+    return rmdText(g)
+  }
+
+  it('reads the raw file behind a GitHub file link, and says that it did', () => {
+    const page = 'https://github.com/o/r/blob/main/annotations.csv'
+    const text = urlChunk(page)
+    expect(text).toContain(
+      'read_csv("https://raw.githubusercontent.com/o/r/main/annotations.csv"',
+    )
+    expect(text).toContain(page)
+    expect(text).not.toContain(`read_csv("${page}`)
+  })
+
+  it('leaves an ordinary URL alone, with nothing to explain', () => {
+    const text = urlChunk('https://example.org/annotations.csv')
+    expect(text).toContain('read_csv("https://example.org/annotations.csv"')
+    expect(text).not.toContain('GitHub')
+  })
+})

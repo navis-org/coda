@@ -16,6 +16,7 @@ import { NM_PER_UM } from '../../../nodes/lib/nblastOps'
 import { effectiveOutput, isLongLayout } from '../../../nodes/lib/similarityOps'
 import type { SimilarityMetric, SimilarityOutput } from '../../../nodes/lib/similarityOps'
 import { ID_COLUMN_NAME } from '../../../core/ids'
+import { rawFileNote, rawFileUrl } from '../../../data/rawFileUrl'
 import { portIdAt } from '../../../core/ports'
 import { compareParamsFrom } from '../../../nodes/lib/edgeComparison'
 import { repeatParamId } from '../../../nodes/lib/repeatParams'
@@ -321,12 +322,19 @@ registerEmitter('core.uploadTable', (ctx) => {
 registerEmitter('core.tableFromUrl', (ctx) => {
   ctx.require('pandas')
   const out = ctx.output('out')
-  const url = String(ctx.params.url ?? '').trim()
-  if (!url) return ctx.todo('This Table from URL node has no URL.')
+  const typed = String(ctx.params.url ?? '').trim()
+  if (!typed) return ctx.todo('This Table from URL node has no URL.')
 
   // The counterpart of the upload node, and the one property that separates them: a URL is
-  // reproducible, so this node needs nothing carried alongside the notebook.
-  return [`${out} = pd.read_csv(${pyStr(url)})`, ...shapingLines(ctx, out)]
+  // reproducible, so this node needs nothing carried alongside the notebook. `rawFileUrl` for
+  // the reason its header gives, and the note names the pasted link so the emitted address does
+  // not read as a typo beside the one on the card.
+  const url = rawFileUrl(typed)
+  return [
+    ...(url === typed ? [] : ctx.note(rawFileNote(typed, 'pandas'))),
+    `${out} = pd.read_csv(${pyStr(url)})`,
+    ...shapingLines(ctx, out),
+  ]
 })
 
 /**

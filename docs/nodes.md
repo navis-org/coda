@@ -1010,11 +1010,24 @@ usable CORS header**. `github.com/<org>/<repo>/raw/refs/heads/main/<path>` answe
 a browser CORS-checks every hop of a chain, so it stops there and never reaches
 `raw.githubusercontent.com`, which answers `200` with `access-control-allow-origin: *` and gzips.
 Measured from a real page origin: the first throws `TypeError: Failed to fetch`, the second
-returns 31,718,491 characters. The fix is to paste the redirect *target*, and it is worth
-knowing because the URL that fails is the one GitHub's own UI hands you.
+returns 31,718,491 characters.
 
-Nothing in the code changed for this; it is recorded because "is it the format or is it CORS" is
-the first question anybody asks, and the header evidence answers it in one look.
+The other GitHub link is worse, because it does not fail at all. The address bar of a file page —
+`github.com/<org>/<repo>/blob/<ref>/<path>` — answers **`200 text/html`**, so the parser reads the
+page's markup and a person is left looking at a table that came back wrong rather than at an error.
+Two ways to paste a link, two unrelated failures, and both links are ones GitHub's own UI hands you.
+
+**So the node rewrites rather than refusing.** `rawFileUrl` (`src/data/rawFileUrl.ts`) turns both
+spellings into `raw.githubusercontent.com/<org>/<repo>/<rest>`; its header holds the rules, and
+the two worth knowing from out here are that **the param keeps the pasted text** — the rewrite
+happens at each door that turns it into a request, so a shared workflow shows the link its author
+typed — and that **both exporters call it too**, `pd.read_csv` and `read_csv` on a file page
+succeeding and handing back a frame of HTML.
+
+The door is `urlOf`, and the reason it is one function rather than four call sites is the schema
+map: keyed by the pasted text instead of the fetched address, a node pointed at the page link and
+one pointed at the raw address would learn the same table's shape separately, and the second would
+look unfetched.
 
 ## Type column, and combining several into one
 

@@ -514,3 +514,40 @@ describe('the population filters', () => {
     expect(source).not.toContain("'Traced'")
   })
 })
+
+describe('Table from URL', () => {
+  /*
+   * The rewrite is `rawFileUrl`'s and tested there; what matters here is that the *emitter*
+   * asks. `pd.read_csv` on a github.com file page does not fail — it returns a frame of HTML —
+   * so a notebook carrying the pasted link reproduces the silent version of the bug outside
+   * Coda, where nothing at all is left to explain it.
+   */
+  function urlCell(url: string): string {
+    let g = emptyGraph('from-url')
+    g = addNode(g, {
+      id: 'u',
+      type: 'core.tableFromUrl',
+      position: { x: 0, y: 0 },
+      params: { url },
+    })
+    return notebookText(g)
+  }
+
+  it('reads the raw file behind a GitHub file link, and says that it did', () => {
+    const page = 'https://github.com/o/r/blob/main/annotations.csv'
+    const text = urlCell(page)
+    expect(text).toContain(
+      "pd.read_csv('https://raw.githubusercontent.com/o/r/main/annotations.csv')",
+    )
+    // The note names the pasted link, so the emitted address does not read as a typo beside
+    // the one on the card — which keeps showing what was typed.
+    expect(text).toContain(page)
+    expect(text).not.toContain(`pd.read_csv('${page}`)
+  })
+
+  it('leaves an ordinary URL alone, with nothing to explain', () => {
+    const text = urlCell('https://example.org/annotations.csv')
+    expect(text).toContain("pd.read_csv('https://example.org/annotations.csv')")
+    expect(text).not.toContain('GitHub')
+  })
+})

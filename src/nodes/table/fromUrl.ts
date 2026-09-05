@@ -32,12 +32,20 @@
  * hidden mutable state invariant 4 requires an explicit nonce for, exactly as the Dataset node's
  * own `refresh` does. Without it, re-running a workflow against an updated file returns the old
  * table from cache with nothing to say so.
+ *
+ * **A GitHub file link is rewritten rather than refused.** `rawFileUrl` turns the address bar
+ * of a file on github.com into its `raw.githubusercontent.com` twin; the param keeps the pasted
+ * text, so everything the user sees, shares and exports is what they typed. Every place that
+ * turns the param into a URL goes through it — including the schema map's key, or one node
+ * pointed at the page link and another at the raw one would each learn the same table's shape
+ * separately, and the second would look unfetched.
  */
 
 import { registerNode } from '../../core/registry'
 import type { TableSchema } from '../../core/types'
 import { T, columnNames, findColumn } from '../../core/types'
 import { readDelimitedResponse } from '../../data/csv'
+import { rawFileUrl } from '../../data/rawFileUrl'
 import { reportUploadLearned } from '../../data/uploads'
 import { importShapeIssues, importShapeParams, readImportShape } from '../lib/importParams'
 import { uploadIsNeurons, uploadShapeSchema, uploadShapeTable } from '../lib/tableOps'
@@ -51,6 +59,11 @@ import { uploadIsNeurons, uploadShapeSchema, uploadShapeTable } from '../lib/tab
  * and re-added has not learned anything new.
  */
 const schemaByUrl = new Map<string, TableSchema>()
+
+/** The address the param names, in the form that can actually be fetched. Invariant 5's idiom. */
+function urlOf(params: { url?: unknown }): string {
+  return rawFileUrl(String(params.url ?? ''))
+}
 
 /** Test seam, and the reason the map is not exported directly. */
 export function resetFetchedSchemas(): void {
@@ -73,11 +86,13 @@ export const tableFromUrlNode = registerNode({
       kind: 'string',
       label: 'URL',
       placeholder: 'https://example.org/annotations.csv',
-      help: 'A CSV, TSV or semicolon-separated file. The host must allow cross-origin reads.',
+      help:
+        'A CSV, TSV or semicolon-separated file. The host must allow cross-origin reads. A ' +
+        'GitHub file link is read from raw.githubusercontent.com automatically.',
       default: '',
     },
     ...importShapeParams({
-      read: (params) => schemaByUrl.get(String(params.url ?? '').trim()),
+      read: (params) => schemaByUrl.get(urlOf(params)),
       textAdvanced: true,
     }),
     {
@@ -93,7 +108,7 @@ export const tableFromUrlNode = registerNode({
   ],
 
   inferOutputs: (ctx) => {
-    const known = schemaByUrl.get(String(ctx.params.url ?? '').trim())
+    const known = schemaByUrl.get(urlOf(ctx.params))
     const shape = readImportShape(ctx)
     const shaped = uploadShapeSchema(known, shape)
     return {
@@ -128,11 +143,13 @@ export const tableFromUrlNode = registerNode({
     }
     // Once the URL has answered once, the same checks the upload node makes — including the
     // "not in this file" pair, which this node used to skip while its twin reported them.
-    return importShapeIssues(ctx, schemaByUrl.get(url), 'what this URL returned')
+    return importShapeIssues(ctx, schemaByUrl.get(urlOf(ctx.params)), 'what this URL returned')
   },
 
   evaluate: async (ctx) => {
-    const url = String(ctx.params.url ?? '').trim()
+    // The rewritten address from here down: it is the one that gets requested, so it is the one
+    // every message about the request should name.
+    const url = urlOf(ctx.params)
     if (!url) throw new Error('No URL. Paste the address of a CSV file into the URL field.')
 
     ctx.progress(0, 'fetching')

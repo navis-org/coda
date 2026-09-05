@@ -9,6 +9,7 @@
 import type { CellValue } from '../../../core/values'
 import type { DType } from '../../../core/types'
 import { isNumericDType } from '../../../core/types'
+import { rawFileNote, rawFileUrl } from '../../../data/rawFileUrl'
 import { decodeSetters, disabledEditNote, editPlan } from '../../../nodes/lib/tableEdits'
 import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { filterPredicates } from './tableFilters'
@@ -736,9 +737,16 @@ registerEmitter('core.uploadTable', (ctx) => {
 registerEmitter('core.tableFromUrl', (ctx) => {
   ctx.library('readr')
   const out = ctx.output('out')
-  const url = String(ctx.params.url ?? '').trim()
-  if (!url) return ctx.todo('This Table from URL node has no URL.')
-  return [`${out} <- read_csv(${rStr(url)}, show_col_types = FALSE)`, ...shapingLines(ctx, out)]
+  const typed = String(ctx.params.url ?? '').trim()
+  if (!typed) return ctx.todo('This Table from URL node has no URL.')
+  // `rawFileUrl` and its note, as the notebook does: `read_csv` on a github.com file page reads
+  // the page's HTML rather than failing.
+  const url = rawFileUrl(typed)
+  return [
+    ...(url === typed ? [] : ctx.note(rawFileNote(typed, 'readr'))),
+    `${out} <- read_csv(${rStr(url)}, show_col_types = FALSE)`,
+    ...shapingLines(ctx, out),
+  ]
 })
 
 /**

@@ -128,6 +128,34 @@ describe('core.tableFromUrl — fetching', () => {
     expect(out.data['type']).toEqual(['LC4', 'LC6'])
   })
 
+  it('fetches the raw file behind a GitHub file link, and remembers it under that address', async () => {
+    /*
+     * The rewrite is `rawFileUrl`'s and covered there; what this asserts is that the node put
+     * it at *every* door. A github.com file page answers 200 with HTML, so getting this wrong
+     * does not fail — it parses one column of markup — and the schema map keyed by the pasted
+     * text rather than the fetched address would leave a second node pointed at the raw URL
+     * looking as though nothing had ever been fetched.
+     */
+    const page = 'https://github.com/o/r/blob/main/annotations.csv'
+    const raw = 'https://raw.githubusercontent.com/o/r/main/annotations.csv'
+    const scheduler = makeScheduler()
+    let g = emptyGraph('gh')
+    g = addNode(g, node('url', 'core.tableFromUrl', { url: page }))
+    await scheduler.run(g, { mode: 'full' })
+
+    expect(fetchMock.mock.calls[0]![0]).toBe(raw)
+    // The param keeps what was pasted: it is what a colleague recognises in a shared workflow.
+    expect(g.nodes.find((n) => n.id === 'url')!.params.url).toBe(page)
+    // And a second node holding the raw address reads the shape without a run of its own.
+    let twin = emptyGraph('gh-twin')
+    twin = addNode(twin, node('url2', 'core.tableFromUrl', { url: raw }))
+    expect(columnNames(schemaOf(inferGraph(twin).nodes['url2']?.outputs['out']))).toEqual([
+      'root_id',
+      'cellType',
+      'cluster',
+    ])
+  })
+
   it('is expensive, so typing a URL cannot fire a request', async () => {
     // Invariant 6, in its plainest form: this param is a text field aimed at an arbitrary host.
     expect(requireNodeDef('core.tableFromUrl').cost).toBe('expensive')
