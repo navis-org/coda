@@ -38,18 +38,22 @@ import {
 const UNITS = ['nm', 'um']
 
 describe('the generated manifest', () => {
-  it('describes the five spaces Coda has datasets in, by name', () => {
+  it('describes the six spaces Coda has datasets in, by name', () => {
     /*
      * Named rather than counted. A count passes whatever the generator emitted, which is the
      * assertion-against-the-expression-it-is-built-from that `starterFamilies`' tests avoid —
      * and the failure this should catch is a space silently *dropping out* of the manifest
      * because its landmark file went missing, which a count would only catch by luck.
+     *
+     * It is also the check that `gen-transforms.py` was run **incrementally**: it writes the
+     * manifest whole, so a `--only` run that did not carry the other entries through leaves a
+     * manifest with one space in it and every other landmark file orphaned in `public/`.
      */
     expect(
       allSpaces()
         .map((s) => s.id)
         .sort(),
-    ).toEqual(['FAFB14', 'FLYWIRE', 'JRCFIB2018F', 'JRCFIB2022M', 'MANC'])
+    ).toEqual(['AEDES', 'FAFB14', 'FLYWIRE', 'JRCFIB2018F', 'JRCFIB2022M', 'MANC'])
   })
 
   it('names JRC2018U as the common space, in micrometres', () => {
@@ -60,11 +64,29 @@ describe('the generated manifest', () => {
     expect(COMMON_SPACE.note).toMatch(/layout rather than a registration/)
   })
 
-  it('gives every space a direct mirror and a route to the common space', () => {
+  it('gives every space a direct mirror', () => {
+    // The one thing every space here has. A space with neither half is a manifest entry that
+    // buys nothing, and both nodes would decline it.
     for (const space of allSpaces()) {
       expect(space.mirror, `${space.id} mirror`).toBeDefined()
-      expect(space.toCommon, `${space.id} toCommon`).toBeDefined()
     }
+  })
+
+  it('routes every fly space into the common frame, and the mosquito nowhere', () => {
+    /*
+     * Named rather than derived: a `toCommon` missing from a *fly* space is a regeneration that
+     * half-finished, and a loop over whatever the manifest happens to carry cannot tell that
+     * from the mosquito, which has no route by nature. See `public/transforms/README.md`.
+     */
+    const bridged = allSpaces()
+      .filter((space) => space.toCommon)
+      .map((space) => space.id)
+      .sort()
+    expect(bridged).toEqual(['FAFB14', 'FLYWIRE', 'JRCFIB2018F', 'JRCFIB2022M', 'MANC'])
+    // Absent, not null — which the filter above cannot see, both being falsy. The generator
+    // omits a half it did not produce, because `spaces.ts` casts this JSON to `toCommon?`
+    // without checking and a null would be read as a spec.
+    expect('toCommon' in spaceById('AEDES')!).toBe(false)
   })
 
   it('gives every landmark set three source and three target columns', () => {
@@ -112,7 +134,8 @@ describe('the generated manifest', () => {
 
   it('accounts for every landmark in a region', () => {
     for (const space of allSpaces()) {
-      const spec = space.toCommon!
+      const spec = space.toCommon
+      if (!spec) continue
       const summed = Object.values(spec.regions).reduce((a, b) => a + b, 0)
       expect(summed, space.id).toBe(spec.landmarks)
     }
@@ -134,8 +157,9 @@ describe('the generated manifest', () => {
       expect(space.units, space.id).toBe('nm')
       expect(space.mirror!.sourceUnits).toBe('nm')
       expect(space.mirror!.targetUnits).toBe('nm')
-      expect(space.toCommon!.sourceUnits).toBe('nm')
-      expect(space.toCommon!.targetUnits).toBe('um')
+      if (!space.toCommon) continue
+      expect(space.toCommon.sourceUnits).toBe('nm')
+      expect(space.toCommon.targetUnits).toBe('um')
     }
   })
 })
@@ -158,6 +182,13 @@ describe('which space a dataset is in', () => {
 
   it('reads a CAVE datastack by its materialization-free half', () => {
     expect(spaceForDataset('cave', 'flywire_fafb_public:783')).toBe('FLYWIRE')
+    /*
+     * `wclee_aedes_brain` has no dataset node at all — it is named by hand on a `Custom CAVE`
+     * card, which builds its id with this same grammar. That is what the table being keyed on
+     * the dataset id rather than on `DatasetFamily` buys, so both forms are asserted.
+     */
+    expect(spaceForDataset('cave', 'wclee_aedes_brain:1')).toBe('AEDES')
+    expect(spaceForDataset('cave', 'wclee_aedes_brain')).toBe('AEDES')
   })
 
   it('binds CATMAID project 1 to Virtual Fly Brain and to nothing else', () => {
@@ -188,6 +219,7 @@ describe('which space a dataset is in', () => {
         spaceForDataset('neuprint', 'male-cns:v1.0'),
         spaceForDataset('neuprint', 'manc:v1.0'),
         spaceForDataset('cave', 'flywire_fafb_public:783'),
+        spaceForDataset('cave', 'wclee_aedes_brain:1'),
         spaceForDataset('catmaid', '1'),
       ].filter(Boolean),
     )

@@ -162,6 +162,15 @@ const BINDINGS: readonly SpaceBinding[] = [
   { scope: 'neuprint', dataset: 'manc', space: 'MANC' },
   { scope: 'cave', dataset: 'flywire_fafb_public', space: 'FLYWIRE' },
   /*
+   * The mosquito, and the one binding here whose dataset node does not exist: Coda ships no
+   * family entry for `wclee_aedes_brain`, so it is reached through `Custom CAVE`, which builds
+   * its dataset id with the same `datastack:materialization` grammar every CAVE dataset uses.
+   * That is the whole reason this table is keyed on the *dataset id* rather than on
+   * `DatasetFamily` — a space is a fact about coordinates, and coordinates arrive from a
+   * hand-named datastack exactly as they do from a shipped one.
+   */
+  { scope: 'cave', dataset: 'wclee_aedes_brain', space: 'AEDES' },
+  /*
    * Project 1 on Virtual Fly Brain, and *only* there. A lab CATMAID's project 1 is whatever
    * that lab numbered first, so this is pinned to the source rather than to the backend.
    */

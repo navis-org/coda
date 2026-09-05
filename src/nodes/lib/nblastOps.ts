@@ -32,6 +32,7 @@ import {
   tableFromRows,
 } from '../../core/values'
 import type { Value } from '../../core/values'
+import { toCommonFor } from '../../data/transforms/landmarks'
 import type { NblastKnnResult, NblastResult, PointSet } from '../../pyodide/nblast'
 
 /**
@@ -193,6 +194,13 @@ export function checkNblastUnits(
  * Custom dataset both produce spaceless geometry, and refusing on a fact nobody stated would
  * break the mock chains every example runs on. What is refused is two sides that *both* say,
  * and disagree.
+ *
+ * **And a refusal that names a remedy has to check the remedy exists.** Not every space has a
+ * route into the common frame — `AEDES` is a mosquito, and there is no registration between it
+ * and a fly template in any language, let alone one that runs in a browser. Sending that pair
+ * to `Transform Neurons` is telling somebody to do the one thing that cannot work, which is the
+ * failure `missing_tos` records on the CAVE side. So the sentence branches on `toCommonFor`,
+ * the same lookup the node itself would consult.
  */
 export function checkNblastSpaces(
   query: { space?: TemplateSpaceId },
@@ -201,11 +209,16 @@ export function checkNblastSpaces(
   noun: string,
 ): void {
   if (!query.space || !target.space || query.space === target.space) return
+  const bridgeable = toCommonFor(query.space) && toCommonFor(target.space)
   throw new Error(
     `Query ${noun} are in ${query.space} and Target ${noun} are in ${target.space}. NBLAST ` +
       'scores how well two arbors lie along each other, so across two coordinate systems it ' +
-      'would score every pair as a stranger and say nothing about it. Put both sides through ' +
-      'Transform Neurons first.',
+      'would score every pair as a stranger and say nothing about it. ' +
+      (bridgeable
+        ? 'Put both sides through Transform Neurons first.'
+        : 'Coda ships no route from one of these into a shared frame — where the two spaces ' +
+          'are different animals there is no such registration to ship — so there is no ' +
+          'step that would make this comparison mean anything.'),
   )
 }
 

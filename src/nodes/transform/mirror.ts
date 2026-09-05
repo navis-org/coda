@@ -36,8 +36,8 @@
  * reads, so it cannot drift from the landmark sets fitted against it. `scripts/check-mirror.py`
  * holds the two to exact agreement.
  *
- * **The correction** is a thin-plate spline through a few thousand landmark pairs, because a
- * fly brain is not symmetric: flipped and left there, a neuron sits about 7 µm from its
+ * **The correction** is a thin-plate spline through a few thousand landmark pairs, because an
+ * insect brain is not symmetric: flipped and left there, a neuron sits about 7 µm from its
  * contralateral partner on FlyWire and 33 µm on MaleCNS. That is the residual `Warp` removes,
  * and it is roughly the width of a small neuropil — enough to make NBLAST score a homologue as
  * a stranger.
@@ -58,7 +58,7 @@
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isTransformValue } from '../../core/values'
-import { allSpaces, spaceById, spaceName } from '../../data/transforms/spaces'
+import { allSpaces, spaceName } from '../../data/transforms/spaces'
 import { loadLandmarks, mirrorFor } from '../../data/transforms/landmarks'
 import {
   geometryNoun,
@@ -72,6 +72,18 @@ import {
   warpGeometry,
 } from '../lib/transformOps'
 import { FROM_DATA, resolveSpace } from '../lib/spaceParam'
+
+/**
+ * Spaces with a midline to flip about — which is what this node's Space override may name.
+ *
+ * `neuron.xform`'s `bridgeableSpaces()`, the other way round, and the pair is the point: a
+ * space's two halves are separately optional, so each node offers the half it can actually
+ * perform. Every space ships both today except `AEDES`, which has a mirror and no bridge — so
+ * this filter is inert now and stops being inert the first time the reverse arrives.
+ */
+function mirrorableSpaces() {
+  return allSpaces().filter((space) => space.mirror)
+}
 
 export const mirrorNode = registerNode({
   type: 'neuron.mirror',
@@ -130,7 +142,7 @@ export const mirrorNode = registerNode({
       kind: 'enum',
       label: 'Space',
       default: '',
-      options: [FROM_DATA, ...allSpaces().map((s) => ({ value: s.id, label: s.label }))],
+      options: [FROM_DATA, ...mirrorableSpaces().map((s) => ({ value: s.id, label: s.label }))],
       help:
         'Which template space to mirror in. Leave on “From the data” unless the geometry ' +
         'arrived without one — a Custom dataset node, usually — in which case naming it here ' +
@@ -161,8 +173,14 @@ export const mirrorNode = registerNode({
      * state, and a warning there would sit on every freshly-wired node. `evaluate` is where the
      * real answer arrives, and its message is the one that names what is missing.
      */
+    /*
+     * Asked as `mirrorFor` rather than `spaceById`: what this node needs is the *mirror* half,
+     * and a space Coda knows with no midline registered is exactly as unusable here as a space
+     * it has never heard of. The two used to be the same question because every space had
+     * both halves; `evaluate` has always refused on this lookup, and now the card agrees.
+     */
     const override = String(ctx.params.space ?? '')
-    if (override && !spaceById(override)) {
+    if (override && !mirrorFor(override)) {
       return [`Coda ships no mirror for “${override}”.`]
     }
     return []

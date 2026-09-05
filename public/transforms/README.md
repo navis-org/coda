@@ -7,8 +7,15 @@ half Coda imports statically, and the two have to be produced in the same run:
 `landmarks.ts` refuses a file whose row count disagrees with the manifest.
 
 ```
-python3 scripts/gen-transforms.py
+python3 scripts/gen-transforms.py                 # everything
+python3 scripts/gen-transforms.py --only AEDES    # one space, the rest left alone
 ```
+
+The manifest is written whole on every run, but a run only *replaces* what it regenerated: a
+space `--only` left out keeps its entry, and `--skip-common` keeps the route it already had
+rather than deleting it. Adding a space is therefore the second command above, which needs no H5
+registrations — without that, `--only` would leave five landmark files in this directory with
+nothing in the manifest pointing at them.
 
 Needs `navis`, `flybrains` and the Saalfeld H5 registrations
 (`flybrains.download_jrc_transforms()`; check with `flybrains.report()`). About 25 seconds for
@@ -34,6 +41,12 @@ fitted against — a different flip constant hands the spline a pre-image it has
 converts on load). Generated here by sampling inside the space's own shell mesh, padded 10 µm,
 and pushing every sample through the full navis route. One direct edge per dataset to the common
 template; there is no bridging graph in the browser.
+
+**The two halves are separately optional, and `AEDES` is the space that shows it.** JRC2018U is a
+*Drosophila* template, so a mosquito brain has no route into it and flybrains registers none to
+build one from — that entry carries a mirror and no `toCommon`, and `Transform Neurons` leaves the
+space out of both its dropdowns rather than offering it and then refusing. A midline is a property
+of the volume itself, so mirroring is unaffected.
 
 Accuracy of the shortcut against the full navis route, 3,000 independent shell vertices each:
 

@@ -28,6 +28,7 @@ import type { DataSource } from '../../data/source'
 import type { NblastRequest } from '../../pyodide/nblast'
 import {
   checkNblastSize,
+  checkNblastSpaces,
   checkNblastUnits,
   dotpropSetFrom,
   nblastLabels,
@@ -193,6 +194,28 @@ describe('nblastOps — the flattening', () => {
     expect(() =>
       checkNblastUnits('Query', skeletonsFixture(), 'skeletons', 'Skeletons'),
     ).not.toThrow()
+  })
+
+  it('sends a bridgeable mismatch to Transform Neurons, and a mosquito nowhere', () => {
+    /*
+     * Two spaces that disagree are refused either way; what differs is whether the sentence can
+     * name a remedy. `AEDES` has mirror landmarks and no route into the common frame — no such
+     * registration exists between a mosquito and a fly in any language — so naming the node
+     * that bridges would be telling somebody to do the one thing that cannot work, which is
+     * the `missing_tos` failure one backend over.
+     */
+    const spaced = (space: string) => ({ ...skeletonsFixture(), space })
+    expect(() =>
+      checkNblastSpaces(spaced('JRCFIB2018F'), spaced('FLYWIRE'), 'skeletons'),
+    ).toThrow(/Put both sides through Transform Neurons first/)
+    expect(() => checkNblastSpaces(spaced('AEDES'), spaced('FLYWIRE'), 'skeletons')).toThrow(
+      /no route from one of these into a shared frame/,
+    )
+    // Both sides still named, whichever branch answered: which one to move is the first thing
+    // somebody needs.
+    expect(() => checkNblastSpaces(spaced('AEDES'), spaced('FLYWIRE'), 'skeletons')).toThrow(
+      /are in AEDES and Target skeletons are in FLYWIRE/,
+    )
   })
 
   it('says what an oversized comparison will cost, naming both sides, and scores it anyway', () => {

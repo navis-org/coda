@@ -29,7 +29,7 @@ where `c` is a property of the volume rather than of your data. It is one pass o
 costs nothing.
 
 **The correction** is a thin-plate spline through a few thousand landmark pairs, and it is there
-because *a fly brain is not symmetric*. Flipped and left there, a neuron sits about **7 µm** from
+because *an insect brain is not symmetric*. Flipped and left there, a neuron sits about **7 µm** from
 its contralateral partner on FlyWire and **33 µm** on MaleCNS. That is roughly the width of a
 small neuropil — comfortably enough for NBLAST to score a homologue as a stranger.
 
@@ -55,13 +55,23 @@ of a million points per second.
 
 ## Which brains it works in
 
-Coda ships direct mirror landmarks for the five spaces its published datasets live in —
-hemibrain, MaleCNS, MANC, FlyWire and FAFB. **Only direct ones.** navis can mirror a brain by
-routing through another template; that needs registration files which are native libraries and
-gigabytes of data, so Coda does not offer it rather than offering it badly.
+Coda ships direct mirror landmarks for six spaces — hemibrain, MaleCNS, MANC, FlyWire and FAFB,
+plus the *Aedes aegypti* brain. **Only direct ones.** navis can mirror a brain by routing through
+another template; that needs registration files which are native libraries and gigabytes of data,
+so Coda does not offer it rather than offering it badly.
 
 A dataset outside that list — the optic lobe, a synthetic connectome, a Custom node pointed at
 your own server — has no midline anywhere, and this node says so instead of guessing one.
+
+> [!note]
+> The mosquito brain is the one space here with **no route into the shared template**, so
+> `Transform Neurons` does not offer it: JRC2018U is a *Drosophila* template, and there is no
+> registration between the two animals to build one from. Mirroring is unaffected — a midline is
+> a property of the volume itself, and this one has its own.
+
+The Aedes volume is the `wclee_aedes_brain` CAVE datastack, which Coda ships no dataset node for:
+reach it through **Custom CAVE**, and the space is stamped on the geometry from there exactly as
+it is for a dataset with a node of its own.
 
 ## Two things worth knowing
 

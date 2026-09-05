@@ -10,10 +10,15 @@
  *
  * ## One edge per dataset, and no path finding
  *
- * Every space Coda knows has exactly one registration, into `JRC2018U` — the unisex template
- * that navis and the natverse both treat as the meeting point. That is a **star**, not a graph:
+ * A space Coda knows has at most one registration, into `JRC2018U` — the unisex template that
+ * navis and the natverse both treat as the meeting point. That is a **star**, not a graph:
  * `toCommonFor` is a lookup, there is nothing to search, and a space with no entry has no route
  * rather than a longer one.
+ *
+ * *At most*, because the two halves of a space are separately optional: `AEDES` is a mosquito
+ * brain with mirror landmarks and no bridge, JRC2018U being a *Drosophila* template. So this
+ * node's two dropdowns are `bridgeableSpaces()` rather than `allSpaces()` — a space with no
+ * route is absent from them rather than offered and then refused.
  *
  * An arbitrary space-to-space transform therefore needs **no path finding either**: it is out
  * through the hub and back, always exactly two hops, from two lookups. The return leg is the
@@ -317,10 +322,18 @@ export const xformNode = registerNode({
 
     const outbound = toCommonFor(spaceId)
     if (!outbound) {
+      /*
+       * Reachable although the dropdown offers no such space: geometry arrives carrying one.
+       * Two different absences behind it, and the message names both rather than asserting the
+       * one that used to be the only case — a fly space whose bridge is a CMTK or H5
+       * registration Coda cannot run, and a space in another animal for which no registration
+       * exists at all. Telling somebody the second is a browser limitation would send them
+       * looking for a workaround there is none of.
+       */
       throw new Error(
-        `Coda ships no route from ${spaceName(spaceId)} (${spaceId}) into ${COMMON_SPACE.id}. ` +
-          'The registrations that would build one are native libraries, so there is no route ' +
-          'to it that works in a browser.',
+        `Coda ships no route from ${spaceName(spaceId)} (${spaceId}) into ${COMMON_SPACE.id} — ` +
+          'either none exists, or the registrations that would build one are native libraries ' +
+          'that cannot run in a browser.',
       )
     }
     /*

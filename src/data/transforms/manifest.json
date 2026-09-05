@@ -227,6 +227,30 @@
         "sourceUnits": "nm",
         "targetUnits": "um"
       }
+    },
+    {
+      "id": "AEDES",
+      "label": "Aedes aegypti",
+      "units": "nm",
+      "mirror": {
+        "file": "AEDES_mirror.csv",
+        "landmarks": 1347,
+        "axis": "x",
+        "flipAt": 732516.0,
+        "sourceColumns": [
+          "x_flip",
+          "y_flip",
+          "z_flip"
+        ],
+        "targetColumns": [
+          "x_mirr",
+          "y_mirr",
+          "z_mirr"
+        ],
+        "sourceUnits": "nm",
+        "targetUnits": "nm",
+        "origin": "navis-flybrains/Aedes_mirror_landmarks_nm.csv"
+      }
     }
   ]
 }

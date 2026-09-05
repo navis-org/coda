@@ -147,6 +147,18 @@ SPACES: list[Space] = [
         regions=("vnc",),
         res=20_000,
     ),
+    Space(
+        id="AEDES",
+        label="Aedes aegypti",
+        mirror_file="Aedes_mirror_landmarks_nm.csv",
+        # A mosquito. JRC2018U is a *Drosophila* template, and flybrains
+        # registers no bridging transform for this volume — only the mirror —
+        # so there is no route to the common frame to generate. That is a fact
+        # about the animal rather than a missing file: the entry carries no
+        # `toCommon` at all, and `Transform Neurons` declines by leaving the
+        # space out of its dropdowns rather than offering it and refusing.
+        to_common=False,
+    ),
 ]
 
 
@@ -245,6 +257,33 @@ def flip_constant(space_id: str, axis: str, flybrains) -> float:
     return float(bbox[AXIS_INDEX[axis], :].sum())
 
 
+def check_files(entries: list[dict], out: Path) -> list[str]:
+    """Every landmark file the manifest names, present and the right length.
+
+    Both halves of the check are `landmarks.ts`' own: it refuses a file it
+    cannot fetch, and refuses one whose row count disagrees with the manifest —
+    the second being what catches a CSV replaced without its entry. Asked here
+    because a run that regenerates everything cannot fail either test, and a
+    partial one can.
+    """
+    problems = []
+    for entry in entries:
+        for half in ("mirror", "toCommon"):
+            spec = entry.get(half)
+            if not spec:
+                continue
+            path = out / spec["file"]
+            if not path.exists():
+                problems.append(f"{entry['id']} {half}: no {spec['file']} in {out}")
+            elif sum(1 for _ in path.open()) - 1 != spec["landmarks"]:
+                rows = sum(1 for _ in path.open()) - 1
+                problems.append(
+                    f"{entry['id']} {half}: {spec['file']} has {rows} landmarks, "
+                    f"the manifest says {spec['landmarks']}"
+                )
+    return problems
+
+
 # --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
@@ -291,6 +330,20 @@ def main() -> int:
     out: Path = args.out
     out.mkdir(parents=True, exist_ok=True)
 
+    # What the manifest says today, by space id.
+    #
+    # This file is written whole on every run, and both flags below narrow what
+    # a run *produces* — so without this a `--only AEDES` would replace five
+    # generated entries with one, and `--skip-common` would null out every route
+    # into the hub. Neither is a deletion anybody asked for, and both leave a
+    # manifest whose landmark CSVs are still sitting in `public/transforms/`
+    # with nothing pointing at them. So a space this run does not regenerate
+    # keeps exactly what it had, and adding a space is one cheap command rather
+    # than a rerun of the whole H5 stack.
+    prior: dict[str, dict] = {}
+    if args.manifest.exists():
+        prior = {e["id"]: e for e in json.loads(args.manifest.read_text())["spaces"]}
+
     if not args.skip_common:
         register_vnc_placement(navis)
 
@@ -311,17 +364,15 @@ def main() -> int:
                 "than a registration."
             ),
         },
-        "spaces": [],
     }
+    generated: dict[str, dict] = {}
 
     for space in wanted:
-        entry: dict = {
-            "id": space.id,
-            "label": space.label,
-            "units": "nm",
-            "mirror": None,
-            "toCommon": None,
-        }
+        # Only what this run produced. A half is a key that is *there* or is
+        # not — `spaces.ts` declares both optional (`mirror?`, `toCommon?`) and
+        # casts the JSON to that shape without checking, so a null would be
+        # read as a spec by everything downstream of the cast.
+        entry: dict = {"id": space.id, "label": space.label, "units": "nm"}
 
         # --- mirror: copy what flybrains already ships -----------------------
         if space.mirror_file:
@@ -388,7 +439,35 @@ def main() -> int:
                 "targetUnits": "um",
             }
 
-        manifest["spaces"].append(entry)
+        # A half this space no longer declares is *dropped*; a half it declares
+        # and this run did not produce is *kept*. That is the whole of the
+        # merge, and the distinction it turns on is intent: editing `SPACES` is
+        # a decision, where `--only` and `--skip-common` narrow what a run
+        # produces and neither one is a deletion anybody asked for.
+        kept = dict(prior.get(space.id, {}))
+        if not space.mirror_file:
+            kept.pop("mirror", None)
+        if not space.to_common:
+            kept.pop("toCommon", None)
+        generated[space.id] = kept | entry
+
+    # SPACES order, so the manifest reads the same whichever subset was asked
+    # for. A space dropped from SPACES is dropped from the manifest with it —
+    # deliberate, for the same reason.
+    by_id = prior | generated
+    manifest["spaces"] = [by_id[space.id] for space in SPACES if space.id in by_id]
+
+    # Nothing carried forward may name a file that is no longer there. The
+    # manifest is the only index of `public/transforms/`, and `landmarks.ts`
+    # discovers a missing or resized file by *fetching* it at run time — so a
+    # partial run that preserved an entry whose CSV was deleted or regenerated
+    # elsewhere would ship a space that fails in the browser and nowhere else.
+    stale = check_files(manifest["spaces"], out)
+    if stale:
+        for line in stale:
+            print(f"  ! {line}", file=sys.stderr)
+        print("\nthe manifest would name files that are not there; re-run in full.")
+        return 1
 
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.write_text(json.dumps(manifest, indent=2) + "\n")
