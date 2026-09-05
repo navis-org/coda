@@ -27,10 +27,9 @@ Other useful links:
 Check out `?` ▶ `Guides` for in-app tutorials and `Examples` for pre-built workflows.
 
 - add credentials to access neuPrint/CAVE/CATMAID datasets via `Connections` icon in the top toolbar
-- `New` to create a new graph, optionally preconfigured for a specific datastack
-- `Examples` menu contains some pre-built workflows
+- `New` to create a new graph, either from scratch or using the Workflow Wizard/Examples/Preconfigured datastacks
 - click and drag to pan, scroll to zoom
-- `Tab` or **+ Add** to add nodes
+- **+** button (lower right) to add nodes or `Tab` to search for nodes
 - `Space` for the command palette
 - "Run" button or `⇧R` to run all stale nodes
 - `I` to show/hide the inspector
