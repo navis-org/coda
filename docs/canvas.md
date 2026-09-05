@@ -665,6 +665,19 @@ card React Flow does not know is selected is one a pane click cannot *de*select,
 selection would quietly accumulate cards nobody can see and the next ⌫ would take them along.
 jsdom draws no such overlay, so nothing in the suite could have caught either half.
 
+The same overlay had a second failure on an ordinary canvas, and it reads as a bug somewhere else
+entirely. React Flow gives its rect `pointer-events: all` and hangs a drag-the-whole-selection
+gesture off it, and the overlay is a **sibling of the viewport at `z-index: 3`** — above everything
+the renderer draws. So the box a Shift+drag leaves behind covers the cards it surrounds and takes
+their events: a right-click there reaches `onSelectionContextMenu`, which `Editor` does not pass,
+and with nobody calling `preventDefault` the **browser's** menu opens over the canvas. What is
+reported is that the node menu stopped working after a box-select. The rect is made
+`pointer-events: none` in `editor.css`, leaving the box as a marker of the selection's extent and
+nothing more; dragging any *card* in the selection still moves all of them, which is React Flow's
+own behaviour rather than this overlay's, and what is given up is dragging by the empty space
+between the cards. Same silent failure as the rule above — jsdom draws no overlay, so an upstream
+rename brings the interception back with every test green.
+
 ### The controls a folded group carries
 
 A frame may promote any of its members' params onto the box (`GraphGroup.exposed`), which is what

@@ -9222,6 +9222,26 @@ details[open] > summary.tile__label {
 }
 
 /*
+ * The same overlay, made inert on every canvas: it marks the extent of the selection and nothing
+ * more. React Flow gives the rect `pointer-events: all` and hangs its own drag off it, so the box
+ * left behind by a Shift+drag sits *over* the cards it surrounds (`nodesselection` is a sibling of
+ * the viewport at `z-index: 3`, above everything the renderer draws) and swallows their events. A
+ * right-click there reaches `onSelectionContextMenu`, which `Editor` does not pass, so nothing
+ * calls `preventDefault` and the browser's own menu opens on top of the canvas — reported as the
+ * node menu being broken, which is what it looks like.
+ *
+ * What is given up is dragging the selection by the empty space between its cards; dragging any
+ * *card* in it still moves all of them, which is React Flow's behaviour and not this overlay's.
+ * A click on that empty space now deselects, as a click on the pane anywhere else does.
+ *
+ * Same standing as the rule above, and the same silent failure: jsdom draws no overlay, so a
+ * rename upstream restores the interception with every test still green.
+ */
+.react-flow__nodesselection-rect {
+  pointer-events: none;
+}
+
+/*
  * The promoted-controls picker inside the group's menu: a section that opens in place rather
  * than a flyout, so there is no second panel to place and no `overflow-y` trap (see
  * `GroupContextMenu`). Scrolls, because a frame of six cards can offer forty params.

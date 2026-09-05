@@ -220,8 +220,10 @@ Area-specific — the rule, then the doc that holds why:
   `draggable`/`selectable`/`deletable` make React Flow **withhold the pointer**, and both symptoms
   read as features working — the drag panned the canvas, the right-click opened the palette
   (`style: { pointerEvents: 'all' }` restores it, and so does `CARD_POINTERS` inside `GroupPeek`);
-  the multi-selection rectangle **includes hidden nodes**, leaving a draggable box over vacated
-  canvas (`has-folded-selection` stands it down — falsifying `selected` instead strands a selection
+  the multi-selection rectangle sits **over** the cards it surrounds and takes their events, so its
+  rect is `pointer-events: none` or a right-click on a selected node opens the *browser's* menu, and
+  it **includes hidden nodes**, leaving a draggable box over vacated canvas
+  (`has-folded-selection` stands it down — falsifying `selected` instead strands a selection
   no pane click can clear); `GroupPeek`'s cards carry the same `data-id`s, so `measureCardSizes`,
   the port measurement and `spliceOn` must scope to `.canvas-area`; and its panel must stop **bare**
   keys or `d` opens the dashboard behind the dialog. `useAnyNodeState`/`useNodeStateCount` return
