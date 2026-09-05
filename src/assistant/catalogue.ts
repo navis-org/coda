@@ -13,19 +13,26 @@
  * **It must stay byte-identical between calls.** It is the cached prefix (see `client.ts`), so
  * anything per-request — the current graph, a timestamp — belongs in the user turn instead.
  *
- * **It is 65,230 characters — re-measured, because the last figure here was written at 49 nodes
- * and there are now 77.** Ollama counted 16,587 tokens for it at 65,076 characters, 17,687 with
- * the plan schema attached; a Claude tokenizer will read it higher, since identifiers
- * (`edgeWeightInfluence`, `countDistinct`) tokenize far worse than prose. 62.1k of that is
- * catalogue against 3.1k of rules. Inside the catalogue, across 334 params of which 110 are `presentational`:
+ * **It is 44,735 characters at the default `lean` detail, and 112,682 at `full` — re-measured,
+ * because the figure here was written at 77 nodes and there are now 102.** The split matters
+ * more than it used to: `lean` is what ships (see `DEFAULT_DETAIL`), and it omits every param's
+ * `help`, so a node's `description` is the *only* prose the model gets about it. Ollama's
+ * earlier count was 16,587 tokens for a 65,076-character rendering; a Claude tokenizer reads
+ * higher, since identifiers (`edgeWeightInfluence`, `countDistinct`) tokenize far worse than
+ * prose. Inside the catalogue, across 560 plannable params of which 175 are `presentational`:
  *
- *  - param `help` text is 32.5k chars, **52%** — by far the largest single component
- *  - eight of the seventy-seven nodes are **41%** of the param text: `out.viewer3d` (30 params),
- *    `out.network` (33), `neuron.cleanMeshes`, `out.scatter` and the NBLAST family
- *  - node descriptions are 5.2k, and the rest is ports, `carries:` lines and enum options
+ *  - param `help` text is 66.6k chars, **59% of `full`** — by far the largest single component,
+ *    and the whole of the difference between the two detail levels
+ *  - eight of the hundred-and-two nodes are **33%** of that: `out.viewer3d` (37 params),
+ *    `out.network` (41), `out.topology` (17), `out.heatmap` (16), `neuron.connectivity`,
+ *    `neuron.influence`, `neuron.cleanMeshes` and `neuron.paths`
+ *  - `presentational` params carry 16.6k of the help, **15% of `full`**
+ *  - node descriptions are 7.0k, and the rest is ports, `carries:` lines and enum options
  *
  * What each trim is worth, rendered and counted rather than reasoned about (±3%, the model of
- * the renderer used to measure them is not this one):
+ * the renderer used to measure them is not this one). **These were measured against `full` at 77
+ * nodes**, so read them as ratios rather than as today's absolute token counts — the first is
+ * what `lean` already does:
  *
  *  - drop `help` on `presentational` params: **-13%**, to ~14.7k tokens
  *  - drop presentational params outright: **-20%** — but `plannableParams` has to refuse them

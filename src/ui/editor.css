@@ -7096,6 +7096,31 @@ details[open] > summary.tile__label {
   font-size: 10px;
 }
 
+/*
+ * The offer to fetch a subject too large to fetch on a page turn.
+ *
+ * A row between the pager and the tiles rather than a control inside each tile: six buttons for
+ * one decision reads as six decisions, and the sentence has to name the subject and its size to
+ * be a decision at all. `flex: 0 0 auto` for `.profile__error`'s reason — the tiles are what
+ * scrolls, and a banner that shrinks under them is a banner nobody reads.
+ */
+.profile__deferred {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 6px 9px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.profile__deferred .tile__link {
+  margin-top: 0;
+  white-space: nowrap;
+}
+
 .profile__error {
   padding: 6px 9px;
   color: var(--status-error);
@@ -7538,9 +7563,18 @@ details[open] > summary.tile__label {
   gap: 3px;
 }
 
+/*
+ * The track keeps a floor, because the value column is `auto` and the bars are the point.
+ *
+ * Grouped, a row's number grew from `30` to `4.2±5.3` and its detail from `39% · 2` to
+ * `39% · 1.5±2`, which on a 190px tile column left the track about half its width — so the one
+ * thing the list exists for, comparing lengths, got quietly worse the moment you grouped. The
+ * spread is a whisker now rather than text, and this floor is the backstop for a four-digit
+ * count: past it the *key* ellipsises, which it is already set up to do.
+ */
 .tile__bar {
   display: grid;
-  grid-template-columns: minmax(28px, 4.5em) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 4.5em) minmax(36px, 1fr) auto;
   gap: 6px;
   align-items: center;
 }
@@ -7558,12 +7592,51 @@ details[open] > summary.tile__label {
    second chart. The 1px gap is the surface showing through, which is the secondary encoding
    the palette validation requires wherever two categorical fills touch. */
 .tile__bar-track {
+  position: relative;
   display: flex;
   gap: 1px;
   height: 7px;
   border-radius: 2px;
   background: var(--surface-3);
   overflow: hidden;
+}
+
+/*
+ * A mean's spread, as ±1 sd around the bar's end.
+ *
+ * Achromatic: colour on this card is the categorical channel, and a spread is not a category.
+ * The 1px surface ring is what keeps the line readable where it crosses the fill it describes —
+ * the dataviz rule for overlapping marks, and the reason this is not simply a paler hue.
+ */
+.tile__bar-spread {
+  position: absolute;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+  background: var(--text-muted);
+  box-shadow: 0 0 0 1px var(--surface-3);
+  pointer-events: none;
+}
+
+/* The caps, so the extent reads as an interval rather than as a second bar. */
+.tile__bar-spread::before,
+.tile__bar-spread::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 1px;
+  height: 5px;
+  transform: translateY(-50%);
+  background: var(--text-muted);
+  box-shadow: 0 0 0 1px var(--surface-3);
+}
+
+.tile__bar-spread::before {
+  left: 0;
+}
+
+.tile__bar-spread::after {
+  right: 0;
 }
 
 .tile__bar-fill {

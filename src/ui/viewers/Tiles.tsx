@@ -90,7 +90,13 @@ export function Loadable({
   emptyLabel,
   children,
 }: {
-  state: 'none' | 'loading' | 'ready' | 'error'
+  /**
+   * `deferred` is a fetch nobody has asked for yet — Neuron Profile's cell-type mode, where a
+   * page turn would otherwise ask a connectome about every neuron of a type. It is a tile state
+   * rather than a message here because the *offer* belongs beside the pager: one banner naming
+   * the subject and its size, not the same button repeated in six tiles.
+   */
+  state: 'none' | 'deferred' | 'loading' | 'ready' | 'error'
   empty?: boolean
   /**
    * What to say instead of the bare "None".
@@ -103,6 +109,7 @@ export function Loadable({
   emptyLabel?: string
   children: ReactNode
 }) {
+  if (state === 'deferred') return <p className="tile__pending">Not loaded</p>
   if (state === 'loading') return <p className="tile__pending">Loading…</p>
   if (state === 'error') return <p className="tile__pending">Unavailable</p>
   if (state === 'none') return <p className="tile__pending">No dataset</p>
@@ -151,6 +158,16 @@ export interface BarRow {
   title?: string
   /** 0..1 of the tile's width. */
   fraction: number
+  /**
+   * A spread around `fraction`, on the same 0..1 scale, drawn as a whisker on the track.
+   *
+   * For a mean over several things, where the row's number is the mean and the spread would
+   * otherwise have to be printed beside it. It is a *mark* rather than text on purpose: the value
+   * column is `auto`, so "4.2±5.3 39% · 1.5±2" starved the track it sits next to and made the
+   * bars — the thing the list exists to compare — about half their proper length. A whisker costs
+   * no horizontal space at all, and the exact figures stay in the row's tooltip.
+   */
+  spread?: { lo: number; hi: number }
   value: string
   detail?: string
 }
@@ -170,6 +187,18 @@ export function Bars({ rows, color }: { rows: BarRow[]; color: string }) {
                 background: row.color ?? color,
               }}
             />
+            {row.spread && (
+              // Achromatic, because colour here is the categorical channel and a spread is not a
+              // category. The surface ring in the stylesheet is what keeps it legible where it
+              // crosses the fill.
+              <span
+                className="tile__bar-spread"
+                style={{
+                  left: `${Math.max(0, Math.min(1, row.spread.lo)) * 100}%`,
+                  width: `${Math.max(0, Math.min(1, row.spread.hi - row.spread.lo)) * 100}%`,
+                }}
+              />
+            )}
           </span>
           <span className="tile__bar-value">
             {row.value}

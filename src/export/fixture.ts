@@ -1154,6 +1154,20 @@ export function everythingGraph(): CodaGraph {
     { id: 'ng', type: 'out.neuroglancer', col: 3, row: 6 },
     { id: 'profile', type: 'out.profile', col: 3, row: 7, params: { selection: ['1001'] } },
     {
+      /*
+       * A second Profile, grouped, for `probe-py-helpers.py`'s reason one node over: the two
+       * modes emit genuinely different cells — one folds every frame to a mean per cell type
+       * with a spread, the other does not — so a fixture carrying only the ungrouped one leaves
+       * the fold unexported, unrun and unread. `pinned` is deliberately absent: a pin under a
+       * grouping is one group's members, and the emitter widens to the whole table there.
+       */
+      id: 'typeprofile',
+      type: 'out.profile',
+      col: 3,
+      row: 10,
+      params: { groupBy: 'type', topN: 5 },
+    },
+    {
       id: 'summary',
       type: 'out.datasetSummary',
       col: 3,
@@ -1249,6 +1263,8 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'extremes', 'in'],
     ['find', 'neurons', 'profile', 'neurons'],
     ['ds', 'dataset', 'profile', 'dataset'],
+    ['find', 'neurons', 'typeprofile', 'neurons'],
+    ['ds', 'dataset', 'typeprofile', 'dataset'],
     ['ds', 'dataset', 'summary', 'dataset'],
     ['ds', 'dataset', 'rois', 'dataset'],
     ['find', 'neurons', 'ng', 'neurons'],

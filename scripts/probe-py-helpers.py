@@ -900,6 +900,92 @@ check("natural: an 18-digit id is compared exactly",
 check("natural: a non-string label does not throw",
       sorted([3, 10, 2], key=nkns["coda_natural_key"]) == [2, 3, 10])
 
+# --- the cell-type profile's fold -------------------------------------------------------------
+# `_coda_group_means` is the notebook's half of Neuron Profile's Group by, and its numbers have to
+# be the card's: `subjectPartnerTypes` in `nodes/lib/profileStats.ts`, whose own suite runs the
+# same three members. Reading the two implementations side by side is exactly what does not catch
+# a denominator — every version of this produces plausible numbers.
+import math
+
+gns = load_cell(FIXTURES / "everything.ipynb", "def _coda_group_means(", {"pd": pd})
+
+# Member 1 reaches Tm3 with 10, member 2 with 2, member 3 not at all.
+per_neuron = pd.DataFrame({
+    "neuronId": [1, 2, 3],
+    "type": ["Tm3", "Tm3", "Mi1"],
+    "synapses": [10, 2, 6],
+    "partners": [1, 1, 1],
+})
+lc4 = pd.Series({1: "LC4", 2: "LC4", 3: "LC4"})
+folded = gns["_coda_group_means"](per_neuron, lc4, ["type"], ["synapses", "partners"])
+tm3 = folded[folded["type"] == "Tm3"].iloc[0]
+
+# The whole point: three members, not the two that connect. Averaging over the rows present
+# would say 6 and print it under the cell type's name.
+check("group fold: divides by every member", tm3["synapses_mean"] == 4.0, str(tm3["synapses_mean"]))
+check("group fold: sample sd, absent members included",
+      abs(tm3["synapses_sd"] - math.sqrt(28)) < 1e-9, str(tm3["synapses_sd"]))
+check("group fold: counts who contributed", tm3["synapses_present"] == 2, str(tm3["synapses_present"]))
+check("group fold: n is the group", tm3["n"] == 3, str(tm3["n"]))
+
+# One member has no spread — NaN, not 0. "12 +/- 0" is a claim one neuron cannot support.
+alone = gns["_coda_group_means"](
+    pd.DataFrame({"neuronId": [1], "type": ["Tm3"], "synapses": [10]}),
+    pd.Series({1: "LC4"}), ["type"], ["synapses"],
+)
+check("group fold: no spread for a group of one", pd.isna(alone["synapses_sd"].iloc[0]),
+      str(alone["synapses_sd"].iloc[0]))
+check("group fold: a group of one keeps its value", alone["synapses_mean"].iloc[0] == 10.0)
+
+# An untyped partner keeps its own bucket, exactly as the ungrouped roll-up leaves it.
+untyped = gns["_coda_group_means"](
+    pd.DataFrame({"neuronId": [1, 2], "type": [None, "x"], "synapses": [4, 6]}),
+    pd.Series({1: "G", 2: "G"}), ["type"], ["synapses"],
+)
+check("group fold: the untyped bucket survives", len(untyped) == 2, str(len(untyped)))
+
+# A neuron the grouping does not name is not a member, so it is not a denominator either.
+outside = gns["_coda_group_means"](
+    pd.DataFrame({"neuronId": [1, 9], "type": ["Tm3", "Tm3"], "synapses": [10, 99]}),
+    pd.Series({1: "LC4"}), ["type"], ["synapses"],
+)
+check("group fold: an unmapped neuron is not counted",
+      outside["synapses_mean"].iloc[0] == 10.0, str(outside["synapses_mean"].iloc[0]))
+
+check("group fold: an empty frame still has its columns",
+      "synapses_mean" in gns["_coda_group_means"](
+          per_neuron.iloc[0:0], lc4, ["type"], ["synapses"]).columns)
+
+# Capped after the fold: per member first would rank a type by how often it reaches somebody's
+# top ten rather than by how strong it is.
+ranked = gns["_coda_rank"](
+    gns["_coda_group_means"](
+        pd.DataFrame({"neuronId": [1, 1, 1], "type": ["a", "b", "c"], "synapses": [1, 5, 3]}),
+        pd.Series({1: "G"}), ["type"], ["synapses"],
+    ),
+    ["group"], "synapses_mean", 2,
+)
+check("group fold: top_n applies to the fold", list(ranked["type"]) == ["b", "c"],
+      str(list(ranked["type"])))
+
+# The keyless fold, which is what `summary` goes through: one row per group, no key column.
+# Not covered by the cases above and the only caller that passes an empty `keys`.
+summary_totals = pd.DataFrame({
+    "neuronId": [1, 2, 3],
+    "upstream_synapses": [10.0, 2.0, 0.0],
+    "downstream_synapses": [5.0, 5.0, 5.0],
+})
+keyless = gns["_coda_group_means"](
+    summary_totals, lc4, [], ["upstream_synapses", "downstream_synapses"],
+)
+check("group fold: no key means one row per group", len(keyless) == 1, str(len(keyless)))
+check("group fold: keyless means match the keyed ones",
+      keyless["upstream_synapses_mean"].iloc[0] == 4.0,
+      str(keyless["upstream_synapses_mean"].iloc[0]))
+check("group fold: a column every member agrees on has a spread of zero",
+      keyless["downstream_synapses_sd"].iloc[0] == 0.0,
+      str(keyless["downstream_synapses_sd"].iloc[0]))
+
 print()
 print(f'{len(fails)} failed' if fails else 'all passed')
 sys.exit(1 if fails else 0)

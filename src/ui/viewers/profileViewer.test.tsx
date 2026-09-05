@@ -25,7 +25,7 @@ import type { DataSource, DatasetInfo } from '../../data/source'
 import { registerSource } from '../../data/source'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { ProfileViewer } from './ProfileViewer'
-import { clearProfileCache } from './useNeuronProfile'
+import { MAX_AUTO_MEMBERS, clearProfileCache } from './useNeuronProfile'
 
 const NEURONS = tableSchema(
   column('neuronId', 'i64'),
@@ -117,6 +117,8 @@ const DATASET: DatasetInfo = {
 }
 
 let hang = false
+/** Counted so the deferral test can assert that nothing was asked for, not merely not shown. */
+let fetches = 0
 
 function stubSource(overrides: Partial<DataSource> = {}): DataSource {
   const never = () => new Promise<never>(() => {})
@@ -142,8 +144,10 @@ function stubSource(overrides: Partial<DataSource> = {}): DataSource {
     peekDatasets: () => [DATASET],
     peekDataset: () => DATASET,
     findNeurons: async () => neurons(),
-    fetchConnectivity: async (req) =>
-      hang ? await never() : req.direction === 'inputs' ? INPUTS : OUTPUTS,
+    fetchConnectivity: async (req) => {
+      fetches += 1
+      return hang ? await never() : req.direction === 'inputs' ? INPUTS : OUTPUTS
+    },
     fetchAdjacency: async () => {
       throw new Error('not used')
     },
@@ -159,8 +163,14 @@ function pager(container: HTMLElement): HTMLElement {
   return found as HTMLElement
 }
 
-function view(props: Partial<React.ComponentProps<typeof ProfileViewer>> = {}) {
-  return render(
+/**
+ * The element, apart from `render`, so a `rerender` can reuse the same defaults.
+ *
+ * Split out when a test needed to step the pager: spelling the twelve props out again at the
+ * call site is how a rerender comes to run under different defaults from every other test here.
+ */
+function card(props: Partial<React.ComponentProps<typeof ProfileViewer>> = {}) {
+  return (
     <ProfileViewer
       neurons={neurons()}
       sourceId="stub"
@@ -173,8 +183,12 @@ function view(props: Partial<React.ComponentProps<typeof ProfileViewer>> = {}) {
       topN={10}
       compact
       {...props}
-    />,
+    />
   )
+}
+
+function view(props: Partial<React.ComponentProps<typeof ProfileViewer>> = {}) {
+  return render(card(props))
 }
 
 beforeAll(() => {
@@ -184,7 +198,17 @@ beforeAll(() => {
 
 beforeEach(() => {
   hang = false
+  fetches = 0
   clearProfileCache()
+  /*
+   * The plain stub back, every test.
+   *
+   * `registerSource` replaces by id, and three tests below register an override whose
+   * `fetchConnectivity` does not count — so without this, every test *after* one of those
+   * silently ran against somebody else's stub. It cost an afternoon: the card rendered
+   * perfectly and only the fetch counter was wrong, which reads as the cache working.
+   */
+  registerSource(stubSource())
 })
 
 afterEach(cleanup)
@@ -278,6 +302,25 @@ describe('tiles', () => {
     expect(screen.queryByText('Transmitter')).toBeNull()
   })
 
+  it('reports the confidence beside the call, which the card is where you read it', () => {
+    // Lost once already: the tile moved onto the subject roll-up and quietly stopped showing a
+    // row the ungrouped card had always had, with nothing in the docs to say it was a decision.
+    const { container } = view({
+      neurons: tableFromRows(
+        tableSchema(
+          column('neuronId', 'i64'),
+          column('type', 'str'),
+          column('predictedNt', 'str'),
+          column('predictedNtProb', 'f64'),
+        ),
+        [{ neuronId: 1, type: 'CT1', predictedNt: 'gaba', predictedNtProb: 0.87 }],
+        'neurons',
+      ),
+    })
+    expect(container.textContent).toContain('confidence')
+    expect(container.textContent).toContain('0.87')
+  })
+
   it('shows the transmitter tile where the columns exist', () => {
     const schema = tableSchema(
       column('neuronId', 'i64'),
@@ -307,7 +350,6 @@ describe('tiles', () => {
     registerSource(stubSource({ peekDataset: () => ({ ...DATASET, primaryRois: undefined }) }))
     view()
     await waitFor(() => expect(screen.getByText(/may double-count/)).toBeTruthy())
-    registerSource(stubSource())
   })
 
   it('lists every attribute the schema carries, so nothing is silently invisible', () => {
@@ -458,5 +500,225 @@ describe('the annotation chain', () => {
     view({ annotations: chain('b') })
     await waitFor(() => expect(screen.getByTitle(/Tm9 — 50 synapses/)).toBeTruthy())
     expect(calls).toBeGreaterThan(after)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Cell-type profiles
+// ---------------------------------------------------------------------------
+
+/** Two LC4s and a Tm9, so a group of two sits beside a group of one. */
+function grouped() {
+  return tableFromRows(
+    NEURONS,
+    [
+      {
+        neuronId: 1,
+        type: 'LC4',
+        instance: 'LC4_L',
+        status: 'Traced',
+        class: 'optic',
+        pre: 90,
+        post: 40,
+      },
+      {
+        neuronId: 2,
+        type: 'LC4',
+        instance: 'LC4_R',
+        status: 'Traced',
+        class: 'optic',
+        pre: 10,
+        post: 30,
+      },
+      {
+        neuronId: 3,
+        type: 'Tm9',
+        instance: 'Tm9_R',
+        status: 'Traced',
+        class: 'optic',
+        pre: 5,
+        post: 7,
+      },
+    ],
+    'neurons',
+  )
+}
+
+describe('grouping', () => {
+  it('pages groups rather than rows, and says how many neurons one holds', () => {
+    const { container } = view({ neurons: grouped(), groupBy: 'type' })
+    // Two subjects, not three rows.
+    expect(within(pager(container)).getByText('1 / 2')).toBeTruthy()
+    expect(within(pager(container)).getByText('LC4')).toBeTruthy()
+    expect(within(pager(container)).getByText('2 neurons')).toBeTruthy()
+  })
+
+  it('pins every member, which is what lets the control stay presentational', async () => {
+    // The group is resolved to ids here, so `selection` carries neurons either way and the
+    // node's `evaluate` never learns that grouping exists.
+    const onPin = vi.fn()
+    const { container } = view({ neurons: grouped(), groupBy: 'type', onPin })
+    within(pager(container)).getByText('Pin').click()
+    expect(onPin).toHaveBeenCalledWith(['1', '2'])
+  })
+
+  it('reads a pin as a set, so a reloaded graph still shows it pinned', () => {
+    // `selection` comes back off a stored graph in whatever order it was written. Comparing
+    // sequences left Pin unlit, and a second press then cleared a pin that looked unset.
+    const { container } = view({ neurons: grouped(), groupBy: 'type', pinned: ['2', '1'] })
+    expect(within(pager(container)).getByText('Pinned')).toBeTruthy()
+  })
+
+  it('keeps the spread out of the list rows, where it starves the bar', async () => {
+    /*
+     * The value column of a bar row is one `auto` grid track sharing a row with the bar. Printing
+     * `4.2±5.3` there — and `39% · 1.5±2` beside it — took roughly half the width of the track on
+     * a tile column, so the one thing the list is for, comparing lengths, got worse the moment
+     * you grouped. The figures live in the tooltip and the whisker now.
+     */
+    const { container } = view({ neurons: grouped(), groupBy: 'type' })
+    await waitFor(() => expect(container.textContent).toContain('26.5 ± 37.5'))
+
+    const bars = container.querySelectorAll('.tile__bar-value')
+    expect(bars.length).toBeGreaterThan(0)
+    for (const value of bars) expect(value.textContent).not.toContain('±')
+
+    // The spread is drawn instead — one whisker per bar whose subject has more than one member.
+    expect(container.querySelectorAll('.tile__bar-spread').length).toBeGreaterThan(0)
+  })
+
+  it('draws no whisker for a subject of one, which has no spread', async () => {
+    const { container } = view({ neurons: grouped(), groupBy: 'type', page: 1 })
+    await waitFor(() => expect(container.textContent).toContain('Top input types'))
+    expect(container.querySelectorAll('.tile__bar-spread')).toHaveLength(0)
+  })
+
+  it('reports a mean and a spread, over every member and not only the ones that connect', async () => {
+    // Only neuron 1 has rows in the fixture: 53 input synapses against neuron 2's nothing.
+    // A mean over the members that connect would say 53; the mean over the type is 26.5, and
+    // the spread is what says the two cells are nothing like each other.
+    const { container } = view({ neurons: grouped(), groupBy: 'type' })
+    await waitFor(() => expect(container.textContent).toContain('26.5 ± 37.5'))
+    expect(container.textContent).toContain('Mean ± sd across 2 neurons')
+  })
+
+  it('prints no spread for a group of one, because one measurement has none', async () => {
+    const { container } = view({ neurons: grouped(), groupBy: 'type', page: 1 })
+    await waitFor(() => expect(within(pager(container)).getByText('Tm9')).toBeTruthy())
+    expect(container.textContent).not.toContain('±')
+  })
+
+  it('counts the answers where the group disagrees rather than showing one member’s', () => {
+    // `instance` differs per neuron by construction. Naming the type after whichever member
+    // sorted first is the quiet lie this exists to avoid.
+    const { container } = view({ neurons: grouped(), groupBy: 'type' })
+    expect(container.textContent).toContain('2 values')
+    // A field they agree on is still just the value.
+    expect(container.textContent).toContain('Traced')
+  })
+
+  it('leaves a disagreement out of the chips, where there is no room to explain it', () => {
+    const { container } = view({ neurons: grouped(), groupBy: 'type', chips: ['class'] })
+    const chips = container.querySelectorAll('.explore-chip')
+    // `class` agrees across both, so it draws; nothing draws "2 values" as a chip.
+    expect([...chips].map((c) => c.textContent)).toContain('optic')
+    expect([...chips].some((c) => c.textContent?.includes('values'))).toBe(false)
+  })
+
+  it('falls back to one neuron at a time when the column is not in the schema', () => {
+    // A picker pointed at a column a Select removed must not empty the card.
+    const { container } = view({ neurons: grouped(), groupBy: 'hemilineage' })
+    expect(within(pager(container)).getByText('1 / 3')).toBeTruthy()
+    // And it must not *label* those rows as groups either. `profileSubjects` decides the
+    // fallback, so the viewer reads its answer rather than re-deriving one from the param —
+    // otherwise a single neuron is drawn with a member count and a "mean ± sd across 1 neuron".
+    expect(container.textContent).not.toContain('1 neuron')
+    expect(container.textContent).not.toContain('Mean ± sd')
+  })
+})
+
+describe('a subject too large to fetch on a page turn', () => {
+  /** One type, one neuron past the ceiling — read from the constant so a change to it lands here. */
+  const OVER = MAX_AUTO_MEMBERS + 1
+
+  function big() {
+    return tableFromRows(
+      NEURONS,
+      Array.from({ length: OVER }, (_, i) => ({
+        neuronId: i + 1,
+        type: 'LC4',
+        instance: `LC4_${i}`,
+        status: 'Traced',
+        class: 'optic',
+        pre: 1,
+        post: 1,
+      })),
+      'neurons',
+    )
+  }
+
+  it('asks before fetching, and asks nothing of the backend until it is answered', async () => {
+    const { container } = view({ neurons: big(), groupBy: 'type' })
+    await waitFor(() => expect(container.textContent).toContain(`LC4 has ${OVER} neurons`))
+    // Not merely hidden: the point of the deferral is that no query was issued.
+    expect(fetches).toBe(0)
+  })
+
+  it('fetches once asked, which is what makes it a deferral rather than a refusal', async () => {
+    const { container } = view({ neurons: big(), groupBy: 'type' })
+    await waitFor(() => screen.getByText('Load anyway'))
+    screen.getByText('Load anyway').click()
+    await waitFor(() => expect(fetches).toBeGreaterThan(0))
+    expect(container.textContent).not.toContain('Load anyway')
+  })
+
+  it('does not re-ask for a subject already in hand', async () => {
+    // The gate is about work a browsing gesture would incur, and a cache hit incurs none. Paging
+    // away from an approved type and back used to re-show the banner, because the approval is
+    // this component's state and the answer is the module's cache.
+    const first = view({ neurons: big(), groupBy: 'type' })
+    await waitFor(() => screen.getByText('Load anyway'))
+    screen.getByText('Load anyway').click()
+    await waitFor(() => expect(fetches).toBeGreaterThan(0))
+    first.unmount()
+
+    const { container } = view({ neurons: big(), groupBy: 'type' })
+    await waitFor(() => expect(container.textContent).toContain('Connectivity'))
+    expect(screen.queryByText('Load anyway')).toBeNull()
+  })
+
+  it('approves one subject at a time, not the pager', async () => {
+    // Approving LC4 must not approve whatever the next › lands on — each is its own decision —
+    // and it must not un-approve LC4 either, which one stored key would.
+    const two = tableFromRows(
+      NEURONS,
+      Array.from({ length: OVER * 2 }, (_, i) => ({
+        neuronId: i + 1,
+        type: i < OVER ? 'LC4' : 'LPLC2',
+        instance: `n${i}`,
+        status: 'Traced',
+        class: 'optic',
+        pre: 1,
+        post: 1,
+      })),
+      'neurons',
+    )
+    const { rerender } = render(card({ neurons: two, groupBy: 'type' }))
+    await waitFor(() => screen.getByText('Load anyway'))
+    screen.getByText('Load anyway').click()
+    await waitFor(() => expect(fetches).toBeGreaterThan(0))
+
+    // The second group is a decision of its own, so the banner is back.
+    rerender(card({ neurons: two, groupBy: 'type', page: 1 }))
+    await waitFor(() => expect(screen.getByText('Load anyway')).toBeTruthy())
+    // And returning to the first does not ask again.
+    rerender(card({ neurons: two, groupBy: 'type', page: 0 }))
+    await waitFor(() => expect(screen.queryByText('Load anyway')).toBeNull())
+  })
+
+  it('leaves a subject under the ceiling alone', async () => {
+    view({ neurons: grouped(), groupBy: 'type' })
+    await waitFor(() => expect(fetches).toBeGreaterThan(0))
+    expect(screen.queryByText('Load anyway')).toBeNull()
   })
 })

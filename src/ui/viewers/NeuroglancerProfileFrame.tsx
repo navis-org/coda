@@ -1,5 +1,5 @@
 /**
- * The profile's 3D tile: the dataset's published neuroglancer scene, showing one neuron.
+ * The profile's 3D tile: the dataset's published neuroglancer scene, showing the subject.
  *
  * A thin wrapper over `NeuroglancerViewer` rather than a second iframe implementation, and
  * that is the whole point of it existing. The `#!+` merge form — which is what lets paging to
@@ -19,23 +19,40 @@ import type { NgScene } from '../../data/neuroglancer/scene'
 import { buildScene, sceneUrl, viewerBaseFor } from '../../data/neuroglancer/scene'
 import { getSource } from '../../data/source'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
+import { formatNumber, plural } from '../format'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
 import { errorMessage } from '../../core/errors'
 
 export interface NeuroglancerProfileFrameProps {
   sourceId: string | undefined
   datasetId: string | undefined
-  /** Text, never a number: it becomes a neuroglancer segment. See invariant 8. */
-  neuronId: string | undefined
+  /**
+   * The subject's neurons. Text, never numbers: these become neuroglancer segments, invariant 8.
+   *
+   * A list rather than one id because a profile's subject can be a whole cell type, and a type
+   * drawn as one of its members is the least useful of the available pictures.
+   */
+  neuronIds: readonly string[]
   onError?: (message: string) => void
 }
 
 /**
- * One neuron, one colour, in palette.
+ * How many segments the scene is given.
  *
- * Slot 0 rather than neuroglancer's own hash colouring: a profile shows a single segment, so
- * a hashed hue would differ between this frame and the 3D view of the same neuron elsewhere
- * in the graph for no reason anyone could act on.
+ * A cell type is routinely tens of neurons and occasionally hundreds, and each is a mesh
+ * neuroglancer downloads and keeps. This is a *drawing* limit and it is said out loud below —
+ * unlike the profile's own fetch gate, there is nothing here for the reader to approve, because
+ * the hundred-and-first mesh does not add a picture anybody can read.
+ */
+const MAX_SEGMENTS = 25
+
+/**
+ * One colour for the subject, in palette.
+ *
+ * Slot 0 rather than neuroglancer's own hash colouring, so this frame and the 3D view of the
+ * same neuron elsewhere in the graph agree for no reason anyone could act on. One colour for
+ * every segment even when the subject is a whole cell type: the tile answers "where is this
+ * type", and hashing per body would imply a distinction the card is not making.
  */
 const SEGMENT_COLOR: ColorSpec = { mode: 'constant', column: undefined, constant: '0' }
 
@@ -101,10 +118,11 @@ function usePublishedScene(
 export function NeuroglancerProfileFrame({
   sourceId,
   datasetId,
-  neuronId,
+  neuronIds,
   onError,
 }: NeuroglancerProfileFrameProps) {
   const state = usePublishedScene(sourceId, datasetId)
+  const shown = neuronIds.slice(0, MAX_SEGMENTS)
 
   if (state.status === 'loading') return <p className="profile__pending">Loading scene…</p>
   if (state.status === 'none') return <p className="profile__pending">No dataset</p>
@@ -125,28 +143,38 @@ export function NeuroglancerProfileFrame({
    */
   const scene = buildScene(state.scene, {
     datasetId: datasetId ?? '',
-    segments: neuronId === undefined ? [] : [neuronId],
+    segments: shown,
     segmentDefaultColor: '#3987e5',
     layout: '3d',
     layers: 'all',
   })
 
   return (
-    <NeuroglancerViewer
-      // The dataset's own deployment, through the same resolver `out.neuroglancer` uses. This
-      // was a bare `''`, so a CAVE dataset opened in the built-in default rather than the viewer
-      // its own datastack names — and a segmentation source is written for one flavour or the
-      // other, so it drew the EM volume with no neurons in it. See `viewerKind`.
-      url={sceneUrl(
-        viewerBaseFor('', getSource(sourceId ?? '')?.peekDataset(datasetId ?? '')?.viewerSite),
-        scene,
+    <>
+      {neuronIds.length > shown.length && (
+        <p className="tile__note">
+          Showing {formatNumber(shown.length)} of {plural(neuronIds.length, 'neuron')}.
+        </p>
       )}
-      color={SEGMENT_COLOR}
-      // This frame builds its own scene from the same `buildScene` and adds no extra layers, so
-      // the one layer it owns is the dataset's own segmentation.
-      datasetId={datasetId}
-      compact
-      onError={onError}
-    />
+      <NeuroglancerViewer
+        // The dataset's own deployment, through the same resolver `out.neuroglancer` uses. This
+        // was a bare `''`, so a CAVE dataset opened in the built-in default rather than the viewer
+        // its own datastack names — and a segmentation source is written for one flavour or the
+        // other, so it drew the EM volume with no neurons in it. See `viewerKind`.
+        url={sceneUrl(
+          viewerBaseFor(
+            '',
+            getSource(sourceId ?? '')?.peekDataset(datasetId ?? '')?.viewerSite,
+          ),
+          scene,
+        )}
+        color={SEGMENT_COLOR}
+        // This frame builds its own scene from the same `buildScene` and adds no extra layers, so
+        // the one layer it owns is the dataset's own segmentation.
+        datasetId={datasetId}
+        compact
+        onError={onError}
+      />
+    </>
   )
 }

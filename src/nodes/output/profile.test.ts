@@ -246,6 +246,36 @@ describe('out.profile — provenance', () => {
     expect(scheduler.info('prof').state).toBe('stale')
   })
 
+  it('grouping is free, because a pin resolves the group to ids before the port sees it', async () => {
+    // The claim the `groupBy` picker rests on. Switching from one cell at a time to one cell
+    // type at a time changes every number the card draws and *nothing* either port carries —
+    // `selection` is a list of neurons under both, so `evaluate` never learns grouping exists.
+    // Were it wrong, a presentational param would be in the provenance key (invariant 4).
+    const graph = pipeline()
+    await scheduler.run(graph, { mode: 'full' })
+
+    const byType = setNodeParam(graph, 'prof', 'groupBy', 'type')
+    scheduler.refreshStates(byType)
+    expect(scheduler.info('prof').state).toBe('ok')
+
+    const summary = await scheduler.run(byType, { mode: 'full' })
+    expect(summary.executed).toEqual([])
+  })
+
+  it('leaves the group picker unset rather than substituting a column', () => {
+    // `resolveColumn`'s rule 3 substitutes the first compatible column for a *required* picker
+    // the schema has no default for — which here would group every profile by whatever column
+    // came first, silently and on graphs saved before this existed.
+    const params = requireNodeDef('out.profile').params ?? []
+    const groupBy = params.find((p) => p.id === 'groupBy')
+    expect(groupBy?.kind).toBe('column')
+    // Narrowed rather than read off `ParamDef`: `optional` lives on the column arm, and reading
+    // it through the union is what the compiler is right to refuse.
+    if (groupBy?.kind !== 'column') throw new Error('groupBy is not a column picker')
+    expect(groupBy.optional).toBe(true)
+    expect(groupBy.default).toBe('')
+  })
+
   it('is cheap, because evaluate touches no network', () => {
     expect(requireNodeDef('out.profile').cost).toBe('cheap')
   })
@@ -257,6 +287,7 @@ describe('out.profile — provenance', () => {
     expect(params.find((p) => p.id === 'page')?.presentational).toBe(true)
     expect(params.find((p) => p.id === 'minWeight')?.presentational).toBe(true)
     expect(params.find((p) => p.id === 'topN')?.presentational).toBe(true)
+    expect(params.find((p) => p.id === 'groupBy')?.presentational).toBe(true)
     expect(params.find((p) => p.id === 'selection')?.presentational).toBeFalsy()
   })
 })

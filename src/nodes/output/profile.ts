@@ -22,6 +22,14 @@
  * downstream graph stale; with auto-run on it would fire a full pass per page turn. This is
  * the same live-widget / committed-param split that makes Explore feel like a browser.
  *
+ * **A subject is a neuron or a group of them, and grouping is presentational too.** With
+ * `groupBy` set, the pager pages cell types (or hemilineages, or clusters) and every tile shows
+ * a mean across the members with its spread beside it. That could reach the ports and does not,
+ * because a pin resolves the group to its member ids before writing them: `selection` is a list
+ * of neurons either way, `evaluate` is unchanged, and `Current` still emits neurons rather than
+ * acquiring a second meaning. The arithmetic is `profileStats`' subject layer, which is the
+ * single-neuron roll-ups run per member and folded — so the two modes cannot drift apart.
+ *
  * **`minWeight` and `topN` are presentational, and that is not an oversight.** Neither can
  * change a byte of what the ports carry — the outputs are the pass-through and the pinned
  * row, and no threshold touches either. They decide what the widget *draws*, so marking them
@@ -52,14 +60,24 @@ export const profileNode = registerNode({
   type: 'out.profile',
   label: 'Neuron Profile',
   category: 'visualisation',
+  /*
+   * Longer than most, for `core.groupBy`'s reason: the assistant's catalogue renders param
+   * `help` only at `full` detail and defaults to `lean`, so in the prompt the model actually
+   * sees this node has a bare `groupBy column` line and nothing saying what it does. Whatever a
+   * planner must know to *choose* this node has to be here. The first sentence is still the
+   * one-liner the palette shows.
+   */
   description:
-    'Inspect one neuron at a time: identity, partners by type, regions, transmitter and shape.',
+    'Inspect one neuron at a time: identity, partners by type, regions, transmitter and shape. ' +
+    'Set Group by to a column and it profiles whole groups instead — one cell type per page, ' +
+    'every number a mean with a spread across the members.',
+  // Capped at 400 characters — `help.test.ts` holds it to being a TL;DR rather than the page.
   guide:
-    'Inspect one neuron at a time: identity and classification, partners rolled up by type in ' +
-    'both directions, synapses by region, transmitter call, and a 3D view of the cell. It takes ' +
-    'a whole collection rather than one body, so it works on an Explore selection or a ' +
-    'connectivity result. Paging through the neurons is free; pinning one sends it out of the ' +
-    'Current port and is what marks the graph stale.',
+    'Inspect one neuron at a time: identity, partners by type in both directions, synapses by ' +
+    'region, transmitter, and a 3D view. Set Group by to a column and it pages those groups ' +
+    'instead — a cell type, a hemilineage, a cluster — every number a mean with its spread. ' +
+    'Paging is free; pinning sends what you are looking at, a whole type when grouped, out of ' +
+    'the Current port and marks the graph stale.',
   cost: 'cheap',
   defaultSize: { width: 560, height: 620 },
   inputs: [
@@ -94,6 +112,37 @@ export const profileNode = registerNode({
     },
     {
       /*
+       * The subject the profile is about: one neuron per row, or one per distinct value here.
+       *
+       * A column picker rather than a `Show types` boolean, and the difference is not taste. A
+       * boolean has to name `type`, which is the one thing the widget's own rule forbids — no
+       * tile here names a column that must be present, because datasets disagree about nearly
+       * all of them. CAVE and CATMAID spell it differently, a table through Select may not carry
+       * it at all, and `Match Cell Types` publishes a *shared* label that is the only sensible
+       * subject for a cross-brain profile. The same control then also profiles by hemilineage,
+       * by class, or by a cluster id out of `Cut Tree`, for nothing extra.
+       *
+       * **Presentational, and that is a real claim about the ports.** Grouping cannot reach
+       * either output because pinning resolves a group to its member ids *at pin time* — what
+       * lands in `selection` is a list of neurons, so `evaluate` never learns grouping exists
+       * and `Current` keeps meaning exactly what it always meant. Getting this wrong the other
+       * way would put a presentational param in the provenance key (invariant 4).
+       *
+       * `optional`, so empty stays empty: `resolveColumn`'s rule 3 substitutes the first
+       * compatible column for a *required* picker the schema has no default for, which here
+       * would silently group every profile by whatever column happens to come first.
+       */
+      id: 'groupBy',
+      kind: 'column',
+      label: 'Group by',
+      from: 'neurons',
+      help: 'Profile every neuron sharing this column’s value together — means and spreads across a cell type rather than one cell. Leave empty for one neuron at a time.',
+      default: '',
+      optional: true,
+      presentational: true,
+    },
+    {
+      /*
        * Named `selection` rather than `pinned` on purpose: this is the same param the 3D and
        * network viewers write, so it travels down the write-back path the UI already has and
        * reads the same way in the inspector on every viewer.
@@ -102,7 +151,9 @@ export const profileNode = registerNode({
       kind: 'ids',
       label: 'Pinned',
       noun: 'neurons',
-      help: 'The neuron the Current port emits. Written by the widget’s pin control; kept when you page away.',
+      help:
+        'The neurons the Current port emits. Written by the widget’s pin control — one neuron, ' +
+        'or every member of the group when Group by is set. Kept when you page away.',
       default: [],
     },
     {

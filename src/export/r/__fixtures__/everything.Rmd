@@ -650,7 +650,7 @@ coda_partner_vectors <- function(edges, neurons = NULL, partner_by = "type",
 }
 
 
-coda_profile <- function(ids, min_weight = 1, top_n = 10, conn) {
+coda_profile <- function(ids, min_weight = 1, top_n = 10, groups = NULL, conn) {
   # Keys mirror the card's tiles: upstream_types, downstream_types, top_upstream,
   # top_downstream, regions.
   #
@@ -669,7 +669,7 @@ coda_profile <- function(ids, min_weight = 1, top_n = 10, conn) {
     tbl
   }
 
-  roll_up <- function(tbl) {
+  roll_up <- function(tbl, cap = top_n) {
     if (is.null(tbl)) return(NULL)
     tbl |>
       group_by(bodyid) |>
@@ -682,17 +682,17 @@ coda_profile <- function(ids, min_weight = 1, top_n = 10, conn) {
       select(-total_syn, -total_partners) |>
       arrange(bodyid, desc(synapses), type) |>
       group_by(bodyid) |>
-      (\(g) if (top_n > 0) slice_head(g, n = top_n) else g)() |>
+      (\(g) if (cap > 0) slice_head(g, n = cap) else g)() |>
       ungroup()
   }
 
-  top_of <- function(tbl) {
+  top_of <- function(tbl, cap = top_n) {
     if (is.null(tbl)) return(NULL)
     tbl |>
       group_by(bodyid) |>
       mutate(share = weight / sum(weight)) |>
       arrange(bodyid, desc(weight), partner) |>
-      (\(g) if (top_n > 0) slice_head(g, n = top_n) else g)() |>
+      (\(g) if (cap > 0) slice_head(g, n = cap) else g)() |>
       ungroup()
   }
 
@@ -702,14 +702,104 @@ coda_profile <- function(ids, min_weight = 1, top_n = 10, conn) {
   primary <- neuprint_ROIs(superLevel = FALSE, conn = conn)
   roi <- neuprint_get_roiInfo(ids, conn = conn)
 
+  if (is.null(groups)) {
+    return(list(
+      upstream_types = roll_up(up),
+      downstream_types = roll_up(down),
+      top_upstream = top_of(up),
+      top_downstream = top_of(down),
+      regions = roi,
+      primary_rois = primary
+    ))
+  }
+
+  # Uncapped before the fold, capped after it: capping each member's own list first would
+  # rank a partner type by how often it reaches somebody's top ten rather than by how
+  # strong it is. Passed as `cap = 0` at each call rather than by reassigning `top_n`, which
+  # the closures above capture -- rewriting what a parameter means underneath them leaves a
+  # signature saying the per-neuron frames are capped when they are not.
+  rank_groups <- function(df, column) {
+    if (is.null(df) || top_n <= 0) return(df)
+    df |> group_by(group) |> arrange(desc(.data[[column]]), .by_group = TRUE) |>
+      slice_head(n = top_n) |> ungroup()
+  }
+
+  # Bound once: R has no common-subexpression elimination, so `roll_up(up)` written twice is
+  # two full group_by/summarise passes over the connectivity frame in every knit.
+  up_types <- roll_up(up, cap = 0)
+  down_types <- roll_up(down, cap = 0)
+
   list(
-    upstream_types = roll_up(up),
-    downstream_types = roll_up(down),
-    top_upstream = top_of(up),
-    top_downstream = top_of(down),
+    upstream_types = rank_groups(
+      coda_group_means(up_types, groups, "type", c("synapses", "partners")),
+      "synapses_mean"
+    ),
+    downstream_types = rank_groups(
+      coda_group_means(down_types, groups, "type", c("synapses", "partners")),
+      "synapses_mean"
+    ),
+    top_upstream = rank_groups(
+      coda_group_means(top_of(up, cap = 0), groups, c("partner", "type"), "weight"),
+      "weight_mean"
+    ),
+    top_downstream = rank_groups(
+      coda_group_means(top_of(down, cap = 0), groups, c("partner", "type"), "weight"),
+      "weight_mean"
+    ),
+    # NOT folded, and the same raw roiInfo the ungrouped branch returns: neuprintr hands
+    # back the nested breakdown and leaves the primary-ROI filter to the reader, so a mean
+    # over it would average double-counted totals. The Python helper folds its regions
+    # because it filters them first.
     regions = roi,
-    primary_rois = primary
+    primary_rois = primary,
+    upstream_types_by_neuron = up_types,
+    downstream_types_by_neuron = down_types
   )
+}
+
+coda_group_means <- function(per_neuron, groups, keys, values) {
+  # Per-neuron rows folded to one row per (group, key), absent members counted as ZERO.
+  #
+  # `groups` is a data frame of bodyid and group. Every member of a group is in the
+  # denominator whether or not it has a row here, and that is the whole of what makes these
+  # means over a cell type: a neuron that never reaches partner type X has been measured,
+  # and the measurement is zero. Averaging the rows present would report the mean over the
+  # members that happen to connect and print it under the type's name.
+  #
+  # `<value>_present` is what tells those two apart. The spread is the SAMPLE sd and is NA
+  # for a group of one, where the spread of one measurement is unknown rather than zero.
+  #
+  # Ported from `subjectPartnerTypes` in nodes/lib/profileStats.ts, which is what the card
+  # draws; `pnpm probe:r-helpers` runs this against the same numbers.
+  if (is.null(per_neuron) || nrow(per_neuron) == 0) return(NULL)
+  sizes <- groups |> count(group, name = "n")
+  df <- per_neuron |> inner_join(groups, by = "bodyid")
+  by <- c("group", keys)
+
+  out <- NULL
+  for (value in values) {
+    stats <- df |>
+      group_by(across(all_of(by))) |>
+      summarise(total = sum(.data[[value]]), counted = n(),
+                present = sum(.data[[value]] != 0), .groups = "drop") |>
+      left_join(sizes, by = "group") |>
+      mutate(mean = total / n)
+    # Second pass, because a deviation needs the mean. Members with no row here each
+    # contribute a full (0 - mean)^2, which is the (n - counted) term.
+    ss <- df |>
+      left_join(stats, by = by) |>
+      group_by(across(all_of(by))) |>
+      summarise(ss = sum((.data[[value]] - mean)^2), .groups = "drop")
+    stats <- stats |>
+      left_join(ss, by = by) |>
+      mutate(sd = ifelse(n > 1, sqrt((ss + (n - counted) * mean^2) / (n - 1)),
+                         NA_real_)) |>
+      select(all_of(by), n, mean, sd, present)
+    names(stats)[names(stats) %in% c("mean", "sd", "present")] <-
+      paste0(value, "_", c("mean", "sd", "present"))
+    out <- if (is.null(out)) stats else left_join(out, stats, by = c(by, "n"))
+  }
+  out
 }
 
 
@@ -1447,6 +1537,30 @@ neuron_profile_top_downstream <- profile$top_downstream
 neuron_profile_regions <- profile$regions
 
 neuron_profile_upstream_types
+```
+
+```{r neuron-profile-2}
+# ── Neuron Profile ──
+neuron_profile_2_out <- find_neurons
+# NOTE: No neuron is pinned on the canvas, so Current is empty.
+neuron_profile_2_current <- neuron_profile_2_out |> slice(0)
+
+profile <- coda_profile(
+  neuron_profile_2_out$neuronId,
+  min_weight = 1,
+  top_n = 5,
+  groups = neuron_profile_2_out |> select(bodyid = neuronId, group = `type`),
+  conn = hemibrain_neuprint
+)
+
+neuron_profile_2_upstream_types <- profile$upstream_types
+neuron_profile_2_downstream_types <- profile$downstream_types
+neuron_profile_2_top_upstream <- profile$top_upstream
+neuron_profile_2_top_downstream <- profile$top_downstream
+neuron_profile_2_regions <- profile$regions
+neuron_profile_2_upstream_types_by_neuron <- profile$upstream_types_by_neuron
+
+neuron_profile_2_upstream_types
 ```
 
 ```{r neuroglancer}

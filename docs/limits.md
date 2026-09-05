@@ -200,6 +200,22 @@ Left alone deliberately, so a sweep like this one does not come back for them:
   real fix is an archive, and that is a feature rather than a number.
 - **`MAX_ROOTS_CHECKED` (250,000)** — a backstop on somebody else's service that already reports
   `checked` against `total`, so it is on the warn tier by construction.
+- **`MAX_SEGMENTS` (25, `NeuroglancerProfileFrame`)** — a *drawing* cap, and the ordinary kind:
+  a grouped profile hands the neuroglancer frame every member of a cell type, and each is a mesh
+  the viewer downloads and keeps. Said out loud on the tile ("Showing 25 of 214 neurons") rather
+  than offered as a choice the way `MAX_AUTO_MEMBERS` is, because the hundred-and-first mesh does
+  not add a picture anybody can read — there is nothing here for the reader to decide.
+- **`MAX_AUTO_MEMBERS` (50)** — a **deferral**, which is a shape this table did not have before,
+  and it is worth distinguishing from both neighbours. Neuron Profile's `Group by` turned a page
+  turn into a query over a whole cell type; the control is a *column picker*, so `status` is one
+  mis-click from asking a connectome about every traced neuron between two presses of ›. A warning
+  would arrive after the query, and a refusal would be a lie — the answer is perfectly well
+  defined at any size and takes one click to get. So above fifty members nothing is fetched until
+  the banner beside the pager is answered, and each subject is approved on its own, since the
+  point is that it is a decision. The distinction it draws is between work somebody *asked for*
+  and work a browsing gesture would incur: fifty is where a page turn stops being a page turn.
+  Nothing else on this page defers, and nothing else should unless the same two things are true —
+  the cost is incidental to browsing, and one click makes it deliberate.
 - **Correctness refusals.** Not limits at all, and they must never become warnings: mismatched
   NBLAST units (`checkNblastUnits`), a distance control applied to voxel coordinates
   (`cleanOps.checkCleanUnits` — and note it refuses *only* where a distance is actually in play,

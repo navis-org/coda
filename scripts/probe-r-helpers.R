@@ -36,6 +36,12 @@ close_at <- open_at + which(lines[(open_at + 1L):length(lines)] == "```")[1]
 eval(parse(text = paste(lines[(open_at + 1L):(close_at - 1L)], collapse = "\n")),
      envir = globalenv())
 
+# Attached, not qualified, because that is what the document does: the profile emitter calls
+# `ctx.library('dplyr')`, so `coda_group_means` runs under an attached dplyr in every knit. The
+# older helpers here reach for `readr::` and `stats::` instead — those are emitted by helpers
+# that declare no library, and the difference is the declaration rather than a style.
+suppressPackageStartupMessages(library(dplyr))
+
 fails <- 0L
 check <- function(name, ok, detail = "") {
   if (isTRUE(ok)) {
@@ -550,6 +556,57 @@ check("natural: an 18-digit id is compared exactly",
       identical(ids[coda_natural_order(ids)], rev(ids)))
 check("natural: a tie keeps arrival order",
       identical(coda_natural_order(c("b", "A", "a")), c(2L, 3L, 1L)))
+
+# --- the cell-type profile's fold ------------------------------------------------------------
+# `coda_group_means` is the R Markdown's half of Neuron Profile's Group by. Its numbers have to
+# be the card's and the notebook's: `subjectPartnerTypes` in `nodes/lib/profileStats.ts` and
+# `_coda_group_means` in `probe-py-helpers.py` run these same three members. Reading three
+# implementations side by side is exactly what does not catch a denominator — each produces
+# perfectly plausible numbers on its own.
+#
+# Member 1 reaches Tm3 with 10, member 2 with 2, member 3 not at all.
+per_neuron <- data.frame(
+  bodyid = c(1, 2, 3),
+  type = c("Tm3", "Tm3", "Mi1"),
+  synapses = c(10, 2, 6),
+  partners = c(1, 1, 1)
+)
+lc4 <- data.frame(bodyid = c(1, 2, 3), group = c("LC4", "LC4", "LC4"))
+folded <- coda_group_means(per_neuron, lc4, "type", c("synapses", "partners"))
+tm3 <- folded[folded$type == "Tm3", ]
+
+# Three members, not the two that connect. Averaging the rows present would say 6 and print it
+# under the cell type's name.
+check("group fold: divides by every member", isTRUE(tm3$synapses_mean == 4), tm3$synapses_mean)
+check("group fold: sample sd, absent members included",
+      isTRUE(abs(tm3$synapses_sd - sqrt(28)) < 1e-9), tm3$synapses_sd)
+check("group fold: counts who contributed", isTRUE(tm3$synapses_present == 2),
+      tm3$synapses_present)
+check("group fold: n is the group", isTRUE(tm3$n == 3), tm3$n)
+
+# NA, not 0. "12 +/- 0" is a claim one neuron cannot support.
+alone <- coda_group_means(data.frame(bodyid = 1, type = "Tm3", synapses = 10),
+                          data.frame(bodyid = 1, group = "LC4"), "type", "synapses")
+check("group fold: no spread for a group of one", is.na(alone$synapses_sd))
+check("group fold: a group of one keeps its value", isTRUE(alone$synapses_mean == 10))
+
+# The untyped keep their own bucket, exactly as the ungrouped roll-up leaves them.
+untyped <- coda_group_means(
+  data.frame(bodyid = c(1, 2), type = c(NA, "x"), synapses = c(4, 6)),
+  data.frame(bodyid = c(1, 2), group = c("G", "G")), "type", "synapses"
+)
+check("group fold: the untyped bucket survives", isTRUE(nrow(untyped) == 2), nrow(untyped))
+
+# A neuron the grouping does not name is not a member, so not a denominator either.
+outside <- coda_group_means(
+  data.frame(bodyid = c(1, 9), type = c("Tm3", "Tm3"), synapses = c(10, 99)),
+  data.frame(bodyid = 1, group = "LC4"), "type", "synapses"
+)
+check("group fold: an unmapped neuron is not counted", isTRUE(outside$synapses_mean == 10),
+      outside$synapses_mean)
+
+check("group fold: an empty frame answers NULL", is.null(
+  coda_group_means(per_neuron[0, ], lc4, "type", "synapses")))
 
 cat("\n", if (fails > 0L) paste(fails, "failed") else "all passed", "\n", sep = "")
 quit(status = if (fails > 0L) 1L else 0L)

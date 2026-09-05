@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'vitest'
 
+import type { CellValue } from '../../core/values'
 import { tableSchema, column } from '../../core/types'
 import { tableFromRows } from '../../core/values'
 import {
@@ -19,8 +20,14 @@ import {
   partnerTypes,
   regionRows,
   roiSide,
+  partitionByMember,
+  profileSubjects,
+  subjectConnectivity,
+  subjectPartnerTypes,
+  subjectRegions,
+  subjectTopPartners,
+  subjectTransmitter,
   topPartners,
-  transmitterReading,
 } from './profileStats'
 
 const CONNECTIVITY = tableSchema(
@@ -39,8 +46,17 @@ const ROI_COUNTS = tableSchema(
   column('post', 'i64', 'synapses'),
 )
 
+/**
+ * A connectivity table. `neuronId` defaults to one body and is overridable per row, which is what
+ * a *grouped* fetch returns — one table covering every member of the subject.
+ */
 function connectivity(
-  rows: Array<{ partnerId: number; partnerType: string | null; weight: number }>,
+  rows: Array<{
+    neuronId?: number
+    partnerId: number
+    partnerType: string | null
+    weight: number
+  }>,
 ) {
   return tableFromRows(
     CONNECTIVITY,
@@ -242,41 +258,59 @@ describe('hemisphereSplit', () => {
   })
 })
 
-describe('transmitterReading', () => {
+describe('subjectTransmitter', () => {
+  /**
+   * A subject of one, which is how the single-neuron rules are exercised now that there is one
+   * transmitter reader rather than two. The rules themselves — which column holds the call, that
+   * `predictedNtProb` is a confidence and not a transmitter, that a published-but-empty value is
+   * absent — are what these pin; `callColumnOf`, `confidenceColumnOf` and `probabilityLabel` are
+   * where they live.
+   */
+  const one = (row: Record<string, CellValue>) => subjectTransmitter([row])
+
   it('prefers the curated call over the predicted one', () => {
-    const reading = transmitterReading({ consensusNt: 'gaba', predictedNt: 'acetylcholine' })
-    expect(reading.call).toBe('gaba')
-    expect(reading.callColumn).toBe('consensusNt')
+    const reading = one({ consensusNt: 'gaba', predictedNt: 'acetylcholine' })
+    expect(reading.calls.map((c) => c.label)).toEqual(['gaba'])
   })
 
-  it('falls back through the list and reports nothing where a dataset publishes nothing', () => {
-    expect(transmitterReading({ predictedNt: 'gaba' }).call).toBe('gaba')
-    expect(transmitterReading({ type: 'CT1' }).call).toBeUndefined()
-    expect(transmitterReading({ type: 'CT1' }).probabilities).toEqual([])
+  it('falls back to the prediction, and answers nothing where there is none', () => {
+    expect(one({ predictedNt: 'gaba' }).calls[0]?.label).toBe('gaba')
+    expect(one({ type: 'CT1' }).calls).toEqual([])
+    expect(one({ type: 'CT1' }).probabilities).toEqual([])
   })
 
-  it('reads per-transmitter probabilities and shortens the long MANC names', () => {
-    const reading = transmitterReading({
-      ntAcetylcholineProb: 0.3,
-      ntGabaProb: 0.66,
-      ntGlutamateProb: 0.03,
-      ntUnknownProb: 0.01,
-    })
-    expect(reading.probabilities.map((p) => p.label)).toEqual(['GABA', 'ACh', 'Glu', 'unknown'])
-    expect(reading.probabilities[0]?.value).toBeCloseTo(0.66)
+  it('reads the per-transmitter probabilities, strongest first', () => {
+    const reading = one({ ntAchProb: 0.2, ntGabaProb: 0.7, ntGluProb: 0.1 })
+    expect(reading.probabilities.map((p) => p.label)).toEqual(['GABA', 'ACh', 'Glu'])
+    expect(reading.probabilities[0]?.value).toBeCloseTo(0.7)
   })
 
-  it('does not mistake predictedNtProb for a transmitter', () => {
-    // It is the confidence in the call, not a per-transmitter probability. Sweeping it in
-    // puts a phantom bar beside the real ones and makes the set sum past 1.
-    const reading = transmitterReading({ predictedNtProb: 0.92, ntGabaProb: 0.66 })
-    expect(reading.probabilities.map((p) => p.column)).toEqual(['ntGabaProb'])
-    expect(reading.confidence).toBeCloseTo(0.92)
+  it('keeps the confidence out of the probabilities, and reports it separately', () => {
+    // `predictedNtProb` is confidence in the *call*. Swept in as a transmitter it would sit
+    // beside the real ones and make the set sum past one.
+    const reading = one({ predictedNt: 'gaba', predictedNtProb: 0.92, ntGabaProb: 0.66 })
+    expect(reading.probabilities.map((p) => p.label)).toEqual(['GABA'])
+    expect(reading.confidence?.mean).toBeCloseTo(0.92)
   })
 
-  it('ignores non-numeric probability cells rather than charting NaN', () => {
-    const reading = transmitterReading({ ntGabaProb: null, ntAchProb: 0.5 })
-    expect(reading.probabilities.map((p) => p.column)).toEqual(['ntAchProb'])
+  it('skips a column that is published but empty', () => {
+    // `Number(null)` is 0, which is finite — so presence has to be checked first or a missing
+    // probability draws a confident zero.
+    const reading = one({ ntGabaProb: null, ntAchProb: 0.5 })
+    expect(reading.probabilities.map((p) => p.label)).toEqual(['ACh'])
+  })
+
+  it('averages the confidence over the members that publish one', () => {
+    const reading = subjectTransmitter([
+      { predictedNt: 'gaba', predictedNtProb: 0.9 },
+      { predictedNt: 'gaba', predictedNtProb: 0.7 },
+      { predictedNt: 'gaba' },
+    ])
+    // Two publishers, not three: an unscored neuron has not been measured, so counting it as
+    // zero would make a type look less confident the more of it the model declined to score.
+    expect(reading.confidence?.mean).toBeCloseTo(0.8)
+    expect(reading.confidence?.n).toBe(2)
+    expect(reading.calls).toEqual([{ label: 'gaba', count: 3 }])
   })
 })
 
@@ -345,5 +379,210 @@ describe('grouping a partner list', () => {
     expect(partnerKey('neuron', 'Tm3', '900')).toBe('900')
     expect(partnerKey('type', 'Tm3', '900')).toBe('Tm3')
     expect(partnerKey('typed', 'Tm3', '900')).toBe('Tm3')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Subjects
+// ---------------------------------------------------------------------------
+
+const NEURONS = tableSchema(
+  column('neuronId', 'i64'),
+  column('type', 'str'),
+  column('status', 'str'),
+)
+
+function neurons(rows: Array<{ neuronId: number; type: string | null; status?: string }>) {
+  return tableFromRows(
+    NEURONS,
+    rows.map((row) => ({ status: 'Traced', ...row })),
+  )
+}
+
+describe('profileSubjects', () => {
+  it('is one subject per row when nothing is grouped', () => {
+    const subjects = profileSubjects(
+      neurons([
+        { neuronId: 1, type: 'LC4' },
+        { neuronId: 2, type: 'LC4' },
+      ]),
+    )
+    expect(subjects.map((s) => s.key)).toEqual(['1', '2'])
+    expect(subjects.map((s) => s.members)).toEqual([['1'], ['2']])
+  })
+
+  it('groups by the column, keeping the table’s own order', () => {
+    // First appearance, not alphabetical: an upstream Sort is then what decides the paging
+    // order, where a private rule here would silently override it.
+    const subjects = profileSubjects(
+      neurons([
+        { neuronId: 1, type: 'LPLC2' },
+        { neuronId: 2, type: 'LC4' },
+        { neuronId: 3, type: 'LPLC2' },
+      ]),
+      'type',
+    )
+    expect(subjects.map((s) => s.label)).toEqual(['LPLC2', 'LC4'])
+    expect(subjects[0]?.members).toEqual(['1', '3'])
+  })
+
+  it('gives the untyped their own subject rather than folding them into a neighbour', () => {
+    const subjects = profileSubjects(
+      neurons([
+        { neuronId: 1, type: 'LC4' },
+        { neuronId: 2, type: null },
+      ]),
+      'type',
+    )
+    expect(subjects.map((s) => s.label)).toEqual(['LC4', '—'])
+    expect(subjects[1]?.members).toEqual(['2'])
+  })
+
+  it('counts a repeated neuron once, or the denominator is not the type’s size', () => {
+    // A Stack of two searches carries one neuron twice. A mean over three rows and two cells is
+    // not a mean over the cell type.
+    const subjects = profileSubjects(
+      neurons([
+        { neuronId: 1, type: 'LC4' },
+        { neuronId: 2, type: 'LC4' },
+        { neuronId: 1, type: 'LC4' },
+      ]),
+      'type',
+    )
+    expect(subjects[0]?.rows).toHaveLength(3)
+    expect(subjects[0]?.members).toEqual(['1', '2'])
+  })
+
+  it('ignores a group column the schema does not have, and says it did', () => {
+    const subjects = profileSubjects(neurons([{ neuronId: 1, type: 'LC4' }]), 'hemilineage')
+    expect(subjects.map((s) => s.key)).toEqual(['1'])
+    // `grouped` is the fallback's own answer, so a caller cannot disagree with it by reading
+    // the param — which is how a lone neuron came to be drawn as a group of one.
+    expect(subjects[0]?.grouped).toBe(false)
+  })
+
+  it('marks a real group as grouped even when it holds one neuron', () => {
+    const subjects = profileSubjects(neurons([{ neuronId: 1, type: 'LC4' }]), 'type')
+    expect(subjects[0]?.grouped).toBe(true)
+  })
+})
+
+/**
+ * The partition every subject roll-up now takes, spelled out at the call site.
+ *
+ * It used to be built inside each roll-up and memoised behind their backs; passing it in is what
+ * lets three roll-ups over one subject share one `selectRows` pass without the stats module
+ * depending on a caller's `useMemo`.
+ */
+const parts = partitionByMember
+
+describe('subject roll-ups', () => {
+  const TABLE = connectivity([
+    // Member 1 reaches Tm3 with 10, member 2 with 2, member 3 not at all.
+    { neuronId: 1, partnerId: 900, partnerType: 'Tm3', weight: 10 },
+    { neuronId: 2, partnerId: 901, partnerType: 'Tm3', weight: 2 },
+    { neuronId: 3, partnerId: 902, partnerType: 'Mi1', weight: 6 },
+  ])
+
+  it('divides by every member, not by the ones that happen to connect', () => {
+    // The whole reason `present` sits beside `mean`: 4 across three cells where one connects is
+    // a different fact from 4 across three where all three do, and the mean cannot say which.
+    const rows = subjectPartnerTypes(parts(TABLE, ['1', '2', '3']))
+    const tm3 = rows.find((r) => r.type === 'Tm3')
+    expect(tm3?.synapses.total).toBe(12)
+    expect(tm3?.synapses.mean).toBeCloseTo(4)
+    expect(tm3?.synapses.present).toBe(2)
+    expect(tm3?.synapses.n).toBe(3)
+  })
+
+  it('counts a member with no rows at all as a measured zero', () => {
+    // Member 4 is in the type and connects to nothing the fetch returned. Dropping it would
+    // report the mean over the members that connect and call it the mean over the type.
+    const rows = subjectPartnerTypes(parts(TABLE, ['1', '2', '3', '4']))
+    expect(rows.find((r) => r.type === 'Tm3')?.synapses.mean).toBeCloseTo(3)
+  })
+
+  it('reports a sample standard deviation, and none for a subject of one', () => {
+    // [10, 0, 2] about a mean of 4: 36 + 16 + 4 = 56, over n-1 = 2.
+    const rows = subjectPartnerTypes(parts(TABLE, ['1', '2', '3']))
+    expect(rows.find((r) => r.type === 'Tm3')?.synapses.sd).toBeCloseTo(Math.sqrt(28))
+
+    const alone = subjectPartnerTypes(parts(TABLE, ['1']))
+    expect(alone[0]?.synapses.sd).toBeNull()
+  })
+
+  it('agrees with the single-neuron roll-up on a subject of one', () => {
+    // The grouped answer *is* the ungrouped one folded — that is the point of running the same
+    // functions per member rather than reimplementing them over a grouped table.
+    const one = connectivity([
+      { neuronId: 1, partnerId: 900, partnerType: 'Tm3', weight: 10 },
+      { neuronId: 1, partnerId: 901, partnerType: null, weight: 3 },
+    ])
+    const flat = partnerTypes(one, { minWeight: 1 })
+    const grouped = subjectPartnerTypes(parts(one, ['1']))
+    expect(grouped.map((r) => r.type)).toEqual(flat.map((r) => r.type))
+    expect(grouped.map((r) => r.synapses.total)).toEqual(flat.map((r) => r.synapses))
+    expect(grouped.map((r) => r.partners.total)).toEqual(flat.map((r) => r.partners))
+    expect(grouped.map((r) => r.synapseShare)).toEqual(flat.map((r) => r.synapseShare))
+  })
+
+  it('ranks on the whole population, not on each member’s own top list', () => {
+    // Capping per member first would rank a type by how often it reaches somebody's top ten
+    // rather than by how strong it is.
+    const rows = subjectPartnerTypes(parts(TABLE, ['1', '2', '3']), { topN: 1 })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.type).toBe('Tm3')
+  })
+
+  it('summarises synapses and partners per member', () => {
+    const summary = subjectConnectivity(parts(TABLE, ['1', '2', '3']))
+    expect(summary.synapses.total).toBe(18)
+    expect(summary.synapses.mean).toBeCloseTo(6)
+    expect(summary.partners.total).toBe(3)
+    expect(summary.partners.n).toBe(3)
+  })
+
+  it('honours the threshold without a refetch, exactly as the single-neuron list does', () => {
+    const rows = subjectPartnerTypes(parts(TABLE, ['1', '2', '3']), { minWeight: 5 })
+    expect(rows.map((r) => r.type)).toEqual(['Tm3', 'Mi1'])
+    // Member 2's connection of 2 is below the floor, so Tm3 is 10 over three members.
+    expect(rows[0]?.synapses.total).toBe(10)
+    expect(rows[0]?.synapses.present).toBe(1)
+  })
+
+  it('rolls individual partners up per member too', () => {
+    const rows = subjectTopPartners(parts(TABLE, ['1', '2', '3']))
+    expect(rows[0]).toMatchObject({ neuronId: '900', type: 'Tm3' })
+    expect(rows[0]?.weight.mean).toBeCloseTo(10 / 3)
+    expect(rows[0]?.weight.present).toBe(1)
+  })
+})
+
+describe('subjectRegions', () => {
+  const TABLE = tableFromRows(ROI_COUNTS, [
+    { neuronId: 1, type: 'LC4', roi: 'LO(R)', pre: 10, post: 4 },
+    { neuronId: 1, type: 'LC4', roi: 'OL(R)', pre: 10, post: 4 },
+    { neuronId: 2, type: 'LC4', roi: 'LO(R)', pre: 6, post: 2 },
+  ])
+
+  it('filters to the primary list before averaging, or the totals double-count', () => {
+    const out = subjectRegions(parts(TABLE, ['1', '2']), { primaryRois: ['LO(R)'] })
+    expect(out.rows.map((r) => r.roi)).toEqual(['LO(R)'])
+    expect(out.rows[0]?.pre.mean).toBeCloseTo(8)
+    expect(out.rows[0]?.post.mean).toBeCloseTo(3)
+  })
+
+  it('splits the sides over every region, not only the ones the list shows', () => {
+    const out = subjectRegions(parts(TABLE, ['1', '2']), { primaryRois: ['LO(R)'] })
+    expect(out.right.mean).toBeCloseTo(11)
+    expect(out.left.total).toBe(0)
+    expect(out.total).toBeCloseTo(11)
+  })
+
+  it('counts a member with no regions as a zero, not as an absence', () => {
+    const out = subjectRegions(parts(TABLE, ['1', '2', '3']), { primaryRois: ['LO(R)'] })
+    expect(out.rows[0]?.pre.mean).toBeCloseTo(16 / 3)
+    expect(out.rows[0]?.pre.n).toBe(3)
+    expect(out.rows[0]?.pre.present).toBe(2)
   })
 })

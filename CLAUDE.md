@@ -652,6 +652,28 @@ Area-specific — the rule, then the doc that holds why:
   ride on the result and `evaluate` warns from them, which is `out.describe`'s arrangement.
   See [docs/nodes.md](docs/nodes.md), [docs/viewers.md](docs/viewers.md) and
   [docs/export.md](docs/export.md).
+- **A profile's subject is a neuron or a group of them, and the grouped answer is the ungrouped one
+  folded.** Neuron Profile's `Group by` is a **column picker, not a `Show types` boolean** — a boolean
+  has to name `type`, which is the one thing that card's own rule forbids, and the picker also buys
+  hemilineage, class, a `Cut Tree` cluster and `Match Cell Types`' shared label. It stays
+  **presentational** because a **pin resolves the group to member ids at pin time**: `selection` is a
+  list of neurons under both modes, so `evaluate` is untouched and `Current` gains no second meaning.
+  `profileStats`' subject layer partitions the fetched table by member and runs the *same*
+  single-neuron roll-ups per part — reimplementing them over a grouped table is how the untyped
+  bucket, the `>= minWeight` boundary and the nested-ROI filter come to disagree while still drawing
+  a plausible bar. **Absent is a measured zero**, inverting `groupByTable`'s null rule on purpose (the
+  fetch enumerated every partner of every member), which is why `Aggregate.present` rides beside
+  `mean` — 4 across thirty cells where two connect is a different fact from 4 where all thirty do.
+  The two measurements that *are* unmeasured when absent, a transmitter probability and a table
+  attribute like `size`, say so where they are computed. `sd` is **null below two members**, never 0.
+  Above `MAX_AUTO_MEMBERS` a subject is **deferred, not refused** — one banner, per subject, because a
+  column picker puts `status` one mis-click from querying a whole connectome between two page turns.
+  The exporters fold too — **Python over every frame, R over the partner frames only**, because
+  neuprintr hands back the nested `roiInfo` and leaves the primary-ROI filter to the reader, so a
+  mean over it would average double-counted totals; each says so where it diverges. All three
+  implementations are pinned against the same three members by `pnpm probe:helpers` and
+  `pnpm probe:r-helpers`. A grouped emit **widens a pin to the whole table**, since a pin under a
+  grouping is one group's members. See [docs/widgets.md](docs/widgets.md).
 - **A dataset-level filter is not a filter row, the row wins, and the filters OR.** The population
   checkboxes on a neuPrint dataset node are **OR-ed** — a second ticked box lets *more* rows through.
   `typed` matches column names **ending** in `type`. `findNeuronsCypher` drops the `traced` disjunct
