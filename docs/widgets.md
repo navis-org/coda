@@ -2,9 +2,6 @@
 
 Explore Dataset, Neuron Profile, Dataset Summary and ROI Viewer — the surfaces that fetch for themselves.
 
-Moved verbatim out of `CLAUDE.md`.
-
-
 ## Explore Dataset: the browsing widget
 
 The entry point for someone who does not yet know what to ask for. `Find Neurons` is

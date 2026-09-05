@@ -2,9 +2,6 @@
 
 The scheduler-adjacent rules: caching, auto-run, and reference edges.
 
-Moved verbatim out of `CLAUDE.md`.
-
-
 ## Three caches, and the two controls that clear them
 
 `Invalidate Results` and `Clear Cache`, in the node's context menu and side by side in the
@@ -340,7 +337,6 @@ pairing beside it is refused for the same reason.
 **`autoWireDataset` fills at most one port per group.** Pointing every Dataset input of a
 comparison node at the graph's single dataset node wires it to compare a connectome with itself
 — a graph that runs, produces an answer, and means nothing.
-
 
 ## Reference edges — a port that names a node
 

@@ -2,9 +2,6 @@
 
 One section per node whose behaviour cost a decision. See also `adding-a-node.md`.
 
-Moved verbatim out of `CLAUDE.md`.
-
-
 ## Text notes
 
 `note.text`, added from `Add ▶ Utility ▶ Text`: a framed block of markdown on the canvas. It is
@@ -3130,7 +3127,6 @@ on screen.
 **The miss is only reported with a Dataset wired.** Unwired the node hands back exactly the ids it
 was given, so every id matches by construction and a `0 not found` line would be a fact about
 nothing.
-
 
 ## List CAVE tables and CAVE table info
 

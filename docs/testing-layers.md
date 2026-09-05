@@ -2,9 +2,6 @@
 
 Which test file covers what — the index to consult before writing a new test.
 
-Moved verbatim out of `CLAUDE.md`.
-
-
 ## Testing layers
 
 | File                                     | Covers                                                                                                                           |

@@ -2,9 +2,6 @@
 
 The family table, the companion card, auto-wiring, and the starter graphs.
 
-Moved verbatim out of `CLAUDE.md`.
-
-
 ## Dataset nodes
 
 **One node per dataset, not one generic picker.** `Add ▶ Dataset ▶ MaleCNS` replaces choosing a

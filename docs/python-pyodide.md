@@ -2,9 +2,6 @@
 
 The Pyodide bridge and the two capabilities built on it.
 
-Moved verbatim out of `CLAUDE.md`.
-
-
 ## NBLAST, and Python in the tab
 
 `neuron.nblast`, `Add ▸ Analysis ▸ NBLAST`. Skeletons in, a score matrix out — which is a

@@ -3,7 +3,6 @@
 Long-form, in-app documentation for the nodes that need more than a sentence — the
 overlay, the document format, and the figures that draw real registry objects.
 
-
 ## What this is, and what it is not
 
 There are now four places a node describes itself, and they are not interchangeable:
@@ -25,7 +24,6 @@ The `?` button exists **because a file exists** and for no other reason. There i
 `src/help/nodes/neuron.nblast.md` into place and the NBLAST card grows a `?` on the next reload.
 The alternative — a `hasDocs: true` beside the definition — is two things that can disagree, and
 the failure when they do is a button that opens nothing.
-
 
 ## Writing one
 
@@ -49,7 +47,6 @@ node's `guide` and move the detail into the file — NBLAST's was 830 characters
 **Cross-reference with a fragment**: `[Hierarchical Clustering](#cluster.linkage)`. That opens the
 other node's document *in the same overlay*, with a Back button. The target must itself have a
 document — a cross-reference that opens an empty page is a broken link, and the test says so.
-
 
 ## The format
 
@@ -86,7 +83,6 @@ Figure images get a **white plate**, and that is not cosmetic either. These diag
 white or on transparency with black ink, which in dark mode is a bright rectangle with a hard
 edge or — worse — black ink on a dark surface and therefore invisible. Inverting instead was
 rejected: they use colour semantically, and an inverted red query neuron is a different claim.
-
 
 ## Figures: actual Coda objects
 
@@ -145,7 +141,6 @@ asserted to produce none, which is what turns "renders a complaint" from a toler
 build-time check; what the complaint actually serves is the person editing a document with the
 app open beside them.
 
-
 ## Headless, so the node guide can adopt it
 
 `src/help/figures.ts` produces a **model** — cards with positions and sizes, wires with an SVG
@@ -187,7 +182,6 @@ The wire is React Flow's bezier written out in six lines rather than imported, b
 `getBezierPath` would make the module depend on React, which is the one thing the guide page
 cannot have.
 
-
 ## Where the button is, and where it is not
 
 Four entry points, all opening the same overlay keyed on the node **type**:
@@ -208,7 +202,6 @@ browser's footer already links the node guide, which is the reference the row's 
 Keyed on the type rather than on a node id is the whole design. A document is about a *kind* of
 node, which is what lets the same overlay open from a card, from a menu, and from a
 cross-reference inside another document — a node id would have made the last of those meaningless.
-
 
 ## Loading, and what it costs
 

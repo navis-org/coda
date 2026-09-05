@@ -2,9 +2,6 @@
 
 The overview, tutorial and node guide — extra vite entries that ship beside the app.
 
-Moved verbatim out of `CLAUDE.md`.
-
-
 ## The overview page
 
 A **fourth** vite entry — `overview.html` at the root, `src/overview/{main.ts,overview.css}` —

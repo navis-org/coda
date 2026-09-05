@@ -2,9 +2,6 @@
 
 React Flow, layout, and every gesture that edits the graph by pointer.
 
-Moved verbatim out of `CLAUDE.md`.
-
-
 ## Framing a graph that was just opened
 
 `loadGraph` bumps `fitRequest`; the canvas catches it and calls `fitView`. Everything that opens

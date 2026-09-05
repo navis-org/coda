@@ -3,9 +3,6 @@
 Panels, fullscreen, the run indicator, the `?` menu, the keyboard-shortcut table and the
 start page.
 
-Moved verbatim out of `CLAUDE.md`.
-
-
 ## Two shortcut listeners, split by what a key is about
 
 `shortcuts.ts` is the one *description* of every binding — that has not changed, and neither has

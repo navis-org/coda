@@ -2,9 +2,6 @@
 
 The `src/export` tree: both language exporters, the refusal policy, and the goldens.
 
-Moved verbatim out of `CLAUDE.md`.
-
-
 ## Exporting a notebook
 
 `Save ▸ Export as Jupyter Notebook`, or the palette's `Graph ▸ Export as Jupyter Notebook`, writes the graph as

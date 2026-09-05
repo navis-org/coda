@@ -2,8 +2,6 @@
 
 Everything under `src/data` that talks to somebody else's server.
 
-Moved verbatim out of `CLAUDE.md`.
-
 **Every _neuron_ skeleton and mesh fetch goes through `geometryCache.ts` first.** All three
 backends compose their own key and hand it the ids they were asked for; it answers the ones it
 holds and calls back with only the remainder, so a node re-running on a changed neuron set
@@ -53,7 +51,6 @@ the cache was written for at ten times the bytes per item. It needs `refresh`/`o
 `NeuPrintSource.fetchRoiMeshes`, and `dataCache: true` on the node. Note `roiOutlines.ts` caches
 only the *derived 2D outlines*, under a UI-layer key, so the ROI Viewer and the node share
 nothing today.
-
 
 ## neuPrint
 
@@ -2115,7 +2112,6 @@ misleadingly named — it is a universal Emscripten build whose `require("fs")` 
 Node-only guard — and the wasm is handed over explicitly via a `?url` import so Emscripten
 never guesses at a path the bundler has hashed. Do not import three's `DRACOLoader` here:
 it would pull three.js into `src/data`, which has to stay usable by a non-browser consumer.
-
 
 ## DVID
 

@@ -2,9 +2,6 @@
 
 Share links, the autosave across tabs, and the browser shelf.
 
-Moved verbatim out of `CLAUDE.md`.
-
-
 ## Sharing a workflow
 
 The **⧉ icon in the toolbar**, or the palette's `Graph ▸ Share Workflow…`: a link that opens

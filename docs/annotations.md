@@ -2,9 +2,6 @@
 
 Where a neuron's labels come from when they do not come from the connectome.
 
-Moved verbatim out of `CLAUDE.md`.
-
-
 ## Annotations, and telling backends apart
 
 Two things landed together because the second is what the first made necessary: neuron labels
