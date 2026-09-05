@@ -349,6 +349,35 @@ describe('the FlyWire starter', () => {
     expect(topoSort(graph).cyclic).toEqual([])
   })
 
+  it('ships the whole chain folded into one frame', () => {
+    /*
+     * The six cards are plumbing that has to be right and never has to be touched, and they are
+     * the biggest thing on the canvas. Folded, the first screen is the four nodes every other
+     * starter has. `collapsed` lives in the document exactly so a graph can *arrive* this way.
+     *
+     * Membership is pinned as a set rather than a count: a card that fell out of the frame is
+     * still six-minus-one plus whatever came in, and it would draw beside the box rather than
+     * inside it with nothing saying so.
+     */
+    const graph = buildStarter(spec)
+    expect(graph.groups).toHaveLength(1)
+    const frame = graph.groups![0]!
+    expect(frame.collapsed).toBe(true)
+    expect(frame.title).toBe('FlyWire annotations')
+    expect([...frame.nodeIds].sort()).toEqual(
+      ['annotations', 'combine', 'foldTags', 'join', 'repair', 'tags'].sort(),
+    )
+
+    // Nothing promoted: an exposed param is a control worth driving without unfolding, and every
+    // param down this chain is a wiring decision made once.
+    expect(frame.exposed ?? []).toEqual([])
+
+    // The visible four, so the fold cannot quietly take one of them with it.
+    for (const id of ['dataset', 'explore', 'ngl', 'picked']) {
+      expect(frame.nodeIds).not.toContain(id)
+    }
+  })
+
   it('survives a save and reload', () => {
     const graph = buildStarter(spec)
     const { graph: restored, warnings } = deserializeGraph(
@@ -356,5 +385,8 @@ describe('the FlyWire starter', () => {
     )
     expect(warnings).toEqual([])
     expect(restored.nodes).toHaveLength(graph.nodes.length)
+    // `validGroups` drops a frame naming a node this build has never had, so a round trip is
+    // where a mistyped member id would surface — silently, as an unfolded chain.
+    expect(restored.groups).toEqual(graph.groups)
   })
 })

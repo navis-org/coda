@@ -541,6 +541,23 @@ CAVE table (neuron_information_v2) ▸ Group By (join text) ───┘        
 Two sources answering two different questions about one neuron: structured fields along the top,
 free-form community text along the bottom.
 
+**All six ship folded into one frame**, which is the one decision here that is about the first
+screen rather than about the data. Six cards in two rows are the biggest thing on the canvas and
+none of them is what a newcomer came to do — they are plumbing that has to be right and never has
+to be touched — so folded, the starter reads as the four nodes every other one has (labels,
+dataset, browser, views) with the chain as a single box anybody can open. `GraphGroup.collapsed`
+lives in the document precisely so a graph can *arrive* this way, and the frame is built through
+`createGroup`, the same call ⌘G makes, so a starter is not the one surface assembling a group by
+hand. Nothing is `exposed` onto the box: a promoted control is one worth driving *without*
+unfolding, and every param down this chain is a wiring decision made once.
+
+The two notes that used to caption the two rows are one note now, directly under the folded box
+and the same width as it — two captions pointing at a thing that is no longer two things would be
+describing a canvas nobody sees. Its placement is derived from `GROUP_PADDING` and
+`COLLAPSED_SIZE` rather than written down, because `collapsedView` puts the box at the frame's own
+corner and stores nothing: a hard-coded corner drifts the day either constant moves, and it drifts
+into a note overlapping the box it annotates.
+
 `BESPOKE` in that file is the dispatch — keyed by node type, since that is what a `StarterSpec`
 carries, and a table rather than an `if` so the second could not become one. There are two.
 

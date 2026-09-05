@@ -32,20 +32,24 @@
  * **Two families opt out of all of that** — see `BESPOKE` at the foot of the file, and note the
  * two do it differently. A CAVE datastack keeps its cell typing in a table rather than on the
  * neuron, so the generic four nodes open on a list of root ids: FlyWire needs a graph of its own
- * because its labels are a published file that has to be fetched and repaired first, while BANC's
- * are already in the datastack and its starter is the generic shape *plus one node*, composed
- * rather than copied.
+ * because its labels are a published file that has to be fetched and repaired first — six cards,
+ * which is why they ship folded into one frame and the first screen is still the usual four —
+ * while BANC's are already in the datastack and its starter is the generic shape *plus one node*,
+ * composed rather than copied.
  */
 
 import type { CodaGraph, GraphNode } from '../core/graph'
 import { addNodeWithCompanion } from '../core/companion'
 import { addEdge } from '../core/graph'
+import { createGroup } from '../core/groups'
 import type { Link } from './assemble'
 import { assembleGraph as assemble, graphNode as node } from './assemble'
 import { ID_COLUMN_NAME } from '../core/ids'
 import { findColumn } from '../core/types'
 import { aggColumnName } from '../nodes/lib/tableOps'
 import { capabilityAnywhere, getSource } from '../data/source'
+import { COLLAPSED_SIZE } from '../layout/collapse'
+import { GROUP_PADDING } from '../layout/groupBounds'
 import { noteNode } from './notes'
 
 export interface StarterSpec {
@@ -153,10 +157,34 @@ const FLYWIRE_ANNOTATIONS =
   'https://raw.githubusercontent.com/flyconnectome/flywire_annotations/main/supplemental_files/Supplemental_file1_neuron_annotations.tsv'
 
 /**
- * Two rows: the published cell typing on top, the community tags underneath, meeting at the Join.
+ * The annotation chain's two rows and the column it starts in: the published cell typing on top,
+ * the community tags underneath, meeting at the Join.
+ *
+ * The whole chain ships **folded** into one frame (see `flywireStarter`), so these coordinates
+ * decide two things at once — where the six cards land when somebody opens the frame, and, through
+ * the frame's own top-left corner, where the folded box sits on the first screen.
  */
-const MAIN_ROW = 0
-const TAG_ROW = 200
+const CHAIN_X = 492
+const CHAIN_TOP = 210
+const CHAIN_BOTTOM = 410
+
+/** Column spacing inside the chain, wide enough for its widest card. */
+const CHAIN_STEP = 268
+
+/**
+ * Where the folded frame draws, derived rather than written down.
+ *
+ * `collapsedView` puts the box at the frame's own corner — `union` of the members plus
+ * `GROUP_PADDING` — and nothing stores it, for `groupBox`'s reason. So the note below it is
+ * placed off the same arithmetic and off `COLLAPSED_SIZE`: a starter that hard-coded the corner
+ * would drift the day either constant moves, and it would drift *silently*, into a note
+ * overlapping the box it annotates.
+ */
+const FOLDED_X = CHAIN_X - GROUP_PADDING
+const FOLDED_Y = CHAIN_TOP - GROUP_PADDING
+
+/** The chain's six cards, in the order they run. What the frame holds. */
+const CHAIN_NODES = ['annotations', 'combine', 'repair', 'tags', 'foldTags', 'join']
 
 /** The column of `neuron_information_v2` holding the free-form text. */
 const TAG_SOURCE_COLUMN = 'tag'
@@ -210,6 +238,19 @@ const TAG_COLUMN = aggColumnName('join', TAG_SOURCE_COLUMN)
  *    `neuron_information_v2` is bookkeeping — a point, a supervoxel, a user id, a timestamp —
  *    that would arrive in every neuron table and in every column picker downstream.
  *
+ * **All six ship folded into one frame**, which is the one thing here that is about the *first
+ * screen* rather than about the data. Six cards in two rows are the biggest thing on the canvas
+ * and none of them is what a newcomer came to do: they are plumbing that has to be right and
+ * never has to be touched. Folded, the starter reads as the four nodes every other one has —
+ * labels, dataset, browser, views — with the chain as a single box anybody can open. `collapsed`
+ * lives in the document precisely so a graph can *arrive* this way (see `GraphGroup.collapsed`),
+ * and the frame is built through `createGroup`, the same call ⌘G makes, so a starter cannot be
+ * the one surface where a group is assembled by hand.
+ *
+ * Nothing is `exposed` onto the box: an exposed param is a control worth driving without
+ * unfolding, and every param down this chain is a wiring decision made once. The note beside it
+ * says the frame is worth opening; a promoted control would say the opposite.
+ *
  * Explore reads the folded column through `Additional tags`, which draws them as a muted row of
  * their own, apart from the fields above. The name is **`join_tag`** rather than `tag` because
  * `groupByTable` writes `<agg>_<column>`, and the two halves have to agree: `Additional tags`
@@ -225,27 +266,33 @@ const TAG_COLUMN = aggColumnName('join', TAG_SOURCE_COLUMN)
  * something. `defaultParams` supplies both, so this is a matter of not overriding them.
  */
 function flywireStarter(spec: StarterSpec): CodaGraph {
-  return assemble(
+  const graph = assemble(
     spec.label,
     `${spec.label} with the published cell annotations and the community tags wired in as its labels. Search in the Explore Dataset node, tick neurons, then Run.`,
     [
-      // The notes are right-aligned against the pipeline's left edge rather than left-aligned
-      // with each other: they form a margin beside the two rows they are about.
+      // One note where the two rows used to have one each: folded, they are one box, and two
+      // captions pointing at it from different sides would be describing a thing that is no
+      // longer two things. Directly under the box and the same width as it, so it reads as that
+      // box's caption rather than as loose text on the canvas.
       noteNode({
         id: 'sourceNote',
-        x: -288,
-        y: MAIN_ROW,
-        width: 280,
-        height: 184,
+        x: FOLDED_X,
+        y: FOLDED_Y + COLLAPSED_SIZE.height + 16,
+        width: COLLAPSED_SIZE.width,
+        height: 300,
         text: `
         Hierarchical annotations loaded from [github.com/flyconnectome/flywire_annotations](https://github.com/flyconnectome/flywire_annotations).
 
-        Initial set of annotations reported in [Schlegel _et al._, Nature (2024)](https://doi.org/10.1038/s41586-024-07686-5). Now incorporates optic lobe annotations from [Matsliah _et al._, Nature (2024)](https://www.nature.com/articles/s41586-024-07981-1), and general updates from [Berg _et al._, Cell (2026)](https://www.biorxiv.org/content/10.1101/2025.10.09.680999v1).`,
+        Initial set of annotations reported in [Schlegel _et al._, Nature (2024)](https://doi.org/10.1038/s41586-024-07686-5). Now incorporates optic lobe annotations from [Matsliah _et al._, Nature (2024)](https://www.nature.com/articles/s41586-024-07981-1), and general updates from [Berg _et al._, Cell (2026)](https://www.biorxiv.org/content/10.1101/2025.10.09.680999v1).
+
+        Community annotations are added as separate "tags" (as opposed to the more structured "fields").
+
+        Open the group for details.`,
       }),
       node(
         'annotations',
         'core.tableFromUrl',
-        { x: 0, y: MAIN_ROW },
+        { x: CHAIN_X, y: CHAIN_TOP },
         {
           url: FLYWIRE_ANNOTATIONS,
           idColumn: 'root_id',
@@ -254,30 +301,17 @@ function flywireStarter(spec: StarterSpec): CodaGraph {
       node(
         'combine',
         'core.combineColumns',
-        { x: 262, y: MAIN_ROW },
+        { x: CHAIN_X + CHAIN_STEP, y: CHAIN_TOP },
         {
           columns: ['cell_type', 'hemibrain_type'],
         },
       ),
-      node('repair', 'cave.updateRootIds', { x: 530, y: MAIN_ROW }),
-      node('explore', 'neuron.explore', { x: 1070, y: MAIN_ROW }, { tagColumn: TAG_COLUMN }),
-      node('ngl', 'out.neuroglancer', { x: 1610, y: MAIN_ROW }, undefined, {
-        width: 633,
-        height: 839,
-      }),
+      node('repair', 'cave.updateRootIds', { x: CHAIN_X + 2 * CHAIN_STEP, y: CHAIN_TOP }),
 
-      noteNode({
-        id: 'tagsNote',
-        x: -238,
-        y: TAG_ROW + 58,
-        width: 230,
-        height: 86,
-        text: `Community annotations are added as separate "tags" (as opposed to the more structured "fields").`,
-      }),
       node(
         'tags',
         'annotation.caveTable',
-        { x: 0, y: TAG_ROW },
+        { x: CHAIN_X, y: CHAIN_BOTTOM },
         {
           table: 'neuron_information_v2',
           columns: 'pt_root_id, tag',
@@ -286,16 +320,28 @@ function flywireStarter(spec: StarterSpec): CodaGraph {
       node(
         'foldTags',
         'core.groupBy',
-        { x: 262, y: TAG_ROW },
+        { x: CHAIN_X + CHAIN_STEP, y: CHAIN_BOTTOM },
         {
           by: [ID_COLUMN_NAME],
           agg: 'join',
           value: ['tag'],
         },
       ),
-      node('join', 'core.join', { x: 530, y: TAG_ROW }, { leftKey: ID_COLUMN_NAME }),
-      node('dataset', spec.nodeType, { x: 790, y: TAG_ROW }, spec.params),
+      node(
+        'join',
+        'core.join',
+        { x: CHAIN_X + 2 * CHAIN_STEP, y: CHAIN_BOTTOM },
+        { leftKey: ID_COLUMN_NAME },
+      ),
 
+      // Beside the folded box rather than after the two rows it would have to clear: the dataset
+      // is the card the four visible nodes hang off, so it sits at the box's own height.
+      node('dataset', spec.nodeType, { x: 790, y: FOLDED_Y }, spec.params),
+      node('explore', 'neuron.explore', { x: 1070, y: 0 }, { tagColumn: TAG_COLUMN }),
+      node('ngl', 'out.neuroglancer', { x: 1610, y: 0 }, undefined, {
+        width: 633,
+        height: 839,
+      }),
       node(
         'picked',
         'out.table',
@@ -322,6 +368,8 @@ function flywireStarter(spec: StarterSpec): CodaGraph {
       ['explore', 'selected', 'ngl', 'neurons'],
     ],
   )
+
+  return createGroup(graph, CHAIN_NODES, { title: 'FlyWire annotations', collapsed: true })
 }
 
 // ---------------------------------------------------------------------------
