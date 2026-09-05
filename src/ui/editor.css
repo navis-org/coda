@@ -10510,6 +10510,30 @@ details[open] > summary.tile__label {
 }
 
 /*
+ * The grouping select, on a row of its own under the direction toggle. That row already carries a
+ * segmented control and a search box, and the rail is 216px at its narrowest — a third control in
+ * it leaves the search box too small to type a cell type into.
+ */
+.topo__seg--group {
+  padding-top: 0;
+}
+.topo__seg--group .topo__select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/*
+ * The cell type beside a row keyed by an id. Muted and after the id, because the id is what the
+ * row *is* — two neurons of one type are two rows, and a subtitle drawn as the name would make
+ * them look like one thing listed twice.
+ */
+.topo__partner-sub {
+  color: var(--text-muted);
+  font-style: normal;
+  margin-left: 5px;
+}
+
+/*
  * The partner filter box. Sits in the same row as the direction toggle, taking whatever is left
  * — a fixed width would either crowd the toggle in the dock or leave a gap in the overlay.
  */

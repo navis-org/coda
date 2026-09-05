@@ -184,3 +184,50 @@ export function paramsForPanel(def: NodeDefinition): (param: ParamDef) => boolea
   return (param) =>
     param.presentational === true || (!!param.group && dataGroups.has(param.group))
 }
+
+/**
+ * The params `ViewerSurface`'s flat rail draws for a node.
+ *
+ * Here rather than inline in the component because it is the whole of a policy decision and the
+ * component is a hundred lines of frame around it — and because a rule that can be read without
+ * mounting a WebGL canvas is a rule a test can hold. `ViewerSurface` renders three surfaces (the
+ * expanded overlay, the pinned dock, a dashboard cell) and this is the same answer in all three.
+ *
+ * Two rules, and the first is the interesting one:
+ *
+ * - **A node that draws its own controls gets none.** `NodeDefinition.ownControls` says the
+ *   body is already a control surface, and the rail would then be the same knobs a second time
+ *   a few pixels away. Neuron Topology is the case: seventeen presentational params, every one
+ *   of them drawn by its pager, its stage toolbar or one of its three tabs.
+ * - **Presentational only**, and only where `visibleIf` admits it. Anything that changes what
+ *   the node *returns* belongs on the node, where changing it marks the graph stale — a rail
+ *   that could edit `Min weight` would restyle a result into being wrong.
+ */
+export function railParams(def: NodeDefinition, params: ParamValues): ParamDef[] {
+  if (def.ownControls) return []
+  return (def.params ?? []).filter(
+    (param) => param.presentational === true && (!param.visibleIf || param.visibleIf(params)),
+  )
+}
+
+/**
+ * The tabbed styling sidebar's buckets, or none.
+ *
+ * `railParams`' other half, and here for the same reason: `ownControls` was read once inside that
+ * function and once again by hand at `ViewerSurface`'s tab expression, so the flag meant two
+ * things in two places and only one of them was where the doc said the policy lived — and only
+ * one had a test. The combination is unreachable today (no node declares both `paramGroups` and
+ * `ownControls`), which is exactly why it is cheap to state now rather than after one does.
+ *
+ * `controls` is the frame's half of the decision: a dashboard cell asks for the flat rail however
+ * the node is declared, because a 268px sidebar in a sixth of a window is the panel plus a strip
+ * and no view.
+ */
+export function panelTabs(
+  def: NodeDefinition,
+  params: ParamValues,
+  controls: 'auto' | 'rail' | 'hidden',
+): ReturnType<typeof groupParams> {
+  if (controls !== 'auto' || def.ownControls || !def.paramGroups?.length) return []
+  return groupParams(def, params, paramsForPanel(def))
+}

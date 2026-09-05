@@ -19,6 +19,7 @@ import {
   facetLabel,
   groupParams,
   paramsForPanel,
+  railParams,
 } from './paramGroups'
 
 const def = requireNodeDef('out.network')
@@ -54,10 +55,10 @@ describe('groupParams over out.network', () => {
   })
 
   it('shows every param the flat rail did, and no more', () => {
-    // The rail's rule, verbatim: presentational and not hidden by visibleIf.
-    const rail = (def.params ?? [])
-      .filter((p) => p.presentational && (!p.visibleIf || p.visibleIf(base)))
-      .map((p) => p.id)
+    // `railParams`, not a copy of its filter. This restated the rule inline, which meant the rail
+    // could grow a clause — `ownControls` did exactly that — and this test would go on comparing
+    // the sidebar against a rule the rail no longer followed.
+    const rail = railParams(def, base).map((p) => p.id)
     expect([...shownIds(groupParams(def, base, presentational))].sort()).toEqual(
       [...rail].sort(),
     )
@@ -440,5 +441,58 @@ describe('bucketParams over compare.connectivity, the card filter', () => {
   ])('leaves %s alone, at %i bucket(s)', (type, expected) => {
     const def = requireNodeDef(type)
     expect(bucketParams(def, defaultParams(def), card)).toHaveLength(expected)
+  })
+})
+
+describe('which presentational controls a generic surface draws', () => {
+  const param = (over: Partial<ParamDef>): ParamDef =>
+    ({ id: 'p', kind: 'boolean', label: 'P', default: false, ...over }) as ParamDef
+
+  const defOf = (params: ParamDef[], over: Partial<NodeDefinition> = {}): NodeDefinition =>
+    ({ type: 't', label: 'T', params, ...over }) as NodeDefinition
+
+  it('draws presentational params and refuses the rest', () => {
+    // A rail that could edit a data param would restyle a result into being wrong: the whole
+    // promise of these surfaces is that touching them never marks the graph stale.
+    const def = defOf([
+      param({ id: 'colour', presentational: true }),
+      param({ id: 'minWeight' }),
+    ])
+    expect(railParams(def, {}).map((p) => p.id)).toEqual(['colour'])
+  })
+
+  it('honours visibleIf, so a hidden control is not drawn somewhere else', () => {
+    const def = defOf([
+      param({ id: 'a', presentational: true }),
+      param({ id: 'b', presentational: true, visibleIf: (v) => v['a'] === true }),
+    ])
+    expect(railParams(def, { a: false }).map((p) => p.id)).toEqual(['a'])
+    expect(railParams(def, { a: true }).map((p) => p.id)).toEqual(['a', 'b'])
+  })
+
+  it('draws nothing for a node whose body is already a control surface', () => {
+    /*
+     * `ownControls`. Without it, expanding Neuron Topology drew its seventeen presentational
+     * params in the header *and* in the card a few pixels below — the same pager, the same layer
+     * toggles, the same six sliders, twice. The failure is entirely visual, which is why the
+     * rule is asserted here as arithmetic rather than left to a surface nobody can render in
+     * jsdom: the card mounts a WebGL canvas.
+     */
+    const params = [param({ id: 'colour', presentational: true })]
+    expect(railParams(defOf(params), {})).toHaveLength(1)
+    expect(railParams(defOf(params, { ownControls: true }), {})).toHaveLength(0)
+  })
+
+  it('is what Neuron Topology declares, and what no ordinary viewer does', () => {
+    // Both directions: the flag reaching a plain viewer would silently strip its only controls.
+    expect(requireNodeDef('out.topology').ownControls).toBe(true)
+    expect(railParams(requireNodeDef('out.topology'), {})).toHaveLength(0)
+    for (const type of ['out.barChart', 'out.heatmap', 'out.table', 'out.viewer3d']) {
+      expect(
+        requireNodeDef(type).ownControls,
+        `${type} should not claim its own controls`,
+      ).toBe(undefined)
+      expect(railParams(requireNodeDef(type), {}).length).toBeGreaterThan(0)
+    }
   })
 })

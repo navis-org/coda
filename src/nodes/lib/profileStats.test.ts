@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { tableSchema, column } from '../../core/types'
 import { tableFromRows } from '../../core/values'
 import {
+  partnerKey,
   connectivitySummary,
   hemisphereSplit,
   partnerTypes,
@@ -276,5 +277,73 @@ describe('transmitterReading', () => {
   it('ignores non-numeric probability cells rather than charting NaN', () => {
     const reading = transmitterReading({ ntGabaProb: null, ntAchProb: 0.5 })
     expect(reading.probabilities.map((p) => p.column)).toEqual(['ntAchProb'])
+  })
+})
+
+describe('grouping a partner list', () => {
+  const TABLE = tableFromRows(
+    tableSchema(
+      column('neuronId', 'str'),
+      column('partnerId', 'str'),
+      column('partnerType', 'str'),
+      column('weight', 'i64'),
+    ),
+    [
+      { neuronId: '1', partnerId: '900', partnerType: 'Tm3', weight: 5 },
+      { neuronId: '1', partnerId: '901', partnerType: 'Tm3', weight: 3 },
+      { neuronId: '1', partnerId: '902', partnerType: null, weight: 2 },
+      { neuronId: '1', partnerId: '903', partnerType: null, weight: 1 },
+    ],
+  )
+
+  it('lumps the untyped into one row by default, which is what `type` means', () => {
+    const rows = partnerTypes(TABLE, { minWeight: 1 })
+    expect(rows.map((r) => r.type)).toEqual(['Tm3', null])
+    // The lump is two neurons and three synapses, and that is exactly what you cannot see into.
+    expect(rows[1]).toMatchObject({ partners: 2, synapses: 3 })
+  })
+
+  it('splits only the untyped under `typed`, keyed by id', () => {
+    const rows = partnerTypes(TABLE, { minWeight: 1, grouping: 'typed' })
+    expect(rows.map((r) => r.type)).toEqual(['Tm3', '902', '903'])
+    // The typed bucket is untouched: both Tm3 neurons stay one row.
+    expect(rows[0]).toMatchObject({ type: 'Tm3', partners: 2 })
+    // And a row keyed by an id whose neuron has no type carries no cell type to show.
+    expect(rows[1]?.partnerType).toBeUndefined()
+  })
+
+  it('gives every partner its own row under `neuron`, with the type kept beside it', () => {
+    const rows = partnerTypes(TABLE, { minWeight: 1, grouping: 'neuron' })
+    expect(rows.map((r) => r.type)).toEqual(['900', '901', '902', '903'])
+    expect(rows.every((r) => r.partners === 1)).toBe(true)
+    /*
+     * `partnerType` is for display and filtering only. It must never reach the key: keyed by type,
+     * `900` and `901` would collapse back into one row the moment somebody asked for neurons.
+     */
+    expect(rows[0]?.partnerType).toBe('Tm3')
+    expect(rows[1]?.partnerType).toBe('Tm3')
+    expect(rows[0]?.type).not.toBe(rows[1]?.type)
+  })
+
+  it('keeps the shares over the same population whichever way it is grouped', () => {
+    // 11 synapses over 4 partners, however the rows are cut. A share computed per bucket rather
+    // than over the whole direction would make the numbers depend on the control.
+    for (const grouping of ['type', 'typed', 'neuron'] as const) {
+      const rows = partnerTypes(TABLE, { minWeight: 1, grouping })
+      const synapses = rows.reduce((sum, r) => sum + r.synapses, 0)
+      const shares = rows.reduce((sum, r) => sum + r.synapseShare, 0)
+      expect(synapses).toBe(11)
+      expect(shares).toBeCloseTo(1)
+    }
+  })
+
+  it('answers null only where a grouping has nothing to call a partner', () => {
+    // `partnerKey` is the one rule both the list and the arbour read; `null` is what `markLabel`
+    // spells `—`, and it may only mean "the untyped bucket".
+    expect(partnerKey('type', null, '900')).toBeNull()
+    expect(partnerKey('typed', null, '900')).toBe('900')
+    expect(partnerKey('neuron', 'Tm3', '900')).toBe('900')
+    expect(partnerKey('type', 'Tm3', '900')).toBe('Tm3')
+    expect(partnerKey('typed', 'Tm3', '900')).toBe('Tm3')
   })
 })

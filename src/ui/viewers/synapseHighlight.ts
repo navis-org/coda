@@ -31,10 +31,13 @@
  * That was a second, independent bug in the same expression.
  */
 
+import { idText } from '../../core/ids'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { getColumn } from '../../core/values'
 import { findColumn } from '../../core/types'
 import { markLabel } from '../../nodes/lib/chartSelection'
+import type { PartnerGrouping } from '../../nodes/lib/profileStats'
+import { partnerKey } from '../../nodes/lib/profileStats'
 
 /**
  * The derived column's name.
@@ -43,6 +46,26 @@ import { markLabel } from '../../nodes/lib/chartSelection'
  * with a column a backend publishes. `codaHighlight` is not a name any connectome uses.
  */
 export const HIGHLIGHT_COLUMN = 'codaHighlight'
+
+/**
+ * The two columns a cloud can name its partner with.
+ *
+ * `partnerType` is the canonical one and what `type` grouping reads directly. `partnerId` is what
+ * CAVE publishes *instead* — its synapse table carries a root id on each side and no type — and
+ * what every per-neuron grouping needs whatever the source. Named here because
+ * `partnerLabelColumn` and the card's own "can this dataset highlight at all" test are two
+ * readers of one fact.
+ */
+export const PARTNER_COLUMN = 'partnerType'
+export const PARTNER_ID_COLUMN = 'partnerId'
+
+/** Whether a cloud with this schema can name its partners at all, either way. */
+export function namesPartners(schema: TableValue['schema']): boolean {
+  return (
+    findColumn(schema, PARTNER_COLUMN) !== undefined ||
+    findColumn(schema, PARTNER_ID_COLUMN) !== undefined
+  )
+}
 
 /** Everything not lit. One key, so the whole remainder takes one muted colour. */
 export const HIGHLIGHT_OTHER = 'other'
@@ -102,4 +125,67 @@ export function highlightColumn(
     values[i] = matches ? name : HIGHLIGHT_OTHER
   }
   return { values, lit }
+}
+
+/**
+ * The column naming each synapse's partner, in the same vocabulary the partner list uses.
+ *
+ * Headless and here rather than in two `useMemo`s inside the card, for the reason this module
+ * exists at all: it is the vocabulary the list and the arbour share, and a disagreement between
+ * them lights nothing while looking perfectly clickable. Fifty lines of column arithmetic whose
+ * only test route was a three-second jsdom render of a WebGL card is fifty lines nobody checks.
+ *
+ * **Two routes, and which one runs is a fact about the data plus the grouping.**
+ *
+ * - The cloud names the partner's *type* and `type` grouping wants exactly that: the column is
+ *   handed back as it stands, no copy.
+ * - Otherwise the cloud's `partnerId` is joined against the connectivity tables, which carry the
+ *   type for each partner — on CAVE resolved through `typeLookup`, i.e. through whatever
+ *   annotations are wired to the dataset node. `cave/schema.ts` narrows the synapse schema to
+ *   four columns because a CAVE synapse table has a root id on each side and no type at all.
+ *
+ * A partner in neither table comes back `null`, which `markLabel` spells `—` — the same bucket
+ * `partnerTypes` files it under. So the two agree about what is unnamed by construction.
+ *
+ * The map holds the partner's **type**, not its key: the key is `partnerKey`'s answer and depends
+ * on the grouping, so keying the map by it made `neuron` grouping build fifteen thousand entries
+ * of `id → id` and re-walk both tables on every change of a control that could not move them.
+ */
+export function partnerLabelColumn(
+  attributes: TableValue,
+  tables: ReadonlyArray<TableValue | undefined>,
+  grouping: PartnerGrouping,
+): ColumnData | undefined {
+  const hasType = findColumn(attributes.schema, PARTNER_COLUMN) !== undefined
+  if (hasType && grouping === 'type') return getColumn(attributes, PARTNER_COLUMN)
+  if (!findColumn(attributes.schema, PARTNER_ID_COLUMN)) {
+    // Nothing to join on. A type column alone cannot answer a per-neuron grouping.
+    return hasType && grouping !== 'neuron' ? getColumn(attributes, PARTNER_COLUMN) : undefined
+  }
+
+  const typeById = new Map<string, CellValue>()
+  for (const table of tables) {
+    if (!table || !findColumn(table.schema, PARTNER_ID_COLUMN)) continue
+    const ids = getColumn(table, PARTNER_ID_COLUMN)
+    const types = findColumn(table.schema, PARTNER_COLUMN)
+      ? getColumn(table, PARTNER_COLUMN)
+      : undefined
+    for (let i = 0; i < table.length; i++) {
+      // `idText` on both sides of the join — invariant 8, and the two columns are declared `str`
+      // on CAVE and `i64` on the canonical schema, so this is the seam.
+      const id = idText(ids[i] ?? null)
+      if (id) typeById.set(id, types?.[i] ?? null)
+    }
+  }
+
+  const ids = getColumn(attributes, PARTNER_ID_COLUMN)
+  const labels: ColumnData = new Array<CellValue>(attributes.length)
+  for (let i = 0; i < attributes.length; i++) {
+    const id = idText(ids[i] ?? null)
+    // `has`, not a truthy value: a partner *known* to be untyped is not the same as one this
+    // neuron has no connection row for, and only the second may fall out of the vocabulary.
+    labels[i] =
+      id !== null && typeById.has(id) ? partnerKey(grouping, typeById.get(id), id) : null
+  }
+  return labels
 }

@@ -4,6 +4,7 @@ import type { GraphNode } from '../../core/graph'
 import type { InferContext, ParamValue } from '../../core/node'
 import { schemaOf } from '../../core/types'
 import type { Value } from '../../core/values'
+import type { PartnerGrouping } from '../../nodes/lib/profileStats'
 import {
   asString,
   describeValue,
@@ -473,6 +474,8 @@ function ValuePreviewInner({
         onLayer={(id, on) => onParamChange?.(id, on)}
         partners={idList(node.params.partners)}
         onPartners={(next) => onParamChange?.('partners', next)}
+        grouping={String(node.params.grouping ?? 'type') as PartnerGrouping}
+        onGrouping={(value) => onParamChange?.('grouping', value)}
         direction={String(node.params.direction ?? 'outputs')}
         onDirection={(value) => onParamChange?.('direction', value)}
         partnerQuery={String(node.params.partnerQuery ?? '')}

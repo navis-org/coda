@@ -52,7 +52,7 @@ import { formatDuration } from '../format'
 import { nodeBody } from '../nodes/nodeBodies'
 import { ParamField } from '../params/ParamField'
 import { ParamRows } from '../params/ParamRows'
-import { groupParams, paramsForPanel } from '../params/paramGroups'
+import { panelTabs, railParams } from '../params/paramGroups'
 import { ValuePreview } from '../viewers/ValuePreview'
 
 /**
@@ -184,17 +184,15 @@ export function ViewerSurface({
   if (!node || !def || !ctx) return null
 
   const body = nodeBody(node.type)
-  const railParams = (def.params ?? []).filter(
-    (p) => p.presentational && (!p.visibleIf || p.visibleIf(node.params)),
-  )
+  // `railParams` in `paramGroups.ts`, which is where this policy is stated and tested. Note it
+  // answers empty for a node with `ownControls`, which takes the tabbed sidebar with it below —
+  // both are built from the same params, and a body that already carries them needs neither.
+  const rail = railParams(def, node.params)
   // Grouped nodes take the sidebar; everything else keeps the rail it has always had. Neither the
   // sidebar nor the tab strip that opens it fits a frame that asked for the rail — see `controls`.
-  const tabs =
-    controls === 'auto' && def.paramGroups?.length
-      ? groupParams(def, node.params, paramsForPanel(def))
-      : []
+  const tabs = panelTabs(def, node.params, controls)
   const showRail =
-    railParams.length > 0 && (controls === 'auto' ? tabs.length === 0 : controls === 'rail')
+    rail.length > 0 && (controls === 'auto' ? tabs.length === 0 : controls === 'rail')
   // Falling back to the first tab rather than storing a reset makes an id that no longer
   // exists — a different node, or a tab whose params are all hidden — harmless.
   const activeTab = tabs.find((t) => t.id === tabId) ?? tabs[0]
@@ -244,7 +242,7 @@ export function ViewerSurface({
 
       {showRail && (
         <div className="overlay__rail">
-          {railParams.map((param) => (
+          {rail.map((param) => (
             <div key={param.id} className="overlay__rail-item">
               <span className="param__label" title={param.help ?? param.label}>
                 {param.label}

@@ -10,7 +10,14 @@ import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
 import { tableFromRows } from '../../core/values'
-import { HIGHLIGHT_OTHER, highlightColumn, partnerLabel, polarityFor } from './synapseHighlight'
+import {
+  namesPartners,
+  partnerLabelColumn,
+  HIGHLIGHT_OTHER,
+  highlightColumn,
+  partnerLabel,
+  polarityFor,
+} from './synapseHighlight'
 
 const SCHEMA = tableSchema(
   column('neuronId', 'str'),
@@ -160,5 +167,91 @@ describe('highlightColumn', () => {
       direction: 'inputs',
     })
     expect(new Set(out.values)).toEqual(new Set(['Tm3', HIGHLIGHT_OTHER]))
+  })
+})
+
+describe('naming each synapse’s partner', () => {
+  const CLOUD_WITH_TYPE = tableSchema(
+    column('neuronId', 'str'),
+    column('partnerId', 'str'),
+    column('partnerType', 'str'),
+  )
+  /** CAVE's narrowed shape: a root id on each side and no type at all. */
+  const CLOUD_BY_ID = tableSchema(column('neuronId', 'str'), column('partnerId', 'str'))
+  const LINKS = tableSchema(column('partnerId', 'str'), column('partnerType', 'str'))
+
+  const links = tableFromRows(LINKS, [
+    { partnerId: '900', partnerType: 'Tm3' },
+    { partnerId: '901', partnerType: 'Tm3' },
+    { partnerId: '902', partnerType: null },
+  ])
+  const rows = [
+    { neuronId: '1', partnerId: '900', partnerType: 'Tm3' },
+    { neuronId: '1', partnerId: '901', partnerType: 'Tm3' },
+    { neuronId: '1', partnerId: '902', partnerType: null },
+    // A partner in the cloud that no connectivity row mentions.
+    { neuronId: '1', partnerId: '999', partnerType: null },
+  ]
+
+  it('hands back the cloud’s own column untouched when that is what was asked for', () => {
+    // Identity, not equality: the common case must stay a zero-copy reference rather than
+    // allocating one label per synapse — a 57,034-element array on a dense cell.
+    const cloud = tableFromRows(CLOUD_WITH_TYPE, rows)
+    const out = partnerLabelColumn(cloud, [links], 'type')
+    expect(out).toBe(cloud.data['partnerType'])
+  })
+
+  it('joins ids against the connectivity tables when the cloud has no type', () => {
+    /*
+     * The CAVE case. `cave/schema.ts` narrows the synapse schema because the table carries a root
+     * id on each side, and `fetchConnectivity` has already resolved those ids through the
+     * annotations wired to the dataset. Without this the card reported "these synapses do not
+     * name their partner" about a cloud that named it perfectly well, by id.
+     */
+    const cloud = tableFromRows(CLOUD_BY_ID, rows)
+    expect(partnerLabelColumn(cloud, [links], 'type')).toEqual(['Tm3', 'Tm3', null, null])
+  })
+
+  it('splits the untyped by id, and everything by id, on the other two groupings', () => {
+    const cloud = tableFromRows(CLOUD_WITH_TYPE, rows)
+    expect(partnerLabelColumn(cloud, [links], 'typed')).toEqual(['Tm3', 'Tm3', '902', null])
+    expect(partnerLabelColumn(cloud, [links], 'neuron')).toEqual(['900', '901', '902', null])
+  })
+
+  it('tells "untyped" apart from "not connected", which are different answers', () => {
+    /*
+     * Row 2's partner is in the table with no type; row 3's is not in the table at all. Under
+     * `typed` the first gets its own id-keyed row and the second cannot be named — a `has` test
+     * rather than a truthy value is the whole of that distinction, and getting it wrong files
+     * every unknown partner under a real partner's key.
+     */
+    const cloud = tableFromRows(CLOUD_BY_ID, rows)
+    const out = partnerLabelColumn(cloud, [links], 'typed')
+    expect(out?.[2]).toBe('902')
+    expect(out?.[3]).toBeNull()
+  })
+
+  it('reads both directions, since a type belongs to the partner and not to the direction', () => {
+    const cloud = tableFromRows(CLOUD_BY_ID, rows)
+    const inputs = tableFromRows(LINKS, [{ partnerId: '900', partnerType: 'Tm3' }])
+    const outputs = tableFromRows(LINKS, [{ partnerId: '901', partnerType: 'LC4' }])
+    expect(partnerLabelColumn(cloud, [inputs, outputs], 'type')).toEqual([
+      'Tm3',
+      'LC4',
+      null,
+      null,
+    ])
+  })
+
+  it('refuses a cloud that names its partner neither way', () => {
+    // CATMAID: its synapse schema declines `partnerId` on purpose, so there is nothing to join.
+    const cloud = tableFromRows(tableSchema(column('neuronId', 'str')), [{ neuronId: '1' }])
+    expect(namesPartners(cloud.schema)).toBe(false)
+    expect(partnerLabelColumn(cloud, [links], 'neuron')).toBeUndefined()
+  })
+
+  it('says a cloud names its partner whichever column carries it', () => {
+    expect(namesPartners(tableFromRows(CLOUD_WITH_TYPE, rows).schema)).toBe(true)
+    expect(namesPartners(tableFromRows(CLOUD_BY_ID, rows).schema)).toBe(true)
   })
 })

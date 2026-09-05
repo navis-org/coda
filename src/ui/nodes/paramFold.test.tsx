@@ -21,6 +21,8 @@ import { App } from '../../App'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import { allNodeDefs, requireNodeDef } from '../../core/registry'
+import { SKELETON_SOURCE_PARAM } from '../../nodes/lib/skeletonParams'
+import { SYNAPSE_UNIT_PARAM } from '../../nodes/lib/synapseParams'
 import type { NodeDefinition, ParamValues } from '../../core/node'
 import { defaultParams } from '../../core/node'
 import { MockSource } from '../../data/mock/MockSource'
@@ -271,5 +273,29 @@ describe('which cards the affordance reaches', () => {
     // Explore draws a search bar and a list of neurons instead of the generic rows; its params
     // are real, and reachable in the inspector, but there is no band here either.
     expect(drawsBand(requireNodeDef('neuron.explore'))).toBe(false)
+    /*
+     * Neuron Topology is the neuroglancer case with one extra wrinkle. Its card is a 3D stage
+     * with a data rail folded over it, and three of its params — `Split axon/dendrite`, the
+     * skeleton `Source` and the synapse `Rows` — were the last non-advanced ones, so the card
+     * carried three rows of pickers above the picture. Two of the three come from shared helpers
+     * that are *rightly* on the card of `neuron.skeletons` and `neuron.synapses`, where they are
+     * the only controls there are; here they are spread with `advanced: true`, which is a
+     * judgement about this card rather than about those params.
+     *
+     * Asserted here rather than beside the node because this is the file that owns the rule.
+     */
+    expect(drawsBand(requireNodeDef('out.topology'))).toBe(false)
+  })
+
+  it('leaves the topology card’s three former rows reachable in the inspector', () => {
+    // The other half: `advanced` moves a param, it does not delete it. A reader who wants the
+    // split in the port, or a pinned skeleton route, still has one place to find them — and the
+    // card says so through `showHidden`, which counts exactly these.
+    const params = requireNodeDef('out.topology').params ?? []
+    for (const id of ['split', SKELETON_SOURCE_PARAM, SYNAPSE_UNIT_PARAM]) {
+      const param = params.find((p) => p.id === id)
+      expect(param, `out.topology has no ${id} param`).toBeDefined()
+      expect(param?.advanced, `${id} should be inspector-only`).toBe(true)
+    }
   })
 })

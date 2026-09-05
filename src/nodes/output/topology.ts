@@ -118,6 +118,14 @@ export const topologyNode = registerNode({
    */
   defaultSize: { width: 720, height: 560 },
   dataCache: true,
+  /*
+   * The card is a control surface, not a picture with knobs above it: a pager in the identity
+   * bar, a layer toolbar and a colour select over the stage, and three tabs of sliders in the
+   * rail. Every one of its seventeen presentational params is drawn by one of those, so the
+   * generic rail `ViewerSurface` builds was the same seventeen controls a second time, in the
+   * header of the expanded card. See `NodeDefinition.ownControls`.
+   */
+  ownControls: true,
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
     // `table` rather than `neurons`, on Profile's reasoning: `neurons` is a subtype so both
@@ -140,6 +148,15 @@ export const topologyNode = registerNode({
         'Adds per-compartment columns to Morphometrics, so it marks the graph stale — and it ' +
         'needs the Python runtime, which is a one-off download the first time anything uses it.',
       default: false,
+      /*
+       * `advanced`, like every other control on this node, and for the reason the three
+       * presentational ones below already record: the card *is* the viewer, and a param row above
+       * it is a second copy of a control the Compartments tab already draws — with the reader's
+       * eye landing on whichever is nearer rather than on the picture. This one is data where
+       * those are presentation, which changes where it belongs in the inspector and not whether
+       * it belongs on the card.
+       */
+      advanced: true,
     },
     /*
      * navis's two tuning knobs, and the pair is deliberate: between them they cover both ways a
@@ -189,8 +206,16 @@ export const topologyNode = registerNode({
       advanced: true,
       visibleIf: (params) => params['split'] === true,
     },
-    skeletonSourceParam(),
-    synapseUnitParam(),
+    /*
+     * Both `advanced`, which is a departure from `neuron.skeletons` and `neuron.synapses` where
+     * the same two helpers are the card's only real controls and belong on it. Here the card is a
+     * 3D stage with a data rail over it, and a route picker and a row-unit picker stacked above
+     * that are two rows of chrome between the reader and the neuron. Spread rather than given an
+     * option on the helpers, because this is one node's judgement about its own card and not a
+     * new fact about what these params are.
+     */
+    { ...skeletonSourceParam(), advanced: true },
+    { ...synapseUnitParam(), advanced: true },
     warnAboveParam({
       threshold: MAX_NEURONS,
       min: 1,
@@ -458,6 +483,33 @@ export const topologyNode = registerNode({
       noun: 'partners',
       help: 'Partners whose synapses are drawn on the arbour. Lighting one is free.',
       default: [],
+      presentational: true,
+      advanced: true,
+      internal: true,
+    },
+    {
+      /*
+       * How finely the partner list rolls up. Presentational and `internal`, for `partners`'
+       * reasons exactly: it changes what the rail lists and what a lit partner *means*, and
+       * nothing any port carries.
+       *
+       * Three settings rather than two checkboxes — see `PartnerGrouping`. The default is `type`
+       * because that is the question most people arrive with ("which cell types drive this
+       * neuron"), and because on a dense cell the ungrouped list is fifteen thousand rows: a
+       * reachable list, thanks to the filter, but not one to open on.
+       */
+      id: 'grouping',
+      kind: 'enum',
+      label: 'Group partners',
+      options: [
+        { value: 'type', label: 'Cell type' },
+        { value: 'typed', label: 'Cell type, untyped apart' },
+        { value: 'neuron', label: 'One row per neuron' },
+      ],
+      help:
+        'How the partner list is rolled up. Cell type puts every untyped partner in one “—” ' +
+        'row; the other two give those partners, or all of them, a row each keyed by id.',
+      default: 'type',
       presentational: true,
       advanced: true,
       internal: true,

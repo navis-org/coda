@@ -21,10 +21,66 @@ import { getColumn } from '../../core/values'
 // Connectivity
 // ---------------------------------------------------------------------------
 
+/**
+ * How finely a partner list is rolled up.
+ *
+ * Three settings and not two booleans, because the obvious pair — "split untyped" and "don't
+ * group" — has a fourth state that means nothing: with grouping off, every partner is already
+ * its own row and there is no lump left to split. An ordered scale says that in the type.
+ *
+ * - `type` rolls every partner up by cell type and files the untyped under one `null` bucket.
+ *   That bucket is a real answer on a dense neuron — 13,621 of male-cns body 10003's synapses
+ *   name an untyped partner — and it is also the thing you cannot see inside.
+ * - `typed` keeps the typed buckets and gives each *untyped* partner its own row, keyed by id.
+ * - `neuron` groups nothing: one row per partner neuron.
+ */
+export type PartnerGrouping = 'type' | 'typed' | 'neuron'
+
+/**
+ * What a partner is called under a grouping — **the one place that decides**, because two
+ * readers have to agree about it.
+ *
+ * The partner list is built from a connectivity table and the highlight is a column written onto
+ * a synapse cloud, and a partner that is spelled differently in the two is a partner that lights
+ * nothing while looking perfectly clickable. `synapseHighlight.ts` records what that costs: the
+ * first version of the highlight keyed nulls as `''` where `resolveColor` keys them `'—'`, and
+ * 13,621 synapses stayed lit whatever was selected.
+ *
+ * Returns `null` only where the grouping genuinely has nothing to call this partner — the `type`
+ * bucket for an untyped one — which is what `markLabel` renders as `—`. Everywhere else the key
+ * is an id, through `idText` because that is invariant 8's cell → id.
+ */
+export function partnerKey(
+  grouping: PartnerGrouping,
+  type: CellValue | undefined,
+  id: CellValue | undefined,
+): string | null {
+  if (grouping !== 'neuron') {
+    const named = asType(type)
+    if (named !== null) return named
+    // `type` lumps; `typed` splits the lump by id, which is the whole difference between them.
+    if (grouping === 'type') return null
+  }
+  return idText(id ?? null)
+}
+
 /** One row of the "top input/output types" list. */
 export interface PartnerTypeRow {
-  /** Partner type, or `null` for partners the dataset has not typed. */
+  /**
+   * What this row is called: a cell type, a neuron id, or `null` for the untyped bucket under
+   * `type` grouping. See `partnerKey` — the name is historical, the value is the *key*.
+   */
   type: string | null
+  /**
+   * The cell type of the neuron this row is keyed by, where the key is an id and a type is
+   * known. Absent otherwise — a row keyed by type already says it.
+   *
+   * Never part of the key, because two neurons of one type must stay two rows once the reader
+   * has asked for neurons. Named for what it *is* rather than for where a viewer puts it: this
+   * type is headless and shared with Neuron Profile, and `subtitle` named a slot in one card's
+   * layout that the other card has no equivalent of.
+   */
+  partnerType?: string
   synapses: number
   /** Distinct partner neurons of this type. */
   partners: number
@@ -60,6 +116,8 @@ export interface PartnerOptions {
   minWeight?: number
   /** Keep at most this many rows. 0 or undefined keeps all of them. */
   topN?: number
+  /** How finely to roll up. Defaults to `type`, which is what every existing caller wants. */
+  grouping?: PartnerGrouping
 }
 
 /**
@@ -115,18 +173,30 @@ export function partnerTypes(
   const partnerId = getColumn(table, 'partnerId')
   const partnerType = getColumn(table, 'partnerType')
 
-  const buckets = new Map<string | null, { synapses: number; ids: Set<string> }>()
+  const grouping = options.grouping ?? 'type'
+  const buckets = new Map<
+    string | null,
+    { synapses: number; ids: Set<string>; partnerType?: string }
+  >()
   let totalSynapses = 0
   const allPartners = new Set<string>()
 
   for (const row of rows) {
     // A Map keyed by `string | null` rather than by a string sentinel: a dataset is free to
     // have a type literally called "untyped", and a sentinel would merge the two.
-    const type = asType(partnerType[row])
-    let bucket = buckets.get(type)
+    const key = partnerKey(grouping, partnerType[row], partnerId[row])
+    let bucket = buckets.get(key)
     if (!bucket) {
       bucket = { synapses: 0, ids: new Set() }
-      buckets.set(type, bucket)
+      /*
+       * Only when the key is an id — that is what `partnerType` is for, and asking `key !== type`
+       * is how the row knows which it was keyed by without a second flag. A row keyed by its
+       * type has nothing to add; a row keyed by an id carries the type as something to read and
+       * to filter on, never as part of its identity.
+       */
+      const named = asType(partnerType[row])
+      if (named !== null && key !== named) bucket.partnerType = named
+      buckets.set(key, bucket)
     }
     const w = toNumber(weight[row])
     const id = String(partnerId[row])
@@ -139,12 +209,29 @@ export function partnerTypes(
   const out: PartnerTypeRow[] = [...buckets.entries()]
     .map(([type, bucket]) => ({
       type,
+      // Plain, not a conditional spread: `exactOptionalPropertyTypes` is off, so the two read
+      // identically, and the spread allocated a throwaway object per row — fifteen thousand of
+      // them on a dense cell's ungrouped list.
+      partnerType: bucket.partnerType,
       synapses: bucket.synapses,
       partners: bucket.ids.size,
       synapseShare: totalSynapses > 0 ? bucket.synapses / totalSynapses : 0,
       partnerShare: allPartners.size > 0 ? bucket.ids.size / allPartners.size : 0,
     }))
-    .sort((a, b) => b.synapses - a.synapses || collate(a.type, b.type))
+    /*
+     * `compareIds` where the key is an id, `collate` where it is a type. Ties are what this
+     * decides, and an id compared by locale is `topPartners`' recorded mistake one function
+     * down: ids are wider than a double, so lexicographic order puts `1000` before `999`.
+     * `partnerType` is present only on an id-keyed row, which is what tells the two apart
+     * without a second flag.
+     */
+    .sort(
+      (a, b) =>
+        b.synapses - a.synapses ||
+        (grouping === 'type'
+          ? collate(a.type, b.type)
+          : compareIds(a.type ?? '', b.type ?? '')),
+    )
 
   return capped(out, options.topN)
 }

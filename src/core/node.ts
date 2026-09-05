@@ -714,6 +714,29 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    * what was fetched rather than by the graph.
    */
   dataCache?: boolean
+
+  /**
+   * This node's own surface draws its presentational controls, so the generic ones must not.
+   *
+   * `ViewerSurface` — the frame around an expanded node, a pinned dock and a dashboard cell —
+   * builds a rail from every `presentational` param, which is right for the viewers it was
+   * written for: a bar chart's card is a picture and the rail is the only place its category and
+   * value pickers exist. It is wrong for a card that is already a control surface. Neuron
+   * Topology draws a pager, a layer toolbar, a colour select and three tabs of sliders; expanded,
+   * every one of its seventeen presentational params appeared **twice**, a few pixels apart,
+   * with the reader's eye landing on whichever was nearer.
+   *
+   * A property of the *node*, not of the frame: `ViewerSurface.controls` deliberately names what
+   * a frame has room for rather than which caller is asking, and "my body already drew this" is
+   * not something a frame can know. So it is declared here and honoured by all three surfaces,
+   * which is also the honest answer — the duplication is identical in each.
+   *
+   * The cost, stated: a presentational param added later that the body does *not* draw has no
+   * control outside the inspector, and nothing will say so. That is the trade against seventeen
+   * per-param flags which could each go stale on their own. `paramFold.test.tsx` holds the
+   * matching rule for the card.
+   */
+  ownControls?: boolean
   /**
    * Tabs for a grouped styling panel, in display order; a param's `group` names one.
    *

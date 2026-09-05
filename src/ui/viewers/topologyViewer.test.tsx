@@ -23,6 +23,7 @@ import { column, tableSchema } from '../../core/types'
 import type { MeshesValue, PointsValue, SkeletonsValue, TableValue } from '../../core/values'
 import { makeTable, tableFromRows } from '../../core/values'
 import type { DataSource } from '../../data/source'
+import type { PartnerGrouping } from '../../nodes/lib/profileStats'
 import { registerSource } from '../../data/source'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { currentMode, sequentialColor } from '../colors'
@@ -140,21 +141,39 @@ function connectivity(direction: string) {
 const fetchSkeletons = vi.fn()
 const fetchSynapses = vi.fn()
 
-function install(): void {
+/**
+ * Register a source for one describe block, and reset the two shared fetch mocks.
+ *
+ * Parameterised rather than copied. Four blocks wanted the same eight-key shape with a different
+ * id, a different synapse cloud and a different connectivity table — CAVE's id-only cloud, the
+ * grouping fixture's typed one — and written out each time a new required field on `DataSource`
+ * is four edits, with four independently drifting casts.
+ */
+function install(over: Partial<InstallOptions> = {}): void {
+  const { id = 'topo-test', points, links, units = 'sites' } = over
   fetchSkeletons.mockReset().mockResolvedValue(skeleton())
-  fetchSynapses.mockReset().mockResolvedValue(synapses())
+  fetchSynapses.mockReset().mockResolvedValue(points ?? synapses())
   const source: Partial<DataSource> = {
-    id: 'topo-test',
+    id,
     label: 'Topology test',
     capabilities: { skeletons: true, synapses: true } as never,
-    synapseUnits: ['sites'] as never,
+    synapseUnits: [units] as never,
     fetchSkeletons: fetchSkeletons as never,
     fetchSynapses: fetchSynapses as never,
     fetchConnectivity: (async (req: { direction?: string }) =>
-      connectivity(req.direction ?? 'outputs')) as never,
+      links ?? connectivity(req.direction ?? 'outputs')) as never,
     peekDataset: (() => undefined) as never,
   }
   registerSource(source as DataSource)
+}
+
+interface InstallOptions {
+  id: string
+  /** The synapse cloud, when the block is about a schema `synapses()` does not have. */
+  points: PointsValue
+  /** One connectivity table for both directions, where the block does not care which. */
+  links: TableValue
+  units: 'sites' | 'links'
 }
 
 const PROPS = {
@@ -176,6 +195,8 @@ const PROPS = {
   onLayer: vi.fn(),
   partners: [] as string[],
   onPartners: vi.fn(),
+  grouping: 'type' as PartnerGrouping,
+  onGrouping: vi.fn(),
   direction: 'outputs',
   onDirection: vi.fn(),
   partnerQuery: '',
@@ -301,9 +322,13 @@ describe('partner highlighting', () => {
 
   it('says so when the dataset cannot name a synapse’s partner', async () => {
     /*
-     * neuPrint drops `partnerType` from the canonical synapse schema on purpose, so the highlight
-     * genuinely cannot work there. A list that looked clickable and silently did nothing is what
-     * this sentence replaces.
+     * A cloud with **neither** partner column, which is CATMAID's shape: its synapse schema
+     * declines `partnerId` on purpose, because naming the far end of a connector costs a second
+     * POST per connector set. There is nothing to join, so the refusal is real and a list that
+     * looked clickable and silently did nothing is what this sentence replaces.
+     *
+     * Not neuPrint, which this comment used to name: neuPrint drops both columns too, but has
+     * `fetchSynapseLinks` to answer with instead, so it takes the other branch.
      */
     fetchSynapses.mockResolvedValue({
       kind: 'points',
@@ -323,9 +348,12 @@ describe('partner highlighting', () => {
      * thing that makes these two independent.
      */
     render(<TopologyViewer {...PROPS} tab="partners" datasetId="test:no-partners" />)
-    await waitFor(() => expect(screen.getByText(/do not name their partner/)).toBeTruthy(), {
-      timeout: 3000,
-    })
+    await waitFor(
+      () => expect(screen.getByText(/carry no partner on the far side/)).toBeTruthy(),
+      {
+        timeout: 3000,
+      },
+    )
   })
 
   it('offers the size controls without re-running anything', async () => {
@@ -713,7 +741,7 @@ describe('the partner-resolved cloud, from a class-based source', () => {
     // says highlighting is impossible on exactly the backend where the second query exists.
     render(<LinkSource_Viewer partners={[]} />)
     await waitFor(() => expect(screen.getByText('DNp02')).toBeTruthy(), { timeout: 3000 })
-    expect(screen.queryByText(/do not name their partner/)).toBeNull()
+    expect(screen.queryByText(/carry no partner on the far side/)).toBeNull()
   })
 
   function LinkSource_Viewer({ partners }: { partners: string[] }) {
@@ -999,5 +1027,198 @@ describe('the mesh layer', () => {
     // itself on while nothing is drawn is the one appearance it must never have, and jsdom
     // computes no styles, so the CSS half of that is invisible to this suite.
     expect(button.getAttribute('aria-pressed')).toBe('false')
+  })
+})
+
+/**
+ * A CAVE-shaped cloud: partners named by **id**, with the type only in the connectivity table.
+ *
+ * Reported against the `wclee_aedes_brain` datastack, whose cell types come from a FlyTable sheet
+ * wired to the dataset node. The card said "this dataset's synapses do not name their partner"
+ * while the partner list beside it was full of real type names — a refusal that was true of the
+ * column it looked for and false of the data. `cave/schema.ts` narrows the canonical synapse
+ * schema to four columns because a CAVE synapse table carries a root id on each side and no type,
+ * and `fetchConnectivity` resolves those ids through `typeLookup`, which reads the annotations.
+ */
+describe('a dataset that names partners by id', () => {
+  const CAVE_SYNAPSES = tableSchema(
+    column('neuronId', 'str'),
+    column('partnerId', 'str'),
+    column('polarity', 'str'),
+    column('weight', 'f64'),
+  )
+
+  const CAVE_PROPS = {
+    ...PROPS,
+    sourceId: 'topo-cave',
+    datasetId: 'cave:v1',
+    direction: 'inputs',
+  }
+
+  beforeEach(() => {
+    install({
+      id: 'topo-cave',
+      units: 'links',
+      points: {
+        kind: 'points',
+        positions: new Float32Array([0, 0, 0, 1000, 0, 0, 2000, 0, 0]),
+        attributes: tableFromRows(CAVE_SYNAPSES, [
+          // Two from the same partner, one from another, all inputs.
+          { neuronId: '1001', partnerId: '900', polarity: 'post', weight: 1 },
+          { neuronId: '1001', partnerId: '901', polarity: 'post', weight: 1 },
+          { neuronId: '1001', partnerId: '902', polarity: 'post', weight: 1 },
+        ]),
+        bounds: { min: [0, 0, 0], max: [2000, 0, 0] },
+        units: 'nm',
+      },
+      // The type lives here and only here — as it does on CAVE, via the attached annotations.
+      links: tableFromRows(CONNECTIVITY, [
+        { neuronId: '1001', partnerId: 900, partnerType: 'AN10B021', weight: 2 },
+        { neuronId: '1001', partnerId: 901, partnerType: 'AN10B021', weight: 1 },
+        { neuronId: '1001', partnerId: 902, partnerType: 'Tm3', weight: 5 },
+      ]),
+    })
+  })
+
+  it('does not claim the synapses fail to name their partner', async () => {
+    render(<TopologyViewer {...CAVE_PROPS} tab="partners" />)
+    await waitFor(() => expect(screen.getByText('AN10B021')).toBeTruthy(), { timeout: 3000 })
+    expect(screen.queryByText(/carry no partner on the far side/)).toBeNull()
+  })
+
+  it('lights exactly the synapses of the chosen type, joined through the id', async () => {
+    /*
+     * The count is the assertion: partner `AN10B021` is two of the three rows, and it is reached
+     * only by mapping each synapse's `partnerId` through the connectivity table. A join that
+     * matched on the id *string* against a type name would light nothing and still look like a
+     * working control.
+     */
+    render(<TopologyViewer {...CAVE_PROPS} tab="partners" partners={['AN10B021']} />)
+    await waitFor(() => expect(screen.getByText(/2 synapses lit/)).toBeTruthy(), {
+      timeout: 3000,
+    })
+  })
+
+  it('colours the scene by the joined column rather than by polarity', async () => {
+    render(<TopologyViewer {...CAVE_PROPS} tab="partners" partners={['Tm3']} />)
+    await waitFor(
+      () =>
+        expect((sceneProps?.pointColor as { column?: string } | undefined)?.column).toBe(
+          'codaHighlight',
+        ),
+      { timeout: 3000 },
+    )
+    const emphasis = sceneProps?.pointEmphasis as (row: number) => boolean
+    // Row 2 is the Tm3 synapse; the other two belong to AN10B021.
+    expect(emphasis(2)).toBe(true)
+    expect(emphasis(0)).toBe(false)
+  })
+})
+
+/**
+ * Grouping the partner list, and the one property that has to survive it.
+ *
+ * A row's label is what gets stored in `partners` and what `highlightColumn` matches against, so
+ * the list and the arbour have to spell a partner the same way. `partnerKey` is the single rule
+ * both read; these tests are about the *seam*, which is the half a headless test cannot see.
+ */
+describe('grouping the partner list', () => {
+  const SYNAPSES = tableSchema(
+    column('neuronId', 'str'),
+    column('partnerId', 'str'),
+    column('partnerType', 'str'),
+    column('polarity', 'str'),
+  )
+
+  beforeEach(() => {
+    install({
+      id: 'topo-group',
+      points: {
+        kind: 'points',
+        positions: new Float32Array([0, 0, 0, 1000, 0, 0, 2000, 0, 0, 3000, 0, 0]),
+        attributes: tableFromRows(SYNAPSES, [
+          { neuronId: '1001', partnerId: '900', partnerType: 'Tm3', polarity: 'post' },
+          { neuronId: '1001', partnerId: '901', partnerType: 'Tm3', polarity: 'post' },
+          { neuronId: '1001', partnerId: '902', partnerType: null, polarity: 'post' },
+          { neuronId: '1001', partnerId: '903', partnerType: null, polarity: 'post' },
+        ]),
+        bounds: { min: [0, 0, 0], max: [3000, 0, 0] },
+        units: 'nm',
+      },
+      links: tableFromRows(CONNECTIVITY, [
+        { neuronId: '1001', partnerId: 900, partnerType: 'Tm3', weight: 1 },
+        { neuronId: '1001', partnerId: 901, partnerType: 'Tm3', weight: 1 },
+        { neuronId: '1001', partnerId: 902, partnerType: null, weight: 1 },
+        { neuronId: '1001', partnerId: 903, partnerType: null, weight: 1 },
+      ]),
+    })
+  })
+
+  const GROUP_PROPS = {
+    ...PROPS,
+    sourceId: 'topo-group',
+    datasetId: 'group:v1',
+    tab: 'partners',
+    direction: 'inputs',
+  }
+
+  it('offers the three settings as one control, not as two checkboxes', async () => {
+    render(<TopologyViewer {...GROUP_PROPS} />)
+    const select = await screen.findByLabelText('Group partners by', undefined, {
+      timeout: 3000,
+    })
+    expect((select as HTMLSelectElement).value).toBe('type')
+    expect([...(select as HTMLSelectElement).options].map((o) => o.value)).toEqual([
+      'type',
+      'typed',
+      'neuron',
+    ])
+    fireEvent.change(select, { target: { value: 'neuron' } })
+    expect(GROUP_PROPS.onGrouping).toHaveBeenCalledWith('neuron')
+  })
+
+  it('lumps the untyped under one row by default', async () => {
+    render(<TopologyViewer {...GROUP_PROPS} />)
+    await waitFor(() => expect(screen.getByText('Tm3')).toBeTruthy(), { timeout: 3000 })
+    // One `—` row standing for both untyped partners, which is the thing the toggles open up.
+    expect(screen.getAllByText('—')).toHaveLength(1)
+    expect(screen.queryByText('902')).toBeNull()
+  })
+
+  it('splits the untyped apart under `typed`, leaving the typed bucket whole', async () => {
+    render(<TopologyViewer {...GROUP_PROPS} grouping="typed" />)
+    await waitFor(() => expect(screen.getByText('902')).toBeTruthy(), { timeout: 3000 })
+    expect(screen.getByText('903')).toBeTruthy()
+    expect(screen.getByText('Tm3')).toBeTruthy()
+    expect(screen.queryByText('900')).toBeNull()
+  })
+
+  it('lights one neuron rather than its whole type, once ungrouped', async () => {
+    /*
+     * The seam. `900` and `901` are both Tm3, so under `type` grouping picking Tm3 lights two
+     * synapses; picking the neuron `900` must light exactly one. A cloud still labelled by type
+     * while the list had moved on to ids would light *nothing* here — a plausible-looking list
+     * whose every click does nothing, which is this card's recurring failure.
+     */
+    render(<TopologyViewer {...GROUP_PROPS} grouping="neuron" partners={['900']} />)
+    await waitFor(() => expect(screen.getByText(/1 synapse lit/)).toBeTruthy(), {
+      timeout: 3000,
+    })
+
+    cleanup()
+    render(<TopologyViewer {...GROUP_PROPS} partners={['Tm3']} />)
+    await waitFor(() => expect(screen.getByText(/2 synapses lit/)).toBeTruthy(), {
+      timeout: 3000,
+    })
+  })
+
+  it('keeps the type beside an id-keyed row, and lets the filter find it', async () => {
+    render(<TopologyViewer {...GROUP_PROPS} grouping="neuron" partnerQuery="Tm3" />)
+    // Filtering by a type the labels no longer carry still reaches the two Tm3 neurons.
+    await waitFor(() => expect(screen.getByText('900')).toBeTruthy(), { timeout: 3000 })
+    expect(screen.getByText('901')).toBeTruthy()
+    expect(screen.queryByText('902')).toBeNull()
+    // …and the type is on screen, so the ids are not eighteen digits of nothing.
+    expect(screen.getAllByText('Tm3').length).toBeGreaterThan(0)
   })
 })
