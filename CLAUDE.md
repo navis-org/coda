@@ -302,7 +302,17 @@ Area-specific — the rule, then the doc that holds why:
   `pruneGroups`/`createGroup` drop a deleted or regrouped card, `cloneGroups` **remaps** them (or a
   duplicate's controls write to the original's cards), and `visibleIf` is asked in `collapsedView`
   rather than in the file because it answers differently a keystroke later. One call decides the
-  rows *and* the box's size, so a row ELK reserved no space for cannot exist. **Looking inside a folded group is a second React Flow in a modal** (`GroupPeek`), holding the
+  rows *and* the box's size, so a row ELK reserved no space for cannot exist. **A folded frame says what its hidden cards would have said about the run**: the same
+  `NodeRunRing` (indeterminate — a group's progress is not the mean of its members') while any
+  member runs, and the card's own `.state-badge` + `STATE_GLYPH` + `data-state='error'` for a
+  failure, joining the card's own CSS rule rather than writing a second one. **Only the failure
+  reaches the outline** — running is the ring's to say, and a card tints its header strip for it,
+  which a box has not got. `useAnyNodeState`/`useNodeStateCount` return **primitives** (invariant
+  7), and a boolean where only truthiness is read: a running *count* re-renders the box on every
+  1→2→1 among its members, which a For Each region does thousands of times. A test faking
+  `nodeInfo` must hold one object per id for the same invariant, or the cards re-render forever.
+  The ring takes the corner radius as a **prop**, because it is a sibling of what it rings and the
+  alternative is a CSS selector keyed on React Flow's generated class — i.e. on a TS constant. **Looking inside a folded group is a second React Flow in a modal** (`GroupPeek`), holding the
   members' own live cards from `subgraphOf` with `previews: false` and nothing that writes a
   position. Two costs, both silent: the same cards carry the same `data-id`s, so
   `measureCardSizes`, the port measurement and `spliceOn` are scoped to `.canvas-area` — unscoped,

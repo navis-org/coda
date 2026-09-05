@@ -61,13 +61,17 @@ import {
   COLLAPSED_HEADER_HEIGHT,
   COLLAPSED_IN,
   COLLAPSED_OUT,
+  COLLAPSED_RADIUS,
   COLLAPSED_ROWS_PADDING,
   COLLAPSED_ROW_HEIGHT,
   COLLAPSED_SIZE,
 } from '../../layout/collapse'
-import { useGraphStore } from '../../store/graphStore'
+import { useAnyNodeState, useGraphStore, useNodeStateCount } from '../../store/graphStore'
 import { union } from '../../layout/place'
+import { plural } from '../format'
 import { useGroupDrag } from '../groupDrag'
+import { NodeRunRing } from './NodeRunRing'
+import { STATE_GLYPH } from './runState'
 import { GroupTitleInput } from '../GroupTitle'
 import { ParamField } from '../params/ParamField'
 
@@ -107,6 +111,11 @@ export function GroupCollapsedCard({ data }: NodeProps<GroupCollapsedNode>) {
   // the canvas whenever a rename started.
   const editing = useGraphStore((s) => s.editingGroupId) === group.id
   const editTitle = useGraphStore((s) => s.editGroupTitle)
+  // What the member cards would have shown, said by the box instead. Two of the seven states,
+  // and they are the two that are about *work*: one happening now, one that has already happened
+  // and outlives the run that caused it. See `useNodeStateCount`.
+  const running = useAnyNodeState(group.nodeIds, 'running')
+  const failed = useNodeStateCount(group.nodeIds, 'error')
   const selection = useGraphStore((s) => s.selection)
   const toggle = useGraphStore((s) => s.toggleGroupCollapsed)
   const peekGroup = useGraphStore((s) => s.peekGroup)
@@ -134,100 +143,141 @@ export function GroupCollapsedCard({ data }: NodeProps<GroupCollapsedNode>) {
   }, [group.nodeIds, selection])
 
   return (
-    <div
-      className="group-collapsed nopan"
-      data-color={group.color ?? 'grey'}
-      data-filled={group.filled || undefined}
-      data-dashed={group.dashed || undefined}
-      data-selected={allSelected || undefined}
-      data-group-id={group.id}
-      style={
-        {
-          width: size.width,
-          height: size.height,
-          // The numbers both languages need, handed to the stylesheet rather than restated in
-          // it. `boxSize` adds up exactly these; see `layout/collapse.ts`.
-          '--collapsed-header': `${COLLAPSED_HEADER_HEIGHT}px`,
-          '--collapsed-row': `${COLLAPSED_ROW_HEIGHT}px`,
-          '--collapsed-rows-pad': `${COLLAPSED_ROWS_PADDING}px`,
-          '--collapsed-map-pad': `${MAP_PAD}px`,
-        } as React.CSSProperties
-      }
-      onContextMenu={(event) => {
-        event.preventDefault()
-        event.stopPropagation()
-        onContextMenu(group.id, { x: event.clientX, y: event.clientY })
-      }}
-      /*
-       * Double-click the *body* to look inside — the header keeps its own double-click for
-       * renaming, and the controls band stops the event because a double-click in a text field
-       * selects a word. So the gesture lands on the mini-map, which is the part of the box that
-       * is a picture of what the panel will show.
-       */
-      onDoubleClick={(event) => {
-        event.stopPropagation()
-        peekGroup(group.id)
-      }}
-      {...handlers}
-    >
+    <>
       {/*
-       * Both sockets are `isConnectable={false}`: a wire dragged to a box would have to name a
-       * card inside it, and which one is a question the box cannot answer. Present all the same,
-       * because they are where the merged wires terminate — see `layout/collapse.ts`.
+       * The card's own ring, told where this box's corner is. **Indeterminate on purpose** — a
+       * group's progress is not the mean of its members', and averaging a member reporting 90%
+       * with one that has not started claims a number nobody measured. What it says is
+       * "something in here is working", which is the question a folded box raises.
        */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id={COLLAPSED_IN}
-        isConnectable={false}
-        className="group-collapsed__port"
-      />
+      {running && <NodeRunRing radius={COLLAPSED_RADIUS} />}
       <div
-        className="group-collapsed__header"
-        // Double-click to rename, as on the expanded frame's outline. On the header alone: the
-        // rows below hold real fields, where a double-click selects a word.
+        className="group-collapsed nopan"
+        data-color={group.color ?? 'grey'}
+        // The card's own attribute, and the box joins the card's own rule for it — see
+        // `.coda-node[data-state='error']`. Only the failure: `running` is the ring's to say, and
+        // a card says it on its header strip rather than its border, which a folded box has not
+        // got.
+        data-state={failed > 0 ? 'error' : undefined}
+        data-filled={group.filled || undefined}
+        data-dashed={group.dashed || undefined}
+        data-selected={allSelected || undefined}
+        data-group-id={group.id}
+        style={
+          {
+            width: size.width,
+            height: size.height,
+            // The numbers both languages need, handed to the stylesheet rather than restated in
+            // it. `boxSize` adds up exactly these; see `layout/collapse.ts`.
+            '--collapsed-header': `${COLLAPSED_HEADER_HEIGHT}px`,
+            '--collapsed-row': `${COLLAPSED_ROW_HEIGHT}px`,
+            '--collapsed-rows-pad': `${COLLAPSED_ROWS_PADDING}px`,
+            '--collapsed-map-pad': `${MAP_PAD}px`,
+          '--collapsed-radius': `${COLLAPSED_RADIUS}px`,
+          } as React.CSSProperties
+        }
+        onContextMenu={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          onContextMenu(group.id, { x: event.clientX, y: event.clientY })
+        }}
+        /*
+         * Double-click the *body* to look inside — the header keeps its own double-click for
+         * renaming, and the controls band stops the event because a double-click in a text field
+         * selects a word. So the gesture lands on the mini-map, which is the part of the box that
+         * is a picture of what the panel will show.
+         */
         onDoubleClick={(event) => {
           event.stopPropagation()
-          editTitle(group.id)
+          peekGroup(group.id)
         }}
+        {...handlers}
       >
-        <button
-          type="button"
-          className="group-collapsed__chevron nodrag"
-          title="Expand this group"
-          aria-label="Expand group"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
+        {/*
+         * Both sockets are `isConnectable={false}`: a wire dragged to a box would have to name a
+         * card inside it, and which one is a question the box cannot answer. Present all the same,
+         * because they are where the merged wires terminate — see `layout/collapse.ts`.
+         */}
+        <Handle
+          type="target"
+          position={Position.Left}
+          id={COLLAPSED_IN}
+          isConnectable={false}
+          className="group-collapsed__port"
+        />
+        <div
+          className="group-collapsed__header"
+          // Double-click to rename, as on the expanded frame's outline. On the header alone: the
+          // rows below hold real fields, where a double-click selects a word.
+          onDoubleClick={(event) => {
             event.stopPropagation()
-            toggle(group.id)
+            editTitle(group.id)
           }}
         >
-          ▸
-        </button>
-        {editing ? (
-          <GroupTitleInput group={group} />
-        ) : (
-          <span className="group-collapsed__title">{group.title || 'Group'}</span>
-        )}
-        <span className="group-collapsed__count" title={`${group.nodeIds.length} nodes inside`}>
-          {group.nodeIds.length}
-        </span>
+          <button
+            type="button"
+            className="group-collapsed__chevron nodrag"
+            title="Expand this group"
+            aria-label="Expand group"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation()
+              toggle(group.id)
+            }}
+          >
+            ▸
+          </button>
+          {editing ? (
+            <GroupTitleInput group={group} />
+          ) : (
+            <span className="group-collapsed__title">{group.title || 'Group'}</span>
+          )}
+          {failed > 0 && <FailedBadge failed={failed} of={group.nodeIds.length} />}
+          <span className="group-collapsed__count" title={`${group.nodeIds.length} nodes inside`}>
+            {group.nodeIds.length}
+          </span>
+        </div>
+        {/*
+         * The map keeps the bare box's height whatever the box grew to: `boxSize` adds the
+         * controls band *on top of* `COLLAPSED_SIZE.height`, so this is that addition not made
+         * rather than an addition undone.
+         */}
+        <GroupMiniMap box={box} />
+        {box.exposed.length > 0 && <ExposedControls controls={box.exposed} />}
+        <Handle
+          type="source"
+          position={Position.Right}
+          id={COLLAPSED_OUT}
+          isConnectable={false}
+          className="group-collapsed__port"
+        />
       </div>
-      {/*
-       * The map keeps the bare box's height whatever the box grew to: `boxSize` adds the
-       * controls band *on top of* `COLLAPSED_SIZE.height`, so this is that addition not made
-       * rather than an addition undone.
-       */}
-      <GroupMiniMap box={box} />
-      {box.exposed.length > 0 && <ExposedControls controls={box.exposed} />}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id={COLLAPSED_OUT}
-        isConnectable={false}
-        className="group-collapsed__port"
-      />
-    </div>
+    </>
+  )
+}
+
+/**
+ * How many cards inside the fold have failed.
+ *
+ * The card's own badge — same class, same `data-state`, same glyph off `STATE_GLYPH` — with a
+ * count after it, which is the one thing a card's badge never has to say. `--count` widens the
+ * 14px disc into a pill for it; two characters in a circle sized for one is a clip.
+ *
+ * One sentence for both the tooltip and the screen reader, because they are one fact — and
+ * written separately, one of them shipped as `1 nodes failed`.
+ */
+function FailedBadge({ failed, of }: { failed: number; of: number }) {
+  const said = `${plural(failed, 'node')} of ${of} inside failed — open the group to see which`
+  return (
+    <span
+      className={`state-badge${failed > 1 ? ' state-badge--count' : ''}`}
+      data-state="error"
+      title={said}
+      aria-label={said}
+    >
+      {STATE_GLYPH.error}
+      {failed > 1 ? failed : ''}
+    </span>
   )
 }
 

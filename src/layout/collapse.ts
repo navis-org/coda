@@ -88,6 +88,15 @@ export const COLLAPSED_SIZE: NodeSize = { width: FALLBACK_NODE_SIZE.width, heigh
  * the canvas and ELK are both told, and only CSS can draw it — so the few numbers both languages
  * need go *that* way rather than being written twice with a comment between them.
  */
+/**
+ * The box's corner, in px — the frame's, not a card's.
+ *
+ * A folded frame is drawn as the frame it folded, so its radius is `GroupLayer`'s outline radius
+ * rather than `--radius`. One constant because four things have to agree on it: the outline's
+ * three `rx`es, the box's `border-radius`, and the running ring drawn concentric with it.
+ */
+export const COLLAPSED_RADIUS = 14
+
 export const COLLAPSED_WIDE = 288
 export const COLLAPSED_HEADER_HEIGHT = 26
 export const COLLAPSED_ROW_HEIGHT = 26

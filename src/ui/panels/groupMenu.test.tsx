@@ -17,6 +17,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { App } from '../../App'
 import { serializeGraph } from '../../core/graph'
 import { configurableParams } from '../../core/node'
+import type { NodeRunState } from '../../core/scheduler'
 import { measureCardSizes } from '../cardSizes'
 import { getNodeDef, requireNodeDef } from '../../core/registry'
 import { MockSource } from '../../data/mock/MockSource'
@@ -444,6 +445,106 @@ describe('a folded frame', () => {
     collapsedFrame()
     fireEvent.doubleClick(document.querySelector('.group-collapsed__header')!)
     expect(screen.getByLabelText('Group title')).toBeTruthy()
+  })
+
+  /**
+   * What the box says about work it is hiding.
+   *
+   * Folding hides the cards, not the running: without these, a graph working inside a fold looks
+   * idle and a node that failed in one is invisible until somebody unfolds it. The states are
+   * faked through `nodeInfo` rather than driven through the scheduler, because what is asserted
+   * is the drawing — that a run *reaches* these states is `store/run.test.ts`'s job.
+   */
+  describe('what it says about the run inside it', () => {
+    /*
+     * The scheduler's own `nodeInfo`, captured once and put back after each case — the store is a
+     * module singleton, so a fake left in place is a fake every later test in this file inherits.
+     */
+    const realNodeInfo = useGraphStore.getState().nodeInfo
+    afterEach(() => {
+      act(() => {
+        useGraphStore.setState({ nodeInfo: realNodeInfo })
+      })
+    })
+
+    /*
+     * One object per id, held across calls. A fresh `{ state }` per call is a new snapshot on
+     * every read, and `useSyncExternalStore` compares by identity — the cards' own selectors then
+     * re-render forever, which is invariant 7 biting inside the test rather than in the app.
+     */
+    const fakeStates = (states: Record<string, NodeRunState>) => {
+      const infos: Record<string, { state: NodeRunState }> = Object.fromEntries(
+        Object.entries(states).map(([id, state]) => [id, { state }]),
+      )
+      act(() => {
+        useGraphStore.setState({ nodeInfo: (id: string) => infos[id] ?? realNodeInfo(id) })
+      })
+    }
+
+    /*
+     * The ring is a *sibling* of the box, not a child — that is what the wrapping fragment is
+     * for, since the box clips — so it is queried through React Flow's wrapper. A
+     * `.group-collapsed .coda-node__ring` descendant query is null in every state including the
+     * running one, which is an assertion that cannot fail.
+     */
+    const ring = () => document.querySelector('.react-flow__node-groupBox .coda-node__ring')
+    const badge = () => box()?.querySelector('.state-badge')
+
+    beforeEach(() => {
+      render(<App />)
+      collapsedFrame()
+    })
+
+    it('wears the running ring while a member is running, and drops it after', () => {
+      const [a] = nodeIds()
+      expect(ring()).toBeNull()
+
+      fakeStates({ [a!]: 'running' })
+      expect(ring()).toBeTruthy()
+      // The ring is the whole of what running says: a card tints its *header strip* for it, and
+      // a folded box has not got one, so nothing on the outline changes.
+      expect(box()?.hasAttribute('data-state')).toBe(false)
+
+      fakeStates({ [a!]: 'ok' })
+      expect(ring()).toBeNull()
+    })
+
+    it('badges a failure inside it, and counts them past one', () => {
+      const [a, b] = nodeIds()
+
+      fakeStates({ [a!]: 'error' })
+      expect(badge()?.getAttribute('data-state')).toBe('error')
+      expect(badge()?.textContent).toBe('×')
+      expect(badge()?.getAttribute('aria-label')).toBe(
+        '1 node of 2 inside failed — open the group to see which',
+      )
+      expect(box()?.getAttribute('data-state')).toBe('error')
+
+      fakeStates({ [a!]: 'error', [b!]: 'error' })
+      expect(badge()?.textContent).toBe('×2')
+      // The disc is sized for one character; a count gets the pill.
+      expect(badge()?.className).toContain('state-badge--count')
+      expect(badge()?.getAttribute('aria-label')).toBe(
+        '2 nodes of 2 inside failed — open the group to see which',
+      )
+    })
+
+    /* A failure outlives the run that caused it; a ring does not. Both can be true at once. */
+    it('shows the failure over the ring when a run is still going', () => {
+      const [a, b] = nodeIds()
+      fakeStates({ [a!]: 'error', [b!]: 'running' })
+      expect(ring()).toBeTruthy()
+      expect(box()?.getAttribute('data-state')).toBe('error')
+      expect(badge()).toBeTruthy()
+    })
+
+    /* A member's own state, not the whole graph's: a failure outside the frame is not its news. */
+    it('ignores a node that is not inside it', () => {
+      const outside = nodeIds().find((id) => !store().graph.groups![0]!.nodeIds.includes(id))!
+      fakeStates({ [outside]: 'error' })
+      expect(box()?.hasAttribute('data-state')).toBe(false)
+      expect(badge()).toBeNull()
+    })
   })
 
   /*

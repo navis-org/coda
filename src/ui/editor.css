@@ -632,7 +632,13 @@
     0 0 0 1px var(--accent),
     var(--shadow-node);
 }
-.coda-node[data-state='error'] {
+/*
+ * A failure tints the outline. Both surfaces that draw a card-like thing are on the list, the way
+ * the `data-color` rules are: one edit retunes the blend for the canvas and for a folded group's
+ * box, which has no header strip to carry the state bar a card uses for everything else.
+ */
+.coda-node[data-state='error'],
+.group-collapsed[data-state='error'] {
   border-color: color-mix(in srgb, var(--status-error) 55%, var(--border));
 }
 .coda-node[data-disabled='true'] {
@@ -731,6 +737,19 @@
   background: var(--status-muted);
   font-family: var(--font-mono);
 }
+/*
+ * A badge carrying a count as well as its glyph — `×2`. The disc above is sized for the one
+ * character `STATE_GLYPH` produces, and two of them clip; this widens it into a pill and leaves
+ * everything else alone.
+ */
+.state-badge--count {
+  width: auto;
+  min-width: 14px;
+  padding: 0 4px;
+  border-radius: 7px;
+  gap: 1px;
+}
+
 .state-badge[data-state='ok'] {
   background: var(--status-ok);
 }
@@ -1576,8 +1595,13 @@ select.field {
   y: calc(var(--ring-width) / 2);
   width: calc(100% - var(--ring-width));
   height: calc(100% - var(--ring-width));
-  /* Concentric with the card's corner: its radius plus the distance out to the centreline. */
-  rx: calc(var(--radius) + var(--ring-gap) + var(--ring-width) / 2);
+  /*
+   * Concentric with the host's corner: its radius plus the distance out to the centreline.
+   * `--ring-radius` is the ring's own prop (see `NodeRunRing`), set by a host whose corner is not
+   * a card's — the collapsed group box wears a frame's. Absent, which is every card, it is
+   * `--radius`.
+   */
+  rx: calc(var(--ring-radius, var(--radius)) + var(--ring-gap) + var(--ring-width) / 2);
   fill: none;
   stroke: var(--status-running-ring);
   stroke-width: var(--ring-width);
@@ -9254,7 +9278,8 @@ details[open] > summary.tile__label {
   flex-direction: column;
   box-sizing: border-box;
   border: 1.5px solid var(--group-color);
-  border-radius: 14px;
+  /* From the component, with the rest of the box's arithmetic — `COLLAPSED_RADIUS`. */
+  border-radius: var(--collapsed-radius);
   background: color-mix(in srgb, var(--canvas) 88%, transparent);
   cursor: grab;
   overflow: hidden;

@@ -37,6 +37,7 @@
 
 import { ViewportPortal } from '@xyflow/react'
 import type { MeasuredSizes } from '../layout/elkGraph'
+import { COLLAPSED_RADIUS } from '../layout/collapse'
 import { groupBoxes } from '../layout/groupBounds'
 import { useGraphStore } from '../store/graphStore'
 import { useGroupDrag } from './groupDrag'
@@ -138,7 +139,7 @@ export function GroupLayer({ measured, onContextMenu }: GroupLayerProps) {
                   y={GROUP_GRAB / 2}
                   width={box.width}
                   height={box.height}
-                  rx="14"
+                  rx={COLLAPSED_RADIUS}
                 />
                 <rect
                   className="group-frame__line"
@@ -146,7 +147,7 @@ export function GroupLayer({ measured, onContextMenu }: GroupLayerProps) {
                   y={GROUP_GRAB / 2}
                   width={box.width}
                   height={box.height}
-                  rx="14"
+                  rx={COLLAPSED_RADIUS}
                 />
                 {/*
                  * The grab band: transparent, `GROUP_GRAB` wide, centred on the same path. Last
@@ -159,7 +160,7 @@ export function GroupLayer({ measured, onContextMenu }: GroupLayerProps) {
                   y={GROUP_GRAB / 2}
                   width={box.width}
                   height={box.height}
-                  rx="14"
+                  rx={COLLAPSED_RADIUS}
                   strokeWidth={GROUP_GRAB}
                   {...handlers}
                 />

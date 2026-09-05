@@ -22,11 +22,21 @@
 export interface NodeRunRingProps {
   /** 0..1 when the node reports progress; undefined while it is working but silent. */
   progress?: number | undefined
+  /**
+   * The corner radius of the thing being ringed, in px. Defaults to a card's `--radius`.
+   *
+   * A knob rather than a rule keyed on the host, because the ring is a *sibling* of what it
+   * rings: nothing the host sets on itself reaches it. The collapsed group box wears a frame's
+   * 14px corner, and the alternative — a stylesheet rule selecting on React Flow's generated
+   * `.react-flow__node-groupBox` — is a CSS selector depending on a TypeScript string constant,
+   * which a rename breaks in silence (the ring keeps drawing, concentric with nothing).
+   */
+  radius?: number | undefined
 }
 
 const round = (value: number) => Math.round(value * 10_000) / 10_000
 
-export function NodeRunRing({ progress }: NodeRunRingProps) {
+export function NodeRunRing({ progress, radius }: NodeRunRingProps) {
   const determinate = typeof progress === 'number' && Number.isFinite(progress)
   // Clamped, and floored just above zero: a zero-length dash draws nothing, so a node that
   // has only just started would show no ring at all.
@@ -38,6 +48,10 @@ export function NodeRunRing({ progress }: NodeRunRingProps) {
   return (
     <svg
       className="coda-node__ring"
+      // Read by the rect's `rx`, which falls back to `--radius` when nothing sets it.
+      {...(radius === undefined
+        ? {}
+        : { style: { '--ring-radius': `${radius}px` } as React.CSSProperties })}
       data-mode={determinate ? 'progress' : 'indeterminate'}
       aria-hidden="true"
       focusable="false"

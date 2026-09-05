@@ -711,6 +711,47 @@ Params of a node that draws its own body (Find Neurons, Paths) are offered like 
 the generic control, which for most of them *is* the card's control and for a few is the raw
 value. That is the reader's call rather than a rule per node type somebody has to keep true.
 
+### What a folded frame says about the run inside it
+
+Folding hides the cards, not the work — so the box says what those cards would have: the **running
+ring** while any member is running, and an **error badge** with a red outline while any of them has
+failed. Without it a graph working inside a fold looks idle, and a failure inside one is invisible
+until somebody unfolds it.
+
+Three things worth knowing. The ring is `NodeRunRing`, which sizes itself against React Flow's
+wrapper with `pathLength="1"` and now takes the one number it cannot derive — the corner it should
+be concentric with, `COLLAPSED_RADIUS`, since a folded frame wears the frame's 14px rather than a
+card's `--radius`. A prop rather than a stylesheet rule reaching in, because the ring is a
+*sibling* of what it rings and the alternative was a CSS selector keyed on React Flow's generated
+`.react-flow__node-groupBox` — i.e. on a TypeScript string constant, which a rename breaks in
+silence. It is **indeterminate on purpose**: a group's progress is not the mean of its members',
+and averaging a member reporting 90% with one that has not started claims a number nobody measured.
+
+**Only the failure reaches the outline**, and it does so by joining `.coda-node[data-state='error']`'s
+own rule rather than writing a second one. Running is the ring's to say: a card tints its *header
+strip* for it, which a folded box has not got, and a second signal that only ever appears
+alongside the ring is a rule to keep true for nothing. Both can still be true at once — a box
+wears the ring and the badge while one member works and another has already failed.
+
+The two facts come from `useAnyNodeState` and `useNodeStateCount`, `useStaleCount`'s idiom scoped
+to a set, each returning a **primitive** for invariant 7's reason. A *boolean* where only
+truthiness is read: a running count makes every 1→2→1 among members a new snapshot and a full
+re-render of a box whose markup never changed, and a For Each region ticks thousands of times. The
+badge is the card's `.state-badge` with the card's glyph (`STATE_GLYPH`, lifted to
+`ui/nodes/runState.ts` at its second reader) plus a count, which is the one thing a card's badge
+never says — `--count` widens the 14px disc into a pill, because two characters in a circle sized
+for one is a clip.
+
+`ui/panels/groupMenu.test.tsx` fakes the states through `nodeInfo` (restoring it after each case,
+and holding one object per id — a fresh `{ state }` per call is an identity loop). The states were
+also driven for real in Chrome: folding a frame around the neuPrint dataset node with no token and
+pressing ⇧R, a `MutationObserver` on the box saw the ring appear and then the error land, ending on
+a red outline and `1 node of 2 inside failed`.
+
+Not built, and deliberately: the mini-map does not mark *which* member failed. It is drawing a rect
+per member already, so a stroke on the failed one would turn the count into a picture — the badge
+says how many and the panel says which.
+
 ### Looking inside without unfolding
 
 Double-click a folded box's mini-map, or **Look inside** on its menu, and the group opens in a

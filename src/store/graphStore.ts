@@ -64,7 +64,7 @@ import { spliceCandidate, spliceGraph } from '../core/splice'
 import type { ParamValue } from '../core/node'
 import { defaultParams } from '../core/node'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
-import type { IterationInfo, NodeRunInfo, RunSummary } from '../core/scheduler'
+import type { IterationInfo, NodeRunInfo, NodeRunState, RunSummary } from '../core/scheduler'
 import { Scheduler } from '../core/scheduler'
 import type { TableSchema } from '../core/types'
 import type { Value } from '../core/values'
@@ -2795,6 +2795,39 @@ export function useStaleCount(): number {
       const state = s.nodeInfo(n.id).state
       return state === 'stale' || state === 'blocked'
     }).length
+  })
+}
+
+/**
+ * What a set of nodes is doing, for a surface that draws them as one thing.
+ *
+ * `useStaleCount`'s idiom scoped to a set. Both exist for the collapsed group box: a folded frame
+ * draws no member cards, so the ring and the error badge those cards would have shown have
+ * nowhere to appear — the box says it for them, or a graph running inside a fold looks idle and a
+ * failure inside one is invisible until you unfold it.
+ *
+ * Both return a **primitive**, like their two neighbours and for invariant 7's reason: the store
+ * is read through `useSyncExternalStore`, which compares snapshots by identity, so one selector
+ * handing back a fresh `{running, failed}` would re-render on every tick of anything.
+ *
+ * **A count where the number is shown, a boolean where it is not.** `useAnyNodeState` stops at
+ * the first match and, more to the point, does not change as members hand the work along: a
+ * running *count* makes every 1→2→1 among ten members a new snapshot and a full re-render of a
+ * card whose markup never changed — and a For Each region can tick thousands of times.
+ */
+export function useNodeStateCount(nodeIds: readonly string[], state: NodeRunState): number {
+  return useGraphStore((s) => {
+    void s.runVersion // subscribe to scheduler ticks
+    let count = 0
+    for (const id of nodeIds) if (s.nodeInfo(id).state === state) count += 1
+    return count
+  })
+}
+
+export function useAnyNodeState(nodeIds: readonly string[], state: NodeRunState): boolean {
+  return useGraphStore((s) => {
+    void s.runVersion
+    return nodeIds.some((id) => s.nodeInfo(id).state === state)
   })
 }
 

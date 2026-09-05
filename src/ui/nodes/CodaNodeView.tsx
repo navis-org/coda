@@ -27,7 +27,6 @@ import {
 } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
 import { hasHelp } from '../../help/registry'
-import type { NodeRunState } from '../../core/scheduler'
 import type { CodaType } from '../../core/types'
 import { datasetRef, isAssignable, typeLabel } from '../../core/types'
 import { describeValue, isDatasetValue } from '../../core/values'
@@ -44,6 +43,7 @@ import { nodeBody } from './nodeBodies'
 import { nodeIssues } from './nodeIssues'
 import { NodeHints } from './NodeHints'
 import { NodeRunRing } from './NodeRunRing'
+import { STATE_GLYPH, STATE_TEXT } from './runState'
 import { ResultDownload } from './ResultDownload'
 import { firstOutputPort, inputPorts, outputPorts } from '../../core/ports'
 import { nodePorts } from '../../core/graph'
@@ -60,26 +60,6 @@ export interface CodaNodeData {
    * already per surface: the canvas's cache hands back `{ node }` and this one builds its own.
    */
   previews?: boolean
-}
-
-const STATE_GLYPH: Record<NodeRunState, string> = {
-  ok: '✓',
-  stale: '!',
-  running: '·',
-  error: '×',
-  blocked: '–',
-  disabled: 'M',
-  idle: '',
-}
-
-const STATE_TEXT: Record<NodeRunState, string> = {
-  ok: 'up to date',
-  stale: 'needs run',
-  running: 'running',
-  error: 'error',
-  blocked: 'waiting upstream',
-  disabled: 'muted',
-  idle: 'not evaluated',
 }
 
 /**
