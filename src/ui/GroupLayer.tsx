@@ -25,20 +25,22 @@
  *    d3's own filter reads, and it is the only thing that stops the canvas sliding out from
  *    under a frame being dragged.
  *
- * The drag itself writes through `moveNodes`, the same action a card drag uses: one frame per
- * pointer move with `commit: false`, one committing call at the end. That is what makes ⌘Z put
- * the whole gesture back rather than its last frame, and what makes a locked canvas refuse it —
- * the guard is already in the action, and the layer only adds the notice that says so.
+ * The drag itself is `ui/groupDrag.ts`, shared with the box a *collapsed* frame folds into — it
+ * writes through `moveNodes`, the same action a card drag uses.
+ *
+ * **A collapsed frame draws none of this, and is a React Flow node.** That inversion is
+ * deliberate and is argued where it lives, in `nodes/GroupCollapsedCard.tsx`: the case against a
+ * node here is that a frame's members are cards whose positions must stay absolute, and a folded
+ * frame has no members on the canvas at all — it is a box wires arrive at, which is what a node
+ * is. `groupBoxes` skips them, so this layer simply never sees one.
  */
 
-import { ViewportPortal, useReactFlow } from '@xyflow/react'
-import { useRef, useState } from 'react'
-
-import type { GraphGroup } from '../core/graph'
+import { ViewportPortal } from '@xyflow/react'
 import type { MeasuredSizes } from '../layout/elkGraph'
 import { groupBoxes } from '../layout/groupBounds'
 import { useGraphStore } from '../store/graphStore'
-import { LOCKED_NOTICE } from './lockCopy'
+import { useGroupDrag } from './groupDrag'
+import { GroupTitleInput } from './GroupTitle'
 
 /**
  * Width of the invisible band over the outline that a pointer can grab, in flow units.
@@ -49,107 +51,30 @@ import { LOCKED_NOTICE } from './lockCopy'
  */
 export const GROUP_GRAB = 14
 
-/** Below this much pointer travel a drag is a click, and the cards are left where they are. */
-const DRAG_SLOP = 2
-
-interface Drag {
-  pointerId: number
-  startX: number
-  startY: number
-  zoom: number
-  /** Where each member was when the gesture began — deltas are applied to these, not stacked. */
-  from: Array<{ id: string; position: { x: number; y: number } }>
-  moved: boolean
-}
-
 export interface GroupLayerProps {
   /** What React Flow last measured for each card. Without it every box fits the fallback size. */
   measured: MeasuredSizes
-  /** The frame whose title is being typed, if any. Owned by the canvas so the menu can set it. */
-  editingId: string | undefined
-  onEditingChange: (groupId: string | undefined) => void
   onContextMenu: (groupId: string, screenPosition: { x: number; y: number }) => void
 }
 
-export function GroupLayer({
-  measured,
-  editingId,
-  onEditingChange,
-  onContextMenu,
-}: GroupLayerProps) {
+export function GroupLayer({ measured, onContextMenu }: GroupLayerProps) {
   const graph = useGraphStore((s) => s.graph)
   const selection = useGraphStore((s) => s.selection)
+  const collapse = useGraphStore((s) => s.toggleGroupCollapsed)
+  // Which frame is being renamed is the store's, not a prop: three surfaces ask, and the menu
+  // that starts it cannot reach either of the two that draw it. See `editingGroupId`.
+  const editingId = useGraphStore((s) => s.editingGroupId)
+  const editTitle = useGraphStore((s) => s.editGroupTitle)
   // A primitive — invariant 7. Only the cursor reads it; the refusal is `moveNodes`'s own.
   const locked = useGraphStore((s) => s.locked)
-  const { getZoom } = useReactFlow()
-  const dragRef = useRef<Drag | null>(null)
+  // The gesture is `ui/groupDrag.ts`, shared with the box a collapsed frame folds into.
+  const dragHandlers = useGroupDrag()
 
   if (!graph.groups?.length) return null
 
   const boxes = groupBoxes(graph, measured)
   const byId = new Map(graph.groups.map((g) => [g.id, g]))
   const selected = new Set(selection)
-
-  /**
-   * Take hold of a frame.
-   *
-   * Selecting the members is part of the gesture rather than a separate click: a frame you are
-   * about to move is a set you have picked, and the inspector, the mute key and ⌘D all read the
-   * selection. ⌘/Ctrl adds to it, matching `multiSelectionKeyCode` on the canvas.
-   */
-  const onPointerDown = (event: React.PointerEvent, group: GraphGroup) => {
-    if (event.button !== 0 || editingId === group.id) return
-    const store = useGraphStore.getState()
-    if (store.locked) {
-      // The lock refuses the move at `moveNodes` regardless; this is the half that speaks, for
-      // the reason every other locked surface does.
-      store.setNotice(LOCKED_NOTICE)
-      return
-    }
-    event.stopPropagation()
-    const target = event.currentTarget as Element
-    target.setPointerCapture(event.pointerId)
-
-    const members = new Set(group.nodeIds)
-    const from = store.graph.nodes
-      .filter((n) => members.has(n.id))
-      .map((n) => ({ id: n.id, position: n.position }))
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      // Read once: the camera cannot move during the gesture, since the frame holds the pointer
-      // and `nopan` keeps d3-zoom out of it.
-      zoom: getZoom() || 1,
-      from,
-      moved: false,
-    }
-    const additive = event.metaKey || event.ctrlKey
-    store.setSelection(
-      additive ? [...new Set([...store.selection, ...group.nodeIds])] : group.nodeIds,
-    )
-  }
-
-  const onPointerMove = (event: React.PointerEvent) => {
-    const drag = dragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    const dx = (event.clientX - drag.startX) / drag.zoom
-    const dy = (event.clientY - drag.startY) / drag.zoom
-    if (!drag.moved && Math.abs(dx) < DRAG_SLOP && Math.abs(dy) < DRAG_SLOP) return
-    drag.moved = true
-    useGraphStore.getState().moveNodes(shift(drag, dx, dy), false)
-  }
-
-  const onPointerUp = (event: React.PointerEvent) => {
-    const drag = dragRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    dragRef.current = null
-    if (!drag.moved) return
-    const dx = (event.clientX - drag.startX) / drag.zoom
-    const dy = (event.clientY - drag.startY) / drag.zoom
-    // The committing frame, which is the one that becomes a single undo step for the whole drag.
-    useGraphStore.getState().moveNodes(shift(drag, dx, dy), true)
-  }
 
   return (
     <ViewportPortal>
@@ -161,13 +86,10 @@ export function GroupLayer({
             group.nodeIds.length > 0 && group.nodeIds.every((id) => selected.has(id))
           const editing = editingId === group.id
           const handlers = {
-            onPointerDown: (event: React.PointerEvent) => onPointerDown(event, group),
-            onPointerMove,
-            onPointerUp,
-            onPointerCancel: onPointerUp,
+            ...dragHandlers(group, { disabled: editing }),
             onDoubleClick: (event: React.MouseEvent) => {
               event.stopPropagation()
-              onEditingChange(group.id)
+              editTitle(group.id)
             },
             onContextMenu: (event: React.MouseEvent) => {
               event.preventDefault()
@@ -243,76 +165,45 @@ export function GroupLayer({
                 />
               </svg>
 
-              {(group.title || editing) && (
-                <div className="group-frame__title-row">
-                  {editing ? (
-                    <GroupTitleInput
-                      group={group}
-                      onDone={() => onEditingChange(undefined)}
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      className="group-frame__title nopan"
-                      title={`Group: ${group.title}`}
-                      {...handlers}
-                    >
-                      {group.title}
-                    </button>
-                  )}
-                </div>
-              )}
+              {/*
+               * Always drawn, where the title alone was drawn only when there was one: the
+               * chevron is one of the two ways to fold a frame and the only one that is visible
+               * without a right-click, so an unnamed frame has to carry it too. An untitled
+               * frame therefore shows a chevron and nothing else, which is a smaller mark than
+               * the outline it sits on.
+               */}
+              <div className="group-frame__title-row">
+                <button
+                  type="button"
+                  className="group-frame__chevron nopan"
+                  title="Collapse this group"
+                  aria-label="Collapse group"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    collapse(group.id)
+                  }}
+                >
+                  ▾
+                </button>
+                {editing && (
+                  <GroupTitleInput group={group} />
+                )}
+                {!editing && group.title && (
+                  <button
+                    type="button"
+                    className="group-frame__title nopan"
+                    title={`Group: ${group.title}`}
+                    {...handlers}
+                  >
+                    {group.title}
+                  </button>
+                )}
+              </div>
             </div>
           )
         })}
       </div>
     </ViewportPortal>
-  )
-}
-
-/** Every member's starting position plus the gesture's delta. Never stacked frame on frame. */
-function shift(drag: Drag, dx: number, dy: number) {
-  return drag.from.map((n) => ({
-    id: n.id,
-    position: { x: n.position.x + dx, y: n.position.y + dy },
-  }))
-}
-
-/**
- * The title field.
- *
- * Escape reverts and blur commits, and the flag is why — the same trap `NoteCard` records:
- * unmounting a focused input can fire blur on the way out, so "cancel" cannot be expressed by
- * leaving edit mode, because the blur handler would then write the edit being abandoned.
- */
-function GroupTitleInput({ group, onDone }: { group: GraphGroup; onDone: () => void }) {
-  const renameGroup = useGraphStore((s) => s.renameGroup)
-  const [text, setText] = useState(group.title ?? '')
-  const reverting = useRef(false)
-
-  return (
-    <input
-      className="group-frame__title-input nopan nodrag"
-      value={text}
-      autoFocus
-      aria-label="Group title"
-      placeholder="Name this group"
-      onChange={(event) => setText(event.target.value)}
-      onPointerDown={(event) => event.stopPropagation()}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') event.currentTarget.blur()
-        if (event.key === 'Escape') {
-          reverting.current = true
-          event.currentTarget.blur()
-        }
-        // Every canvas shortcut is a window listener that skips fields — but Escape and the
-        // canvas's own keys reach it through React first, so the propagation stops here.
-        event.stopPropagation()
-      }}
-      onBlur={() => {
-        if (!reverting.current) renameGroup(group.id, text.trim())
-        onDone()
-      }}
-    />
   )
 }

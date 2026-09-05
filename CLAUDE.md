@@ -254,12 +254,53 @@ Area-specific — the rule, then the doc that holds why:
   because it is about the *graph* and has no card to point at, and every wizard hint docks
   **bottom** because a top one is drawn into that note. See [docs/canvas.md](docs/canvas.md) and
   [docs/wizard.md](docs/wizard.md).
-- **A group frame is not a React Flow node**, and three viewport properties keep it honest:
-  `ViewportPortal` at `z-index: -1`, `pointer-events: stroke` on the rect alone (the interior
-  must stay click-through), and `nopan`, because panning is d3-zoom's *native* listener and
-  `stopPropagation` cannot reach it. Membership is a list of node ids and the box is derived —
-  `parentId` would re-base every child's `position`, which five subsystems read absolutely.
-  See [docs/canvas.md](docs/canvas.md).
+- **A group frame is not a React Flow node — and a *folded* one is, which is the same argument
+  reaching the opposite answer.** Expanded: `ViewportPortal` at `z-index: -1`, `pointer-events:
+  stroke` on the rect alone (the interior must stay click-through), `nopan` because panning is
+  d3-zoom's *native* listener and `stopPropagation` cannot reach it; membership is a list of node
+  ids and the box is derived, since `parentId` would re-base every child's `position`, which five
+  subsystems read absolutely. Folded, there are no members on the canvas at all — it is a box
+  wires arrive at, which is what a node is, and drawn in the portal instead it would need
+  hand-rolled edge geometry, handles and a hit test for both ends of every crossing wire. Still
+  not in the document: the pseudo card is minted per render by `layout/collapse.ts` and declares
+  its own two **ports**, which is `resolveSize`'s arrangement (*a node carrying its own value beats
+  the registry*) and is what keeps `elkGraph.ts` from knowing this feature by name; and
+  `draggable`/`selectable`/`deletable` are all false, each closing a path that would reach the
+  store with an id naming nothing — **whose price is that React Flow then withholds the pointer**
+  (`pointer-events: none` on a wrapper with no flags and no mouse handlers), and both failures read
+  as features working: the drag reached the pane and *panned the canvas*, which moves the box on
+  screen by the drag delta, and the right-click opened the node palette. `node.style` is spread
+  after that line, so `style: { pointerEvents: 'all' }` puts it back — and a browser check of a
+  drag has to assert that everything *else* stayed still. **One derivation, two readers** — `collapsedView` answers the
+  canvas *and* the ELK pass (`condense` folds each group to one node, `expandPositions` moves the
+  members by the delta the box got), because an arrangement made against the members while the
+  canvas draws a box moves cards nobody can see. Crossing wires **merge by their two visible
+  ends** and are un-interactive: N stacked hit targets under one line each delete a wire into a
+  card the reader cannot see, and the key keeps the *port* so two sockets on one card stay two
+  wires. **A folded group can carry its members' params** (`GraphGroup.exposed`), which is a
+  **reference and never a copy**: the row is the same `ParamField` with an `InferContext` built
+  the way the card, the inspector and the styling rail each build one, writing through the same
+  `setParam(nodeId, …)` — one value, two editors, and nothing about evaluation or the provenance
+  key differs because nothing about the param does. Three ways the reference stops naming
+  something, in two places: `validGroups` and the edit refuse a non-member or an undeclared param,
+  `pruneGroups`/`createGroup` drop a deleted or regrouped card, `cloneGroups` **remaps** them (or a
+  duplicate's controls write to the original's cards), and `visibleIf` is asked in `collapsedView`
+  rather than in the file because it answers differently a keystroke later. One call decides the
+  rows *and* the box's size, so a row ELK reserved no space for cannot exist. **Looking inside a folded group is a second React Flow in a modal** (`GroupPeek`), holding the
+  members' own live cards from `subgraphOf` with `previews: false` and nothing that writes a
+  position. Two costs, both silent: the same cards carry the same `data-id`s, so
+  `measureCardSizes`, the port measurement and `spliceOn` are scoped to `.canvas-area` — unscoped,
+  ELK sized the graph from cards in a dialog and `structureKey` changed when a peek opened; and a
+  card that is neither draggable nor selectable gets `pointer-events: none`, so `CARD_POINTERS`
+  restores it (the box needs the same) and the panel stops **bare** keys, or a `d` typed at an
+  inert field opens the dashboard behind the dialog — the deeper fix, both canvas listeners asking
+  `isDialogOpen()`, is written up in the doc and deliberately not taken, because eleven tests
+  encode the opposite contract for the thirteen other dialogs. The trap that only a browser shows: React Flow's **multi-selection rectangle** includes
+  hidden nodes, so a folded group left an 850×240 draggable box over the canvas its cards had
+  vacated — the overlay is stood down (`has-folded-selection`) rather than the `selected` flags
+  being falsified, because a hidden card React Flow does not know is selected is one a pane click
+  cannot deselect, and the store's selection would then accumulate cards nobody can see for the
+  next ⌫ to take. See [docs/canvas.md](docs/canvas.md).
 - **`overflow-y: auto` clips the other axis too**, so a `Dropdown` holding a flyout submenu
   must pass `flyouts` to switch the panel's scroll off, or the submenu renders as a horizontal
   scrollbar. And **a shortcut's glyph is stored by meaning, not as text** — `src/ui/shortcuts.ts`

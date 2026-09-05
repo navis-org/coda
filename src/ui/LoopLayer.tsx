@@ -29,7 +29,9 @@
 import { ViewportPortal } from '@xyflow/react'
 import { useMemo } from 'react'
 
+import type { CollapsedView } from '../layout/collapse'
 import type { MeasuredSizes } from '../layout/elkGraph'
+import type { NodeRect } from '../layout/groupBounds'
 import { loopBoxes } from '../layout/groupBounds'
 import { isIterableValue } from '../nodes/lib/iterables'
 import { loopPlanOf } from '../nodes/flow/plan'
@@ -39,9 +41,12 @@ import { formatNumber } from './format'
 export interface LoopLayerProps {
   /** What React Flow last measured for each card. Without it every box fits the fallback size. */
   measured: MeasuredSizes
+  /** The folded groups, so a loop crossing one is drawn around the box rather than around the
+   * empty canvas its members left behind. */
+  collapse: CollapsedView
 }
 
-export function LoopLayer({ measured }: LoopLayerProps) {
+export function LoopLayer({ measured, collapse }: LoopLayerProps) {
   const graph = useGraphStore((s) => s.graph)
   // Subscribes to scheduler ticks so the caption follows a run — the count is read off the wire,
   // which is empty until something has produced it.
@@ -49,7 +54,27 @@ export function LoopLayer({ measured }: LoopLayerProps) {
   // The resolved input types, so the caption resolves `groupBy` exactly as the node will.
   const inference = useGraphStore((s) => s.inference)
 
-  const boxes = useMemo(() => loopBoxes(graph, measured), [graph, measured])
+  /**
+   * A member of a folded group stands in as its box, so a region spanning one is framed where it
+   * is drawn. Every member of one group resolves to the same rectangle, which is the truth: the
+   * box is where all of them are.
+   */
+  const substitute = useMemo(() => {
+    if (collapse.boxes.length === 0) return undefined
+    const rects = new Map<string, NodeRect>()
+    for (const box of collapse.boxes) {
+      // One rectangle per box, not per member: every member of a folded group resolves to the
+      // same box, which is the point.
+      const rect = { position: box.position, size: box.size }
+      for (const member of box.members) rects.set(member.id, rect)
+    }
+    return rects
+  }, [collapse])
+
+  const boxes = useMemo(
+    () => loopBoxes(graph, measured, undefined, substitute),
+    [graph, measured, substitute],
+  )
 
   /*
    * Keyed on the *value* rather than on `runVersion`, which is the difference between recomputing

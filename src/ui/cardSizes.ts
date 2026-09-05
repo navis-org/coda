@@ -22,9 +22,19 @@ import type { MeasuredSizes, NodeSize } from '../layout/elkGraph'
 
 export function measureCardSizes(): MeasuredSizes {
   const sizes = new Map<string, NodeSize>()
-  // One query rather than a lookup per id: it avoids escaping ids into a selector, and a loaded
-  // file may carry any id at all.
-  for (const el of document.querySelectorAll<HTMLElement>('.react-flow__node[data-id]')) {
+  /*
+   * One query rather than a lookup per id: it avoids escaping ids into a selector, and a loaded
+   * file may carry any id at all.
+   *
+   * **Scoped to the canvas, and that scope is load-bearing.** The group peek mounts a second
+   * React Flow inside a modal, holding *the same cards* — so their `data-id`s appear twice in
+   * the document, and while the group is folded the modal's copies are the only ones. Unscoped,
+   * ELK would size the graph from cards drawn in a dialog and `structureKey` would change the
+   * moment a peek opened, re-arranging the canvas behind it under auto-layout.
+   */
+  for (const el of document.querySelectorAll<HTMLElement>(
+    '.canvas-area .react-flow__node[data-id]',
+  )) {
     const id = el.dataset.id
     if (id && el.offsetWidth > 0 && el.offsetHeight > 0) {
       sizes.set(id, { width: el.offsetWidth, height: el.offsetHeight })

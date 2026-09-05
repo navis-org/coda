@@ -106,6 +106,28 @@ export function typeColorVar(type: CodaType | undefined): string {
   return familyColorVar(socketStyle(type).family)
 }
 
+/** How thick a wire is drawn. One number: three surfaces had a copy of it. */
+export const WIRE_WIDTH = 1.8
+
+/**
+ * The stroke a wire wears: the colour of the data flowing through it, as in Blender.
+ *
+ * `muted` is a node producing nothing — dashed and dimmed, so a chain that has been switched off
+ * reads as switched off rather than as ordinary. Shared by the canvas, the merged wires a folded
+ * group draws and the panel it opens, which each had the pair written out and only two of which
+ * remembered the muting.
+ */
+export function wireStyle(
+  type: CodaType | undefined,
+  muted = false,
+): { stroke: string; strokeWidth: number; strokeDasharray?: string; opacity?: number } {
+  return {
+    stroke: typeColorVar(type),
+    strokeWidth: WIRE_WIDTH,
+    ...(muted ? { strokeDasharray: '4 3', opacity: 0.5 } : {}),
+  }
+}
+
 /**
  * The tint a node wears: its backend's, or its category's, or nothing.
  *

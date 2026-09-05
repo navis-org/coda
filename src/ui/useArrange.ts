@@ -15,6 +15,8 @@ import { useReactFlow } from '@xyflow/react'
 
 import type { MeasuredPorts, MeasuredSizes, NodeSize } from '../layout/elkGraph'
 import { measureCardSizes } from './cardSizes'
+import { nodesById } from '../core/graph'
+import { collapsedView, condense, expandPositions, foldedNodeCount } from '../layout/collapse'
 import { arrangeScope, resolveSize } from '../layout/elkGraph'
 import { runLayout } from '../layout/engine'
 import type { XY } from '../layout/place'
@@ -186,7 +188,11 @@ export function useArrange(): ArrangeHandle {
     // place is worse than no pinning at all — `toElkGraph` falls back to `FIXED_ORDER` per card.
     if (!Number.isFinite(zoom) || zoom <= 0) return ports
 
-    for (const el of document.querySelectorAll<HTMLElement>('.react-flow__node[data-id]')) {
+    // `.canvas-area`, for the reason `measureCardSizes` records at length: the group peek mounts
+    // the same cards inside a modal, and their ids are the same ids.
+    for (const el of document.querySelectorAll<HTMLElement>(
+      '.canvas-area .react-flow__node[data-id]',
+    )) {
       const id = el.dataset.id
       if (!id) continue
       const card = el.getBoundingClientRect()
@@ -284,21 +290,37 @@ export function useArrange(): ArrangeHandle {
     if (scope.nodes.length < 2) return
 
     const measured = measure()
+    /*
+     * Collapsed groups take part as **one box each**, which is the whole of what this pass has
+     * to know about them. Arranging the members instead would move cards nobody can see, reserve
+     * their space in the layout and leave the box wherever its top-left member landed — a graph
+     * with a hole in it and a card in the wrong place, from a button that looks like it worked.
+     *
+     * Condensed *after* scoping, so a selection decides which cards take part and the folding
+     * decides how they are counted. See `layout/collapse.ts`.
+     */
+    const view = collapsedView(current, measured)
+    const { nodes: items, edges: links } = condense(scope.nodes, scope.edges, view)
+    if (items.length < 2) return
+
     const sizes = new Map<string, NodeSize>(
-      scope.nodes.map((node) => [node.id, resolveSize(node, measured)]),
+      items.map((node) => [node.id, resolveSize(node, measured)]),
     )
-    const before = boundsOf(scope.nodes, measured)
+    const before = boundsOf(items, measured)
     if (!before) return
 
     setBusy(true)
-    void runLayout(scope.nodes, scope.edges, state.layoutOptions, measured, measurePorts())
+    void runLayout(items, links, state.layoutOptions, measured, measurePorts())
       .then(({ positions: raw, routes: rawRoutes }) => {
         if (token.current !== mine) return
         const anchored = anchorTo(raw, sizes, { x: before.x, y: before.y })
         // Notes are dodged even when only a selection is being arranged: a subgraph landing on
         // a note is the same collision, and the selection is not what decides that.
-        const obstacles = noteRects(current, measured)
-        const final = dodge(anchored, sizes, obstacles)
+        const obstacles = noteRects(current, measured, view.hidden)
+        // Still keyed by box wherever a group is folded: `dodge` and the routes below both work
+        // in the arranged vocabulary, and only the positions handed to the store are expanded.
+        const placed = dodge(anchored, sizes, obstacles)
+        const final = expandPositions(placed, view)
 
         /*
          * The routes take the *same* two shifts the positions did, read back off `place.ts`
@@ -311,9 +333,15 @@ export function useArrange(): ArrangeHandle {
         const cleared = dodgeDelta(anchored, sizes, obstacles)
         const routes = translateRoutes(rawRoutes, shift.x + cleared.x, shift.y + cleared.y)
 
-        const from = new Map<string, XY>(
-          scope.nodes.map((node) => [node.id, { ...node.position }]),
-        )
+        // The *members'* starting places, not the boxes': the animation drives the real cards,
+        // and a box is drawn from wherever its members currently are — so it glides with them.
+        // Indexed rather than scanned: `find` per arranged node is O(n·m) over the document.
+        const byId = nodesById(current)
+        const from = new Map<string, XY>()
+        for (const id of final.keys()) {
+          const node = byId.get(id)
+          if (node) from.set(id, { ...node.position })
+        }
         if (prefersReducedMotion()) {
           useGraphStore.getState().arrangeNodes(final)
           publishRoutes(routes)
@@ -422,7 +450,12 @@ export function useArrange(): ArrangeHandle {
      * is what is being waited for. Bounded, and then it proceeds anyway — arranging around one
      * fallback box is bad, never arranging at all is worse.
      */
-    if (measured.size < graph.nodes.length && retries.current < MEASURE_RETRIES) {
+    // Cards inside a folded group are not on the canvas and will never be measured, so the count
+    // to wait for is what is *drawn* — the box itself is a card and does get measured. The count
+    // rather than the whole view: this runs on every commit, which during a drag is every frame,
+    // and the view also walks the edges and mints a wire per crossing to be thrown away.
+    const drawn = graph.nodes.length - foldedNodeCount(graph)
+    if (measured.size < drawn && retries.current < MEASURE_RETRIES) {
       const raf = requestAnimationFrame(() => {
         retries.current += 1
         setMeasureTick((tick) => tick + 1)

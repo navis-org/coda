@@ -542,11 +542,13 @@ choices, and both had an obvious alternative that is worse here:
   collapsed, folded, added by an assistant plan, re-placed by an arrange — and a stored box would
   need every one of them to remember. `layout/groupBounds.ts` computes it instead, from the same
   `resolveSize` the layout uses, so a frame cannot go stale. It costs one pass over the members
-  per render.
+  per render. `groupBox` takes **one** accessor (`nodeRects`) rather than a position lookup and a
+  size lookup that have to agree — the loop frame's substitution composes that single resolver
+  once, and the folded box's corner comes from the same `union` the arrange's own bounds use.
 
 **A node belongs to at most one group and groups do not nest.** So "which box owns this card" has
-an answer, which is what a future *collapse a group into one box* would need and what an
-overlapping model could not give it. Grouping a card that is already framed **moves** it rather
+an answer, which is what folding a group into one box needs — see *Folding a group*, below — and
+what an overlapping model could not give it. Grouping a card that is already framed **moves** it rather
 than refusing — a refusal would have to be explained on a menu row, and "regroup these four" is
 what somebody pressing ⌘G on four cards means. A frame emptied by that move is dropped; a frame
 of one is legitimate, so the floor is one member, not two.
@@ -609,6 +611,188 @@ box-selecting, a frame dragged at a zoom other than 1.0 moving its cards by the 
 frame painting *behind* the cards, and the title staying legible over the dot grid. **Those
 checks have not been run against this implementation yet.** `ui/panels/groupMenu.test.tsx` covers
 the DOM the frame draws, the menu, the keys and the palette rows.
+
+## Folding a group
+
+⌘-free: the chevron above a frame's top-left corner, or **Collapse** on the frame's own menu. The
+frame is replaced by one node-sized box carrying its title, the number of cards inside it and a
+mini-map of them; every wire crossing its boundary arrives at a single socket on the left or
+leaves from one on the right. `GraphGroup.collapsed` is the whole of what is stored.
+
+**A collapsed frame *is* a React Flow node, and that inverts the rule above deliberately.** The
+case against a node for an expanded frame is that its members are cards whose positions must stay
+absolute, and `parentId` would re-base them. A folded frame has no members on the canvas at all:
+it is a box that wires arrive at, which is exactly what a node is. Drawn in the viewport portal
+instead it would need hand-rolled edge geometry, hand-rolled handles and a hand-rolled hit test
+for both ends of every crossing wire. It is still not in the document — the pseudo card is minted
+per render by `layout/collapse.ts`, `graph.nodes` never holds one, and three React Flow flags keep
+it that way (`draggable`, `selectable`, `deletable` all false), each closing a path that would
+otherwise reach the store with an id naming nothing. `collapsedGroupId` is asked at the top of
+`onNodesChange` for the same reason.
+
+**Those three flags cost the box its pointer, and both failures looked like features working.**
+`NodeWrapper` puts `pointer-events: none` on any node that is neither selectable nor draggable and
+carries no mouse handlers of its own (`hasPointerEvents`), so the box could be neither grabbed nor
+right-clicked: a drag reached the pane and **panned the canvas**, which moves the box on screen by
+the drag delta and is indistinguishable from a drag that worked unless you check whether anything
+*else* moved — the first browser check here did not, and reported a working drag. A right-click
+reached the pane and opened the node palette, leaving the chevron as the only way back out.
+`node.style` is spread *after* that line in the wrapper, so `style: { pointerEvents: 'all' }` on
+the pseudo node is the seam that puts it back; the gestures stay ours. jsdom dispatches neither
+gesture, so what the suite pins is the inline style.
+
+**One derivation, two readers.** `collapsedView` answers the canvas (which cards to withhold,
+which box to draw, which wires to redraw) and the layout pass (`condense` → one ELK node per
+folded group, `expandPositions` → the members move by the delta the box was given). Written per
+surface, the half that goes wrong silently is the second: an arrangement made against the members
+while the canvas draws a box moves cards nobody can see and leaves a hole where they were. A
+consequence worth knowing rather than designing away: folding a group is now also how you tell
+auto-layout to keep part of a graph as it is.
+
+**Crossing wires are merged by their two visible ends, and drawn un-interactive.** Several cards
+inside one box wired to the same socket outside it are one line; keeping every real edge would
+stack N hit targets under that line, any of which deletes a wire into a card the reader cannot
+see. The merge key includes the *port*, so two wires from one box into two sockets of the same
+card stay two wires. A merged line takes its type colour only when every socket it stands for
+agrees; where they disagree it is achromatic, because a wire drawn Neurons-green that is also
+carrying a table is a claim.
+
+**Two things about the selection, and the second was found in a browser.** A folded group's
+members stay selected in the store — that is what the inspector, ⌘D and the box's own outline
+read — and React Flow is told the truth about it. But React Flow draws a **multi-selection
+rectangle** around every node it thinks is selected and does not skip hidden ones, so a folded
+group left an 850×240 box across the empty canvas its cards had vacated, draggable, moving cards
+nobody could see. The overlay is stood down instead (`has-folded-selection`), and only while the
+selection reaches into a fold. Lying about the flags was the other option and is worse: a hidden
+card React Flow does not know is selected is one a pane click cannot *de*select, so the store's
+selection would quietly accumulate cards nobody can see and the next ⌫ would take them along.
+jsdom draws no such overlay, so nothing in the suite could have caught either half.
+
+### The controls a folded group carries
+
+A frame may promote any of its members' params onto the box (`GraphGroup.exposed`), which is what
+makes a folded group something you can still *drive* — the picker is a section inside the frame's
+own menu, closed by default and counted on its row.
+
+**A reference, never a copy.** `{node, param}` names a card and one of its params; the row draws
+the same `ParamField` the card and the inspector draw, with an `InferContext` built for that node
+the way all three existing surfaces build one, and writes through the same `setParam(nodeId, …)`.
+One value with two editors: nothing about evaluation, the cache or the provenance key differs,
+because nothing about the *param* differs. A column picker on a promoted param therefore resolves
+against its own node's input schema, and typing coalesces into one undo step, both for free.
+
+**Three ways the reference stops naming something, checked in two places.** A card outside the
+frame or a param the type does not declare is refused at the edit and dropped at the load
+(`validGroups`); a deleted member is dropped by `pruneGroups`, a regrouped one by `createGroup` —
+a frame drawing a control for a card it no longer contains is the same lie as a membership naming
+a node nobody can see. `cloneGroups` **remaps** them, or a duplicated frame's controls would write
+to the original's cards, with both boxes on screen. The third check is `visibleIf`, and it lives in
+`collapsedView` rather than in the file on purpose: it is a function of the node's *current*
+params, so it answers differently a keystroke later.
+
+**The same call decides the rows and the size.** A box with controls is 288 wide and taller by a
+row each, and that size is what the canvas draws *and* what ELK is told — computed once in
+`layout/collapse.ts`, so a row the layout reserved no space for cannot exist. The three numbers
+that add up to it reach the stylesheet as custom properties the card writes onto its own element
+(`--collapsed-header`, `--collapsed-row`, `--collapsed-rows-pad`), which is `AddMenu`'s
+arrangement: the arithmetic belongs where the size is decided, and only CSS can draw it, so the
+numbers go that way rather than being written twice. The card draws from `box.size` rather than
+React Flow's `width`/`height` props: the same number in a browser, and not the same under a
+measurement stub.
+
+Two details found in Chrome. The controls band **swallows the pointer** (`stopPropagation` on
+pointerdown, not `nodrag` — React Flow's class only stops React Flow's drag), or a pointerdown on
+a slider takes hold of the frame and moves every card inside it while the value stays put. And the
+row's label is two elements, `Card · Param`, of which only the **owner** shrinks: as one
+ellipsised string at 288px a row reads `Explore Dataset · Sea…`, naming the card you already know
+and hiding the control you were looking for.
+
+Params of a node that draws its own body (Find Neurons, Paths) are offered like any other and get
+the generic control, which for most of them *is* the card's control and for a few is the raw
+value. That is the reader's call rather than a rule per node type somebody has to keep true.
+
+### Looking inside without unfolding
+
+Double-click a folded box's mini-map, or **Look inside** on its menu, and the group opens in a
+modal panel: `ui/panels/GroupPeek.tsx`, a **second React Flow** holding the group's own cards and
+the wires among them, framed by `fitView`. Unfolding on a full canvas puts those cards back where
+they were, over whatever has since been put there; this is the same read without the move.
+
+**The cards are the real ones**, and they are built by the same `cardShape`/`CARD_TYPES`/
+`wireStyle` the canvas uses — written separately, the panel silently drew a muted node's wires and
+a reference wire as ordinary live ones. `CodaNodeView` reads the store by node id, so what the
+panel draws is live — params, run state, ports, issues. `subgraphOf` supplies the fragment, the same
+helper copy and duplicate use, so "what is in this group" has one answer. Nothing writes a
+position: no `onNodesChange`, no dragging, no selection, no delete key, and the canvas's own
+selection is untouched — a click in the panel must not change what ⌫ would act on outside it.
+Viewer cards draw their controls and **not their results** (`previews: false` on the node data): a
+peek is opened to see what is in the group, and mounting several live viewers is a heavy answer to
+a glance.
+
+**The trap it would have sprung, and the one it did.** Both are about a second flow drawing cards
+with the *same ids*. `measureCardSizes` and `useArrange`'s port measurement read
+`.react-flow__node[data-id]` out of the whole document — and while a group is folded the panel's
+copies are the only ones, so ELK would have sized the graph from cards in a dialog and
+`structureKey` would have changed the moment a peek opened, re-arranging the canvas behind it
+under auto-layout. Both queries (and `spliceOn`'s) are scoped to `.canvas-area` now. The one that
+did spring is `CARD_POINTERS`: a card that is neither draggable nor selectable gets
+`pointer-events: none` from React Flow, so every control in the panel was inert — and the
+keystrokes meant for them fell through to the canvas's window listeners, where `d` opened the
+dashboard *behind the dialog*. `CARD_POINTERS` puts the pointer back — one constant, since the folded box
+needs it for the same reason — and the panel stops **bare** keys from reaching those listeners,
+letting the modified ones (⌘Z, ⌘C) through to the history and clipboard, which a dialog showing
+live cards has no business deciding on their behalf.
+
+The deeper version of that last fix is written down and **not taken**: the two canvas listeners
+could ask `isDialogOpen()` beside `isTourActive()`, which would close the same hole in the
+thirteen other `.overlay` surfaces — `ViewerOverlay` and `HelpOverlay` have it too. It is a change
+to what every dialog does with every shortcut, and eleven tests across five files currently assert
+that `i`, `Space`, `Tab` and `p` still fire with one up. That is a decision about the app rather
+than a cleanup.
+
+`peekGroupId` is session state beside `expandedNodeId`, never the document — a workflow somebody
+sends you does not arrive with a panel open — and it is cleared whenever the document under it is
+replaced, since a group id means nothing in the next graph.
+
+### The rest
+
+**Renaming reaches whichever surface is on screen.** `groupBoxes` skips a folded frame, so the
+menu's Rename used to open the title field on an outline that is not drawn — the edit landed on
+the frame you would see after expanding again, which reads as a menu row that does nothing. The
+field is `ui/GroupTitle.tsx` now, drawn by the frame *or* by the box's header, off one
+`editingGroupId` in the store — beside `peekGroupId` and for the identical reason, since the menu
+that starts a rename can reach neither surface that draws one. Prop-drilled instead (two props on
+the layer, two fields in the box's `data`, a callback on the menu) it also sat in `rfNodes`'
+dependencies, so starting a rename rebuilt every card on the canvas. Double-clicking the header
+starts it, as double-clicking the outline does. On the header alone, because the rows below hold real fields where a
+double-click selects a word.
+
+The rest is inherited rather than written: the drag is `ui/groupDrag.ts`, shared with the expanded
+frame, so ⌘Z puts a whole gesture back and a locked canvas refuses it; a loop frame around a
+folded group is drawn around the *box* (`loopBoxes`' `substitute`), not around the empty canvas
+its members left; and `structureKey` carries the **folded** frames — their membership and how many controls they
+carry, both of which change the box — so auto mode re-arranges when one is folded, exactly as it
+does when a card is added. An expanded frame contributes nothing to that key, deliberately: ⌘G
+changes no input the layout has.
+
+Folding is **live under the lock** and an ordinary undo step, like `toggleCollapsed` on a card: it
+hides cards where they are and puts them back where they were. `store/lock.test.ts` classifies it.
+
+`layout/collapse.test.ts` pins the arithmetic; `ui/panels/groupMenu.test.tsx` pins the DOM, the
+two affordances, the overlay class, the promoted rows and the rename landing in the box; `store/groups.test.ts` pins the four
+ways a promoted reference goes stale. **Checked in Chrome, and only there:** folding and
+unfolding from both chevrons and both menus, a right-click reaching the frame's own menu, a click
+selecting the members, the box dragged at a zoom other than 1.0 **with every other card asserted
+still** (the check that separates a drag from a pan), the wires joining at its edges, the
+mini-map's tints, and an arrange with a group folded — which laid the graph out around the box and
+moved its members with it. Then, for the promoted controls: the picker offering each member's
+params under its own caption and staying open across several picks, the box growing to 288×184 for
+two rows, typing in a promoted field landing on the member's param, and the box still dragging by
+its header with every other card still. And for the peek: opened by the double-click, both member
+cards drawn inside with one wire and no previews, a param written through it (a select changed from
+100 to 500 on a card nobody can see), the canvas behind it unmoved, and Escape closing it. The two
+findings above came out of exactly that run — the second was found by typing into a peeked field
+and watching the dashboard open behind the panel.
 
 ## Copy, cut and paste
 

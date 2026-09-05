@@ -15,9 +15,11 @@
  */
 
 import type { CodaGraph, GraphGroup } from '../core/graph'
-import { loopsIn } from '../core/graph'
-import type { MeasuredSizes } from './elkGraph'
+import { loopsIn, nodesById } from '../core/graph'
+import type { MeasuredSizes, NodeSize } from './elkGraph'
 import { resolveSize } from './elkGraph'
+import type { Rect, XY } from './place'
+import { union } from './place'
 
 /**
  * Space between the outermost card and the frame, in flow units.
@@ -27,6 +29,12 @@ import { resolveSize } from './elkGraph'
  * card's own drag target — the two overlapping would make the top-left card ungrabbable.
  */
 export const GROUP_PADDING = 24
+
+/** Where one card is and how big it is — what a box is derived from. */
+export interface NodeRect {
+  position: XY
+  size: NodeSize
+}
 
 export interface GroupBox {
   id: string
@@ -46,58 +54,58 @@ export interface GroupBox {
  */
 export function groupBox(
   group: GraphGroup,
-  nodes: ReadonlyMap<string, { position: { x: number; y: number } }>,
-  sizeOf: (id: string) => { width: number; height: number } | undefined,
+  rectOf: (id: string) => NodeRect | undefined,
   padding = GROUP_PADDING,
 ): GroupBox | undefined {
-  let left = Infinity
-  let top = Infinity
-  let right = -Infinity
-  let bottom = -Infinity
-
+  const rects: Rect[] = []
   for (const id of group.nodeIds) {
-    const node = nodes.get(id)
-    if (!node) continue
-    const size = sizeOf(id)
-    if (!size) continue
-    left = Math.min(left, node.position.x)
-    top = Math.min(top, node.position.y)
-    right = Math.max(right, node.position.x + size.width)
-    bottom = Math.max(bottom, node.position.y + size.height)
+    const rect = rectOf(id)
+    if (rect) rects.push({ ...rect.position, ...rect.size })
   }
-
-  if (left === Infinity) return undefined
+  const bounds = union(rects)
+  if (!bounds) return undefined
   return {
     id: group.id,
-    x: left - padding,
-    y: top - padding,
-    width: right - left + padding * 2,
-    height: bottom - top + padding * 2,
+    x: bounds.x - padding,
+    y: bounds.y - padding,
+    width: bounds.width + padding * 2,
+    height: bounds.height + padding * 2,
   }
 }
 
-/** Every frame's box, in document order, skipping any that has nothing to draw around. */
+/**
+ * Every frame's box, in document order, skipping any that has nothing to draw around.
+ *
+ * **A collapsed group has no frame**, and that is an absence rather than a hidden rectangle: it
+ * draws a card instead (`layout/collapse.ts`), and a frame drawn around members nobody can see
+ * would be an outline around empty canvas whose contents move when its box is dragged.
+ */
 export function groupBoxes(
   graph: CodaGraph,
   measured?: MeasuredSizes,
   padding = GROUP_PADDING,
 ): GroupBox[] {
   if (!graph.groups?.length) return []
-  const nodes = new Map(graph.nodes.map((n) => [n.id, n]))
+  const rectOf = nodeRects(graph, measured)
   const boxes: GroupBox[] = []
   for (const group of graph.groups) {
-    const box = groupBox(
-      group,
-      nodes,
-      (id) => {
-        const node = nodes.get(id)
-        return node ? resolveSize(node, measured) : undefined
-      },
-      padding,
-    )
+    if (group.collapsed) continue
+    const box = groupBox(group, rectOf, padding)
     if (box) boxes.push(box)
   }
   return boxes
+}
+
+/** Where each card is and how big it is, as one lookup — `groupBox`'s only argument. */
+export function nodeRects(
+  graph: CodaGraph,
+  measured?: MeasuredSizes,
+): (id: string) => NodeRect | undefined {
+  const nodes = nodesById(graph)
+  return (id) => {
+    const node = nodes.get(id)
+    return node ? { position: node.position, size: resolveSize(node, measured) } : undefined
+  }
 }
 
 /**
@@ -120,22 +128,24 @@ export function loopBoxes(
   graph: CodaGraph,
   measured?: MeasuredSizes,
   padding = LOOP_PADDING,
+  substitute?: ReadonlyMap<string, NodeRect>,
 ): LoopBox[] {
   const loops = loopsIn(graph)
   if (loops.length === 0) return []
-  const nodes = new Map(graph.nodes.map((n) => [n.id, n]))
+  const real = nodeRects(graph, measured)
+  /*
+   * A member standing in for another card is read from `substitute` and not from the document: a
+   * loop crossing a collapsed group is drawn around the *box*, because a frame stretched to where
+   * the hidden members really are is an outline reaching across empty canvas. Two nodes of a
+   * region inside one box therefore resolve to the same rectangle, which is exactly right — the
+   * box is where they are. One resolver, composed once: written as two parallel accessors the
+   * fallback had to be spelled twice and could disagree about which card it was answering for.
+   */
+  const rectOf = substitute ? (id: string) => substitute.get(id) ?? real(id) : real
   const boxes: LoopBox[] = []
   for (const { beginId, region } of loops) {
     if (region.size < 2) continue
-    const box = groupBox(
-      { id: beginId, nodeIds: [...region] },
-      nodes,
-      (id) => {
-        const node = nodes.get(id)
-        return node ? resolveSize(node, measured) : undefined
-      },
-      padding,
-    )
+    const box = groupBox({ id: beginId, nodeIds: [...region] }, rectOf, padding)
     // The region rides along because `loopsIn` has already walked it. Without it the caller has
     // to call `loopRegion` again per box — a second edge index per frame memo, and a second
     // place that must keep agreeing on the "stop at `loop: 'end'`" rule.

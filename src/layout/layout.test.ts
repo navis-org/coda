@@ -390,6 +390,45 @@ describe('structureKey', () => {
     const measured: MeasuredSizes = new Map([['find', { width: 232, height: 400 }]])
     expect(structureKey(graph, measured)).not.toBe(base)
   })
+
+  /*
+   * A frame is decoration until it is folded. ⌘G changes nothing the layout is given — the same
+   * cards, the same wires — so under auto mode it must not re-arrange the graph, which is the
+   * cost this key already refuses for a frame's title and colour.
+   */
+  it('ignores an expanded frame, and follows a folded one', () => {
+    const graph = chain()
+    const base = structureKey(graph)
+    const ids = graph.nodes.map((n) => n.id)
+
+    const framed = { ...graph, groups: [{ id: 'g1', nodeIds: ids.slice(0, 2) }] }
+    expect(structureKey(framed)).toBe(base)
+
+    const folded = { ...graph, groups: [{ id: 'g1', nodeIds: ids.slice(0, 2), collapsed: true }] }
+    expect(structureKey(folded)).not.toBe(base)
+
+    // Membership decides which cards the box stands for, so it is part of the arrangement.
+    const wider = { ...graph, groups: [{ id: 'g1', nodeIds: ids.slice(0, 3), collapsed: true }] }
+    expect(structureKey(wider)).not.toBe(structureKey(folded))
+
+    /*
+     * And so does a promoted control: `boxSize` makes the box wider and one row taller, which is
+     * a size no `measured` entry can carry — the box is not a card in the document, so the
+     * measurement route the resize case above relies on does not exist for it.
+     */
+    const withControl = {
+      ...graph,
+      groups: [
+        {
+          id: 'g1',
+          nodeIds: ids.slice(0, 2),
+          collapsed: true,
+          exposed: [{ node: ids[0]!, param: 'url' }],
+        },
+      ],
+    }
+    expect(structureKey(withControl)).not.toBe(structureKey(folded))
+  })
 })
 
 // ---------------------------------------------------------------------------

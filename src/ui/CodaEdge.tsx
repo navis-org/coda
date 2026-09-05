@@ -117,3 +117,11 @@ function CodaEdgeComponent({
  * `rfEdges` memo only when the graph, the inference or the route set actually changes.
  */
 export const CodaEdge = memo(CodaEdgeComponent)
+
+/**
+ * One edge type for every wire this app draws, registered by both flows.
+ *
+ * Beside the component rather than in the canvas, because the panel a folded group opens draws
+ * the same wires: a second registered type would otherwise be invisible in one of them.
+ */
+export const EDGE_TYPES = { coda: CodaEdge }

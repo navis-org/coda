@@ -15,6 +15,10 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
+import { serializeGraph } from '../../core/graph'
+import { configurableParams } from '../../core/node'
+import { measureCardSizes } from '../cardSizes'
+import { getNodeDef, requireNodeDef } from '../../core/registry'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
@@ -200,6 +204,373 @@ describe('the frame’s menu', () => {
     expect(store().graph.groups).toBeUndefined()
     expect(store().graph.nodes.map((n) => n.position)).toEqual(positions)
     expect(frames().length).toBe(0)
+  })
+})
+
+/**
+ * Folding a frame into one box.
+ *
+ * The arithmetic is `layout/collapse.test.ts`; what is asserted here is the half that only the
+ * canvas can answer — that the members stop being drawn, that one box is drawn in their place,
+ * and that both ways of asking for it reach the same store action. The pointer half (dragging
+ * the box) is `ui/groupDrag.ts` and needs a real browser, exactly as the frame's drag does.
+ */
+describe('a folded frame', () => {
+  const box = () => document.querySelector('.group-collapsed')
+  const cards = () => document.querySelectorAll('.react-flow__node')
+
+  function collapsedFrame(): string {
+    const [a, b] = nodeIds()
+    act(() => {
+      store().setSelection([a!, b!])
+      store().groupSelection()
+    })
+    const id = store().graph.groups![0]!.id
+    act(() => store().toggleGroupCollapsed(id))
+    return id
+  }
+
+  it('draws one box and stops drawing the cards inside it', () => {
+    render(<App />)
+    const before = cards().length
+    collapsedFrame()
+    expect(box()).toBeTruthy()
+    expect(frames().length).toBe(0)
+    // Two cards away, one box back.
+    expect(cards().length).toBe(before - 1)
+    expect(document.querySelector(`.react-flow__node[data-id="${nodeIds()[0]}"]`)).toBeNull()
+  })
+
+  it('says how many cards it is holding, and wears the frame’s own colour', () => {
+    render(<App />)
+    const id = collapsedFrame()
+    act(() => store().styleGroup(id, { color: 'violet', dashed: true }))
+    expect(document.querySelector('.group-collapsed__count')?.textContent).toBe('2')
+    expect(box()?.getAttribute('data-color')).toBe('violet')
+    expect(box()?.hasAttribute('data-dashed')).toBe(true)
+  })
+
+  it('draws a mini-map cell per member, tinted by the card’s own category', () => {
+    render(<App />)
+    collapsedFrame()
+    const cells = document.querySelectorAll('.group-collapsed__cell')
+    expect(cells.length).toBe(2)
+    const types = nodeIds()
+      .slice(0, 2)
+      .map((id) => store().graph.nodes.find((n) => n.id === id)!.type)
+    expect([...cells].map((c) => c.getAttribute('data-category'))).toEqual(
+      types.map((t) => getNodeDef(t)?.category ?? 'utility'),
+    )
+  })
+
+  /*
+   * The box is not draggable, selectable or deletable as far as React Flow is concerned — the
+   * three flags that keep a pseudo id out of the store — and the price of those is silent:
+   * `NodeWrapper` puts `pointer-events: none` on any node with none of them and no mouse
+   * handlers of its own. The box was then neither grabbable nor right-clickable, and both
+   * failures *looked like features working*: the drag reached the pane and panned the canvas,
+   * which moves the box on screen, and the right-click reached the pane and opened the node
+   * palette. Both reported from a real browser; what is pinned here is the seam that puts it
+   * back, since jsdom can read the inline style but cannot dispatch either gesture.
+   */
+  it('takes the pointer, which React Flow would otherwise withhold from it', () => {
+    render(<App />)
+    collapsedFrame()
+    const wrapper = document.querySelector('.react-flow__node-groupBox') as HTMLElement
+    expect(wrapper).toBeTruthy()
+    expect(wrapper.style.pointerEvents).toBe('all')
+  })
+
+  it('opens the frame’s own menu on a right-click, not the canvas palette', () => {
+    render(<App />)
+    collapsedFrame()
+    fireEvent.contextMenu(box()!)
+    expect(screen.getByRole('button', { name: 'Expand' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Ungroup/ })).toBeTruthy()
+  })
+
+  /*
+   * The chevron is the only way in that is visible without a right-click, and it is on both
+   * surfaces: the frame folds from its own corner, the box unfolds from its header.
+   */
+  it('folds from the frame’s chevron and unfolds from the box’s', () => {
+    render(<App />)
+    const [a, b] = nodeIds()
+    act(() => {
+      store().setSelection([a!, b!])
+      store().groupSelection()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse group', hidden: true }))
+    expect(store().graph.groups?.[0]?.collapsed).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand group', hidden: true }))
+    expect(store().graph.groups?.[0]?.collapsed).toBeUndefined()
+    expect(frames().length).toBe(1)
+  })
+
+  it('folds from the frame’s menu, and offers the way back from the box’s', () => {
+    render(<App />)
+    openFrameMenu()
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse' }))
+    expect(store().graph.groups?.[0]?.collapsed).toBe(true)
+
+    fireEvent.contextMenu(box()!)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }))
+    expect(store().graph.groups?.[0]?.collapsed).toBeUndefined()
+  })
+
+  /*
+   * The wires. In this workflow the two framed cards are the dataset and the search, so folding
+   * them hides three wires — one between them and one each into Connectivity — and draws two
+   * stand-ins, which are *two* rather than one because they land on different sockets. A merge
+   * key that dropped the port would draw one wire here and lose the other silently.
+   */
+  it('joins the wires that cross its boundary at its edges', () => {
+    render(<App />)
+    const wires = () => document.querySelectorAll('.react-flow__edge')
+    const before = wires().length
+    collapsedFrame()
+    expect(wires().length).toBe(before - 1)
+    expect(document.querySelectorAll('.react-flow__edge.coda-edge--collapsed').length).toBe(2)
+  })
+
+  /*
+   * React Flow's multi-selection rectangle is drawn around every node it thinks is selected,
+   * hidden ones included — so a folded group whose members are still selected drew a box across
+   * the empty canvas they left behind, draggable, moving cards nobody could see. Found in
+   * Chrome; jsdom draws no such overlay, so what is pinned here is the class the stylesheet
+   * keys on, and *that it is not set* for an ordinary multi-selection.
+   */
+  it('stands React Flow’s selection rectangle down while a folded card is selected', () => {
+    render(<App />)
+    const pane = () => document.querySelector('.react-flow')
+    const [a, b, c] = nodeIds()
+    act(() => store().setSelection([a!, b!]))
+    expect(pane()?.classList.contains('has-folded-selection')).toBe(false)
+    const id = collapsedFrame()
+    expect(pane()?.classList.contains('has-folded-selection')).toBe(true)
+    act(() => store().setSelection([c!]))
+    expect(pane()?.classList.contains('has-folded-selection')).toBe(false)
+    expect(id).toBeTruthy()
+  })
+
+  /*
+   * The promoted controls. What only the canvas can answer is that the row is drawn, that it
+   * carries the card's name as well as the param's, and that editing it writes to the *member*
+   * — one value with two editors is the whole feature, and a control that wrote somewhere else
+   * would look identical until you unfolded the group.
+   */
+  it('draws a promoted param as a row, and writes it back to the card it belongs to', () => {
+    render(<App />)
+    const id = collapsedFrame()
+    // Whichever of the two framed cards offers a control that can be typed into.
+    const target = store()
+      .graph.groups![0]!.nodeIds.flatMap((nodeId) => {
+        const node = store().graph.nodes.find((n) => n.id === nodeId)!
+        const def = requireNodeDef(node.type)
+        const param = configurableParams(def, node.params).find(
+          (p) => p.kind === 'string' || p.kind === 'number' || p.kind === 'int',
+        )
+        return param ? [{ node, def, param }] : []
+      })[0]!
+    act(() => store().toggleExposedParam(id, target.node.id, target.param.id))
+
+    const row = document.querySelector('.group-collapsed__row')
+    expect(row?.textContent).toContain(target.param.label)
+    expect(row?.querySelector('.group-collapsed__row-owner')?.textContent).toBe(
+      target.node.title ?? target.def.label,
+    )
+
+    const field = row!.querySelector('input') as HTMLInputElement
+    const typed = target.param.kind === 'string' ? 'typed' : '7'
+    fireEvent.change(field, { target: { value: typed } })
+    fireEvent.blur(field)
+    expect(String(store().graph.nodes.find((n) => n.id === target.node.id)!.params[target.param.id])).toBe(
+      typed,
+    )
+  })
+
+  /* The box's height is what ELK is told, so a row the size did not account for is a row drawn
+   * over the mini-map. One derivation decides both — asserted here through the DOM. */
+  it('grows when it carries a control', () => {
+    render(<App />)
+    const id = collapsedFrame()
+    const height = () => (document.querySelector('.group-collapsed') as HTMLElement).style.height
+    const bare = height()
+    const [a] = nodeIds()
+    const def = requireNodeDef(store().graph.nodes.find((n) => n.id === a)!.type)
+    act(() => store().toggleExposedParam(id, a!, def.params![0]!.id))
+    expect(parseFloat(height())).toBeGreaterThan(parseFloat(bare))
+  })
+
+  /* The picker: closed by default, counted, and it does not close the menu — picking controls
+   * is a several-at-a-time job, exactly as the swatches below it are. */
+  it('picks the controls from the frame’s menu, without closing it', () => {
+    render(<App />)
+    openFrameMenu()
+    expect(screen.queryByRole('button', { name: /^Controls on the folded box$/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^Controls on the folded box/ }))
+
+    const [a] = nodeIds()
+    const def = requireNodeDef(store().graph.nodes.find((n) => n.id === a)!.type)
+    const param = def.params![0]!
+    fireEvent.click(screen.getByRole('button', { name: param.label }))
+    expect(store().graph.groups?.[0]?.exposed).toEqual([{ node: a, param: param.id }])
+    expect(screen.getByRole('button', { name: /Controls on the folded box \(1\)/ })).toBeTruthy()
+  })
+
+  /*
+   * Rename has to reach the surface that is *on screen*. A folded frame draws no outline
+   * (`groupBoxes` skips it), so the row used to open the title field on the frame — invisible
+   * until the group was expanded again, which reads as a menu row that does nothing.
+   */
+  it('renames from the box, not from the frame nobody can see', () => {
+    render(<App />)
+    const id = collapsedFrame()
+    fireEvent.contextMenu(box()!)
+    fireEvent.click(screen.getByRole('button', { name: /Name this group/ }))
+
+    const input = screen.getByLabelText('Group title') as HTMLInputElement
+    expect(box()?.contains(input)).toBe(true)
+    fireEvent.change(input, { target: { value: 'Search block' } })
+    fireEvent.blur(input)
+    expect(store().graph.groups?.find((g) => g.id === id)?.title).toBe('Search block')
+    expect(document.querySelector('.group-collapsed__title')?.textContent).toBe('Search block')
+  })
+
+  it('starts a rename on a double-click of its header', () => {
+    render(<App />)
+    collapsedFrame()
+    fireEvent.doubleClick(document.querySelector('.group-collapsed__header')!)
+    expect(screen.getByLabelText('Group title')).toBeTruthy()
+  })
+
+  /*
+   * Looking inside without unfolding. What only the canvas can answer is that the panel draws
+   * the *members'* cards, that both ways in reach it, and that the canvas behind it is untouched
+   * — including its measurements, which is the half that would have gone wrong in silence.
+   */
+  describe('the peek', () => {
+    const peek = () => document.querySelector('.group-peek')
+    const peekCards = () =>
+      [...document.querySelectorAll('.group-peek .react-flow__node')].map((n) =>
+        n.getAttribute('data-id'),
+      )
+
+    it('opens from a double-click on the box and draws the cards inside it', () => {
+      render(<App />)
+      collapsedFrame()
+      const members = store().graph.groups![0]!.nodeIds
+      expect(peek()).toBeNull()
+
+      fireEvent.doubleClick(document.querySelector('.group-collapsed__map')!)
+      expect(peek()).toBeTruthy()
+      expect(peekCards().sort()).toEqual([...members].sort())
+    })
+
+    it('opens from the frame’s menu, and only while it is folded', () => {
+      render(<App />)
+      openFrameMenu()
+      expect(screen.queryByRole('button', { name: 'Look inside' })).toBeNull()
+
+      act(() => store().toggleGroupCollapsed(store().graph.groups![0]!.id))
+      fireEvent.contextMenu(box()!)
+      fireEvent.click(screen.getByRole('button', { name: 'Look inside' }))
+      expect(peek()).toBeTruthy()
+    })
+
+    it('closes on Escape and on the backdrop', () => {
+      render(<App />)
+      collapsedFrame()
+      act(() => store().peekGroup(store().graph.groups![0]!.id))
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(store().peekGroupId).toBeUndefined()
+
+      act(() => store().peekGroup(store().graph.groups![0]!.id))
+      fireEvent.pointerDown(document.querySelector('.group-peek')!.parentElement!)
+      expect(store().peekGroupId).toBeUndefined()
+    })
+
+    /*
+     * The trap: both surfaces draw cards carrying the *same* `data-id`, and while the group is
+     * folded the panel's copies are the only ones in the document. Unscoped, `measureCardSizes`
+     * would hand ELK the sizes of cards drawn in a dialog and `structureKey` would change the
+     * moment a peek opened — an arrange of the canvas behind it, under auto-layout.
+     */
+    it('is invisible to the canvas’s own measurements', () => {
+      render(<App />)
+      collapsedFrame()
+      const members = store().graph.groups![0]!.nodeIds
+      act(() => store().peekGroup(store().graph.groups![0]!.id))
+
+      expect(peekCards().length).toBe(members.length)
+      const measured = measureCardSizes()
+      expect(members.some((id) => measured.has(id))).toBe(false)
+      // And the panel is genuinely in the document, so this is scoping rather than an empty page.
+      expect(document.querySelectorAll(`[data-id="${members[0]}"]`).length).toBeGreaterThan(0)
+    })
+
+    /*
+     * Both found in Chrome, and both invisible from here without the assertion. A card that is
+     * neither draggable nor selectable is one React Flow gives `pointer-events: none`, so every
+     * control in the panel was inert — and the keystrokes meant for them fell through to the
+     * canvas's window listeners, where `d` opened the dashboard behind the dialog.
+     */
+    it('lets the pointer reach its cards', () => {
+      render(<App />)
+      collapsedFrame()
+      act(() => store().peekGroup(store().graph.groups![0]!.id))
+      const cards = document.querySelectorAll<HTMLElement>('.group-peek .react-flow__node')
+      expect(cards.length).toBeGreaterThan(0)
+      for (const card of cards) expect(card.style.pointerEvents).toBe('all')
+    })
+
+    it('keeps the canvas’s shortcuts out while it is up', () => {
+      render(<App />)
+      collapsedFrame()
+      act(() => store().peekGroup(store().graph.groups![0]!.id))
+      // Dispatched *inside* the panel, which is the real path: a keystroke bubbles from the
+      // focused element up to the window listeners the canvas binds. Fired at `window` directly
+      // it would be at-target for both, where `stopPropagation` does not separate them.
+      act(() => {
+        fireEvent.keyDown(document.querySelector('.group-peek')!, { key: 'd' })
+      })
+      expect(store().dashboardOpen).toBe(false)
+      expect(store().peekGroupId).toBeTruthy()
+    })
+
+    /* A peek is a look at *this* document; a group id means nothing in the next one. */
+    it('closes when the document under it is replaced', () => {
+      render(<App />)
+      collapsedFrame()
+      act(() => store().peekGroup(store().graph.groups![0]!.id))
+      act(() => store().loadGraph(demoWorkflow('partners')))
+      expect(store().peekGroupId).toBeUndefined()
+      expect(peek()).toBeNull()
+    })
+  })
+
+  /* Folding is a view of the document, so it travels with it — and it is not a canvas edit. */
+  it('is in the file, and is allowed on a locked canvas', () => {
+    render(<App />)
+    const id = collapsedFrame()
+    expect(JSON.parse(serializeGraph(store().graph)).groups[0].collapsed).toBe(true)
+    act(() => {
+      useGraphStore.setState({ locked: true })
+      store().toggleGroupCollapsed(id)
+    })
+    expect(store().graph.groups?.[0]?.collapsed).toBeUndefined()
+  })
+
+  /*
+   * Every card put back exactly where it was: folding hides cards, it never moves them. This is
+   * what makes a fold safe to undo by unfolding rather than by ⌘Z.
+   */
+  it('puts every card back where it was', () => {
+    render(<App />)
+    const before = store().graph.nodes.map((n) => ({ ...n.position }))
+    const id = collapsedFrame()
+    act(() => store().toggleGroupCollapsed(id))
+    expect(store().graph.nodes.map((n) => ({ ...n.position }))).toEqual(before)
   })
 })
 

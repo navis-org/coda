@@ -41,7 +41,13 @@ import {
   setColumns as setDashboardTracks,
   setSpan as setCellSpan,
 } from '../core/dashboard'
-import { createGroup, removeGroups, updateGroup } from '../core/groups'
+import {
+  createGroup,
+  groupById,
+  removeGroups,
+  toggleExposedParam,
+  updateGroup,
+} from '../core/groups'
 import type { Point } from '../core/clipboard'
 import {
   PASTE_OFFSET,
@@ -577,6 +583,33 @@ export interface GraphState {
   expandedNodeId: string | undefined
   expandNode(nodeId: string | undefined): void
   /**
+   * Frame whose contents are open in the peek, if any.
+   *
+   * Looking, not editing: a folded group draws a box, and unfolding one on a full canvas to read
+   * what is inside it moves whatever the cards land on. The peek is that reading without the
+   * move — see `ui/panels/GroupPeek.tsx`.
+   *
+   * In the store, like `expandedNodeId` and for the same reason: two surfaces open it (the box's
+   * own double-click and the frame's menu) and neither can reach the other. Session state, never
+   * the document — a workflow somebody sends you does not arrive with a panel open — and cleared
+   * whenever the document under it changes, since a group id means nothing in the next graph.
+   */
+  peekGroupId: string | undefined
+  peekGroup(groupId: string | undefined): void
+  /**
+   * Frame whose title is being typed, if any.
+   *
+   * `peekGroupId`'s twin, and here for the same reason: the menu's Rename, the frame's outline
+   * and the folded box's header are three surfaces, and a context menu cannot reach into a card.
+   * It was prop-drilled through all three — two props on `GroupLayer`, two fields in the box's
+   * React Flow `data`, one callback on the menu — which also put it in `rfNodes`' dependencies,
+   * so starting a rename rebuilt every card on the canvas.
+   *
+   * Session state, never the document, and dropped when the document changes.
+   */
+  editingGroupId: string | undefined
+  editGroupTitle(groupId: string | undefined): void
+  /**
    * Node whose output is docked down the right-hand side of the canvas, if any.
    *
    * The overlay's non-modal twin: same surface, drawn beside the graph instead of over it, so a
@@ -854,6 +887,23 @@ export interface GraphState {
    * restructured. A locked canvas is about geometry and structure, not about how things look.
    */
   styleGroup(groupId: string, patch: Omit<Partial<GraphGroup>, 'id' | 'nodeIds'>): void
+  /**
+   * Fold one frame into a single node-sized box, or unfold it.
+   *
+   * Live under the lock, and deliberately the same call `toggleCollapsed` is for a card: folding
+   * hides cards, it does not move or restructure anything, and every position the members had is
+   * exactly where they are when it is unfolded. What the lock refuses is *dragging* the box,
+   * which is `moveNodes` and already guarded.
+   */
+  toggleGroupCollapsed(groupId: string): void
+  /**
+   * Put one member's param on the frame's folded box, or take it off.
+   *
+   * Live under the lock, with `styleGroup` and `toggleGroupCollapsed`: it decides what the box
+   * *draws*, and the control it draws writes through `setParam` — which is itself deliberately
+   * live, since the lock is about geometry and structure rather than about values.
+   */
+  toggleExposedParam(groupId: string, nodeId: string, paramId: string): void
   deleteNodes(nodeIds: string[]): void
   deleteEdges(edgeIds: string[]): void
   connect(edge: Omit<GraphEdge, 'id'>): boolean
@@ -1963,6 +2013,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
      * somebody opened a table for a moment. What the narrow test still forbids is the case that
      * actually costs: one node mounted in two full-size surfaces at once.
      */
+    peekGroupId: undefined,
+    peekGroup: (groupId) => set({ peekGroupId: groupId }),
+    editingGroupId: undefined,
+    editGroupTitle: (groupId) => set({ editingGroupId: groupId }),
+
     expandNode: (nodeId) =>
       set((s) =>
         nodeId && s.pinnedNodeId === nodeId
@@ -2112,6 +2167,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
         notice: undefined,
         lastRun: undefined,
         expandedNodeId: undefined,
+        peekGroupId: undefined,
+        editingGroupId: undefined,
         pinnedNodeId: undefined,
         // Nothing to show in a grid, so the canvas whatever the last graph was seen through.
         dashboardOpen: false,
@@ -2135,6 +2192,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
         notice: warnings.length ? warnings.join(' · ') : undefined,
         lastRun: undefined,
         expandedNodeId: undefined,
+        peekGroupId: undefined,
+        editingGroupId: undefined,
         pinnedNodeId: undefined,
         /*
          * The view the file was saved from — the one thing on this list that is *read* from the
@@ -2505,6 +2564,16 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     styleGroup: (groupId, patch) => {
       commit((g) => updateGroup(g, groupId, patch), { autoRun: false })
+    },
+
+    toggleExposedParam: (groupId, nodeId, paramId) => {
+      commit((g) => toggleExposedParam(g, groupId, nodeId, paramId), { autoRun: false })
+    },
+
+    toggleGroupCollapsed: (groupId) => {
+      const group = groupById(get().graph, groupId)
+      if (!group) return
+      commit((g) => updateGroup(g, groupId, { collapsed: !group.collapsed }), { autoRun: false })
     },
 
     deleteNodes: (nodeIds) => {

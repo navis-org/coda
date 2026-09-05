@@ -39,17 +39,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { CodaGraph, GraphNode } from '../core/graph'
 import type { NodeSize } from '../layout/elkGraph'
-import { getNodeDef, isAnnotation } from '../core/registry'
+import { getNodeDef } from '../core/registry'
 import type { CodaType } from '../core/types'
 import { nodePorts, referenceEdgeIds } from '../core/graph'
 import { groupsTouching } from '../core/groups'
+import type { CollapsedEdge } from '../layout/collapse'
+import { COLLAPSED_TYPE, collapsedView, isFolded } from '../layout/collapse'
 import { spliceCandidate } from '../core/splice'
 import { useGraphStore } from '../store/graphStore'
 import { edgeUnderRect } from './spliceHit'
 import type { CodaNodeData } from './nodes/CodaNodeView'
-import { CodaNodeView } from './nodes/CodaNodeView'
-import { NoteCard } from './nodes/NoteCard'
-import { CodaEdge } from './CodaEdge'
+import { CARD_POINTERS } from './nodes/cardPointers'
+import { CARD_TYPES, cardShape } from './nodes/cardNode'
+import type { GroupCollapsedNode } from './nodes/GroupCollapsedCard'
+import { GroupCollapsedCard } from './nodes/GroupCollapsedCard'
+import { EDGE_TYPES } from './CodaEdge'
 import { GroupLayer } from './GroupLayer'
 import { LoopLayer } from './LoopLayer'
 import { CommandPalette } from './panels/CommandPalette'
@@ -74,7 +78,7 @@ import { isTourActive, refreshTour } from './tour/tourState'
 import { TOUR_DECLINES, isTypingTarget } from './appShortcuts'
 import { useClipboardShortcuts } from './clipboard'
 import { LOCKED_NOTICE } from './lockCopy'
-import { typeColorVar } from './socketStyle'
+import { wireStyle } from './socketStyle'
 import { useArrange } from './useArrange'
 import { useDownloads } from './useDownloads'
 import { useRunNotify } from './notify'
@@ -108,15 +112,20 @@ const DELETE_KEYS = ['Delete', 'Backspace']
 /** Shared, so the hit test's `exclude` argument is not a fresh Set on every pointer move. */
 const EMPTY_IDS: ReadonlySet<string> = new Set()
 
-const NODE_TYPES = { coda: CodaNodeView, note: NoteCard }
+// The two document renderers plus the pseudo card only this surface draws.
+const NODE_TYPES = { ...CARD_TYPES, [COLLAPSED_TYPE]: GroupCollapsedCard }
 
 /**
- * One edge type for all three routings. Registered rather than left to React Flow's default
- * bezier, which is what every wire was before routing existed — `CodaEdge` still draws exactly
- * that whenever it has no route to follow, so `curved` is not a reimplementation of the old
- * behaviour, it is the old behaviour reached through one more component.
+ * What the canvas draws: the document's cards, plus one pseudo card per collapsed group.
+ *
+ * A union rather than one data type, because the second kind is not a `GraphNode` and must not
+ * be able to pass for one — every handler that maps a change back to the store asks
+ * `collapsedGroupId` first, and a shared data shape is exactly what would make forgetting that
+ * compile.
  */
-const EDGE_TYPES = { coda: CodaEdge }
+type CanvasNode = Node<CodaNodeData> | GroupCollapsedNode
+
+
 
 /** Keeps `data` object identity stable per GraphNode so memoised nodes don't re-render. */
 const dataCache = new WeakMap<GraphNode, CodaNodeData>()
@@ -264,52 +273,107 @@ function EditorCanvas() {
     screenPosition: { x: number; y: number }
     groupId: string
   } | null>(null)
-  /*
-   * Which group frame's title is being typed, held here rather than inside the frame itself.
-   *
-   * The frame draws inside React Flow's transformed viewport and the menu cannot — a
-   * `position: fixed` descendant of a transformed element is captured by the transform, the same
-   * containing-block trap the edge-set panel records. So the menu's Rename has to reach *into*
-   * the layer, and this is the seam it crosses.
-   */
-  const [editingGroup, setEditingGroup] = useState<string | undefined>(undefined)
 
   // --- derive React Flow's arrays -----------------------------------------
 
   const selectedSet = useMemo(() => new Set(selection), [selection])
 
-  const rfNodes = useMemo<Node<CodaNodeData>[]>(
+  /**
+   * The collapsed groups, as boxes and merged wires — see `layout/collapse.ts`.
+   *
+   * Handed the arrange animation's positions as well as the document's, so a box glides with its
+   * members rather than sitting still and jumping at the end of the pass. `NO_COLLAPSE` is
+   * identity-stable, so a graph with nothing folded costs one comparison and no allocation.
+   */
+  const collapse = useMemo(
+    () => collapsedView(graph, measuredSizes, arrangeOverrides ?? undefined),
+    [graph, measuredSizes, arrangeOverrides],
+  )
+  /** Which ids on the canvas are boxes rather than cards — see `onNodesChange`. */
+  const boxIds = useMemo(() => new Set(collapse.boxes.map((b) => b.id)), [collapse])
+
+
+
+  /** The handler the boxes carry in their data, kept stable so they re-render on their own terms. */
+  const onGroupContextMenu = useCallback(
+    (groupId: string, screenPosition: { x: number; y: number }) => {
+      setMenu(null)
+      setContextMenu(null)
+      setEdgeMenu(null)
+      setGroupMenu({ groupId, screenPosition })
+    },
+    [],
+  )
+
+  /**
+   * The pseudo cards, memoised apart from the real ones.
+   *
+   * A box's `data` is a fresh object on every `rfNodes` pass, and that array recomputes on things
+   * a box does not care about — a rubber-band selection (per pointer move), an arrange animation
+   * (per frame), a measurement batch. Each of those changed the box's data identity, so React
+   * Flow re-rendered `GroupCollapsedCard`: the mini-map's `union`, a `getNodeDef` and a `<rect>`
+   * per member, and every promoted row, on every frame. A folded group is supposed to be the
+   * *cheap* drawing of N cards.
+   */
+  const boxNodes = useMemo<CanvasNode[]>(
     () =>
-      graph.nodes.map((node) => {
-        // `node.size` is a decision someone made; `defaultSize` is the definition's ask. Read
-        // as a fallback rather than stamped at creation, so every path that makes a node gets
-        // it and only a real resize lands in the file.
-        const size = node.size ?? getNodeDef(node.type)?.defaultSize
+      collapse.boxes.map((box) => ({
+        id: box.id,
+        type: COLLAPSED_TYPE,
+        position: box.position,
+        width: box.size.width,
+        height: box.size.height,
+        data: { box, onContextMenu: onGroupContextMenu },
+        /*
+         * Three refusals, each closing a path that would otherwise reach the store with an id
+         * naming nothing in the document: the drag writes the *members*' positions and is ours,
+         * the selection is the members' too, and ⌫ over a box would ask `deleteNodes` about a
+         * pseudo id. See `GroupCollapsedCard`.
+         */
+        draggable: false,
+        selectable: false,
+        deletable: false,
+        // And the price of those three, which is silent — see `CARD_POINTERS`. The gestures stay
+        // ours; what this restores is the pointer reaching them at all.
+        style: CARD_POINTERS,
+      })),
+    [collapse.boxes, onGroupContextMenu],
+  )
+
+  const rfNodes = useMemo<CanvasNode[]>(
+    () => {
+      const cards: CanvasNode[] = graph.nodes.map((node) => {
         return {
           id: node.id,
-          type: isAnnotation(node.type) ? 'note' : 'coda',
+          // Which renderer and what size — `cardShape`, shared with the group peek.
+          ...cardShape(node),
           // While an arrange is gliding, the card is drawn from the animation rather than from
           // the document — the store gets one commit at the end, not one per frame.
           position: arrangeOverrides?.get(node.id) ?? node.position,
           data: dataFor(node),
           selected: selectedSet.has(node.id),
-          /*
-           * Width always, height only while the card is showing something. A collapsed card is
-           * a header, and pinning the wrapper to a 620px Profile box leaves it floating in the
-           * top-left of an empty rectangle — with `.coda-node::before` inset against the
-           * *wrapper*, so the state bar hangs 570px below it as a coloured line with nothing
-           * beside it. Letting the height go auto also makes the wrapper actually shrink, which
-           * is what re-measures the handles now that collapsing moves them.
-           */
-          ...(size
-            ? { width: size.width, ...(node.collapsed ? {} : { height: size.height }) }
-            : {}),
           // What React Flow itself last measured, handed straight back — see `measuredSizes`.
           // Without it the minimap cannot see a card that carries no explicit size.
           ...(measuredSizes.has(node.id) ? { measured: measuredSizes.get(node.id) } : {}),
+          /*
+           * A card inside a folded group is hidden rather than dropped from the list. React Flow
+           * keeps a hidden node's entry — so its measurement, its selection and its handles
+           * survive the fold and come back with it — where an absent one is a node that was
+           * deleted and re-added, and comes back unmeasured.
+           */
+          ...(collapse.hidden.has(node.id) ? { hidden: true } : {}),
         }
-      }),
-    [graph.nodes, selectedSet, arrangeOverrides, measuredSizes],
+      })
+      return [...cards, ...boxNodes]
+    },
+    [
+      graph.nodes,
+      selectedSet,
+      arrangeOverrides,
+      measuredSizes,
+      collapse.hidden,
+      boxNodes,
+    ],
   )
 
   /** Only the `disabled` flag is read per edge, so a set beats a node lookup per edge. */
@@ -329,9 +393,27 @@ function EditorCanvas() {
    */
   const referenceIds = useMemo(() => referenceEdgeIds(graph), [graph])
 
+  /**
+   * Whether anything selected is inside a folded group.
+   *
+   * React Flow draws a **multi-selection rectangle** around every node it thinks is selected and
+   * does not skip the hidden ones, so a folded group whose members are still selected left a
+   * 850×240 box across the canvas where its cards used to be — draggable, and moving cards
+   * nobody could see. Seen in Chrome; jsdom draws no such overlay, so nothing in the suite could
+   * have caught it.
+   *
+   * The fix is to stand that overlay down rather than to lie about the selection. A hidden card
+   * that React Flow does not know is selected is one a click on the pane cannot *de*select — its
+   * select changes never arrive — so the store's selection would silently accumulate cards
+   * nobody can see, and the next ⌫ would take them with it. Keeping the flags honest and
+   * dropping the drag handle costs only that handle, and only while a folded group is in the
+   * selection: the box is how you drag those cards now.
+   */
+  const foldedSelection = selection.some((id) => collapse.hidden.has(id))
+
   const rfEdges = useMemo<Edge[]>(
-    () =>
-      graph.edges.map((edge) => {
+    () => {
+      const wires: Edge[] = graph.edges.map((edge) => {
         const sourceType = inference.nodes[edge.source]?.outputs[edge.sourceHandle]
         const muted = disabledIds.has(edge.source)
         /*
@@ -369,14 +451,20 @@ function EditorCanvas() {
             ]
               .filter(Boolean)
               .join(' ') || undefined,
-          // Links wear the colour of the data flowing through them, as in Blender.
-          style: {
-            stroke: typeColorVar(sourceType),
-            strokeWidth: 1.8,
-            ...(muted ? { strokeDasharray: '4 3', opacity: 0.5 } : {}),
-          },
+          style: wireStyle(sourceType, muted),
+          /*
+           * A wire with an end inside a folded group is withheld, and `collapse.edges` draws the
+           * merged stand-in instead. Hidden rather than dropped, for the reason a hidden card is:
+           * React Flow keeps what it knows about it.
+           */
+          ...(isFolded(collapse, edge) ? { hidden: true } : {}),
         }
-      }),
+      })
+      for (const edge of collapse.edges) {
+        wires.push(collapsedWire(edge, inference, edgeRouting === 'orthogonal'))
+      }
+      return wires
+    },
     [
       graph.edges,
       disabledIds,
@@ -385,6 +473,7 @@ function EditorCanvas() {
       arrangeRoutes,
       spliceEdgeId,
       referenceIds,
+      collapse,
     ],
   )
 
@@ -407,7 +496,10 @@ function EditorCanvas() {
     const store = useGraphStore.getState()
     const node = store.graph.nodes.find((n) => n.id === nodeId)
     if (!node) return undefined
-    const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${nodeId}"]`)
+    // Scoped to the canvas: the group peek draws the same cards, with the same ids, in a modal.
+    const el = document.querySelector<HTMLElement>(
+      `.canvas-area .react-flow__node[data-id="${nodeId}"]`,
+    )
     if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return undefined
 
     const edgeId = edgeUnderRect(
@@ -429,7 +521,7 @@ function EditorCanvas() {
   }, [])
 
   const onNodesChange = useCallback(
-    (changes: NodeChange<Node<CodaNodeData>>[]) => {
+    (changes: NodeChange<CanvasNode>[]) => {
       const moves: Array<{ id: string; position: { x: number; y: number } }> = []
       const sizes: Array<{ id: string; size: { width: number; height: number } }> = []
       /** Measurements seen in this batch, folded into `measuredSizes` below if any changed. */
@@ -438,6 +530,18 @@ function EditorCanvas() {
       const nextSelection = new Set(selection)
 
       for (const change of changes) {
+        /*
+         * A pseudo card is not in the document, so nothing it reports may reach the store or the
+         * measurement bookkeeping: its id names no node, and `measuredSizes` prunes anything it
+         * cannot find in `graph.nodes` — which would evict this entry on every batch and rebuild
+         * every card with it. The box has no stored size to keep anyway; `COLLAPSED_SIZE` is
+         * what it draws at and what the layout is told.
+         *
+         * Asked of the set of boxes rather than of the id's shape: a `startsWith` here is the
+         * string-prefix test over ids this codebase has retired once already, and a second place
+         * that would have to agree with the prefix `collapsedNodeId` mints.
+         */
+        if ('id' in change && boxIds.has(change.id)) continue
         if (change.type === 'position' && change.position) {
           moves.push({ id: change.id, position: change.position })
           draggingRef.current = change.dragging === true
@@ -519,7 +623,7 @@ function EditorCanvas() {
           .setSelection(graph.nodes.filter((n) => nextSelection.has(n.id)).map((n) => n.id))
       }
     },
-    [graph.nodes, selection, spliceOn],
+    [graph.nodes, selection, spliceOn, boxIds],
   )
 
   const isValidConnection = useCallback<IsValidConnection>((candidate) => {
@@ -1030,6 +1134,7 @@ function EditorCanvas() {
       }}
     >
       <ReactFlow
+        className={foldedSelection ? 'has-folded-selection' : undefined}
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={NODE_TYPES}
@@ -1179,22 +1284,12 @@ function EditorCanvas() {
          * portal, so its position in this list decides nothing. See `GroupLayer` for the three
          * viewport properties that do.
          */}
-        <GroupLayer
-          measured={measuredSizes}
-          editingId={editingGroup}
-          onEditingChange={setEditingGroup}
-          onContextMenu={(groupId, screenPosition) => {
-            setMenu(null)
-            setContextMenu(null)
-            setEdgeMenu(null)
-            setGroupMenu({ groupId, screenPosition })
-          }}
-        />
+        <GroupLayer measured={measuredSizes} onContextMenu={onGroupContextMenu} />
         {/*
          * After `GroupLayer` for reading order only, as above. It takes no pointer at all, so
          * none of the three viewport hazards that layer documents apply to it beyond the depth.
          */}
-        <LoopLayer measured={measuredSizes} />
+        <LoopLayer measured={measuredSizes} collapse={collapse} />
         {/*
          * The open workflows. Top-left is the one corner of the pane nothing else claims — see
          * `WorkflowTabs` for why it is a canvas panel rather than a strip in the shell.
@@ -1299,7 +1394,6 @@ function EditorCanvas() {
         <GroupContextMenu
           screenPosition={groupMenu.screenPosition}
           groupId={groupMenu.groupId}
-          onRename={() => setEditingGroup(groupMenu.groupId)}
           onClose={() => setGroupMenu(null)}
         />
       )}
@@ -1356,6 +1450,46 @@ function anchorPoint(
     pointer.y >= bounds.top &&
     pointer.y <= bounds.bottom
   return inside ? pointer : canvasAnchor(wrapper)
+}
+
+/**
+ * One merged wire crossing a collapsed group's boundary.
+ *
+ * **Un-interactive on purpose**, all four ways: it cannot be selected, focused, deleted or
+ * reconnected. It is not an edge in the document — it stands for one or more that are — so every
+ * one of those gestures would have to pick which real wire it meant, and the reader cannot see
+ * the card at the other end to make that choice.
+ *
+ * Its colour is the type flowing through it *when they all agree*, which is the common case (one
+ * card inside a group, wired to several outside it) and the honest one. Where several sockets of
+ * different types merge into one line, the line takes no type colour at all rather than the first
+ * one's: a wire drawn Neurons-green that is also carrying a table is a claim, where an achromatic
+ * one is a line whose contents you have to unfold to see.
+ */
+function collapsedWire(
+  edge: CollapsedEdge,
+  inference: ReturnType<typeof useGraphStore.getState>['inference'],
+  step: boolean,
+): Edge {
+  const types = new Set(
+    edge.origins.map((from) => inference.nodes[from.nodeId]?.outputs[from.portId]),
+  )
+  const only = types.size === 1 ? [...types][0] : undefined
+  return {
+    id: edge.id,
+    type: 'coda',
+    source: edge.source,
+    sourceHandle: edge.sourceHandle,
+    target: edge.target,
+    targetHandle: edge.targetHandle,
+    data: { step },
+    selectable: false,
+    focusable: false,
+    deletable: false,
+    reconnectable: false,
+    className: 'coda-edge--collapsed',
+    style: wireStyle(only),
+  }
 }
 
 /** Static type of a port, used when a drag starts so the palette can filter. */

@@ -63,6 +63,31 @@ export function resolveSize(node: GraphNode, measured?: MeasuredSizes): NodeSize
 }
 
 /**
+ * A node this pass may be handed: a card from the document, or something standing in for several.
+ *
+ * The extension is `ports`, and it is `resolveSize`'s arrangement exactly — *a node carrying its
+ * own value beats the registry*. A collapsed group arrives as a pseudo card
+ * (`layout/collapse.ts`) whose type is registered nowhere, so the ordinary lookup would answer
+ * "no ports", and an ELK edge naming a port its node does not declare is not a silent
+ * degradation but a rejected graph. Declared on the node, this file needs to know nothing about
+ * that feature — which also keeps the two modules from importing each other.
+ */
+export interface LayoutNode extends GraphNode {
+  ports?: { inputs: ReadonlyArray<{ id: string }>; outputs: ReadonlyArray<{ id: string }> }
+}
+
+/** The sockets a card offers the layout: its own where it declares them, else the registry's. */
+export function layoutPorts(node: LayoutNode): {
+  inputs: ReadonlyArray<{ id: string }>
+  outputs: ReadonlyArray<{ id: string }>
+} {
+  if (node.ports) return node.ports
+  const def = getNodeDef(node.type)
+  if (!def) return { inputs: [], outputs: [] }
+  return { inputs: inputPorts(def, node.params), outputs: outputPorts(def, node.params) }
+}
+
+/**
  * Nodes the layout is allowed to move.
  *
  * Annotations are excluded outright — a text note is not a step in the pipeline and never
@@ -106,7 +131,7 @@ export function portIndices(
  * whole graph over it.
  */
 export function toElkGraph(
-  nodes: readonly GraphNode[],
+  nodes: readonly LayoutNode[],
   edges: readonly GraphEdge[],
   options: LayoutOptions,
   measured?: MeasuredSizes,
@@ -125,9 +150,7 @@ export function toElkGraph(
   const mayPin = options.direction === 'RIGHT' || options.direction === 'LEFT'
 
   const children: ElkNode[] = nodes.map((node) => {
-    const def = getNodeDef(node.type)
-    const inputs = def ? inputPorts(def, node.params) : []
-    const outputs = def ? outputPorts(def, node.params) : []
+    const { inputs, outputs } = layoutPorts(node)
     const index = portIndices(inputs.length, outputs.length)
     const size = resolveSize(node, measured)
     const offsets = ports?.get(node.id)

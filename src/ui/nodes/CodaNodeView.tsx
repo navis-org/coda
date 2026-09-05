@@ -51,6 +51,15 @@ import { nodePorts } from '../../core/graph'
 export interface CodaNodeData {
   [key: string]: unknown
   node: GraphNode
+  /**
+   * Whether a viewer card on this surface may draw its result. Absent means yes.
+   *
+   * Set false by the group peek, which mounts real cards inside a modal to show what a folded
+   * frame contains — several live viewers is a heavy answer to a glance, and the panel is about
+   * structure and settings. A flag on the *data* rather than a context because the data is
+   * already per surface: the canvas's cache hands back `{ node }` and this one builds its own.
+   */
+  previews?: boolean
 }
 
 const STATE_GLYPH: Record<NodeRunState, string> = {
@@ -369,6 +378,7 @@ function CodaNodeViewImpl({
    */
   const showPreview =
     isViewer(def) &&
+    data.previews !== false &&
     !node.collapsed &&
     expandedNodeId !== id &&
     !isPinned &&

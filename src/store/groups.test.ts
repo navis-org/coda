@@ -236,6 +236,86 @@ describe('a frame against the rest of the editor', () => {
   })
 })
 
+/**
+ * Promoted params: a frame putting one of its members' controls on the box it folds into.
+ *
+ * A **reference, never a copy** — so what is worth pinning is the four ways the reference can
+ * come to name something that is not there, each of which draws a control writing to a card
+ * nobody can see: a node outside the group, a param the type does not declare, a member deleted,
+ * and a duplicate that copied the frame.
+ */
+describe('promoting a member’s param onto the folded box', () => {
+  const firstParam = (nodeId: string) =>
+    requireNodeDef(graph().nodes.find((n) => n.id === nodeId)!.type).params![0]!.id
+
+  it('adds and removes one, and stores nothing when the list is empty again', () => {
+    store().setSelection(['a', 'b'])
+    const id = store().groupSelection()!
+    const param = firstParam('a')
+
+    store().toggleExposedParam(id, 'a', param)
+    expect(groups()[0]?.exposed).toEqual([{ node: 'a', param }])
+    store().toggleExposedParam(id, 'a', param)
+    expect(groups()[0]?.exposed).toBeUndefined()
+  })
+
+  /* A frame may promote its own cards and nothing else — which is answerable exactly because a
+   * node belongs to at most one group. Both refusals leave the graph identical, so no undo step. */
+  it('refuses a card outside the frame, and a param the type does not declare', () => {
+    store().setSelection(['a'])
+    const id = store().groupSelection()!
+    const before = graph()
+
+    store().toggleExposedParam(id, 'b', firstParam('b'))
+    store().toggleExposedParam(id, 'a', 'nosuchparam')
+    expect(graph()).toBe(before)
+  })
+
+  it('forgets a promoted param when its card is deleted', () => {
+    store().setSelection(['a', 'b'])
+    const id = store().groupSelection()!
+    store().toggleExposedParam(id, 'a', firstParam('a'))
+    store().toggleExposedParam(id, 'b', firstParam('b'))
+
+    store().deleteNodes(['a'])
+    expect(groups()[0]?.exposed).toEqual([{ node: 'b', param: firstParam('b') }])
+  })
+
+  /* Regrouping moves a card out of its old frame; its controls go with it, or the old frame
+   * draws a control for a card it no longer contains. */
+  it('drops a promoted param when its card is regrouped elsewhere', () => {
+    store().setSelection(['a', 'b'])
+    const first = store().groupSelection()!
+    store().toggleExposedParam(first, 'a', firstParam('a'))
+    store().toggleExposedParam(first, 'b', firstParam('b'))
+
+    store().setSelection(['a'])
+    store().groupSelection()
+    const old = groups().find((g) => g.id === first)
+    expect(old?.nodeIds).toEqual(['b'])
+    expect(old?.exposed).toEqual([{ node: 'b', param: firstParam('b') }])
+  })
+
+  /*
+   * A duplicate that kept the original's node ids would put the copy's controls on the
+   * original's cards — an edit in one box landing in the other, with both on screen.
+   */
+  it('remaps the references when a whole frame is duplicated', () => {
+    store().setSelection(['a', 'b'])
+    const id = store().groupSelection()!
+    const param = firstParam('a')
+    store().toggleExposedParam(id, 'a', param)
+
+    store().setSelection(['a', 'b'])
+    store().duplicateSelection()
+    const clone = groups().find((g) => g.id !== id)!
+    expect(clone.exposed?.length).toBe(1)
+    expect(clone.exposed![0]!.param).toBe(param)
+    expect(clone.exposed![0]!.node).not.toBe('a')
+    expect(clone.nodeIds).toContain(clone.exposed![0]!.node)
+  })
+})
+
 describe('a frame in the file', () => {
   it('round trips through save and load with its title and style', () => {
     store().setSelection(['a', 'b'])
@@ -248,6 +328,55 @@ describe('a frame in the file', () => {
     expect(loaded.groups).toEqual([
       { id, nodeIds: ['a', 'b'], title: 'Sensory', color: 'violet', dashed: true },
     ])
+  })
+
+  /*
+   * Folding is in the document for the reason a card's own `collapsed` is: a workflow whose
+   * author folded its boring halves should arrive folded, through a file, a share link or a Zoo
+   * entry. Absence means expanded, which is what every file written before this meant — so this
+   * is not a case for `absentMeans`.
+   */
+  it('round trips a folded frame, and stores nothing for an unfolded one', () => {
+    store().setSelection(['a', 'b'])
+    const id = store().groupSelection()!
+    store().toggleGroupCollapsed(id)
+    expect(deserializeGraph(serializeGraph(graph())).graph.groups).toEqual([
+      { id, nodeIds: ['a', 'b'], collapsed: true },
+    ])
+
+    store().toggleGroupCollapsed(id)
+    expect(JSON.parse(serializeGraph(graph())).groups).toEqual([{ id, nodeIds: ['a', 'b'] }])
+  })
+
+  /*
+   * A promoted param is two ids and a file is lenient in, so the load has to answer for a
+   * reference into a graph it has never seen: a card outside the frame, a param this build has
+   * no definition for, and the same one twice — which would draw two controls racing on one
+   * value. `visibleIf` is deliberately *not* asked here; that belongs to the render.
+   */
+  it('drops promoted params it cannot honour, and keeps the rest', () => {
+    const param = requireNodeDef(graph().nodes[0]!.type).params![0]!.id
+    const file = JSON.stringify({
+      version: 1,
+      nodes: graph().nodes,
+      edges: [],
+      groups: [
+        {
+          id: 'g1',
+          nodeIds: ['a', 'b'],
+          exposed: [
+            { node: 'a', param },
+            { node: 'a', param },
+            { node: 'c', param },
+            { node: 'a', param: 'nosuchparam' },
+            { node: 'a' },
+            'nonsense',
+          ],
+        },
+      ],
+    })
+    const { graph: loaded } = deserializeGraph(file)
+    expect(loaded.groups).toEqual([{ id: 'g1', nodeIds: ['a', 'b'], exposed: [{ node: 'a', param }] }])
   })
 
   it('leaves a graph nobody grouped anything in without the key at all', () => {

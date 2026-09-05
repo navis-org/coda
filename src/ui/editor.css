@@ -651,7 +651,8 @@
   border-bottom: 1px solid var(--border);
   cursor: grab;
 }
-.coda-node__header[data-category='dataset'] {
+.coda-node__header[data-category='dataset'],
+.group-collapsed__cell[data-category='dataset'] {
   --cat: var(--cat-dataset);
 }
 /*
@@ -672,19 +673,24 @@
 .coda-node__header[data-backend='mock'] {
   --cat: var(--cat-dataset-mock);
 }
-.coda-node__header[data-category='query'] {
+.coda-node__header[data-category='query'],
+.group-collapsed__cell[data-category='query'] {
   --cat: var(--cat-query);
 }
-.coda-node__header[data-category='transform'] {
+.coda-node__header[data-category='transform'],
+.group-collapsed__cell[data-category='transform'] {
   --cat: var(--cat-transform);
 }
-.coda-node__header[data-category='analysis'] {
+.coda-node__header[data-category='analysis'],
+.group-collapsed__cell[data-category='analysis'] {
   --cat: var(--cat-analysis);
 }
-.coda-node__header[data-category='visualisation'] {
+.coda-node__header[data-category='visualisation'],
+.group-collapsed__cell[data-category='visualisation'] {
   --cat: var(--cat-visualisation);
 }
-.coda-node__header[data-category='utility'] {
+.coda-node__header[data-category='utility'],
+.group-collapsed__cell[data-category='utility'] {
   --cat: var(--cat-utility);
 }
 
@@ -9018,19 +9024,26 @@ details[open] > summary.tile__label {
   --group-color: var(--group-line);
 }
 
-.group-frame[data-color='blue'] {
+/* Both surfaces a frame has — the outline, and the box it folds into — off one list, so a sixth
+   colour is one edit rather than two. `GROUP_COLORS` is the vocabulary. */
+.group-frame[data-color='blue'],
+.group-collapsed[data-color='blue'] {
   --group-color: var(--chip-1);
 }
-.group-frame[data-color='orange'] {
+.group-frame[data-color='orange'],
+.group-collapsed[data-color='orange'] {
   --group-color: var(--chip-2);
 }
-.group-frame[data-color='green'] {
+.group-frame[data-color='green'],
+.group-collapsed[data-color='green'] {
   --group-color: var(--chip-3);
 }
-.group-frame[data-color='pink'] {
+.group-frame[data-color='pink'],
+.group-collapsed[data-color='pink'] {
   --group-color: var(--chip-5);
 }
-.group-frame[data-color='violet'] {
+.group-frame[data-color='violet'],
+.group-collapsed[data-color='violet'] {
   --group-color: var(--chip-7);
 }
 
@@ -9097,6 +9110,39 @@ details[open] > summary.tile__label {
   bottom: calc(100% - var(--group-grab) / 2 + 3px);
   max-width: 100%;
   pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/*
+ * The fold control, on the frame and on the box it folds into.
+ *
+ * Drawn on the *outside* of the frame beside the title, which is the one place on an outline
+ * that is guaranteed not to be over a card: the interior is click-through by design, and a
+ * control floating in it would be the one thing in the frame that took a pointer.
+ */
+.group-frame__chevron,
+.group-collapsed__chevron {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--canvas) 78%, transparent);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.group-frame__chevron:hover,
+.group-collapsed__chevron:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
 }
 
 .group-frame__title,
@@ -9135,6 +9181,247 @@ details[open] > summary.tile__label {
   border: 1px solid var(--group-color);
   min-width: 120px;
   outline: none;
+}
+
+/*
+ * React Flow's multi-selection rectangle, stood down while the selection reaches into a folded
+ * group — it is drawn around every selected node including the hidden ones, so it would span the
+ * empty canvas the folded cards left behind. The reasoning is in `Editor`'s `foldedSelection`.
+ *
+ * A vendor internal, which `editor.css` overrides in 39 other places, but this one is load-bearing
+ * rather than cosmetic: renamed upstream, the 850×240 box comes back with every test still green,
+ * because jsdom draws no such overlay. Checked against @xyflow/react 12 (`NodesSelection` renders
+ * unconditionally on `nodesSelectionActive`; there is no prop for it).
+ */
+.react-flow.has-folded-selection .react-flow__nodesselection {
+  display: none;
+}
+
+/*
+ * The promoted-controls picker inside the group's menu: a section that opens in place rather
+ * than a flyout, so there is no second panel to place and no `overflow-y` trap (see
+ * `GroupContextMenu`). Scrolls, because a frame of six cards can offer forty params.
+ */
+.context-menu__item--parent {
+  justify-content: space-between;
+  gap: 8px;
+}
+.context-menu__controls {
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin: 3px 0;
+}
+
+/*
+ * Looking inside a folded group: a dialog holding a second React Flow.
+ *
+ * The head is `.overlay__header` / `.overlay__title`, shared with every other dialog — only the
+ * panel's own bounds and the flow inside it are peek-specific.
+ *
+ * Narrower than the viewer overlay's uncapped panel and taller than the dialog default, because
+ * what is in it is a *piece of a canvas* — a few cards and the wires between them, framed by
+ * `fitView`. The flow fills what the header leaves, and `min-height: 0` is what lets it: a flex
+ * child's automatic minimum is its content, and React Flow's pane reports the whole graph's
+ * extent as that (the same trap the pinned dock's `minmax(0, 1fr)` records).
+ */
+.group-peek {
+  max-width: 1100px;
+  max-height: 82vh;
+}
+
+.group-peek__flow {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  background: var(--canvas);
+}
+
+/*
+ * A collapsed group: the frame's outline at one card's size, with the mini-map inside it.
+ *
+ * A React Flow node rather than part of the frame layer — the argument is in
+ * `nodes/GroupCollapsedCard.tsx` — so it is `pointer-events: auto` by inheritance and needs none
+ * of the layer's care about the interior staying click-through. What it *does* share is the
+ * colour: `--group-color` is set from the same `data-color` names, so a folded frame is the same
+ * blue it was, and `filled` and `dashed` still mean what they meant.
+ */
+.group-collapsed {
+  --group-color: var(--group-line);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  border: 1.5px solid var(--group-color);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--canvas) 88%, transparent);
+  cursor: grab;
+  overflow: hidden;
+}
+.group-collapsed:active {
+  cursor: grabbing;
+}
+.group-collapsed[data-filled] {
+  background: color-mix(in srgb, var(--group-color) 12%, var(--canvas));
+}
+.group-collapsed[data-dashed] {
+  border-style: dashed;
+}
+.group-collapsed[data-selected] {
+  border-width: 2px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--group-color) 45%, transparent);
+}
+
+.group-collapsed__header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  /* From the component, which gets it from `layout/collapse.ts` — the box's size is arithmetic
+     over these three, and only this file can draw them. */
+  height: var(--collapsed-header);
+  padding: 0 8px;
+  flex: 0 0 auto;
+}
+
+/*
+ * The title field, when the box is the surface being renamed. The frame's own input is sized by
+ * the text above the outline; in the header it is a row item and takes the space the title had.
+ */
+.group-collapsed__header .group-frame__title-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.group-collapsed__title {
+  flex: 1;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* How many cards are folded away — the one number a folded frame owes the reader. */
+.group-collapsed__count {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--group-color) 16%, transparent);
+}
+
+.group-collapsed__map {
+  display: block;
+  margin: 0 var(--collapsed-map-pad) var(--collapsed-map-pad);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/*
+ * One rect per member, tinted by the `--cat` its card's header strip already resolves — the
+ * mini-map joins that selector list rather than restating the six-way mapping, which is where a
+ * category added tomorrow would otherwise be grey here and coloured there. Opaque enough to read
+ * at three pixels across, which is the floor the component enforces.
+ */
+.group-collapsed__cell {
+  fill: var(--cat, var(--cat-utility));
+  opacity: 0.75;
+}
+
+/*
+ * The promoted params: one row each, below the mini-map.
+ *
+ * The row height and the band's padding come *from* `layout/collapse.ts`, through custom
+ * properties the card writes onto its own element — `AddMenu`'s arrangement, and for the same
+ * reason: the box's size is arithmetic the canvas and ELK are both told, and only this file can
+ * draw it. Nothing here restates a number.
+ */
+.group-collapsed__rows {
+  flex: 0 0 auto;
+  padding: 0 8px var(--collapsed-rows-pad);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.group-collapsed__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--collapsed-row);
+  flex: 0 0 auto;
+}
+
+/*
+ * `Card · Param`, always qualified — two members exposing `Limit` is the ordinary case. The
+ * card's name is the muted half: it says *where* the control reaches, and the param's label is
+ * what somebody is looking for.
+ *
+ * Which is why the two are separate elements and only the **owner** shrinks. As one ellipsised
+ * string at this width a row reads `Explore Dataset · Sea…`, naming the card you already know
+ * and hiding the control you were looking for. Seen in Chrome at 288px.
+ */
+.group-collapsed__row-label {
+  display: flex;
+  align-items: baseline;
+  flex: 0 0 46%;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.group-collapsed__row-owner {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+}
+/*
+ * The separator belongs to the param, not to the owner: on the owner it is inside the span that
+ * ellipsises, so the moment a card's name is too long the `·` is clipped with it and the row
+ * reads `Explore Datas… Search`. Margins rather than spaces in the content, since a trimmed
+ * white-space in generated content is not something to rely on.
+ */
+.group-collapsed__row-param {
+  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.group-collapsed__row-param::before {
+  content: '·';
+  margin: 0 4px;
+  color: var(--text-muted);
+}
+
+/* The field takes what is left, and never pushes the row wider than the box. */
+.group-collapsed__row > :not(.group-collapsed__row-label) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/*
+ * The two sockets. They take no pointer — a wire dropped on a box would have to name a card
+ * inside it — so they are drawn as the ends of the merged wires rather than as targets.
+ */
+.group-collapsed__port {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--group-color);
+  background: var(--canvas);
+  cursor: default;
+}
+
+/*
+ * A merged wire. Achromatic where the sockets it stands for disagree about the type — see
+ * `collapsedWire` — and never a click target, so it is drawn without the interaction affordance
+ * every real wire has.
+ */
+.coda-edge--collapsed {
+  cursor: default;
 }
 
 /*

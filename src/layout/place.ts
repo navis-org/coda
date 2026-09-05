@@ -60,7 +60,15 @@ export const ROW_HEIGHT = 190
 /** Where the first node of a hand-placed graph lands on an empty canvas. */
 export const GRID_ORIGIN = { x: 60, y: 80 } as const
 
-function union(rects: readonly Rect[]): Rect | undefined {
+/**
+ * The smallest rectangle containing all of these, or undefined for none.
+ *
+ * Exported because three surfaces want exactly this and had each written their own `Math.min`
+ * over four extents: the arrange's own bounds, a group frame's box, and the mini-map a folded
+ * group draws. Four hand-rolled reductions is how one of them comes to disagree about an empty
+ * set — this one answers `undefined`, which every caller has to handle anyway.
+ */
+export function union(rects: readonly Rect[]): Rect | undefined {
   if (rects.length === 0) return undefined
   let left = Infinity
   let top = Infinity
@@ -244,9 +252,15 @@ export function translateRoutes(
 }
 
 /** Rectangles for every annotation node — what `dodge` has to keep off. */
-export function noteRects(graph: CodaGraph, measured?: MeasuredSizes): Rect[] {
+export function noteRects(
+  graph: CodaGraph,
+  measured?: MeasuredSizes,
+  hidden?: ReadonlySet<string>,
+): Rect[] {
   return rectsOf(
-    graph.nodes.filter((node) => isAnnotation(node.type)),
+    // A note inside a collapsed group is not on the canvas, so it is not in the way of anything.
+    // Left in, it reserves a rectangle of empty space wherever its card used to be.
+    graph.nodes.filter((node) => isAnnotation(node.type) && !hidden?.has(node.id)),
     measured,
   )
 }
@@ -274,7 +288,22 @@ export function structureKey(graph: CodaGraph, measured?: MeasuredSizes): string
   const edges = graph.edges
     .map((e) => `${e.source}.${e.sourceHandle}->${e.target}.${e.targetHandle}`)
     .join(',')
-  return `${nodes}|${edges}`
+  /*
+   * **Only the folded frames, and everything about them that changes the box.** A collapsed group
+   * is a single node as far as the layout is concerned, so folding one, unfolding it, or changing
+   * who is inside it changes the arrangement's right answer as much as adding a card does — and
+   * so does promoting a param onto it, because `boxSize` makes the box wider and a row taller,
+   * which is a size no `measured` entry can carry (the box is not a card in the document).
+   *
+   * An *expanded* frame contributes nothing, and that absence is the point: ⌘G changes no input
+   * the layout has, so grouping four cards under auto mode must not re-arrange the graph — the
+   * same cost this key rejects for a frame's title and colour.
+   */
+  const folded = (graph.groups ?? [])
+    .filter((g) => g.collapsed)
+    .map((g) => `${g.id}:${g.nodeIds.join('+')}:${g.exposed?.length ?? 0}`)
+    .join(',')
+  return `${nodes}|${edges}|${folded}`
 }
 
 /**

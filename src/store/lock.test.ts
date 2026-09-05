@@ -311,6 +311,10 @@ describe('every store action is on one side of the lock', () => {
     'setWizardDashboard',
     'setStartPageDismissed',
     'expandNode',
+    // Looking inside a folded frame: a panel, and one that edits nothing but params.
+    'peekGroup',
+    // Which frame's title is being typed — the field itself writes through `renameGroup`.
+    'editGroupTitle',
     // The dock is the same kind of thing as the overlay — looking at a result, not editing the
     // graph — and its width is a panel preference.
     'pinNode',
@@ -349,6 +353,13 @@ describe('every store action is on one side of the lock', () => {
     // moves and nothing is restructured, and the lock is about geometry and structure.
     'renameGroup',
     'styleGroup',
+    // And folding one, which is `toggleCollapsed` for a set of cards rather than for one: it
+    // hides them where they are and puts them back where they were. Dragging the box that
+    // results is `moveNodes`, which is on the frozen side.
+    'toggleGroupCollapsed',
+    // Which of a member's params the folded box draws. A decision about the frame, and the
+    // control it puts on screen writes through `setParam`, which is live for the same reason.
+    'toggleExposedParam',
     'canConnect',
     'setSelection',
     'runAll',

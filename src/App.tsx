@@ -22,6 +22,7 @@ import { ZooGate } from './ui/panels/ZooGate'
 import { StatusBar } from './ui/panels/StatusBar'
 import { Toolbar } from './ui/panels/Toolbar'
 import { ViewerDock } from './ui/panels/ViewerDock'
+import { GroupPeek } from './ui/panels/GroupPeek'
 import { ViewerOverlay } from './ui/panels/ViewerOverlay'
 
 export function App() {
@@ -78,6 +79,12 @@ export function App() {
       <AssistantPanel />
       <StatusBar />
       <ViewerOverlay />
+      {/*
+       * Beside the viewer overlay, and for the same reason it is beside the dock: both are a
+       * full-size look at part of the graph. Never both at once in practice — a folded group's
+       * cards are not on the canvas to be expanded from.
+       */}
+      <GroupPeek />
       {/*
        * Above the viewer overlay, because it is opened *from* one: an expanded chart has a `?`
        * of its own, and a help document that rendered underneath the thing it was opened from

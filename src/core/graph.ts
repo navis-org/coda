@@ -166,6 +166,47 @@ export interface GraphGroup {
   filled?: boolean
   /** A dashed outline rather than a solid one. Off by default. */
   dashed?: boolean
+  /**
+   * Params of member cards to put on the folded box, in the order somebody picked them.
+   *
+   * A **reference, never a copy** — `{node, param}` names a card and one of its params, and the
+   * control the box draws writes through the same `setParam` the card's own control does. So
+   * there is one value with two editors, which is the whole feature: a folded group you can
+   * still drive without unfolding it. Nothing about evaluation, the cache or the provenance key
+   * changes, because nothing about the *param* changes.
+   *
+   * Only meaningful while `collapsed` — an expanded frame's cards carry their own controls, and
+   * a second copy of one a few pixels away would be two editors for one value on screen at once.
+   * Kept when the group is unfolded, so folding it again brings the same controls back.
+   *
+   * Goes stale the four ways a membership list does, and is checked in the same two places:
+   * `validGroups` on load (a file arrives from a gist naming a param this build has never had)
+   * and `pruneGroups` on delete.
+   */
+  exposed?: ExposedParam[]
+  /**
+   * Folded into one node-sized box, with its members not drawn.
+   *
+   * In the document, like `GraphNode.collapsed` and unlike the canvas lock: a workflow of forty
+   * cards whose author folded the four boring halves is a workflow that should *arrive* folded,
+   * through a saved file, a share link or a Zoo entry. Absent means expanded, which is the
+   * default and what every file written before this existed meant — so this is not a case for
+   * `absentMeans`.
+   *
+   * Nothing else about a collapsed group is stored. The box's position, its size, which wires
+   * cross its boundary and what the mini-map draws are all derived from the members, for
+   * `groupBox`'s reason: six things move a frame's contents and none of them knows it exists.
+   * See `layout/collapse.ts`.
+   */
+  collapsed?: boolean
+}
+
+/** One member card's param, promoted onto the frame's folded box. See `GraphGroup.exposed`. */
+export interface ExposedParam {
+  /** A member of the same group. Never anything else — `validGroups` drops the rest. */
+  node: string
+  /** A param id declared by that node's type. */
+  param: string
 }
 
 export interface CodaGraph {
@@ -724,6 +765,28 @@ export function removeNodes(graph: CodaGraph, ids: readonly string[]): CodaGraph
 }
 
 /**
+ * The same frame with a narrowed membership, and its promoted params narrowed to match.
+ *
+ * `exposed` may only ever name a member (`validExposed` refuses the rest on load and
+ * `toggleExposedParam` at the edit), so every route that takes a card *out* of a frame has to
+ * take its controls with it — a frame drawing a control for a card it no longer contains is the
+ * same lie as a membership naming a node nobody can see. Written once here rather than at each
+ * of them: `pruneGroups` below and `createGroup`'s exclusivity move both call it, and the
+ * "delete the key rather than store an empty array" dance exists in one place.
+ *
+ * In `graph.ts` rather than beside the rest of the group edits because `pruneGroups` is here —
+ * `groups.ts` imports this file, so the dependency cannot run the other way.
+ */
+export function withMembers(group: GraphGroup, nodeIds: string[]): GraphGroup {
+  const members = new Set(nodeIds)
+  const exposed = group.exposed?.filter((e) => members.has(e.node))
+  const next: GraphGroup = { ...group, nodeIds }
+  if (exposed?.length) next.exposed = exposed
+  else delete next.exposed
+  return next
+}
+
+/**
  * Drop group members that are not in the graph, and groups that are left with none.
  *
  * Here rather than in the store, and called from `removeNodes` rather than beside each caller,
@@ -746,7 +809,11 @@ export function pruneGroups(graph: CodaGraph): CodaGraph {
       continue
     }
     changed = true
-    if (nodeIds.length > 0) groups.push({ ...group, nodeIds })
+    // A promoted param outlives its card the same way a membership does, and worse: the frame
+    // would draw a control writing to a node id nothing can look up. `withMembers` is the one
+    // place that narrows both, so a dead member cannot take a live control with it and a fifth
+    // route into a group cannot forget the second half.
+    if (nodeIds.length > 0) groups.push(withMembers(group, nodeIds))
   }
   if (!changed) return graph
   const next = { ...graph }
@@ -1070,7 +1137,7 @@ export function deserializeGraph(json: string): LoadResult {
     })
   }
 
-  const groups = validGroups(obj.groups, new Set(alive.keys()))
+  const groups = validGroups(obj.groups, alive)
   // The whole map, not its keys: a cell's eligibility depends on the node's *type*.
   const dashboard = validDashboard(obj.dashboard, alive)
 
@@ -1102,13 +1169,16 @@ export function deserializeGraph(json: string): LoadResult {
  * minus decoration, and a warning per stale membership on a file somebody was sent would bury
  * the warnings that are about their data.
  */
-function validGroups(raw: unknown, alive: ReadonlySet<string>): GraphGroup[] {
+function validGroups(raw: unknown, alive: ReadonlyMap<string, GraphNode>): GraphGroup[] {
   if (!Array.isArray(raw)) return []
   const groups: GraphGroup[] = []
   const claimed = new Set<string>()
   for (const g of raw) {
     if (!g || typeof g !== 'object') continue
-    const { id, nodeIds, title, color, filled, dashed } = g as Record<string, unknown>
+    const { id, nodeIds, title, color, filled, dashed, collapsed, exposed } = g as Record<
+      string,
+      unknown
+    >
     if (typeof id !== 'string' || !Array.isArray(nodeIds)) continue
     // A node in two groups cannot be drawn honestly by either — first one wins, as
     // `createGroup` would have done.
@@ -1118,6 +1188,7 @@ function validGroups(raw: unknown, alive: ReadonlySet<string>): GraphGroup[] {
     if (members.length === 0) continue
     for (const n of members) claimed.add(n)
     const named = GROUP_COLORS.find((c) => c === color)
+    const controls = validExposed(exposed, members, alive)
     groups.push({
       id,
       nodeIds: members,
@@ -1125,7 +1196,47 @@ function validGroups(raw: unknown, alive: ReadonlySet<string>): GraphGroup[] {
       ...(named ? { color: named } : {}),
       ...(filled === true ? { filled: true } : {}),
       ...(dashed === true ? { dashed: true } : {}),
+      ...(collapsed === true ? { collapsed: true } : {}),
+      ...(controls.length ? { exposed: controls } : {}),
     })
   }
   return groups
+}
+
+/**
+ * The promoted params a file may keep: a member of *this* group, and a param its type declares.
+ *
+ * Three checks, and each is a way a control could otherwise be drawn for something that is not
+ * there. A node outside the group would put a card's control on a box that does not contain it
+ * — and since a node belongs to at most one group, "member of this one" is a question with an
+ * answer. A param id this build has never heard of (a file written by a newer one, or a param
+ * since renamed) would draw a row with no control in it. And a duplicate would draw the same
+ * control twice, which is two editors racing on one value.
+ *
+ * Silent, like a dropped membership: the document still means what it said, minus decoration.
+ * `visibleIf` is deliberately **not** asked here — it is a function of the node's current params
+ * and answers differently a keystroke later, so it belongs to the render (`collapsedView`), not
+ * to the file.
+ */
+function validExposed(
+  raw: unknown,
+  members: readonly string[],
+  alive: ReadonlyMap<string, GraphNode>,
+): ExposedParam[] {
+  if (!Array.isArray(raw)) return []
+  const inGroup = new Set(members)
+  const seen = new Set<string>()
+  const kept: ExposedParam[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const { node, param } = entry as Record<string, unknown>
+    if (typeof node !== 'string' || typeof param !== 'string') continue
+    if (!inGroup.has(node) || seen.has(`${node}\u0000${param}`)) continue
+    const type = alive.get(node)?.type
+    const def = type ? getNodeDef(type) : undefined
+    if (!def?.params?.some((p) => p.id === param)) continue
+    seen.add(`${node}\u0000${param}`)
+    kept.push({ node, param })
+  }
+  return kept
 }
