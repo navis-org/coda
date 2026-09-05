@@ -135,8 +135,7 @@ export function checkLinkageInput(ctx: Warner, matrix: MatrixValue): void {
       threshold: LINKAGE_OBSERVATIONS_WARN,
       unit: 'observations',
       control: "this node's warn-above",
-      cost:
-        'Linkage is single-threaded and grows with the square of that number.',
+      cost: 'Linkage is single-threaded and grows with the square of that number.',
     })
   }
 }

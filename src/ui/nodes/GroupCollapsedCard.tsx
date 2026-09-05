@@ -173,7 +173,7 @@ export function GroupCollapsedCard({ data }: NodeProps<GroupCollapsedNode>) {
             '--collapsed-row': `${COLLAPSED_ROW_HEIGHT}px`,
             '--collapsed-rows-pad': `${COLLAPSED_ROWS_PADDING}px`,
             '--collapsed-map-pad': `${MAP_PAD}px`,
-          '--collapsed-radius': `${COLLAPSED_RADIUS}px`,
+            '--collapsed-radius': `${COLLAPSED_RADIUS}px`,
           } as React.CSSProperties
         }
         onContextMenu={(event) => {
@@ -233,7 +233,10 @@ export function GroupCollapsedCard({ data }: NodeProps<GroupCollapsedNode>) {
             <span className="group-collapsed__title">{group.title || 'Group'}</span>
           )}
           {failed > 0 && <FailedBadge failed={failed} of={group.nodeIds.length} />}
-          <span className="group-collapsed__count" title={`${group.nodeIds.length} nodes inside`}>
+          <span
+            className="group-collapsed__count"
+            title={`${group.nodeIds.length} nodes inside`}
+          >
             {group.nodeIds.length}
           </span>
         </div>
