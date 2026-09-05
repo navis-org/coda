@@ -1973,8 +1973,21 @@ deduplicate <- sample_df[!duplicated(sample_df[c("preType", "postType")], fromLa
 dendrogram_out <- cut_tree_2_tree
 dendrogram_out_clusters <- cut_tree_2_tree_clusters
 
+named_ <- find_neurons |>
+  filter(!is.na(`type`) & `type` != "")
+shown_ <- coda_relabel(
+  data.frame(label = dendrogram_out$labels),
+  "label",
+  named_,
+  "neuronId",
+  "type",
+  unmatched = "keep"
+)$label
+plotted_ <- dendrogram_out
+plotted_$labels <- shown_
+
 plot(
-  as.dendrogram(dendrogram_out),
+  as.dendrogram(plotted_),
   horiz = FALSE,
 )
 

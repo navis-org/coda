@@ -58,3 +58,13 @@ export function tooltipPoint(event: PointerLike, container: HTMLElement | null):
     y: (event.clientY - rect.top) / scale,
   }
 }
+
+/**
+ * Below this much pointer travel a drag is read as a click.
+ *
+ * Here rather than in either viewer for `labelStep`'s reason, one directory over: two slops that
+ * rounded differently would make the same gesture select on one chart and pan on the other. It
+ * sits beside `tooltipPoint` because that is already the module both gesture handlers import for
+ * the other half of the same question — where the pointer is.
+ */
+export const CLICK_SLOP = 3

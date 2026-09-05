@@ -139,7 +139,7 @@ an empty card. The caption is the viewer's version of `ctx.warn`.
 | ---------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | Heatmap    | 4,000,000 cells — `large matrix`  | `CRASH_FLOOR_CELLS`. Paint tracks the **grid**, not the matrix, so the fold is the only thing that scales.                              |
 | Network    | 20,000 nodes — `layout unsettled` | 100,000 nodes. `settleDuration` is a wall-clock budget on a worker, so a big graph gets a _less settled_ arrangement, not a frozen tab. |
-| Dendrogram | 3,000 leaves — `structure only`   | 20,000 leaves, which is 40,000 SVG paths.                                                                                               |
+| Dendrogram | 3,000 leaves — `structure only`   | 20,000 leaves, which is 40,000 SVG paths. Expanded, the zoom is the way past the warning rather than around it: `visibleLinks` culls to the window, so a zoomed card draws far fewer paths than a fitted one. |
 
 ### The refusals
 

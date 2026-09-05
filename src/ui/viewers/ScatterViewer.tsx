@@ -43,7 +43,7 @@ import {
 } from './scatterPlot'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
-import { tooltipPoint } from './tooltipPoint'
+import { CLICK_SLOP, tooltipPoint } from './tooltipPoint'
 import { prepareCanvas } from './canvas2d'
 import { useElementSize } from './useElementSize'
 import { useStable } from './useStable'
@@ -81,9 +81,6 @@ export interface ScatterViewerProps {
 
 /** How close the pointer has to be to a mark for the tooltip to claim it. */
 const HOVER_RADIUS = 12
-
-/** Below this much pointer travel a drag is read as a click. */
-const CLICK_SLOP = 3
 
 /** Minimum pointer travel between recorded lasso vertices. */
 const LASSO_STEP = 4

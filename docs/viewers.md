@@ -2434,6 +2434,184 @@ any other table, so offering them here as well would be two routes to one file. 
 export because the card is a grid of tiles, several drawing their own picture, and an SVG would
 have to invent a composite nothing renders — `DatasetSummaryViewer`'s call, for its reason.
 
+## Dendrogram: naming leaves without renaming the tree
+
+A `LinkageValue` knows its leaves by one `string[]`, taken straight off the matrix's row labels
+— and a `MatrixValue` axis is also just `string[]`. So on every route into `Linkage` except
+NBLAST's, a leaf is a bare root id: `core.similarity` labels its rows with the observation column
+it was given, `neuron.adjacency` and `core.pivot` the same, and none of them offer a choice.
+NBLAST is the exception only because it has `Label by`, which reads a column off
+`skeletons.attributes` and writes the result into the matrix.
+
+The `Annotations` port on `out.dendrogram` is the general answer, and it is a *viewer's* port —
+it names what the drawing says and never what the value carries. `displayLabels`
+(`nodes/lib/displayLabels.ts`) is the whole operation: match the leaf's own label against a
+column of a wired table, take another column as its name.
+
+**The tree keeps its identity, and that is the reason this is a decoration rather than a
+relabel.** `Selected` carries a `label` column that `cluster.selectedToNeurons` matches against a
+neuron table. Rename the *tree* by cell type and a clade of fourteen neurons resolves to every
+neuron of those five types in the connectome — a plausible, wrong answer with nothing to raise.
+So `evaluate` never reads the port at all, both pickers are `presentational`, and the annotation
+is recovered downstream for free, since `Selected to Neurons` carries the neuron table's own
+columns onto its output. The payoff of that discipline is that trying `type`, then `instance`,
+then `hemilineage` costs nothing: no provenance key changes, so the `expensive` Linkage above
+never re-runs.
+
+**The join is `labelsByNeuron`**, which is the same operation — an id column and a label column
+of *some* table — and already had three callers (`partnerVectors` calls it with two picked
+columns over an arbitrary table, which is exactly this shape). Its rules come with it: a blank
+annotation is no label, the first non-blank row wins a repeated id, and ids resolve through
+`idText`, so a table carrying them as `i64` drops the ones that were already rounded rather than
+naming whichever neuron owns the rounded value — invariant 8. That last case presents identically
+to "no annotations wired", which is why the node's `validate` says it out loud; the warning is
+`relabelTable`'s, one node over.
+
+What `displayLabels` adds is only the guard: the four ways of having nothing to look anything up
+in, which `labelsByNeuron` answers by throwing (it reads through `getColumn`) and a viewer asked
+to draw whatever is on the wire this frame has to answer with a picture.
+
+**An unnamed leaf keeps its own label**, which inverts `core.relabel`'s `Unmatched` default on
+purpose: there, an unmapped value passing for a mapped one is the confusion being prevented,
+where here a blank leaf is strictly worse than the id it replaced. The caption counts them
+(`12 unnamed`) on the `labels thinned` idiom, because a tree where a third of the leaves are
+still root ids looks like a half-broken join and usually is one.
+
+**Cell types repeat, so the identity moves to a `<title>`.** `Label by: type` routinely gives
+fourteen neurons five names, and then nothing else on screen says which leaf is which. It is an
+SVG `<title>` rather than the `chart-tooltip` the brackets use — one string per drawn label,
+shown by the browser for free, where a hover handler per label would put a `setHover` and a
+re-render of the whole tree between the pointer and three thousand of them. It sits in a `<g>`
+**beside** the `<text>` rather than inside it: both are spec'd identically (a `<title>` is never
+rendered), but only one of them needs that to hold in every renderer an exported SVG lands in,
+and jsdom cannot answer the question either way — it concatenates descendant text, so a test
+asserting the drawn label reads `aLC4`. The form with no question is the one to ship.
+
+**The Heatmap deliberately does not get the same port**, though the wizard pairs the two
+(`tree` → dendrogram, `ordered` → heatmap) and a reader therefore sees types on one and ids on
+the other. Its row labels are **data**: the Filter tab matches on them and the Order tab sorts by
+them, both declared `affectsData`, and both run in `evaluate`. A presentational rename there
+would put `LC4` on screen while a filter typed `LC4` matched nothing — a silent mismatch, and the
+worse kind because the picture looks right. The honest answer for the heatmap is a matrix-level
+relabel that also feeds the filter and the sort, i.e. a `Relabel Matrix` node on
+[core.relabel](../src/nodes/table/relabel.ts)'s exact shape, which is a separate decision with a
+different cost: it rewrites the axis, so it spends the identity that this port exists to keep.
+Both at once would be two answers to one question with nothing saying which won.
+
+**Both exporters emit the relabel, into the plot and nowhere else.** `dendrogram(labels=…)` in
+Python and a copy of the tree with its `labels` replaced in R — never an assignment back into the
+pass-through variable a later chunk reads, which would hand `Selected to Neurons` cell types to
+merge on.
+
+**The join itself is `coda_relabel`**, the registered helper `core.relabel` already emits, which
+carries first-occurrence-wins and `coda_match_keys` — and that last one is why hand-rolling it
+was wrong rather than merely repetitive. Spelled inline the key was `.astype(str)`, where an
+`i64` column carrying one null is `float64` in pandas and prints `'101.0'` against a leaf label
+of `'101'`: the notebook would have matched **nothing** and drawn root ids while the canvas drew
+cell types, silently, on exactly the dtype the node's `validate` warns about. Verified by running
+the emitted cell against a float64 id column rather than by reading it.
+
+The one rule left inline is dropping blanks, because `coda_relabel` maps a matched-but-null to
+null where a leaf has to keep the label the matrix gave it. That half was also wrong until it was
+**run**: `dropna(subset=['type'])` keeps the empty string, so a neuron whose type is `''` — which
+neuPrint returns for an untyped body and every CSV upload can carry — drew a blank leaf in the
+notebook where the canvas drew its id. The fixture carries the wire, so both goldens hold the
+branch.
+
+### Zoom and pan: one axis, because the height is the data
+
+`⌥`-free gestures, `HeatmapViewer`'s exactly — wheel zooms about the pointer, a drag pans,
+double-click or ⤢ fits, a `×N` note in the caption — and off the canvas only, where the card is
+not a 150px preview React Flow already zooms. What differs is the shape of the window and two
+pieces of pointer bookkeeping.
+
+**One axis.** `DendrogramWindow` is `{ at0, atSpan }` along the leaf axis; the distance axis is
+never windowed. The heatmap's two axes are the same kind of thing — matrix lines — so one
+magnification over both is right there, and stretching one alone would make a block read as a
+different shape. A dendrogram's are not: the leaf axis is a list of `n` slots and the distance
+axis is the *measurement*.
+
+It was built both ways, and the two-axis version is wrong in a way only a browser shows. On a
+real 398-leaf tree at ×8.7, zooming about a pointer part way up the distance axis moves the
+window off the leaves: the card came back as a column of readable names beside two brackets and
+an acre of empty space, because the merges joining what you are reading sit *below* the window —
+which is exactly what you zoomed in to look at. Holding the distance axis whole fixes that and
+buys two more things: a merge sits at the same fraction of the plot at every zoom, so two zoom
+states are comparable, and the root's crossbar spans every leaf, so the spine of the tree is
+always on screen. The case the other version would have served — a single-linkage tree with every
+merge crushed near zero — wants a log height scale, which is a different control.
+
+The consequence to know is that **a drag along the distance axis does nothing**, and that is by
+construction rather than an oversight: vertical for leaves-at-the-bottom, horizontal for
+leaves-on-the-right. Both were driven in Chrome.
+
+**The window is the drawing's input, not a transform over it** — `HeatmapWindow`'s rule for a
+sharper reason. A scaled bracket takes its labels with it, and 10px leaf names blown up to 40px
+is the one thing a zoom must not do. So `visibleLeaves` re-thins the names for the pitch the zoom
+gives them and `visibleLinks` drops the brackets the window cannot reach. Measured in Chrome:
+397 brackets and 67 names fitted, 51 brackets and 46 names at ×8.7, with `labels thinned` gone
+from the caption.
+
+**Everything the window feeds is memoised, and that is not a micro-optimisation.** `clampWindow`
+returns a fresh object, and the window is a prop of the memoised `DendrogramLinks` — so an
+unmemoised one fails its shallow compare on *every* render, including the `setHover` that fires
+on each pointer move over a bracket. That is 4,000 `linkPath` calls and 12,000 elements
+reconciled per pointer move on a fitted tree: precisely the cost that component exists to avoid,
+and it would silently have voided `visibleLinks`' returning `shape.links` **by identity** at the
+fit, which is the other half of the same arrangement. `visibleLeaves` is memoised beside it
+because it is O(leaves) unconditionally, and the gutter's `longest` is folded into the `names`
+pass rather than reduced again — the three of them were the whole of the hover path's O(n) work.
+
+`visibleLeaves` itself is arithmetic rather than a scan: `dendrogramShape` builds its leaves with
+`Array.from(linkage.order, …)`, so index `i` *is* slot `i` and `at` is `(i + 0.5) / n`, strictly
+increasing. Inverting that is two divisions where a filter was 20,000 comparisons and two arrays
+of that length on a card drawing sixty names. A pan is still a genuine re-render of every visible
+bracket, and the culling is what keeps that affordable.
+
+The floor is **one leaf filling the plot**, so the maximum magnification is the leaf count — a
+four-leaf tree has nothing to show at ×1000. `clampWindow` is applied on the way *out* as well as
+in, because a window stored at 400 leaves is out of range the moment the clustering upstream is
+filtered to 40.
+
+**The wheel itself is `useWheelZoom`**, shared with the heatmap. The non-passive listener (React
+routes `onWheel` through a passive root listener, so `preventDefault` there is ignored and the
+overlay scrolls behind the chart), the per-frame coalescing of a trackpad's faster-than-frames
+delivery, and the `0.0015` sensitivity were all written out three times — and the third copy had
+already drifted, listing the window in its dependency array and so tearing the listener down and
+putting it back on every render, cancelling any queued gesture step with it. The hook reads its
+callback through a ref, which is what makes attaching once per element compatible with seeing
+this render's window. `ScatterViewer` keeps its own, which has no coalescing and three gesture
+kinds; it is the next caller, not a fourth copy to make.
+
+**Three things exist only because this viewer's purpose is clicking branches**, which the heatmap
+has no equivalent of:
+
+- **Pan runs only while zoomed.** Fitted, the pointer belongs entirely to the brackets; a drag
+  handler live at the fit would make every selection a one-pixel gamble.
+- **A drag that becomes a pan must not select the clade it was dragged from.** `draggedRef` — a
+  ref, not state, because `pick` is a `useCallback` handed to the memoised `DendrogramLinks` and
+  anything it reads that changes per render would put every bracket back through reconciliation
+  on each pointer move. A click fires after `pointerup`, so by the time `pick` asks, the ref
+  describes the finished gesture — which is also why the pan state carries no `moved` flag of its
+  own: the ref has to outlive the gesture anyway, and two spellings of one fact is one of them
+  going stale. `CLICK_SLOP` sits beside `tooltipPoint`, which both gesture handlers already
+  import for the other half of the same question.
+- **Pointer capture is taken at the slop, not at the press.** Captured from `pointerdown`, the
+  subsequent `click` is dispatched to the capturing element rather than to the bracket under it,
+  so selection would silently stop working the moment anybody zoomed in. Taken once the gesture
+  has travelled far enough to stop being a click, a pan that runs off the edge of the card keeps
+  going and nothing that was still available is lost.
+
+Two smaller findings, both from the browser. A pan drags across leaf labels and the browser's
+default for that is to **select** them — a zoomed tree came back with half its names highlighted
+blue, which the heatmap never had because its plot is a canvas. `user-select: none` only while a
+pan is live, so a label stays selectable the rest of the time; `preventDefault` on the
+`pointerdown` is the other fix and is the wrong one, since cancelling it suppresses the
+compatibility mouse events and the click that selects a branch goes with them. And the two clip
+regions are **the plot and the gutter**, the gutter clipped along the leaf axis only — a name
+lives outside the plot along the distance axis by definition, and clipping it there erases every
+label.
+
 ## Heatmap: more cells than pixels
 
 `out.heatmap` used to refuse above **20,000 cells**, and that number was a fact about SVG rather

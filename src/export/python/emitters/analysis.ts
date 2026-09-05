@@ -757,16 +757,74 @@ registerEmitter('out.dendrogram', (ctx) => {
   // canvas holds the observation index. See `out.dendrogram`.
   const selection = selectionIds(ctx)
 
+  /*
+   * The Annotations port, and it reaches only the `labels=` argument.
+   *
+   * The canvas relabels leaves presentationally — `${outNames.labels}` below is still the
+   * matrix's own labels and is what `Selected` and everything downstream read — so emitting
+   * this into the *drawing* and nowhere else is what makes the notebook's picture the canvas's
+   * picture without making its data a different data. Getting that backwards would put cell
+   * types in the frame `Selected to Neurons` merges on, which matches nothing.
+   *
+   * Wired-but-unset is a real state (both pickers are `optional`), so all three are required
+   * before anything is emitted — the same three-way test `displayLabels` makes.
+   */
+  const annotations = ctx.input('annotations')
+  const matchColumn = ctx.column('matchColumn')
+  const labelColumn = ctx.column('labelColumn')
+  const named = Boolean(annotations && matchColumn && labelColumn)
+  const relabel: string[] = named
+    ? [
+        /*
+         * **Blanks dropped here, everything else by `coda_relabel`.** Dropping them is the one
+         * rule that helper does not carry: it maps a matched-but-null to null, where a leaf has
+         * to keep the label the matrix gave it.
+         *
+         * `notna()` is not enough and the difference was measured, not reasoned about: `dropna`
+         * keeps the empty string, so a neuron whose `type` is `''` — which neuPrint returns for
+         * an untyped body and every CSV upload can carry — drew a blank leaf here while the
+         * canvas drew its id.
+         */
+        `${ctx.name}_named = ${annotations}.loc[`,
+        `    ${annotations}[${pyStr(labelColumn!)}].notna()`,
+        `    & (${annotations}[${pyStr(labelColumn!)}].astype(str) != '')`,
+        `]`,
+        /*
+         * First occurrence wins and keys match as text — `firstByKey`'s rule and `rowKey`'s,
+         * both inside `coda_relabel` rather than spelled out again. Spelled out, the key was
+         * `.astype(str)`, which `coda_match_keys` exists to correct: an `i64` column carrying
+         * one null is `float64` in pandas and prints `'101.0'` against a leaf label of `'101'`,
+         * so the notebook silently matched nothing where the canvas matched everything.
+         *
+         * A one-column frame in and a column out, because the labels are a list here rather
+         * than a column of the frame being rewritten.
+         */
+        `${ctx.name}_shown = coda_relabel(`,
+        `    pd.DataFrame({'label': ${outNames.labels}}),`,
+        `    'label',`,
+        `    ${ctx.name}_named,`,
+        `    ${pyStr(matchColumn!)},`,
+        `    ${pyStr(labelColumn!)},`,
+        `    unmatched='keep',`,
+        `)['label']`,
+        ``,
+      ]
+    : []
+  if (named) ctx.helper('coda_relabel')
+  const shown = named ? `${ctx.name}_shown` : outNames.labels
+
   const lines = [
     `${out} = ${src}`,
     `${outNames.labels} = ${labels}`,
     `${outNames.order} = ${order}`,
     `${outNames.clusters} = ${clusters}`,
     ``,
+    ...relabel,
     `plt.figure(figsize=(10, 6))`,
     `dendrogram(`,
     `    ${out},`,
-    `    labels=${outNames.labels},`,
+    // The drawn names, which are the matrix's own unless Annotations is wired.
+    `    labels=${shown},`,
     // 'left' puts the root at the left and the leaves to its right.
     `    orientation=${pyStr(down ? 'top' : 'left')},`,
     ...(ctx.params.showLabels === false ? [`    no_labels=True,`] : []),

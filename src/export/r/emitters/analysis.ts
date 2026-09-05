@@ -885,16 +885,56 @@ registerEmitter('out.dendrogram', (ctx) => {
   // Leaf positions, not names — see the notebook emitter and `out.dendrogram`.
   const selection = selectionIds(ctx)
 
+  /*
+   * The Annotations port. It reaches the *plot* and nothing else — see the notebook emitter for
+   * why that asymmetry is the point rather than an oversight.
+   *
+   * `plotted_` is a copy of the tree with its `labels` replaced, not an assignment into `${out}`:
+   * the pass-through output is what a later chunk reads, and renaming its leaves there would
+   * hand `Selected to Neurons` cell types to merge on.
+   */
+  const annotations = ctx.input('annotations')
+  const matchColumn = ctx.column('matchColumn')
+  const labelColumn = ctx.column('labelColumn')
+  const named = Boolean(annotations && matchColumn && labelColumn)
+  const relabel: string[] = named
+    ? [
+        // Blanks dropped here and nothing else: `coda_relabel` maps a matched-but-null to NA,
+        // where a leaf has to keep the label the matrix gave it. See the notebook emitter.
+        `named_ <- ${annotations} |>`,
+        `  filter(!is.na(${col(labelColumn!)}) & ${col(labelColumn!)} != "")`,
+        // First of a repeated key and the text match are `coda_relabel`'s — `match`'s own rule
+        // and `coda_match_keys`', rather than a second spelling of either.
+        `shown_ <- coda_relabel(`,
+        `  data.frame(label = ${out}$labels),`,
+        `  "label",`,
+        `  named_,`,
+        `  ${rStr(matchColumn!)},`,
+        `  ${rStr(labelColumn!)},`,
+        `  unmatched = "keep"`,
+        `)$label`,
+        `plotted_ <- ${out}`,
+        `plotted_$labels <- shown_`,
+        ``,
+      ]
+    : []
+  if (named) {
+    ctx.library('dplyr')
+    ctx.helper('coda_relabel')
+  }
+  const plotted = named ? 'plotted_' : out
+
   const lines = [
     `${out} <- ${src}`,
     // All three companions, not two: the tree passes through, and so does the cut beside it.
     // Bound rather than read from `${src}` below, so a chunk further on sees one name.
     `${out}_clusters <- ${src}_clusters`,
     ``,
+    ...relabel,
     // `as.dendrogram` rather than plotting the hclust directly: `plot.hclust` has no `horiz`,
     // so the orientation this node offers only exists on the dendrogram class.
     `plot(`,
-    `  as.dendrogram(${out}),`,
+    `  as.dendrogram(${plotted}),`,
     `  horiz = ${down ? 'FALSE' : 'TRUE'},`,
     ...(ctx.params.showLabels === false ? [`  leaflab = "none",`] : []),
     `)`,

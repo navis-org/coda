@@ -376,7 +376,11 @@ export function everythingGraph(): CodaGraph {
       row: 5,
       // Positions rather than labels, which is what the viewer writes — a label column can
       // name two leaves the same thing.
-      params: { orientation: 'down', selection: ['0', '2'] },
+      //
+      // `Annotations` is wired below, so the golden carries the relabel branch: the plot draws
+      // cell types while `Selected` still carries the matrix's own labels, which is the one
+      // asymmetry a reader of the notebook has to be able to see.
+      params: { orientation: 'down', selection: ['0', '2'], labelColumn: 'type' },
     },
 
     {
@@ -1338,6 +1342,8 @@ export function everythingGraph(): CodaGraph {
     // Through the Cut rather than off the Linkage, so the golden shows a Dendrogram reading a
     // tree that has been cut — which is the arrangement that colours its branches.
     ['cut', 'tree', 'dendro', 'in'],
+    // The same neuron table that fed the clustering, naming the leaves — see `out.dendrogram`.
+    ['find', 'neurons', 'dendro', 'annotations'],
     ['dendro', 'selected', 'sel', 'labels'],
     ['cut', 'clusters', 'clu', 'labels'],
     ['find', 'neurons', 'clu', 'neurons'],

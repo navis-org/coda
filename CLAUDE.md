@@ -731,6 +731,82 @@ Area-specific — the rule, then the doc that holds why:
   export's alone; and **an interior line's visible extent equals its pitch only up to rounding**,
   so the sliver test carries a tolerance or a third of the labels vanish at random.
   See [docs/viewers.md](docs/viewers.md).
+- **The dendrogram's zoom is a window along the *leaf* axis only, and that asymmetry is the
+  finding.** The gestures are `HeatmapViewer`'s exactly — wheel about the pointer, drag to pan,
+  double-click or ⤢ to fit, `×N` in the caption, off the canvas only — and like the heatmap's it
+  is an **input to the drawing rather than a transform over it**, for a sharper reason: a scaled
+  bracket takes its labels with it, and 10px leaf names blown up to 40px is the one thing a zoom
+  must not do. So `visibleLeaves` re-thins names for the pitch the zoom gives them and
+  `visibleLinks` drops what the window cannot reach (397 brackets/67 names fitted → 51/46 at ×8.7
+  on a real 398-leaf tree, measured in Chrome), returning `shape.links` **by identity** at the fit
+  so an unzoomed card pays nothing and the memo still bites. **Two axes was built first and is
+  wrong in a way only a browser shows**: a heatmap's axes are both matrix lines, where a
+  dendrogram's leaf axis is a list and its distance axis is the *measurement* — zooming about a
+  pointer part way up it moves the window off the leaves, and ×8.7 drew a column of readable names
+  beside two brackets and an acre of empty card, the merges joining what you are reading being
+  exactly what you zoomed in to see. Holding the distance axis whole also makes two zoom states
+  comparable and keeps the root's crossbar on screen; the case the other version served — a
+  single-linkage tree crushed near zero — wants a log scale, not a zoom. Its price is that **a
+  drag along the distance axis does nothing**, by construction. Three rules exist only because
+  this viewer's purpose is *clicking* branches, which the heatmap has no equivalent of: **pan runs
+  only while zoomed** (fitted, the pointer belongs to the brackets); **`draggedRef` is a ref, not
+  state**, or `pick`'s identity changes and every bracket re-reconciles on each pointer move —
+  a click fires after `pointerup`, so it describes the finished gesture, and it is also why the
+  pan state carries no `moved` flag saying the same thing one render later; and **pointer capture
+  is taken at the slop, not at the press**, because capturing from `pointerdown` sends the `click`
+  to the capturing element rather than the bracket and selection silently stops working the moment
+  anybody zooms in. The wheel is **`useWheelZoom`**, shared with the heatmap — the non-passive
+  listener, the per-frame coalescing and the one sensitivity constant were written out three
+  times, and the third copy had already drifted into re-attaching per render. Everything the
+  window feeds is **memoised**, which is not a micro-optimisation: `clampWindow` mints a fresh
+  object and the window is a prop of the memoised `DendrogramLinks`, so an unmemoised one fails
+  the shallow compare on every `setHover` — 12,000 elements reconciled per pointer move on a
+  fitted tree, and it voids `visibleLinks`' by-identity return at the fit. Two more from the browser: a pan drags across leaf labels and **selects** them
+  (`user-select: none` while panning only — `preventDefault` on the `pointerdown` suppresses the
+  compatibility mouse events and takes the selecting click with them), and the two clip zones are
+  the plot and the gutter, the gutter clipped **along the leaf axis only** or every label is
+  erased. See [docs/viewers.md](docs/viewers.md).
+- **A dendrogram leaf's *name* is a drawing and its *label* is the identity, and the Annotations
+  port only ever touches the first.** A `LinkageValue` knows its leaves by one `string[]` taken
+  off the matrix's row labels, and a `MatrixValue` axis is also just `string[]` — so on every
+  route into Linkage but NBLAST's (which has `Label by`) a leaf is a bare root id, because
+  `core.similarity`, `neuron.adjacency` and `core.pivot` all label their axes with the id column
+  they were handed. `out.dendrogram`'s `Annotations` port takes an ordinary table and
+  `Match on`/`Label by` join it onto the leaf's own label — `displayLabels`, headless in
+  `nodes/lib` so an exporter reads the same rule the viewer does. **`evaluate` never reads it**
+  and both pickers are `presentational`, which is the whole design rather than an optimisation:
+  `Selected.label` is what `cluster.selectedToNeurons` matches against a neuron table, so a tree
+  renamed by cell type turns one clade of fourteen neurons into every neuron of those five types
+  in the connectome — plausible, wrong, and nothing raises it. Nothing is lost, since
+  `Selected to Neurons` already carries the neuron table's own columns across; what is bought is
+  that trying `type`, then `instance`, then `hemilineage` changes no provenance key and re-runs
+  no `expensive` Linkage. Both pickers are **`optional`** for a sharper reason than taste:
+  `resolveColumn`'s rule 3 substitutes the *first compatible column* for a required picker whose
+  default the schema lacks, which here would name every leaf after whatever column comes first in
+  somebody's table. **The join is `labelsByNeuron`**, the same operation with three callers
+  already, so its rules come with it rather than being restated: a blank is no label, the first
+  non-blank row wins a repeated id, and ids go through `idText` — which drops an already-rounded
+  wide id (invariant 8) instead of naming whichever neuron owns the rounded value, a case that
+  presents *identically to an unwired port* and is therefore what the `validate` line exists for.
+  `displayLabels` adds only the guard `labelsByNeuron` cannot: four ways of having nothing to
+  look anything up in, which it answers by throwing and a viewer must answer with a picture. An **unnamed leaf
+  keeps its own label**, inverting `core.relabel`'s `Unmatched` default because a blank leaf is
+  worse than the id it replaced; the caption counts them. The identity moves to an SVG `<title>`
+  in a `<g>` **beside** the `<text>`, not inside it — both are spec'd the same, but only one
+  needs that to hold in every renderer an exported SVG lands in, and jsdom concatenates
+  descendant text so a test reads `aLC4` either way. **The Heatmap deliberately gets no such
+  port**, though the wizard pairs the two: its row labels are *data*, matched by the Filter tab
+  and sorted by the Order tab, both `affectsData` and both in `evaluate` — so a presentational
+  rename there shows `LC4` while a filter typed `LC4` matches nothing. That one wants a
+  matrix-level relabel, which spends the identity this port exists to keep, and both at once
+  would be two answers to one question. Last trap, found by **running** the emitted cell rather
+  than reading it: pandas' `dropna` keeps the empty string, so a neuron whose `type` is `''` —
+  neuPrint's answer for an untyped body — drew a blank leaf in the notebook where the canvas drew
+  its id. **The join the emitters do is `coda_relabel`**, the helper `core.relabel` already emits;
+  hand-rolling it keyed on `.astype(str)`, and an `i64` column with one null is `float64` in
+  pandas and prints `'101.0'` against a leaf label of `'101'` — the notebook matching *nothing*
+  while the canvas matched everything, on exactly the dtype the `validate` warns about.
+  See [docs/viewers.md](docs/viewers.md).
 - **The graph metrics are two nodes because `cost` is a property of a node type.** `net.metrics`
   is `cheap` and every measure on it is O(V + E); `net.centrality` is `expensive` and runs only on
   Run. One node holding both would have to be `expensive`, and then reading a graph's node count

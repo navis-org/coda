@@ -246,6 +246,17 @@ export function niceTicks(max: number, count = 4): number[] {
 }
 
 /**
+ * A magnification, as a caption says it: `×2.4` up to ten, `×15` past it.
+ *
+ * Here for `labelStep`'s reason, a few lines down: the heatmap and the dendrogram both put this
+ * beside a leaf count under captions that mean the same thing, and two roundings would make one
+ * chart claim a precision the other withholds at the same zoom.
+ */
+export function formatZoom(scale: number): string {
+  return scale >= 10 ? String(Math.round(scale)) : scale.toFixed(1)
+}
+
+/**
  * How many labels to skip so they do not overlap.
  *
  * Every `step`th, never a subset chosen by importance: an axis's labels are in a meaningful

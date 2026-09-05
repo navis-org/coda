@@ -531,11 +531,22 @@ function ValuePreviewInner({
   }
 
   if (node.type === 'out.dendrogram' && isLinkageValue(value)) {
+    // The value on the second port, not the type: a wire says a table is coming, and only a run
+    // says what is in it. Unwired, muted or not yet run are one state here and all three draw
+    // the tree's own labels — the reading `out.viewer3d` and `out.rois` take of the same field.
+    const annotations = inputValues?.annotations
+    // Through `ctx.column`, never `ctx.params` — invariant 5, and what keeps the picture from
+    // naming a column the emitted notebook would not.
+    const matchColumn = ctx.column('matchColumn')
+    const labelColumn = ctx.column('labelColumn')
     return (
       <DendrogramViewer
         linkage={value}
         orientation={node.params.orientation === 'down' ? 'down' : 'right'}
         showLabels={node.params.showLabels !== false}
+        {...(isTableValue(annotations) ? { annotations } : {})}
+        {...(matchColumn ? { matchColumn } : {})}
+        {...(labelColumn ? { labelColumn } : {})}
         selection={selection}
         {...(onSelectionChange ? { onSelectionChange } : {})}
         {...shared}

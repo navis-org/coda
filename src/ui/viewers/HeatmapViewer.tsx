@@ -4,7 +4,7 @@ import type { MatrixValue } from '../../core/values'
 import type { ColorLimits, HeatmapPalette } from '../../nodes/lib/heatmapParams'
 import { CHART_INK, chartSurface, currentMode } from '../colors'
 import { exportBaseName as makeBaseName, matrixToCsv } from '../export'
-import { formatCompact, formatNumber } from '../format'
+import { formatCompact, formatNumber, formatZoom } from '../format'
 import { drawHeatmap, heatmapToSvg } from './heatmapDraw'
 import { CRASH_FLOOR_CELLS } from '../../core/limits'
 import type { HeatmapWindow } from './heatmapPlot'
@@ -29,6 +29,7 @@ import {
 } from './heatmapPlot'
 import { prepareCanvas } from './canvas2d'
 import { tooltipPoint } from './tooltipPoint'
+import { useWheelZoom } from './useWheelZoom'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import { useElementSize } from './useElementSize'
@@ -218,53 +219,19 @@ export function HeatmapViewer({
 
   // --- zoom --------------------------------------------------------------
   /*
-   * A native, non-passive listener, for `ScatterViewer`'s reason: React routes `onWheel`
-   * through a passive root listener, so `preventDefault` there is ignored and the overlay
-   * scrolls behind the chart. `nowheel` on the box is the other half where a card is on the
-   * canvas — moot here, since the gesture is off under `compact`, but the class costs nothing.
+   * Zoom about the pointer: the cell under it is the one that must not move. The non-passive
+   * listener, the per-frame coalescing and the sensitivity are `useWheelZoom`'s — this was the
+   * first of three copies, and the third is what retired them.
+   *
+   * `nowheel` on the box below is the other half where a card is on the canvas — moot here,
+   * since the gesture is off under `compact`, but the class costs nothing.
    */
-  useEffect(() => {
-    const element = ref.current
-    if (!element || !spec || !zoomable) return
-    /*
-     * Coalesced to one update per animation frame. A trackpad delivers wheel events faster
-     * than frames, each one a React render and a canvas paint on its own; the factors multiply
-     * while the frame is pending and the last pointer position is the anchor, which is what a
-     * single larger step about the same point would have been.
-     */
-    let pending: { factor: number; x: number; y: number; frame: number } | undefined
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault()
-      const rect = element.getBoundingClientRect()
-      const factor = Math.exp(event.deltaY * 0.0015)
-      const x = event.clientX - rect.left
-      const y = event.clientY - rect.top
-      if (pending) {
-        pending.factor *= factor
-        pending.x = x
-        pending.y = y
-        return
-      }
-      pending = {
-        factor,
-        x,
-        y,
-        frame: requestAnimationFrame(() => {
-          const step = pending!
-          pending = undefined
-          // Zoom about the pointer: the cell under it is the one that must not move.
-          const anchor = pointToMatrix(spec, step.x, step.y)
-          const next = zoomWindow(spec.window, full, anchor, step.factor)
-          setView(isFullWindow(next, full) ? undefined : next)
-        }),
-      }
-    }
-    element.addEventListener('wheel', onWheel, { passive: false })
-    return () => {
-      element.removeEventListener('wheel', onWheel)
-      if (pending) cancelAnimationFrame(pending.frame)
-    }
-  }, [ref, spec, full, zoomable])
+  useWheelZoom(ref, Boolean(spec) && zoomable, (factor, x, y) => {
+    if (!spec) return
+    const anchor = pointToMatrix(spec, x, y)
+    const next = zoomWindow(spec.window, full, anchor, factor)
+    setView(isFullWindow(next, full) ? undefined : next)
+  })
 
   const fit = () => setView(undefined)
 
@@ -577,7 +544,7 @@ export function HeatmapViewer({
             className="viewer__note"
             title={`Zoomed in: rows ${Math.floor(spec.window.row0) + 1}–${Math.ceil(spec.window.row0 + spec.window.rows)} of ${rows.toLocaleString()}, columns ${Math.floor(spec.window.col0) + 1}–${Math.ceil(spec.window.col0 + spec.window.cols)} of ${cols.toLocaleString()}. Scroll to zoom, drag to pan, double-click or ⤢ to fit.`}
           >
-            ×{zoom >= 10 ? Math.round(zoom) : zoom.toFixed(1)}
+            ×{formatZoom(zoom)}
           </span>
         )}
         <span className="colorbar">

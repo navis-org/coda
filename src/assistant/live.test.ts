@@ -237,6 +237,39 @@ describe.skipIf(!RUNNABLE)('against the real API', () => {
   )
 
   it(
+    'finds a port that only a description mentions',
+    async () => {
+      /*
+       * The discoverability case for a *decoration*, which is the one the catalogue is thinnest
+       * about. `catalogue.ts` runs at `lean`, so no param `help` reaches the model at all: what
+       * says a dendrogram's leaves can be renamed is one clause in `out.dendrogram`'s
+       * `description`, the port rendering as `annotations? (Table)`, and two param names with
+       * their defaults. Nothing else in the prompt mentions it.
+       *
+       * The failure to watch for is not a refusal — it is a plan that relabels *upstream*
+       * instead, with a `core.relabel` on the neuron table or a `labelColumn` on the NBLAST.
+       * Both apply cleanly and both change the tree's identity, so nothing objects and the
+       * dendrogram's `Selected` output quietly stops naming neurons.
+       *
+       * A failure here is a finding about the catalogue, not about this code.
+       */
+      const built = await ask(
+        emptyGraph(),
+        'On the mini hemibrain, find LC4 and LC6 neurons, fetch their skeletons, NBLAST them ' +
+          'against each other, cluster the scores and draw a dendrogram.',
+      )
+      const graph = await ask(built, 'Label the dendrogram leaves with cell types.')
+      console.log(`\n${describeGraph(graph)}\n`)
+      const dendro = graph.nodes.find((n) => n.type === 'out.dendrogram')
+      expect(dendro).toBeDefined()
+      expect(
+        graph.edges.some((e) => e.target === dendro!.id && e.targetHandle === 'annotations'),
+      ).toBe(true)
+    },
+    PER_QUESTION_MS,
+  )
+
+  it(
     'declines rather than inventing, when asked for something Coda cannot do',
     async () => {
       // The interesting failure is a plan full of plausible node types that do not exist. An
