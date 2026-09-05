@@ -425,7 +425,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     backend: 'cave',
     family: 'brain_and_nerve_cord_public',
     label: 'BANC public',
-    description: 'Adult male fly brain and ventral nerve cord.',
+    description: 'Adult female fly brain and ventral nerve cord.',
     guide:
       'The public BANC segmentation read through CAVE. It exposes the full brain-and-nerve-cord volume, and the neuron table is the public cell list published alongside the stack.',
     glyph: 'fly_cns',
