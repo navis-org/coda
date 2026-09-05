@@ -38,6 +38,7 @@ import type { RefObject } from 'react'
 import * as THREE from 'three'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { FlexLineMaterial, setLineWidths } from './flexLineMaterial'
+import { applyOpacity } from './materialOpacity'
 import { AmbientOcclusion } from './ambientOcclusion'
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
@@ -1561,11 +1562,7 @@ function FatSkeletonLines({
    * program cache keys by shader source, so the rebuild reuses the compiled program anyway.
    */
   useEffect(() => {
-    const faded = opacity < 1
-    if (material.transparent !== faded) material.needsUpdate = true
-    material.transparent = faded
-    material.depthWrite = !faded
-    material.opacity = opacity
+    applyOpacity(material, opacity)
     invalidate()
   }, [material, opacity, invalidate])
 
@@ -1663,24 +1660,41 @@ function PointSprites({
     return () => geometry.dispose()
   }, [geometry, invalidate])
 
-  const faded = opacity < 1
+  /*
+   * **`transparent` changing on a live material needs `needsUpdate`, and R3F does not set it.**
+   *
+   * This is the bug that survived four fixes, because every one of them was checked on a scene
+   * that *mounted* already split. The card opens with no partner lit, so `PointCloud` renders one
+   * `PointSprites` at opacity 1; lighting a partner renders two, and React reconciles the first by
+   * position — same component, same slot, so the `<points>` and this material are **reused**. R3F
+   * then writes `opacity` 1 → 0.1 and `transparent` false → true onto a material three has already
+   * compiled, and three keeps the program and the blending state it built when `transparent` was
+   * false. The dim half stays fully opaque and the slider does nothing to it.
+   *
+   * Closing the expanded card and re-opening it fixed it every time, which is the whole diagnosis:
+   * a remount *constructs* the material with `transparent: true`. Reported that way by the user;
+   * confirmed in a browser by flipping `pointEmphasis` from undefined to a function 800 ms after
+   * mount and comparing against a panel mounted split — same props, one faded, one a white slab.
+   *
+   * `FatSkeletonLines` already does this by hand for the same reason a few hundred lines down,
+   * which is why `Skeleton opacity` never had the bug. Only `transparent` needs it: `opacity` is a
+   * uniform and `depthWrite` is state read per draw.
+   *
+   * `applyOpacity` holds the rule and is unit-tested against a real material; the three fields
+   * are set here rather than as JSX props because R3F would re-apply them on every render without
+   * the rebuild. Nothing is drawn in between: `frameloop="demand"` renders only on `invalidate`,
+   * and effects run on commit — `FatSkeletonLines`' width effect makes the same argument.
+   */
+  const material = useRef<THREE.PointsMaterial>(null)
+  useEffect(() => {
+    if (!material.current) return
+    applyOpacity(material.current, opacity)
+    invalidate()
+  }, [opacity, invalidate])
+
   return (
     <points geometry={geometry}>
-      <pointsMaterial
-        vertexColors
-        size={size}
-        sizeAttenuation={attenuate}
-        transparent={faded}
-        opacity={opacity}
-        /*
-         * A faded cloud must not write depth. With it on, a dimmed dot in front of an emphasised
-         * one occludes it — so the thirty-eight points somebody is looking for disappear behind
-         * the fourteen thousand they asked to be pushed back, which is worse than not fading at
-         * all. The emphasised half stays opaque and keeps its depth, so it still sits correctly
-         * against the skeleton.
-         */
-        depthWrite={!faded}
-      />
+      <pointsMaterial ref={material} vertexColors size={size} sizeAttenuation={attenuate} />
     </points>
   )
 }
