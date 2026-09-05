@@ -34,6 +34,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { exportBaseName } from '../export'
 import { formatDuration } from '../format'
 import { ParamField } from '../params/ParamField'
+import { IssueText } from '../IssueText'
 import { bucketParams } from '../params/paramGroups'
 import { socketStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
@@ -861,7 +862,7 @@ function CodaNodeViewImpl({
 
         {shownIssue && (
           <div className="coda-node__issue" data-severity={shownIssue.severity}>
-            {shownIssue.message}
+            <IssueText message={shownIssue.message} />
           </div>
         )}
 

@@ -27,7 +27,7 @@ import { resetPrecomputedProbes } from '../precomputed/probe'
 import { resetTransport } from '../precomputed/transport'
 import { CaveSource } from './CaveSource'
 import { SYNAPSE_UNITS } from '../synapseUnits'
-import { CAVE_MAX_ROWS, refuseIfCapped } from './client'
+import { CAVE_MAX_ROWS, caveGet, refuseIfCapped } from './client'
 import {
   peekTableFacts,
   peekTableList,
@@ -39,12 +39,13 @@ import {
 import { registerDatastackSpec, resetRuntimeSpecs, specFor } from './spec'
 import { caveScene } from './scene'
 import { readL2Skeletons } from './l2'
-import { l2SourceFor } from './datastack'
+import { l2SourceFor, peekDatastacks } from './datastack'
 import { probeFlat } from './flat'
 import { skeletonServiceFor, skeletonServiceUrl } from './skeletonService'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { MESH_WARN_NEURONS, decimateGridFor, fragmentConcurrencyFor } from './meshes'
 import { quoteWideIntegers, parseCaveJson } from './json'
+import { installRefusingCaveFetch, materializations } from '../../test/caveStubs'
 import {
   getSession,
   reportAuthFailure,
@@ -52,6 +53,13 @@ import {
   setToken,
   subscribeAuthFailure,
 } from './credentials'
+
+/** Collect what reaches the auth channel, which is what opens the Connections dialog. */
+function failures(): { raised: string[]; stop: () => void } {
+  const raised: string[] = []
+  const stop = subscribeAuthFailure((message) => raised.push(message))
+  return { raised, stop }
+}
 
 const fixture = (name: string) => readFileSync(join(__dirname, '__fixtures__', name), 'utf8')
 
@@ -79,19 +87,6 @@ const rowQueries = (captured: readonly Captured[], path: string): Captured[] =>
 
 const countQueries = (captured: readonly Captured[], path: string): Captured[] =>
   captured.filter((c) => c.url.includes(path) && c.url.includes('count=true'))
-
-/** A version listing in the shape `versions.json` has, for a datastack with no fixture. */
-const materializations = (datastack: string, versions: number[]) =>
-  JSON.stringify(
-    versions.map((version, i) => ({
-      version,
-      valid: true,
-      datastack,
-      status: 'AVAILABLE',
-      time_stamp: `202${4 + i}-01-0${i + 1}T00:00:00.000000`,
-      expires_on: '2121-11-10T07:10:01.417779',
-    })),
-  )
 
 /**
  * A fetch that answers from the fixtures and records what was asked for.
@@ -541,6 +536,88 @@ describe('datasets and versions', () => {
     const [latest] = await new CaveSource().listDatasets()
     expect(latest!.rois).toEqual([])
     expect(latest!.statuses).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+/**
+ * The listing behind the Custom CAVE card's Datastack completions.
+ *
+ * `CaveSource.listDatasets` above is the *other* listing and deliberately narrower — only the
+ * datastacks with a spec — so this is the one place the raw thirteen are read, and the three
+ * facts worth pinning are all about when it does **not** ask.
+ */
+describe('the datastacks a token can see', () => {
+  it('answers undefined on the first look, then the listing, sorted', async () => {
+    const captured = installFetch()
+
+    // Invariant 2's ordinary state: this is read from a card that renders on every graph
+    // mutation, so the first look starts the fetch and cannot answer it.
+    expect(peekDatastacks()).toBeUndefined()
+
+    await vi.waitFor(() => expect(peekDatastacks()).toBeDefined())
+    expect(peekDatastacks()).toEqual([...(peekDatastacks() ?? [])].sort())
+    expect(peekDatastacks()).toContain('wclee_aedes_brain')
+    // Everything the info service lists, not the three `spec.ts` wires: a datastack nobody has
+    // written a spec for is exactly what this node exists for.
+    expect(peekDatastacks()).toHaveLength(13)
+    expect(rowQueries(captured, '/info/api/v2/datastacks')).toHaveLength(1)
+  })
+
+  it('shares one request with the source’s own listing, rather than asking twice', async () => {
+    const captured = installFetch()
+    // Both readers of `/info/api/v2/datastacks`: the card's completions and `runListing`, which
+    // narrows the same list to the specced datastacks. They had a cache each — two round trips
+    // for one fact, with two different invalidation rules.
+    peekDatastacks()
+    await new CaveSource().listDatasets()
+    await vi.waitFor(() => expect(peekDatastacks()).toBeDefined())
+    expect(rowQueries(captured, '/info/api/v2/datastacks')).toHaveLength(1)
+  })
+
+  it('asks once however many cards look, and does not retry a token that failed', async () => {
+    const captured = installFetch()
+    peekDatastacks()
+    await vi.waitFor(() => expect(peekDatastacks()).toBeDefined())
+    for (let i = 0; i < 20; i += 1) peekDatastacks()
+    expect(rowQueries(captured, '/info/api/v2/datastacks')).toHaveLength(1)
+  })
+
+  it('issues no request and raises nothing when there is no token', async () => {
+    const captured = installFetch()
+    setToken(undefined)
+    const { raised, stop } = failures()
+
+    expect(peekDatastacks()).toBeUndefined()
+    await Promise.resolve()
+
+    /*
+     * Both halves matter and the second is the one that bites. `client.ts` refuses a tokenless
+     * request *and reports an auth failure as it goes*, so an ungated peek would raise "No CAVE
+     * token" in the status bar at somebody who has only dragged a node onto the canvas — on
+     * every render, from a control nobody has touched.
+     */
+    expect(captured).toHaveLength(0)
+    expect(raised).toEqual([])
+    stop()
+  })
+
+  it('re-asks when the token changes, and does not keep the other account’s list', async () => {
+    const captured = installFetch()
+    await vi.waitFor(() => expect(peekDatastacks()).toBeDefined())
+
+    setToken('someone-else')
+    /*
+     * The listing is permission-filtered, so what the previous credential could see is not an
+     * answer about this one — and answering from the stale list is how a colleague's datastack
+     * appears on a card that cannot query it. Undefined is the honest state until the new one
+     * lands, which is the state the widget already draws (a plain text field).
+     */
+    expect(peekDatastacks()).toBeUndefined()
+    await vi.waitFor(() => expect(peekDatastacks()).toBeDefined())
+    expect(peekDatastacks()).toHaveLength(13)
+    expect(rowQueries(captured, '/info/api/v2/datastacks')).toHaveLength(2)
   })
 })
 
@@ -2238,5 +2315,140 @@ describe('CAVE discovery', () => {
   it('reads no columns off an empty result rather than inventing them', async () => {
     installFetch({ '/table/nuclei_v1/query': '[]' })
     expect(await tableColumnsFor(DATASTACK, VERSION, 'nuclei_v1', 'table')).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+/**
+ * A refusal about a datastack nobody asked for, which is the ordinary state of a new account.
+ *
+ * Reported from a real session, and the trace is what this reconstructs: a fresh sign-in, `Test`
+ * green, and then on every Run a `403` on `datastack/full/minnie65_public` beside `200` from
+ * FlyWire's and BANC's metadata — a dialog demanding a token that was fine, and a graph that ran
+ * correctly the moment it was dismissed. Two halves, and only together do they make the bug:
+ * `runListing` asks about *every* specced datastack because it is filling a picker, and CAVE's
+ * listing endpoint filters with `ignore_tos=True`, so it offers datastacks whose terms this
+ * account has not accepted.
+ */
+describe('a datastack this account cannot read', () => {
+  /** The reported session, from the shared stub: one datastack of three refusing. */
+  const listingFetch = (
+    refuse: string,
+    status = 403,
+    body = '{"error":"missing_permission"}',
+  ) => installRefusingCaveFetch({ refuse, status, body })
+
+  it('lists the datastacks that answered and raises nothing about the one that did not', async () => {
+    listingFetch('minnie65_public')
+    const { raised, stop } = failures()
+
+    const datasets = await new CaveSource().listDatasets()
+
+    // The picker keeps what worked...
+    expect(datasets.map((d) => d.id)).toEqual([
+      'flywire_fafb_public:783',
+      'brain_and_nerve_cord_public:783',
+    ])
+    /*
+     * ...and the panel stays shut. This is the whole bug: `listOne`'s `catch` already tolerated
+     * the refusal, so the run was never affected — but `client.ts` had opened the Connections
+     * dialog before the catch could run, on every Run, demanding a credential that was working.
+     */
+    expect(raised).toEqual([])
+    stop()
+  })
+
+  it('says the token is fine and names the terms of service, where that is the refusal', async () => {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve({
+        ok: false,
+        status: 403,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              error: 'missing_tos',
+              message: 'Need to accept Terms of Service to access resource.',
+              data: {
+                tos_id: 3,
+                tos_name: 'MICrONS Data Use',
+                tos_form_url: 'https://global.daf-apis.com/sticky_auth/api/v1/tos/3/accept',
+                auth_dataset: 'minnie65_public',
+              },
+            }),
+          ),
+      } as Response),
+    )
+    const { raised, stop } = failures()
+
+    /*
+     * `middle_auth_client` answers a `Bearer` request three distinguishable ways and Coda told
+     * everybody the same one. "Your token may have expired" sent the reporter to sign in again —
+     * twice — for a refusal that no sign-in can lift: the account may view the dataset and has
+     * not agreed to its terms, and the body carries the form that fixes it.
+     */
+    const error = (await caveGet(
+      'https://global.daf-apis.com/info/api/v2/datastack/full/minnie65_public',
+    ).catch((e: unknown) => e)) as Error
+    expect(error.message).toContain('MICrONS Data Use')
+    expect(error.message).toContain('/sticky_auth/api/v1/tos/3/accept')
+    expect(error.message).toContain('signing in again will not help')
+    // A request nobody marked `quiet` still reaches the panel. Only the sentence changed.
+    expect(raised).toEqual([error.message])
+    stop()
+  })
+
+  it('keeps the refusal as the answer to why that dataset is not in the listing', async () => {
+    listingFetch(
+      'minnie65_public',
+      403,
+      JSON.stringify({
+        error: 'missing_tos',
+        data: {
+          tos_id: 3,
+          tos_name: 'MICrONS Data Use',
+          tos_form_url: 'https://global.daf-apis.com/sticky_auth/api/v1/tos/3/accept',
+          auth_dataset: 'minnie65_public',
+        },
+      }),
+    )
+    const source = new CaveSource()
+    await source.listDatasets()
+
+    /*
+     * What the dataset node asks. Its own id could not be resolved — no materialization came
+     * back — so this is asked about the bare datastack, which is the case that needed answering:
+     * with a `datastack:version` in hand the node was never the one in trouble.
+     */
+    expect(source.whyDatasetMissing('minnie65_public')).toContain('MICrONS Data Use')
+    expect(source.whyDatasetMissing('minnie65_public')).toContain('/tos/3/accept')
+    // And by full id, since a node whose version *is* pinned asks that way.
+    expect(source.whyDatasetMissing('minnie65_public:1822')).toContain('MICrONS Data Use')
+    // Nothing is known about the two that answered, which is not the same as "it is fine".
+    expect(source.whyDatasetMissing('flywire_fafb_public')).toBeUndefined()
+  })
+
+  it('names the datastack in a refusal that does not name itself', async () => {
+    // The fallback body: middle_auth spells out `missing_tos` and `missing_permission`, and
+    // anything else lands on the token sentence — which on a card would be a complaint about a
+    // credential with nothing tying it to the node that is broken.
+    listingFetch('minnie65_public', 403, 'not json at all')
+    const source = new CaveSource()
+    await source.listDatasets()
+    expect(source.whyDatasetMissing('minnie65_public')).toMatch(
+      /^minnie65_public: CAVE rejected/,
+    )
+  })
+
+  it('reports once, not per datastack, when every one of them refuses', async () => {
+    // The case the global listing cannot catch: a token the info service accepts and no
+    // *deployment* does. Nothing came back, so the picker is empty for a reason somebody has to
+    // be told — but once, about the first refusal, rather than three times.
+    listingFetch('/metadata')
+    const { raised, stop } = failures()
+
+    expect(await new CaveSource().listDatasets()).toEqual([])
+    expect(raised).toHaveLength(1)
+    stop()
   })
 })

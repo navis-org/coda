@@ -278,6 +278,24 @@ export interface StringParam extends ParamBase {
   default: string
   placeholder?: string
   multiline?: boolean
+  /**
+   * Completions for a field that takes free text but usually takes one of a known set.
+   *
+   * Drawn as the browser's own `datalist` popup rather than as a `select`, which is the whole
+   * distinction from `EnumParam`: the value is still anything you can type. That is what a name
+   * *not* on the list has to stay — Custom CAVE exists for the datastack Coda ships nothing for,
+   * its listing needs a token that expires in a week, and the reply has not landed on the first
+   * render of any session. A select would empty in all three cases, which reads as the card
+   * having forgotten what the graph says.
+   *
+   * Same contract as `EnumParam.options`: **synchronous and network-free**, for `inferOutputs`'
+   * reason (invariant 2) — it is asked on every render, so a fetch here is a request per
+   * keystroke. A source that has to fetch answers from a peek and re-infers through
+   * `reportSourceLearned`, which is what fills the list a beat later.
+   *
+   * Empty and undefined mean the same thing to the widget: no popup, an ordinary text field.
+   */
+  suggestions?: (ctx: InferContext) => string[]
 }
 
 export interface BooleanParam extends ParamBase {

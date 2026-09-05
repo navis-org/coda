@@ -96,6 +96,28 @@ export function refuseIfCapped(
 export interface CaveRequestOptions {
   signal?: AbortSignal | undefined
   token?: string | undefined
+  /**
+   * Refuse quietly: throw as usual, but keep a 401/403 off the global auth channel.
+   *
+   * For a request made **speculatively, about something nobody asked for**, whose failure the
+   * caller has already decided to tolerate. `runListing` is the case that forced it: it asks
+   * every specced datastack for its materializations so the dataset picker can offer them, and
+   * catches each failure into an empty list — but the report had already fired, so a user with
+   * no access to *one* of the three opened the Connections panel on every Run of a graph that
+   * worked. Measured: `403` on `datastack/full/minnie65_public` beside `200` from FlyWire's and
+   * BANC's.
+   *
+   * **Not a way to make a failure quieter in general.** A 401/403 on a request somebody's graph
+   * is waiting for has to reach the panel — that is the whole of how a stale token gets
+   * replaced. The test is whether the caller can carry on without an answer.
+   *
+   * One nuance where it meets a memo: `datastackRecord` shares an in-flight promise, so a loud
+   * caller arriving while a quiet fetch is in flight inherits the silence. It is self-healing —
+   * a rejected record is dropped, so the next loud caller re-asks and reports — and the
+   * alternative, keying the memo on the flag, would issue the request twice to keep a message
+   * that arrives one run later anyway.
+   */
+  quiet?: boolean | undefined
 }
 
 /** One row of a CAVE query result: the API answers with an array of record objects. */
@@ -107,11 +129,7 @@ async function request<T>(
   options: CaveRequestOptions,
 ): Promise<T> {
   const token = options.token ?? getToken()
-  if (!token) {
-    const message = 'No CAVE token. Add one in Connections — the branch icon in the toolbar.'
-    reportAuthFailure(message)
-    throw new CaveError(message, 401)
-  }
+  if (!token) refuseNoToken(options)
 
   const headers = new Headers(init.headers)
   headers.set('Authorization', `Bearer ${token}`)
@@ -135,18 +153,111 @@ async function request<T>(
     )
   }
 
-  if (response.status === 401 || response.status === 403) {
-    const message =
-      `CAVE rejected the token (${response.status}). It may have expired, or it may not ` +
-      `grant access to this datastack — check at ${new URL(url).origin}.`
-    reportAuthFailure(message)
-    throw new CaveError(message, response.status)
-  }
-
   const text = await response.text()
+  // `text` is read *before* this branch because the refusal is in the body: the canned sentence
+  // was being told to somebody whose token was fine and whose remedy was a terms page.
+  if (response.status === 401 || response.status === 403)
+    refuseAuth(url, response.status, text, options)
+
   if (!response.ok)
     throw new CaveError(`CAVE returned ${response.status}: ${explain(text)}`, response.status)
   return parseCaveJson<T>(text)
+}
+
+/**
+ * Refuse a request on the credential: build the sentence, report it unless the caller is carrying
+ * on without an answer, and throw.
+ *
+ * **One function because there were four sites and they had drifted.** `request` grew the
+ * body-derived message and the `quiet` rule; `cavePostBinary` and `caveGetBytes` kept a canned
+ * `CAVE rejected the token (403).` that neither read the body nor honoured `quiet` — so a
+ * terms-gated *skeleton* fetch still told somebody to sign in again, which is the thing that
+ * cannot work. The tokenless case was a third spelling, in all three functions, and it ignored
+ * `quiet` too: a speculative caller had to gate on `getToken()` itself to avoid raising "No CAVE
+ * token" at somebody who had only dragged a node onto the canvas.
+ *
+ * `never`, so a call site is a statement rather than a branch it has to remember to `throw` in.
+ */
+function refuseAuth(
+  url: string,
+  status: number,
+  body: string,
+  options: CaveRequestOptions,
+): never {
+  return refuse(authRefusal(url, status, body), status, options)
+}
+
+/**
+ * The refusal for a request that was never sent, because there is no credential to send.
+ *
+ * Its own entry point rather than `refuseAuth` with an empty body: a server that answers `401`
+ * with nothing in it is a different thing from never having asked, and inferring one from the
+ * other tells somebody who *has* a token to go and add one.
+ */
+function refuseNoToken(options: CaveRequestOptions): never {
+  return refuse(
+    'No CAVE token. Add one in Connections — the branch icon in the toolbar.',
+    401,
+    options,
+  )
+}
+
+/** Report unless the caller is carrying on without an answer, and throw either way. */
+function refuse(message: string, status: number, options: CaveRequestOptions): never {
+  if (!options.quiet) reportAuthFailure(message)
+  throw new CaveError(message, status)
+}
+
+/**
+ * What a 401 or 403 actually means, read off the body rather than assumed.
+ *
+ * `middle_auth_client` answers a `Bearer` request three distinguishable ways, and telling
+ * somebody the wrong one costs them the fix. **`missing_tos`** is the one that was being
+ * mistold: the account may view the dataset and has not agreed to its terms, and the body
+ * carries the form that fixes it (`tos_form_url`, plus the terms' name) — so "your token may
+ * have expired" sends somebody to sign in again, which cannot work and is exactly what was
+ * reported. **`missing_permission`** is a group they are not in, where signing in again is
+ * equally useless. Anything else falls back to the token, which is what a bare `401` from the
+ * auth layer really is.
+ *
+ * A browser-shaped request gets a `302` to the terms form instead of any of this, which is why
+ * it is never seen outside a programmatic client — and why this is read from the JSON rather
+ * than from a status alone.
+ */
+function authRefusal(url: string, status: number, body: string): string {
+  const parsed = parsedBody(body)
+  const data = (parsed.data ?? {}) as Record<string, unknown>
+  const dataset = typeof data.auth_dataset === 'string' ? data.auth_dataset : 'this dataset'
+
+  if (parsed.error === 'missing_tos') {
+    const name = typeof data.tos_name === 'string' ? data.tos_name : 'its terms of service'
+    const form =
+      typeof data.tos_form_url === 'string' ? ` — accept them at ${data.tos_form_url}` : ''
+    return (
+      `CAVE will not serve ${dataset} until you have accepted ${name}${form}. Your token is ` +
+      `fine; signing in again will not help.`
+    )
+  }
+  if (parsed.error === 'missing_permission') {
+    return (
+      `Your CAVE account is not permitted to read ${dataset} (${status} at ` +
+      `${new URL(url).origin}). Your token is fine; this is a permission on the dataset, so ` +
+      `signing in again will not help.`
+    )
+  }
+  return (
+    `CAVE rejected the token (${status}). It may have expired, or it may not ` +
+    `grant access to this datastack — check at ${new URL(url).origin}.`
+  )
+}
+
+/** A CAVE error body as an object, or an empty one — it is JSON on some paths and HTML on others. */
+function parsedBody(body: string): Record<string, unknown> {
+  try {
+    return (JSON.parse(body) ?? {}) as Record<string, unknown>
+  } catch {
+    return {}
+  }
 }
 
 /**
@@ -159,14 +270,11 @@ async function request<T>(
  * of JSON at somebody, and falling back to a truncated body beats printing nothing.
  */
 function explain(body: string): string {
-  try {
-    const parsed = JSON.parse(body) as Record<string, unknown>
-    if (typeof parsed.message === 'string') return parsed.message
-    if (parsed.schema_errors) return `invalid query — ${JSON.stringify(parsed.schema_errors)}`
-    if (typeof parsed.error === 'string') return parsed.error
-  } catch {
-    // Not JSON: an HTML error page, or nothing at all.
-  }
+  const parsed = parsedBody(body)
+  if (typeof parsed.message === 'string') return parsed.message
+  if (parsed.schema_errors) return `invalid query — ${JSON.stringify(parsed.schema_errors)}`
+  if (typeof parsed.error === 'string') return parsed.error
+  // Not JSON: an HTML error page, or nothing at all.
   return body.slice(0, 300) || '(empty response)'
 }
 
@@ -210,11 +318,7 @@ export async function cavePostBinary(
   options: CaveRequestOptions = {},
 ): Promise<BigUint64Array> {
   const token = options.token ?? getToken()
-  if (!token) {
-    const message = 'No CAVE token. Add one in Connections — the branch icon in the toolbar.'
-    reportAuthFailure(message)
-    throw new CaveError(message, 401)
-  }
+  if (!token) refuseNoToken(options)
   let response: Response
   try {
     response = await fetch(url, {
@@ -233,11 +337,8 @@ export async function cavePostBinary(
         `the host is down — a browser reports both the same way. (${errorMessage(error)})`,
     )
   }
-  if (response.status === 401 || response.status === 403) {
-    const message = `CAVE rejected the token (${response.status}).`
-    reportAuthFailure(message)
-    throw new CaveError(message, response.status)
-  }
+  if (response.status === 401 || response.status === 403)
+    refuseAuth(url, response.status, await response.text(), options)
   if (!response.ok) {
     throw new CaveError(`CAVE returned ${response.status}`, response.status)
   }
@@ -267,11 +368,7 @@ export async function caveGetBytes(
   options: CaveRequestOptions = {},
 ): Promise<ArrayBuffer | undefined> {
   const token = options.token ?? getToken()
-  if (!token) {
-    const message = 'No CAVE token. Add one in Connections — the branch icon in the toolbar.'
-    reportAuthFailure(message)
-    throw new CaveError(message, 401)
-  }
+  if (!token) refuseNoToken(options)
   let response: Response
   try {
     response = await fetch(url, {
@@ -286,11 +383,8 @@ export async function caveGetBytes(
     )
   }
   if (response.status === 404) return undefined
-  if (response.status === 401 || response.status === 403) {
-    const message = `CAVE rejected the token (${response.status}).`
-    reportAuthFailure(message)
-    throw new CaveError(message, response.status)
-  }
+  if (response.status === 401 || response.status === 403)
+    refuseAuth(url, response.status, await response.text(), options)
   if (!response.ok) throw new CaveError(`CAVE returned ${response.status}`, response.status)
   return response.arrayBuffer()
 }

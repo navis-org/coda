@@ -40,7 +40,11 @@ import {
 import { DATASTACK_SPECS, datasetIdFor, registerDatastackSpec } from '../../data/cave/spec'
 import { DEFAULT_CATMAID_SERVER } from '../../data/catmaid/credentials'
 import { catmaidSourceFor, normaliseCatmaidServer } from '../../data/catmaid/registry'
-import { materializationsFor, peekMaterializations } from '../../data/cave/datastack'
+import {
+  materializationsFor,
+  peekDatastacks,
+  peekMaterializations,
+} from '../../data/cave/datastack'
 import {
   ANNOTATIONS_INPUT,
   annotationIssues,
@@ -147,9 +151,17 @@ function buildDatasetNode(family: DatasetFamily) {
       // `validate` runs on every graph mutation for every dataset node on the canvas.
       const datasetId = resolveDatasetId(family, ctx.params.version)
       const versions = versionsFor(family)
-      // Empty means the listing has not arrived (or failed); that is the connection panel's
-      // story to tell, not a per-node error on every dataset node in the graph.
-      if (versions.length === 0) return []
+      /*
+       * Empty is two states and only one of them is silent. The listing not having arrived is
+       * the connection panel's story to tell, not a per-node error on every dataset node in the
+       * graph — but a listing that *has* run and dropped this datastack knows why, and that is
+       * this node's story: it is the node nobody can run, and waiting for a Run to say so costs
+       * a press and produces the least actionable message in the app.
+       */
+      if (versions.length === 0) {
+        const why = source.whyDatasetMissing?.(family.family)
+        return why ? [why] : []
+      }
       const chosen = String(ctx.params.version ?? '')
       if (chosen && !versions.some((v) => v.version === chosen)) {
         return [
@@ -171,8 +183,16 @@ function buildDatasetNode(family: DatasetFamily) {
       const datasetId = resolveDatasetId(family, ctx.params.version)
       const info = datasets.find((d) => d.id === datasetId)
       if (!info) {
+        /*
+         * The listing tolerates a datastack it could not read, which is right — one dataset an
+         * account lacks access to must not empty the picker — so "not in the listing" is the
+         * ordinary shape of "you are not allowed to read this", and the generic sentence below
+         * then described the symptom and named nothing: `no dataset "(none)" on CAVE. Available:`
+         * followed by two datasets somebody did not ask for. The source kept the reason.
+         */
         throw new Error(
-          `${familyLabel(family)}: no dataset "${datasetId ?? '(none)'}" on ${source.label}. Available: ${datasets.map((d) => d.id).join(', ')}`,
+          source.whyDatasetMissing?.(datasetId ?? family.family) ??
+            `${familyLabel(family)}: no dataset "${datasetId ?? '(none)'}" on ${source.label}. Available: ${datasets.map((d) => d.id).join(', ')}`,
         )
       }
       const value: DatasetValue = {
@@ -203,8 +223,20 @@ function buildDatasetNode(family: DatasetFamily) {
  * The rest is left off deliberately. Annotations come from whatever is wired to the Annotations
  * socket, so there is nothing to name here; connectivity needs a server-side roll-up view, which
  * a datastack either publishes or does not, and naming one that is not there would turn a clean
- * refusal into a 404. Both are `advanced` params rather than absent, because somebody who knows
- * their datastack has them should not need a code change.
+ * refusal into a 404. That one stays an `advanced` param rather than absent, because somebody who
+ * knows their datastack publishes one should not need a code change.
+ *
+ * **The neuron table and its id column are on the card; the connection view is not**, and the
+ * line between them is `validate`'s. This node refuses to say anything useful — "name a table
+ * listing this datastack's neurons, or wire an Annotations source" — until the first of them is
+ * set, and an inspector-only control cannot be the answer to a complaint the *card* is making:
+ * the inspector is closed by default, so a first-time reader is looking at a card asking for
+ * something that has no field on it. The id column comes with it because the two are one
+ * decision, which the node's own guide already spells as one sentence — a table, and the column
+ * its root ids are in — and because a card that asks for half of a pair reads as finished when it
+ * is not. Nothing similar is true of the connection view: not naming one is an ordinary
+ * configuration whose whole consequence is that Connectivity declines, said elsewhere, on the
+ * node that declines.
  */
 export const customCaveNode = registerNode({
   type: 'dataset.cave',
@@ -227,8 +259,22 @@ export const customCaveNode = registerNode({
       kind: 'string',
       label: 'Datastack',
       placeholder: 'flywire_fafb_public',
-      help: 'Datastack name exactly as the CAVE info service lists it.',
+      help: 'Datastack name exactly as the CAVE info service lists it. Once a token is saved, the field completes from the datastacks that token can see.',
       default: '',
+      /*
+       * A `datalist` rather than the `enum` its neighbour above is, and the difference is the
+       * node: this one exists for the datastack Coda ships nothing for, and a private one need
+       * not be in any listing at all — `evaluate` says so where it declines to check the name.
+       * So the listing is a spelling aid over a field that still takes anything, which is also
+       * what makes the three states it has no answer for harmless: no token, a token whose
+       * seven days are up, and the first render of every session.
+       *
+       * Not filtered against `DATASTACK_SPECS`. A shipped datastack works from this card — the
+       * spec simply wins over the settings on it — and `validate` says as much in words, where
+       * dropping the name would leave the field's list disagreeing with the count the
+       * Connections panel prints from the very same request.
+       */
+      suggestions: () => peekDatastacks() ?? [],
     },
     {
       id: 'version',
@@ -278,7 +324,6 @@ export const customCaveNode = registerNode({
       placeholder: 'proofread_neurons',
       help: 'Any table with one row per neuron carrying a root id — a proofreading list, a nuclei table. Nothing in CAVE marks one, so it has to be named. Leave empty where the datastack has none: the Annotations source then supplies the neuron list.',
       default: '',
-      advanced: true,
     },
     {
       id: 'idColumn',
@@ -287,7 +332,6 @@ export const customCaveNode = registerNode({
       placeholder: 'pt_root_id',
       help: 'Column holding the root id. `pt_root_id` on every CAVE table Coda has seen.',
       default: 'pt_root_id',
-      advanced: true,
     },
     {
       id: 'connectionView',

@@ -87,6 +87,11 @@ Cross-cutting — these bite in code that is not obviously "about" the area:
   decision and stays one. **A multi-column picker keeps an unseen list untouched.**
 - **Both peeks start the fetch they cannot answer** (`peekDatasets`, `schemasFor`), once
   per instance. Otherwise the first Run of a session behaves differently from the second.
+  **A peek whose fetch needs a credential is gated on having one**, and re-armed by the credential
+  *changing*: `client.ts` refuses a tokenless CAVE request and fires `reportAuthFailure` as it
+  does, so an ungated `peekDatastacks` puts "No CAVE token" in the status bar at somebody who has
+  only dragged a node onto the canvas. A per-account listing is also not reusable across accounts.
+  See [docs/backends.md](docs/backends.md).
 - **A node whose output size is the product of two independently-resolved columns needs a
   ceiling checked before allocation** — neither picker knows what the other did.
 - **A guard rail warns; it does not refuse.** A refusal claims there is no useful answer,
@@ -352,6 +357,33 @@ Area-specific — the rule, then the doc that holds why:
   where the card gates on `isViewer`, because a non-viewer node can hold a cell; and the test must
   run **underneath** a mounted grid, the one order that can see it.
   See [docs/dashboard.md](docs/dashboard.md).
+- **A tolerated failure and a global alarm cannot be the same line.** `client.ts` reported every
+  CAVE 401/403 to the channel that *opens the Connections dialog*, including the ones
+  `runListing` was already catching — so a user with no access to one of the three specced
+  datastacks got a dialog demanding a working token on every Run of a graph that ran fine. A
+  request made speculatively, about something nobody asked for, carries `quiet` — **every peek
+  included**, since `peekMaterializations` reaches the same record from a *render*; the backstop is
+  that `runListing` reports **once** when nothing at all came back, and `refuseAuth` is the single
+  site that decides, or three of the four had already drifted. And CAVE's listing filters
+  with `ignore_tos=True`, so it names datastacks that then refuse — a listing longer than what
+  works is the ordinary state of a new account, not a bug to design around. Second half:
+  `missing_tos` is not a bad token, it carries the form that fixes it, and telling somebody to
+  sign in again is telling them to do the one thing that cannot work. Third half, found by fixing
+  the first two: **a tolerated refusal is still the answer to a question somebody will ask** —
+  silencing the panel left the node pointed at that datastack saying `no dataset "(none)" on CAVE.
+  Available: …` and listing the datasets that *did* answer. `DataSource.whyDatasetMissing` is
+  where the listing's kept failures are read, synchronous so `validate` marks the card before a
+  Run, and `undefined` there means *nothing is known* rather than *nothing is wrong*.
+  See [docs/backends.md](docs/backends.md).
+- **A message that names a remedy has to be reachable, and on a card nothing is.** React Flow puts
+  `user-select: none` on every node, so an error naming the terms-of-service form that lifts it
+  was a URL somebody had to retype by eye — `IssueText` is the one component the card, the
+  inspector and the Connections alert render through, and the text carries `user-select: text`
+  **and** `nodrag` (without the second, the drag that starts a selection moves the node). Its
+  rule: **the visible text is the href**, because `authRefusal` reads that URL out of whatever
+  deployment a Custom node points at and a mismatched label is the only thing an anchor can lie
+  about; `http`/`https` only, so a server cannot write `javascript:` into an error body and have
+  it linked. See [docs/ui-shell.md](docs/ui-shell.md).
 - **A published token is not a credential, and shipping one makes a rotation a new failure mode.**
   Virtual Fly Brain publishes an `AnonymousUser` token per instance because CATMAID's query
   endpoints are POST-only and a browser satisfies neither of Django's CSRF gates. `publicTokens.ts`

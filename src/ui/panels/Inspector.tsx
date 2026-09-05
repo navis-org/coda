@@ -7,6 +7,7 @@
  */
 
 import { useMemo } from 'react'
+import { IssueText } from '../IssueText'
 
 import { makeInferContext } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
@@ -155,7 +156,9 @@ export function Inspector() {
               {issues.map((issue, index) => (
                 <div key={index} className="issue" data-severity={issue.severity}>
                   <span className="issue__glyph">{issue.severity === 'error' ? '×' : '!'}</span>
-                  <span>{issue.message}</span>
+                  {/* The one surface with room for the button, which is why the card does
+                      without one: the same sentence, ranked identically, one click away. */}
+                  <IssueText message={issue.message} copyable />
                 </div>
               ))}
             </div>

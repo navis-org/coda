@@ -22,6 +22,7 @@
  * datastack without one refuses rather than downloading 244 million synapse rows to count them.
  */
 
+import { errorMessage } from '../../core/errors'
 import { describeDuration } from '../../core/limits'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import type { TableSchema } from '../../core/types'
@@ -99,17 +100,12 @@ import { SKELETON_ROUTES, route } from '../skeletonRoutes'
 import type { CaveRequestOptions, CaveRow } from './client'
 import type { DatastackInfo } from './api'
 import { CaveError } from './client'
-import {
-  listDatastacks,
-  queryTableChecked,
-  queryView,
-  uniqueStringValues,
-  versionsMetadata,
-} from './api'
-import { getServer } from './credentials'
+import { queryTableChecked, queryView, uniqueStringValues, versionsMetadata } from './api'
+import { getServer, reportAuthFailure } from './credentials'
 import {
   caveServerFor,
   datastackRecord,
+  datastacksFor,
   l2SourceFor,
   peekL2Cache,
   usableVersions,
@@ -352,6 +348,8 @@ export class CaveSource implements DataSource {
   readonly schemas: SourceSchemas = defaultSchemas()
 
   private datasets: DatasetInfo[] | undefined
+  /** Why each specced datastack is absent from `datasets`, from the last listing. */
+  private failures = new Map<string, string>()
   private listing: Promise<DatasetInfo[]> | undefined
   private listingRequested = false
   /** Which global server produced `datasets`. A changed setting invalidates everything. */
@@ -368,7 +366,7 @@ export class CaveSource implements DataSource {
     // Concurrent callers share one listing — a graph can hold several dataset nodes and each
     // one's inference peeks. Unlike the neuron index this is not persisted: it is small, and it
     // is the one thing that would tell us a materialization has expired.
-    this.listing ??= this.runListing(server, signal).finally(() => {
+    this.listing ??= this.runListing(signal).finally(() => {
       this.listing = undefined
     })
     return this.listing
@@ -400,26 +398,102 @@ export class CaveSource implements DataSource {
   private reset(server: string): void {
     this.listedFrom = server
     this.datasets = undefined
+    // With the rest: an explanation of why a datastack was missing from the *previous* server's
+    // listing is not an explanation of anything on this one.
+    this.failures = new Map()
     this.listing = undefined
     this.listingRequested = false
     this.states.clear()
   }
 
-  private async runListing(server: string, signal?: AbortSignal): Promise<DatasetInfo[]> {
+  /**
+   * Every specced datastack's materializations, and the one place a refusal is *expected*.
+   *
+   * The listing asks about datastacks nobody has put on the canvas — that is what a picker is —
+   * and CAVE's own listing endpoint filters with `ignore_tos=True`, so a name in it is one the
+   * account may view **once it has agreed to that dataset's terms**, not one it can query today.
+   * A fresh account therefore refuses one or two of the three as a matter of course.
+   *
+   * So each is asked `quiet`ly and its failure caught, which is what it always did — the bug was
+   * that `client.ts` had already opened the Connections panel by then, on every Run of a graph
+   * that worked perfectly. Reported: `403` on `datastack/full/minnie65_public` beside `200` from
+   * FlyWire's and BANC's, a dialog demanding a token that was fine, and a graph that ran the
+   * moment it was dismissed.
+   *
+   * **The backstop is that nothing at all came back.** A token that no *deployment* accepts —
+   * valid at the global service, refused at `prod.flywire-daf.com` — leaves every spec failing
+   * and a picker that is empty for a reason nobody could see; the global call above cannot catch
+   * that, since it is a different service. That case is reported once, rather than once per
+   * datastack, and only when nothing succeeded: one refusal among two answers is a fact about
+   * one dataset.
+   */
+  private async runListing(signal?: AbortSignal): Promise<DatasetInfo[]> {
     const options: CaveRequestOptions = signal ? { signal } : {}
-    const available = new Set(await listDatastacks(server, options))
+    // Through `datastack.ts`'s memo rather than a second call to the same URL: one fact, one
+    // request, one invalidation rule — and the Datastack field's completions are then filled by
+    // whichever of the two asked first.
+    const available = new Set(await datastacksFor(options))
     /*
      * Only datastacks Coda has a spec for. The info service lists thirteen and most of them
      * would fail on the first Run — see `spec.ts` for why a CAVE datastack cannot describe its
      * own roles. Offering a dataset that cannot work is worse than not offering it.
      */
     const specs = DATASTACK_SPECS.filter((s) => available.has(s.datastack))
+    /*
+     * Kept rather than swallowed, and this is the second half of the same bug. A tolerated
+     * refusal is still the answer to "why is this dataset not in the picker" — and without it the
+     * node pointed at that datastack reported `no dataset "(none)" on CAVE. Available: …`, which
+     * describes the symptom and names nothing anybody can act on. Replaced wholesale each listing
+     * rather than merged: a datastack that has started answering must stop being explained.
+     */
+    const failures = new Map<string, string>()
+    let refused: string | undefined
     const perSpec = await Promise.all(
-      specs.map((spec) => this.listOne(spec, options).catch(() => [])),
+      specs.map((spec) =>
+        this.listOne(spec, { ...options, quiet: true }).catch((error: unknown) => {
+          failures.set(spec.datastack, errorMessage(error))
+          if (
+            !refused &&
+            error instanceof CaveError &&
+            (error.status === 401 || error.status === 403)
+          )
+            refused = error.message
+          return []
+        }),
+      ),
     )
     this.datasets = perSpec.flat()
+    this.failures = failures
+    /*
+     * The backstop, and only when nothing at all came back: a token the info service accepts and
+     * no *deployment* does leaves every spec failing, which the global call above cannot see —
+     * different service. One refusal among two answers is a fact about one dataset; every one of
+     * them refusing is a fact about the credential, and is said once rather than once per
+     * datastack.
+     */
+    if (this.datasets.length === 0 && refused) reportAuthFailure(refused)
     reportSourceLearned(this.id)
     return this.datasets
+  }
+
+  /**
+   * Why a specced datastack is missing from the listing — `DataSource.whyDatasetMissing`.
+   *
+   * Reads the last listing's failures, so it is a map lookup and safe from `validate`. The ref is
+   * a dataset id or a bare datastack, since the case this exists for is the one where no
+   * materialization could be resolved and there is therefore no `datastack:version` to ask about.
+   */
+  whyDatasetMissing(ref: string): string | undefined {
+    const datastack = splitDatasetId(ref)?.datastack ?? ref
+    const message = this.failures.get(datastack)
+    /*
+     * Named, unless it names itself. A refusal middle_auth spells out already carries the dataset
+     * (`missing_tos`, `missing_permission`); the fallbacks do not — "CAVE rejected the token
+     * (403)" on a card would be a sentence about a credential with nothing tying it to the one
+     * node in the graph that is broken, which is most of what made the old message useless.
+     */
+    if (!message) return undefined
+    return message.includes(datastack) ? message : `${datastack}: ${message}`
   }
 
   private async listOne(

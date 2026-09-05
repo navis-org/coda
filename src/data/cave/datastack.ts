@@ -16,9 +16,9 @@
 
 import type { DatastackInfo } from './api'
 import type { VersionInfo } from './api'
-import { datastackInfo, versionsMetadata } from './api'
+import { datastackInfo, listDatastacks, versionsMetadata } from './api'
 import type { CaveRequestOptions } from './client'
-import { getServer } from './credentials'
+import { getServer, getToken } from './credentials'
 import { reportSourceLearned } from '../source'
 import type { GrapheneSource } from './graphene'
 import { parseGrapheneSource } from './graphene'
@@ -95,9 +95,16 @@ export function peekMaterializations(datastack: string): number[] | undefined {
   const known = materializations.get(datastack)
   if (known || !datastack || asked.has(datastack)) return known
   asked.add(datastack)
-  // Swallowed: a peek has no caller to report to, and a 401 already travels on its own channel
-  // to the Connections panel. `NeuPrintSource.peekDatasets`' trade.
-  void materializationsFor(datastack).catch(() => undefined)
+  /*
+   * Swallowed *and* `quiet`. The swallow is `NeuPrintSource.peekDatasets`' trade — a peek has no
+   * caller to report to. The quiet is the other half, and it was missing: this reaches
+   * `datastackRecord`, so a card naming a datastack the account may not read raised the alarm
+   * that opens the Connections panel **from a render**, which is the reported bug arriving by a
+   * shorter route than the Run that first showed it. The Datastack field now offers every
+   * datastack the listing names, refusable ones included, so picking a suggestion led straight
+   * here. A credential-level refusal is still loud, on `datastacksFor` above.
+   */
+  void materializationsFor(datastack, { quiet: true }).catch(() => undefined)
   return undefined
 }
 
@@ -210,6 +217,87 @@ const versionInfo = new Map<string, VersionInfo[]>()
 const loading = new Map<string, Promise<number[]>>()
 const asked = new Set<string>()
 
+// ---------------------------------------------------------------------------
+// Which datastacks a token can see
+// ---------------------------------------------------------------------------
+
+/**
+ * Every datastack the current token can see — the listing the Custom CAVE card's Datastack field
+ * completes from, and the one `runListing` narrows to the specced datastacks.
+ *
+ * **One memo for one request**, which is this module's whole reason for existing: `CaveSource`
+ * asked the same URL for its own listing, so the fact was fetched twice per session and cached
+ * twice with different invalidation rules — the arrangement the module header records being
+ * dissolved when the annotation providers became a second consumer.
+ *
+ * Keyed on the credential as well as the server, because the listing is filtered per account: a
+ * list fetched for one is not an answer for the next. That doubles as `asked`'s rule — a
+ * *failing* token keeps its spelling, so a 401 costs one request rather than one per keystroke,
+ * and signing in is what re-asks. `clearLearned` drops it with everything else a server change
+ * invalidates.
+ *
+ * Deliberately **not** `quiet`: this is the credential-level question, so a refusal here really
+ * does mean the token, and that is the one thing the Connections panel must still be told. The
+ * per-datastack calls it leads to are the quiet ones.
+ */
+export function datastacksFor(options: CaveRequestOptions = {}): Promise<string[]> {
+  const server = currentServer()
+  const token = getToken()
+  const current = listing?.token === token ? listing : undefined
+  if (current?.names) return Promise.resolve(current.names)
+  if (current?.pending) return current.pending
+  const entry: Listing = { token }
+  listing = entry
+  entry.pending = listDatastacks(server, options)
+    .then((names) => {
+      // Still the question that was asked? A server switch clears this and a sign-in replaces it,
+      // and neither can cancel a request already in flight.
+      if (listing !== entry) return names
+      entry.names = [...names].sort()
+      // Not a data-changed event, `materializationsFor`'s rule: nothing cached is invalidated and
+      // no run is scheduled. It only tells inference that a field it drew bare can be filled in.
+      reportSourceLearned('cave')
+      return entry.names
+    })
+    .finally(() => {
+      // A rejection is not kept, so the next *awaited* caller retries; the peek does not, since
+      // it re-asks only on a new token.
+      entry.pending = undefined
+    })
+  return entry.pending
+}
+
+/**
+ * The same list, synchronously, if it is known.
+ *
+ * `peekMaterializations`' contract: read from a card that renders on every graph mutation and may
+ * not await, so the first look answers `undefined`, starts the fetch, and `reportSourceLearned`
+ * re-infers when it lands.
+ *
+ * **No token, no request, and that is not an optimisation.** `client.ts` refuses without one *and
+ * fires `reportAuthFailure` as it goes*, so an ungated peek would raise "No CAVE token" at
+ * somebody who has only dragged a node onto the canvas. The endpoint needs the token anyway: with
+ * no `Authorization` header the info service answers `302` into `sticky_auth` and on to Google's
+ * sign-in — measured against `global.daf-apis.com` — which from a browser `fetch` is a CORS
+ * failure rather than a status anything could read or report on.
+ */
+export function peekDatastacks(): string[] | undefined {
+  if (!getToken()) return undefined
+  // Swallowed: a peek has no caller to report to, and a refusal here already travels on its own
+  // channel to the Connections panel. `peekMaterializations`' trade.
+  void datastacksFor().catch(() => undefined)
+  return listing?.names
+}
+
+/** The listing, the credential it was asked for, and the request if one is in flight. */
+interface Listing {
+  token: string | undefined
+  names?: string[]
+  pending?: Promise<string[]>
+}
+
+let listing: Listing | undefined
+
 /**
  * Everything learned from one global server, dropped together.
  *
@@ -224,6 +312,7 @@ function clearLearned(): void {
   versionInfo.clear()
   loading.clear()
   asked.clear()
+  listing = undefined
   l2Sources.clear()
   l2Loading.clear()
   resetL2Cache()
@@ -263,8 +352,9 @@ export function peekL2Cache(datastack: string): boolean | undefined {
   currentServer()
   if (l2Sources.has(datastack)) return l2Sources.get(datastack) !== null
   if (!datastack || l2Loading.has(datastack)) return undefined
-  // Swallowed: a peek has no caller to report to, and a 401 travels on its own channel.
-  void l2SourceFor(datastack).catch(() => undefined)
+  // Swallowed and `quiet`, for `peekMaterializations`' reason exactly: this asks the same
+  // datastack record, from a card that renders on every graph mutation.
+  void l2SourceFor(datastack, { quiet: true }).catch(() => undefined)
   return undefined
 }
 

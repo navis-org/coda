@@ -47,6 +47,7 @@
  */
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { IssueText } from '../IssueText'
 
 import { ConnectionsIcon } from '../Icons'
 
@@ -626,7 +627,13 @@ function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
           </button>
         </header>
 
-        {alert && <p className="sources__alert">{alert.message}</p>}
+        {/* The same treatment as a node's issue band, and for the same sentence: a CAVE refusal
+            that names the terms-of-service form which lifts it can land in either place. */}
+        {alert && (
+          <p className="sources__alert">
+            <IssueText message={alert.message} copyable />
+          </p>
+        )}
 
         <div className="sources__sections" role="tablist" aria-label="Connection kind">
           {SECTIONS.map((entry) => (

@@ -61,6 +61,13 @@ function versionOptions(type: string, params: ParamValues = {}): EnumOption[] {
     : param.options
 }
 
+/** The `datastack` param's completions, resolved against the live registry. */
+function datastackSuggestions(): string[] {
+  const param = (requireNodeDef('dataset.cave').params ?? []).find((p) => p.id === 'datastack')
+  if (!param || param.kind !== 'string') throw new Error('no datastack string param')
+  return param.suggestions?.(ctxFor('dataset.cave')) ?? []
+}
+
 describe('per-dataset nodes', () => {
   it('arrives already pointed at its dataset, with no source to choose', () => {
     const def = requireNodeDef('dataset.mock.opticlobe')
@@ -198,6 +205,62 @@ describe('the superseded generic node', () => {
   })
 })
 
+/**
+ * A dataset node for a datastack this account cannot read.
+ *
+ * The other half of the listing fix. `runListing` tolerates a refusal so that one datastack an
+ * account lacks access to cannot empty the picker — which makes "absent from the listing" the
+ * ordinary shape of "you may not read this", and left the node pointed at it reporting
+ * `no dataset "(none)" on CAVE. Available: <two datasets nobody asked for>`. Reported from a real
+ * session, on `minnie65_public`.
+ */
+describe('a dataset node whose datastack refused', () => {
+  const REASON =
+    'CAVE will not serve minnie65_public until you have accepted MICrONS Data Use — accept ' +
+    'them at https://global.daf-apis.com/sticky_auth/api/v1/tos/3/accept. Your token is fine; ' +
+    'signing in again will not help.'
+
+  /** A CAVE source that lists nothing and knows why, which is the state after one listing. */
+  class RefusingCave extends CaveSource {
+    override listDatasets(): Promise<never[]> {
+      return Promise.resolve([])
+    }
+    override peekDatasets(): never[] {
+      return []
+    }
+    override whyDatasetMissing(ref: string): string | undefined {
+      return ref.startsWith('minnie65_public') ? REASON : undefined
+    }
+  }
+
+  beforeEach(() => {
+    registerSource(new RefusingCave())
+  })
+  afterEach(() => {
+    registerSource(new CaveSource())
+  })
+
+  it('says why on the card, without waiting for a Run', () => {
+    // The node nobody can run, marked before anybody presses Run: `validate` used to stay silent
+    // whenever the listing was empty, because it could not tell "not arrived" from "refused".
+    const def = requireNodeDef('dataset.minnie65')
+    expect(def.validate?.(ctxFor('dataset.minnie65'))).toEqual([REASON])
+  })
+
+  it('fails a run with the reason rather than with somebody else’s datasets', async () => {
+    const scheduler = new Scheduler({ resolveSource: (id) => requireSource(id) })
+    let g = emptyGraph('refused')
+    g = addNode(g, node('dataset.minnie65', {}))
+    await scheduler.run(g, { mode: 'full' })
+
+    const error = scheduler.info('ds').error ?? ''
+    expect(error).toBe(REASON)
+    // The sentence it replaced described the symptom and named nothing actionable.
+    expect(error).not.toContain('(none)')
+    expect(error).not.toContain('Available:')
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Custom CAVE
 // ---------------------------------------------------------------------------
@@ -254,6 +317,75 @@ describe('Custom CAVE', () => {
     expect(
       def.validate?.(ctxFor('dataset.cave', { datastack: 'x', neuronTable: 'n', version: '' })),
     ).toEqual([])
+  })
+
+  it('completes the datastack name from what the token can see, and only once it can', async () => {
+    const listed = ['b_stack', 'a_stack']
+    setToken('test-token')
+    vi.stubGlobal('fetch', (url: string) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () =>
+          Promise.resolve(
+            JSON.stringify(String(url).endsWith('/info/api/v2/datastacks') ? listed : []),
+          ),
+      } as Response),
+    )
+
+    // Invariant 2's state again, and the reason this is a `datalist` and not a `select`: on the
+    // first render of every session there is nothing to offer, and a control that empties reads
+    // as one that has forgotten what the graph says.
+    expect(datastackSuggestions()).toEqual([])
+    await vi.waitFor(() => expect(datastackSuggestions()).toHaveLength(2))
+    expect(datastackSuggestions()).toEqual(['a_stack', 'b_stack'])
+
+    vi.unstubAllGlobals()
+    resetCaveCredentials()
+  })
+
+  it('offers nothing, and asks nothing, before there is a token', async () => {
+    resetCaveCredentials()
+    const fetched = vi.fn()
+    vi.stubGlobal('fetch', fetched)
+    expect(datastackSuggestions()).toEqual([])
+    await Promise.resolve()
+    // The listing endpoint needs the credential: with no `Authorization` header the info service
+    // redirects into a sign-in page, which from a browser is a CORS failure rather than a status.
+    expect(fetched).not.toHaveBeenCalled()
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps a datastack the listing does not mention', async () => {
+    // The node exists for the datastack Coda ships nothing for, and a private one need not be in
+    // any listing at all — so the field takes free text and `evaluate` never checks the name
+    // against the list. A `select` here would be a control that cannot express the node's job.
+    const param = (requireNodeDef('dataset.cave').params ?? []).find(
+      (p) => p.id === 'datastack',
+    )
+    expect(param?.kind).toBe('string')
+
+    const def = requireNodeDef('dataset.cave')
+    const issues = def.validate?.(
+      ctxFor('dataset.cave', { datastack: 'nobodys_stack', neuronTable: 'n' }),
+    )
+    expect(issues).toEqual([])
+  })
+
+  it('puts the neuron table and its id column on the card, not in the inspector', () => {
+    const params = requireNodeDef('dataset.cave').params ?? []
+    const advanced = (id: string) => params.find((p) => p.id === id)?.advanced === true
+
+    /*
+     * `validate` complains "name a table listing this datastack's neurons" until the first of
+     * these is set, and the inspector is closed by default — so as `advanced` these were a card
+     * asking for something that had no field on it. The id column comes with it because the two
+     * are one decision. The connection view stays inspector-only: not naming one is an ordinary
+     * configuration whose only consequence is that Connectivity declines, said on that node.
+     */
+    expect(advanced('neuronTable')).toBe(false)
+    expect(advanced('idColumn')).toBe(false)
+    expect(advanced('connectionView')).toBe(true)
   })
 
   it('resolves an unpinned materialization by fetching, so the first Run works', async () => {

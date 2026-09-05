@@ -428,6 +428,154 @@ window; `ui/panels/caveSignIn.ts` is what is true about a browser. Nothing in th
 reachable from jsdom, so `openWindow` is a seam and the gesture itself was walked in a real
 browser against `global.daf-apis.com`.
 
+### The datastack listing is a fact about the credential, so its peek is gated on one
+
+`/info/api/v2/datastacks` is filtered by permission, which is what makes it worth putting behind
+the Custom CAVE card's Datastack field as completions (`peekDatastacks`, `datastack.ts`) — but
+**it is filtered by `view` with the terms of service deliberately skipped**, and that gap is load
+bearing. Read off `AnnotationFrameworkInfoService`, `datasets/api.py`:
+
+```python
+@auth_required                                     #  ← the listing
+def get(self):
+    return [d["name"] for d in DataStackService.get_all()
+            if user_has_permission("view", d["name"], "datastack", ignore_tos=True)]
+
+@auth_requires_permission("view", table_arg="datastack",
+                          resource_namespace="datastack")   # ← /datastack/full/<name>, no ignore_tos
+```
+
+So a listed datastack is one the account may *view* once it has agreed to that dataset's terms —
+not one it can query today. Everything downstream enforces the terms, and `middle_auth_client`
+answers a `Bearer` request that has not accepted them with **`403 missing_tos`**, carrying
+`tos_id`, `tos_name` and a `tos_form_url` in the body (a browser-shaped request gets a `302` to
+that form instead). A genuine non-member gets `403 missing_permission`. Which is to say: **a
+listing longer than what works is the ordinary state of a fresh account**, and the completions
+have to be read as spelling aids rather than as a list of datastacks that will answer.
+
+Three more things were established against `global.daf-apis.com` rather than assumed, and the
+gate follows from the first two.
+
+- **With a token, even a wrong one, it is a clean `401`** carrying `access-control-allow-origin`
+  and `access-control-expose-headers: WWW-Authenticate`. That is the behaviour the module header
+  already records, and it is why an expired token surfaces as a message rather than as silence.
+- **With no `Authorization` header at all it is a `302`**, into `sticky_auth/api/v1/authorize`
+  and on to Google's sign-in page. From a page that is a cross-origin redirect chain a `fetch`
+  follows and then cannot read — a CORS failure rather than any status, so there is nothing to
+  report and nothing to distinguish it from the host being down.
+- **`client.ts` refuses a tokenless request before it is sent, and fires `reportAuthFailure` as
+  it does.** Which is right for a query somebody pressed Run on, and wrong for a peek: the peek is
+  read from a card that renders on every graph mutation, so an ungated one would put "No CAVE
+  token" in the status bar at somebody who has only dragged a node onto the canvas.
+
+So the peek answers `undefined` with no token and issues nothing. What re-arms it is the
+**credential changing**: the listing is memoised against the token it was asked for, so a signed-in
+account's list is never shown to the next one, a failing token is asked once rather than once per
+keystroke (`asked`'s rule, reached by comparing the credential instead of by a second flag), and
+signing in is what fills a field that was drawn bare — with no listing button anywhere, because
+there is nowhere sensible to put one on a card.
+
+**One memo, two readers.** `CaveSource.runListing` narrows the very same list to the datastacks
+with a spec, so `datastacksFor` in `datastack.ts` is what both go through — one fact, one request,
+one invalidation rule. Written as a second call it was two round trips per session cached two ways
+(the card's re-asked on a token change, the source's only on a server change), which is the
+arrangement this module was extracted to dissolve when the annotation providers became a second
+consumer.
+
+The Connections panel asks the same endpoint for its Test button and deliberately does **not**
+share it: it checks a **candidate** token, one the user may not save, and priming a memo other
+cards read from an unsaved credential is how a card comes to offer a list nothing it does can
+use.
+
+### A refusal about a datastack nobody asked for must not raise a credential alarm
+
+The gap above is not only a fact about a picker. It produced a bug worth keeping the shape of.
+
+**Reported**: sign in with Google, press Test, get green and a list of datastacks. Return to the
+canvas, press Run — the Connections dialog opens demanding a token. Dismiss it and the graph runs
+perfectly. Every Run, forever. The trace:
+
+```
+GET  https://global.daf-apis.com/info/api/v2/datastacks                                    200
+GET  https://global.daf-apis.com/info/api/v2/datastack/full/minnie65_public                403
+GET  https://prod.flywire-daf.com/materialize/…/flywire_fafb_public/metadata               200
+GET  https://cave.fanc-fly.com/materialize/…/brain_and_nerve_cord_public/metadata          200
+```
+
+Three things had to be true at once. `listDatasets` **does not cache** — a fresh listing is the
+only thing that notices a materialization expiring — so every Run re-asks. It asks about **every
+specced datastack**, because it is filling a picker rather than answering a question, and the
+three live on three deployments. And the listing that named them was filtered `ignore_tos=True`,
+so one of them refuses. `listOne` had always caught that refusal into an empty list, which is why
+the run was unaffected — but `client.ts` had already called `reportAuthFailure`, and that opens
+the panel. **The tolerated failure and the global alarm were the same line.**
+
+So the rule: **`quiet` marks a request whose failure the caller has already decided to tolerate**,
+and the test for it is whether the caller can carry on without an answer — not whether the failure
+is likely or the endpoint unimportant. A 401 on something a graph is waiting for still has to
+reach the panel; that is the whole of how a stale token gets replaced.
+
+**The peeks are the other set that passes that test**, and one of them is reachable from the
+feature that provoked all this: the Datastack field offers every datastack the listing names,
+refusable ones included, and picking one makes the Materialization dropdown beside it call
+`peekMaterializations` → `datastackRecord` → the same 403 — so the dialog reopened **from a
+render** rather than from a Run. `peekMaterializations` and `peekL2Cache` are therefore quiet too.
+`datastacksFor` deliberately is **not**: that one is the credential-level question, where a
+refusal really does mean the token.
+
+**Enforced in one place, or it is a promise the module does not keep.** `refuseAuth` builds the
+sentence, reports unless the caller is quiet, and throws — reached from all four refusal sites in
+`client.ts`. Three of them had drifted: `cavePostBinary` and `caveGetBytes` never read the body
+and never honoured `quiet`, so a terms-gated *skeleton* fetch still told somebody their token had
+expired; and the tokenless refusal, spelled three times, ignored `quiet` as well, which is why a
+speculative caller had to gate on `getToken()` itself. That gate stays — a request that must fail
+is not worth sending — but it is now a caller's choice rather than the only way out.
+
+Two things around it that the obvious fix leaves broken:
+
+- **The backstop.** A token the info service accepts and no *deployment* does leaves every spec
+  failing, and the global call cannot see it — different service. So `runListing` reports **once**
+  if nothing at all came back, rather than once per datastack. One refusal among two answers is a
+  fact about one dataset; three refusals and nothing else is a fact about the credential.
+- **The sentence.** `middle_auth_client` answers three distinguishable ways and Coda told
+  everybody the same one. `missing_tos` carries `tos_name` and a `tos_form_url` — the account may
+  view the dataset and has not agreed to its terms — so "your token may have expired" sends
+  somebody to sign in again, which cannot lift a terms gate, and is exactly what the reporter did.
+  `authRefusal` reads the body: the terms case names the form, the `missing_permission` case says
+  it is a permission on the dataset, and only an unrecognised body falls back to the token.
+
+**And a tolerated refusal is still an answer somebody needs.** Silencing the panel left the node
+*pointed at* the refused datastack reporting
+
+```
+MICrONS Minnie65 public (CAVE): no dataset "(none)" on CAVE. Available: flywire_fafb_public:783, …
+```
+
+— which describes the symptom, names nothing that can be acted on, and reads as a bug in Coda.
+Every part of it is a consequence of the tolerance working: the id is `(none)` because no
+materialization came back, and the two datasets listed are the ones that answered, i.e. exactly
+the datasets the reader did not ask about. The reason was three frames away and being thrown out.
+
+So `runListing` **keeps** its failures, and `DataSource.whyDatasetMissing(ref)` is where a node
+asks. Four things about that seam:
+
+- It takes a dataset id **or** a bare family key, because the case that needs it most is the one
+  where no id could be resolved — there is no `datastack:version` to ask about. Each source splits
+  the ref at its own edge.
+- It is **synchronous and network-free**, because `validate` reads it: the node nobody can run is
+  now marked *before* anybody presses Run. `validate`'s old silence on an empty listing could not
+  tell "has not arrived" from "was refused"; those are different states and only the first is the
+  Connections panel's story.
+- The failures are **replaced wholesale each listing**, so a datastack that starts answering stops
+  being explained, and dropped in `reset` with everything else the old server taught us.
+- `undefined` means **nothing is known**, which is not "it is fine" — a listing that has not run
+  answers it too, so the generic sentence stays as the fallback rather than being replaced.
+
+`CaveSource` prefixes the datastack onto a message that does not already name it. `missing_tos`
+and `missing_permission` name the dataset themselves; the token fallback does not, and "CAVE
+rejected the token (403)" on a card is a complaint about a credential with nothing tying it to the
+one node in the graph that is broken.
+
 ### neuPrint is queried; CAVE is downloaded
 
 The single decision the whole module follows from. neuPrint runs Cypher against a shared

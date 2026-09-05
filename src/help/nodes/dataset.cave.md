@@ -14,7 +14,7 @@ Annotations come from whatever you wire to the **Annotations** socket, not from 
 
 ### Parameters
 
-- **Datastack**: name as the CAVE info service lists it (e.g., `flywire_fafb_public`)
+- **Datastack**: name as the CAVE info service lists it (e.g., `flywire_fafb_public`). Once a CAVE token is saved in **Connections**, this field completes from the datastacks that token can see — the listing needs a token, so signing in is what fills it. It shows what your account may *view*, which can be more than it may query — CAVE checks each dataset’s terms of service separately. It stays a text field either way: a datastack that isn't listed (a private one, or one on a deployment Coda hasn't asked) can still be typed in.
 - **Materialization**: which version to query; empty tracks the newest the server reports
 - **Neuron table** (optional): name a CAVE table with one row per neuron (e.g., `proofread_neurons`); leave empty if the datastack has none and you're wiring annotations instead
 - **ID column** (optional): which column holds root IDs (usually `pt_root_id`)
@@ -24,5 +24,5 @@ Annotations come from whatever you wire to the **Annotations** socket, not from 
 > Some datatsacks provide a "view" into the raw synapse table that aggregates synapses into weighted connections on the server side, which is much more efficient. Coda will use that view if provided and fall back to querying the synapse table (which can be slow) if not. If you know the view name, you can specify it here.
 
 ```coda-params
-dataset.cave: datastack, version
+dataset.cave: datastack, version, neuronTable, idColumn
 ```

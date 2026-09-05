@@ -260,6 +260,41 @@ none.
 **+3.08 kB raw / +1.02 kB gzipped on the main chunk**, measured against a build of `HEAD` in a
 clean worktree.
 
+**`Custom CAVE`'s Datastack completes rather than picks**, which is the same listing pressed into
+a different control, and the difference from `Custom CATMAID`'s Project above is worth stating
+because the obvious move is to make it a third dropdown. A CATMAID project id is positional and a
+materialization is a number CAVE mints, so for both of those the server's list is the whole option
+space. A datastack name is not: this node exists for the datastack Coda ships no spec for, a
+private one need not appear in any listing at all, and `evaluate` deliberately does not check the
+name it was given against one. So the field stays free text with a `<datalist>` on it — a spelling
+aid over a control that still takes anything — which is also what makes its three empty states
+harmless rather than something to word around: no token, a login token whose seven days are up,
+and the first render of every session, all of which a `select` would draw as a card that had
+forgotten what the graph says. The listing needs the credential, and answers what the account may
+*view* rather than what it can query today, so the peek behind it is gated on having one; see
+[backends.md](backends.md#the-datastack-listing-is-a-fact-about-the-credential-so-its-peek-is-gated-on-one).
+It is **not** filtered against `DATASTACK_SPECS` — a shipped datastack works from this card, the
+spec simply winning over the settings on it, and `validate` says exactly that in words, where
+dropping those names would leave the field disagreeing with the count the Connections panel prints
+from the very same request.
+
+The mechanism is `StringParam.suggestions`, which is a general control rather than this node's:
+`EnumParam.options`' contract exactly — synchronous, network-free, asked on every render — drawn
+by `SuggestField`, which pairs a `TextField` with a `datalist` of its own. `TextField.list` stays
+what it was, the *caller's* list, because `Edit Table` draws several column fields over one set of
+options and a list per field multiplies a wide pivot's few thousand columns by the rows on the
+card.
+
+**The neuron table and its id column are on that card; the connection view is not.** The line
+between them is `validate`'s. This node refuses to say anything useful — "name a table listing
+this datastack's neurons, or wire an Annotations source" — until the first of them is set, and the
+inspector is closed by default, so as `advanced` params these left the card asking for something
+that had no field on it. The id column comes with it because the two are one decision, which the
+node's own guide already spells as one sentence, and because a card asking for half a pair reads
+as finished when it is not. Nothing similar is true of the connection view: not naming one is an
+ordinary configuration whose whole consequence is that Connectivity declines, said on the node
+that declines.
+
 **`DatasetFamily.starter` decides where somebody *begins*, and nothing else.** Absent means yes;
 `starter: false` on Optic Lobe, FIB-19 and Mushroom Body keeps them out of the New menu and off
 the start page's dataset rail. The node is registered either way, `Add ▸ Dataset` lists all of

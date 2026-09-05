@@ -422,6 +422,43 @@ suite checks is which element is handed over and how the button reads the answer
 transition itself, and the installed window, have not been driven by anyone here. Same standing
 as the WebGL viewers.
 
+## A message somebody has to act on
+
+Three surfaces show the same sentence — a node card's issue band, the inspector's ranked list,
+the Connections dialog's alert — and until a CAVE refusal started naming the *page that lifts
+it*, none of them had to be more than text. `middle_auth` answers a 403 with a `tos_form_url`, so
+the sentence now carries a URL, and on a card that URL could be neither clicked nor selected: a
+remedy the reader had to retype into a browser by eye. `IssueText` is the one component all three
+render through; `linkify.ts` is its headless half.
+
+Four things in it, and only the first is cosmetic.
+
+- **The visible text is the href.** Not a style — a safety property. These sentences are not
+  always ours: `authRefusal` reads that URL out of whatever deployment a Custom node was pointed
+  at, so a link here can be a remote server's choice. A reader who sees the address they are
+  about to follow cannot be sent somewhere by a mismatched label, which is the only thing an
+  anchor can lie about. Same reasoning as `parseMarkdown`'s extended kinds being opt-in.
+- **Two schemes, `http` and `https`, and everything else stays text.** A lab's own CAVE or
+  CATMAID is routinely plain http, so requiring TLS would drop exactly the deployments least
+  likely to be documented anywhere else — while `javascript:`, `data:` and `file:` are how a
+  server would otherwise get a scheme of its choosing into an `href` by writing one into an error
+  body.
+- **The trailing full stop is not part of the URL.** `…/tos/3/accept. Your token is fine` — a
+  greedy match hands the reader `/accept.`, a 404 on the one page that would have fixed their
+  problem, which reads as Coda naming the wrong URL. A closing bracket is dropped only when
+  nothing opened it, so a URL that really contains one survives.
+- **React Flow puts `user-select: none` on every node**, which is why the message could not be
+  copied at all — right for a card you drag, wrong for the one part of it somebody wants to send
+  to a colleague. So the text carries `user-select: text` *and* `nodrag`: without the second, the
+  drag that starts a selection moves the node instead. `.coda-note__editor` already carried the
+  same exception for the same reason. The anchor stops its own `pointerdown` too, or the click
+  reaches the canvas and starts a drag from under the pointer.
+
+The **copy button is the inspector's and the dialog's, not the card's**: selecting 10px text
+inside a draggable card is a fiddly way to do something that is one click everywhere else, and the
+card has no width to spare — the inspector holds the same sentence, ranked identically by
+`nodeIssues`, one click away.
+
 ## Run indicator
 
 A stroked rounded rect traced round the node perimeter (`ui/nodes/NodeRunRing.tsx`), replacing

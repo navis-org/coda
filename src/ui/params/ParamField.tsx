@@ -7,7 +7,7 @@
  * without it these would be free-text fields.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 
 import type { InferContext, ParamDef, ParamValue } from '../../core/node'
 import { availableColumns, columnsKnown } from '../../core/node'
@@ -74,7 +74,7 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
 
     case 'string':
       return (
-        <TextField
+        <SuggestField
           label={label}
           value={typeof value === 'string' ? value : param.default}
           placeholder={param.placeholder}
@@ -84,6 +84,7 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
             param.placeholder?.includes('regex') ||
             param.id.includes('Pattern')
           }
+          suggestions={param.suggestions?.(ctx) ?? []}
           onChange={onChange}
         />
       )
@@ -469,6 +470,51 @@ export function TextField({
         }
       }}
     />
+  )
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * A `TextField` that carries its own `<datalist>` — the widget behind `StringParam.suggestions`.
+ *
+ * `TextField.list` is deliberately the *caller's* list, for the reason recorded on it: `Edit
+ * Table` draws several column fields over one set of options, and rendering the `<option>`
+ * elements per field multiplies a wide pivot's few thousand columns by the number of rows on the
+ * card. A declared `suggestions` is the other shape entirely — one field, one list — so this
+ * pairs the two rather than teaching `TextField` a second way to be given the same thing.
+ *
+ * The `id` comes from `useId`, which is what keeps two cards of the same node type from both
+ * pointing at the first one's list: a `datalist` is addressed by document-unique id, and a param
+ * id is only unique within a node.
+ *
+ * A `datalist` is `display: none` in every UA stylesheet, so it is not a grid item and the field
+ * stays in the single cell its row lays out for it.
+ */
+function SuggestField({ suggestions, ...text }: TextFieldProps & { suggestions: string[] }) {
+  const id = useId()
+  /*
+   * **One element type either way**, which is why the empty case returns here rather than being a
+   * ternary at the call site. `peekDatastacks` answers `undefined` on the first render and the
+   * list a beat later, so a call site that swapped `TextField` for `SuggestField` changed the
+   * element *type* mid-session — React tears the input down and rebuilds it, taking the caret, the
+   * focus and `TextField`'s pending debounced commit with it. The only real difference between the
+   * two renders is one attribute.
+   *
+   * Empty is also not a shorter list, it is *no list*: a `datalist` with no options draws a field
+   * with a popup arrow that opens onto nothing, which claims the set is empty where the ordinary
+   * case is that it has not arrived.
+   */
+  if (suggestions.length === 0) return <TextField {...text} />
+  return (
+    <>
+      <TextField {...text} list={id} />
+      <datalist id={id}>
+        {suggestions.map((value) => (
+          <option key={value} value={value} />
+        ))}
+      </datalist>
+    </>
   )
 }
 

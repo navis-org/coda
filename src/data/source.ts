@@ -720,6 +720,28 @@ export interface DataSource {
   /** Cached, synchronous. Undefined until `listDatasets` has resolved at least once. */
   peekDatasets(): DatasetInfo[] | undefined
   peekDataset(datasetId: string): DatasetInfo | undefined
+  /**
+   * Why a dataset that ought to be in the listing is not — where the listing found out.
+   *
+   * **A listing that drops what it could not read knows something no caller can reconstruct.**
+   * `CaveSource` asks every specced datastack for its materializations and tolerates a refusal,
+   * which is right: one datastack an account cannot read must not empty the picker. But the node
+   * pointed at *that* datastack then failed with `no dataset "(none)" on CAVE. Available: …` and
+   * a list of somebody else's datasets — a message that describes the symptom, names nothing that
+   * could be acted on, and reads as a bug in Coda. The reason was three frames away and thrown
+   * out: a `403` naming the dataset, the terms of service that gate it and the form that lifts
+   * them.
+   *
+   * Takes a dataset id **or** the family key it would be built from (`minnie65_public`), because
+   * the case that needs this most is the one where the id could not be resolved at all — no
+   * materialization is known, so there is no `datastack:version` to ask about. Each source splits
+   * the ref at its own edge, `ids.ts`' rule one level up.
+   *
+   * Synchronous and network-free: `validate` reads it on every graph mutation. `undefined` is the
+   * ordinary answer and means *nothing is known*, which is not the same as "it is fine" — a
+   * listing that has not run yet answers it too.
+   */
+  whyDatasetMissing?(ref: string): string | undefined
 
   findNeurons(req: FindNeuronsRequest): Promise<TableValue>
   /**

@@ -2689,6 +2689,46 @@ select.field {
 }
 
 /* --------------------------------------------------------------------------
+ * A message somebody has to act on
+ *
+ * Shared by the inspector's list, a node card's issue band and the Connections alert — see
+ * `IssueText`. Two things, and the first is the one that is not obvious: **React Flow puts
+ * `user-select: none` on every node**, so an error message on a card could not be selected,
+ * let alone copied, and a CAVE refusal that names the terms-of-service form which lifts it was
+ * a remedy somebody had to retype by eye. `.coda-note__editor` already carries the same
+ * exception for the same reason.
+ * -------------------------------------------------------------------------- */
+
+.issue__text {
+  user-select: text;
+  cursor: text;
+  /* A URL is one long unbreakable token; without this it widens the inspector's whole column
+     and pushes a 232px card's band past its own edge. */
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.issue__text a {
+  color: inherit;
+  /* Underlined rather than tinted: the issue band is already a status colour, and a second
+     hue inside it competes with the severity it is drawn in. */
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.issue__text a:hover {
+  text-decoration-thickness: 2px;
+}
+.issue__copy {
+  flex: none;
+  align-self: flex-start;
+  padding: 1px 6px;
+  font-size: 10px;
+  /* Its own line height, or the button sets the row's and the glyph stops sitting on the first
+     line of a wrapped message. */
+  line-height: 1.4;
+}
+
+/* --------------------------------------------------------------------------
  * Viewers
  * -------------------------------------------------------------------------- */
 
@@ -4560,6 +4600,9 @@ a.viewer-actions__btn {
 /* The reason the panel opened on its own — stated before the field that fixes it. */
 .sources__alert {
   flex: none;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
   margin: 0;
   padding: 10px 14px;
   font-size: 11px;
