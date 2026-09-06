@@ -121,15 +121,26 @@ export interface DemoPlan extends DemoPlanRef {
 export const demoPlan = keyed((type: string): DemoPlan | undefined => search(type)?.plan)
 
 /**
- * Build the workflow a plan names, and put the node in it. What a `demo://` link opens.
+ * Build the workflow a plan names, and put the node in it. What a `demo://` link opens, and what
+ * the in-app `?` overlay's "Open in a workflow" builds.
  *
- * Deterministic and cheap: one `buildWorkflow`, and one wiring pass. With no plan — a link
- * somebody wrote by hand — it searches, but over the synthetic dataset alone, which is the one
- * that answers every question without a request, and it keeps the graph the search already
- * built rather than replaying its own answer.
+ * Deterministic and cheap with a plan: one `buildWorkflow`, and one wiring pass. Without one —
+ * a link somebody typed, or the overlay, which has no guide build behind it — it searches, and
+ * the two arguments to that search are what keep the click free of requests: **every dataset may
+ * be built, only the synthetic one may be scored.** Building a workflow costs nothing, so the
+ * containment half reaches the same answer the guide did for every node a wizard workflow
+ * already holds — `out.neuroglancer` on MaleCNS included. Scoring runs `inferGraph`, which peeks
+ * at a dataset node's source, so the append half stays on the mock connectome.
+ *
+ * What that costs is the handful of nodes that are *about* a backend and have to be appended —
+ * Raw Cypher, the CAVE table nodes — where the guide's link opens a CAVE or neuPrint workflow
+ * and this opens a synthetic one carrying the node's own "connect a neuPrint dataset" warning.
+ * Three of the 64 documented nodes, against a `?` button that would otherwise fire listings at
+ * three connectomes on being pressed.
  */
 export function demoGraph(type: string, plan?: DemoPlanRef): CodaGraph | undefined {
-  const graph = (plan && replay(type, plan)) ?? search(type, [DEMO_DATASET])?.graph
+  const graph =
+    (plan && replay(type, plan)) ?? search(type, demoDatasets(), [DEMO_DATASET])?.graph
   return graph && withSwapHint(graph)
 }
 
@@ -163,7 +174,10 @@ function replay(type: string, plan: DemoPlanRef): CodaGraph | undefined {
  */
 function search(
   type: string,
-  datasets = demoDatasets(),
+  /** Datasets whose workflows may be *built*. Free: `buildWorkflow` asks nothing of a server. */
+  buildable = demoDatasets(),
+  /** Datasets whose candidates may be *scored*. `inferGraph` peeks, so a caller may narrow it. */
+  scorable = buildable,
 ): { plan: DemoPlan; graph: CodaGraph } | undefined {
   const def = getNodeDef(type)
   if (!def) return undefined
@@ -175,12 +189,12 @@ function search(
    * opens on its dataset.
    */
   const own = familyForNodeType(type)?.key
-  const held = contains(type, own ? [own, ...datasets] : datasets)
+  const held = contains(type, own ? [own, ...buildable] : buildable)
   if (held) {
     const graph = workflow(held)
     if (graph) return { plan: held, graph }
   }
-  return bestAppend(def, datasets)
+  return bestAppend(def, scorable)
 }
 
 /**

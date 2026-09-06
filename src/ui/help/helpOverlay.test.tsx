@@ -15,7 +15,15 @@
  * where a card ends up on screen would be asserted against nothing.
  */
 
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
@@ -200,3 +208,78 @@ async function loadSource(type: string): Promise<string> {
   const { loadHelpDoc } = await import('../../help/registry')
   return (await loadHelpDoc(type))!.source
 }
+
+/**
+ * "Open in a workflow", the overlay's half of the button the node guide's entries carry.
+ *
+ * What is worth asserting is the *end* of that path rather than the builder, which
+ * `wizard/demo.test.ts` owns across all 102 types: a document of its own opens, it holds the
+ * node the reader was reading about, and the modal gets out of the way. The three assertions
+ * correspond to the three things that would each be a silent failure — a workflow built into the
+ * canvas the reader already had, a workflow about the wrong node, and a modal left over it.
+ */
+describe('opening a workflow from the overlay', () => {
+  it('opens a document of its own holding the node, and closes the overlay', async () => {
+    // Work on the canvas first, which is the case the button is *for*: `openDocument` reuses a
+    // blank, historyless tab (`graphStore`, so a fresh visit strands no empty one), and a test
+    // that opened onto an untouched canvas would be asserting the reuse rather than the split.
+    act(() => {
+      useGraphStore.getState().addNode('core.sort', { x: 0, y: 0 })
+    })
+    const before = useGraphStore.getState().activeTabId
+    const dialog = await openHelp('core.filterTable')
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Open in a workflow' }))
+
+    await waitFor(() => {
+      expect(
+        useGraphStore.getState().graph.nodes.some((n) => n.type === 'core.filterTable'),
+      ).toBe(true)
+    })
+    // A whole pipeline, in a tab of its own — the reader's own canvas is still there behind it.
+    expect(useGraphStore.getState().graph.nodes.length).toBeGreaterThan(2)
+    expect(useGraphStore.getState().activeTabId).not.toBe(before)
+    expect(useGraphStore.getState().tabs.length).toBeGreaterThan(1)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /help/i })).toBeNull())
+  })
+
+  /*
+   * A cross-reference moves the button with the reader. The header takes the *trail's* tail, not
+   * the type the store was opened on, so following NBLAST → Linkage and pressing the button has
+   * to open a Linkage workflow — the failure otherwise is silent and reads as the builder
+   * choosing the wrong node.
+   */
+  it('follows the reader across a cross-reference', async () => {
+    act(() => {
+      useGraphStore.getState().addNode('core.sort', { x: 0, y: 0 })
+    })
+    const dialog = await openHelp('neuron.nblast')
+    act(() => {
+      within(dialog)
+        .getByRole('button', { name: /Linkage/i })
+        .click()
+    })
+    await waitFor(() => expect(screen.getByText(/What's a linkage/)).toBeTruthy())
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Open in a workflow' }))
+    await waitFor(() => {
+      const types = useGraphStore.getState().graph.nodes.map((n) => n.type)
+      expect(types).toContain('cluster.linkage')
+      expect(types).not.toContain('neuron.nblast')
+    })
+  })
+
+  /* Every documented node has one, which is the claim that makes it worth putting in the header
+     rather than on the few nodes somebody remembered to add it to. */
+  it('is on every documented node', async () => {
+    for (const type of helpTypes()) {
+      cleanup()
+      act(() => useGraphStore.getState().openHelp(undefined))
+      const dialog = await openHelp(type)
+      expect(
+        within(dialog).queryByRole('button', { name: 'Open in a workflow' }),
+        type,
+      ).not.toBeNull()
+    }
+  })
+})

@@ -218,7 +218,11 @@ Area-specific — the rule, then the doc that holds why:
   **wiring is scored, not reasoned about** — half these ports are `any`, which says nothing about
   what the node wants, so a first-compatible rule wired Mirror to a neuron table and Download to a
   Dataset; the viewer must be chosen from the node's *inferred* output, since every passthrough
-  declares `any`. Warnings are a ceiling in `demo.test.ts`, errors are zero. A demo also starts
+  declares `any`. **The in-app `?` overlay carries the same button**, building through `openDocument` rather than a
+  link and taking the *trail's* tail so a cross-reference moves it with the reader — and it searches
+  with **every dataset buildable, only the synthetic one scorable**, since `buildWorkflow` asks
+  nothing of a server and `inferGraph` peeks. Warnings are a ceiling in `demo.test.ts`, errors are
+  zero. A demo also starts
   with a **structured search** rather than the wizard's first answer, which is an Explore card
   opening with nothing ticked — auto-run then painted a red "No neuronIds" card as the first thing
   on screen — and the synthetic dataset carries a dismissable **hint** saying the card is

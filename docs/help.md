@@ -48,6 +48,36 @@ node's `guide` and move the detail into the file — NBLAST's was 830 characters
 other node's document *in the same overlay*, with a Back button. The target must itself have a
 document — a cross-reference that opens an empty page is a broken link, and the test says so.
 
+## "Open in a workflow"
+
+The header carries the same button the node guide's entries do, and it is the one thing in that
+header that *does* something rather than being a way out of it — so it is a bordered `.btn` where
+Back, Node guide and ✕ are all `.btn--ghost`. It builds a workflow with this node in it through
+`src/wizard/demo.ts` and hands it to `openDocument`, so the graph opens in a document of its own
+beside whatever the reader already had, and the overlay closes on the way out: the thing it was
+describing is now on the canvas, and a modal over it would have to be dismissed first.
+
+**It takes the trail's tail, not the type the store was opened on.** Follow a cross-reference from
+NBLAST to Linkage and the button opens a *Linkage* workflow. That is one line — `type={current}` —
+and the failure if it were `helpType` would be silent.
+
+**Built without a plan, and that is a real difference from the link.** The guide's version carries
+three wizard answers and a wiring rank, because the guide *searched* at build time; the app has no
+build behind it, so `demoGraph` searches on the click. The two arguments to that search are what
+keep it free of requests — every dataset may be **built**, only the synthetic one may be
+**scored** — because building a workflow asks nothing of a server while scoring one runs
+`inferGraph`, which peeks at a dataset node's source. So the containment half reaches the guide's
+own answer for every node a wizard workflow already holds, `out.neuroglancer` on MaleCNS included.
+
+What it costs is the handful of nodes that are *about* a backend and have to be appended — Raw
+Cypher, CAVE Table, Update Root IDs — where the guide's link opens a CAVE or neuPrint workflow and
+this opens a synthetic one carrying the node's own "connect a neuPrint dataset" warning. Three of
+the 64 documented nodes, against a `?` overlay that would otherwise fire listings at three
+connectomes on being opened. See [pages.md](pages.md) for the measurement that rule came from.
+
+The builder arrives through a dynamic `import()`, the same chunk `useShareLink` loads, so a
+session that never presses the button never pays for the wizard and the inference pass.
+
 ## The format
 
 `src/ui/markdown.ts` gained four block kinds, and they are **off by default**. That is a safety

@@ -109,6 +109,7 @@ function HelpHeader({
           {def?.cost === 'expensive' && ' · runs on demand'}
         </span>
       </div>
+      <OpenInWorkflow type={type} onOpened={onClose} />
       <a
         className="btn btn--ghost"
         href={NODE_GUIDE_URL}
@@ -127,6 +128,76 @@ function HelpHeader({
         ✕
       </button>
     </div>
+  )
+}
+
+/**
+ * "Open in a workflow": the same button the node guide's entries carry, doing the same thing one
+ * step more directly.
+ *
+ * The guide is a static page, so its version is a `#!demo://` link that reloads the app and lets
+ * `useShareLink` build the graph. In here there is nothing to navigate to — the builder is a
+ * dynamic import away and `openDocument` is the same call that link ends in, so the workflow
+ * opens in a document of its own beside whatever the reader already had.
+ *
+ * **Built without a plan**, unlike the link's. A plan is a fact about a guide *build*, and the
+ * app has no build behind it; `demoGraph` searches instead, over every dataset it may build and
+ * the synthetic one alone for anything it must score. See `wizard/demo.ts` for what that costs.
+ *
+ * The overlay closes on the way, because the thing it was describing is now on the canvas — and
+ * a modal left open over it would have to be dismissed before the reader could look.
+ */
+function OpenInWorkflow({ type, onOpened }: { type: string; onOpened: () => void }) {
+  const openDocument = useGraphStore((s) => s.openDocument)
+  const [busy, setBusy] = useState(false)
+
+  const open = useCallback(() => {
+    setBusy(true)
+    void (async () => {
+      /*
+       * Dynamic, on the pattern `useShareLink` and `ui/export.ts` follow: the builder drags in
+       * the wizard and the inference pass for a button most sessions never press. It is the same
+       * chunk the share link loads, so a reader who arrives by link pays for it once.
+       */
+      const { demoGraph } = await import('../../wizard/demo')
+      const graph = demoGraph(type)
+      setBusy(false)
+      if (!graph) return
+      openDocument(graph)
+      onOpened()
+    })()
+  }, [type, openDocument, onOpened])
+
+  /*
+   * A bordered `.btn` where everything else in this header is a `.btn--ghost`. Back, Node guide
+   * and ✕ are chrome — ways out of the overlay — and this is the one thing in it that *does*
+   * something, so it is the one thing that looks like a button. The arrow is the node guide's,
+   * on the same button, which is the whole of what makes the two read as one feature.
+   */
+  return (
+    <button
+      type="button"
+      className="btn"
+      onClick={open}
+      disabled={busy}
+      title="Build a workflow with this node in it, in a document of its own"
+    >
+      Open in a workflow
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <line x1="4" y1="12" x2="19" y2="12" />
+        <polyline points="13,6 19,12 13,18" />
+      </svg>
+    </button>
   )
 }
 
