@@ -129,6 +129,10 @@ export function portIndices(
  * `edges` is filtered to those with both ends in `nodes`, so a caller arranging a selection
  * does not have to do it: an edge leaving the set has no port to attach to and ELK rejects the
  * whole graph over it.
+ *
+ * `aspect` joins `measured` and `ports` as a third thing only the canvas can answer — the shape
+ * of the pane the arrangement will be framed into, width ÷ height. It is read solely through
+ * `elkOptionsFor`, which withholds it unless the layout options asked for it.
  */
 export function toElkGraph(
   nodes: readonly LayoutNode[],
@@ -136,6 +140,7 @@ export function toElkGraph(
   options: LayoutOptions,
   measured?: MeasuredSizes,
   ports?: MeasuredPorts,
+  aspect?: number,
 ): ElkNode {
   const included = new Set(nodes.map((n) => n.id))
   /*
@@ -199,7 +204,7 @@ export function toElkGraph(
 
   return {
     id: 'root',
-    layoutOptions: elkOptionsFor(options),
+    layoutOptions: elkOptionsFor(options, aspect),
     children,
     edges: edges
       .filter((edge) => included.has(edge.source) && included.has(edge.target))

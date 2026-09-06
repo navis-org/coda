@@ -1,9 +1,14 @@
 /**
  * What the layout bubble can change, and how it reaches ELK.
  *
- * Six controls, deliberately. ELK exposes several hundred options and layered alone has a few
+ * Seven controls, deliberately. ELK exposes several hundred options and layered alone has a few
  * dozen; the ones here are the ones whose effect is visible on a connectome pipeline at a
  * glance. Everything else keeps ELK's own default, which is what a default is for.
+ *
+ * Six of the seven are answered from the graph alone. The seventh, `useScreenAspect`, is the one
+ * that needs a number this module cannot see — `src/layout` is headless and the canvas is where
+ * a viewport is — so `elkOptionsFor` takes the measurement as an argument, the same way
+ * `toElkGraph` takes card sizes.
  *
  * Kept apart from the React that draws it so the mapping can be asserted headlessly — a wrong
  * option *key* is silently ignored by ELK rather than rejected, so "does this string reach the
@@ -72,6 +77,16 @@ export interface LayoutOptions {
   alignment: LayoutAlignment
   /** Lay disconnected pieces out separately and pack them, rather than in one shared field. */
   packComponents: boolean
+  /**
+   * Pack those pieces towards the shape of the canvas, rather than towards ELK's fixed 1.6.
+   *
+   * Off by default, and the default is the half worth arguing with. Every other option here is
+   * answered from the graph, so two people arranging one `.coda.json` get one arrangement; this
+   * one makes the result depend on the window it was arranged in, which is exactly what somebody
+   * on an ultrawide wants and exactly what makes a shared file land differently on the next
+   * machine. So it is asked for rather than assumed.
+   */
+  useScreenAspect: boolean
 }
 
 export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
@@ -83,10 +98,62 @@ export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
   layerSpacing: 96,
   alignment: 'BRANDES_KOEPF',
   packComponents: true,
+  useScreenAspect: false,
 }
 
 /** Bounds for the two spacing sliders. Also what `coerceLayoutOptions` clamps to. */
 export const SPACING_RANGE = { min: 16, max: 240 } as const
+
+/**
+ * What a measured aspect is clamped to before it reaches ELK. A guard, not a taste range.
+ *
+ * ELK's packer overshoots its target at the extremes rather than refusing them: asked for 8 on
+ * twelve two-card components it returns a strip of actual ratio 21 under layered and 48 under
+ * mrtree. So an unmeasurable moment that still produced a number — a pane mid-transition, a
+ * canvas one pixel tall — would arrange the graph into a line rather than degrade. These bounds
+ * bracket every real display with room to spare: 0.25 is past portrait, 4 is past 32:9.
+ */
+export const ASPECT_RANGE = { min: 0.25, max: 4 } as const
+
+/**
+ * Whether `elk.aspectRatio` reaches anything at all under these options.
+ *
+ * Exported because two places have to agree and drifting apart is silent in both directions:
+ * `elkOptionsFor` decides whether to send the key, `LayoutControls` decides whether the checkbox
+ * is live. A checkbox that is on while the option does nothing is the failure the `routed` edge
+ * routing above was deleted for — a control you have to press something else first to see.
+ *
+ * Measured on twelve two-card components at 232×120, bundled elkjs, sweeping the ratio 0.5 … 8:
+ *
+ * - **It is a component-packing option and nothing else.** With `separateConnectedComponents`
+ *   off the bounds are 572×1980 at every ratio; with it on but only *one* component, 3852×132 at
+ *   every ratio. That second case is the ordinary Coda graph — a single wired chain — which is
+ *   why this option changes nothing on most canvases and says so on the card.
+ * - **`radial` ignores it**, at 621×192 throughout. `layered`, `force` and `mrtree` all move.
+ *
+ * ELK's own default is **1.6**, confirmed by 1.6 and *unset* returning identical bounds.
+ */
+export function aspectRatioApplies(options: LayoutOptions): boolean {
+  return options.packComponents && options.algorithm !== 'radial'
+}
+
+/**
+ * `elk.aspectRatio`, when the options ask for it and the canvas had one to give.
+ *
+ * Withheld rather than sent-and-ignored wherever `aspectRatioApplies` says no, so the emitted
+ * record answers "did this preference reach the algorithm" honestly — the same care `toElkGraph`
+ * takes not to hand ELK port coordinates under a direction that has just freed the ports.
+ *
+ * An unmeasurable canvas is the same case as the preference being off: no key, ELK's own 1.6.
+ * Rounded to three places because the raw quotient is a sixteen-digit float that would make two
+ * option records differ over a pixel of window.
+ */
+function aspectOption(options: LayoutOptions, aspect: number | undefined): ElkOptions {
+  if (!options.useScreenAspect || !aspectRatioApplies(options)) return {}
+  if (aspect === undefined || !Number.isFinite(aspect) || aspect <= 0) return {}
+  const clamped = Math.min(ASPECT_RANGE.max, Math.max(ASPECT_RANGE.min, aspect))
+  return { 'elk.aspectRatio': String(Math.round(clamped * 1000) / 1000) }
+}
 
 /**
  * Layout options as ELK wants them, for the *root* graph.
@@ -96,8 +163,14 @@ export const SPACING_RANGE = { min: 16, max: 240 } as const
  * is a property *of a node*. Setting the latter on the root applies it to the root and to
  * nothing that matters, and the symptom is a layout that ignores every port — which looks
  * like a plausible layout, just a worse one.
+ *
+ * `aspect` is the canvas's width ÷ height, and it is the one input here that does not come from
+ * the graph — hence an argument rather than a field on `LayoutOptions`. Passing it is harmless
+ * while `useScreenAspect` is off, and omitting it is harmless while it is on; either way ELK
+ * keeps its own 1.6.
  */
-export function elkOptionsFor(options: LayoutOptions): ElkOptions {
+export function elkOptionsFor(options: LayoutOptions, aspect?: number): ElkOptions {
+  const shape = aspectOption(options, aspect)
   if (options.algorithm !== 'layered') {
     return {
       'elk.algorithm': options.algorithm,
@@ -108,6 +181,7 @@ export function elkOptionsFor(options: LayoutOptions): ElkOptions {
       'elk.spacing.nodeNode': String(Math.max(options.nodeSpacing, options.layerSpacing)),
       'elk.separateConnectedComponents': String(options.packComponents),
       'elk.spacing.componentComponent': String(Math.round(options.nodeSpacing * 1.5)),
+      ...shape,
     }
   }
   return {
@@ -118,6 +192,7 @@ export function elkOptionsFor(options: LayoutOptions): ElkOptions {
     'elk.spacing.componentComponent': String(Math.round(options.nodeSpacing * 1.5)),
     'elk.layered.spacing.nodeNodeBetweenLayers': String(options.layerSpacing),
     'elk.layered.nodePlacement.strategy': options.alignment,
+    ...shape,
   }
 }
 
@@ -189,5 +264,9 @@ export function coerceLayoutOptions(raw: unknown): LayoutOptions {
     layerSpacing: spacing(held.layerSpacing, DEFAULT_LAYOUT_OPTIONS.layerSpacing),
     alignment: oneOf(held.alignment, LAYOUT_ALIGNMENTS, DEFAULT_LAYOUT_OPTIONS.alignment),
     packComponents: held.packComponents !== false,
+    // Absence reads as off, which is also the default — so a preference written before this
+    // control existed is not read as somebody having asked for a viewport-shaped arrangement.
+    // The inverse of the line above it, and for the same reason: each matches its own default.
+    useScreenAspect: held.useScreenAspect === true,
   }
 }

@@ -35,7 +35,13 @@ import {
 } from './elkGraph'
 import { runLayout } from './engine'
 import { NETWORK_NODE_SIZE, layoutNetwork } from './network'
-import { DEFAULT_LAYOUT_OPTIONS, coerceLayoutOptions, elkOptionsFor } from './options'
+import {
+  ASPECT_RANGE,
+  DEFAULT_LAYOUT_OPTIONS,
+  aspectRatioApplies,
+  coerceLayoutOptions,
+  elkOptionsFor,
+} from './options'
 import { DODGE_GAP, anchorTo, boundsOf, dodge, noteRects, structureKey } from './place'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 
@@ -85,6 +91,35 @@ function chain(): CodaGraph {
     targetHandle: 'in',
   })
   return graph
+}
+
+/**
+ * `n` unwired Filter → Table pairs, which is the only shape `elk.aspectRatio` can move.
+ *
+ * A single connected chain is laid out identically at every ratio — the option is a target for
+ * the *component packer*, and `aspectRatioApplies` records the measurement. So the fixture for it
+ * cannot be `chain()`.
+ */
+function components(n: number): CodaGraph {
+  let graph = emptyGraph('components')
+  for (let i = 0; i < n; i++) {
+    graph = addNode(graph, node(`filter${i}`, 'core.filterTable'))
+    graph = addNode(graph, node(`table${i}`, 'out.table'))
+    graph = addEdge(graph, {
+      source: `filter${i}`,
+      sourceHandle: 'out',
+      target: `table${i}`,
+      targetHandle: 'in',
+    })
+  }
+  return graph
+}
+
+/** Width ÷ height of everything a layout put on the canvas. */
+function spread(positions: Map<string, { x: number; y: number }>): number {
+  const xs = [...positions.values()].map((p) => p.x)
+  const ys = [...positions.values()].map((p) => p.y)
+  return (Math.max(...xs) - Math.min(...xs)) / (Math.max(...ys) - Math.min(...ys))
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +276,41 @@ describe('elkOptionsFor', () => {
     expect(options['elk.layered.spacing.nodeNodeBetweenLayers']).toBeUndefined()
     expect(options['elk.spacing.nodeNode']).toBe('120')
   })
+
+  it('sends the measured aspect only when the preference asks for it', () => {
+    const off = elkOptionsFor(DEFAULT_LAYOUT_OPTIONS, 1.5)
+    expect(off['elk.aspectRatio']).toBeUndefined()
+
+    const on = elkOptionsFor({ ...DEFAULT_LAYOUT_OPTIONS, useScreenAspect: true }, 1.5)
+    expect(on['elk.aspectRatio']).toBe('1.5')
+  })
+
+  it('withholds it wherever it would reach nothing', () => {
+    // Both halves of `aspectRatioApplies`, which the checkbox's disabled state reads too — the
+    // two must not be able to disagree about whether the option was sent.
+    const asked = { ...DEFAULT_LAYOUT_OPTIONS, useScreenAspect: true }
+    expect(elkOptionsFor({ ...asked, packComponents: false }, 1.5)['elk.aspectRatio']).toBe(
+      undefined,
+    )
+    expect(elkOptionsFor({ ...asked, algorithm: 'radial' }, 1.5)['elk.aspectRatio']).toBe(
+      undefined,
+    )
+    expect(aspectRatioApplies({ ...asked, packComponents: false })).toBe(false)
+    expect(aspectRatioApplies({ ...asked, algorithm: 'radial' })).toBe(false)
+    expect(aspectRatioApplies(asked)).toBe(true)
+  })
+
+  it('clamps a measurement and drops one that is not a measurement', () => {
+    const asked = { ...DEFAULT_LAYOUT_OPTIONS, useScreenAspect: true }
+    expect(elkOptionsFor(asked, 40)['elk.aspectRatio']).toBe(String(ASPECT_RANGE.max))
+    expect(elkOptionsFor(asked, 0.01)['elk.aspectRatio']).toBe(String(ASPECT_RANGE.min))
+    // Three places, so a pixel of window does not make two option records differ.
+    expect(elkOptionsFor(asked, 1200 / 763)['elk.aspectRatio']).toBe('1.573')
+    // An unmeasurable canvas degrades to ELK's own 1.6, which is where the option is off too.
+    for (const bad of [undefined, 0, -2, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(elkOptionsFor(asked, bad)['elk.aspectRatio']).toBeUndefined()
+    }
+  })
 })
 
 describe('coerceLayoutOptions', () => {
@@ -262,6 +332,14 @@ describe('coerceLayoutOptions', () => {
     expect(coerceLayoutOptions({ layerSpacing: -5 }).layerSpacing).toBe(16)
     expect(coerceLayoutOptions({}).packComponents).toBe(true)
     expect(coerceLayoutOptions(null).packComponents).toBe(true)
+  })
+
+  it('reads a missing screen-aspect flag as off, which is its default', () => {
+    // The inverse of the line above, and deliberately so: a preference written before this
+    // control existed must not be read as somebody having asked for a viewport-shaped layout.
+    expect(coerceLayoutOptions({}).useScreenAspect).toBe(false)
+    expect(coerceLayoutOptions({ useScreenAspect: 'yes' }).useScreenAspect).toBe(false)
+    expect(coerceLayoutOptions({ useScreenAspect: true }).useScreenAspect).toBe(true)
   })
 })
 
@@ -519,6 +597,80 @@ describe('runLayout, against ELK itself', () => {
     for (let i = 1; i < declared.length; i++) {
       expect(declared[i]!).toBeGreaterThan(declared[i - 1]!)
     }
+  })
+
+  it('packs disconnected parts towards the aspect it was handed', async () => {
+    /*
+     * The key reaching the algorithm, which is the only thing worth asserting about an ELK
+     * option — a mistyped one is ignored rather than rejected, so nothing else in the suite
+     * would notice. Twelve unwired pairs, laid out for a tall pane and then for a wide one.
+     *
+     * Measured on this fixture: the packer is coarse and overshoots, so the assertion is that
+     * the arrangement got wider, not that it hit either number.
+     */
+    const graph = components(12)
+    const asked = { ...DEFAULT_LAYOUT_OPTIONS, useScreenAspect: true }
+    const { positions: tall } = await runLayout(
+      graph.nodes,
+      graph.edges,
+      asked,
+      undefined,
+      undefined,
+      0.5,
+    )
+    const { positions: wide } = await runLayout(
+      graph.nodes,
+      graph.edges,
+      asked,
+      undefined,
+      undefined,
+      3,
+    )
+    expect(spread(wide)).toBeGreaterThan(spread(tall))
+
+    // And the preference is what decides: the same two panes with the checkbox off arrange alike.
+    const off = DEFAULT_LAYOUT_OPTIONS
+    const { positions: a } = await runLayout(
+      graph.nodes,
+      graph.edges,
+      off,
+      undefined,
+      undefined,
+      0.5,
+    )
+    const { positions: b } = await runLayout(
+      graph.nodes,
+      graph.edges,
+      off,
+      undefined,
+      undefined,
+      3,
+    )
+    expect(spread(a)).toBe(spread(b))
+  })
+
+  it('leaves one connected chain alone whatever the pane is shaped like', async () => {
+    // Why the control says so on the card: the ordinary Coda graph is one wired chain, and
+    // `elk.aspectRatio` is a component-packing target. Nothing to steer, so nothing moves.
+    const graph = chain()
+    const asked = { ...DEFAULT_LAYOUT_OPTIONS, useScreenAspect: true }
+    const { positions: tall } = await runLayout(
+      graph.nodes,
+      graph.edges,
+      asked,
+      undefined,
+      undefined,
+      0.5,
+    )
+    const { positions: wide } = await runLayout(
+      graph.nodes,
+      graph.edges,
+      asked,
+      undefined,
+      undefined,
+      3,
+    )
+    expect([...wide.entries()]).toEqual([...tall.entries()])
   })
 
   it('returns nothing for nothing, without waking the engine', async () => {

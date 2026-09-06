@@ -30,6 +30,7 @@ import {
   LAYOUT_ALIGNMENTS,
   LAYOUT_DIRECTIONS,
   SPACING_RANGE,
+  aspectRatioApplies,
 } from '../../layout/options'
 import { useGraphStore } from '../../store/graphStore'
 import { lockedTitle } from '../lockCopy'
@@ -154,6 +155,18 @@ export function LayoutControls({ onArrange }: { onArrange: () => void }) {
 
   const layered = options.algorithm === 'layered'
   const orthogonal = edgeRouting === 'orthogonal'
+  /*
+   * Whether the screen-aspect checkbox does anything, asked of `layout/options.ts` rather than
+   * spelled out here. Two spellings of one condition drift, and this one drifts silently in both
+   * directions: a live checkbox over an option ELK is not being sent, or a greyed one over an
+   * option it is.
+   */
+  const aspectLive = aspectRatioApplies(options)
+  const aspectHint = aspectLive
+    ? "Pack disconnected parts towards the shape of this canvas, rather than ELK's fixed 1.6"
+    : options.packComponents
+      ? 'Radial packs to its own shape'
+      : 'Needs "Pack disconnected parts" — it is the packing this steers'
 
   return (
     <>
@@ -315,6 +328,32 @@ export function LayoutControls({ onArrange }: { onArrange: () => void }) {
                 onChange={(e) => setLayoutOptions({ packComponents: e.target.checked })}
               />
               <span>Pack disconnected parts</span>
+            </label>
+
+            {/*
+             * Under the pack checkbox because it only means anything through it: `elk.aspectRatio`
+             * is a component-packing target and nothing else, so an ordinary Coda graph — one
+             * wired chain — is laid out identically at every ratio. Disabled rather than hidden,
+             * as Alignment is, so the bubble keeps its height under the pointer and the control's
+             * absence has a visible cause; the `title` sits on the label, since a disabled input
+             * does not show one of its own.
+             *
+             * This is the only option in the bubble whose input is the *window* rather than the
+             * graph, which is why it is off by default. `LayoutOptions.useScreenAspect` has the
+             * argument; `useArrange.canvasAspect` measures the pane it names.
+             */}
+            <label
+              className="layout-bubble__row layout-bubble__row--check"
+              data-disabled={!aspectLive ? 'true' : undefined}
+              title={aspectHint}
+            >
+              <input
+                type="checkbox"
+                checked={options.useScreenAspect}
+                disabled={!aspectLive}
+                onChange={(e) => setLayoutOptions({ useScreenAspect: e.target.checked })}
+              />
+              <span>Use screen aspect ratio</span>
             </label>
 
             <div className="layout-bubble__foot">

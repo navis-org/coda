@@ -133,7 +133,8 @@ and that check has not been run against this implementation yet.
 ## Automatic layout
 
 Four buttons in the canvas controls rail, after Zoom In / Zoom Out / Fit View / Fit Selected
-(`ui/panels/LayoutControls.tsx`): **arrange**, **auto-layout**, and an **options** bubble.
+(`ui/panels/LayoutControls.tsx`): **arrange**, **auto-layout**, wire **routing**, and an
+**options** bubble of seven controls.
 ELK Layered via `elkjs`. The headless half is `src/layout/`; only the buttons and the pass
 driver (`ui/useArrange.ts`) are React.
 
@@ -196,10 +197,46 @@ the one below, and a four-node chain comes out as a **diagonal staircase**: x-sp
 Nothing is lost by freeing them — ELK's port coordinates are discarded regardless and React Flow
 draws each wire from the real socket.
 
+**One option comes from the window, and it is off by default.** `Use screen aspect ratio` in the
+options bubble sends `elk.aspectRatio` — the shape the packer aims at — measured off the canvas
+pane rather than assumed. Every other option in the bubble is answered from the graph, so two
+people arranging one `.coda.json` get one arrangement; this one makes the result depend on the
+window it was arranged in, which is what somebody on an ultrawide wants and what makes a shared
+file land differently on the next machine. Hence a control rather than a rule.
+
+Three measurements decide its shape, taken on twelve unwired two-card components at 232×120 with
+the ratio swept 0.5 … 8:
+
+- **It is a component-packing target and nothing else.** With `separateConnectedComponents` off
+  the bounds are 572×1980 at every ratio; with it on but only _one_ component, 3852×132 at every
+  ratio. That second case is the ordinary Coda graph — a single wired chain — so on most canvases
+  this option correctly does nothing.
+- **`radial` ignores it**, at 621×192 throughout; `layered`, `force` and `mrtree` all move.
+- **ELK's own default is 1.6**, confirmed by 1.6 and _unset_ returning identical bounds.
+
+So the checkbox is disabled — not hidden, as Alignment is — whenever packing is off or the
+algorithm is radial, and `aspectRatioApplies` is the single predicate both the disabled state and
+`elkOptionsFor` read. Two spellings of that condition would drift silently in both directions: a
+live checkbox over an option ELK is not being sent, or a greyed one over an option it is. A live
+checkbox that does nothing is also precisely the failure the `routed` wire mode was deleted for.
+
+The measurement is `.canvas-area`'s bounding rect (`useArrange.canvasAspect`) — the window minus
+the toolbar, the panels and, with a viewer pinned, a whole grid column, which on a 16:9 display
+with the dock open is nearer 1:1 than 1.78. A rect rather than `offsetWidth`, inverting the rule
+two paragraphs up for `measurePorts`' reason: the pane sits _outside_ React Flow's transformed
+subtree, so its rect is CSS pixels at any zoom, and this is the one measurement here that wants
+the fractional answer. An unmeasurable pane sends no key at all, which lands on ELK's 1.6 —
+the same result as leaving the checkbox off, rather than a number nobody typed. `ASPECT_RANGE`
+clamps to 0.25 … 4 as a guard, not a taste: ELK overshoots its target at the extremes rather than
+refusing them, returning an actual ratio of 21 under layered and 48 under mrtree when asked for 8.
+
 **A wrong ELK option key is silent.** ELK ignores an option it does not recognise instead of
 rejecting it, so a typo in one of those strings survives typecheck, lint and the eye. That is why
 `layout.test.ts` runs the real algorithm and asserts on the _result_ — direction, spacing, port
-order — rather than on the record being built.
+order — rather than on the record being built. The aspect option is checked the same way, by
+packing twelve components for a tall pane and then a wide one and requiring the second to be
+wider, with the checkbox-off pair asserted identical so the test cannot pass on the packer's own
+1.6.
 
 **Edges reference port ids, not node ids** (`elkPortId`, `nodeId#portId`), which is what makes
 `FIXED_ORDER` mean anything. Deliberately not `core/graph`'s `portKey`, which joins with a NUL

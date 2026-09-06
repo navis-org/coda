@@ -208,8 +208,15 @@
   min-width: 22px;
   text-align: right;
 }
-/* Disabled rather than hidden, so the bubble does not change height under the pointer. */
-.layout-bubble__row[data-disabled='true'] > span:first-child {
+/*
+ * Disabled rather than hidden, so the bubble does not change height under the pointer.
+ *
+ * `> span` rather than `> span:first-child`: on a checkbox row the label follows the input, so
+ * the narrower selector matched nothing and the row read as live while its control was dead.
+ * Every row holds exactly one span — the gap sliders put their number in an `<output>` — so this
+ * is the same element in both shapes rather than a broader net.
+ */
+.layout-bubble__row[data-disabled='true'] > span {
   opacity: 0.5;
 }
 .layout-bubble__row--check {

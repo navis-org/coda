@@ -31,6 +31,7 @@ import { registerSource } from '../../data/source'
 import { DEFAULT_LAYOUT_OPTIONS } from '../../layout/options'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { canvasAspect } from '../useArrange'
 import { demoWorkflow } from '../../wizard/build'
 import { loadLayoutPrefs } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
@@ -373,7 +374,7 @@ describe('the options bubble', () => {
     expect(bubble()).toBeNull()
   })
 
-  it('holds the six controls, and each one writes through and persists', () => {
+  it('holds the seven controls, and each one writes through and persists', () => {
     render(<App />)
     fireEvent.click(optionsButton())
 
@@ -387,6 +388,9 @@ describe('the options bubble', () => {
     fireEvent.change(screen.getByRole('slider', { name: /Layer gap/ }), {
       target: { value: '120' },
     })
+    // Screen aspect before packing, because unticking the second disables the first — which is
+    // the whole of what the next case is about.
+    fireEvent.click(screen.getByRole('checkbox', { name: /screen aspect/i }))
     fireEvent.click(screen.getByRole('checkbox', { name: /Pack disconnected/ }))
 
     const options = useGraphStore.getState().layoutOptions
@@ -396,10 +400,53 @@ describe('the options bubble', () => {
       nodeSpacing: 72,
       layerSpacing: 120,
       packComponents: false,
+      useScreenAspect: true,
     })
     // Per-user and remembered, rather than written into the `.coda.json` — a file you were sent
     // must not silently re-arrange itself to somebody else's taste.
-    expect(loadLayoutPrefs().options).toMatchObject({ algorithm: 'mrtree', direction: 'DOWN' })
+    expect(loadLayoutPrefs().options).toMatchObject({
+      algorithm: 'mrtree',
+      direction: 'DOWN',
+      useScreenAspect: true,
+    })
+  })
+
+  it('measures the canvas pane rather than the window', () => {
+    /*
+     * The number the checkbox turns on. It has to be the pane: `.canvas-area` is the window minus
+     * the toolbar, the panels and — with a viewer pinned — a whole grid column, so on a 16:9
+     * display with the dock open the space a layout is fitted into is nearer 1:1 than 1.78.
+     *
+     * jsdom performs no layout, so all this can pin is that the *window* was not what answered —
+     * which is the one substitution a reader of this code would plausibly make, and the reason
+     * `installJsdomStubs` special-cases `.canvas-area` at all. 1200×800 against jsdom's own
+     * 1024×768. Whether the pane is measured correctly against real CSS is a browser question.
+     */
+    render(<App />)
+    expect(canvasAspect()).toBeCloseTo(1200 / 800)
+    expect(canvasAspect()).not.toBeCloseTo(window.innerWidth / window.innerHeight)
+  })
+
+  it('stands the screen-aspect checkbox down where the option would reach nothing', () => {
+    /*
+     * `elk.aspectRatio` is a target for the *component packer* and nothing else: with packing
+     * off, or under radial, ELK returns identical bounds at every ratio. A live checkbox over
+     * an option that is not being sent is the failure the `routed` wire mode was deleted for, so
+     * the disabled state and `elkOptionsFor` read one predicate — this pins the UI half.
+     */
+    render(<App />)
+    fireEvent.click(optionsButton())
+    const aspect = () => screen.getByRole('checkbox', { name: /screen aspect/i })
+    expect((aspect() as HTMLInputElement).disabled).toBe(false)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Pack disconnected/ }))
+    expect((aspect() as HTMLInputElement).disabled).toBe(true)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Pack disconnected/ }))
+    fireEvent.change(screen.getByRole('combobox', { name: /Algorithm/ }), {
+      target: { value: 'radial' },
+    })
+    expect((aspect() as HTMLInputElement).disabled).toBe(true)
   })
 
   it('disables Alignment away from layered rather than removing it', () => {

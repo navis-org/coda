@@ -86,15 +86,23 @@ export interface Arrangement {
   routes: Map<string, XY[]>
 }
 
-/** Lay out a set of nodes and the edges among them, returning ELK's raw origin-based result. */
+/**
+ * Lay out a set of nodes and the edges among them, returning ELK's raw origin-based result.
+ *
+ * `measured`, `ports` and `aspect` are the three things only the canvas knows — how big a card
+ * is, where its sockets sit, and the shape of the pane the result is framed into. All three are
+ * optional because the tests call this with none of them; `useArrange` is the only caller that
+ * has any (`layout/network.ts` goes through `runElk` and has its own vocabulary).
+ */
 export async function runLayout(
   nodes: readonly GraphNode[],
   edges: readonly GraphEdge[],
   options: LayoutOptions,
   measured?: MeasuredSizes,
   ports?: MeasuredPorts,
+  aspect?: number,
 ): Promise<Arrangement> {
   if (nodes.length === 0) return { positions: new Map(), routes: new Map() }
-  const laid = await runElk(toElkGraph(nodes, edges, options, measured, ports))
+  const laid = await runElk(toElkGraph(nodes, edges, options, measured, ports, aspect))
   return { positions: positionsFrom(laid), routes: routesFrom(laid) }
 }

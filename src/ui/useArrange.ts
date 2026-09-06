@@ -59,6 +59,42 @@ function prefersReducedMotion(): boolean {
   }
 }
 
+/**
+ * The shape of the space this arrangement will be framed into, as width ÷ height.
+ *
+ * **`.canvas-area`, not `window`, and the difference is the whole point of measuring.** What a
+ * layout is fitted into is the pane — the window minus the toolbar, the panels and, when a viewer
+ * is pinned, a whole grid column. On a 16:9 display with the dock open that is nearer 1:1 than
+ * 1.78, and the dock is exactly the case somebody would notice. Scoped to that class for the
+ * reason `measureCardSizes` records at length: the group peek mounts a second React Flow inside a
+ * modal, and it is not the canvas.
+ *
+ * **A bounding rect, which is the opposite of what `measure` above does, and the exception is the
+ * same one `measurePorts` makes.** The pane sits *outside* React Flow's transformed subtree — the
+ * camera lives on `.react-flow__viewport`, inside it — so its rect is in CSS pixels at any zoom
+ * and needs no division. It is also the one measurement here that wants the fractional answer,
+ * `offsetWidth` being rounded to whole pixels.
+ *
+ * `undefined` for anything unmeasurable: no element yet, or an axis at zero mid-transition.
+ * `elkOptionsFor` reads that as "send no key", and ELK answers with its own 1.6 — the same result
+ * as leaving the option switched off, which is the right degradation for a number nobody typed.
+ *
+ * Read once per pass, unconditionally. Gating it on the preference would save one rect and buy a
+ * second place that has to know what the preference means.
+ *
+ * Exported only so `layoutControls.test.tsx` can pin that the *window* is not what answered —
+ * the substitution a reader would plausibly make, and the reason `installJsdomStubs` gives
+ * `.canvas-area` a size of its own (1200×800, against jsdom's 1024×768). jsdom performs no
+ * layout, so whether the pane is measured correctly against real CSS is a browser question.
+ */
+export function canvasAspect(): number | undefined {
+  const pane = document.querySelector('.canvas-area')
+  if (!pane) return undefined
+  const { width, height } = pane.getBoundingClientRect()
+  if (!(width > 0) || !(height > 0)) return undefined
+  return width / height
+}
+
 /** Ease-out cubic: fast away from the old arrangement, gentle into the new one. */
 function ease(t: number): number {
   return 1 - (1 - t) ** 3
@@ -335,7 +371,14 @@ export function useArrange(): ArrangeHandle {
       if (!before) return
 
       setBusy(true)
-      void runLayout(items, links, state.layoutOptions, measured, measurePorts())
+      void runLayout(
+        items,
+        links,
+        state.layoutOptions,
+        measured,
+        measurePorts(),
+        canvasAspect(),
+      )
         .then(({ positions: raw, routes: rawRoutes }) => {
           if (token.current !== mine) return
           const anchored = anchorTo(raw, sizes, { x: before.x, y: before.y })
