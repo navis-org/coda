@@ -31,6 +31,8 @@ import '../nodes'
  * and the browser never loads this file, which is what makes a side effect here affordable.
  */
 import { registerBuiltinSources } from '../data/builtins'
+import { demoFragment } from '../data/share/fragment'
+import { type DemoPlan, demoPlans } from '../wizard/demo'
 import { DEMO_DATASET, buildWorkflow } from '../wizard/build'
 import { analysisOption, analysisOptions, everyCombination } from '../wizard/options'
 import type { NodeCategory, NodeDefinition, ParamDef, ResolvedPort } from '../core/node'
@@ -87,6 +89,16 @@ export interface GuideNode {
   params: GuideParam[]
   /** Wizard workflows whose graph contains this type, by the question they answer. */
   workflows: string[]
+  /**
+   * The `#!` fragment that opens a workflow with this node in it, or absent for a node nothing
+   * can host.
+   *
+   * The **fragment**, not the href: its grammar lives in `data/share/fragment.ts` and importing
+   * that into `nodes.html` would put `src/core` behind a static document, so it is written here,
+   * in Node, where the import costs nothing. Which page it hangs off is a drawing decision and
+   * stays with the two things that draw it — the same line this module's own header draws.
+   */
+  demo?: string
   /**
    * Which specimen silhouette a dataset node's family declares, for the nodes that have one.
    *
@@ -188,9 +200,28 @@ function glyphOf(type: string): { datasetGlyph?: DatasetGlyph } {
   return glyph ? { datasetGlyph: glyph } : {}
 }
 
+/**
+ * Spread rather than assigned, on `glyphOf`'s rule: a node with no demo carries no key, and the
+ * JSON is inlined into a page every reader downloads.
+ */
+function demoLink(plan: DemoPlan | undefined, type: string): { demo?: string } {
+  return plan ? { demo: demoFragment(type, plan) } : {}
+}
+
 export function guideData(): GuideData {
   registerBuiltinSources()
   const usedIn = workflowIndex()
+  /*
+   * Asked once for the whole registry rather than per node: the builder shares one set of built
+   * workflows across every question, and 102 separate answers would rebuild it 102 times.
+   * Measured at ~250 ms for the set, against the ~250 ms this module already costs a build.
+   *
+   * **This is where the searching happens, and that is the point.** Scoring a demo means running
+   * inference over graphs whose dataset nodes belong to every backend, and inference peeks — so
+   * doing it here, in Node, is what keeps a click in the browser from firing listings at three
+   * connectomes. The link carries the answer. See `wizard/demo.ts`.
+   */
+  const demos = demoPlans()
   const nodes = listableNodeDefs()
     .map((def): GuideNode => ({
       type: def.type,
@@ -206,6 +237,7 @@ export function guideData(): GuideData {
       outputs: portsOf(defaultOutputPorts(def)),
       params: paramsOf(def),
       workflows: def.annotation ? [] : [...(usedIn.get(def.type) ?? [])],
+      ...demoLink(demos.get(def.type), def.type),
       ...glyphOf(def.type),
     }))
     .sort((a, b) => a.label.localeCompare(b.label))

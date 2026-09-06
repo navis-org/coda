@@ -12,6 +12,7 @@ import { deserializeGraph, emptyGraph, newId, type CodaGraph } from '../../core/
 import {
   ShareLinkError,
   decodePacked,
+  demoFragment,
   encodeShareFragment,
   hasShareFragment,
   isLocalOrigin,
@@ -176,6 +177,86 @@ describe('references', () => {
     expect(parseShareFragment('#!https://lab.example.org/w.json?v=2')).toEqual({
       kind: 'https',
       url: 'https://lab.example.org/w.json?v=2',
+    })
+  })
+})
+
+describe('demo links', () => {
+  it('reads a node type out of a demo:// payload', () => {
+    expect(parseShareFragment('#!demo://core.filterTable')).toEqual({
+      kind: 'demo',
+      type: 'core.filterTable',
+    })
+  })
+
+  /* `dataset.catmaid.fafb` has two dots, and a trailing slash is what a browser or a chat client
+     adds to something that looks like a host. Neither is a reason to refuse a link. */
+  it('takes a type with several segments, and forgives a trailing slash', () => {
+    expect(parseShareFragment('#!demo://dataset.catmaid.fafb')).toMatchObject({
+      type: 'dataset.catmaid.fafb',
+    })
+    expect(parseShareFragment('#!demo://out.heatmap/')).toMatchObject({ type: 'out.heatmap' })
+  })
+
+  it('refuses a payload that is not a node type at all', () => {
+    expect(() => parseShareFragment('#!demo://')).toThrow(/does not name a node/)
+    expect(() => parseShareFragment('#!demo://Filter Table')).toThrow(/does not name a node/)
+  })
+
+  /*
+   * A host-shaped payload parses as a node type and is inert: nothing about a demo reference
+   * fetches, so `evil.com` is a name the registry does not have and the app says so. Worth
+   * pinning, because the segments after the type *look* like a path and are not one.
+   */
+  it('treats a host-shaped payload as a node name, which fetches nothing', () => {
+    expect(parseShareFragment('#!demo://evil.com/steal')).toEqual({
+      kind: 'demo',
+      type: 'evil.com',
+    })
+  })
+
+  it('reads the plan the node guide writes', () => {
+    expect(parseShareFragment('#!demo://core.sort/mock.opticlobe/partners/bar/2')).toEqual({
+      kind: 'demo',
+      type: 'core.sort',
+      plan: { dataset: 'mock.opticlobe', analysis: 'partners', view: 'bar', rank: 2 },
+    })
+    expect(parseShareFragment('#!demo://neuron.paths/hemibrain/paths/network')).toMatchObject({
+      plan: { dataset: 'hemibrain', analysis: 'paths', view: 'network' },
+    })
+  })
+
+  /* The type is the address; the plan is an optimisation over it. A link cut short after the
+     node name, or one whose tail was mangled, still opens the right node's workflow. */
+  it('drops a broken plan rather than refusing the link', () => {
+    expect(parseShareFragment('#!demo://core.sort/mock.opticlobe')).toEqual({
+      kind: 'demo',
+      type: 'core.sort',
+    })
+    expect(parseShareFragment('#!demo://core.sort/a/b/c/notanumber')).toEqual({
+      kind: 'demo',
+      type: 'core.sort',
+    })
+  })
+
+  /*
+   * Deliberately *not* checked against the registry: this module is pure and knows nothing about
+   * which nodes exist. A retired type is a link the app refuses with a sentence naming it, which
+   * is where the registry is.
+   */
+  it('accepts a well-formed type this build may not have', () => {
+    expect(parseShareFragment('#!demo://core.notARealNode')).toMatchObject({
+      type: 'core.notARealNode',
+    })
+  })
+
+  it('writes what it reads', () => {
+    expect(demoFragment('out.table')).toBe('#!demo://out.table')
+    const plan = { dataset: 'mock.opticlobe', analysis: 'matrix', view: 'heatmap', rank: 0 }
+    expect(parseShareFragment(demoFragment('out.heatmap', plan))).toEqual({
+      kind: 'demo',
+      type: 'out.heatmap',
+      plan,
     })
   })
 })

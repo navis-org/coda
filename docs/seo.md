@@ -54,8 +54,9 @@ drift, and a node added next month appears with no one opening `src/nodeguide`. 
 browser. `SECTIONS` and `CAT_LABEL` moved to `src/nodeguide/sections.ts` when this arrived, so the
 grid and the index answer "which section is Normalize in" from one table.
 
-**Measured cost:** `dist/nodes.html` goes from 5.4 kB to 87.8 kB raw, 2.1 kB to 22.2 kB gzipped.
-`nodes-*.js` is unchanged at 198.8 kB — confirmed by building both ways, and the thing to check
+**Measured cost:** `dist/nodes.html` goes from 5.4 kB to 87.8 kB raw, 2.1 kB to 22.2 kB gzipped
+(104.1 / 23.6 since each entry gained an "Open in a workflow" link — see [pages.md](pages.md)).
+`nodes-*.js` is unchanged at 230.4 kB — confirmed by building both ways, and the thing to check
 after any edit here, since an accidental import of `appendix.ts` from `main.ts` would show up
 there and nowhere else.
 

@@ -418,6 +418,37 @@ describe('opening a link somebody sent', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  /*
+   * The node guide's "Open in a workflow". A `demo://` link carries a node type and no payload,
+   * so the graph is *built* on arrival by `wizard/demo.ts` — the one reference that never
+   * reaches `resolveShareRef`. What is asserted is the end of that path rather than the builder,
+   * which `wizard/demo.test.ts` owns: a document opens, it contains the node named, and the
+   * link leaves the address bar like any other.
+   */
+  it('builds a workflow from a demo link', async () => {
+    act(() => useGraphStore.getState().newGraph())
+    window.history.replaceState(null, '', '/#!demo://core.filterTable')
+
+    render(<App />)
+    await waitFor(() =>
+      expect(
+        useGraphStore.getState().graph.nodes.some((n) => n.type === 'core.filterTable'),
+      ).toBe(true),
+    )
+    // A whole pipeline, not the one card.
+    expect(useGraphStore.getState().graph.nodes.length).toBeGreaterThan(2)
+    // No gate: there is no host to name and nothing to fetch, so nothing to ask about.
+    expect(screen.queryByRole('dialog', { name: 'Shared workflow' })).toBeNull()
+    await waitFor(() => expect(window.location.hash).toBe(''))
+  })
+
+  it('says so when a demo link names a node this build does not have', async () => {
+    window.history.replaceState(null, '', '/#!demo://core.notARealNode')
+    render(<App />)
+    const gate = await screen.findByRole('dialog', { name: 'Shared workflow' })
+    expect(within(gate).getByText(/core.notARealNode/)).toBeTruthy()
+  })
+
   it('names the scheme it cannot open rather than failing silently', async () => {
     window.history.replaceState(null, '', '/#!ftp://example.org/w.json')
     render(<App />)

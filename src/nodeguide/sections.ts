@@ -61,6 +61,18 @@ export const SECTIONS: readonly Section[] = [
   },
 ]
 
+/**
+ * Where the editor is from either of these pages.
+ *
+ * Here rather than in each renderer because both write it: `main.ts` for the detail pane's
+ * button and `appendix.ts` for the static index's link, and a base-relative convention stated
+ * twice in one directory is one the appendix keeps pointing at the old page when it changes.
+ * Same argument as `SECTIONS` above — this module exists for what the two drawers must agree on.
+ *
+ * Relative because `base` is `'./'`, like every other cross-page link in these documents.
+ */
+export const appHref = (fragment: string): string => `./index.html${fragment}`
+
 export const CAT_LABEL: Record<GuideNode['category'], string> = {
   dataset: 'Dataset',
   query: 'Query',

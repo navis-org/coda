@@ -34,7 +34,7 @@
  */
 
 import { guideData, type GuideNode } from './data'
-import { CAT_LABEL, SECTIONS } from './sections'
+import { CAT_LABEL, SECTIONS, appHref } from './sections'
 
 /**
  * HTML escaping for text that came out of a node definition.
@@ -79,6 +79,16 @@ function signature(n: GuideNode): string {
   return `${inputs} → ${outputs}`
 }
 
+/**
+ * One node's entry, prose and all — and the demo link spelled out, which is the point of putting
+ * it in this section at all.
+ *
+ * `#!demo://core.filterTable` is a *readable* address: a language model reading this page can
+ * quote it, and a person can retype it. The alternative the guide was measured against — a
+ * packed `c1.` share fragment per node — would have put a thousand characters of base64 between
+ * every paragraph and the next, four times the gzipped weight of this section and the end of it
+ * as something worth reading straight through. See `docs/pages.md`.
+ */
 function entry(n: GuideNode): string {
   const sig = signature(n)
   /*
@@ -93,6 +103,7 @@ function entry(n: GuideNode): string {
       }</span></p>
       ${n.description ? `<p class="entry__desc">${esc(n.description)}</p>` : ''}
       <p class="entry__guide">${esc(n.guide)}</p>
+      ${n.demo ? `<p class="entry__open"><a href="${esc(appHref(n.demo))}">Open ${esc(n.label)} in a workflow</a></p>` : ''}
     </article>`
 }
 

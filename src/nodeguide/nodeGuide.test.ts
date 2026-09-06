@@ -11,6 +11,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { guideData } from './data'
+import { demoFragment } from '../data/share/fragment'
 import '../nodes'
 import { listableNodeDefs } from '../core/registry'
 import { familyForNodeType } from '../nodes/lib/datasetFamilies'
@@ -64,6 +65,37 @@ describe('coverage', () => {
         expect(p.shape, `${n.type}.${p.id}`).toBeTruthy()
       }
     }
+  })
+})
+
+describe('the demo link', () => {
+  /*
+   * Every listable node gets one, which is the claim the whole feature rests on — a guide where
+   * three quarters of the entries have no way to see the node working is the state this replaced.
+   * The set comes from `wizard/demo.ts`, which builds all 102 graphs to answer; `demo.test.ts`
+   * is where those graphs are checked.
+   */
+  it('is on every node', () => {
+    for (const n of DATA.nodes) expect(n.demo, n.type).toBeTruthy()
+  })
+
+  /*
+   * A `demo://` fragment and not a packed graph. Measured: 102 packed workflows would have been
+   * ~100 kB of base64, near-incompressible, most of it in the static appendix that is the page's
+   * readable half — against ~4 kB of link text. See `docs/pages.md`.
+   */
+  it('is a fragment naming the node and the workflow, not a payload', () => {
+    const conn = byType.get('neuron.connectivity')!
+    expect(conn.demo).toBe('#!demo://neuron.connectivity/mock.opticlobe/partners/table')
+    expect(
+      demoFragment('core.sort', {
+        dataset: 'hemibrain',
+        analysis: 'partners',
+        view: 'bar',
+        rank: 2,
+      }),
+    ).toBe('#!demo://core.sort/hemibrain/partners/bar/2')
+    for (const n of DATA.nodes) expect(n.demo!.length, n.type).toBeLessThan(110)
   })
 })
 

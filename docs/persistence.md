@@ -32,8 +32,9 @@ mail and chat clients cut short.
 | `gh://<user>/<gistId>` | a GitHub Gist, optionally `@<revision>`          |
 | `gs://<bucket>/<path>` | an object on Google Cloud Storage                |
 | `https://…`            | any JSON over https                              |
+| `demo://<type>[/plan]` | a workflow built around that node type           |
 
-Coda writes the second and third and reads all five. **The literal form is kept because a link
+Coda writes the second, third and sixth and reads all six. **The literal form is kept because a link
 you can read before opening is worth 2.8×** — it is what lets the docs print one, what makes a
 hand-edited link work, and what the AI assistant would emit. Decoding is attempted and its
 failure _ignored_, so a payload that was never encoded is not refused for containing a stray `%`.
@@ -42,6 +43,34 @@ failure _ignored_, so a payload that was never encoded is not refused for contai
 rather than an inflate error, and changing compressor later is a `c2` rather than a guess about
 what the bytes were. **`deflate-raw`, not `gzip`**: measured 24 characters shorter, which is
 exactly the gzip container — a header, a CRC and a length, none of which a URL wants.
+
+**`demo://` is the one form that carries no document.** It names a node type and, optionally, the
+three wizard answers and the wiring rank that say which workflow to build —
+`demo://core.filterTable/mock.opticlobe/partners/table/0`. The node guide writes it under every
+entry as "Open in a workflow", and `src/wizard/demo.ts` assembles the graph on arrival. Three
+consequences, each of which the obvious version gets wrong:
+
+- **It never reaches `resolveShareRef`.** The builder reaches `src/wizard`, so it lives above
+  `src/data` (invariant 1) and `useShareLink` answers this branch before the fetch layer is asked.
+  The switch arm there refuses it *by name* rather than being left unreachable, so a second caller
+  finds out at once instead of getting an empty graph.
+- **The plan is in the link because the search is not free.** Choosing the workflow means scoring
+  candidates with `inferGraph`, and inference on a dataset node peeks — so searching on the click
+  fired listings at two CATMAID servers and CAVE, and opened a Connections dialog demanding a token
+  over a workflow about filtering a table. The guide searches at build time and writes the answer
+  down; the app builds exactly one workflow. A bare `demo://<type>` still works and falls back to
+  searching the synthetic dataset alone, which asks nothing of anybody.
+- **A plan that does not work is dropped, not refused, and that rule is applied twice.** The type
+  is the address; the plan is an optimisation over it. `parseDemoRef` drops a *malformed* tail, so
+  a link cut short after the node name still opens the right node's workflow; `demoGraph` drops a
+  *stale* one — a rank a wiring rule has since moved, an analysis a dataset no longer offers — and
+  falls back to searching. Which leaves exactly one way for a demo link to fail, a node this build
+  does not have, and that is the only sentence `useShareLink` has to write.
+
+`fragment.ts` checks the *shape* of a type and never the registry — it is pure, and a link naming a
+retired node should fail where every other unreadable link does, with a sentence from the app. A
+host-shaped payload like `demo://evil.com/steal` therefore parses as a node name and is inert:
+nothing about a demo reference fetches. See [pages.md](pages.md).
 
 **An unknown scheme is named.** `Coda cannot open "ftp://" workflow links` — the fix for `http://`
 is a URL change and the fix for `file://` is to send the file, and a shared "bad link" helps with

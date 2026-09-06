@@ -57,6 +57,27 @@ describe('coverage', () => {
   })
 })
 
+describe('the demo link', () => {
+  /*
+   * The reason it is *in* the appendix rather than only in the pane above: this section is the
+   * half of the page a crawler and a language model read, and a link they can quote is the only
+   * way an openable workflow reaches them at all. Spelled out, forty characters, no payload —
+   * see `docs/pages.md` for what the packed alternative would have cost this file.
+   */
+  it('carries an openable link for every node', () => {
+    for (const n of DATA.nodes) {
+      expect(n.demo, n.type).toMatch(new RegExp(`^#!demo://${n.type.replace('.', '\\.')}(/|$)`))
+      // The page composes the href; the fragment is all the registry knows. See `data.ts`.
+      expect(HTML, n.type).toContain(`href="./index.html${n.demo}"`)
+    }
+  })
+
+  it('names the node in the link text, since the anchor is read on its own', () => {
+    const first = DATA.nodes[0]!
+    expect(HTML).toContain(`>Open ${esc(first.label)} in a workflow</a>`)
+  })
+})
+
 describe('anchors', () => {
   it('are unique and usable as a CSS selector', () => {
     const ids = DATA.nodes.map((n) => nodeAnchor(n.type))
@@ -72,7 +93,7 @@ describe('escaping', () => {
      * Rather than assert on the current text, which changes, the check is structural: strip the
      * markup this module writes and nothing that could open an element may be left.
      */
-    const text = HTML.replace(/<\/?(?:section|h2|h3|h4|p|article|code|span|div)[^>]*>/g, '')
+    const text = HTML.replace(/<\/?(?:section|h2|h3|h4|p|a|article|code|span|div)[^>]*>/g, '')
     expect(text).not.toMatch(/<[a-zA-Z/]/)
   })
 

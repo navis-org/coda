@@ -566,6 +566,32 @@ mark {
   gap: 0.3rem 0.5rem;
   padding-top: 0.15rem;
 }
+/*
+ * The one action on this page. Category-tinted like the preview card beside it, so the button
+ * and the card it opens read as the same object — `--cat` is set on the panel per selection.
+ */
+.openflow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+  padding: 0.42em 0.85em;
+  border: 1px solid var(--cat, var(--border-strong));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--cat, var(--surface-3)) 12%, transparent);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.openflow:hover {
+  background: color-mix(in srgb, var(--cat, var(--surface-3)) 22%, transparent);
+}
+.openflow svg {
+  /* Nudged rather than centred: the arrow's stem sits above its own box's middle. */
+  margin-top: 1px;
+}
+
 .badge {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -986,18 +1012,13 @@ button.setting__row[aria-expanded='true'] .setting__name {
   flex-wrap: wrap;
   gap: 0.3rem;
 }
-.seen a {
+.seen span {
   font-size: 11.5px;
   color: var(--text-secondary);
   background: var(--surface-3);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0.1em 0.6em;
-  text-decoration: none;
-}
-.seen a:hover {
-  color: var(--text-primary);
-  border-color: var(--border-strong);
 }
 
 /* --------------------------------------------------------------------------
@@ -1228,4 +1249,16 @@ button.setting__row[aria-expanded='true'] .setting__name {
   font-size: 0.92rem;
   line-height: 1.65;
   color: var(--text-secondary);
+}
+.entry__open {
+  margin: 0.45rem 0 0;
+  font-size: 0.85rem;
+}
+.entry__open a {
+  color: var(--text-secondary);
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+}
+.entry__open a:hover {
+  color: var(--text-primary);
 }

@@ -64,8 +64,15 @@ entry that says nothing. `nodeGuide.test.ts` fails a node that ships without a `
 whose `guide` merely repeats its `description`.
 
 Everything else on the guide page is derived — sockets, settings, defaults, the preview card, the
-"seen in" cross-reference against the workflows the wizard can build. Adding a node is these two strings and
-nothing else; see `src/nodeguide/data.ts`.
+"seen in" cross-reference against the workflows the wizard can build, and the **"Open in a
+workflow" link**, which `src/wizard/demo.ts` resolves by searching the wizard's own graphs for
+one that already holds your node or can feed it. Adding a node is these two strings and nothing
+else; see `src/nodeguide/data.ts`.
+
+If your node ends up demoed somewhere odd, the search is telling you something about its ports
+rather than about itself — `demo.test.ts` prints the graph it chose, and the two things that move
+it are a port typed `any` where a real type would do, and a `validate` that does not say when the
+input is wrong for it. Both are worth fixing anyway.
 
 **A third length exists and is optional.** A node whose behaviour genuinely needs pages — NBLAST,
 the clustering pair, anything with a non-obvious implicit rule — gets a markdown file at

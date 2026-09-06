@@ -19,7 +19,7 @@
 import './nodeguide.css'
 import NODE_DATA from 'virtual:node-guide-data'
 import type { GuideData, GuideNode, GuideParam, GuidePort } from './data'
-import { CAT_LABEL, SECTIONS } from './sections'
+import { CAT_LABEL, SECTIONS, appHref } from './sections'
 /*
  * The one import that reaches into the editor, and it is affordable because it reaches into
  * a table: `ui/glyphs.ts` is drawing data with no React, no store and no registry behind it.
@@ -273,6 +273,28 @@ function settingsHTML(n: GuideNode): string {
   </details>`
 }
 
+/**
+ * The link that opens a real graph with this node in it.
+ *
+ * `n.demo` is a `#!` fragment, written at build time by `data.ts` — the app builds the workflow
+ * on arrival and the page carries no payload: forty characters a reader can see before clicking,
+ * against the 75 kB of base64 that 102 packed graphs would have put in this document. Which page
+ * it hangs off is this file's decision, not the registry's, which is why `appHref` is here.
+ *
+ * Absent for a node nothing can host, which is none of them today and is still a `?.` rather
+ * than an assumption — the guide is generated from whatever registry it is built against.
+ */
+function openHTML(n: GuideNode): string {
+  if (!n.demo) return ''
+  return `<a class="openflow" href="${esc(appHref(n.demo))}">
+    Open in a workflow
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <line x1="4" y1="12" x2="19" y2="12" /><polyline points="13,6 19,12 13,18" />
+    </svg>
+  </a>`
+}
+
 function costLine(n: GuideNode): string {
   return n.cost === 'cheap'
     ? 'Cheap — re-runs on its own as you edit, so a threshold moves the result live.'
@@ -286,9 +308,18 @@ function renderDetail(): void {
   const ts = termsOf(qEl.value)
   panelEl.style.setProperty('--cat', `var(--cat-${n.category})`)
 
+  /*
+   * Chips, not links — and that is a repair rather than a restraint. They were `<a>` elements
+   * pointing at `./index.html`, every one of them, from the commit that added this page: back
+   * then they named the four bundled example graphs, which the start page listed, so "go to the
+   * app" was half an answer. The examples became wizard analyses, whose names appear on no
+   * surface in the app, and the link went on pointing at a page where the word it carried does
+   * not exist. What somebody wanted from clicking one is `openHTML` below, which opens a
+   * workflow with this node in it.
+   */
   const seen = n.workflows.length
     ? `<div class="sub"><p class="sub__h">Seen in</p><div class="seen">${n.workflows
-        .map((e) => `<a href="./index.html">${esc(e)}</a>`)
+        .map((e) => `<span>${esc(e)}</span>`)
         .join('')}</div></div>`
     : ''
 
@@ -303,6 +334,7 @@ function renderDetail(): void {
         <span class="badge" data-kind="${n.cost}">${n.cost}</span>
         <span class="badge">${n.inputs.length} in · ${n.outputs.length} out</span>
       </div>
+      ${openHTML(n)}
     </div>
     <div class="panel__body">
       <div class="sub"><p class="sub__h">Sockets</p><div class="ports">${portListHTML(n)}</div></div>

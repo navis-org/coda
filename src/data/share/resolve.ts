@@ -23,7 +23,7 @@
  */
 
 import { fetchText } from '../fetchText'
-import type { ShareRef } from './fragment'
+import type { FetchableRef } from './fragment'
 import { decodePacked } from './fragment'
 import { readGist } from './gist'
 
@@ -37,7 +37,7 @@ export interface ShareTarget {
   needsConfirm: boolean
 }
 
-export function shareTarget(ref: ShareRef): ShareTarget {
+export function shareTarget(ref: FetchableRef): ShareTarget {
   switch (ref.kind) {
     case 'json':
     case 'packed':
@@ -71,8 +71,17 @@ function hostOf(url: string): string | undefined {
   }
 }
 
-/** Fetch whatever the reference points at, and hand back graph JSON. */
-export async function resolveShareRef(ref: ShareRef): Promise<string> {
+/**
+ * Fetch whatever the reference points at, and hand back graph JSON.
+ *
+ * **`FetchableRef`, not `ShareRef`, and the narrowing is the contract.** A `demo://` reference
+ * is built rather than fetched, by `wizard/demo.ts`, which reaches the wizard and therefore sits
+ * above `src/data` — invariant 1, and the lint rule enforces it. `useShareLink` answers that one
+ * before anything here is asked. Saying so in the type means a caller who does not know is a
+ * compile error; saying it in a `case` that throws meant a sentence nobody could reach and a
+ * `shareTarget` label nobody could see.
+ */
+export async function resolveShareRef(ref: FetchableRef): Promise<string> {
   switch (ref.kind) {
     case 'json':
       return ref.json

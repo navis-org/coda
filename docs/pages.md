@@ -201,10 +201,75 @@ change under `src/nodes`, `src/core` or `src/examples`, or dev would keep servin
 registry said when the page first loaded — the one failure that would make this worse than a
 committed file.
 
-Verify with `pnpm build`: `nodes-*.js` is **198.8 kB (49.2 kB gzipped)**, almost all of it the
+Verify with `pnpm build`: `nodes-*.js` is **230.4 kB (56.9 kB gzipped)**, almost all of it the
 inlined registry, so the page's own logic is a few kB of that; `dist/nodes.html` must reference no
-`main-*` chunk. (An earlier figure here said ~86 kB; the registry has roughly doubled since, and
-the number was re-measured rather than reasoned forward.)
+`main-*` chunk. (Earlier figures here said ~86 kB and then 198.8 kB; the registry keeps growing,
+and each number was re-measured rather than reasoned forward.)
+
+**The page is not a 5 kB document and has not been one since the registry dump landed**, which is
+worth saying because the sentence above still calls 660 kB unaffordable and both are true. The
+whole entry costs **343 kB raw / 86.5 kB gzipped** — `nodes.html` 104.1/23.6, `nodes-*.js`
+230.4/56.9, the shared `glyphs-*.js` 31.6/8.7 — against the field guide's 43.8/10.5 plus 4.4 kB of
+script. What survives from the 5 kB argument is the *rule*, not the number: the page must import
+nothing from `src/nodes`, `src/core` or `src/ui` beyond the glyph table, and the check for that is
+the chunk list rather than a byte count.
+
+### "Open in a workflow": a link that names a node, not a graph
+
+Every entry carries a link that opens a real workflow with that node in it — in the detail pane as
+a button, and in the static index as a sentence. The graph is **built by the app on arrival**, from
+`src/wizard/demo.ts` — which is where it lives because that is what it is made of: the plans are
+a projection of `everyCombination`, the start is `resolveOption`, and the whole search is over
+the wizard's own answer space. The link carries a node type and a plan, and no payload at all.
+`useShareLink` reaches it through a dynamic `import()`, on the pattern `ui/export.ts` and
+`ZooGate` follow, so the builder and its two memos are a 2.2 kB chunk nobody who never opens a
+demo link pays for.
+
+**Three ways to do this, and the sizes decided it.** Packing each workflow into a `c1.` share
+fragment and putting *that* in the link was the obvious version and was measured first: 37 packed
+graphs came to 36.9 kB raw / **27.7 kB gzipped**, base64 being almost incompressible, and at all
+102 nodes roughly 100 kB / 75 kB. Most of it would have landed in the appendix — the half of this
+page a crawler and a language model actually read — as a thousand characters of noise between every
+paragraph and the next, about four times the section's gzipped weight. Inlining the graphs as
+*plain JSON* and packing in the browser was much better (81.3 kB raw but **6.6 kB gzipped**, since
+37 wizard graphs are nearly the same text) and still put a payload in a document whose point is
+prose. Naming the node instead costs **+15.0 kB raw / +1.55 kB gzipped** on `nodes.html` and
++8.0/+1.17 on `nodes-*.js`: 2.7 kB gzipped for 102 openable workflows.
+
+The link is also the only one of the three a reader can *read*:
+`#!demo://core.filterTable/mock.opticlobe/partners/table/0` — node, dataset, analysis, viewer, and
+which pass of the wiring search won. See [persistence.md](persistence.md) for the grammar and
+`src/wizard/demo.ts` for why the plan is in the link rather than derived on the click.
+
+**The synthetic dataset card carries a dismissable hint**, docked to it the way the wizard docks
+its three stage hints: *the data here is synthetic — swap this card for a real connectome and run
+the same chain against it*. It is on the demos and not on the wizard's own Demo Data workflows,
+because there the dataset was **asked for** — the dialog offered every connectome and this is the
+answer somebody gave — where a demo link hands synthetic data to somebody who clicked "Open in a
+workflow" on Filter Table. Dismissal is `localStorage` keyed on the hint's text (see
+[canvas.md](canvas.md)), so it is read once and then gone from all 102. A hint's box is its card's
+width and a dataset card is among the narrowest on the canvas, which is what set the length: the
+first draft wrapped to six lines under it.
+
+**A demo starts with a structured search, not the wizard's first answer.** That is `browse`
+wherever a source has a neuron index — an Explore card that opens with nothing ticked, which is
+right in the dialog and wrong here: the Paths demo opened on two empty cards, auto-run fired, and
+the first thing on screen was a red "No neuronIds in the incoming Sources table". A demo is looked
+at before it is touched, so it wants the start that produces rows on its own.
+
+**The search runs here, at build time.** `guideData()` calls `demoPlans()`, which is another
+~250 ms on top of the registry dump's own ~250 ms. That is not an optimisation: scoring a demo means
+running `inferGraph` over candidate graphs whose dataset nodes belong to every backend, and
+`inferOutputs` on a dataset node *peeks* — so doing it on a click fired project listings at two
+CATMAID servers and a datastack listing at CAVE, and opened a Connections dialog demanding a token
+over a workflow about filtering a table. Seen in a browser; jsdom reaches none of it.
+
+**The "Seen in" chips are chips, not links, and that is a repair.** They were `<a href="./index.html">`
+— every one of them, on every node — from the commit that added this page, when they named the four
+bundled example graphs the start page listed. The examples became wizard analyses, whose names appear
+on no surface in the app, and the link went on pointing at a page where the word it carried does not
+exist. `nodeGuide.test.ts` asserted the names were derived correctly and never that they resolved to
+anything, which is why nothing caught it.
 
 ### The static index at the foot of the page
 
@@ -218,6 +283,7 @@ crawler, and `SECTIONS`/`CAT_LABEL` moved to `src/nodeguide/sections.ts` so the 
 cannot disagree about which section a node is in. Cost: `dist/nodes.html` 5.4 kB → 87.8 kB raw,
 2.1 kB → 22.2 kB gzipped, with `nodes-*.js` unchanged — which is the number to re-check after any
 edit here, since importing `appendix.ts` from `main.ts` would land the whole registry in the page.
+(104.1 kB / 23.6 kB now, with a demo link per entry.)
 See [seo.md](seo.md).
 
 ### Smaller decisions, each of which was wrong first

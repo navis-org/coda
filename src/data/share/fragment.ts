@@ -14,8 +14,9 @@
  *   gh://<user>/<gistId>     a GitHub Gist
  *   gs://<bucket>/<path>     an object on Google Cloud Storage
  *   https://…                any JSON over https
+ *   demo://<type>[/plan]     a workflow built on the spot around that node
  *
- * Coda *writes* the second and third; it *reads* all five. The literal form is what keeps a
+ * Coda *writes* the second, third and sixth; it *reads* all six. The literal form is what keeps a
  * link hand-editable and lets the docs print one, which is worth the 2.8x it costs — measured
  * on the bundled examples at 4,282–4,786 characters against 1,540–2,004 packed.
  *
@@ -41,18 +42,67 @@ export const SHARE_PREFIX = '#!'
 const PACKED_TAG = 'c1.'
 
 /**
- * A link resolved as far as it can be without touching the network.
+ * The four forms that name somewhere to *get* a document, which is what `resolve.ts` handles.
  *
  * `json` and `packed` are separate members because only one of them is async: the literal form
  * is a graph already, where the packed one has to be inflated. Collapsing them would make the
  * cheap case await for nothing.
+ *
+ * Split from `ShareRef` so that the one form which is built rather than fetched cannot reach a
+ * function that fetches. Both of those functions used to carry a `case 'demo'` — one inventing a
+ * label nobody could see, one throwing a sentence no path reached — because the switch was
+ * exhaustive over a union that claimed every reference was resolvable. A type is the right place
+ * to say it is not.
  */
-export type ShareRef =
+export type FetchableRef =
   | { kind: 'json'; json: string }
   | { kind: 'packed'; blob: string }
   | { kind: 'gist'; owner?: string; id: string; revision?: string }
   | { kind: 'gcs'; bucket: string; path: string }
   | { kind: 'https'; url: string }
+
+/**
+ * The one form whose payload is not a document.
+ *
+ * See `wizard/demo.ts`. `useShareLink` answers it above `src/data`, because the builder reaches
+ * `src/wizard` and invariant 1 forbids that here — so this is deliberately not a `FetchableRef`,
+ * and a caller that hands one to `resolveShareRef` is a compile error rather than a thrown
+ * sentence nobody ever sees.
+ */
+export type BuiltRef = {
+  kind: 'demo'
+  type: string
+  plan?: DemoPlanRef
+}
+
+/** Everything a fragment can name — one to fetch, or the one to build. */
+export type ShareRef = FetchableRef | BuiltRef
+
+/**
+ * A demo workflow's plan, as it travels in a link: three wizard answers and the wiring rank.
+ *
+ * The node guide's "Open in a workflow" carries a node type and, optionally, this — about forty
+ * characters in all, where 102 packed graphs would have been 75 kB of base64 in a static page
+ * whose readable half is what a crawler and a language model get.
+ * `demo://out.heatmap/mock.opticlobe/matrix/heatmap` is something somebody can quote, retype,
+ * and read before clicking.
+ *
+ * The plan is a *fact about the guide's build*, not part of the address: without it the app
+ * searches for itself, which is what a hand-written `demo://core.filterTable` gets. With it,
+ * exactly one workflow is built — and that is what keeps a click from peeking at every backend
+ * (see `wizard/demo.ts`), so the guide always writes the long form.
+ *
+ * **Strings, not the wizard's own id types**, which live in `src/wizard` and `src/data` may not
+ * import (invariant 1). Declared once here and imported by the builder rather than restated
+ * there, so a fifth field is one edit. The builder narrows the names, and one it does not
+ * recognise is a link that opens nothing rather than one that opens something wrong.
+ */
+export interface DemoPlanRef {
+  dataset: string
+  analysis: string
+  view: string
+  rank?: number
+}
 
 /** A fragment that is not a link this build can read. Carries a sentence, never a code. */
 export class ShareLinkError extends Error {}
@@ -118,6 +168,8 @@ export function parseShareFragment(hash: string): ShareRef {
       return parseGcsRef(rest)
     case 'https':
       return { kind: 'https', url: payload }
+    case 'demo':
+      return parseDemoRef(rest)
     case undefined:
       throw new ShareLinkError(
         'This workflow link is in a format this build does not recognise — it may have been made by a newer version of Coda, or truncated on the way here.',
@@ -128,6 +180,38 @@ export function parseShareFragment(hash: string): ShareRef {
       throw new ShareLinkError(
         `Coda cannot open "${scheme}://" workflow links. Links can carry the workflow itself, or point at a gist (gh://), a storage object (gs://) or an https URL.`,
       )
+  }
+}
+
+/**
+ * `demo://<type>` or `demo://<type>/<dataset>/<analysis>/<view>[/<rank>]`.
+ *
+ * The grammar, not the list: `fragment.ts` is pure and knows nothing about which nodes or
+ * analyses exist, and a link naming something this build has retired should fail where every
+ * other unreadable link does — with a sentence from whoever *does* know, which is the app. What
+ * is refused here is anything that is not a node type at all, since that is the half a regex can
+ * settle.
+ *
+ * **A malformed plan is dropped, not refused.** The type is the address and the plan is an
+ * optimisation over it, so a link truncated after the node name, or one whose trailing segments
+ * were mangled, still opens the right node's workflow — the app searches instead. Refusing would
+ * turn a recoverable link into a dead one.
+ */
+function parseDemoRef(rest: string): ShareRef {
+  const [type = '', ...plan] = rest.replace(/\/+$/, '').split('/')
+  if (!/^[a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9]+)+$/.test(type)) {
+    throw new ShareLinkError(
+      `"${rest}" does not name a node. A demo link looks like demo://core.filterTable.`,
+    )
+  }
+  const [dataset, analysis, view, rank] = plan
+  if (!dataset || !analysis || !view) return { kind: 'demo', type }
+  const nth = rank === undefined ? undefined : Number(rank)
+  if (nth !== undefined && !Number.isInteger(nth)) return { kind: 'demo', type }
+  return {
+    kind: 'demo',
+    type,
+    plan: { dataset, analysis, view, ...(nth === undefined ? {} : { rank: nth }) },
   }
 }
 
@@ -182,6 +266,22 @@ export async function encodeShareFragment(graph: CodaGraph): Promise<string> {
     new CompressionStream('deflate-raw'),
   )
   return `${SHARE_PREFIX}${PACKED_TAG}${toBase64Url(packed)}`
+}
+
+/**
+ * The link that opens a workflow around this node type.
+ *
+ * One composer, because the fragment is written in a page that cannot import this module: the
+ * node guide is a separate vite entry and pulling `serializeGraph` in for a string concatenation
+ * would land `src/core` in a 5 kB document. `src/nodeguide/data.ts` runs at build time, where the
+ * import is free, and puts the finished href in the JSON the page reads. So the grammar has one
+ * writer and one reader, and they are in the same file.
+ */
+export function demoFragment(type: string, plan?: DemoPlanRef): string {
+  const tail = plan
+    ? `/${plan.dataset}/${plan.analysis}/${plan.view}${plan.rank === undefined ? '' : `/${plan.rank}`}`
+    : ''
+  return `${SHARE_PREFIX}demo://${type}${tail}`
 }
 
 /** Inflate a `c1.` payload back to graph JSON. */

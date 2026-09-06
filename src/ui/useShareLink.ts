@@ -15,6 +15,12 @@
  * the shared graph, which is the single worst thing this feature could do. The link is not the
  * store; the Share dialog regenerates it on demand.
  *
+ * **A `demo://` link is built, not fetched.** The node guide's "Open in a workflow" carries a
+ * node type and nothing else, and `wizard/demo.ts` assembles the graph on arrival — so that
+ * branch is answered here, above `src/data`, and never reaches `resolveShareRef`. Everything
+ * after that point is the ordinary path: serialised, deserialised leniently, opened in a
+ * document of its own.
+ *
  * **One confirmation, and it is about the network rather than the canvas.** *Shall I fetch from
  * this host?* is asked only for a bare `https://` link, whose destination the recipient cannot
  * see — `gh://` and `gs://` name a known host in the link itself, and neither asks.
@@ -29,9 +35,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { LoadResult } from '../core/graph'
-import { deserializeGraph } from '../core/graph'
+import { deserializeGraph, serializeGraph } from '../core/graph'
 import { errorMessage } from '../core/errors'
-import type { ShareRef } from '../data/share/fragment'
+import type { FetchableRef, ShareRef } from '../data/share/fragment'
 import { hasShareFragment, parseShareFragment } from '../data/share/fragment'
 import type { ShareTarget } from '../data/share/resolve'
 import { resolveShareRef, shareTarget } from '../data/share/resolve'
@@ -40,7 +46,7 @@ import { useGraphStore } from '../store/graphStore'
 export type ShareLoad =
   | { state: 'idle' }
   /** A bare https link, waiting on "fetch from this host?". */
-  | { state: 'confirm-fetch'; ref: ShareRef; target: ShareTarget }
+  | { state: 'confirm-fetch'; ref: FetchableRef; target: ShareTarget }
   | { state: 'loading'; target: ShareTarget }
   | { state: 'error'; message: string }
 
@@ -98,7 +104,7 @@ export function useShareLink(): ShareLinkState {
   )
 
   const fetchRef = useCallback(
-    (ref: ShareRef) => {
+    (ref: FetchableRef) => {
       setLoad({ state: 'loading', target: shareTarget(ref) })
       resolveShareRef(ref).then(receive, (err: unknown) => {
         clearFragment()
@@ -124,10 +130,47 @@ export function useShareLink(): ShareLinkState {
       return
     }
 
+    /*
+     * A demo reference is built here rather than fetched, because the builder reaches the wizard
+     * and `src/data` may not (invariant 1) — which is why `ShareRef` splits into `FetchableRef`
+     * and `BuiltRef`, and why `resolveShareRef` cannot be handed this one. Serialised straight
+     * back into `receive` so a demo takes exactly the path every other link takes: the same
+     * lenient load, the same warnings, its own document.
+     */
+    if (ref.kind === 'demo') {
+      /*
+       * Imported at the moment it is needed, on the pattern `ui/export.ts` and `ZooGate` follow:
+       * it drags in the wizard, the registry and the inference pass for a branch that fires only
+       * when somebody arrives on a `demo://` link. Defined inside the effect rather than in a
+       * `useCallback`, because this effect runs once per page load and its identity never
+       * matters — a deps array here would be one more thing to keep right for no reader.
+       */
+      void (async () => {
+        const { demoGraph } = await import('../wizard/demo')
+        const graph = demoGraph(ref.type, ref.plan)
+        if (!graph) {
+          /*
+           * The only way `demoGraph` answers nothing is a type this build does not have: a plan
+           * it cannot honour falls back to searching for the node rather than refusing, which is
+           * `parseDemoRef`'s rule one layer down. So this sentence is true, where a message
+           * covering every `undefined` it used to return was false in three cases out of four.
+           */
+          clearFragment()
+          setLoad({
+            state: 'error',
+            message: `This build has no node called "${ref.type}", so there is no workflow to open. It may have been renamed or retired since the link was made.`,
+          })
+          return
+        }
+        receive(serializeGraph(graph))
+      })()
+      return
+    }
+
     const target = shareTarget(ref)
     if (target.needsConfirm) setLoad({ state: 'confirm-fetch', ref, target })
     else fetchRef(ref)
-  }, [fetchRef])
+  }, [fetchRef, receive])
 
   /*
    * Read straight off `load` rather than through a functional updater. `accept` only ever runs

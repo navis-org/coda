@@ -18,31 +18,32 @@
 import { describe, expect, it } from 'vitest'
 
 import type { GraphNode } from '../core/graph'
-import { getNodeDef } from '../core/registry'
 import { registerBuiltinSources } from '../data/builtins'
 import { DEMO_DATASET, buildWorkflow } from '../wizard/build'
+import { demoGraph, demoPlans } from '../wizard/demo'
 import { everyCombination } from '../wizard/options'
 import '../nodes'
-import { NODE_BODIES } from '../ui/nodes/nodeBodies'
+import { cardWidth } from '../ui/nodes/nodeBodies'
 
-/** The default card width, from `.coda-node`'s `--node-width`. */
-const DEFAULT_NODE_WIDTH = 232
 /** Enough of a gap that two cards read as separate. Cosmetic; overlap is the real failure. */
 const MIN_GAP = 24
 
 /**
- * How wide this node draws.
+ * How wide this node draws — through `cardWidth`, which is what lays these graphs out.
  *
- * Both declarations, because a node can carry either: `defaultSize` sizes React Flow's wrapper
- * and a viewer's card fills one, while everything else that only wants to be wider sets
- * `NODE_BODIES[type].width`. Taking the larger covers both without needing to know which kind
- * this is.
+ * This was a local `Math.max` over `defaultSize` and `NODE_BODIES`, written before `cardWidth`
+ * existed; that helper's own header names this file as one of its three callers, and it was not
+ * one. The difference is load-bearing rather than cosmetic: `cardWidth` counts a third source
+ * this did not, a viewer that declares no width reaching `WIDE_CARD_WIDTH` the moment it has
+ * something to draw. So a viewer card measured 232 here and 360 in `wizard/demo.ts`'s `place`,
+ * and the demo graphs below were being checked with a different ruler from the one that placed
+ * them — the exact drift this file exists to catch.
+ *
+ * A node's own `size` still wins: that is a card somebody resized, and `resolveSize` reads it
+ * first for the same reason.
  */
 function widthOf(node: GraphNode): number {
-  if (node.size) return node.size.width
-  const declared = getNodeDef(node.type)?.defaultSize?.width ?? 0
-  const body = NODE_BODIES[node.type]?.width ?? DEFAULT_NODE_WIDTH
-  return Math.max(declared, body)
+  return node.size?.width ?? cardWidth(node.type)
 }
 
 /** Cards on the same band of canvas, near enough vertically that a horizontal clash would show. */
@@ -61,31 +62,36 @@ function sharesRow(a: GraphNode, b: GraphNode): boolean {
 // read at *collection* time, before any hook runs. `wizard.test.ts` records what goes wrong.
 registerBuiltinSources({ mockLatencyMs: 0 })
 
+/**
+ * Every pair of cards on one row that is closer than `MIN_GAP`, named with its numbers.
+ *
+ * Named rather than counted because the fix is a judgement — widen `COL_WIDTH`, move the node,
+ * or narrow the card — and the message should say which pair forced it.
+ */
+function clashesIn(nodes: readonly GraphNode[]): string[] {
+  const clashes: string[] = []
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i]!
+      const b = nodes[j]!
+      if (!sharesRow(a, b)) continue
+      const [left, right] = a.position.x <= b.position.x ? [a, b] : [b, a]
+      const gap = right.position.x - (left.position.x + widthOf(left))
+      if (gap < MIN_GAP) {
+        clashes.push(
+          `${left.type} (${widthOf(left)}px) → ${right.type}: ${Math.round(gap)}px gap`,
+        )
+      }
+    }
+  }
+  return clashes
+}
+
 describe('the generated graphs', () => {
   for (const answers of everyCombination(DEMO_DATASET)) {
     const name = `${answers.start}/${answers.analysis}/${answers.visualisations.join('+')}`
     it(`lays "${name}" out with no card on top of another`, () => {
-      const nodes = buildWorkflow(answers).nodes
-      const clashes: string[] = []
-
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const a = nodes[i]!
-          const b = nodes[j]!
-          if (!sharesRow(a, b)) continue
-          const [left, right] = a.position.x <= b.position.x ? [a, b] : [b, a]
-          const gap = right.position.x - (left.position.x + widthOf(left))
-          if (gap < MIN_GAP) {
-            // Named with the numbers, because the fix is a judgement — widen `COL_WIDTH`, move
-            // the node, or narrow the card — and the message should say which pair forced it.
-            clashes.push(
-              `${left.type} (${widthOf(left)}px) → ${right.type}: ${Math.round(gap)}px gap`,
-            )
-          }
-        }
-      }
-
-      expect(clashes).toEqual([])
+      expect(clashesIn(buildWorkflow(answers).nodes)).toEqual([])
     })
   }
 
@@ -104,21 +110,24 @@ describe('the generated graphs', () => {
       notes: true,
       dashboard: false,
     }).nodes
-    const clashes: string[] = []
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const a = nodes[i]!
-        const b = nodes[j]!
-        if (!sharesRow(a, b)) continue
-        const [left, right] = a.position.x <= b.position.x ? [a, b] : [b, a]
-        const gap = right.position.x - (left.position.x + widthOf(left))
-        if (gap < MIN_GAP) {
-          clashes.push(
-            `${left.type} (${widthOf(left)}px) → ${right.type}: ${Math.round(gap)}px gap`,
-          )
-        }
-      }
-    }
-    expect(clashes).toEqual([])
+    expect(clashesIn(nodes)).toEqual([])
   })
+})
+
+/*
+ * The node guide's demo workflows, which are the wizard's graphs with a node or three appended —
+ * so they inherit the layout above and then extend it, which is its own way to overlap.
+ *
+ * It did: `place` measured the right edge with `boundsOf`, and `layout/elkGraph`'s `resolveSize`
+ * cannot read `NODE_BODIES` (`src/layout` may not import `src/ui`), so an Explore card measured
+ * 232 where it draws 520 and the appended card landed on top of it — 53 pairs across the 102
+ * demos while the wizard's own graphs had none. `cardWidth` is the reader that sees all four
+ * width sources, and this is what says so.
+ */
+describe('the node guide demo workflows', () => {
+  for (const [type, plan] of demoPlans()) {
+    it(`lays the ${type} demo out with no card on top of another`, () => {
+      expect(clashesIn(demoGraph(type, plan)!.nodes)).toEqual([])
+    })
+  }
 })

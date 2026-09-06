@@ -202,6 +202,28 @@ Area-specific — the rule, then the doc that holds why:
   `insertFragment`) without the clipboard. A live text selection wins; a paste lands at a point the
   canvas supplies and **steps** on repeat. **Copy is live under the lock**; cut and paste are not.
   See [docs/canvas.md](docs/canvas.md).
+- **A link in a static page names a thing; it never carries one — and the search that resolves the
+  name runs at build time.** Every node guide entry opens a real workflow through
+  `#!demo://<type>/<dataset>/<analysis>/<view>/<rank>`, and `src/wizard/demo.ts` builds it on
+  arrival from the wizard's own graphs: 37 of 102 types are found *inside* a wizard workflow (asked
+  across every family, or `out.neuroglancer` demos its own refusal), the rest are appended to a port
+  already carrying a compatible value and given a viewer. Three findings. **Packing the graphs was
+  measured and rejected** — 27.7 kB gzipped at 37 nodes, ~75 kB at 102, nearly all of it landing as
+  base64 between the paragraphs of the appendix, which is the half a crawler and a language model
+  read; the name costs **2.7 kB gzipped** for all 102. **The plan is in the link because scoring
+  peeks**: candidates are ranked by `inferGraph`, and `inferOutputs` on a dataset node starts the
+  listing it cannot answer — so searching on the click fired requests at two CATMAID servers and
+  CAVE and put a "No CAVE token" dialog over a workflow about filtering a table. Seen in a browser;
+  jsdom reaches none of it and a Node probe counting inference issues sees nothing wrong. And
+  **wiring is scored, not reasoned about** — half these ports are `any`, which says nothing about
+  what the node wants, so a first-compatible rule wired Mirror to a neuron table and Download to a
+  Dataset; the viewer must be chosen from the node's *inferred* output, since every passthrough
+  declares `any`. Warnings are a ceiling in `demo.test.ts`, errors are zero. A demo also starts
+  with a **structured search** rather than the wizard's first answer, which is an Explore card
+  opening with nothing ticked — auto-run then painted a red "No neuronIds" card as the first thing
+  on screen — and the synthetic dataset carries a dismissable **hint** saying the card is
+  replaceable, which the wizard's own Demo Data workflows do not, that dataset having been asked
+  for. See [docs/pages.md](docs/pages.md) and [docs/persistence.md](docs/persistence.md).
 - **A hint is docked to a card and dismissing it is not an edit.** `NodeHint` is a field on
   `GraphNode`, not a document-level list, so duplicate, copy/paste, `subgraphOf` and delete carry it
   free. It draws as a **sibling of `.coda-node`** (which clips), so `bottom: 100%` / `top: 100%`
