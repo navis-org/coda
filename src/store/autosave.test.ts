@@ -42,6 +42,24 @@ function graphNamed(name: string, padding = ''): CodaGraph {
   }
 }
 
+/**
+ * A graph with a node that can actually run, so freshness is a question boot has to answer.
+ *
+ * `graphNamed`'s note is not one: an annotation is outside the dataflow and `refreshStates`
+ * deliberately gives it no state at all, so a boot that derived nothing would look identical.
+ * `dataset.mock.opticlobe` takes no inputs and infers clean without a source being registered.
+ */
+function graphWithWork(name: string): CodaGraph {
+  return {
+    version: 1,
+    nodes: [
+      { id: 'src', type: 'dataset.mock.opticlobe', position: { x: 0, y: 0 }, params: {} },
+    ],
+    edges: [],
+    meta: { name },
+  }
+}
+
 /** Become a particular tab, the way a browser does — by what is in `sessionStorage`. */
 function asTab(id: string): void {
   window.sessionStorage.setItem(TAB_KEY, id)
@@ -133,6 +151,36 @@ describe('autosave across tabs', () => {
     vi.resetModules()
     const { useGraphStore } = await import('./graphStore')
     expect(useGraphStore.getState().graph.meta?.name).toBe('workflow A')
+  })
+
+  /**
+   * A restored workflow has nothing cached, so every node in it is stale — and boot has to be the
+   * thing that says so.
+   *
+   * A `NodeRunState` is derived, never stored: `loadGraph` and `switchDocument` both end in a
+   * `refreshStates`, and boot did not, so a reloaded graph came up with every node `idle` — the
+   * one state `useStaleCount` does not count. That is a **disabled Run button on a workflow with
+   * no results**, beside a status bar reading "up to date".
+   *
+   * It was invisible on the canvas, which repairs it by accident: React Flow measures its cards
+   * on mount, `onNodesChange` commits those sizes, and any commit runs `afterGraphChange`. Open
+   * straight into the dashboard — which `DashboardLayout.open` does for a graph saved from it —
+   * and React Flow never mounts, so nothing ever asked. Hence the assertion is on the *store*
+   * rather than through a canvas, which is the one way to see it.
+   */
+  it('derives the restored graph’s freshness, so Run is offered on a workflow with no results', async () => {
+    asTab('a')
+    saveAutosave(graphWithWork('needs a run'))
+
+    vi.resetModules()
+    const { useGraphStore } = await import('./graphStore')
+    const state = useGraphStore.getState()
+
+    expect(state.graph.meta?.name).toBe('needs a run')
+    // The one node, and therefore the whole of what the toolbar counts. Asserted as the state
+    // rather than by re-spelling `useStaleCount`'s predicate here: a copy of it cannot fail when
+    // the real one moves, which is the only way this assertion could ever earn its place.
+    expect(state.nodeInfo('src').state).toBe('stale')
   })
 
   it('falls back to one shared slot where there is no sessionStorage', () => {

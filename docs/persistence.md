@@ -421,6 +421,49 @@ upgrade while the new one degrades — permanently in `cache.ts`, which memoises
 `dbPromise`, and as "this browser has no storage" in the three that reject. Cheap insurance to add
 before the schema moves.
 
+## What comes back is a graph, not a session — freshness has to be re-derived
+
+An autosave restores the *document*. It restores no results, because none are stored: the
+scheduler's cache is memory. So every node in a restored workflow is stale by definition, and the
+only thing that can say so is a `refreshStates` at boot.
+
+A `NodeRunState` is **derived, never stored** — `refreshStates` compares each cache entry's key
+against the one the graph now wants — which is why `loadGraph` and `switchDocument` both end in
+one. Boot did not. The store's initialiser set `graph` and `inference` from `initialGraph` and
+stopped there, so a reloaded workflow came up with every node `idle`: the one state
+`useStaleCount` does not count. What that looked like was a **disabled Run button on a workflow
+with no results**, beside a status bar reading *up to date*, and no way forward but Clear.
+
+**The canvas had been hiding it since before the dashboard existed.** React Flow measures its
+cards on mount, `onNodesChange` commits those sizes, and any commit runs `afterGraphChange`, whose
+last act is `refreshStates` — so the canvas repaired itself a frame or two into every reload and
+nobody ever saw the `idle`. Open straight into the grid, which `DashboardLayout.open` does for a
+graph saved from it, and React Flow never mounts, so nothing ever asked. The bug was general and
+the dashboard was only the surface without the accident.
+
+Two rules came out of fixing it.
+
+**Nothing in the store's initialiser may notify the host, and *where* the derive sits is what
+says so.** zustand assigns its state from what that function *returns*, so a `set` made while it
+is still running is handed `undefined` and then discarded by the return anyway — and
+`onStateChange` reads `s.graph`, so it does not merely go unheard, it throws. Found in a browser,
+not by types: the crash is inside zustand's `createStoreImpl`.
+
+The derive therefore sits in the window `createDoc`'s own note already carves out — after the
+record is minted and **before `activeDoc` names it**. Every one of those host callbacks opens with
+`if (activeDoc !== id) return`, and `activeDoc` is still `''` there (`loadActiveDocId` never
+answers with that), so the notification meets the guard the file already has and returns. A
+readiness flag was the first version and is the thing to keep out: it adds a second concept beside
+`activeDoc`, a clearing statement whose omission silently kills the only channel that updates
+badges for the life of the page, and a branch on the callback that fires thousands of times per
+loop. Nothing between the two points is an input to the derive — `initialGraph` is fixed earlier,
+`restoreSession` is `void`-ed and awaits before touching anything, and the `subscribe*` calls only
+register handlers.
+
+**Deriving is not running.** Boot says what is stale and stops. Starting queries against a shared
+server because somebody reloaded a tab is a different decision, and it belongs to auto-run on the
+next edit.
+
 ## What the budget actually is
 
 Restated here because the numbers were being quoted from a comment rather than measured, and the

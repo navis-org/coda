@@ -373,6 +373,21 @@ handing back an object, which is invariant 7 obeyed rather than bent: what the r
 fresh `{ done, total }` per call is an infinite render loop, and the test that stubs the store
 proves it — that stub had to be given one stable object before it would run at all.
 
+## The bug the grid found, which was never the grid's
+
+A workflow reloaded straight into the dashboard came up with its widgets empty — correct, nothing
+is cached across a reload — and its **Run button disabled**, as though there were nothing to run.
+Clear, or a trip to the canvas, was the only way out.
+
+Nothing about it was the dashboard's. Run states are derived rather than stored, boot never
+derived them, and the canvas had been covering that since long before this view existed: React
+Flow measures its cards on mount and the resulting commit runs `afterGraphChange`, which ends in
+`refreshStates`. The grid mounts no React Flow, so on the one route that opens without a canvas —
+`DashboardLayout.open`, this feature's own — nothing ever asked. The fix is in the store's boot
+path and the record is in [persistence.md](persistence.md); it is here because this is where it
+was seen, and because the general shape is worth keeping: **a second surface is how you find out
+which of your invariants were being maintained by the first one's side effects.**
+
 ## The two gestures
 
 Both are in `DashboardCellView`; the arithmetic is in `gridGeometry.ts`, headless, on

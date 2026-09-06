@@ -1809,6 +1809,37 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * has no session to restore anyway.
    */
   const rootDoc = createDoc(loadActiveDocId() ?? newId('doc'))
+  /*
+   * The boot graph's badges, derived before the first paint — and **before `activeDoc` names
+   * this document**, which is the whole of what makes it safe to do here.
+   *
+   * A `NodeRunState` is not stored and not computed by a constructor: it is *derived*, by
+   * comparing each cache entry's key against the one the graph now wants, which is why
+   * `loadGraph` and `switchDocument` both end in a `refreshStates`. Boot did not, so every node
+   * on a restored workflow started `idle` — the scheduler's cache is empty on a fresh page, but
+   * nothing had asked it, and `idle` is the one state `useStaleCount` does not count. What that
+   * looked like was a **Run button disabled on a workflow with nothing cached**, beside a status
+   * bar reading "up to date".
+   *
+   * It was the dashboard that made it visible rather than the dashboard's bug. The canvas has
+   * always been repairing it by accident within a frame or two: React Flow measures its cards on
+   * mount, `onNodesChange` commits those sizes, and any commit runs `afterGraphChange`, whose
+   * last act is this call. Open into the grid — which `DashboardLayout.open` does for a graph
+   * saved from it — and React Flow never mounts, so nothing ever asked.
+   *
+   * `refreshStates` ends by telling the host, and the host's `set` reads `s.graph`: zustand
+   * assigns its state from what this initialiser *returns*, so a `set` made now is handed
+   * `undefined` and throws. Sitting above the assignment two lines down means the notification
+   * meets `activeDoc !== id` — `activeDoc` is still `''`, and `loadActiveDocId` never answers
+   * with that — and returns, which is the guard every one of these callbacks already carries.
+   * Nothing is subscribed this early either way, so there is no audience to lose.
+   *
+   * Deliberately **not** a run: deriving says what is stale, and starting queries against a
+   * shared server because somebody reloaded a tab is a different decision, made by auto-run on
+   * the next edit.
+   */
+  const bootInference = inferGraph(initialGraph)
+  rootDoc.scheduler.refreshStates(initialGraph, bootInference)
   activeDoc = rootDoc.id
   saveActiveDocId(rootDoc.id)
   /*
@@ -1877,7 +1908,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
   return {
     graph: initialGraph,
-    inference: inferGraph(initialGraph),
+    inference: bootInference,
     selection: [],
     runVersion: 0,
     previewVersion: 0,
@@ -2878,7 +2909,21 @@ export function useSelectedNode(): GraphNode | undefined {
   })
 }
 
-/** Count of nodes waiting for a Run, for the toolbar badge. */
+/**
+ * Count of nodes waiting for a Run, for the toolbar badge.
+ *
+ * **`stale | blocked`, which is deliberately narrower than `needsRun`'s set** — that one adds
+ * `error` and `idle`, because a per-node Run button is a retry and a card that has never been
+ * evaluated is worth offering. This is a *count of work a full Run would do*, and neither of the
+ * extra two is that: an `error` node re-runs and fails again, and `idle` means nothing has asked,
+ * which on a graph anyone has looked at is only annotations.
+ *
+ * The divergence is worth knowing because it is what shaped a real bug rather than a hypothetical
+ * one. Boot used to derive no states at all, so a reloaded workflow sat at `idle` — and one screen
+ * then carried four answers to one question: this said nothing was stale and disabled Run, the
+ * palette's "Evaluate N" said there was work, the status bar said "up to date", and every card
+ * said "not evaluated". See the boot derive in `createStore`.
+ */
 export function useStaleCount(): number {
   return useGraphStore((s) => {
     void s.runVersion // subscribe to scheduler ticks

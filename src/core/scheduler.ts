@@ -503,9 +503,26 @@ export class Scheduler {
   refreshStates(graph: CodaGraph, inference?: InferenceResult): void {
     const inf = inference ?? inferGraph(graph)
     const { order, cyclic } = topoSort(graph)
-    const keys = this.desiredKeys(graph, inf, order)
     const nodes = nodesById(graph)
     const inbound = inboundIndex(graph)
+    /*
+     * Skipped outright on an empty cache, which is every boot and every refresh after
+     * `invalidateAll`. The keys have exactly one reader — the freshness test below, against a
+     * `cached` that cannot exist — so with nothing cached every one of them is computed and
+     * discarded unread. That is a `normalizeParams` and an FNV hash per node on the path to the
+     * first paint, and the case it matters in is not the average one: a stored Explore selection
+     * near `SELECT_ALL_WARN` serialises to a few hundred kB, whose `serialised` WeakMap is cold
+     * at boot, so one node can cost milliseconds before anything is on screen. Deferred rather
+     * than avoided — the first edit's `afterGraphChange` pays it, by which time it answers
+     * something.
+     *
+     * The indexes are handed over rather than rebuilt, which is what the parameter is for; the
+     * loop path already does this.
+     */
+    const keys =
+      this.cache.size === 0
+        ? new Map<string, string>()
+        : this.desiredKeys(graph, inf, order, { nodes, inbound })
     const fresh = new Set<string>()
 
     for (const nodeId of order) {

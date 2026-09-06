@@ -355,6 +355,25 @@ Area-specific — the rule, then the doc that holds why:
   four surfaces rendering a flow no path can reach. **`newGraph` stays the in-place reset**
   twenty-three suites use; `newWorkflow` mints a document.
   See [docs/ui-shell.md](docs/ui-shell.md).
+- **A run state is derived, and boot was the one path that never derived it.** `refreshStates`
+  compares each cache entry's key against the one the graph now wants, which is why `loadGraph`
+  and `switchDocument` both end in one; the store's initialiser did not, so a reloaded workflow
+  came up **all `idle`** — the one state `useStaleCount` ignores — i.e. a disabled Run button on a
+  graph with no results, beside a status bar saying *up to date*. **The canvas had been hiding it
+  by accident**: React Flow measures its cards on mount and that commit runs `afterGraphChange`,
+  whose last act is the refresh, so only a route that opens *without* a canvas could show it —
+  `DashboardLayout.open`. Two rules from the fix: **nothing in the store's initialiser may notify
+  the host** (zustand assigns state from what the initialiser *returns*, so a `set` there is handed
+  `undefined` and `onStateChange` throws on `s.graph`) — which is answered by *position* rather
+  than a readiness flag, the derive sitting after `createDoc` and **before `activeDoc` names it**,
+  where the `activeDoc !== id` guard every host callback already carries does the work; and
+  **deriving is not running**, since starting queries at a shared server because somebody reloaded
+  a tab belongs to auto-run on the next edit. `refreshStates` also **skips its key pass on an empty
+  cache**: the keys have one reader, a freshness test against a `cached` that cannot exist, so at
+  boot every one is hashed and discarded — milliseconds before first paint for a stored Explore
+  selection near `SELECT_ALL_WARN`, whose `serialised` WeakMap is cold. The general shape is
+  worth keeping: a second surface is how you find out which invariants the first one's side effects
+  were quietly maintaining. See [docs/persistence.md](docs/persistence.md).
 - **The open set survives a reload in two stores, and the split is about *when* the answer is
   needed.** The active document stays in the `localStorage` slot, because `loadAutosave` is read
   synchronously in the store's initialiser and `initialGraph` decides the first paint — an IndexedDB
