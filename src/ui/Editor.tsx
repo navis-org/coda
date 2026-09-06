@@ -1005,6 +1005,23 @@ function EditorCanvas() {
         void useGraphStore.getState().runAll()
         return
       }
+      /*
+       * ⌘A selects every card, the ones a folded group is hiding included: "all" is a claim
+       * about the document, and a ⌫ straight after it that quietly spared the folded members
+       * would be the worst kind of wrong. React Flow is told the truth about them — `rfNodes`
+       * sets `selected` on a hidden card — so a click on the pane still clears them, and the
+       * only thing that stands down is the multi-selection rectangle (see `foldedSelection`).
+       *
+       * Not refused by the lock, on Copy's reasoning: selecting takes nothing away. And
+       * `preventDefault` unconditionally, because the browser's ⌘A selects the whole page —
+       * every panel around the canvas with it — which is never what was meant here.
+       */
+      if (mod && event.key.toLowerCase() === 'a') {
+        event.preventDefault()
+        const store = useGraphStore.getState()
+        store.setSelection(store.graph.nodes.map((node) => node.id))
+        return
+      }
       if (mod && event.key.toLowerCase() === 'z') {
         event.preventDefault()
         if (refuseIfLocked()) return

@@ -224,6 +224,31 @@ describe('the keys the card advertises', () => {
     )
   })
 
+  /*
+   * ⌘A, and the half of it that is a claim rather than a convenience: a card inside a folded
+   * group is still in the graph, so "select every node" has to reach it. The obvious
+   * implementation — the ids React Flow is currently drawing — passes an unfolded canvas and
+   * quietly spares the folded members from the very next ⌫.
+   */
+  it('selects every node, the ones a folded group is hiding included', () => {
+    render(<App />)
+    const ids = useGraphStore.getState().graph.nodes.map((n) => n.id)
+    const folded = ids.slice(0, 2)
+    act(() => {
+      const store = useGraphStore.getState()
+      store.setSelection(folded)
+      const group = store.groupSelection()
+      if (group) useGraphStore.getState().toggleGroupCollapsed(group)
+      useGraphStore.getState().setSelection([])
+    })
+    // Or the folded half of the claim is never exercised and the test passes for free.
+    expect(useGraphStore.getState().graph.groups?.[0]?.collapsed).toBe(true)
+
+    act(() => press('select-all'))
+    expect([...useGraphStore.getState().selection].sort()).toEqual([...ids].sort())
+    for (const id of folded) expect(useGraphStore.getState().selection).toContain(id)
+  })
+
   /**
    * The three rows `press` cannot reach, and why they get a route of their own.
    *

@@ -280,6 +280,16 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       perform: () => store.redo(),
     },
     {
+      id: 'cmd:select-all',
+      label: 'Select All Nodes',
+      action: 'Edit',
+      hint: 'Cards inside a folded group too — they are still in the graph',
+      shortcut: shortcutKeys('select-all'),
+      // Not disabled by the lock, for the same reason Copy is not: selecting takes nothing away.
+      disabled: store.graph.nodes.length === 0,
+      perform: () => store.setSelection(store.graph.nodes.map((node) => node.id)),
+    },
+    {
       id: 'cmd:duplicate',
       label: 'Duplicate Selection',
       action: 'Edit',

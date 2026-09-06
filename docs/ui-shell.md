@@ -793,6 +793,17 @@ lives in the label instead, and `overflow-wrap: anywhere` on the `kbd` is the ba
 performs no layout, so the suite was green throughout; this was found in a browser and is only
 findable there.
 
+**`⌘A` selects every node in the *document*, not every card on screen.** The obvious
+implementation is the ids React Flow is drawing, and it passes on an unfolded canvas: a card
+inside a folded group is `hidden: true` rather than absent from the list, and the very next `⌫`
+would then quietly spare exactly the nodes the user had just been told were selected. So the
+binding reads `graph.nodes`. Nothing else was needed for the folded case, because the canvas
+already keeps React Flow's `selected` flags honest for hidden cards — a click on the pane still
+clears them, and the multi-selection rectangle that would otherwise be drawn across vacated
+canvas stands down through `foldedSelection`. The lock does not refuse it, on Copy's reasoning:
+selecting takes nothing away. `preventDefault` is unconditional, since the browser's own `⌘A`
+would select the whole page, panels included.
+
 **`⌘S` is deliberately absent.** `Editor.tsx` swallows it and shows "Use the Save button",
 which is a refusal rather than a shortcut. A row for it would be the card teaching a key that
 does nothing.

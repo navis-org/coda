@@ -165,10 +165,16 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   },
   {
     title: 'Editing',
-    note: 'These are the ones the canvas lock refuses; the rest carry on while it is on. Copy is the exception here — it takes nothing away.',
+    note: 'These are the ones the canvas lock refuses; the rest carry on while it is on. Select All and Copy are the exceptions here — neither takes anything away.',
     items: [
       { id: 'undo', chords: [{ mod: true, key: 'Z' }], label: 'Undo', short: 'undo' },
       { id: 'redo', chords: [{ mod: true, shift: true, key: 'Z' }], label: 'Redo' },
+      {
+        id: 'select-all',
+        chords: [{ mod: true, key: 'A' }],
+        label: 'Select every node',
+        hint: 'Cards inside a folded group too — they are still in the graph',
+      },
       {
         id: 'duplicate',
         chords: [{ mod: true, key: 'D' }],
