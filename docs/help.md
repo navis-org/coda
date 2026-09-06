@@ -48,6 +48,58 @@ node's `guide` and move the detail into the file — NBLAST's was 830 characters
 other node's document *in the same overlay*, with a Back button. The target must itself have a
 document — a cross-reference that opens an empty page is a broken link, and the test says so.
 
+## "See also"
+
+A Python docstring's See Also section, at the foot of the document: a **table of Node and
+Description**, the way numpydoc renders one. A name on its own asks the reader to already know
+what Partner Vectors is, which is the thing they came here not knowing. The name cell navigates
+**in place** through the same `onNavigate` a cross-reference uses, so Back works across them and
+the reader keeps the trail they arrived on — only the name, because a whole clickable row puts a
+target under a sentence somebody is trying to select.
+
+**The second column is the registry's own `description`**, the same sentence the palette and the
+node browser show, so nothing is written twice and a node that rewords itself rewords this too. It
+goes through `parseInline` rather than being printed as text: descriptions are written for the
+palette and several name a column in backticks — Group By's says the aggregate is renamed
+`<agg>_<column>` — which as text is a sentence with punctuation in it that is not punctuation. The
+same reason a callout's title takes the same parser, and it is why `MarkdownInlines` is exported
+from `MarkdownView` rather than being the private `Inlines` it was.
+
+The table is `.markdown__table`, the class a document's own pipe tables use, so a See Also and a
+table three paragraphs above it cannot disagree about what a table looks like. That class gained a
+`text-align: left` on `th`, which changes nothing for a pipe table — `MarkdownView` sets an inline
+alignment per column and an inline style wins — and stops a hand-built one centring its headers
+over left-aligned cells.
+
+**The relation is a table (`src/help/seeAlso.ts`), not the cross-references the documents already
+carry**, and the measurement is why. Across the 64 documents: **105 links, 74 distinct pairs, of
+which 12 mutual and 62 one-way**, with 13 documents in no pair at all. Both halves of that argue
+against mirroring the prose. The one-way links are one-way because a document explains its own
+node — Find Neurons' document links nothing while four documents link *to* it, so the hub nodes,
+the ones most worth arriving at, were exactly the ones a reader could not leave. And the pairs
+prose never states are the ones a reader most wants: Mirror and Transform, the two CATMAID
+datasets, the three ways of choosing neurons. No document has a reason to mention its own sibling.
+
+So it is editorial, on the line `guide` and `coda-params` already draw: the registry knows what a
+node *is*, and a person knows which other one you actually wanted. A See Also derived from a
+shared category or socket type would relate every viewer to every other, since they all take a
+table and almost none are alternatives.
+
+**Groups, not pairs.** A group means every member is worth reading next to every other, so a set of
+four is one line rather than six — five of which somebody would forget, which is how the relation
+comes to be asymmetric in the first place. Mirroring is by construction; `seeAlso.test.ts` asserts
+symmetry, that every entry has a document to open, and that **no documented node is a dead end**,
+which is the coverage claim the feature exists for.
+
+A group may name a node whose document has not been written yet — it is dropped rather than being
+an error, so writing a document does not mean remembering to come back here. What it may not name
+is a type the registry has never heard of, which is a typo rather than a plan.
+
+One thing this changed in the suite: the cross-reference tests now scope their lookups to
+`.help-doc__body`, because See Also offers the same node labels as buttons. That is deliberate —
+they do the same thing — and the scoping makes those tests say what they always meant, which is *a
+link inside a sentence*.
+
 ## "Open in a workflow"
 
 The header carries the same button the node guide's entries do, and it is the one thing in that

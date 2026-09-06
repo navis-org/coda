@@ -6279,6 +6279,13 @@ p.sources__hint {
   font-weight: 600;
   border-bottom-color: var(--border-strong);
   white-space: nowrap;
+  /*
+   * A `th` centres by default, and every cell under it here is left-aligned. `MarkdownView` sets
+   * an inline `text-align` per column so a pipe table saying `---:` still gets its right, and an
+   * inline style wins — so this only decides for a table built by hand against the same class,
+   * which is what the See Also section is.
+   */
+  text-align: left;
 }
 
 .markdown__figure {
@@ -8846,6 +8853,62 @@ details[open] > summary.tile__label {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   vertical-align: 1px;
+}
+
+/*
+ * "See also", at the foot of a document.
+ *
+ * A rule above it rather than a card around it: it is the end of the reading, not a panel beside
+ * it, and the same hairline the lede uses at the top closes the pair.
+ *
+ * The table itself is `.markdown__table`, the one a document's own pipe tables use, so a See Also
+ * and a table three paragraphs above it cannot disagree about what a table looks like. `70ch` is
+ * the measure every body paragraph takes; a two-column table across the full 988px panel puts its
+ * descriptions an inch from the names they belong to.
+ */
+.help-see {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  max-width: 70ch;
+}
+.help-see__title {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/*
+ * The name column is sized to its content and the description takes the rest, which is what a
+ * `width: 1%` on a `white-space: nowrap` cell means in a `width: 100%` table — the table's own
+ * rule, not a magic number. Without it the two columns split evenly and every label sits alone in
+ * half a panel.
+ */
+.help-see__table td:first-child {
+  width: 1%;
+  white-space: nowrap;
+}
+/*
+ * A button that reads as a link, because it is one: it navigates, and the cross-references in the
+ * prose above it are the same gesture drawn the same way. Not `.btn` — a column of bordered
+ * buttons is a toolbar, and this is a table of names.
+ */
+.help-see__item {
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.help-see__item:hover {
+  text-decoration: underline;
+}
+.help-see__desc {
+  color: var(--text-secondary);
 }
 
 .help-doc__status {

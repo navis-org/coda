@@ -98,14 +98,14 @@ function Block({ block, options }: { block: MarkdownBlock; options?: MarkdownRen
       const Tag = (['h3', 'h4', 'h5'] as const)[block.level - 1] ?? 'h5'
       return (
         <Tag className="markdown__heading" data-level={block.level}>
-          <Inlines nodes={block.children} options={options} />
+          <MarkdownInlines nodes={block.children} options={options} />
         </Tag>
       )
     }
     case 'paragraph':
       return (
         <p className="markdown__p">
-          <Inlines nodes={block.children} options={options} />
+          <MarkdownInlines nodes={block.children} options={options} />
         </p>
       )
     case 'list':
@@ -130,7 +130,7 @@ function Block({ block, options }: { block: MarkdownBlock; options?: MarkdownRen
            * tests that read it.
            */}
           <div className="markdown__callout-title">
-            <Inlines nodes={parseInline(block.title ?? '')} options={options} />
+            <MarkdownInlines nodes={parseInline(block.title ?? '')} options={options} />
           </div>
           <MarkdownBlocks
             blocks={block.blocks}
@@ -168,7 +168,7 @@ function Table({ table, options }: { table: MarkdownTable; options?: MarkdownRen
           <tr>
             {table.head.map((cell, i) => (
               <th key={i} style={{ textAlign: table.align[i] ?? 'left' }}>
-                <Inlines nodes={cell} options={options} />
+                <MarkdownInlines nodes={cell} options={options} />
               </th>
             ))}
           </tr>
@@ -178,7 +178,7 @@ function Table({ table, options }: { table: MarkdownTable; options?: MarkdownRen
             <tr key={i}>
               {row.map((cell, j) => (
                 <td key={j} style={{ textAlign: table.align[j] ?? 'left' }}>
-                  <Inlines nodes={cell} options={options} />
+                  <MarkdownInlines nodes={cell} options={options} />
                 </td>
               ))}
             </tr>
@@ -195,7 +195,7 @@ function List({ list, options }: { list: MarkdownList; options?: MarkdownRenderO
     <Tag className="markdown__list">
       {list.items.map((item, i) => (
         <li key={i} className="markdown__item">
-          <Inlines nodes={item.children} options={options} />
+          <MarkdownInlines nodes={item.children} options={options} />
           {item.list && <List list={item.list} options={options} />}
         </li>
       ))}
@@ -203,7 +203,15 @@ function List({ list, options }: { list: MarkdownList; options?: MarkdownRenderO
   )
 }
 
-function Inlines({
+/**
+ * A run of inline nodes. Exported because two callers outside a document body want it.
+ *
+ * A callout's title goes through it (see the note at that call site) and so does the See Also
+ * table's description column, for the same reason in both: a `description` written in the
+ * registry names columns and settings in backticks, and printed as text those are three literal
+ * characters. `parseInline` is `markdown.ts`'s, so nothing here decides what the subset is.
+ */
+export function MarkdownInlines({
   nodes,
   options,
 }: {
@@ -225,13 +233,13 @@ function Inlines({
           case 'strong':
             return (
               <strong key={i}>
-                <Inlines nodes={node.children} options={options} />
+                <MarkdownInlines nodes={node.children} options={options} />
               </strong>
             )
           case 'em':
             return (
               <em key={i}>
-                <Inlines nodes={node.children} options={options} />
+                <MarkdownInlines nodes={node.children} options={options} />
               </em>
             )
           case 'link': {
@@ -247,7 +255,7 @@ function Inlines({
               if (!navigate) {
                 return (
                   <span key={i}>
-                    <Inlines nodes={node.children} options={options} />
+                    <MarkdownInlines nodes={node.children} options={options} />
                   </span>
                 )
               }
@@ -258,7 +266,7 @@ function Inlines({
                   className="markdown__link markdown__link--internal"
                   onClick={() => navigate(target)}
                 >
-                  <Inlines nodes={node.children} options={options} />
+                  <MarkdownInlines nodes={node.children} options={options} />
                 </button>
               )
             }
@@ -271,7 +279,7 @@ function Inlines({
                 rel="noopener noreferrer"
                 title={node.href}
               >
-                <Inlines nodes={node.children} options={options} />
+                <MarkdownInlines nodes={node.children} options={options} />
               </a>
             )
           }

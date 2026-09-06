@@ -25,9 +25,11 @@ import { getNodeDef } from '../../core/registry'
 import { buildFigure, isFigureLang } from '../../help/figures'
 import type { HelpDoc } from '../../help/registry'
 import { helpImageUrl, loadHelpDoc } from '../../help/registry'
+import { seeAlsoFor } from '../../help/seeAlso'
 import { useGraphStore } from '../../store/graphStore'
-import { MarkdownBlocks } from '../MarkdownView'
+import { MarkdownBlocks, MarkdownInlines } from '../MarkdownView'
 import type { MarkdownRenderOptions } from '../MarkdownView'
+import { parseInline } from '../markdown'
 import { FigureView } from './FigureView'
 
 const NODE_GUIDE_URL = `${import.meta.env.BASE_URL}nodes.html`
@@ -201,6 +203,78 @@ function OpenInWorkflow({ type, onOpened }: { type: string; onOpened: () => void
   )
 }
 
+/**
+ * The docstring convention, at the foot of the document where a reader who has finished is.
+ *
+ * The relation is `help/seeAlso.ts` — editorial, symmetric, and deliberately not the prose
+ * cross-references, which are one-way and say why in the sentence around them. What it answers is
+ * the question the sentences have stopped answering: *what is the other one of these*.
+ *
+ * **A table, the way numpydoc renders one**, rather than a row of chips: a name on its own asks
+ * the reader to already know what Partner Vectors is, which is the thing they came here not
+ * knowing. The second column is the registry's own `description` — the same sentence the palette
+ * and the node browser show, so nothing is written twice and a node that rewords itself rewords
+ * this too.
+ *
+ * That description is **inline markdown**, not text. They are written for the palette and several
+ * name a column or a setting in backticks — Group By's says the aggregate is renamed
+ * `<agg>_<column>` — which printed as text is a sentence with punctuation in it that is not
+ * punctuation. Same reason a callout's title goes through the same parser, one component up.
+ *
+ * The name cell is the button, and it navigates **in place** through the same `onNavigate` a
+ * cross-reference uses, so Back works across them and the reader keeps the trail they arrived on.
+ * Only the name: a whole clickable row puts a click target under a sentence somebody is trying to
+ * select, and the sentence is the half they are reading.
+ *
+ * Rendered only once the document is `ready`. Under "Loading…" it would be a table of links to
+ * nowhere in particular, and under the no-document message it would be the only thing on screen.
+ */
+function SeeAlso({ type, onNavigate }: { type: string; onNavigate: (type: string) => void }) {
+  const related = useMemo(
+    () =>
+      seeAlsoFor(type, (other) => getNodeDef(other)?.label ?? other).map((other) => ({
+        type: other,
+        label: getNodeDef(other)?.label ?? other,
+        description: parseInline(getNodeDef(other)?.description ?? ''),
+      })),
+    [type],
+  )
+  if (!related.length) return null
+  return (
+    <section className="help-see">
+      <h2 className="help-see__title">See also</h2>
+      <div className="markdown__table-scroll">
+        <table className="markdown__table help-see__table">
+          <thead>
+            <tr>
+              <th scope="col">Node</th>
+              <th scope="col">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {related.map((entry) => (
+              <tr key={entry.type}>
+                <td>
+                  <button
+                    type="button"
+                    className="help-see__item"
+                    onClick={() => onNavigate(entry.type)}
+                  >
+                    {entry.label}
+                  </button>
+                </td>
+                <td className="help-see__desc">
+                  <MarkdownInlines nodes={entry.description} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 function HelpBody({ type, onNavigate }: { type: string; onNavigate: (type: string) => void }) {
   const [doc, setDoc] = useState<HelpDoc | undefined>(undefined)
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading')
@@ -272,6 +346,7 @@ function HelpBody({ type, onNavigate }: { type: string; onNavigate: (type: strin
         {doc && (
           <MarkdownBlocks blocks={doc.blocks} className="help-doc__body" options={options} />
         )}
+        {state === 'ready' && <SeeAlso type={type} onNavigate={onNavigate} />}
       </article>
     </div>
   )

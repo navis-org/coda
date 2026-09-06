@@ -50,6 +50,18 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
+/**
+ * The document's own prose, which is where a *cross-reference* lives.
+ *
+ * Scoped rather than searched dialog-wide because "See also" at the foot offers the same node
+ * labels as buttons — deliberately, they do the same thing — so `getByRole('button', {name:
+ * /Linkage/})` over the whole dialog is ambiguous. The distinction the cross-reference tests are
+ * making is *a link inside a sentence*, and this says so.
+ */
+function prose(dialog: HTMLElement): HTMLElement {
+  return dialog.querySelector('.help-doc__body') as HTMLElement
+}
+
 /** Open the overlay on a type and wait for its document to have loaded. */
 async function openHelp(type: string) {
   render(<App />)
@@ -174,9 +186,7 @@ describe('the help overlay', () => {
   it('follows a cross-reference in place, and comes back', async () => {
     const dialog = await openHelp('neuron.nblast')
     // The document links to the clustering node as the standard follow-on.
-    const link = within(dialog).getByRole('button', {
-      name: /Linkage/i,
-    })
+    const link = within(prose(dialog)).getByRole('button', { name: /Linkage/i })
     act(() => {
       link.click()
     })
@@ -255,7 +265,7 @@ describe('opening a workflow from the overlay', () => {
     })
     const dialog = await openHelp('neuron.nblast')
     act(() => {
-      within(dialog)
+      within(prose(dialog))
         .getByRole('button', { name: /Linkage/i })
         .click()
     })
@@ -281,5 +291,53 @@ describe('opening a workflow from the overlay', () => {
         type,
       ).not.toBeNull()
     }
+  })
+})
+
+/**
+ * "See also" at the foot of a document — the relation is `help/seeAlso.test.ts`'s to check; what
+ * belongs here is that it reaches the reader and behaves like the cross-references beside it.
+ */
+describe('see also', () => {
+  it('lists related nodes with the registry’s own description, and navigates in place', async () => {
+    const dialog = await openHelp('neuron.findNeurons')
+    const see = within(dialog).getByRole('heading', { name: 'See also' }).parentElement!
+
+    // A table, the way a docstring renders one: a name is not enough for a reader who came here
+    // not knowing what the node is.
+    expect(within(see).getByRole('columnheader', { name: 'Node' })).toBeTruthy()
+    expect(within(see).getByRole('columnheader', { name: 'Description' })).toBeTruthy()
+
+    // The second column is the registry's, not a second sentence written here — the same one the
+    // palette shows, so a node that rewords itself rewords this.
+    const row = within(see).getByRole('button', { name: 'Explore Dataset' }).closest('tr')!
+    expect(row.textContent).toContain(requireNodeDef('neuron.explore').description)
+
+    // The pair the feature was asked for, and by the name the app calls it.
+    const explore = within(see).getByRole('button', { name: 'Explore Dataset' })
+    act(() => {
+      explore.click()
+    })
+
+    // In place, through the same trail a cross-reference uses — so Back is now available and the
+    // store still holds where the reader came in.
+    await waitFor(() =>
+      expect(dialog.querySelector('.overlay__title')?.textContent).toContain('Explore Dataset'),
+    )
+    expect(useGraphStore.getState().helpType).toBe('neuron.findNeurons')
+    expect(within(dialog).getByRole('button', { name: /back/i })).toBeTruthy()
+  })
+
+  /* It is the end of the reading, so it must not appear before there is any — under "Loading…"
+     it would be a row of links to nowhere, and on an undocumented node it would be the only
+     thing on screen. */
+  it('says nothing for a node with no document', async () => {
+    render(<App />)
+    act(() => {
+      useGraphStore.getState().openHelp('core.sort')
+    })
+    const dialog = await screen.findByRole('dialog', { name: /help/i })
+    await waitFor(() => expect(within(dialog).queryByText('Loading…')).toBeNull())
+    expect(within(dialog).queryByRole('heading', { name: 'See also' })).toBeNull()
   })
 })

@@ -166,6 +166,17 @@ Cross-cutting — these bite in code that is not obviously "about" the area:
 
 Area-specific — the rule, then the doc that holds why:
 
+- **A node's "See also" is a table, because the cross-references it looks derivable from are
+  one-way.** Measured across the 64 help documents: 105 prose links, 74 distinct pairs, **12 mutual
+  and 62 one-way**, 13 documents in no pair at all — a document explains its own node, so the hub
+  nodes everything links *to* were exactly the ones with no way onward, and no document mentions
+  its own sibling (Mirror and Transform, the two CATMAID datasets, the three ways to choose
+  neurons). `src/help/seeAlso.ts` states it once as **groups**, every member related to every
+  other, so a set of four is one line rather than six pairs of which five get forgotten — which is
+  how a relation becomes asymmetric. Editorial on the line `guide` and `coda-params` draw: a
+  relation derived from a shared category or socket type relates every viewer to every other.
+  `seeAlso.test.ts` pins symmetry, that every entry has a document to open, and that **no
+  documented node is a dead end**. See [docs/help.md](docs/help.md).
 - **A node's glyph is one drawing per type, and the table is data because a third surface has no
   React.** `ui/glyphs.ts`: 101 drawings on eleven base shapes — the base shape names the material,
   the drawing on top names the operation. Four marks are shared and load-bearing (funnel =
