@@ -37,6 +37,7 @@ import { getNodeDef } from '../../core/registry'
 import { useGraphStore } from '../../store/graphStore'
 import { useDismissOnOutside } from '../useDismiss'
 import { DashboardCellView } from './DashboardCellView'
+import { RunProgressBar } from './RunProgressBar'
 import { dropIndex, rowHeight } from './gridGeometry'
 
 /** What the pointer is currently over, mid-drag. */
@@ -268,6 +269,16 @@ export function DashboardView() {
         >
           ← Canvas
         </button>
+
+        {/*
+         * The run indication this view otherwise has none of — a cell draws values, not badges,
+         * so a run under a wall of viewers is invisible until they change. Last child of the bar
+         * and absolutely positioned over its bottom border, which is both where "between the
+         * header and the cards" is and the only place it costs no layout: `--dash-row` is
+         * measured from the grid's content box, so a bar taking a row's worth of height would
+         * resize every cell twice per run. See `RunProgressBar`.
+         */}
+        <RunProgressBar />
       </div>
 
       {!hasCells ? (

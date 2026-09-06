@@ -235,6 +235,144 @@ The regression test is in `dashboard.test.tsx`, and its shape is the point — e
 that file runs first and enters the grid second, which is the one order that cannot see this. It
 loads a wizard graph with `dashboard: true`, renders, and runs *underneath* the mounted grid.
 
+## The run bar
+
+The grid is the one surface with no run indication of its own. A card on the canvas wears
+`NodeRunRing` and a `For Each` its own bar; a cell draws *values*, not badges — so a run under a
+wall of viewers was a wall of viewers that sat there and then changed. `RunProgressBar` is the
+missing half, and it borrows the ring's two channels rather than inventing a third vocabulary:
+**that** it is running, and **how far**.
+
+**The denominator is the run's scope, and only the Scheduler knows it.** A surface counting stale
+nodes would be counting the wrong set: `resolveScope` takes the targets plus their ancestors —
+plus any loop region, pulled in whole — so a cell's `▸` on a four-node graph covers three of them,
+and a bar over the graph would stop at 75% with nothing wrong. So `Scheduler.runProgress()` is
+where the number comes from, `RunProgress` is what it means, and a step is a node in scope counted
+once each.
+
+Three properties, each of which the obvious version gets wrong:
+
+- **A loop is not one step.** Counted at its trigger, a four-hundred-element loop over a ten-node
+  region leaves the whole graph's progress sitting still for the length of the run and then
+  jumping to the end, which is what a hung app looks like. `countLoopPass` publishes the region's
+  share as a fraction that grows per pass; `countSettled` replaces it with the whole region when
+  the loop finishes. The hand-over is monotonic by construction, since a share is at most
+  `region × (count − 1) / count`. Nesting needs no counter: `runNodes` already carries an
+  `iteration`, handed to it by a loop's passes and by nothing else, so "inside a pass" — which is
+  both "do not count these nodes again" and "this loop is not the outermost" — is a value already
+  in scope. A depth field would need a `try`/`finally` and a wrapper function to stay balanced
+  across the nine places the loop driver returns from.
+- **A node that failed is as far behind you as one that succeeded.** Counting only successes
+  leaves the bar short of its own end on exactly the runs somebody is watching most closely.
+- **A node that was already fresh is done when the walk reaches it.** Re-running a cached graph
+  fills the bar at once, which is the true answer: there was nothing to do.
+- **A step is not the smallest unit — the node currently running contributes a fraction of one.**
+  Whole nodes alone leave the run that most looks like a hang, one slow fetch, as the one the bar
+  says nothing about. `ctx.progress` is already reported by every node whose work is worth watching
+  (NBLAST, the centrality sweep, `Match Cell Types`, Topology), and `countRunning` weighs that same
+  number — the one the card's own ring draws — against the rest of the graph. Three rules come with
+  it. It is **raised, never lowered** within a node, since nothing obliges a node to report
+  monotonically and one starting a second phase at 0.2 having reached 0.8 would walk the bar
+  backwards; the hand-over is safe because the share is at most 1 and `countSettled` replaces it
+  with exactly 1. It applies to the **top-level node only** — inside a loop the region's share
+  already speaks for the body, and the begin node's own `progress` *is* that share, so folding
+  either counts one thing twice (the guard is `iteration`, the same value `countSettled` reads, and
+  the test that pins it fails the moment it is removed). And it **publishes without announcing**,
+  because `ctx.progress` calls the host itself a statement later.
+
+The counters ride `RunPass` beside `summary`, `controller` and `generation`, so a superseded run
+unwinding after a newer one started cannot reach the newer one's tally at all. Only the published
+snapshot is instance state, because `runProgress()` is read from outside a run.
+
+**The ordinary walk announced nothing, and the fix needed a channel of its own.** Found while
+wiring this up, and it is a fact about the Scheduler rather than about the dashboard: `executeNode`
+never called `onStateChange`, so between a run's start and its end the host heard only
+`ctx.progress`, `ctx.warn` and each loop pass — the store's own comment there says "this fires on
+every node state transition", which it did not.
+
+Announcing a step on `onStateChange` was the obvious fix and is the expensive one. That callback
+walks the whole graph for observed schemas, and its only short-circuit is the `looping` flag, which
+is set inside `onIteration` and is therefore false for the entire top-level walk — so a step per
+node meant `scope.size` whole-graph walks per run. The run that pays most is the one that shows no
+bar at all: the auto pass fires 180ms after every keystroke and scopes to the whole graph, so on a
+120-node canvas that is 120 walks and 120 app-wide selector passes per keystroke pause. And it
+buys nothing, since a step reveals no schema the run's own final notification will not.
+
+So `SchedulerHost.onRunProgress` is a third channel beside `onStateChange` and `onPreview`, named
+for what it is and doing the least a host can do: bump the tick every run-state reader already
+subscribes to. `onPreview` exists for the same kind of reason from the other side. A loop pass
+publishes **without** announcing, because the pass announces a statement later anyway — otherwise a
+four-hundred-element loop doubled its notifications for a number moving by `region / count` a pass.
+And `publishProgress` keeps its previous snapshot when the number has not moved, so the identity
+that drives the selector means something: every loop's first pass would otherwise republish the
+zero the preceding `countSettled` had just left.
+
+**It costs no layout, and that is the point of where it lives.** `--dash-row` is divided out of
+the grid's *content box*, so a bar taking 3px in the column would shorten every row the moment a
+run started and lengthen them again when it stopped — every cell resized twice per run, WebGL
+scenes included, which is the cost this whole view is arranged around. So it is absolutely
+positioned over the header's own bottom border, which is where "between the header and the cards"
+actually is. It sits below `.dropdown__panel`'s `z-index: 40` by having none of its own, so the
+add menu opening mid-run is not underlined by a bar drawn across it.
+
+**It waits `RUN_BAR_DELAY_MS` before appearing.** `busy` is also true for auto-run's automatic
+full pass, which fires 700ms after any edit — including a presentational one from a cell's ⚙ rail,
+where nothing is stale and the run is over in about a millisecond. Without the delay, changing a
+colour scale blinks a progress bar at somebody a beat later, for a run that did nothing. One
+`setTimeout` per run, not per tick. (The *cheap* auto pass raises no `busy` at all, so it is not
+what the number is defending against.)
+
+**A determinate bar still has to say it is alive.** Length alone cannot be told from a hang: a
+graph with one slow node settles nothing for as long as that node takes, which is exactly when
+somebody is watching the bar hardest. So both of `NodeRunRing`'s channels are used here too — the
+width is *how far*, a pulse is *that it is running*.
+
+Two details, each measured rather than guessed:
+
+- **The depth is 0.4, and it is measured.** `coda-pulse` (renamed from `coda-ring-pulse`, since
+  it now has three callers) is one keyframe at one depth. A shallower 0.72 was tried first, on the
+  reasoning that the same opacity range is not the same amount of ink on a window-wide line as on
+  a stroke around one card — and it was reported as hardly noticeable, which the numbers agree
+  with: **the two ends of that breath are 1.49:1 apart**, under the 3:1 non-text floor. At 0.4
+  they are 2.33:1 apart, about what separates the bar from its own track. The taste argument was
+  wrong and the parameterisation it justified (`--pulse-low` / `--pulse-high` `var()`s in the
+  keyframe) went with it — three callers at one depth is a plain keyframe.
+
+  The dip is toward the **surface** rather than toward a second colour, which is why one number
+  serves both themes: `--status-running` is `#2a78d6` in both (only `--status-running-ring` and
+  `--accent` get dark overrides) while `--surface-3` is `#f0efec` on one and `#1a1a19` on the
+  other, so the blend lightens on light and darkens on dark and lands within **0.03** of the same
+  contrast either way. It is also why the swing cannot be made obvious *and* keep the dim end at
+  3:1 against the track: full strength is only 3.84:1 to begin with, so every dip spends that
+  directly. What carries "how far" is the **edge position**, which is equally readable at any
+  opacity above the track — the contrast floor is about a static encoding, not about the trough of
+  a breath.
+- **A zero-width bar draws nothing**, so the run whose *first* node is the slow one would pulse
+  something invisible — worse than looking stuck. `min-width: 3px` is `NodeRunRing`'s own floor
+  (`Math.max(0.02, progress)`, "a zero-length dash draws nothing") in the geometry that can express
+  it in CSS. It is a **drawing** floor only: at `0 of 1` the sliver is 3px while `aria-valuenow`
+  and the caption still say 0.
+
+The pulse survives `prefers-reduced-motion`, which departs from the ring's rule ("motion is
+decoration here; length is information") on purpose. It is an opacity breath at 0.7Hz rather than
+movement, and the two surfaces are not in the same position: a card has a badge, a border and its
+neighbours also saying it is running, where this bar is the only run indication the grid has.
+Dropping it would hand the looks-hung problem it exists to fix to the readers who asked for less
+motion.
+
+**A missing denominator is drawn rather than faked.** `runProgress()` is undefined for the moment
+between `busy` and the scope being known, and for a run whose scope is empty. The bar goes
+indeterminate — a short bar travelling, `NodeRunRing`'s rule in a second geometry, because a
+filled track that means "no idea how far" reads as finished. No `aria-valuenow` either, which is
+what ARIA means by indeterminate; a `0` there would claim a measurement rather than admit to
+having none.
+
+**The snapshot's identity is load-bearing.** `useRunProgress` is the one selector in the store
+handing back an object, which is invariant 7 obeyed rather than bent: what the rule forbids is
+*allocating* in a selector, and the Scheduler replaces its snapshot only when the count moves. A
+fresh `{ done, total }` per call is an infinite render loop, and the test that stubs the store
+proves it — that stub had to be given one stable object before it would run at all.
+
 ## The two gestures
 
 Both are in `DashboardCellView`; the arithmetic is in `gridGeometry.ts`, headless, on
@@ -371,6 +509,27 @@ performs no layout and has no WebGL:
   the call was also asserted directly).
 - The eligibility rule end to end, on a graph carrying three text notes: the add menu offers only
   the three real nodes, and "add the selection" with everything selected produces no note cell.
+- The run bar, on a 1600 × 1000 window: absent at rest, still absent 80ms after `busy` goes up,
+  present at 300ms, gone when the run ends. It is `1600 × 3` at y 79.4–82.4, and the header's
+  bottom edge and the grid's top edge are both 82.4 — so it is the header's last three pixels and
+  nothing else moved for it. `--dash-row` is `122.1015625px` and a half-height cell `386.28px`
+  **before, during and after**, with neither the page nor the grid scrolling: the layout claim,
+  which is the whole reason it is positioned where it is. Indeterminate computes to `480px` of
+  the 1600 with `dash-progress-slide` running; determinate to `1200px` with no animation, off an
+  inline `75%`.
+- The pulse: `coda-pulse` on the fill, opacity `0.401 ↔ 1.0` over a cycle; at
+  `{ done: 0, total: 1 }` an inline width of `0%` still draws `3px` and still pulses, with
+  `aria-valuenow="0"` and `0 of 1 node`; and a bare element on the shared keyframe swings the
+  same, so the ring draws exactly what it did. The rejected 0.72 measured `0.720 ↔ 0.999`.
+- The swing itself, computed rather than eyeballed (`--status-running` over `--surface-3`): the
+  bar is 3.84:1 against its track on light and 3.94:1 on dark; the two ends of the breath are
+  1.49:1 apart at 0.72 and 2.33:1 at 0.4, with light and dark within 0.03 of each other at every
+  stop.
+- A real run underneath the grid, sampled from outside at 4ms: 7 nodes, 6 executed, **~540ms**, the
+  count going `0/7 → 2.1/7 → 3.15/7` and then clearing — the fractions being a running node's own
+  `ctx.progress` folded in, where before the fold the same run stepped `0/7 → 2/7 → 3/7`. The bar was up for it and gone afterwards. The
+  tail is invisible to a poll because the last four nodes were cache-fast and settled inside one
+  turn — which is also why a bar rarely *shows* itself reaching its own end.
 - The saved view, over real page reloads: a layout with no flag opens on the canvas; the toolbar
   toggle writes `"open": true`; a reload lands in the grid; `← Canvas` removes the key rather than
   storing `false`; a reload lands on the canvas. With every cell removed, the toggle leaves no

@@ -64,7 +64,13 @@ import { spliceCandidate, spliceGraph } from '../core/splice'
 import type { ParamValue } from '../core/node'
 import { defaultParams } from '../core/node'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
-import type { IterationInfo, NodeRunInfo, NodeRunState, RunSummary } from '../core/scheduler'
+import type {
+  IterationInfo,
+  NodeRunInfo,
+  NodeRunState,
+  RunProgress,
+  RunSummary,
+} from '../core/scheduler'
 import { Scheduler } from '../core/scheduler'
 import type { TableSchema } from '../core/types'
 import type { Value } from '../core/values'
@@ -1008,6 +1014,15 @@ export interface GraphState {
   /** True when running this node would actually do work. */
   needsRun(nodeId: string): boolean
   nodeInfo(nodeId: string): NodeRunInfo
+  /**
+   * How far the run in flight has got, or undefined when nothing is running.
+   *
+   * Read through `runVersion` like `nodeInfo`, and a method rather than a snapshot field for the
+   * same reason: it belongs to the Scheduler's clock, not the graph's. The Scheduler hands back
+   * a reference it replaces only when the number moves, which is what lets a selector return it
+   * whole without breaking invariant 7 — see `useRunProgress`.
+   */
+  runProgress(): RunProgress | undefined
   nodeOutput(nodeId: string, portId: string): Value | undefined
   /**
    * When the data behind a node's current result was read from a server, or undefined.
@@ -1146,6 +1161,19 @@ export const useGraphStore = create<GraphState>((set, get) => {
       onPreview: () => {
         if (activeDoc !== id) return
         set((s) => ({ previewVersion: s.previewVersion + 1 }))
+      },
+      /*
+       * A step of the run behind us. Deliberately the cheapest of the three channels: it bumps
+       * the tick every run-state reader already subscribes to and does nothing else.
+       *
+       * Not folded into `onStateChange`, which walks the whole graph for observed schemas — a
+       * walk per node, on a run that fires 180ms after every keystroke and shows no bar at all,
+       * against a schema that only the end of the run can have revealed anyway. `onPreview`'s
+       * note above states the same split from the other side.
+       */
+      onRunProgress: () => {
+        if (activeDoc !== id) return
+        set((s) => ({ runVersion: s.runVersion + 1 }))
       },
       onStateChange: () => {
         if (activeDoc !== id) return
@@ -2821,6 +2849,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     nodeInfo: (nodeId) => sched().info(nodeId),
+    runProgress: () => sched().runProgress(),
     nodeInputs: (nodeId) => {
       const graph = get().graph
       const node = graph.nodes.find((n) => n.id === nodeId)
@@ -2857,6 +2886,22 @@ export function useStaleCount(): number {
       const state = s.nodeInfo(n.id).state
       return state === 'stale' || state === 'blocked'
     }).length
+  })
+}
+
+/**
+ * How far the run in flight has got, or undefined when nothing is running.
+ *
+ * The one selector here that hands back an object rather than a primitive, and it is invariant 7
+ * obeyed rather than bent: what the rule forbids is *allocating* in a selector, and this returns
+ * the Scheduler's own snapshot — replaced when the count moves and identical between times. A
+ * fresh `{ done, total }` built here would instead re-render its reader on every tick of
+ * anything at all.
+ */
+export function useRunProgress(): RunProgress | undefined {
+  return useGraphStore((s) => {
+    void s.runVersion // subscribe to scheduler ticks
+    return s.runProgress()
   })
 }
 

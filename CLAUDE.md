@@ -406,7 +406,36 @@ Area-specific — the rule, then the doc that holds why:
   rows. **Not a better dep and not a memo**: `runVersion` buys back the same class of bug, and the
   memo was saving nothing. Two things not to undo — `previewVersion` is subscribed **ungated** here,
   where the card gates on `isViewer`, because a non-viewer node can hold a cell; and the test must
-  run **underneath** a mounted grid, the one order that can see it.
+  run **underneath** a mounted grid, the one order that can see it. Last, **a run's denominator is
+  its *scope***: the grid draws values rather than badges, so it is the one surface with no run
+  indication, and the bar it grew reads `Scheduler.runProgress()` — `resolveScope` being the only
+  thing that knows a cell's `▸` covers three of four nodes, where a stale count would stop at 75%
+  with nothing wrong. A loop is **not one step** (its region's share grows per pass; nesting is
+  read off the `iteration` `runNodes` already carries, a depth field needing a `try`/`finally` and
+  a wrapper to survive nine early returns), a **failed** node is as far behind you as a successful
+  one, and the bar lives in the *header* — `--dash-row` is measured, so 3px in the column resizes
+  every cell twice per run. Three things found by building it. The ordinary walk **announced
+  nothing** between a run's start and its end, against the store's own comment, so the badges
+  arrived all at once. Fixing that on `onStateChange` is the **expensive** spelling — it walks the
+  whole graph for observed schemas and its only guard is `looping`, false for the entire top-level
+  walk, so a step per node is `scope.size` walks per run, worst on the auto pass that fires per
+  keystroke and shows no bar at all; hence **`onRunProgress`**, a third channel doing the least a
+  host can do, with a loop pass publishing but not announcing and an unmoved number keeping its
+  old snapshot. And `useRunProgress` returns the Scheduler's own object, since a selector minting
+  `{done, total}` is an infinite render — which is what the stubbed test does until it is given
+  one. The bar also **pulses while determinate**, since length alone cannot be told from a hang, and
+  `min-width` is the ring's own "a zero-length dash draws nothing" floor — a *drawing* floor,
+  `aria-valuenow` still saying 0. A step is also **not the smallest unit**: the node currently running folds in its own
+  `ctx.progress` fraction (`countRunning`), raised-never-lowered within the node and **top-level
+  only**, since inside a loop the region's share already speaks for the body and the begin node's
+  `progress` *is* that share — `iteration` is the guard, the same value `countSettled` reads.
+  `coda-pulse` is one keyframe at **one** depth for all three
+  callers: a shallower swing for the wide bar was taste, it was reported as invisible, and the
+  numbers agreed — 0.72 puts the two ends **1.49:1** apart, under the 3:1 floor, against 2.33:1 at
+  the ring's 0.4. Two consequences worth keeping: the parameterisation that taste justified went
+  with it, and because the dip is toward `--surface-3` rather than toward a second colour, one
+  number serves both themes to within 0.03 — but nothing can make the swing obvious *and* hold the
+  trough at 3:1, since full strength is only 3.84:1 to start with.
   See [docs/dashboard.md](docs/dashboard.md).
 - **A tolerated failure and a global alarm cannot be the same line.** `client.ts` reported every
   CAVE 401/403 to the channel that *opens the Connections dialog*, including the ones

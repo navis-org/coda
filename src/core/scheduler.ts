@@ -110,6 +110,33 @@ export interface RunSummary {
   durationMs: number
 }
 
+/**
+ * How far the run in flight has got, while it is still going.
+ *
+ * A **step is a node in the run's scope**, counted once each — which is the only denominator
+ * anything outside this class could not work out for itself. A run's scope is not the graph: it
+ * is the targets plus their ancestors (plus any loop region pulled in whole), so a surface
+ * counting stale nodes instead would put a "run this node" at a third of the way along and leave
+ * it there. `resolveScope` is the one place that knows, hence this.
+ *
+ * Two properties are worth stating because a bar that breaks either reads as broken rather than
+ * as informative:
+ *
+ *  - **`done` never goes backwards within a run.** A node settles once, and a mid-flight loop
+ *    contributes its region's share as a fraction that only grows — see `countLoopPass`.
+ *  - **A node that was already fresh is done the moment the walk reaches it.** Re-running a
+ *    cached graph fills the bar at once, which is the true answer: there was nothing to do.
+ *
+ * `undefined` between runs, and also *during* a run whose scope is empty — nothing to be a
+ * fraction of, and a bar drawn over that would be a bar with no meaning.
+ */
+export interface RunProgress {
+  /** Steps settled, including the share a loop part way through its passes has covered. */
+  done: number
+  /** Steps this run will attempt. Never zero — see above. */
+  total: number
+}
+
 /** What one node's turn came to. `aborted` is the only one that ends the walk. */
 type NodeVerdict = 'ran' | 'skipped' | 'blocked' | 'failed' | 'aborted'
 
@@ -140,6 +167,16 @@ interface RunPass {
   /** See `RunOptions.automatic`. Read by loops, which defer on it whatever the mode says. */
   automatic: boolean
   keys: Map<string, string>
+  /**
+   * The step count behind `Scheduler.runProgress`, or `undefined` for a run with an empty scope
+   * — nothing to be a fraction of, and a bar drawn over that would be a bar with no meaning.
+   *
+   * The three are kept apart rather than summed as they arrive because they move on different
+   * clocks: a node settles once and for good, while a loop's share and the running node's share
+   * are each *replaced* as they go and forgotten wholesale the moment what they stand for is
+   * counted as settled.
+   */
+  steps: { total: number; settled: number; loop: number; running: number } | undefined
   available: Set<string>
   /**
    * What each loop exit returned on the pass before this one — the accumulator of a fold.
@@ -195,6 +232,16 @@ export interface SchedulerHost {
   resolveSource(sourceId: string): DataSource
   /** Called whenever node run state changes, so the UI can repaint. Should be cheap. */
   onStateChange?(): void
+  /**
+   * The run in flight has got further through its scope. Read back with `runProgress`.
+   *
+   * Its own channel, and the reason is what the other two cost. `onStateChange` re-walks the
+   * graph for observed schemas — right once at the end of a run, wrong `scope.size` times
+   * during one, since a step reveals no schema the run's final notification will not. And
+   * `onPreview` moves what a viewer *draws*, which a step does not. A host that only wants to
+   * repaint a badge or a bar wants neither of those walks.
+   */
+  onRunProgress?(): void
   /**
    * Called when a running node publishes or drops a partial result.
    *
@@ -288,6 +335,18 @@ export class Scheduler {
    * Session state beside `loopIndex` and dropped with it, for the same reasons.
    */
   private loopDone = new Set<string>()
+  /**
+   * The snapshot `runProgress` hands out, replaced — never mutated — when it moves.
+   *
+   * The **only** part of the count that is instance state, and it is here because it is read
+   * from outside a run. The counters themselves ride `RunPass` with everything else one run
+   * owns, so a superseded run cannot reach a newer one's tally at all rather than being caught
+   * on the way past a generation check.
+   *
+   * The store passes this straight to a zustand selector, which compares by identity: a mutated
+   * object is a progress bar that never repaints, and it would look exactly like a stuck run.
+   */
+  private progress: RunProgress | undefined
   private abort: AbortController | undefined
   /** Bumped on every run; results from a superseded run are discarded. */
   private generation = 0
@@ -309,6 +368,117 @@ export class Scheduler {
    */
   info(nodeId: string): NodeRunInfo {
     return this.states.get(nodeId) ?? IDLE
+  }
+
+  /**
+   * How far the run in flight has got, or `undefined` when nothing is running.
+   *
+   * Stable by identity between changes, for `info`'s reason exactly — see `RunProgress`.
+   */
+  runProgress(): RunProgress | undefined {
+    return this.progress
+  }
+
+  /**
+   * One or more nodes have settled for good.
+   *
+   * Called from the **top-level** walk only, which is what `iteration` says: `runNodes` is
+   * handed one by each of a loop's passes and by nothing else, so "inside a pass" needs no
+   * counter of its own. Inside a pass the same nodes run again on the next element, and
+   * counting them there would take `done` past `total` on pass two and mean nothing on pass
+   * three; the loop reports its region as one share instead.
+   *
+   * Clearing `loop` here is what makes the hand-over monotonic: the share a loop was publishing
+   * is at most `region × (count - 1) / count`, and it is replaced by the whole `region` in the
+   * same step.
+   */
+  private countSettled(pass: RunPass, nodes: number): void {
+    const steps = pass.steps
+    if (!steps) return
+    steps.settled += nodes
+    steps.loop = 0
+    steps.running = 0
+    this.publishProgress(pass, true)
+  }
+
+  /**
+   * The share of a loop's region that its passes have covered.
+   *
+   * The whole reason a loop is not simply counted at its trigger: a four-hundred-element loop
+   * over a ten-node region is most of the run, and a bar that sits still for all of it is a bar
+   * that reads as a hung app. The For Each card's own bar says which element; this says what
+   * that is worth against the rest of the graph.
+   *
+   * **Publishes without announcing**, because the pass it belongs to announces a couple of
+   * statements later — `runLoop` sets the begin node's own `progress` and calls the host right
+   * after this. Announcing here as well doubled a four-hundred-element loop's notifications for
+   * a number that moves by `region / count` a pass.
+   *
+   * Only the *outermost* loop writes a share. A nested one runs inside a pass that is already
+   * being counted, and letting it write would replace a share of the outer region with a share
+   * of the inner one — a smaller number, and therefore a bar going backwards.
+   */
+  private countLoopPass(pass: RunPass, region: number, index: number, count: number): void {
+    const steps = pass.steps
+    if (!steps) return
+    // `count > 0` and `index < count` both hold by construction: the only caller is the pass
+    // loop itself, and the empty-collection case returns long before it.
+    steps.loop = (region * index) / count
+    this.publishProgress(pass, false)
+  }
+
+  /**
+   * How far the node currently executing says it has got, as a fraction of its own one step.
+   *
+   * Without it the bar moves only as whole nodes settle, so the run that most looks like a hang —
+   * one slow fetch — is exactly the one it says nothing about. `ctx.progress` is already reported
+   * by every node whose work is worth watching (NBLAST, the centrality sweep, `Match Cell Types`,
+   * Topology), and this is the same number the card's own ring draws, weighed against the rest of
+   * the graph rather than against the node.
+   *
+   * **Only the top-level node**, which is what `iteration` says at the call site. A node inside a
+   * loop pass is already spoken for by its region's share, and the begin node's own `progress` is
+   * that share expressed a second way — folding either would count one thing twice.
+   *
+   * **Raised, never lowered**, within the node: nothing obliges a node to report monotonically,
+   * and one that starts a second phase at 0.2 having reached 0.8 would otherwise walk the bar
+   * backwards. Scoped to one node because `countSettled` zeroes it as that node settles, which is
+   * also what makes the hand-over safe — the share is at most 1 and it is replaced by exactly 1.
+   *
+   * Publishes without announcing: `ctx.progress` calls the host itself a statement later, and
+   * that notification carries this with it.
+   */
+  private countRunning(pass: RunPass, fraction: number): void {
+    const steps = pass.steps
+    if (!steps) return
+    steps.running = Math.max(steps.running, Math.min(1, Math.max(0, fraction)))
+    this.publishProgress(pass, false)
+  }
+
+  /**
+   * Rebuild the snapshot, and announce it if anything can see the difference.
+   *
+   * Clamped to `total` rather than trusted: the counters are maintained by two call sites and an
+   * overshoot would draw a bar past its own track, which is a worse way to find out.
+   *
+   * Unchanged means untouched — the same reference is kept and nothing is announced. Every loop
+   * begins with a `countLoopPass(…, 0, count)` that sets the share back to the zero the
+   * preceding `countSettled` left, and a snapshot published for that is a new identity, a store
+   * write and a re-render for identical pixels.
+   *
+   * The announcement is **`onRunProgress`, not `onStateChange`**, and the difference is what it
+   * costs the host: `onStateChange` re-walks the graph for observed schemas, which is right once
+   * at the end of a run and wrong `scope.size` times during one — on a 120-node graph that is
+   * 120 whole-graph walks per auto pass, i.e. per keystroke pause, for a bar that auto passes
+   * never even show. A step reveals no schema that the run's own final notification will not.
+   */
+  private publishProgress(pass: RunPass, announce: boolean): void {
+    const steps = pass.steps
+    if (!steps || pass.generation !== this.generation) return
+    const done = Math.min(steps.total, steps.settled + steps.loop + steps.running)
+    if (this.progress?.done === done && this.progress.total === steps.total) return
+    this.progress = { done, total: steps.total }
+    if (announce) this.host.onRunProgress?.()
   }
 
   /** Cached outputs of a node, if fresh or stale-but-present. Viewers read this. */
@@ -521,9 +691,18 @@ export class Scheduler {
       mode: options.mode,
       automatic: options.automatic === true,
       keys: this.desiredKeys(graph, inference, order),
+      /*
+       * The step count opens with the scope, because the scope is the whole of what makes the
+       * number mean anything — see `RunProgress`. Every node in it is counted exactly once: the
+       * walk either executes a node or hands its whole loop region to `runLoop`, and the two
+       * together come to `scope.size`.
+       */
+      steps:
+        scope.size > 0 ? { total: scope.size, settled: 0, loop: 0, running: 0 } : undefined,
       available: new Set<string>(),
       accumulations: new Map<string, Record<string, Value>>(),
     }
+    this.progress = pass.steps ? { done: 0, total: pass.steps.total } : undefined
     this.markAvailable(pass, order)
 
     for (const id of loops.flatMap((l) => [...l.region])) {
@@ -542,6 +721,13 @@ export class Scheduler {
 
     summary.durationMs = performance.now() - started
     if (this.abort === controller) this.abort = undefined
+    /*
+     * Guarded, for `this.abort`'s reason one line up: a superseded run keeps unwinding after the
+     * newer one has already published its own count, and clearing it here would blank a bar that
+     * belongs to a run still going. Only the *published* snapshot needs saying — the counters
+     * went out of scope with the pass that owned them.
+     */
+    if (this.generation === generation) this.progress = undefined
     this.host.onStateChange?.()
     return summary
   }
@@ -596,9 +782,19 @@ export class Scheduler {
 
       const trigger = triggers.get(nodeId)
       if (trigger) {
-        const verdict = await this.runLoop(pass, trigger.beginId, trigger.region, order, loops)
+        const verdict = await this.runLoop(
+          pass,
+          trigger.beginId,
+          trigger.region,
+          order,
+          loops,
+          // Outermost exactly when this walk is not itself a pass — see `countLoopPass`.
+          iteration === undefined,
+        )
         if (verdict === 'aborted') return 'aborted'
         if (verdict === 'failed') failed = true
+        // The whole region, in one step: its passes were reported as a fraction of this.
+        if (!iteration) this.countSettled(pass, trigger.region.size)
         continue
       }
       // Claimed by a loop whose turn has not come yet — it runs inside that loop's passes.
@@ -607,6 +803,13 @@ export class Scheduler {
       const verdict = await this.executeNode(pass, nodeId, iteration)
       if (verdict === 'aborted') return 'aborted'
       if (verdict === 'failed') failed = true
+      /*
+       * Counted after the node has settled however it settled — ran, skipped, failed, blocked.
+       * A run's progress is how much of it is *behind* you, and a node that failed is as behind
+       * you as one that succeeded; counting only successes would leave the bar short of its own
+       * end on exactly the runs somebody is watching most closely.
+       */
+      if (!iteration) this.countSettled(pass, 1)
     }
     return failed ? 'failed' : 'ran'
   }
@@ -631,6 +834,8 @@ export class Scheduler {
     region: Set<string>,
     order: readonly string[],
     loops: ReadonlyArray<{ beginId: string; region: Set<string> }>,
+    /** Whether this loop is the run's own, rather than one nested inside a pass of another. */
+    outermost: boolean,
   ): Promise<NodeVerdict> {
     const node = this.nodeOf(pass, beginId)
     const def = getNodeDef(node.type)
@@ -771,6 +976,9 @@ export class Scheduler {
 
     for (let index = 0; index < count; index++) {
       if (this.abandoned(pass, beginId)) return 'aborted'
+
+      // `index` passes are behind us, which is what the share is worth against the whole run.
+      if (outermost) this.countLoopPass(pass, region.size, index, count)
 
       const iteration: LoopIteration = {
         index,
@@ -1259,6 +1467,13 @@ export class Scheduler {
           progress: Math.max(0, Math.min(1, fraction)),
           ...(note ? { note } : {}),
         })
+        /*
+         * The same number, weighed against the whole run — see `countRunning`. Gated on
+         * `opts.iteration` being absent, which is precisely "this node is the top-level walk's
+         * current one": inside a pass its region's share already counts it, and the begin node's
+         * own `progress` *is* that share. Ahead of the notification below, which carries it.
+         */
+        if (!opts.iteration) this.countRunning(pass, fraction)
         this.host.onStateChange?.()
       },
     }

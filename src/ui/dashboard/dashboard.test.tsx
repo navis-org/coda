@@ -58,6 +58,15 @@ const store = () => useGraphStore.getState()
 const cells = () => document.querySelectorAll('.dash-cell')
 const cellFor = (nodeId: string) => document.querySelector(`.dash-cell[data-node="${nodeId}"]`)
 
+/** Render, run, then put these nodes on the grid and open it. */
+async function withCells(ids: string[]) {
+  await renderRun()
+  act(() => {
+    store().addToDashboard(ids)
+    store().setDashboardOpen(true)
+  })
+}
+
 async function renderRun(run = true) {
   render(<App />)
   if (run) {
@@ -236,14 +245,6 @@ describe('a cell whose node is run underneath it', () => {
 })
 
 describe('a cell', () => {
-  async function withCells(ids: string[]) {
-    await renderRun()
-    act(() => {
-      store().addToDashboard(ids)
-      store().setDashboardOpen(true)
-    })
-  }
-
   /*
    * The reuse claim. A cell knows nothing about tables, networks or neuroglancer — it renders
    * `ViewerSurface`, which is what makes "any node off the graph" possible rather than "any
@@ -442,5 +443,97 @@ describe('the grid', () => {
     await waitFor(() => expect(document.querySelectorAll('.dash-cell__drop').length).toBe(2))
     fireEvent.dragEnd(grip)
     await waitFor(() => expect(document.querySelectorAll('.dash-cell__drop').length).toBe(0))
+  })
+})
+
+/**
+ * The run bar, which is the run indication this view otherwise has none of.
+ *
+ * A cell draws values, not badges — there is no `NodeRunRing` on a grid — so a run under a wall
+ * of viewers is a wall of viewers that sit there and then change. Three things about it are
+ * decisions rather than styling, and each is what one of these asserts:
+ *
+ *  - **It is in the header, not in the column.** `--dash-row` is divided out of the grid's
+ *    content box, so a bar taking a row's worth of height would resize every cell twice per run
+ *    — WebGL scenes included, which is the cost this whole view is arranged around.
+ *  - **It waits.** `busy` is also true for auto-run's automatic full pass, which fires 700ms
+ *    after any edit and is over in about a millisecond when nothing is stale.
+ *  - **A missing denominator is drawn rather than faked.** An indeterminate bar says "working,
+ *    and I cannot say how far"; a full one that means the same thing reads as finished.
+ *
+ * `busy` is set directly here. The bar's contract is that flag plus the delay, and the
+ * alternative — a node that blocks long enough to be caught mid-run — would be testing the mock
+ * source's timing rather than this.
+ */
+describe('the run bar', () => {
+  async function running(): Promise<HTMLElement> {
+    await withCells(['view'])
+    act(() => useGraphStore.setState({ busy: true }))
+    return await screen.findByRole('progressbar')
+  }
+
+  it('is absent while nothing is running', async () => {
+    await withCells(['view'])
+    expect(screen.queryByRole('progressbar')).toBeNull()
+  })
+
+  it('waits before appearing, so a pass with nothing in it does not blink one', async () => {
+    await withCells(['view'])
+    act(() => useGraphStore.setState({ busy: true }))
+    // The flag is up and the bar is not, which is the whole of what the delay buys.
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(await screen.findByRole('progressbar')).toBeTruthy()
+  })
+
+  /*
+   * The layout claim, and the one a future tidy-up would break: moving the bar into the grid
+   * looks like a better home for it and costs every cell two resizes per run.
+   */
+  it('sits in the header rather than in the grid', async () => {
+    await running()
+    expect(document.querySelector('.dashboard__bar .dashboard__progress')).not.toBeNull()
+    expect(document.querySelector('.dashboard__grid .dashboard__progress')).toBeNull()
+  })
+
+  it('goes away when the run ends', async () => {
+    await running()
+    act(() => useGraphStore.setState({ busy: false }))
+    expect(screen.queryByRole('progressbar')).toBeNull()
+  })
+
+  it('says it is working without claiming a fraction when there is no scope', async () => {
+    const bar = await running()
+    expect(bar.getAttribute('data-mode')).toBe('indeterminate')
+    // No `valuenow` at all, which is what ARIA means by indeterminate — a 0 there would claim a
+    // measurement rather than admit to having none.
+    expect(bar.getAttribute('aria-valuenow')).toBeNull()
+  })
+
+  /*
+   * The determinate half. `runProgress` is the Scheduler's, and a run over the mock source is
+   * finished long before anything could observe it mid-flight — so the store's own accessor is
+   * stood in for, which is exactly the seam the component reads through.
+   */
+  it('draws how far along the run is once the scope is known', async () => {
+    await running()
+    /*
+     * One object, returned every time. The Scheduler replaces its snapshot only when the count
+     * moves, and `useRunProgress` hands that reference straight to a zustand selector — a stub
+     * minting a fresh `{ done, total }` per call re-renders forever, which is this file's proof
+     * that the identity rule is real rather than decorative.
+     */
+    const progress = { done: 3, total: 4 }
+    act(() => useGraphStore.setState({ runProgress: () => progress }))
+    const bar = screen.getByRole('progressbar')
+    expect(bar.getAttribute('data-mode')).toBe('progress')
+    expect(bar.getAttribute('aria-valuenow')).toBe('75')
+    expect(bar.getAttribute('aria-valuetext')).toBe('3 of 4 nodes')
+    expect(bar.getAttribute('title')).toBe('Running · 3 of 4 nodes')
+    expect((bar.firstElementChild as HTMLElement).style.width).toBe('75%')
+
+    // `plural` on the total rather than a bare "nodes", or a one-node run reads "1 of 1 nodes".
+    const one = { done: 1, total: 1 }
+    act(() => useGraphStore.setState({ runProgress: () => one }))
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuetext')).toBe('1 of 1 node')
   })
 })

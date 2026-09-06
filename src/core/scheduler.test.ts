@@ -25,6 +25,40 @@ function makeScheduler(): Scheduler {
   })
 }
 
+/**
+ * A scheduler that records every progress snapshot the UI could have seen, in order.
+ *
+ * **Both channels**, because that is what a reader gets: the store bumps one `runVersion` from
+ * `onRunProgress` *and* from `onStateChange`, so a snapshot published by a loop pass — which
+ * deliberately does not announce, its pass announcing a statement later — reaches the bar all
+ * the same. Sampling one channel would test the wiring rather than the number.
+ */
+function sampling(): { scheduler: Scheduler; seen: { done: number; total: number }[] } {
+  const seen: { done: number; total: number }[] = []
+  const sample = () => {
+    const progress = scheduler.runProgress()
+    if (progress) seen.push(progress)
+  }
+  // `const` with a self-reference: the host callbacks only ever run from inside `run`, which is
+  // long after this is assigned.
+  const scheduler: Scheduler = new Scheduler({
+    resolveSource: (id) => {
+      if (id !== 'mock') throw new Error(`unexpected source ${id}`)
+      return source
+    },
+    onRunProgress: sample,
+    onStateChange: sample,
+  })
+  return { scheduler, seen }
+}
+
+/** Never backwards: a bar that retreats reads as broken rather than as informative. */
+function expectNeverBackwards(seen: readonly { done: number }[]): void {
+  for (const [i, p] of seen.entries()) {
+    expect(p.done).toBeGreaterThanOrEqual(seen[i - 1]?.done ?? 0)
+  }
+}
+
 function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
   const def = requireNodeDef(type)
   return {
@@ -1099,6 +1133,59 @@ describe('For Each', () => {
   })
 
   /**
+   * A loop is most of the run it is in, so it cannot be one step.
+   *
+   * Counted at its trigger alone, a four-element loop over a two-node region would leave the
+   * whole graph's progress sitting still for the entire loop and then jump to the end — which is
+   * what a hung app looks like. The region's share is published per pass instead, and the thing
+   * being asserted is that it lands *between* the two whole numbers either side of it, without
+   * ever going backwards on the hand-over.
+   */
+  it('moves the run’s progress per pass rather than sitting at the loop’s trigger', async () => {
+    source('test.loop.srcP', 4)
+    recorder('test.loop.bodyP')
+    const { scheduler, seen } = sampling()
+    await scheduler.run(loopGraph('test.loop.srcP', 'test.loop.bodyP'), { mode: 'full' })
+
+    // src, loop, body — the region being {loop, body}, counted as one share until it finishes.
+    expect(seen.at(-1)).toEqual({ done: 3, total: 3 })
+    // The share while the passes run: past the source, short of the whole region.
+    expect(seen.some((p) => p.done > 1 && p.done < 3)).toBe(true)
+    expectNeverBackwards(seen)
+  })
+
+  /**
+   * A node's own `ctx.progress` folds into the run's count — but not inside a loop, where its
+   * region's share already speaks for it. Folded in both places, one pass of the body would be
+   * counted as itself *and* as part of the share, and the bar would run ahead of the loop.
+   */
+  it('does not count a body’s own progress on top of its loop’s share', async () => {
+    source('test.loop.srcR', 2)
+    registerNode({
+      type: 'test.loop.bodyR',
+      label: 'reporting body',
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [{ id: 'in', label: 'In', type: T.any() }],
+      outputs: [{ id: 'out', label: 'Out', type: T.any() }],
+      inferOutputs: () => ({ out: T.any() }),
+      evaluate: async (ctx) => {
+        ctx.progress(0.5)
+        await Promise.resolve()
+        return { out: ctx.input('in')! }
+      },
+    })
+    const { scheduler, seen } = sampling()
+    await scheduler.run(loopGraph('test.loop.srcR', 'test.loop.bodyR'), { mode: 'full' })
+
+    // src is 1, the region {loop, body} is 2 over 2 passes — so every share is a whole number,
+    // and the body's 0.5 would be visible immediately as a half if it had leaked in.
+    expect(seen.every((p) => Number.isInteger(p.done))).toBe(true)
+    expect(seen.at(-1)).toEqual({ done: 3, total: 3 })
+    expectNeverBackwards(seen)
+  })
+
+  /**
    * The stale half of the same bug, stated directly: a loop that had elements and now has none
    * must not leave the old ones on its port.
    */
@@ -1124,5 +1211,137 @@ describe('For Each', () => {
     scheduler.invalidateNode(g, 'src')
     await scheduler.run(g, { mode: 'full' })
     expect(rowCount2(scheduler.output('loop', 'item'))).toBe(0)
+  })
+})
+
+/**
+ * What a run says about itself *while* it is going, for a surface with no per-node badges — the
+ * dashboard's grid draws values, not run states, so without this a run under a wall of viewers
+ * is a wall of viewers that sit there and then change.
+ *
+ * The number nothing outside this class could work out for itself is the **denominator**. A run's
+ * scope is the targets plus their ancestors, not the graph, so a surface counting stale nodes
+ * would put "run this node" at a third of the way along and leave it there.
+ */
+describe('a run’s progress', () => {
+  it('counts every node in the run, once each, and finishes on its own total', async () => {
+    const { scheduler, seen } = sampling()
+    await scheduler.run(pipeline(), { mode: 'full' })
+
+    expect(seen.at(-1)).toEqual({ done: 4, total: 4 })
+    expect(seen.every((p) => p.total === 4)).toBe(true)
+    expectNeverBackwards(seen)
+  })
+
+  /**
+   * The whole reason this lives in the Scheduler. `resolveScope` is the only thing that knows a
+   * targeted run covers the target and its ancestors — three of these four nodes — and a count
+   * taken anywhere else would stop at 75% with nothing wrong.
+   */
+  it('counts the run’s scope rather than the graph', async () => {
+    const { scheduler, seen } = sampling()
+    await scheduler.run(pipeline(), { mode: 'full', targets: ['filter'] })
+
+    expect(seen.at(-1)).toEqual({ done: 3, total: 3 })
+  })
+
+  it('reports nothing at all between runs', async () => {
+    const { scheduler } = sampling()
+    expect(scheduler.runProgress()).toBeUndefined()
+    await scheduler.run(pipeline(), { mode: 'full' })
+    expect(scheduler.runProgress()).toBeUndefined()
+  })
+
+  /**
+   * Register a node that reports these fractions through `ctx.progress` as it runs.
+   *
+   * `ctx.progress` is what the card's own ring draws, and folding it in is what makes the bar
+   * creep during a single long fetch rather than only when whole nodes settle.
+   */
+  function reporter(type: string, fractions: readonly number[]): void {
+    registerNode({
+      type,
+      label: type,
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [],
+      outputs: [{ id: 'out', label: 'Out', type: T.any() }],
+      inferOutputs: () => ({ out: T.any() }),
+      evaluate: async (ctx) => {
+        for (const fraction of fractions) {
+          ctx.progress(fraction)
+          await Promise.resolve()
+        }
+        return { out: tableFromRows(tableSchema(column('id', 'str')), [{ id: '1' }]) }
+      },
+    })
+  }
+
+  function oneNode(id: string, type: string): CodaGraph {
+    return addNode(emptyGraph('progress-one'), {
+      id,
+      type,
+      position: { x: 0, y: 0 },
+      params: {},
+    })
+  }
+
+  /**
+   * The whole point of the fold: a graph of one slow node used to sit at 0 until it finished,
+   * which is the run that most looks like a hang.
+   */
+  it('creeps while a single node reports its own progress', async () => {
+    reporter('test.progress.slow', [0.25, 0.5, 0.75])
+    const { scheduler, seen } = sampling()
+    await scheduler.run(oneNode('slow', 'test.progress.slow'), { mode: 'full' })
+
+    expect(seen.map((p) => p.done)).toContain(0.5)
+    expect(seen.at(-1)).toEqual({ done: 1, total: 1 })
+    expectNeverBackwards(seen)
+  })
+
+  /**
+   * Nothing obliges a node to report monotonically — one that starts a second phase would walk
+   * the bar backwards, and a bar that retreats reads as broken.
+   */
+  it('never lowers the bar when a node reports a fraction it has already passed', async () => {
+    reporter('test.progress.back', [0.8, 0.2, 0.4])
+    const { scheduler, seen } = sampling()
+    await scheduler.run(oneNode('back', 'test.progress.back'), { mode: 'full' })
+
+    expect(Math.max(...seen.map((p) => p.done))).toBe(1)
+    expect(seen.some((p) => p.done === 0.8)).toBe(true)
+    expectNeverBackwards(seen)
+  })
+
+  /**
+   * A node that failed is as far behind you as one that succeeded. Counting only successes
+   * leaves the bar short of its own end on exactly the runs somebody is watching most closely.
+   */
+  it('counts a node that failed', async () => {
+    registerNode({
+      type: 'test.progress.boom',
+      label: 'boom',
+      category: 'utility',
+      cost: 'cheap',
+      inputs: [],
+      outputs: [{ id: 'out', label: 'Out', type: T.any() }],
+      inferOutputs: () => ({ out: T.any() }),
+      evaluate: () => {
+        throw new Error('nope')
+      },
+    })
+    let g = emptyGraph('progress-fail')
+    g = addNode(g, {
+      id: 'boom',
+      type: 'test.progress.boom',
+      position: { x: 0, y: 0 },
+      params: {},
+    })
+    const { scheduler, seen } = sampling()
+    const summary = await scheduler.run(g, { mode: 'full' })
+
+    expect(summary.failed).toEqual(['boom'])
+    expect(seen.at(-1)).toEqual({ done: 1, total: 1 })
   })
 })

@@ -375,6 +375,8 @@ describe('every store action is on one side of the lock', () => {
     'clearResults',
     'needsRun',
     'nodeInfo',
+    // How far the run in flight has got. A read, like its four neighbours here.
+    'runProgress',
     'nodeInputs',
     'nodeOutput',
     'nodeFetchedAt',

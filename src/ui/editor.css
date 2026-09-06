@@ -1623,7 +1623,7 @@ select.field {
 
 /* Determinate: an arc growing clockwise from the top-left, pulsing so it still reads alive. */
 .coda-node__ring[data-mode='progress'] rect {
-  animation: coda-ring-pulse 1.4s ease-in-out infinite;
+  animation: coda-pulse 1.4s ease-in-out infinite;
 }
 
 /*
@@ -1636,7 +1636,20 @@ select.field {
   transition: none;
 }
 
-@keyframes coda-ring-pulse {
+/*
+ * The "still alive" breath, shared by every running mark: the ring, the dashboard's run bar, and
+ * that bar again when reduced motion takes its travel away.
+ *
+ * **One depth, and 0.4 is measured rather than chosen.** A shallower swing was tried on the run
+ * bar first, on the reasoning that the same opacity range is not the same amount of ink on a
+ * window-wide line as on a stroke around one card — and at 0.72 the two ends of the breath are
+ * 1.49:1 apart, under the 3:1 non-text floor, which is a pulse nobody can see. 0.4 puts them
+ * 2.33:1 apart, about what separates the bar from its own track. The dip is toward the surface
+ * rather than toward a second colour, which is why one number serves both themes: `--surface-3`
+ * is near-white on one and near-black on the other, so the same opacity lands within 0.03 of the
+ * same contrast on each.
+ */
+@keyframes coda-pulse {
   0%,
   100% {
     opacity: 1;
@@ -9831,6 +9844,105 @@ details[open] > summary.tile__label {
   padding: 6px 12px;
   background: var(--surface-1);
   border-bottom: 1px solid var(--border);
+  /* The run bar's containing block. The add menu's panel has a positioned `.dropdown` of its
+     own, so nothing else in here is affected by this. */
+  position: relative;
+}
+
+/*
+ * The run bar: between the header and the cards, and costing neither of them a pixel.
+ *
+ * Absolutely positioned over the header's own bottom border rather than laid out in the column,
+ * and that is a measurement rather than a preference. `--dash-row` is divided out of the grid's
+ * *content box* (see `rowHeight`), so a bar that took 3px of height would shorten every row the
+ * moment a run started and lengthen them again when it finished — every cell in the grid
+ * resized twice per run, WebGL scenes included, which is the one cost this whole view is
+ * arranged around. Overlapping the border costs nothing and lands in the same place.
+ *
+ * Below `.dropdown__panel`'s `z-index: 40` by having none of its own, so the add menu opening
+ * mid-run is not underlined by a bar drawn across it.
+ */
+.dashboard__progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* Over the 1px border, so the bar reads as the edge thickening rather than as a fourth strip
+     of chrome appearing. */
+  bottom: -1px;
+  height: 3px;
+  overflow: hidden;
+  /* The recessed-well token, which is what a progress track is — `.loop-body__progress`'s
+     choice, and already themed for both surfaces. */
+  background: var(--surface-3);
+}
+.dashboard__progressBar {
+  height: 100%;
+  /* The token named for exactly this state, so the bar and a running node's badge agree. */
+  background: var(--status-running);
+  /* Only the width animates, and only briefly: nodes settle in bursts, and a slow ease would
+     leave the bar behind the run it is reporting. `.loop-body__bar`'s number. */
+  transition: width 120ms linear;
+}
+/*
+ * Determinate, and it still has to say it is alive.
+ *
+ * `NodeRunRing`'s two channels, both of them: the length is how far, and the pulse is *that* it
+ * is running. Length alone is a bar that cannot be told from a hung one — a graph with a single
+ * slow node settles nothing for as long as that node takes, which is exactly when somebody is
+ * watching it hardest.
+ *
+ * The ring's own swing, and deliberately not a shallower one — see `coda-pulse` for the numbers
+ * that settled it.
+ *
+ * `min-width` is the ring's floor in the geometry that can express it — "a zero-length dash
+ * draws nothing", so a run whose first node is the slow one would otherwise pulse a bar with no
+ * width at all, which is worse than looking stuck. It is a *drawing* floor and nothing else:
+ * `aria-valuenow` and the caption still say 0.
+ */
+.dashboard__progress[data-mode='progress'] .dashboard__progressBar {
+  min-width: 3px;
+  animation: coda-pulse 1.4s ease-in-out infinite;
+}
+/*
+ * Indeterminate: a short bar travelling, never a full one.
+ *
+ * `NodeRunRing`'s rule in a second geometry — a filled track that means "no idea how far" reads
+ * as finished. It is a `@keyframes` animation rather than a transition for `fab-menu`'s reason:
+ * there is no state change to transition *from* on the frame it appears.
+ */
+.dashboard__progress[data-mode='indeterminate'] .dashboard__progressBar {
+  width: 30%;
+  animation: dash-progress-slide 1.1s ease-in-out infinite;
+}
+@keyframes dash-progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(333%);
+  }
+}
+/*
+ * Reduced motion keeps the bar and drops the travel: the determinate one is already a width
+ * that steps, and a static 30% stub would claim a measurement it does not have — so the
+ * indeterminate one pulses in place instead, which says "working" without saying "this far".
+ *
+ * **The determinate pulse stays**, which departs from `.coda-node__ring`'s rule one screen up
+ * ("motion is decoration here; length is information") and does so deliberately. A pulse is an
+ * opacity breath at 0.7Hz rather than movement, and the two surfaces are not in the same
+ * position: a card has a badge, a border and its neighbours all saying it is running, whereas
+ * this bar is the *only* run indication the grid has. Dropping it would hand exactly the
+ * looks-hung problem it exists to fix to the readers who asked for less motion.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .dashboard__progressBar {
+    transition: none;
+  }
+  .dashboard__progress[data-mode='indeterminate'] .dashboard__progressBar {
+    width: 100%;
+    /* `coda-pulse` rather than an opacity cycle of its own — see the keyframe. */
+    animation: coda-pulse 1.6s ease-in-out infinite;
+  }
 }
 .dashboard__title {
   font-size: 13px;
