@@ -27,7 +27,7 @@ import { describe, expect, it } from 'vitest'
 import type { CodaGraph } from '../core/graph'
 import { deserializeGraph, serializeGraph } from '../core/graph'
 import { inferGraph } from '../core/inference'
-import { isAnnotation, requireNodeDef } from '../core/registry'
+import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
 import { ROW_TRACKS } from '../core/dashboard'
 import { Scheduler } from '../core/scheduler'
 import { isMatrixValue, isTableValue } from '../core/values'
@@ -37,11 +37,13 @@ import { starterFamilies } from '../nodes/lib/datasetFamilies'
 import { parseMarkdown } from '../ui/markdown'
 import '../nodes'
 import { DEMO_DATASET, buildWorkflow, demoWorkflow } from './build'
-import type { AnalysisId, VisualisationId, WizardAnswers } from './options'
+import type { AnalysisId, VisualisationId, WizardAnswers, WizardOption } from './options'
 import {
   analysisOption,
   analysisOptions,
   everyCombination,
+  glyphNodeOf,
+  resolveVisualisations,
   startOptions,
   visualisationOption,
   visualisationOptions,
@@ -154,6 +156,199 @@ describe('the option space', () => {
           `${family.key} / ${analysis.id}`,
         ).toBeGreaterThan(0)
       }
+    }
+  })
+})
+
+/**
+ * What the fourth question arrives with ticked.
+ *
+ * The default is **everything the analysis offers**, and what is remembered is the reader's
+ * *refusals* — so these assert the two things an allow-list would get wrong, plus the floor the
+ * set has always had.
+ */
+describe('the viewers a question opens with', () => {
+  const viewsFor = (analysis: AnalysisId) => visualisationOptions(DEMO_DATASET, analysis)
+
+  it('ticks every viewer the analysis offers, for a reader who has said nothing', () => {
+    for (const analysis of analysisOptions(DEMO_DATASET)) {
+      const options = viewsFor(analysis.id)
+      expect(resolveVisualisations(options, []), analysis.id).toEqual(
+        options.map((option) => option.id),
+      )
+    }
+  })
+
+  it('drops the ones turned off and keeps the rest in offer order', () => {
+    const options = viewsFor('partners')
+    expect(options.map((o) => o.id)).toEqual(['table', 'bar', 'pie'])
+    expect(resolveVisualisations(options, ['bar'])).toEqual(['table', 'pie'])
+    // Order is the option list's, not the off-list's — a re-ticked viewer comes back where it
+    // was rather than on the end, which is also where its card is placed.
+    expect(resolveVisualisations(options, ['table'])).toEqual(['bar', 'pie'])
+  })
+
+  /*
+   * The case an allow-list gets wrong, and the reason the stored half is the refusals. A reader
+   * who ticks everything under one analysis has said nothing; a remembered `[table, bar, pie]`
+   * would still narrow the matrix question to its table, because that is the one member the two
+   * lists share. An empty off-list says the same nothing under every analysis.
+   */
+  it('carries a refusal between analyses and carries nothing else', () => {
+    expect(resolveVisualisations(viewsFor('matrix'), [])).toEqual(['heatmap', 'table'])
+    expect(resolveVisualisations(viewsFor('matrix'), ['pie', 'bar'])).toEqual([
+      'heatmap',
+      'table',
+    ])
+    expect(resolveVisualisations(viewsFor('matrix'), ['heatmap'])).toEqual(['table'])
+  })
+
+  /*
+   * The floor, and the only way to reach it: the dialog refuses to untick the last box, so an
+   * off-list cannot empty the question it was made in — but it accumulates across questions, and
+   * two analyses each giving up one viewer can between them cover everything a third offers.
+   */
+  it('falls back to everything rather than to nothing', () => {
+    const options = viewsFor('cluster')
+    expect(options.map((o) => o.id)).toEqual(['dendrogram', 'heatmap'])
+    expect(resolveVisualisations(options, ['dendrogram', 'heatmap'])).toEqual([
+      'dendrogram',
+      'heatmap',
+    ])
+  })
+
+  it('builds a graph with no type errors when every viewer is ticked', () => {
+    for (const analysis of analysisOptions(DEMO_DATASET)) {
+      const answers: WizardAnswers = {
+        dataset: DEMO_DATASET,
+        start: 'search',
+        analysis: analysis.id,
+        visualisations: resolveVisualisations(viewsFor(analysis.id), []),
+        notes: true,
+        dashboard: false,
+      }
+      expect(answers.visualisations.length).toBeGreaterThan(0)
+      expect(errorsIn(answers), label(answers)).toEqual([])
+    }
+  })
+})
+
+/**
+ * The picture on every answer's row.
+ *
+ * A glyph fails **silently and upwards**: a type that is not in the registry falls through
+ * `glyphShapes` to the drawing for its category, which is a picture, so the row looks finished
+ * and merely says the wrong thing. Two answers that name the same node fail the same way — the
+ * icons are all there, and none of them tells the two apart. So both are asserted rather than
+ * looked at, and the two halves of `glyphNodeOf` are pinned to what the builder actually does.
+ */
+describe('the glyph on an answer', () => {
+  /** Every answer of every question, on every dataset the wizard offers. */
+  function everyOption(): { question: string; option: WizardOption<string> }[] {
+    const all: { question: string; option: WizardOption<string> }[] = []
+    for (const family of starterFamilies()) {
+      all.push(...startOptions(family.key).map((option) => ({ question: 'start', option })))
+      for (const analysis of analysisOptions(family.key)) {
+        all.push({ question: 'analysis', option: analysis })
+        all.push(
+          ...visualisationOptions(family.key, analysis.id).map((option) => ({
+            question: `views/${analysis.id}`,
+            option,
+          })),
+        )
+      }
+    }
+    return all
+  }
+
+  it('names a node that exists, for every answer of every question', () => {
+    const options = everyOption()
+    for (const { question, option } of options) {
+      const type = glyphNodeOf(option)
+      expect(type, `${question} / ${option.id} draws nothing`).toBeTruthy()
+      // `getNodeDef`, not `requireNodeDef`: the point is to name the offender, and a throw from
+      // inside the loop names the assertion instead.
+      expect(getNodeDef(type!), `${question} / ${option.id} → ${type}`).toBeTruthy()
+    }
+    expect(options.length).toBeGreaterThan(60)
+  })
+
+  /*
+   * An icon that does not tell two answers apart is not an icon. Per *question* rather than
+   * across the whole wizard: the viewer question is asked once per analysis, and a viewer meaning
+   * the same node under two analyses is the property `VIEWS_BY_ID` is built on.
+   */
+  it('draws no two answers to one question alike', () => {
+    const seen = new Map<string, Map<string, string>>()
+    for (const { question, option } of everyOption()) {
+      const drawn = seen.get(question) ?? new Map<string, string>()
+      seen.set(question, drawn)
+      const type = glyphNodeOf(option)!
+      const first = drawn.get(type)
+      expect(
+        first ?? option.id,
+        `${question}: ${first} and ${option.id} both draw ${type}`,
+      ).toBe(option.id)
+      drawn.set(type, option.id)
+    }
+  })
+
+  /*
+   * The second question's answers *are* cards, so this is exact: the glyph is the head that
+   * answer builds. The one place in the wizard where a declared drawing can be checked against
+   * the graph rather than merely against the registry.
+   */
+  it('names the head card the second question builds', () => {
+    for (const option of startOptions(DEMO_DATASET)) {
+      const graph = buildWorkflow({
+        dataset: DEMO_DATASET,
+        start: option.id,
+        analysis: 'neurons',
+        visualisations: ['table'],
+        notes: false,
+        dashboard: false,
+      })
+      // Everything but the dataset node and the viewer the answer ends on.
+      const head = graph.nodes.find(
+        (node) => !node.type.startsWith('dataset.') && !node.type.startsWith('out.'),
+      )
+      expect(head?.type, option.id).toBe(glyphNodeOf(option))
+    }
+  })
+
+  /*
+   * The third question's answers are chains, so the claim is weaker and still worth pinning: the
+   * card the label names is one of the cards the arm builds. Stated as "an analysis that builds
+   * anything of its own", which is what excuses `neurons` — it builds no analysis node at all,
+   * and draws as the table it hands on. A named exemption would have to be revisited by whoever
+   * adds the tenth analysis; this rule answers for them.
+   */
+  it('names a card the third question builds, wherever it builds one', () => {
+    for (const analysis of analysisOptions(DEMO_DATASET)) {
+      const own = new Set<string>()
+      for (const view of visualisationOptions(DEMO_DATASET, analysis.id)) {
+        for (const node of buildWorkflow({
+          dataset: DEMO_DATASET,
+          start: 'search',
+          analysis: analysis.id,
+          visualisations: [view.id],
+          notes: false,
+          dashboard: false,
+        }).nodes) {
+          // The head and the viewers belong to the other two questions; annotations to neither.
+          if (
+            node.id === 'ds' ||
+            node.id === 'find' ||
+            node.id.startsWith('view') ||
+            isAnnotation(node.type)
+          ) {
+            continue
+          }
+          own.add(node.type)
+        }
+      }
+      if (!own.size) continue
+      expect([...own], analysis.id).toContain(glyphNodeOf(analysis))
     }
   })
 })

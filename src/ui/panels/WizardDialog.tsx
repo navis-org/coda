@@ -38,18 +38,22 @@ import { useGraphStore } from '../../store/graphStore'
 import { useDismissOnOutside } from '../useDismiss'
 import { datasetGlyph } from '../nodes/DatasetPreview'
 import { BACKENDS } from '../../nodes/lib/datasetFamilies'
+import { GLYPH_STROKE_WIDTH, GLYPH_VIEWBOX, SPECIMEN_VIEWBOX } from '../glyphs'
 import { GlyphSvg } from './startGlyphs'
+import { nodeGlyph } from './NodeThumbnail'
 import { buildWorkflow } from '../../wizard/build'
-import type { AnalysisId, StartId, VisualisationId } from '../../wizard/options'
+import type { AnalysisId, StartId, VisualisationId, WizardOption } from '../../wizard/options'
 import {
   WIZARD_LABEL,
   analysisOptions,
   datasetOptions,
+  glyphNodeOf,
   resolveOption,
+  resolveVisualisations,
   startOptions,
   visualisationOptions,
 } from '../../wizard/options'
-import { isAnnotation, requireNodeDef } from '../../core/registry'
+import { getNodeDef, isAnnotation, requireNodeDef } from '../../core/registry'
 import { plural } from '../format'
 import type { CodaGraph } from '../../core/graph'
 
@@ -69,6 +73,16 @@ function Dialog() {
   const setNotes = useGraphStore((s) => s.setWizardNotes)
   const dashboard = useGraphStore((s) => s.wizardDashboard)
   const setDashboard = useGraphStore((s) => s.setWizardDashboard)
+  /*
+   * The viewers turned off, remembered per profile beside the notes and dashboard checkboxes.
+   * A plain field read straight out, never a derived array — invariant 7: the store is compared
+   * by identity, so a selector that filtered here would re-render on every unrelated set.
+   */
+  const viewsOff = useGraphStore((s) => s.wizardViewsOff)
+  const setViewsOff = useGraphStore((s) => s.setWizardViewsOff)
+  const arrange = useGraphStore((s) => s.wizardArrange)
+  const setArrange = useGraphStore((s) => s.setWizardArrange)
+  const requestArrange = useGraphStore((s) => s.requestArrange)
 
   const datasets = useMemo(() => datasetOptions(), [])
   const [dataset, setDataset] = useState(() => datasets[0]?.key ?? '')
@@ -79,12 +93,6 @@ function Dialog() {
    */
   const [chosenStart, setStart] = useState<StartId>('browse')
   const [chosenAnalysis, setAnalysis] = useState<AnalysisId>('partners')
-  /*
-   * A set, because a reader may want a table *and* a chart of the same thing — two viewers off
-   * one chain rather than two workflows. Order is the order they were ticked, which is the order
-   * they are stacked on the canvas.
-   */
-  const [chosenViews, setViews] = useState<VisualisationId[]>(['table'])
   const [step, setStep] = useState(0)
 
   const panelRef = useRef<HTMLDivElement>(null)
@@ -107,13 +115,17 @@ function Dialog() {
   const analysis = resolveOption(analyses, chosenAnalysis, 'neurons')
   const views = useMemo(() => visualisationOptions(dataset, analysis), [dataset, analysis])
   /*
-   * The ticked viewers this analysis can actually end on, and never none: switching analysis
-   * drops the viewers the new one does not offer, and if that empties the set the first viewer it
-   * *does* offer stands in — the same rule `resolveOption` applies to the single answers, which a
-   * set has to state for itself.
+   * A set, because a reader may want a table *and* a chart of the same thing — two viewers off
+   * one chain rather than two workflows. **Everything this analysis offers, minus what has been
+   * turned off**, which is the whole of the state: there is no ticked-set of our own to keep in
+   * step with a question whose options change under it, and switching analysis therefore needs
+   * no repair. `resolveVisualisations` is headless and states the "never none" floor.
+   *
+   * Order is the option list's rather than the order boxes were ticked, which is also the order
+   * the cards are placed in — a reader who unticks and re-ticks the bar chart gets it back where
+   * it was rather than on the end.
    */
-  const offered = chosenViews.filter((id) => views.some((option) => option.id === id))
-  const visualisations = offered.length ? offered : [resolveOption(views, 'table', 'table')]
+  const visualisations = resolveVisualisations(views, viewsOff)
 
   const pick = {
     dataset: (key: string) => {
@@ -135,13 +147,19 @@ function Dialog() {
      * one is a set, so it needs somewhere to stop — the footer's Continue — and unticking the last
      * one is refused rather than allowed: an empty set builds a chain with nothing on the end of
      * it, and the reader who wanted that wants a different analysis.
+     *
+     * **What is written down is the refusal.** Every viewer arrives ticked, so a click that
+     * matters is one that turns something off, and that is the statement worth carrying to the
+     * next question and the next session — see `resolveVisualisations`. It also means the
+     * remembered value stays empty for a reader who never changes anything, so the default can
+     * move later without a stored answer nobody gave standing in its way.
      */
     visualisation: (id: VisualisationId) => {
-      setViews((current) => {
-        const without = current.filter((one) => one !== id)
-        if (!current.includes(id)) return [...current, id]
-        return without.length ? without : current
-      })
+      const ticked = visualisations.includes(id)
+      // Refused rather than ignored silently: the box the pointer is on stays ticked, which is
+      // the same feedback the old ticked-set version gave.
+      if (ticked && visualisations.length === 1) return
+      setViewsOff(ticked ? [...viewsOff, id] : viewsOff.filter((one) => one !== id))
     },
   }
 
@@ -171,10 +189,21 @@ function Dialog() {
     [dataset, start, analysis, viewKey, notes, dashboard],
   )
 
-  // Nothing is asked first: a generated workflow opens in a document of its own, so whatever was
-  // on the canvas is still open beside it. This used to arm a replace-confirm on the summary.
+  /*
+   * Nothing is asked first: a generated workflow opens in a document of its own, so whatever was
+   * on the canvas is still open beside it. This used to arm a replace-confirm on the summary.
+   *
+   * The arrange is asked for **after** the open and only when the canvas is what it is opening
+   * onto. `buildWorkflow` places a row of columns, which is legible at four cards and a long
+   * thin strip at nine — and a strip is what the fit `loadGraph` fires zooms out to frame. It
+   * cannot be done in the builder: a layout pass needs each card's real size, which only React
+   * Flow knows (`GraphState.arrangeRequest`). And a request made with the grid up would be
+   * dropped by the canvas's mount-seeded guard, so this does not pretend to make one — a
+   * dashboard is a graph whose positions nobody is looking at.
+   */
   const create = () => {
     openDocument(graph)
+    if (arrange && !dashboard) requestArrange()
     close()
   }
 
@@ -222,7 +251,7 @@ function Dialog() {
                   blurb={family.description}
                   onPick={() => pick.dataset(family.key)}
                   glyph={
-                    <GlyphSvg className="wizard__glyph" viewBox="0 0 52 46">
+                    <GlyphSvg className="wizard__glyph" viewBox={SPECIMEN_VIEWBOX}>
                       {datasetGlyph(family.glyph)}
                     </GlyphSvg>
                   }
@@ -234,7 +263,7 @@ function Dialog() {
           {step === 1 && (
             <Question
               title="Which neurons?"
-              hint="How you want to define the set of neurons you want to work with."
+              hint="How you want to define the set of neurons you want to work on."
             >
               {starts.map((option) => (
                 <Option
@@ -242,6 +271,7 @@ function Dialog() {
                   selected={option.id === start}
                   label={option.label}
                   blurb={option.blurb}
+                  glyph={<OptionGlyph option={option} />}
                   onPick={() => pick.start(option.id)}
                 />
               ))}
@@ -259,6 +289,7 @@ function Dialog() {
                   selected={option.id === analysis}
                   label={option.label}
                   blurb={option.blurb}
+                  glyph={<OptionGlyph option={option} />}
                   onPick={() => pick.analysis(option.id)}
                 />
               ))}
@@ -277,6 +308,7 @@ function Dialog() {
                   multiple
                   label={option.label}
                   blurb={option.blurb}
+                  glyph={<OptionGlyph option={option} />}
                   onPick={() => pick.visualisation(option.id)}
                 />
               ))}
@@ -290,6 +322,8 @@ function Dialog() {
               onNotes={setNotes}
               dashboard={dashboard}
               onDashboard={setDashboard}
+              arrange={arrange}
+              onArrange={setArrange}
             />
           )}
         </div>
@@ -340,6 +374,39 @@ function Question({
       <p className="wizard__hint">{hint}</p>
       <ul className="wizard__options">{children}</ul>
     </section>
+  )
+}
+
+/**
+ * The picture on an answer's row: the drawing of the node that answer is about.
+ *
+ * **Derived from the registry rather than drawn for the wizard**, which is the rule the start
+ * page's tiles and the add-menu's band already follow — the one hand-drawn set in the app is
+ * `startGlyphs.tsx`, and its header says why it is the exception (a rail of tours and dialogs has
+ * no node to derive from). Here every answer does have one: a viewer *is* a node, and a start or
+ * an analysis is a chain whose subject is a card in it. So a node whose drawing changes takes the
+ * wizard's rows with it, and a viewer added to `VIEWS` next month arrives with a picture.
+ *
+ * `getNodeDef` rather than `requireNodeDef`: a row with no picture is a cosmetic loss, and
+ * throwing out of a dialog somebody is halfway through is not the way to report a typo.
+ * `wizard.test.ts` reports it instead, where the fix is free.
+ *
+ * `GLYPH_STROKE_WIDTH` and the 24-unit box, not `GlyphSvg`'s default 1.4 in the specimen box:
+ * that function's own header records that a node glyph drawn at 1.4 comes out light beside the
+ * ones `NodeThumbnail` draws.
+ */
+function OptionGlyph({ option }: { option: WizardOption<string> }) {
+  const type = glyphNodeOf(option)
+  const def = type ? getNodeDef(type) : undefined
+  if (!def) return null
+  return (
+    <GlyphSvg
+      className="wizard__glyph"
+      viewBox={GLYPH_VIEWBOX}
+      strokeWidth={GLYPH_STROKE_WIDTH}
+    >
+      {nodeGlyph(def.type, def.category)}
+    </GlyphSvg>
   )
 }
 
@@ -422,12 +489,16 @@ function Summary({
   onNotes,
   dashboard,
   onDashboard,
+  arrange,
+  onArrange,
 }: {
   graph: CodaGraph
   notes: boolean
   onNotes: (enabled: boolean) => void
   dashboard: boolean
   onDashboard: (enabled: boolean) => void
+  arrange: boolean
+  onArrange: (enabled: boolean) => void
 }) {
   const chain = useMemo(
     () =>
@@ -473,6 +544,28 @@ function Summary({
         <span>
           Add explanatory notes to the canvas
           <em>Remembered for next time.</em>
+        </span>
+      </label>
+
+      {/*
+        An opt-out rather than an offer, which is why it is worded as the thing it does and not
+        as a question. The row a workflow is built as is arithmetic — column index times a
+        constant — and tidy only while the chain is short; the pass that fixes it is the Arrange
+        button's, so somebody who turns this off has not lost anything, they have kept the press.
+      */}
+      <label className="wizard__notes">
+        <input
+          type="checkbox"
+          checked={arrange}
+          onChange={(e) => onArrange(e.target.checked)}
+        />
+        <span>
+          Arrange the nodes on the canvas
+          <em>
+            {dashboard
+              ? 'Only when it opens on the canvas — a dashboard has no card positions to tidy.'
+              : 'Tidies the generated row into a layout. Remembered for next time.'}
+          </em>
         </span>
       </label>
 

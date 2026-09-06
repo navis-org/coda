@@ -5169,6 +5169,13 @@ p.sources__hint {
   padding-left: 9px;
 }
 
+/*
+ * One slot, two kinds of drawing: a dataset's specimen silhouette in its `0 0 52 46` box, and
+ * every other answer's node glyph in the 24-unit one. Sized for the first — 34 x 30 is its
+ * aspect ratio — and the second letterboxes to 30 x 30 inside it, which is the point: the width
+ * is what the label lines up against, and a reader moving between questions sees the text start
+ * in the same place rather than stepping left and right.
+ */
 .wizard__glyph {
   flex: none;
   width: 34px;
@@ -5230,10 +5237,16 @@ p.sources__hint {
   color: var(--text-muted);
 }
 
+/*
+ * The summary's checkboxes. Three of them now, and the gap is what that added: with two, the
+ * second row's label sat far enough from the first row's `em` to read as a separate answer; with
+ * three they run together into one block of prose with tick boxes down the side.
+ */
 .wizard__notes {
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  margin-top: 10px;
   font-size: 11.5px;
   cursor: pointer;
 }

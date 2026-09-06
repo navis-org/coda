@@ -178,7 +178,7 @@ Area-specific — the rule, then the doc that holds why:
   `seeAlso.test.ts` pins symmetry, that every entry has a document to open, and that **no
   documented node is a dead end**. See [docs/help.md](docs/help.md).
 - **A node's glyph is one drawing per type, and the table is data because a third surface has no
-  React.** `ui/glyphs.ts`: 101 drawings on eleven base shapes — the base shape names the material,
+  React.** `ui/glyphs.ts`: 103 drawings on eleven base shapes — the base shape names the material,
   the drawing on top names the operation. Four marks are shared and load-bearing (funnel =
   filtering, dashed outline = a user's selection, four-point spark = "cleaned", weight = role).
   Colour is not a channel; `currentColor` only. Primitives rather than JSX because `nodes.html`
@@ -291,7 +291,21 @@ Area-specific — the rule, then the doc that holds why:
   assembles the chain, each question narrowing on `capabilityAnywhere` and on what the analysis
   *produces*; `VIEWS` is that pairing **and** the node each pair ends on, one table read by both
   halves. The view question takes a **set**, stepped by `cardWidth`, because a viewer's height is
-  its content and stacking overlapped on the first run. Four traps. **It asks the ceiling, not the
+  its content and stacking overlapped on the first run; it opens with **every box ticked** and what
+  is remembered is the **refusals** (`coda.wizardViews.v1`), because this question's options change
+  with the analysis — a stored allow-list means something different every time it is read, and the
+  reader who ticked *everything* under one analysis, having said nothing, would still narrow the
+  next one to whichever members the two lists share. Absence is the default, so no sentinel.
+  Every answer's row also draws a **node's** glyph, declared for a start or an analysis and read off
+  `VIEWS` for a viewer; a glyph fails silently *upwards* into the category drawing, so the tests
+  assert every answer names a registered type and no two answers to one question draw alike.
+  A generated workflow also asks the canvas for **one layout pass** on arrival
+  (`arrangeRequest`, opt-out on the summary): the row `buildWorkflow` places frames at 40–70% of a
+  canvas and one ELK pass frames at 52–92%, and it cannot be done in the builder because **only the
+  canvas knows how big a card is**. It is a request from a *builder*, never a property of opening —
+  `loadGraph` stands auto-layout *down* on every open, so it must run ahead of that branch rather
+  than behind it — and it neither glides (nobody saw the arrangement it left) nor keeps the camera
+  (the fit on open framed the row). Four traps. **It asks the ceiling, not the
   floor**, since a wizard answer is a *family* with no dataset id yet — the floor hid Morphology and
   NBLAST for all three CAVE families; the ceiling names only keys that *vary*, the node still reads
   the floor so a real absence lands a message, and the test asserts both directions **per backend**.

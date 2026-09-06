@@ -67,6 +67,28 @@ const WIZARD_NOTES_KEY = 'coda.wizardNotes.v1'
  * means a tab that writes one clobbers the other's in-flight value.
  */
 const WIZARD_DASHBOARD_KEY = 'coda.wizardDashboard.v1'
+/**
+ * Which viewers the fourth question does **not** tick — a deny-list, and that is the design.
+ *
+ * The question's option list changes with the analysis, so an allow-list would mean something
+ * different every time it was read. Two ways that goes wrong and only the second is obvious.
+ * A reader who ticks `[table]` under Connectivity partners and then chooses an Adjacency matrix
+ * gets a table there too, which is arguably what they asked for — but a reader who ticks
+ * *everything* under partners has said nothing at all, and an allow-list of `[table, bar, pie]`
+ * still narrows the matrix question to its table, because that is the only member the two lists
+ * share. Storing the refusals inverts both: absence is nothing turned off, which is the default
+ * of everything ticked, and "not the pie chart" is the statement that actually carries from one
+ * question to the next.
+ */
+const WIZARD_VIEWS_KEY = 'coda.wizardViews.v1'
+/**
+ * Whether a generated workflow is arranged once as it lands on the canvas.
+ *
+ * On unless somebody has said otherwise, so like the notes key this holds only the opt-out.
+ * `buildWorkflow` places its cards as a row of columns, which is legible at four nodes and a
+ * long thin strip at nine — and a strip is what `fitView` zooms out to frame.
+ */
+const WIZARD_ARRANGE_KEY = 'coda.wizardArrange.v1'
 const GUIDES_SEEN_KEY = 'coda.guidesSeen.v1'
 const GUIDES_DONE_KEY = 'coda.guidesDone.v1'
 const LAYOUT_KEY = 'coda.layout.v1'
@@ -875,6 +897,36 @@ export function loadWizardDashboard(): boolean {
 
 export function saveWizardDashboard(enabled: boolean): void {
   writeLocal(WIZARD_DASHBOARD_KEY, String(enabled))
+}
+
+/**
+ * The viewers this reader has turned off — see `WIZARD_VIEWS_KEY` for why it is the off list.
+ *
+ * Ids are not checked against the option space and deliberately so: one that no longer exists is
+ * simply never offered, so it costs nothing, where filtering here would mean this module knowing
+ * the wizard's vocabulary in order to forget it. `readStringArray` already drops a non-string
+ * member rather than the whole key.
+ */
+export function loadWizardViewsOff(): string[] {
+  return readStringArray(WIZARD_VIEWS_KEY)
+}
+
+export function saveWizardViewsOff(ids: readonly string[]): void {
+  writeStringArray(WIZARD_VIEWS_KEY, ids)
+}
+
+/**
+ * Whether a generated workflow gets its one layout pass on arrival.
+ *
+ * `!== 'false'`, the notes spelling: nothing is stored until the box is touched, so absence has
+ * to read as the default rather than as a deliberate no.
+ */
+export function loadWizardArrange(): boolean {
+  return readLocal(WIZARD_ARRANGE_KEY) !== 'false'
+}
+
+export function saveWizardArrange(enabled: boolean): void {
+  writeLocal(WIZARD_ARRANGE_KEY, String(enabled))
 }
 
 // ---------------------------------------------------------------------------

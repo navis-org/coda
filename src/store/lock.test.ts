@@ -309,6 +309,11 @@ describe('every store action is on one side of the lock', () => {
     'closeWizard',
     'setWizardNotes',
     'setWizardDashboard',
+    'setWizardViewsOff',
+    'setWizardArrange',
+    // A layout pass is not an edit to the document until it commits, and `arrangeNodes` — which
+    // is what commits — is classified on its own.
+    'requestArrange',
     'setStartPageDismissed',
     'expandNode',
     // Looking inside a folded frame: a panel, and one that edits nothing but params.

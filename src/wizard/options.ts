@@ -143,6 +143,22 @@ export interface WizardOption<Id extends string> {
    */
   hint: WizardHint
   /**
+   * The node whose drawing names this answer, for the row's icon.
+   *
+   * An answer here is a *chain* rather than a node, so the field says which card in that chain
+   * the answer is **about** — the one somebody would point at to name the technique. For the
+   * second question that is the head the answer builds, pinned exactly by `wizard.test.ts`; for
+   * the third it is the node the label names, which is not always the first one the arm builds
+   * (three arms open on a Connectivity, and drawing three answers alike is drawing none of
+   * them). `neurons` is the one answer that builds no node of its own, and names the table it
+   * hands on.
+   *
+   * Absent on a viewer, and that is the point: a viewer **is** a node and `VIEWS` already says
+   * which, so `glyphNodeOf` reads it there rather than having it written twice. See that
+   * function for the whole rule.
+   */
+  glyph?: string
+  /**
    * The source capability this answer needs, if any.
    *
    * Declared on the option rather than tested at each question, which is where it started: three
@@ -225,6 +241,7 @@ const STARTS: WizardOption<StartId>[] = [
     label: 'Interactive Search with Thumbnails',
     blurb:
       'Uses the `Explore Dataset` node: free-form search the full neuron table in the browser, tick the ones you want.',
+    glyph: 'neuron.explore',
     hint: {
       text: '**Search and tick neurons here**, then Run. Everything downstream reads the ticked set — a card further along saying it has no neurons is the graph waiting for you, not a mistake.',
       tone: 'tip',
@@ -235,6 +252,7 @@ const STARTS: WizardOption<StartId>[] = [
     label: 'Structured Search',
     blurb:
       'Uses the `Find Neurons` node: filter by type, status or region. Best when you already know what to ask for.',
+    glyph: 'neuron.findNeurons',
     hint: {
       text: '**Set a filter here**, then Run. A type like `LC.*` is a regex, anchored the way the backend anchors it.',
       tone: 'tip',
@@ -244,6 +262,7 @@ const STARTS: WizardOption<StartId>[] = [
     id: 'ids',
     label: 'Paste IDs',
     blurb: 'Copy a list of body or root ids you already have into Coda.',
+    glyph: 'neuron.inputIds',
     hint: {
       text: '**Paste body ids here**, one per line, then Run. Ids are text, never numbers — an 18-digit root id does not survive being parsed as one.',
       tone: 'tip',
@@ -278,6 +297,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     label: 'Connectivity partners',
     blurb:
       'Fetch up- and/or downstream partners → aggregate by type and sort such that strongest partners appear first.',
+    glyph: 'neuron.connectivity',
     hint: {
       text: 'Connectivity → group → sort, the chain most connectivity questions are built from. `Min weight` drops the weak pairs at the server rather than after the download.',
     },
@@ -287,6 +307,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     label: 'Adjacency matrix',
     blurb:
       'All-by-all connectivity. Can feed into heatmap, clustering or network visualization/analysis.',
+    glyph: 'neuron.adjacency',
     hint: {
       text: 'Adjacency between the same set on both axes. Row-normalising makes each row sum to 1, so rows with very different totals can still be compared.',
     },
@@ -296,6 +317,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     label: 'Influence score',
     blurb:
       'Influence → Pivot: how strongly every neuron drives your set, summed over every path rather than along one route.',
+    glyph: 'neuron.influence',
     hint: {
       text: 'The influence score of Bates et al., bounded to a few hops. Scores are a lower bound and the card says how much it left out. Press `?` for what the number means.',
     },
@@ -305,6 +327,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     requires: 'paths',
     label: 'Shortest paths',
     blurb: 'Paths from one neuron set to another, a few hops deep. Two searches.',
+    glyph: 'neuron.paths',
     hint: {
       text: 'This node needs two inputs - `Sources` & `Targets` - which is why we have two searches on the left. `Max hops` and `Min weight` keep the traversal bounded.',
     },
@@ -313,6 +336,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     id: 'network',
     label: 'Network graph + stats',
     blurb: 'Type-level edges as a node-link network graph and/or the graph metrics over it.',
+    glyph: 'net.build',
     hint: {
       text: 'Grouping by both ends turns neuron-to-neuron rows into the type-level edge list a network is built from.',
     },
@@ -321,6 +345,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     id: 'cluster',
     label: 'Connectivity similarity',
     blurb: 'Partner Vectors → Similarity Matrix → Linkage, over the shared partners.',
+    glyph: 'neuron.partnerVectors',
     hint: {
       text: 'Partner Vectors makes one vector per neuron. There is deliberately no Pivot in this chain — that is what keeps it from being a hundred million cells.',
     },
@@ -330,6 +355,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     requires: 'skeletons',
     label: 'View morphology in 3D',
     blurb: 'Skeletons and synapse locations, drawn in one scene.',
+    glyph: 'neuron.skeletons',
     hint: {
       text: 'Two queries off one search: the arbours and the synapse points, drawn in the same scene.',
     },
@@ -339,6 +365,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     requires: 'skeletons',
     label: 'NBLAST clustering',
     blurb: 'All-by-all NBLAST over their skeletons → Linkage.',
+    glyph: 'neuron.nblast',
     hint: {
       text: 'NBLAST is all-by-all, so the work grows with the **square** of the set. The search above is capped for that reason; widen it deliberately.',
       tone: 'warning',
@@ -348,6 +375,7 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     id: 'neurons',
     label: 'Neuron table only',
     blurb: 'No analysis, just the data. Build on it with your own queries and viewers.',
+    glyph: 'out.table',
     hint: {
       text: 'No analysis yet. Add nodes to the right of this one — press Tab for the node browser.',
     },
@@ -577,6 +605,43 @@ export const VIEWS: Record<AnalysisId, Partial<Record<VisualisationId, ViewSpec>
   },
 }
 
+/**
+ * Every viewer's node spec, by id — `VIEWS` inverted once rather than searched per lookup.
+ *
+ * A viewer means the same node whichever analysis offers it, which is the property that makes
+ * this safe to flatten: `out.neuroglancer` under `morphology` and under `neurons` are the same
+ * entry. Built at module scope because the answer is a fact about the table, not about a graph.
+ *
+ * Two readers, and they want it for opposite halves of one node: `build.ts` asks the registry
+ * whether the type has a `dataset` port, and `glyphNodeOf` asks what it draws as.
+ */
+export const VIEWS_BY_ID: ReadonlyMap<VisualisationId, ViewSpec> = new Map(
+  Object.values(VIEWS).flatMap(
+    (byView) => Object.entries(byView) as [VisualisationId, ViewSpec][],
+  ),
+)
+
+/**
+ * The node whose drawing names an answer — the icon on its row.
+ *
+ * **Declared for a start or an analysis, derived for a viewer**, and the split is not a
+ * convenience. A viewer *is* a node and `VIEWS` already says which, so writing it a second time
+ * on the option is how the row comes to show one node and the chain to end on another. A start
+ * or an analysis is a *chain*, and which card in it names the answer is a judgement — three arms
+ * open on a Connectivity, so deriving it from the first node an arm builds would draw three
+ * different answers identically, which is drawing none of them.
+ *
+ * `wizard.test.ts` holds both halves: every answer the wizard offers names a registered type (a
+ * typo otherwise falls through to the category drawing in silence, which is a picture and so
+ * looks like it worked), no two answers to one question draw alike, the second question's glyph
+ * is exactly the head that answer builds, and an analysis that builds anything of its own draws
+ * as one of the nodes it builds. `neurons` is the answer that builds nothing of its own — the
+ * rule excuses it by saying so rather than by naming it — and draws as the table it hands on.
+ */
+export function glyphNodeOf(option: WizardOption<string>): string | undefined {
+  return option.glyph ?? VIEWS_BY_ID.get(option.id as VisualisationId)?.type
+}
+
 /** The viewers this analysis can end on, in offer order, minus what the source cannot do. */
 export function visualisationOptions(
   dataset: string,
@@ -607,6 +672,34 @@ export function resolveOption<T extends string>(
 ): T {
   if (options.some((option) => option.id === chosen)) return chosen
   return options[0]?.id ?? fallback
+}
+
+/**
+ * Which viewers the fourth question arrives with ticked.
+ *
+ * **Everything the analysis offers, minus what this reader has turned off** — so a first visit
+ * gets every way of looking at the answer and finds out what they are, and somebody who has said
+ * "not the pie chart" is not told again. The refusals are the remembered half rather than the
+ * picks, for the reason `loadWizardViewsOff` records: this question's options change with the
+ * analysis, so a remembered *allow*-list means something different every time it is read, and a
+ * reader who ticked everything under one analysis would silently narrow the next one.
+ *
+ * The floor is the rule the set has always had, restated for the new default: **never none.**
+ * The dialog refuses to untick the last box, so the off-list can never empty the question it was
+ * made in — but it accumulates across questions, and two analyses each giving up one viewer can
+ * between them cover every viewer a third one offers. Everything, then, rather than nothing: an
+ * empty question builds a chain with no end on it, and a reader who wants that wants a different
+ * analysis.
+ *
+ * Headless and here rather than in the dialog, which is `resolveOption`'s reason a few lines
+ * down: applied on the way *out* of the state, so no path can forget it.
+ */
+export function resolveVisualisations(
+  options: readonly WizardOption<VisualisationId>[],
+  off: readonly VisualisationId[],
+): VisualisationId[] {
+  const kept = options.filter((option) => !off.includes(option.id)).map((option) => option.id)
+  return kept.length ? kept : options.map((option) => option.id)
 }
 
 export const startOption = (id: StartId): WizardOption<StartId> | undefined =>

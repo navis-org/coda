@@ -457,6 +457,16 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M6.8 19.6v-5.2L4 11.4M6.8 14.4l2.8-2.4M9.6 12l-.6-2.8' }],
     ['path', { d: 'M13.6 6.6h6.8M13.6 10.4h6.8M13.6 14.2h4.6' }],
   ],
+  // Its sibling one card along: the same arbour with the pager that steps through the set,
+  // because what separates this from every other way of drawing a neuron is that it draws
+  // *one* — and ‹ › is the control its own card carries. The arbour is `neuron.skeletons`'
+  // scaled 0.74 about the centre to leave the chevrons their margins; scaled by hand into
+  // literals rather than by a group transform, which would take the stroke weight with it.
+  'out.topology': [
+    ['circle', { cx: '7.9', cy: '16.7', r: '1.5' }],
+    ['path', { d: 'M8.9 15.7 12 12.3M12 12.3l3.1-3.4M12 12.3l1 3.7M15.1 8.9l2.5-1.3M15.1 8.9l-.4-2.5M13 16l2.7 1.2' }],
+    ['path', { d: 'M4.9 9.6 3.1 12l1.8 2.4M19.1 9.6l1.8 2.4-1.8 2.4' }],
+  ],
 
   // --- The node-link graph ---------------------------------------------------------------
   // Circles and wires. Weight says role: a larger or filled disc is the node the question is

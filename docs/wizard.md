@@ -64,6 +64,42 @@ the third hardcoded `heatmap` under a comment claiming it was "the first one tha
 `wizard.test.ts` running `inferGraph` over every combination catches a pair that cannot be *wired*;
 it says nothing about two halves disagreeing, which is why they are now one.
 
+## Every answer wears a node's drawing
+
+The dataset question always had icons — the specimen silhouettes the dataset cards wear. The other
+three now do too, and **not one of them is drawn for the wizard**: `glyphNodeOf` names a node and
+`ui/glyphs.ts` draws it, the rule the start page's tiles and the add-menu's band already follow.
+So a node redrawn next month takes the wizard's rows with it, and the one hand-drawn set in the
+app stays the one `startGlyphs.tsx` documents as the exception.
+
+**Declared for a start or an analysis, derived for a viewer**, and the split is the same one the
+rest of this file keeps making. A viewer *is* a node and `VIEWS` already says which, so writing it
+again on the option is how a row comes to show one node while the chain ends on another —
+`VIEWS_BY_ID` moved here from `build.ts` so that inversion happens once, with `selfFetching` and
+the glyph as its two readers. A start or an analysis is a *chain*, and which card in it names the
+answer is a judgement rather than a lookup: three arms open on a Connectivity, so deriving the
+picture from the first node an arm builds would draw `partners`, `network` and `cluster`
+identically, which is drawing none of them.
+
+Four properties, all in `wizard.test.ts`, and the first two are why this is asserted rather than
+looked at once. **A glyph fails silently upwards**: a type that is not in the registry falls
+through `glyphShapes` to its category's drawing, so the row looks finished and merely says the
+wrong thing — the same failure `glyphs.test.ts` records for a mistyped key, arriving here through
+a different door. So: every answer names a registered type; **no two answers to one question draw
+alike**, per question rather than across the wizard, since a viewer meaning the same node under
+two analyses is exactly what `VIEWS_BY_ID` is built on; the second question's glyph is **the head
+card that answer builds**, which is exact because those answers *are* cards; and an analysis draws
+as one of the cards its arm builds, stated as "wherever it builds one" so that `neurons` — the
+answer with no analysis node at all, drawn as the table it hands on — is excused by the rule
+rather than by name. Each was falsified by breaking it.
+
+One node had to be drawn for this: `out.topology` had no entry and was serving the `visualisation`
+category fallback, which is a bar chart. Nothing was broken — a node without a drawing getting a
+placeholder is a promise `glyphs.test.ts` deliberately protects — but a bar chart between a 3D
+scene and a Neuroglancer cell is an icon that misinforms rather than one that is missing. It is
+`neuron.skeletons`' arbour with the pager its own card carries, which is what separates it from
+every other way of drawing a neuron: it draws *one*.
+
 ## The third question names techniques, not questions
 
 Its answers were plain language — "What the wiring looks like", "Which of them are wired alike" — on
@@ -83,6 +119,36 @@ A reader who wants a table *and* a bar chart of the same ranked partners wants t
 chain, not two workflows — so `visualisations` is a list, the question draws checkboxes, and the
 footer grows a Continue (the other three advance on the answer, each *being* one answer). Unticking
 the last viewer is refused: an empty set builds a chain with nothing on the end.
+
+**It opens with every box ticked, and what is remembered is the refusals.** Showing one viewer and
+inviting somebody to find the others made the reader do the discovery; every viewer an analysis
+offers is a way of looking at the same answer, and the cheapest way to learn that a dendrogram and
+a heatmap pair up is to be handed both. So `resolveVisualisations` is *everything offered, minus
+what this reader has turned off*, and the off-list is what `coda.wizardViews.v1` holds.
+
+**The stored half is the off-list because this question's options change under it.** A remembered
+allow-list means something different every time it is read, and the failure is not the obvious one.
+`[table]` carried from Connectivity partners to an Adjacency matrix gives a table there too, which
+is arguably what was asked for — but a reader who ticks *everything* under partners has said
+nothing at all, and a stored `[table, bar, pie]` still narrows the matrix question to its table,
+because that is the one member the two lists share. An empty off-list says the same nothing under
+every analysis, absence *is* the default of everything ticked so no migration or sentinel is
+needed, and "not the pie chart" is the one statement that genuinely carries between questions.
+
+Two consequences. The floor is the rule the set always had, restated: **never none**. The dialog
+refuses to untick the last box, so an off-list cannot empty the question it was made in — but it
+accumulates across questions, and two analyses each giving up one viewer can between them cover
+everything a third offers, so that case opens whole rather than empty. And switching analysis now
+needs **no repair at all**: there is no ticked-set of ours to keep in step with a list that changes
+under it, which is what the old `offered.length ? offered : …` line was doing.
+
+The default is also what most generated graphs now *are* — three viewer cards on one row rather
+than one — so `placeGuards.test.ts` walks every analysis with every viewer it offers, which
+`everyCombination`'s singletons never exercise. Two arms are worth knowing about: `influence` goes
+from five nodes to nine, because ticking the heatmap turns `Per query neuron` on and the table
+beside it then needs its Group By and Sort back (the round trip below); and `morphology`'s search
+is now capped at `GEOMETRY_LIMIT` by default rather than `SEARCH_LIMIT`, since the 3D scene is
+ticked and `searchLimit` reads that.
 
 **The viewers sit side by side, stepped by each card's own width.** Stacking was wrong the moment the
 graph ran: a viewer's *height* is its content, so an unrun Table card is short and a run one is 387px
@@ -150,6 +216,54 @@ under the **deepest row** rather than at a fixed height — derived from the row
 placed at, because the fixed one had been chosen when every chain was a single row and the paths
 query's second head landed straight on it.
 
+## The arrange is a request, not a layout
+
+`buildWorkflow` places its cards as a row of columns — column index times `COL_WIDTH`, plus the
+viewers stepped by `cardWidth`. That is legible at four cards and a long thin strip at nine, and a
+strip is what the fit `loadGraph` fires zooms out to frame. Measured across the nine analyses with
+every viewer ticked, on a 1400 x 820 canvas: the row frames at **40–70%** and one ELK pass over the
+same nodes frames at **52–92%**, because the viewers stack into a layer instead of extending the
+row. `partners` goes 41% → 64%, `cluster` 40% → 52%.
+
+**It cannot be done in the builder, and that is the whole shape of this.** A layout pass needs to
+know how big every card is, and a card's height is decided by its param rows, its port count and
+its body widget — none of which the document records. `useArrange`'s header says it outright: only
+the canvas knows. A headless pass would arrange a row of identical `FALLBACK_NODE_SIZE` boxes and
+pack an Explore card's neighbour straight through it. So `buildWorkflow` is untouched, the answer
+it returns is the same either way, and what the wizard does is raise `GraphState.arrangeRequest`
+after `openDocument` — a counter with a mount-seeded guard, `fitRequest`'s idiom.
+
+**It is not auto-layout, and the distinction is the reason it is allowed to exist.** `loadGraph`
+turns that mode *off* on every open, because the positions in a file are somebody's decision and a
+mode that re-arranged them on open would mean a saved layout could not survive being looked at.
+This is the other case: positions that are arithmetic nobody chose. So the request comes from the
+thing that *built* the graph, never from opening one — which is what keeps it off files, share
+links and the Zoo, and why the pass has to run ahead of the auto-layout branch in `useArrange`
+rather than behind it. Gated behind the mode it would never run at all, and the workflow would
+still open, just as a row.
+
+Two things ride on the request that the Arrange button does not want. It does **not glide**: the
+animation explains a change to somebody who was looking at the old arrangement and explains
+nothing to somebody who has not seen it. And it **frames what it landed**, because `loadGraph`
+already fired its fit and that fit framed the row. Both are options on the internal pass with the
+button's behaviour as the default; the exported handle stays zero-argument, because
+`LayoutControls` passes it straight to `onClick` and a first parameter would be handed a React
+event whose every property reads `undefined` — right by accident until an option's default is
+`true`.
+
+Only `Editor` answers, and the grid replaces it, so **the wizard does not ask when it is opening
+into a dashboard** — a graph whose card positions nobody is looking at. The mount-seeded guard
+would drop such a request anyway; that is the belt rather than the braces, and it is not pinned by
+the suite, for a reason worth keeping: asserting an *absence* here is a race every way it was
+tried. A fixed window passes whenever it is shorter than a pass (60 ms against ~400, guard
+deliberately broken, test still green), and counting commits does not separate the cases either,
+since `token` supersedes an in-flight pass so a stray request answered just before a real one
+lands as one commit — the same number the correct behaviour produces. What *is* asserted is that
+the wizard does not raise a request nothing will answer.
+
+The pass is one commit tagged `layout`, so ⌘Z puts the row back — the same undo step the Arrange
+button has always been.
+
 ## Three numbers, and what each is protecting
 
 **`SEARCH_LIMIT` (100) on a published dataset.** Auto-run is on by default, so a generated Find
@@ -177,9 +291,15 @@ the combination nobody tried is the one that overlaps.
 
 ## Two things on the summary that are not questions
 
-**Notes**, and **"open as a dashboard"** — checkboxes rather than a fifth and sixth question, both
-remembered per profile (`coda.wizardNotes.v1`, `coda.wizardDashboard.v1`), because each says how this
-reader likes to be *handed* a workflow rather than anything about the workflow.
+**Notes**, **"arrange the nodes"** and **"open as a dashboard"** — checkboxes rather than three more questions, all
+remembered per profile (`coda.wizardNotes.v1`, `coda.wizardArrange.v1`, `coda.wizardDashboard.v1`),
+because each says how this reader likes to be *handed* a workflow rather than anything about the
+workflow. A third preference is
+remembered and is **not** on this screen: the viewers turned off (`coda.wizardViews.v1`) belong to
+the question they were answered on, being a statement about the workflow rather than about how it
+arrives. Three keys and not one object, which `persistence.ts` gives the reason for: a preference is
+read once at init and cached, so one key holding several answers means a tab writing one clobbers
+another's in-flight value.
 
 Their defaults are opposite, deliberately. Notes are **on**: they explain the graph somebody just
 generated and cost nothing to ignore. The dashboard is **off**: it replaces the view the reader is in,

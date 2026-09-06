@@ -13,9 +13,11 @@
  *    off the first time it ran;
  *  - and the options survive a reload.
  *
- * The arrangement itself is not exercised: ELK is loaded through a dynamic import and jsdom
- * measures nothing, so a pass here would arrange a set of zero-sized boxes. The mapping and the
- * arithmetic are covered headlessly in `layout/layout.test.ts` against the real algorithm.
+ * The arrangement itself is not exercised: ELK is loaded through a dynamic import and every card
+ * measures the same stubbed box, so a pass here arranges a set of identical ones. The mapping and
+ * the arithmetic are covered headlessly in `layout/layout.test.ts` against the real algorithm.
+ * What a pass *is* good for here is whether it ran at all, once, and what it did to the camera —
+ * which is the last group below, about the one-shot pass a builder asks for.
  */
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -88,6 +90,77 @@ describe('the layout controls', () => {
     // Two or more selected means "tidy these", and the button has to say so — otherwise the
     // same press does two different things with nothing on screen distinguishing them.
     expect(arrangeButton().getAttribute('aria-label')).toBe('Arrange the selected nodes')
+  })
+})
+
+/**
+ * The one pass a builder asks for — `GraphState.arrangeRequest`, and the wizard's only caller.
+ *
+ * Three of these fail in ways that look like the feature working. A pass gated behind
+ * auto-layout never runs at all, because `loadGraph` turns that mode off on the way in — and the
+ * graph still opens, just as a row. A request answered twice re-arranges a canvas somebody has
+ * since touched. And a pass that lands without framing leaves the camera on the bounds of a
+ * layout that no longer exists, which is the zoomed-out view this was for.
+ */
+describe('the arrange a builder requests', () => {
+  const positions = () =>
+    new Map(useGraphStore.getState().graph.nodes.map((n) => [n.id, { ...n.position }]))
+
+  const moved = (before: ReturnType<typeof positions>) =>
+    [...positions()].filter(([id, at]) => {
+      const was = before.get(id)
+      return !was || was.x !== at.x || was.y !== at.y
+    }).length
+
+  it('runs although opening the graph turned auto-layout off', async () => {
+    render(<App />)
+    // The gate that matters: `loadGraph` stood the mode down, and this is not that mode.
+    expect(useGraphStore.getState().autoLayout).toBe(false)
+    const before = positions()
+
+    act(() => useGraphStore.getState().requestArrange())
+    await waitFor(() => expect(moved(before)).toBeGreaterThan(0))
+  })
+
+  it('frames what it landed, because the fit on open framed the row', async () => {
+    render(<App />)
+    const fits = useGraphStore.getState().fitRequest
+    const before = positions()
+
+    act(() => useGraphStore.getState().requestArrange())
+    await waitFor(() => expect(moved(before)).toBeGreaterThan(0))
+    await waitFor(() => expect(useGraphStore.getState().fitRequest).toBeGreaterThan(fits))
+  })
+
+  it('lands in one commit, so one press of undo puts the row back', async () => {
+    render(<App />)
+    const before = positions()
+
+    act(() => useGraphStore.getState().requestArrange())
+    await waitFor(() => expect(moved(before)).toBeGreaterThan(0))
+
+    act(() => useGraphStore.getState().undo())
+    expect(positions()).toEqual(before)
+  })
+
+  it('answers a request once, and not again on the next commit', async () => {
+    render(<App />)
+    const before = positions()
+    act(() => useGraphStore.getState().requestArrange())
+    await waitFor(() => expect(moved(before)).toBeGreaterThan(0))
+
+    const arranged = positions()
+    // A commit of any kind re-runs the effect that consumes the request. Moving a card is the
+    // cheapest one that also proves the pass did not simply put everything back.
+    const first = useGraphStore.getState().graph.nodes[0]!
+    act(() =>
+      useGraphStore
+        .getState()
+        .moveNodes([{ id: first.id, position: { x: -400, y: -400 } }], true),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(useGraphStore.getState().graph.nodes[0]!.position).toEqual({ x: -400, y: -400 })
+    expect(moved(arranged)).toBe(1)
   })
 })
 

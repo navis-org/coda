@@ -114,6 +114,8 @@ import {
   loadGuidesSeen,
   loadWizardDashboard,
   loadWizardNotes,
+  loadWizardArrange,
+  loadWizardViewsOff,
   loadStartPageDismissed,
   loadTheme,
   saveAutoRun,
@@ -127,8 +129,11 @@ import {
   saveStartPageDismissed,
   saveWizardDashboard,
   saveWizardNotes,
+  saveWizardArrange,
+  saveWizardViewsOff,
   watchTabIdentity,
 } from './persistence'
+import type { VisualisationId } from '../wizard/options'
 // Side-effect import: the store resolves node types the moment it loads the autosaved
 // graph, so the node pack must be registered first. Declaring the dependency here rather
 // than relying on import order in main.tsx keeps that from silently breaking.
@@ -340,6 +345,29 @@ export interface GraphState {
    */
   fitRequest: number
   requestFitView(): void
+  /**
+   * Asks the canvas to arrange the graph **once**, and to frame the result.
+   *
+   * A counter with a mount-seeded guard, `fitRequest`'s idiom, and here for `fitRequest`'s
+   * reason turned up one level: only the canvas can do it. A layout pass needs to know how big
+   * every card is, and a card's height is decided by its param rows, its port count and its body
+   * widget — none of which the document records, so the sizes come off React Flow's own
+   * measurements and nowhere else (`useArrange`). A builder that wanted to hand over an arranged
+   * graph would be arranging a row of identical fallback boxes.
+   *
+   * **Not auto-layout, and the distinction is load-bearing.** `loadGraph` turns that mode *off*
+   * on every open, because the positions in a file are somebody's decision and a mode that
+   * re-arranged them on open would mean a saved layout could not survive being looked at. This
+   * is the other case: a graph whose positions are arithmetic nobody chose, so the thing that
+   * built it asks for one pass. It is a request from a *builder*, never a property of opening —
+   * which is what keeps it off files, share links and the Zoo.
+   *
+   * Only `Editor` answers it, so a request made while the dashboard is up is dropped by the
+   * mount-seeded guard rather than firing whenever somebody next presses `D`. The wizard
+   * therefore asks only when it is opening onto the canvas.
+   */
+  arrangeRequest: number
+  requestArrange(): void
   /** Theme preference. In the store because both the toolbar and the palette set it. */
   theme: ThemePreference
   setTheme(theme: ThemePreference): void
@@ -575,6 +603,28 @@ export interface GraphState {
    */
   wizardDashboard: boolean
   setWizardDashboard(enabled: boolean): void
+  /**
+   * The viewers the fourth question does **not** tick — the reader's refusals, not their picks.
+   *
+   * Every viewer an analysis offers is ticked until somebody unticks one, so what is worth
+   * remembering is which ones they turned off; `loadWizardViewsOff` records why an allow-list
+   * would mean something different under every analysis. `resolveVisualisations` is what turns
+   * this plus the current question into an answer.
+   *
+   * A `VisualisationId[]` here and a `string[]` in storage: the store speaks the wizard's
+   * vocabulary, and the slot it is read from cannot.
+   */
+  wizardViewsOff: VisualisationId[]
+  setWizardViewsOff(ids: VisualisationId[]): void
+  /**
+   * Whether a generated workflow is arranged once as it lands.
+   *
+   * Remembered beside the other two summary checkboxes and on by default. Unlike them it is not
+   * an answer `buildWorkflow` reads: the graph it produces is the same either way, and the pass
+   * is `requestArrange` on the canvas afterwards — see there for why it cannot be anywhere else.
+   */
+  wizardArrange: boolean
+  setWizardArrange(enabled: boolean): void
   setStartPageDismissed(dismissed: boolean): void
   /**
    * Node whose output is open in the full-size viewer overlay, if any. In the store because
@@ -1825,6 +1875,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
       set((s) => ({ feedbackRequest: { seq: s.feedbackRequest.seq + 1, category } })),
     fitRequest: 0,
     requestFitView: () => set((s) => ({ fitRequest: s.fitRequest + 1 })),
+    arrangeRequest: 0,
+    requestArrange: () => set((s) => ({ arrangeRequest: s.arrangeRequest + 1 })),
     autoRun: loadAutoRun(),
     setAutoRun: (enabled) => {
       saveAutoRun(enabled)
@@ -2000,6 +2052,16 @@ export const useGraphStore = create<GraphState>((set, get) => {
     setWizardDashboard: (enabled) => {
       saveWizardDashboard(enabled)
       set({ wizardDashboard: enabled })
+    },
+    wizardViewsOff: loadWizardViewsOff() as VisualisationId[],
+    setWizardViewsOff: (ids) => {
+      saveWizardViewsOff(ids)
+      set({ wizardViewsOff: ids })
+    },
+    wizardArrange: loadWizardArrange(),
+    setWizardArrange: (enabled) => {
+      saveWizardArrange(enabled)
+      set({ wizardArrange: enabled })
     },
     setStartPageDismissed: (dismissed) => {
       saveStartPageDismissed(dismissed)

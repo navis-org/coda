@@ -50,14 +50,15 @@ import { noteNode } from '../examples/notes'
 import { datasetFamily } from '../nodes/lib/datasetFamilies'
 import { inputPorts } from '../core/ports'
 import { getNodeDef } from '../core/registry'
-import type {
-  AnalysisId,
-  ViewSpec,
-  VisualisationId,
-  WizardAnswers,
-  WizardHint,
+import type { AnalysisId, VisualisationId, WizardAnswers, WizardHint } from './options'
+import {
+  VIEWS,
+  VIEWS_BY_ID,
+  analysisOption,
+  familyCan,
+  startOption,
+  visualisationOption,
 } from './options'
-import { VIEWS, analysisOption, familyCan, startOption, visualisationOption } from './options'
 
 /**
  * How many neurons a search on a published dataset comes back with until somebody says
@@ -103,19 +104,6 @@ function selfFetching(visualisation: VisualisationId): boolean {
   // would mean typing them as `ParamValues` for a question that does not read them.
   return def ? inputPorts(def, {}).some((port) => port.id === 'dataset') : false
 }
-
-/**
- * Every viewer's node spec, by id — `VIEWS` inverted once rather than searched per lookup.
- *
- * A viewer means the same node whichever analysis offers it, which is the property that makes
- * this safe to flatten: `out.neuroglancer` under `morphology` and under `neurons` are the same
- * entry. Built at module scope because the answer is a fact about the tables, not about a graph.
- */
-const VIEWS_BY_ID: ReadonlyMap<VisualisationId, ViewSpec> = new Map(
-  Object.values(VIEWS).flatMap(
-    (byView) => Object.entries(byView) as [VisualisationId, ViewSpec][],
-  ),
-)
 
 interface Placement {
   id: string

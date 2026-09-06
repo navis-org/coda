@@ -64,6 +64,23 @@ function ease(t: number): number {
   return 1 - (1 - t) ** 3
 }
 
+/**
+ * What a pass does besides moving the cards. Both defaults are what the Arrange button wants.
+ *
+ * Two independent things rather than one "opening" flag, because they are answers to two
+ * questions and only one of them is about the reader being there. `animate` is: gliding the
+ * cards explains a change to somebody who was looking at the old arrangement, and explains
+ * nothing to somebody who has not seen it. `frame` is about the camera, which after a pass that
+ * halves a graph's width is pointed at a frame that no longer exists — `loadGraph` already fired
+ * its fit, and it framed the row.
+ */
+interface ArrangeOptions {
+  /** Glide the cards to their new places. Off for a pass the reader was not watching. */
+  animate?: boolean
+  /** Frame the result when it lands, through `requestFitView`. */
+  frame?: boolean
+}
+
 export interface ArrangeHandle {
   arrange: () => void
   /**
@@ -112,7 +129,8 @@ export function useArrange(): ArrangeHandle {
   const [held, setHeld] = useState<{ key: string; routes: Map<string, XY[]> } | null>(null)
   /** Supersedes an in-flight pass, so a burst of edits cannot land two arrangements at once. */
   const token = useRef(0)
-  const frame = useRef<number | undefined>(undefined)
+  /** The animation's rAF handle. `frameRef`, because a pass has a `frame` option. */
+  const frameRef = useRef<number | undefined>(undefined)
 
   /**
    * How big each card actually is, in flow units, read off the DOM.
@@ -247,7 +265,12 @@ export function useArrange(): ArrangeHandle {
   )
 
   const animate = useCallback(
-    (final: ReadonlyMap<string, XY>, from: Map<string, XY>, routes: Map<string, XY[]>) => {
+    (
+      final: ReadonlyMap<string, XY>,
+      from: Map<string, XY>,
+      routes: Map<string, XY[]>,
+      frame: boolean,
+    ) => {
       const mine = token.current
       const start = performance.now()
       const step = () => {
@@ -264,7 +287,7 @@ export function useArrange(): ArrangeHandle {
         }
         if (t < 1) {
           setOverrides(at)
-          frame.current = requestAnimationFrame(step)
+          frameRef.current = requestAnimationFrame(step)
           return
         }
         // Commit and drop the overrides together, so the frame that stops drawing the animation
@@ -274,96 +297,115 @@ export function useArrange(): ArrangeHandle {
         publishRoutes(routes)
         setOverrides(null)
         setBusy(false)
+        if (frame) useGraphStore.getState().requestFitView()
       }
-      frame.current = requestAnimationFrame(step)
+      frameRef.current = requestAnimationFrame(step)
     },
     [publishRoutes],
   )
 
-  const arrange = useCallback(() => {
-    const mine = ++token.current
-    const state = useGraphStore.getState()
-    const current = state.graph
-    const scope = arrangeScope(current, state.selection)
-    // One node cannot be arranged, and neither can none. No commit, so no undo entry for a
-    // press that did nothing.
-    if (scope.nodes.length < 2) return
+  const runArrange = useCallback(
+    ({ animate: gliding = true, frame = false }: ArrangeOptions = {}) => {
+      const mine = ++token.current
+      const state = useGraphStore.getState()
+      const current = state.graph
+      const scope = arrangeScope(current, state.selection)
+      // One node cannot be arranged, and neither can none. No commit, so no undo entry for a
+      // press that did nothing.
+      if (scope.nodes.length < 2) return
 
-    const measured = measure()
-    /*
-     * Collapsed groups take part as **one box each**, which is the whole of what this pass has
-     * to know about them. Arranging the members instead would move cards nobody can see, reserve
-     * their space in the layout and leave the box wherever its top-left member landed — a graph
-     * with a hole in it and a card in the wrong place, from a button that looks like it worked.
-     *
-     * Condensed *after* scoping, so a selection decides which cards take part and the folding
-     * decides how they are counted. See `layout/collapse.ts`.
-     */
-    const view = collapsedView(current, measured)
-    const { nodes: items, edges: links } = condense(scope.nodes, scope.edges, view)
-    if (items.length < 2) return
+      const measured = measure()
+      /*
+       * Collapsed groups take part as **one box each**, which is the whole of what this pass has
+       * to know about them. Arranging the members instead would move cards nobody can see, reserve
+       * their space in the layout and leave the box wherever its top-left member landed — a graph
+       * with a hole in it and a card in the wrong place, from a button that looks like it worked.
+       *
+       * Condensed *after* scoping, so a selection decides which cards take part and the folding
+       * decides how they are counted. See `layout/collapse.ts`.
+       */
+      const view = collapsedView(current, measured)
+      const { nodes: items, edges: links } = condense(scope.nodes, scope.edges, view)
+      if (items.length < 2) return
 
-    const sizes = new Map<string, NodeSize>(
-      items.map((node) => [node.id, resolveSize(node, measured)]),
-    )
-    const before = boundsOf(items, measured)
-    if (!before) return
+      const sizes = new Map<string, NodeSize>(
+        items.map((node) => [node.id, resolveSize(node, measured)]),
+      )
+      const before = boundsOf(items, measured)
+      if (!before) return
 
-    setBusy(true)
-    void runLayout(items, links, state.layoutOptions, measured, measurePorts())
-      .then(({ positions: raw, routes: rawRoutes }) => {
-        if (token.current !== mine) return
-        const anchored = anchorTo(raw, sizes, { x: before.x, y: before.y })
-        // Notes are dodged even when only a selection is being arranged: a subgraph landing on
-        // a note is the same collision, and the selection is not what decides that.
-        const obstacles = noteRects(current, measured, view.hidden)
-        // Still keyed by box wherever a group is folded: `dodge` and the routes below both work
-        // in the arranged vocabulary, and only the positions handed to the store are expanded.
-        const placed = dodge(anchored, sizes, obstacles)
-        const final = expandPositions(placed, view)
+      setBusy(true)
+      void runLayout(items, links, state.layoutOptions, measured, measurePorts())
+        .then(({ positions: raw, routes: rawRoutes }) => {
+          if (token.current !== mine) return
+          const anchored = anchorTo(raw, sizes, { x: before.x, y: before.y })
+          // Notes are dodged even when only a selection is being arranged: a subgraph landing on
+          // a note is the same collision, and the selection is not what decides that.
+          const obstacles = noteRects(current, measured, view.hidden)
+          // Still keyed by box wherever a group is folded: `dodge` and the routes below both work
+          // in the arranged vocabulary, and only the positions handed to the store are expanded.
+          const placed = dodge(anchored, sizes, obstacles)
+          const final = expandPositions(placed, view)
 
-        /*
-         * The routes take the *same* two shifts the positions did, read back off `place.ts`
-         * rather than re-derived here. ELK lays out from the origin and knows nothing about
-         * where the work already was, so a route left in raw coordinates would be a wire drawn
-         * across the canvas to wherever (0,0) happens to be — and being off by the anchor is not
-         * a subtle wrongness, it is the whole graph's width.
-         */
-        const shift = anchorDelta(raw, sizes, { x: before.x, y: before.y })
-        const cleared = dodgeDelta(anchored, sizes, obstacles)
-        const routes = translateRoutes(rawRoutes, shift.x + cleared.x, shift.y + cleared.y)
+          /*
+           * The routes take the *same* two shifts the positions did, read back off `place.ts`
+           * rather than re-derived here. ELK lays out from the origin and knows nothing about
+           * where the work already was, so a route left in raw coordinates would be a wire drawn
+           * across the canvas to wherever (0,0) happens to be — and being off by the anchor is not
+           * a subtle wrongness, it is the whole graph's width.
+           */
+          const shift = anchorDelta(raw, sizes, { x: before.x, y: before.y })
+          const cleared = dodgeDelta(anchored, sizes, obstacles)
+          const routes = translateRoutes(rawRoutes, shift.x + cleared.x, shift.y + cleared.y)
 
-        // The *members'* starting places, not the boxes': the animation drives the real cards,
-        // and a box is drawn from wherever its members currently are — so it glides with them.
-        // Indexed rather than scanned: `find` per arranged node is O(n·m) over the document.
-        const byId = nodesById(current)
-        const from = new Map<string, XY>()
-        for (const id of final.keys()) {
-          const node = byId.get(id)
-          if (node) from.set(id, { ...node.position })
-        }
-        if (prefersReducedMotion()) {
-          useGraphStore.getState().arrangeNodes(final)
-          publishRoutes(routes)
+          // The *members'* starting places, not the boxes': the animation drives the real cards,
+          // and a box is drawn from wherever its members currently are — so it glides with them.
+          // Indexed rather than scanned: `find` per arranged node is O(n·m) over the document.
+          const byId = nodesById(current)
+          const from = new Map<string, XY>()
+          for (const id of final.keys()) {
+            const node = byId.get(id)
+            if (node) from.set(id, { ...node.position })
+          }
+          // A pass nobody watched lands the same way one somebody asked not to see does, so the
+          // two share a branch: there is nothing to explain and no old arrangement to leave.
+          if (!gliding || prefersReducedMotion()) {
+            useGraphStore.getState().arrangeNodes(final)
+            publishRoutes(routes)
+            setBusy(false)
+            if (frame) useGraphStore.getState().requestFitView()
+            return
+          }
+          animate(final, from, routes, frame)
+        })
+        .catch((error: unknown) => {
+          if (token.current !== mine) return
           setBusy(false)
-          return
-        }
-        animate(final, from, routes)
-      })
-      .catch((error: unknown) => {
-        if (token.current !== mine) return
-        setBusy(false)
-        setOverrides(null)
-        useGraphStore
-          .getState()
-          .setNotice(`Layout failed: ${error instanceof Error ? error.message : String(error)}`)
-      })
-  }, [animate, measure, measurePorts, publishRoutes])
+          setOverrides(null)
+          useGraphStore
+            .getState()
+            .setNotice(
+              `Layout failed: ${error instanceof Error ? error.message : String(error)}`,
+            )
+        })
+    },
+    [animate, measure, measurePorts, publishRoutes],
+  )
+
+  /**
+   * The Arrange button's pass — glides, and leaves the camera alone.
+   *
+   * Zero-arg on purpose: `LayoutControls` passes this straight to `onClick`, so a first
+   * parameter would be handed a React `MouseEvent` and every property read off it would be
+   * `undefined` — which for an options object means the defaults, i.e. right by accident until
+   * somebody adds an option whose default is `true`.
+   */
+  const arrange = useCallback(() => runArrange(), [runArrange])
 
   useEffect(
     () => () => {
       token.current++
-      if (frame.current !== undefined) cancelAnimationFrame(frame.current)
+      if (frameRef.current !== undefined) cancelAnimationFrame(frameRef.current)
     },
     [],
   )
@@ -412,6 +454,33 @@ export function useArrange(): ArrangeHandle {
    */
   const armed = useRef(false)
   const lastKey = useRef<string | undefined>(undefined)
+  /**
+   * The one-shot pass a builder asks for — see `GraphState.arrangeRequest`.
+   *
+   * It rides *this* effect rather than one of its own, because what it needs is the half that is
+   * hard: waiting until every drawn card has a real `offsetWidth`, which is the retry below.
+   * A pass fired before then arranges the graph around `FALLBACK_NODE_SIZE` boxes, so an Explore
+   * card at 520 gets its neighbour packed straight through it — the failure `measure` records,
+   * and one that looks like a layout bug rather than a timing one.
+   *
+   * **Seeded from the store at mount**, `fitRequest`'s guard: a request made while the dashboard
+   * was up — where there is no canvas and no `useArrange` at all — is dropped rather than fired
+   * at whoever next presses `D`, and a remount does not re-arrange a graph somebody has since
+   * moved by hand.
+   *
+   * That drop is a property of the ref rather than something the suite pins, and the attempt is
+   * worth recording. A test that raises a request with the grid up, opens the canvas and asserts
+   * nothing moved is asserting an *absence*, and every way of waiting for one here is a race: a
+   * fixed window passes whenever it is shorter than a pass, which at 60ms against a pass that
+   * takes ~400 it was, guard deliberately broken and the test still green. Counting commits
+   * instead does not separate them either — `token` supersedes an in-flight pass, so a stray
+   * request answered a moment before a real one lands as *one* commit, which is the same number
+   * the correct behaviour produces. What is asserted instead is the half that decides it in
+   * practice: the wizard does not raise a request it knows nothing will answer
+   * (`wizardDialog.test.tsx`).
+   */
+  const arrangeRequest = useGraphStore((s) => s.arrangeRequest)
+  const handledRequest = useRef(arrangeRequest)
   const pending = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   /** Bumped to re-run this effect once the browser has laid a new card out. */
   const [measureTick, setMeasureTick] = useState(0)
@@ -465,6 +534,23 @@ export function useArrange(): ArrangeHandle {
     retries.current = 0
 
     const key = structureKey(graph, measured)
+    /*
+     * Ahead of the auto-layout branch, because the two are unrelated and this one has to happen
+     * whatever the mode says — `loadGraph` turns auto-layout *off* on every open, so a requested
+     * pass gated behind it would never run at all.
+     *
+     * `lastKey` is advanced with it: the arrangement about to land is this structure's, and
+     * leaving it stale would have auto mode re-arrange the same graph a moment later for anybody
+     * who had the mode on.
+     */
+    if (arrangeRequest !== handledRequest.current) {
+      handledRequest.current = arrangeRequest
+      lastKey.current = key
+      // Not gliding, and framed when it lands: the reader has not seen the arrangement this is
+      // moving away from, and the fit `loadGraph` fired framed it.
+      runArrange({ animate: false, frame: true })
+      return
+    }
     if (!autoLayout) {
       armed.current = false
       lastKey.current = key
@@ -491,7 +577,7 @@ export function useArrange(): ArrangeHandle {
     lastKey.current = key
     if (pending.current) clearTimeout(pending.current)
     pending.current = setTimeout(arrange, AUTO_DELAY_MS)
-  }, [autoLayout, locked, graph, arrange, measure, measureTick])
+  }, [autoLayout, locked, graph, arrange, runArrange, arrangeRequest, measure, measureTick])
 
   useEffect(
     () => () => {

@@ -21,7 +21,12 @@ import type { GraphNode } from '../core/graph'
 import { registerBuiltinSources } from '../data/builtins'
 import { DEMO_DATASET, buildWorkflow } from '../wizard/build'
 import { demoGraph, demoPlans } from '../wizard/demo'
-import { everyCombination } from '../wizard/options'
+import {
+  analysisOptions,
+  everyCombination,
+  startOptions,
+  visualisationOptions,
+} from '../wizard/options'
 import '../nodes'
 import { cardWidth } from '../ui/nodes/nodeBodies'
 
@@ -101,6 +106,30 @@ describe('the generated graphs', () => {
    * place that is not true: ticking a heatmap *and* a table builds a Group By and a Sort on a
    * second row that neither singleton has, so the shape nobody enumerated is the one to place.
    */
+  /*
+   * And the shape the wizard now *opens* with: every viewer an analysis offers, ticked. That
+   * used to be the rare answer and is the default one, so a row of three cards stepped by
+   * `cardWidth` is what most generated graphs are — the arithmetic `everyCombination`'s
+   * singletons never exercise.
+   */
+  for (const analysis of analysisOptions(DEMO_DATASET)) {
+    const views = visualisationOptions(DEMO_DATASET, analysis.id)
+    if (views.length < 2) continue
+    for (const start of startOptions(DEMO_DATASET)) {
+      it(`lays "${start.id}/${analysis.id}" out with every viewer ticked`, () => {
+        const nodes = buildWorkflow({
+          dataset: DEMO_DATASET,
+          start: start.id,
+          analysis: analysis.id,
+          visualisations: views.map((view) => view.id),
+          notes: true,
+          dashboard: false,
+        }).nodes
+        expect(clashesIn(nodes)).toEqual([])
+      })
+    }
+  }
+
   it('lays the two-viewer influence chain out with no card on top of another', () => {
     const nodes = buildWorkflow({
       dataset: DEMO_DATASET,
