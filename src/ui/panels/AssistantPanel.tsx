@@ -23,9 +23,13 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 
 import { countPlanParams } from '../../assistant/planShape'
 import {
+  getFullCatalogue,
   getModel,
   getProviderId,
+  getThinking,
   isConfigured,
+  setFullCatalogue,
+  setThinking,
   subscribeCredentials,
 } from '../../data/ai/credentials'
 import { providerFor } from '../../data/ai/providers'
@@ -93,6 +97,55 @@ function describeSelection(): string {
   const id = getProviderId()
   // `providerFor` cannot miss: `getProviderId` resolves an unknown stored id to the default.
   return `${providerFor(id)!.label} · ${getModel(id)}`
+}
+
+/**
+ * Whether the selected provider takes a per-request reasoning switch.
+ *
+ * A boolean rather than the provider object, for `describeSelection`'s reason one function up:
+ * a getter returning the provider would be stable today and stops being so the moment anything
+ * derives one, and invariant 7 compares snapshots by identity. Only Ollama answers true — the
+ * cloud providers' reasoning is adaptive and inside a `max_tokens` their clients already set, so
+ * a checkbox there would be a control over something else wearing the same words.
+ */
+function offersReasoning(): boolean {
+  return providerFor(getProviderId())?.thinkingSwitch === true
+}
+
+/**
+ * One header switch.
+ *
+ * **Takes effect on click, which inverts the rule the Connections panel follows.** That panel
+ * treats every field as a draft until Save, because a key half-typed is not a key; here there is
+ * no Save to be a draft against, and the whole point of moving these two out of the dialog is
+ * that they are what you reach for when an answer comes back wrong — so the next question is the
+ * confirmation. Nothing in flight is affected either way: `send` reads the values as it starts.
+ *
+ * The explanation is on `title` rather than under the control. Both hints are a sentence with a
+ * measurement in them, and the drawer is 232px tall: printing them would cost more transcript
+ * than the two switches are worth, and the same text is in the setup guide.
+ */
+function Toggle({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string
+  hint: string
+  checked: boolean
+  onChange: (next: boolean) => void
+}) {
+  return (
+    <label className="assistant__toggle" title={hint}>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span>{label}</span>
+    </label>
+  )
 }
 
 export function AssistantPanel() {
@@ -166,6 +219,12 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
 
       const outcome = await runTurn({
         request: text,
+        /*
+         * Read here rather than closed over, so a switch flipped while the composer already held
+         * text still applies to the question it is flipped before — and so this callback's deps
+         * do not grow a value that changes underneath a half-typed request.
+         */
+        detail: getFullCatalogue() ? 'full' : 'lean',
         graph: () => store().graph,
         /*
          * The editor's own inference, not a fresh one. It is the only one that carries what a
@@ -174,6 +233,21 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
          * made it leave those pickers unset.
          */
         inference: () => store().inference,
+        /*
+         * What the graph has actually produced, read through the store rather than gathered into
+         * one snapshot: `describeGraph` asks per node, and only about the nodes that turn out to
+         * have something worth a line.
+         *
+         * `nodeInfo(...).state === 'ok'` is the freshness gate and it is the load-bearing half —
+         * a cache entry is keyed by provenance, so a node whose params moved still answers with
+         * the numbers its *previous* settings produced. `'ok'` is the one state that means the
+         * cached result is the answer to the graph as it stands; `needsRun` is the same question
+         * asked upside down and would let a `running` or `disabled` node through.
+         */
+        results: {
+          fresh: (nodeId) => store().nodeInfo(nodeId).state === 'ok',
+          output: (nodeId, portId) => store().nodeOutput(nodeId, portId),
+        },
         apply: (plan) => store().applyAssistantPlan(plan),
         signal: controller.signal,
       })
@@ -227,6 +301,15 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
    */
   const using = useSyncExternalStore(subscribeCredentials, describeSelection)
   /*
+   * The two levers, as three primitives off one channel. All booleans, so invariant 7 is
+   * satisfied by value rather than by memoising — and each of the getters defaults its argument
+   * to the selected provider, which is what keeps them from reporting one provider's settings
+   * beside another's name in the line above.
+   */
+  const full = useSyncExternalStore(subscribeCredentials, getFullCatalogue)
+  const think = useSyncExternalStore(subscribeCredentials, getThinking)
+  const canReason = useSyncExternalStore(subscribeCredentials, offersReasoning)
+  /*
    * A locked canvas refuses a plan at `applyAssistantPlan`, which is the right backstop and the
    * wrong place to *first* find out: the request has been to the model and back by then, and the
    * answer was knowable before it was sent. So the composer stands down the way it does with no
@@ -250,6 +333,43 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
         <span className="assistant__hint" title={using}>
           {using}
         </span>
+        {/*
+         * How much goes with the question, beside who it goes to — the rest of the sentence the
+         * line above starts. Withheld until something can answer, because a lever over a request
+         * nobody can make yet is chrome in front of the one instruction that matters, which is
+         * the empty state's "pick a provider".
+         *
+         * Both are `flex: none`, so the header truncates the model name rather than pushing
+         * Clear and ✕ off the edge — the guard `.assistant__hint` already carries, now doing
+         * some work.
+         */}
+        {ready && (
+          <>
+            <Toggle
+              label="Full node help"
+              hint={
+                'Send what every setting means, not just its name, kind and bounds — roughly ' +
+                'twice the prompt. Measured as good as the lean one on every model tried, so ' +
+                'this is for a request that came back wrong. The next question re-sends the ' +
+                'whole prompt either way.'
+              }
+              checked={full}
+              onChange={(next) => setFullCatalogue(getProviderId(), next)}
+            />
+            {canReason && (
+              <Toggle
+                label="Let the model reason"
+                hint={
+                  'Slower, often by a lot — one measured question took 254s with reasoning and ' +
+                  '49s without, for plans that were as good. Turn it on if a request comes back ' +
+                  'wrong.'
+                }
+                checked={think}
+                onChange={(next) => setThinking(getProviderId(), next)}
+              />
+            )}
+          </>
+        )}
         <div className="toolbar__spacer" />
         {entries.length > 0 && (
           <button

@@ -30,7 +30,6 @@ import {
   reportAuthFailure as reportAiAuthFailure,
   resetCredentials as resetAiCredentials,
   getKey,
-  getThinking,
   setKey,
   setModel,
 } from '../../data/ai/credentials'
@@ -729,14 +728,6 @@ describe('the models a local server actually has', () => {
     expect(modelPicker().querySelector('optgroup')).toBeNull()
   })
 
-  /*
-   * Reasoning is a *speed* control, and only for a provider that takes a per-request switch.
-   * Measured: the same question took 254 s with reasoning and 49 s without, on a warm model,
-   * for plans that were as good — so it is off, and offered rather than decided.
-   */
-  const reasoning = () =>
-    screen.queryByLabelText('Let the model reason before answering') as HTMLInputElement | null
-
   it('links the setup guide, because the setup is longer than a note', async () => {
     /*
      * Ollama is the only provider whose setup is more than pasting a key — a runtime to
@@ -762,38 +753,20 @@ describe('the models a local server actually has', () => {
     expect(screen.queryByRole('link', { name: 'Full setup guide' })).toBeNull()
   })
 
-  it('offers reasoning, off, for the provider that takes the switch', async () => {
+  it('sends the two levers it no longer holds to where they now are', async () => {
+    /*
+     * Reasoning was a checkbox here and the catalogue level was nowhere at all; both are in the
+     * assistant drawer now, beside the ask box you reach for when an answer comes back wrong.
+     * The pointer is the test rather than the absence: somebody who set reasoning in a previous
+     * build comes back to this panel looking for it, and an empty space answers nothing.
+     */
     serverHas('qwen3.8:latest')
     await openOllama()
 
-    expect(reasoning()).not.toBeNull()
-    expect(reasoning()!.checked).toBe(false)
-  })
-
-  it('does not offer it where reasoning is not a per-request boolean', async () => {
-    // Anthropic's is adaptive and inside a `max_tokens` the provider already sets. A checkbox
-    // there would be a control over something else entirely, wearing the same words.
-    render(<SourcesPanel />)
-    open()
-    fireEvent.click(section('AI assistant'))
-
-    expect(reasoning()).toBeNull()
-  })
-
-  it('stores it on Save and not before', async () => {
-    // Same rule the key and the model follow: the panel is a draft until Save. A checkbox that
-    // took effect on click would change what the assistant does while somebody is still reading
-    // the sentence under it.
-    serverHas('qwen3.8:latest')
-    await openOllama()
-
-    fireEvent.click(reasoning()!)
-    expect(getThinking('ollama')).toBe(false)
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    })
-    expect(getThinking('ollama')).toBe(true)
+    expect(screen.queryByLabelText(/Let the model reason/)).toBeNull()
+    expect(screen.getByText(/whether the model reasons first/).textContent).toMatch(
+      /assistant drawer/,
+    )
   })
 })
 

@@ -3,8 +3,10 @@
  *
  * **Kept per provider, not per session.** Switching to Gemini to try it and back to Anthropic
  * must not cost you the key you already pasted — a settings panel that forgets is one nobody
- * experiments in. So the key, the model and (where it is the user's to choose) the base URL are
- * all stored under the provider's id, and selecting a provider is a separate, single value.
+ * experiments in. So the key, the model, (where it is the user's to choose) the base URL, and
+ * the two switches the assistant drawer offers are all stored under the provider's id, and
+ * selecting a provider is a separate, single value. Two of those five are settings rather than
+ * credentials, which is why the module is named for the harder half of what it holds.
  *
  * **Bring your own key.** There is no Coda-side account and no server: the key is the user's,
  * the requests are billed to them, and nothing here ever reaches a machine we run. That is also
@@ -23,11 +25,11 @@ import { PROVIDERS, providerFor } from './providers'
 /**
  * The per-provider values, as one table.
  *
- * Written as a table rather than as three near-identical getter/setter pairs because the rule
+ * Written as a table rather than as five near-identical getter/setter pairs because the rule
  * they share is the one that would drift: a value equal to the provider's own default is *not*
  * stored, so a provider changing its default in a later build moves everyone who never chose
- * otherwise. Three copies of that decision meant three places to keep it, none of which fails
- * to compile when one is missed.
+ * otherwise. Five copies of that decision would mean five places to keep it, none of which
+ * fails to compile when one is missed.
  */
 const FIELDS = {
   key: {
@@ -60,6 +62,24 @@ const FIELDS = {
     clean: (raw: string) => (raw === 'on' ? 'on' : ''),
     fallback: () => '',
   },
+  /*
+   * The full node catalogue rather than the lean one, as `'on'` or nothing.
+   *
+   * Rides in this table for `think`'s reason and one of its own. The table's reason: lean *is*
+   * the default, so off costs no storage and a later build changing the default moves everyone
+   * who never chose — see `catalogue.ts` for the measurement that made lean the default.
+   *
+   * Its own reason is that this is per *provider* even though the catalogue is a property of the
+   * prompt rather than of the service. What varies between providers is what the extra 33k
+   * characters cost: an hour-TTL cache read on Anthropic, and KV memory plus a re-prefill on a
+   * model running on somebody's laptop. So the answer is reasonably different per provider, and
+   * keeping it here means trying Gemini and coming back does not cost you what you already set.
+   */
+  full: {
+    prefix: 'coda.ai.full.',
+    clean: (raw: string) => (raw === 'on' ? 'on' : ''),
+    fallback: () => '',
+  },
 } as const
 
 type Field = keyof typeof FIELDS
@@ -87,6 +107,7 @@ const held: Record<Field, Map<string, string>> = {
   model: new Map(),
   base: new Map(),
   think: new Map(),
+  full: new Map(),
 }
 let loaded = false
 
@@ -187,6 +208,26 @@ export function getThinking(id: string = getProviderId()): boolean {
 
 export function setThinking(id: string, on: boolean): void {
   write('think', id, on ? 'on' : '')
+}
+
+/**
+ * Whether to send the full node catalogue. Off — i.e. `lean` — unless the user turned it on.
+ *
+ * A boolean here and a `CatalogueDetail` at the seam that uses it, deliberately: naming the
+ * level would make this module import `assistant/catalogue.ts`, which imports `data/ai` back.
+ * The mapping is one ternary and it lives where the type already legitimately is.
+ *
+ * Lean is the default because it was measured, not assumed: three full-suite reps at each level
+ * against Sonnet 5 were 15/15 either way, and the case `help` prose should matter most for
+ * produced the identical graph on all six runs. It is roughly half the prompt. On is the escape
+ * hatch for a request where the prose might be what was missing.
+ */
+export function getFullCatalogue(id: string = getProviderId()): boolean {
+  return read('full', id) === 'on'
+}
+
+export function setFullCatalogue(id: string, on: boolean): void {
+  write('full', id, on ? 'on' : '')
 }
 
 /** Is the selected provider ready to be asked something? */

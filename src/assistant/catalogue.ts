@@ -314,6 +314,20 @@ Column params — set them when you can, and you often can:
   the graph has been run — and once it has, its real columns are in the listing like any
   other's. A missing line means unknown, never none.
 
+What a run tells you, where the graph has been run:
+- A \`ran:\` line reports what a node produced, and it is only there when the node's *current*
+  settings are the ones that produced it. Use what is in it — an actual value for a filter, an
+  actual range for a threshold — rather than guessing one.
+- A value list reading \`61 distinct, 8 commonest:\` shows eight of sixty-one. **It is not the
+  set of values.** Do not conclude that anything is absent from a column because it is absent
+  from that line, and do not write a filter whose correctness depends on the list being complete.
+- Numeric columns give a range and a median rather than a list, because a threshold is chosen
+  from the spread. Id columns give a count and no values at all.
+- \`(same columns as n3:out)\` means this port holds a table that summarises identically to that
+  one — a Sort or a viewer passing rows through. It is a fact worth having, not an omission.
+- No \`ran:\` line means the node has not run, or its settings have moved since it did. That is
+  unknown, never none — the same rule as a missing \`carries:\` line.
+
 What is fine, and should not stop you:
 - A column you genuinely cannot know yet, per the above.
 - A required input left unwired, when the user has not said what should feed it.

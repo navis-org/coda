@@ -19,12 +19,14 @@ import { installStorageStub } from '../../test/jsdomStubs'
 import { anthropic } from './anthropic'
 import {
   getBaseUrl,
+  getFullCatalogue,
   getKey,
   getModel,
   getProviderId,
   isConfigured,
   resetCredentials,
   setBaseUrl,
+  setFullCatalogue,
   setKey,
   setModel,
   setProviderId,
@@ -105,6 +107,26 @@ describe('choosing a provider', () => {
     expect(isConfigured()).toBe(false)
     setKey('openai', 'sk-oai')
     expect(isConfigured()).toBe(true)
+  })
+
+  it('keeps the catalogue level per provider, and off — meaning lean — until asked', () => {
+    /*
+     * Lean is the default and it was measured: 15/15 either way against Sonnet 5, with the case
+     * `help` prose should matter most for producing the identical graph on all six runs. Per
+     * provider because what the extra 33k characters *cost* differs — a cached read on Anthropic,
+     * KV memory and a re-prefill on somebody's laptop — so the answer reasonably differs too.
+     */
+    expect(getFullCatalogue('anthropic')).toBe(false)
+
+    setFullCatalogue('ollama', true)
+    expect(getFullCatalogue('ollama')).toBe(true)
+    expect(getFullCatalogue('anthropic')).toBe(false)
+
+    // Off again stores nothing, which is the table's rule: a value equal to the default is not
+    // kept, so a later build changing that default moves everyone who never chose.
+    setFullCatalogue('ollama', false)
+    expect(getFullCatalogue('ollama')).toBe(false)
+    expect(localStorage.getItem('coda.ai.full.ollama')).toBeNull()
   })
 
   it('remembers a server only where the endpoint is the user’s to choose', () => {

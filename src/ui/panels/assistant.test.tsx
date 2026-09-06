@@ -20,7 +20,15 @@ import { inferGraph } from '../../core/inference'
 import type { StubbedCall } from '../../data/ai/fixture'
 import { messagesReply, stubFetch } from '../../data/ai/fixture'
 import { pivotGraph, pivotObserved } from '../../assistant/fixture'
-import { resetCredentials, setKey, setModel, setProviderId } from '../../data/ai/credentials'
+import {
+  getFullCatalogue,
+  getThinking,
+  resetCredentials,
+  setKey,
+  setModel,
+  setProviderId,
+} from '../../data/ai/credentials'
+import { buildSystemPrompt } from '../../assistant/catalogue'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
@@ -447,6 +455,53 @@ describe('what the canvas already knows', () => {
     expect(asked(stub.sent[0]!)).toContain('partnerType')
   })
 
+  it('tells the model what a run actually produced, values and all', async () => {
+    /*
+     * The values half, and the reason it needed no tool: every question it answers — which value
+     * to filter on, what a threshold should be, why a table came back empty — is an aggregate.
+     * Asserted through the *store*, because the part that could not be tested headlessly is the
+     * freshness gate: it is read off the run state, and only a real run produces one.
+     */
+    const { graph } = pivotGraph()
+    act(() => useGraphStore.setState({ graph, inference: inferGraph(graph) }))
+    await act(async () => {
+      await useGraphStore.getState().runAll()
+    })
+
+    const stub = stubReplies(PIPELINE)
+    render(<AssistantPanel />)
+    await ask('chart the connections')
+
+    const sent = asked(stub.sent[0]!)
+    expect(sent).toContain('ran:')
+    expect(sent).toMatch(/ran: \w+ — [\d,]+ rows/)
+  })
+
+  it('says nothing a node ran when its settings have moved since', async () => {
+    /*
+     * A cache entry is keyed by provenance, so a stale node is still holding the numbers its
+     * *previous* settings produced — and a line built from those describes a graph that no
+     * longer exists, indistinguishable from a current one. Editing a param after the run is the
+     * whole of the setup; the gate is `nodeInfo(...).state === 'ok'`.
+     */
+    const { graph } = pivotGraph()
+    act(() => useGraphStore.setState({ graph, inference: inferGraph(graph) }))
+    await act(async () => {
+      await useGraphStore.getState().runAll()
+    })
+
+    const find = useGraphStore
+      .getState()
+      .graph.nodes.find((n) => n.type === 'neuron.findNeurons')
+    act(() => useGraphStore.getState().setParam(find!.id, 'limit', 7))
+
+    const stub = stubReplies(PIPELINE)
+    render(<AssistantPanel />)
+    await ask('chart the connections')
+
+    expect(asked(stub.sent[0]!)).not.toContain('ran:')
+  })
+
   it('says nothing about them before a run, because there is nothing to say', async () => {
     // Unknown is not none. A blank here is the honest answer and the rules tell the model to
     // leave the picker alone; the bug was reporting a blank when the app knew better.
@@ -517,5 +572,95 @@ describe('the conversation', () => {
 
     expect(screen.queryByText('chart the LC4 neurons')).toBeNull()
     expect(graph().nodes).toHaveLength(3)
+  })
+})
+
+/**
+ * The two levers, in the header beside who is about to answer.
+ *
+ * They are the whole of what the assistant can be tuned with short of changing model, and until
+ * now one lived three clicks away in a dialog and the other was reachable only from a test.
+ * Asserted on the wire rather than on the checkbox, because the failure worth catching is a
+ * switch that moves and changes nothing about the request — which looks identical on screen.
+ */
+
+/** The cached prefix, as the provider actually sent it. Anthropic wraps it for the breakpoint. */
+function systemSent(call: StubbedCall): string {
+  return (call.body.system as Array<{ text: string }>)[0]!.text
+}
+
+const help = () => screen.queryByLabelText('Full node help') as HTMLInputElement | null
+const reason = () => screen.queryByLabelText('Let the model reason') as HTMLInputElement | null
+
+describe('how much goes with the question', () => {
+  it('sends the lean catalogue by default, with the switch off to say so', async () => {
+    // Lean was measured level with full — 15/15 either way against Sonnet 5 — so it is the
+    // default and the box is unticked. The assertion is that the *wire* agrees with the box.
+    const stub = stubReplies(PIPELINE)
+    render(<AssistantPanel />)
+    expect(help()!.checked).toBe(false)
+
+    await ask('chart the LC4 neurons')
+    expect(systemSent(stub.sent[0]!)).toBe(buildSystemPrompt('lean'))
+  })
+
+  it('sends the full one once it is ticked, and needs no Save to do it', async () => {
+    /*
+     * The Connections panel treats every field as a draft until Save; there is no Save here, and
+     * the point of moving this lever beside the ask box is that you flip it and immediately ask
+     * again. So the click is the decision — stored at once, and carried by the next request.
+     */
+    const stub = stubReplies(PIPELINE, PIPELINE)
+    render(<AssistantPanel />)
+
+    await act(async () => {
+      fireEvent.click(help()!)
+    })
+    expect(getFullCatalogue('anthropic')).toBe(true)
+
+    await ask('chart the LC4 neurons')
+    expect(systemSent(stub.sent[0]!)).toBe(buildSystemPrompt('full'))
+    // Not the same prompt wearing a different name: `full` is roughly twice `lean`.
+    expect(buildSystemPrompt('full').length).toBeGreaterThan(buildSystemPrompt('lean').length)
+  })
+
+  it('offers neither lever until something can answer', () => {
+    // A control over a request nobody can make yet sits in front of the one instruction that
+    // matters, which is the empty state telling you to pick a provider.
+    resetCredentials()
+    render(<AssistantPanel />)
+
+    expect(help()).toBeNull()
+    expect(reason()).toBeNull()
+  })
+})
+
+describe('letting the model reason', () => {
+  it('is offered, off, for the provider that takes the switch', () => {
+    setProviderId('ollama')
+    render(<AssistantPanel />)
+
+    expect(reason()!.checked).toBe(false)
+  })
+
+  it('takes effect on the click, for the provider it was clicked on', async () => {
+    setProviderId('ollama')
+    render(<AssistantPanel />)
+
+    await act(async () => {
+      fireEvent.click(reason()!)
+    })
+    expect(getThinking('ollama')).toBe(true)
+    // Per provider, like the key and the model: trying another and coming back costs nothing.
+    expect(getThinking('anthropic')).toBe(false)
+  })
+
+  it('is not offered where reasoning is not a per-request boolean', () => {
+    // Anthropic's is adaptive and inside a `max_tokens` its client already sets. A checkbox
+    // there would be a control over something else entirely, wearing the same words.
+    render(<AssistantPanel />)
+
+    expect(help()).not.toBeNull()
+    expect(reason()).toBeNull()
   })
 })

@@ -18,6 +18,8 @@ import { complete } from '../data/ai/registry'
 import { errorMessage } from '../core/errors'
 import type { CatalogueDetail } from './catalogue'
 import { buildSystemPrompt, carriesLines } from './catalogue'
+import type { ResultReader } from './digest'
+import { digestState, resultLines } from './digest'
 import type { AssistantPlan } from './planShape'
 import { parsePlan, planJsonSchema } from './plan'
 
@@ -37,6 +39,14 @@ export interface PlanRequest {
   inference?: InferenceResult | undefined
   /** How much of each param the catalogue prints. See `CatalogueDetail`. */
   detail?: CatalogueDetail | undefined
+  /**
+   * What the graph's nodes last produced, where the caller can read it.
+   *
+   * Absent for every headless caller, and the fallback is a listing with no `ran:` lines — which
+   * is the honest answer for a graph nobody has run, and the same shape `inference` takes one
+   * field up.
+   */
+  results?: ResultReader | undefined
   /** The conversation so far, oldest first. The last entry is normally the user's request. */
   messages: readonly AssistantTurn[]
   signal?: AbortSignal | undefined
@@ -56,10 +66,20 @@ export type PlanOutcome =
  * turn restating the definitions the cached catalogue already gave — and, worse, bury the two
  * values somebody actually chose.
  */
-export function describeGraph(
-  graph: CodaGraph,
-  inference?: InferenceResult | undefined,
-): string {
+export interface GraphContext {
+  /**
+   * The editor's own inference of that graph, where the caller has one.
+   *
+   * Must be the inference *of this graph*, read at the same moment — see below, which falls
+   * back to inferring for itself when it is absent.
+   */
+  inference?: InferenceResult | undefined
+  /** What the graph's nodes last produced, where the caller can read it. */
+  results?: ResultReader | undefined
+}
+
+export function describeGraph(graph: CodaGraph, ctx: GraphContext = {}): string {
+  const { inference, results } = ctx
   if (graph.nodes.length === 0) return 'The canvas is empty.'
 
   /*
@@ -84,13 +104,15 @@ export function describeGraph(
    */
   const resolved = inference ?? inferGraph(graph)
 
+  const digest = digestState()
   const lines: string[] = ['Nodes:']
   for (const node of graph.nodes) {
     const def = getNodeDef(node.type)
     const label = node.title ? ` "${node.title}"` : ''
+    const outputs = nodeTypes(resolved, node.id).outputs
     const bits: string[] = [`  ${node.id}  ${node.type}${label}`]
 
-    for (const line of carriesLines(nodeTypes(resolved, node.id).outputs)) {
+    for (const line of carriesLines(outputs)) {
       bits.push(`    ${line}`)
     }
 
@@ -114,7 +136,15 @@ export function describeGraph(
       bits.push('    (unknown type — this graph was saved by a different build)')
     }
     if (node.disabled) bits.push('    (muted)')
+    bits.push(...resultLines(node.id, outputs, results, digest))
     lines.push(bits.join('\n'))
+  }
+  const short = digest.skipped()
+  if (short > 0) {
+    lines.push(
+      `(column detail left out for ${short} more node${short === 1 ? '' : 's'} that have` +
+        ' results, to keep this short.)',
+    )
   }
 
   if (graph.edges.length) {
@@ -130,12 +160,8 @@ export function describeGraph(
 }
 
 /** The user turn: the graph, then the request. */
-function userContent(
-  graph: CodaGraph,
-  request: string,
-  inference: InferenceResult | undefined,
-): string {
-  return `Current graph:\n${describeGraph(graph, inference)}\n\nRequest:\n${request}`
+function userContent(graph: CodaGraph, request: string, ctx: GraphContext): string {
+  return `Current graph:\n${describeGraph(graph, ctx)}\n\nRequest:\n${request}`
 }
 
 /**
@@ -156,7 +182,10 @@ export async function requestPlan(request: PlanRequest): Promise<PlanOutcome> {
     ...turns.map((t) => ({ role: t.role, content: t.content })),
     {
       role: 'user' as const,
-      content: userContent(request.graph, last.content, request.inference),
+      content: userContent(request.graph, last.content, {
+        ...(request.inference ? { inference: request.inference } : {}),
+        ...(request.results ? { results: request.results } : {}),
+      }),
     },
   ]
 
@@ -231,6 +260,15 @@ export interface TurnRequest {
   inference?: (() => InferenceResult) | undefined
   /** How much of each param the catalogue prints. See `CatalogueDetail`. */
   detail?: CatalogueDetail | undefined
+  /**
+   * What the graph's nodes last produced. Optional for the headless callers, exactly as
+   * `inference` is — and for the same reason, since a graph nobody has run has nothing to read.
+   *
+   * A reader rather than a snapshot: the two questions it answers are asked per node, and only
+   * for the nodes that turn out to have something. Building a record of every result up front
+   * would summarise a hundred nodes to print eight.
+   */
+  results?: ResultReader | undefined
   /** Applies a plan, or refuses it. The store's `applyAssistantPlan`, or a bare `applyPlan`. */
   apply: (plan: AssistantPlan) => ApplyResult
   request: string
@@ -256,8 +294,9 @@ export async function runTurn(turn: TurnRequest): Promise<TurnOutcome> {
     const outcome = await requestPlan({
       graph: turn.graph(),
       messages,
-      // Read here, beside the graph, so the two cannot describe different moments.
+      // Read here, beside the graph, so the three cannot describe different moments.
       inference: turn.inference?.(),
+      results: turn.results,
       detail: turn.detail,
       ...(turn.signal ? { signal: turn.signal } : {}),
     })

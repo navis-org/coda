@@ -20,6 +20,10 @@ import { buildSystemPrompt, catalogueText } from './catalogue'
 import { pivotGraph, pivotObserved } from './fixture'
 import { messagesReply, stubFetch } from '../data/ai/fixture'
 import { describeGraph, repairPrompt, requestPlan } from './converse'
+import type { GraphContext } from './converse'
+import type { Value } from '../core/values'
+import { makeTable } from '../core/values'
+import { column, tableSchema } from '../core/types'
 import type { AssistantPlan } from './planShape'
 import { parsePlan, planJsonSchema } from './plan'
 import { emptyPlan, isEmptyPlan, plannableParams } from './planShape'
@@ -897,7 +901,7 @@ describe('describing the canvas', () => {
      */
     const { graph, pivotId } = pivotGraph()
     const observedSchemas = pivotObserved(pivotId)
-    const text = describeGraph(graph, inferGraph(graph, { observedSchemas }))
+    const text = describeGraph(graph, { inference: inferGraph(graph, { observedSchemas }) })
     expect(text).toContain('partnerType')
     expect(text).toContain('weight')
   })
@@ -906,6 +910,267 @@ describe('describing the canvas', () => {
     const text = repairPrompt(['connect[2]: Table ▸ out → Filter ▸ in — Would create a cycle.'])
     expect(text).toContain('connect[2]')
     expect(text).toContain('nothing was applied')
+  })
+})
+
+/**
+ * What a run produced, in the user turn — the values half of "can the assistant inspect
+ * results", which turned out to need no tool because every question it answers is an aggregate.
+ *
+ * The cases that matter are the ones where a line is *wrong to print*: a node whose settings
+ * have moved since it ran, an id column, and a folded value list read as the whole set. Each of
+ * those produces a plan that applies cleanly and answers a different question, which is the one
+ * failure this whole module is arranged against.
+ */
+describe('what a run produced', () => {
+  const TYPES = ['LC4', 'LC4', 'LC4', 'LC6', 'LC6', 'LPLC2', 'LT1', 'T4a', 'T4b', 'T5a', 'Tm3']
+
+  /** A neuron table with a wide id, a category, a measure and a column of prose. */
+  function neurons(types: readonly string[] = TYPES) {
+    return makeTable(
+      tableSchema(
+        column('neuronId', 'i64'),
+        column('type', 'str'),
+        column('pre', 'i64'),
+        column('note', 'str'),
+      ),
+      {
+        neuronId: types.map((_, i) => 720575940000000000 + i),
+        type: [...types],
+        pre: types.map((_, i) => i * 10),
+        note: types.map((_, i) =>
+          i === 0 ? 'a note that runs on well past forty characters' : '',
+        ),
+      },
+      'neurons',
+    )
+  }
+
+  /** A context answering for one node, so freshness can be turned off without moving anything. */
+  function reader(nodeId: string, value: Value, fresh = true): GraphContext {
+    return {
+      results: {
+        fresh: (id) => fresh && id === nodeId,
+        output: (id, port) => (id === nodeId && port === 'neurons' ? value : undefined),
+      },
+    }
+  }
+
+  it('reports the rows and the columns a fresh node produced', () => {
+    const { graph, ids } = seeded()
+    const text = describeGraph(graph, reader(ids.find!, neurons()))
+
+    expect(text).toContain('ran: neurons — 11 rows')
+    // A value a filter could be written with, which is the whole point of the line.
+    expect(text).toContain('LC4 (3)')
+  })
+
+  it('says nothing at all about a node whose settings have moved since it ran', () => {
+    /*
+     * **The load-bearing case.** A cache entry is keyed by provenance, so a stale node still
+     * holds the numbers its *previous* settings produced — and a digest built from those
+     * describes a graph that no longer exists, in a line indistinguishable from a current one.
+     * Absence is the answer, and the rules already give absence a meaning: unknown, never none.
+     */
+    const { graph, ids } = seeded()
+    const text = describeGraph(graph, reader(ids.find!, neurons(), false))
+
+    expect(text).not.toContain('ran:')
+    expect(text).not.toContain('LC4 (3)')
+  })
+
+  it('names the total when it folds a value list, so eight cannot read as all of them', () => {
+    /*
+     * A bare list of eight cell types invites a filter that silently excludes the rest. Same
+     * rule as `+N more` on a legend: where a fold happens, its cost is said out loud.
+     */
+    const many = Array.from({ length: 30 }, (_, i) => `type${i % 10}`)
+    const { graph, ids } = seeded()
+    const text = describeGraph(graph, reader(ids.find!, neurons(many)))
+
+    expect(text).toContain('10 distinct, 8 commonest')
+  })
+
+  it('drops the counts on a key column, where every one of them is 1', () => {
+    /*
+     * Downstream of a `Group By` every value appears exactly once, so `AOTU008 (1), Dm8 (1)`
+     * spends a third of the line on the number 1 and calls an arbitrary eight the *commonest*.
+     * Measured on the wizard's own demo, where the whole chain past the grouping is like this.
+     */
+    const unique = Array.from({ length: 30 }, (_, i) => `type${i}`)
+    const { graph, ids } = seeded()
+    const text = describeGraph(graph, reader(ids.find!, neurons(unique)))
+
+    expect(text).toContain('30 distinct, 8 of them: type0, type1')
+    expect(text).not.toContain('commonest')
+  })
+
+  it('says nothing about folding when the list is the whole list', () => {
+    // The other spelling, and the reason there are two: a complete list must not carry a
+    // caveat, or every list reads as partial and the caveat stops meaning anything.
+    const { graph, ids } = seeded()
+    const text = describeGraph(graph, reader(ids.find!, neurons(['LC4', 'LC6'])))
+
+    expect(text).toContain('2 distinct: LC4, LC6')
+    expect(text).not.toContain('commonest')
+  })
+
+  it('never prints a value from the id column', () => {
+    /*
+     * Invariant 8, reached from the one direction that has no type to stop it. `CellValue` is a
+     * float64, so an 18-digit root id in a cell is already a different neuron — offering one as
+     * a value to copy into a filter is how this module would invent a neuron. `describeOps`
+     * refuses to *measure* the id column for the same reason; this refuses to list it.
+     */
+    const { graph, ids } = seeded()
+    const text = describeGraph(graph, reader(ids.find!, neurons()))
+
+    expect(text).toContain('neuronId (i64)')
+    expect(text).not.toContain('720575940')
+  })
+
+  it('gives a numeric column a range and a median rather than a list of values', () => {
+    // A threshold is chosen from the spread. A list of the eight commonest synapse counts is
+    // not a thing anybody filters on, and it would cost the line that is.
+    const { graph, ids } = seeded()
+    const text = describeGraph(graph, reader(ids.find!, neurons()))
+
+    expect(text).toMatch(/pre \(i64\) 0 … 100, median 50/)
+  })
+
+  it('counts an absent cell rather than listing it, empty string included', () => {
+    // `valueLabel`'s rule, inherited by using `describeTable` rather than a second pass: an
+    // empty string is nothing recorded, so a column of one note is one distinct value.
+    const { graph, ids } = seeded()
+    const text = describeGraph(graph, reader(ids.find!, neurons()))
+
+    expect(text).toContain('10 null')
+  })
+
+  it('summarises a value that is not a table by what it is', () => {
+    const { graph, ids } = seeded()
+    const network: Value = {
+      kind: 'network',
+      directed: true,
+      nodes: makeTable(tableSchema(column('id', 'str')), { id: ['a', 'b', 'c'] }),
+      edges: makeTable(tableSchema(column('source', 'str'), column('target', 'str')), {
+        source: ['a', 'b'],
+        target: ['b', 'c'],
+      }),
+    }
+    const text = describeGraph(graph, reader(ids.find!, network))
+
+    expect(text).toContain('network — 3 nodes, 2 links')
+  })
+
+  it('counts a table too large to summarise instead of walking it', () => {
+    /*
+     * This runs unasked on every question, so the ceiling is far below the Describe node's own —
+     * that one warns on a node somebody chose to add. A digest that spent seconds sorting a
+     * 400k-row table before the model had seen the request would be a hang with no cause.
+     */
+    const big = makeTable(tableSchema(column('type', 'str')), {
+      type: Array.from({ length: 300_000 }, (_, i) => `t${i % 7}`),
+    })
+    const { graph, ids } = seeded()
+    const text = describeGraph(graph, reader(ids.find!, big))
+
+    expect(text).toContain('ran: neurons — 300,000 rows')
+    expect(text).toContain('too large to summarise')
+  })
+
+  it('names a repeated summary rather than printing it again', () => {
+    /*
+     * Measured, not anticipated: a passthrough chain summarises identically at every step — a
+     * Sort changes no per-column aggregate, and a Table viewer's `out` and `filtered` are the
+     * same table with no filter set — so the wizard's own seven-node demo emitted one four-line
+     * block **four times**, 2,257 characters of which about six hundred said anything.
+     *
+     * Named rather than dropped, because "these two are the same table" is worth knowing and
+     * costs one line.
+     */
+    const table = neurons()
+    const chain = expectOk(
+      applyPlan(
+        emptyGraph(),
+        plan({
+          add: [
+            { ref: 'a', type: 'core.filterTable' },
+            { ref: 'b', type: 'core.sort' },
+          ],
+        }),
+      ),
+    )
+    const text = describeGraph(chain.graph, {
+      results: { fresh: () => true, output: () => table },
+    })
+
+    expect(text.match(/type \(str\)/g)).toHaveLength(1)
+    expect(text).toMatch(/\(same columns as \w+:out\)/)
+    // The headline survives on both, because a row count is the half most questions need.
+    expect(text.match(/ran: out — 11 rows/g)).toHaveLength(2)
+  })
+
+  it('counts the columns of a very wide table rather than naming every one', () => {
+    /*
+     * `core.pivot` emits one column per distinct value of the column it pivots on, so a pivot
+     * over cell type is hundreds of narrow columns and very few cells — it sails past the cell
+     * ceiling and would then spend the whole graph's budget in one node. The `carries:` line has
+     * already named them all, so the count here is what stops the two contradicting each other.
+     */
+    const names = Array.from({ length: 40 }, (_, i) => `col${i}`)
+    const wide = makeTable(
+      tableSchema(...names.map((name) => column(name, 'str'))),
+      Object.fromEntries(names.map((name) => [name, ['a', 'b']])),
+    )
+    const { graph, ids } = seeded()
+    const text = describeGraph(graph, reader(ids.find!, wide))
+
+    expect(text).toContain('col0 (str)')
+    expect(text).toContain('and 16 more columns, not summarised')
+    expect(text).not.toContain('col39 (str)')
+  })
+
+  it('drops column detail rather than the node once the budget is spent, and counts it', () => {
+    /*
+     * The graph listing is already the largest per-request thing in the prompt, and a canvas of
+     * twenty run nodes would double it. The headline survives — a row count is the half most
+     * questions need — and the shortfall is stated rather than being an absence the model would
+     * read as "this node has not run".
+     */
+    const many = expectOk(
+      applyPlan(
+        emptyGraph(),
+        plan({
+          add: Array.from({ length: 20 }, (_, i) => ({
+            ref: `f${i}`,
+            type: 'core.filterTable',
+          })),
+        }),
+      ),
+    )
+    /*
+     * A different table per node, or the repeat detection answers first and the budget is never
+     * reached — which is itself the measured behaviour on a real passthrough chain, and the
+     * reason this fixture has to work at it.
+     */
+    const perNode = new Map(
+      many.graph.nodes.map((n) => [n.id, neurons(TYPES.map((t) => `${t}-${n.id}`))]),
+    )
+    const text = describeGraph(many.graph, {
+      results: { fresh: () => true, output: (id) => perNode.get(id) },
+    })
+
+    expect(text).toContain('ran: out — 11 rows')
+    expect(text).toMatch(/column detail left out for \d+ more nodes/)
+    // Every node still says how many rows it has; only the columns are rationed.
+    expect(text.match(/ran: out — 11 rows/g)).toHaveLength(20)
+  })
+
+  it('is absent entirely when the caller has no results to read', () => {
+    // Every headless caller, and a graph nobody has run. The same fallback `inference` takes.
+    const { graph } = seeded()
+    expect(describeGraph(graph)).not.toContain('ran:')
   })
 })
 

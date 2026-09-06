@@ -95,8 +95,6 @@ import {
   getModel,
   getProviderId,
   setBaseUrl as setAiBaseUrl,
-  getThinking,
-  setThinking,
   setKey,
   setModel,
   setProviderId,
@@ -359,15 +357,18 @@ const SECTIONS: readonly [Section, ...Section[]] = [
      */
     privacy: (
       <>
-        <strong>Your key, your account, your bill.</strong> Your question and the graph on your
-        canvas go to the provider you pick.
+        <strong>Your key, your account, your bill.</strong> Your question, the graph on your
+        canvas and a summary of what it last produced go to the provider you pick.
         <Why>
           {"Keys are held in this browser's local storage on this machine only, are never " +
             'written into a saved graph or an export, and are never sent to us — requests go ' +
             'straight from this page to the provider you pick, with no server of ours in ' +
-            'between. A model running on your own machine under Ollama sends nothing off it ' +
-            'at all — but an Ollama model whose name ends in -cloud runs on ollama.com, and ' +
-            'is no more local than the rest.'}
+            'between. The summary describes what a node produced rather than reproducing it: ' +
+            'row counts, ranges, and the commonest values of a column, for nodes whose results ' +
+            'are current. No rows are sent, and neuron ids are never listed. A model running ' +
+            'on your own machine under Ollama sends nothing off it at all — but an Ollama ' +
+            'model whose name ends in -cloud runs on ollama.com, and is no more local than ' +
+            'the rest.'}
         </Why>
       </>
     ),
@@ -1563,8 +1564,9 @@ function AssistantTab({ onSaved }: { onSaved: () => void }) {
   /*
    * Keyed, so switching provider *remounts* the form and every field re-reads from storage.
    * Replaying the reads by hand — one `setXField(getX(next.id))` per field — meant the initial
-   * read and the on-switch read were the same four lines written twice, and a fifth field added
-   * to one and not the other would leave the previous provider's value in the box, silently.
+   * read and the on-switch read were the same three lines written twice, and a fourth field
+   * added to one and not the other would leave the previous provider's value in the box,
+   * silently.
    * The same trick `Dialog` uses above for the source tabs, for the same reason.
    */
   return (
@@ -1589,7 +1591,6 @@ function ProviderForm({
   const [key, setKeyField] = useState(() => getKey(provider.id) ?? '')
   const [model, setModelField] = useState(() => getModel(provider.id))
   const [base, setBaseField] = useState(() => getAiBaseUrl(provider.id))
-  const [think, setThinkField] = useState(() => getThinking(provider.id))
   const [probe, setProbe] = useState<
     Probe<{ label: string; context: number; warning?: string | undefined }>
   >({ state: 'idle' })
@@ -1818,26 +1819,16 @@ function ProviderForm({
       </div>
 
       {/*
-       * A speed control, so the hint states the measurement rather than describing the switch.
-       * Off by default: on a reasoning model the thinking is most of the wait — 254 s against
-       * 49 s for the same question — and the plans did not get worse without it.
+       * Where the other two levers went. They were here — reasoning as a checkbox with the
+       * measurement under it — and they belong beside the ask box instead: both are what you
+       * reach for when an answer comes back wrong, which is a moment three clicks and a dialog
+       * away from this panel. Left as a pointer rather than silently, because somebody who set
+       * reasoning in a previous build will come back here looking for it.
        */}
-      {provider.thinkingSwitch && (
-        <div className="sources__field">
-          <label className="sources__check">
-            <input
-              type="checkbox"
-              checked={think}
-              onChange={(e) => setThinkField(e.target.checked)}
-            />
-            <span>Let the model reason before answering</span>
-          </label>
-          <span className="sources__hint">
-            Slower, often by a lot — one measured question took 254s with reasoning and 49s
-            without, for plans that were as good. Turn it on if a request comes back wrong.
-          </span>
-        </div>
-      )}
+      <p className="sources__hint">
+        How much is sent with each question, and whether the model reasons first, are in the
+        assistant drawer — the robot icon, or <kbd>/</kbd>.
+      </p>
 
       <div className="sources__actions">
         <button
@@ -1871,7 +1862,6 @@ function ProviderForm({
             setKey(provider.id, key)
             setModel(provider.id, model)
             if (provider.editableBaseUrl) setAiBaseUrl(provider.id, base)
-            if (provider.thinkingSwitch) setThinking(provider.id, think)
             // Closes, like the neuPrint tab's Save: the confirmation lands in the status bar,
             // which is behind this dialog, so staying open would report nothing at all.
             notify(`Assistant set to ${provider.label}`)

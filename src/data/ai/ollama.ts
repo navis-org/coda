@@ -59,7 +59,7 @@
  * **Reasoning is off by default, and that is a speed decision.** A thinking model spends most
  * of the wait on it: `qwen3.8:latest` answered the same question in 254 s with reasoning and
  * 49 s without, on a warm model — 6k characters of thinking against a 1.6k-character plan.
- * Both applied. `thinkingSwitch` is what puts the choice in Connections; `complete` below has
+ * Both applied. `thinkingSwitch` is what puts the choice in the assistant drawer's header; `complete` below has
  * the asymmetry it has to be sent with.
  *
  * **Cross-origin.** Ollama refuses browsers it has not been told about; the user sets

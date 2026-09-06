@@ -293,9 +293,11 @@ Several origins are comma-separated: `OLLAMA_ORIGINS="https://navis-org.github.i
 3. **Provider** → `Ollama`. The key field disappears; there is nothing to paste.
 4. **Server** → `http://localhost:11434` (already filled in; change it only if you moved the port with `OLLAMA_HOST`).
 5. **Model** → the dropdown separates **On this machine** from **Available to pull**. Yours is in the first group. If the list looks stale, press **↻** beside it — that asks the server what is installed rather than guessing. A cloud model is marked `cloud · runs on ollama.com` in either group; the free ones are offered under **Available to pull** whether or not you have run `ollama pull` for them.
-6. **Let the model reason before answering** → leave it off unless you have a reason. See [reasoning](#reasoning-and-why-it-is-off) below.
-7. Press **Test**.
-8. Press **Save**. The assistant does not use the new provider until you do.
+6. Press **Test**.
+7. Press **Save**. The assistant does not use the new provider until you do.
+
+Reasoning is not in this dialog. It, and how much of the node catalogue goes with each question,
+are two switches in the assistant drawer itself — see [the two switches](#the-two-switches).
 
 A working Test reads:
 
@@ -335,9 +337,35 @@ question — so a first answer of several minutes is normal, and the second is f
 
 ---
 
+## The two switches
+
+The drawer's header carries them, beside the provider and model it names. Both are remembered
+**per provider**, so setting them for Ollama leaves a cloud provider's alone, and both take effect
+on the click — there is no Save, and the next question is what confirms them. Neither touches a
+request already in flight.
+
+| Switch | Off (the default) | On |
+| --- | --- | --- |
+| **Full node help** | Each param reaches the model as a name, a kind, its bounds and its options — everything a plan can be *refused* for getting wrong | Adds what every setting *means*, which is roughly twice the prompt |
+| **Let the model reason** | `think: false` — the plan, and nothing else | The model's own default. Only offered on Ollama; see below |
+
+Both are for a request that came back wrong. Neither is a knob to turn up in advance:
+
+- **Full node help was measured level with the lean one.** Three full-suite reps at each level
+  against Sonnet 5 were 15/15 either way, zero refusals, and the case the prose should matter most
+  for — finding `neuron.paths` rather than assembling a chain of Connectivity nodes by hand —
+  produced the *identical* six-node graph on all six runs. Lean is the default because of that,
+  not to save money.
+- **Changing either re-sends the whole prompt**, so the next question pays a session's first-question
+  price again — [see below](#why-the-first-question-is-the-slow-one). Flipping one back and forth
+  costs that each time. Both prompts stay in the KV cache rather than evicting each other, so it
+  is one extra prefill per level per model load, not one per switch.
+
+---
+
 ## Reasoning, and why it is off
 
-Coda sends `think: false` unless you tick the box. On a reasoning model — the `qwen3` family,
+Coda sends `think: false` unless you tick the switch. On a reasoning model — the `qwen3` family,
 `deepseek-r1` — that is most of the wait:
 
 | Same question, warm model | Total |
@@ -349,7 +377,7 @@ Both plans applied. The faster one was the better graph of the two, which at one
 tie rather than a win — so the switch is there. Turn it on if a request comes back wrong, not
 before.
 
-Ticking the box does not send `think: true`, it stops sending the field. That is deliberate:
+Ticking the switch does not send `think: true`, it stops sending the field. That is deliberate:
 Ollama accepts `think: false` from *any* model, but rejects `think: true` from one without the
 capability (`"qwen2.5:0.5b" does not support thinking`), and Coda's default model is one of
 those. Silence means "whatever the model does on its own", which is what "on" means anyway.
@@ -404,7 +432,7 @@ Coda's messages are specific on purpose; each one below names its own fix.
 | `Could not reach http://localhost:11434. Is the server running, and is it set to accept requests from this page?` | One of three: Ollama is not running (`curl http://localhost:11434`), the origin is not allowed ([step 3](#3-let-the-browser-in)), or the browser blocked it before it was sent (Safari, or a denied Chrome prompt). A browser reports all three identically, which is why the message lists them |
 | `<model> is not pulled on this machine. Run ollama pull <model>, or choose one you have: …` | Coda asked `/api/tags` and the name in the dropdown is not among the answers. The models it lists after the colon are really there |
 | `Nothing pulled yet — run ollama pull … , then refresh` | The server answered and has no models. Pull one, then press **↻** |
-| `The prompt did not fit <model>'s context window. Ollama truncated it from the front until the question itself was gone…` | The model clamped `num_ctx` to its own trained window and Coda's prompt did not fit. `ollama show <model>` prints that window; pull one with at least 32k. **This is the one that looks like a hang** — the prompt is evaluated before the refusal, so on a 27B model the error lands three to five minutes after you asked |
+| `The prompt did not fit <model>'s context window. Ollama truncated it from the front until the question itself was gone…` | The model clamped `num_ctx` to its own trained window and Coda's prompt did not fit. `ollama show <model>` prints that window; pull one with at least 32k. **This is the one that looks like a hang** — the prompt is evaluated before the refusal, so on a 27B model the error lands three to five minutes after you asked. If it started after you ticked **Full node help**, that is why: it roughly doubles the prompt |
 | `The reply hit the length limit before it finished, so the plan is incomplete. Ask for a smaller change.` | The answer ran out of room inside the 32k window. Genuinely ask for less — or use a model with a larger window |
 | `… is not a GGUF build, so it runs on an engine that accepts the JSON schema and ignores it` | The MLX trap. Pull the plain tag |
 | A plan that reads like a sensible sentence but changes nothing | Same cause as the row above, or a model whose context clamped below the prompt. Check `ollama ps` |
@@ -417,14 +445,22 @@ Linux `journalctl -u ollama -f`.
 
 ## What is sent where
 
-Every request the assistant makes carries the node catalogue, **the graph on your canvas**, and
-what you typed. Where that goes depends on the model, and only on the model:
+Every request the assistant makes carries the node catalogue, **the graph on your canvas**, a
+**summary of what that graph last produced**, and what you typed. Where that goes depends on the
+model, and only on the model:
 
 - **A local model** — to `localhost` and no further. No account, no key, no third party, and it
   works with no network at all once the model is pulled.
-- **A `-cloud` model** — through `localhost` and on to **ollama.com**, which runs it. The
-  catalogue, your graph and your question all go with it, under your ollama.com account. This is
-  the same bargain as Anthropic or OpenAI, minus the API key.
+- **A `-cloud` model** — through `localhost` and on to **ollama.com**, which runs it. All four go
+  with it, under your ollama.com account. This is the same bargain as Anthropic or OpenAI, minus
+  the API key.
+
+The summary is what lets the assistant pick a real filter value or a sensible threshold instead
+of guessing one. It **describes** a result rather than reproducing it: per column, how many rows,
+how many distinct values, the range and median of a number, and the eight commonest values of a
+category. **No rows are sent, and neuron ids are never listed** — an id column is counted and
+nothing more. Only nodes whose results match their current settings are described at all; a node
+you have edited since running it says nothing.
 
 Coda says so in three places rather than only here, because the setting is one dropdown entry
 away from the other: the model's row reads `cloud · runs on ollama.com`, the provider note says
