@@ -75,6 +75,7 @@ export const roiMeshesNode = registerNode({
       default: [],
       // Shared with Connectivity's region picker, which is where the alphabetical rule and the
       // reason for it now live — see `roiOptions`.
+      optionsWithoutPeek: true,
       options: (ctx) => roiOptions(ctx.inputs.dataset),
     },
   ],

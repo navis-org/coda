@@ -197,13 +197,20 @@ interface ParamBase {
    * How a value for this param is *written*, for a param whose stored shape its `kind` does not
    * convey. Rendered by the assistant catalogue beside the param it belongs to.
    *
-   * Only the opaque kinds need one — an `ids` param is a `string[]` and nothing about that says
+   * Two kinds of param need one. The **opaque** kinds, where the stored shape says nothing —
+   * an `ids` param is a `string[]` and nothing about that says
    * whether an entry is a column name, a `field\u0000value` pair or a JSON object, so a model can
    * add the node and wire it and not configure it. Declared **here, on the param**, rather than
    * as a paragraph in the shared prompt: the prose is then deleted with the param and renamed
    * with it, where a prompt naming `neuron.findNeurons.filters` goes on confidently instructing
    * a model about a param that no longer exists, with nothing failing. Same argument
    * `CompositeRef` makes below about param metadata living on the definition.
+   *
+   * And the **dynamic-enum** kinds, where the kind conveys the shape but the catalogue cannot
+   * name the legal values: `renderParam` prints `(options depend on the input)` for a
+   * function-valued `options`, so a model adding the node has no vocabulary at all. Worth a
+   * note only where that vocabulary is *closed and known to the type* — `operatorVocabulary()`
+   * on the two filter nodes. An ROI list or a materialization has no static union to write.
    *
    * Kept under `lean`, unlike `help`: `help` says what a setting *means*, which a plan can be
    * refused for ignoring but not for not knowing. This is the only thing that makes the param
@@ -328,6 +335,33 @@ export interface EnumParam extends ParamBase {
   default: string
   /** Static list, or derived from resolved input types (e.g. aggregations per dtype). */
   options: EnumOption[] | ((ctx: InferContext) => EnumOption[])
+  /**
+   * True when resolving `options` reaches no peek — no fetch is started by asking.
+   *
+   * **Named for the negative on purpose.** Almost every dynamic options function is "derived
+   * from the input" in an ordinary reading, `dataset.*.version` included, so a name saying that
+   * would be set correctly by its own wording and wrongly by its contract. What this asserts is
+   * the *absence*: calling `options` must not reach `peekDatasets`, `peekMaterializations`,
+   * `skeletonSourcesFor` or anything else that starts a request it cannot await.
+   *
+   * **An opt-in, and the default is the safe direction.** The assistant lists a param's live
+   * options in its graph listing (`catalogue.ts`'s `optionLines`), because the catalogue itself
+   * can only say `(options depend on the input)` — and a model that cannot see the options
+   * guesses. Measured: asked to filter a table, both a local and a cloud model wrote `is`, which
+   * is the *label* of `core.filterTable`'s `eq`, and the plan applied with a warning nothing
+   * downstream refuses.
+   *
+   * What it cannot do is resolve every such param. `dataset.*.version` reads `versionsFor`,
+   * which calls `peekDatasets` — one of the two peeks that **start the fetch they cannot
+   * answer** — so a listing that resolved it would fire a dataset listing per dataset node, at
+   * two CATMAID servers and CAVE, because somebody typed a question. That is the failure the
+   * demo links already had to be redesigned around.
+   *
+   * So the flag asserts *this options function reaches no source listing*. Reading a cached
+   * `peekDataset` is fine — it is a map lookup — and `peekDatasets`, `listDatasets` and
+   * `schemasFor` are not. `assistant.test.ts` pins it against a source that counts.
+   */
+  optionsWithoutPeek?: true
 }
 
 /**
@@ -393,6 +427,8 @@ export interface MultiEnumParam extends ParamBase {
   default: string[]
   /** Static, or derived from the resolved input types the way `enum`'s is. */
   options: EnumOption[] | ((ctx: InferContext) => EnumOption[])
+  /** Same assertion as `EnumParam.optionsWithoutPeek`, for the same reason. */
+  optionsWithoutPeek?: true
   /**
    * What an empty selection means, in words, shown where the chips would be.
    *

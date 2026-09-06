@@ -89,6 +89,15 @@ export function skeletonSourceParam(): ParamDef {
       'they differ in how detailed they are and whether they carry radii. Automatic takes the ' +
       'best one this dataset has; the result says which it used.',
     default: '',
+    /*
+     * **Deliberately not `optionsWithoutPeek`.** `skeletonSourceOptions` reaches
+     * `skeletonRoutesOf` → `DataSource.skeletonSourcesFor`, and neuPrint's fires
+     * `publishedSkeletonsFor` — a neuroglancer state fetch and a precomputed probe — on first
+     * call, while CAVE's starts every peek before reading any of them. Legal from
+     * `inferOutputs`, which is what that method is written for; not legal from a graph listing
+     * built because somebody typed a question. The sibling `synapseUnit` param *is* flagged:
+     * `synapseUnits` is a static property on the source, so reading it costs nothing.
+     */
     options: (ctx: InferContext) =>
       skeletonSourceOptions(
         ctx.inputs.dataset,

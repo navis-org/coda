@@ -124,6 +124,7 @@ export function synapseUnitParam(): ParamDef {
       'connection” repeats it once each while “one row per site” returns it once. Backends ' +
       'differ in which they can answer; Automatic takes the one this source has.',
     default: '',
+    optionsWithoutPeek: true,
     options: (ctx: InferContext) =>
       synapseUnitOptions(ctx.inputs.dataset, String(ctx.params[SYNAPSE_UNIT_PARAM] ?? '')),
   }

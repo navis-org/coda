@@ -2,7 +2,7 @@ import { registerNode } from '../../core/registry'
 import { T, findColumn, isTabular, schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import type { FilterOp } from '../lib/tableOps'
-import { filterTable, opNeedsValue, opsForDType } from '../lib/tableOps'
+import { filterTable, opNeedsValue, operatorVocabulary, opsForDType } from '../lib/tableOps'
 
 /**
  * Row filter. Cheap, so it re-runs live as you type a threshold — this is the node the
@@ -34,6 +34,8 @@ export const filterNode = registerNode({
       kind: 'enum',
       label: 'Condition',
       default: 'ge',
+      optionsWithoutPeek: true,
+      catalogueNote: operatorVocabulary(),
       options: (ctx) => {
         const schema = ctx.schema('in')
         const columnName = ctx.column('column')

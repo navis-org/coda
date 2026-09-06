@@ -155,6 +155,7 @@ export const connectivityNode = registerNode({
       emptyLabel: 'the whole connection',
       help: 'Restrict every weight to these regions. A row\u2019s weight becomes the synapses inside them rather than the connection\u2019s total, and a connection with none is dropped.',
       default: [],
+      optionsWithoutPeek: true,
       options: (ctx) =>
         sourceSupports(ctx.inputs.dataset, 'connectivityRois')
           ? roiOptions(ctx.inputs.dataset, {

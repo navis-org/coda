@@ -73,6 +73,7 @@ export const datasetSummaryNode = registerNode({
       label: 'Status',
       help: STATUS_HELP,
       default: '',
+      optionsWithoutPeek: true,
       options: (ctx: InferContext) => {
         const statuses = datasetInfoFromType(ctx.inputs.dataset)?.statuses ?? ['Traced']
         return [ANY_OPTION, ...statuses.map((s) => ({ value: s, label: s }))]

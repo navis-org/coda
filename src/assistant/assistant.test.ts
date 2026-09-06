@@ -16,7 +16,12 @@ import { configurableParams, defaultParams } from '../core/node'
 import { getNodeDef, listableNodeDefs } from '../core/registry'
 import type { ApplyOk, ApplyResult } from './apply'
 import { applyPlan } from './apply'
-import { buildSystemPrompt, catalogueText } from './catalogue'
+import { buildSystemPrompt, catalogueText, gateNote, optionLines } from './catalogue'
+import { registerBuiltinSources } from '../data/builtins'
+import { getSource } from '../data/source'
+import type { NodeDefinition } from '../core/node'
+import { T } from '../core/types'
+import type { CodaType } from '../core/types'
 import { pivotGraph, pivotObserved } from './fixture'
 import { messagesReply, stubFetch } from '../data/ai/fixture'
 import { describeGraph, repairPrompt, requestPlan } from './converse'
@@ -30,6 +35,7 @@ import { emptyPlan, isEmptyPlan, plannableParams } from './planShape'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 import { searchFor } from '../test/findNeurons'
 import { ALL_ROW_OPS, arityOf, decodeRows } from '../data/filterRows'
+import { opsForDType } from '../nodes/lib/tableOps'
 import { requireNodeDef } from '../core/registry'
 
 function plan(patch: Partial<AssistantPlan>): AssistantPlan {
@@ -714,6 +720,90 @@ describe('the catalogue', () => {
     expect(text).toContain('options depend on the input')
   })
 
+  it('names the input a picker reads, when that input is one the node runs without', () => {
+    /*
+     * **Measured on the live suite, and the failure is a plan that looks finished.** Asked to
+     * label a dendrogram's leaves by cell type, a model set `labelColumn` and wired nothing —
+     * "Configure the dendrogram to use the 'type' column" — `0 added, 0 wired, 1 set`. The value
+     * is right and the picker is inert, because `annotations` is empty; nothing refuses it,
+     * since an unwired optional port is an ordinary half-built graph.
+     *
+     * The fact was in the definition all along (`ColumnParam.from`) and simply was not printed.
+     * With it: **10/10 against 5/10** over twenty runs of that case on `gemma4:31b-cloud`.
+     */
+    const text = catalogueText('lean')
+    const dendrogram = text.slice(text.indexOf('## out.dendrogram'))
+    expect(dendrogram).toContain('labelColumn column default=type (reads the annotations input')
+  })
+
+  it('says nothing of the sort for a picker on a required input', () => {
+    /*
+     * The asymmetry, and it is what keeps this from costing 2.4k characters: 97 column params
+     * read a *required* port, where the model has to wire it to use the node at all, so saying
+     * so repeats what the port list already forces. Sixteen read an optional one, and those are
+     * exactly the params that can be set while the port stays empty.
+     */
+    const text = catalogueText('lean')
+    const filter = text.slice(text.indexOf('## core.filterTable'))
+    expect(filter.slice(0, filter.indexOf('##', 2))).not.toContain('reads the')
+  })
+
+  it('names the setting that switches a param off', () => {
+    /*
+     * The measured case. Building a chart from scratch, a model set `core.groupBy`'s
+     * `agg: 'count'` *and* its `value: ['weight']` — count the rows, and also aggregate a
+     * column — and `applyPlan` refused the whole plan. The gate was in the definition
+     * (`visibleIf`) and rendered nowhere, so the two read as independent settings.
+     */
+    const def = requireNodeDef('core.groupBy')
+    const value = def.params?.find((p) => p.id === 'value')
+    expect(gateNote(def, value!)).toBe(' (not with agg=count)')
+    expect(catalogueText('lean')).toContain('value columns (not with agg=count)')
+  })
+
+  it('derives every gate note from the gate itself, so none can be wrong', () => {
+    /*
+     * **The anti-drift assertion, and the reason this is a probe rather than a sentence beside
+     * each predicate.** Every note is checked back against `configurableParams` — the same
+     * function `applyPlan` refuses a plan with — so a note can only ever say what the applier
+     * will actually do. A hand-written phrase is the second spelling this codebase keeps a rule
+     * about; this test is what makes the generated one worth having.
+     */
+    let checked = 0
+    for (const def of listableNodeDefs()) {
+      for (const param of def.params ?? []) {
+        const note = gateNote(def, param)
+        if (!note) continue
+        const base = defaultParams(def)
+        for (const [, kind, gate, values] of note.matchAll(/(not|only) with (\w+)=([^,)]+)/g)) {
+          for (const raw of values!.split('|')) {
+            const value = raw === 'true' ? true : raw === 'false' ? false : raw!
+            const applies = configurableParams(def, { ...base, [gate!]: value }).some(
+              (p) => p.id === param.id,
+            )
+            // `not with X=v` claims the param is off at v; `only with X=v` claims it is on.
+            expect(applies, `${def.type}.${param.id}: "${kind} with ${gate}=${raw}"`).toBe(
+              kind === 'only',
+            )
+            checked++
+          }
+        }
+      }
+    }
+    // A silent pass would mean the probe found nothing at all, which is its own failure.
+    expect(checked, 'gate notes were actually produced and verified').toBeGreaterThan(50)
+  })
+
+  it('says nothing for a param nothing gates', () => {
+    const def = requireNodeDef('core.groupBy')
+    expect(
+      gateNote(
+        def,
+        def.params!.find((p) => p.id === 'agg')!,
+      ),
+    ).toBe('')
+  })
+
   it('is stable between calls, because it is the cached prefix', () => {
     /*
      * Asked of `catalogueText`, which is rebuilt each time, rather than of the memoised
@@ -853,6 +943,46 @@ describe('the filter-row note on Find Neurons', () => {
     // `help` is dropped under `lean` and this must not be: it is the only thing that makes an
     // opaque param writable, so a lean catalogue without it lists a control nothing can reach.
     expect(catalogueText('lean')).toContain('`op` is one of:')
+  })
+})
+
+/**
+ * The operator vocabulary, in the catalogue rather than in the graph listing.
+ *
+ * The per-node `options:` line describes a node *on the canvas*, and the commonest thing a plan
+ * does is **add** one — at which point there is nothing to describe. Measured live, twice: told
+ * only `(options depend on the input)`, a model wrote `op: "is"`, the *label* of `eq`; told
+ * nothing about the vocabulary at all, it left `op` unset and inherited the numeric default
+ * `ge` on a text column. Both applied and both left a warning on a card.
+ */
+describe('the operator vocabulary on a filter', () => {
+  const note = () => {
+    const param = requireNodeDef('core.filterTable').params?.find((p) => p.id === 'op')
+    expect(param?.catalogueNote, 'op carries a catalogue note').toBeTruthy()
+    return param!.catalogueNote!
+  }
+
+  it('names every operator each column type actually allows', () => {
+    // Generated by asking `opsForDType`, so a new operator cannot be missing from it — the rule
+    // `filtersNote()` already follows, and for the same reason.
+    for (const dtype of ['i64', 'str', 'bool'] as const) {
+      for (const option of opsForDType(dtype)) {
+        expect(note(), `${dtype} allows ${option.value}`).toContain(option.value)
+      }
+    }
+  })
+
+  it('gives values and never labels, which is what a model reached for', () => {
+    // `is` is the label of `eq`, `is not` of `ne`, `matches regex` of `matches`.
+    expect(note()).not.toMatch(/\bis not\b/)
+    expect(note()).not.toContain('matches regex')
+    expect(note()).toContain('Write the value, never the label')
+  })
+
+  it('reaches the model under `lean`, where every other prose line is dropped', () => {
+    // A note says how a value is *written*; without it the param cannot be set correctly at all,
+    // which is the asymmetry that keeps `catalogueNote` out of the `help` that `lean` drops.
+    expect(catalogueText('lean')).toContain('a boolean column: isTrue | isFalse')
   })
 })
 
@@ -1171,6 +1301,146 @@ describe('what a run produced', () => {
     // Every headless caller, and a graph nobody has run. The same fallback `inference` takes.
     const { graph } = seeded()
     expect(describeGraph(graph)).not.toContain('ran:')
+  })
+})
+
+/**
+ * What a param's options actually are on *this* node — the answer the catalogue cannot give.
+ *
+ * `renderParam` prints `(options depend on the input)` for a function-valued enum, because a
+ * catalogue describes a node *type* and `core.filterTable`'s operators depend on the dtype of
+ * the column somebody picked. A model that cannot see them guesses: measured live, both a local
+ * and a cloud model wrote `op: "is"`, which is the *label* of `eq`. Nothing refuses it —
+ * `validateParamValue` skips dynamic options by design — so the plan applies and the node
+ * carries a warning the user has to find.
+ */
+describe('the options a node actually offers', () => {
+  /** `Connectivity → Filter`, so the filter's column has a real dtype to derive operators from. */
+  function filtering(column: string) {
+    const result = expectOk(
+      applyPlan(emptyGraph(), {
+        ...SEED,
+        add: [
+          ...SEED.add,
+          { ref: 'conn', type: 'neuron.connectivity' },
+          { ref: 'f', type: 'core.filterTable', params: { column } },
+        ],
+        connect: [
+          ...SEED.connect,
+          { from: { node: 'ds', port: 'dataset' }, to: { node: 'conn', port: 'dataset' } },
+          { from: { node: 'find', port: 'neurons' }, to: { node: 'conn', port: 'neurons' } },
+          { from: { node: 'conn', port: 'connections' }, to: { node: 'f', port: 'in' } },
+        ],
+      }),
+    )
+    return describeGraph(result.graph)
+  }
+
+  it('names the operators a string column offers, by value and not by label', () => {
+    // `is` is the label of `eq` in `tableOps.ts`, and is what a model reached for unprompted.
+    const text = filtering('postType')
+    expect(text).toContain('options: op = eq | ne | contains')
+    expect(text).not.toMatch(/options: op = .*\bis\b/)
+  })
+
+  it('names different operators for a numeric column, which is why it cannot be in the catalogue', () => {
+    // The whole reason this is per-node: the same param on the same type answers differently
+    // depending on what is wired to it.
+    const text = filtering('weight')
+    expect(text).toContain('options: op = eq | ne | gt | ge | lt | le')
+    expect(text).not.toContain('contains')
+  })
+
+  it('says nothing about a param whose options are static, since the catalogue has them', () => {
+    /*
+     * `neuron.connectivity`'s `direction` is a real static enum, which is what makes this able
+     * to fail: an earlier version asserted on `limit` and `filters`, an `int` and an `ids` param
+     * that carry no options at all, so it passed on the `kind` guard without reaching the
+     * question.
+     */
+    expect(filtering('weight')).not.toContain('options: direction =')
+  })
+
+  it('counts the tail rather than printing every value', () => {
+    /*
+     * A fold is stated, the digest's rule — and it matters more here, because a value the model
+     * cannot see may still be legal while one it invents is refused. Asked of a definition built
+     * for the purpose rather than of a registered node, because no shipped node has thirty
+     * options against a dataset a test can hold still.
+     */
+    const def: NodeDefinition = {
+      type: 'test.manyOptions',
+      label: 'Many',
+      category: 'transform',
+      cost: 'cheap',
+      inputs: [],
+      outputs: [],
+      params: [
+        {
+          id: 'pick',
+          kind: 'enum',
+          label: 'Pick',
+          default: '',
+          optionsWithoutPeek: true,
+          options: () =>
+            Array.from({ length: 30 }, (_, i) => ({ value: `R${i}`, label: `R${i}` })),
+        },
+      ],
+      inferOutputs: () => ({}),
+      evaluate: () => ({}),
+    }
+
+    const [line] = optionLines(def, { pick: '' }, {})
+    expect(line).toContain('pick = R0 | R1')
+    expect(line).toContain('and 18 more')
+  })
+
+  it('resolves no options function that would start a dataset listing', () => {
+    /*
+     * **The safety property, and the whole reason `optionsWithoutPeek` is opt-in rather than
+     * assumed.** `dataset.*.version` reads `versionsFor` → `peekDatasets`, one of the two peeks
+     * that *start the fetch they cannot answer*. Resolving every dynamic param here would fire a
+     * dataset listing per dataset node — at two CATMAID servers and CAVE — because somebody
+     * asked a question, which is the failure the demo links had to be redesigned around.
+     *
+     * Behavioural rather than a check that the line is absent: that one would pass just as well
+     * if the function were called and its answer thrown away, which is the version that still
+     * makes the requests.
+     */
+    registerBuiltinSources()
+    const source = getSource('neuprint')
+    expect(source, 'the neuPrint source is registered').toBeTruthy()
+
+    /*
+     * **The deny-list itself, method by method, rather than `fetch`.** Watching `fetch` reads as
+     * the stronger pin and is the weaker one: `skeletonSourcesFor` starts its probe through an
+     * `await` chain that bails in a fresh process before any request goes out, so a `fetch` spy
+     * stays green on exactly the param that made this rename necessary. These three are the
+     * seams the flag's contract names, they are synchronous, and calling one *is* the violation
+     * whether or not a socket is opened afterwards.
+     */
+    const watched = ['peekDatasets', 'schemasFor', 'skeletonSourcesFor'] as const
+    const held = source as unknown as Record<string, () => unknown>
+    const spies = watched.map((name) => {
+      const original = held[name]!
+      expect(typeof original, `${name} exists to be watched`).toBe('function')
+      const spy = vi.fn(original)
+      held[name] = spy
+      return { name, spy, original }
+    })
+
+    for (const def of listableNodeDefs()) {
+      const inputs: Record<string, CodaType | undefined> = {}
+      for (const port of defaultInputPorts(def)) {
+        inputs[port.id] = T.dataset('neuprint', 'hemibrain:v1.2.1')
+      }
+      optionLines(def, defaultParams(def), inputs)
+    }
+
+    for (const { name, spy } of spies) {
+      expect(spy, `no options function reached ${name}`).not.toHaveBeenCalled()
+    }
+    for (const { name, original } of spies) held[name] = original
   })
 })
 

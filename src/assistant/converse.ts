@@ -17,7 +17,7 @@ import type { CompletionResult, Usage } from '../data/ai/types'
 import { complete } from '../data/ai/registry'
 import { errorMessage } from '../core/errors'
 import type { CatalogueDetail } from './catalogue'
-import { buildSystemPrompt, carriesLines } from './catalogue'
+import { buildSystemPrompt, carriesLines, optionLines } from './catalogue'
 import type { ResultReader } from './digest'
 import { digestState, resultLines } from './digest'
 import type { AssistantPlan } from './planShape'
@@ -109,10 +109,10 @@ export function describeGraph(graph: CodaGraph, ctx: GraphContext = {}): string 
   for (const node of graph.nodes) {
     const def = getNodeDef(node.type)
     const label = node.title ? ` "${node.title}"` : ''
-    const outputs = nodeTypes(resolved, node.id).outputs
+    const types = nodeTypes(resolved, node.id)
     const bits: string[] = [`  ${node.id}  ${node.type}${label}`]
 
-    for (const line of carriesLines(outputs)) {
+    for (const line of carriesLines(types.outputs)) {
       bits.push(`    ${line}`)
     }
 
@@ -132,11 +132,20 @@ export function describeGraph(graph: CodaGraph, ctx: GraphContext = {}): string 
         },
       )
       if (changed.length) bits.push(`    set: ${changed.join('  ')}`)
+
+      /*
+       * What this node's dynamic enums actually offer, which the catalogue could only call
+       * `(options depend on the input)`. Here rather than there because the answer depends on
+       * what is wired: `core.filterTable`'s operators follow the dtype of the chosen column.
+       */
+      for (const line of optionLines(def, node.params, types.inputs)) {
+        bits.push(`    options: ${line}`)
+      }
     } else {
       bits.push('    (unknown type — this graph was saved by a different build)')
     }
     if (node.disabled) bits.push('    (muted)')
-    bits.push(...resultLines(node.id, outputs, results, digest))
+    bits.push(...resultLines(node.id, types.outputs, results, digest))
     lines.push(bits.join('\n'))
   }
   const short = digest.skipped()

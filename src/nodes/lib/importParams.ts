@@ -43,6 +43,7 @@ export function importShapeParams({ read, textAdvanced }: ImportShapeOptions): P
        * schema that is empty before the first read and full after it would key the node two
        * different ways either side of a run it had just finished.
        */
+      optionsWithoutPeek: true,
       options: (ctx) => [
         { value: '', label: 'none (plain table)' },
         // Identifiers only. A float is a measurement and a boolean is a flag; offering either
@@ -63,6 +64,7 @@ export function importShapeParams({ read, textAdvanced }: ImportShapeOptions): P
        * and there is no downstream contract that a type be text — where offering a float as an
        * *id* would invite a Neurons table whose neuron ids are neither.
        */
+      optionsWithoutPeek: true,
       options: (ctx) => {
         const id = String(ctx.params.idColumn ?? '')
         return [

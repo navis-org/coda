@@ -149,6 +149,7 @@ export const networkMetricsNode = registerNode({
       kind: 'enum',
       label: 'Distribution',
       default: DEFAULT_HISTOGRAM_CHOICE,
+      optionsWithoutPeek: true,
       options: (ctx) =>
         histogramChoices(
           attributeSchema(ctx.inputs['in'], 'nodes'),

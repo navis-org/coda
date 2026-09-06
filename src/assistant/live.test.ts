@@ -45,6 +45,14 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import '../nodes'
+import { registerBuiltinSources } from '../data/builtins'
+import { requireSource } from '../data/source'
+import { Scheduler } from '../core/scheduler'
+import { inferGraph } from '../core/inference'
+import { getColumn, isTableValue } from '../core/values'
+import { searchFor } from '../test/findNeurons'
+import { emptyPlan } from './planShape'
+import type { ResultReader } from './digest'
 import { setKey, setModel, setProviderId } from '../data/ai/credentials'
 import { providerFor } from '../data/ai/registry'
 import type { CodaGraph } from '../core/graph'
@@ -53,6 +61,7 @@ import { applyPlan } from './apply'
 import type { CatalogueDetail } from './catalogue'
 import { buildSystemPrompt } from './catalogue'
 import { describeGraph, requestPlan, runTurn } from './converse'
+import type { AssistantPlan } from './planShape'
 import { countPlanParams } from './planShape'
 
 const KEY = process.env.ANTHROPIC_API_KEY
@@ -129,12 +138,18 @@ beforeAll(() => {
  * rather than a re-creation of it — the point of a live test being to catch what the stubs
  * cannot, which includes the loop itself having changed.
  */
-async function ask(graph: CodaGraph, request: string): Promise<CodaGraph> {
+async function ask(
+  graph: CodaGraph,
+  request: string,
+  results?: ResultReader,
+): Promise<{ graph: CodaGraph; plan: AssistantPlan }> {
   let next = graph
   const outcome = await runTurn({
     request,
     detail: CATALOGUE,
     graph: () => next,
+    inference: () => inferGraph(next),
+    ...(results ? { results } : {}),
     apply: (plan) => {
       const result = applyPlan(next, plan)
       if (result.ok) next = result.graph
@@ -159,14 +174,42 @@ async function ask(graph: CodaGraph, request: string): Promise<CodaGraph> {
   for (const warning of applied.warnings) {
     console.log(`  left for the user — ${warning.label}: ${warning.message}`)
   }
-  return next
+  return { graph: next, plan }
+}
+
+/**
+ * Every param value a plan sets, however it was spelled.
+ *
+ * The value counterpart of `countPlanParams`, whose comment records the rule both follow: a
+ * param can be set inline on an added node *or* as a `setParams` entry, and reading one spelling
+ * reports nothing for a plan that used the other.
+ */
+function planValues(plan: AssistantPlan): string[] {
+  const inline = plan.add.flatMap((node) => Object.values(node.params ?? {}))
+  return [...inline, ...plan.setParams.map((p) => p.value)].flat().map(String)
+}
+
+/**
+ * Run a graph for real, and hand back what the assistant panel hands back.
+ *
+ * The mock dataset, so this stays a test about the assistant rather than about whether neuPrint
+ * is up: it is generated in the browser and the numbers are deterministic from a seed.
+ */
+async function runFor(graph: CodaGraph): Promise<ResultReader> {
+  registerBuiltinSources()
+  const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
+  await sched.run(graph, { mode: 'full' })
+  return {
+    fresh: (nodeId) => sched.info(nodeId).state === 'ok',
+    output: (nodeId, portId) => sched.output(nodeId, portId),
+  }
 }
 
 describe.skipIf(!RUNNABLE)('against the real API', () => {
   it(
     'builds a pipeline from scratch',
     async () => {
-      const graph = await ask(
+      const { graph } = await ask(
         emptyGraph(),
         'Using the mini hemibrain dataset, find the LC4 neurons, get what they connect to, ' +
           'and chart the strongest partner types.',
@@ -180,11 +223,11 @@ describe.skipIf(!RUNNABLE)('against the real API', () => {
   it(
     'edits a graph it did not build',
     async () => {
-      const start = await ask(
+      const { graph: start } = await ask(
         emptyGraph(),
         'Give me the mini hemibrain dataset wired to Find Neurons.',
       )
-      const graph = await ask(
+      const { graph } = await ask(
         start,
         'Add a table showing the results, and limit the query to 50.',
       )
@@ -206,7 +249,7 @@ describe.skipIf(!RUNNABLE)('against the real API', () => {
        *
        * A failure here is a finding about the model, not a bug in the code.
        */
-      const graph = await ask(
+      const { graph } = await ask(
         emptyGraph(),
         'On the mini hemibrain, how do the LC4 neurons reach DNp01? Show me the routes.',
       )
@@ -221,11 +264,11 @@ describe.skipIf(!RUNNABLE)('against the real API', () => {
     async () => {
       // `remove` and `disconnect` are unit-tested and have never been exercised by a real model.
       // A plan that only ever appends would pass every other case here.
-      const built = await ask(
+      const { graph: built } = await ask(
         emptyGraph(),
         'On the mini hemibrain, find LC4 neurons, get their connections, and bar-chart them.',
       )
-      const graph = await ask(
+      const { graph } = await ask(
         built,
         'Drop the bar chart — show the connections in a table instead.',
       )
@@ -253,18 +296,76 @@ describe.skipIf(!RUNNABLE)('against the real API', () => {
        *
        * A failure here is a finding about the catalogue, not about this code.
        */
-      const built = await ask(
+      const { graph: built } = await ask(
         emptyGraph(),
         'On the mini hemibrain, find LC4 and LC6 neurons, fetch their skeletons, NBLAST them ' +
           'against each other, cluster the scores and draw a dendrogram.',
       )
-      const graph = await ask(built, 'Label the dendrogram leaves with cell types.')
+      const { graph } = await ask(built, 'Label the dendrogram leaves with cell types.')
       console.log(`\n${describeGraph(graph)}\n`)
       const dendro = graph.nodes.find((n) => n.type === 'out.dendrogram')
       expect(dendro).toBeDefined()
       expect(
         graph.edges.some((e) => e.target === dendro!.id && e.targetHandle === 'annotations'),
       ).toBe(true)
+    },
+    PER_QUESTION_MS,
+  )
+
+  it(
+    'uses a value it could only have got from the run',
+    async () => {
+      /*
+       * **The digest's own case, and the only one here that a schema cannot answer.** Every
+       * other test asks for structure; this asks for a *value* — the name of the commonest
+       * postsynaptic type — which is nowhere in the catalogue, nowhere in the graph listing and
+       * nowhere in the inferred schema. It exists only in the rows the run produced.
+       *
+       * Built by hand rather than by asking, so the model's freedom is spent on the one question
+       * under test. The control turn is run second, without `results`, and is *printed rather
+       * than asserted*: a model that guesses "LPLC2" is unlikely but possible, and a suite that
+       * failed when it got lucky would be testing the weather. Read the two summaries.
+       */
+      const built = applyPlan(emptyGraph(), {
+        ...emptyPlan(),
+        summary: 'a pipeline to ask about',
+        add: [
+          { ref: 'ds', type: 'dataset.mock.opticlobe' },
+          { ref: 'find', type: 'neuron.findNeurons', params: searchFor({ type: 'LC.*' }) },
+          { ref: 'conn', type: 'neuron.connectivity' },
+        ],
+        connect: [
+          { from: { node: 'ds', port: 'dataset' }, to: { node: 'find', port: 'dataset' } },
+          { from: { node: 'ds', port: 'dataset' }, to: { node: 'conn', port: 'dataset' } },
+          { from: { node: 'find', port: 'neurons' }, to: { node: 'conn', port: 'neurons' } },
+        ],
+      })
+      if (!built.ok) expect.fail(built.errors.join('; '))
+      const results = await runFor(built.graph)
+
+      // What the data actually says, computed here so the assertion cannot go stale with the seed.
+      const connections = results.output(built.created.conn!, 'connections')
+      if (!isTableValue(connections)) expect.fail('the pipeline produced no connections table')
+      const tally = new Map<string, number>()
+      for (const cell of getColumn(connections, 'postType')) {
+        const label = String(cell ?? '')
+        if (label) tally.set(label, (tally.get(label) ?? 0) + 1)
+      }
+      const [commonest] = [...tally].sort((a, b) => b[1] - a[1])[0]!
+      console.log(`\n  the commonest postType is ${commonest}, in ${tally.get(commonest)} rows`)
+
+      const question =
+        'Add a filter that keeps only the connections whose postsynaptic type is the ' +
+        'commonest one in this table.'
+
+      const withDigest = planValues((await ask(built.graph, question, results)).plan)
+      console.log(`  with the digest, the plan set: ${withDigest.join(' | ')}`)
+
+      // The control: the same question with nothing said about what ran.
+      const control = planValues((await ask(built.graph, question)).plan)
+      console.log(`  without it, the plan set:     ${control.join(' | ')}`)
+
+      expect(withDigest).toContain(commonest)
     },
     PER_QUESTION_MS,
   )

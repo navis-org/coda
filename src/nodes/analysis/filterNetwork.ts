@@ -28,7 +28,7 @@ import type { DType } from '../../core/types'
 import { getColumn, isNetworkValue, isTableValue } from '../../core/values'
 import { collectLabels } from '../lib/labelLookup'
 import type { FilterOp } from '../lib/tableOps'
-import { filterTable, opNeedsValue, opsForDType } from '../lib/tableOps'
+import { filterTable, opNeedsValue, operatorVocabulary, opsForDType } from '../lib/tableOps'
 import {
   EXPANSION_OPTIONS,
   WALK_OPTIONS,
@@ -84,6 +84,8 @@ export const filterNetworkNode = registerNode({
       default: 'contains',
       // The same operator table `Filter Table` offers, resolved against the same dtype, so the
       // two nodes named Filter behave identically on the half they have in common.
+      optionsWithoutPeek: true,
+      catalogueNote: operatorVocabulary(),
       options: (ctx) => opsForDType(chosenDType(ctx)),
     },
     {

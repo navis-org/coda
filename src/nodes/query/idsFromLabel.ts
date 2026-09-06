@@ -120,6 +120,7 @@ export const idsFromLabelNode = registerNode({
       // not return two different counts. Set it to Any to include untraced fragments.
       default: 'Traced',
       advanced: true,
+      optionsWithoutPeek: true,
       options: (ctx) => {
         const info = datasetInfoFromType(ctx.inputs.dataset)
         const statuses = info?.statuses ?? ['Traced']

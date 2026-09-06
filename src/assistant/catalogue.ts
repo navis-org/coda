@@ -62,7 +62,8 @@ import type { NodeDefinition } from '../core/node'
 import type { CodaGraph } from '../core/graph'
 import { GRAPH_FORMAT_VERSION } from '../core/graph'
 import { inferGraph, nodeTypes } from '../core/inference'
-import { defaultParams } from '../core/node'
+import type { EnumOption, ParamValue, ParamValues } from '../core/node'
+import { configurableParams, defaultParams, makeInferContext } from '../core/node'
 import { nodeDefsByCategory } from '../core/registry'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 import type { AttributePart, CodaType } from '../core/types'
@@ -82,7 +83,123 @@ function renderPort(port: PortDef, side: 'in' | 'out'): string {
   return `${port.id}${optional} (${typeLabel(port.type)})`
 }
 
-function renderParam(param: ParamDef, detail: CatalogueDetail): string {
+/**
+ * `labelColumn column default=type (reads the annotations input)` — where a picker's column
+ * names come from, when that input is one the node can run without.
+ *
+ * **Measured, and the failure is a plan that looks finished.** Asked to label a dendrogram's
+ * leaves by cell type, a model set `labelColumn` and wired nothing: "Configure the dendrogram to
+ * use the 'type' column for leaf labels" — `0 added, 0 wired, 1 set`. The param is real, the
+ * value is right, and the picker is inert because `annotations` is empty. Nothing refuses it,
+ * because an unwired optional port is an ordinary half-built graph.
+ *
+ * The information was in the definition all along — `ColumnParam.from` names the port — and
+ * simply was not rendered, so under `lean` all the model saw was `labelColumn column`.
+ *
+ * **Only for an *optional* port**, which is the whole asymmetry: 97 column params read a
+ * required input, and there the model has to wire it to use the node at all, so saying so costs
+ * 2.4k characters to repeat what the port list already forces. Sixteen read an optional one, and
+ * those are exactly the params that can be set while the port stays empty.
+ */
+function readsFrom(param: ParamDef, optionalInputs: ReadonlySet<string>): string {
+  const from = 'from' in param ? param.from : undefined
+  return typeof from === 'string' && optionalInputs.has(from)
+    ? ` (reads the ${from} input — wire it, or this does nothing)`
+    : ''
+}
+
+/**
+ * The values a param can be flipped through to see what it gates, or `undefined` for one that
+ * cannot be enumerated.
+ *
+ * Static enums and booleans only. A dynamic `options` function is skipped for
+ * `optionsWithoutPeek`'s reason — asking it may start a request — and a `multiEnum`'s value is a
+ * subset, so probing it means enumerating a power set. A `string` or `column` gate is nearly
+ * always "is it set at all" (`core.stack`'s labels appear once its source column is named), so
+ * those get exactly the two cases that distinguishes, and the sentinel never reaches the page.
+ */
+function probeValues(param: ParamDef): ParamValue[] | undefined {
+  if (param.kind === 'boolean') return [true, false]
+  if (param.kind === 'enum' && Array.isArray(param.options)) {
+    return param.options.map((o) => o.value)
+  }
+  if (param.kind === 'string' || param.kind === 'column') return ['', 'set']
+  return undefined
+}
+
+/**
+ * `(not with agg=count)` — the other setting on this node that switches this param off.
+ *
+ * **Measured, and the failure is a refused plan rather than a bad one.** Building a chart from
+ * scratch, a model set `core.groupBy`'s `agg: 'count'` *and* its `value: ['weight']` — count the
+ * rows, and also aggregate a column. `value` is `visibleIf: (params) => params.agg !== 'count'`,
+ * so `applyPlan` refuses the whole plan ("setting it would do nothing"), correctly: dropping the
+ * param quietly is the silent success that module is arranged to avoid. The repair round was
+ * handed the exact error and made the same mistake again. ~1 run in 10.
+ *
+ * **Derived by probing the predicate, never transcribed.** `visibleIf` is an arbitrary function,
+ * so there is nothing to read — but there is something to *ask*: hold every other param at its
+ * default, flip one through its own declared values, and see whether this param's visibility
+ * moves. What comes out cannot drift from the gate `configurableParams` enforces, because it is
+ * that gate answering. A hand-written phrase beside the predicate is the second spelling this
+ * codebase keeps a rule about.
+ *
+ * 137 params carry a `visibleIf` and 93 answer to a single flip. The rest — gates needing two
+ * params set together, or reading something this cannot enumerate — stay silent, which is the
+ * same "unknown, never none" the missing `carries:` line means.
+ *
+ * Never throws: a predicate handed a combination it did not expect must not take the prompt down.
+ */
+export function gateNote(def: NodeDefinition, param: ParamDef): string {
+  const gate = param.visibleIf
+  if (!gate) return ''
+  const base = defaultParams(def)
+  const notes: string[] = []
+
+  for (const other of def.params ?? []) {
+    if (other.id === param.id || notes.length >= GATE_NOTES) continue
+    const values = probeValues(other)
+    if (!values) continue
+
+    const shown: ParamValue[] = []
+    const hidden: ParamValue[] = []
+    for (const value of values) {
+      let visible: boolean
+      try {
+        visible = gate({ ...base, [other.id]: value })
+      } catch {
+        return ''
+      }
+      ;(visible ? shown : hidden).push(value)
+    }
+    // Flipping it changed nothing, so it is not a gate on this param.
+    if (shown.length === 0 || hidden.length === 0) continue
+
+    /*
+     * A `string`/`column` gate is about being set at all, so it says that rather than printing
+     * the sentinel — and the shorter of the two lists wins elsewhere, since both are exact and
+     * `not with agg=count` beats naming the five values that do work. Ties go to the positive,
+     * which is the actionable direction for a boolean.
+     */
+    if (other.kind === 'string' || other.kind === 'column') {
+      notes.push(
+        hidden.includes('') ? `only with ${other.id} set` : `only with ${other.id} unset`,
+      )
+    } else if (hidden.length < shown.length) {
+      notes.push(`not with ${other.id}=${hidden.join('|')}`)
+    } else {
+      notes.push(`only with ${other.id}=${shown.join('|')}`)
+    }
+  }
+  return notes.length > 0 ? ` (${notes.join(', ')})` : ''
+}
+
+function renderParam(
+  def: NodeDefinition,
+  param: ParamDef,
+  detail: CatalogueDetail,
+  optionalInputs: ReadonlySet<string>,
+): string {
   const bits: string[] = [param.id, param.kind]
 
   if (param.kind === 'enum' || param.kind === 'multiEnum') {
@@ -110,7 +227,7 @@ function renderParam(param: ParamDef, detail: CatalogueDetail): string {
     bits.push(`default=${String(value)}`)
   }
 
-  const line = bits.join(' ')
+  const line = bits.join(' ') + readsFrom(param, optionalInputs) + gateNote(def, param)
   /*
    * `lean` keeps the name, the kind, the bounds and the enum options — everything a plan can be
    * *refused* for getting wrong — and drops only the prose. See `CatalogueDetail`.
@@ -172,6 +289,80 @@ export function portColumns(type: CodaType): Array<[string, string[]]> {
   return names.length ? [['', names]] : []
 }
 
+/**
+ * How many of a param's live options are printed before the rest are counted.
+ *
+ * Twelve: `core.filterTable`'s nine operators fit whole, which is the case this exists for, and
+ * a Connectivity node's ROI list runs to hundreds — where naming twelve tells the model the
+ * shape of the vocabulary without spending the whole user turn on region names.
+ */
+const OPTION_VALUES = 12
+
+/**
+ * How many gates one param's note may name.
+ *
+ * Two. A param answering to three flips is describing a mode system rather than a gate, and the
+ * line stops being readable before it stops being true.
+ */
+const GATE_NOTES = 2
+
+/**
+ * `op = eq | ne | contains | …` — what a param's options actually are on *this* node.
+ *
+ * The counterpart to the `(options depend on the input)` that `renderParam` prints one screen
+ * up, and it belongs beside it: the catalogue describes a node *type*, so it genuinely cannot
+ * know: `core.filterTable`'s operators depend on the dtype of the column somebody picked. The
+ * canvas can. So the type gets the apology and the graph listing gets the answer.
+ *
+ * **Measured, not anticipated.** Asked to filter a table to its commonest partner type, both
+ * `qwen3.8` locally and a cloud model wrote `op: "is"` — which is the *label* of the `eq`
+ * option, from `tableOps.ts`. Nothing refuses it: `validateParamValue` skips dynamic options
+ * by design, so the plan applies and the node carries `"is" does not apply to a str column`
+ * where the user has to find it.
+ *
+ * **Only `optionsWithoutPeek` params are resolved, and that is a safety property rather than a
+ * filter.** `dataset.*.version` reads `peekDatasets`, which starts the fetch it cannot answer —
+ * so resolving every dynamic param here would fire a dataset listing per dataset node, at two
+ * CATMAID servers and CAVE, because somebody asked a question. See the flag's own comment.
+ *
+ * Never throws, for `inferOutputs`' reason one file over: this runs on a graph the user is
+ * holding, and a node pack whose options function is unhappy must not take the prompt down.
+ */
+export function optionLines(
+  def: NodeDefinition,
+  params: ParamValues,
+  inputs: Readonly<Record<string, CodaType | undefined>>,
+): string[] {
+  const lines: string[] = []
+  const ctx = makeInferContext(def, params, inputs)
+  // `configurableParams` rather than `plannableParams`: a param the node's own values have
+  // switched off is one a plan may not set, so naming its options would be an invitation.
+  for (const param of configurableParams(def, params)) {
+    if (param.kind !== 'enum' && param.kind !== 'multiEnum') continue
+    if (typeof param.options !== 'function' || param.optionsWithoutPeek !== true) continue
+
+    let options: EnumOption[]
+    try {
+      options = param.options(ctx)
+    } catch {
+      continue
+    }
+    if (options.length === 0) continue
+
+    /*
+     * `""` rather than a word like `(empty)`. Four of these params default to the empty option
+     * — Automatic, or none — so it is the commonest *correct* answer, and a model writes what it
+     * is shown: `(empty)` goes into the plan verbatim and is refused, where `""` is the value.
+     */
+    const shown = options.slice(0, OPTION_VALUES).map((o) => (o.value === '' ? '""' : o.value))
+    const rest = options.length - shown.length
+    // The fold is counted, the digest's rule: a list read as complete is a value silently ruled
+    // out. Here it is worse than in the digest, because an unlisted value is simply refused.
+    lines.push(`${param.id} = ${shown.join(' | ')}${rest > 0 ? ` … and ${rest} more` : ''}`)
+  }
+  return lines
+}
+
 /** `connections carries: a, b` — or `network carries (links): …` where a port has two tables. */
 export function carriesLines(outputs: Readonly<Record<string, CodaType>>): string[] {
   const lines: string[] = []
@@ -212,8 +403,12 @@ function renderNode(def: NodeDefinition, detail: CatalogueDetail): string {
 
   const params = plannableParams(def)
   if (params.length) {
+    // The optional ones only — see `readsFrom`. `inputs` is already in hand from the port list.
+    const optionalInputs = new Set(inputs.filter((p) => p.required === false).map((p) => p.id))
     lines.push('params:')
-    for (const param of params) lines.push(`  ${renderParam(param, detail)}`)
+    for (const param of params) {
+      lines.push(`  ${renderParam(def, param, detail, optionalInputs)}`)
+    }
   }
   return lines.join('\n')
 }
@@ -308,6 +503,10 @@ Column params — set them when you can, and you often can:
   Connectivity node should name its category and value, not be left blank.
 - The current-graph listing carries the same line per node, and it is the authoritative one:
   a dataset adds properties the catalogue above cannot know about.
+- An \`options:\` line lists what a param whose catalogue entry says *options depend on the
+  input* actually offers on **that** node, as it is wired right now. Where one is present it is
+  the only correct source: write the value exactly as listed. \`… and N more\` means the list was
+  cut, so a value you cannot see may still be legal — but one you invent will be refused.
 - When no \`carries:\` line covers what you need, leave the param at its default and say so in
   your reply. Guessing a column name that does not exist fails at run time. A Pivot or a raw
   Cypher is the usual case: what it emits depends on the data, so it publishes nothing until

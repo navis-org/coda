@@ -154,6 +154,7 @@ export const findNeuronsNode = registerNode({
       help: 'Restrict to neurons with synapses in this region. Not a field: a region is a property per ROI rather than a column, so it cannot be a filter row \u2014 but it is a filter, so a node whose only setting is a region still queries.',
       default: '',
       advanced: true,
+      optionsWithoutPeek: true,
       options: (ctx) => {
         // Gated on whether the source can *answer* a region filter, not on whether it happens to
         // publish a region list. CATMAID publishes eighty and can answer none of them.
