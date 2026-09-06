@@ -39,6 +39,7 @@ import {
 } from '../lib/cleanOps'
 import { NM_PER_UM } from '../lib/nblastOps'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 vi.mock('../../pyodide/skeletons', () => ({ runCleanSkeletons: vi.fn() }))
 const { runCleanSkeletons } = await import('../../pyodide/skeletons')
@@ -296,7 +297,10 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('clean-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })),
+  )
   g = addNode(g, node('skel', 'neuron.skeletons', { limit: 20 }))
   g = addNode(g, node('clean', 'neuron.cleanSkeletons', params))
   for (const [from, out, to, into] of [

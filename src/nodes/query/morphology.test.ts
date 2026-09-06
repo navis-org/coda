@@ -30,6 +30,7 @@ import { MAX_NEURONS } from './morphology'
 import { SYNAPSE_UNIT_PARAM } from '../lib/synapseParams'
 
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
@@ -107,7 +108,10 @@ function pipeline(geometryType: string, limit: number): CodaGraph {
 
   let g = emptyGraph('limit-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })),
+  )
   g = addNode(g, node('geo', geometryType))
   g = addEdge(g, {
     source: 'ds',

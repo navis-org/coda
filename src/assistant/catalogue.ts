@@ -111,9 +111,26 @@ function renderParam(param: ParamDef, detail: CatalogueDetail): string {
   }
 
   const line = bits.join(' ')
-  // `lean` keeps the name, the kind, the bounds and the enum options — everything a plan can be
-  // *refused* for getting wrong — and drops only the prose. See `CatalogueDetail`.
-  return detail === 'full' && param.help ? `${line} — ${param.help}` : line
+  /*
+   * `lean` keeps the name, the kind, the bounds and the enum options — everything a plan can be
+   * *refused* for getting wrong — and drops only the prose. See `CatalogueDetail`.
+   *
+   * `catalogueNote` survives it, which is the one asymmetry: `help` says what a setting means,
+   * and a plan is not refused for not knowing that. A note says how the value is *written*, and
+   * without it the param cannot be set at all — a lean catalogue that dropped it would list a
+   * control nothing can reach. It goes on its own indented lines because the ones that need one
+   * are grammars rather than sentences.
+   */
+  const noted = param.catalogueNote
+    ? [
+        line,
+        ...param.catalogueNote
+          .trim()
+          .split('\n')
+          .map((l) => `    ${l}`),
+      ].join('\n')
+    : line
+  return detail === 'full' && param.help ? `${noted} — ${param.help}` : noted
 }
 
 /**

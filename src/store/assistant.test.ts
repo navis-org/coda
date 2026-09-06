@@ -19,6 +19,7 @@ import { emptyGraph } from '../core/graph'
 import '../nodes'
 import { clearStorage } from '../test/jsdomStubs'
 import { useGraphStore } from './graphStore'
+import { searchFor } from '../test/findNeurons'
 
 function plan(patch: Partial<AssistantPlan>): AssistantPlan {
   return { ...emptyPlan(), summary: 'a test edit', ...patch }
@@ -29,7 +30,7 @@ const PIPELINE = plan({
   summary: 'Chart the LC4 neurons.',
   add: [
     { ref: 'ds', type: 'dataset.mock.opticlobe' },
-    { ref: 'find', type: 'neuron.findNeurons', params: { typePattern: 'LC4' } },
+    { ref: 'find', type: 'neuron.findNeurons', params: searchFor({ type: 'LC4' }) },
     { ref: 'table', type: 'out.table' },
   ],
   connect: [

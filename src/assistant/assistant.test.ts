@@ -24,6 +24,9 @@ import type { AssistantPlan } from './planShape'
 import { parsePlan, planJsonSchema } from './plan'
 import { emptyPlan, isEmptyPlan, plannableParams } from './planShape'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
+import { searchFor } from '../test/findNeurons'
+import { ALL_ROW_OPS, arityOf, decodeRows } from '../data/filterRows'
+import { requireNodeDef } from '../core/registry'
 
 function plan(patch: Partial<AssistantPlan>): AssistantPlan {
   return { ...emptyPlan(), summary: 'a test edit', ...patch }
@@ -63,7 +66,7 @@ function parsedPlan(text: string): AssistantPlan {
 const SEED: AssistantPlan = plan({
   add: [
     { ref: 'ds', type: 'dataset.mock.opticlobe' },
-    { ref: 'find', type: 'neuron.findNeurons', params: { typePattern: 'LC.*' } },
+    { ref: 'find', type: 'neuron.findNeurons', params: searchFor({ type: 'LC.*' }) },
   ],
   connect: [{ from: { node: 'ds', port: 'dataset' }, to: { node: 'find', port: 'dataset' } }],
 })
@@ -81,7 +84,7 @@ describe('applying a plan', () => {
         plan({
           add: [
             { ref: 'ds', type: 'dataset.mock.opticlobe' },
-            { ref: 'find', type: 'neuron.findNeurons', params: { typePattern: 'LC.*' } },
+            { ref: 'find', type: 'neuron.findNeurons', params: searchFor({ type: 'LC.*' }) },
             { ref: 'conn', type: 'neuron.connectivity' },
             { ref: 'chart', type: 'out.barChart', title: 'Partners' },
           ],
@@ -99,13 +102,12 @@ describe('applying a plan', () => {
     expect(result.graph.edges).toHaveLength(4)
 
     const find = nodeFor(result, 'find')
-    expect(find.params.typePattern).toBe('LC.*')
-    // Untouched params keep the definition's default rather than arriving undefined. Find
-    // Neurons' `status` default is empty now — a fresh node filters nothing — so `limit` and
-    // `filters` are what say the merge happened.
-    expect(find.params.status).toBe('')
+    expect(find.params.filters).toEqual(searchFor({ type: 'LC.*' }).filters)
+    // Untouched params keep the definition's default rather than arriving undefined. `roi` and
+    // `limit` are all Find Neurons has left besides the filters, so they are what say the merge
+    // happened rather than the plan having replaced the params wholesale.
+    expect(find.params.roi).toBe('')
     expect(find.params.limit).toBe(0)
-    expect(find.params.filters).toEqual([])
 
     const chart = nodeFor(result, 'chart')
     expect(chart.title).toBe('Partners')
@@ -212,18 +214,19 @@ describe('refusing a plan', () => {
     })
 
     expect(message).toContain('no param "pattern"')
-    expect(message).toContain('typePattern')
+    expect(message).toContain('filters')
   })
 
   it('refuses a value of the wrong kind', () => {
     /*
      * Still refused after `coerceParamValue` learned to read a number as an enum option, and
      * deliberately so: nothing downstream checks a `string` param, so `4` here would become the
-     * pattern `"4"` and apply cleanly. A model putting a limit in the wrong field is exactly
-     * what that looks like, and this refusal is the only thing that ever says so.
+     * id list `"4"` and apply cleanly. This used to be asked of Find Neurons' `typePattern`,
+     * whose deletion left `Input IDs` as the plainest `string` param in the catalogue — and it
+     * makes the point harder, since a number where an id list goes is invariant 8's own hazard.
      */
     const message = refusal({
-      add: [{ ref: 'f', type: 'neuron.findNeurons', params: { typePattern: 4 as never } }],
+      add: [{ ref: 'f', type: 'neuron.inputIds', params: { ids: 4 as never } }],
     })
 
     expect(message).toContain('wants a string, got a number')
@@ -247,17 +250,19 @@ describe('refusing a plan', () => {
   })
 
   it('accepts an enum whose options depend on the input, and leaves validate to judge it', () => {
-    // `status` options come from the dataset, which inference cannot resolve here — so this
-    // file must not pretend to know them. A wrong one is the node's own `validate` to report.
+    // `roi` options come from the dataset, which inference cannot resolve here — so this file
+    // must not pretend to know them. A wrong one is the node's own `validate` to report. This
+    // used to ask it of `status`, which was one of the four legacy params; `roi` is the same
+    // shape of question and is the one that could never have become a filter row.
     const result = expectOk(
       applyPlan(
         emptyGraph(),
         plan({
-          add: [{ ref: 'f', type: 'neuron.findNeurons', params: { status: 'Anything' } }],
+          add: [{ ref: 'f', type: 'neuron.findNeurons', params: { roi: 'Anything' } }],
         }),
       ),
     )
-    expect(result.graph.nodes[0]?.params.status).toBe('Anything')
+    expect(result.graph.nodes[0]?.params.roi).toBe('Anything')
   })
 
   it('refuses a number outside the bounds the definition declares', () => {
@@ -628,13 +633,13 @@ describe('the plan format', () => {
     // more readable as a map. Both have to arrive at the same node.
     const fromWire = parsedPlan(
       '{"summary":"x","add":[{"ref":"f","type":"neuron.findNeurons",' +
-        '"params":[{"param":"typePattern","value":"LC.*"},{"param":"limit","value":10}]}]}',
+        '"params":[{"param":"roi","value":"ME(R)"},{"param":"limit","value":10}]}]}',
     )
-    expect(fromWire.add[0]!.params).toEqual({ typePattern: 'LC.*', limit: 10 })
+    expect(fromWire.add[0]!.params).toEqual({ roi: 'ME(R)', limit: 10 })
 
     const fromMap = parsedPlan(
       '{"summary":"x","add":[{"ref":"f","type":"neuron.findNeurons",' +
-        '"params":{"typePattern":"LC.*","limit":10}}]}',
+        '"params":{"roi":"ME(R)","limit":10}}]}',
     )
     expect(fromMap.add[0]!.params).toEqual(fromWire.add[0]!.params)
   })
@@ -746,8 +751,8 @@ describe('a value written as text', () => {
   })
 
   it('leaves a text param alone, since text is what it wanted', () => {
-    const found = nodeFor(expectOk(withParam('neuron.findNeurons', 'typePattern', '42')), 'n')
-    expect(found.params.typePattern).toBe('42')
+    const found = nodeFor(expectOk(withParam('neuron.inputIds', 'ids', '42')), 'n')
+    expect(found.params.ids).toBe('42')
   })
 
   it('reads 50 as "50" where the options are strings that look like numbers', () => {
@@ -782,6 +787,71 @@ describe('a value written as text', () => {
   })
 })
 
+describe('the filter-row note on Find Neurons', () => {
+  /*
+   * The one param whose shape its kind cannot convey, and the only one carrying a
+   * `catalogueNote`.
+   *
+   * Read off the **definition**, not scraped out of the prompt between two prose landmarks —
+   * that was the first spelling and it could only find the paragraph by its own wording, so
+   * moving or renaming it broke the test in a way that looked like a formatting change. What is
+   * asserted is that the note is *derived*: its example decodes back to the row it claims to be,
+   * every operator it names is one `decodeRows` accepts, and its arity groups agree with
+   * `arityOf`. A transcribed grammar passes none of these once the encoder moves, and the
+   * failure it would otherwise produce is a plan refused with a message about `filters` — which
+   * a model reads as "that param is wrong" rather than "that detail is stale".
+   */
+  const note = () => {
+    const param = requireNodeDef('neuron.findNeurons').params?.find(
+      (def) => def.id === 'filters',
+    )
+    expect(param?.catalogueNote, 'filters carries a catalogue note').toBeTruthy()
+    return param!.catalogueNote!
+  }
+
+  it('shows an example that decodes back to the row it says it is', () => {
+    // Greedy, over one whole line: the encoded row contains `"]` itself, so a non-greedy match
+    // stops inside it and hands `JSON.parse` half an example.
+    const example = /^\s*(\[".*\])\s*$/m.exec(note())?.[1]
+    expect(example, 'the note carries a JSON example').toBeTruthy()
+    expect(decodeRows(JSON.parse(example!) as unknown)).toEqual([
+      { field: 'type', op: 'matches', values: ['LC.*'] },
+    ])
+  })
+
+  it('names only operators a stored row can carry', () => {
+    const listed = /`op` is one of: ([^.]+)\./.exec(note())![1]!.split(', ')
+    expect(listed).toEqual([...ALL_ROW_OPS])
+    for (const op of listed) {
+      expect(decodeRows([JSON.stringify({ f: 'type', op, v: ['x'] })]), op).toHaveLength(1)
+    }
+  })
+
+  it('groups the operators by the arity `arityOf` gives them', () => {
+    // The half a name-and-count check cannot see: an operator can keep its name and change how
+    // many values it takes, and the note would go on claiming the old shape.
+    const text = note()
+    for (const op of ALL_ROW_OPS) {
+      const clause = /take several values in `v`; (.*) take none; the rest take one\./.exec(
+        text,
+      )
+      expect(clause, 'the note states its arity groups').toBeTruthy()
+      const takesNone = clause![1]!.includes(`\`${op}\``)
+      expect(takesNone, op).toBe(arityOf(op) === 'none')
+    }
+  })
+
+  it('says what an empty list means, since that is the half a model gets backwards', () => {
+    expect(note()).toContain('no neurons')
+  })
+
+  it('reaches the model under `lean` as well, or the param cannot be set at all', () => {
+    // `help` is dropped under `lean` and this must not be: it is the only thing that makes an
+    // opaque param writable, so a lean catalogue without it lists a control nothing can reach.
+    expect(catalogueText('lean')).toContain('`op` is one of:')
+  })
+})
+
 describe('describing the canvas', () => {
   it('says so when there is nothing on it', () => {
     expect(describeGraph(emptyGraph())).toContain('empty')
@@ -798,9 +868,11 @@ describe('describing the canvas', () => {
   it('prints only the params somebody chose', () => {
     const { graph } = seeded()
     const text = describeGraph(graph)
-    expect(text).toContain('typePattern=LC.*')
-    // `status` is still at its default, so saying it would bury the one value that was set.
-    expect(text).not.toContain('status=Traced')
+    // An `ids` param prints as the list it stores, which is the same shape the rules teach a
+    // plan to write — so what the model reads back is what it would have to send.
+    expect(text).toContain(`filters=[${searchFor({ type: 'LC.*' }).filters.join(',')}]`)
+    // `limit` is still at its default, so saying it would bury the one value that was set.
+    expect(text).not.toContain('limit=')
   })
 
   it('says nothing about a Pivot’s columns when nothing has run', () => {
@@ -853,7 +925,7 @@ describe('the loop, end to end', () => {
       {
         ref: 'find',
         type: 'neuron.findNeurons',
-        params: [{ param: 'typePattern', value: 'LC4' }],
+        params: [{ param: 'filters', value: searchFor({ type: 'LC4' }).filters }],
         title: '',
       },
       {
@@ -1153,7 +1225,11 @@ describe('recovering a plan a weak model wrapped in an envelope of its own', () 
         steps: [
           { add: { ref: 'hemi', type: 'dataset.hemibrain' } },
           {
-            add: { ref: 'findLC4', type: 'neuron.findNeurons', params: { typePattern: 'LC4' } },
+            add: {
+              ref: 'findLC4',
+              type: 'neuron.findNeurons',
+              params: searchFor({ type: 'LC4' }),
+            },
           },
           { add: { ref: 'table', type: 'out.table' } },
           {
@@ -1177,7 +1253,7 @@ describe('recovering a plan a weak model wrapped in an envelope of its own', () 
       'neuron.findNeurons',
       'out.table',
     ])
-    expect(result.plan.add[1]!.params).toEqual({ typePattern: 'LC4' })
+    expect(result.plan.add[1]!.params).toEqual(searchFor({ type: 'LC4' }))
     // `ref` where the format says `node` — the same word `add` uses for that very node.
     expect(result.plan.connect[0]!.from).toEqual({ node: 'hemi', port: 'dataset' })
   })
@@ -1213,7 +1289,7 @@ describe('recovering a plan a weak model wrapped in an envelope of its own', () 
             action: 'add',
             type: 'neuron.findNeurons',
             ref: 'find',
-            params: { typePattern: 'LC4' },
+            params: searchFor({ type: 'LC4' }),
           },
           {
             action: 'connect',

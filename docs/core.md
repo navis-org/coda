@@ -243,8 +243,9 @@ stale until you touch something reads as the setting not working.
 
 Testing note: the Filter node is `cheap`, so editing it proves nothing about auto-run — the
 ordinary pass re-runs it either way. Only an expensive node's param distinguishes the modes.
-And a `typePattern` matching nothing makes Connectivity error ("No neuronIds…") and blocks
-everything downstream, so a test that waits for zero stale nodes will hang on it.
+And a Find Neurons whose filters match nothing — or which has none, since that now returns no
+neurons — makes Connectivity error ("No neuronIds…") and blocks everything downstream, so a test
+that waits for zero stale nodes will hang on it.
 
 ## Variadic ports — a port set sized by a param
 

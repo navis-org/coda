@@ -29,6 +29,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import { METRIC_COLUMNS, networkSummarySchema, nodeStatsSchema } from '../lib/networkMetrics'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
@@ -45,7 +46,10 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(): CodaGraph {
   let g = emptyGraph('metrics-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC.*', status: 'Traced' })),
+  )
   g = addNode(g, node('conn', 'neuron.connectivity', { direction: 'downstream', minWeight: 3 }))
   g = addNode(
     g,
@@ -197,7 +201,7 @@ describe('net.metrics — values', () => {
   it('refuses a table on the Network socket, naming the port', async () => {
     let g = emptyGraph('metrics-bad')
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-    g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*' }))
+    g = addNode(g, node('find', 'neuron.findNeurons', searchFor({ type: 'LC.*' })))
     g = addNode(g, node('metrics', 'net.metrics'))
     g = addEdge(g, {
       source: 'ds',

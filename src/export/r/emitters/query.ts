@@ -21,12 +21,19 @@ import { parseIdList } from '../../../nodes/lib/idList'
 import { SYNAPSE_UNITS } from '../../../data/synapseUnits'
 import { minSynapseConfidence, synapseUnitFor } from '../../../nodes/lib/synapseParams'
 import { parseTypedLabels } from '../../../nodes/lib/labelLookup'
-import { rLongVector, rStr, rVector } from '../r'
+import { rCol, rLongVector, rStr, rVector } from '../r'
 import { registerEmitter } from '../registry'
 import type { FieldTerm } from '../../../data/terms'
 import { anchoredPattern, escapeRegex } from '../../../data/terms'
 import { resolveRows } from '../../../data/filterRows'
-import { rowsFromParams } from '../../../nodes/lib/findNeuronsRows'
+import { ID_COLUMN_NAME } from '../../../core/ids'
+import type { DType } from '../../../core/types'
+import { isNumericDType } from '../../../core/types'
+import {
+  asksNothing,
+  noFiltersReason,
+  rowsFromParams,
+} from '../../../nodes/lib/findNeuronsRows'
 import { schemasFromType } from '../../../nodes/lib/datasetParam'
 import { filterPredicates } from './tableFilters'
 import type { EmitContext } from '../types'
@@ -165,11 +172,53 @@ registerEmitter('neuron.findNeurons', (ctx) => {
   const schema = schemasFromType(ctx.inputType('dataset')).neurons
   // `resolveRows` lowers unchecked when the schema has not arrived, so this reads the same in
   // both emitters rather than each carrying its own unknown-is-not-missing branch.
-  const resolved = resolveRows(schema, rowsFromParams(ctx.params))
+  const rows = rowsFromParams(ctx.params)
+  const resolved = resolveRows(schema, rows)
   const roi = String(ctx.params.roi ?? '')
   const limit = Number(ctx.params.limit ?? 0)
 
   const lines: string[] = resolved.problems.flatMap((p) => ctx.note(p.message))
+
+  /*
+   * Asking nothing answers nothing, ahead of the searchable-row check below — and the two are
+   * different statements about different cards. This one reproduces what the canvas does: an
+   * empty frame, deterministically, because that is the node's answer. The `todo` below is a
+   * node that *does* filter in a way `neuprint_search` has no argument for, which is a gap in
+   * this emitter rather than a result.
+   */
+  if (asksNothing(ctx.params, rows)) {
+    /*
+     * `data.frame` and `rCol`, which is the house pair: base R needs no library, and a backticked
+     * name is right for every column rather than for the ones that happen to need it.
+     *
+     * The zero-length vectors are **typed off the schema** rather than all `character(0)`. On a
+     * frame with no rows nothing downstream can go wrong today — `filter()` on an empty character
+     * column returns `logical(0)` either way — but the reader's next move is to write a real query
+     * in place of this, and a template declaring `size` as text is a template that quietly teaches
+     * the wrong shape.
+     */
+    const empty = (col: { name: string; dtype: DType }) => {
+      // The id column is text whatever the schema calls it — invariant 8, and a template is
+      // exactly where that gets learned wrong. `CANONICAL_SCHEMAS` types `neuronId` numerically
+      // because a `CellValue` is a float64, and an eighteen-digit root id through one is a
+      // different neuron; every real frame in this document reaches the reader as character.
+      if (col.name === ID_COLUMN_NAME) return 'character(0)'
+      if (isNumericDType(col.dtype)) return 'numeric(0)'
+      return col.dtype === 'bool' ? 'logical(0)' : 'character(0)'
+    }
+    const columns = (schema?.columns ?? []).map((col) => `  ${rCol(col.name)} = ${empty(col)},`)
+    return [
+      ...lines,
+      ...ctx.note(
+        `${noFiltersReason()} So this chunk is the empty frame it produces — add a filter row ` +
+          'on the canvas and re-export, or write the query in here.',
+      ),
+      `${out} <- data.frame(`,
+      ...columns,
+      '  stringsAsFactors = FALSE',
+      ')',
+    ]
+  }
 
   /*
    * `neuprint_search` takes one field and one pattern, where Coda's node narrows on several rows

@@ -43,6 +43,7 @@ import { CANONICAL_SCHEMAS, registerSource, requireSource } from '../../data/sou
 import { MockSource } from '../../data/mock/MockSource'
 import { mockDatasetIds } from '../../data/mock/generate'
 import { resetCache } from '../../data/cache'
+import { everyNeuron } from '../../test/findNeurons'
 import '../index'
 
 const def = requireNodeDef('compare.matchTypes')
@@ -346,7 +347,9 @@ describe('through a real Scheduler, on the mock connectome', () => {
    * has, in miniature.
    */
   describe('the Pass Through port', () => {
-    const names = () => node('keep', 'neuron.findNeurons', {})
+    // A Find Neurons with no filters returns none, so "every neuron in the mock" has to be said
+    // rather than left implied. `everyNeuron` is the one spelling of saying it.
+    const names = () => node('keep', 'neuron.findNeurons', everyNeuron())
     const CROSSED = { types1: ['type'], types2: ['instance'] }
 
     it('changes nothing while no column is chosen', async () => {

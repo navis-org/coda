@@ -152,8 +152,11 @@ both lists. See `PROPERTY_NAMES` in `schema.ts` for the one place that mapping i
 helper was swallowing every failure — it now rethrows when all items fail.
 
 **Guard rails were considered and declined.** `Find Neurons` still defaults to `limit: 0`
-(everything), and raw Cypher is sent as typed. That is a deliberate call: these queries hit
-a shared production Neo4j, so an unbounded `MATCH (n:Neuron)` on male-cns is a real hazard. A
+(no cap), and raw Cypher is sent as typed. That is a deliberate call: these queries hit
+a shared production Neo4j, so an unbounded `MATCH (n:Neuron)` on male-cns is a real hazard —
+which is why the one thing that *is* refused there is not a rail at all but a semantic: a node
+with no filters returns no neurons rather than the dataset, so an unconfigured card never sends
+that query in the first place (see [nodes.md](nodes.md)). A
 neuPrint `:Neuron` is any body above a synapse threshold or carrying a name, not a proofread one —
 hemibrain has 186,061 of them — which is what the **population checkboxes** on the dataset node
 narrow. `populationCypher` compiles them to one parenthesised `OR` group ANDed onto the rest of
@@ -1885,7 +1888,8 @@ with the feature absent — comparable to CAVE's +16.4 / +5.2.
   survived into the request regardless, and filtering on it drops every row for a value nobody
   chose. This source ignored `statuses` outright and a test pinned it; the same failure was live
   on CAVE. It is unreachable now: a status is an ordinary filter row, CATMAID's schema has no
-  `status` for one to name, and a fresh Find Neurons carries no rows at all.
+  `status` for one to name, and a fresh Find Neurons carries no rows at all — which now also means
+  it sends no query.
 - **A filter somebody *chose* is refused instead, and the difference is the default.** That
   distinction still holds for `In ROI`, the one filter that cannot be a row — see
   `refuseUnfilterableRoi`. CATMAID is the case that makes it visible: `volumeList` fills

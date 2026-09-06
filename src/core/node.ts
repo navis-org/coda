@@ -194,6 +194,26 @@ interface ParamBase {
   /** Marks this param as one facet of a composite visual property. See `CompositeRef`. */
   composite?: CompositeRef
   /**
+   * How a value for this param is *written*, for a param whose stored shape its `kind` does not
+   * convey. Rendered by the assistant catalogue beside the param it belongs to.
+   *
+   * Only the opaque kinds need one — an `ids` param is a `string[]` and nothing about that says
+   * whether an entry is a column name, a `field\u0000value` pair or a JSON object, so a model can
+   * add the node and wire it and not configure it. Declared **here, on the param**, rather than
+   * as a paragraph in the shared prompt: the prose is then deleted with the param and renamed
+   * with it, where a prompt naming `neuron.findNeurons.filters` goes on confidently instructing
+   * a model about a param that no longer exists, with nothing failing. Same argument
+   * `CompositeRef` makes below about param metadata living on the definition.
+   *
+   * Kept under `lean`, unlike `help`: `help` says what a setting *means*, which a plan can be
+   * refused for ignoring but not for not knowing. This is the only thing that makes the param
+   * writable at all, so dropping it would leave a catalogue that lists a param nothing can set.
+   *
+   * Generate it rather than transcribing it wherever the shape has an encoder — see
+   * `findNeurons.ts`, which builds its example by calling `encodeRows`.
+   */
+  catalogueNote?: string
+  /**
    * What a **stored** node that has no key for this param meant, when that is not the default.
    *
    * For a param added to a node type that already existed, "absent" is a third state, and it is

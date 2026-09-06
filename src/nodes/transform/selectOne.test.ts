@@ -23,6 +23,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import '../index'
 import { defaultInputPorts } from '../../core/ports'
+import { searchFor } from '../../test/findNeurons'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
@@ -55,7 +56,10 @@ function pipeline(
   // `Warn above` threshold is a sentence, not a truncation — so a wide population here would
   // really fetch the lot.
   const pattern = via ? 'LC4' : 'LC.*'
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: pattern, status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: pattern, status: 'Traced' })),
+  )
   g = addNode(g, node('pick', 'core.selectOne', params))
   g = addEdge(g, {
     source: 'ds',
@@ -146,7 +150,7 @@ describe('core.selectOne — validation', () => {
     // which is the same call `out.profile` makes about needing a neuronId.
     let g = emptyGraph('matrix-in')
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-    g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*' }))
+    g = addNode(g, node('find', 'neuron.findNeurons', searchFor({ type: 'LC.*' })))
     g = addNode(g, node('conn', 'neuron.connectivity'))
     g = addNode(
       g,

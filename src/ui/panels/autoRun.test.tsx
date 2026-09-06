@@ -21,6 +21,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { demoWorkflow } from '../../wizard/build'
 import { loadAutoRun, saveAutoRun } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
+import { searchFor } from '../../test/findNeurons'
 
 beforeAll(() => {
   installJsdomStubs({ width: 900, height: 600 })
@@ -70,7 +71,7 @@ function editQuery(pattern: string) {
   const store = useGraphStore.getState()
   const find = store.graph.nodes.find((n) => n.type === 'neuron.findNeurons')!
   act(() => {
-    store.setParam(find.id, 'typePattern', pattern)
+    store.setParam(find.id, 'filters', searchFor({ type: pattern }).filters)
   })
 }
 

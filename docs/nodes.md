@@ -2922,24 +2922,84 @@ null, and `WHERE` keeps only *true*, so the unlabelled vanish with no error and 
 compare against. Every negated row therefore compiles to `(NOT (…) OR n.prop IS NULL)`. Get it
 wrong and one graph returns different neurons on CAVE and on neuPrint, silently.
 
-### A new node filters nothing, and the old params still work
+### A node that asks nothing returns nothing
 
-No rows, no status, no limit — an honest "everything in this dataset", uniform across backends.
-The old `Traced` default was a filter nobody chose. Note the cost of the other direction, which is
-real: a fresh node on hemibrain now asks for all 176,422 neurons including untraced fragments.
+No rows, no region: no neurons. Not the whole dataset — that was the previous answer, and it was
+honest and uniform across backends and cost a freshly-dropped card on hemibrain all 176,422
+neurons including untraced fragments, fired at a shared production Neo4j the first time anybody
+pressed Run.
 
-**The five old params are still declared and still read**, folded into rows by
-`nodes/lib/findNeuronsRows.ts`. A load-time migration was considered and rejected: `addNode` and
-`defaultParams` never go through `deserializeGraph`, so it would have caught saved files and
-missed the six starter graphs, the export golden, and some fifty tests that build the node by
+It is **not** the old `Traced` default coming back, and the difference is the whole reason that one
+had to go. `Traced` was a *filter nobody chose*, applied silently, which emptied the result on a
+dataset with no `status` column and said nothing. This narrows nothing at all: it declines to ask,
+says so through `ctx.warn`, and leaves the card's foot line reading `no filters — no neurons`
+before anybody runs it.
+
+**The decision is at the node, not at the seam.** `FindNeuronsRequest.rows` being empty still means
+*no narrowing*, because `neuronIndex` and Explore's whole-table fetch reach the same method — a
+source that learned this rule would break both. `asksNothing` in `nodes/lib/findNeuronsRows.ts`
+owns it, one call above the seam, and four surfaces read it: `evaluate`, the card's foot line, and
+both emitters, which write an empty frame rather than a cell fetching a connectome the canvas never
+asked for.
+
+**Two of the three controls, and only two, count as asking something.** `In ROI` does — it is not a
+row only because a region is not a column, and a card set to `In ROI: LO(R)` is visibly asking a
+question; a rule reading rows alone would answer it empty, which is this node's own worst failure
+shape. `Limit` does not — a cap is not a question about *which* neurons, and "the first 100 of
+everything" is an arbitrary sample of whatever order the backend returned. Saying "everything" on
+purpose is still available and now has to be said: a `neuronId is not empty` row.
+
+**What it cost:** the Workflow Wizard's Structured Search start builds exactly this card, so
+`buildWorkflow` seeds that row — **on the synthetic dataset only**. The tour, the start page and a
+node guide's demo link all open a graph somebody is being *shown*, and an empty chain shows
+nothing; against a published dataset the same card is a question nobody has asked yet, and the
+start's own hint says so. The seed changes what is written on the card, not what comes back.
+
+### The size of the answer is said out loud
+
+`FOUND_NEURONS_WARN`, 10,000, and it fires **after** the fetch because a match count is not
+knowable before one — an admission about the answer rather than a guard rail before a wait, which
+is why it is a plain `ctx.warn` and not `warnOverThreshold` (whose closing clause promises to go
+ahead anyway, a sentence about work that has not happened). Deliberately not `MAX_NEURONS`, which
+is the same number governing every geometry node's `Warn above`: two thresholds sharing a value and
+answering different questions, and [limits.md](limits.md) records that tying one to the other is
+precisely what a shared constant does. Not a `Warn above` control either, for a mechanical reason —
+`warnAboveParam` spells that control `limit`, which this node already spends on a real `LIMIT`.
+
+### The old params are gone
+
+`typePattern`, `instancePattern`, `status` and `minSize` are deleted. `roi` stayed, being the one
+that could never have been a row.
+
+They outlived the row model by a release because of a **bridge**, and the bridge is worth recording
+even though it is gone: they were kept declared and folded into rows by
+`nodes/lib/findNeuronsRows.ts`, rather than migrated at load time, because `addNode` and
+`defaultParams` never go through `deserializeGraph` — so a migration would have caught saved files
+and missed the starter graphs, the export golden, and some fifty tests that built the node by
 writing `{ typePattern: 'LC.*' }` directly.
 
-They are `advanced`, **not** `visibleIf`-hidden, and that is invariant 4 rather than taste:
-`normalizeParams` drops a hidden param from the provenance key, so one that still reached
-`evaluate` would let a stale result survive an edit to it. Saved graphs are unaffected by the
-changed `status` default because `defaultParams` wrote the old value into every node when it was
-created. The card shows legacy params as ordinary rows and converts them in the edit that touches
-them — a conversion somebody performed, rather than one that happened to their file on load.
+Those fifty were the whole cost, and they are what made the deletion cheap in the end: every one of
+them now says what it means in rows, through `test/findNeurons.ts`'s `searchFor`, which emits
+**exactly** the rows the fold used to. That is the migration a load-time one could not perform, and
+it is why the export goldens did not move — identical rows in, identical notebook out, which was the
+assertion that mattered while doing it.
+
+**What is left uncrossable is a `.coda.json` or a share link written by an alpha build**, and the
+answer is deliberately not a migration. Such a file arrives holding four keys no definition
+declares; `normalizeParams` reads only declared params, so the node is an unfiltered one — and
+under the rule above that means it returns **no neurons and says so**, rather than silently
+querying a connectome. That is the failure worth having, and it is why the two changes went in
+in that order: had the params been deleted first, the same file would have quietly become a
+whole-dataset query.
+
+The one thing the deletion did break is the **assistant**, which could set `typePattern: 'LC.*'`
+and now faces `filters`, an `ids` param holding JSON. `catalogue.ts` therefore carries a
+`FILTER_ROW_RULE` — the row shape and the operator vocabulary, **generated by calling `encodeRows`
+and reading `ALL_ROW_OPS`** rather than transcribed, because drift there is the bad kind: a plan
+naming an operator that no longer exists is refused with a message about the *param*, which reads
+to a model as "filters is wrong" rather than "that operator is gone". The other two `ids` params —
+`out.table`'s clauses and `core.rename`'s remappings — are deliberately not covered, since one rule
+generalising over "ids params" would be three grammars under one name.
 
 ## IDs from Label: the inverse query
 
@@ -2970,17 +3030,19 @@ population, which is a different question with a different empty state.
 The literal form compiles to `n.\`type\` IN […]`, which neuPrint has indexed — the equivalent
 regex alternation expresses the same set and forces a scan of every `:Neuron` in the dataset.
 
-**Empty `values` matches nothing, which inverts the field beside it.** An empty `typePattern`
-means "do not narrow", i.e. everything. A lookup of nothing is nothing. A source implementing
-`LabelMatch` must not read an empty list as "no filter" — an unconfigured node firing an
-unbounded `MATCH (n:Neuron)` at a shared production Neo4j is a hazard, not a default. The node
+**Empty `values` matches nothing.** A source implementing `LabelMatch` must not read an empty
+list as "no filter" — an unconfigured node firing an unbounded `MATCH (n:Neuron)` at a shared
+production Neo4j is a hazard, not a default. This was written as an *inversion* of the field
+beside it, because an empty `typePattern` on Find Neurons meant "do not narrow", i.e. everything.
+That is no longer true: Find Neurons answers an unasked question with no neurons too, and the
+argument it was brought to is the one made here first. The node
 answers that case without a query at all, returning an empty table _of the right schema_ so
 downstream column pickers populate before anyone has typed anything.
 
 **Literal is the default; regex is opt-in.** A label is text somebody copied out of a result, and
 `SMP001(a)` and `5-HT` carry regex metacharacters — reading those as syntax turns a lookup into a
 different question with no error to say so. Under `regex`, each value is matched with the same
-anchored whole-string semantics `typePattern` has, and `MockSource` wraps in `^(?:…)$` exactly as
+anchored whole-string semantics a `matches` row has, and `MockSource` wraps in `^(?:…)$` exactly as
 `compileRegex` does, so the two sides of the seam agree.
 
 **Each regex is matched on its own — `any(p IN […] WHERE n.f =~ p)`, never one alternation.**

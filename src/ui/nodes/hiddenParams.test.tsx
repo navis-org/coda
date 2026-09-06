@@ -183,7 +183,7 @@ describe('the hint on the card', () => {
      */
     act(() => useGraphStore.getState().addNode('neuron.findNeurons', { x: 0, y: 900 }))
     const card = await cardFor(nodeIdOfType('neuron.findNeurons', -1))
-    expect(hintOf(card)!.textContent).toBe('… 6 more')
+    expect(hintOf(card)!.textContent).toBe('… 2 more')
   })
 
   it('adds the changed clause when one carries a value somebody chose', async () => {
@@ -256,20 +256,16 @@ describe('the hint on the card', () => {
     const card = await cardFor(find)
 
     act(() => useGraphStore.getState().setParam(find, 'limit', 50))
-    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 6 more (1 changed)'))
+    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 2 more (1 changed)'))
 
-    act(() => useGraphStore.getState().setParam(find, 'minSize', 10_000))
-    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 6 more (2 changed)'))
-
-    // A legacy param counts as changed like any other — it is a real value that still reaches
-    // the query, which is exactly why it is `advanced` rather than hidden.
-    act(() => useGraphStore.getState().setParam(find, 'status', 'Traced'))
-    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 6 more (3 changed)'))
+    // Both of them, which is all Find Neurons has left: `roi` and `limit`. It carried six while
+    // the four legacy params were still declared, and they are the ones this count moved with.
+    act(() => useGraphStore.getState().setParam(find, 'roi', 'ME(R)'))
+    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 2 more (2 changed)'))
 
     act(() => useGraphStore.getState().setParam(find, 'limit', 0))
-    act(() => useGraphStore.getState().setParam(find, 'minSize', 0))
-    act(() => useGraphStore.getState().setParam(find, 'status', ''))
-    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 6 more'))
+    act(() => useGraphStore.getState().setParam(find, 'roi', ''))
+    await waitFor(() => expect(hintOf(card)!.textContent).toBe('… 2 more'))
   })
 
   it('stays away from a dataset card, whose one hidden param is a nonce', async () => {

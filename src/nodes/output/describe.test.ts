@@ -22,6 +22,7 @@ import type { DataSource } from '../../data/source'
 import { describeSchema } from '../lib/describeOps'
 import '../index'
 import { defaultOutputPorts } from '../../core/ports'
+import { searchFor } from '../../test/findNeurons'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
@@ -38,7 +39,10 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(): CodaGraph {
   let g = emptyGraph('describe-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC.*', status: 'Traced' })),
+  )
   g = addNode(g, node('desc', 'out.describe'))
   g = addEdge(g, {
     source: 'ds',

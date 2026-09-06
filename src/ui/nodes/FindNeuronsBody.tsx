@@ -27,15 +27,27 @@
  * instead, which is what `validate` and the foot line already read, so the `(missing)` marker,
  * the badge and the count are one analysis rather than three that agree today.
  *
- * ## Legacy params are shown as rows, and converted on first edit
+ * ## The foot line says which of two things an empty card means
  *
- * A saved graph carries `typePattern`/`status`/`minSize` rather than `filters`, and
- * `rowsFromParams` folds them in — so they appear here as ordinary rows immediately. Editing
- * anything writes the whole set to `filters` and clears whichever of the four carried a value,
- * which is a conversion somebody performed rather than one that happened to their file on load.
- * Until then the node runs off the legacy params exactly as it did before. What "cleared" means
- * per param is `LEGACY_DEFAULTS`, beside the code that reads them — those values are in the
- * provenance key, so the two halves cannot be allowed to disagree.
+ * A node with no filters returns **no neurons**, so the line has to say that rather than "every
+ * neuron in the dataset" — and it reads `asksNothing` to decide, not `stored.length`. The two
+ * disagree on exactly one card: `In ROI` set with no rows, which queries perfectly well and which
+ * a row count would report as empty. One function decides it here and in `evaluate`, which is the
+ * rule the `(missing)` marker above already follows.
+ *
+ * There is deliberately **no `validate` issue** for it. An unconfigured node is not a broken one,
+ * and marking every freshly-dropped card with a warning badge is how a badge stops meaning
+ * anything; the run-time `ctx.warn` is what explains the empty table to somebody who pressed Run.
+ *
+ * ## There is nothing to convert any more
+ *
+ * This card used to draw the four legacy params as rows and write them back as real ones in the
+ * first edit that touched anything — a conversion somebody performed rather than one that
+ * happened to their file on load. The params are gone, so `stored` is simply `filters`, and the
+ * `commit` below writes one param instead of up to five. What that removed is worth naming,
+ * because it was the subtle half: every `setParam` is its own store commit — a full `inferGraph`
+ * over the canvas, a `refreshStates` pass and an undo entry — so the conversion had to clear only
+ * the legacy params that actually carried something, or a single click cost five of them.
  */
 
 import { useMemo, useState } from 'react'
@@ -45,7 +57,7 @@ import type { FilterRow } from '../../data/filterRows'
 import { arityOf, encodeRows, resolveRows, rowOpsForDType } from '../../data/filterRows'
 import { resolveColumn } from '../../data/terms'
 import { schemasFromType } from '../../nodes/lib/datasetParam'
-import { LEGACY_DEFAULTS, rowsFromParams } from '../../nodes/lib/findNeuronsRows'
+import { askShape, rowsFromParams } from '../../nodes/lib/findNeuronsRows'
 import { parseTypedLabels } from '../../nodes/lib/labelLookup'
 import { SelectField, TextField } from '../params/ParamField'
 import type { NodeBodyProps } from './nodeBodies'
@@ -72,11 +84,23 @@ function readValues(row: FilterRow, text: string): string[] {
   return text === '' ? [] : [text]
 }
 
+/**
+ * The foot line, one entry per `askShape` answer.
+ *
+ * A table rather than a chain of ternaries in the JSX, so adding a fourth kind of question is a
+ * compile error here rather than a card that silently keeps saying one of the old three.
+ */
+const FOOT_LABEL: Record<ReturnType<typeof askShape>, (rows: number) => string> = {
+  nothing: () => 'no filters — no neurons',
+  regionOnly: () => 'region only — every neuron innervating it',
+  rows: (n) => `${n} filter${n === 1 ? '' : 's'}, all must match`,
+}
+
 export function FindNeuronsBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   /*
-   * The rows the node is actually asking for — legacy params folded in, exactly as `evaluate`
-   * and both emitters read them. Drawing `filters` alone would show an empty card for every
-   * graph saved before this node had rows.
+   * The rows the node is actually asking for, read exactly as `evaluate` and both emitters read
+   * them. Through `rowsFromParams` rather than `decodeRows(node.params.filters)` for that reason
+   * alone — six readers of one param is six chances for one of them to grow a condition.
    */
   const stored = useMemo(() => rowsFromParams(node.params), [node.params])
 
@@ -110,23 +134,10 @@ export function FindNeuronsBody({ node, ctx, compact, setParam }: NodeBodyProps)
   )
   const fields = useMemo(() => schema?.columns.map((c) => c.name) ?? [], [schema])
 
-  /*
-   * Writing the rows is also what converts a legacy node: the four old params are cleared in the
-   * same edit that stores the equivalent rows, so the two can never both contribute. Clearing
-   * them is safe precisely because `stored` already contains what they meant.
-   */
+  /** One param, one store commit — see the header for what this used to have to do besides. */
   const commit = (next: readonly FilterRow[]) => {
     setDraft([...next])
     setParam('filters', encodeRows(next) as unknown as ParamValue)
-    /*
-     * Only the legacy params that actually carry something. Every `setParam` is a separate store
-     * commit — a full `inferGraph` over the whole canvas, a `refreshStates` pass and its own undo
-     * entry — so clearing all four unconditionally cost five of those per click, three of them
-     * writing a value that was already there.
-     */
-    for (const [id, cleared] of Object.entries(LEGACY_DEFAULTS)) {
-      if (node.params[id] !== cleared) setParam(id, cleared)
-    }
   }
 
   /** Edit a row on screen. It reaches the param only once it is complete enough to store. */
@@ -145,6 +156,14 @@ export function FindNeuronsBody({ node, ctx, compact, setParam }: NodeBodyProps)
    */
   const problems = useMemo(() => resolveRows(schema, stored).problems, [schema, stored])
   const broken = useMemo(() => new Set(problems.map((p) => p.field)), [problems])
+
+  /*
+   * What kind of question this node is asking, named by the same function `evaluate` reads rather
+   * than reconstructed from `stored.length` — those two disagree exactly where `In ROI` is set
+   * and no row is, a card the foot line would otherwise tell "no neurons" while the node queried
+   * perfectly well. `stored` is handed over so the rows are decoded once for both.
+   */
+  const shape = useMemo(() => askShape(node.params, stored), [node.params, stored])
 
   return (
     <div className="list-body nodrag">
@@ -248,17 +267,13 @@ export function FindNeuronsBody({ node, ctx, compact, setParam }: NodeBodyProps)
 
       {!compact ? null : (
         <div
-          className={`list-body__foot${stored.length === 0 ? ' list-body__foot--empty' : ''}`}
+          className={`list-body__foot${shape === 'nothing' ? ' list-body__foot--empty' : ''}`}
         >
           {!connected ? (
             <span>Connect a dataset.</span>
           ) : (
             <>
-              <span>
-                {stored.length === 0
-                  ? 'no filters — every neuron in the dataset'
-                  : `${stored.length} filter${stored.length === 1 ? '' : 's'}, all must match`}
-              </span>
+              <span>{FOOT_LABEL[shape](stored.length)}</span>
               {problems.length > 0 && (
                 <span
                   className="list-body__missing"

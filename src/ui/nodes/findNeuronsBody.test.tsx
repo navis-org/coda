@@ -174,44 +174,37 @@ describe('the rows', () => {
 })
 
 describe('a node saved before this card existed', () => {
-  const LEGACY = { typePattern: 'LC.*', status: 'Traced', minSize: 50_000 }
-
-  it('shows the old params as rows straight away', async () => {
-    // `rowsFromParams`, not `filters`: drawing the stored param alone would show an empty card
-    // for every graph saved before this node had rows.
-    const body = await open(LEGACY)
-    const fields = selects(body)
-      .filter((_, i) => i % 2 === 0)
-      .map((s) => s.value)
-    expect(fields).toEqual(['type', 'status', 'size'])
-  })
-
-  it('converts them in the edit that touches them, and not on load', async () => {
-    const body = await open(LEGACY)
-    // Untouched, the node still runs off the legacy params exactly as it did before. A file that
-    // rewrote itself on load would be a change nobody asked for.
-    expect(paramsOf().typePattern).toBe('LC.*')
+  /*
+   * The four legacy params are gone, and with them this card's conversion-on-first-edit. What
+   * replaces those two tests is the one thing that can still go wrong: such a node arrives with
+   * keys nothing declares, and the card must draw it as the *unconfigured* card it now is —
+   * blank row, `no filters — no neurons` — rather than reading the orphaned keys back out of
+   * `node.params`, which is exactly what the old `rowsFromParams` did and what a well-meaning
+   * "restore the old behaviour" edit would reinstate.
+   */
+  it('draws it as the unconfigured card it now is', async () => {
+    const body = await open({ typePattern: 'LC.*', status: 'Traced', minSize: 50_000 })
     expect(storedRows()).toEqual([])
-
-    fireEvent.change(inputs(body)[0]!, { target: { value: 'LC4.*' } })
-
-    await waitFor(() => expect(paramsOf().typePattern).toBe(''))
-    expect(paramsOf().status).toBe('')
-    expect(paramsOf().minSize).toBe(0)
-    // All three survive the conversion, with the edit applied — and the old five cannot now
-    // contribute a second time.
-    expect(storedRows()).toEqual([
-      { field: 'type', op: 'matches', values: ['LC4.*'] },
-      { field: 'status', op: 'is', values: ['Traced'] },
-      { field: 'size', op: 'ge', values: ['50000'] },
-    ])
+    expect(
+      selects(body)
+        .filter((_, i) => i % 2 === 0)
+        .map((el) => el.value),
+    ).toEqual([''])
+    expect(body.textContent).toContain('no filters — no neurons')
   })
 })
 
 describe('the foot line', () => {
-  it('says an empty node means every neuron, rather than saying nothing', async () => {
+  it('says an empty node means no neurons, rather than saying nothing', async () => {
     const body = await open()
-    expect(body.textContent).toContain('every neuron in the dataset')
+    expect(body.textContent).toContain('no filters \u2014 no neurons')
+  })
+
+  it('does not say that about a card whose only setting is a region', async () => {
+    // The one card where a row count and `asksNothing` disagree: `In ROI` is a question that
+    // simply cannot be a row, so the node queries and the foot line has to know it.
+    const body = await open({ roi: 'ME(R)' })
+    expect(body.textContent).not.toContain('no neurons')
   })
 
   it('marks a row naming a field this dataset does not have', async () => {

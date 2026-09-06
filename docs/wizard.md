@@ -264,12 +264,31 @@ the wizard does not raise a request nothing will answer.
 The pass is one commit tagged `layout`, so ⌘Z puts the row back — the same undo step the Arrange
 button has always been.
 
+## The seeded filter row, and why only the synthetic dataset gets one
+
+A `Find Neurons` with no filters returns **no neurons** ([nodes.md](nodes.md)), and the Structured
+Search start builds exactly that card. So `buildWorkflow` seeds one row — `neuronId is not empty`,
+which every neuron satisfies — and seeds it **only where the dataset is the synthetic one**.
+
+The asymmetry is about who is looking. The synthetic dataset is what the tour walks, what the start
+page opens and what every node guide's demo link builds: somebody is being *shown* the shape of a
+workflow, and an empty chain shows nothing. Against hemibrain the same card is a question nobody has
+asked yet, and that start's own hint already says to set a filter before pressing Run — which the
+new rule makes load-bearing rather than advice.
+
+What is seeded is deliberately a tautology, so the demo returns the 401 neurons it always did: the
+seed changes what is *written on the card*, not what comes back. And it is a real row on a real
+card, so the first thing a reader can do to it is the thing they will have to do on a published
+dataset — edit it, or delete it and write their own.
+
 ## Three numbers, and what each is protecting
 
-**`SEARCH_LIMIT` (100) on a published dataset.** Auto-run is on by default, so a generated Find
-Neurons with no filters and no limit fires a whole-connectome query at a shared production server the
-moment the graph lands. The synthetic dataset is 401 neurons that never leave the browser and gets no
-limit.
+**`SEARCH_LIMIT` (100) on a published dataset.** Auto-run is on by default, and the first filter a
+reader types can perfectly well be `type is not empty` — so this is what stands between one
+impatient row and a whole-connectome query at a shared production server. It is no longer about
+what the node does *on arrival*: an unfiltered Find Neurons now returns nothing and sends no query
+at all, which is where that hazard used to live. The synthetic dataset is 401 neurons that never
+leave the browser and gets no limit.
 
 **`GEOMETRY_LIMIT` (30) on the morphology arm's search, whatever the dataset** — when a 3D scene is
 one of the ticked viewers, since a workflow whose only viewer is Neuroglancer downloads nothing — and

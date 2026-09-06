@@ -25,6 +25,7 @@ import { addEdge, addNode, emptyGraph } from '../core/graph'
 import type { ParamValues } from '../core/node'
 import { defaultParams } from '../core/node'
 import { requireNodeDef } from '../core/registry'
+import { encodeRows } from '../data/filterRows'
 
 interface Spec {
   id: string
@@ -99,7 +100,20 @@ export function everythingGraph(): CodaGraph {
       id: 'find',
       type: 'neuron.findNeurons',
       col: 1,
-      params: { typePattern: 'LC.*', status: 'Traced', minSize: 50_000, limit: 200 },
+      /*
+       * The rows the four legacy scalars used to fold into, written out. Identical rows, so the
+       * golden did not move when they were deleted — which is the assertion that mattered while
+       * removing them, and the reason this is spelled here rather than borrowed from
+       * `test/findNeurons.ts`: a fixture read by the goldens should say what it asks for.
+       */
+      params: {
+        filters: encodeRows([
+          { field: 'type', op: 'matches', values: ['LC.*'] },
+          { field: 'status', op: 'is', values: ['Traced'] },
+          { field: 'size', op: 'ge', values: ['50000'] },
+        ]),
+        limit: 200,
+      },
     },
     { id: 'ids', type: 'neuron.inputIds', col: 1, row: 1, params: { ids: '1001, 1002, 1003' } },
     {
@@ -1459,7 +1473,12 @@ export function caveGraph(): CodaGraph {
       params: { idColumn: 'neuronId', supervoxelColumn: 'supervoxel_id' },
     },
     { id: 'table', type: 'out.table', col: 5, row: 1 },
-    { id: 'find', type: 'neuron.findNeurons', col: 5, params: { typePattern: 'LC.*' } },
+    {
+      id: 'find',
+      type: 'neuron.findNeurons',
+      col: 5,
+      params: { filters: encodeRows([{ field: 'type', op: 'matches', values: ['LC.*'] }]) },
+    },
     // A neuPrint-only node on a CAVE dataset: the walk turns an undeclared backend into a TODO,
     // and the golden is where that message is read. Find Neurons used to be this one, and is now
     // written for both — which is the shape of the whole exercise, so the marker moved rather
@@ -1574,7 +1593,11 @@ export function pathsGraph(params: ParamValues = {}): CodaGraph {
   let g = emptyGraph('paths')
   for (const [id, type, nodeParams] of [
     ['ds', 'dataset.hemibrain', { version: 'v1.2.1' }],
-    ['find', 'neuron.findNeurons', { typePattern: 'LC4' }],
+    [
+      'find',
+      'neuron.findNeurons',
+      { filters: encodeRows([{ field: 'type', op: 'matches', values: ['LC4'] }]) },
+    ],
     ['paths', 'neuron.paths', params],
   ] as const) {
     g = addNode(g, {

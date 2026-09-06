@@ -22,6 +22,7 @@ import { caveGraph, everythingGraph, pathsGraph, twoNodeGraph } from '../fixture
 import { getEmitter } from './registry'
 import { serializeNotebook } from './notebook'
 import { inputPorts, outputPorts } from '../../core/ports'
+import { searchFor } from '../../test/findNeurons'
 
 const GOLDEN = new URL('./__fixtures__/everything.ipynb', import.meta.url).pathname
 const CAVE_GOLDEN = new URL('./__fixtures__/cave.ipynb', import.meta.url).pathname
@@ -246,7 +247,7 @@ describe('the region and normalisation options', () => {
       id: 'find',
       type: 'neuron.findNeurons',
       position: { x: 260, y: 0 },
-      params: { typePattern: 'LC4' },
+      params: searchFor({ type: 'LC4' }),
     })
     g = addNode(g, { id: 'c', type: 'neuron.connectivity', position: { x: 520, y: 0 }, params })
     g = {
@@ -437,6 +438,44 @@ describe('a normalised Paths node', () => {
   })
 })
 
+/*
+ * A Find Neurons asking nothing answers nothing, and the notebook has to say that *in code*.
+ *
+ * The failure this stops is the one this exporter is most exposed to: falling through to the
+ * fetch would write a cell downloading a connectome the canvas never asked for, so the reader
+ * runs it, waits, and gets a frame that disagrees with the card they exported from. Asserted on
+ * both backend arms, because the CAVE branch is a separate function that would happily emit its
+ * own unfiltered `dataset.labels`.
+ */
+describe('a node that asks nothing', () => {
+  const emptyFrame = (datasetType: string, datasetParams: ParamValues) =>
+    exportFixture(twoNodeGraph(datasetType, datasetParams, 'neuron.findNeurons', {}))
+
+  it.each([
+    ['neuPrint', 'dataset.hemibrain', { version: 'v1.2.1' } as ParamValues],
+    ['CAVE', 'dataset.flywire', { version: '783' } as ParamValues],
+  ])('writes an empty frame rather than a query, on %s', (_name, type, params) => {
+    const source = emptyFrame(type, params)
+    expect(source).toContain('pd.DataFrame(columns=')
+    expect(source).not.toContain('fetch_neurons(')
+    // Silently empty is the thing the CAVE `status` bug was, one section down. It says why.
+    expect(source).toContain('no filters')
+  })
+
+  it('still emits the query once a row is asked for', () => {
+    const source = exportFixture(
+      twoNodeGraph(
+        'dataset.hemibrain',
+        { version: 'v1.2.1' },
+        'neuron.findNeurons',
+        searchFor({ type: 'LC.*' }),
+      ),
+    )
+    expect(source).toContain('fetch_neurons(')
+    expect(source).not.toContain('pd.DataFrame(columns=')
+  })
+})
+
 describe('the population filters', () => {
   const graphWith = (params: ParamValues, query: string, queryParams: ParamValues = {}) =>
     twoNodeGraph('dataset.hemibrain', params, query, queryParams)
@@ -444,7 +483,7 @@ describe('the population filters', () => {
   const NONE = { tracedOnly: false, typedOnly: false, superclassOnly: false }
 
   const QUERIES: [string, ParamValues][] = [
-    ['neuron.findNeurons', { typePattern: 'LC.*' }],
+    ['neuron.findNeurons', searchFor({ type: 'LC.*' })],
     ['neuron.idsFromLabel', { labels: ['LC4'], status: '' }],
     ['neuron.explore', {}],
   ]
@@ -506,8 +545,7 @@ describe('the population filters', () => {
   it('lets an explicit status row win rather than emitting both', () => {
     const source = exportFixture(
       graphWith({ ...NONE, tracedOnly: true }, 'neuron.findNeurons', {
-        typePattern: 'LC.*',
-        status: 'Assign',
+        ...searchFor({ type: 'LC.*', status: 'Assign' }),
       }),
     )
     expect(source).toContain("status=['Assign']")

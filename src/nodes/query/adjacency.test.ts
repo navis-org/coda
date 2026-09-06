@@ -24,6 +24,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import { matrixLinksSchema } from '../lib/tableOps'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
@@ -47,8 +48,11 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('adjacency-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }))
-  g = addNode(g, node('all', 'neuron.findNeurons', { typePattern: '', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC.*', status: 'Traced' })),
+  )
+  g = addNode(g, node('all', 'neuron.findNeurons', searchFor({ type: '', status: 'Traced' })))
   g = addNode(g, node('adj', 'neuron.adjacency', params))
   // `Target` and `Weight` set by hand, which is what a user does — see the picker test below
   // for why the matching column names do not make that unnecessary.

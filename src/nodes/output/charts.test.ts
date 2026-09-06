@@ -23,6 +23,7 @@ import { isTableValue } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
@@ -48,7 +49,7 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(type: string, params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('chart-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { status: 'Traced' }))
+  g = addNode(g, node('find', 'neuron.findNeurons', searchFor({ status: 'Traced' })))
   g = addNode(g, node('chart', type, params))
   g = addEdge(g, {
     source: 'ds',
@@ -69,7 +70,7 @@ function pipeline(type: string, params: Record<string, unknown> = {}): CodaGraph
 function pivoted(type: string): CodaGraph {
   let g = emptyGraph('chart-pivot')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { status: 'Traced' }))
+  g = addNode(g, node('find', 'neuron.findNeurons', searchFor({ status: 'Traced' })))
   g = addNode(
     g,
     node('grp', 'core.groupBy', { by: ['type', 'status'], agg: 'sum', value: ['pre'] }),

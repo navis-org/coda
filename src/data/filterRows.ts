@@ -232,11 +232,21 @@ export function decodeRows(raw: unknown): FilterRow[] {
   return keptRows(rows)
 }
 
-const ROW_OPS = new Set<string>([
+/**
+ * Every operator a stored row may name, deduplicated across the three dtype sets.
+ *
+ * Derived from those sets rather than listed, because a fourth reader now exists: the assistant
+ * catalogue tells a model how to write a `filters` param, and a hand-kept list there would be a
+ * second spelling of this vocabulary — one that stays plausible while being wrong, since a plan
+ * naming an operator that no longer exists is refused with a message about the *param*.
+ */
+const ROW_OPS = new Set<RowOp>([
   ...TEXT_OPS.map((o) => o.value),
   ...NUMERIC_OPS.map((o) => o.value),
   ...BOOL_OPS.map((o) => o.value),
 ])
+
+export const ALL_ROW_OPS: readonly RowOp[] = [...ROW_OPS]
 
 function decodeRow(raw: unknown): FilterRow | undefined {
   if (typeof raw !== 'string') return undefined
@@ -248,7 +258,9 @@ function decodeRow(raw: unknown): FilterRow | undefined {
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
   const { f, op, v, i } = parsed as Record<string, unknown>
-  if (typeof f !== 'string' || typeof op !== 'string' || !ROW_OPS.has(op)) return undefined
+  if (typeof f !== 'string' || typeof op !== 'string') return undefined
+  // `has` narrows nothing on its own, so the cast is here rather than on the `op` field below.
+  if (!ROW_OPS.has(op as RowOp)) return undefined
   if (!Array.isArray(v) || v.some((entry) => typeof entry !== 'string')) return undefined
   return {
     field: f,

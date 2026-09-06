@@ -23,6 +23,7 @@ import type { DataSource } from '../../data/source'
 import { encodeClauses } from '../lib/tableFilter'
 import '../index'
 import { defaultOutputPorts } from '../../core/ports'
+import { searchFor } from '../../test/findNeurons'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
@@ -51,7 +52,10 @@ const filters = (...pairs: Array<[string, string]>) =>
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('table-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC.*', status: 'Traced' })),
+  )
   g = addNode(g, node('tbl', 'out.table', params))
   g = addEdge(g, {
     source: 'ds',

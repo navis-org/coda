@@ -18,6 +18,7 @@ import type { TableValue } from '../../core/values'
 import { getColumn, tableFromRows } from '../../core/values'
 import '../index'
 import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
+import { searchFor } from '../../test/findNeurons'
 
 const BOTH = ['cluster.selectedToNeurons', 'cluster.clustersToNeurons']
 
@@ -143,7 +144,7 @@ describe('inference', () => {
       params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
     })
     g = addNode(g, node('ds', 'dataset.mock.opticlobe'))
-    g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*' }))
+    g = addNode(g, node('find', 'neuron.findNeurons', searchFor({ type: 'LC.*' })))
     g = addNode(g, node('l2n', 'cluster.clustersToNeurons', { matchColumn }))
     g = addEdge(g, {
       source: 'ds',

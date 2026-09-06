@@ -29,6 +29,7 @@ import { clusterColor } from '../../ui/encoding'
 import type { DataSource } from '../../data/source'
 import type { LinkageRequest } from '../../pyodide/linkage'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 vi.mock('../../pyodide/linkage', () => ({ runLinkage: vi.fn() }))
 const { runLinkage } = await import('../../pyodide/linkage')
@@ -88,7 +89,10 @@ function linkageResult() {
 function pipeline(): CodaGraph {
   let g = emptyGraph('linkage-pipeline')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC.*', status: 'Traced' })),
+  )
   g = addNode(g, node('adj', 'neuron.adjacency', { groupByType: true }))
   g = addNode(g, node('lk', 'cluster.linkage', { method: 'average' }))
   g = addNode(g, node('cut', 'cluster.cut', { mode: 'count', count: 2 }))

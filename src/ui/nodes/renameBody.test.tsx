@@ -29,6 +29,7 @@ import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
+import { searchFor } from '../../test/findNeurons'
 
 const DATASET = mockDatasetIds()[0]!
 
@@ -62,7 +63,7 @@ function graphWith(params: Record<string, unknown>, upstream: 'neurons' | 'url' 
   g = addNode(g, node('rn', 'core.rename', 640, params))
   if (upstream === 'neurons') {
     g = addNode(g, node('ds', 'neuron.dataset', 0, { dataset: DATASET }))
-    g = addNode(g, node('find', 'neuron.findNeurons', 320, { typePattern: 'LC.*' }))
+    g = addNode(g, node('find', 'neuron.findNeurons', 320, searchFor({ type: 'LC.*' })))
     g = addEdge(g, {
       source: 'ds',
       sourceHandle: 'dataset',

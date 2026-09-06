@@ -30,6 +30,7 @@ import '../nodes'
 import { useGraphStore } from '../store/graphStore'
 import type { CapturedDownload } from '../test/jsdomStubs'
 import { clearStorage, installDownloadCapture, installJsdomStubs } from '../test/jsdomStubs'
+import { searchFor } from '../test/findNeurons'
 
 const DATASET = mockDatasetIds()[0]!
 
@@ -66,7 +67,10 @@ function node(id: string, type: string, extra: Record<string, unknown> = {}) {
 function graphWith(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('sweep')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })),
+  )
   g = addNode(g, node('dl', 'out.download', params))
   g = addEdge(g, {
     source: 'ds',

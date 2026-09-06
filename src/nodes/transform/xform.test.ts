@@ -26,6 +26,7 @@ import type { DataSource } from '../../data/source'
 import { COMMON_SPACE, allSpaces, spaceById } from '../../data/transforms/spaces'
 import { loadLandmarks, resetLandmarks } from '../../data/transforms/landmarks'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 vi.mock('../../pyodide/warp', () => ({ warpPoints: vi.fn() }))
 const { warpPoints } = await import('../../pyodide/warp')
@@ -86,7 +87,10 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('xform-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })),
+  )
   g = addNode(g, node('geo', 'neuron.skeletons', { limit: 100 }))
   g = addNode(g, node('xf', 'neuron.xform', params))
   g = addEdge(g, {

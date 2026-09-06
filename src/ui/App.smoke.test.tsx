@@ -27,6 +27,7 @@ import { registerSource } from '../data/source'
 import { useGraphStore } from '../store/graphStore'
 import { demoWorkflow } from '../wizard/build'
 import { clearStorage, installJsdomStubs } from '../test/jsdomStubs'
+import { searchFor } from '../test/findNeurons'
 
 beforeAll(() => {
   installJsdomStubs({ width: 360, height: 220 })
@@ -181,7 +182,9 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByText('Find Neurons')).toBeTruthy())
 
     await act(async () => {
-      useGraphStore.getState().setParam('find', 'typePattern', '[bad')
+      // A half-typed pattern in a row, which is what a `matches` row reports through
+      // `resolveRows` — the same analysis the card's badge and `validate` read.
+      useGraphStore.getState().setParam('find', 'filters', searchFor({ type: '[bad' }).filters)
     })
 
     await waitFor(() => {
@@ -216,7 +219,7 @@ describe('App', () => {
     })
 
     act(() => {
-      useGraphStore.getState().setParam('find', 'typePattern', 'T4.*')
+      useGraphStore.getState().setParam('find', 'filters', searchFor({ type: 'T4.*' }).filters)
     })
     expect(useGraphStore.getState().nodeInfo('find').state).toBe('stale')
 

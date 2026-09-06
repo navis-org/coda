@@ -37,6 +37,7 @@ import { getColumn, isNetworkValue, isTableValue, tableFromRows } from '../../co
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource, requireSource } from '../../data/source'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
@@ -55,7 +56,10 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(overrides: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('network-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })),
+  )
   g = addNode(g, node('conn', 'neuron.connectivity', { direction: 'outputs', minWeight: 5 }))
   g = addNode(
     g,

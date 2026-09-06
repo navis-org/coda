@@ -48,6 +48,8 @@ import { COL_WIDTH, GRID_ORIGIN, ROW_HEIGHT } from '../layout/place'
 import { NODE_BODIES, cardWidth } from '../ui/nodes/nodeBodies'
 import { noteNode } from '../examples/notes'
 import { datasetFamily } from '../nodes/lib/datasetFamilies'
+import { ID_COLUMN_NAME } from '../core/ids'
+import { encodeRows } from '../data/filterRows'
 import { inputPorts } from '../core/ports'
 import { getNodeDef } from '../core/registry'
 import type { AnalysisId, VisualisationId, WizardAnswers, WizardHint } from './options'
@@ -271,8 +273,10 @@ function dashboardFor(graph: CodaGraph, answers: WizardAnswers, headId: string):
  *
  * Three answers, and each is about what the *rest* of the chain will do with them. Morphology
  * downloads geometry per neuron, so it is capped tightly whatever the dataset. A published
- * dataset is capped because auto-run is on by default and an uncapped search is a
- * whole-connectome query fired at a shared server the moment the graph lands. The synthetic
+ * dataset is capped because auto-run is on by default, and the *first filter the reader types*
+ * can perfectly well be `type is not empty` — the cap is no longer about what the node does on
+ * arrival, since an unfiltered Find Neurons now returns nothing and fires no query at all, but
+ * it is still the thing between one impatient row and a whole-connectome download. The synthetic
  * dataset is 401 neurons that never leave the browser, so it gets the whole of itself.
  */
 function searchLimit(answers: WizardAnswers, synthetic: boolean): number {
@@ -327,17 +331,37 @@ function headOf(
     }
   }
   const limit = searchLimit(answers, synthetic)
+  // One object rather than a conditional `params` key: `graphNode` spreads it over
+  // `defaultParams`, so `{}` and absent are the same arrival.
+  const params = { ...(limit ? { limit } : {}), ...seedFilters(synthetic) }
   return {
-    node: {
-      id: id('find'),
-      type: 'neuron.findNeurons',
-      col: 1,
-      row,
-      ...(limit ? { params: { limit } } : {}),
-    },
+    node: { id: id('find'), type: 'neuron.findNeurons', col: 1, row, params },
     port: [id('find'), 'neurons'],
     links: [['ds', 'dataset', id('find'), 'dataset']],
   }
+}
+
+/**
+ * The one filter row a generated search arrives carrying — **on the synthetic dataset only**.
+ *
+ * A Find Neurons with no filters returns no neurons (`nodes/lib/findNeuronsRows.ts`), so a
+ * generated Structured Search would otherwise arrive drawing empty cards all the way down. That
+ * is the right answer for a published dataset and the wrong one here, and the asymmetry is about
+ * who is looking: the synthetic dataset is what the tour walks, what the start page opens and
+ * what a node guide's demo link builds, and every one of those is somebody being *shown* the
+ * shape of a workflow rather than asking a question of their own. An empty chain shows nothing.
+ * Against hemibrain the same card is a question nobody has asked yet, and the start's own hint
+ * says so.
+ *
+ * `neuronId is not empty` rather than a type: it is exactly "everything", so the demo returns the
+ * 401 neurons it always did — the seeding changes what is *written on the card*, not what comes
+ * back. And it is a real row on a real card, so the first thing the reader can do to it is what
+ * they will have to do on a published dataset: edit it, or delete it and write their own.
+ * `ID_COLUMN_NAME` rather than the literal, for invariant 8's reason.
+ */
+function seedFilters(synthetic: boolean): { filters?: string[] } {
+  if (!synthetic) return {}
+  return { filters: encodeRows([{ field: ID_COLUMN_NAME, op: 'notEmpty', values: [] }]) }
 }
 
 /**

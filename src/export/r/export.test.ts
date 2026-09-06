@@ -23,6 +23,7 @@ import '../../nodes'
 import { caveGraph, everythingGraph, pathsGraph, twoNodeGraph } from '../fixture'
 import { exportRmd } from './exporter'
 import { getEmitter } from './registry'
+import { searchFor } from '../../test/findNeurons'
 
 const GOLDEN = new URL('./__fixtures__/everything.Rmd', import.meta.url).pathname
 const OPTIONS = { now: '2026-01-01', appVersion: '0.0.0-test' }
@@ -109,7 +110,7 @@ describe('include fragments', () => {
       id: 'find',
       type: 'neuron.findNeurons',
       position: { x: 260, y: 0 },
-      params: { typePattern: 'LC4' },
+      params: searchFor({ type: 'LC4' }),
     })
     g = addNode(g, { id: 'c', type: 'neuron.connectivity', position: { x: 520, y: 0 }, params })
     g = {
@@ -195,7 +196,7 @@ describe('the Neuron Set port', () => {
       id: 'find',
       type: 'neuron.findNeurons',
       position: { x: 260, y: 0 },
-      params: { typePattern: 'LC4' },
+      params: searchFor({ type: 'LC4' }),
     })
     g = addNode(g, { id: 'c', type: 'neuron.connectivity', position: { x: 520, y: 0 }, params })
     g = {
@@ -284,6 +285,45 @@ describe('a normalised Paths node', () => {
   })
 })
 
+/*
+ * The same rule as the notebook's, and it sits **ahead of** the `neuprint_search` TODO below it.
+ *
+ * The two are different statements about different cards. This one reproduces an answer the
+ * canvas actually gives — deterministically empty — where the TODO is a node that *does* filter
+ * in a way `neuprint_search` has no argument for, which is a gap in this emitter rather than a
+ * result. Collapsing them would turn a faithful chunk into a refusal.
+ */
+describe('a node that asks nothing', () => {
+  it('writes an empty frame rather than refusing', () => {
+    const result = exportRmd(
+      twoNodeGraph('dataset.hemibrain', { version: 'v1.2.1' }, 'neuron.findNeurons', {}),
+      OPTIONS,
+    )
+    if (!result.ok) throw new Error(`refused: ${result.reason}`)
+    expect(result.source).toContain('data.frame(')
+    expect(result.source).not.toContain('neuprint_search(')
+    expect(result.source).toContain('no filters')
+    // Typed off the schema, and the id column is text whatever the schema says — invariant 8,
+    // and a template is where that would otherwise be learned wrong.
+    expect(result.source).toContain('`neuronId` = character(0)')
+    expect(result.source).toContain('`size` = numeric(0)')
+  })
+
+  it('keeps refusing a node that filters in a way neuprint_search cannot express', () => {
+    const result = exportRmd(
+      twoNodeGraph(
+        'dataset.hemibrain',
+        { version: 'v1.2.1' },
+        'neuron.findNeurons',
+        searchFor({ status: 'Traced' }),
+      ),
+      OPTIONS,
+    )
+    if (!result.ok) throw new Error(`refused: ${result.reason}`)
+    expect(result.source).toContain('no type or instance filter')
+  })
+})
+
 describe('the population filters', () => {
   const graphWith = (params: ParamValues, query: string, queryParams: ParamValues = {}) =>
     twoNodeGraph('dataset.hemibrain', params, query, queryParams)
@@ -303,7 +343,7 @@ describe('the population filters', () => {
    * `WHERE` and the response is smaller rather than merely shorter.
    */
   const QUERIES: [string, ParamValues, string][] = [
-    ['neuron.findNeurons', { typePattern: 'LC.*' }, 'filter((status == "Traced"))'],
+    ['neuron.findNeurons', searchFor({ type: 'LC.*' }), 'filter((status == "Traced"))'],
     ['neuron.idsFromLabel', { labels: ['LC4'], status: '' }, 'filter((status == "Traced"))'],
     ['neuron.explore', {}, "WHERE n.`status` = 'Traced'"],
   ]
@@ -326,19 +366,22 @@ describe('the population filters', () => {
    * and in a knitted document nobody re-derives precedence before trusting a row count.
    */
   it('ORs the disjuncts rather than ANDing them', () => {
-    const source = emit({ ...NONE, tracedOnly: true, typedOnly: true }, 'neuron.findNeurons', {
-      typePattern: 'LC.*',
-    })
+    const source = emit(
+      { ...NONE, tracedOnly: true, typedOnly: true },
+      'neuron.findNeurons',
+      searchFor({ type: 'LC.*' }),
+    )
     expect(source).toContain('(status == "Traced") | (!is.na(type) & type != "")')
   })
 
   // The precedence, as in the notebook: the row is the more specific statement and removes the
   // `traced` disjunct, so the chunk must not filter twice and return nothing.
   it('lets an explicit status row win rather than filtering twice', () => {
-    const source = emit({ ...NONE, tracedOnly: true }, 'neuron.findNeurons', {
-      typePattern: 'LC.*',
-      status: 'Assign',
-    })
+    const source = emit(
+      { ...NONE, tracedOnly: true },
+      'neuron.findNeurons',
+      searchFor({ type: 'LC.*', status: 'Assign' }),
+    )
     expect(source).toContain('"Assign"')
     expect(source).not.toContain('Traced')
   })

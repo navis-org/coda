@@ -19,6 +19,7 @@ import { isTableValue } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource, requireSource } from '../../data/source'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
@@ -39,7 +40,7 @@ function pipeline(params: Record<string, unknown> = {}, seedType = 'LC4'): CodaG
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
   g = addNode(
     g,
-    node('find', 'neuron.findNeurons', { typePattern: seedType, status: 'Traced' }),
+    node('find', 'neuron.findNeurons', searchFor({ type: seedType, status: 'Traced' })),
   )
   g = addNode(g, node('conn', 'neuron.connectivity', params))
   const wire = (source: string, handle: string, target: string, into: string) => {

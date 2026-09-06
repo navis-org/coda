@@ -30,6 +30,7 @@ import {
 import { CommandPalette, parsePaletteQuery } from './CommandPalette'
 import type { PaletteItem } from './paletteItems'
 import { buildCommandItems, buildNodeItems } from './paletteItems'
+import { searchFor } from '../../test/findNeurons'
 
 beforeAll(() => {
   installJsdomStubs()
@@ -152,7 +153,7 @@ describe('buildCommandItems', () => {
         id: 'find',
         type: 'neuron.findNeurons',
         position: { x: 1, y: 0 },
-        params: { typePattern: 'LC4' },
+        params: searchFor({ type: 'LC4' }),
       })
       // `Paths` with `Collapse types` on has no equivalent in either language.
       g = addNode(g, {

@@ -27,6 +27,7 @@ import { getColumn, isLayoutValue, isNetworkValue, isTableValue } from '../../co
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource, requireSource } from '../../data/source'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 const DATASET = 'optic-lobe-mini'
 
@@ -47,8 +48,8 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(params: Record<string, unknown> = {}, from = 'L1', to = 'DNp02'): CodaGraph {
   let g = emptyGraph('paths-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
-  g = addNode(g, node('src', 'neuron.findNeurons', { typePattern: from, status: 'Traced' }))
-  g = addNode(g, node('dst', 'neuron.findNeurons', { typePattern: to, status: 'Traced' }))
+  g = addNode(g, node('src', 'neuron.findNeurons', searchFor({ type: from, status: 'Traced' })))
+  g = addNode(g, node('dst', 'neuron.findNeurons', searchFor({ type: to, status: 'Traced' })))
   g = addNode(g, node('paths', 'neuron.paths', params))
   const wire = (source: string, handle: string, target: string, into: string) => {
     g = addEdge(g, { source, sourceHandle: handle, target, targetHandle: into })

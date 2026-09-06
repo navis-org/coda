@@ -26,6 +26,7 @@ import { getColumn, isTableValue } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource, requireSource } from '../../data/source'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
@@ -59,7 +60,10 @@ function pipeline(
 ): CodaGraph {
   let g = emptyGraph('influence-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })),
+  )
   g = addNode(g, node('inf', 'neuron.influence', params))
   const wire = (source: string, handle: string, target: string, into: string) => {
     g = addEdge(g, { source, sourceHandle: handle, target, targetHandle: into })
@@ -70,7 +74,11 @@ function pipeline(
   if (options.candidates) {
     g = addNode(
       g,
-      node('cand', 'neuron.findNeurons', { typePattern: options.candidates, status: 'Traced' }),
+      node(
+        'cand',
+        'neuron.findNeurons',
+        searchFor({ type: options.candidates, status: 'Traced' }),
+      ),
     )
     wire('ds', 'dataset', 'cand', 'dataset')
     wire('cand', 'neurons', 'inf', 'candidates')
@@ -336,7 +344,7 @@ describe('Influence over a Neurons table that repeats an id', () => {
     let g = pipeline(params)
     g = addNode(
       g,
-      node('wider', 'neuron.findNeurons', { typePattern: 'LC[46]', status: 'Traced' }),
+      node('wider', 'neuron.findNeurons', searchFor({ type: 'LC[46]', status: 'Traced' })),
     )
     g = addNode(g, node('twice', 'core.stack'))
     g = addEdge(g, {
@@ -375,7 +383,12 @@ describe('Influence over a Neurons table that repeats an id', () => {
     return {
       ...g,
       nodes: g.nodes.map((n) =>
-        n.id === 'find' ? { ...n, params: { ...n.params, typePattern: 'LC[46]' } } : n,
+        n.id === 'find'
+          ? {
+              ...n,
+              params: { ...n.params, ...searchFor({ type: 'LC[46]', status: 'Traced' }) },
+            }
+          : n,
       ),
     }
   }

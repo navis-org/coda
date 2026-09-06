@@ -20,9 +20,14 @@ import { parseTypedLabels } from '../../../nodes/lib/labelLookup'
 import { pyLongIntList, pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import type { TableSchema } from '../../../core/types'
+import { columnNames } from '../../../core/types'
 import type { FieldTerm } from '../../../data/terms'
 import { resolveRows } from '../../../data/filterRows'
-import { rowsFromParams } from '../../../nodes/lib/findNeuronsRows'
+import {
+  asksNothing,
+  noFiltersReason,
+  rowsFromParams,
+} from '../../../nodes/lib/findNeuronsRows'
 import { schemasFromType } from '../../../nodes/lib/datasetParam'
 import { filterMasks } from './tableFilters'
 import type { EmitContext } from '../types'
@@ -238,8 +243,33 @@ registerEmitter(
     // One resolution of the dataset's neuron schema, threaded to whichever branch runs — it was
     // being recomputed three times per node, once in a helper that then discarded it.
     const schema = schemasFromType(ctx.inputType('dataset')).neurons
-    const { terms, problems } = resolveRows(schema, rowsFromParams(ctx.params))
+    const rows = rowsFromParams(ctx.params)
+    const { terms, problems } = resolveRows(schema, rows)
     const notes = problems.flatMap((p) => ctx.note(p.message))
+
+    /*
+     * A node asking nothing answers nothing, and the notebook has to say so *in code* rather than
+     * in a note — `asksNothing` is the canvas' own rule, and an emitter that fell through to the
+     * fetch below would write a cell downloading a connectome the canvas never asked for. Which
+     * is the failure this exporter is most exposed to: the reader runs it, waits, and gets a
+     * frame that disagrees with the card they exported.
+     *
+     * An empty frame with the right columns rather than `None`, so every cell below it — the
+     * masks, the merges, the plots — still runs and still describes the right shape.
+     */
+    if (asksNothing(ctx.params, rows)) {
+      const out = ctx.output('neurons')
+      ctx.require('pandas')
+      return [
+        ...notes,
+        ...ctx.note(
+          `${noFiltersReason()} So this cell is the empty frame it produces — add a filter row ` +
+            'on the canvas and re-export, or write the query in here.',
+        ),
+        `${out} = pd.DataFrame(columns=${pyList(columnNames(schema))})`,
+      ]
+    }
+
     if (isCaveDataset(ctx)) return [...notes, ...caveFindNeurons(ctx, c, terms, schema)]
 
     ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')

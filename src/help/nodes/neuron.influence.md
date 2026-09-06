@@ -121,7 +121,7 @@ Three things to know before you read too much into a number.
 ```coda-graph
 caption: Which neurons most influence a set of LHONs.
 dataset.hemibrain as ds
-neuron.findNeurons as find { typePattern: "LHON.*" }
+neuron.findNeurons as find { filters: "type matches LHON.*" }
 neuron.influence as inf
 out.table as tbl
 ds -> find

@@ -517,9 +517,11 @@ describe('Learn to Build', () => {
     for (const [type, params] of Object.entries(PARAMS)) {
       /*
        * The search is where the two differ on purpose. The tour types a pattern in, because it
-       * needs something on screen to talk about; the wizard leaves Find Neurons empty, because
-       * which neurons somebody wants is the one thing four questions cannot answer for them.
-       * Everything downstream of it is a claim about the *pipeline*, and that has to agree.
+       * needs something on screen to talk about; the wizard seeds a row that matches everything,
+       * because which neurons somebody wants is the one thing four questions cannot answer for
+       * them — and since a Find Neurons with no filters now returns none, "leave it to the
+       * reader" has to be said in a row rather than by omission. Everything downstream of it is
+       * a claim about the *pipeline*, and that has to agree.
        */
       if (type === 'neuron.findNeurons') continue
       const node = graph.nodes.find((candidate) => candidate.type === type)

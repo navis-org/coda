@@ -28,6 +28,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import { resetAssistantChat } from '../assistantChat'
 import { AssistantPanel } from './AssistantPanel'
+import { searchFor } from '../../test/findNeurons'
 
 beforeAll(() => {
   installJsdomStubs({ width: 1200, height: 800 })
@@ -43,7 +44,7 @@ const PIPELINE = JSON.stringify({
     {
       ref: 'find',
       type: 'neuron.findNeurons',
-      params: [{ param: 'typePattern', value: 'LC4' }],
+      params: [{ param: 'filters', value: searchFor({ type: 'LC4' }).filters }],
       title: '',
     },
     { ref: 'table', type: 'out.table', params: [], title: '' },

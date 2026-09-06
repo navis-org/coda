@@ -21,6 +21,7 @@ import { registerSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installDownloadCapture, installJsdomStubs } from '../../test/jsdomStubs'
 import { resetExportWarnings } from '../exportWarnings'
+import { searchFor } from '../../test/findNeurons'
 
 beforeAll(() => {
   installJsdomStubs({ width: 900, height: 600 })
@@ -54,7 +55,7 @@ function realGraph() {
     id: 'find',
     type: 'neuron.findNeurons',
     position: { x: 260, y: 0 },
-    params: { typePattern: 'LC4' },
+    params: searchFor({ type: 'LC4' }),
   })
   return addEdge(g, {
     source: 'ds',

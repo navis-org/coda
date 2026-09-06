@@ -633,6 +633,16 @@ rather than pandas' defaults**. Both backends now go through `filterMasks` — t
 nothing else) and per-term case handling arrive written out rather than approximated, and a
 `matches` row is anchored at both ends because that is what Neo4j's `=~` does.
 
+**A node asking nothing emits an empty frame, in both languages, before either backend arm runs.**
+`asksNothing` is the canvas' own rule and the emitters read the same function, because an emitter
+that fell through to the fetch would write a cell downloading a connectome the canvas never asked
+for — which is this exporter's most exposed failure: the reader runs it, waits, and gets a frame
+that disagrees with the card they exported from. The frame carries the dataset's columns rather
+than being `None`, so every cell below it still runs and still describes the right shape. In R this
+sits **ahead of** the `neuprint_search` TODO beside it, and the two are different statements: this
+one reproduces an answer the canvas actually gives, where the TODO is a node that *does* filter in a
+way `neuprint_search` has no argument for — a gap in the emitter rather than a result.
+
 On neuPrint the node **partitions its rows**: what `NeuronCriteria` can carry goes into the query,
 and the rest becomes a mask on the result — same rows, one larger response, said in a NOTE. That
 partition is only ever valid because rows are ANDed; each is independent, so any subset can be
@@ -646,7 +656,9 @@ the node answered nothing without anybody having chosen a status. The CAVE golde
 reproducing it and a NOTE naming the fix, because a notebook that returned nothing silently would
 send the reader to look at their datastack. That cell is simply gone from the golden now: a fresh
 Find Neurons carries no rows, and a status is a field a CAVE datastack does not publish, so there
-is nothing for the card to offer and nothing for the notebook to reproduce.
+is nothing for the card to offer and nothing for the notebook to reproduce. Note that "returned
+nothing silently" is exactly what the empty-frame branch above must not do either, which is why it
+carries a NOTE of its own rather than emitting a bare empty frame.
 
 **`selectionIds` answered `number[]`, which is invariant 8 at a seam nobody had looked at.** A
 stored id is a string of digits and `Number('720575940628857210')` is `…216` — a different neuron,

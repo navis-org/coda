@@ -35,6 +35,7 @@ import type { DataSource } from '../../data/source'
 import { MIRRORED_COLUMN, checkWarpSize } from '../lib/transformOps'
 import { resetLandmarks } from '../../data/transforms/landmarks'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 vi.mock('../../pyodide/warp', () => ({ warpPoints: vi.fn() }))
 const { warpPoints } = await import('../../pyodide/warp')
@@ -100,7 +101,10 @@ function pipeline(
 ): CodaGraph {
   let g = emptyGraph('mirror-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })),
+  )
   g = addNode(g, node('mirror', 'neuron.mirror', params))
   g = addEdge(g, {
     source: 'ds',

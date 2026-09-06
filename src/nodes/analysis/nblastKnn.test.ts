@@ -30,6 +30,7 @@ import type { DataSource } from '../../data/source'
 import type { NblastKnnRequest } from '../../pyodide/nblast'
 import { knnTable } from '../lib/nblastOps'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 vi.mock('../../pyodide/nblast', () => ({
   runNblast: vi.fn(),
@@ -53,7 +54,10 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('knn-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })),
+  )
   g = addNode(g, node('skel', 'neuron.skeletons', { limit: 20 }))
   g = addNode(g, node('knn', 'neuron.nblastKnn', params))
   g = addEdge(g, {

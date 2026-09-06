@@ -21,6 +21,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { mockDatasetIds } from '../../data/mock/generate'
 import { registerSource, requireSource } from '../../data/source'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 const DATASET = mockDatasetIds()[0]!
 
@@ -135,7 +136,7 @@ describe('IDs from Label', () => {
   })
 
   it('reads labels out of a wired column', async () => {
-    const table = await run({ column: 'type' }, { typePattern: 'T4a', status: 'Traced' })
+    const table = await run({ column: 'type' }, searchFor({ type: 'T4a', status: 'Traced' }))
     expect(typesIn(table)).toEqual(['T4a'])
   })
 
@@ -143,7 +144,7 @@ describe('IDs from Label', () => {
     // The failure this guards is silent: either half alone returns a perfectly good table.
     const table = await run(
       { labels: 'Mi1', column: 'type' },
-      { typePattern: 'T4a', status: 'Traced' },
+      searchFor({ type: 'T4a', status: 'Traced' }),
     )
     expect(typesIn(table)).toEqual(['Mi1', 'T4a'])
   })

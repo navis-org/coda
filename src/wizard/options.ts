@@ -254,7 +254,7 @@ const STARTS: WizardOption<StartId>[] = [
       'Uses the `Find Neurons` node: filter by type, status or region. Best when you already know what to ask for.',
     glyph: 'neuron.findNeurons',
     hint: {
-      text: '**Set a filter here**, then Run. A type like `LC.*` is a regex, anchored the way the backend anchors it.',
+      text: '**Set a filter here**, then Run \u2014 with none set this node returns no neurons, since these run against a live server. A type like `LC.*` is a regex, anchored the way the backend anchors it.',
       tone: 'tip',
     },
   },

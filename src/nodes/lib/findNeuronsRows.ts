@@ -6,92 +6,103 @@
  * second reading of the same params is how a notebook comes to filter differently from the
  * canvas it was exported from — and neither would be wrong on its own.
  *
- * ## The legacy half, and why it is not a migration
+ * ## What used to be here, and why deleting it was the right end
  *
- * Find Neurons used to carry five named params — `typePattern`, `instancePattern`, `status`,
- * `minSize`, `roi` — and four of them are rows now. Every saved graph still holds them, and so do
- * the starter graphs in `examples/starters.ts`, the export golden in `export/fixture.ts`, and
- * some fifty tests that build a node by writing `{ typePattern: 'LC.*' }` directly.
+ * Find Neurons carried five named params before the row model — `typePattern`, `instancePattern`,
+ * `status`, `minSize`, `roi` — and four of them were folded into rows here, on the way past. That
+ * fold was a **bridge, not a design**: it was chosen over a load-time migration because `addNode`
+ * and `defaultParams` never go through `deserializeGraph`, so a migration would have caught saved
+ * files and missed the starter graphs, the export golden, and some fifty tests that built the node
+ * by writing `{ typePattern: 'LC.*' }` directly.
  *
- * A load-time migration would have caught the first of those and none of the rest: `addNode` and
- * `defaultParams` never go through `deserializeGraph`. So the legacy params stay **declared**,
- * and are folded into rows here instead. Two consequences worth stating:
+ * Those fifty were the actual cost, and they are the reason the bridge could be removed without
+ * one: every one of them has been rewritten to say what it means in rows (`test/findNeurons.ts`),
+ * which is the migration the load-time version could not perform. What is left uncrossable is a
+ * `.coda.json` or a share link written by an alpha build. Those arrive with four keys no
+ * definition declares, `normalizeParams` reads only declared params, and the node is therefore an
+ * unfiltered one — which since `asksNothing` means it returns **no neurons and says so**, rather
+ * than silently querying a whole connectome. That is the failure worth having, and it is why the
+ * order of the two changes mattered.
  *
- *  - They must **not** be hidden behind `visibleIf`. `normalizeParams` drops a hidden param from
- *    the provenance key (invariant 4), so a `typePattern` that still reached `evaluate` while
- *    being invisible would let a stale result survive an edit to it. They are `advanced`, which
- *    hides them from the card without touching the key.
- *  - A node created today has empty legacy params and contributes no rows from them, which is
- *    what makes "a new Find Neurons filters nothing" true while every saved graph keeps the
- *    `status: Traced` it was built with.
- *
- * The card materialises legacy params into real rows the first time somebody edits the filters,
- * so a node converts by being used rather than by being loaded.
+ * The one param that never was a row is `roi`, and it never can be: a region is not a column. It
+ * stays on the node, and `asksNothing` below is where it is read alongside the rows.
  */
 
-import type { ParamValue, ParamValues } from '../../core/node'
+import type { ParamValues } from '../../core/node'
 import type { FilterRow } from '../../data/filterRows'
 import { decodeRows } from '../../data/filterRows'
 
 /**
- * The legacy params and what clearing one means, in one place.
+ * Every row this node is asking for.
  *
- * Both halves together, deliberately: the read side is `legacyRows` below and the write side is
- * the card's conversion, and having "which params" here while "what cleared means for each"
- * lived as a literal in the UI is one decision in two modules. These values are the definition's
- * declared defaults, and they have to stay that way — the params are in the provenance key
- * (invariant 4), so a converted node that cleared `minSize` to `''` rather than `0` would carry
- * a different cache key from an identical node that had never been converted.
+ * A thin read of one param today, and kept as a named function rather than inlined at each call
+ * site for the reason the header gives: the value of this file is that six readers cannot come to
+ * disagree about what a stored node asks. `decodeRows` spread across `evaluate`, `validate`, the
+ * card and two emitters is five chances for one of them to grow a condition.
  */
-export const LEGACY_DEFAULTS = {
-  typePattern: '',
-  instancePattern: '',
-  status: '',
-  minSize: 0,
-} as const satisfies Record<string, ParamValue>
-
-/**
- * Rows implied by the five params Find Neurons used to have.
- *
- * Each maps to exactly the clause the old request field compiled to, so a saved graph returns
- * the same neurons it did before: `typePattern` was `n.type =~ …`, which is a whole-string match
- * (`matches`, anchored); `status` was `n.status IN [one]`, which is `is`; `minSize` was
- * `n.size >= …`, which is `ge`.
- *
- * Empty contributes nothing, which is what makes an unset legacy param and an absent one the
- * same thing — and they are not distinguishable, since `defaultParams` writes every default into
- * every node.
- */
-export function legacyRows(params: ParamValues): FilterRow[] {
-  const rows: FilterRow[] = []
-  const text = (id: string) => String(params[id] ?? '')
-
-  const typePattern = text('typePattern')
-  if (typePattern) rows.push({ field: 'type', op: 'matches', values: [typePattern] })
-
-  const instancePattern = text('instancePattern')
-  if (instancePattern)
-    rows.push({ field: 'instance', op: 'matches', values: [instancePattern] })
-
-  const status = text('status')
-  if (status) rows.push({ field: 'status', op: 'is', values: [status] })
-
-  const minSize = Number(params.minSize ?? 0)
-  if (Number.isFinite(minSize) && minSize > 0) {
-    rows.push({ field: 'size', op: 'ge', values: [String(Math.floor(minSize))] })
-  }
-
-  return rows
+export function rowsFromParams(params: ParamValues): FilterRow[] {
+  return decodeRows(params.filters)
 }
 
 /**
- * Every row this node is asking for: the legacy params first, then the stored ones.
+ * What kind of question this node is asking, in one word.
  *
- * Legacy first so a converted card lists `type`, `instance`, `status`, `size` in the order the
- * five boxes had, and anything since appended after. Order is otherwise immaterial — rows are
- * ANDed — but it is what somebody reads, and it travels into the provenance key, so it needs to
- * be decided once rather than per caller.
+ * **`nothing` means it answers with no neurons**, which is the opposite of what an empty `rows`
+ * means at the seam — and the asymmetry is the design. `FindNeuronsRequest.rows` being empty
+ * means *no narrowing*, because that is what `neuronIndex` and Explore need from the same method:
+ * a source honours it and returns the dataset. The node is the layer where somebody's half-built
+ * card is, and an unconfigured card is not a request for all 176,422 neurons of hemibrain. So the
+ * decision sits here, one call above the seam, and nothing about the seam changes: no source
+ * learns this rule, and every other caller of `findNeurons` goes on meaning what it meant.
+ *
+ * **`In ROI` counts.** It is not a row — a region is not a column — but it is a question, and a
+ * card set to `In ROI: LO(R)` is visibly asking one. A rule that read only the rows would answer
+ * that card empty, which is this node's own worst failure shape: a count that looks like an
+ * answer. **`Limit` does not**: a cap is not a question about *which* neurons, "the first 100 of
+ * everything" being an arbitrary sample of whatever order the backend returned, and Explore
+ * Dataset is the surface for looking at a dataset without asking it anything.
+ *
+ * Three answers rather than the boolean this started as, because the **card has to name which
+ * clause fired** — a region-only node queries and must not be labelled "no neurons". It was
+ * reconstructing that from `asksNothing() === false && rows.length === 0`, which is a second
+ * reading of the same params one level up, the thing this file exists to forbid. It also fails
+ * silently the day a third non-row question is added: a card with no region set would read
+ * "region only".
+ *
+ * `rows` is optional so a caller that has already decoded them does not pay for it twice — the
+ * card memoises them for its own drawing, and `evaluate` needs them for the request.
  */
-export function rowsFromParams(params: ParamValues): FilterRow[] {
-  return [...legacyRows(params), ...decodeRows(params.filters)]
+export function askShape(
+  params: ParamValues,
+  rows: readonly FilterRow[] = rowsFromParams(params),
+): 'nothing' | 'regionOnly' | 'rows' {
+  if (rows.length > 0) return 'rows'
+  return String(params.roi ?? '') === '' ? 'nothing' : 'regionOnly'
+}
+
+/**
+ * Whether this node is asking for nothing at all — in which case it answers with no neurons.
+ *
+ * The half of `askShape` that four surfaces read: `evaluate` returns an empty table, the card's
+ * foot line says which of the two things "no filters" now means, and both exporters emit an empty
+ * frame rather than a query. A second reading of this is how a notebook comes to fetch a
+ * connectome the canvas did not.
+ */
+export function asksNothing(
+  params: ParamValues,
+  rows: readonly FilterRow[] = rowsFromParams(params),
+): boolean {
+  return askShape(params, rows) === 'nothing'
+}
+
+/**
+ * Why such a node returns nothing, as one sentence four surfaces render.
+ *
+ * The node says it through `ctx.warn`, and both exporters write it into a NOTE above the empty
+ * frame they emit — so it is `synapseUnitRefusal`'s arrangement, and for its reason: written out
+ * per surface, the three copies had already drifted in the clause that carries the meaning. The
+ * remedy differs per surface, so each appends its own.
+ */
+export function noFiltersReason(): string {
+  return 'This Find Neurons has no filters, so it returns no neurons rather than the whole dataset.'
 }

@@ -21,6 +21,7 @@ import { defaultParams } from './node'
 import { registerNode, requireNodeDef } from './registry'
 import { spliceCandidate, spliceGraph } from './splice'
 import '../nodes'
+import { searchFor } from '../test/findNeurons'
 
 /*
  * A dataset in, a dataset out — what a "pin the materialization" node would be. Nothing in the
@@ -52,7 +53,7 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function chain(loose: string): { graph: CodaGraph; edgeId: string } {
   let g = emptyGraph('splice-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*' }))
+  g = addNode(g, node('find', 'neuron.findNeurons', searchFor({ type: 'LC.*' })))
   g = addNode(g, node('skel', 'neuron.skeletons'))
   g = addNode(g, node('loose', loose))
   g = addEdge(g, {

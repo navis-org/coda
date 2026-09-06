@@ -34,10 +34,14 @@ import { collectLabels, labelMatch, parseTypedLabels } from '../lib/labelLookup'
  * the question already fixes; capping it answers a different one.
  *
  * **Empty is empty.** No labels typed and nothing wired returns an empty table rather than the
- * whole dataset, which is what an empty `typePattern` means one node over. The inversion is the
- * point: a pattern that narrows nothing is everything, a lookup of nothing is nothing — and an
- * unconfigured node that fires an unbounded `MATCH (n:Neuron)` at a shared production Neo4j is
- * a hazard, not a default.
+ * whole dataset: an unconfigured node firing an unbounded `MATCH (n:Neuron)` at a shared
+ * production Neo4j is a hazard, not a default.
+ *
+ * This used to be stated as an *inversion* — "a pattern that narrows nothing is everything, a
+ * lookup of nothing is nothing" — because Find Neurons answered the opposite way, and the
+ * asymmetry was the interesting part. It no longer does (`asksNothing`), so the two nodes now
+ * agree and the reason this one gave is the reason both give. Worth recording rather than
+ * deleting: the argument here was made first, and the other node was brought to it.
  */
 export const idsFromLabelNode = registerNode({
   type: 'neuron.idsFromLabel',

@@ -26,6 +26,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { mockDatasetIds } from '../../data/mock/generate'
 import { registerSource, requireSource } from '../../data/source'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 const DATASET = mockDatasetIds()[0]!
 
@@ -56,8 +57,8 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('stack-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
-  g = addNode(g, node('a', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
-  g = addNode(g, node('b', 'neuron.findNeurons', { typePattern: 'LC6', status: 'Traced' }))
+  g = addNode(g, node('a', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })))
+  g = addNode(g, node('b', 'neuron.findNeurons', searchFor({ type: 'LC6', status: 'Traced' })))
   g = addNode(g, node('stack', 'core.stack', params))
   g = addNode(g, node('sort', 'core.sort', { column: 'neuronId' }))
   g = addEdge(g, {
@@ -200,7 +201,7 @@ describe('core.stack — evaluate', () => {
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
     g = addNode(
       g,
-      node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }),
+      node('find', 'neuron.findNeurons', searchFor({ type: 'LC.*', status: 'Traced' })),
     )
     g = addNode(g, node('conn', 'neuron.connectivity', { direction: 'outputs', minWeight: 1 }))
     g = addNode(

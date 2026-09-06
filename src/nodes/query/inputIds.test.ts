@@ -34,6 +34,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource, FindNeuronsRequest } from '../../data/source'
 
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 const DATASET = 'optic-lobe-mini'
 
@@ -236,10 +237,9 @@ describe('neuron.inputIds — the wired IDs table', () => {
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
     g = addNode(
       g,
-      node('find', 'neuron.findNeurons', {
-        rows: [{ field: 'type', op: 'matches', values: ['LC4'] }],
-        status: 'Traced',
-      }),
+      // `rows` was written here as a param and is not one — it is the *seam's* field name, so
+      // the key sat inert while `status: 'Traced'` did the narrowing. Both are `filters` now.
+      node('find', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })),
     )
     g = addNode(g, node('ids', 'neuron.inputIds', { ids: typed }))
     g = addEdge(g, {

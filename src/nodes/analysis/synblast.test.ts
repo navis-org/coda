@@ -37,6 +37,7 @@ import {
   synblastSidesFrom,
 } from '../lib/synblastOps'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 vi.mock('../../pyodide/nblast', async (importOriginal) => {
   // Only `runSynblast` is replaced: `NM_PER_UM` and the request types come from the real
@@ -72,7 +73,10 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('synblast-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })),
+  )
   g = addNode(g, node('syn', 'neuron.synapses', { limit: 20 }))
   g = addNode(g, node('sb', 'neuron.synblast', params))
   for (const [from, out, to, into] of [

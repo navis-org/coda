@@ -36,6 +36,7 @@ import {
   meshesFromResult,
 } from '../lib/cleanOps'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 vi.mock('../../pyodide/meshes', () => ({ runCleanMeshes: vi.fn() }))
 const { runCleanMeshes } = await import('../../pyodide/meshes')
@@ -280,7 +281,10 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('clean-mesh-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })),
+  )
   g = addNode(g, node('mesh', 'neuron.meshes', { limit: 10 }))
   g = addNode(g, node('clean', 'neuron.cleanMeshes', params))
   for (const [from, out, to, into] of [

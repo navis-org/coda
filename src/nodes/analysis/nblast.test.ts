@@ -35,6 +35,7 @@ import {
   NM_PER_UM,
 } from '../lib/nblastOps'
 import '../index'
+import { searchFor } from '../../test/findNeurons'
 
 vi.mock('../../pyodide/nblast', () => ({
   runNblast: vi.fn(),
@@ -66,7 +67,10 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(params: Record<string, unknown> = {}, limit = 20): CodaGraph {
   let g = emptyGraph('nblast-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })),
+  )
   g = addNode(g, node('skel', 'neuron.skeletons', { limit }))
   g = addNode(g, node('nb', 'neuron.nblast', params))
   g = addEdge(g, {

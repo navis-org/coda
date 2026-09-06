@@ -188,7 +188,8 @@ describe('out.datasetSummary', () => {
      * male-CNS's 176,422 neurons would answer a different question than its title.
      *
      * This used to be stated as a *contrast* with the query nodes, which both defaulted to
-     * `Traced`. Find Neurons no longer does — a fresh one filters nothing — so `IDs from Label`
+     * `Traced`. Find Neurons no longer does — a fresh one asks nothing, and so answers with nothing —
+     * so `IDs from Label`
      * is what the contrast is with, and it is the last node carrying that default.
      */
     const status = requireNodeDef('out.datasetSummary').params?.find((p) => p.id === 'status')

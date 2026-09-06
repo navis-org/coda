@@ -346,9 +346,11 @@ export function applyPlan(graph: CodaGraph, plan: AssistantPlan): ApplyResult {
  *
  * That bar is why `string` and `column` are left out, though they are the easiest conversions
  * of the lot. Nothing downstream checks them: a `string` param takes any text, so writing `50`
- * into `typePattern` — a model putting a limit in the wrong field — would become the pattern
- * `"50"` and apply cleanly. Refusing it is the only thing that ever says so. `assistant.test.ts`
- * has asserted that refusal since before this function existed, and it was right to.
+ * into `Input IDs`' `ids` — a model putting a count where a list of body ids goes — would become
+ * the id `"50"` and apply cleanly, which is invariant 8's hazard reached from the one direction
+ * that has no type to stop it. Refusing it is the only thing that ever says so.
+ * `assistant.test.ts` has asserted that refusal since before this function existed, and it was
+ * right to; it used to ask it of Find Neurons' `typePattern`, and moved when that was deleted.
  *
  * Anything that does not convert is returned untouched, so `validateParamValue` still gets to
  * say what is wrong in its own words. `"1.5"` for an `int` converts to `1.5` and is then refused

@@ -29,6 +29,7 @@ import { mockDatasetIds } from '../../data/mock/generate'
 import { registerSource, requireSource } from '../../data/source'
 import '../index'
 import { defaultInputPorts } from '../../core/ports'
+import { searchFor } from '../../test/findNeurons'
 
 const DATASET = mockDatasetIds()[0]!
 
@@ -53,7 +54,10 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('download-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC4', status: 'Traced' })),
+  )
   g = addNode(g, node('dl', 'out.download', params))
   g = addNode(g, node('sort', 'core.sort', { column: 'neuronId' }))
   g = addEdge(g, {
@@ -91,7 +95,7 @@ describe('out.download — the tap', () => {
     // A Network is not a Table, and this is the only node in the tree that takes both.
     let g = emptyGraph('any')
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
-    g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC4' }))
+    g = addNode(g, node('find', 'neuron.findNeurons', searchFor({ type: 'LC4' })))
     g = addNode(g, node('conn', 'neuron.connectivity', { direction: 'outputs' }))
     g = addNode(g, node('net', 'net.build'))
     g = addNode(g, node('dl', 'out.download'))
@@ -156,7 +160,9 @@ describe('out.download — when it runs', () => {
     changed = {
       ...changed,
       nodes: changed.nodes.map((n) =>
-        n.id === 'find' ? { ...n, params: { ...n.params, typePattern: 'LC6' } } : n,
+        n.id === 'find'
+          ? { ...n, params: { ...n.params, ...searchFor({ type: 'LC6', status: 'Traced' }) } }
+          : n,
       ),
     }
     expect((await scheduler.run(changed, { mode: 'full' })).executed).toContain('dl')

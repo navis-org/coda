@@ -12,6 +12,7 @@ import { registerNode, requireNodeDef } from './registry'
 import { Scheduler } from './scheduler'
 import type { Value } from './values'
 import { isTableValue, tableFromRows } from './values'
+import { searchFor } from '../test/findNeurons'
 
 /** Zero-latency source so tests don't wait on the simulated round trip. */
 const source: DataSource = new MockSource({ latencyMs: 0 })
@@ -73,7 +74,10 @@ function node(id: string, type: string, params: Record<string, unknown> = {}): G
 function pipeline(): CodaGraph {
   let g = emptyGraph('scheduler-test')
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: 'optic-lobe-mini' }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { typePattern: 'LC.*', status: 'Traced' }))
+  g = addNode(
+    g,
+    node('find', 'neuron.findNeurons', searchFor({ type: 'LC.*', status: 'Traced' })),
+  )
   g = addNode(g, node('filter', 'core.filterTable', { column: 'size', op: 'ge', value: '0' }))
   g = addNode(g, node('view', 'out.table'))
   g = addEdge(g, {
@@ -160,7 +164,7 @@ describe('hybrid evaluation', () => {
     let graph = pipeline()
     await scheduler.run(graph, { mode: 'full' })
 
-    graph = setNodeParam(graph, 'find', 'typePattern', 'T4.*')
+    graph = setNodeParam(graph, 'find', 'filters', searchFor({ type: 'T4.*' }).filters)
     scheduler.refreshStates(graph)
 
     expect(scheduler.info('find').state).toBe('stale')
@@ -172,7 +176,7 @@ describe('hybrid evaluation', () => {
     const graph = pipeline()
     await scheduler.run(graph, { mode: 'full' })
 
-    const changed = setNodeParam(graph, 'find', 'typePattern', 'T4.*')
+    const changed = setNodeParam(graph, 'find', 'filters', searchFor({ type: 'T4.*' }).filters)
     scheduler.refreshStates(changed)
     expect(scheduler.info('find').state).toBe('stale')
 

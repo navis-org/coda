@@ -28,6 +28,7 @@ import { mockDatasetIds } from '../../data/mock/generate'
 import { copyIds } from '../../nodes/lib/copyIds'
 import { isTableValue } from '../../core/values'
 import { registerSource } from '../../data/source'
+import { everyNeuron } from '../../test/findNeurons'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
@@ -79,7 +80,9 @@ function graphWith(params: Record<string, unknown>, wired: boolean): CodaGraph {
   g = addNode(g, node('copy', 'out.copyIds', params))
   if (!wired) return g
   g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
-  g = addNode(g, node('find', 'neuron.findNeurons', { limit: 3 }))
+  // A row as well as the cap: a Find Neurons with no filters returns no neurons, so "three
+  // neurons" has to be asked for rather than left as the first three of everything.
+  g = addNode(g, node('find', 'neuron.findNeurons', { ...everyNeuron(), limit: 3 }))
   g = addEdge(g, {
     source: 'ds',
     sourceHandle: 'dataset',
