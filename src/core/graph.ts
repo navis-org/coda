@@ -979,16 +979,23 @@ export interface LoadResult {
  * One end of a stored edge resolved against the ports the node actually has.
  *
  * Returns the port id to use, or undefined when the edge names a socket that is not there. A
- * stored handle that matches is kept as-is; a **missing** one falls back to the node's sole port
- * where it has exactly one, and only then to the historical default — a file old enough to omit
- * handles predates any node with two ports on a side, so "the only port" is what it meant.
+ * stored handle that matches is kept as-is; one that matches a port's **former** id is rewritten
+ * to the live one (`PortGroupDef.formerIds`, for a fixed pair that has since become a repeat);
+ * a **missing** one falls back to the node's sole port where it has exactly one, and only then to
+ * the historical default — a file old enough to omit handles predates any node with two ports on
+ * a side, so "the only port" is what it meant.
  */
 function healHandle(
-  ports: readonly { id: string }[],
+  ports: readonly ResolvedPort[],
   stored: string | undefined,
   legacy: string,
 ): string | undefined {
-  if (typeof stored === 'string') return ports.some((p) => p.id === stored) ? stored : undefined
+  if (typeof stored === 'string') {
+    if (ports.some((p) => p.id === stored)) return stored
+    // Only after the live ids have all missed, so a former id that some *other* port now spells
+    // live can never shadow it.
+    return ports.find((p) => p.formerId === stored)?.id
+  }
   if (ports.length === 1) return ports[0]!.id
   return ports.some((p) => p.id === legacy) ? legacy : undefined
 }

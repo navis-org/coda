@@ -55,8 +55,8 @@ core.similarity as sim { layout: long, metric: cosine }
 cluster.linkage as link
 pvA -> qA
 pvB -> qB
-qA -> stack:top
-qB -> stack:bottom
+qA -> stack:in1
+qB -> stack:in2
 stack -> sim
 sim -> link
 ```

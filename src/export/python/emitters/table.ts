@@ -29,7 +29,10 @@ import {
 import { unpivotPlan } from '../../../nodes/lib/tableOps'
 import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
-import type { AggFn } from '../../../nodes/lib/tableOps'
+import type { AggFn, StackOptions } from '../../../nodes/lib/tableOps'
+import { stackLabelAt } from '../../../nodes/lib/tableOps'
+import { readStackOptions } from '../../../nodes/lib/stackParams'
+import { inputPorts } from '../../../core/ports'
 import type { CellValue } from '../../../core/values'
 import type { DType } from '../../../core/types'
 import { findColumn, isNumericDType } from '../../../core/types'
@@ -37,7 +40,6 @@ import { decodeSetters, disabledEditNote, editPlan } from '../../../nodes/lib/ta
 import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { filterMasks } from './tableFilters'
 import { pyList, pyStr, pyValue } from '../py'
-import { STACK_LABELS } from '../../../nodes/transform/stackNeurons'
 import { qualifyTarget } from '../../../nodes/table/qualifyIds'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
@@ -503,45 +505,51 @@ registerEmitter('core.join', (ctx) => {
 // ---------------------------------------------------------------------------
 
 /**
- * Two data frames end to end: `core.stack`'s whole body, and the branch of `neuron.stack` that
- * handles points.
+ * Any number of data frames end to end: `core.stack`'s whole body, and the branch of
+ * `neuron.stack` that handles points.
  *
  * Shared rather than copied, because the copy had already lost a line — the points branch
  * returned its `pd.concat` *before* reaching `ctx.require('pandas')`, so an unlabelled stack
  * emitted a pandas call into a notebook that never imported pandas. One `require` at the top,
  * ahead of every return, is what makes that unrepresentable.
  */
-function stackFrames(
-  ctx: EmitContext,
-  top: string,
-  bottom: string,
-  labels: { source: string; top: string; bottom: string },
-): string[] {
+function stackFrames(ctx: EmitContext, frames: string[], options: StackOptions): string[] {
   ctx.require('pandas')
   const out = ctx.output('out')
-  if (!labels.source) {
+  const source = options.sourceColumn
+  if (!source) {
     // `concat` unions the columns and fills the gaps with NaN, which is exactly what the
-    // node does — a column only one side carries is not recorded for the other's rows.
-    return [`${out} = pd.concat([${top}, ${bottom}], ignore_index=True)`]
+    // node does — a column only some inputs carry is not recorded for the others' rows.
+    return [`${out} = pd.concat([${frames.join(', ')}], ignore_index=True)`]
   }
   return [
     `${out} = pd.concat(`,
     `    [`,
-    `        ${top}.assign(**{${pyStr(labels.source)}: ${pyStr(labels.top)}}),`,
-    `        ${bottom}.assign(**{${pyStr(labels.source)}: ${pyStr(labels.bottom)}}),`,
+    ...frames.map(
+      (frame, i) =>
+        `        ${frame}.assign(**{${pyStr(source)}: ${pyStr(stackLabelAt(options.labels, i + 1))}}),`,
+    ),
     `    ],`,
     `    ignore_index=True,`,
     `)`,
   ]
 }
 
-registerEmitter('core.stack', (ctx) =>
-  stackFrames(ctx, ctx.wired('top'), ctx.wired('bottom'), {
-    source: String(ctx.params.sourceColumn ?? ''),
-    top: String(ctx.params.topLabel ?? 'Top'),
-    bottom: String(ctx.params.bottomLabel ?? 'Bottom'),
-  }),
-)
+/**
+ * The variable on each of a Stack node's inputs, in socket order.
+ *
+ * Through `inputPorts` rather than a hand-built `in1 … inN`, so the exporter and the canvas read
+ * one statement of both the id rule and the clamp on a stored arity — `portIdAt`'s reason, and
+ * the one that bites here is a `.coda.json` written by a build whose max was higher.
+ */
+function stackInputs(ctx: EmitContext): string[] {
+  return inputPorts(ctx.def, ctx.node.params).map((port) => ctx.wired(port.id))
+}
+
+registerEmitter('core.stack', (ctx) => {
+  const frames = stackInputs(ctx)
+  return stackFrames(ctx, frames, readStackOptions(ctx.params, frames.length))
+})
 
 // ---------------------------------------------------------------------------
 // Sample
@@ -785,36 +793,33 @@ registerEmitter('core.selectOne', (ctx) => {
  * completely different cells.
  */
 registerEmitter('neuron.stack', (ctx) => {
-  const top = ctx.wired('top')
-  const bottom = ctx.wired('bottom')
+  const ports = inputPorts(ctx.def, ctx.node.params)
+  const vars = ports.map((port) => ctx.wired(port.id))
   const out = ctx.output('out')
-  const sourceColumn = String(ctx.params.sourceColumn ?? '').trim()
-  const topLabel = String(ctx.params.topLabel ?? STACK_LABELS.top)
-  const bottomLabel = String(ctx.params.bottomLabel ?? STACK_LABELS.bottom)
+  const options = readStackOptions(ctx.params, vars.length)
+  const source = options.sourceColumn
 
   // Points are a frame on this side; skeletons and meshes are neuron objects. Unknown takes
-  // the neuron branch, which is what this node is overwhelmingly used for.
-  if (ctx.inputType('top')?.kind === 'points') {
-    return stackFrames(ctx, top, bottom, {
-      source: sourceColumn,
-      top: topLabel,
-      bottom: bottomLabel,
-    })
+  // the neuron branch, which is what this node is overwhelmingly used for. Read off the *first*
+  // input, which is the one `checkStackable` measures the rest against.
+  if (ctx.inputType(ports[0]?.id ?? '')?.kind === 'points') {
+    return stackFrames(ctx, vars, options)
   }
 
   ctx.require('navis')
-  if (!sourceColumn) return [`${out} = navis.NeuronList([*${top}, *${bottom}])`]
+  const joined = `navis.NeuronList([${vars.map((v) => `*${v}`).join(', ')}])`
+  if (!source) return [`${out} = ${joined}`]
 
   return [
     ...ctx.note(
       'Coda adds the source as a column on the attribute table; navis carries it as an ' +
         'attribute on each neuron, which is what plot3d(color_by=) and NeuronList.summary() read.',
     ),
-    `for _n in ${top}:`,
-    `    _n.${sourceColumn} = ${pyStr(topLabel)}`,
-    `for _n in ${bottom}:`,
-    `    _n.${sourceColumn} = ${pyStr(bottomLabel)}`,
-    `${out} = navis.NeuronList([*${top}, *${bottom}])`,
+    ...vars.flatMap((v, i) => [
+      `for _n in ${v}:`,
+      `    _n.${source} = ${pyStr(stackLabelAt(options.labels, i + 1))}`,
+    ]),
+    `${out} = ${joined}`,
   ]
 })
 

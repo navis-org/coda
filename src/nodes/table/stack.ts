@@ -1,8 +1,8 @@
 import { registerNode } from '../../core/registry'
 import { T, isTabular, schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
-import type { StackOptions } from '../lib/tableOps'
-import { stackColumns, stackSchema, stackTables } from '../lib/tableOps'
+import { describeConflict, stackColumns, stackSchema, stackTables } from '../lib/tableOps'
+import { readStackOptions, stackCountParam, stackLabelParams } from '../lib/stackParams'
 
 /**
  * Two tables end to end — the vertical counterpart of `Join`.
@@ -28,9 +28,14 @@ import { stackColumns, stackSchema, stackTables } from '../lib/tableOps'
  * identical rows to keep is a real question with its own answer, and it belongs in the node that
  * asks it.
  *
- * **Two inputs, chained for more.** Exactly `Join`'s shape. Note the consequence for the source
- * column: it distinguishes the two inputs of the stack that *added* it, so three tables want
- * either a distinct name per level or the labels set at each one.
+ * **As many inputs as you ask for**, one socket each, added with the `Inputs` spinner. It used to
+ * be a fixed pair chained for more, which worked and cost the source column its meaning: each
+ * card labelled *its own* two inputs, so a three-table stack named the third and called the first
+ * two by whatever the inner stack's label had been. One card labels every input once.
+ *
+ * The old pair's port ids (`top`, `bottom`) are carried by `PortGroupDef.formerIds`, so a saved
+ * graph keeps its wires; the label params keep their ids for the same reason. See
+ * `nodes/lib/stackParams.ts`.
  */
 export const stackNode = registerNode({
   type: 'core.stack',
@@ -41,11 +46,16 @@ export const stackNode = registerNode({
     'The vertical counterpart of Join: where that one widens a table with columns, this lengthens it with rows. Every column survives — a column only one side has is null-filled for the other. But a column the two sides genuinely disagree on (number vs text) is refused by name rather than reconciled.',
   cost: 'cheap',
   inputs: [
-    { id: 'top', label: 'Top', type: T.table() },
-    { id: 'bottom', label: 'Bottom', type: T.table() },
+    {
+      repeat: stackCountParam.id,
+      ports: [{ id: 'in', label: 'Input {n}', type: T.table() }],
+      // What indices 1 and 2 were called when this node had a fixed pair.
+      formerIds: ['top', 'bottom'],
+    },
   ],
   outputs: [{ id: 'out', label: 'Table', type: T.table() }],
   params: [
+    stackCountParam,
     {
       id: 'sourceColumn',
       kind: 'string',
@@ -54,47 +64,31 @@ export const stackNode = registerNode({
       help: 'Adds a column naming which input each row came from. Empty adds none.',
       default: '',
     },
-    /*
-     * Only worth showing once there is a column to put them in, and `visibleIf` keeps them out
-     * of the provenance key while there is not — so naming the inputs of a stack that is not
-     * labelling anything cannot stale it.
-     */
-    {
-      id: 'topLabel',
-      kind: 'string',
-      label: 'Top label',
-      default: 'Top',
-      advanced: true,
-      visibleIf: (params) => String(params.sourceColumn ?? '').trim() !== '',
-    },
-    {
-      id: 'bottomLabel',
-      kind: 'string',
-      label: 'Bottom label',
-      default: 'Bottom',
-      advanced: true,
-      visibleIf: (params) => String(params.sourceColumn ?? '').trim() !== '',
-    },
+    ...stackLabelParams(['Top', 'Bottom']),
   ],
 
   /**
-   * Unknown until *both* sides are known, and that is not laziness.
+   * Unknown until *every* input is known, and that is not laziness.
    *
-   * The result's column set depends on both, so publishing the top's schema alone would
-   * advertise a table missing every column the bottom contributes — and a picker downstream
-   * would be configured against a shape that never arrives.
+   * The result's column set depends on all of them, so publishing an answer while one is still
+   * missing would advertise a table without the columns that input contributes — and a picker
+   * downstream would be configured against a shape that never arrives.
    *
-   * A dtype clash still publishes the union, using the top's reading. Nothing is ever built from
-   * it, because `evaluate` refuses on the same list; what it buys is that the other columns stay
-   * pickable while somebody fixes the one that clashes.
+   * A dtype clash still publishes the union, using the reading the earlier inputs agreed on.
+   * Nothing is ever built from it, because `evaluate` refuses on the same list; what it buys is
+   * that the other columns stay pickable while somebody fixes the one that clashes.
    */
   inferOutputs: (ctx) => {
-    const schema = stackSchema(ctx.schema('top'), ctx.schema('bottom'), readOptions(ctx.params))
+    const ports = ctx.inputPorts()
+    const schema = stackSchema(
+      ports.map((port) => ctx.schema(port.id)),
+      readStackOptions(ctx.params, ports.length),
+    )
     if (!schema) return { out: T.table() }
-    // Neurons only when both inputs are — a `neurons` kind is a claim about the ids, and the
-    // plain table never made it. `stackTables` decides the same way on the values.
-    const both = ctx.inputs.top?.kind === 'neurons' && ctx.inputs.bottom?.kind === 'neurons'
-    return { out: both ? T.neurons(schema) : T.table(schema) }
+    // Neurons only when every input is — a `neurons` kind is a claim about the ids, and a plain
+    // table never made it. `stackTables` decides the same way on the values.
+    const all = ports.every((port) => ctx.inputs[port.id]?.kind === 'neurons')
+    return { out: all ? T.neurons(schema) : T.table(schema) }
   },
 
   /**
@@ -103,46 +97,41 @@ export const stackNode = registerNode({
    */
   validate: (ctx) => {
     const issues: string[] = []
-    const top = ctx.inputs.top
-    const bottom = ctx.inputs.bottom
-    const topSchema = schemaOf(top)
-    const bottomSchema = schemaOf(bottom)
+    const ports = ctx.inputPorts()
+    const types = ports.map((port) => ctx.inputs[port.id])
+    const schemas = types.map(schemaOf)
 
     const source = String(ctx.params.sourceColumn ?? '').trim()
     if (source) {
       // Checked against each schema that is *known*: an unknown one is not a schema without the
       // column in it, and warning there would fire on every graph downstream of a Pivot.
-      const clashes = [topSchema, bottomSchema].some(
+      const clashes = schemas.some(
         (schema) => schema && schema.columns.some((c) => c.name === source),
       )
       if (clashes) issues.push(`Source column "${source}" already exists in one of the inputs`)
     }
 
-    if (isTabular(top) && isTabular(bottom) && topSchema && bottomSchema) {
-      for (const clash of stackColumns(topSchema, bottomSchema).conflicts) {
-        issues.push(`"${clash.name}" is ${clash.top} above and ${clash.bottom} below`)
+    /*
+     * The conflict scan needs every schema, so one unconnected socket stands the whole check
+     * down rather than reporting a clash between the inputs that happen to have arrived — which
+     * would name a pair that is not the pair the run will refuse on.
+     */
+    if (types.every(isTabular) && schemas.every((schema) => schema)) {
+      for (const clash of stackColumns(schemas as NonNullable<(typeof schemas)[number]>[])
+        .conflicts) {
+        issues.push(describeConflict(clash))
       }
     }
     return issues
   },
 
   evaluate: (ctx) => {
-    const top = ctx.input('top')
-    const bottom = ctx.input('bottom')
-    if (!isTableValue(top)) throw new Error('Top input is not a table')
-    if (!isTableValue(bottom)) throw new Error('Bottom input is not a table')
-    return { out: stackTables(top, bottom, readOptions(ctx.params)) }
+    const ports = ctx.inputPorts()
+    const tables = ports.map((port) => {
+      const value = ctx.input(port.id)
+      if (!isTableValue(value)) throw new Error(`${port.label} is not a table`)
+      return value
+    })
+    return { out: stackTables(tables, readStackOptions(ctx.params, ports.length)) }
   },
 })
-
-/**
- * One reader for both halves, so the schema and the values cannot disagree about whether a
- * source column was asked for — the trimming in particular, which decides it.
- */
-function readOptions(params: Record<string, unknown>): StackOptions {
-  return {
-    sourceColumn: String(params.sourceColumn ?? '').trim(),
-    topLabel: String(params.topLabel ?? 'Top'),
-    bottomLabel: String(params.bottomLabel ?? 'Bottom'),
-  }
-}

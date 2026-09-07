@@ -1082,15 +1082,55 @@ export function selectTable(table: TableValue, names: string[]): TableValue {
 export interface StackOptions {
   /** Column naming which input each row came from. Empty adds none. */
   sourceColumn?: string
-  topLabel?: string
-  bottomLabel?: string
+  /**
+   * What each input is called in that column, by position.
+   *
+   * Shorter than the input list — or absent — falls back to `Input {n}`, which is what a table
+   * assembled in a test or by the wizard gets. `nodes/lib/stackParams.ts` is where the two Stack
+   * nodes read it off their params, so the schema half and the value half cannot disagree about
+   * a name (they already had, once).
+   */
+  labels?: readonly string[]
 }
 
-/** A column both tables have, under two dtypes that cannot be reconciled. */
+/** One input's reading of a column: the dtype, and the 1-based input that states it. */
+export interface DTypeReading {
+  dtype: DType
+  input: number
+}
+
+/**
+ * A column several inputs carry under dtypes that cannot be reconciled.
+ *
+ * Two readings rather than every input's, because the fold is left to right and stops at the
+ * first input it cannot absorb: `left` is what the inputs before it had agreed on and which one
+ * states it, `right` is the one that disagrees. Naming all of them would list `i64` and `f64`
+ * as if they were part of the problem when they had already merged.
+ */
 export interface DTypeConflict {
   name: string
-  top: DType
-  bottom: DType
+  left: DTypeReading
+  right: DTypeReading
+}
+
+/** A conflict as a sentence, so `validate` and `stackTables` cannot describe one two ways. */
+export function describeConflict(clash: DTypeConflict): string {
+  return (
+    `"${clash.name}" is ${clash.left.dtype} on input ${clash.left.input} and ` +
+    `${clash.right.dtype} on input ${clash.right.input}`
+  )
+}
+
+/**
+ * What input `n` is called in the source column. One rule, four readers.
+ *
+ * Blank counts as unnamed, not as a blank name: the column exists to tell the inputs apart, so a
+ * cleared field falling back beats a stack whose halves are told apart by nothing. `stackParams.ts`
+ * declares the same string as the param's default, through this call rather than beside it.
+ */
+export function stackLabelAt(labels: readonly string[] | undefined, index: number): string {
+  const named = labels?.[index - 1]
+  return named !== undefined && named !== '' ? named : `Input ${index}`
 }
 
 /**
@@ -1109,49 +1149,62 @@ export function mergedDType(top: DType, bottom: DType): DType | undefined {
 }
 
 /**
- * The stacked column set: the top table's columns in order, then whatever the bottom adds.
+ * The stacked column set: the first input's columns in order, then whatever each later one adds.
  *
  * Conflicts are **returned rather than thrown**, because both halves need them and neither may
  * throw: `inferOutputs` must never throw (invariant 2) and `validate` reports strings. Only
  * `stackTables` refuses, and it refuses on exactly this list.
+ *
+ * Order is the reason this is a left fold rather than a merge of merges: a column belongs where
+ * the first input that carries it put it, and one appearing for the first time on input 4 lands
+ * after everything inputs 1–3 had. That is the two-input rule generalised, not a new one.
  */
 export function stackColumns(
-  top: TableSchema,
-  bottom: TableSchema,
+  schemas: readonly TableSchema[],
   options: StackOptions = {},
 ): { columns: ColumnSchema[]; conflicts: DTypeConflict[] } {
   const conflicts: DTypeConflict[] = []
   const columns: ColumnSchema[] = []
+  // Where each name sits in `columns`, so a fifth input's lookup is not a scan of the union.
+  const at = new Map<string, number>()
+  // The input whose dtype `columns[i]` currently states — `describeConflict`'s `left.input`.
+  // After an `i64` + `f64` widening that is the input that forced the widening, which is the
+  // honest thing to name: it is the reading the clash is actually against.
+  const from = new Map<string, number>()
 
-  for (const col of top.columns) {
-    const other = findColumn(bottom, col.name)
-    if (!other) {
-      columns.push(col)
-      continue
+  schemas.forEach((schema, i) => {
+    const input = i + 1
+    for (const col of schema.columns) {
+      const seen = at.get(col.name)
+      if (seen === undefined) {
+        at.set(col.name, columns.length)
+        from.set(col.name, input)
+        columns.push(col)
+        continue
+      }
+      const held = columns[seen]!
+      const dtype = mergedDType(held.dtype, col.dtype)
+      if (!dtype) {
+        conflicts.push({
+          name: col.name,
+          left: { dtype: held.dtype, input: from.get(col.name)! },
+          right: { dtype: col.dtype, input },
+        })
+        // Keep the reading already held so the rest of the schema stays useful to look at.
+        // Nothing is ever built from it — `stackTables` refuses on the same list.
+        continue
+      }
+      // The unit rides along only while every input agrees on it: nanometres stacked onto voxels
+      // is a column with no single unit, and carrying one of them would label the others' rows
+      // wrongly.
+      const unit = held.unit && held.unit === col.unit ? held.unit : undefined
+      columns[seen] = unit ? column(col.name, dtype, unit) : column(col.name, dtype)
+      if (dtype !== held.dtype) from.set(col.name, input)
     }
-    const dtype = mergedDType(col.dtype, other.dtype)
-    if (!dtype) {
-      conflicts.push({ name: col.name, top: col.dtype, bottom: other.dtype })
-      // Keep the top's reading so the rest of the schema stays useful to look at. Nothing is
-      // ever built from it — `stackTables` refuses on the same list.
-      columns.push(col)
-      continue
-    }
-    // The unit rides along only while both agree on it: nanometres stacked onto voxels is a
-    // column with no single unit, and carrying one of them would label the other's rows wrongly.
-    columns.push(
-      col.unit && col.unit === other.unit
-        ? column(col.name, dtype, col.unit)
-        : column(col.name, dtype),
-    )
-  }
-
-  for (const col of bottom.columns) {
-    if (!findColumn(top, col.name)) columns.push(col)
-  }
+  })
 
   const source = options.sourceColumn?.trim()
-  // Appended last rather than first: it is this node's annotation, not part of either table, and
+  // Appended last rather than first: it is this node's annotation, not part of any input, and
   // pushing every real column one place right on every stack reads as the data having moved.
   if (source) columns.push(column(source, 'str'))
 
@@ -1159,25 +1212,24 @@ export function stackColumns(
 }
 
 /**
- * Schema in, schema out. Undefined when either side is unknown.
+ * Schemas in, schema out. Undefined when *any* input's is unknown.
  *
- * Not "the half that is known": the result's column *set* depends on both, so publishing the
- * top's schema alone would advertise a table missing every column the bottom contributes, and a
- * picker downstream would be configured against a shape that never arrives.
+ * Not "the ones that are known": the result's column *set* depends on all of them, so publishing
+ * an answer while one is still missing would advertise a table without every column that input
+ * contributes, and a picker downstream would be configured against a shape that never arrives.
  */
 export function stackSchema(
-  top: TableSchema | undefined,
-  bottom: TableSchema | undefined,
+  schemas: readonly (TableSchema | undefined)[],
   options: StackOptions = {},
 ): TableSchema | undefined {
-  if (!top || !bottom) return undefined
-  return { columns: stackColumns(top, bottom, options).columns }
+  if (schemas.length === 0 || schemas.some((schema) => !schema)) return undefined
+  return { columns: stackColumns(schemas as readonly TableSchema[], options).columns }
 }
 
 /**
- * Two tables end to end, keeping every column either of them has.
+ * Any number of tables end to end, keeping every column any of them has.
  *
- * A column only one side carries is filled with **null** for the other's rows, which is what
+ * A column only some inputs carry is filled with **null** for the others' rows, which is what
  * null already means everywhere here: not recorded. That is the same call `Join` makes when it
  * suffixes a colliding name rather than dropping it — quietly losing a column in a scientific
  * pipeline is worse than an untidy result.
@@ -1187,57 +1239,66 @@ export function stackSchema(
  * that asks it.
  */
 export function stackTables(
-  top: TableValue,
-  bottom: TableValue,
+  tables: readonly TableValue[],
   options: StackOptions = {},
 ): TableValue {
   const source = options.sourceColumn?.trim()
-  if (source && (findColumn(top.schema, source) || findColumn(bottom.schema, source))) {
+  if (source && tables.some((table) => findColumn(table.schema, source))) {
     throw new Error(
-      `Source column "${source}" already exists in one of the inputs. Pick a name neither ` +
-        `table uses, or clear the field.`,
+      `Source column "${source}" already exists in one of the inputs. Pick a name no input ` +
+        `uses, or clear the field.`,
     )
   }
 
-  const { columns, conflicts } = stackColumns(top.schema, bottom.schema, options)
+  const { columns, conflicts } = stackColumns(
+    tables.map((table) => table.schema),
+    options,
+  )
   if (conflicts.length > 0) {
-    const named = conflicts
-      .map((c) => `"${c.name}" is ${c.top} above and ${c.bottom} below`)
-      .join('; ')
     throw new Error(
-      `Cannot stack: ${named}. One column cannot hold both — convert it upstream, or drop it ` +
-        `with a Select.`,
+      `Cannot stack: ${conflicts.map(describeConflict).join('; ')}. One column cannot hold ` +
+        `both — convert it upstream, or drop it with a Select.`,
     )
   }
 
-  const total = top.length + bottom.length
+  // Where each input's rows begin, so a column's copy and the source labels agree on it.
+  const starts: number[] = []
+  let total = 0
+  for (const table of tables) {
+    starts.push(total)
+    total += table.length
+  }
+
   const data: Record<string, ColumnData> = {}
   for (const col of columns) {
     if (col.name === source) continue
     // Allocated once at full length rather than concatenated: two 165k-row neuron tables is
     // 330k cells per column, and `[...a, ...b]` builds both spreads before joining them.
     const out: ColumnData = new Array(total).fill(null)
-    const fromTop = top.data[col.name]
-    if (fromTop) for (let i = 0; i < top.length; i++) out[i] = fromTop[i] ?? null
-    const fromBottom = bottom.data[col.name]
-    if (fromBottom)
-      for (let i = 0; i < bottom.length; i++) out[top.length + i] = fromBottom[i] ?? null
+    tables.forEach((table, i) => {
+      const values = table.data[col.name]
+      if (!values) return
+      const start = starts[i]!
+      for (let row = 0; row < table.length; row++) out[start + row] = values[row] ?? null
+    })
     data[col.name] = out
   }
 
   if (source) {
     const labels: ColumnData = new Array(total)
-    labels.fill(options.topLabel ?? 'Top', 0, top.length)
-    labels.fill(options.bottomLabel ?? 'Bottom', top.length, total)
+    tables.forEach((table, i) => {
+      labels.fill(stackLabelAt(options.labels, i + 1), starts[i]!, starts[i]! + table.length)
+    })
     data[source] = labels
   }
 
   /*
-   * Neurons only when *both* inputs are. A neuron table stacked onto a plain one that happens to
+   * Neurons only when *every* input is. A neuron table stacked onto a plain one that happens to
    * carry a `neuronId` is not a neuron table: the plain one never claimed its ids were neurons of
    * this dataset, and a `neurons` kind is exactly that claim.
    */
-  const kind = top.kind === 'neurons' && bottom.kind === 'neurons' ? 'neurons' : 'table'
+  const kind =
+    tables.length > 0 && tables.every((table) => table.kind === 'neurons') ? 'neurons' : 'table'
   return makeTable({ columns }, data, kind)
 }
 

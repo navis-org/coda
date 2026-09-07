@@ -120,8 +120,7 @@ export interface RepeatSlot {
  * port: both are derived from the one base below.
  */
 type RepeatedColumnParam = (
-  | Omit<ColumnParam, 'from' | 'schemaFrom' | 'visibleIf'>
-  | Omit<ColumnsParam, 'from' | 'schemaFrom' | 'visibleIf'>
+  Omit<ColumnParam, 'from' | 'schemaFrom'> | Omit<ColumnsParam, 'from' | 'schemaFrom'>
 ) & {
   /** The port base this picker reads — `edges` resolves to `edges2` at index 2. */
   fromPort: string
@@ -130,7 +129,7 @@ type RepeatedColumnParam = (
 }
 
 /** Anything else — a name, a threshold — which needs only the id suffix and the `visibleIf`. */
-type RepeatedPlainParam = Omit<ParamDef, 'visibleIf'> & { fromPort?: undefined }
+type RepeatedPlainParam = ParamDef & { fromPort?: undefined }
 
 export type RepeatedParam = RepeatedColumnParam | RepeatedPlainParam
 
@@ -140,7 +139,7 @@ export interface RepeatParamsOptions {
    * and the default are read off the one declaration rather than copied.
    */
   count: NumberParam
-  /** The params for one index. Anything returned gets its `visibleIf` from the arity. */
+  /** The params for one index. Anything returned gets the arity ANDed onto its `visibleIf`. */
   build: (slot: RepeatSlot) => RepeatedParam[]
 }
 
@@ -152,6 +151,12 @@ export interface RepeatParamsOptions {
  * key, so editing a picker for a dataset that is not connected restales every downstream node —
  * a node re-running for a control nobody can see. `normalizeParams` excludes hidden params for
  * exactly this reason ([invariant 4](../../../docs/invariants.md)).
+ *
+ * A builder **may** return a `visibleIf` of its own and it is **ANDed on**, never replaced —
+ * `Stack Tables`' per-input labels are only worth showing once a source column names somewhere to
+ * put them. Composed rather than handed over, so the arity half stays unforgeable: a builder that
+ * simply returned its own condition would silently take the previous paragraph's guarantee away,
+ * and the symptom is a stale re-run rather than anything on screen.
  *
  * The fallback when the count is unset is the param's own `default`, `countIn`'s `range.fresh`:
  * reading an absent count as zero would hide every picker on a node nobody has touched yet.
@@ -168,7 +173,9 @@ export function repeatParams(options: RepeatParamsOptions): ParamDef[] {
       group: repeatGroupId(index),
     }
     return build(slot).map((param) => {
-      const visibleIf = (values: ParamValues) => Number(values[count.id] ?? fresh) >= index
+      const own = param.visibleIf
+      const visibleIf = (values: ParamValues) =>
+        Number(values[count.id] ?? fresh) >= index && (own?.(values) ?? true)
       // The tab defaults to this index's, *before* the spread so an explicit `group` still wins.
       // Written here rather than by each builder for `portIdAt`'s reason one field over: a param
       // naming a tab its node spells differently does not fail, it lands in the trailing "Other"

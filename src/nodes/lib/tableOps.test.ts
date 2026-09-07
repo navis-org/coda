@@ -37,6 +37,7 @@ import {
   selectSchema,
   selectTable,
   sortTable,
+  describeConflict,
   stackColumns,
   stackSchema,
   stackTables,
@@ -281,8 +282,8 @@ describe('stack', () => {
   const right = () => tableFromRows(RIGHT, [{ neuronId: 2, hemilineage: '0B' }])
 
   it('puts the rows end to end and agrees with its schema half', () => {
-    const declared = stackSchema(LEFT, LEFT)
-    const out = stackTables(left(), left())
+    const declared = stackSchema([LEFT, LEFT])
+    const out = stackTables([left(), left()])
     expectSchemaAgreement(declared, out)
     expect(out.length).toBe(2)
     expect(out.data.neuronId).toEqual([1, 1])
@@ -291,8 +292,8 @@ describe('stack', () => {
   it('keeps every column, filling the gaps with null', () => {
     // The whole design: a column only one side carries is *not recorded* for the other's rows,
     // which is what null already means here. Dropping it would discard data that was wired in.
-    const declared = stackSchema(LEFT, RIGHT)
-    const out = stackTables(left(), right())
+    const declared = stackSchema([LEFT, RIGHT])
+    const out = stackTables([left(), right()])
     expectSchemaAgreement(declared, out)
     expect(columnNames(out.schema)).toEqual(['neuronId', 'type', 'hemilineage'])
     expect(out.data.type).toEqual(['LC4', null])
@@ -300,9 +301,9 @@ describe('stack', () => {
   })
 
   it('keeps duplicates and input order — UNION ALL, not UNION', () => {
-    const out = stackTables(left(), left())
+    const out = stackTables([left(), left()])
     expect(out.length).toBe(2)
-    const ordered = stackTables(right(), left())
+    const ordered = stackTables([right(), left()])
     expect(ordered.data.neuronId).toEqual([2, 1])
   })
 
@@ -310,7 +311,7 @@ describe('stack', () => {
     // The same kind of thing: a count stacked onto a ratio is still a number.
     const floats = tableSchema(column('neuronId', 'i64'), column('score', 'f64'))
     const ints = tableSchema(column('neuronId', 'i64'), column('score', 'i64'))
-    const merged = stackColumns(floats, ints)
+    const merged = stackColumns([floats, ints])
     expect(merged.conflicts).toEqual([])
     expect(merged.columns.map((c) => `${c.name}:${c.dtype}`)).toEqual([
       'neuronId:i64',
@@ -322,61 +323,110 @@ describe('stack', () => {
     // Returned rather than thrown because `inferOutputs` may not throw (invariant 2) and
     // `validate` returns strings. Only `stackTables` refuses, and on exactly this list.
     const asText = tableSchema(column('neuronId', 'str'))
-    const clash = stackColumns(LEFT, asText)
-    expect(clash.conflicts).toEqual([{ name: 'neuronId', top: 'i64', bottom: 'str' }])
+    const clash = stackColumns([LEFT, asText])
+    expect(clash.conflicts).toEqual([
+      { name: 'neuronId', left: { dtype: 'i64', input: 1 }, right: { dtype: 'str', input: 2 } },
+    ])
     // The rest of the schema stays readable, which is what keeps the other pickers usable.
     expect(columnNames({ columns: clash.columns })).toEqual(['neuronId', 'type'])
   })
 
-  it('refuses to build a table over a dtype clash, naming both readings', () => {
-    const asText = tableFromRows(tableSchema(column('neuronId', 'str')), [{ neuronId: 'x' }])
-    expect(() => stackTables(left(), asText)).toThrow(/i64 above and str below/)
+  it('names the input that disagrees, not the one before it', () => {
+    // A clash on input 4 reported against input 3 sends somebody to a card that is fine. And
+    // the reading it is *against* is the one the widening left behind, not the original i64.
+    const floats = tableSchema(column('neuronId', 'f64'))
+    const asText = tableSchema(column('neuronId', 'str'))
+    const clash = stackColumns([LEFT, floats, LEFT, asText])
+    expect(clash.conflicts).toEqual([
+      { name: 'neuronId', left: { dtype: 'f64', input: 2 }, right: { dtype: 'str', input: 4 } },
+    ])
+    expect(describeConflict(clash.conflicts[0]!)).toBe(
+      '"neuronId" is f64 on input 2 and str on input 4',
+    )
   })
 
-  it('drops a unit the two sides do not agree on', () => {
+  it('refuses to build a table over a dtype clash, naming both readings', () => {
+    const asText = tableFromRows(tableSchema(column('neuronId', 'str')), [{ neuronId: 'x' }])
+    expect(() => stackTables([left(), asText])).toThrow(
+      /"neuronId" is i64 on input 1 and str on input 2/,
+    )
+  })
+
+  it('drops a unit the inputs do not all agree on', () => {
     // Nanometres stacked onto voxels is a column with no single unit, and carrying one of them
-    // would label the other's rows wrongly.
+    // would label the others' rows wrongly.
     const nm = tableSchema(column('length', 'f64', 'nm'))
     const voxels = tableSchema(column('length', 'f64', 'voxels'))
-    expect(stackColumns(nm, nm).columns[0]!.unit).toBe('nm')
-    expect(stackColumns(nm, voxels).columns[0]!.unit).toBeUndefined()
+    expect(stackColumns([nm, nm]).columns[0]!.unit).toBe('nm')
+    expect(stackColumns([nm, voxels]).columns[0]!.unit).toBeUndefined()
+    // Third input disagreeing is the case a pairwise check against input 1 would pass.
+    expect(stackColumns([nm, nm, voxels]).columns[0]!.unit).toBeUndefined()
   })
 
   it('labels the rows when asked, appending the column last', () => {
-    const options = { sourceColumn: 'source', topLabel: 'A', bottomLabel: 'B' }
-    const declared = stackSchema(LEFT, RIGHT, options)
-    const out = stackTables(left(), right(), options)
+    const options = { sourceColumn: 'source', labels: ['A', 'B'] }
+    const declared = stackSchema([LEFT, RIGHT], options)
+    const out = stackTables([left(), right()], options)
     expectSchemaAgreement(declared, out)
-    // Last rather than first: it is this node's annotation, not part of either table.
+    // Last rather than first: it is this node's annotation, not part of any input.
     expect(columnNames(out.schema)).toEqual(['neuronId', 'type', 'hemilineage', 'source'])
     expect(out.data.source).toEqual(['A', 'B'])
   })
 
-  it('refuses a source column either input already uses', () => {
-    expect(() => stackTables(left(), right(), { sourceColumn: 'type' })).toThrow(
+  it('labels every input once, at any arity, falling back where nobody named one', () => {
+    // One card labels every input, which is what the chain of two-input stacks could not do:
+    // there, each card named its own two and only the outermost column meant anything.
+    const out = stackTables([left(), right(), left()], {
+      sourceColumn: 'source',
+      labels: ['A', ''],
+    })
+    expect(out.length).toBe(3)
+    expect(out.data.source).toEqual(['A', 'Input 2', 'Input 3'])
+  })
+
+  it('refuses a source column any input already uses', () => {
+    expect(() => stackTables([left(), right()], { sourceColumn: 'type' })).toThrow(
       /already exists/,
     )
+    // Including one that only the third input has, which is the case a two-input check missed.
+    expect(() =>
+      stackTables([left(), left(), right()], { sourceColumn: 'hemilineage' }),
+    ).toThrow(/already exists/)
   })
 
-  it('is Neurons only when both sides are', () => {
+  it('is Neurons only when every input is', () => {
     // A `neurons` kind is a claim about the ids; a plain table carrying a neuronId never made it.
     const neurons = tableFromRows(LEFT, [{ neuronId: 1, type: 'LC4' }], 'neurons')
-    expect(stackTables(neurons, neurons).kind).toBe('neurons')
-    expect(stackTables(neurons, left()).kind).toBe('table')
+    expect(stackTables([neurons, neurons]).kind).toBe('neurons')
+    expect(stackTables([neurons, left()]).kind).toBe('table')
+    expect(stackTables([neurons, neurons, left()]).kind).toBe('table')
   })
 
-  it('knows nothing until both sides are known', () => {
-    // Publishing the top's schema alone would advertise a table missing every column the
-    // bottom contributes, and a picker downstream would be set up against a shape never built.
-    expect(stackSchema(LEFT, undefined)).toBeUndefined()
-    expect(stackSchema(undefined, RIGHT)).toBeUndefined()
+  it('knows nothing until every input is known', () => {
+    // Publishing the known ones alone would advertise a table missing every column the absent
+    // input contributes, and a picker downstream would be set up against a shape never built.
+    expect(stackSchema([LEFT, undefined])).toBeUndefined()
+    expect(stackSchema([undefined, RIGHT])).toBeUndefined()
+    expect(stackSchema([LEFT, RIGHT, undefined])).toBeUndefined()
+    expect(stackSchema([])).toBeUndefined()
   })
 
   it('stacks an empty table without inventing a row', () => {
     const empty = tableFromRows(RIGHT, [])
-    const out = stackTables(left(), empty)
+    const out = stackTables([left(), empty])
     expect(out.length).toBe(1)
     expect(out.data.hemilineage).toEqual([null])
+  })
+
+  it('puts a column first seen on a later input after everything before it', () => {
+    // The two-input rule generalised: a column belongs where the first input carrying it put it.
+    const third = tableSchema(column('side', 'str'))
+    expect(columnNames({ columns: stackColumns([LEFT, RIGHT, third]).columns })).toEqual([
+      'neuronId',
+      'type',
+      'hemilineage',
+      'side',
+    ])
   })
 })
 

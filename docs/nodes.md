@@ -1664,46 +1664,56 @@ alternative, keeping only the columns both have, silently discards data that was
 two neuron tables from different datasets that can be most of the columns with nothing on screen
 saying so. Same call `Join` makes when it suffixes a colliding name rather than dropping it.
 
-**A dtype clash is refused, not reconciled.** `neuronId` as a number above and text below is two
-different columns wearing one name. Widening both to text keeps every value and removes the column
+**A dtype clash is refused, not reconciled.** `neuronId` as a number on one input and text on
+another is two different columns wearing one name. Widening both to text keeps every value and removes the column
 from every numeric picker downstream; coercing text to a number loses values outright
 (`Number('n/a')`). Neither is a decision this node has grounds to make, so it names the column,
-both readings, and stops. `i64` and `f64` are the exception and merge to `f64` silently: those are
+both readings, and **which input states each** — the reading the earlier inputs agreed on, and the
+first one that cannot be absorbed, which is the card that has to change rather than the one next
+to it. It stops there. `i64` and `f64` are the exception and merge to `f64` silently: those are
 the same kind of thing, and a count stacked onto a ratio is still a number.
 
 The clash is **returned rather than thrown** by `stackColumns`, because both halves need it and
 neither may throw — `inferOutputs` must not (invariant 2) and `validate` returns strings. Only
 `stackTables` refuses, on exactly that list.
 
-**A unit rides along only while both sides agree on it.** Nanometres stacked onto voxels is a
-column with no single unit, and carrying one of them would label the other's rows wrongly.
+**A unit rides along only while every input agrees on it.** Nanometres stacked onto voxels is a
+column with no single unit, and carrying one of them would label the others' rows wrongly.
 
 **Rows keep input order and duplicates are kept** — `UNION ALL`, not `UNION`. Which of two
 identical rows to keep is a real question with its own answer, and it belongs in the node that
 asks it.
 
-**Unknown until _both_ sides are known.** The result's column set depends on both, so publishing
-the top's schema alone would advertise a table missing every column the bottom contributes, and a
-picker downstream would be configured against a shape that never arrives. A dtype clash still
-publishes the union using the top's reading — nothing is built from it, since `evaluate` refuses
-on the same list, and it keeps the other columns pickable while somebody fixes the one that
-clashes.
+**Unknown until _every_ input is known.** The result's column set depends on all of them, so
+publishing an answer while one is still missing would advertise a table without the columns that
+input contributes, and a picker downstream would be configured against a shape that never arrives.
+A dtype clash still publishes the union using the reading the earlier inputs agreed on — nothing is
+built from it, since `evaluate` refuses on the same list, and it keeps the other columns pickable
+while somebody fixes the one that clashes.
 
-**Neurons only when both inputs are.** A `neurons` kind is a claim that the ids are neurons of a
+**Neurons only when every input is.** A `neurons` kind is a claim that the ids are neurons of a
 dataset; a plain table that happens to carry a `neuronId` never made it. The type half and the value
 half decide it the same way.
 
-**Two inputs, chained for more**, exactly `Join`'s shape. Note the consequence for the source
-column: it distinguishes the two inputs of the stack that _added_ it, so three tables want either
-a distinct name per level or the labels set at each one.
+**As many inputs as you ask for**, one socket each, on an `Inputs` spinner — the shape
+`Match Cell Types` established. It was a fixed pair chained for more, and the chain is what made
+the source column mean two things: a stack refuses to add a column an input already has, so the
+levels could not share a name, and only the *outermost* one partitioned the whole result. One card
+labels every input once. Both halves of the migration are carried deliberately, because both fail
+quietly — `PortGroupDef.formerIds` rewrites a stored `top`/`bottom` handle onto `in1`/`in2`, so a
+share link keeps its wires, and the first two label params keep their ids and record their old
+defaults in `absentMeans`, so a saved graph's source column holds the same values it did before.
+See [stackParams.ts](../src/nodes/lib/stackParams.ts).
 
 **The source column is off by default and refused on a collision.** Empty adds none; a name adds a
-`str` column holding `Top`/`Bottom`, or whatever the two labels say. Appended **last** rather than
-first — it is this node's annotation, not part of either table, and pushing every real column one
-place right on every stack reads as the data having moved. A name either input already uses is
+`str` column holding `Input 1`, `Input 2`, … or whatever the labels say. Appended **last** rather
+than first — it is this node's annotation, not part of any input, and pushing every real column one
+place right on every stack reads as the data having moved. A name any input already uses is
 refused rather than suffixed: the point of the column is to say where a row came from, and quietly
 writing that into somebody's existing column is worse than untidy. The labels are `visibleIf` the
-column is named, so naming the inputs of a stack that is not labelling anything cannot stale it.
+column is named **and** the arity — both conditions, ANDed by `repeatParams` rather than one
+replacing the other — so neither a label for a socket nobody connected nor one on a stack that is
+not labelling anything can stale a downstream result.
 
 Worth knowing that a genuine clash is reachable with nothing but built-in nodes, which is what
 `stack.test.ts` uses: `core.pivot`'s wide table types its label column `str` even when pivoted

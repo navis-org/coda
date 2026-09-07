@@ -25,10 +25,13 @@ import {
   resolveFilterOp,
 } from '../../../nodes/lib/tableOps'
 import { unpivotPlan } from '../../../nodes/lib/tableOps'
+import type { StackOptions } from '../../../nodes/lib/tableOps'
+import { stackLabelAt } from '../../../nodes/lib/tableOps'
+import { readStackOptions } from '../../../nodes/lib/stackParams'
+import { inputPorts } from '../../../core/ports'
 import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
 import { rCol, rStr, rValue, rVector } from '../r'
-import { STACK_LABELS } from '../../../nodes/transform/stackNeurons'
 import { qualifyTarget } from '../../../nodes/table/qualifyIds'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
@@ -494,7 +497,7 @@ registerEmitter('core.join', (ctx) => {
 })
 
 /**
- * Two data frames end to end: `core.stack`'s whole body, and the points branch of
+ * Any number of data frames end to end: `core.stack`'s whole body, and the points branch of
  * `neuron.stack`.
  *
  * Shared rather than copied, because the copy had drifted three ways — `rbind` for
@@ -502,32 +505,39 @@ registerEmitter('core.join', (ctx) => {
  * a bare column name where `col()` quotes one that needs it; and no `ctx.library('dplyr')` at
  * all. Each of the three is invisible until somebody runs the document.
  */
-function stackFrames(
-  ctx: EmitContext,
-  top: string,
-  bottom: string,
-  labels: { source: string; top: string; bottom: string },
-): string[] {
+function stackFrames(ctx: EmitContext, frames: string[], options: StackOptions): string[] {
   ctx.library('dplyr')
   const out = ctx.output('out')
+  const source = options.sourceColumn
   // `bind_rows` unions the columns and fills the gaps with NA, which is what the node does —
-  // a column only one side carries is not recorded for the other's rows.
-  if (!labels.source) return [`${out} <- bind_rows(${top}, ${bottom})`]
+  // a column only some inputs carry is not recorded for the others' rows.
+  if (!source) return [`${out} <- bind_rows(${frames.join(', ')})`]
   return [
     `${out} <- bind_rows(`,
-    `  ${top} |> mutate(${col(labels.source)} = ${rStr(labels.top)}),`,
-    `  ${bottom} |> mutate(${col(labels.source)} = ${rStr(labels.bottom)})`,
+    ...frames.map(
+      (frame, i) =>
+        `  ${frame} |> mutate(${col(source)} = ${rStr(stackLabelAt(options.labels, i + 1))})` +
+        (i === frames.length - 1 ? '' : ','),
+    ),
     `)`,
   ]
 }
 
-registerEmitter('core.stack', (ctx) =>
-  stackFrames(ctx, ctx.wired('top'), ctx.wired('bottom'), {
-    source: String(ctx.params.sourceColumn ?? ''),
-    top: String(ctx.params.topLabel ?? 'Top'),
-    bottom: String(ctx.params.bottomLabel ?? 'Bottom'),
-  }),
-)
+/**
+ * The variable on each of a Stack node's inputs, in socket order.
+ *
+ * Through `inputPorts` rather than a hand-built `in1 … inN`, so the exporter and the canvas read
+ * one statement of both the id rule and the clamp on a stored arity — `portIdAt`'s reason, and
+ * the one that bites here is a `.coda.json` written by a build whose max was higher.
+ */
+function stackInputs(ctx: EmitContext): string[] {
+  return inputPorts(ctx.def, ctx.node.params).map((port) => ctx.wired(port.id))
+}
+
+registerEmitter('core.stack', (ctx) => {
+  const frames = stackInputs(ctx)
+  return stackFrames(ctx, frames, readStackOptions(ctx.params, frames.length))
+})
 
 // ---------------------------------------------------------------------------
 // Sample
@@ -782,32 +792,30 @@ registerEmitter('core.tableFromUrl', (ctx) => {
  * object — read off `inputType` rather than guessed, since the two emit unrelated cells.
  */
 registerEmitter('neuron.stack', (ctx) => {
-  const top = ctx.wired('top')
-  const bottom = ctx.wired('bottom')
+  const ports = inputPorts(ctx.def, ctx.node.params)
+  const vars = ports.map((port) => ctx.wired(port.id))
   const out = ctx.output('out')
-  const sourceColumn = String(ctx.params.sourceColumn ?? '').trim()
-  const topLabel = String(ctx.params.topLabel ?? STACK_LABELS.top)
-  const bottomLabel = String(ctx.params.bottomLabel ?? STACK_LABELS.bottom)
+  const options = readStackOptions(ctx.params, vars.length)
+  const source = options.sourceColumn
 
-  if (ctx.inputType('top')?.kind === 'points') {
-    return stackFrames(ctx, top, bottom, {
-      source: sourceColumn,
-      top: topLabel,
-      bottom: bottomLabel,
-    })
+  // Read off the *first* input, which is the one `checkStackable` measures the rest against.
+  if (ctx.inputType(ports[0]?.id ?? '')?.kind === 'points') {
+    return stackFrames(ctx, vars, options)
   }
 
   ctx.library('nat')
-  if (!sourceColumn) return [`${out} <- c(${top}, ${bottom})`]
+  const joined = `c(${vars.join(', ')})`
+  if (!source) return [`${out} <- ${joined}`]
 
   return [
     ...ctx.note(
       'c() merges the neuronlists and their attached data frames together, which is the ' +
         'pairing Coda keeps between the geometry and its attribute table.',
     ),
-    `${top}[, ${rStr(sourceColumn)}] <- ${rStr(topLabel)}`,
-    `${bottom}[, ${rStr(sourceColumn)}] <- ${rStr(bottomLabel)}`,
-    `${out} <- c(${top}, ${bottom})`,
+    ...vars.map(
+      (v, i) => `${v}[, ${rStr(source)}] <- ${rStr(stackLabelAt(options.labels, i + 1))}`,
+    ),
+    `${out} <- ${joined}`,
   ]
 })
 

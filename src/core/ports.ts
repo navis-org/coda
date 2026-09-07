@@ -151,13 +151,20 @@ export function portIdAt(base: string, index: number): string {
   return `${base}${index}`
 }
 
-function expandPort(template: PortDef, repeat: string, index: number): ResolvedPort {
+function expandPort(
+  template: PortDef,
+  repeat: string,
+  index: number,
+  formerIds: readonly string[] | undefined,
+): ResolvedPort {
   const base = template.label ?? template.id
+  const formerId = formerIds?.[index - 1]
   return {
     ...template,
     id: portIdAt(template.id, index),
     label: base.includes('{n}') ? base.replaceAll('{n}', String(index)) : `${base} ${index}`,
     group: { repeat, index, base: template.id },
+    ...(formerId ? { formerId } : {}),
   }
 }
 
@@ -185,7 +192,9 @@ function expand(
     // Index-major, so a group repeating a tuple keeps its members adjacent: edges1, labels1,
     // edges2, labels2 — not edges1, edges2, labels1, labels2. See `PortGroupDef.ports`.
     for (let i = 1; i <= count; i++) {
-      for (const template of slot.ports) ports.push(expandPort(template, slot.repeat, i))
+      for (const template of slot.ports) {
+        ports.push(expandPort(template, slot.repeat, i, slot.formerIds))
+      }
     }
   }
   return ports

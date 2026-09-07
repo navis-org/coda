@@ -92,6 +92,27 @@ registerNode({
   evaluate: () => ({ out: tableFromRows(SCHEMA, []) }),
 })
 
+/**
+ * A group that used to be a fixed pair — `Stack Tables`' shape, and the only reason `formerIds`
+ * exists. Its own registration is the assertion that `checkPortGroups` allows the legal form.
+ */
+registerNode({
+  type: 'test.ports.grown',
+  label: 'Grown (test)',
+  category: 'transform',
+  cost: 'cheap',
+  inputs: [
+    {
+      repeat: 'n',
+      ports: [{ id: 'in', label: 'Input {n}', type: T.table() }],
+      formerIds: ['top', 'bottom'],
+    },
+  ],
+  outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+  params: [{ id: 'n', kind: 'int', label: 'Inputs', default: 2, min: 2, max: 4 }],
+  evaluate: () => ({ out: tableFromRows(SCHEMA, []) }),
+})
+
 /** A plain node, for the identity fast path and as a wiring partner. */
 registerNode({
   type: 'test.ports.plain',
@@ -534,6 +555,119 @@ describe('loading a file whose handles the node no longer has', () => {
     const { graph, warnings } = deserializeGraph(JSON.stringify(raw))
     expect(warnings).toEqual([])
     expect(graph.edges[0]?.sourceHandle).toBe('out')
+  })
+})
+
+/**
+ * The half of the variadic mechanism that is about *files rather than cards*.
+ *
+ * A node that grows a repeat where it had a fixed pair renames its ports, and every stored edge
+ * into either socket then names one the node no longer has — which the block above establishes
+ * is dropped with a warning. On share links and `.coda.json` files, that is a workflow arriving
+ * with its wires missing and no way to re-save the original.
+ */
+describe('a group that used to be a fixed pair', () => {
+  function storedPair(handle: string, count = 2) {
+    let g = emptyGraph('file')
+    g = addNode(g, {
+      id: 'g',
+      type: 'test.ports.grown',
+      position: { x: 0, y: 0 },
+      params: { n: count },
+    })
+    g = addNode(g, { id: 's', type: 'test.ports.plain', position: { x: 0, y: 0 }, params: {} })
+    // Straight into the JSON: `addEdge` would be building a wire against today's ports, and
+    // what has to be reproduced is a document written by yesterday's build.
+    const raw = JSON.parse(serializeGraph(g)) as {
+      edges: Record<string, string>[]
+    }
+    raw.edges = [
+      { id: 'e1', source: 's', sourceHandle: 'out', target: 'g', targetHandle: handle },
+    ]
+    return JSON.stringify(raw)
+  }
+
+  it('expands to the live ids, carrying the former one alongside', () => {
+    const ports = inputPorts(requireNodeDef('test.ports.grown'), { n: 3 })
+    expect(ports.map((p) => p.id)).toEqual(['in1', 'in2', 'in3'])
+    expect(ports.map((p) => p.formerId)).toEqual(['top', 'bottom', undefined])
+  })
+
+  it('rewrites a stored handle onto the port that replaced it', () => {
+    for (const [was, now] of [
+      ['top', 'in1'],
+      ['bottom', 'in2'],
+    ]) {
+      const { graph, warnings } = deserializeGraph(storedPair(was!))
+      expect(warnings, was).toEqual([])
+      expect(graph.edges[0]?.targetHandle, was).toBe(now)
+    }
+  })
+
+  it('still drops a handle that was never one of them', () => {
+    // The rewrite is a fact about two named ids, not a fallback for anything unrecognised.
+    const { graph, warnings } = deserializeGraph(storedPair('middle'))
+    expect(graph.edges).toEqual([])
+    expect(warnings.join(' ')).toContain('no input "middle"')
+  })
+
+  it('does not resurrect a socket the stored arity no longer draws', () => {
+    /*
+     * `bottom` became `in2`, and at arity 2 that is the minimum so it is always there. The case
+     * that matters is a *former* id whose index is past the count — which cannot happen at this
+     * node's `min` of 2, so the check is that healing never expands the port list: a former id
+     * is resolved against the ports the node actually has.
+     */
+    const ports = inputPorts(requireNodeDef('test.ports.grown'), { n: 2 })
+    expect(ports).toHaveLength(2)
+    expect(ports.some((p) => p.formerId === 'bottom')).toBe(true)
+  })
+
+  it('is refused on a group repeating a tuple, where a position names two ports', () => {
+    expect(() =>
+      registerNode({
+        type: 'test.ports.grown.tuple',
+        label: 'Bad (test)',
+        category: 'transform',
+        cost: 'cheap',
+        inputs: [
+          {
+            repeat: 'n',
+            ports: [
+              { id: 'a', label: 'A', type: T.table() },
+              { id: 'b', label: 'B', type: T.table() },
+            ],
+            formerIds: ['top'],
+          },
+        ],
+        outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+        params: [{ id: 'n', kind: 'int', label: 'N', default: 1, min: 1, max: 2 }],
+        evaluate: () => ({ out: tableFromRows(SCHEMA, []) }),
+      }),
+    ).toThrow(/cannot say which port of a tuple/)
+  })
+
+  it('is refused where it names more indices than the group can ever have', () => {
+    // Such an entry reads as covered and is not: the index never expands, so the edge it was
+    // written for is dropped anyway.
+    expect(() =>
+      registerNode({
+        type: 'test.ports.grown.long',
+        label: 'Bad (test)',
+        category: 'transform',
+        cost: 'cheap',
+        inputs: [
+          {
+            repeat: 'n',
+            ports: [{ id: 'in', label: 'In {n}', type: T.table() }],
+            formerIds: ['a', 'b', 'c'],
+          },
+        ],
+        outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+        params: [{ id: 'n', kind: 'int', label: 'N', default: 1, min: 1, max: 2 }],
+        evaluate: () => ({ out: tableFromRows(SCHEMA, []) }),
+      }),
+    ).toThrow(/indices that never expand/)
   })
 })
 

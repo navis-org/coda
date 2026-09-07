@@ -144,7 +144,8 @@ verbatim. Read the entry before arguing with the rule.
 
    What it cost was **two connectomes in one table**. `mergedDType` refuses `i64` against `str`,
    so `Stack Tables` and `Stack Neurons` answered `Cannot stack: "neuronId" is i64 above and str
-   below` for every neuPrint + CAVE pair — and the error's two remedies, "convert it upstream, or
+   below` for every neuPrint + CAVE pair — the wording of the day; both nodes are variadic now and
+   the message names the two inputs by number — and the error's two remedies, "convert it upstream, or
    drop it with a Select", are both unreachable from a *geometry* card, since `Qualify Ids`,
    `Select` and `Edit Table` all take `T.table()`. The Workflow Wizard's own cross-dataset
    geometry arms (`xmorphology`, `xnblast`) build exactly that chain, gated only on a shared

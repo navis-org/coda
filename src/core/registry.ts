@@ -109,6 +109,25 @@ function checkPortGroups(def: NodeDefinition): void {
           `${where} has default ${param.default} outside [${param.min}, ${param.max}], so a fresh node would not open at the arity its own field reports.`,
         )
       }
+      /*
+       * `formerIds` is positional, so on a group repeating a *tuple* "the id at index 2" names
+       * two ports and the array cannot say which — a silent half-migration where one socket of
+       * the pair keeps its stored edges and the other drops them. And an entry past `max` names
+       * an index that never expands, so the edge it was written for is dropped anyway while the
+       * declaration reads as if it were covered.
+       */
+      if (slot.formerIds) {
+        if (slot.ports.length > 1) {
+          throw new Error(
+            `${where} declares \`formerIds\` on a group repeating ${slot.ports.length} ports. A former id is positional, so it cannot say which port of a tuple it renames.`,
+          )
+        }
+        if (slot.formerIds.length > param.max) {
+          throw new Error(
+            `${where} declares ${slot.formerIds.length} \`formerIds\` for a group whose max is ${param.max}; the surplus name indices that never expand.`,
+          )
+        }
+      }
     }
     const seen = new Set<string>()
     for (const port of side === 'inputs' ? allInputPorts(def) : allOutputPorts(def)) {

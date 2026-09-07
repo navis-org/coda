@@ -148,6 +148,23 @@ export interface PortGroupDef {
    * (`edges1, labels1, edges2, labels2`) rather than in two runs of one.
    */
   ports: readonly PortDef[]
+  /**
+   * The id each index carried **before** this group was variadic, by position.
+   *
+   * For a node that grew a repeat where it used to have a fixed pair: `Stack Tables` was `top`
+   * and `bottom`, and is now `in1 … inN`. Without this, every stored edge into either socket
+   * names a port the node no longer has, and `deserializeGraph` drops it with a warning — on
+   * share links and `.coda.json` files that cannot be re-saved. There is no migration pass to
+   * put it in instead: `storedParams` records why a load-time rewrite is the wrong tool, and an
+   * edge is worse than a param there, since the wizard, the fixtures and thirty tests build
+   * edges by hand and would never come through one.
+   *
+   * So it is a fact about the *port*, carried on the resolved port and read by `healHandle`.
+   * Position, not an alias list: index 1 answers to `formerIds[0]`. Only meaningful on a group
+   * repeating a single template — `registerNode` refuses it on a tuple, where "the id at index
+   * 2" names two ports and the array cannot say which.
+   */
+  formerIds?: readonly string[]
 }
 
 /** One entry in a node's `inputs`/`outputs`: either a port or a run of them. */
@@ -169,6 +186,13 @@ export interface ResolvedPort extends PortDef {
    * name happens to share the prefix.
    */
   group?: { repeat: string; index: number; base: string }
+  /**
+   * The id this port had before its group became variadic — see `PortGroupDef.formerIds`.
+   *
+   * Read by `healHandle` alone, and only for a handle that matches nothing. Never by anything
+   * that addresses a port: there is exactly one live id and it is `id`.
+   */
+  formerId?: string
 }
 
 // ---------------------------------------------------------------------------

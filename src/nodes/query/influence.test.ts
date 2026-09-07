@@ -357,13 +357,13 @@ describe('Influence over a Neurons table that repeats an id', () => {
       source: 'find',
       sourceHandle: 'neurons',
       target: 'twice',
-      targetHandle: 'top',
+      targetHandle: 'in1',
     })
     g = addEdge(g, {
       source: 'wider',
       sourceHandle: 'neurons',
       target: 'twice',
-      targetHandle: 'bottom',
+      targetHandle: 'in2',
     })
     g = {
       ...g,

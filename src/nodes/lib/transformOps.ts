@@ -402,11 +402,11 @@ export function checkWarpSize(ctx: Warner, points: number, landmarks: number): v
 }
 
 // ---------------------------------------------------------------------------
-// Two collections into one
+// Any number of collections into one
 // ---------------------------------------------------------------------------
 
 /**
- * Whether two geometry values can be stacked, and what to say when they cannot.
+ * Whether a set of geometry values can be stacked, and what to say when it cannot.
  *
  * Three questions, in the order that a reader would want them answered — and each of the three
  * is a case where combining anyway produces a picture rather than an error.
@@ -428,50 +428,73 @@ export function checkWarpSize(ctx: Warner, points: number, landmarks: number): v
  * Absent means unknown throughout: the mock connectome and any Custom dataset produce geometry
  * with no space at all, and refusing on a fact nobody stated would break every example.
  */
-export function checkStackable(top: GeometryValue, bottom: GeometryValue): void {
-  if (top.kind !== bottom.kind) {
-    throw new Error(
-      `Top is ${geometryNoun(top)} and Bottom is ${geometryNoun(bottom)}. These are different ` +
-        'kinds of geometry and cannot share one collection — wire them to separate ports on ' +
-        'the 3D View instead.',
-    )
-  }
+export function checkStackable(inputs: readonly GeometryValue[]): void {
+  const first = inputs[0]
+  if (!first) return
 
-  if (top.units && bottom.units && top.units !== bottom.units) {
-    throw new Error(
-      `Top is in ${top.units} and Bottom is in ${bottom.units}. Stacked, half the collection ` +
-        'would be drawn at the wrong scale with nothing to say so.',
-    )
-  }
+  /*
+   * Each input is checked against the first that *stated* the property, not against its
+   * predecessor. Two things follow, and both are wrong in the chained version. A refusal at
+   * input 4 names the input that actually disagrees rather than the one next to it. And a
+   * collection whose first member states no units at all still catches a nanometre input against
+   * a voxel one three sockets later — where a check against input 1 would pass, and
+   * `stackGeometry` would then stamp the whole collection with whichever unit it saw first.
+   */
+  let units: { value: string; input: number } | undefined = undefined
+  let space: { value: string; input: number } | undefined = undefined
 
-  if (top.space && bottom.space && top.space !== bottom.space) {
-    throw new Error(
-      `Top is in ${top.space} and Bottom is in ${bottom.space}. Two template spaces are ` +
-        'hundreds of micrometres apart, so this would draw two clouds in opposite corners of ' +
-        'an empty scene. Put both sides through Transform Neurons first.',
-    )
-  }
+  inputs.forEach((input, i) => {
+    const where = `Input ${i + 1}`
+    if (input.kind !== first.kind) {
+      throw new Error(
+        `Input 1 is ${geometryNoun(first)} and ${where} is ${geometryNoun(input)}. These are ` +
+          'different kinds of geometry and cannot share one collection — wire them to separate ' +
+          'ports on the 3D View instead.',
+      )
+    }
+    if (input.units) {
+      if (units && units.value !== input.units) {
+        throw new Error(
+          `Input ${units.input} is in ${units.value} and ${where} is in ${input.units}. ` +
+            'Stacked, part of the collection would be drawn at the wrong scale with nothing to ' +
+            'say so.',
+        )
+      }
+      units ??= { value: input.units, input: i + 1 }
+    }
+    if (input.space) {
+      if (space && space.value !== input.space) {
+        throw new Error(
+          `Input ${space.input} is in ${space.value} and ${where} is in ${input.space}. Two ` +
+            'template spaces are hundreds of micrometres apart, so this would draw two clouds ' +
+            'in opposite corners of an empty scene. Put every input through Transform Neurons ' +
+            'first.',
+        )
+      }
+      space ??= { value: input.space, input: i + 1 }
+    }
+  })
 }
 
 /**
- * Two geometry collections end to end, with their attribute tables stacked alongside.
+ * Any number of geometry collections end to end, with their attribute tables stacked alongside.
  *
- * **The two halves have to move together**, which is the whole difficulty and the reason this
- * is not just array concatenation. `SkeletonsValue` promises one attribute row per item *in the
- * same order*; every consumer reads a neuron's type by indexing the table with the item's
- * position. Concatenating the items and the rows in different orders is a collection where
- * every neuron after the first input's length wears somebody else's name — and it draws.
+ * **The geometry and its table have to move together**, which is the whole difficulty and the
+ * reason this is not just array concatenation. `SkeletonsValue` promises one attribute row per
+ * item *in the same order*; every consumer reads a neuron's type by indexing the table with the
+ * item's position. Concatenating the items and the rows in different orders is a collection
+ * where every neuron after the first input's length wears somebody else's name — and it draws.
  *
  * ## What is recomputed, and what is dropped
  *
  * **Bounds** are recomputed, being a roll-up over exactly what changed. **`detail`** is kept
- * only where both sides agree: a mesh set at the finest level stacked with one at the coarsest
+ * only where every input agrees: a mesh set at the finest level stacked with one at the coarsest
  * has no single level of detail, and a caption claiming one is worse than a caption claiming
  * none. Same call `filterNetwork` makes about degrees.
  *
- * **`units` and `space` survive when either side states them**, having been checked compatible
- * by `checkStackable` — so a set that knows where it is passes that on to a collection whose
- * other half did not, which is the only direction that adds information.
+ * **`units` and `space` survive when any input states them**, having been checked compatible by
+ * `checkStackable` — so a set that knows where it is passes that on to a collection whose other
+ * members did not, which is the only direction that adds information.
  *
  * ## Ids are left exactly alone
  *
@@ -488,41 +511,56 @@ export function checkStackable(top: GeometryValue, bottom: GeometryValue): void 
  * as the only workable one: they *are* the same neuron.
  */
 export function stackGeometry(
-  top: GeometryValue,
-  bottom: GeometryValue,
+  inputs: readonly GeometryValue[],
   options: StackOptions = {},
 ): GeometryValue {
-  checkStackable(top, bottom)
-  const attributes = stackTables(top.attributes, bottom.attributes, options)
+  checkStackable(inputs)
+  const first = inputs[0]
+  if (!first) throw new Error('Nothing to stack.')
+  const attributes = stackTables(
+    inputs.map((input) => input.attributes),
+    options,
+  )
 
-  // `units` and `space` are equal or one-sided by the time `checkStackable` has passed, so
-  // either side's answer is the collection's. Built without the key rather than with an
-  // explicit `undefined`, for `geometryFrame`'s structured-clone reason.
+  // `units` and `space` are equal or unstated across the inputs by the time `checkStackable` has
+  // passed, so the first input that states one answers for the collection. Built without the key
+  // rather than with an explicit `undefined`, for `geometryFrame`'s structured-clone reason.
+  const units = inputs.find((input) => input.units)?.units
+  const space = inputs.find((input) => input.space)?.space
   const frame = {
-    ...((top.units ?? bottom.units) ? { units: top.units ?? bottom.units } : {}),
-    ...((top.space ?? bottom.space) ? { space: top.space ?? bottom.space } : {}),
+    ...(units ? { units } : {}),
+    ...(space ? { space } : {}),
   }
 
-  if (top.kind === 'points' && bottom.kind === 'points') {
-    const positions = new Float32Array(top.positions.length + bottom.positions.length)
-    positions.set(top.positions)
-    positions.set(bottom.positions, top.positions.length)
+  if (first.kind === 'points') {
+    const clouds = inputs as readonly PointsValue[]
+    const positions = new Float32Array(
+      clouds.reduce((total, cloud) => total + cloud.positions.length, 0),
+    )
+    let offset = 0
+    for (const cloud of clouds) {
+      positions.set(cloud.positions, offset)
+      offset += cloud.positions.length
+    }
     return { kind: 'points', positions, attributes, bounds: boundsOf([positions]), ...frame }
   }
 
-  if (top.kind === 'skeletons' && bottom.kind === 'skeletons') {
-    const items = [...top.items, ...bottom.items]
+  if (first.kind === 'skeletons') {
+    const sets = inputs as readonly SkeletonsValue[]
+    const items = sets.flatMap((set) => set.items)
     /*
-     * Kept only where both sides agree, which is the rule `detail` follows just below and for
+     * Kept only where *every* input agrees, which is the rule `detail` follows just below and for
      * the same reason: two routes in one collection is no route. Stacking a traced
      * reconstruction onto a chunk-graph one is a legitimate thing to want — that is what the
      * node is for — but the result cannot be labelled as either, and a card naming one of them
-     * would be claiming something about half its contents.
+     * would be claiming something about part of its contents.
      *
-     * By **id**, not by identity: these come from two fetches and are equal objects at best.
+     * By **id**, not by identity: these come from separate fetches and are equal objects at best.
      */
     const provenance =
-      top.provenance && top.provenance.id === bottom.provenance?.id ? top.provenance : undefined
+      first.provenance && sets.every((set) => set.provenance?.id === first.provenance?.id)
+        ? first.provenance
+        : undefined
     return {
       kind: 'skeletons',
       items,
@@ -533,14 +571,14 @@ export function stackGeometry(
     }
   }
 
-  const meshTop = top as MeshesValue
-  const meshBottom = bottom as MeshesValue
-  const items = [...meshTop.items, ...meshBottom.items]
+  const sets = inputs as readonly MeshesValue[]
+  const items = sets.flatMap((set) => set.items)
   // Two levels of detail in one collection is no level of detail. Compared by value rather than
-  // by identity: these come from two fetches and are structurally equal at best.
+  // by identity: these come from separate fetches and are structurally equal at best.
   const detail =
-    meshTop.detail && meshBottom.detail && sameDetail(meshTop.detail, meshBottom.detail)
-      ? meshTop.detail
+    sets[0]!.detail &&
+    sets.every((set) => set.detail && sameDetail(set.detail, sets[0]!.detail!))
+      ? sets[0]!.detail
       : undefined
   return {
     kind: 'meshes',

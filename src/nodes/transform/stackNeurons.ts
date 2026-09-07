@@ -1,5 +1,5 @@
 /**
- * Stack Neurons: two collections of geometry end to end.
+ * Stack Neurons: any number of geometry collections end to end.
  *
  * The geometry sibling of `Stack Tables`, and it exists for one thing above all — **putting
  * neurons from two datasets in one 3D View**. That is now a question worth asking, because
@@ -16,11 +16,13 @@
  * `NBLAST` and `Select One` want, and each of those would need the same widening again. One
  * value that *is* the union is the thing worth having; drawing it is one consumer.
  *
- * ## Two inputs, chained for more
+ * ## As many inputs as you ask for
  *
- * Exactly `Stack Tables`' shape, and the same consequence follows: the source column
- * distinguishes the two inputs of the stack that *added* it, so three collections want either a
- * distinct column name per level or the labels set at each one.
+ * Exactly `Stack Tables`' shape, down to the shared params in `nodes/lib/stackParams.ts`. It used
+ * to be a fixed pair chained for more, and that is what made the source column mean two things:
+ * each card labelled *its own* two inputs, so a three-dataset scene named the third and coloured
+ * the first two alike. One card labels every input once, which is the whole of what the 3D View's
+ * colour encoding reads.
  *
  * ## What it refuses
  *
@@ -40,8 +42,8 @@
 
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
-import type { StackOptions } from '../lib/tableOps'
 import { stackSchema } from '../lib/tableOps'
+import { readStackOptions, stackCountParam, stackLabelParams } from '../lib/stackParams'
 import {
   geometryNoun,
   isGeometryKind,
@@ -50,48 +52,33 @@ import {
   schemaOfGeometry,
 } from '../lib/transformOps'
 
-/** The two labels and the column they go in, read once so both halves cannot disagree. */
-function stackOptions(params: Record<string, unknown>): StackOptions {
-  return {
-    sourceColumn: String(params.sourceColumn ?? ''),
-    topLabel: String(params.topLabel ?? STACK_LABELS.top),
-    bottomLabel: String(params.bottomLabel ?? STACK_LABELS.bottom),
-  }
-}
-
-/**
- * What the source column says when nobody renamed the inputs.
- *
- * One pair, read by the param declarations *and* by the reader that falls back when a param is
- * absent — which is exactly the disagreement this replaced: the params declared `First`/`Second`
- * while the fallback said `Top`/`Bottom`, so which one a column ended up carrying depended on
- * whether the param had ever been written. `core.stack` keeps its own `Top`/`Bottom`, which are
- * that node's declared defaults and appear in saved graphs.
- */
-export const STACK_LABELS = { top: 'First', bottom: 'Second' } as const
-
 export const stackNeuronsNode = registerNode({
   type: 'neuron.stack',
   label: 'Stack Neurons',
   category: 'transform',
-  description: 'Combine two sets of skeletons, meshes or points into one collection.',
+  description: 'Combine several sets of skeletons, meshes or points into one collection.',
   guide:
-    'The geometry counterpart of Stack Tables: two collections end to end, with their ' +
-    'attribute tables stacked alongside. This is how neurons from two datasets reach one 3D ' +
-    'View — transform both into a shared space first, then stack them and colour by the ' +
-    'source column. Both sides must be the same kind, in the same units and the same space.',
+    'The geometry counterpart of Stack Tables: several collections end to end, with their ' +
+    'attribute tables stacked alongside. This is how neurons from two or more datasets reach ' +
+    'one 3D View — transform each into a shared space first, then stack them and colour by the ' +
+    'source column. Every input must be the same kind, in the same units and the same space.',
   // Concatenating buffers already in hand. No network, no runtime, one pass.
   cost: 'cheap',
   /*
-   * `any` on both ports, on `core.selectOne`'s reasoning: the type system cannot say "skeletons,
+   * `any` on every port, on `core.selectOne`'s reasoning: the type system cannot say "skeletons,
    * meshes or points", so the port says `any` and the refusal is a validation question.
    */
   inputs: [
-    { id: 'top', label: 'First', type: T.any() },
-    { id: 'bottom', label: 'Second', type: T.any() },
+    {
+      repeat: stackCountParam.id,
+      ports: [{ id: 'in', label: 'Input {n}', type: T.any() }],
+      // What indices 1 and 2 were called when this node had a fixed pair.
+      formerIds: ['top', 'bottom'],
+    },
   ],
   outputs: [{ id: 'out', label: 'Neurons', type: T.any() }],
   params: [
+    stackCountParam,
     {
       id: 'sourceColumn',
       kind: 'string',
@@ -100,67 +87,48 @@ export const stackNeuronsNode = registerNode({
       /*
        * Filled by default, unlike `Stack Tables`' — and the difference is what the two are for.
        * A stacked *table* is usually rows of the same kind of thing and the column is an extra;
-       * a stacked *collection* is usually two datasets in one scene, where being unable to tell
-       * which neuron came from where is the failure rather than an inconvenience.
+       * a stacked *collection* is usually several datasets in one scene, where being unable to
+       * tell which neuron came from where is the failure rather than an inconvenience.
        */
       default: 'source',
       help: 'Adds a column naming which input each neuron came from — this is what a colour encoding reads in the 3D View. Empty adds none.',
     },
-    {
-      id: 'topLabel',
-      kind: 'string',
-      label: 'First label',
-      default: STACK_LABELS.top,
-      advanced: true,
-      // Out of the provenance key while there is no column to put them in, so renaming the
-      // inputs of a stack that is not labelling anything cannot stale a downstream result.
-      visibleIf: (params) => String(params.sourceColumn ?? '').trim() !== '',
-    },
-    {
-      id: 'bottomLabel',
-      kind: 'string',
-      label: 'Second label',
-      default: STACK_LABELS.bottom,
-      advanced: true,
-      visibleIf: (params) => String(params.sourceColumn ?? '').trim() !== '',
-    },
+    ...stackLabelParams(['First', 'Second']),
   ],
 
   /**
-   * Unknown until *both* sides are known, which is `Stack Tables`' rule and not laziness.
+   * Unknown until *every* input is known, which is `Stack Tables`' rule and not laziness.
    *
-   * The attribute schema depends on both, so publishing the first's alone would advertise a
-   * table missing every column the second contributes — and a picker downstream would be
+   * The attribute schema depends on all of them, so publishing the first's alone would advertise
+   * a table missing every column the others contribute — and a picker downstream would be
    * configured against a shape that never arrives.
    */
   inferOutputs: (ctx) => {
-    const top = ctx.inputs.top
-    const bottom = ctx.inputs.bottom
-    if (!top || !bottom || top.kind !== bottom.kind) return { out: T.any() }
+    const ports = ctx.inputPorts()
+    const types = ports.map((port) => ctx.inputs[port.id])
+    const first = types[0]
+    if (!first || types.some((type) => !type || type.kind !== first.kind))
+      return { out: T.any() }
 
     const schema = stackSchema(
-      schemaOfGeometry(top),
-      schemaOfGeometry(bottom),
-      stackOptions(ctx.params),
+      types.map(schemaOfGeometry),
+      readStackOptions(ctx.params, ports.length),
     )
-    if (top.kind === 'skeletons') return { out: T.skeletons(schema) }
-    if (top.kind === 'meshes') return { out: T.meshes(schema) }
-    if (top.kind === 'points') return { out: T.points(schema) }
+    if (first.kind === 'skeletons') return { out: T.skeletons(schema) }
+    if (first.kind === 'meshes') return { out: T.meshes(schema) }
+    if (first.kind === 'points') return { out: T.points(schema) }
     return { out: T.any() }
   },
 
   validate: (ctx) => {
-    const top = ctx.inputs.top
-    const bottom = ctx.inputs.bottom
+    const ports = ctx.inputPorts()
     const issues: string[] = []
 
-    for (const [label, type] of [
-      ['First', top],
-      ['Second', bottom],
-    ] as const) {
+    for (const port of ports) {
+      const type = ctx.inputs[port.id]
       if (type && !isGeometryKind(type.kind)) {
         issues.push(
-          `${label} is not geometry — Stack Neurons takes skeletons, meshes or points.`,
+          `${port.label} is not geometry — Stack Neurons takes skeletons, meshes or points.`,
         )
       }
     }
@@ -170,18 +138,21 @@ export const stackNeuronsNode = registerNode({
      * data one: it is visible from the types alone, it will not fix itself on a Run, and the
      * remedy is a different wire rather than a different upstream node. Units and space are
      * value-level facts a type cannot carry, so those wait for `evaluate`.
+     *
+     * Against the *first stated* kind rather than pairwise, which is `checkStackable`'s rule and
+     * for its reason: a clash at input 4 names the input that has to change, not the one next
+     * to it. `any` states nothing, so an unresolved socket neither answers nor accuses.
      */
-    if (
-      top &&
-      bottom &&
-      isGeometryKind(top.kind) &&
-      isGeometryKind(bottom.kind) &&
-      top.kind !== bottom.kind
-    ) {
-      {
+    const stated = ports
+      .map((port) => ({ port, kind: ctx.inputs[port.id]?.kind }))
+      .filter((entry) => entry.kind && entry.kind !== 'any' && isGeometryKind(entry.kind))
+    const first = stated[0]
+    for (const entry of stated) {
+      if (first && entry.kind !== first.kind) {
         issues.push(
-          `First is ${top.kind} and Second is ${bottom.kind}. Different kinds of geometry ` +
-            'cannot share one collection — the 3D View takes them on separate ports.',
+          `${first.port.label} is ${first.kind} and ${entry.port.label} is ${entry.kind}. ` +
+            'Different kinds of geometry cannot share one collection — the 3D View takes them ' +
+            'on separate ports.',
         )
       }
     }
@@ -189,15 +160,18 @@ export const stackNeuronsNode = registerNode({
   },
 
   evaluate: (ctx) => {
-    const top = ctx.input('top')
-    const bottom = ctx.input('bottom')
-    if (!isGeometryValue(top) || !isGeometryValue(bottom)) {
-      throw new Error('Stack Neurons takes skeletons, meshes or points on both inputs.')
-    }
+    const ports = ctx.inputPorts()
+    const inputs = ports.map((port) => {
+      const value = ctx.input(port.id)
+      if (!isGeometryValue(value)) {
+        throw new Error('Stack Neurons takes skeletons, meshes or points on every input.')
+      }
+      return value
+    })
 
     // `stackGeometry` runs `checkStackable` itself, so the refusals cannot be skipped by a
     // caller — the same reason `datasetRequest` bundles the annotations with the id.
-    const out = stackGeometry(top, bottom, stackOptions(ctx.params))
+    const out = stackGeometry(inputs, readStackOptions(ctx.params, ports.length))
     const count = out.kind === 'points' ? out.attributes.length : out.items.length
     ctx.progress(1, `${count.toLocaleString()} ${geometryNoun(out)}`)
     return { out }

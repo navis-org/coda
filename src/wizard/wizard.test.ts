@@ -35,6 +35,7 @@ import { isMatrixValue, isTableValue } from '../core/values'
 import { registerBuiltinSources } from '../data/builtins'
 import { requireSource } from '../data/source'
 import { DATASET_FAMILIES, datasetFamily, starterFamilies } from '../nodes/lib/datasetFamilies'
+import { stackLabelParamId } from '../nodes/lib/stackParams'
 import type { BuildOptions } from './build'
 import { CROSS_SETS, GROWING_CROSS_SETS } from '../test/crossSets'
 import { parseMarkdown } from '../ui/markdown'
@@ -1208,23 +1209,35 @@ describe('the cross-dataset path', () => {
    * exists in either input, so a chain naming them all alike builds a graph that refuses on Run —
    * a failure no amount of inference can see.
    */
-  it('chains the geometry stacks and gives each level its own source column', () => {
+  it('folds every dataset onto one stack, with one source column', () => {
+    /*
+     * One card at every arity, which is what the `Inputs` spinner bought. The chain it replaced
+     * needed a *distinct* column per level — a stack refuses to add one an input already has —
+     * so only the outermost partitioned the whole collection and the scene had to be pointed at
+     * whichever that was. Here there is one column and it names every dataset.
+     */
     for (const datasets of GROWING_CROSS_SETS) {
       const graph = buildWorkflow(answersFor([...datasets], 'xmorphology', ['viewer3d']))
       const stacks = graph.nodes.filter((node) => node.type === 'neuron.stack')
-      expect(stacks.length, datasets.join('+')).toBe(datasets.length - 1)
+      expect(stacks.length, datasets.join('+')).toBe(1)
 
-      const columns = stacks.map((node) => String(node.params.sourceColumn))
-      expect(new Set(columns).size, `${datasets.join('+')}: ${columns.join(', ')}`).toBe(
-        columns.length,
+      const stack = stacks[0]!
+      expect(stack.params.inputCount, datasets.join('+')).toBe(datasets.length)
+      expect(stack.params.sourceColumn).toBe(STACK_SOURCE_COLUMN)
+
+      // A label per dataset, all of them distinct — the whole point of the column.
+      const labels = datasets.map((_key, i) => stack.params[stackLabelParamId(i + 1)])
+      expect(new Set(labels).size, `${datasets.join('+')}: ${labels.join(', ')}`).toBe(
+        datasets.length,
       )
-      expect(columns[0]).toBe(STACK_SOURCE_COLUMN)
 
-      // The scene colours by the column that partitions the *whole* collection, which is the
-      // outermost one — at two datasets that is `STACK_SOURCE_COLUMN` and `VIEWS`' declared value
-      // is already right, above two it is the suffixed one.
+      // Every dataset's transform reaches its own socket, so nothing is dropped by a wire that
+      // silently replaced another — input ports take one edge each.
+      const wired = graph.edges.filter((edge) => edge.target === stack.id)
+      expect(new Set(wired.map((edge) => edge.targetHandle)).size).toBe(datasets.length)
+
       const view = graph.nodes.find((node) => node.id === 'view')!
-      expect(view.params.skeletonColorBy, datasets.join('+')).toBe(columns.at(-1))
+      expect(view.params.skeletonColorBy, datasets.join('+')).toBe(STACK_SOURCE_COLUMN)
     }
   })
 

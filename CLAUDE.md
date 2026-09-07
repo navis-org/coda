@@ -111,6 +111,21 @@ Cross-cutting — these bite in code that is not obviously "about" the area:
   which for a count is almost never true. `ctx.warn` is the channel; `CRASH_FLOOR_BYTES` is
   the only thing left that refuses, and only for an allocation. Time is never a refusal.
   See [docs/limits.md](docs/limits.md).
+- **A port id has a history, and a node that grows a repeat where it had a fixed pair needs it.**
+  `Stack Tables` and `Stack Neurons` went from `top`/`bottom` to `in1 … inN` on an `Inputs`
+  spinner. Every stored edge into either socket then names a port the node no longer has, and
+  `deserializeGraph` drops such an edge with a warning — on share links and `.coda.json` files
+  nobody can re-save. So `PortGroupDef.formerIds` is positional (`['top','bottom']`), rides on the
+  resolved port, and is read by `healHandle` **only after every live id has missed**, so a former
+  id cannot shadow one that is live today. `registerNode` refuses it on a group repeating a
+  *tuple*, where a position names two ports and the migration would silently cover half the pair.
+  The **params** need the same care and get it a different way: the first two label ids are kept
+  as they were (`nodes/lib/stackParams.ts`), because `normalizeParams` reads only declared params
+  so a renamed one is ignored rather than migrated — and the new uniform defaults are declared
+  with the old ones in `absentMeans`, absence and the default being different answers about a
+  column of *data*. Not a load-time migration: `storedParams` records why that is the wrong tool,
+  and an edge is worse than a param there, the wizard and thirty tests building edges by hand.
+  See [docs/nodes.md](docs/nodes.md).
 - **A param added to an existing node type has three states, and a card can only draw two.**
   `defaultParams` writes a default at *creation* and never runs over `deserializeGraph`, so a
   stored node without the key was written by a build that had no such control — not the same as
@@ -423,10 +438,11 @@ Area-specific — the rule, then the doc that holds why:
   `join`s and `assembleGraph` keys by id — `prefixChain` rewrites a **whole chain** rather than
   threading a prefix through its three readers, the first dataset keeping bare ids; FlyWire and BANC
   both call a card `annotations`, of different types, so the test asserts the *type* at each id.
-  `Stack Neurons` **throws** on a source column already present in either input, so an N-dataset
-  chain suffixes each level and the 3D scene colours by the **outermost** — a run-time error no
-  inference can see; the table stack adds none at all, `Qualify Ids` having put the dataset in the
-  id. And `DATASET_ROW` (3) is **not `ARM_ROW` (2) raised**: the extra row is the Description
+  Every dataset meets on **one variadic `Stack Neurons`**, which is what retired the chain of
+  two-input ones: a stack throws on a source column an input already has, so the levels could not
+  share a name, and the 3D scene had to colour by the **outermost** — a run-time error no
+  inference can see, still pinned directly. The table stack adds none at all, `Qualify Ids` having
+  put the dataset in the id. And `DATASET_ROW` (3) is **not `ARM_ROW` (2) raised**: the extra row is the Description
   companion 300px below each dataset node, which a head-clearance band put on top of the *next*
   dataset — found at four datasets, invisible at two. `DatasetFamily.typeColumns` pre-fills the
   mapper's pickers (decision 3's "a default a reader can see", not a source capability), and

@@ -53,6 +53,7 @@ import { ID_COLUMN_NAME } from '../core/ids'
 import { encodeRows } from '../data/filterRows'
 import { inputPorts, portIdAt } from '../core/ports'
 import { repeatParamId } from '../nodes/lib/repeatParams'
+import { stackLabelParamId } from '../nodes/lib/stackParams'
 import { getNodeDef } from '../core/registry'
 import type { AnnotationChain } from '../nodes/lib/annotationChain'
 import {
@@ -647,20 +648,15 @@ interface Band {
 }
 
 /**
- * Two to four collections folded into one, through a chain of two-input stacks.
+ * Two to four collections folded into one, on a single variadic stack.
  *
- * Both stack nodes take exactly two inputs and say so — `Stack Neurons`' own header records that
- * three collections are a chain — so N datasets are N−1 cards, each taking what the last one
- * produced. At two, which is the case anybody is actually building, it is one card.
- *
- * **Each level needs its own source column, and that is a rule of the node rather than a choice
- * here**: `stackTables` throws where the column it is about to add already exists in either
- * input, so a chain that named them all `dataset` would build a graph that refuses on Run. So
- * level 2 writes the name it was given and each level above writes that name suffixed, with its
- * top label naming everything accumulated so far. The *outermost* column is therefore the one
- * that partitions the whole collection, and it is what the 3D scene is pointed at; the inner
- * ones are still there, one click away in the colour picker, and split the earlier datasets
- * apart again.
+ * This was a **chain** of two-input stacks until both nodes grew an `Inputs` spinner, and what
+ * the chain cost is worth recording, because it is the reason the feature was worth having. A
+ * stack refuses to add a source column that already exists on an input, so the levels could not
+ * share one name: level 2 wrote `dataset`, level 3 wrote `dataset3`, and only the *outermost*
+ * column partitioned the whole collection — the inner ones split the earlier datasets apart
+ * again, and the 3D scene had to be pointed at whichever one happened to be last. One card
+ * labels every input once, so there is one column and it means one thing at every arity.
  *
  * `sourceColumn` absent adds none, which is what the table side wants: a co-clustering has
  * already been through `Qualify Ids`, so its rows carry their dataset *in the id* — which is the
@@ -669,7 +665,7 @@ interface Band {
 interface StackChain {
   nodes: Placement[]
   links: Link[]
-  /** What the fold produced: the last stack's output, or the lone input where there was one. */
+  /** What the fold produced: the stack's output, or the lone input where there was one. */
   out: [string, string]
   /** How many columns it consumed, so the caller can place what comes after it. */
   cols: number
@@ -704,11 +700,6 @@ const VECTOR_SIMILARITY = {
  */
 const VECTOR_CONNECTIVITY = { direction: 'both', minWeight: 3 } as const
 
-/** Level 2 writes the name it was given; each level above suffixes it with its own level. */
-function levelColumn(base: string, level: number): string {
-  return level === 2 ? base : `${base}${level}`
-}
-
 function stackChain(spec: {
   type: 'core.stack' | 'neuron.stack'
   /** `[nodeId, port]` per dataset, in the order they were chosen. */
@@ -719,40 +710,45 @@ function stackChain(spec: {
   row: number
   sourceColumn?: string
 }): StackChain {
-  const nodes: Placement[] = []
-  const links: Link[] = []
-  let out = spec.inputs[0] ?? (['ds', 'dataset'] as [string, string])
-  let column: string | undefined
+  // One input is not a stack. The caller's chain still has to end somewhere, so that input's own
+  // socket is the answer — which is what the fold used to return before it ran.
+  const lone = spec.inputs.length < 2
+  const out: [string, string] = lone ? (spec.inputs[0] ?? ['ds', 'dataset']) : ['stack', 'out']
+  if (lone) return { nodes: [], links: [], out, cols: 0 }
 
-  spec.inputs.slice(1).forEach((input, offset) => {
-    const level = offset + 2
-    const id = suffixed('stack', level)
-    column = spec.sourceColumn ? levelColumn(spec.sourceColumn, level) : undefined
-    nodes.push({
-      id,
-      type: spec.type,
-      col: spec.col + offset,
-      row: spec.row + offset * 0.5,
-      params: column
-        ? {
-            sourceColumn: column,
-            // Everything already folded in on one side, the newly arriving dataset on the other.
-            // At two datasets — the case this is nearly always built for — that is just the two
-            // names.
-            topLabel: spec.labels.slice(0, level - 1).join(' + '),
-            bottomLabel: spec.labels[level - 1] ?? `Dataset ${level}`,
-          }
-        : {},
-    })
-    links.push([out[0], out[1], id, 'top'], [input[0], input[1], id, 'bottom'])
-    out = [id, 'out']
-  })
-
+  const column = spec.sourceColumn
   return {
-    nodes,
-    links,
+    nodes: [
+      {
+        id: 'stack',
+        type: spec.type,
+        col: spec.col,
+        row: spec.row,
+        params: {
+          inputCount: spec.inputs.length,
+          ...(column
+            ? {
+                sourceColumn: column,
+                ...Object.fromEntries(
+                  spec.labels
+                    .slice(0, spec.inputs.length)
+                    .map((label, i) => [stackLabelParamId(i + 1), label]),
+                ),
+              }
+            : {}),
+        },
+      },
+    ],
+    // `portIdAt`, as every other variadic link in this file does — the suffix rule has one
+    // statement and a second one here would address sockets that do not exist.
+    links: spec.inputs.map((input, i): Link => [
+      input[0],
+      input[1],
+      'stack',
+      portIdAt('in', i + 1),
+    ]),
     out,
-    cols: Math.max(0, spec.inputs.length - 1),
+    cols: 1,
     ...(column ? { sourceColumn: column } : {}),
   }
 }
@@ -1430,10 +1426,10 @@ function bodyOf(
               ? {
                   ...node,
                   /*
-                   * The **outermost** stack's column, which is the one that partitions the whole
-                   * collection — at two datasets that is `STACK_SOURCE_COLUMN` and `VIEWS`'
-                   * declared value is already right; above two it is the suffixed one, for the
-                   * reason `stackChain` records.
+                   * The stack's column, which partitions the whole collection at every arity —
+                   * one card, one column. Set here rather than left to `VIEWS`' declared value
+                   * because that value is right only while the two agree, and this is where the
+                   * name is actually chosen.
                    */
                   params: { ...(node.params ?? {}), skeletonColorBy: stacks.sourceColumn },
                 }

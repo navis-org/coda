@@ -296,16 +296,17 @@ through the chain, so a FlyWire node without one has no type column for the mapp
 The folding rule is unchanged, which means BANC's single card is left unfolded beside FlyWire's
 frame.
 
-**`Stack Neurons` throws on a source column that already exists in either input.** So an N-dataset
-chain of two-input stacks cannot name them all alike; level 2 writes the name it was given and each
-level above writes that name suffixed, its top label naming everything accumulated so far. The
-*outermost* column is therefore the one that partitions the whole collection and it is what the 3D
-scene is pointed at — at two datasets that is `dataset` and `VIEWS`' declared value is already
-right, above two it is the suffixed one and the earlier columns are still there, one click away in
-the colour picker. This is a run-time error no amount of inference can see, which is why it is
-pinned directly. The **table** stack adds no source column at all: a co-clustering has been through
-`Qualify Ids`, so its rows carry their dataset *in the id*, and a second column saying the same
-thing would be a second key.
+**Every dataset meets on one variadic `Stack Neurons`, and the chain it replaced is the reason it
+is worth having.** `Stack Neurons` throws on a source column that already exists in an input, so a
+chain of two-input stacks could not name its levels alike: level 2 wrote the name it was given,
+each level above wrote it suffixed, and only the *outermost* column partitioned the whole
+collection — so the 3D scene had to be pointed at whichever that happened to be, with the earlier
+columns still there splitting the earlier datasets apart again. One card now takes `inputCount`
+sockets and labels each once, so there is one column, `VIEWS`' declared value is right at every
+arity, and the throw is unreachable. It was a run-time error no amount of inference could see,
+which is why the arrangement is still pinned directly. The **table** stack adds no source column at
+all: a co-clustering has been through `Qualify Ids`, so its rows carry their dataset *in the id*,
+and a second column saying the same thing would be a second key.
 
 ### Two rows where there was one
 

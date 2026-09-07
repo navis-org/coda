@@ -49,7 +49,7 @@ describe('stackGeometry', () => {
      * item's position. Concatenated in different orders, every neuron after the first input's
      * length wears somebody else's name — and it draws perfectly well.
      */
-    const out = stackGeometry(skeletons(['1', '2']), skeletons(['3', '4', '5']))
+    const out = stackGeometry([skeletons(['1', '2']), skeletons(['3', '4', '5'])])
     expect(out.kind).toBe('skeletons')
     if (out.kind !== 'skeletons') throw new Error('kind')
     expect(out.items.map((i) => i.id)).toEqual(['1', '2', '3', '4', '5'])
@@ -59,9 +59,9 @@ describe('stackGeometry', () => {
   it('recomputes the bounding box over both halves', () => {
     // A roll-up, like every other bounds in this codebase. Kept from one side, a viewer frames
     // half the scene and the other half sits outside the camera.
-    const out = stackGeometry(skeletons(['1']), skeletons(['2', '3']))
+    const out = stackGeometry([skeletons(['1']), skeletons(['2', '3'])])
     expect(out.bounds.max[0]).toBeGreaterThan(
-      stackGeometry(skeletons(['1']), skeletons(['1'])).bounds.max[0] - 1,
+      stackGeometry([skeletons(['1']), skeletons(['1'])]).bounds.max[0] - 1,
     )
     expect(out.bounds.min).toEqual([0, 0, 0])
   })
@@ -69,12 +69,12 @@ describe('stackGeometry', () => {
   it('adds the source column, and promises it in the schema', () => {
     // Invariant 3: `inferOutputs` publishes what `evaluate` builds, or a downstream picker is
     // configured against a shape that never arrives.
-    const options = { sourceColumn: 'origin', topLabel: 'A', bottomLabel: 'B' }
+    const options = { sourceColumn: 'origin', labels: ['A', 'B'] }
     const top = skeletons(['1'])
     const bottom = skeletons(['2'])
 
-    const promised = stackSchema(top.attributes.schema, bottom.attributes.schema, options)
-    const built = stackGeometry(top, bottom, options)
+    const promised = stackSchema([top.attributes.schema, bottom.attributes.schema], options)
+    const built = stackGeometry([top, bottom], options)
 
     expect(promised?.columns.map((c) => c.name)).toEqual(
       built.attributes.schema.columns.map((c) => c.name),
@@ -89,10 +89,9 @@ describe('stackGeometry', () => {
      * selection back as those keys and `rowsWithIds` matches them against `neuronId`, which is
      * the identity and cannot be respelled. A suffixed key matches no row.
      */
-    const out = stackGeometry(skeletons(['1', '2']), skeletons(['1', '2']), {
+    const out = stackGeometry([skeletons(['1', '2']), skeletons(['1', '2'])], {
       sourceColumn: 'side',
-      topLabel: 'Original',
-      bottomLabel: 'Mirrored',
+      labels: ['Original', 'Mirrored'],
     })
     if (out.kind !== 'skeletons') throw new Error('kind')
     expect(out.items.map((i) => i.id)).toEqual(['1', '2', '1', '2'])
@@ -103,12 +102,27 @@ describe('stackGeometry', () => {
   it('carries a space that only one side knew', () => {
     // The only direction that adds information: a set that knows where it is passes that on to
     // a collection whose other half never said.
-    const out = stackGeometry(skeletons(['1'], { space: 'MANC' }), skeletons(['2']))
+    const out = stackGeometry([skeletons(['1'], { space: 'MANC' }), skeletons(['2'])])
     expect(out.space).toBe('MANC')
     expect(out.units).toBe('nm')
   })
 
-  it('keeps the skeleton route only where both sides came down the same one', () => {
+  it('folds any number of collections, labelling each one once', () => {
+    /*
+     * The whole of what the `Inputs` spinner bought. Chained two-input stacks could not do this:
+     * a stack refuses to add a source column an input already has, so each card had to invent a
+     * new name and only the outermost partitioned the whole collection.
+     */
+    const out = stackGeometry([skeletons(['1']), skeletons(['2', '3']), skeletons(['4'])], {
+      sourceColumn: 'origin',
+      labels: ['A', 'B', 'C'],
+    })
+    if (out.kind !== 'skeletons') throw new Error('kind')
+    expect(out.items.map((i) => i.id)).toEqual(['1', '2', '3', '4'])
+    expect(out.attributes.data.origin).toEqual(['A', 'B', 'B', 'C'])
+  })
+
+  it('keeps the skeleton route only where every input came down the same one', () => {
     /*
      * `MeshDetail`'s rule, on the field beside it: two routes in one collection is no route.
      * Stacking a traced reconstruction onto a chunk-graph one is what this node is *for*, but
@@ -119,7 +133,7 @@ describe('stackGeometry', () => {
      */
     const l2 = { id: 'l2', label: 'level-2 chunk graph' }
     const routeOf = (top: SkeletonsValue, bottom: SkeletonsValue) => {
-      const out = stackGeometry(top, bottom)
+      const out = stackGeometry([top, bottom])
       if (out.kind !== 'skeletons') throw new Error('kind')
       return out.provenance
     }
@@ -136,6 +150,15 @@ describe('stackGeometry', () => {
     ).toBeUndefined()
     // And one side saying nothing is not agreement either.
     expect(routeOf(skeletons(['1'], { provenance: l2 }), skeletons(['2']))).toBeUndefined()
+
+    // A third input is the case a check against the first two would pass.
+    const three = stackGeometry([
+      skeletons(['1'], { provenance: l2 }),
+      skeletons(['2'], { provenance: { ...l2 } }),
+      skeletons(['3'], { provenance: { id: 'published', label: 'published skeletons' } }),
+    ])
+    if (three.kind !== 'skeletons') throw new Error('kind')
+    expect(three.provenance).toBeUndefined()
   })
 })
 
@@ -154,13 +177,13 @@ describe('checkStackable', () => {
       bounds: boundsOf([new Float32Array([0, 0, 0])]),
       units: 'nm',
     }
-    expect(() => checkStackable(skeletons(['1']), meshes)).toThrow(/separate ports/)
+    expect(() => checkStackable([skeletons(['1']), meshes])).toThrow(/separate ports/)
   })
 
   it('refuses a scale mismatch', () => {
     // Half the collection eight times too small, in one scene, with a box framing neither.
     expect(() =>
-      checkStackable(skeletons(['1']), skeletons(['2'], { units: 'voxels' })),
+      checkStackable([skeletons(['1']), skeletons(['2'], { units: 'voxels' })]),
     ).toThrow(/nm.*voxels|voxels.*nm/)
   })
 
@@ -172,10 +195,10 @@ describe('checkStackable', () => {
      */
     const error = (() => {
       try {
-        checkStackable(
+        checkStackable([
           skeletons(['1'], { space: 'FLYWIRE' }),
           skeletons(['2'], { space: 'JRCFIB2018F' }),
-        )
+        ])
         return ''
       } catch (e) {
         return String(e)
@@ -186,14 +209,38 @@ describe('checkStackable', () => {
     expect(error).toMatch(/Transform Neurons/)
   })
 
+  it('names the input that disagrees, not the one before it', () => {
+    /*
+     * Two rules in one case, and both are wrong in the pairwise version this replaced. The
+     * refusal names input 4, which is the card that has to change — chained, it would have named
+     * input 3, which is fine. And input 1 states no space at all, so a check against *it* would
+     * pass and `stackGeometry` would then stamp the collection with whichever space it saw first.
+     */
+    const error = (() => {
+      try {
+        checkStackable([
+          skeletons(['1']),
+          skeletons(['2'], { space: 'FLYWIRE' }),
+          skeletons(['3'], { space: 'FLYWIRE' }),
+          skeletons(['4'], { space: 'JRCFIB2018F' }),
+        ])
+        return ''
+      } catch (e) {
+        return String(e)
+      }
+    })()
+    expect(error).toMatch(/Input 2 is in FLYWIRE/)
+    expect(error).toMatch(/Input 4 is in JRCFIB2018F/)
+  })
+
   it('lets an unstated space through', () => {
     // Absent means unknown, not wrong — `checkNblastUnits`' rule. The mock connectome and every
     // Custom dataset produce spaceless geometry, and refusing on a fact nobody stated would
     // break every bundled example.
     expect(() =>
-      checkStackable(skeletons(['1'], { space: 'FLYWIRE' }), skeletons(['2'])),
+      checkStackable([skeletons(['1'], { space: 'FLYWIRE' }), skeletons(['2'])]),
     ).not.toThrow()
-    expect(() => checkStackable(skeletons(['1']), skeletons(['2']))).not.toThrow()
+    expect(() => checkStackable([skeletons(['1']), skeletons(['2'])])).not.toThrow()
   })
 
   it('drops a level of detail the two sides disagree on', () => {
@@ -217,8 +264,8 @@ describe('checkStackable', () => {
       units: 'nm',
       detail: { lod, levels: 3, triangles: 10 },
     })
-    expect((stackGeometry(mesh(0), mesh(2)) as MeshesValue).detail).toBeUndefined()
-    expect((stackGeometry(mesh(1), mesh(1)) as MeshesValue).detail).toEqual({
+    expect((stackGeometry([mesh(0), mesh(2)]) as MeshesValue).detail).toBeUndefined()
+    expect((stackGeometry([mesh(1), mesh(1)]) as MeshesValue).detail).toEqual({
       lod: 1,
       levels: 3,
       triangles: 10,
@@ -237,7 +284,7 @@ describe('checkStackable', () => {
       bounds: boundsOf([new Float32Array(n * 3).fill(n)]),
       units: 'nm',
     })
-    const out = stackGeometry(points(2), points(3)) as PointsValue
+    const out = stackGeometry([points(2), points(3)]) as PointsValue
     expect(out.positions.length).toBe(15)
     expect(out.attributes.length).toBe(5)
   })

@@ -1890,7 +1890,8 @@ n_3d_view <- tibble(neuronId = character(0))
 # ── Stack Neurons ──
 stack_neurons <- bind_rows(
   synapses |> mutate(`batch` = "Run 1"),
-  synapses |> mutate(`batch` = "Run 2")
+  synapses |> mutate(`batch` = "Run 2"),
+  synapses |> mutate(`batch` = "Run 3")
 )
 ```
 

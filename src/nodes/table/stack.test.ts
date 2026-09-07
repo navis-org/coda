@@ -14,10 +14,11 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { addEdge, addNode, emptyGraph } from '../../core/graph'
+import { addEdge, addNode, deserializeGraph, emptyGraph } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import { defaultParams } from '../../core/node'
+import { inputPorts } from '../../core/ports'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { columnNames, schemaOf } from '../../core/types'
@@ -73,12 +74,12 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
     target: 'b',
     targetHandle: 'dataset',
   })
-  g = addEdge(g, { source: 'a', sourceHandle: 'neurons', target: 'stack', targetHandle: 'top' })
+  g = addEdge(g, { source: 'a', sourceHandle: 'neurons', target: 'stack', targetHandle: 'in1' })
   g = addEdge(g, {
     source: 'b',
     sourceHandle: 'neurons',
     target: 'stack',
-    targetHandle: 'bottom',
+    targetHandle: 'in2',
   })
   g = addEdge(g, { source: 'stack', sourceHandle: 'out', target: 'sort', targetHandle: 'in' })
   return g
@@ -91,13 +92,13 @@ function narrowed(columns: string[], params: Record<string, unknown> = {}): Coda
   g = addEdge(g, { source: 'b', sourceHandle: 'neurons', target: 'sel', targetHandle: 'in' })
   g = {
     ...g,
-    edges: g.edges.filter((e) => !(e.target === 'stack' && e.targetHandle === 'bottom')),
+    edges: g.edges.filter((e) => !(e.target === 'stack' && e.targetHandle === 'in2')),
   }
   return addEdge(g, {
     source: 'sel',
     sourceHandle: 'out',
     target: 'stack',
-    targetHandle: 'bottom',
+    targetHandle: 'in2',
   })
 }
 
@@ -114,7 +115,7 @@ describe('core.stack — types', () => {
     // Half a schema is worse than none: a picker downstream would be configured against a
     // shape that never arrives, and nothing says so until after a run.
     let g = pipeline()
-    g = { ...g, edges: g.edges.filter((e) => e.targetHandle !== 'bottom') }
+    g = { ...g, edges: g.edges.filter((e) => e.targetHandle !== 'in2') }
     expect(schemaOf(inferGraph(g).nodes['stack']?.outputs['out'])).toBeUndefined()
   })
 
@@ -129,13 +130,13 @@ describe('core.stack — types', () => {
     g = addNode(g, node('up', 'core.uploadTable'))
     g = {
       ...g,
-      edges: g.edges.filter((e) => !(e.target === 'stack' && e.targetHandle === 'bottom')),
+      edges: g.edges.filter((e) => !(e.target === 'stack' && e.targetHandle === 'in2')),
     }
     g = addEdge(g, {
       source: 'up',
       sourceHandle: 'out',
       target: 'stack',
-      targetHandle: 'bottom',
+      targetHandle: 'in2',
     })
     expect(inferGraph(g).nodes['stack']?.outputs['out']?.kind).toBe('table')
   })
@@ -147,7 +148,7 @@ describe('core.stack — types', () => {
 })
 
 describe('core.stack — evaluate', () => {
-  it('emits both inputs’ rows, top first', async () => {
+  it('emits both inputs’ rows, first input first', async () => {
     const scheduler = makeScheduler()
     await scheduler.run(pipeline(), { mode: 'full' })
 
@@ -249,13 +250,13 @@ describe('core.stack — evaluate', () => {
       source: 'conn',
       sourceHandle: 'connections',
       target: 'stack',
-      targetHandle: 'top',
+      targetHandle: 'in1',
     })
     g = addEdge(g, {
       source: 'piv',
       sourceHandle: 'table',
       target: 'stack',
-      targetHandle: 'bottom',
+      targetHandle: 'in2',
     })
     g = addEdge(g, { source: 'stack', sourceHandle: 'out', target: 'sort', targetHandle: 'in' })
 
@@ -266,7 +267,7 @@ describe('core.stack — evaluate', () => {
     const message = scheduler.info('stack').error ?? ''
     // Both readings, because the fix depends on which one is wrong.
     expect(message).toContain('weight')
-    expect(message).toContain('i64 above and str below')
+    expect(message).toContain('i64 on input 1 and str on input 2')
     // And it says what to do about it rather than only what happened.
     expect(message).toMatch(/convert it upstream|Select/)
     expect(scheduler.info('sort').state).toBe('blocked')
@@ -298,16 +299,16 @@ describe('core.stack — evaluate', () => {
       source: 'conn',
       sourceHandle: 'connections',
       target: 'stack',
-      targetHandle: 'top',
+      targetHandle: 'in1',
     })
     g = addEdge(g, {
       source: 'piv',
       sourceHandle: 'table',
       target: 'stack',
-      targetHandle: 'bottom',
+      targetHandle: 'in2',
     })
     const reported = (inferGraph(g).nodes['stack']?.issues ?? []).map((i) => i.message)
-    expect(reported.join(' ')).not.toContain('above and')
+    expect(reported.join(' ')).not.toContain('on input 1 and')
   })
 })
 
@@ -328,7 +329,7 @@ describe('core.stack — validation', () => {
     // until it has run and none again after a reload. Guessing there would put a warning on
     // every graph that stacks something downstream of it, on every single load.
     let g = pipeline({ sourceColumn: 'origin' })
-    g = { ...g, edges: g.edges.filter((e) => e.targetHandle !== 'bottom') }
+    g = { ...g, edges: g.edges.filter((e) => e.targetHandle !== 'in2') }
     g = addNode(g, node('raw', 'neuron.rawCypher'))
     g = addEdge(g, {
       source: 'ds',
@@ -340,7 +341,7 @@ describe('core.stack — validation', () => {
       source: 'raw',
       sourceHandle: 'result',
       target: 'stack',
-      targetHandle: 'bottom',
+      targetHandle: 'in2',
     })
     expect(issues(g)).toBe('')
   })
@@ -350,16 +351,119 @@ describe('core.stack — validation', () => {
     g = addNode(g, node('up', 'core.uploadTable'))
     g = {
       ...g,
-      edges: g.edges.filter((e) => !(e.target === 'stack' && e.targetHandle === 'bottom')),
+      edges: g.edges.filter((e) => !(e.target === 'stack' && e.targetHandle === 'in2')),
     }
     g = addEdge(g, {
       source: 'up',
       sourceHandle: 'out',
       target: 'stack',
-      targetHandle: 'bottom',
+      targetHandle: 'in2',
     })
     // Nothing is known about the upload's columns yet, so there is nothing to clash with —
     // which is the honest answer, not an oversight.
     expect(issues(g)).toBe('')
+  })
+})
+
+/**
+ * What a document written before the `Inputs` spinner gets, which is the half no card can show.
+ *
+ * Two ids moved and one default moved, and both were carried deliberately — see
+ * `nodes/lib/stackParams.ts`. The failures if either had been left alone are quiet: a wire
+ * missing from a share link, or a column of data whose values changed on reload.
+ */
+describe('core.stack — the label params', () => {
+  const def = () => requireNodeDef('core.stack')
+  const hidden = (params: Record<string, unknown>) =>
+    (def().params ?? [])
+      .filter((p) => p.visibleIf && !p.visibleIf(params as never))
+      .map((p) => p.id)
+
+  it('hides a label past the arity, so an unseen control cannot stale a run', () => {
+    // Invariant 4: hidden params are outside the provenance key.
+    expect(hidden({ ...defaultParams(def()), sourceColumn: 'origin', inputCount: 2 })).toEqual([
+      'label3',
+      'label4',
+      'label5',
+      'label6',
+      'label7',
+      'label8',
+    ])
+  })
+
+  it('hides every label while nothing names a column to put them in', () => {
+    /*
+     * The builder's own condition, ANDed onto the arity one by `repeatParams` rather than
+     * replacing it — which is the half that is invisible when wrong. Both must hold: renaming
+     * the inputs of a stack that is not labelling anything is a control nobody can see whose
+     * edits would still re-run everything downstream.
+     */
+    const all = hidden({ ...defaultParams(def()), sourceColumn: '', inputCount: 8 })
+    expect(all).toContain('topLabel')
+    expect(all).toContain('label8')
+    // And with a column named at full arity, none of them is hidden.
+    expect(hidden({ ...defaultParams(def()), sourceColumn: 'origin', inputCount: 8 })).toEqual(
+      [],
+    )
+  })
+})
+
+describe('core.stack — a graph saved before it was variadic', () => {
+  /** A two-input stack exactly as an older build wrote it: `top`/`bottom` handles, no count. */
+  function storedPair(params: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      version: 1,
+      nodes: [
+        { id: 'a', type: 'core.uploadTable', position: { x: 0, y: 0 }, params: {} },
+        { id: 'b', type: 'core.uploadTable', position: { x: 0, y: 0 }, params: {} },
+        { id: 'stack', type: 'core.stack', position: { x: 0, y: 0 }, params },
+      ],
+      edges: [
+        { id: 'e1', source: 'a', sourceHandle: 'out', target: 'stack', targetHandle: 'top' },
+        { id: 'e2', source: 'b', sourceHandle: 'out', target: 'stack', targetHandle: 'bottom' },
+      ],
+    })
+  }
+
+  it('keeps both wires, on the sockets that replaced them', () => {
+    const { graph, warnings } = deserializeGraph(storedPair())
+    expect(warnings).toEqual([])
+    expect(graph.edges.map((e) => e.targetHandle)).toEqual(['in1', 'in2'])
+  })
+
+  it('keeps a label somebody typed, the first two ids never having moved', () => {
+    const { graph } = deserializeGraph(
+      storedPair({ sourceColumn: 'origin', topLabel: 'MaleCNS', bottomLabel: 'FlyWire' }),
+    )
+    const stack = graph.nodes.find((n) => n.id === 'stack')!
+    expect(stack.params.topLabel).toBe('MaleCNS')
+    expect(stack.params.bottomLabel).toBe('FlyWire')
+  })
+
+  it('keeps the labels an untouched stack was emitting, rather than the new defaults', () => {
+    /*
+     * `absentMeans`' case exactly: absence and the declared default are different answers. The
+     * inputs are `Input 1`/`Input 2` now, but a saved graph was writing `Top`/`Bottom` into a
+     * column of *data*, and a new default would silently rewrite it on load.
+     */
+    const { graph } = deserializeGraph(storedPair({ sourceColumn: 'origin' }))
+    const stack = graph.nodes.find((n) => n.id === 'stack')!
+    expect(stack.params.topLabel).toBe('Top')
+    expect(stack.params.bottomLabel).toBe('Bottom')
+
+    // And a *fresh* node gets the uniform scheme, which is what makes it a migration rather
+    // than a second vocabulary living on.
+    expect(defaultParams(requireNodeDef('core.stack')).topLabel).toBe('Input 1')
+  })
+
+  it('opens at two inputs, the count being absent', () => {
+    // Absence and the default agree here, so no `absentMeans` — the port group's own clamp is
+    // what turns a missing count into the arity the document was written at.
+    const { graph } = deserializeGraph(storedPair())
+    const stack = graph.nodes.find((n) => n.id === 'stack')!
+    expect(inputPorts(requireNodeDef('core.stack'), stack.params).map((p) => p.id)).toEqual([
+      'in1',
+      'in2',
+    ])
   })
 })

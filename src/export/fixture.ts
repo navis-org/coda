@@ -802,12 +802,24 @@ export function everythingGraph(): CodaGraph {
       row: 13,
       params: {},
     },
+    /*
+     * **Three** inputs, not two, and that is the point of it: both emitters loop over the
+     * sockets, and at an arity of two every loop body is also what the old fixed pair emitted —
+     * so a golden at two would record nothing about the variadic half. R's `bind_rows` in
+     * particular has to leave the comma off its last frame.
+     */
     {
       id: 'stackpoints',
       type: 'neuron.stack',
       col: 4,
       row: 7,
-      params: { sourceColumn: 'batch', topLabel: 'Run 1', bottomLabel: 'Run 2' },
+      params: {
+        inputCount: 3,
+        sourceColumn: 'batch',
+        topLabel: 'Run 1',
+        bottomLabel: 'Run 2',
+        label3: 'Run 3',
+      },
     },
 
     {
@@ -1293,23 +1305,24 @@ export function everythingGraph(): CodaGraph {
     ['skel', 'skeletons', 'pickSkel', 'in'],
     ['skel', 'skeletons', 'mirror', 'in'],
     ['skel', 'skeletons', 'xform', 'in'],
-    ['skel', 'skeletons', 'stackneurons', 'top'],
-    ['mirror', 'out', 'stackneurons', 'bottom'],
+    ['skel', 'skeletons', 'stackneurons', 'in1'],
+    ['mirror', 'out', 'stackneurons', 'in2'],
     ['upload', 'out', 'landmarks', 'in'],
     ['landmarks', 'transform', 'xformcustom', 'transform'],
     ['skel', 'skeletons', 'xformcustom', 'in'],
     ['landmarks', 'transform', 'mirror', 'warp'],
-    ['syn', 'points', 'stackpoints', 'top'],
-    ['syn', 'points', 'stackpoints', 'bottom'],
+    ['syn', 'points', 'stackpoints', 'in1'],
+    ['syn', 'points', 'stackpoints', 'in2'],
+    ['syn', 'points', 'stackpoints', 'in3'],
     ['group', 'out', 'select', 'in'],
     ['select', 'out', 'join', 'left'],
     ['group', 'out', 'join', 'right'],
-    ['join', 'out', 'stack', 'top'],
+    ['join', 'out', 'stack', 'in1'],
     ['select', 'out', 'joinOuter', 'left'],
     ['group', 'out', 'joinOuter', 'right'],
     ['select', 'out', 'joinRight', 'left'],
     ['group', 'out', 'joinRight', 'right'],
-    ['conn2', 'connections', 'stack', 'bottom'],
+    ['conn2', 'connections', 'stack', 'in2'],
     ['conn', 'connections', 'pvec', 'in'],
     ['find', 'neurons', 'pvec', 'neurons'],
     ['conn2', 'connections', 'pvecId', 'in'],

@@ -100,10 +100,10 @@ export const collectNode = registerNode({
     if (previous === undefined) return { out: value }
 
     if (isTableValue(previous) && isTableValue(value)) {
-      return { out: stackTables(previous, value) }
+      return { out: stackTables([previous, value]) }
     }
     if (isGeometryValue(previous) && isGeometryValue(value)) {
-      return { out: stackGeometry(previous, value) }
+      return { out: stackGeometry([previous, value]) }
     }
     /*
      * Two passes of one loop produced different kinds, which means something upstream is
