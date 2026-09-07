@@ -167,6 +167,16 @@ export interface CollapsedEdge extends GraphEdge {
    * inference — and, being one entry per merged wire, how many it stands for.
    */
   origins: Array<{ nodeId: string; portId: string }>
+  /**
+   * The ids of the real wires it stands for, in the same order as `origins`.
+   *
+   * A socket is not an identity: `origins` names where each wire *left* from, and two wires can
+   * leave one socket. This names the wires themselves, which is what a caller has to have to ask
+   * a question about them — and the only caller is `condense`'s `omit`, which has to decide
+   * whether every wire behind a stand-in is one the layout was told to ignore. Without it the
+   * stand-in is opaque and a rule applied to the real edges is silently undone by the merge.
+   */
+  merged: string[]
 }
 
 /**
@@ -276,6 +286,7 @@ export function collapsedView(
     const existing = merged.get(id)
     if (existing) {
       existing.origins.push(origin)
+      existing.merged.push(edge.id)
       continue
     }
     merged.set(id, {
@@ -285,6 +296,7 @@ export function collapsedView(
       target: to.node,
       targetHandle: to.handle,
       origins: [origin],
+      merged: [edge.id],
     })
   }
 
@@ -325,12 +337,25 @@ export function boxSize(rows: number): NodeSize {
  * Takes a scope rather than the whole graph, because an arrange over a selection is scoped
  * before it is condensed: a box joins the pass when any of its members was in scope, and a
  * stand-in wire joins it when both of its ends did.
+ *
+ * **`omit` is what keeps this from undoing a decision the caller already made, and it is not
+ * optional in spirit.** The stand-ins come from `collapsedView`, which merges from `graph.edges`
+ * — *not* from the `edges` handed in here. So an edge the caller withheld comes straight back as
+ * a stand-in the moment either of its ends is folded, and the caller has no way to see that it
+ * did. That is exactly how `arrangeScope`'s reference-edge rule was silently undone for a folded
+ * annotation chain: `ds → chain` was dropped, the fold put `ds → box` back, and ELK had its
+ * two-edge loop again — on the very graph the rule was written for. A stand-in is dropped only
+ * when **every** wire behind it was omitted, since one real dependency among them is still a real
+ * dependency.
  */
 export function condense(
   nodes: readonly GraphNode[],
   edges: readonly GraphEdge[],
   view: CollapsedView,
+  omit?: ReadonlySet<string>,
 ): { nodes: LayoutNode[]; edges: GraphEdge[] } {
+  // The early return has to honour `omit` too: with nothing folded there are no stand-ins, but
+  // the caller's own list still has to arrive unchanged rather than re-filtered, which it is.
   if (view.boxes.length === 0) return { nodes: [...nodes], edges: [...edges] }
 
   const boxOf = new Map<string, CollapsedBox>()
@@ -352,7 +377,9 @@ export function condense(
 
   const keptEdges: GraphEdge[] = edges.filter((e) => !isFolded(view, e))
   for (const edge of view.edges) {
-    if (included.has(edge.source) && included.has(edge.target)) keptEdges.push(edge)
+    if (!included.has(edge.source) || !included.has(edge.target)) continue
+    if (omit && edge.merged.every((id) => omit.has(id))) continue
+    keptEdges.push(edge)
   }
   return { nodes: kept, edges: keptEdges }
 }

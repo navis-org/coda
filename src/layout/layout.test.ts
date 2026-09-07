@@ -38,9 +38,12 @@ import { NETWORK_NODE_SIZE, layoutNetwork } from './network'
 import {
   ASPECT_RANGE,
   DEFAULT_LAYOUT_OPTIONS,
+  PACK_TARGET_ASPECT,
   aspectRatioApplies,
   coerceLayoutOptions,
   elkOptionsFor,
+  packSupported,
+  targetAspect,
 } from './options'
 import { DODGE_GAP, anchorTo, boundsOf, dodge, noteRects, structureKey } from './place'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
@@ -90,6 +93,61 @@ function chain(): CodaGraph {
     target: 'table',
     targetHandle: 'in',
   })
+  return graph
+}
+
+/**
+ * `arms` datasets, each with an annotation card in front of it and a query behind it.
+ *
+ * The two wires between a dataset and its card are what this fixture is for.
+ * `tags:annotations → ds:annotations` is an ordinary dependency; `ds:dataset → tags:dataset` is a
+ * **reference** — the card reads which datastack to query out of the dataset it is about to feed,
+ * which is why `PortDef.reference` exists and why `topoSort` does not call this a cycle. ELK has
+ * no such notion, so handed both it must break the loop, and which end it picks is its business.
+ *
+ * **One arm is not enough to see it go wrong, and that is worth stating rather than discovering.**
+ * Swept against the real algorithm with the references left in: at one arm the card still lands
+ * left of its dataset and the bug is invisible; at two, the *second* arm's card lands at x = 350
+ * with its dataset at x = 22, and at three both of the later arms do. Two arms is also exactly
+ * the shape the wizard builds for a cross-dataset comparison, which is where this was reported.
+ */
+function annotated(arms = 1): CodaGraph {
+  let graph = emptyGraph('annotated')
+  for (let i = 1; i <= arms; i++) {
+    const [ds, tags, find, table] = [`ds${i}`, `tags${i}`, `find${i}`, `table${i}`]
+    graph = addNode(graph, node(ds, 'dataset.flywire', 0, 0))
+    graph = addNode(graph, node(tags, 'annotation.caveTable', -300, 0))
+    graph = addNode(graph, node(find, 'neuron.findNeurons', 300, 0))
+    graph = addNode(graph, node(table, 'out.table', 600, 0))
+    graph = addEdge(graph, {
+      id: `${tags}>${ds}`,
+      source: tags,
+      sourceHandle: 'annotations',
+      target: ds,
+      targetHandle: 'annotations',
+    })
+    graph = addEdge(graph, {
+      id: `${ds}>${tags}`,
+      source: ds,
+      sourceHandle: 'dataset',
+      target: tags,
+      targetHandle: 'dataset',
+    })
+    graph = addEdge(graph, {
+      id: `${ds}>${find}`,
+      source: ds,
+      sourceHandle: 'dataset',
+      target: find,
+      targetHandle: 'dataset',
+    })
+    graph = addEdge(graph, {
+      id: `${find}>${table}`,
+      source: find,
+      sourceHandle: 'neurons',
+      target: table,
+      targetHandle: 'in',
+    })
+  }
   return graph
 }
 
@@ -200,6 +258,26 @@ describe('arrangeScope', () => {
     const scope = arrangeScope(graph, ['n', 'find'])
     // One arrangeable node left, so this is the whole-graph case rather than a one-node scope.
     expect(scope.scoped).toBe(false)
+  })
+
+  it('drops reference edges, in both the whole-graph and the scoped case', () => {
+    const graph = annotated()
+    const whole = arrangeScope(graph, [])
+    // The chain member is still arranged; only the wire naming the dataset is withheld.
+    expect(whole.nodes.map((n) => n.id).sort()).toEqual(['ds1', 'find1', 'table1', 'tags1'])
+    expect(whole.edges.map((e) => e.id).sort()).toEqual([
+      'ds1>find1',
+      'find1>table1',
+      'tags1>ds1',
+    ])
+    // And says which ones, because `condense` re-derives edges and has to apply the same rule.
+    expect([...whole.omit]).toEqual(['ds1>tags1'])
+  })
+
+  it('drops them from a scoped arrange too', () => {
+    expect(arrangeScope(annotated(), ['ds1', 'tags1']).edges.map((e) => e.id)).toEqual([
+      'tags1>ds1',
+    ])
   })
 })
 
@@ -313,6 +391,59 @@ describe('elkOptionsFor', () => {
   })
 })
 
+describe('packSupported', () => {
+  it('is layered only, since nothing else has columns', () => {
+    expect(packSupported({ ...DEFAULT_LAYOUT_OPTIONS, algorithm: 'layered' })).toBe(true)
+    for (const algorithm of ['force', 'mrtree', 'radial'] as const) {
+      expect(packSupported({ ...DEFAULT_LAYOUT_OPTIONS, algorithm })).toBe(false)
+    }
+  })
+
+  it('is left-to-right only, because a column is only a layer under RIGHT', () => {
+    /*
+     * Under `DOWN`/`UP` layered's layers are rows, so grouping by `x` reads within-row neighbours
+     * as columns and stacks them — a packing of nothing. Under `LEFT` the flow runs the other way,
+     * so moving into an earlier column moves a card against it.
+     */
+    for (const direction of ['DOWN', 'UP', 'LEFT'] as const) {
+      expect(packSupported({ ...DEFAULT_LAYOUT_OPTIONS, direction })).toBe(false)
+    }
+  })
+
+  it('says nothing about the checkbox, which is composed in at the call site', () => {
+    /*
+     * `aspectRatioApplies`' split, and for its reason: a predicate folding in its own switch
+     * cannot answer "would this control do anything if you ticked it", so the one caller that
+     * needs that — the checkbox's own enabled state — had to ask about a state the reader is not
+     * in.
+     */
+    expect(packSupported({ ...DEFAULT_LAYOUT_OPTIONS, packColumns: false })).toBe(true)
+  })
+})
+
+describe('targetAspect', () => {
+  it('aims at the pane, because that is the complaint it answers', () => {
+    /*
+     * Deliberately *not* gated on `useScreenAspect`, which was built and measured first: on the
+     * worked FlyWire case the packed height is 851 aiming at the pane and 1156 aiming at a fixed
+     * 1.6 — most of the win, on the graph the feature exists for, and the complaint is
+     * specifically about the screen having more horizontal space. `useScreenAspect`'s own note has
+     * been narrowed to say it governs `elk.aspectRatio` alone.
+     */
+    expect(targetAspect(1.9)).toBe(1.9)
+  })
+
+  it('falls back on a pane it cannot use, and clamps one it can', () => {
+    for (const bad of [undefined, 0, -1, NaN, Infinity]) {
+      expect(targetAspect(bad)).toBe(PACK_TARGET_ASPECT)
+    }
+    // `ASPECT_RANGE`'s guard, shared with `aspectOption`: a pane mid-transition must not produce
+    // a degenerate target.
+    expect(targetAspect(99)).toBe(ASPECT_RANGE.max)
+    expect(targetAspect(0.01)).toBe(ASPECT_RANGE.min)
+  })
+})
+
 describe('coerceLayoutOptions', () => {
   it('falls back per field rather than all at once', () => {
     const coerced = coerceLayoutOptions({
@@ -340,6 +471,27 @@ describe('coerceLayoutOptions', () => {
     expect(coerceLayoutOptions({}).useScreenAspect).toBe(false)
     expect(coerceLayoutOptions({ useScreenAspect: 'yes' }).useScreenAspect).toBe(false)
     expect(coerceLayoutOptions({ useScreenAspect: true }).useScreenAspect).toBe(true)
+  })
+
+  it('packs columns by default, for a new reader and for a stored preference alike', () => {
+    /*
+     * Both halves, because they are two different mechanisms and only one of them is the
+     * `DEFAULT_LAYOUT_OPTIONS` entry. A reader who has never opened the bubble gets the default;
+     * a reader who set any layout preference before this control existed has a stored record with
+     * no such key, and `coerceLayoutOptions` is what decides how that silence reads.
+     *
+     * `packComponents`' rule rather than `useScreenAspect`'s, and the two disagree on purpose:
+     * absence must not be read as consent to a *window-shaped* arrangement, but nothing is being
+     * consented to here — the pass returns a graph it cannot improve untouched, and improves the
+     * ones it can. Pinned because it is the one of the three sibling rules that had no test, and
+     * a default flipped by accident is invisible until somebody notices their arrange got worse.
+     */
+    expect(DEFAULT_LAYOUT_OPTIONS.packColumns).toBe(true)
+    // A record written before this control existed — the sibling test covers `{}` and `null` for
+    // the same coercion, so what is new here is the field, not the shapes.
+    expect(coerceLayoutOptions({ nodeSpacing: 64 }).packColumns).toBe(true)
+    // Only an explicit `false` turns it off — the reader who unticked the box.
+    expect(coerceLayoutOptions({ packColumns: false }).packColumns).toBe(false)
   })
 })
 
@@ -532,6 +684,26 @@ describe('runLayout, against ELK itself', () => {
     expect(x('ds')).toBeLessThan(x('find'))
     expect(x('find')).toBeLessThan(x('filter'))
     expect(x('filter')).toBeLessThan(x('table'))
+  })
+
+  it('puts an annotation card left of the dataset it feeds, despite the round trip', async () => {
+    /*
+     * The whole reason reference edges leave the layout graph. With both wires in, ELK sees a
+     * two-edge cycle, breaks it at whichever end it likes, and on the wizard's FlyWire/BANC
+     * comparison it chose the *annotations* edge — so the folded chain was drawn at x = −540 with
+     * its dataset at x = −884, i.e. the plumbing after the thing it feeds. Measured in a browser;
+     * nothing about it is visible from the option record, which still reads exactly as intended.
+     *
+     * Asked through `arrangeScope` rather than by handing `runLayout` a hand-filtered edge list,
+     * because the filter is the thing under test and a test that applies it itself would pass with
+     * the production one deleted.
+     */
+    const scope = arrangeScope(annotated(2), [])
+    const { positions } = await runLayout(scope.nodes, scope.edges, DEFAULT_LAYOUT_OPTIONS)
+    for (const i of [1, 2]) {
+      expect(positions.get(`tags${i}`)!.x).toBeLessThan(positions.get(`ds${i}`)!.x)
+      expect(positions.get(`ds${i}`)!.x).toBeLessThan(positions.get(`find${i}`)!.x)
+    }
   })
 
   it('honours the direction option', async () => {

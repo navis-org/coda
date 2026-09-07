@@ -83,7 +83,15 @@ export function union(rects: readonly Rect[]): Rect | undefined {
   return { x: left, y: top, width: right - left, height: bottom - top }
 }
 
-function overlaps(a: Rect, b: Rect): boolean {
+/**
+ * Whether two rectangles intersect at all — touching edges do not count.
+ *
+ * Exported because it is the one rule `dodge` enforces at runtime, and three test suites had each
+ * written the same four-term expression to assert that an arrangement respects it. Four spellings
+ * of one predicate is how a test comes to mean something the code does not: "nothing overlaps"
+ * has to be the same claim in the assertion as in the pass it is asserting about.
+ */
+export function overlaps(a: Rect, b: Rect): boolean {
   return (
     a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
   )

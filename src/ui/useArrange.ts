@@ -17,7 +17,10 @@ import type { MeasuredPorts, MeasuredSizes, NodeSize } from '../layout/elkGraph'
 import { measureCardSizes } from './cardSizes'
 import { nodesById } from '../core/graph'
 import { collapsedView, condense, expandPositions, foldedNodeCount } from '../layout/collapse'
-import { arrangeScope, resolveSize } from '../layout/elkGraph'
+import { arrangeScope } from '../layout/elkGraph'
+import { companionView, expandCompanions, pinCompanions } from '../layout/companions'
+import { packColumns } from '../layout/pack'
+import { packSupported, targetAspect } from '../layout/options'
 import { runLayout } from '../layout/engine'
 import type { XY } from '../layout/place'
 import {
@@ -344,6 +347,7 @@ export function useArrange(): ArrangeHandle {
     ({ animate: gliding = true, frame = false }: ArrangeOptions = {}) => {
       const mine = ++token.current
       const state = useGraphStore.getState()
+      const opts = state.layoutOptions
       const current = state.graph
       const scope = arrangeScope(current, state.selection)
       // One node cannot be arranged, and neither can none. No commit, so no undo entry for a
@@ -361,34 +365,68 @@ export function useArrange(): ArrangeHandle {
        * decides how they are counted. See `layout/collapse.ts`.
        */
       const view = collapsedView(current, measured)
-      const { nodes: items, edges: links } = condense(scope.nodes, scope.edges, view)
+      // `scope.omit` rather than a second `referenceEdgeIds` call: the fold re-derives its
+      // stand-ins from the whole graph, so a rule the scope applied has to be handed on or it is
+      // undone for exactly the folded annotation chains it was written for. See `condense`.
+      const folded = condense(scope.nodes, scope.edges, view, scope.omit)
+      /*
+       * Then the companion cards, which is the same move one level down: a Description is not a
+       * step in the pipeline, so it leaves the layout and its dataset's box grows to hold the
+       * place it will be put back in. *After* the fold, because a card inside a folded group is
+       * not on the canvas and has no place of its own to be put back into — `condense` has
+       * already replaced it with a box by the time this asks. See `layout/companions.ts`.
+       */
+      const pins = companionView(folded.nodes, folded.edges, measured)
+      /*
+       * Nodes, edges and sizes together, because they have to agree: `sizes` is keyed by layout
+       * item — boxes in, pinned companions out, hosts grown to hold the card that is coming back
+       * — and everything after this reads *it* rather than `measured`. What ELK is told, what
+       * `boundsOf` anchors against and what `dodge` keeps off the notes are then one answer, or
+       * the space reserved for a companion is reserved in the layout and nowhere else.
+       */
+      const {
+        nodes: items,
+        edges: links,
+        sizes,
+      } = pinCompanions(folded.nodes, folded.edges, pins, measured)
       if (items.length < 2) return
-
-      const sizes = new Map<string, NodeSize>(
-        items.map((node) => [node.id, resolveSize(node, measured)]),
-      )
-      const before = boundsOf(items, measured)
+      const before = boundsOf(items, sizes)
       if (!before) return
 
       setBusy(true)
-      void runLayout(
-        items,
-        links,
-        state.layoutOptions,
-        measured,
-        measurePorts(),
-        canvasAspect(),
-      )
-        .then(({ positions: raw, routes: rawRoutes }) => {
+      const aspect = canvasAspect()
+      void runLayout(items, links, opts, sizes, measurePorts(), aspect)
+        .then(({ positions: laid, routes: rawRoutes }) => {
           if (token.current !== mine) return
-          const anchored = anchorTo(raw, sizes, { x: before.x, y: before.y })
+          /*
+           * Packed before anything is anchored, because the pack changes the block's *shape* and
+           * the anchor is about where that shape lands. It aims at the pane it is about to be
+           * framed into — the one input here the graph cannot answer, which is `canvasAspect`'s
+           * whole reason for existing; an unmeasurable pane falls to `PACK_TARGET_ASPECT`.
+           *
+           * **The routes are given up whenever it moves anything**, and that is not a shortcut.
+           * ELK's bend points describe gaps between cards at the positions ELK chose, so a card
+           * that has since moved to another column leaves its wire heading into empty space —
+           * exactly the staleness `routeKey` drops a whole arrangement's routes for. The pass
+           * reports whether it moved anything rather than leaving the caller to compare maps,
+           * because it always builds one: read as identity this was true on every arrange, and
+           * the routes were being dropped even on the graphs it declined to touch.
+           */
+          const { positions: raw, moved: packed } =
+            opts.packColumns && packSupported(opts)
+              ? packColumns(items, links, laid, sizes, opts, targetAspect(aspect))
+              : { positions: laid, moved: false }
+          const anchor = { x: before.x, y: before.y }
+          const anchored = anchorTo(raw, sizes, anchor)
           // Notes are dodged even when only a selection is being arranged: a subgraph landing on
           // a note is the same collision, and the selection is not what decides that.
           const obstacles = noteRects(current, measured, view.hidden)
           // Still keyed by box wherever a group is folded: `dodge` and the routes below both work
           // in the arranged vocabulary, and only the positions handed to the store are expanded.
           const placed = dodge(anchored, sizes, obstacles)
-          const final = expandPositions(placed, view)
+          // Companions first, then folded members: each undoes one of the two condensations, in
+          // the reverse of the order they were applied.
+          const final = expandPositions(expandCompanions(placed, pins), view)
 
           /*
            * The routes take the *same* two shifts the positions did, read back off `place.ts`
@@ -397,9 +435,11 @@ export function useArrange(): ArrangeHandle {
            * across the canvas to wherever (0,0) happens to be — and being off by the anchor is not
            * a subtle wrongness, it is the whole graph's width.
            */
-          const shift = anchorDelta(raw, sizes, { x: before.x, y: before.y })
+          const shift = anchorDelta(raw, sizes, anchor)
           const cleared = dodgeDelta(anchored, sizes, obstacles)
-          const routes = translateRoutes(rawRoutes, shift.x + cleared.x, shift.y + cleared.y)
+          const routes = packed
+            ? new Map<string, XY[]>()
+            : translateRoutes(rawRoutes, shift.x + cleared.x, shift.y + cleared.y)
 
           // The *members'* starting places, not the boxes': the animation drives the real cards,
           // and a box is drawn from wherever its members currently are — so it glides with them.

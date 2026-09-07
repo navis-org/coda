@@ -29,6 +29,8 @@ import { isAnnotation } from '../../core/registry'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { DEFAULT_LAYOUT_OPTIONS } from '../../layout/options'
+import type { Rect } from '../../layout/place'
+import { overlaps } from '../../layout/place'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
 import { canvasAspect } from '../useArrange'
@@ -66,6 +68,23 @@ const autoButton = () => screen.getByRole('button', { name: 'Auto-layout' })
 const optionsButton = () => screen.getByRole('button', { name: 'Layout options' })
 const bubble = () => screen.queryByRole('group', { name: 'Layout options' })
 const routingButton = () => screen.getByRole('button', { name: /Wire routing/ })
+
+/**
+ * Every pair of cards that overlaps, named.
+ *
+ * Through `place.ts`' own `overlaps`, so "nothing overlaps" means here what it means to `dodge` at
+ * runtime — and stated once, since the two callers had the identical nine-line pair scan between
+ * them.
+ */
+function collisionsIn(boxes: readonly (Rect & { id: string })[]): string[] {
+  const hits: string[] = []
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      if (overlaps(boxes[i]!, boxes[j]!)) hits.push(`${boxes[i]!.id}/${boxes[j]!.id}`)
+    }
+  }
+  return hits
+}
 
 describe('the layout controls', () => {
   it('adds four buttons to the canvas rail, beside zoom and fit', () => {
@@ -274,21 +293,7 @@ describe('arranging', () => {
       .getState()
       .graph.nodes.filter((n) => arrangedIds.includes(n.id))
       .map((n) => ({ id: n.id, ...n.position, ...size }))
-    const collisions: string[] = []
-    for (let i = 0; i < boxes.length; i++) {
-      for (let j = i + 1; j < boxes.length; j++) {
-        const a = boxes[i]!
-        const b = boxes[j]!
-        if (
-          a.x < b.x + b.width &&
-          b.x < a.x + a.width &&
-          a.y < b.y + b.height &&
-          b.y < a.y + a.height
-        ) {
-          collisions.push(`${a.id}/${b.id}`)
-        }
-      }
-    }
+    const collisions = collisionsIn(boxes)
     expect(collisions).toEqual([])
   })
 
@@ -325,21 +330,7 @@ describe('arranging', () => {
       .getState()
       .graph.nodes.filter((n) => !isAnnotation(n.type))
       .map((n) => ({ id: n.id, ...n.position, ...size }))
-    const collisions: string[] = []
-    for (let i = 0; i < boxes.length; i++) {
-      for (let j = i + 1; j < boxes.length; j++) {
-        const a = boxes[i]!
-        const b = boxes[j]!
-        if (
-          a.x < b.x + b.width &&
-          b.x < a.x + a.width &&
-          a.y < b.y + b.height &&
-          b.y < a.y + a.height
-        ) {
-          collisions.push(`${a.id}/${b.id}`)
-        }
-      }
-    }
+    const collisions = collisionsIn(boxes)
     expect(collisions).toEqual([])
   })
 
@@ -433,6 +424,10 @@ describe('the options bubble', () => {
      * off, or under radial, ELK returns identical bounds at every ratio. A live checkbox over
      * an option that is not being sent is the failure the `routed` wire mode was deleted for, so
      * the disabled state and `elkOptionsFor` read one predicate — this pins the UI half.
+     *
+     * The column packer aims at the pane too, and **deliberately does not consult this box** —
+     * `targetAspect` carries that argument. So this checkbox goes on meaning exactly what it
+     * meant, which is why the assertions below are unchanged by that feature.
      */
     render(<App />)
     fireEvent.click(optionsButton())
@@ -634,10 +629,52 @@ describe('routes in the real editor', () => {
     await waitFor(() => expect(paths().every((d) => !d.includes('C'))).toBe(true))
   })
 
+  /**
+   * Arrange with the column packer switched off.
+   *
+   * **Packing and ELK's waypoints are genuinely exclusive, and these tests are about the
+   * waypoints.** A bend point describes a gap between two cards at the positions ELK chose; the
+   * packer moves cards into other columns, so every one of those gaps is somewhere else and the
+   * whole set is stale in exactly the way `routeKey` exists to catch. `useArrange` therefore gives
+   * the routes up whenever the packer moved anything — which the test below pins — so a route test
+   * that left packing on would be asserting on a canvas that has no routes at all. That is not a
+   * test being bent to fit: it is the same trade `EdgeRouting`'s note records, and the reason
+   * `orthogonal` steps *every* wire rather than only the routed ones.
+   */
+  const arrangeUnpacked = async () => {
+    await act(async () => {
+      useGraphStore.getState().setLayoutOptions({ packColumns: false })
+    })
+    await arrangeAndSettle()
+  }
+
+  it('keeps ELK’s waypoints when the column packer declines to move anything', async () => {
+    /*
+     * The half of the interaction jsdom can actually show, and the more valuable half. The packer
+     * only acts on a graph taller than the shape it aims at; here every card reports the one
+     * stubbed size, so there is no slack, it returns its input untouched — and the routes have to
+     * survive that.
+     *
+     * **This is the assertion the shipped code failed.** `useArrange` read "did it move anything"
+     * off map identity, and every one of the packer's do-nothing exits built a fresh `Map`, so
+     * `packed` was true on every arrange and the waypoints were discarded even on graphs the pass
+     * had declined to touch. The test that stood here asserted *zero* routes and passed for
+     * exactly that reason — it was pinning the bug. `moved` is a returned field now, and this
+     * fails against the old code.
+     */
+    render(<App />)
+    fireEvent.click(routingButton())
+    await act(async () => {
+      useGraphStore.getState().setLayoutOptions({ packColumns: true })
+    })
+    await arrangeAndSettle()
+    expect(routedCount()).toBeGreaterThan(0)
+  })
+
   it('follows ELK’s waypoints after an arrange, and gives them up when a card moves', async () => {
     render(<App />)
     fireEvent.click(routingButton())
-    await arrangeAndSettle()
+    await arrangeUnpacked()
     // `partners` has wires ELK has to bend — asserted rather than assumed, since everything
     // below is about those going away and would pass trivially if there were none.
     expect(routedCount()).toBeGreaterThan(0)
@@ -662,7 +699,7 @@ describe('routes in the real editor', () => {
     // routed or not — has to redraw identically.
     render(<App />)
     fireEvent.click(routingButton())
-    await arrangeAndSettle()
+    await arrangeUnpacked()
     // Non-vacuity: without this the test would pass on a canvas with no routes at all, which
     // is exactly the state an over-eager drop produces — so it would green-light the bug.
     const routed = routedCount()

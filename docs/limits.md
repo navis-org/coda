@@ -142,6 +142,25 @@ an empty card. The caption is the viewer's version of `ctx.warn`.
 | Network    | 20,000 nodes — `layout unsettled` | 100,000 nodes. `settleDuration` is a wall-clock budget on a worker, so a big graph gets a _less settled_ arrangement, not a frozen tab. |
 | Dendrogram | 3,000 leaves — `structure only`   | 20,000 leaves, which is 40,000 SVG paths. Expanded, the zoom is the way past the warning rather than around it: `visibleLinks` culls to the window, so a zoomed card draws far fewer paths than a fitted one. |
 
+### The canvas
+
+One entry, and it is here rather than in the tables above because it is neither a wait, an
+allocation nor a drawing: it is a **layout pass declining to improve on one that already works**.
+
+| Guard             | Where                    | What it does                                                                                                                                                                                                                                                                          |
+| ----------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PACK_MAX_NODES`  | 80 cards in one arrange  | The column packer (`layout/pack.ts`) stands down and the arrangement is ELK's — which is what shipped before it existed, so the degradation is "no improvement" rather than a worse picture. Measured on the worst *legal* shape: 2.3 ms at 40 cards, **33 ms at 80, 200 ms at 120**. Synchronous inside a promise continuation, so the tail eats the frame the arrange animation starts on. An ordinary pipeline is not on that curve at all — it is already wide enough, evaluates one box and leaves, about 0.1 ms at any size. |
+
+**It is silent, and that is argued rather than assumed.** The doctrine above says a guard rail
+warns, and the channels this could warn through are each wrong: there is no `EvalContext` — this is
+a canvas gesture, not an evaluation — and `setNotice` renders a banner that only a click dismisses,
+so under auto-layout a declined pass would re-raise it on every wire, which is the "line people
+learn to skip" this file warns about. The surface that fits is the checkbox's own hint, and 80 is so
+far above every real graph (the worked case is five cards, a four-dataset wizard build thirty-three)
+that the branch would be prose nobody reads. The *other* two reasons the pass declines do reach that
+hint: `packSupported` greys the box out under a non-layered algorithm or a vertical direction, and
+says which.
+
 ### The refusals
 
 Everything below is an allocation, sized against `CRASH_FLOOR_BYTES` (512 MB — roughly where a

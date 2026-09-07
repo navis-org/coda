@@ -10,6 +10,7 @@
 import type { ElkNode } from 'elkjs/lib/elk-api'
 
 import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
+import { referenceEdgeIds } from '../core/graph'
 import { getNodeDef, isAnnotation } from '../core/registry'
 import { inputPorts, outputPorts } from '../core/ports'
 import type { LayoutOptions } from './options'
@@ -265,26 +266,47 @@ export function routesFrom(result: ElkNode): Map<string, XY[]> {
  * Two or more selected nodes mean "tidy these"; anything else means the whole graph. One
  * selected node is deliberately the second case — arranging a single node in place is a no-op,
  * and reading it as one would make the button appear broken for whoever had just clicked a card.
+ *
+ * **Reference edges are not in the result, and that is a layering decision rather than a tidy-up.**
+ * A reference names a node instead of consuming its output (`PortDef.reference`), which is exactly
+ * why `topoSort` and `wouldCreateCycle` already exclude them — a round trip through one is not a
+ * cycle. Handed to ELK it *is* one: an annotation chain reads its datastack out of the dataset
+ * (`dataset:dataset → chain:dataset`) and feeds the same dataset back
+ * (`chain:out → dataset:annotations`), so layered has to break the two-edge loop and picks
+ * whichever end it likes. Measured in a browser on the wizard's FlyWire/BANC comparison: the
+ * folded FlyWire chain landed at x = −540 with its dataset at x = −884, i.e. the plumbing drawn
+ * *after* the thing it feeds. Dropped here it lands at x = −1212, left of the dataset, and the
+ * graph is 145 units shorter for it.
+ *
+ * Excluded rather than reversed. Reversing asserts a direction ELK would then reserve a routing
+ * channel for; a reference constrains nothing, so the honest statement is that it is not an
+ * ordering constraint at all. The wire is still drawn — nothing here touches what the canvas
+ * renders, only what the layout is told to satisfy.
+ *
+ * **`omit` is handed back rather than kept private, because this is not the last stage that
+ * decides the layout's edges.** `condense` appends stand-ins derived from `graph.edges`, so a rule
+ * applied only here is undone the moment a folded group is involved — see `condense`'s own note,
+ * where that is written up as the bug it caused. Returning the set is what lets one author state
+ * the rule and every later stage apply the same one, at no second traversal.
  */
-export function arrangeScope(
-  graph: CodaGraph,
-  selection: readonly string[],
-): { nodes: GraphNode[]; edges: GraphEdge[]; scoped: boolean } {
+export interface ArrangeScope {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  scoped: boolean
+  /** Edge ids withheld here, for any later stage that re-derives edges. See the note above. */
+  omit: ReadonlySet<string>
+}
+
+export function arrangeScope(graph: CodaGraph, selection: readonly string[]): ArrangeScope {
+  const omit = referenceEdgeIds(graph)
+  const between = (chosen: readonly GraphNode[]) => {
+    const ids = new Set(chosen.map((n) => n.id))
+    return graph.edges.filter((e) => ids.has(e.source) && ids.has(e.target) && !omit.has(e.id))
+  }
+
   const selected = new Set(selection)
   const inSelection = arrangeable(graph.nodes.filter((n) => selected.has(n.id)))
-  if (inSelection.length >= 2) {
-    const ids = new Set(inSelection.map((n) => n.id))
-    return {
-      nodes: inSelection,
-      edges: graph.edges.filter((e) => ids.has(e.source) && ids.has(e.target)),
-      scoped: true,
-    }
-  }
-  const nodes = arrangeable(graph.nodes)
-  const ids = new Set(nodes.map((n) => n.id))
-  return {
-    nodes,
-    edges: graph.edges.filter((e) => ids.has(e.source) && ids.has(e.target)),
-    scoped: false,
-  }
+  const scoped = inSelection.length >= 2
+  const nodes = scoped ? inSelection : arrangeable(graph.nodes)
+  return { nodes, edges: between(nodes), scoped, omit }
 }

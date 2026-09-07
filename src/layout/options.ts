@@ -1,14 +1,18 @@
 /**
  * What the layout bubble can change, and how it reaches ELK.
  *
- * Seven controls, deliberately. ELK exposes several hundred options and layered alone has a few
+ * Eight controls, deliberately. ELK exposes several hundred options and layered alone has a few
  * dozen; the ones here are the ones whose effect is visible on a connectome pipeline at a
  * glance. Everything else keeps ELK's own default, which is what a default is for.
  *
- * Six of the seven are answered from the graph alone. The seventh, `useScreenAspect`, is the one
- * that needs a number this module cannot see — `src/layout` is headless and the canvas is where
- * a viewport is — so `elkOptionsFor` takes the measurement as an argument, the same way
- * `toElkGraph` takes card sizes.
+ * Six are answered from the graph alone. Two need a number this module cannot see — the shape of
+ * the pane, since `src/layout` is headless and the canvas is where a viewport is — so
+ * `elkOptionsFor` takes the measurement as an argument, the same way `toElkGraph` takes card
+ * sizes, and `packColumns` takes it as the shape to aim at.
+ *
+ * `packColumns` is also the one that sets **no ELK option at all**: it is a pass over the answer
+ * rather than an instruction to the algorithm, and lives in `layout/pack.ts`. `EdgeRouting` is the
+ * other control of that kind, and for the same reason — see its note.
  *
  * Kept apart from the React that draws it so the mapping can be asserted headlessly — a wrong
  * option *key* is silently ignored by ELK rather than rejected, so "does this string reach the
@@ -80,13 +84,31 @@ export interface LayoutOptions {
   /**
    * Pack those pieces towards the shape of the canvas, rather than towards ELK's fixed 1.6.
    *
-   * Off by default, and the default is the half worth arguing with. Every other option here is
-   * answered from the graph, so two people arranging one `.coda.json` get one arrangement; this
-   * one makes the result depend on the window it was arranged in, which is exactly what somebody
-   * on an ultrawide wants and exactly what makes a shared file land differently on the next
-   * machine. So it is asked for rather than assumed.
+   * Off by default, and the default is the half worth arguing with: this makes ELK's *component
+   * packing* depend on the window it was arranged in, which is exactly what somebody on an
+   * ultrawide wants and exactly what makes a shared file land differently on the next machine. So
+   * it is asked for rather than assumed.
+   *
+   * **It governs `elk.aspectRatio` and nothing else.** `packColumns` also aims at the pane, and
+   * does so unconditionally — `targetAspect` carries that argument and the measurement behind it.
+   * Stated here because the obvious reading of this field is that it is *the* switch for
+   * window-dependence, and it is not.
    */
   useScreenAspect: boolean
+  /**
+   * Pull cards leftwards into columns that have room, after the algorithm has run.
+   *
+   * A post-pass rather than an algorithm — see `layout/pack.ts`, which carries the measurements
+   * that rule out doing this inside ELK. It belongs in `LayoutOptions` because changing it
+   * requires a new arrange, which is what this interface is for; that it sets no ELK key is
+   * incidental. (`EdgeRouting` is the control that sets no key *and* needs no arrange, which is
+   * why it is the one kept out of here — a near-neighbour, not a precedent.)
+   *
+   * On by default: every graph it was tried on came out closer to the shape of the screen, and a
+   * graph it cannot improve is returned untouched, so the blast radius is only the graphs that
+   * were too tall.
+   */
+  packColumns: boolean
 }
 
 export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
@@ -99,6 +121,7 @@ export const DEFAULT_LAYOUT_OPTIONS: LayoutOptions = {
   alignment: 'BRANDES_KOEPF',
   packComponents: true,
   useScreenAspect: false,
+  packColumns: true,
 }
 
 /** Bounds for the two spacing sliders. Also what `coerceLayoutOptions` clamps to. */
@@ -114,6 +137,15 @@ export const SPACING_RANGE = { min: 16, max: 240 } as const
  * bracket every real display with room to spare: 0.25 is past portrait, 4 is past 32:9.
  */
 export const ASPECT_RANGE = { min: 0.25, max: 4 } as const
+
+/**
+ * The shape the column packer aims at when it is not allowed to look at the window.
+ *
+ * ELK's own `aspectRatio` default, which is what every other fallback here lands on — so a graph
+ * arranged with the screen-aspect control off is packed towards the same shape ELK would pack its
+ * components towards, rather than towards a number nobody chose.
+ */
+export const PACK_TARGET_ASPECT = 1.6
 
 /**
  * Whether `elk.aspectRatio` reaches anything at all under these options.
@@ -138,6 +170,68 @@ export function aspectRatioApplies(options: LayoutOptions): boolean {
 }
 
 /**
+ * Whether the column packer *can* do anything under these options. See `layout/pack.ts`.
+ *
+ * Here rather than in `pack.ts` for `aspectRatioApplies`' reason and beside it: the checkbox's
+ * enabled state and the pass have to agree, and a control that is live over a pass which is not
+ * running is the failure `EdgeRouting`'s `routed` mode was deleted for.
+ *
+ * **It does not read `packColumns`**, which is the same split `aspectRatioApplies` makes — that
+ * one leaves `useScreenAspect` to `aspectOption` — and the reason is the call site. A predicate
+ * folding in its own switch cannot answer "would this control do anything if you ticked it", so
+ * `LayoutControls` had to ask it about a state the reader is not in
+ * (`packApplies({ ...options, packColumns: true })`). A call site lying to a predicate to get a
+ * usable answer is the shape, not the comment explaining it.
+ *
+ * **Direction is part of the constraint, not an afterthought.** "A column is a layer" is only true
+ * under `RIGHT`. Under `DOWN`/`UP` layered's layers are *rows*, so grouping by `x` reads
+ * within-row neighbours as columns and stacks them — a packing of nothing. Under `LEFT` the flow
+ * runs the other way, so "move into an earlier column" moves a card *against* it and the
+ * predecessor/successor asymmetry the pass relies on is inverted. `elkNodeOptions` has the same
+ * shape of rule for the same reason, and its note is the measurement behind it.
+ */
+export function packSupported(options: LayoutOptions): boolean {
+  return options.algorithm === 'layered' && options.direction === 'RIGHT'
+}
+
+/**
+ * A measured pane, clamped — or `undefined` for one that cannot be used.
+ *
+ * The one place that decides what a canvas measurement is allowed to be, because it now has two
+ * readers and they were spelling it identically: `elk.aspectRatio` and the column packer's target.
+ * `ASPECT_RANGE`'s note has the reason for the bounds; this is the reason there is one copy of
+ * them. `overlaps` was exported from `place.ts` for the same class of drift.
+ */
+function usableAspect(aspect: number | undefined): number | undefined {
+  if (aspect === undefined || !Number.isFinite(aspect) || aspect <= 0) return undefined
+  return Math.min(ASPECT_RANGE.max, Math.max(ASPECT_RANGE.min, aspect))
+}
+
+/**
+ * The shape the column packer aims at: the pane, clamped, or ELK's 1.6 if it cannot be measured.
+ *
+ * **It reads the pane whether or not `useScreenAspect` is ticked, and that asymmetry is a
+ * decision rather than an oversight.** Routing it through that control was built and measured
+ * first, because the control exists to answer exactly this question and its note argues that a
+ * window-dependent arrangement makes a shared file land differently on the next machine. The
+ * measurement is what settled it: on the worked FlyWire case the packed height is **851 against
+ * the pane's shape and 1156 against a fixed 1.6** — most of the win, on the graph the feature was
+ * built for, and the complaint it answers is *specifically* "taller than wide despite the screen
+ * having more horizontal space". A packer aiming at a constant is a worse answer to that question,
+ * and one that needs a second checkbox — labelled for something else — before it works properly is
+ * the shape of control this codebase has deleted before.
+ *
+ * The cost is real and bounded: two people pressing Arrange on one `.coda.json` at different
+ * window shapes get different arrangements. What they do *not* get is a different file — positions
+ * are saved, so a shared workflow opens exactly as it was sent. `useScreenAspect`'s note has been
+ * narrowed to say what it now governs, which is `elk.aspectRatio` alone; silently outgrowing it
+ * was the part that would not have been acceptable.
+ */
+export function targetAspect(aspect: number | undefined): number {
+  return usableAspect(aspect) ?? PACK_TARGET_ASPECT
+}
+
+/**
  * `elk.aspectRatio`, when the options ask for it and the canvas had one to give.
  *
  * Withheld rather than sent-and-ignored wherever `aspectRatioApplies` says no, so the emitted
@@ -150,8 +244,8 @@ export function aspectRatioApplies(options: LayoutOptions): boolean {
  */
 function aspectOption(options: LayoutOptions, aspect: number | undefined): ElkOptions {
   if (!options.useScreenAspect || !aspectRatioApplies(options)) return {}
-  if (aspect === undefined || !Number.isFinite(aspect) || aspect <= 0) return {}
-  const clamped = Math.min(ASPECT_RANGE.max, Math.max(ASPECT_RANGE.min, aspect))
+  const clamped = usableAspect(aspect)
+  if (clamped === undefined) return {}
   return { 'elk.aspectRatio': String(Math.round(clamped * 1000) / 1000) }
 }
 
@@ -268,5 +362,14 @@ export function coerceLayoutOptions(raw: unknown): LayoutOptions {
     // control existed is not read as somebody having asked for a viewport-shaped arrangement.
     // The inverse of the line above it, and for the same reason: each matches its own default.
     useScreenAspect: held.useScreenAspect === true,
+    /*
+     * Absence reads as on, matching the default — the `packComponents` shape rather than the
+     * `useScreenAspect` one, and the difference is worth stating because the two rules disagree
+     * on purpose. `useScreenAspect` reads absence as *off* so that silence is never taken for
+     * consent to a window-dependent arrangement. Nothing is consented to here: the pass is a
+     * no-op on a graph it cannot improve, and on one it can the answer is better. So the default
+     * is the honest reading of a preference written before this control existed.
+     */
+    packColumns: held.packColumns !== false,
   }
 }

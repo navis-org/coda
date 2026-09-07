@@ -478,7 +478,9 @@ function isReferencePort(nodeType: string | undefined, portId: string): boolean 
  * with a reference edge counted once and decremented never.
  *
  * A reference names a node rather than consuming its output — see `PortDef.reference`. It is
- * excluded here and in `wouldCreateCycle`, and **nowhere else**: invalidation still follows it, so
+ * excluded here, in `wouldCreateCycle` and — through `referenceEdgeIds` — by the layout, whose
+ * `arrangeScope` asks it for the same reason: a two-edge round trip is not a cycle, and ELK has
+ * no way of being told so. Excluded **nowhere else**: invalidation still follows it, so
  * dropping a dataset's result still reaches the node that read its identity. That walk is
  * `descendantsOf` in `scheduler.ts` — *not* the `descendants` exported here, which has no
  * production caller. Whoever consolidates the two must keep it walking every edge.

@@ -199,6 +199,85 @@ Area-specific — the rule, then the doc that holds why:
   button, because `tour.css` frees the spotlit element **and its subtree** — hence three tour steps
   on three surfaces; and the feedback nudge withholds itself off `addMenuOpen` rather than a
   `:has()` rule. See [docs/canvas.md](docs/canvas.md).
+- **A card the layout must not place is condensed, never constrained — and the two cases are a
+  companion and a reference.** ELK has no "directly below" constraint and no notion of an edge that
+  is not a dependency, so both were being answered by accident. A **Description** card is a credit
+  with no outputs, and as an ordinary node layered puts it in the layer *after* its dataset,
+  competing with the real next step: measured in a browser at x = −540 beside `find` while its
+  dataset sat at −884, and once as the topmost card on a canvas whose dataset was a column back.
+  `layout/companions.ts` gives it `collapse.ts`' treatment one level down — the companion leaves the
+  graph, **the host's box grows to cover where it will sit**, and it is snapped back to
+  `CompanionSpec.offset` afterwards; the growth is the silent half, since withholding and replacing
+  looks plausible either way and the only symptom is a card over whatever filled the gap (1 collision
+  with it removed). Grown as an **overlay** on the measurement map, never a `size` on the node
+  (`resolveSize` reads `measured` first) and never in place (that map is `structureKey`'s). Three
+  refusals: a companion carrying **any other wire** stays put, which is also what pins a card fed by
+  two datasets under *neither* rather than under the first; a second companion on one host stays an
+  ordinary node; and a **negative offset declines**, the box's top-left being the host's, which is
+  what keeps a `FIXED_POS` socket offset describing the host. Expansion **snaps**, inverting
+  `expandPositions` on purpose: a folded group keeps its author's arrangement, a companion is placed
+  by its definition. Separately, **`arrangeScope` withholds every reference edge**
+  (`referenceEdgeIds`) — a reference names a node rather than consuming it, which is why `topoSort`
+  already excludes it, and an annotation chain reading its datastack out of the dataset it feeds is
+  a two-edge loop ELK must break at one end or the other. It picked the annotations edge, drawing the
+  chain *after* its dataset. Excluded rather than reversed: reversing asserts a direction ELK then
+  reserves a channel for. **Filtering at the scope is not enough, and that half shipped broken**:
+  `collapsedView` merges stand-ins from `graph.edges` rather than from the list handed to
+  `condense`, so a withheld wire returns as `ds → box` the moment an end is folded — which
+  `foldChain` does to FlyWire's chain by default, i.e. the exact graph the rule was for, and the
+  arrangement still looked fine (the browser check passed by luck). So `arrangeScope` **returns**
+  its `omit` set, `condense` takes it, and `CollapsedEdge.merged` names the wires behind a stand-in
+  so one is dropped only when **every** wire behind it was omitted. **One arm cannot show it** — swept with references in, the flip starts at
+  two datasets, which is why the fixture has two and why both tests were checked by mutation. Both
+  rules together, in a browser at a 1.90 pane: 1.43 → **1.88**, 1.45 → **1.79**, 1.62 → **1.90**.
+  Width never moves, so it is all height. The four-dataset figure is the tell: 1.66 with the
+  reference rule at the scope alone, 1.90 once `condense` stopped undoing it — the graph with the
+  most folded chains had the most to gain, and the broken version looked right in a browser.
+  See [docs/canvas.md](docs/canvas.md).
+- **A layer is a column, and the tightest layouts break that rule — so packing is a post-pass, not a
+  fifth algorithm.** ELK layered spends a whole column on a card that is only ever a leaf and makes
+  a graph as tall as its tallest column, which is why a hand-tidied FlyWire workflow measured
+  **1939 × 1259 against 1743 × 857** — 63% more area for six cards, most of it a void beside a tall
+  Neuroglancer. The move a person makes is to put a card in its *predecessor's* column drawn below
+  it (`Explore ▸ Table` as one column), which is a layer violation **no ELK configuration
+  produces** — swept, not assumed: all four `nodePlacement` strategies are byte-identical, all five
+  `postCompaction` strategies reach +48%, `rectpacking` reaches +8% only by ignoring every edge, and
+  `elk.partitioning` *ignored* a column assignment handed back to it and spread the graph wider than
+  not asking. `layout/pack.ts` runs **after** ELK — standalone it gives the same answer, so
+  replacing layered would only lose crossing minimisation, within-layer order and port order — and
+  takes 1939 × 1259 to **1941 × 851**, all of it height. **The objective is one-sided**: it scores
+  only how much *taller* than the pane the box is, so a graph already wide enough scores zero and
+  comes back untouched — a two-sided score folded a perfectly good four-card chain into one vertical
+  column to "reach" 1.6. Two rules keep it readable: a card joins a column at its **bottom**, so it
+  may share one with a predecessor and never with a successor (that rule missing put an annotation
+  chain *below* the dataset it feeds), and the within-column order is **ELK's**, never recomputed.
+  Columns are read off `x` with a **tolerance** of half the layer gap, since layered nudges a node
+  whose predecessors are short. Gated by `packApplies` — homed in `options.ts` beside
+  `aspectRatioApplies`, one predicate for the checkbox and the pass — which asks for `layered`
+  **and `RIGHT`**, a column being a layer only left-to-right (`DOWN`/`UP` make layers *rows*;
+  `LEFT` inverts the pred/succ asymmetry). Two further gates stand it down as **correctness**:
+  more than one component *while `packComponents` is on* (ELK packs those in two dimensions, so "a
+  row of columns" does not describe the answer, and merging across them dismantles that option —
+  conditional on it, since with it off ELK gives one shared layering and the model holds), and
+  `PACK_MAX_NODES` = 80 — re-measured on the worst legal shape at 33 ms at 80 and **200 ms at
+  120**, synchronous inside a promise continuation. The first gate is **not rare**: an unwired card
+  is a second component, so packing stands down mid-build; that is a missed improvement, not a
+  worse arrangement. `docs/limits.md` carries the row, and the silence is argued there — there is
+  no `EvalContext` on a canvas gesture and `setNotice` would re-nag per wire under auto-layout. **The target is the pane**, clamped, and gating it on
+  `useScreenAspect` was built and *measured against*: 851 aiming at the pane against 1156 aiming at
+  a fixed 1.6, on the graph the feature exists for, answering a complaint that is specifically about
+  the screen — a packer aiming at a constant is the wrong answer to it, and one needing a second
+  checkbox labelled for something else first is a control shape already deleted here. So
+  `useScreenAspect`'s note was **narrowed** to say it governs `elk.aspectRatio` alone; silently
+  outgrowing it was the unacceptable part, not the window-dependence. **What it costs is ELK's edge
+  routes**, which describe gaps at the positions ELK chose. That signal **shipped broken for one
+  round, and is the part worth keeping**: it rode on map identity (`raw !== laid`) while every
+  do-nothing exit built a fresh `Map`, so routes were discarded on every arrange including the
+  graphs the pass declined — three doc comments described the contract, nothing enforced it, and
+  the test meant to pin it asserted *zero* routes after a pack, passing for exactly the wrong
+  reason. `moved` is a returned field now, and the test asserts the case jsdom can show: a decline
+  keeps the routes.
+  See [docs/canvas.md](docs/canvas.md).
 - **`defaultSize` sizes React Flow's _wrapper_, and only a viewer's card fills one**
   (`category: 'visualisation'`). Elsewhere it leaves the state bar hanging below the card. A
   node that only wants to be wider sets `NODE_BODIES[type].width`.

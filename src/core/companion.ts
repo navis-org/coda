@@ -39,6 +39,14 @@ export interface CompanionSpec {
    *
    * Below rather than beside, because a graph flows left to right: a companion off to the right
    * sits where the *next* step in the pipeline goes, and reads as part of the chain.
+   *
+   * **Both coordinates must be non-negative, and that is a constraint rather than the taste
+   * above.** `layout/companions.ts` withholds a companion from the layout and grows its host's box
+   * to reserve the space, anchoring that box at the host card's own top-left — which is what keeps
+   * the measured socket offsets ELK is handed (`FIXED_POS` takes them literally) describing the
+   * host. A negative offset would put the companion outside the reserved box, so the layout
+   * declines to pin it at all: the card lands here on add and then wanders on the next arrange,
+   * with nothing on screen to say why. Stated here because this is where a node pack writes one.
    */
   offset: { x: number; y: number }
 }

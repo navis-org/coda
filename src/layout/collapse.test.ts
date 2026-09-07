@@ -14,8 +14,9 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { addNode, emptyGraph } from '../core/graph'
+import { addEdge, addNode, emptyGraph } from '../core/graph'
 import type { CodaGraph } from '../core/graph'
+import { createGroup } from '../core/groups'
 import { defaultParams } from '../core/node'
 import { requireNodeDef } from '../core/registry'
 import { MockSource } from '../data/mock/MockSource'
@@ -34,7 +35,7 @@ import {
   isFolded,
 } from './collapse'
 import { GROUP_PADDING } from './groupBounds'
-import { layoutPorts, resolveSize } from './elkGraph'
+import { arrangeScope, layoutPorts, resolveSize } from './elkGraph'
 
 beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
@@ -328,5 +329,104 @@ describe('what the layout pass is handed', () => {
         ['c', { x: 640, y: 90 }],
       ]),
     )
+  })
+})
+
+describe('the omit set, which the fold could otherwise undo', () => {
+  /**
+   * A dataset whose two-card annotation chain is folded — `foldChain`'s shape exactly.
+   *
+   * Both wires between the dataset and the chain are here: `join → ds:annotations` is an ordinary
+   * dependency, and `ds:dataset → tags:dataset` is a **reference**, which the layout withholds
+   * (`arrangeScope`). The chain being folded is what makes this interesting: the withheld wire has
+   * one end inside the box.
+   */
+  function foldedChain(): CodaGraph {
+    let graph = emptyGraph('folded chain')
+    const card = (id: string, type: string) => {
+      const def = requireNodeDef(type)
+      graph = addNode(graph, { id, type, position: { x: 0, y: 0 }, params: defaultParams(def) })
+    }
+    card('ds', 'dataset.flywire')
+    card('tags', 'annotation.caveTable')
+    card('join', 'core.join')
+    card('find', 'neuron.findNeurons')
+    graph = addEdge(graph, {
+      id: 'tags>join',
+      source: 'tags',
+      sourceHandle: 'annotations',
+      target: 'join',
+      targetHandle: 'left',
+    })
+    graph = addEdge(graph, {
+      id: 'join>ds',
+      source: 'join',
+      sourceHandle: 'out',
+      target: 'ds',
+      targetHandle: 'annotations',
+    })
+    graph = addEdge(graph, {
+      id: 'ds>tags',
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'tags',
+      targetHandle: 'dataset',
+    })
+    graph = addEdge(graph, {
+      id: 'ds>find',
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'find',
+      targetHandle: 'dataset',
+    })
+    return createGroup(graph, ['tags', 'join'], { title: 'annotations', collapsed: true })
+  }
+
+  it('drops a stand-in whose every wire was omitted', () => {
+    /*
+     * The bug this exists for. `arrangeScope` withholds the reference wire, but `collapsedView`
+     * merges from `graph.edges` rather than from the caller's list, so the fold handed it straight
+     * back as `ds → box` — and ELK got the two-edge loop again, on exactly the folded FlyWire
+     * chain the rule was written for. Caught by probing the condensed edge list; the arrangement
+     * it produced looked entirely reasonable, which is why nothing else saw it.
+     */
+    const graph = foldedChain()
+    const scope = arrangeScope(graph, [])
+    const view = collapsedView(graph)
+    const box = collapsedNodeId(graph.groups![0]!.id)
+
+    const undone = condense(scope.nodes, scope.edges, view)
+    expect(undone.edges.some((e) => e.source === 'ds' && e.target === box)).toBe(true)
+
+    const honoured = condense(scope.nodes, scope.edges, view, scope.omit)
+    expect(honoured.edges.some((e) => e.source === 'ds' && e.target === box)).toBe(false)
+    // The wire *out* of the box is a real dependency and must survive, or the chain stops being
+    // upstream of the dataset at all and the box floats free.
+    expect(honoured.edges.some((e) => e.source === box && e.target === 'ds')).toBe(true)
+  })
+
+  it('keeps a stand-in that merges one omitted wire and one real one', () => {
+    // A stand-in is dropped only when *every* wire behind it was omitted: one real dependency
+    // among them is still a real dependency, and the box still has to be placed after its source.
+    const graph = addEdge(foldedChain(), {
+      id: 'ds>join',
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'join',
+      targetHandle: 'right',
+    })
+    const scope = arrangeScope(graph, [])
+    const view = collapsedView(graph)
+    const box = collapsedNodeId(graph.groups![0]!.id)
+    const folded = condense(scope.nodes, scope.edges, view, scope.omit)
+    expect(folded.edges.some((e) => e.source === 'ds' && e.target === box)).toBe(true)
+  })
+
+  it('records the real wires behind each stand-in, in step with its origins', () => {
+    const view = collapsedView(foldedChain())
+    for (const edge of view.edges) {
+      expect(edge.merged.length).toBe(edge.origins.length)
+    }
+    expect(view.edges.flatMap((e) => e.merged).sort()).toEqual(['ds>tags', 'join>ds'])
   })
 })

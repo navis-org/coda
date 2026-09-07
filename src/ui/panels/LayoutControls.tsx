@@ -31,6 +31,7 @@ import {
   LAYOUT_DIRECTIONS,
   SPACING_RANGE,
   aspectRatioApplies,
+  packSupported,
 } from '../../layout/options'
 import { useGraphStore } from '../../store/graphStore'
 import { lockedTitle } from '../lockCopy'
@@ -162,6 +163,17 @@ export function LayoutControls({ onArrange }: { onArrange: () => void }) {
    * option it is.
    */
   const aspectLive = aspectRatioApplies(options)
+  const packLive = packSupported(options)
+  /*
+   * Which reason, not just that there is one. The gate has two halves and a single sentence is
+   * false for whichever half you are not in — `aspectHint` above has three branches for the same
+   * reason, and the note on that row records why an absent control needs a visible cause.
+   */
+  const packHint = packLive
+    ? 'Pull cards into earlier columns where there is room, so the graph fits the canvas better'
+    : options.algorithm !== 'layered'
+      ? 'Only Layered has columns to pack'
+      : 'Only a left-to-right layout has columns — under ↓ and ↑ a layer is a row'
   const aspectHint = aspectLive
     ? "Pack disconnected parts towards the shape of this canvas, rather than ELK's fixed 1.6"
     : options.packComponents
@@ -354,6 +366,25 @@ export function LayoutControls({ onArrange }: { onArrange: () => void }) {
                 onChange={(e) => setLayoutOptions({ useScreenAspect: e.target.checked })}
               />
               <span>Use screen aspect ratio</span>
+            </label>
+
+            {/*
+             * Gated on `layered` through `packApplies`, the one predicate this and the pass both
+             * read — a column is a layer, and `force` and `radial` have none. Disabled rather than
+             * hidden, for the reason the row above it is.
+             */}
+            <label
+              className="layout-bubble__row layout-bubble__row--check"
+              data-disabled={!packLive ? 'true' : undefined}
+              title={packHint}
+            >
+              <input
+                type="checkbox"
+                checked={options.packColumns}
+                disabled={!packLive}
+                onChange={(e) => setLayoutOptions({ packColumns: e.target.checked })}
+              />
+              <span>Pack columns</span>
             </label>
 
             <div className="layout-bubble__foot">

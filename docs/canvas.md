@@ -266,9 +266,107 @@ sideways shift would slide every note out from over the step it describes.
 
 Note the consequence, which was accepted rather than overlooked: arranging a bundled example
 moves the pipeline but not its commentary, so a note written for one step can end up above a
-different one. And `dataset.description` is **not** an annotation — it has a Dataset input and
-takes an ordinary pipeline slot, which is the position `core/companion.ts` deliberately avoids
-when it places one by hand.
+different one. And `dataset.description` is **not** an annotation — it has a Dataset input, so it
+is arranged rather than dodged; what keeps it off the pipeline is the next section rather than
+this one.
+
+### A companion is placed with its host, not after it
+
+`layout/companions.ts`. A dataset node arrives with a Description card wired to it
+(`NodeDefinition.companion`), and that card has no outputs at all — it is a credit hanging off the
+dataset rather than a step. Handed to ELK as an ordinary node it is treated as one, and layered
+puts it in the layer *after* its dataset, where it competes with the real next step for the column
+and adds a row to it. Measured in a browser on the wizard's `flywire + banc / compare`: both
+Description cards at x = −540 beside `find` and `find2`, a full layer right of their datasets at
+x = −884; on the four-dataset co-cluster, one of them was the **topmost card on the canvas** while
+its dataset sat in the previous column.
+
+**It is condensed, not constrained.** ELK has no "directly below" constraint, and the two things
+that come closest are both wrong: a partition puts the pair in one *layer* and says nothing about
+which is above, and a post-pass that moves the card afterwards lands it on whatever ELK put there.
+So the pair goes through `collapse.ts`' shape one level down — the companion leaves the layout
+graph, **the host's box grows to cover where it will sit**, and it is put back at the declared
+offset once positions are known. ELK reserves the space, so nothing can be placed in it, and the
+rule holds exactly rather than on average. The host keeps its id, ports and edges; only its size
+changes, which is why `toElkGraph` and `place.ts` learn nothing about this.
+
+The growth is the half that fails silently: withholding a node and putting it back produces a
+perfectly plausible arrangement whether or not the box grew, and the only symptom is a card drawn
+over whatever filled the gap. `companions.test.ts` runs the real algorithm and asserts no two cards
+overlap at their real sizes — 1 collision with the growth removed. The grown sizes are an
+**overlay** on the measurement map rather than a `size` on the node, because `resolveSize` reads
+`measured` first and a written `size` would be ignored on exactly the graphs where it matters; the
+overlay is a copy, since the original is what `structureKey` is computed from and growing it in
+place would make the key follow the pinning rather than the cards.
+
+Three refusals, each of which the obvious loop gets wrong. **A companion carrying any other wire
+is left alone** — a Description has no outputs so this is not the daily case, but withholding a
+node with a real dependency deletes that edge from the layout silently. That same rule settles the
+*shared* companion: one card fed by two datasets is pinned under neither, rather than under the
+first, because pinning it would hide the second wire while looking like a decision. **A second
+companion on one host** stays an ordinary node, two cards at one offset being worse than either
+place ELK would have chosen. And **a negative offset declines the pin**: the box's top-left is the
+host card's, which is what keeps a pinned socket offset (`FIXED_POS` takes those literally)
+describing the host — a companion above or to the left would need every one of them shifted, and
+would sit outside the reserved box if they were not.
+
+Expansion inverts `expandPositions`' rule on purpose. A folded group's members keep the
+arrangement their author left, because folding is a way of telling the layout to leave that part
+alone; a companion has no such arrangement to keep — it is placed by its host's *definition*, so
+an arrange snaps it back there.
+
+### A reference edge is not a layering constraint
+
+`arrangeScope` filters through `core/graph.ts`' `referenceEdgeIds`. A reference names a node
+instead of consuming its output (`PortDef.reference`), which is exactly why `topoSort` and
+`wouldCreateCycle` already exclude them: a round trip through one is not a cycle. Handed to ELK it
+**is** one. An annotation chain reads its datastack out of the dataset it is about to feed
+(`dataset:dataset → chain:dataset`) and feeds the same dataset back
+(`chain:out → dataset:annotations`), so layered has to break the two-edge loop and picks whichever
+end it likes — and on the wizard's cross-dataset workflows it picked the annotations edge, drawing
+the plumbing *after* the thing it feeds. Measured in a browser: the folded FlyWire chain at
+x = −540 with its dataset at x = −884.
+
+**Excluded rather than reversed.** Reversing asserts a direction ELK would then reserve a routing
+channel for; a reference constrains nothing, so the honest statement is that it is not an ordering
+constraint at all. Nothing here touches what the canvas draws — the wire is still there, and still
+a wire.
+
+**And filtering at the scope is not enough on its own — this is the half that was shipped broken
+and caught in review.** `collapsedView` merges its stand-ins from `graph.edges`, *not* from the
+edge list the caller hands `condense`, so a withheld wire comes straight back as `ds → box` the
+moment either end is folded. That is not a corner: `foldChain` folds FlyWire's annotation chain by
+default, so the exact graph the rule was written for still went to ELK with its two-edge loop. The
+arrangement it produced looked entirely reasonable — the browser measurement passed by luck —
+which is why nothing saw it until the edge list itself was printed. So `arrangeScope` **returns**
+the set it withheld, `condense` takes it as `omit`, and `CollapsedEdge.merged` names the real wires
+behind each stand-in so a stand-in can be dropped when **every** one of them was omitted. One
+author, every stage applying the same rule. `collapse.test.ts` pins all three: that the unguarded
+call still re-introduces the loop, that the guarded one does not, and that a stand-in merging one
+omitted wire and one real one survives.
+
+**One arm does not show it, and that is worth knowing before writing a fixture.** Swept against the
+real algorithm with the references left in: at one dataset the card still lands left and the bug is
+invisible, at two the second arm's card flips, at three both later arms do. Two arms is also the
+shape the wizard builds for a comparison, which is where it was reported. `layout.test.ts` covers
+both halves — that `arrangeScope` withholds the edge, and that ELK then puts the card on the left —
+and both were verified by mutation, since the first passes on a fixture the second cannot fail on.
+
+What the two rules together bought, measured in a browser at a pane of 1600 × 843 (aspect 1.90),
+arranged bounds before → after:
+
+| workflow                       | before             | after              |
+| ------------------------------ | ------------------ | ------------------ |
+| flywire + banc, compare        | 2016 × 1414 (1.43) | 2016 × 1072 (1.88) |
+| hemibrain + malecns, compare   | 1916 × 1323 (1.45) | 1916 × 1072 (1.79) |
+| four datasets, co-cluster      | 4112 × 2545 (1.62) | 4112 × 2167 (1.90) |
+
+The width never moves — neither rule adds or removes a layer from the pipeline — so the whole of it
+is height, and all three now sit at or near the shape of the pane they are framed into. The
+four-dataset figure is the one worth reading twice: it was 2475 with the reference rule applied at
+the scope alone, and only reached 2167 once `condense` stopped handing the withheld wire back. The
+graph with the most folded chains had the most to gain, and the version that "worked" in the browser
+was leaving a third of the improvement on the table while looking correct.
 
 **Auto mode watches `structureKey`, not the graph.** Node identity, type, collapse and _measured_
 size, plus every edge's four endpoints. Positions are out, so a drag never asks for a new
@@ -313,6 +411,117 @@ distinguishable against a laid-out page.
 The _worker wrapper_ remains uncovered: jsdom has no `Worker`, so tests take the bundled path.
 What was checked by hand is that `elk-worker.min.js` guards both its entry branches with `typeof`
 and calls no `importScripts`, so vite serving it as a module worker in dev is safe.
+
+### Packing columns into the shape of the canvas
+
+`layout/pack.ts`, a **post-pass** on ELK's answer, on by default and switched off by *Pack columns*
+in the options bubble. Layered gives every node its own layer and a layer is a column, so it spends
+a whole column on a card that is only ever a leaf and makes the graph as tall as its tallest column
+whatever else is going on. Measured in a browser on a hand-tidied FlyWire workflow: **1939 × 1259
+against the hand-placed 1743 × 857** — 63% more area for the same six cards, most of it an L-shaped
+void beside a tall Neuroglancer card.
+
+The move a person makes and layered cannot is to put a card in its *predecessor's* column, drawn
+below it, so `Explore ▸ Table` is one column rather than two. That is a layer violation by
+construction. **No ELK configuration produces it**, which was swept rather than assumed:
+
+| what was tried                      | area   | aspect | vs hand-placed              |
+| ----------------------------------- | ------ | ------ | --------------------------- |
+| `layered`, as it shipped            | 2404k  | 1.56   | +61%                        |
+| all four `nodePlacement` strategies | 2404k  | 1.56   | +61% — no change at all     |
+| `postCompaction`, all five          | 2216k  | 1.44   | +48%                        |
+| `mrtree` / `force`                  | ~2280k | ~1.3   | +49% / +57%                 |
+| `rectpacking` / `box`               | 1617k  | 0.92   | +8%, by ignoring every edge |
+| **this pass**                       | 1652k  | 2.28   | **+11%**                    |
+
+End to end that is 1939 × 1259 becoming **1941 × 851**: the width does not move at all, and a third
+of the height goes. `elk.partitioning` was tried as a way of handing the columns *back* to ELK; it
+ignored the assignment and spread the graph to 2557 wide, worse than not asking.
+
+**A post-pass, not a fifth algorithm.** Run standalone it gives the same answer as it does over
+ELK's output, so replacing layered buys nothing and loses crossing minimisation, the within-layer
+ordering and the port-order work that makes a wire arrive at the right socket. It reads ELK's answer
+and moves cards *leftwards into slack*, which is why it composes with the algorithm choice instead
+of being one — and why the checkbox sits in the bubble rather than in the algorithm dropdown. It is
+gated regardless by `packApplies` — one predicate the checkbox and the pass both read, homed in
+`options.ts` beside `aspectRatioApplies` for that predicate's reason. It asks for `layered` **and
+`RIGHT`**: a column is a layer only under a left-to-right direction. Under `DOWN`/`UP` layered's
+layers are *rows*, so grouping by `x` reads within-row neighbours as columns and stacks them, and
+under `LEFT` "move into an earlier column" moves a card *against* the flow with the
+predecessor/successor asymmetry inverted. `force` and `radial` have no layers at all.
+
+**The objective is one-sided, and that is the whole character of it.** It scores only how much
+*taller* than the target shape the box is; once the graph is wide enough the score is zero, no move
+can improve on zero, and the input comes back untouched. Scoring the distance to the target in both
+directions makes the packer fight a graph for being too *wide*, which is nobody's problem — measured
+on a four-card chain, perfectly good at an aspect of 5.4, a two-sided score folded it into a single
+vertical column to "reach" 1.6.
+
+**The target is the pane** (`canvasAspect`, the one input the graph cannot answer), clamped through
+`ASPECT_RANGE` and falling back to `PACK_TARGET_ASPECT` = ELK's own 1.6 when it cannot be measured.
+
+Routing it through `useScreenAspect` instead was built and measured first, because that control
+exists to answer exactly this question and its note argues a window-dependent arrangement makes a
+shared file land differently on the next machine. **The measurement settled it against that**: on
+the worked case the packed height is 851 aiming at the pane and 1156 aiming at a fixed 1.6 — most
+of the win, on the graph the feature was built for, and the complaint it answers is *specifically*
+"taller than wide despite the screen having more horizontal space". A packer aiming at a constant is
+a worse answer to that, and one needing a second checkbox — labelled for something else — before it
+works properly is the shape of control this codebase has deleted before. The cost is bounded: two
+people pressing Arrange on one `.coda.json` at different window shapes get different arrangements,
+but not a different *file*, since positions are saved. `useScreenAspect`'s note has been narrowed to
+say it governs `elk.aspectRatio` alone — silently outgrowing it was the part that would not do.
+
+Two rules keep the result readable rather than merely small. A card joins a column at its **bottom**,
+so it may share one with a *predecessor* — the wire runs downwards, which is the move being copied —
+and never with a *successor*, which would draw a wire back up the column; minimising the box with
+that second rule missing put a dataset's annotation chain below the dataset it feeds. And the order
+within a column is **ELK's**, by `y`, never recomputed: this pass moves cards between columns and
+reorders none, so the crossing minimisation still holds.
+
+Columns are read off ELK's `x` with a tolerance of half the layer gap, because layered left-aligns a
+layer but nudges a node whose predecessors are all short a few units off its neighbours — grouped by
+exact `x` that reports one column as several and the pass has nothing to merge.
+
+Two gates stand it down entirely, and both are correctness rather than caution. **More than one
+connected component, while `packComponents` is on** and it declines: ELK packs disconnected pieces
+in *two* dimensions, so its answer is not a row of columns and summing column widths describes a
+single strip — run over it the pass would mis-score and merge a column of one component with an
+unrelated column of another, dismantling the packing that option just asked for. The two are
+complements, since `elk.aspectRatio` shapes a multi-component graph and can do nothing for a single
+chain. It is conditional on that option because the argument is: with component packing off, ELK
+gives every node one shared set of layers and the model holds at any number of pieces.
+
+Worth knowing what the component gate costs, because it is not rare: **an unwired card is a second
+component**, so packing stands down while a graph is being built and comes back when the last wire
+lands — and it counts components of the *layout* graph, which `arrangeScope` has already stripped of
+reference edges, so a card joined only through one is its own piece here while the canvas shows it
+connected. Both are a missed improvement rather than a worse arrangement. Packing each component and
+re-placing the boxes is a rectangle packer, i.e. a second algorithm, which is why declining is where
+this stops. **Above `PACK_MAX_NODES` (80)** it declines too: the greedy is `passes × nodes × columns` trials
+and `passes` grows with the graph on exactly this shape — re-measured against the current code on
+the worst *legal* shape at 2.3 ms for 40 cards, **33 ms at 80 and 200 ms at 120**, synchronously
+inside a promise continuation, so the tail would eat the frame the arrange animation starts on. An
+ordinary pipeline is not on that curve: already wide enough, it evaluates one box and leaves, about
+0.1 ms at any size. Both gates are pinned at their boundary, because a fixture the packer would
+decline anyway proves nothing. `docs/limits.md` carries the row.
+
+**What it costs is ELK's edge routes.** A bend point describes a gap between two cards at the
+positions ELK chose, so a card that has moved to another column leaves its wire heading into empty
+space — the staleness `routeKey` exists to catch. `useArrange` gives the routes up whenever this
+pass moved anything. The `orthogonal` mode survives it, because it steps *every* wire rather than
+only the ones ELK bent; what is lost is the routed-around-a-card half. That is the same trade
+`EdgeRouting`'s note records, and it is why "did it move anything" matters — a graph the packer
+cannot help keeps every route it would have had.
+
+**That signal shipped broken for one round, and it is the useful part of this record.** It rode on
+map identity (`raw !== laid`), and every one of the packer's do-nothing exits builds a fresh `Map`,
+so `packed` was true on every arrange and the waypoints were discarded even on the graphs the pass
+declined to touch. Three doc comments described the contract and nothing enforced it; the test that
+was supposed to pin it asserted *zero* routes after a pack, which passed for exactly the wrong
+reason. `moved` is a field of the return type now, so the compiler carries it, and the test asserts
+the case jsdom can actually show — that a decline **keeps** the routes. The two remaining route
+tests arrange with packing off, since they are about the waypoints rather than the packer.
 
 ### Edge routing — wires that go around the cards
 
