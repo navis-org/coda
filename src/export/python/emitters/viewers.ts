@@ -785,7 +785,10 @@ registerEmitter('out.viewer3d', (ctx) => {
   } else {
     lines.push(
       ...ctx.note('Nothing is picked in the viewer, so Selected is empty.'),
-      `${selected} = pd.DataFrame({'neuronId': []})`,
+      // Typed at the literal rather than cast after it: an empty `[]` is `float64`, where the
+      // node's own fallback schema says `str`. Nothing to convert, so `coda_ids` would be a
+      // line of ceremony over a frame with no rows.
+      `${selected} = pd.DataFrame({'neuronId': pd.Series([], dtype='string')})`,
     )
   }
   return lines

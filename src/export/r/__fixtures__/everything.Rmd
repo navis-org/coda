@@ -1878,7 +1878,7 @@ plot3d(skeletons)
 for (.mesh in roi_meshes) rgl::shade3d(.mesh, alpha = 0.12, col = "grey70")
 
 # NOTE: Nothing is picked in the viewer, so Selected is empty.
-n_3d_view <- tibble(neuronId = numeric(0))
+n_3d_view <- tibble(neuronId = character(0))
 ```
 
 ```{r clean-meshes}

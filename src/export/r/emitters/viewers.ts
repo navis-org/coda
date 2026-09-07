@@ -757,7 +757,9 @@ registerEmitter('out.viewer3d', (ctx) => {
   } else {
     lines.push(
       ...ctx.note('Nothing is picked in the viewer, so Selected is empty.'),
-      `${selected} <- tibble(neuronId = numeric(0))`,
+      // `character(0)`, not `numeric(0)`: the node's fallback schema is `str`, and an empty
+      // double column is what makes a later `bind_rows` against a real one error outright.
+      `${selected} <- tibble(neuronId = character(0))`,
     )
   }
   return lines

@@ -66,8 +66,8 @@ export function neuronIdInts(frame: string, limit = 0): string {
  * digits to match the `str` id column every source publishes — and with `decodeIndices`
  * (`nodes/lib/chartSelection.ts`) instead where the param holds leaf positions rather than ids.
  */
-export function selectionIds(ctx: EmitContext, paramId = 'selection'): string[] {
-  const raw = ctx.params[paramId]
+export function selectionIds(ctx: EmitContext): string[] {
+  const raw = ctx.params.selection
   return Array.isArray(raw) ? raw.map((id) => String(id).trim()).filter(Boolean) : []
 }
 
@@ -124,13 +124,19 @@ export function codaNeurons(ctx: EmitContext, frame: string): string {
  * The helper is idempotent (a `string` column is cast straight through), so a frame that reaches
  * two of these seams pays a no-op rather than needing anyone to work out which one owns it.
  *
- * **The rule, rather than the list of sites it was found at:** an emitter that produces a column
- * named by `ID_COLUMN_NAME` — or renames one onto it — ends in this. It is written that way
- * because enumerating the seams is what missed two of them, both of which sat in a regenerated
- * golden looking plausible: `shapingLines` renamed an uploaded column onto `neuronId` without
- * retyping it, and the unwired `Input IDs` branch built a frame from an integer list. Where a
- * rename is involved the retype belongs *with* it, since that is how `uploadShapeSchema` states
- * the same thing on the canvas.
+ * **The rule, rather than the list of sites it was found at:** an emitter that *renames* a column
+ * onto an id name ends in this, and the retype belongs with the rename rather than after it —
+ * which is how `uploadShapeSchema` states the same thing on the canvas. Enumerating the seams is
+ * what missed two, both of which sat in a regenerated golden looking plausible: `shapingLines`
+ * renamed an uploaded column onto `neuronId` without retyping it, and the unwired `Input IDs`
+ * branch built a frame from an integer list.
+ *
+ * Not `ID_COLUMN_NAME` only — `preId`/`postId` go through it too, which is why it is varargs.
+ *
+ * **A column *minted* from a literal is the other half, and this cannot state it**: there is no
+ * rename to hang on, so the fix is to write the literal already typed (`pd.Series([], dtype=
+ * 'string')` in `viewers.ts`) rather than to cast an empty frame afterwards. Casting is for a
+ * column that arrived; typing is for one you are writing.
  */
 export function codaIds(ctx: EmitContext, frame: string, ...columns: string[]): string {
   ctx.helper('coda_ids')

@@ -27,13 +27,10 @@ export function neuronIds(frame: string): string {
  * answer. A Coda id column is `character` on every source, and R punishes a disagreement harder
  * than pandas does: `bind_rows` on `<double>` against `<character>` errors outright.
  *
- * **The rule, rather than the list of sites it was found at:** an emitter that produces a column
- * named by `ID_COLUMN_NAME` — or renames one onto it — ends in this. It is written that way
- * because enumerating the seams is what missed two of them, both of which sat in a regenerated
- * golden looking plausible: `shapingLines` renamed an uploaded column onto `neuronId` without
- * retyping it, and the unwired `Input IDs` branch built a frame from an integer list. Where a
- * rename is involved the retype belongs *with* it, since that is how `uploadShapeSchema` states
- * the same thing on the canvas.
+ * **When to call it** is the Python twin's rule and is written there once rather than twice.
+ * Where the two exporters differ is `neuron.inputIds`: Python's unwired branch needed this
+ * because `pyLongIntList` mints an integer list for `NeuronCriteria`, where `rLongVector`
+ * already emits `c("1001", …)` and there is nothing to convert.
  */
 export function codaIds(ctx: EmitContext, frame: string, ...columns: string[]): string {
   ctx.helper('coda_ids')
@@ -55,8 +52,8 @@ export function codaIds(ctx: EmitContext, frame: string, ...columns: string[]): 
  *
  * `rVector` over these gives `c("1001", …)`, which is exact at any width and matches the column.
  */
-export function selectionIds(ctx: EmitContext, paramId = 'selection'): string[] {
-  const raw = ctx.params[paramId]
+export function selectionIds(ctx: EmitContext): string[] {
+  const raw = ctx.params.selection
   return Array.isArray(raw) ? raw.map((id) => String(id)) : []
 }
 
@@ -68,8 +65,8 @@ export function selectionIds(ctx: EmitContext, paramId = 'selection'): string[] 
  * turn a category that happens to look numeric into a value that no longer matches the string
  * the canvas compared against (see `nodes/lib/chartSelection.ts`).
  */
-export function selectionLabels(ctx: EmitContext, paramId = 'selection'): string[] {
-  const raw = ctx.params[paramId]
+export function selectionLabels(ctx: EmitContext): string[] {
+  const raw = ctx.params.selection
   return Array.isArray(raw) ? raw.map((label) => String(label)) : []
 }
 

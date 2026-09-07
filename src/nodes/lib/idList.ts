@@ -28,7 +28,7 @@ import { idText, isTypedId } from '../../core/ids'
  */
 const SEPARATORS = /[\s,;[\]()'"]+/
 
-/** Hoisted, like the two above it — `parseIdList` runs on every keystroke of the ids field. */
+/** Hoisted, like `SEPARATORS` above — `parseIdList` runs on every keystroke of the ids field. */
 const LEADING_ZEROS = /^0+(?=\d)/
 
 export interface IdListResult {

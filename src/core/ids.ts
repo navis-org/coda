@@ -44,15 +44,6 @@ import type { CellValue } from './values'
 export type NeuronId = string
 
 /**
- * The id grammar: digits, optionally signed. No separators, no exponent, no leading `+`.
- *
- * Signed because this is the *transport* grammar rather than the input grammar — a source may
- * hand back a negative id and the honest thing is to carry it through to a query that will say
- * so. Typed input is stricter (`parseIdList` refuses `-1` outright, since a negative neuron id
- * is almost always a mistyped range), and that asymmetry is deliberate: authored text is a
- * mistake somebody can fix, where data is data.
- */
-/**
  * The name a neuron table's id column has to use.
  *
  * Here, beside the grammar, for the reason the grammar is here: the *name* is a cross-layer
@@ -112,6 +103,15 @@ export function isIdentifierColumn(name: string | undefined): boolean {
   return last === 'id' || last === 'ids'
 }
 
+/**
+ * The id grammar: digits, optionally signed. No separators, no exponent, no leading `+`.
+ *
+ * Signed because this is the *transport* grammar rather than the input grammar — a source may
+ * hand back a negative id and the honest thing is to carry it through to a query that will say
+ * so. Typed input is stricter (`isTypedId` below refuses `-1` outright, since a negative neuron
+ * id is almost always a mistyped range), and that asymmetry is deliberate: authored text is a
+ * mistake somebody can fix, where data is data.
+ */
 const ID_GRAMMAR = /^-?\d+$/
 
 /** Whether a string is a well-formed id, i.e. safe to splice into a query unquoted. */
@@ -122,24 +122,22 @@ export function isNeuronId(value: string): value is NeuronId {
 /**
  * The **input** grammar: digits only, no sign.
  *
- * The strict half of the pair `ID_GRAMMAR`'s note already describes — "typed input is stricter
- * (`parseIdList` refuses `-1` outright, since a negative neuron id is almost always a mistyped
- * range), and that asymmetry is deliberate: authored text is a mistake somebody can fix, where
- * data is data." That sentence documented a rule with no home, so the rule was written twice:
- * a private `DIGITS = /^\d+$/` in `nodes/lib/idList.ts` and a second one, citing the first, in
- * `nodes/lib/labelsToNeurons.ts`. Two copies with a pointer between them is the state this
- * module's own header describes as what it exists to end.
+ * The strict half of the asymmetry `ID_GRAMMAR` describes just above. That sentence documented a
+ * rule with no home, so the rule was written twice: a private `DIGITS = /^\d+$/` in
+ * `nodes/lib/idList.ts` and a second one, citing the first, in `nodes/lib/labelsToNeurons.ts`.
+ * Two copies with a pointer between them is the state this module's own header describes as
+ * what it exists to end.
  *
  * Three callers, and each reads a value somebody *chose* rather than one a backend published:
  * `parseIdList` (typed text, which refuses), `idsFromColumn` and `usableId` (a wired column,
  * which drop and count). The refuse/drop asymmetry stays theirs — it is about where the value
  * came from, not about what an id looks like.
  */
+const TYPED_GRAMMAR = /^\d+$/
+
 export function isTypedId(value: string): value is NeuronId {
   return TYPED_GRAMMAR.test(value)
 }
-
-const TYPED_GRAMMAR = /^\d+$/
 
 /**
  * One table cell as an exact id, or null where it is not one.

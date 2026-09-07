@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import type { LinkageValue, TableValue } from '../../core/values'
+import { decodeIndices } from '../../nodes/lib/chartSelection'
 import { displayLabels } from '../../nodes/lib/displayLabels'
 import type { Mode } from '../colors'
 import { CHART_INK, MAX_SERIES, chartSurface, currentMode } from '../colors'
@@ -169,7 +170,11 @@ export function DendrogramViewer({
   // the arrays inside a linkage are stable, so they are the honest key.
   const shape = useMemo(() => dendrogramShape(linkage), [linkage])
 
-  const selected = useMemo(() => new Set(selection.map(Number)), [selection])
+  // Through `decodeIndices` rather than a fourth `.map(Number)`: this is the surface that
+  // *writes* the param, so a viewer that read it differently from the node and the two
+  // exporters is the drift that helper exists to end. It was already different — `NaN` stayed
+  // in this Set and highlighted nothing, where the readers drop it.
+  const selected = useMemo(() => new Set(decodeIndices(selection)), [selection])
 
   /*
    * Which branches are *wholly* selected, in one bottom-up pass over the merges rather than by
