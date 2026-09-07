@@ -657,6 +657,23 @@ Both goldens now carry the refusal, which is what stops that recurring.
 **Still open**, and deliberately: `sides_rel` (decision 7's v2), which is a change to the feature
 axis and so lands in Partner Vectors beside items 2 and 3.
 
+## Reachable from the wizard — **built**
+
+All three layers are now something the Workflow Wizard can build: **Multiple datasets** on its
+first question opens a multi-select, and the third question offers four cross-dataset answers —
+type-level comparison (L2a), co-clustering (L2b), morphology in one shared space, and NBLAST
+across datasets. See [wizard.md](wizard.md) for the option space and the three silent failures
+that shape has.
+
+Two things there are decisions from this document surfacing one layer up. The mapper is wired to
+the **Dataset** nodes rather than the neuron tables, which is decision 4 and is also why the
+wizard builds each dataset's annotation chain — a CAVE datastack's typing arrives through that
+chain, so a FlyWire node without one has no type column to match on. And `DatasetFamily.typeColumns`
+pre-fills the per-dataset pickers, which is decision 3's "pre-filled params the user can see and
+override, never hidden behaviour" written as a declaration: absent means nobody has made the
+judgement (minnie65 has no cell typing; BANC's column names come from its own pivot), and the card
+then says what to pick.
+
 ## Where the tests go
 
 Per [testing-layers.md](testing-layers.md). The mapper is pure and headless, so its tests are

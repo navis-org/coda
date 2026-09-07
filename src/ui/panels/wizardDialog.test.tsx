@@ -25,7 +25,13 @@ import { useGraphStore } from '../../store/graphStore'
 import { loadWizardArrange, loadWizardViewsOff } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import { DEMO_DATASET } from '../../wizard/build'
-import { visualisationOptions } from '../../wizard/options'
+import {
+  MULTI_DATASET,
+  analysisOptions,
+  maxWizardDatasets,
+  multiDatasetOptions,
+  visualisationOptions,
+} from '../../wizard/options'
 import { WizardDialog } from './WizardDialog'
 
 beforeAll(() => {
@@ -137,7 +143,7 @@ describe('the fourth question', () => {
     // A guard against the question rendering a *subset* that happens to look ticked: the count
     // on screen has to be the count `visualisationOptions` answers with.
     askThrough('Adjacency matrix')
-    expect(boxes()).toHaveLength(visualisationOptions(DEMO_DATASET, 'matrix').length)
+    expect(boxes()).toHaveLength(visualisationOptions([DEMO_DATASET], 'matrix').length)
   })
 
   it('remembers a refusal in the profile, not the picks', () => {
@@ -220,5 +226,106 @@ describe('the fourth question', () => {
       ['A dendrogram', true],
       ['A heatmap', true],
     ])
+  })
+})
+
+/**
+ * The cross-dataset path: the fifth row on the first question, and the question it opens.
+ *
+ * The headless half — which analyses a set of datasets can answer, what the arms build — is in
+ * `wizard/wizard.test.ts`. What lives here is the wiring that half cannot see: that the sequence
+ * grows a question rather than renumbering the ones after it, that the new question refuses to be
+ * left before it has an answer anything can be asked of, and that leaving the path again puts the
+ * reader back on the four-question sequence rather than stranding them on a fifth screen.
+ */
+describe('the cross-dataset path', () => {
+  const open = () => {
+    render(<WizardDialog />)
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(MULTI_DATASET.label) }))
+  }
+  const continues = () => screen.getByRole('button', { name: 'Continue' })
+  const progress = () => document.querySelector('.wizard__progress')?.textContent ?? ''
+
+  it('offers the extra row on the first question and opens a second dataset question', () => {
+    render(<WizardDialog />)
+    expect(progress()).toBe('Question 1 of 4')
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(MULTI_DATASET.label) }))
+
+    // A question inserted, not one renumbered: the four that follow are still the same four.
+    expect(progress()).toContain('Question 2 of 5')
+    expect(screen.getByRole('heading', { name: /Which datasets\?/ })).toBeTruthy()
+    // Every family the option space offers has a box, and nothing else does.
+    expect(screen.getAllByRole('checkbox').length).toBe(multiDatasetOptions().length)
+  })
+
+  /*
+   * Both floors, and the second is the one no other question has: two connectomes that share no
+   * capability share no analysis, so the question *after* this one can be empty. That is a
+   * refusal on Continue rather than a question opened with nothing in it.
+   */
+  it('refuses to continue until two datasets are ticked', () => {
+    open()
+    expect(continues().hasAttribute('disabled')).toBe(true)
+    expect(progress()).toContain('at least two')
+
+    tick('Demo Data')
+    expect(continues().hasAttribute('disabled')).toBe(true)
+
+    tick('Hemibrain')
+    expect(continues().hasAttribute('disabled')).toBe(false)
+    // And the pair really can be asked something, or the guard is passing on a graph nobody
+    // could build.
+    expect(analysisOptions([DEMO_DATASET, 'hemibrain']).length).toBeGreaterThan(0)
+  })
+
+  it('refuses a dataset past the arity the nodes accept', () => {
+    open()
+    const rows = screen.getAllByRole('checkbox')
+    const max = maxWizardDatasets()
+    expect(rows.length, 'not enough families to reach the cap').toBeGreaterThan(max)
+    for (const row of rows.slice(0, max + 1)) fireEvent.click(row)
+    // The click past the cap does nothing at all, which is the one outcome a test can mistake
+    // for a click that never happened — so the *last* row is the one asserted unticked, on top
+    // of the count. `boxes()` is the file's own reader of the ticked state.
+    expect(boxes().filter(([, on]) => on).length).toBe(max)
+    expect(boxes()[max]?.[1]).toBe(false)
+  })
+
+  it('walks on to the same three questions and builds a workflow over both datasets', () => {
+    open()
+    tick('Demo Data')
+    tick('Hemibrain')
+    fireEvent.click(continues())
+
+    expect(progress()).toBe('Question 3 of 5')
+    fireEvent.click(screen.getByRole('button', { name: /Structured Search/ }))
+    // Only the cross-dataset techniques here — the single-dataset ones are a different list.
+    expect(screen.queryByRole('button', { name: /Connectivity partners/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Compare connectivity/ }))
+    fireEvent.click(continues())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create workflow' }))
+    const graph = useGraphStore.getState().graph
+    const types = graph.nodes.map((node) => node.type)
+    expect(types).toContain(`dataset.${DEMO_DATASET}`)
+    expect(types).toContain('dataset.hemibrain')
+    expect(types).toContain('compare.matchTypes')
+    expect(types).toContain('compare.connectivity')
+  })
+
+  /*
+   * Leaving the path is what picking a single dataset *means*, and it has to happen on that click
+   * rather than as a repair: a stale flag leaves a five-question sequence behind a one-dataset
+   * answer, and the screen that would show it is behind us.
+   */
+  it('goes back to the four-question sequence when a single dataset is picked', () => {
+    open()
+    tick('Demo Data')
+    tick('Hemibrain')
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Demo Data/ }))
+    expect(progress()).toBe('Question 2 of 4')
+    expect(screen.getByRole('heading', { name: /Which neurons\?/ })).toBeTruthy()
   })
 })

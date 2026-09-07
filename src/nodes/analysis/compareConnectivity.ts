@@ -67,8 +67,16 @@ const datasetCountParam = {
   max: MAX_DATASETS,
 } as const
 
-/** `A`, `B`, `C`, `D` — short, because these become column-name suffixes. */
-function defaultName(index: number): string {
+/**
+ * `A`, `B`, `C`, `D` — short, because these become column-name suffixes.
+ *
+ * Exported for `resolveDatasetNames`' reason one function down: these names *are* the output's
+ * column names, so anything that has to say `weight_A` before this node has run has to read them
+ * from here. The Workflow Wizard's cross-dataset arm is that caller — it writes the `name{n}`
+ * params and points a Scatter Plot at two of the columns they produce, and a second spelling of
+ * this rule would aim that viewer at a column the node does not emit.
+ */
+export function compareDatasetName(index: number): string {
   return String.fromCharCode(64 + index)
 }
 
@@ -93,7 +101,7 @@ const perDatasetParams = repeatParams({
       kind: 'string',
       label: `Name ${slot.index}`,
       help: 'What this dataset is called in the output’s column names — weight_A, present_A. Keep it short.',
-      default: defaultName(slot.index),
+      default: compareDatasetName(slot.index),
     },
     {
       id: slot.id('pre'),
@@ -145,7 +153,7 @@ export function resolveDatasetNames(ctx: {
   return Array.from({ length: count }, (_, i) => {
     const index = i + 1
     const typed = String(ctx.params[repeatParamId('name', index)] ?? '').trim()
-    return uniqueName(taken, typed || defaultName(index))
+    return uniqueName(taken, typed || compareDatasetName(index))
   })
 }
 

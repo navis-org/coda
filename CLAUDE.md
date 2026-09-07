@@ -315,6 +315,32 @@ Area-specific — the rule, then the doc that holds why:
   `Limit` being a warn threshold, not a cap). And `demoWorkflow()` is what the tour's empty canvas
   and thirty test files load, so the suites exercise the graph that ships.
   See [docs/wizard.md](docs/wizard.md).
+- **The wizard's first question has a fifth kind of answer, and the mode is derived from it.**
+  **Multiple datasets** replaces that question with a multi-select and the other three follow
+  unchanged, offering four cross-dataset analyses — `Compare Connectivity`, co-clustering,
+  morphology in one space, NBLAST across datasets. `WizardAnswers.datasets` is a **list at every
+  arity** and `isMulti` reads its length: a `multi` flag beside it is a second answer to a question
+  the list already answers, and one written without the other is a `Match Cell Types` with a single
+  input. The two analysis lists are **disjoint** and gated per *chosen dataset* rather than per
+  first one, which is `available` generalised; a template space is a **second gate**
+  (`requiresTemplateSpace`), not foldable into `SourceCapabilities`, because a space is a fact about
+  coordinates bound to a dataset id. The third question is the one that can come back **empty** —
+  two connectomes sharing no capability share no analysis — so it is a refusal on Continue with the
+  reason beside the counter, and the arity ceiling is **read off the two nodes' `datasetCount`**.
+  Three silent failures. A chain's ids are local to it, so two datasets each carrying one mint two
+  `join`s and `assembleGraph` keys by id — `prefixChain` rewrites a **whole chain** rather than
+  threading a prefix through its three readers, the first dataset keeping bare ids; FlyWire and BANC
+  both call a card `annotations`, of different types, so the test asserts the *type* at each id.
+  `Stack Neurons` **throws** on a source column already present in either input, so an N-dataset
+  chain suffixes each level and the 3D scene colours by the **outermost** — a run-time error no
+  inference can see; the table stack adds none at all, `Qualify Ids` having put the dataset in the
+  id. And `DATASET_ROW` (3) is **not `ARM_ROW` (2) raised**: the extra row is the Description
+  companion 300px below each dataset node, which a head-clearance band put on top of the *next*
+  dataset — found at four datasets, invisible at two. `DatasetFamily.typeColumns` pre-fills the
+  mapper's pickers (decision 3's "a default a reader can see", not a source capability), and
+  **absent means nobody judged** — minnie65 has no typing, BANC's names come from its own pivot.
+  See [docs/wizard.md](docs/wizard.md), [docs/datasets.md](docs/datasets.md) and
+  [docs/comparative.md](docs/comparative.md).
 - **The launch sequence is one boolean and a stage, and the guides dialog is the first stop.**
   `startPageOpen` means the sequence is showing, `guidesOpen` that it is at its first stop, and
   `useLaunchStage` is the only place both are read — a second independent boolean would have taught

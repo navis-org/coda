@@ -227,6 +227,30 @@ export interface DatasetFamily {
    */
   population?: readonly PopulationFilter[]
   /**
+   * The columns holding this dataset's cell typing, for the one node that has to be told.
+   *
+   * `Match Cell Types` reads every column naming a type — including the ones written in
+   * *another* dataset's namespace, since those cross-references are what a correspondence is
+   * made of — and its pickers are empty by default, so a generated cross-dataset workflow would
+   * otherwise arrive with a card refusing to run. The Workflow Wizard pre-fills them from here.
+   *
+   * **A default a reader can see and change, never hidden behaviour** — decision 3 in
+   * [comparative.md](../../../docs/comparative.md), which declined to move any of this into
+   * `src/data` for exactly that reason. It is written into the node at creation and read back
+   * off the params from then on.
+   *
+   * **Absent means nobody has made this judgement**, which is a third thing from `['type']`:
+   * minnie65 is a mouse volume with no cell typing at all, and BANC's arrive from a pivot whose
+   * column names are the datastack's `classification_system` values rather than anything this
+   * build can know. Both leave the pickers empty and the card says what to pick, which is the
+   * honest answer — a guessed column name that is absent is dropped by `resolveColumns` and
+   * reads as a schema that has not arrived.
+   *
+   * Names are matched against the *annotated* neuron schema, so a family whose typing arrives
+   * through `annotationChain` names the columns that chain publishes.
+   */
+  typeColumns?: readonly string[]
+  /**
    * The nodes this family needs in front of it before its neurons have names.
    *
    * Declared here rather than in whichever builder needed it first, because three surfaces read
@@ -301,6 +325,10 @@ const NEUPRINT_NOTEBOOK: ExportClients = { python: 'neuprint', r: 'neuprint' }
 const NEUPRINT_FAMILIES: DatasetFamily[] = [
   {
     key: 'malecns',
+    // Four namespaces on one neuron, which is what makes this the dataset a mapping is
+    // usually anchored on: `type` is its own, the other three are cross-references written
+    // in the naming of a connectome it can be compared against.
+    typeColumns: ['type', 'hemibrainType', 'flywireType', 'mancType'],
     sourceId: 'neuprint',
     backend: 'neuprint',
     notebook: NEUPRINT_NOTEBOOK,
@@ -315,6 +343,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   },
   {
     key: 'hemibrain',
+    typeColumns: ['type'],
     sourceId: 'neuprint',
     backend: 'neuprint',
     notebook: NEUPRINT_NOTEBOOK,
@@ -328,6 +357,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   },
   {
     key: 'manc',
+    typeColumns: ['type'],
     sourceId: 'neuprint',
     backend: 'neuprint',
     notebook: NEUPRINT_NOTEBOOK,
@@ -340,6 +370,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   },
   {
     key: 'opticlobe',
+    typeColumns: ['type'],
     sourceId: 'neuprint',
     backend: 'neuprint',
     notebook: NEUPRINT_NOTEBOOK,
@@ -355,6 +386,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   },
   {
     key: 'fib19',
+    typeColumns: ['type'],
     sourceId: 'neuprint',
     backend: 'neuprint',
     notebook: NEUPRINT_NOTEBOOK,
@@ -369,6 +401,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   },
   {
     key: 'mushroombody',
+    typeColumns: ['type'],
     sourceId: 'neuprint',
     backend: 'neuprint',
     notebook: NEUPRINT_NOTEBOOK,
@@ -387,6 +420,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
 const MOCK_FAMILIES: DatasetFamily[] = [
   {
     key: 'mock.opticlobe',
+    typeColumns: ['type'],
     sourceId: 'mock',
     backend: 'mock',
     // The family and dataset ids stay `optic-lobe-mini`: they are what a saved graph and a
@@ -557,6 +591,10 @@ const BANC_CHAIN: AnnotationChain = {
 const CAVE_FAMILIES: DatasetFamily[] = [
   {
     key: 'flywire',
+    // The two the chain's Table from URL publishes, rather than the `type` its Combine
+    // Columns derives from them: a mapping wants both namespaces apart, and the combined
+    // column is the first of the two under another name.
+    typeColumns: ['cell_type', 'hemibrain_type'],
     sourceId: 'cave',
     backend: 'cave',
     family: 'flywire_fafb_public',
@@ -628,6 +666,7 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
      * same EM. A bare `fafb` would claim the volume's name for one of its two backends.
      */
     key: 'catmaid.fafb',
+    typeColumns: ['type'],
     sourceId: 'catmaid',
     backend: 'catmaid',
     family: '1',
@@ -642,6 +681,7 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
     // `catmaid.l1` for `catmaid.fafb`'s reason: the key is a permanent flat namespace, and `l1`
     // on its own names a developmental stage rather than a reconstruction of one.
     key: 'catmaid.l1',
+    typeColumns: ['type'],
     sourceId: L1_CATMAID_SOURCE_ID,
     backend: 'catmaid',
     family: '1',

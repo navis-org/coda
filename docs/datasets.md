@@ -622,6 +622,51 @@ the flag so one builder serves both.
 stale, beside a chain that no longer fetches the replacement, is exactly the drift the shared
 declaration exists to stop.
 
+**A chain's ids are local to it, which only matters once two are on one canvas.** The wizard's
+cross-dataset path builds one per dataset, and `annotations`, `combine` and `join` are ids two
+declarations can both use — FlyWire and BANC both call their first card `annotations`, of two
+different node types. `prefixChain` rewrites a whole chain rather than threading a prefix through
+`chainGrid`, `chainLinks` and `foldChain`, which would be three places that must agree how a prefix
+is spelled; the first dataset keeps the bare ids, so a single-dataset graph is unchanged. The
+failure it prevents is silent: `assembleGraph` keys nodes by id, so the second `join` replaces the
+first and both sets of wires land on whichever survived.
+
+That path is also why a chain is built for *every* dataset in a comparison rather than only the one
+being browsed. `Match Cell Types` takes a **Dataset** and reads its whole annotated table, so a
+FlyWire node without its chain has no type column for the mapper to match on.
+
+## The type columns a family publishes
+
+`DatasetFamily.typeColumns`: every column naming a cell type, **including the ones written in
+another dataset's namespace** — maleCNS carries `type`, `hemibrainType`, `flywireType` and
+`mancType`, and those cross-references are what a correspondence is made of. One reader today, the
+wizard's cross-dataset arms, which pre-fill `Match Cell Types`' per-dataset pickers; those are
+empty by default and `validate` refuses an empty one by name, so without this a generated
+comparison arrives with a red card.
+
+**A default a reader can see and change, never hidden behaviour** — decision 3 in
+[comparative.md](comparative.md) declined to move any of this into `src/data` for exactly that
+reason, and this is that decision written as a declaration rather than as a source capability. It
+is written into the node at creation and read back off the params from then on.
+
+**Absent means nobody has made this judgement**, which is a third thing from `['type']`: minnie65
+is a mouse volume with no cell typing at all, and BANC's arrive from a pivot whose column names are
+the datastack's own `classification_system` values rather than anything this build can know. Both
+leave the picker empty, and the card says which dataset needs columns picked — the honest answer,
+and better than a guessed name that is dropped for not existing and reads as a schema that has not
+arrived.
+
+Names are matched against the **annotated** neuron schema, so a family whose typing comes through
+`annotationChain` names the columns that chain publishes — FlyWire's are `cell_type` and
+`hemibrain_type`, the two the published file carries, rather than the `type` its Combine Columns
+derives from them. A mapping wants both namespaces apart; the combined column is the first of the
+two under another name.
+
+One thing this does not fix, and it is ordinary rather than a bug: a neuPrint neuron's columns past
+the core set are *discovered*, so a freshly-built mapper warns `Missing column(s): hemibrainType,
+flywireType, mancType` until the schema lands. That is the multi-column picker keeping a chosen
+column rather than substituting, and it clears on the first peek.
+
 ## Starter graphs, and the one that is not the generic shape
 
 `examples/starters.ts` — what `New ▸ <dataset>` and the start page's dataset rail both build,

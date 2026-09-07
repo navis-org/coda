@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { GraphNode } from '../core/graph'
 import { registerBuiltinSources } from '../data/builtins'
+import { GROWING_CROSS_SETS } from '../test/crossSets'
 import { DEMO_DATASET, buildWorkflow } from '../wizard/build'
 import { demoGraph, demoPlans } from '../wizard/demo'
 import {
@@ -93,7 +94,7 @@ function clashesIn(nodes: readonly GraphNode[]): string[] {
 }
 
 describe('the generated graphs', () => {
-  for (const answers of everyCombination(DEMO_DATASET)) {
+  for (const answers of everyCombination([DEMO_DATASET])) {
     const name = `${answers.start}/${answers.analysis}/${answers.visualisations.join('+')}`
     it(`lays "${name}" out with no card on top of another`, () => {
       expect(clashesIn(buildWorkflow(answers).nodes)).toEqual([])
@@ -112,13 +113,13 @@ describe('the generated graphs', () => {
    * `cardWidth` is what most generated graphs are — the arithmetic `everyCombination`'s
    * singletons never exercise.
    */
-  for (const analysis of analysisOptions(DEMO_DATASET)) {
-    const views = visualisationOptions(DEMO_DATASET, analysis.id)
+  for (const analysis of analysisOptions([DEMO_DATASET])) {
+    const views = visualisationOptions([DEMO_DATASET], analysis.id)
     if (views.length < 2) continue
-    for (const start of startOptions(DEMO_DATASET)) {
+    for (const start of startOptions([DEMO_DATASET])) {
       it(`lays "${start.id}/${analysis.id}" out with every viewer ticked`, () => {
         const nodes = buildWorkflow({
-          dataset: DEMO_DATASET,
+          datasets: [DEMO_DATASET],
           start: start.id,
           analysis: analysis.id,
           visualisations: views.map((view) => view.id),
@@ -130,9 +131,24 @@ describe('the generated graphs', () => {
     }
   }
 
+  /*
+   * The cross-dataset shapes, which are the only ones that put cards on more than one **row** of
+   * their own: an arm per dataset running down, the shared chain running right. `everyCombination`
+   * above walks one dataset, so nothing there exercises the band spacing — and a head card is the
+   * tallest thing the wizard places, which is what `ARM_ROW` is measured against.
+   */
+  for (const datasets of GROWING_CROSS_SETS) {
+    for (const answers of everyCombination(datasets)) {
+      const name = `${datasets.join('+')}/${answers.start}/${answers.analysis}/${answers.visualisations.join('+')}`
+      it(`lays "${name}" out with no card on top of another`, () => {
+        expect(clashesIn(buildWorkflow(answers).nodes)).toEqual([])
+      })
+    }
+  }
+
   it('lays the two-viewer influence chain out with no card on top of another', () => {
     const nodes = buildWorkflow({
-      dataset: DEMO_DATASET,
+      datasets: [DEMO_DATASET],
       start: 'search',
       analysis: 'influence',
       visualisations: ['heatmap', 'table'],

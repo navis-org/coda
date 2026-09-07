@@ -220,7 +220,7 @@ describe('a cell whose node is run underneath it', () => {
     act(() =>
       store().loadGraph(
         buildWorkflow({
-          dataset: DEMO_DATASET,
+          datasets: [DEMO_DATASET],
           start: 'search',
           analysis: 'neurons',
           visualisations: ['topology'],

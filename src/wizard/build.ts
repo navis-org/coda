@@ -47,15 +47,24 @@ import { assembleGraph, graphNode } from '../examples/assemble'
 import { COL_WIDTH, GRID_ORIGIN, ROW_HEIGHT } from '../layout/place'
 import { NODE_BODIES, cardWidth } from '../ui/nodes/nodeBodies'
 import { noteNode } from '../examples/notes'
+import type { DatasetFamily } from '../nodes/lib/datasetFamilies'
 import { datasetFamily } from '../nodes/lib/datasetFamilies'
 import { ID_COLUMN_NAME } from '../core/ids'
 import { encodeRows } from '../data/filterRows'
-import { inputPorts } from '../core/ports'
+import { inputPorts, portIdAt } from '../core/ports'
+import { repeatParamId } from '../nodes/lib/repeatParams'
 import { getNodeDef } from '../core/registry'
 import type { AnnotationChain } from '../nodes/lib/annotationChain'
-import { chainGrid, chainLinks, chainWidth, foldChain } from '../nodes/lib/annotationChain'
+import {
+  chainGrid,
+  chainLinks,
+  chainWidth,
+  foldChain,
+  prefixChain,
+} from '../nodes/lib/annotationChain'
 import type { AnalysisId, VisualisationId, WizardAnswers, WizardHint } from './options'
 import {
+  STACK_SOURCE_COLUMN,
   VIEWS,
   VIEWS_BY_ID,
   analysisOption,
@@ -83,6 +92,13 @@ const SEARCH_LIMIT = 100
  * somebody widens the search themselves.
  */
 const GEOMETRY_LIMIT = 30
+
+/** The analyses whose search is capped whatever was ticked — see `searchLimit`. */
+const GEOMETRY_ANALYSES: ReadonlySet<AnalysisId> = new Set<AnalysisId>([
+  'nblast',
+  'xnblast',
+  'xmorphology',
+])
 
 /**
  * Whether a viewer fetches its own geometry, asked of the node rather than listed by id.
@@ -184,62 +200,94 @@ export interface BuildOptions {
 }
 
 export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}): CodaGraph {
-  const family = datasetFamily(answers.dataset)
-  const synthetic = Boolean(family?.synthetic)
+  const keys = answers.datasets
   const shift = answers.start === 'browse' ? EXPLORE_SHIFT : 0
 
-  const nodes: Placement[] = [{ id: 'ds', type: `dataset.${answers.dataset}`, col: 0 }]
+  const nodes: Placement[] = []
   const links: Link[] = []
+  const chains: AnnotationChain[] = []
+  const heads: Head[] = []
 
   /*
-   * What this dataset needs in front of it before its neurons have names.
-   *
-   * `DatasetFamily.annotationChain`, which the starter graph also builds — one declaration, two
-   * builders, because the wizard opened every FlyWire workflow on a list of eighteen-digit root
-   * ids while `New ▸ FlyWire FAFB` opened the same dataset fully typed. That is the same graph
-   * answering the same question two ways depending on which menu you came through.
-   *
-   * Placed in the columns *before* the dataset, and folded, for the reason the starter folds it:
-   * six cards of plumbing that has to be right and never has to be touched are the biggest thing
-   * on the canvas and none of them is what the reader asked the wizard for. The negative columns
-   * are only a starting arrangement — a generated workflow asks the canvas for one ELK pass on
-   * arrival, and that is what decides where any of this actually sits.
+   * One band per dataset: its node, whatever it needs in front of it, and the card the neurons
+   * are chosen on. A single-dataset workflow is the one-iteration case of this loop and comes
+   * out byte-identical to what it always did — `ds`, `find`, the chain's own ids — which is what
+   * `suffixed` and the empty prefix below are for.
    */
-  const chain = options.annotationChain === false ? undefined : family?.annotationChain
-  if (chain) {
-    const width = chainWidth(chain)
-    for (const cell of chainGrid(chain)) {
-      nodes.push({
-        id: cell.node.id,
-        type: cell.node.type,
-        // Right-to-left from the dataset at column 0, so the last card of the widest row is the
-        // one beside it. The row is the chain's own (`ChainNode.row`), not this file's guess.
-        col: cell.col - width,
-        row: cell.row,
-        ...(cell.node.params ? { params: cell.node.params } : {}),
-      })
+  keys.forEach((key, index) => {
+    const which = index + 1
+    const family = datasetFamily(key)
+    const dsId = suffixed('ds', which)
+    const row = index * DATASET_ROW
+    nodes.push({ id: dsId, type: `dataset.${key}`, col: 0, row })
+
+    /*
+     * What this dataset needs in front of it before its neurons have names.
+     *
+     * `DatasetFamily.annotationChain`, which the starter graph also builds — one declaration, two
+     * builders, because the wizard opened every FlyWire workflow on a list of eighteen-digit root
+     * ids while `New ▸ FlyWire FAFB` opened the same dataset fully typed. That is the same graph
+     * answering the same question two ways depending on which menu you came through.
+     *
+     * Placed in the columns *before* the dataset, and folded, for the reason the starter folds it:
+     * six cards of plumbing that has to be right and never has to be touched are the biggest thing
+     * on the canvas and none of them is what the reader asked the wizard for. The negative columns
+     * are only a starting arrangement — a generated workflow asks the canvas for one ELK pass on
+     * arrival, and that is what decides where any of this actually sits.
+     *
+     * **Prefixed past the first**, because a chain's ids are local to the chain: two datasets
+     * each carrying one would mint two nodes called `join` in one graph, which `assembleGraph`
+     * has no way to notice — the second silently replaces the first and both sets of wires point
+     * at whichever survived. The first keeps its bare ids so a single-dataset graph is unchanged.
+     *
+     * It is built for every dataset in a comparison and not only the first, which is what makes
+     * the cross-dataset connectivity arms work at all: `Match Cell Types` takes a **Dataset**
+     * and reads its whole annotation table, and a CAVE datastack's typing arrives through this
+     * chain — so a FlyWire node without one has no type column for the mapper to match on.
+     */
+    const declared = options.annotationChain === false ? undefined : family?.annotationChain
+    const chain = declared ? prefixChain(declared, which === 1 ? '' : `${dsId}-`) : undefined
+    if (chain) {
+      const width = chainWidth(chain)
+      for (const cell of chainGrid(chain)) {
+        nodes.push({
+          id: cell.node.id,
+          type: cell.node.type,
+          // Right-to-left from the dataset at column 0, so the last card of the widest row is the
+          // one beside it. The row is the chain's own (`ChainNode.row`), not this file's guess.
+          col: cell.col - width,
+          row: row + cell.row,
+          ...(cell.node.params ? { params: cell.node.params } : {}),
+        })
+      }
+      links.push(...chainLinks(chain, dsId))
+      chains.push(chain)
     }
-    links.push(...chainLinks(chain, 'ds'))
-  }
 
-  // --- the head: whichever way the neurons are chosen ------------------------
-  const head = headOf(answers, synthetic, 1, chain)
-  nodes.push(head.node)
-  links.push(...head.links)
+    // --- the head: whichever way the neurons are chosen ---------------------
+    const head = headOf(answers, family, which, dsId, row, chain)
+    nodes.push(head.node)
+    links.push(...head.links)
+    heads.push(head)
+  })
 
   /*
-   * A second one, for the one analysis whose question has two ends. It is built here rather than
-   * inside the arm because it is a *head*: which card it is, and whether its search is capped,
-   * are the first question's answers and not the third's.
+   * A second head on the *first* dataset, for the one analysis whose question has two ends. It is
+   * built here rather than inside the arm because it is a *head*: which card it is, and whether
+   * its search is capped, are the first question's answers and not the third's. `paths` is a
+   * single-dataset analysis, so its suffix `2` can never collide with a second dataset's.
    */
-  const target = answers.analysis === 'paths' ? headOf(answers, synthetic, 2, chain) : undefined
+  const target =
+    answers.analysis === 'paths'
+      ? headOf(answers, datasetFamily(keys[0] ?? ''), 2, 'ds', ARM_ROW, chains[0])
+      : undefined
   if (target) {
     nodes.push(target.node)
     links.push(...target.links)
   }
 
   // --- the analysis, and the viewer that ends it ----------------------------
-  const body = bodyOf(answers, head.port, target?.port)
+  const body = bodyOf(answers, heads, target?.port)
   nodes.push(...body.nodes)
   links.push(...body.links)
 
@@ -271,7 +319,13 @@ export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}
       // added to one arrives here rather than being silently dropped by a hand-written copy.
       hints.set(nodeId, [...(hints.get(nodeId) ?? []), { ...hint }])
     }
-    dock(head.node.id, startOption(answers.start)?.hint)
+    /*
+     * The start hint on the **first** head only, even where a comparison built four. Every one of
+     * them is the same card asking the same thing, and four identical boxes down the left of a
+     * canvas is the failure the stage notes had — one hint per stage is the rule, and "per
+     * stage" does not become "per dataset" because a stage grew a second card.
+     */
+    dock(heads[0]?.node.id, startOption(answers.start)?.hint)
     if (answers.analysis !== 'neurons') {
       dock(body.nodes[0]?.id, analysisOption(answers.analysis)?.hint)
     }
@@ -279,7 +333,15 @@ export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}
   }
 
   const graph = assemble(answers, nodes, overview, links, shift, hints)
-  return dashboardFor(chain ? foldChain(graph, chain) : graph, answers, head.node.id)
+  // One frame per chain, folded in the order the datasets were chosen. `foldChain` leaves a
+  // single-card chain alone, which is BANC's — so a FlyWire/BANC comparison gets one frame and
+  // one bare card rather than a box around nothing.
+  const folded = chains.reduce((graph, chain) => foldChain(graph, chain), graph)
+  return dashboardFor(
+    folded,
+    answers,
+    heads.map((head) => head.node.id),
+  )
 }
 
 /**
@@ -302,12 +364,17 @@ export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}
  * together, so there is no moment where the graph has a dashboard that does not know it is being
  * looked at.
  */
-function dashboardFor(graph: CodaGraph, answers: WizardAnswers, headId: string): CodaGraph {
+function dashboardFor(
+  graph: CodaGraph,
+  answers: WizardAnswers,
+  /** Every head, in dataset order — a comparison has one per connectome. */
+  headIds: readonly string[],
+): CodaGraph {
   if (!answers.dashboard) return graph
   const viewers = graph.nodes
     .filter((node) => node.id === 'view' || /^view\d+$/.test(node.id))
     .map((node) => node.id)
-  const cells = [headId, ...viewers]
+  const cells = [...headIds, ...viewers]
   const columns = cells.length > 1 ? DEFAULT_COLUMNS : MIN_COLUMNS
   const placed = setColumns(addCells(graph, cells), columns)
   const full = cells.length <= columns
@@ -332,13 +399,18 @@ function dashboardFor(graph: CodaGraph, answers: WizardAnswers, headId: string):
  */
 function searchLimit(answers: WizardAnswers, synthetic: boolean): number {
   /*
-   * Only when something is actually going to fetch geometry — a morphology workflow whose one
-   * ticked viewer is Neuroglancer downloads nothing — and always for NBLAST, which fetches a
-   * skeleton per neuron *and* compares every pair: the work grows with the square of the set, so
-   * an uncapped search here is the one answer in the wizard that can spend minutes before it
-   * draws anything.
+   * Always for the arms that fetch a skeleton per neuron *and* compare every pair: the work grows
+   * with the square of the set, so an uncapped search here is the one answer in the wizard that
+   * can spend minutes before it draws anything. Sharper across datasets than within one, since
+   * the all-by-all runs over the *combined* set — two uncapped searches square their sum rather
+   * than each other. `xmorphology` is here rather than below because its only viewer is the 3D
+   * scene, so there is no ticked set that downloads nothing.
    */
-  if (answers.analysis === 'nblast') return GEOMETRY_LIMIT
+  if (GEOMETRY_ANALYSES.has(answers.analysis)) return GEOMETRY_LIMIT
+  /*
+   * And only when something is actually going to fetch geometry — a single-dataset morphology
+   * workflow whose one ticked viewer is Neuroglancer downloads nothing.
+   */
   if (answers.analysis === 'morphology' && answers.visualisations.includes('viewer3d')) {
     return GEOMETRY_LIMIT
   }
@@ -346,27 +418,86 @@ function searchLimit(answers: WizardAnswers, synthetic: boolean): number {
 }
 
 /**
- * A path has two ends, so the paths analysis gets a second head — the same kind of card as the
- * first, stacked under it.
+ * How far apart two head cards sit, in node heights.
  *
- * Not two questions: "which neurons?" is answered once and the second card starts empty, because
- * a wizard that asked twice would be asking a reader who has not yet been told there are two ends
- * to fill in. The note under it says which is which. `PATHS_ROW` is measured rather than chosen —
- * see its own note.
+ * Measured rather than chosen: the clearance an Explore card needs from the one under it. One
+ * reader — the paths query's second end, which is a second head on the *same* dataset. "Which
+ * neurons?" is answered once and the second card starts empty, because a wizard that asked twice
+ * would be asking a reader who has not yet been told there are two ends.
  */
-const PATHS_ROW = 2
+const ARM_ROW = 2
 
-/** The node the neurons come from, and what its outgoing port is called. */
+/**
+ * How far apart two **datasets** sit, in node heights — larger than `ARM_ROW`, and the extra row
+ * is a card neither builder places.
+ *
+ * A published dataset node arrives with its Description companion, which `addNodeWithCompanion`
+ * puts 300px below it (`NodeDefinition.companion.offset`) — so a band that only cleared the head
+ * cards put the first dataset's credit card on top of the second dataset's node, at the same x
+ * and 80px apart. Found by `placeGuards.test.ts` at four datasets and invisible at two, because
+ * two bands is one gap and the clash needs a *following* dataset to land in.
+ *
+ * Two constants rather than one raised to cover both, because they measure different things: a
+ * second head is a second card of the same kind, and a second dataset is a card plus everything
+ * the dataset drags along with it. Raising `ARM_ROW` to match would space a paths query's two
+ * searches for a companion neither of them has.
+ */
+const DATASET_ROW = 3
+
+/**
+ * The dataset node's id for the nth dataset, and every other per-dataset card's suffix rule.
+ *
+ * `ds`, `ds2`, `ds3` — the first keeps the name every single-dataset workflow has always had, so
+ * a saved file, a share link and the thirty test files that name `ds` all go on meaning the same
+ * node when somebody picks a second dataset. `viewNode` follows the same rule for `view`, and it
+ * is the same rule again for `find`/`find2` inside `headOf`.
+ */
+function suffixed(base: string, which: number): string {
+  return which === 1 ? base : `${base}${which}`
+}
+
+/** The node the neurons come from, what its outgoing port is called, and where it reads from. */
+interface Head {
+  node: Placement
+  port: [string, string]
+  links: Link[]
+  /**
+   * The dataset node this head reads from.
+   *
+   * Carried rather than re-derived, because `bodyOf` needs it for every per-dataset card it
+   * wires and the only other way to get it is to mirror `buildWorkflow`'s id-minting loop. Two
+   * facts about one dataset — which node holds it and which port carries its neurons — should
+   * not be one carried and one reconstructed by convention: change the suffix rule and the
+   * reconstruction addresses a node that does not exist, which `assembleGraph` drops silently.
+   */
+  datasetId: string
+}
+
+/**
+ * One dataset's head card.
+ *
+ * `which` is the id suffix; `datasetId` is passed separately rather than derived from it, because
+ * the two come apart in exactly one place — a paths query's second head is `find2` on dataset
+ * `ds`, the same dataset asked a second question. Deriving one from the other would wire that
+ * card to a dataset node that does not exist.
+ *
+ * The family is passed resolved rather than looked up again: every caller is holding it already,
+ * and `datasetFamily` is a scan of the table.
+ */
 function headOf(
   answers: WizardAnswers,
-  synthetic: boolean,
-  /** `2` for the second head of a paths query — see `PATHS_ROW`. Ids gain the suffix. */
-  which = 1,
+  /** This head's family, already resolved. `undefined` for a key the table does not know. */
+  family: DatasetFamily | undefined,
+  which: number,
+  /** The dataset node this head reads from. */
+  datasetId: string,
+  /** The band this dataset's arm is laid out on, in node heights. */
+  row: number,
   /** The chain actually being built, or undefined — never the family's, see `BuildOptions`. */
   chain?: AnnotationChain | undefined,
-): { node: Placement; port: [string, string]; links: Link[] } {
-  const id = (base: string) => (which === 1 ? base : `${base}${which}`)
-  const row = which === 1 ? 0 : PATHS_ROW
+): Head {
+  const synthetic = Boolean(family?.synthetic)
+  const id = (base: string) => suffixed(base, which)
   if (answers.start === 'browse') {
     /*
      * `Additional tags`, where the dataset's chain folds community text into a column of its own.
@@ -385,14 +516,16 @@ function headOf(
       // `selected`, not `hits`: an empty search is the whole dataset, and a workflow whose first
       // Run pushes 165,000 rows into a viewer teaches the wrong thing about what to wire.
       port: [id('explore'), 'selected'],
-      links: [['ds', 'dataset', id('explore'), 'dataset']],
+      links: [[datasetId, 'dataset', id('explore'), 'dataset']],
+      datasetId,
     }
   }
   if (answers.start === 'ids') {
     return {
       node: { id: id('ids'), type: 'neuron.inputIds', col: 1, row },
       port: [id('ids'), 'neurons'],
-      links: [['ds', 'dataset', id('ids'), 'dataset']],
+      links: [[datasetId, 'dataset', id('ids'), 'dataset']],
+      datasetId,
     }
   }
   const limit = searchLimit(answers, synthetic)
@@ -402,7 +535,8 @@ function headOf(
   return {
     node: { id: id('find'), type: 'neuron.findNeurons', col: 1, row, params },
     port: [id('find'), 'neurons'],
-    links: [['ds', 'dataset', id('find'), 'dataset']],
+    links: [[datasetId, 'dataset', id('find'), 'dataset']],
+    datasetId,
   }
 }
 
@@ -461,6 +595,169 @@ function viewNode(
 }
 
 /**
+ * The `Match Cell Types` card every cross-dataset connectivity arm is built around.
+ *
+ * Two arms build it and they must build the *same* one: a mapping is not composable — a
+ * three-dataset correspondence is not two two-dataset ones chained, which is what the variadic
+ * ports are for — so a second spelling here would be a second mapping with no way to tell which
+ * one a workflow was read off.
+ *
+ * **It takes the Dataset nodes, not the neuron tables.** Decision 4 in `docs/comparative.md`: the
+ * evidence that `A_a` and `A_b` split from `X` very often sits entirely outside the neurons you
+ * selected, so a mapper fed a selection gives a different answer for the same two neurons
+ * depending on what else the graph happened to query. That is also why the annotation chain is
+ * built for every dataset in a comparison — the chain is where a CAVE datastack's typing comes
+ * from, and this node reads the dataset's whole annotated table.
+ *
+ * The type columns come from `DatasetFamily.typeColumns`, because the node's own pickers are
+ * empty by default and `validate` refuses an empty one by name. A family that declares none
+ * leaves its picker empty and the card says which dataset to pick columns for — which is the
+ * honest answer where nobody has made that judgement, and better than a guessed column that is
+ * silently dropped for not existing.
+ */
+function mapperNode(
+  bands: readonly Band[],
+  col: number,
+  row: number,
+): { node: Placement; links: Link[] } {
+  const params: Record<string, unknown> = { datasetCount: bands.length }
+  bands.forEach((band, index) => {
+    const columns = datasetFamily(band.key)?.typeColumns
+    if (columns?.length) params[repeatParamId('types', index + 1)] = [...columns]
+  })
+  return {
+    node: { id: 'match', type: 'compare.matchTypes', col, row, params },
+    links: bands.map((band, index): Link => [
+      band.id,
+      'dataset',
+      'match',
+      portIdAt('dataset', index + 1),
+    ]),
+  }
+}
+
+/**
+ * One dataset in a cross-dataset workflow: which family it is, and which node on the canvas holds
+ * it. The two facts every per-dataset card needs, carried together rather than one of them
+ * re-minted from an index — see `Head.datasetId`.
+ */
+interface Band {
+  id: string
+  key: string
+}
+
+/**
+ * Two to four collections folded into one, through a chain of two-input stacks.
+ *
+ * Both stack nodes take exactly two inputs and say so — `Stack Neurons`' own header records that
+ * three collections are a chain — so N datasets are N−1 cards, each taking what the last one
+ * produced. At two, which is the case anybody is actually building, it is one card.
+ *
+ * **Each level needs its own source column, and that is a rule of the node rather than a choice
+ * here**: `stackTables` throws where the column it is about to add already exists in either
+ * input, so a chain that named them all `dataset` would build a graph that refuses on Run. So
+ * level 2 writes the name it was given and each level above writes that name suffixed, with its
+ * top label naming everything accumulated so far. The *outermost* column is therefore the one
+ * that partitions the whole collection, and it is what the 3D scene is pointed at; the inner
+ * ones are still there, one click away in the colour picker, and split the earlier datasets
+ * apart again.
+ *
+ * `sourceColumn` absent adds none, which is what the table side wants: a co-clustering has
+ * already been through `Qualify Ids`, so its rows carry their dataset *in the id* — which is the
+ * whole of decision 1, and a second column saying the same thing would be a second key.
+ */
+interface StackChain {
+  nodes: Placement[]
+  links: Link[]
+  /** What the fold produced: the last stack's output, or the lone input where there was one. */
+  out: [string, string]
+  /** How many columns it consumed, so the caller can place what comes after it. */
+  cols: number
+  /** The column that partitions the whole result, or undefined where none was added. */
+  sourceColumn?: string
+}
+
+/**
+ * How `Similarity Matrix` reads what `Partner Vectors` wrote.
+ *
+ * These are that node's **output column names**, so the two arms that go through it — the
+ * single-dataset `cluster` and the cross-dataset `coclust` — must agree, and a rename upstream
+ * has to reach both. Written out twice, a rename fixes whichever arm somebody was looking at and
+ * leaves the other pointing at columns that do not exist.
+ *
+ * A long table already *is* the matrix, in the coordinate form every sparse library starts
+ * from — see `docs/nodes.md`.
+ */
+const VECTOR_SIMILARITY = {
+  layout: 'long',
+  observations: 'neuronId',
+  features: 'feature',
+  value: 'weight',
+} as const
+
+/**
+ * The Connectivity both clustering arms open on.
+ *
+ * **Both directions**, because a neuron that *receives* from a type and one that projects to it
+ * are not alike for it — Partner Vectors keeps the two apart with its `out:`/`in:` prefix, and
+ * asking for one direction throws half the evidence away before it can.
+ */
+const VECTOR_CONNECTIVITY = { direction: 'both', minWeight: 3 } as const
+
+/** Level 2 writes the name it was given; each level above suffixes it with its own level. */
+function levelColumn(base: string, level: number): string {
+  return level === 2 ? base : `${base}${level}`
+}
+
+function stackChain(spec: {
+  type: 'core.stack' | 'neuron.stack'
+  /** `[nodeId, port]` per dataset, in the order they were chosen. */
+  inputs: readonly [string, string][]
+  /** What each dataset is called in the source column. Ignored where none is added. */
+  labels: readonly string[]
+  col: number
+  row: number
+  sourceColumn?: string
+}): StackChain {
+  const nodes: Placement[] = []
+  const links: Link[] = []
+  let out = spec.inputs[0] ?? (['ds', 'dataset'] as [string, string])
+  let column: string | undefined
+
+  spec.inputs.slice(1).forEach((input, offset) => {
+    const level = offset + 2
+    const id = suffixed('stack', level)
+    column = spec.sourceColumn ? levelColumn(spec.sourceColumn, level) : undefined
+    nodes.push({
+      id,
+      type: spec.type,
+      col: spec.col + offset,
+      row: spec.row + offset * 0.5,
+      params: column
+        ? {
+            sourceColumn: column,
+            // Everything already folded in on one side, the newly arriving dataset on the other.
+            // At two datasets — the case this is nearly always built for — that is just the two
+            // names.
+            topLabel: spec.labels.slice(0, level - 1).join(' + '),
+            bottomLabel: spec.labels[level - 1] ?? `Dataset ${level}`,
+          }
+        : {},
+    })
+    links.push([out[0], out[1], id, 'top'], [input[0], input[1], id, 'bottom'])
+    out = [id, 'out']
+  })
+
+  return {
+    nodes,
+    links,
+    out,
+    cols: Math.max(0, spec.inputs.length - 1),
+    ...(column ? { sourceColumn: column } : {}),
+  }
+}
+
+/**
  * Everything downstream of the head: the analysis, and every viewer that was ticked.
  *
  * One arm per analysis. Each arm builds the chain its analysis needs *once* and then hangs the
@@ -473,10 +770,42 @@ function viewNode(
  */
 function bodyOf(
   answers: WizardAnswers,
-  [from, port]: [string, string],
+  /** One head per dataset, in the order they were chosen. */
+  heads: readonly Head[],
   targets?: [string, string],
 ): { nodes: Placement[]; links: Link[]; viewId: string | undefined } {
-  const neurons = (to: string, toPort: string): Link => [from, port, to, toPort]
+  /**
+   * The nth dataset's neurons. The fallback is reachable: the dialog previews a graph while the
+   * datasets question is still open, which is `datasets: []` and so no heads at all.
+   */
+  const neuronsAt = (index: number, to: string, toPort: string): Link => {
+    const [from, port] = heads[index]?.port ?? ['ds', 'dataset']
+    return [from, port, to, toPort]
+  }
+  const neurons = (to: string, toPort: string): Link => neuronsAt(0, to, toPort)
+  /** The nth dataset node — read off the head rather than re-minted. See `Head.datasetId`. */
+  const datasetAt = (index: number) => heads[index]?.datasetId ?? 'ds'
+  /**
+   * The two wires every per-dataset card in a cross-dataset arm opens with: the dataset it
+   * belongs to, and that dataset's own neurons. Written out three times before this, once per
+   * arm, each spelling the index twice.
+   */
+  const opensOn = (index: number, to: string, toPort = 'neurons'): Link[] => [
+    [datasetAt(index), 'dataset', to, 'dataset'],
+    neuronsAt(index, to, toPort),
+  ]
+  const keys = answers.datasets
+  /** Each dataset's family and its node on the canvas, paired once. */
+  const bands: Band[] = keys.map((key, index) => ({ id: datasetAt(index), key }))
+  /**
+   * The row a card shared by every dataset sits on: halfway down the band of arms.
+   *
+   * Zero at one dataset, so every single-dataset arm below is unchanged. The arms run down and
+   * the chain runs right, which is what keeps a four-dataset comparison the same *shape* as a
+   * two-dataset one — and it is only a starting arrangement in any case, since a generated
+   * workflow asks the canvas for one ELK pass on arrival.
+   */
+  const mid = ((keys.length - 1) * DATASET_ROW) / 2
   /** The far end of a paths query, which is the only analysis that has one. */
   const targetNeurons = (to: string, toPort: string): Link =>
     targets ? [targets[0], targets[1], to, toPort] : neurons(to, toPort)
@@ -534,6 +863,19 @@ function bodyOf(
     ['ds', 'dataset', id, 'dataset'],
     neurons(id, 'neurons'),
   ]
+
+  /**
+   * What a chain ending on `cluster.linkage` hands each viewer: the dendrogram reads the tree,
+   * the heatmap reads the matrix **reordered by** that tree — the pairing that makes a cluster
+   * visible as a block rather than a scatter.
+   *
+   * Three arms end this way (`cluster`/`nblast`, `coclust`, `xnblast`) and each had written it
+   * out, one of them without the sentence above. One rule, one spelling.
+   */
+  const fromLinkage = (visualisation: VisualisationId, id: string): Link[] =>
+    visualisation === 'dendrogram'
+      ? [['linkage', 'tree', id, 'in']]
+      : [['linkage', 'ordered', id, 'in']]
 
   switch (answers.analysis) {
     case 'partners': {
@@ -725,43 +1067,16 @@ function bodyOf(
        * and Linkage inverts a similarity and leaves a distance alone by reading exactly that.
        */
       const shape = answers.analysis === 'nblast'
-      const tail = views(shape ? 5 : 6, 0, (visualisation, id) =>
-        // The dendrogram reads the tree; the heatmap reads the matrix *reordered by* that tree,
-        // which is what makes a cluster visible as a block.
-        visualisation === 'dendrogram'
-          ? [['linkage', 'tree', id, 'in']]
-          : [['linkage', 'ordered', id, 'in']],
-      )
+      const tail = views(shape ? 5 : 6, 0, fromLinkage)
       const upstream: Placement[] = shape
         ? [
             { id: 'skel', type: 'neuron.skeletons', col: 2 },
             { id: 'nblast', type: 'neuron.nblast', col: 3 },
           ]
         : [
-            {
-              id: 'conn',
-              type: 'neuron.connectivity',
-              col: 2,
-              // Both directions, because a neuron that *receives* from a type and one that
-              // projects to it are not alike for it — Partner Vectors keeps the two apart with
-              // its `out:`/`in:` prefix, and asking for one direction throws half the evidence
-              // away before it can.
-              params: { direction: 'both', minWeight: 3 },
-            },
+            { id: 'conn', type: 'neuron.connectivity', col: 2, params: VECTOR_CONNECTIVITY },
             { id: 'vectors', type: 'neuron.partnerVectors', col: 3 },
-            {
-              id: 'sim',
-              type: 'core.similarity',
-              col: 4,
-              // The columns Partner Vectors writes. A long table already *is* the matrix, in the
-              // coordinate form every sparse library starts from — see `docs/nodes.md`.
-              params: {
-                layout: 'long',
-                observations: 'neuronId',
-                features: 'feature',
-                value: 'weight',
-              },
-            },
+            { id: 'sim', type: 'core.similarity', col: 4, params: VECTOR_SIMILARITY },
           ]
       return {
         nodes: [
@@ -851,7 +1166,7 @@ function bodyOf(
       // `familyCan`, the same reading `options.ts` gates the questions with: this is the *offer*
       // half of one decision, and a builder asking a different question from the dialog that
       // offered it is how a workflow comes to be built without a node it was shown with.
-      const withSynapses = drawn && familyCan(answers.dataset, 'synapses')
+      const withSynapses = drawn && keys.every((key) => familyCan(key, 'synapses'))
       const tail = views(drawn ? 3 : 2, drawn ? 0.5 : 0, (visualisation, id) =>
         visualisation === 'viewer3d'
           ? [
@@ -919,6 +1234,231 @@ function bodyOf(
       }
     }
 
+    case 'compare': {
+      /*
+       * The cross-dataset headline: one connectivity query per dataset, one mapping over all of
+       * them, and a card that puts the same type pair's weight side by side. Five columns whatever
+       * the arity — the arms are rows, not columns, which is what keeps a four-dataset comparison
+       * the same shape as a two-dataset one.
+       *
+       * `Compare Connectivity` is **cheap**, so re-asking the question with a different `Min
+       * weight` costs a pass over an edge list and nothing on anybody's server. The mapper above
+       * it is `expensive` and reads every dataset's whole annotation table, which is why nothing
+       * here re-fetches when that threshold moves.
+       */
+      const mapper = mapperNode(bands, 3, mid)
+      const tail = views(5, mid, (_visualisation, id) => [['cmp', 'comparison', id, 'in']])
+      return {
+        nodes: [
+          ...keys.map((_key, index): Placement => ({
+            id: suffixed('conn', index + 1),
+            type: 'neuron.connectivity',
+            col: 2,
+            row: index * DATASET_ROW,
+            // Outputs, so every row is presynaptic → postsynaptic and the two ends the
+            // comparison reads are `preId`/`postId` — which are `Compare Connectivity`'s own
+            // declared defaults, so its three column pickers need nothing said here.
+            params: { direction: 'outputs', minWeight: 3 },
+          })),
+          mapper.node,
+          {
+            id: 'cmp',
+            type: 'compare.connectivity',
+            col: 4,
+            row: mid,
+            params: { datasetCount: keys.length },
+          },
+          ...tail.nodes,
+        ],
+        links: [
+          ...keys.flatMap((_key, index): Link[] => {
+            const conn = suffixed('conn', index + 1)
+            const slot = index + 1
+            return [
+              ...opensOn(index, conn),
+              [conn, 'connections', 'cmp', portIdAt('edges', slot)],
+              ['match', portIdAt('labels', slot), 'cmp', portIdAt('labels', slot)],
+            ]
+          }),
+          ...mapper.links,
+          ...tail.links,
+        ],
+        viewId: tail.viewId,
+      }
+    }
+
+    case 'coclust': {
+      /*
+       * `cluster`'s chain with two cards inserted, and those two cards are the whole feature.
+       *
+       * **The feature axis is the shared label space**: `Match Cell Types`' output goes into each
+       * `Partner Vectors`, so a partner is counted as the label both connectomes agree on rather
+       * than as its own dataset's type — a feature outside that space can only exist in one of
+       * them, so it can neither make two neurons alike nor tell them apart.
+       *
+       * **The observation axis is dataset-qualified**: `Qualify Ids` rewrites each id to
+       * `dataset:id` before the tables meet, which is decision 1 in `docs/comparative.md` — a
+       * composite key would need every join, dedupe and group-by downstream to carry a second
+       * column, and forgetting it merges two different neurons in silence. The qualified form is
+       * rejected by `isNeuronId`, so anything that would query it refuses loudly instead.
+       *
+       * Which is also why the Stack Tables below adds no source column: the dataset is in the id.
+       */
+      const mapper = mapperNode(bands, 3, mid)
+      const stacks = stackChain({
+        type: 'core.stack',
+        inputs: keys.map((_key, index): [string, string] => [
+          suffixed('qual', index + 1),
+          'out',
+        ]),
+        labels: keys,
+        col: 6,
+        row: mid,
+      })
+      const simCol = 6 + stacks.cols
+      const tail = views(simCol + 2, mid, fromLinkage)
+      return {
+        nodes: [
+          ...keys.flatMap((key, index): Placement[] => {
+            const which = index + 1
+            const row = index * DATASET_ROW
+            return [
+              {
+                id: suffixed('conn', which),
+                type: 'neuron.connectivity',
+                col: 2,
+                row,
+                params: VECTOR_CONNECTIVITY,
+              },
+              { id: suffixed('vectors', which), type: 'neuron.partnerVectors', col: 4, row },
+              {
+                id: suffixed('qual', which),
+                type: 'core.qualifyIds',
+                col: 5,
+                row,
+                // The family key, which is already the short name this param asks for — and the
+                // one string that identifies the dataset everywhere else in the app.
+                params: { prefix: key },
+              },
+            ]
+          }),
+          mapper.node,
+          ...stacks.nodes,
+          {
+            id: 'sim',
+            type: 'core.similarity',
+            col: simCol,
+            row: mid,
+            params: VECTOR_SIMILARITY,
+          },
+          { id: 'linkage', type: 'cluster.linkage', col: simCol + 1, row: mid },
+          ...tail.nodes,
+        ],
+        links: [
+          ...keys.flatMap((_key, index): Link[] => {
+            const which = index + 1
+            const conn = suffixed('conn', which)
+            const vectors = suffixed('vectors', which)
+            return [
+              ...opensOn(index, conn),
+              [conn, 'connections', vectors, 'in'],
+              // The `Neurons` port says outright which end of each edge was the query, which the
+              // derived route can only work out at hop 1.
+              neuronsAt(index, vectors, 'neurons'),
+              ['match', portIdAt('labels', which), vectors, 'labels'],
+              [vectors, 'out', suffixed('qual', which), 'in'],
+            ]
+          }),
+          ...mapper.links,
+          ...stacks.links,
+          [stacks.out[0], stacks.out[1], 'sim', 'in'],
+          ['sim', 'matrix', 'linkage', 'in'],
+          ...tail.links,
+        ],
+        viewId: tail.viewId,
+      }
+    }
+
+    case 'xmorphology':
+    case 'xnblast': {
+      /*
+       * The other axis, and the one that needs no cell types at all: put every dataset's arbours
+       * in one coordinate frame and then either draw them or compare their shapes.
+       *
+       * `Transform Neurons` per dataset, straight into `JRC2018U` — one hop each, rather than a
+       * path found between two brain spaces — and then `Stack Neurons`, which **refuses** two
+       * collections in unrelated spaces. That refusal is the reason both arms are gated on
+       * `requiresTemplateSpace` two screens back: it is exactly the error a wizard must not walk
+       * a reader into.
+       */
+      const shape = answers.analysis === 'xnblast'
+      const stacks = stackChain({
+        type: 'neuron.stack',
+        inputs: keys.map((_key, index): [string, string] => [suffixed('xf', index + 1), 'out']),
+        labels: keys.map((key) => datasetFamily(key)?.label ?? key),
+        col: 4,
+        row: mid,
+        sourceColumn: STACK_SOURCE_COLUMN,
+      })
+      const after = 4 + stacks.cols
+      const tail = views(shape ? after + 2 : after, mid, (visualisation, id) =>
+        shape
+          ? fromLinkage(visualisation, id)
+          : [[stacks.out[0], stacks.out[1], id, 'skeletons']],
+      )
+      return {
+        nodes: [
+          ...keys.flatMap((_key, index): Placement[] => {
+            const which = index + 1
+            const row = index * DATASET_ROW
+            return [
+              { id: suffixed('skel', which), type: 'neuron.skeletons', col: 2, row },
+              // No params: `Target` already defaults to the shared template and `Space` to
+              // whatever the geometry arrived carrying, which is the pair the dataset stamped.
+              { id: suffixed('xf', which), type: 'neuron.xform', col: 3, row },
+            ]
+          }),
+          ...stacks.nodes,
+          ...(shape
+            ? [
+                { id: 'nblast', type: 'neuron.nblast', col: after, row: mid },
+                { id: 'linkage', type: 'cluster.linkage', col: after + 1, row: mid },
+              ]
+            : []),
+          ...tail.nodes.map((node) =>
+            node.type === 'out.viewer3d' && stacks.sourceColumn
+              ? {
+                  ...node,
+                  /*
+                   * The **outermost** stack's column, which is the one that partitions the whole
+                   * collection — at two datasets that is `STACK_SOURCE_COLUMN` and `VIEWS`'
+                   * declared value is already right; above two it is the suffixed one, for the
+                   * reason `stackChain` records.
+                   */
+                  params: { ...(node.params ?? {}), skeletonColorBy: stacks.sourceColumn },
+                }
+              : node,
+          ),
+        ],
+        links: [
+          ...keys.flatMap((_key, index): Link[] => {
+            const which = index + 1
+            const skel = suffixed('skel', which)
+            return [...opensOn(index, skel), [skel, 'skeletons', suffixed('xf', which), 'in']]
+          }),
+          ...stacks.links,
+          ...(shape
+            ? ([
+                [stacks.out[0], stacks.out[1], 'nblast', 'query'],
+                ['nblast', 'scores', 'linkage', 'in'],
+              ] as Link[])
+            : []),
+          ...tail.links,
+        ],
+        viewId: tail.viewId,
+      }
+    }
+
     case 'neurons':
     default: {
       // No analysis: the neuron table straight into whatever was ticked, except the viewers that
@@ -956,7 +1496,12 @@ function answered(answers: WizardAnswers): {
   view: string
 } {
   return {
-    dataset: datasetFamily(answers.dataset)?.label ?? answers.dataset,
+    /*
+     * Every dataset, read as a sentence — `listed` is the same helper the viewers use, so a
+     * comparison's name, description and overview note all say "FlyWire FAFB public and
+     * Hemibrain" rather than three different abbreviations of it.
+     */
+    dataset: listed(answers.datasets.map((key) => datasetFamily(key)?.label ?? key)),
     start: startOption(answers.start)?.label.toLowerCase() ?? '',
     /*
      * Not lowercased, unlike the two beside it: these labels name *techniques* rather than
@@ -990,8 +1535,12 @@ function answered(answers: WizardAnswers): {
  */
 function overviewNote(answers: WizardAnswers): GraphNode {
   const { dataset, start, analysis, view } = answered(answers)
-  const family = datasetFamily(answers.dataset)
-  const synthetic = family?.synthetic
+  /*
+   * Said where **any** dataset is synthetic, and the sentence is about the numbers rather than
+   * about the workflow — so a comparison with one synthetic side is exactly the case a reader
+   * most needs it for.
+   */
+  const synthetic = answers.datasets.some((key) => datasetFamily(key)?.synthetic)
     ? '\n\n*The dataset is synthetic, generated in your browser from a seed. The pipeline is the point; the numbers are not a finding.*'
     : ''
   return noteNode({
@@ -1075,7 +1624,7 @@ export function demoWorkflow(analysis: AnalysisId = 'partners', notes = true): C
    */
   const [visualisation] = Object.keys(VIEWS[analysis]) as VisualisationId[]
   return buildWorkflow({
-    dataset: DEMO_DATASET,
+    datasets: [DEMO_DATASET],
     start: 'search',
     analysis,
     visualisations: [visualisation ?? 'table'],

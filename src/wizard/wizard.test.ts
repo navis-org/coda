@@ -27,6 +27,7 @@ import { describe, expect, it } from 'vitest'
 import type { CodaGraph } from '../core/graph'
 import { deserializeGraph, serializeGraph } from '../core/graph'
 import { inferGraph } from '../core/inference'
+import { findParam } from '../core/node'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
 import { ROW_TRACKS } from '../core/dashboard'
 import { Scheduler } from '../core/scheduler'
@@ -35,15 +36,21 @@ import { registerBuiltinSources } from '../data/builtins'
 import { requireSource } from '../data/source'
 import { DATASET_FAMILIES, datasetFamily, starterFamilies } from '../nodes/lib/datasetFamilies'
 import type { BuildOptions } from './build'
+import { CROSS_SETS, GROWING_CROSS_SETS } from '../test/crossSets'
 import { parseMarkdown } from '../ui/markdown'
 import '../nodes'
 import { DEMO_DATASET, buildWorkflow, demoWorkflow } from './build'
 import type { AnalysisId, VisualisationId, WizardAnswers, WizardOption } from './options'
 import {
+  MULTI_DATASET,
+  STACK_SOURCE_COLUMN,
   analysisOption,
   analysisOptions,
   everyCombination,
+  familyBridges,
   glyphNodeOf,
+  maxWizardDatasets,
+  multiDatasetOptions,
   resolveVisualisations,
   startOptions,
   visualisationOption,
@@ -76,7 +83,7 @@ function errorsIn(answers: WizardAnswers): string[] {
 }
 
 function label(answers: WizardAnswers): string {
-  return `${answers.dataset} / ${answers.start} / ${answers.analysis} / ${answers.visualisations.join('+')}`
+  return `${answers.datasets.join('+')} / ${answers.start} / ${answers.analysis} / ${answers.visualisations.join('+')}`
 }
 
 describe('the option space', () => {
@@ -89,7 +96,7 @@ describe('the option space', () => {
   it('builds a graph with no type errors, for every reachable combination', () => {
     let checked = 0
     for (const family of starterFamilies()) {
-      for (const answers of everyCombination(family.key)) {
+      for (const answers of everyCombination([family.key])) {
         expect(errorsIn(answers), label(answers)).toEqual([])
         checked++
       }
@@ -102,7 +109,7 @@ describe('the option space', () => {
   it('offers only what the source can do', () => {
     // The synthetic source generates geometry in the browser and publishes no scene for an
     // external viewer to read, which is the one capability difference worth pinning by name.
-    const mock = visualisationOptions(DEMO_DATASET, 'neurons').map((o) => o.id)
+    const mock = visualisationOptions([DEMO_DATASET], 'neurons').map((o) => o.id)
     expect(mock).toContain('table')
     expect(mock).not.toContain('neuroglancer')
 
@@ -110,7 +117,7 @@ describe('the option space', () => {
     const published = starterFamilies().find((f) => !f.synthetic)
     expect(published, 'no published family to check the gate against').toBeTruthy()
     expect(
-      visualisationOptions(published!.key, 'neurons').map((o) => o.id),
+      visualisationOptions([published!.key], 'neurons').map((o) => o.id),
       'the scene gate is refusing every family',
     ).toContain('neuroglancer')
   })
@@ -139,7 +146,7 @@ describe('the option space', () => {
     const cave = starterFamilies().filter((family) => family.sourceId === 'cave')
     expect(cave.length, 'no CAVE family to check the gate against').toBeGreaterThan(0)
     for (const { key } of cave) {
-      const analyses = analysisOptions(key).map((o) => o.id)
+      const analyses = analysisOptions([key]).map((o) => o.id)
       expect(
         analyses,
         `${key}: skeletons are per dataset, and every CAVE family has them`,
@@ -149,12 +156,22 @@ describe('the option space', () => {
   })
 
   it('never offers a question with nothing in it', () => {
-    for (const family of starterFamilies()) {
-      expect(startOptions(family.key).length, family.key).toBeGreaterThan(0)
-      for (const analysis of analysisOptions(family.key)) {
+    /*
+     * The third question is the one exception and it is the cross-dataset path's: two connectomes
+     * that share no capability share no analysis, so `analysisOptions` can legitimately come back
+     * empty there. That is a refusal the dialog makes on Continue rather than a question it
+     * opens, which is why this rule is asked of the *viewers* on both paths and of the analyses
+     * on the single one.
+     */
+    for (const datasets of [...starterFamilies().map((f) => [f.key]), ...CROSS_SETS]) {
+      const label = datasets.join('+')
+      expect(startOptions(datasets).length, label).toBeGreaterThan(0)
+      if (datasets.length === 1)
+        expect(analysisOptions(datasets).length, label).toBeGreaterThan(0)
+      for (const analysis of analysisOptions(datasets)) {
         expect(
-          visualisationOptions(family.key, analysis.id).length,
-          `${family.key} / ${analysis.id}`,
+          visualisationOptions(datasets, analysis.id).length,
+          `${label} / ${analysis.id}`,
         ).toBeGreaterThan(0)
       }
     }
@@ -169,10 +186,10 @@ describe('the option space', () => {
  * set has always had.
  */
 describe('the viewers a question opens with', () => {
-  const viewsFor = (analysis: AnalysisId) => visualisationOptions(DEMO_DATASET, analysis)
+  const viewsFor = (analysis: AnalysisId) => visualisationOptions([DEMO_DATASET], analysis)
 
   it('ticks every viewer the analysis offers, for a reader who has said nothing', () => {
-    for (const analysis of analysisOptions(DEMO_DATASET)) {
+    for (const analysis of analysisOptions([DEMO_DATASET])) {
       const options = viewsFor(analysis.id)
       expect(resolveVisualisations(options, []), analysis.id).toEqual(
         options.map((option) => option.id),
@@ -219,9 +236,9 @@ describe('the viewers a question opens with', () => {
   })
 
   it('builds a graph with no type errors when every viewer is ticked', () => {
-    for (const analysis of analysisOptions(DEMO_DATASET)) {
+    for (const analysis of analysisOptions([DEMO_DATASET])) {
       const answers: WizardAnswers = {
-        dataset: DEMO_DATASET,
+        datasets: [DEMO_DATASET],
         start: 'search',
         analysis: analysis.id,
         visualisations: resolveVisualisations(viewsFor(analysis.id), []),
@@ -247,12 +264,19 @@ describe('the glyph on an answer', () => {
   /** Every answer of every question, on every dataset the wizard offers. */
   function everyOption(): { question: string; option: WizardOption<string> }[] {
     const all: { question: string; option: WizardOption<string> }[] = []
-    for (const family of starterFamilies()) {
-      all.push(...startOptions(family.key).map((option) => ({ question: 'start', option })))
-      for (const analysis of analysisOptions(family.key)) {
-        all.push({ question: 'analysis', option: analysis })
+    /*
+     * Both paths, and the third question's two lists are **separate questions** for the purpose
+     * of the rule below: they are disjoint sets shown on different screens, so `neuron.nblast`
+     * naming both `nblast` and `xnblast` is one node answering one question on each path rather
+     * than two answers drawn alike. The lists themselves are asserted disjoint elsewhere.
+     */
+    for (const datasets of [...starterFamilies().map((f) => [f.key]), ...CROSS_SETS]) {
+      const question = datasets.length > 1 ? 'analysis/cross' : 'analysis'
+      all.push(...startOptions(datasets).map((option) => ({ question: 'start', option })))
+      for (const analysis of analysisOptions(datasets)) {
+        all.push({ question, option: analysis })
         all.push(
-          ...visualisationOptions(family.key, analysis.id).map((option) => ({
+          ...visualisationOptions(datasets, analysis.id).map((option) => ({
             question: `views/${analysis.id}`,
             option,
           })),
@@ -300,9 +324,9 @@ describe('the glyph on an answer', () => {
    * the graph rather than merely against the registry.
    */
   it('names the head card the second question builds', () => {
-    for (const option of startOptions(DEMO_DATASET)) {
+    for (const option of startOptions([DEMO_DATASET])) {
       const graph = buildWorkflow({
-        dataset: DEMO_DATASET,
+        datasets: [DEMO_DATASET],
         start: option.id,
         analysis: 'neurons',
         visualisations: ['table'],
@@ -325,11 +349,11 @@ describe('the glyph on an answer', () => {
    * adds the tenth analysis; this rule answers for them.
    */
   it('names a card the third question builds, wherever it builds one', () => {
-    for (const analysis of analysisOptions(DEMO_DATASET)) {
+    for (const analysis of analysisOptions([DEMO_DATASET])) {
       const own = new Set<string>()
-      for (const view of visualisationOptions(DEMO_DATASET, analysis.id)) {
+      for (const view of visualisationOptions([DEMO_DATASET], analysis.id)) {
         for (const node of buildWorkflow({
-          dataset: DEMO_DATASET,
+          datasets: [DEMO_DATASET],
           start: 'search',
           analysis: analysis.id,
           visualisations: [view.id],
@@ -369,7 +393,7 @@ describe('the glyph on an answer', () => {
  * See `docs/python-pyodide.md`.
  */
 const NEEDS_A_BROWSER = new Set<AnalysisId>(['cluster', 'nblast'])
-const RUNNABLE = everyCombination(DEMO_DATASET).filter(
+const RUNNABLE = everyCombination([DEMO_DATASET]).filter(
   (a) => a.start === 'search' && !NEEDS_A_BROWSER.has(a.analysis),
 )
 
@@ -421,7 +445,7 @@ describe.each(RUNNABLE.map((a) => [label(a), a] as const))('runs: %s', (_name, a
 describe('several viewers', () => {
   const both = (analysis: AnalysisId, visualisations: VisualisationId[]) =>
     buildWorkflow({
-      dataset: DEMO_DATASET,
+      datasets: [DEMO_DATASET],
       start: 'search',
       analysis,
       visualisations,
@@ -571,7 +595,7 @@ describe('several viewers', () => {
 describe('the Neuron Topology viewer', () => {
   const build = (analysis: AnalysisId, visualisations: VisualisationId[]) =>
     buildWorkflow({
-      dataset: DEMO_DATASET,
+      datasets: [DEMO_DATASET],
       start: 'search',
       analysis,
       visualisations,
@@ -614,12 +638,14 @@ describe('the Neuron Topology viewer', () => {
   it('is offered wherever a neuron table survives to the end of the chain', () => {
     // Under `morphology` because it is a way of looking at morphology, and under `neurons`
     // because it needs no analysis at all — those are the two chains that still carry neurons.
-    expect(visualisationOptions(DEMO_DATASET, 'morphology').map((o) => o.id)).toContain(
+    expect(visualisationOptions([DEMO_DATASET], 'morphology').map((o) => o.id)).toContain(
       'topology',
     )
-    expect(visualisationOptions(DEMO_DATASET, 'neurons').map((o) => o.id)).toContain('topology')
+    expect(visualisationOptions([DEMO_DATASET], 'neurons').map((o) => o.id)).toContain(
+      'topology',
+    )
     // Not off a chain that has turned neurons into something else.
-    expect(visualisationOptions(DEMO_DATASET, 'partners').map((o) => o.id)).not.toContain(
+    expect(visualisationOptions([DEMO_DATASET], 'partners').map((o) => o.id)).not.toContain(
       'topology',
     )
   })
@@ -646,7 +672,7 @@ describe('the Neuron Topology viewer', () => {
 describe('opening as a dashboard', () => {
   const built = (analysis: AnalysisId, visualisations: VisualisationId[], dashboard: boolean) =>
     buildWorkflow({
-      dataset: DEMO_DATASET,
+      datasets: [DEMO_DATASET],
       start: 'browse',
       analysis,
       visualisations,
@@ -758,7 +784,7 @@ describe('the hints it docks', () => {
    * same set, and building each workflow twice is the wizard's whole option space run twice.
    */
   const graphs: CodaGraph[] = starterFamilies()
-    .flatMap((family) => everyCombination(family.key))
+    .flatMap((family) => everyCombination([family.key]))
     .map((answers) => buildWorkflow(answers))
 
   /** Every hint in a graph, as `nodeId → texts`. */
@@ -798,7 +824,7 @@ describe('the hints it docks', () => {
      * in `assemble`; two hints on one card stack because they are a list on that card.
      */
     const graph = buildWorkflow({
-      dataset: DEMO_DATASET,
+      datasets: [DEMO_DATASET],
       start: 'search',
       analysis: 'morphology',
       visualisations: ['neuroglancer'],
@@ -852,7 +878,7 @@ describe('a dataset that needs an annotation chain', () => {
   const build = (dataset: string, options?: BuildOptions) =>
     buildWorkflow(
       {
-        dataset,
+        datasets: [dataset],
         start: 'browse',
         analysis: 'partners',
         visualisations: ['table'],
@@ -963,6 +989,295 @@ describe('a dataset that needs an annotation chain', () => {
   })
 })
 
+/**
+ * The cross-dataset path: the first question's fifth kind of answer, and the four arms behind it.
+ *
+ * The same standing the rest of this file has, asked of a shape the rest of it cannot reach —
+ * every one of these arms puts two to four dataset nodes, two to four heads and a variadic node
+ * in one graph, and three of the failures that shape can have are silent. A chain's node ids are
+ * local to the chain, so two datasets carrying one mint two nodes with the same id and
+ * `assembleGraph` cannot notice. `Stack Neurons` throws on a source column that already exists,
+ * which is a run-time error a build cannot see. And an analysis one dataset cannot serve is a
+ * card refusing in the middle of a chain, two screens after the question that offered it.
+ */
+describe('the cross-dataset path', () => {
+  const answersFor = (
+    datasets: string[],
+    analysis: AnalysisId,
+    visualisations: VisualisationId[],
+  ): WizardAnswers => ({
+    datasets,
+    start: 'search',
+    analysis,
+    visualisations,
+    notes: false,
+    dashboard: false,
+  })
+
+  it('builds a graph with no type errors, for every reachable combination', () => {
+    let checked = 0
+    for (const datasets of CROSS_SETS) {
+      for (const answers of everyCombination(datasets)) {
+        expect(errorsIn(answers), label(answers)).toEqual([])
+        checked++
+      }
+    }
+    // The guard the single-dataset rule carries, for the same reason: a gate that started
+    // answering `false` everywhere would make this pass by checking nothing.
+    expect(checked).toBeGreaterThan(40)
+  })
+
+  /*
+   * The two lists are disjoint, which is what makes one `AnalysisId` union safe: `bodyOf` has one
+   * arm per id and the note above the chain looks one up without knowing which path built it, so
+   * an id on both lists would be an arm that means two different things.
+   */
+  it('offers a disjoint set of analyses from the single-dataset path', () => {
+    const single = new Set(analysisOptions(['hemibrain']).map((o) => o.id))
+    const cross = analysisOptions(['hemibrain', 'malecns']).map((o) => o.id)
+    expect(cross.length).toBeGreaterThan(0)
+    expect(cross.filter((id) => single.has(id))).toEqual([])
+    // And every cross answer is reachable, or one of the four arms is dead code.
+    expect(cross.sort()).toEqual(['coclust', 'compare', 'xmorphology', 'xnblast'])
+  })
+
+  /*
+   * The intersection, not the union — an analysis one of the chosen datasets cannot serve builds
+   * a chain with a refusing card in it. The synthetic dataset is the case that shows it: it has
+   * skeletons but no registration into the shared template space, so the two geometry arms have
+   * nothing to fit and drop out while the two connectivity ones stay.
+   */
+  it('narrows an analysis against every chosen dataset, not just the first', () => {
+    expect(
+      familyBridges('mock.opticlobe'),
+      'the synthetic dataset gained a template space',
+    ).toBe(false)
+    expect(familyBridges('hemibrain')).toBe(true)
+
+    const both = analysisOptions(['mock.opticlobe', 'hemibrain']).map((o) => o.id)
+    expect(both).toContain('compare')
+    expect(both).not.toContain('xmorphology')
+    expect(both).not.toContain('xnblast')
+
+    // And the same pair without the synthetic side does offer them, or the gate refuses
+    // everything and this test would pass on a broken build.
+    expect(analysisOptions(['hemibrain', 'malecns']).map((o) => o.id)).toContain('xnblast')
+  })
+
+  it('offers only the families that can answer something across datasets', () => {
+    const offered = multiDatasetOptions().map((family) => family.key)
+    expect(offered.length).toBeGreaterThan(1)
+    for (const key of offered) {
+      expect(analysisOptions([key, key]).length, `${key} can answer nothing`).toBeGreaterThan(0)
+    }
+  })
+
+  /*
+   * The other direction, and the one that fails silently: the datasets question is gated on what
+   * `CROSS_ANALYSES` declares, so an analysis whose gate no family on that question can satisfy is
+   * simply unreachable — no error, no empty screen, just an answer nobody is ever offered. The
+   * gate being asked through `available` rather than restated is what makes this checkable at all.
+   */
+  it('leaves every cross-dataset analysis reachable from some pair it offers', () => {
+    const offered = multiDatasetOptions().map((family) => family.key)
+    const reachable = new Set<AnalysisId>()
+    for (const a of offered) {
+      for (const b of offered) {
+        if (a === b) continue
+        for (const option of analysisOptions([a, b])) reachable.add(option.id)
+      }
+    }
+    expect([...reachable].sort()).toEqual(['coclust', 'compare', 'xmorphology', 'xnblast'])
+  })
+
+  /*
+   * The ceiling is the arity the nodes declare, read off them rather than restated — a wizard
+   * offering a fifth dataset would build a `Match Cell Types` with a port it does not have.
+   */
+  it('caps the dataset count at what the nodes accept', () => {
+    const max = maxWizardDatasets()
+    for (const type of ['compare.matchTypes', 'compare.connectivity']) {
+      const param = findParam(requireNodeDef(type), 'datasetCount')
+      expect(param && 'max' in param ? param.max : undefined, type).toBe(max)
+    }
+    expect(
+      CROSS_SETS.some((set) => set.length === max),
+      'nothing exercises the ceiling',
+    ).toBe(true)
+  })
+
+  /*
+   * Every id minted once. The failure this catches is entirely silent: `assembleGraph` keys nodes
+   * by id, so a chain contributing a second `join` replaces the first and both sets of wires end
+   * up on whichever survived — a graph that looks smaller than it should and is wired wrong.
+   */
+  it.each(CROSS_SETS.map((datasets) => [datasets.join(' + '), datasets] as const))(
+    'mints every node id once across %s',
+    (_label, datasets) => {
+      for (const answers of everyCombination(datasets)) {
+        const ids = buildWorkflow(answers).nodes.map((node) => node.id)
+        expect(new Set(ids).size, `${label(answers)}: ${ids.join(' ')}`).toBe(ids.length)
+      }
+    },
+  )
+
+  it('prefixes the second dataset’s annotation chain and leaves the first’s alone', () => {
+    const graph = buildWorkflow(answersFor(['flywire', 'banc'], 'compare', ['table']))
+    const typeAt = (id: string) => graph.nodes.find((node) => node.id === id)?.type
+    // FlyWire is first, so its cards keep the bare ids a single-dataset workflow has always had.
+    for (const node of datasetFamily('flywire')!.annotationChain!.nodes) {
+      expect(typeAt(node.id), `flywire's ${node.id}`).toBe(node.type)
+    }
+    /*
+     * BANC is second, so its card is prefixed with the dataset node it feeds — and these two
+     * chains are exactly the collision the prefix exists for: both declare a node called
+     * `annotations`, of two different types. Asserting the *type* at each id is what says which
+     * chain won, where asserting the id's mere presence cannot.
+     */
+    for (const node of datasetFamily('banc')!.annotationChain!.nodes) {
+      expect(typeAt(`ds2-${node.id}`), `banc's ${node.id}`).toBe(node.type)
+    }
+    expect(typeAt('annotations'), 'the bare id belongs to the first chain').toBe(
+      'core.tableFromUrl',
+    )
+    // Each chain still reaches its own dataset's Annotations port, and no other.
+    const annotations = graph.edges.filter((edge) => edge.targetHandle === 'annotations')
+    expect(annotations.map((edge) => `${edge.source}->${edge.target}`).sort()).toEqual([
+      'ds2-annotations->ds2',
+      'join->ds',
+    ])
+    // One folded frame: `foldChain` leaves BANC's single card alone rather than boxing it.
+    expect((graph.groups ?? []).map((group) => group.title)).toEqual(['FlyWire annotations'])
+  })
+
+  /*
+   * Decision 4 in `docs/comparative.md`, asserted where a wizard could quietly get it wrong: the
+   * mapper reads each dataset's *whole* annotation table, so it takes the Dataset nodes and not
+   * the neuron tables the heads produce. Wired to a selection it would give a different answer
+   * for the same two neurons depending on what else the graph happened to query.
+   */
+  it('wires the mapper to the dataset nodes and pre-fills each one’s type columns', () => {
+    const datasets = ['hemibrain', 'malecns']
+    for (const analysis of ['compare', 'coclust'] as const) {
+      const graph = buildWorkflow(answersFor(datasets, analysis, ['table', 'dendrogram']))
+      const match = graph.nodes.find((node) => node.type === 'compare.matchTypes')
+      expect(match, analysis).toBeTruthy()
+      expect(match!.params.datasetCount).toBe(datasets.length)
+
+      const wires = graph.edges
+        .filter((edge) => edge.target === match!.id)
+        .map((edge) => `${edge.source}.${edge.sourceHandle}->${edge.targetHandle}`)
+        .sort()
+      expect(wires, analysis).toEqual(['ds.dataset->dataset1', 'ds2.dataset->dataset2'])
+
+      datasets.forEach((key, index) => {
+        expect(match!.params[`types${index + 1}`], `${analysis} / ${key}`).toEqual(
+          datasetFamily(key)!.typeColumns,
+        )
+      })
+    }
+  })
+
+  /*
+   * The mapper's own `validate` refuses an empty type-column picker by name, so a family that
+   * declares columns must produce a card with none of those issues on it. This is the assertion
+   * that `DatasetFamily.typeColumns` is doing its job rather than being a field nobody reads.
+   */
+  it('leaves the mapper with nothing to complain about, where the families declare columns', () => {
+    const graph = buildWorkflow(answersFor(['hemibrain', 'malecns'], 'compare', ['table']))
+    const issues = inferGraph(graph).nodes.match?.issues ?? []
+    expect(issues.filter((issue) => /pick at least one column/i.test(issue.message))).toEqual(
+      [],
+    )
+  })
+
+  it('qualifies each dataset’s ids with its own family key before the tables meet', () => {
+    const datasets = ['hemibrain', 'malecns']
+    const graph = buildWorkflow(answersFor(datasets, 'coclust', ['dendrogram']))
+    const qualifiers = graph.nodes.filter((node) => node.type === 'core.qualifyIds')
+    expect(qualifiers.map((node) => node.params.prefix)).toEqual(datasets)
+    // The feature axis is the shared label space, which is the other half of the same decision.
+    const labels = graph.edges.filter((edge) => edge.targetHandle === 'labels')
+    expect(labels.length).toBe(datasets.length)
+    for (const edge of labels) expect(edge.source).toBe('match')
+  })
+
+  /*
+   * Both stack nodes take exactly two inputs, so N datasets are N−1 cards. The rule that is not
+   * obvious is the source column: `stackTables` **throws** where the column it is adding already
+   * exists in either input, so a chain naming them all alike builds a graph that refuses on Run —
+   * a failure no amount of inference can see.
+   */
+  it('chains the geometry stacks and gives each level its own source column', () => {
+    for (const datasets of GROWING_CROSS_SETS) {
+      const graph = buildWorkflow(answersFor([...datasets], 'xmorphology', ['viewer3d']))
+      const stacks = graph.nodes.filter((node) => node.type === 'neuron.stack')
+      expect(stacks.length, datasets.join('+')).toBe(datasets.length - 1)
+
+      const columns = stacks.map((node) => String(node.params.sourceColumn))
+      expect(new Set(columns).size, `${datasets.join('+')}: ${columns.join(', ')}`).toBe(
+        columns.length,
+      )
+      expect(columns[0]).toBe(STACK_SOURCE_COLUMN)
+
+      // The scene colours by the column that partitions the *whole* collection, which is the
+      // outermost one — at two datasets that is `STACK_SOURCE_COLUMN` and `VIEWS`' declared value
+      // is already right, above two it is the suffixed one.
+      const view = graph.nodes.find((node) => node.id === 'view')!
+      expect(view.params.skeletonColorBy, datasets.join('+')).toBe(columns.at(-1))
+    }
+  })
+
+  it('leaves the table stack unlabelled, the dataset being in the qualified id', () => {
+    const graph = buildWorkflow(answersFor(['hemibrain', 'malecns'], 'coclust', ['dendrogram']))
+    for (const node of graph.nodes.filter((n) => n.type === 'core.stack')) {
+      expect(node.params.sourceColumn).toBe('')
+    }
+  })
+
+  it('caps every dataset’s search on the two geometry arms', () => {
+    for (const analysis of ['xmorphology', 'xnblast'] as const) {
+      const views: VisualisationId[] = analysis === 'xnblast' ? ['dendrogram'] : ['viewer3d']
+      const graph = buildWorkflow(answersFor(['hemibrain', 'malecns'], analysis, views))
+      const searches = graph.nodes.filter((node) => node.type === 'neuron.findNeurons')
+      expect(searches.length, analysis).toBe(2)
+      for (const node of searches) expect(node.params.limit, analysis).toBe(30)
+    }
+  })
+
+  /*
+   * One hint per stage, not one per dataset: four identical boxes down the left of a canvas is
+   * the failure the stage notes had, and a stage growing a second card does not make it a
+   * different stage.
+   */
+  it('docks the start hint on the first head only', () => {
+    const graph = buildWorkflow({
+      ...answersFor(['hemibrain', 'malecns'], 'compare', ['table']),
+      notes: true,
+    })
+    const heads = graph.nodes.filter((node) => node.type === 'neuron.findNeurons')
+    expect(heads.map((node) => node.hints?.length ?? 0)).toEqual([1, 0])
+  })
+
+  it('names every dataset in the graph’s own name and description', () => {
+    const graph = buildWorkflow(answersFor(['hemibrain', 'malecns'], 'compare', ['table']))
+    for (const named of ['Hemibrain', 'MaleCNS']) {
+      expect(graph.meta?.name, 'name').toContain(named)
+      expect(graph.meta?.description, 'description').toContain(named)
+    }
+  })
+
+  /*
+   * The first question's extra row is an answer like any other, so it carries its own copy and
+   * draws a registered node — the two rules `options.ts` states for every option there is.
+   */
+  it('gives the first question’s extra row copy and a drawing of its own', () => {
+    expect(MULTI_DATASET.label.trim()).toBeTruthy()
+    expect(MULTI_DATASET.blurb.trim()).toBeTruthy()
+    expect(getNodeDef(glyphNodeOf(MULTI_DATASET)!), MULTI_DATASET.glyph).toBeTruthy()
+  })
+})
+
 describe('the demo workflows', () => {
   it('survives a save/load round trip unchanged', () => {
     const original = demoWorkflow('partners')
@@ -1024,7 +1339,7 @@ describe('the demo workflows', () => {
   it('opens a published dataset with its Description card', () => {
     const published = starterFamilies().find((f) => !f.synthetic)!
     const graph = buildWorkflow({
-      dataset: published.key,
+      datasets: [published.key],
       start: 'search',
       analysis: 'neurons',
       visualisations: ['table'],
@@ -1053,7 +1368,7 @@ describe('the demo workflows', () => {
   it('limits a search against a published dataset, and not against the synthetic one', () => {
     const published = starterFamilies().find((f) => !f.synthetic)!
     const real = buildWorkflow({
-      dataset: published.key,
+      datasets: [published.key],
       start: 'search',
       analysis: 'neurons',
       visualisations: ['table'],

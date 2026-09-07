@@ -168,7 +168,7 @@ function portsOf(ports: readonly ResolvedPort[]): GuidePort[] {
  */
 function workflowIndex(): Map<string, Set<string>> {
   const index = new Map<string, Set<string>>()
-  for (const answers of everyCombination(DEMO_DATASET)) {
+  for (const answers of everyCombination([DEMO_DATASET])) {
     const name = analysisOption(answers.analysis)?.label ?? answers.analysis
     for (const node of buildWorkflow({ ...answers, notes: false }).nodes) {
       const seen = index.get(node.type) ?? new Set<string>()
@@ -187,7 +187,7 @@ function workflowIndex(): Map<string, Set<string>> {
  * reachable (`wizard.test.ts`: "never offers a question with nothing in it").
  */
 function workflowNames(): string[] {
-  return analysisOptions(DEMO_DATASET).map((option) => option.label)
+  return analysisOptions([DEMO_DATASET]).map((option) => option.label)
 }
 
 /**

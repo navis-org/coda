@@ -86,6 +86,44 @@ export interface AnnotationChain {
 }
 
 /**
+ * The same chain with every internal id prefixed, and optionally a new frame title.
+ *
+ * One builder needs it: the Workflow Wizard's cross-dataset path puts two to four dataset nodes
+ * on one canvas, and a chain's ids (`annotations`, `combine`, `join`) are local to the chain —
+ * so two datasets each carrying one would mint two nodes called `join` in one graph. That is a
+ * collision `assembleGraph` has no way to notice: the second node silently replaces the first
+ * and the wires of both point at whichever survived.
+ *
+ * **A whole chain out rather than a prefix threaded through the three readers.** `chainGrid`,
+ * `chainLinks` and `foldChain` each take a chain and each name ids; a `prefix` argument on all
+ * three is three places that must agree about how a prefix is spelled, which is the drift this
+ * module was written to stop. Prefixed once, every one of them works unchanged.
+ *
+ * The frame title is left alone: a chain's title already names its dataset ("FlyWire
+ * annotations", "BANC annotations") and no reader can pick one family twice, so four folded
+ * frames on one canvas are already four different names.
+ */
+export function prefixChain(chain: AnnotationChain, prefix: string): AnnotationChain {
+  // The empty prefix is the *first* dataset of every build, single-dataset ones included, and
+  // rewriting nothing still allocates a node object, a link tuple and a chain per card. All
+  // three readers below are read-only, so the declaration itself is the right answer.
+  if (!prefix) return chain
+  const id = (local: string) => `${prefix}${local}`
+  return {
+    ...chain,
+    nodes: chain.nodes.map((node) => ({ ...node, id: id(node.id) })),
+    links: chain.links.map(([from, fromPort, to, toPort]): ChainLink => [
+      id(from),
+      fromPort,
+      id(to),
+      toPort,
+    ]),
+    datasetRefs: chain.datasetRefs.map(id),
+    output: { ...chain.output, id: id(chain.output.id) },
+  }
+}
+
+/**
  * The chain's cards with their grid position worked out: a row from the declaration, a column
  * from how many cards precede it on that row.
  *

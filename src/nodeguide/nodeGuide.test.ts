@@ -178,7 +178,7 @@ describe('the workflow cross-reference', () => {
    * failure, and it is silent.
    */
   it('agrees with the graphs themselves', () => {
-    for (const answers of everyCombination(DEMO_DATASET)) {
+    for (const answers of everyCombination([DEMO_DATASET])) {
       const name = analysisOption(answers.analysis)!.label
       for (const node of buildWorkflow({ ...answers, notes: false }).nodes) {
         const entry = byType.get(node.type)

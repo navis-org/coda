@@ -34,6 +34,10 @@
 import type { NodeHint } from '../core/graph'
 import type { SourceCapabilities } from '../data/source'
 import { capabilityAnywhere, getSource } from '../data/source'
+import { compareDatasetName } from '../nodes/analysis/compareConnectivity'
+import { findParam } from '../core/node'
+import { getNodeDef } from '../core/registry'
+import { spaceForDataset } from '../data/transforms/spaces'
 import type { DatasetFamily } from '../nodes/lib/datasetFamilies'
 import { datasetFamily, starterFamilies } from '../nodes/lib/datasetFamilies'
 
@@ -52,7 +56,15 @@ export const WIZARD_BLURB = 'Basic workflows tailored to your question.'
 /** How the neurons the workflow is about get chosen. */
 export type StartId = 'search' | 'browse' | 'ids'
 
-/** What the workflow works out about them. */
+/**
+ * What the workflow works out about them.
+ *
+ * Two disjoint sets, and which one the third question offers is decided by the *first* answer:
+ * the nine single-dataset techniques, and the four that only mean anything with more than one
+ * connectome in the graph. They are one type because everything downstream of the question —
+ * `VIEWS`, `bodyOf`, the graph's own name — reads an analysis without caring which list it came
+ * off, and a second union would be a second `VIEWS`.
+ */
 export type AnalysisId =
   | 'partners'
   | 'matrix'
@@ -63,6 +75,11 @@ export type AnalysisId =
   | 'morphology'
   | 'nblast'
   | 'neurons'
+  // Cross-dataset. See `CROSS_ANALYSES`.
+  | 'compare'
+  | 'coclust'
+  | 'xmorphology'
+  | 'xnblast'
 
 /** How the answer is drawn. */
 export type VisualisationId =
@@ -76,6 +93,7 @@ export type VisualisationId =
   | 'viewer3d'
   | 'topology'
   | 'neuroglancer'
+  | 'scatter'
 
 /**
  * One complete set of answers — everything `buildWorkflow` needs.
@@ -85,8 +103,20 @@ export type VisualisationId =
  * than about the workflow they are building.
  */
 export interface WizardAnswers {
-  /** Dataset family key, e.g. `mock.opticlobe`. `dataset.<key>` is the node type. */
-  dataset: string
+  /**
+   * The dataset family keys, e.g. `mock.opticlobe`. `dataset.<key>` is the node type.
+   *
+   * **A list at every arity, and the multi-dataset mode is derived from its length** rather
+   * than carried beside it as a flag. A second field saying "this is a comparison" is a second
+   * answer to a question the list already answers, and the two come apart the moment a path
+   * writes one without the other — a `multi: true` beside one key builds a Match Cell Types
+   * with a single input, which is a node refusing to run for a reason two screens back.
+   *
+   * `isMulti` is the one reader of that rule. Order is the order the reader ticked them, and it
+   * is load-bearing: it is dataset 1..N on every variadic port, the `A`/`B`/`C`/`D` suffix on
+   * `Compare Connectivity`'s output columns, and the row each arm is laid out on.
+   */
+  datasets: string[]
   start: StartId
   analysis: AnalysisId
   /**
@@ -167,14 +197,93 @@ export interface WizardOption<Id extends string> {
    * option added without its filter is offered and then builds a graph nobody can fetch.
    */
   requires?: keyof SourceCapabilities
+  /**
+   * Whether this answer needs the dataset to have a registration into the shared template space.
+   *
+   * Not a `SourceCapabilities` key, and it cannot be made into one: a template space is a fact
+   * about *coordinates*, bound to a dataset id in `data/transforms/spaces.ts` and deliberately
+   * not on `DatasetFamily` — a source cannot see the node layer, and a hand-named Custom
+   * datastack carries coordinates exactly as a shipped one does. So it is a second gate rather
+   * than a second spelling of the first, in the same place and read by the same filter.
+   *
+   * The two cross-dataset geometry arms need it: without a route into `JRC2018U`, `Transform
+   * Neurons` has nothing to fit and `Stack Neurons` refuses two collections in unrelated spaces
+   * — which is the refusal that node was built to make, and not one a wizard should walk into.
+   */
+  requiresTemplateSpace?: boolean
 }
 
-/** The options of a question this dataset's source can actually answer. */
+/**
+ * The options of a question **every** chosen dataset's source can answer.
+ *
+ * The intersection rather than the union, and at one dataset the two are the same thing — which
+ * is why this generalised rather than growing a second function. A cross-dataset workflow runs
+ * one arm over all of its datasets, so an analysis one of them cannot serve is an analysis that
+ * builds a chain with a refusing card in the middle of it. Same rule as at arity one, asked once
+ * per dataset.
+ */
 function available<Id extends string>(
-  dataset: string,
+  datasets: readonly string[],
   options: readonly WizardOption<Id>[],
 ): WizardOption<Id>[] {
-  return options.filter((option) => !option.requires || familyCan(dataset, option.requires))
+  return options.filter((option) => {
+    const capability = option.requires
+    return (
+      (!capability || datasets.every((key) => familyCan(key, capability))) &&
+      (!option.requiresTemplateSpace || datasets.every(familyBridges))
+    )
+  })
+}
+
+/**
+ * Whether a workflow is the cross-dataset kind — **the one place `datasets.length` is read as a
+ * mode**, which is what keeps the mode derived rather than stored. See `WizardAnswers.datasets`.
+ */
+function isMulti(datasets: readonly string[]): boolean {
+  return datasets.length > 1
+}
+
+/**
+ * How many connectomes one generated workflow may span — **read off the nodes, not restated**.
+ *
+ * `Match Cell Types` and `Compare Connectivity` each declare a `datasetCount` with a `max`, and
+ * `compareConnectivity.ts` says outright that its number is the mapper's on purpose: a
+ * comparison is read off a mapping, so a fifth dataset there would be a fifth column of a table
+ * the mapper cannot produce. A third copy of `4` here is the copy that survives whichever of
+ * them changes, and the wizard would then offer a dataset the graph it builds cannot take.
+ *
+ * The **minimum** of the two, because a chain is bounded by its narrowest card. A function
+ * rather than a module const for the reason `docs/gotchas.md` records about module init order:
+ * `registerBuiltinNodes` runs as a side effect of importing `../nodes`, and a constant evaluated
+ * at import time here would read an empty registry from whichever module happened to load first.
+ * The fallback is the value both nodes declare today, so an unregistered registry degrades to
+ * the right answer rather than to zero datasets.
+ */
+export function maxWizardDatasets(): number {
+  const declared = ['compare.matchTypes', 'compare.connectivity'].flatMap((type) => {
+    const def = getNodeDef(type)
+    const param = def && findParam(def, 'datasetCount')
+    return param && 'max' in param && typeof param.max === 'number' ? [param.max] : []
+  })
+  return declared.length ? Math.min(...declared) : 4
+}
+
+/**
+ * Whether a family's coordinates can be moved into the shared template space.
+ *
+ * `familyCan`'s sibling for the gate that is not a capability — see
+ * `WizardOption.requiresTemplateSpace`. The lookup is keyed on a **dataset id**, so a family
+ * hands over its `family` half: a version pins a reconstruction, never a coordinate frame, which
+ * is the same split `spaceForDataset` makes internally.
+ *
+ * An unknown family reads as "yes", which is `familyCan`'s rule and is the right one at this
+ * layer: the wizard is asking whether an answer is worth offering, and `Transform Neurons` is
+ * still the card that says so on the canvas where it genuinely cannot fit.
+ */
+export function familyBridges(key: string): boolean {
+  const family = familyOf(key)
+  if (!family) return true
+  return Boolean(spaceForDataset(family.sourceId, family.family))
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +302,48 @@ function available<Id extends string>(
 export function datasetOptions(): DatasetFamily[] {
   const families = starterFamilies()
   return [...families.filter((f) => f.synthetic), ...families.filter((f) => !f.synthetic)]
+}
+
+/**
+ * The extra row on the first question, which is not a dataset.
+ *
+ * The copy is here rather than in the dialog, which is this file's rule for every other answer
+ * and matters more for this one: it is the only row on that screen whose consequence is *another
+ * question* rather than a node, so what it promises has to be written where the questions are.
+ *
+ * `glyph` is the node the path is about — the mapper is the card every cross-dataset arm but the
+ * geometry pair is built around, and it is the one that could not exist in a single-dataset
+ * workflow at all.
+ */
+export const MULTI_DATASET = {
+  id: 'multiple',
+  label: 'Multiple datasets',
+  blurb:
+    'Compare two or more connectomes: matched cell types, co-clustering, or their morphology in one space.',
+  glyph: 'compare.matchTypes',
+} as const
+
+/**
+ * The families a cross-dataset workflow can be built from.
+ *
+ * `datasetOptions()` minus the ones that can answer none of the four cross-dataset analyses,
+ * applied one question earlier than the other gates because here it is the *answer* rather than
+ * the option that would go on to build a broken chain.
+ *
+ * **Asked of `available`, never restated.** The disjunction this needs — a neuron index, or
+ * skeletons and a template space — is exactly the union of what `CROSS_ANALYSES` already
+ * declares, and writing it out here is the fourth hand-paired `id`-and-capability filter that
+ * `WizardOption.requires` was introduced to delete. A fifth analysis gated on anything else
+ * would otherwise strike every family that can answer it off this question, silently, with the
+ * analysis unreachable and no test able to see it.
+ *
+ * Deliberately **not** narrowed against what is already ticked. Two datasets that share no
+ * analysis are possible and the third question is where that is said, with the list of what each
+ * one can do — narrowing here would make rows disappear as boxes are ticked, which is the one
+ * shape of gating that reads as a bug rather than as a decision.
+ */
+export function multiDatasetOptions(): DatasetFamily[] {
+  return datasetOptions().filter((family) => available([family.key], CROSS_ANALYSES).length > 0)
 }
 
 function familyOf(key: string): DatasetFamily | undefined {
@@ -270,8 +421,8 @@ const STARTS: WizardOption<StartId>[] = [
   },
 ]
 
-export function startOptions(dataset: string): WizardOption<StartId>[] {
-  return available(dataset, STARTS)
+export function startOptions(datasets: readonly string[]): WizardOption<StartId>[] {
+  return available(datasets, STARTS)
 }
 
 // ---------------------------------------------------------------------------
@@ -382,8 +533,92 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
   },
 ]
 
-export function analysisOptions(dataset: string): WizardOption<AnalysisId>[] {
-  return available(dataset, ANALYSES)
+/**
+ * The four answers that only mean anything with more than one connectome on the canvas.
+ *
+ * A separate list rather than four entries in `ANALYSES` behind a flag, because the two sets are
+ * **disjoint**: not one single-dataset technique is offered here and not one of these is offered
+ * there. `Connectivity partners` over two datasets is two workflows, and `Compare Connectivity`
+ * with one input is a node refusing to run. A `mode` field on the option would be a filter every
+ * reader of `ANALYSES` has to remember; two lists and one `if` is the same statement with
+ * nothing to forget.
+ *
+ * The blurbs are the chain, as in `ANALYSES` and for the same reason — but here the chain is the
+ * only way to see what separates the two connectivity answers, which produce a side-by-side
+ * table and a mixed dendrogram from the same starting point.
+ *
+ * The two geometry arms carry `requiresTemplateSpace` as well as `skeletons`: shape can only be
+ * compared once both brains are in one coordinate frame, and that is a fact about the dataset
+ * rather than about its source. See that field.
+ */
+const CROSS_ANALYSES: WizardOption<AnalysisId>[] = [
+  {
+    id: 'compare',
+    requires: 'neuronIndex',
+    label: 'Compare connectivity',
+    blurb:
+      'Match Cell Types → Compare Connectivity: the same type-to-type connection counted in each connectome, side by side.',
+    glyph: 'compare.connectivity',
+    hint: {
+      text: '**Check the type columns on the mapper** — they are pre-filled from what each dataset usually publishes, and a cross-reference column written in the other dataset’s namespace is what a match is made of. Read the `present` columns before the weights: 0 is a real absence, empty means the type is missing there.',
+      tone: 'tip',
+    },
+  },
+  {
+    id: 'coclust',
+    requires: 'neuronIndex',
+    label: 'Co-cluster neurons',
+    blurb:
+      'Partner Vectors → Qualify Ids → Stack Tables → Similarity Matrix → Linkage: both connectomes’ neurons on one tree, matched by who they wire with.',
+    glyph: 'core.qualifyIds',
+    hint: {
+      text: 'Every neuron is a vector over the **shared** label space, which is what the mapper is wired into Partner Vectors for — a partner outside it can only exist in one dataset, so it is dropped rather than counted as a difference. A mixed clade is a matched group.',
+      tone: 'tip',
+    },
+  },
+  {
+    id: 'xmorphology',
+    requires: 'skeletons',
+    requiresTemplateSpace: true,
+    label: 'Morphology in one space',
+    blurb:
+      'Transform Neurons into JRC2018U → Stack Neurons: every dataset’s arbours drawn in one scene.',
+    glyph: 'neuron.xform',
+    hint: {
+      text: 'One landmark transform per dataset, straight into the shared template. The scene colours by the column Stack Neurons adds, which is what lets you tell the brains apart.',
+    },
+  },
+  {
+    id: 'xnblast',
+    requires: 'skeletons',
+    requiresTemplateSpace: true,
+    label: 'NBLAST across datasets',
+    blurb:
+      'Transform → Stack → NBLAST → Linkage: which neurons are the same shape in both brains.',
+    glyph: 'neuron.nblast',
+    hint: {
+      text: 'NBLAST is all-by-all over the **combined** set, so the work grows with the square of every dataset’s search put together. Each search above is capped for that reason; widen them deliberately.',
+      tone: 'warning',
+    },
+  },
+]
+
+/**
+ * The third question's answers: the cross-dataset four where more than one dataset was chosen,
+ * the nine single-dataset techniques otherwise.
+ *
+ * The list is decided by the first answer and then narrowed by `available` against **every**
+ * dataset in it — so a comparison between one connectome with skeletons and one without offers
+ * the two connectivity answers and neither geometry one, which is the honest reading of what
+ * those two brains can be asked together.
+ *
+ * It can come back **empty**, which no single-dataset call can do: two datasets that share no
+ * capability share no analysis. The dialog says so and refuses to continue rather than opening a
+ * question with nothing in it — the alternative is offering an answer one of the two cannot
+ * serve, which is the thing this whole file exists to prevent.
+ */
+export function analysisOptions(datasets: readonly string[]): WizardOption<AnalysisId>[] {
+  return available(datasets, isMulti(datasets) ? CROSS_ANALYSES : ANALYSES)
 }
 
 // ---------------------------------------------------------------------------
@@ -472,6 +707,14 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     },
   },
   {
+    id: 'scatter',
+    label: 'A scatter plot',
+    blurb: 'One point per type pair, each dataset’s count on an axis.',
+    hint: {
+      text: 'A pair on the diagonal is wired the same in both; one far off it is the asymmetry. Both axes are log, because synapse counts span orders of magnitude — a pair absent from one dataset has no logarithm and the caption says how many were dropped.',
+    },
+  },
+  {
     id: 'neuroglancer',
     requires: 'viewerScene',
     label: 'Neuroglancer',
@@ -512,6 +755,15 @@ export interface ViewSpec {
  * What stays in `build.ts` is everything upstream of this node, which is where the analyses
  * genuinely differ.
  */
+/**
+ * The column `Stack Neurons` writes to say which dataset each neuron came from.
+ *
+ * One name, read by the params of the stack that adds it and by the 3D scene that colours by it
+ * — the two halves of the co-visualisation gesture, and a viewer pointed at a column the stack
+ * did not write draws one flat colour and nothing to say why.
+ */
+export const STACK_SOURCE_COLUMN = 'dataset'
+
 export const VIEWS: Record<AnalysisId, Partial<Record<VisualisationId, ViewSpec>>> = {
   partners: {
     table: { type: 'out.table' },
@@ -592,6 +844,49 @@ export const VIEWS: Record<AnalysisId, Partial<Record<VisualisationId, ViewSpec>
     topology: { type: 'out.topology' },
     neuroglancer: { type: 'out.neuroglancer' },
   },
+  /*
+   * The comparison is **wide** — `preLabel`, `postLabel`, then two columns per dataset — which is
+   * what makes both of these readable off one row. The scatter names the first two datasets'
+   * weight columns because those are the two that always exist; a third and fourth are two clicks
+   * on the card, and there is no pair of axes that could have been right for all four.
+   */
+  compare: {
+    table: { type: 'out.table' },
+    scatter: {
+      type: 'out.scatter',
+      params: {
+        x: `weight_${compareDatasetName(1)}`,
+        y: `weight_${compareDatasetName(2)}`,
+        xLog: true,
+        yLog: true,
+      },
+    },
+  },
+  /*
+   * `cluster`'s tail exactly, and that is the finding rather than a shortcut: by the time either
+   * arm reaches Linkage it is the same thing — a square matrix of how alike every pair is — and
+   * what makes this one cross-dataset happened four cards upstream, in the qualified ids and the
+   * shared feature axis. See `bodyOf`.
+   */
+  coclust: {
+    dendrogram: { type: 'out.dendrogram' },
+    heatmap: { type: 'out.heatmap', params: { scale: 'sequential' } },
+  },
+  xmorphology: {
+    viewer3d: {
+      type: 'out.viewer3d',
+      /*
+       * By the column `Stack Neurons` adds, not by `type` — which is the whole difference from
+       * the single-dataset morphology arm. Two brains in one scene are only worth looking at if
+       * you can tell which is which, and the source column is what a colour encoding reads.
+       */
+      params: { skeletonColorMode: 'categorical', skeletonColorBy: STACK_SOURCE_COLUMN },
+    },
+  },
+  xnblast: {
+    dendrogram: { type: 'out.dendrogram' },
+    heatmap: { type: 'out.heatmap', params: { scale: 'sequential' } },
+  },
   neurons: {
     table: { type: 'out.table' },
     /*
@@ -637,19 +932,23 @@ export const VIEWS_BY_ID: ReadonlyMap<VisualisationId, ViewSpec> = new Map(
  * is exactly the head that answer builds, and an analysis that builds anything of its own draws
  * as one of the nodes it builds. `neurons` is the answer that builds nothing of its own — the
  * rule excuses it by saying so rather than by naming it — and draws as the table it hands on.
+ *
+ * Takes only the two fields it reads, so the one answer here that is not a `WizardOption` — the
+ * first question's "Multiple datasets" row, which answers by replacing the question — draws
+ * through the same function rather than through a hand-written second lookup.
  */
-export function glyphNodeOf(option: WizardOption<string>): string | undefined {
+export function glyphNodeOf(option: { id: string; glyph?: string }): string | undefined {
   return option.glyph ?? VIEWS_BY_ID.get(option.id as VisualisationId)?.type
 }
 
 /** The viewers this analysis can end on, in offer order, minus what the source cannot do. */
 export function visualisationOptions(
-  dataset: string,
+  datasets: readonly string[],
   analysis: AnalysisId,
 ): WizardOption<VisualisationId>[] {
   const offered = Object.keys(VIEWS[analysis]) as VisualisationId[]
   return available(
-    dataset,
+    datasets,
     offered.flatMap((id) => {
       const option = visualisationOption(id)
       return option ? [option] : []
@@ -704,8 +1003,19 @@ export function resolveVisualisations(
 
 export const startOption = (id: StartId): WizardOption<StartId> | undefined =>
   STARTS.find((o) => o.id === id)
+/**
+ * Both lists, flattened once at module scope — `VIEWS_BY_ID`'s rule a few functions up, and for
+ * the same reason: the answer is a fact about the tables rather than about a graph.
+ *
+ * A lookup by id is asked *after* the question has been answered and the caller no longer has
+ * the dataset count to hand — the note above the chain and the graph's own name both read an
+ * analysis without knowing which list it came off. The two are disjoint by construction, which
+ * `wizard.test.ts` pins, so a single `find` across both cannot be ambiguous.
+ */
+const ALL_ANALYSES: readonly WizardOption<AnalysisId>[] = [...ANALYSES, ...CROSS_ANALYSES]
+
 export const analysisOption = (id: AnalysisId): WizardOption<AnalysisId> | undefined =>
-  ANALYSES.find((o) => o.id === id)
+  ALL_ANALYSES.find((o) => o.id === id)
 export const visualisationOption = (
   id: VisualisationId,
 ): WizardOption<VisualisationId> | undefined => VISUALISATIONS.find((o) => o.id === id)
@@ -723,13 +1033,13 @@ export const visualisationOption = (
  * lists one question at a time. Both readers want the same thing the dialog produces, which is
  * why this is derived from the same three functions instead of being a second table.
  */
-export function everyCombination(dataset: string): WizardAnswers[] {
+export function everyCombination(datasets: readonly string[]): WizardAnswers[] {
   const answers: WizardAnswers[] = []
-  for (const start of startOptions(dataset)) {
-    for (const analysis of analysisOptions(dataset)) {
-      for (const visualisation of visualisationOptions(dataset, analysis.id)) {
+  for (const start of startOptions(datasets)) {
+    for (const analysis of analysisOptions(datasets)) {
+      for (const visualisation of visualisationOptions(datasets, analysis.id)) {
         answers.push({
-          dataset,
+          datasets: [...datasets],
           start: start.id,
           analysis: analysis.id,
           visualisations: [visualisation.id],

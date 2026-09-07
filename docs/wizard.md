@@ -1,7 +1,8 @@
 # The Workflow Wizard
 
 Four questions — which dataset, how to choose the neurons, what to work out, and how to look at it
-(one answer or several) — and a graph. `src/wizard/options.ts` holds the option space,
+(one answer or several) — and a graph. Five, where the first answer is
+[Multiple datasets](#the-fifth-kind-of-answer-to-the-first-question). `src/wizard/options.ts` holds the option space,
 `src/wizard/build.ts` turns one set of answers into a `CodaGraph`, `src/ui/panels/WizardDialog.tsx`
 asks the questions.
 
@@ -215,6 +216,129 @@ graph ran, for the reason the viewers taught. Everything is a column of its own 
 under the **deepest row** rather than at a fixed height — derived from the row numbers the cards were
 placed at, because the fixed one had been chosen when every chain was a single row and the paths
 query's second head landed straight on it.
+
+## The fifth kind of answer to the first question
+
+Coda can put two connectomes in one table (`Match Cell Types` → `Compare Connectivity`), on one
+tree (`Partner Vectors` → `Qualify Ids` → `Stack Tables` → …) and in one coordinate frame
+(`Transform Neurons` → `Stack Neurons`), and none of it was reachable from the wizard — which
+opened on one dataset and then narrowed every question against it. So the first question gains a
+row that is not a dataset: **Multiple datasets** replaces that question with a multi-select one,
+and the other three follow unchanged.
+
+**The mode is derived from the answer, never carried beside it.** `WizardAnswers.datasets` is a
+list at every arity and `isMulti` reads its length. A `multi: true` field would be a second answer
+to a question the list already answers, and the two come apart the moment one path writes one
+without the other — a comparison built out of one dataset is a `Match Cell Types` with a single
+input, refusing to run for a reason two screens back. In the dialog it *is* a boolean, because
+there it is a statement about which screens exist rather than about the workflow: `stepsFor` is a
+list of question ids rather than the `QUESTIONS = 4` it replaced, since a `step === 2` literal
+means a different screen depending on an answer it cannot see. Picking a single dataset clears the
+flag **on that click**, not as a repair — `resolveOption`'s rule, one question earlier.
+
+### The four arms, and what each one is for
+
+| answer | chain | needs |
+| --- | --- | --- |
+| Compare connectivity | per-dataset `Connectivity` → `Match Cell Types` → `Compare Connectivity` | `neuronIndex` |
+| Co-cluster neurons | per-dataset `Partner Vectors` (labels from the mapper) → `Qualify Ids` → `Stack Tables` → `Similarity Matrix` → `Linkage` | `neuronIndex` |
+| Morphology in one space | per-dataset `Skeletons` → `Transform Neurons` → `Stack Neurons` → 3D View | `skeletons` + a template space |
+| NBLAST across datasets | the same, then `NBLAST` → `Linkage` | `skeletons` + a template space |
+
+**Two disjoint lists, not one with a flag.** Not one single-dataset technique is offered here and
+not one of these is offered there: `Connectivity partners` over two datasets is two workflows, and
+`Compare Connectivity` with one input is a card that refuses. So `CROSS_ANALYSES` sits beside
+`ANALYSES` and `analysisOptions` picks the list — a `mode` field on the option would be a filter
+every reader of `ANALYSES` has to remember. They are asserted disjoint, because one `AnalysisId`
+union is what lets `VIEWS`, `bodyOf` and the graph's own name read an analysis without knowing
+which path built it.
+
+**Narrowed against every chosen dataset, not the first.** `available` takes a list and asks each
+one, which at arity one is the rule it always had. The synthetic dataset is what shows it: it has
+skeletons and *no registration into `JRC2018U`*, so a comparison against it offers the two
+connectivity answers and neither geometry one.
+
+**A template space is a second gate, and it cannot be folded into the first.**
+`WizardOption.requiresTemplateSpace`, beside `requires`. A space is a fact about *coordinates* —
+bound to a dataset id in `data/transforms/spaces.ts`, deliberately not on `DatasetFamily`, because
+a source cannot see the node layer and a hand-named Custom datastack carries coordinates exactly
+as a shipped one does. Without it `Transform Neurons` has nothing to fit and `Stack Neurons`
+refuses two collections in unrelated spaces, which is precisely the refusal that node was built to
+make and not one a wizard should walk anybody into.
+
+**The third question can be empty here, and no other question can.** Two connectomes that share no
+capability share no analysis. That is a refusal on Continue with the reason in the footer beside
+the counter — not a question opened with nothing in it, and not a fallback answer, which is why
+`resolveOption`'s fallback follows the path (`compare`, never `neurons`).
+
+**The ceiling is read off the nodes.** `maxWizardDatasets()` is the minimum of the `datasetCount`
+maxima `Match Cell Types` and `Compare Connectivity` declare — a third copy of `4` here is the copy
+that survives whichever of them changes, and the wizard would then offer a dataset the graph it
+builds cannot take. A function rather than a const, for the module-init reason this file records
+twice already.
+
+### Three failures that are silent, and what stops each
+
+**A chain's node ids are local to the chain.** Two datasets each carrying an annotation chain mint
+two nodes called `join`, and `assembleGraph` keys nodes by id — the second replaces the first and
+both sets of wires end up on whichever survived, giving a graph that looks smaller than it should
+and is wired wrong. `prefixChain` returns a whole chain with its ids rewritten rather than
+threading a prefix through `chainGrid`, `chainLinks` and `foldChain`, which would be three places
+that must agree how a prefix is spelled. The **first** dataset keeps the bare ids, so a
+single-dataset graph is byte-identical to what it always was. FlyWire and BANC are the case that
+proves it: both declare a node called `annotations`, of two different types, so the test asserts
+the *type* at each id rather than the id's presence.
+
+**Chains are built for every dataset in a comparison, and that is what makes the connectivity arms
+work at all.** `Match Cell Types` takes a **Dataset** and reads its whole annotation table
+(decision 4 in [comparative.md](comparative.md)) — and a CAVE datastack's cell typing arrives
+through the chain, so a FlyWire node without one has no type column for the mapper to match on.
+The folding rule is unchanged, which means BANC's single card is left unfolded beside FlyWire's
+frame.
+
+**`Stack Neurons` throws on a source column that already exists in either input.** So an N-dataset
+chain of two-input stacks cannot name them all alike; level 2 writes the name it was given and each
+level above writes that name suffixed, its top label naming everything accumulated so far. The
+*outermost* column is therefore the one that partitions the whole collection and it is what the 3D
+scene is pointed at — at two datasets that is `dataset` and `VIEWS`' declared value is already
+right, above two it is the suffixed one and the earlier columns are still there, one click away in
+the colour picker. This is a run-time error no amount of inference can see, which is why it is
+pinned directly. The **table** stack adds no source column at all: a co-clustering has been through
+`Qualify Ids`, so its rows carry their dataset *in the id*, and a second column saying the same
+thing would be a second key.
+
+### Two rows where there was one
+
+A cross-dataset workflow is the only shape the wizard lays out on more than one row of its own: an
+arm per dataset running down, the shared chain running right. That needs a second spacing constant
+and it is **not** `ARM_ROW` raised. `ARM_ROW` (2) is the clearance between two head *cards*, which
+is what a paths query's second end needs; `DATASET_ROW` (3) is the clearance between two
+*datasets*, and the extra row is a card neither builder places — a published dataset node arrives
+with its Description companion 300px below it, and a band that only cleared the heads put the first
+dataset's credit card on top of the second dataset's node, at the same x and 80px apart. Found by
+`placeGuards.test.ts` at four datasets and **invisible at two**, because two bands is one gap and
+the clash needs a *following* dataset to land in.
+
+The start hint goes on the first head only. One hint per stage is the rule the stage notes were
+replaced by, and a stage growing a second card does not make it four stages.
+
+### `DatasetFamily.typeColumns`
+
+The mapper's per-dataset `Type columns` pickers are empty by default and `validate` refuses an
+empty one by name, so a generated comparison would arrive with a red card. The columns are
+declared on the family — maleCNS's four namespaces, FlyWire's `cell_type` and `hemibrain_type`,
+`type` everywhere else — and the wizard writes them in. **A default a reader can see and change,
+never hidden behaviour**, which is decision 3 in [comparative.md](comparative.md) restated one
+layer up. **Absent means nobody has made this judgement**, which is a third thing from `['type']`:
+minnie65 is a mouse volume with no cell typing, and BANC's arrive from a pivot whose column names
+are the datastack's own `classification_system` values. Both leave the picker empty and the card
+says what to pick.
+
+One thing this does *not* fix, and it is the ordinary state rather than a bug: a neuPrint neuron's
+columns past the core set are **discovered**, so a freshly-built card warns `Missing column(s):
+hemibrainType, flywireType, mancType` until the schema lands. That is the picker keeping a chosen
+column rather than substituting — a schema without a column is very often a schema that has not
+arrived — and it clears on the first peek.
 
 ## A dataset that needs a chain in front of it
 

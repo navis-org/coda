@@ -397,7 +397,7 @@ function issueScore(graph: CodaGraph, subject: string): number {
  */
 const plansFor = keyed((dataset: string): DemoPlan[] => {
   const start = demoStart(dataset)
-  return everyCombination(dataset)
+  return everyCombination([dataset])
     .filter((answers) => answers.start === start)
     .map((answers) => ({
       dataset,
@@ -427,7 +427,7 @@ const workflowFor = keyed((key: string): CodaGraph | undefined => {
   if (!offers) return undefined
   return buildWorkflow(
     {
-      dataset,
+      datasets: [dataset],
       start: demoStart(dataset),
       analysis: offers.analysis,
       visualisations: [offers.view],
@@ -488,7 +488,7 @@ function ownDataset(type: string, dataset: string): boolean {
  * search falls back to what it does offer instead of building a chain the wizard would refuse.
  */
 function demoStart(dataset: string): StartId {
-  return resolveOption(startOptions(dataset), 'search', 'search')
+  return resolveOption(startOptions([dataset]), 'search', 'search')
 }
 
 function append(
