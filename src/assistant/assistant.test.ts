@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import '../nodes'
 import type { CodaGraph } from '../core/graph'
-import { addEdge, addNode, emptyGraph, newId } from '../core/graph'
+import { addEdge, addNode, emptyGraph, newId, updateNode } from '../core/graph'
 import { inferGraph } from '../core/inference'
 import { configurableParams, defaultParams } from '../core/node'
 import { getNodeDef, listableNodeDefs } from '../core/registry'
@@ -21,13 +21,21 @@ import type { ApplyOk, ApplyResult } from './apply'
 import { applyPlan } from './apply'
 import { buildSystemPrompt, catalogueText, gateNote, optionLines } from './catalogue'
 import { registerBuiltinSources } from '../data/builtins'
+import { setKey } from '../data/ai/credentials'
 import { getSource } from '../data/source'
 import type { NodeDefinition } from '../core/node'
 import { T } from '../core/types'
 import type { CodaType } from '../core/types'
 import { pivotGraph, pivotObserved } from './fixture'
 import { messagesReply, stubFetch } from '../data/ai/fixture'
-import { describeGraph, repairPrompt, requestPlan } from './converse'
+import {
+  concernPrompt,
+  concernsFrom,
+  describeGraph,
+  repairPrompt,
+  requestPlan,
+  runTurn,
+} from './converse'
 import type { GraphContext } from './converse'
 import type { Value } from '../core/values'
 import { makeTable } from '../core/values'
@@ -35,7 +43,12 @@ import { column, tableSchema } from '../core/types'
 import type { AssistantPlan } from './planShape'
 import { parsePlan, planJsonSchema } from './plan'
 import { emptyPlan, isEmptyPlan, plannableParams } from './planShape'
-import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
+import {
+  allInputPorts,
+  allOutputPorts,
+  defaultInputPorts,
+  defaultOutputPorts,
+} from '../core/ports'
 import { searchFor } from '../test/findNeurons'
 import { ALL_ROW_OPS, arityOf, decodeRows } from '../data/filterRows'
 import { opsForDType } from '../nodes/lib/tableOps'
@@ -766,6 +779,42 @@ describe('the catalogue', () => {
     const def = getNodeDef('out.neuroglancer')!
     expect(defaultInputPorts(def).find((p) => p.id === 'neurons')?.required).toBe(false)
     expect(catalogueText()).toContain('neurons? (Neurons')
+  })
+
+  it('says which node fills a port only that node can fill', () => {
+    /*
+     * `Compare Connectivity`'s Labels ports. Both ends of the pair are `Table{?}` and
+     * `isAssignable` ignores schema, so nothing else in the catalogue says these two nodes
+     * compose — and a model wired each Connectivity's own neuron table there instead, 0/5.
+     * Rendered as a sentence rather than a tag because a tag measured 0/5 too; the numbers are
+     * in `producerLines`.
+     */
+    expect(catalogueText()).toContain(
+      'labels1 comes from compare.matchTypes (Match Cell Types): ' +
+        'add one and wire its labels1 output here.',
+    )
+  })
+
+  it('never names a producer that is not a registered node type', () => {
+    /*
+     * `registerNode` cannot check this — a producer may register after its consumer — so it is
+     * checked here, where the failure would otherwise be a catalogue line telling a model to
+     * add a node that does not exist, which reads to it as our mistake and to us as the model
+     * hallucinating.
+     */
+    for (const def of listableNodeDefs()) {
+      for (const port of allInputPorts(def)) {
+        if (!port.producedBy) continue
+        const { type, port: source = port.id } = port.producedBy
+        const producer = getNodeDef(type)
+        expect(producer, `${def.type}.${port.id} names ${type}`).toBeTruthy()
+        // The rendered sentence tells the model to wire *this* output, so it has to be real.
+        expect(
+          allOutputPorts(producer!).map((p) => p.id),
+          `${type} has no ${source} output`,
+        ).toContain(source)
+      }
+    }
   })
 
   it('never offers an internal param', () => {
@@ -1811,6 +1860,198 @@ describe('the whole registry, against the applier', () => {
       ),
     )
     expect(result.graph.edges).toHaveLength(2)
+  })
+})
+
+/** A plan the applier accepts and the mapper would have to fix: Labels fed by a neuron table. */
+const MIS_WIRED_REPLY = JSON.stringify({
+  summary: 'Compare connectivity across two datasets.',
+  add: [
+    { ref: 'ds', type: 'dataset.mock.opticlobe', params: [], title: '' },
+    { ref: 'find', type: 'neuron.findNeurons', params: [], title: '' },
+    { ref: 'conn', type: 'neuron.connectivity', params: [], title: '' },
+    { ref: 'cmp', type: 'compare.connectivity', params: [], title: '' },
+  ],
+  remove: [],
+  setParams: [],
+  connect: [
+    { from: { node: 'ds', port: 'dataset' }, to: { node: 'find', port: 'dataset' } },
+    { from: { node: 'ds', port: 'dataset' }, to: { node: 'conn', port: 'dataset' } },
+    { from: { node: 'find', port: 'neurons' }, to: { node: 'conn', port: 'neurons' } },
+    { from: { node: 'conn', port: 'connections' }, to: { node: 'cmp', port: 'edges1' } },
+    { from: { node: 'find', port: 'neurons' }, to: { node: 'cmp', port: 'labels1' } },
+  ],
+  disconnect: [],
+})
+
+describe('a plan that is legal and still wrong', () => {
+  /*
+   * The gap: `applyPlan` checks types, ports, params and cycles, and `isAssignable` ignores
+   * schema — so `Table{?} → Table{?}` is accepted whatever the two tables hold. Asked for a
+   * three-dataset comparison, a model wired each dataset's own neuron table into Compare
+   * Connectivity's Labels ports on five runs out of five, and nothing anywhere said so.
+   */
+
+  /**
+   * The graph, built by applying the plan the model sends rather than restated by hand.
+   *
+   * The suite's whole claim is that the graph *this plan* produces raises the concern — so a
+   * hand-built copy is the one that goes stale while still passing, which is the rule
+   * `fixture.ts` states in its own header. `dataset.mock.opticlobe` is synthetic, so no
+   * Description companion arrives to make the two disagree.
+   */
+  const misWiredComparison = () =>
+    expectOk(applyPlan(emptyGraph(), parsedPlan(MIS_WIRED_REPLY)))
+
+  /**
+   * One turn against a scripted sequence of replies, with the graph it left and what reached
+   * `turn.apply` — the three loop tests differ only in the replies and the two assertions.
+   */
+  async function turnWith(replies: readonly string[]) {
+    stubFetch(
+      (name, value) => vi.stubGlobal(name, vi.fn(value as never)),
+      replies.map(messagesReply),
+    )
+    setKey('anthropic', 'sk-ant-test')
+    let graph = emptyGraph()
+    const applied: AssistantPlan[] = []
+    const outcome = await runTurn({
+      request: 'Compare connectivity across two datasets.',
+      graph: () => graph,
+      apply: (plan) => {
+        applied.push(plan)
+        const result = applyPlan(graph, plan)
+        if (result.ok) graph = result.graph
+        return result
+      },
+    })
+    return { outcome, applied, types: () => graph.nodes.map((n) => n.type) }
+  }
+
+  /** Every complaint on a graph, as one string. */
+  const messagesOf = (graph: CodaGraph) =>
+    Object.values(inferGraph(graph).nodes)
+      .flatMap((n) => n.issues.map((i) => i.message))
+      .join('\n')
+
+  // A tail `unstubAllGlobals` leaks the stubbed `fetch` into the next test when an assertion
+  // above it fails, which is how one broken test becomes five.
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('says a Labels table is not a labels table, where the schema is known', () => {
+    expect(messagesOf(misWiredComparison().graph)).toContain(
+      'Dataset 1: the Labels table has no "label" column, so it is not a Match Cell Types',
+    )
+  })
+
+  it('stands down once a picker has been pointed somewhere by hand', () => {
+    /*
+     * `resolveColumn`'s rule, applied here: a declared default is not a decision and a chosen
+     * value is. A hand-built `{neuronId, name}` table with `labelColumn` set to `name` is a
+     * legitimate thing to wire, and `producedBy` states the pairing without constraining it.
+     */
+    const applied = misWiredComparison()
+    const cmp = applied.created.cmp!
+    const node = applied.graph.nodes.find((n) => n.id === cmp)!
+    const graph = updateNode(applied.graph, cmp, {
+      params: { ...node.params, labelColumn: 'type' },
+    })
+    expect(messagesOf(graph)).not.toContain('is not a Match Cell Types labels table')
+  })
+
+  it('leaves column complaints out, having already told the model they are fine', () => {
+    /*
+     * `NodeIssue.aboutColumns`, carried through `ApplyWarning`. The model has already been told
+     * a column it cannot know yet is fine, so raising them again contradicts the system prompt
+     * — and on a live build there were four to six of them around the one actionable line,
+     * which is how the actionable line gets ignored.
+     */
+    const withBadColumn = parsedPlan(MIS_WIRED_REPLY)
+    withBadColumn.setParams.push({ node: 'cmp', param: 'pre1', value: 'nosuchcolumn' })
+    const applied = expectOk(applyPlan(emptyGraph(), withBadColumn))
+    // Both complaints are on the card; the model is shown one of them.
+    expect(applied.warnings.some((w) => w.aboutColumns)).toBe(true)
+    const concerns = concernsFrom(applied.warnings).join('\n')
+    expect(concerns).toContain('is not a Match Cell Types labels table')
+    expect(concerns).not.toContain('nosuchcolumn')
+  })
+
+  it('says nothing about a node the plan did not touch', () => {
+    /*
+     * `collectWarnings`' scoping, which is what this reuses instead of diffing two inferences:
+     * a graph that was already complaining three nodes away did not acquire that here, and
+     * reporting it beside the edit reads as the assistant having broken something.
+     */
+    const already = misWiredComparison().graph
+    const elsewhere = expectOk(
+      applyPlan(
+        already,
+        plan({ add: [{ ref: 'note', type: 'note.text', params: {}, title: '' }] }),
+      ),
+    )
+    expect(concernsFrom(elsewhere.warnings).join('\n')).not.toContain(
+      'is not a Match Cell Types labels table',
+    )
+  })
+
+  it('holds the plan, asks once, and applies the answer', async () => {
+    /*
+     * The round is advisory, not a refusal: the first plan is *valid* and is kept. So the whole
+     * turn stays one commit and one undo step — the plan is previewed with the pure `applyPlan`
+     * and only the answer reaches `turn.apply`.
+     */
+    const mapper = JSON.stringify({
+      summary: 'Use the mapper for labels.',
+      add: [{ ref: 'm', type: 'compare.matchTypes', params: [], title: '' }],
+      remove: [],
+      setParams: [],
+      connect: [],
+      disconnect: [],
+    })
+    const { outcome, applied } = await turnWith([MIS_WIRED_REPLY, mapper])
+    expect(outcome.ok).toBe(true)
+    // Applied once — the first plan was previewed, held, and never committed.
+    expect(applied.map((p) => p.add.length)).toEqual([1])
+  })
+
+  it('falls back to the held plan when the second answer does not fit', async () => {
+    /*
+     * An advisory round must never leave the user with less than they would have had. The
+     * follow-up here names a node type that does not exist, so it is refused — and the plan we
+     * chose to question is applied instead.
+     */
+    const nonsense = JSON.stringify({
+      summary: 'Nonsense.',
+      add: [{ ref: 'x', type: 'no.such.node', params: [], title: '' }],
+      remove: [],
+      setParams: [],
+      connect: [],
+      disconnect: [],
+    })
+    const { outcome, types } = await turnWith([MIS_WIRED_REPLY, nonsense])
+    expect(outcome.ok).toBe(true)
+    expect(types()).toContain('compare.connectivity')
+  })
+
+  it('takes an empty answer as “these are all fine” and applies what it held', async () => {
+    const declined = JSON.stringify({ ...emptyPlan(), summary: 'All fine.' })
+    const { outcome, types } = await turnWith([MIS_WIRED_REPLY, declined])
+    expect(outcome.ok).toBe(true)
+    expect(types()).toContain('compare.connectivity')
+  })
+
+  it('tells the model the graph is unchanged and that doing nothing is an answer', () => {
+    /*
+     * Both halves are load-bearing and neither is `repairPrompt`'s. A model told its edit landed
+     * sends a diff against a graph that does not exist; a model not told that leaving a warning
+     * alone is allowed invents an edit to justify the round.
+     */
+    const text = concernPrompt(['n1 (Compare Connectivity): the Labels table has no "label".'])
+    expect(text).toContain('nothing has been applied yet')
+    expect(text).toContain('reply with an empty plan')
+    expect(text).toContain('warnings, not refusals')
   })
 })
 

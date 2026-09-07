@@ -1066,10 +1066,24 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   line of it cost to learn. **Read before touching the prompt.** The organising rule is
   type-versus-instance — the catalogue is the cached prefix and gets facts about a node *type*, the
   graph listing gets facts about a node *as wired* — and a fix on the wrong side measures as no
-  improvement at all. Also the two live findings with numbers behind them (naming the input a
+  improvement at all. Also the live findings with numbers behind them (naming the input a
   picker reads, 10/10 against 5/10; probing `visibleIf` to say what switches a param off, 0/20
   against 1/10), why there is no tool loop, and why five runs per side is the floor for judging a
-  prompt change.
+  prompt change. Two rules from the third finding, which is the one that generalises: **a fact the
+  model has been given is not a fact it acts on** — `PortDef.producedBy` says which node fills a
+  port only that node can fill (`isAssignable` ignores schema, so `Table{?}` at both ends hides
+  every pairing), and the *same fact* measured 0/5 as a declared port schema, 0/5 as a `[from …]`
+  tag on the port line and 1/5 inside `def.guide` at +35k characters, against **7/10** as a whole
+  sentence on its own line saying what to do. And **a legal plan can be a wrong one**: `applyPlan`
+  checks types, ports, params and cycles, so a neuron table wired into a Labels port is accepted,
+  which is why `runTurn` previews each plan and hands back what it leaves on the cards. That list
+  is **`ApplyOk.warnings`, already computed** by the `applyPlan` the preview just ran and already
+  scoped to the nodes the plan *touched* — a before/after diff of two fresh inferences was the
+  first shape and was a second spelling of `collectWarnings`, drifting from it on how a node is
+  named and on whether `severity` survives. Only `aboutColumns` issues are dropped, `RULES` having
+  already excused them, and the plan is **held rather than applied** so the turn is still one
+  commit. That round measured **6/10 against 6/10**; it ships for the wire nothing refuses, and
+  wants re-measuring on Sonnet.
 - [docs/zoo.md](docs/zoo.md) — the Coda Zoo, and why its index is a committed file rather
   than an API listing. Read before changing `ZooIndex`.
 - [docs/analytics.md](docs/analytics.md) — the GoatCounter beacon: what it collects, the two

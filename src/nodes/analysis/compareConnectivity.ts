@@ -26,7 +26,9 @@
  */
 
 import { registerNode } from '../../core/registry'
-import { T, uniqueName } from '../../core/types'
+import type { InferContext, ParamDef } from '../../core/node'
+import { changedParams } from '../../core/node'
+import { T, findColumn, uniqueName } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import type { CompareInput } from '../lib/edgeComparison'
 import {
@@ -35,6 +37,7 @@ import {
   compareParamsFrom,
   comparisonSchema,
 } from '../lib/edgeComparison'
+import { MAPPER_LABELS_SCHEMA } from '../lib/typeMapping'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { portIdAt } from '../../core/ports'
 import { repeatGroups, repeatParamId, repeatParams } from '../lib/repeatParams'
@@ -146,6 +149,84 @@ export function resolveDatasetNames(ctx: {
   })
 }
 
+/**
+ * What to say about a Labels port wired to something that is not a labels table.
+ *
+ * The wire cannot be refused and should not be: `isAssignable` ignores schema, so `Table{?}`
+ * fits `Table{?}`, and a hand-built `{neuronId, label}` table is a perfectly good thing to
+ * wire here — `producedBy` on the port states the pairing without constraining it.
+ *
+ * So this is the only thing that notices, and it has to exist, because **nothing else does**.
+ * `idColumn` and `labelColumn` are required pickers sitting on their declared defaults, so
+ * `resolveColumn`'s rule 3 substitutes the first compatible column of whatever arrived: wire a
+ * neuron table here and `neuronId` matches by luck while `label` silently becomes `type` or
+ * `instance`. The comparison then runs, and every row of it is a claim about a label space
+ * nobody built. Measured: asked for a three-dataset comparison, a model wired each dataset's
+ * own Connectivity neurons into these ports on five runs out of five.
+ *
+ * **Only where the schema is known**, per the codebase's oldest column rule — a schema without
+ * `label` in it is very often a schema that has not arrived — and only while both pickers are
+ * still at their declared defaults, since a name somebody *chose* is a decision and this is not
+ * the place to argue with it.
+ */
+function labelsShapeIssue(ctx: InferContext, portId: string, index: number): string[] {
+  const schema = ctx.schema(portId)
+  // Rule one, and the oldest column rule in the codebase: a schema without `label` in it is
+  // very often a schema that has not *arrived*.
+  if (!schema) return []
+  /*
+   * Rule two: a name somebody chose is a decision, and this is not the place to argue with it.
+   * Through `changedParams`, which owns that comparison — `defaultParams` writes each declared
+   * default at creation, so "untouched" is the value *equal* to the default rather than an
+   * absent one, and a hand-rolled `!==` also gets a list-valued param wrong.
+   */
+  if (changedParams(LABEL_PICKERS, ctx.params).length > 0) return []
+  const missing = MAPPER_LABELS_SCHEMA.columns
+    .map((c) => c.name)
+    .filter((name) => !findColumn(schema, name))
+  if (missing.length === 0) return []
+  return [
+    `Dataset ${index}: the Labels table has no ${missing.map((n) => `"${n}"`).join(' or ')} ` +
+      `column, so it is not a Match Cell Types labels table — the comparison would be made ` +
+      `against whichever columns happen to come first.`,
+  ]
+}
+
+/*
+ * The two pickers on the Labels tables, declared here rather than inline in `params` so that
+ * `labelsShapeIssue` can read the same objects.
+ *
+ * Its premise is "still on its declared default", and written twice a default changed in one
+ * place makes the check stand down permanently — a guard that passes while doing nothing. Both
+ * defaults are `MAPPER_LABELS_SCHEMA`'s two column names, which is the pairing the check is
+ * about.
+ *
+ * Shared across every dataset rather than declared per index, and that is not a shortcut: every
+ * Labels table in one comparison comes from the same `Match Cell Types` node, so they have the
+ * same two columns by construction. Four copies of this pair would be four chances to point one
+ * of them at a column the others do not have, for a case that cannot arise.
+ */
+const LABEL_PICKERS: ParamDef[] = [
+  {
+    id: 'idColumn',
+    kind: 'column',
+    label: 'Labels: neuron id',
+    from: 'labels1',
+    help: 'On the Labels tables: the neuron id column. Match Cell Types publishes neuronId.',
+    default: ID_COLUMN_NAME,
+    advanced: true,
+  },
+  {
+    id: 'labelColumn',
+    kind: 'column',
+    label: 'Labels: label',
+    from: 'labels1',
+    help: 'On the Labels tables: the shared label column.',
+    default: 'label',
+    advanced: true,
+  },
+]
+
 export const compareConnectivityNode = registerNode({
   type: 'compare.connectivity',
   label: 'Compare Connectivity',
@@ -161,7 +242,19 @@ export const compareConnectivityNode = registerNode({
       repeat: 'datasetCount',
       ports: [
         { id: 'edges', label: 'Edges {n}', type: T.table() },
-        { id: 'labels', label: 'Labels {n}', type: T.table() },
+        /*
+         * `producedBy` because nothing else says these two nodes are a pair: the port is
+         * `Table{?}` at both ends, so `isAssignable` accepts any table and a model wired each
+         * dataset's own neuron table here. It is a fact, not a constraint — a hand-built
+         * `{neuronId, label}` table is a legitimate thing to wire, and the `validate` below is
+         * what says so when the shape is wrong rather than refusing the wire.
+         */
+        {
+          id: 'labels',
+          label: 'Labels {n}',
+          type: T.table(),
+          producedBy: { type: 'compare.matchTypes' },
+        },
       ],
     },
   ],
@@ -202,30 +295,7 @@ export const compareConnectivityNode = registerNode({
       default: 0,
       min: 0,
     },
-    /*
-     * Shared rather than per dataset, and that is not a shortcut: every Labels table in one
-     * comparison comes from the same `Match Cell Types` node, so they have the same two columns
-     * by construction. Four copies of this pair would be four chances to point one of them at a
-     * column the others do not have, for a case that cannot arise.
-     */
-    {
-      id: 'idColumn',
-      kind: 'column',
-      label: 'Labels: neuron id',
-      from: 'labels1',
-      help: 'On the Labels tables: the neuron id column. Match Cell Types publishes neuronId.',
-      default: ID_COLUMN_NAME,
-      advanced: true,
-    },
-    {
-      id: 'labelColumn',
-      kind: 'column',
-      label: 'Labels: label',
-      from: 'labels1',
-      help: 'On the Labels tables: the shared label column.',
-      default: 'label',
-      advanced: true,
-    },
+    ...LABEL_PICKERS,
   ],
 
   /*
@@ -272,8 +342,11 @@ export const compareConnectivityNode = registerNode({
           issues.push(`Dataset ${index}: pick the ${role}synaptic id column.`)
         }
       }
-      if (!ctx.inputs[portIdAt('labels', index)]) {
+      const labelsPort = portIdAt('labels', index)
+      if (!ctx.inputs[labelsPort]) {
         issues.push(`Dataset ${index}: wire the matching Labels table from Match Cell Types.`)
+      } else {
+        issues.push(...labelsShapeIssue(ctx, labelsPort, index))
       }
     }
     return issues

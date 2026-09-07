@@ -8,7 +8,8 @@
  */
 
 import type { CodaGraph } from '../core/graph'
-import type { ApplyOk, ApplyResult } from './apply'
+import type { ApplyOk, ApplyResult, ApplyWarning } from './apply'
+import { applyPlan } from './apply'
 import type { InferenceResult } from '../core/inference'
 import { inferGraph, nodeTypes } from '../core/inference'
 import { changedParams, configurableParams } from '../core/node'
@@ -21,6 +22,7 @@ import { buildSystemPrompt, carriesLines, optionLines } from './catalogue'
 import type { ResultReader } from './digest'
 import { digestState, resultLines } from './digest'
 import type { AssistantPlan } from './planShape'
+import { isEmptyPlan } from './planShape'
 import { parsePlan, planJsonSchema } from './plan'
 
 export interface AssistantTurn {
@@ -236,6 +238,65 @@ export function repairPrompt(errors: readonly string[]): string {
 }
 
 /**
+ * The complaints a plan would leave on the cards, as lines for the model.
+ *
+ * **The gap this closes is that a legal plan can be a wrong one.** `applyPlan` checks types,
+ * ports, params and cycles, and `isAssignable` ignores schema — so `Table{?} → Table{?}` is
+ * accepted whatever the two tables are. Asked for a three-dataset comparison, a model wired each
+ * dataset's own neuron table into `Compare Connectivity`'s Labels ports on five runs out of
+ * five: structurally perfect, semantically meaningless, and nothing refused it. Meanwhile the
+ * node's own `validate` had the exact sentence — *"wire the matching Labels table from Match
+ * Cell Types"* — and nothing in this directory read node issues at all.
+ *
+ * **The list is `ApplyOk.warnings`, not a second walk.** That was the shape this started in — a
+ * before/after diff of two bare `inferGraph` passes — and every part of it already existed:
+ * `collectWarnings` runs the inference once inside the `applyPlan` this function's caller has
+ * just made, and scopes to the nodes the plan *touched*, which is the precise version of what
+ * the diff was approximating. Its header even makes the same argument. Two rules follow from
+ * reusing it rather than restating it. The scoping is **touch, not diff**, so a node the plan
+ * wired into is reported even for a complaint it was already making — right, because the plan is
+ * about that node. And the user's warning list and the model's are now the same list, where two
+ * walks had already drifted on how a node is named (`collectWarnings` prefers `node.title`) and
+ * on whether `severity` survives.
+ *
+ * The one thing added on top: **column issues are dropped**. See `NodeIssue.aboutColumns` — the
+ * model has already been told a column it cannot know yet is fine, so raising them again
+ * contradicts the system prompt, and on a live build there were four to six of them around the
+ * one actionable line, which is how the actionable line gets ignored.
+ */
+export function concernsFrom(warnings: readonly ApplyWarning[]): string[] {
+  return warnings
+    .filter((warning) => !warning.aboutColumns)
+    .map((warning) => `${warning.nodeId} (${warning.label}): ${warning.message}`)
+}
+
+/**
+ * What to send back when a plan applied but left the cards complaining.
+ *
+ * **Not `repairPrompt`, and the difference is the whole of it.** A refusal means nothing
+ * happened and a corrected plan is the only way forward. This is a *warning*: the plan is
+ * legal, it is held, and it will be applied whatever comes back — so the model has to be told
+ * that doing nothing is a legitimate answer, or it invents an edit to justify the round. Hence
+ * the empty-plan escape hatch, which is the same one `RULES` already gives for a request that
+ * needs no edit.
+ *
+ * It also has to say the graph is *unchanged*, because the plan has not been applied yet: a
+ * model told its edit landed would send a diff against a graph that does not exist.
+ */
+export function concernPrompt(concerns: readonly string[]): string {
+  return [
+    'Your plan is valid and is being held — nothing has been applied yet, so the graph is',
+    'still the one in the listing. Applying it as written would leave these cards complaining:',
+    ...concerns.map((c) => `- ${c}`),
+    '',
+    'These are warnings, not refusals. Some are fine — a column that cannot be known yet, or an',
+    'input the request never said what to feed. Send a complete replacement plan if any of them',
+    'is something you can fix, remembering that it replaces the held one rather than adding to',
+    'it. If they are all fine as they are, reply with an empty plan and your held plan is used.',
+  ].join('\n')
+}
+
+/**
  * How many times a refusal is handed back before the caller is told about it.
  *
  * One, and measured rather than guessed: across five live cases and three model tiers the only
@@ -298,6 +359,39 @@ export interface TurnRequest {
  */
 export async function runTurn(turn: TurnRequest): Promise<TurnOutcome> {
   const messages: AssistantTurn[] = [{ role: 'user', content: turn.request }]
+  /*
+   * A plan that previewed clean and was sent back for a second look anyway — see
+   * `concernPrompt`. Held rather than applied, so the whole turn is still one commit and one
+   * undo step; and kept rather than dropped, so an advisory round can never leave the user with
+   * less than they would have had. Everything after it falls back to this.
+   */
+  let held: { plan: AssistantPlan; usage: Usage; model: string } | undefined
+
+  /** The one place a plan is committed, so the fallback and the ordinary path cannot diverge. */
+  const commit = (
+    plan: AssistantPlan,
+    usage: Usage,
+    model: string,
+  ): TurnOutcome | undefined => {
+    const result = turn.apply(plan)
+    return result.ok ? { ok: true, plan, applied: result, usage, model } : undefined
+  }
+
+  /**
+   * Give the held plan its chance before reporting a failure.
+   *
+   * An advisory round must never leave the user with less than they would have had: the plan we
+   * chose to question was valid, and losing it to a failed follow-up spends their turn on our
+   * own second thoughts. `tried` because on the last round the follow-up may *be* the held plan
+   * — an empty answer resolves to it — and re-committing it can only fail the same way twice.
+   */
+  let tried: AssistantPlan | undefined
+  const giveUp = (error: string, errors?: string[]): TurnOutcome =>
+    (held && held.plan !== tried ? commit(held.plan, held.usage, held.model) : undefined) ?? {
+      ok: false,
+      error,
+      ...(errors ? { errors } : {}),
+    }
 
   for (let round = 0; round <= REPAIR_ROUNDS; round += 1) {
     const outcome = await requestPlan({
@@ -309,28 +403,49 @@ export async function runTurn(turn: TurnRequest): Promise<TurnOutcome> {
       detail: turn.detail,
       ...(turn.signal ? { signal: turn.signal } : {}),
     })
-    if (!outcome.ok) return { ok: false, error: outcome.error }
+    if (!outcome.ok) return giveUp(outcome.error)
 
-    const result = turn.apply(outcome.plan)
-    if (result.ok) {
-      return {
-        ok: true,
-        plan: outcome.plan,
-        applied: result,
-        usage: outcome.usage,
-        model: outcome.model,
+    /*
+     * An empty plan answering the advisory round means "they are all fine" — `concernPrompt`
+     * offers exactly that, so it is an answer rather than a failure to produce one.
+     */
+    const plan = held && isEmptyPlan(outcome.plan) ? held.plan : outcome.plan
+
+    /*
+     * Preview before committing. `applyPlan` is pure and is what the store's applier calls, so
+     * this predicts the commit faithfully — the one thing it cannot see is the canvas lock,
+     * which `turn.apply` reports either way. Its `warnings` are the advisory list, already
+     * scoped to what the plan touched; see `concernsFrom`.
+     */
+    const preview = applyPlan(turn.graph(), plan)
+    if (preview.ok) {
+      // Asked once, and only while there is a round left to ask in — `held` is redundant at
+      // today's `REPAIR_ROUNDS` of 1 and is what keeps this honest if that is ever raised.
+      if (!held && round < REPAIR_ROUNDS) {
+        const concerns = concernsFrom(preview.warnings)
+        if (concerns.length > 0) {
+          held = { plan, usage: outcome.usage, model: outcome.model }
+          messages.push(
+            { role: 'assistant', content: JSON.stringify(plan) },
+            { role: 'user', content: concernPrompt(concerns) },
+          )
+          continue
+        }
       }
+      const done = commit(plan, outcome.usage, outcome.model)
+      if (done) return done
+      // It previewed clean and `turn.apply` still refused it — the canvas lock. Recorded so
+      // `giveUp` does not offer the same plan a second time.
+      tried = plan
     }
+
+    const errors = preview.ok ? ['The canvas would not take this plan.'] : preview.errors
     if (round === REPAIR_ROUNDS) {
-      return {
-        ok: false,
-        error: 'That did not fit the graph, so nothing was changed.',
-        errors: result.errors,
-      }
+      return giveUp('That did not fit the graph, so nothing was changed.', errors)
     }
     messages.push(
-      { role: 'assistant', content: JSON.stringify(outcome.plan) },
-      { role: 'user', content: repairPrompt(result.errors) },
+      { role: 'assistant', content: JSON.stringify(plan) },
+      { role: 'user', content: repairPrompt(errors) },
     )
   }
   // Unreachable: the loop returns on every path. Present so the signature needs no assertion.

@@ -23,6 +23,20 @@ export interface NodeIssue {
   message: string
   /** Port this issue is attached to, when applicable — lets the UI mark the socket. */
   portId?: string
+  /**
+   * Set on the issues `validateColumnParams` raises, and on nothing else.
+   *
+   * A column issue is the one kind that is routinely **not** a mistake: a picker pointing at a
+   * column a Pivot has not published yet, or a dataset property whose schema has not arrived,
+   * reads exactly like a picker pointing at nothing. Every surface that shows issues to a person
+   * shows these too — the card is where you *see* that a schema is late. The assistant is the
+   * one reader that must not, because its own rules already tell the model that a column it
+   * cannot know yet is fine, so raising them again in `newConcerns` contradicts the system
+   * prompt with a list the model was told to ignore.
+   *
+   * A flag rather than a second array, so nothing that renders issues has to learn about it.
+   */
+  aboutColumns?: true
 }
 
 export interface NodeTypes {
@@ -181,6 +195,7 @@ export function inferGraph(graph: CodaGraph, options: InferOptions = {}): Infere
         ...validateColumnParams(def, ctx).map((message): NodeIssue => ({
           severity: 'warning',
           message,
+          aboutColumns: true,
         })),
       )
       if (def.validate) {

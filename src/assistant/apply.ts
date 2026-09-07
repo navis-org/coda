@@ -58,6 +58,14 @@ export interface ApplyWarning {
   label: string
   severity: IssueSeverity
   message: string
+  /**
+   * Carried straight from `NodeIssue.aboutColumns`, whose doc has the reasoning.
+   *
+   * The panel renders every warning, columns and all — the card is where you *see* that a
+   * schema is late. `concernsFrom` is the one reader that drops them, and it needs the flag to
+   * travel with the message rather than re-deriving it from the text.
+   */
+  aboutColumns?: true | undefined
 }
 
 export interface ApplyOk {
@@ -670,6 +678,7 @@ function collectWarnings(graph: CodaGraph, touched: ReadonlySet<string>): ApplyW
         label,
         severity: issue.severity,
         message: issue.message,
+        ...(issue.aboutColumns ? { aboutColumns: issue.aboutColumns } : {}),
       })
     }
   }

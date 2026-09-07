@@ -181,6 +181,90 @@ set together, or reading something the probe cannot enumerate — stay silent, w
 case for `string`/`column` are probed; a dynamic `options` function is skipped for
 `optionsWithoutPeek`'s reason, and a `multiEnum` would mean enumerating a power set.
 
+### Which node fills a port — `comes from`
+
+Two nodes compose because one makes what the other consumes, and **nothing in the catalogue could
+say so.** `isAssignable` ignores schema, so `Compare Connectivity`'s Labels port and `Match Cell
+Types`' labels output are both `Table{?}` and the pair is invisible. Asked to compare connectivity
+for one cell type across three connectomes, a model built the whole chain correctly and then wired
+each dataset's *own* neuron table into Labels — five runs out of five, on an empty canvas. Nothing
+refused it: the plan is structurally perfect, and the comparison it describes is meaningless.
+
+`PortDef.producedBy` is the declaration; `producerLines` renders it. What is worth recording is the
+ranking, because it is not the one the sizes suggest — five runs each, `gemma4:31b-cloud`:
+
+| what the model was told | runs |
+| --- | --- |
+| nothing (the port is `Table{?}`) | 0/5 |
+| the port declared as `Table{neuronId, label}` | 0/5 |
+| `def.guide`, whose first sentence names the node, for +35k characters | 1/5 |
+| `labels1 (Table{?}) [from compare.matchTypes]` in the port list | 0/5 |
+| `labels1 comes from compare.matchTypes (Match Cell Types): add one and wire its labels1 output here.` | **6/10, 7/10** |
+
+**So it is not an information gap.** The fact was on the page, on the very port, and was ignored
+nine times in ten. What the model reads is the line-per-fact block under the ports — the one `RULES`
+teaches it to read for `carries:` — and what it acts on is a whole sentence saying what to *do*.
+Declaring the schema was actively worse: the model started hand-rolling `core.select` and
+`core.rename` to manufacture something label-shaped rather than reaching for the node that already
+emits it. The ceiling is 3/3, which naming the node in the request has always got, so this was
+discovery and never capability.
+
+Rendered at `lean` as well as `full`, per that level's rule: a fact a plan can be wrong about, not
+what a setting means. Both halves are checked against the registry by a test rather than by
+`registerNode`, since a producer may register after its consumer.
+
+It is a `{ type, port? }` pair rather than a bare type, and `port` defaults to this port's own id.
+The bare form looked sufficient on the only member that exists — and cannot express the obvious
+second one: `neuron.partnerVectors` wants the same declaration on a port called `labels`, fed by
+`compare.matchTypes`' `labels1`. **That second member is deliberately not declared yet**, because
+every number on this page was measured and that one has not been.
+
+### A plan that is legal and still wrong — the advisory round
+
+`applyPlan` checks types, ports, params and cycles. It cannot check meaning, and the case above is
+what that costs. Meanwhile the node's own `validate` had the exact sentence — *"wire the matching
+Labels table from Match Cell Types"* — and **nothing in `src/assistant` read node issues at all.**
+
+So `runTurn` now previews each plan with the pure `applyPlan` and spends its one repair round handing
+back what that plan leaves on the cards. Five rules, each of which the obvious version gets wrong:
+
+- **The list is `ApplyOk.warnings`, not a second walk.** This started as a before/after diff of two
+  bare `inferGraph` passes, and every part of it already existed: `collectWarnings` runs the
+  inference once inside the `applyPlan` the caller has just made, and its header states the same
+  premise. Two walks had already drifted on how a node is named and on whether `severity` survives —
+  so the user's warning list and the model's are now one list.
+- **Scoped to what the plan touched**, which is the precise version of what the diff was
+  approximating: added nodes, `setParams` targets, and both ends of every wire. A node the plan
+  wired into is therefore reported even for a complaint it was already making, which is right —
+  the plan is about that node. A graph complaining three nodes away is not this turn's doing.
+- **Column issues are dropped** (`NodeIssue.aboutColumns`, set by `validateColumnParams` and nothing
+  else, carried through `ApplyWarning`). The model has already been told a column it cannot know yet
+  is fine; raising them again contradicts the system prompt, and on a live build there were four to
+  six of them around the one actionable line — which is how the actionable line gets ignored. The
+  panel still renders them, because the card is where you *see* that a schema is late.
+- **Held, not applied.** The plan is valid and is kept, so the whole turn stays one commit and one
+  undo step, and the prompt has to say the graph is *unchanged* — a model told its edit landed sends
+  a diff against a graph that does not exist.
+- **Doing nothing is an answer.** It is a warning, not a refusal, so an empty plan means "these are
+  all fine" and the held plan is used. Without that the model invents an edit to justify the round.
+  And if the follow-up does not fit, the held plan is applied anyway: an advisory round must never
+  leave the user with less than they would have had.
+
+**It measured at zero.** Ten runs each side, everything else equal: **6/10 with the round, 6/10
+without.** It is shipped because it is the only thing that can catch a wire nothing refuses, because
+the model does engage with it — the replacement plans come back saying *"resolving via Match Cell
+Types"* — and because the cost is concentrated where it is least avoidable: the diff cancels on an
+edit turn, so the extra call falls almost entirely on from-scratch builds, which is also where the
+model has no feedback at all. **Re-measure it on Sonnet 5 before trusting the 6/10.**
+
+The half that made the shape check possible is on the node: `Compare Connectivity` now says a Labels
+table with no `label` column is not a labels table. It has to, because nothing else notices —
+`idColumn` and `labelColumn` are required pickers on their declared defaults, so `resolveColumn`'s
+rule 3 substitutes the first compatible column, `neuronId` matches by luck and `label` silently
+becomes `type`. It fires **only where the schema is known** and **only while both pickers are still
+on their declared defaults**, since a name somebody chose is a decision. `defaultParams` writes those
+defaults at creation, so "untouched" is the value *equal* to the default rather than an absent one.
+
 ## Three levers, and where they live
 
 Apart from the model: **Full node help** (the catalogue's `lean`/`full` split), **Send run values**

@@ -64,7 +64,7 @@ import { GRAPH_FORMAT_VERSION } from '../core/graph'
 import { inferGraph, nodeTypes } from '../core/inference'
 import type { EnumOption, ParamValue, ParamValues } from '../core/node'
 import { configurableParams, defaultParams, makeInferContext } from '../core/node'
-import { nodeDefsByCategory } from '../core/registry'
+import { getNodeDef, nodeDefsByCategory } from '../core/registry'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 import type { AttributePart, CodaType } from '../core/types'
 import { attributeSchema, columnNames, typeLabel } from '../core/types'
@@ -363,6 +363,50 @@ export function optionLines(
   return lines
 }
 
+/**
+ * `labels1 comes from compare.matchTypes (Match Cell Types): …` — which node fills this port.
+ *
+ * `PortDef.producedBy`, rendered. The fact is invisible to everything else the catalogue
+ * prints: `isAssignable` ignores schema, so both ends of the pair read `Table{?}` and nothing
+ * says they are a pair.
+ *
+ * **The wording is the measurement.** Asked for a three-dataset comparison, a model wired each
+ * Connectivity's neuron table into `Compare Connectivity`'s Labels ports and never added the
+ * mapper — `0/5`, five runs against `gemma4:31b-cloud` on an empty canvas. Three cheaper
+ * spellings of the same fact were tried, five runs each, and the ranking is not the one the
+ * sizes suggest:
+ *
+ *  - declare the port as `Table{neuronId, label}` so the type line names the shape: **0/5**, and
+ *    it made things worse — the model started hand-rolling `core.select` and `core.rename` to
+ *    manufacture something label-shaped rather than reaching for the node that already emits it
+ *  - render `def.guide`, whose first sentence is *"plus its labels from Match Cell Types"*:
+ *    **1/5**, for +35k characters — a 62% larger prompt at `lean`, all 102 nodes
+ *  - a tag inside the port list, `labels1 (Table{?}) [from compare.matchTypes]`: **0/5**
+ *  - this: a whole sentence, on its own line, in the `carries:` family, saying what to *do*:
+ *    **7/10**
+ *
+ * So it is not an information gap — the fact was on the page, on the very port, and was ignored
+ * nine times in ten. What the model reads is the line-per-fact block under the ports, which
+ * `RULES` teaches it to read for `carries:`. The ceiling is `3/3`: naming the node in the
+ * request has always worked, so this was discovery, never capability.
+ *
+ * Rendered at `lean` as well as `full`, per that level's rule — it is a fact a plan can be
+ * wrong about, not what a setting means.
+ */
+function producerLines(inputs: readonly PortDef[]): string[] {
+  const lines: string[] = []
+  for (const port of inputs) {
+    if (!port.producedBy) continue
+    const { type, port: source = port.id } = port.producedBy
+    const def = getNodeDef(type)
+    lines.push(
+      `${port.id} comes from ${type}${def ? ` (${def.label})` : ''}: ` +
+        `add one and wire its ${source} output here.`,
+    )
+  }
+  return lines
+}
+
 /** `connections carries: a, b` — or `network carries (links): …` where a port has two tables. */
 export function carriesLines(outputs: Readonly<Record<string, CodaType>>): string[] {
   const lines: string[] = []
@@ -399,6 +443,7 @@ function renderNode(def: NodeDefinition, detail: CatalogueDetail): string {
   lines.push(`inputs:  ${list(inputs, 'in')}`)
   lines.push(`outputs: ${list(outputs, 'out')}`)
 
+  lines.push(...producerLines(inputs))
   lines.push(...producedColumns(def))
 
   const params = plannableParams(def)

@@ -73,6 +73,31 @@ export interface PortDef {
    * because this node never reads them.
    */
   reference?: boolean
+  /**
+   * Inputs only: the node whose output belongs here, and which output of it.
+   *
+   * Not a constraint — nothing refuses another producer, and a hand-built table of the right
+   * shape is a legitimate thing to wire. It is a **fact the ports cannot state**: two nodes
+   * compose because one makes what the other consumes, and `isAssignable` ignores schema, so
+   * `Table{?} → Table{?}` says nothing at all about which pair those are.
+   *
+   * Measured on `compare.connectivity`'s Labels ports, where the answer is `compare.matchTypes`
+   * and nothing else can supply it. Asked to build a three-dataset comparison, a model wired
+   * each Connectivity's own neuron table into Labels and never added the mapper: **0/5**. With
+   * this declared and rendered in the assistant catalogue, **7/10**. Three cheaper spellings of
+   * the same fact were tried first and are recorded in `assistant/catalogue.ts` — declaring the
+   * port's schema, rendering the node's `guide`, and a `[from …]` tag on the port line all
+   * measured 0/5 or 1/5. What worked is a whole sentence, on its own line, saying what to do.
+   *
+   * **`port` defaults to this port's own id**, which is the common case and the one that made a
+   * bare `producedBy: string` look sufficient. It is not: `neuron.partnerVectors` wants the same
+   * declaration on a port called `labels`, fed by `compare.matchTypes`' `labels1` — so the pair
+   * is what the field has to hold, or the second member cannot be written down at all.
+   *
+   * Both halves are checked against the registry by `assistant.test.ts`, not by `registerNode`,
+   * since a producer may register after its consumer.
+   */
+  producedBy?: { type: string; port?: string }
 }
 
 /**
