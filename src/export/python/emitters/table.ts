@@ -18,11 +18,13 @@
 
 import type { JoinHow } from '../../../nodes/lib/tableOps'
 import {
+  FILTER_TABLE_DEFAULT_OP,
   aggColumnName,
   combineLayout,
   keepsUnmatchedRight,
   relabelTarget,
   renameMapping,
+  resolveFilterOp,
 } from '../../../nodes/lib/tableOps'
 import { unpivotPlan } from '../../../nodes/lib/tableOps'
 import { readUnpivotSpec } from '../../../nodes/table/unpivot'
@@ -141,9 +143,12 @@ registerEmitter('core.filterTable', (ctx) => {
 
   ctx.require('pandas')
   const out = ctx.output('out')
-  const op = String(ctx.params.op ?? 'ge')
+  // The same resolution `evaluate` makes, or the notebook filters on a different condition
+  // from the card it was exported from. See `resolveFilterOp`.
+  const dtype = dtypeOf(ctx, 'in', name)
+  const op = resolveFilterOp(ctx.params.op, dtype, FILTER_TABLE_DEFAULT_OP)
   const raw = String(ctx.params.value ?? '')
-  const numeric = isNumericDType(dtypeOf(ctx, 'in', name) ?? 'str')
+  const numeric = isNumericDType(dtype ?? 'str')
 
   const built = pyFilterMask(src, name, op, raw, numeric)
   if (built.mask === undefined) return ctx.todo(built.reason)

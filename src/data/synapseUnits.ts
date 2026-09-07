@@ -69,6 +69,25 @@ const UNIT_LABELS: Readonly<Record<SynapseUnitId, string>> = {
   sites: 'one row per site',
 }
 
+/**
+ * The unit ids, as one line for the assistant's catalogue.
+ *
+ * `skeletonRouteVocabulary()`'s twin, and the same criterion: which units a *source* declares is
+ * a fact about the transport and is read off `DataSource.synapseUnits`, but the vocabulary is
+ * two words and closed. Without it the catalogue says `(options depend on the input)` and a
+ * model writes the label — the failure `operatorVocabulary()` was built for, one node over.
+ */
+export function synapseUnitVocabulary(): string {
+  const ids = Object.values(SYNAPSE_UNITS)
+    .map((id) => `${id} (${UNIT_LABELS[id]})`)
+    .join(', ')
+  return [
+    'Empty means Automatic — the unit this source lists first — and is almost always right.',
+    'Pin one only if asked: a unit the source cannot deliver is an error, not a substitution.',
+    `Unit ids: ${ids}`,
+  ].join('\n')
+}
+
 export function synapseUnitLabel(id: SynapseUnitId): string {
   return UNIT_LABELS[id]
 }

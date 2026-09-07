@@ -46,7 +46,7 @@ import { getColumn, makeTable } from '../../core/values'
  * a Distribution node and a Network Metrics node quoting different medians of the same column is
  * a bug nobody would think to look for. `boxStats` is headless and this direction is established.
  */
-import { quantileSorted } from '../../ui/viewers/boxStats'
+import { quantileSorted } from '../../core/stats'
 import { componentsOfNeighbours, foldNodeColumns, withNodeColumns } from './networkOps'
 
 /**

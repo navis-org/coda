@@ -41,16 +41,20 @@ import { column, isNumericDType, tableSchema } from '../../core/types'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { makeTable } from '../../core/values'
 /*
- * The type-7 quantile, from the module that already owns it.
+ * The type-7 quantile, from the module that owns it.
  *
- * `boxStats.ts` sits under `ui/viewers` and is headless — its own header says so, and it
- * already imports `nodes/lib/chartSelection`, so this direction is the established one here
- * (`nodes/output/dendrogram.ts` reaches into `ui/encoding` the same way). Worth the reach:
- * "which of the nine quantile definitions" is exactly the kind of thing two copies come to
- * disagree about, and a Distribution node and a Describe node quoting different medians of the
- * same column is a bug nobody would think to look for.
+ * Shared rather than reimplemented because "which of the nine quantile definitions" is exactly
+ * what two copies come to disagree about, and a Distribution node and a Describe node quoting
+ * different medians of the same column is a bug nobody would think to look for.
+ *
+ * It used to live in `ui/viewers/boxStats.ts` and be reached upward from here — defensible while
+ * the callers were all under `src/nodes`, and untenable once `assistant/digest.ts` reused
+ * `describeTable`: `src/assistant` is in `eslint.config.js`'s boundary block, whose pattern
+ * catches a *direct* import, so `assistant → describeOps → ui/viewers/boxStats → ui/colors` made
+ * that boundary false while the rule reported clean. The arithmetic moved down to `src/core`,
+ * which is in the block, instead.
  */
-import { quantileSorted } from '../../ui/viewers/boxStats'
+import { quantileSorted } from '../../core/stats'
 import { valueLabel } from './datasetStats'
 
 /**

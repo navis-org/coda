@@ -125,6 +125,90 @@ export function operatorVocabulary(): string {
   ].join('\n')
 }
 
+/**
+ * What each Filter node opens on — the one value `resolveFilterOp` may replace.
+ *
+ * Here rather than in the two node files because the *readers* are elsewhere: four emitters
+ * resolve the same param, and a default spelled privately in a node was re-spelled as a literal
+ * at each of them. Change one and the export keeps resolving against the old string — a notebook
+ * filtering on a different condition from the card, which is the failure going through one
+ * function exists to prevent. Beside `FilterOp` and `opsForDType`, which they are about.
+ */
+export const FILTER_TABLE_DEFAULT_OP: FilterOp = 'ge'
+export const FILTER_NETWORK_DEFAULT_OP: FilterOp = 'contains'
+
+/**
+ * The operator a filter will actually use, given the column it is pointed at.
+ *
+ * **The problem it fixes:** an operator list is per dtype, but a param's `default` is one static
+ * value, so whichever the node declares is wrong for some column. `core.filterTable` opens on
+ * `ge` and `net.filter` on `contains` — each legal for the columns its author had in mind and
+ * illegal for the others. Point a fresh Filter Table at a text column and it carries
+ * `"ge" does not apply to a str column` before you have done anything at all.
+ *
+ * **Only the declared default gives way, and that asymmetry is the whole rule.** A declared
+ * default is not a decision — `resolveColumn`'s rule, one layer over — so it may be resolved
+ * against what is actually wired. A value somebody *chose* is a decision and is kept, illegal or
+ * not, so `validate` still says `"contains" does not apply to a i64 column` when a filter is
+ * repointed at a number. Substituting there would quietly change what the filter does, which is
+ * the same refusal `skeletonSource` makes about a pinned route the dataset lacks.
+ *
+ * Every reader goes through this — both nodes' `validate` and `evaluate`, and all four
+ * emitters — or the notebook computes something the canvas does not.
+ */
+export function resolveFilterOp(
+  stored: unknown,
+  dtype: DType | undefined,
+  declared: FilterOp,
+): FilterOp {
+  const raw = String(stored ?? declared)
+  /*
+   * **An unknown dtype resolves nothing.** `opsForDType(undefined)` answers `STRING_OPS`, which
+   * is the right default for a *dropdown* and a licence to substitute here — and the readers do
+   * not all learn the dtype at the same moment. `core.pivot` publishes no schema until it has
+   * run, so on `Pivot → Filter Table` `validate` and both emitters would see `undefined` and
+   * resolve `ge → eq` while `evaluate`, holding the real table, sees `i64` and keeps `ge`: an
+   * exported notebook writing `== value` for a card that ran `>= value`, which is the exact
+   * divergence going through one function was meant to prevent. Unknown is not none.
+   */
+  if (dtype === undefined) return raw as FilterOp
+  const ops = opsForDType(dtype)
+  if (ops.some((o) => o.value === raw)) return raw as FilterOp
+  // `opsForDType` is never empty, so `[0]` always answers.
+  return raw === declared ? ops[0]!.value : (raw as FilterOp)
+}
+
+/**
+ * Everything the two Filter nodes say about a condition, in one place.
+ *
+ * They had converged on the same three checks — the operator applies to this dtype, a value is
+ * needed and present, and a numeric column got a number — written twice, and had already drifted:
+ * one said `"x" is not a number` and the other `"x" is not a number — this column is i64`. The
+ * second check is not decoration either: `makePredicate` *throws* on a non-numeric value against
+ * a numeric column, so without it the node goes red at Run with a raw error where the card could
+ * have said it while there was still something to change.
+ *
+ * Takes the already-resolved op, so callers cannot forget `resolveFilterOp` and get a complaint
+ * about a condition nobody chose.
+ */
+export function filterConditionIssues(
+  dtype: DType | undefined,
+  op: FilterOp,
+  raw: string,
+): string[] {
+  if (!dtype) return []
+  const issues: string[] = []
+  if (!opsForDType(dtype).some((o) => o.value === op)) {
+    issues.push(`"${op}" does not apply to a ${dtype} column — pick another condition`)
+  } else if (opNeedsValue(op)) {
+    if (raw === '') issues.push('Comparison value is empty')
+    else if (isNumericDType(dtype) && !Number.isFinite(Number(raw))) {
+      issues.push(`"${raw}" is not a number — this column is ${dtype}`)
+    }
+  }
+  return issues
+}
+
 /** Ops that ignore the comparison value, so the UI can hide the value field. */
 export function opNeedsValue(op: FilterOp): boolean {
   return !['isEmpty', 'notEmpty', 'isTrue', 'isFalse'].includes(op)

@@ -23,7 +23,7 @@ import { markLabel, numericCell } from '../../nodes/lib/chartSelection'
 import type { ValueRange } from '../../nodes/lib/chartSelection'
 import { foldByRank } from '../colors'
 import { MAX_SERIES, OTHER_LABEL } from '../colors'
-import { quantileSorted } from './boxStats'
+import { quantileSorted } from '../../core/stats'
 
 export type Normalize = 'count' | 'percent' | 'density'
 

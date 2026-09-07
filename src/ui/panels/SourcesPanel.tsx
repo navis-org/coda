@@ -358,12 +358,14 @@ const SECTIONS: readonly [Section, ...Section[]] = [
     privacy: (
       <>
         <strong>Your key, your account, your bill.</strong> Your question, the graph on your
-        canvas and a summary of what it last produced go to the provider you pick.
+        canvas and — unless you switch it off in the drawer — a summary of what it last produced
+        go to the provider you pick.
         <Why>
           {"Keys are held in this browser's local storage on this machine only, are never " +
             'written into a saved graph or an export, and are never sent to us — requests go ' +
             'straight from this page to the provider you pick, with no server of ours in ' +
-            'between. The summary describes what a node produced rather than reproducing it: ' +
+            'between. The summary is the one part you can decline — Send run values, in the ' +
+            'assistant drawer. It describes what a node produced rather than reproducing it: ' +
             'row counts, ranges, and the commonest values of a column, for nodes whose results ' +
             'are current. No rows are sent, and neuron ids are never listed. A model running ' +
             'on your own machine under Ollama sends nothing off it at all — but an Ollama ' +

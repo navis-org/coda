@@ -276,10 +276,24 @@ describe('what it says on the card', () => {
     expect(found.join(' ')).toMatch(/Seed: pick the column/)
   })
 
-  it('refuses an operator the column type does not offer', () => {
+  it('refuses an operator somebody chose that the column type does not offer', () => {
+    // `startsWith` rather than `contains`: `contains` is this node's *declared default*, and a
+    // declared default is not a decision — `resolveFilterOp` resolves it against the column
+    // instead of refusing. Anything else is a choice and is kept, so this still complains.
     expect(
-      issues({ column: 'nNeurons', op: 'contains', value: 'x' }, { in: network }).join(' '),
+      issues({ column: 'nNeurons', op: 'startsWith', value: 'x' }, { in: network }).join(' '),
     ).toMatch(/does not apply to a i64 column/)
+  })
+
+  it('resolves its own default against the column rather than opening broken', () => {
+    /*
+     * The whole point of the resolution. `net.filter` opens on `contains`, which a numeric
+     * column does not offer, so pointing a fresh one at `nNeurons` used to earn
+     * `"contains" does not apply to a i64 column` before anything had been done to it — and its
+     * sibling `Filter Table` had the mirror-image bug, opening on `ge` against text.
+     */
+    const found = issues({ column: 'nNeurons', op: 'contains', value: '5' }, { in: network })
+    expect(found.join(' ')).not.toMatch(/does not apply/)
   })
 
   /*

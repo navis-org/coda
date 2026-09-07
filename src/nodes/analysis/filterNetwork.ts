@@ -22,13 +22,21 @@
  */
 
 import { registerNode } from '../../core/registry'
-import { T, findColumn, isNumericDType } from '../../core/types'
+import { T, findColumn } from '../../core/types'
 import type { InferContext } from '../../core/node'
 import type { DType } from '../../core/types'
 import { getColumn, isNetworkValue, isTableValue } from '../../core/values'
 import { collectLabels } from '../lib/labelLookup'
 import type { FilterOp } from '../lib/tableOps'
-import { filterTable, opNeedsValue, operatorVocabulary, opsForDType } from '../lib/tableOps'
+import {
+  FILTER_NETWORK_DEFAULT_OP,
+  filterConditionIssues,
+  filterTable,
+  opNeedsValue,
+  operatorVocabulary,
+  opsForDType,
+  resolveFilterOp,
+} from '../lib/tableOps'
 import {
   EXPANSION_OPTIONS,
   WALK_OPTIONS,
@@ -81,7 +89,7 @@ export const filterNetworkNode = registerNode({
       id: 'op',
       kind: 'enum',
       label: 'Condition',
-      default: 'contains',
+      default: FILTER_NETWORK_DEFAULT_OP,
       // The same operator table `Filter Table` offers, resolved against the same dtype, so the
       // two nodes named Filter behave identically on the half they have in common.
       optionsWithoutPeek: true,
@@ -93,7 +101,8 @@ export const filterNetworkNode = registerNode({
       kind: 'string',
       label: 'Value',
       default: '',
-      visibleIf: (params) => opNeedsValue(String(params.op ?? 'contains') as FilterOp),
+      visibleIf: (params) =>
+        opNeedsValue(String(params.op ?? FILTER_NETWORK_DEFAULT_OP) as FilterOp),
     },
     {
       id: 'seedColumn',
@@ -159,26 +168,14 @@ export const filterNetworkNode = registerNode({
   validate: (ctx) => {
     const issues: string[] = []
     const column = ctx.column('column')
-    const op = String(ctx.params.op ?? '') as FilterOp
     const dtype = chosenDType(ctx)
+    // Resolved first, so the complaint is about a condition somebody chose — `Filter Table`'s
+    // rule verbatim, and this node has the mirror-image default: `contains` on a number column.
+    const op = resolveFilterOp(ctx.params.op, dtype, FILTER_NETWORK_DEFAULT_OP)
 
-    if (column && dtype && op) {
-      if (!opsForDType(dtype).some((o) => o.value === op)) {
-        issues.push(`"${op}" does not apply to a ${dtype} column — pick another condition`)
-      } else if (opNeedsValue(op)) {
-        const raw = String(ctx.params.value ?? '')
-        /*
-         * Both halves, `Filter Table`'s verbatim. The second is not decoration: `makePredicate`
-         * *throws* on a non-numeric value against a numeric column, so without it the node goes
-         * red at Run with a raw error where its sibling says the same thing on the card while
-         * there is still something to change.
-         */
-        if (raw === '') issues.push('Comparison value is empty')
-        else if (isNumericDType(dtype) && !Number.isFinite(Number(raw))) {
-          issues.push(`"${raw}" is not a number — this column is ${dtype}`)
-        }
-      }
-    }
+    // `Filter Table`'s three checks, now literally the same function rather than a copy that had
+    // already drifted on one message. See `filterConditionIssues`.
+    if (column) issues.push(...filterConditionIssues(dtype, op, String(ctx.params.value ?? '')))
     /*
      * A wired seed table with no column chosen is the one reading of "empty" nobody intends —
      * `Match Cell Types`' Pass Through port, same shape and same message.
@@ -209,11 +206,12 @@ export const filterNetworkNode = registerNode({
     // `filterTable` throws on a column that is not there, and a picker pointing at a column an
     // upstream edit removed is not grounds to block everything downstream.
     const column = ctx.column('column')
-    if (column && findColumn(network.nodes.schema, column)) {
+    const seedCol = column ? findColumn(network.nodes.schema, column) : undefined
+    if (column && seedCol) {
       const kept = filterTable(
         network.nodes,
         column,
-        String(ctx.params.op ?? 'contains') as FilterOp,
+        resolveFilterOp(ctx.params.op, seedCol.dtype, FILTER_NETWORK_DEFAULT_OP),
         String(ctx.params.value ?? ''),
       )
       for (const cell of getColumn(kept, 'id')) seeds.add(String(cell ?? ''))

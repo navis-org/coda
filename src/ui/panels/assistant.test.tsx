@@ -22,6 +22,7 @@ import { messagesReply, stubFetch } from '../../data/ai/fixture'
 import { pivotGraph, pivotObserved } from '../../assistant/fixture'
 import {
   getFullCatalogue,
+  getSendRunValues,
   getThinking,
   resetCredentials,
   setKey,
@@ -632,6 +633,49 @@ describe('how much goes with the question', () => {
 
     expect(help()).toBeNull()
     expect(reason()).toBeNull()
+  })
+})
+
+describe('sending what the graph produced', () => {
+  const values = () => screen.queryByLabelText('Send run values') as HTMLInputElement | null
+
+  it('is on by default, because the digest was measured to help', () => {
+    render(<AssistantPanel />)
+    expect(values()!.checked).toBe(true)
+  })
+
+  it('stops the values reaching the model when it is turned off', async () => {
+    /*
+     * Asserted on the request body, because that is the only place the difference exists: with
+     * the switch off there is no error and no badge, just a prompt with no `ran:` lines — which
+     * is the same shape a graph nobody has run produces, and which the rules already give a
+     * meaning to.
+     */
+    const { graph } = pivotGraph()
+    act(() => useGraphStore.setState({ graph, inference: inferGraph(graph) }))
+    await act(async () => {
+      await useGraphStore.getState().runAll()
+    })
+
+    render(<AssistantPanel />)
+    await act(async () => {
+      fireEvent.click(values()!)
+    })
+    expect(getSendRunValues('anthropic')).toBe(false)
+
+    const stub = stubReplies(PIPELINE)
+    await ask('chart the connections')
+    expect(asked(stub.sent[0]!)).not.toContain('ran:')
+  })
+
+  it('is kept per provider, like the other two levers', async () => {
+    setProviderId('ollama')
+    render(<AssistantPanel />)
+    await act(async () => {
+      fireEvent.click(values()!)
+    })
+    expect(getSendRunValues('ollama')).toBe(false)
+    expect(getSendRunValues('anthropic')).toBe(true)
   })
 })
 

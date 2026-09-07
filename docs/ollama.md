@@ -297,7 +297,7 @@ Several origins are comma-separated: `OLLAMA_ORIGINS="https://navis-org.github.i
 7. Press **Save**. The assistant does not use the new provider until you do.
 
 Reasoning is not in this dialog. It, and how much of the node catalogue goes with each question,
-are two switches in the assistant drawer itself — see [the two switches](#the-two-switches).
+are switches in the assistant drawer itself — see [the three switches](#the-three-switches).
 
 A working Test reads:
 
@@ -337,7 +337,7 @@ question — so a first answer of several minutes is normal, and the second is f
 
 ---
 
-## The two switches
+## The three switches
 
 The drawer's header carries them, beside the provider and model it names. Both are remembered
 **per provider**, so setting them for Ollama leaves a cloud provider's alone, and both take effect
@@ -347,9 +347,11 @@ request already in flight.
 | Switch | Off (the default) | On |
 | --- | --- | --- |
 | **Full node help** | Each param reaches the model as a name, a kind, its bounds and its options — everything a plan can be *refused* for getting wrong | Adds what every setting *means*, which is roughly twice the prompt |
+| **Send run values** | *(on)* A summary of what your graph last produced goes with the question — row counts, ranges, the commonest values of a column — so the model can pick a real filter value instead of guessing | Off: it sends nothing about your data, and plans get worse silently rather than failing |
 | **Let the model reason** | `think: false` — the plan, and nothing else | The model's own default. Only offered on Ollama; see below |
 
-Both are for a request that came back wrong. Neither is a knob to turn up in advance:
+The first and last are for a request that came back wrong. Neither is a knob to turn up in
+advance:
 
 - **Full node help was measured level with the lean one.** Three full-suite reps at each level
   against Sonnet 5 were 15/15 either way, zero refusals, and the case the prose should matter most

@@ -4,8 +4,8 @@
  * **Kept per provider, not per session.** Switching to Gemini to try it and back to Anthropic
  * must not cost you the key you already pasted — a settings panel that forgets is one nobody
  * experiments in. So the key, the model, (where it is the user's to choose) the base URL, and
- * the two switches the assistant drawer offers are all stored under the provider's id, and
- * selecting a provider is a separate, single value. Two of those five are settings rather than
+ * the three switches the assistant drawer offers are all stored under the provider's id, and
+ * selecting a provider is a separate, single value. Three of those six are settings rather than
  * credentials, which is why the module is named for the harder half of what it holds.
  *
  * **Bring your own key.** There is no Coda-side account and no server: the key is the user's,
@@ -80,6 +80,25 @@ const FIELDS = {
     clean: (raw: string) => (raw === 'on' ? 'on' : ''),
     fallback: () => '',
   },
+  /*
+   * Whether a question carries a summary of what the graph last produced, as `'off'` or nothing.
+   *
+   * **The one field here whose default is on, and it is stored inverted for that reason.** The
+   * table's rule is that a value equal to the default is not kept, so what gets written is the
+   * *departure* — `'off'` — and an absent value means the digest is sent. Spelling it the other
+   * way round would store `'on'` for everybody and leave a later build unable to change its mind.
+   *
+   * On by default because it was measured: without it a model asked to filter to the commonest
+   * partner type builds five nodes trying to *compute* the value it was not told, and leaves the
+   * pickers unfinished. Refusable because it is the one setting here that decides whether data —
+   * rather than structure — leaves the machine, and a disclosed behaviour with no control reads
+   * as an oversight. See `docs/assistant.md`.
+   */
+  values: {
+    prefix: 'coda.ai.values.',
+    clean: (raw: string) => (raw === 'off' ? 'off' : ''),
+    fallback: () => '',
+  },
 } as const
 
 type Field = keyof typeof FIELDS
@@ -102,13 +121,10 @@ const LEGACY: Partial<Record<Field, string>> = {
 const DEFAULT_PROVIDER = 'anthropic'
 
 let provider = DEFAULT_PROVIDER
-const held: Record<Field, Map<string, string>> = {
-  key: new Map(),
-  model: new Map(),
-  base: new Map(),
-  think: new Map(),
-  full: new Map(),
-}
+// Derived from `FIELD_NAMES` rather than restated: a sixth field is one edit, not two.
+const held = Object.fromEntries(
+  FIELD_NAMES.map((name) => [name, new Map<string, string>()]),
+) as Record<Field, Map<string, string>>
 let loaded = false
 
 const changed = channel()
@@ -228,6 +244,22 @@ export function getFullCatalogue(id: string = getProviderId()): boolean {
 
 export function setFullCatalogue(id: string, on: boolean): void {
   write('full', id, on ? 'on' : '')
+}
+
+/**
+ * Whether a question carries what the graph last produced. On unless the user turned it off.
+ *
+ * The digest is aggregates — row counts, ranges, medians, the commonest values of a column — for
+ * nodes whose results match their current settings. No rows, and never an id. It is still the
+ * only setting that sends *data* rather than structure, which is why it can be refused; see the
+ * field above for why on is the default and why storage is inverted.
+ */
+export function getSendRunValues(id: string = getProviderId()): boolean {
+  return read('values', id) !== 'off'
+}
+
+export function setSendRunValues(id: string, on: boolean): void {
+  write('values', id, on ? '' : 'off')
 }
 
 /** Is the selected provider ready to be asked something? */

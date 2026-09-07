@@ -24,11 +24,13 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { countPlanParams } from '../../assistant/planShape'
 import {
   getFullCatalogue,
+  getSendRunValues,
   getModel,
   getProviderId,
   getThinking,
   isConfigured,
   setFullCatalogue,
+  setSendRunValues,
   setThinking,
   subscribeCredentials,
 } from '../../data/ai/credentials'
@@ -244,10 +246,17 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
          * cached result is the answer to the graph as it stands; `needsRun` is the same question
          * asked upside down and would let a `running` or `disabled` node through.
          */
-        results: {
-          fresh: (nodeId) => store().nodeInfo(nodeId).state === 'ok',
-          output: (nodeId, portId) => store().nodeOutput(nodeId, portId),
-        },
+        /*
+         * `undefined` when the switch is off, which is the shape `describeGraph` already handles
+         * for every headless caller: no `ran:` lines, which the rules give a meaning to (unknown,
+         * never none). Read here rather than closed over, like `detail` above.
+         */
+        results: getSendRunValues()
+          ? {
+              fresh: (nodeId) => store().nodeInfo(nodeId).state === 'ok',
+              output: (nodeId, portId) => store().nodeOutput(nodeId, portId),
+            }
+          : undefined,
         apply: (plan) => store().applyAssistantPlan(plan),
         signal: controller.signal,
       })
@@ -301,12 +310,13 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
    */
   const using = useSyncExternalStore(subscribeCredentials, describeSelection)
   /*
-   * The two levers, as three primitives off one channel. All booleans, so invariant 7 is
+   * The three levers, as four primitives off one channel. All booleans, so invariant 7 is
    * satisfied by value rather than by memoising — and each of the getters defaults its argument
    * to the selected provider, which is what keeps them from reporting one provider's settings
    * beside another's name in the line above.
    */
   const full = useSyncExternalStore(subscribeCredentials, getFullCatalogue)
+  const values = useSyncExternalStore(subscribeCredentials, getSendRunValues)
   const think = useSyncExternalStore(subscribeCredentials, getThinking)
   const canReason = useSyncExternalStore(subscribeCredentials, offersReasoning)
   /*
@@ -355,6 +365,18 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
               }
               checked={full}
               onChange={(next) => setFullCatalogue(getProviderId(), next)}
+            />
+            <Toggle
+              label="Send run values"
+              hint={
+                'Tell the model what your graph last produced — row counts, ranges, and the ' +
+                'commonest values of a column — so it can pick a real filter value or a ' +
+                'sensible threshold instead of guessing. Aggregates only: no rows are sent and ' +
+                'neuron ids are never listed, and a node you have edited since running says ' +
+                'nothing. This is the only setting here that sends data rather than structure.'
+              }
+              checked={values}
+              onChange={(next) => setSendRunValues(getProviderId(), next)}
             />
             {canReason && (
               <Toggle

@@ -8,43 +8,44 @@ import { makeMatrix, makeTable, tableFromRows, JOIN_SEPARATOR } from '../../core
 import {
   AGG_OPTIONS,
   NUMERIC_AGG_OPTIONS,
+  PIVOT_CELLS_WARN,
+  PIVOT_COLUMNS_WARN,
+  aggColumnName,
   combineSchema,
   combineTable,
-  aggColumnName,
   filterTable,
-  idColumn,
   groupBySchema,
   groupByTable,
+  idColumn,
   joinSchema,
   joinTables,
+  matrixLinksSchema,
+  matrixToLinks,
+  matrixToTable,
+  normalizeMatrix,
+  pivotTable,
   relabelSchema,
   relabelTable,
   relabelTarget,
   renameMapping,
   renameSchema,
   renameTable,
-  matrixLinksSchema,
-  matrixToLinks,
-  matrixToTable,
-  normalizeMatrix,
-  PIVOT_CELLS_WARN,
-  PIVOT_COLUMNS_WARN,
-  pivotTable,
+  resolveFilterOp,
   sampleRowIndices,
   sampleSchema,
   sampleTable,
   selectSchema,
   selectTable,
+  sortTable,
   stackColumns,
   stackSchema,
   stackTables,
-  uploadIsNeurons,
-  uploadShapeSchema,
-  uploadShapeTable,
   unpivotIssues,
   unpivotSchema,
   unpivotTable,
-  sortTable,
+  uploadIsNeurons,
+  uploadShapeSchema,
+  uploadShapeTable,
 } from './tableOps'
 import type { UnpivotSpec } from './tableOps'
 
@@ -1733,5 +1734,39 @@ describe('relabel', () => {
   it('refuses a column it was told to use and cannot find', () => {
     expect(() => relabelTable(edges(), mapping(), spec({ keyColumn: 'gone' }))).toThrow(/gone/)
     expect(() => relabelTable(edges(), mapping(), spec({ column: 'gone' }))).toThrow(/gone/)
+  })
+})
+
+/**
+ * The operator a filter actually uses — see `resolveFilterOp`.
+ *
+ * Beside the function rather than in a node suite, because six readers share it: two nodes'
+ * validate and evaluate, and four emitters.
+ */
+describe('resolveFilterOp', () => {
+  it('resolves a declared default the column cannot take', () => {
+    // `ge` is a number comparison, so a fresh Filter Table on a text column used to open broken.
+    expect(resolveFilterOp('ge', 'str', 'ge')).toBe('eq')
+    expect(resolveFilterOp('ge', 'bool', 'ge')).toBe('isTrue')
+  })
+
+  it('leaves a declared default that is already legal', () => {
+    expect(resolveFilterOp('ge', 'i64', 'ge')).toBe('ge')
+  })
+
+  it('keeps a value somebody chose, illegal or not', () => {
+    // The asymmetry the whole thing rests on: a choice is a decision, so `validate` still gets
+    // to refuse it rather than this quietly changing what the filter does.
+    expect(resolveFilterOp('startsWith', 'i64', 'ge')).toBe('startsWith')
+  })
+
+  it('resolves nothing when the dtype is unknown', () => {
+    /*
+     * `opsForDType(undefined)` answers `STRING_OPS`, which is right for a dropdown and a licence
+     * to substitute here. A Pivot publishes no schema until it has run, so validate and the
+     * emitters would see `undefined` and resolve `ge → eq` while evaluate, holding the real
+     * table, kept `ge` — a notebook filtering differently from the card it came from.
+     */
+    expect(resolveFilterOp('ge', undefined, 'ge')).toBe('ge')
   })
 })

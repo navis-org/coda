@@ -28,7 +28,12 @@ import type { CodaType } from '../../core/types'
 import type { ParamValues } from '../../core/node'
 import { synapseUnitsOf } from '../../data/source'
 import type { SynapseUnitId, SynapseUnits } from '../../data/synapseUnits'
-import { asSynapseUnit, synapseUnitLabel, synapseUnitRefusal } from '../../data/synapseUnits'
+import {
+  asSynapseUnit,
+  synapseUnitLabel,
+  synapseUnitRefusal,
+  synapseUnitVocabulary,
+} from '../../data/synapseUnits'
 import { sourceFromType } from './datasetParam'
 
 /** Param ids, shared by the controls, the readers, `validate` and both exporters. */
@@ -124,6 +129,7 @@ export function synapseUnitParam(): ParamDef {
       'connection” repeats it once each while “one row per site” returns it once. Backends ' +
       'differ in which they can answer; Automatic takes the one this source has.',
     default: '',
+    catalogueNote: synapseUnitVocabulary(),
     optionsWithoutPeek: true,
     options: (ctx: InferContext) =>
       synapseUnitOptions(ctx.inputs.dataset, String(ctx.params[SYNAPSE_UNIT_PARAM] ?? '')),

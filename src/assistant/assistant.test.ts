@@ -6,6 +6,9 @@
  * the fake is self-consistent and nothing about the thing the model is actually told.
  */
 
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import '../nodes'
@@ -36,6 +39,8 @@ import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 import { searchFor } from '../test/findNeurons'
 import { ALL_ROW_OPS, arityOf, decodeRows } from '../data/filterRows'
 import { opsForDType } from '../nodes/lib/tableOps'
+import { SKELETON_ROUTES, skeletonRouteVocabulary } from '../data/skeletonRoutes'
+import { SYNAPSE_UNITS, synapseUnitVocabulary } from '../data/synapseUnits'
 import { requireNodeDef } from '../core/registry'
 
 function plan(patch: Partial<AssistantPlan>): AssistantPlan {
@@ -665,6 +670,79 @@ describe('the plan format', () => {
   })
 })
 
+/**
+ * The boundary, followed all the way rather than one file deep.
+ *
+ * `eslint.config.js` lists `src/assistant/**` in its boundary block so the assistant stays
+ * reachable by a non-React consumer — but its `**\/ui/*` pattern matches a *direct* import, and
+ * the property it protects is transitive. That gap was not hypothetical: `digest.ts` reuses
+ * `describeTable` (so a plan's median and the Describe card's are the same number), and
+ * `describeOps` reached `ui/viewers/boxStats` for `quantileSorted`, which reaches `ui/colors`.
+ * Three files deep, lint clean, property false.
+ *
+ * Moving `quantileSorted` to `core/stats.ts` fixed that instance. This is what stops the next one:
+ * a walk, from every non-test module in `src/assistant`, over relative imports, asserting nothing
+ * under `src/ui` or `src/store` is reachable at any depth.
+ */
+describe('the headless boundary', () => {
+  it('reaches no UI or store module, at any depth, from any headless area', () => {
+    /*
+     * All five directories `eslint.config.js` names, not just this one. The transitive hole is
+     * identical in each, and `src/data` is three times the size of `src/assistant` and the most
+     * likely to reach for a UI formatter. Zero offenders across 255 modules today.
+     */
+    const root = new URL('..', import.meta.url).pathname
+    const seen = new Set<string>()
+    const offenders: string[] = []
+
+    const resolve = (from: string, spec: string): string | undefined => {
+      if (!spec.startsWith('.')) return undefined
+      const base = join(dirname(from), spec)
+      for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts')]) {
+        if (existsSync(candidate)) return candidate
+      }
+      return undefined
+    }
+
+    const walk = (file: string, trail: readonly string[]): void => {
+      if (seen.has(file)) return
+      seen.add(file)
+      const rel = file.slice(root.length)
+      if (rel.startsWith('ui/') || rel.startsWith('store/')) {
+        offenders.push([...trail, rel].join(' → '))
+        return
+      }
+      /*
+       * `import('…')` as well as `from '…'`: a dynamic import is a live idiom here — the
+       * assistant drawer loads `converse.ts` that way on purpose — so a walk that read only
+       * static imports would let `await import('../ui/…')` through.
+       */
+      const source = readFileSync(file, 'utf8')
+      for (const [, a, b] of source.matchAll(
+        /(?:from|import)\s*\(?\s*'([^']+)'|import\('([^']+)'\)/g,
+      )) {
+        const next = resolve(file, (a ?? b)!)
+        if (next) walk(next, [...trail, rel])
+      }
+    }
+
+    for (const area of ['assistant', 'core', 'data', 'layout', 'pyodide']) {
+      const walkDir = (dir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const path = join(dir, entry.name)
+          if (entry.isDirectory()) walkDir(path)
+          else if (/\.tsx?$/.test(entry.name) && !entry.name.includes('.test.')) walk(path, [])
+        }
+      }
+      walkDir(join(root, area))
+    }
+
+    expect(offenders, 'no headless area may reach the UI or the store').toEqual([])
+    // A walk that visited almost nothing would pass for the wrong reason.
+    expect(seen.size, 'the walk actually followed the import graph').toBeGreaterThan(150)
+  })
+})
+
 describe('the catalogue', () => {
   it('offers every listable node type and nothing else', () => {
     const text = catalogueText()
@@ -983,6 +1061,57 @@ describe('the operator vocabulary on a filter', () => {
     // A note says how a value is *written*; without it the param cannot be set correctly at all,
     // which is the asymmetry that keeps `catalogueNote` out of the `help` that `lean` drops.
     expect(catalogueText('lean')).toContain('a boolean column: isTrue | isFalse')
+  })
+})
+
+/**
+ * The two closed vocabularies whose options are dynamic and dataset-dependent.
+ *
+ * Same criterion `operatorVocabulary()` set: a note is worth writing where the vocabulary is
+ * *closed and known to the type*, even though which members are **available** is discovered and
+ * cannot be asked for without starting a probe. Measured on the route case: asked for skeletons
+ * "from the level-2 cache", a model wrote `"level-2"` five times, `"level2"` three and `"L2"`
+ * once in ten runs — the id is `l2` — and with the note, `l2` ten times out of ten.
+ */
+describe('the closed vocabularies behind a dynamic enum', () => {
+  it('names every skeleton route this build knows, generated from the table', () => {
+    // Generated, so a route added later cannot be missing from it. That is the whole reason it
+    // is a function rather than a sentence beside the param.
+    const note = skeletonRouteVocabulary()
+    for (const id of Object.values(SKELETON_ROUTES)) {
+      expect(note, `route ${id} is named`).toContain(id)
+    }
+    expect(note).toContain('Empty means Automatic')
+  })
+
+  it('names every synapse unit, the same way', () => {
+    const note = synapseUnitVocabulary()
+    for (const id of Object.values(SYNAPSE_UNITS)) {
+      expect(note, `unit ${id} is named`).toContain(id)
+    }
+  })
+
+  it('reaches the model under `lean`, where the options themselves cannot be listed', () => {
+    /*
+     * The asymmetry that makes this a `catalogueNote` rather than `help`: the options function
+     * is dynamic *and* peeks, so `optionLines` refuses it (`optionsWithoutPeek` is absent on
+     * `skeletonSource` on purpose) and `renderParam` can only print "(options depend on the
+     * input)". Without the note there is no legal value anywhere in the prompt.
+     */
+    const text = catalogueText('lean')
+    const skeletons = text.slice(text.indexOf('## neuron.skeletons'))
+    expect(skeletons).toContain('skeletonSource enum (options depend on the input)')
+    expect(skeletons).toContain('l2 (level-2 chunk graph)')
+    expect(text).toContain('Unit ids: links (one row per connection)')
+  })
+
+  it('offers no live option line for the route, because asking would start a probe', () => {
+    // The other half of the same decision — see `optionsWithoutPeek`. If this ever starts
+    // emitting, the note is no longer the only source of truth and the probe is firing.
+    const def = requireNodeDef('neuron.skeletons')
+    expect(
+      optionLines(def, defaultParams(def), { dataset: T.dataset('neuprint', 'x') }),
+    ).toEqual([])
   })
 })
 
@@ -1335,6 +1464,21 @@ describe('the options a node actually offers', () => {
     )
     return describeGraph(result.graph)
   }
+
+  it('opens on a condition the chosen column actually offers', () => {
+    /*
+     * `core.filterTable` declares `default: 'ge'`, a number comparison, so a fresh node pointed
+     * at a text column carried `"ge" does not apply to a str column` before anything had been
+     * done to it — and the assistant, which cannot see the dropdown, had no reason to set `op`
+     * at all and inherited it silently. `resolveFilterOp` resolves a *declared default* against
+     * the column; a value somebody chose is kept so `validate` can still refuse it.
+     */
+    const text = filtering('postType')
+    expect(text).not.toContain('does not apply')
+
+    // The resolver's own arithmetic is pinned beside it, in `tableOps.test.ts`; what belongs
+    // here is only that the assistant sees a node it can configure without a warning.
+  })
 
   it('names the operators a string column offers, by value and not by label', () => {
     // `is` is the label of `eq` in `tableOps.ts`, and is what a model reached for unprompted.

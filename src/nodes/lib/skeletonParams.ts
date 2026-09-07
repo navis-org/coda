@@ -35,6 +35,7 @@ import type { EnumOption, InferContext, ParamDef } from '../../core/node'
 import type { CodaType } from '../../core/types'
 import { datasetRef } from '../../core/types'
 import { skeletonRoutesOf } from '../../data/source'
+import { skeletonRouteVocabulary } from '../../data/skeletonRoutes'
 import type { SkeletonProvenance } from '../../core/values'
 import { sourceFromType } from './datasetParam'
 
@@ -89,6 +90,11 @@ export function skeletonSourceParam(): ParamDef {
       'they differ in how detailed they are and whether they carry radii. Automatic takes the ' +
       'best one this dataset has; the result says which it used.',
     default: '',
+    /*
+     * The vocabulary the catalogue cannot get from the options function, which is dynamic and
+     * dataset-dependent — see `skeletonRouteVocabulary`, and `operatorVocabulary`'s criterion.
+     */
+    catalogueNote: skeletonRouteVocabulary(),
     /*
      * **Deliberately not `optionsWithoutPeek`.** `skeletonSourceOptions` reaches
      * `skeletonRoutesOf` → `DataSource.skeletonSourcesFor`, and neuPrint's fires

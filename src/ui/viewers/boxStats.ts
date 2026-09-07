@@ -25,6 +25,7 @@
  * budget.
  */
 
+import { quantileSorted } from '../../core/stats'
 import type { TableValue } from '../../core/values'
 import { markLabel, numericCell } from '../../nodes/lib/chartSelection'
 import { foldByRank } from '../colors'
@@ -94,24 +95,6 @@ export interface GroupedValues {
   log: boolean
   /** False when there was no group column, i.e. one box over every row. */
   grouped: boolean
-}
-
-/**
- * Linear-interpolated quantile — the type-7 definition numpy and R default to.
- *
- * `ArrayLike` rather than `number[]`: it only indexes and reads `.length`, and `net.metrics`
- * sorts its degree and weight columns as `Float64Array`s. Converting a million weights to a
- * boxed array to satisfy a signature would be the tail wagging the dog — and the alternative,
- * a second median beside this one, is what `describeOps` reaches over here to avoid.
- */
-export function quantileSorted(sorted: ArrayLike<number>, p: number): number {
-  const n = sorted.length
-  if (n === 0) return NaN
-  if (n === 1) return sorted[0]!
-  const position = (n - 1) * Math.max(0, Math.min(1, p))
-  const lower = Math.floor(position)
-  const upper = Math.min(n - 1, lower + 1)
-  return sorted[lower]! + (sorted[upper]! - sorted[lower]!) * (position - lower)
 }
 
 /** The five-number summary plus whichever fence was asked for. `sorted` must be ascending. */

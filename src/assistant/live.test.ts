@@ -51,6 +51,8 @@ import { Scheduler } from '../core/scheduler'
 import { inferGraph } from '../core/inference'
 import { getColumn, isTableValue } from '../core/values'
 import { searchFor } from '../test/findNeurons'
+import { asSkeletonRoute } from '../data/skeletonRoutes'
+import { SKELETON_SOURCE_PARAM } from '../nodes/lib/skeletonParams'
 import { emptyPlan } from './planShape'
 import type { ResultReader } from './digest'
 import { setKey, setModel, setProviderId } from '../data/ai/credentials'
@@ -366,6 +368,37 @@ describe.skipIf(!RUNNABLE)('against the real API', () => {
       console.log(`  without it, the plan set:     ${control.join(' | ')}`)
 
       expect(withDigest).toContain(commonest)
+    },
+    PER_QUESTION_MS,
+  )
+
+  it(
+    'writes a route id rather than the words for one',
+    async () => {
+      /*
+       * **The closed-vocabulary case.** `neuron.skeletons`' `Source` is a dynamic enum whose
+       * *available* routes depend on the dataset, so the catalogue can only say `(options depend
+       * on the input)` — but the vocabulary itself is closed (`SKELETON_ROUTES`), which is the
+       * criterion `operatorVocabulary()` set for when a note is worth writing.
+       *
+       * Asserted on the *value*, not on the plan applying: an id this build does not know is
+       * exactly what `asSkeletonRoute` narrows away, and a model writing `"l2 cache"` or
+       * `"published skeletons"` produces a card that validates as a route the dataset lacks.
+       * Empty is a legal answer and the right one here — the mock dataset has one route — so the
+       * test asks only that whatever it wrote is a real id.
+       */
+      const { graph } = await ask(
+        emptyGraph(),
+        'On the mini hemibrain, find the LC4 neurons and fetch their skeletons from the ' +
+          'level-2 cache if that is available.',
+      )
+      const skeletons = graph.nodes.find((n) => n.type === 'neuron.skeletons')
+      expect(skeletons, 'a Skeletons node was added').toBeDefined()
+
+      const chosen = String(skeletons!.params[SKELETON_SOURCE_PARAM] ?? '')
+      console.log(`\n  skeletonSource = ${JSON.stringify(chosen)}`)
+      // Empty is Automatic. Anything else has to be a route this build knows.
+      expect(chosen === '' || asSkeletonRoute(chosen) !== undefined).toBe(true)
     },
     PER_QUESTION_MS,
   )

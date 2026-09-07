@@ -6,6 +6,7 @@
 // An emitter may reach `src/ui`, which is what keeps the palette in one place rather than
 // transcribed into two exporters — the same licence `out.scatter`'s emitter takes.
 import { MAX_SERIES } from '../../../ui/colors'
+import { FILTER_NETWORK_DEFAULT_OP, resolveFilterOp } from '../../../nodes/lib/tableOps'
 import { clusterColor } from '../../../ui/encoding'
 import { pyList, pyStr, pyValue } from '../py'
 import type { LANDMARK_SIDES } from '../../../nodes/transform/landmarkTransform'
@@ -228,12 +229,14 @@ registerEmitter('net.filter', (ctx) => {
   const seeds: string[] = []
 
   if (name) {
-    const op = String(ctx.params.op ?? 'contains')
     const raw = String(ctx.params.value ?? '')
     // `ctx.attributes`, not `ctx.schema`: `schemaOf` has no branch for a network, and this is
     // the accessor `InferContext` carries for exactly that — forwarded onto `EmitContext` rather
     // than reached around, or every network emitter after this writes it again.
     const dtype = findColumn(ctx.attributes('in', 'nodes'), name)?.dtype
+    // The same resolution `evaluate` makes, or the export filters on a different
+    // condition from the card it came from. See `resolveFilterOp`.
+    const op = resolveFilterOp(ctx.params.op, dtype, FILTER_NETWORK_DEFAULT_OP)
     const built = pyFilterMask('_attrs', name, op, raw, isNumericDType(dtype ?? 'str'))
     if (built.mask === undefined) return ctx.todo(built.reason)
     lines.push(

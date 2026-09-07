@@ -6,6 +6,7 @@
  * from numpy's, and a kernel estimate over a column with no spread.
  */
 
+import { quantileSorted } from '../../core/stats'
 import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
@@ -17,7 +18,6 @@ import {
   boxStats,
   buildDistributions,
   kdeCurve,
-  quantileSorted,
   silvermanBandwidth,
   swarmOffsets,
 } from './boxStats'
@@ -30,20 +30,6 @@ function tableOf(rows: { pre: number | null; type?: string }[]) {
     rows.map((r) => ({ pre: r.pre, type: r.type ?? 'a' })),
   )
 }
-
-describe('quantileSorted', () => {
-  it('is the type-7 definition numpy and R default to', () => {
-    // np.percentile([1,2,3,4], 25) is 1.75, not 2 — the difference matters at the small group
-    // sizes a per-cell-type box plot is made of.
-    expect(quantileSorted([1, 2, 3, 4], 0.25)).toBeCloseTo(1.75)
-    expect(quantileSorted([1, 2, 3, 4], 0.5)).toBeCloseTo(2.5)
-    expect(quantileSorted([1, 2, 3, 4], 0.75)).toBeCloseTo(3.25)
-  })
-
-  it('answers the single value for a group of one', () => {
-    expect(quantileSorted([9], 0.25)).toBe(9)
-  })
-})
 
 describe('boxStats', () => {
   const sorted = [1, 2, 3, 4, 5, 6, 7, 8, 9, 100]

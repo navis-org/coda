@@ -2,7 +2,15 @@ import { registerNode } from '../../core/registry'
 import { T, findColumn, isTabular, schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import type { FilterOp } from '../lib/tableOps'
-import { filterTable, opNeedsValue, operatorVocabulary, opsForDType } from '../lib/tableOps'
+import {
+  FILTER_TABLE_DEFAULT_OP,
+  filterConditionIssues,
+  filterTable,
+  opNeedsValue,
+  operatorVocabulary,
+  opsForDType,
+  resolveFilterOp,
+} from '../lib/tableOps'
 
 /**
  * Row filter. Cheap, so it re-runs live as you type a threshold — this is the node the
@@ -33,7 +41,7 @@ export const filterNode = registerNode({
       id: 'op',
       kind: 'enum',
       label: 'Condition',
-      default: 'ge',
+      default: FILTER_TABLE_DEFAULT_OP,
       optionsWithoutPeek: true,
       catalogueNote: operatorVocabulary(),
       options: (ctx) => {
@@ -48,7 +56,8 @@ export const filterNode = registerNode({
       kind: 'string',
       label: 'Value',
       default: '',
-      visibleIf: (params) => opNeedsValue(String(params.op ?? 'eq') as FilterOp),
+      visibleIf: (params) =>
+        opNeedsValue(String(params.op ?? FILTER_TABLE_DEFAULT_OP) as FilterOp),
     },
   ],
 
@@ -62,24 +71,12 @@ export const filterNode = registerNode({
   },
 
   validate: (ctx) => {
-    const issues: string[] = []
     const columnName = ctx.column('column')
     const col = columnName ? findColumn(ctx.schema('in'), columnName) : undefined
-    const op = String(ctx.params.op ?? '') as FilterOp
-    if (col && op) {
-      const allowed = opsForDType(col.dtype).map((o) => o.value)
-      if (!allowed.includes(op)) {
-        issues.push(`"${op}" does not apply to a ${col.dtype} column — pick another condition`)
-      }
-    }
-    if (col && op && opNeedsValue(op)) {
-      const raw = String(ctx.params.value ?? '')
-      if (raw === '') issues.push('Comparison value is empty')
-      else if ((col.dtype === 'i64' || col.dtype === 'f64') && !Number.isFinite(Number(raw))) {
-        issues.push(`"${raw}" is not a number`)
-      }
-    }
-    return issues
+    // Resolved first, so a complaint is about a condition somebody *chose*. A fresh node pointed
+    // at a text column used to earn one before anything had been done to it.
+    const op = resolveFilterOp(ctx.params.op, col?.dtype, FILTER_TABLE_DEFAULT_OP)
+    return filterConditionIssues(col?.dtype, op, String(ctx.params.value ?? ''))
   },
 
   evaluate: (ctx) => {
@@ -90,7 +87,11 @@ export const filterNode = registerNode({
     const out = filterTable(
       table,
       columnName,
-      String(ctx.params.op ?? 'eq') as FilterOp,
+      resolveFilterOp(
+        ctx.params.op,
+        findColumn(schemaOf(table), columnName)?.dtype,
+        FILTER_TABLE_DEFAULT_OP,
+      ),
       String(ctx.params.value ?? ''),
     )
     return { out }

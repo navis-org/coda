@@ -90,6 +90,36 @@ const ROUTE_LABELS: Readonly<Record<SkeletonRouteId, string>> = {
 }
 
 /** A route description, with the shared label and a per-source sentence. */
+/**
+ * The route ids, as one line for the assistant's catalogue.
+ *
+ * **Generated from `SKELETON_ROUTES`, never transcribed** — `operatorVocabulary()`'s rule in
+ * `nodes/lib/tableOps.ts`, and the criterion it set for when a note is worth writing at all: the
+ * vocabulary has to be *closed and known to the type*. Which routes a given dataset actually has
+ * is not — that is `skeletonSourcesFor`, it is discovered, and asking it starts a probe — so the
+ * catalogue can only ever say `(options depend on the input)` about the options. What it can say
+ * is which spellings exist.
+ *
+ * Measured: asked for skeletons "from the level-2 cache", a model wrote `"level-2"` five times,
+ * `"level2"` three times and `"L2"` once in ten runs. The id is `l2`. None of those is narrowed
+ * away by `asSkeletonRoute` at the seam a *stored* graph goes through, because the param is set
+ * directly — it lands as a pinned route the dataset lacks, which is an error rather than a
+ * substitution, and rightly so.
+ *
+ * The sentence leans on Automatic on purpose. Empty is the default and almost always the right
+ * answer; a pin is a provenance decision somebody has to have asked for.
+ */
+export function skeletonRouteVocabulary(): string {
+  const ids = Object.values(SKELETON_ROUTES)
+    .map((id) => `${id} (${ROUTE_LABELS[id]})`)
+    .join(', ')
+  return [
+    'Empty means Automatic — the best route this dataset has — and is almost always right.',
+    'Pin one only if asked: a route the dataset lacks is an error, not a substitution.',
+    `Route ids: ${ids}`,
+  ].join('\n')
+}
+
 export function route(id: SkeletonRouteId, detail: string): SkeletonProvenance {
   return { id, label: ROUTE_LABELS[id], detail }
 }

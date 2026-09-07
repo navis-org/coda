@@ -2,6 +2,7 @@
 
 // An emitter may reach `src/ui` — see the notebook emitter for why the palette lives there.
 import { profileExportPin } from '../../profileSubject'
+import { FILTER_NETWORK_DEFAULT_OP, resolveFilterOp } from '../../../nodes/lib/tableOps'
 import { MAX_SERIES } from '../../../ui/colors'
 import { clusterColor } from '../../../ui/encoding'
 import { rCol as col, rStr, rValue, rVector } from '../r'
@@ -196,11 +197,13 @@ registerEmitter('net.filter', (ctx) => {
   const seeds: string[] = []
 
   if (name) {
-    const op = String(ctx.params.op ?? 'contains')
     const raw = String(ctx.params.value ?? '')
     // `ctx.attributes`, not `ctx.schema`: `schemaOf` has no branch for a network, and this is
     // the accessor `InferContext` carries for exactly that.
     const dtype = findColumn(ctx.attributes('in', 'nodes'), name)?.dtype
+    // The same resolution `evaluate` makes, or the export filters on a different
+    // condition from the card it came from. See `resolveFilterOp`.
+    const op = resolveFilterOp(ctx.params.op, dtype, FILTER_NETWORK_DEFAULT_OP)
     const built = rFilterPredicate(name, op, raw, isNumericDType(dtype ?? 'str'))
     if (built.predicate === undefined) return ctx.todo(built.reason)
     lines.push(
