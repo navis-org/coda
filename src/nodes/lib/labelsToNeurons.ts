@@ -15,7 +15,7 @@
  * cross that gap, and it needs the neuron table to do it whenever the labels are not ids.
  */
 
-import { idText } from '../../core/ids'
+import { idText, isTypedId } from '../../core/ids'
 import type { TableSchema } from '../../core/types'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { getColumn, makeTable, selectRows } from '../../core/values'
@@ -140,10 +140,10 @@ function labelIndex(labels: TableValue, labelColumn: string): Map<string, number
 /**
  * A cell as a neuron id, or undefined where it cannot be one.
  *
- * `idText` plus a digits-only test, and it used to be `Number(cell)` guarded by
+ * `idText` then `isTypedId`, and it used to be `Number(cell)` guarded by
  * `Number.isSafeInteger(value) && value >= 0` — which was two things at once. The sign half is
- * kept: this reads a *label*, and a negative one is a typo rather than a neuron, which is the
- * same call `parseIdList` makes about typed text.
+ * kept, and is now the shared rule rather than a local regex citing one: this reads a *label*,
+ * and a negative one is a typo rather than a neuron, which is exactly what `isTypedId` says.
  *
  * The width half is gone, and that is the change. It dropped every id past the safe range on the
  * true grounds that `ID_ONLY_SCHEMA` was `i64`, so such an id could only be stored as a
@@ -152,12 +152,9 @@ function labelIndex(labels: TableValue, labelColumn: string): Map<string, number
  * into a column now declaring text, which is invariant 3 broken in the direction nothing checks:
  * `tableFromRows` validates no cell against its column's dtype.
  */
-/** Digits only, `parseIdList`'s rule: a negative label is a typo, most often a `123-456` range. */
-const DIGITS = /^\d+$/
-
 function usableId(cell: CellValue | undefined): string | undefined {
   const text = idText(cell)
-  return text !== null && DIGITS.test(text) ? text : undefined
+  return text !== null && isTypedId(text) ? text : undefined
 }
 
 export function labelsToNeurons(request: LabelMatchRequest): LabelMatchResult {

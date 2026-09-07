@@ -19,7 +19,8 @@ import { resolveDatasetNames } from '../../../nodes/analysis/compareConnectivity
 import { centralityOptions } from '../../../nodes/analysis/networkCentrality'
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
-import { codaIds, neuronIds, selectionIds, selectionIndices } from './common'
+import { decodeIndices } from '../../../nodes/lib/chartSelection'
+import { codaIds, neuronIds, selectionIds } from './common'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { populationCypher } from '../../../data/neuprint/cypher'
 import { schemasFromType } from '../../../nodes/lib/datasetParam'
@@ -996,8 +997,8 @@ registerEmitter('out.dendrogram', (ctx) => {
   const selected = ctx.output('selected')
   const down = String(ctx.params.orientation ?? 'right') === 'down'
   // Leaf positions, not names — see the notebook emitter and `out.dendrogram`. A different
-  // reader from `selectionIds`, and the type is the point: see `selectionIndices`.
-  const selection = selectionIndices(ctx)
+  // reader from `selectionIds`, and the type is the point: see `decodeIndices`.
+  const selection = decodeIndices(ctx.params.selection)
 
   /*
    * The Annotations port. It reaches the *plot* and nothing else — see the notebook emitter for
@@ -1065,8 +1066,8 @@ registerEmitter('out.dendrogram', (ctx) => {
   if (selection.length > 0) {
     lines.push(
       // Coda counts observations from 0 and R indexes from 1, so the shift is explicit rather
-      // than left to whoever reads this next. `selectionIndices` is what makes `i + 1`
-      // arithmetic rather than string concatenation — see there.
+      // than left to whoever reads this next. `decodeIndices`' `number[]` is what makes
+      // `i + 1` arithmetic rather than string concatenation — see there.
       `picked_ <- c(${selection.map((i) => i + 1).join(', ')})`,
       `palette_ <- ${rVector(palette)}`,
       `cl_ <- if (is.null(${out}_clusters)) rep(0L, length(${out}$labels)) else ${out}_clusters`,

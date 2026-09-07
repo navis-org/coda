@@ -124,6 +124,30 @@ export function decodeRanges(selection: unknown): ValueRange[] {
 }
 
 /**
+ * A stored selection read as **observation indices** — positions, not ids.
+ *
+ * `decodeRanges`' sibling, and here for its reason: how a `selection` param is *decoded* is a
+ * fact about the node that stored it, so the canvas and both exporters read it through one
+ * function rather than three. `IdsParam` is documented as an opaque `string[]` a bespoke surface
+ * owns, so `kind: 'ids'` never meant "holds ids" — `out.table` keeps filter clauses in one and
+ * `core.rename` keeps rename pairs. What each param *means* has to be said by whoever reads it.
+ *
+ * `out.dendrogram` is the caller: a label column can name two leaves the same thing, so the
+ * canvas stores the leaf's position. That had three spellings and two of them were wrong in
+ * ways that type-check — the notebook emitter quoted them the moment ids became text, which
+ * makes `labels['0']` a TypeError, and the R emitter computed `i + 1` over strings and emitted
+ * `picked_ <- c(01, 21)`, valid R selecting the wrong leaf.
+ *
+ * Non-integers are dropped rather than kept as `NaN`. The node's own reader tolerated them —
+ * `tree.labels[NaN]` is `undefined` and the row is skipped — but an emitter splices them into a
+ * document, where `NaN` is a name Python and R both refuse.
+ */
+export function decodeIndices(selection: unknown): number[] {
+  if (!Array.isArray(selection)) return []
+  return selection.map(Number).filter(Number.isInteger)
+}
+
+/**
  * Read a cell as a number, refusing what `Number()` accepts.
  *
  * `Number(null)`, `Number('')` and `Number(false)` are all 0, so a plain conversion would put

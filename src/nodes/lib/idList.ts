@@ -14,7 +14,7 @@
  */
 
 import type { TableValue } from '../../core/values'
-import { idText } from '../../core/ids'
+import { idText, isTypedId } from '../../core/ids'
 
 /**
  * What separates one id from the next.
@@ -27,12 +27,6 @@ import { idText } from '../../core/ids'
  * quietly discarded after it.
  */
 const SEPARATORS = /[\s,;[\]()'"]+/
-
-/**
- * Digits only, for *typed* text. Stricter than `isNeuronId`, which is the transport grammar
- * and allows a sign: a negative neuron id somebody typed is a typo, most often a `123-456` range.
- */
-const DIGITS = /^\d+$/
 
 /** Hoisted, like the two above it — `parseIdList` runs on every keystroke of the ids field. */
 const LEADING_ZEROS = /^0+(?=\d)/
@@ -79,7 +73,7 @@ export function parseIdList(text: unknown): IdListResult {
 
   for (let index = 0; index < tokens.length; index++) {
     const token = tokens[index]!
-    if (!DIGITS.test(token)) {
+    if (!isTypedId(token)) {
       const headerHint =
         index === 0 && /^[A-Za-z_]+$/.test(token)
           ? ` If you pasted a column, delete its header line.`
@@ -152,7 +146,7 @@ function idsFromColumn(
   for (const cell of data) {
     if (cell === null || cell === undefined || cell === '') continue
     const value = idText(cell)
-    if (value === null || !DIGITS.test(value)) {
+    if (value === null || !isTypedId(value)) {
       dropped++
       continue
     }

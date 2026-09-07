@@ -63,8 +63,8 @@ export function neuronIdInts(frame: string, limit = 0): string {
  * different neuron, written into a notebook with nothing to say so. Harmless while every
  * exportable dataset was neuPrint, whose nine-to-eleven-digit ids are exact as doubles, and live
  * the moment a CAVE selection can be exported at all. Emit with `pySelection`, which quotes the
- * digits to match the `str` id column every source publishes — and with `selectionIndices`
- * instead where the param holds leaf positions rather than ids.
+ * digits to match the `str` id column every source publishes — and with `decodeIndices`
+ * (`nodes/lib/chartSelection.ts`) instead where the param holds leaf positions rather than ids.
  */
 export function selectionIds(ctx: EmitContext, paramId = 'selection'): string[] {
   const raw = ctx.params[paramId]
@@ -89,25 +89,6 @@ export function selectionIds(ctx: EmitContext, paramId = 'selection'): string[] 
  */
 export function pySelection(ids: readonly string[]): string {
   return pyIdList(ids).join('\n')
-}
-
-/**
- * A viewer's `selection` param read as **observation indices**, which is not a set of ids.
- *
- * `out.dendrogram` is the one node whose selection names *leaves* rather than neurons — the node
- * itself reads it as `.map(Number)` — and that has now been a trap in both languages. Python
- * shared `pySelection` while it emitted bare integers and started quoting them the moment ids
- * became text, which would have made `labels['0']` a TypeError; R computed `i + 1` over what it
- * assumed were numbers and silently emitted `picked_ <- c(01, 21)`, string concatenation that
- * type-checks and selects the wrong leaf.
- *
- * Both were fixed at the literal, with a long comment each. This is the fix one level up: the
- * return type is `number[]`, so it cannot be handed to `pyIdList`, and the choice of literal
- * stops being something every new call site has to remember.
- */
-export function selectionIndices(ctx: EmitContext, paramId = 'selection'): number[] {
-  const raw = ctx.params[paramId]
-  return Array.isArray(raw) ? raw.map(Number).filter(Number.isInteger) : []
 }
 
 /**
@@ -142,6 +123,14 @@ export function codaNeurons(ctx: EmitContext, frame: string): string {
  *
  * The helper is idempotent (a `string` column is cast straight through), so a frame that reaches
  * two of these seams pays a no-op rather than needing anyone to work out which one owns it.
+ *
+ * **The rule, rather than the list of sites it was found at:** an emitter that produces a column
+ * named by `ID_COLUMN_NAME` — or renames one onto it — ends in this. It is written that way
+ * because enumerating the seams is what missed two of them, both of which sat in a regenerated
+ * golden looking plausible: `shapingLines` renamed an uploaded column onto `neuronId` without
+ * retyping it, and the unwired `Input IDs` branch built a frame from an integer list. Where a
+ * rename is involved the retype belongs *with* it, since that is how `uploadShapeSchema` states
+ * the same thing on the canvas.
  */
 export function codaIds(ctx: EmitContext, frame: string, ...columns: string[]): string {
   ctx.helper('coda_ids')

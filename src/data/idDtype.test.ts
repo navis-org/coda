@@ -31,13 +31,12 @@ import type { DType, TableSchema } from '../core/types'
 import type { CellValue, TableValue } from '../core/values'
 import { registerBuiltinSources } from './builtins'
 import {
-  CANONICAL_SCHEMAS,
   GROUP_TOTALS_SCHEMA,
   PATH_STEP_SCHEMA,
   SYNAPSE_TOTALS_SCHEMA,
   allSources,
+  type SourceSchemas,
 } from './source'
-import type { SourceSchemas } from './source'
 import { CATMAID_SCHEMAS } from './catmaid/schema'
 import { neuronSchemaFor, schemasFor as caveSchemasFor } from './cave/schema'
 import { discoverNeuronSchema, schemasFor as neuprintSchemasFor } from './neuprint/schema'
@@ -77,11 +76,13 @@ function idColumnsOf(schema: TableSchema): Array<{ name: string; dtype: DType }>
  *
  * The two *discovered* schemas are still built by hand, because they are the interesting ones
  * and a registered source carries only its default: neuPrint's shape arrives from a dataset's
- * `neuronProperties`, CAVE's from the annotation kinds a datastack publishes.
+ * `neuronProperties`, CAVE's from the annotation kinds a datastack publishes. `CANONICAL_SCHEMAS`
+ * is deliberately **not** listed — `MockSource` and `NeuPrintSource` both declare it as their
+ * default, so the registry already yields that very object, and naming it again would report one
+ * bad column on three lines.
  */
 function everySchema(): Array<[string, TableSchema]> {
   const named: Array<[string, SourceSchemas]> = [
-    ['canonical', CANONICAL_SCHEMAS],
     ['neuprint.discovered', neuprintSchemasFor(discoverNeuronSchema({}))],
     ['cave.discovered', caveSchemasFor(neuronSchemaFor(['cell_type']))],
     ...allSources().map((source): [string, SourceSchemas] => [source.id, source.schemas]),

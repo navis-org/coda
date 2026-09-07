@@ -120,6 +120,28 @@ export function isNeuronId(value: string): value is NeuronId {
 }
 
 /**
+ * The **input** grammar: digits only, no sign.
+ *
+ * The strict half of the pair `ID_GRAMMAR`'s note already describes — "typed input is stricter
+ * (`parseIdList` refuses `-1` outright, since a negative neuron id is almost always a mistyped
+ * range), and that asymmetry is deliberate: authored text is a mistake somebody can fix, where
+ * data is data." That sentence documented a rule with no home, so the rule was written twice:
+ * a private `DIGITS = /^\d+$/` in `nodes/lib/idList.ts` and a second one, citing the first, in
+ * `nodes/lib/labelsToNeurons.ts`. Two copies with a pointer between them is the state this
+ * module's own header describes as what it exists to end.
+ *
+ * Three callers, and each reads a value somebody *chose* rather than one a backend published:
+ * `parseIdList` (typed text, which refuses), `idsFromColumn` and `usableId` (a wired column,
+ * which drop and count). The refuse/drop asymmetry stays theirs — it is about where the value
+ * came from, not about what an id looks like.
+ */
+export function isTypedId(value: string): value is NeuronId {
+  return TYPED_GRAMMAR.test(value)
+}
+
+const TYPED_GRAMMAR = /^\d+$/
+
+/**
  * One table cell as an exact id, or null where it is not one.
  *
  * The single rule for turning a cell into an id, shared by the column reader, the connectivity

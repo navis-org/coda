@@ -1245,6 +1245,7 @@ dataset_generic <- neuprint_connection(
 # "annotations.csv".
 upload_table <- read_csv("annotations.csv", show_col_types = FALSE)
 upload_table <- upload_table |> rename(neuronId = `root_id`)
+upload_table <- coda_ids(upload_table, "neuronId")
 upload_table <- upload_table |> mutate(across(all_of(c("cluster")), as.character))
 ```
 

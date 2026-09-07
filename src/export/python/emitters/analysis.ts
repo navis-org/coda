@@ -25,7 +25,8 @@ import { resolveDatasetNames } from '../../../nodes/analysis/compareConnectivity
 import { centralityOptions } from '../../../nodes/analysis/networkCentrality'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
-import { codaIds, selectionIndices } from './common'
+import { decodeIndices } from '../../../nodes/lib/chartSelection'
+import { codaIds } from './common'
 import { pyFilterMask } from './table'
 import { findColumn, isNumericDType } from '../../../core/types'
 import { COMMON_SPACE, nerveCordIn } from '../../../data/transforms/spaces'
@@ -345,6 +346,12 @@ registerEmitter('core.tableFromUrl', (ctx) => {
  *
  * Applied after the read and both lossless, exactly as `uploadShapeTable` applies them — which
  * is what lets them cost no re-parse and never disagree with the rows already read.
+ *
+ * **The id rename carries a retype**, because on the canvas it always did: `uploadShapeSchema`
+ * types the renamed column `str` and `uploadShapeTable` stringifies its cells, so a document
+ * that only renamed held `int64` where the canvas held text — the "never disagree" above,
+ * quietly false. Keyed on what the column comes out *as*, which is `uploadShapeSchema`'s own
+ * rule, so it is part of the rename rather than a second thing to remember after it.
  */
 function shapingLines(ctx: EmitContext, out: string): string[] {
   const lines: string[] = []
@@ -354,7 +361,10 @@ function shapingLines(ctx: EmitContext, out: string): string[] {
   if (idColumn) {
     // Nodes address columns by name, so a file whose author wrote `root_id` cannot meet
     // neuron data until it is renamed.
-    lines.push(`${out} = ${out}.rename(columns={${pyStr(idColumn)}: 'neuronId'})`)
+    lines.push(
+      `${out} = ${out}.rename(columns={${pyStr(idColumn)}: 'neuronId'})`,
+      codaIds(ctx, out, ID_COLUMN_NAME),
+    )
   }
   if (textColumns.length > 0) {
     // Widening only, and null stays null: `str(None)` is the four-letter word "None", which
@@ -769,9 +779,9 @@ registerEmitter('out.dendrogram', (ctx) => {
   const outNames = companions(out)
   const down = String(ctx.params.orientation ?? 'right') === 'down'
   // Leaf *positions*, not names: a label column can call two leaves the same thing, so the
-  // canvas holds the observation index. See `out.dendrogram`, and `selectionIndices` for why
-  // this is a different reader rather than the same one used carefully.
-  const selection = selectionIndices(ctx)
+  // canvas holds the observation index. `decodeIndices` is the node's own reader, shared so
+  // the canvas and both documents cannot disagree about what this param holds.
+  const selection = decodeIndices(ctx.params.selection)
 
   /*
    * The Annotations port, and it reaches only the `labels=` argument.
@@ -864,8 +874,8 @@ registerEmitter('out.dendrogram', (ctx) => {
 
   if (selection.length > 0) {
     lines.push(
-      // Bare integers, because these index `labels` and key `_position`. `selectionIndices`
-      // carries the argument; the type is what keeps them out of `pySelection`.
+      // Bare integers, because these index `labels` and key `_position`. `decodeIndices`
+      // carries the argument; its `number[]` is what keeps them out of `pySelection`.
       `_picked = ${pyList(selection)}`,
       `_position = {int(obs): i for i, obs in enumerate(${outNames.order})}`,
       `_palette = ${pyList(palette)}`,

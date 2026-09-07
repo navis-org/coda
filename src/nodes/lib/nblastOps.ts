@@ -327,10 +327,7 @@ export function nblastMatrix(
  * comparable the same way — and what keeps the cells `knnTable` copies matching the dtype this
  * declares.
  *
- * `str` for a set carrying no `neuronId` at all, which is what the node advertises unwired. That
- * used to be `i64`, on the reasoning that a text column would be handed to every neuPrint user
- * where a number was; neuPrint publishes text now, so `i64` there advertised a dtype no run
- * produces.
+ * The no-`neuronId` case falls to `knnSchema`'s default, which is where that argument lives.
  */
 export function idTypeOf(schema: TableSchema | undefined): DType {
   return findColumn(schema, 'neuronId')?.dtype ?? 'str'

@@ -37,6 +37,7 @@ const DEFAULT_DEPLOYMENT = 'https://neuprint.janelia.org'
 import { neuprintProperty } from '../../../data/neuprint/schema'
 import {
   caveLabels,
+  codaIds,
   codaNeurons,
   codaSynapses,
   isCaveDataset,
@@ -44,6 +45,7 @@ import {
   pyMaskFrame,
   pyPopulationMask,
 } from './common'
+import { ID_COLUMN_NAME } from '../../../core/ids'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { SKELETON_SOURCE_PARAM } from '../../../nodes/lib/skeletonParams'
 import { SKELETON_ROUTES } from '../../../data/skeletonRoutes'
@@ -438,7 +440,11 @@ registerEmitter('neuron.inputIds', (ctx) => {
       ...ctx.note(
         'No Dataset is wired, so this is the ids alone — exactly what the node emits.',
       ),
+      // `_ids` is an integer list, because that is what `NeuronCriteria` takes on the wired
+      // branch above and what the wired-column arm casts to. This frame is not a library
+      // argument, though — it is the node's own `ID_ONLY_SCHEMA` output, which is `str`.
       `${out} = pd.DataFrame({'neuronId': _ids})`,
+      codaIds(ctx, out, ID_COLUMN_NAME),
     ]
   }
 

@@ -26,6 +26,14 @@ export function neuronIds(frame: string): string {
  * — an edge list, a label column read as ids — were typed by hand and each picked its own
  * answer. A Coda id column is `character` on every source, and R punishes a disagreement harder
  * than pandas does: `bind_rows` on `<double>` against `<character>` errors outright.
+ *
+ * **The rule, rather than the list of sites it was found at:** an emitter that produces a column
+ * named by `ID_COLUMN_NAME` — or renames one onto it — ends in this. It is written that way
+ * because enumerating the seams is what missed two of them, both of which sat in a regenerated
+ * golden looking plausible: `shapingLines` renamed an uploaded column onto `neuronId` without
+ * retyping it, and the unwired `Input IDs` branch built a frame from an integer list. Where a
+ * rename is involved the retype belongs *with* it, since that is how `uploadShapeSchema` states
+ * the same thing on the canvas.
  */
 export function codaIds(ctx: EmitContext, frame: string, ...columns: string[]): string {
   ctx.helper('coda_ids')
@@ -50,23 +58,6 @@ export function codaIds(ctx: EmitContext, frame: string, ...columns: string[]): 
 export function selectionIds(ctx: EmitContext, paramId = 'selection'): string[] {
   const raw = ctx.params[paramId]
   return Array.isArray(raw) ? raw.map((id) => String(id)) : []
-}
-
-/**
- * A viewer's `selection` param read as **observation indices**, which is not a set of ids.
- *
- * `out.dendrogram` is the one node whose selection names *leaves* rather than neurons, and it has
- * now been a trap in both languages — see the Python twin. Here it was `selectionIds` answering
- * `number[]`, so `selection.map((i) => i + 1)` was arithmetic; the moment ids became text that
- * became JavaScript string concatenation, which type-checks and emitted `picked_ <- c(01, 21)`
- * for leaves 0 and 2: valid R, selecting the wrong leaf, and caught only by reading a golden diff.
- *
- * The type is the fix. `number[]` cannot be handed to `rVector`-of-ids and arithmetic on it means
- * arithmetic.
- */
-export function selectionIndices(ctx: EmitContext, paramId = 'selection'): number[] {
-  const raw = ctx.params[paramId]
-  return Array.isArray(raw) ? raw.map(Number).filter(Number.isInteger) : []
 }
 
 /**

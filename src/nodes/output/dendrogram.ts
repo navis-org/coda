@@ -47,6 +47,7 @@ import { ID_COLUMN_NAME } from '../../core/ids'
 import { T, column, findColumn, schemaOf, tableSchema } from '../../core/types'
 import { isLinkageValue, tableFromRows } from '../../core/values'
 import { TYPE_COLUMN_NAME } from '../../data/annotations/types'
+import { decodeIndices } from '../lib/chartSelection'
 import { leafPositions } from '../lib/linkageOps'
 /*
  * The one `nodes -> ui` edge this node has, and the same one `out.neuroglancer` takes for the
@@ -271,8 +272,9 @@ export const dendrogramNode = registerNode({
      * `evaluate` to block everything downstream — invariant 5's corollary.
      */
     // Numbers once, so the loop below neither stringifies an index per leaf nor builds a row
-    // and a colour for every observation to keep the handful that were clicked.
-    const wanted = new Set(((ctx.params.selection as string[] | undefined) ?? []).map(Number))
+    // and a colour for every observation to keep the handful that were clicked. Through
+    // `decodeIndices` because both exporters read the same param and had drifted from this.
+    const wanted = new Set(decodeIndices(ctx.params.selection))
     const position = leafPositions(tree)
 
     const rows = []

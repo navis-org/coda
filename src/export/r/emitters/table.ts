@@ -6,12 +6,14 @@
  * if missed are the same three, and each is marked where it is handled.
  */
 
+import { ID_COLUMN_NAME } from '../../../core/ids'
 import type { CellValue } from '../../../core/values'
 import type { DType } from '../../../core/types'
 import { isNumericDType } from '../../../core/types'
 import { rawFileNote, rawFileUrl } from '../../../data/rawFileUrl'
 import { decodeSetters, disabledEditNote, editPlan } from '../../../nodes/lib/tableEdits'
 import { usesRegex } from '../../../nodes/lib/tableFilter'
+import { codaIds } from './common'
 import { filterPredicates } from './tableFilters'
 import type { AggFn } from '../../../nodes/lib/tableOps'
 import {
@@ -705,6 +707,14 @@ registerEmitter('core.normalize', (ctx) => {
 // Importers
 // ---------------------------------------------------------------------------
 
+/**
+ * The two shaping controls both importers share — the notebook emitter's twin.
+ *
+ * **The id rename carries a retype.** `uploadShapeSchema` types the renamed column `str` and
+ * `uploadShapeTable` stringifies its cells, so a document that only renamed held whatever
+ * `read_csv` guessed — a `double` for a column of digits, which is the case R punishes hardest:
+ * `bind_rows` on `<double>` against `<character>` errors outright rather than coercing.
+ */
 function shapingLines(ctx: EmitContext, out: string): string[] {
   const lines: string[] = []
   const idColumn = String(ctx.params.idColumn ?? '')
@@ -712,7 +722,10 @@ function shapingLines(ctx: EmitContext, out: string): string[] {
 
   if (idColumn) {
     ctx.library('dplyr')
-    lines.push(`${out} <- ${out} |> rename(neuronId = ${col(idColumn)})`)
+    lines.push(
+      `${out} <- ${out} |> rename(neuronId = ${col(idColumn)})`,
+      codaIds(ctx, out, ID_COLUMN_NAME),
+    )
   }
   if (textColumns.length > 0) {
     ctx.library('dplyr')
