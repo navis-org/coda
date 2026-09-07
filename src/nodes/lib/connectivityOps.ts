@@ -152,7 +152,10 @@ const SOURCE_TYPE_COLUMN = 'neuronType'
  */
 export function endpointSchema(source: TableSchema | undefined): TableSchema {
   const columns = source?.columns ?? []
-  const id = columns.find((c) => c.name === ID_COLUMN_NAME) ?? column(ID_COLUMN_NAME, 'i64')
+  // The source's own reading where it has one — this table holds the very same cells. `str`
+  // where it does not, which is the dtype every source publishes an id under (invariant 8),
+  // rather than an `i64` the wired case can no longer produce.
+  const id = columns.find((c) => c.name === ID_COLUMN_NAME) ?? column(ID_COLUMN_NAME, 'str')
   const type =
     columns.find((c) => c.name === SOURCE_TYPE_COLUMN) ?? column(ENDPOINT_TYPE_COLUMN, 'str')
   return tableSchema(id, { ...type, name: ENDPOINT_TYPE_COLUMN })

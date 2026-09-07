@@ -514,6 +514,9 @@ describe('influenceTable', () => {
 
   it('takes the id dtype from the source rather than declaring one', () => {
     expect(influenceSchema(SCHEMA).columns[0]).toEqual({ name: 'neuronId', dtype: 'str' })
-    expect(influenceSchema(undefined).columns[0]).toEqual({ name: 'neuronId', dtype: 'i64' })
+    // Unwired falls back to `str` too, where it used to say `i64`: every source publishes the
+    // id as text (invariant 8), so an `i64` here advertised a dtype no run can produce and the
+    // column changed under every downstream picker the moment anything was wired.
+    expect(influenceSchema(undefined).columns[0]).toEqual({ name: 'neuronId', dtype: 'str' })
   })
 })

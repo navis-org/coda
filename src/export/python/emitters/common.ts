@@ -40,9 +40,15 @@ export function neuronIds(frame: string): string {
  * `int64` rather than Python's `int` because it is a pandas cast on a column: a CAVE root id is
  * eighteen digits and fits (int64 tops out around 9.2 × 10^18), where the float64 that a plain
  * `astype(float)` or a JSON round trip would give it does not.
+ *
+ * `limit` takes the node's `Limit` cap, because Skeletons and Meshes fetch a capped list and
+ * were otherwise respelling `.astype('int64').tolist()` by hand — which is the one thing a
+ * function whose whole purpose is to own that string must not leave to a call site. `head`
+ * before the cast, so the cast runs over the rows that will be used rather than the whole column.
  */
-export function neuronIdInts(frame: string): string {
-  return `${frame}['neuronId'].astype('int64').tolist()`
+export function neuronIdInts(frame: string, limit = 0): string {
+  const head = limit > 0 ? `.head(${limit})` : ''
+  return `${frame}['neuronId']${head}.astype('int64').tolist()`
 }
 
 /**
@@ -56,8 +62,9 @@ export function neuronIdInts(frame: string): string {
  * is a string of digits, and `Number('720575940628857210')` is `720575940628857216` — a
  * different neuron, written into a notebook with nothing to say so. Harmless while every
  * exportable dataset was neuPrint, whose nine-to-eleven-digit ids are exact as doubles, and live
- * the moment a CAVE selection can be exported at all. Emit with `pyLongIntList`, which splices
- * the digits, or compare as text where the column is text.
+ * the moment a CAVE selection can be exported at all. Emit with `pySelection`, which quotes the
+ * digits to match the `str` id column every source publishes — and with `selectionIndices`
+ * instead where the param holds leaf positions rather than ids.
  */
 export function selectionIds(ctx: EmitContext, paramId = 'selection'): string[] {
   const raw = ctx.params[paramId]
@@ -85,6 +92,25 @@ export function pySelection(ids: readonly string[]): string {
 }
 
 /**
+ * A viewer's `selection` param read as **observation indices**, which is not a set of ids.
+ *
+ * `out.dendrogram` is the one node whose selection names *leaves* rather than neurons — the node
+ * itself reads it as `.map(Number)` — and that has now been a trap in both languages. Python
+ * shared `pySelection` while it emitted bare integers and started quoting them the moment ids
+ * became text, which would have made `labels['0']` a TypeError; R computed `i + 1` over what it
+ * assumed were numbers and silently emitted `picked_ <- c(01, 21)`, string concatenation that
+ * type-checks and selects the wrong leaf.
+ *
+ * Both were fixed at the literal, with a long comment each. This is the fix one level up: the
+ * return type is `number[]`, so it cannot be handed to `pyIdList`, and the choice of literal
+ * stops being something every new call site has to remember.
+ */
+export function selectionIndices(ctx: EmitContext, paramId = 'selection'): number[] {
+  const raw = ctx.params[paramId]
+  return Array.isArray(raw) ? raw.map(Number).filter(Number.isInteger) : []
+}
+
+/**
  * Normalise a frame that has just come back from neuprint-python.
  *
  * The library publishes `bodyId`; every Coda table calls the id column `neuronId`, so an
@@ -102,6 +128,24 @@ export function pySelection(ids: readonly string[]): string {
 export function codaNeurons(ctx: EmitContext, frame: string): string {
   ctx.helper('coda_neurons')
   return `${frame} = coda_neurons(${frame})`
+}
+
+/**
+ * The same declare-and-call pairing for `coda_ids`, wherever an emitter *mints* a Coda id column.
+ *
+ * `codaNeurons` covers the frames that arrive from neuprint-python; this covers the ones the
+ * document builds itself — an edge list renamed out of `bodyId_pre`, a label column read as ids.
+ * Those were being typed by hand, and each hand-typed one picked a different answer:
+ * `astype('int64')` in `cluster.selectedToNeurons`, nothing at all elsewhere. A Coda id column is
+ * text on every source, so a notebook that types one as an integer disagrees with the canvas
+ * about the column everything joins by, and `merge` then matches nothing without erroring.
+ *
+ * The helper is idempotent (a `string` column is cast straight through), so a frame that reaches
+ * two of these seams pays a no-op rather than needing anyone to work out which one owns it.
+ */
+export function codaIds(ctx: EmitContext, frame: string, ...columns: string[]): string {
+  ctx.helper('coda_ids')
+  return `${frame} = coda_ids(${frame}, ${columns.map(pyStr).join(', ')})`
 }
 
 /**

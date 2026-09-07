@@ -320,6 +320,23 @@ export function nblastMatrix(
 }
 
 /**
+ * What dtype an id column built from this set should be: whatever its own `neuronId` already is.
+ *
+ * The ids are copied out of the attribute table rather than re-derived from the geometry, so
+ * mirroring the dtype is what keeps `queryId` joinable against the `neuronId` it came from and
+ * comparable the same way — and what keeps the cells `knnTable` copies matching the dtype this
+ * declares.
+ *
+ * `str` for a set carrying no `neuronId` at all, which is what the node advertises unwired. That
+ * used to be `i64`, on the reasoning that a text column would be handed to every neuPrint user
+ * where a number was; neuPrint publishes text now, so `i64` there advertised a dtype no run
+ * produces.
+ */
+export function idTypeOf(schema: TableSchema | undefined): DType {
+  return findColumn(schema, 'neuronId')?.dtype ?? 'str'
+}
+
+/**
  * The columns a k-NN result comes out as.
  *
  * **`queryId` / `targetId` rather than navis's `query` / `target`**, and that is not gratuitous
@@ -328,8 +345,15 @@ export function nblastMatrix(
  * "527,536" — a string no query accepts and, under another locale, not even the same string.
  * The Python emitter renames navis's frame to these, or every downstream cell in the notebook
  * would be addressing columns that are not there.
+ *
+ * The **default** is `str`, and that is the half that moved. `idTypeOf` still mirrors the query
+ * set's own `neuronId`, so a set carrying an `i64` id still gets `i64` columns and the cells
+ * `knnTable` copies still match what the schema declares. What changed is the answer when there
+ * is no `neuronId` to read: `i64` there made the *unwired* port advertise a dtype no run can
+ * now produce, since every source publishes the id as text (invariant 8) — a column changing
+ * dtype under every picker downstream the moment anything is wired.
  */
-export function knnSchema(withLabels: boolean, idType: DType = 'i64'): TableSchema {
+export function knnSchema(withLabels: boolean, idType: DType = 'str'): TableSchema {
   return tableSchema(
     column('queryId', idType),
     column('targetId', idType),
@@ -337,21 +361,6 @@ export function knnSchema(withLabels: boolean, idType: DType = 'i64'): TableSche
     column('score', 'f64'),
     ...(withLabels ? [column('queryLabel', 'str'), column('targetLabel', 'str')] : []),
   )
-}
-
-/**
- * What dtype an id column built from this set should be: whatever its own `neuronId` already is.
- *
- * The ids are copied out of the attribute table rather than re-derived from the geometry, so
- * mirroring the dtype is what keeps `queryId` joinable against the `neuronId` it came from and
- * comparable the same way. Deciding here instead would mean choosing between rounding a wide id
- * back into an `i64` and handing every neuPrint user a text column where a number was —
- * which changes what a bare `527536` means in a Table filter, and how the column sorts.
- *
- * `i64` for a set carrying no `neuronId` at all, which is what the node advertises unwired.
- */
-export function idTypeOf(schema: TableSchema | undefined): DType {
-  return findColumn(schema, 'neuronId')?.dtype ?? 'i64'
 }
 
 /**

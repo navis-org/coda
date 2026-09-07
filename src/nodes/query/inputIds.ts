@@ -133,12 +133,15 @@ export const inputIdsNode = registerNode({
     }
 
     /*
-     * Two warnings that `validate` structurally cannot raise, both about the *wire*.
+     * The warning `validate` structurally cannot raise, because it is about the *wire*.
      *
      * `validate` runs at edit time against types, so the wired table's contents do not exist
-     * when it is asked — it can only ever see `ctx.params.ids`. Everything below is a fact about
-     * values, which makes `evaluate` the only place it can be said. Raised at the top, before
-     * the query, which is what `EvalContext.warn` asks for.
+     * when it is asked — it can only ever see `ctx.params.ids`. This is a fact about values,
+     * which makes `evaluate` the only place it can be said. Raised at the top, before the
+     * query, which is what `EvalContext.warn` asks for.
+     *
+     * There were two, and the other was the id-width warning. See `validate`, which records why
+     * it is gone rather than leaving its absence to be rediscovered.
      */
     if (collected.dropped > 0) {
       const n = collected.dropped
@@ -149,21 +152,6 @@ export const inputIdsNode = registerNode({
       )
     }
 
-    /*
-     * The half of the width check `validate` can only do for typed ids.
-     *
-     * With no Dataset the ids *are* the output, and that table's `neuronId` is an `i64` — a JS
-     * number — so an id past `Number.MAX_SAFE_INTEGER` comes back out as a *different neuron*.
-     * That is invariant 8's failure exactly, and until this it was silent for anything arriving
-     * on the wire: `validate` warns about the ids somebody typed, and an 18-digit root id
-     * pasted into an Upload node upstream reached `Number()` with nothing said anywhere.
-     *
-     * Warned rather than dropped, and that is the deliberate half. Dropping would quietly
-     * shorten a list whose entire purpose is that it is the one the user handed over, and it
-     * would contradict what `validate` promises a keystroke earlier — the two have to describe
-     * the same behaviour or they read as two different problems. `docs/limits.md`: a guard rail
-     * warns; it does not refuse.
-     */
     /*
      * The schema `inferOutputs` promised, resolved the same way. Read before the empty check so
      * that an unconfigured node still advertises the shape it is about to have — which is what

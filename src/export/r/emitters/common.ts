@@ -19,6 +19,20 @@ export function neuronIds(frame: string): string {
 }
 
 /**
+ * Declare `coda_ids` and emit the call, wherever an emitter *mints* a Coda id column.
+ *
+ * The twin of the Python exporter's `codaIds`, and it exists for that one's reason: the frames
+ * that arrive from neuprintr go through `coda_neurons`, but the ones the document builds itself
+ * — an edge list, a label column read as ids — were typed by hand and each picked its own
+ * answer. A Coda id column is `character` on every source, and R punishes a disagreement harder
+ * than pandas does: `bind_rows` on `<double>` against `<character>` errors outright.
+ */
+export function codaIds(ctx: EmitContext, frame: string, ...columns: string[]): string {
+  ctx.helper('coda_ids')
+  return `${frame} <- coda_ids(${frame}, ${columns.map(rStr).join(', ')})`
+}
+
+/**
  * A viewer's `ids` selection param, as **exact decimal text**.
  *
  * It answered `number[]` — `raw.map(Number)` — which is the same seam the Python exporter's
@@ -36,6 +50,23 @@ export function neuronIds(frame: string): string {
 export function selectionIds(ctx: EmitContext, paramId = 'selection'): string[] {
   const raw = ctx.params[paramId]
   return Array.isArray(raw) ? raw.map((id) => String(id)) : []
+}
+
+/**
+ * A viewer's `selection` param read as **observation indices**, which is not a set of ids.
+ *
+ * `out.dendrogram` is the one node whose selection names *leaves* rather than neurons, and it has
+ * now been a trap in both languages — see the Python twin. Here it was `selectionIds` answering
+ * `number[]`, so `selection.map((i) => i + 1)` was arithmetic; the moment ids became text that
+ * became JavaScript string concatenation, which type-checks and emitted `picked_ <- c(01, 21)`
+ * for leaves 0 and 2: valid R, selecting the wrong leaf, and caught only by reading a golden diff.
+ *
+ * The type is the fix. `number[]` cannot be handed to `rVector`-of-ids and arithmetic on it means
+ * arithmetic.
+ */
+export function selectionIndices(ctx: EmitContext, paramId = 'selection'): number[] {
+  const raw = ctx.params[paramId]
+  return Array.isArray(raw) ? raw.map(Number).filter(Number.isInteger) : []
 }
 
 /**

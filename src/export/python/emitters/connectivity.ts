@@ -14,7 +14,7 @@
 import { pyList, pyStr } from '../py'
 import { regionOptions } from '../../../nodes/lib/connectivityOps'
 import { registerEmitter, registerHelper } from '../registry'
-import { codaNeurons, neuronIdInts, neuronIds } from './common'
+import { codaIds, codaNeurons, neuronIdInts, neuronIds } from './common'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import type { EmitContext } from '../types'
 
@@ -112,20 +112,6 @@ function endpointLines(
  * chained call: a constant indent is right in one of those places and wrong in the other, and
  * generated code that reads as carelessly formatted is generated code nobody trusts.
  */
-/**
- * The cast that follows every one of those renames: `preId`/`postId` are Coda columns, and a
- * Coda id column is text (invariant 8, and `coda_ids`).
- *
- * Beside `renameLines` because it is the same seam — `bodyId_pre` is neuprint-python's `int64`
- * on the way in and `preId` is Coda's string on the way out, so a rename that did not retype
- * would leave the notebook joining on a column the canvas holds differently. The multi-hop path
- * gets it from `coda_traverse_connectivity`, which returns already-cast columns.
- */
-function edgeIdLines(ctx: EmitContext, frame: string): string[] {
-  ctx.helper('coda_ids')
-  return [`${frame} = coda_ids(${frame}, 'preId', 'postId')`]
-}
-
 function renameLines(indent: string): string[] {
   return [
     `${indent}'bodyId_pre': 'preId',`,
@@ -291,7 +277,9 @@ registerEmitter('neuron.connectivity', (ctx) => {
       `    })`,
       `    .assign(hop=1)`,
       `)`,
-      ...edgeIdLines(ctx, out),
+      // `preId`/`postId` are Coda columns, and a Coda id column is text — `bodyId_pre` arrives
+      // from neuprint-python as `int64`, so the rename has to retype as well as rename.
+      codaIds(ctx, out, 'preId', 'postId'),
       ...endpointLines(ctx, out, ids, c),
     ]
   }
@@ -311,7 +299,7 @@ registerEmitter('neuron.connectivity', (ctx) => {
     `    })`,
     `    .assign(hop=1, direction=${pyStr(label)})`,
     `)`,
-    ...edgeIdLines(ctx, out),
+    codaIds(ctx, out, 'preId', 'postId'),
     ...endpointLines(ctx, out, ids, c),
   ]
 })

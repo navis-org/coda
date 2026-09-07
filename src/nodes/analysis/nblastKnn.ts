@@ -162,7 +162,8 @@ export const nblastKnnNode = registerNode({
    * The id columns are the same argument one seam further out: their dtype is whatever the
    * Query's own `neuronId` is, which the *source* decides, so reading it here is what keeps the
    * advertised schema equal to the one `evaluate` builds. Unwired there is nothing to read and
-   * it falls back to the `i64` the ports declare.
+   * it falls back to `knnSchema`'s default — `str`, the dtype every source publishes an id
+   * under (invariant 8), where an `i64` there would advertise one no run can produce.
    */
   inferOutputs: (ctx) => ({
     matches: T.table(

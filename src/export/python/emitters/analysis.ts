@@ -8,7 +8,7 @@
 import { MAX_SERIES } from '../../../ui/colors'
 import { FILTER_NETWORK_DEFAULT_OP, resolveFilterOp } from '../../../nodes/lib/tableOps'
 import { clusterColor } from '../../../ui/encoding'
-import { pyList, pyLongIntList, pyStr, pyValue } from '../py'
+import { pyList, pyStr, pyValue } from '../py'
 import type { LANDMARK_SIDES } from '../../../nodes/transform/landmarkTransform'
 import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmarkTransform'
 import { matchParamsFrom } from '../../../nodes/lib/matchOps'
@@ -25,7 +25,7 @@ import { resolveDatasetNames } from '../../../nodes/analysis/compareConnectivity
 import { centralityOptions } from '../../../nodes/analysis/networkCentrality'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
-import { selectionIds } from './common'
+import { codaIds, selectionIndices } from './common'
 import { pyFilterMask } from './table'
 import { findColumn, isNumericDType } from '../../../core/types'
 import { COMMON_SPACE, nerveCordIn } from '../../../data/transforms/spaces'
@@ -769,8 +769,9 @@ registerEmitter('out.dendrogram', (ctx) => {
   const outNames = companions(out)
   const down = String(ctx.params.orientation ?? 'right') === 'down'
   // Leaf *positions*, not names: a label column can call two leaves the same thing, so the
-  // canvas holds the observation index. See `out.dendrogram`.
-  const selection = selectionIds(ctx)
+  // canvas holds the observation index. See `out.dendrogram`, and `selectionIndices` for why
+  // this is a different reader rather than the same one used carefully.
+  const selection = selectionIndices(ctx)
 
   /*
    * The Annotations port, and it reaches only the `labels=` argument.
@@ -863,15 +864,9 @@ registerEmitter('out.dendrogram', (ctx) => {
 
   if (selection.length > 0) {
     lines.push(
-      /*
-       * `pyLongIntList`, not `pySelection`, and this is the one selection in the tree that is
-       * not a set of neuron ids: a Linkage selection is a set of **leaf indices**, used below as
-       * `labels[i]` and as a key into `_position`. So it needs bare integers, where every other
-       * `ids` param here needs quoted text to match a Coda id column (invariant 8). It shared
-       * `pySelection` while that emitted integers, and quoting these would make `labels['0']` a
-       * TypeError — which no golden file and no parse check can see.
-       */
-      `_picked = ${pyLongIntList(selection).join('\n')}`,
+      // Bare integers, because these index `labels` and key `_position`. `selectionIndices`
+      // carries the argument; the type is what keeps them out of `pySelection`.
+      `_picked = ${pyList(selection)}`,
       `_position = {int(obs): i for i, obs in enumerate(${outNames.order})}`,
       `_palette = ${pyList(palette)}`,
       `_cluster_of = lambda i: 0 if ${outNames.clusters} is None else int(${outNames.clusters}[i])`,
@@ -924,10 +919,20 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
           'is what they are unless NBLAST was told to label by something else. Rows that are ' +
           'not usable ids are dropped, as they are in Coda.',
       ),
+      /*
+       * Ends in `coda_ids`, like every other seam that mints a Coda id column. It used to end
+       * in `astype('int64')`, which is the one thing an id column must not be: the node's own
+       * `usableId` produces exact text, so a notebook typing the same column as an integer
+       * disagrees with the canvas on the column everything joins by.
+       *
+       * `to_numeric(errors='coerce')` stays as the *filter* — it is how a label that is not an
+       * id is found and dropped, which is what the node does — and `coda_ids` casts what
+       * survives straight back, exactly at width.
+       */
       `${out} = ${labels}.copy()`,
       `${out}['neuronId'] = pd.to_numeric(${out}[${pyStr(labelColumn)}], errors='coerce')`,
       `${out} = ${out}[${out}['neuronId'].notna()].drop(columns=[${pyStr(labelColumn)}])`,
-      `${out}['neuronId'] = ${out}['neuronId'].astype('int64')`,
+      codaIds(ctx, out, 'neuronId'),
       // neuronId first, as the node emits it — a column order nothing depends on but everything
       // downstream is read by a person.
       `${out} = ${out}[['neuronId'] + [c for c in ${out}.columns if c != 'neuronId']]`,

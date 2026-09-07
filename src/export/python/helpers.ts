@@ -83,6 +83,12 @@ registerHelper({
 registerHelper({
   name: 'coda_neurons',
   requires: [['pandas']],
+  // It *calls* `coda_ids`, so it has to declare it: `resolveHelpers` writes out only what was
+  // asked for, and a notebook whose sole helper is this one otherwise emits a call to a function
+  // nothing defines. Invisible to the golden file, which looks right only because some other
+  // emitter in that fixture happens to request `coda_ids` — the same way `neuron.roiCounts` once
+  // lost the `codaNeurons` pairing.
+  needs: ['coda_ids'],
   source: [
     'def coda_neurons(df):',
     '    """Rename neuprint-python\'s `bodyId` to the `neuronId` every Coda table uses."""',

@@ -646,10 +646,7 @@ registerEmitter('neuron.skeletons', (ctx) => {
   ctx.require('navisNeuprint')
   const out = ctx.output('skeletons')
   const limit = Number(ctx.params.limit ?? 0)
-  const ids =
-    limit > 0
-      ? `${neurons}['neuronId'].head(${limit}).astype('int64').tolist()`
-      : neuronIdInts(neurons)
+  const ids = neuronIdInts(neurons, limit)
 
   return [
     /*
@@ -689,10 +686,7 @@ registerEmitter('neuron.meshes', (ctx) => {
   ctx.require('navisNeuprint')
   const out = ctx.output('meshes')
   const limit = Number(ctx.params.limit ?? 0)
-  const ids =
-    limit > 0
-      ? `${neurons}['neuronId'].head(${limit}).astype('int64').tolist()`
-      : neuronIdInts(neurons)
+  const ids = neuronIdInts(neurons, limit)
 
   return [
     // Coda's `Detail` is a triangle budget it spends across the batch, choosing the finest

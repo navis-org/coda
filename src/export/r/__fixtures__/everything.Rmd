@@ -2168,13 +2168,14 @@ relabel_2 <- coda_relabel(deduplicate, "preType", combine_columns, "type", "labe
 ```{r selected-to-neurons}
 # ── Selected to Neurons ──
 # NOTE: No neuron table is wired on the canvas, so the labels are read as
-# neuron ids. They stay `numeric` rather than becoming `integer`: R integers
-# are 32-bit and a neuron id can exceed that, where a double is exact to
-# 2^53 — which is Coda's own representation.
+# neuron ids. Rows that are not usable ids are dropped, as they are in Coda,
+# and what survives is kept as character — every Coda id column is text, and
+# an R `numeric` is a double.
 selected_to_neurons <- dendrogram_selected |>
   mutate(neuronId = suppressWarnings(as.numeric(`label`))) |>
   filter(!is.na(neuronId)) |>
   select(neuronId, everything(), -`label`)
+selected_to_neurons <- coda_ids(selected_to_neurons, "neuronId")
 ```
 
 ```{r select-columns}

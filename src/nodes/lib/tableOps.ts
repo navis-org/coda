@@ -704,6 +704,19 @@ function renamesOf(shape: UploadShape): Rename[] {
  * `i64`, so the same file uploaded from two connectomes arrived under two dtypes and would not
  * stack. Keyed on the **output** name rather than on `shape.idColumn`, so a CSV that already
  * has a column called `neuronId` is covered without anyone naming it.
+ *
+ * The name test is `=== ID_COLUMN_NAME` and deliberately **not** `isIdentifierColumn`, which is
+ * the rule the other sniffing seam (`neuprint/decode.ts`, for a Raw Cypher result) uses. Tried
+ * and reverted: the broad rule closes a real gap — an uploaded *edge list* of five-digit
+ * `preId`/`postId` still sniffs `i64` and still will not stack against a connectivity table —
+ * but it pays for it by retyping any `*_id` column in an upload nobody configured, which is
+ * this node's one promise ("leaves the table alone when nothing is configured") and is somebody
+ * else's `cluster_id` changing dtype because of its name.
+ *
+ * The seams differ because their inputs do: a Raw Cypher column is named by an expression the
+ * user wrote against a known backend, where a CSV header is named by whoever exported it. So an
+ * upload widens the column the user *pointed at*, and `textColumns` is how they ask for any
+ * other — which is what that control is for.
  */
 export function uploadShapeSchema(
   schema: TableSchema | undefined,
@@ -723,11 +736,6 @@ export function uploadShapeSchema(
   }
 }
 
-/** Whether this column comes out as text — the schema half's rule, for the value half. */
-function widensToText(shape: UploadShape, from: string, to: string): boolean {
-  return (shape.textColumns ?? []).includes(from) || to === ID_COLUMN_NAME
-}
-
 export function uploadShapeTable(table: TableValue, shape: UploadShape): TableValue {
   const schema = uploadShapeSchema(table.schema, shape)!
   const data: Record<string, ColumnData> = {}
@@ -735,11 +743,19 @@ export function uploadShapeTable(table: TableValue, shape: UploadShape): TableVa
     const from = table.schema.columns[i]!.name
     const to = schema.columns[i]!.name
     const source = getColumn(table, from)
-    // Null is absence and stays absence: `String(null)` is the four-letter word "null", which
-    // would read as a value everywhere downstream.
-    data[to] = widensToText(shape, from, to)
-      ? source.map((cell) => (cell === null ? null : String(cell)))
-      : source
+    /*
+     * Whether this column widened is read off the schema half rather than re-derived: the pair
+     * is `joinLayout`/`relabelLayout`/`qualifyLayout`'s arrangement in this file, and it makes
+     * invariant 3 hold by construction instead of by two functions agreeing about `textColumns`
+     * and the id rule.
+     *
+     * Null is absence and stays absence: `String(null)` is the four-letter word "null", which
+     * would read as a value everywhere downstream.
+     */
+    data[to] =
+      schema.columns[i]!.dtype === 'str' && table.schema.columns[i]!.dtype !== 'str'
+        ? source.map((cell) => (cell === null ? null : String(cell)))
+        : source
   }
   return makeTable(
     schema,

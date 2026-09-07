@@ -17,14 +17,15 @@
  * two is where this directory starts being a grab bag.
  *
  * The caller formats — `pySelection` or `rVector` — because that is the only part that differs
- * between the two languages. Generic in the id type rather than fixed to `string`, because the
- * two `selectionIds` helpers do not agree about it: Python's answers exact decimal *text* for
- * invariant 8's reason, R's answers `number[]`. Reconciling those changes what the R exporter
- * emits and belongs nowhere near a helper about which ids to export.
+ * between the two languages. It *was* generic in the id type, because the two `selectionIds`
+ * helpers did not agree about it: Python's answered exact decimal text for invariant 8's reason
+ * and R's answered `number[]`, and reconciling them was said to belong nowhere near a helper
+ * about which ids to export. They agree now — both answer text, because every id column they are
+ * compared against is `str` — so the generic is a parameter no caller varies.
  */
-export function profileExportPin<Id>(
-  selection: readonly Id[],
+export function profileExportPin(
+  selection: readonly string[],
   groupBy: string | undefined,
-): readonly Id[] | undefined {
+): readonly string[] | undefined {
   return selection.length > 0 && !groupBy ? selection : undefined
 }

@@ -18,24 +18,10 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import { ID_COLUMN_NAME, compareIds, numericIds } from '../../core/ids'
+import { ID_COLUMN_NAME, compareIds, idText, numericIds } from '../../core/ids'
 import type { CellValue } from '../../core/values'
 import { boundsOf, cableLength, makeMatrix, selectRows, tableFromRows } from '../../core/values'
 import { geometryFrame } from '../transforms/spaces'
-
-/**
- * The generated connectome's numeric key, as the text a published id column holds.
- *
- * Written once because this source builds eight tables and every one of them names a neuron:
- * the generator keys everything by a small integer (`byId`, `out`, `in`, `roiCounts`), and the
- * `str` id column is the seam invariant 8 puts between that and everything downstream. Spelled
- * inline at each site, one of the eight would keep a number under a `str` column and nothing
- * would say so until a join silently matched nothing.
- *
- * Deliberately not `idText`: the input here is this module's own `number`, never a cell, so
- * there is no non-integer case to answer for and no null to propagate.
- */
-const publishedId = (neuronId: number): string => String(neuronId)
 import type {
   AdjacencyRequest,
   CoarseGeometry,
@@ -97,6 +83,22 @@ const SYNTHETIC_ROUTE = route(
   'Generated in the browser from the mock connectome, so a graph can be built and run with no ' +
     'network and no credentials. Shaped like a neuron; not one.',
 )
+
+/**
+ * The generated connectome's numeric key, as the text a published id column holds.
+ *
+ * Written once because this source builds eight tables and every one of them names a neuron:
+ * the generator keys everything by a small integer (`byId`, `out`, `in`, `roiCounts`), and the
+ * `str` id column is the seam invariant 8 puts between that and everything downstream. Spelled
+ * inline at each site, one of the eight would keep a number under a `str` column and nothing
+ * would say so until a join silently matched nothing.
+ *
+ * Deliberately not `idText` at these sites: the input is this module's own `number`, never a
+ * cell, so there is no non-integer case to answer for and no null to propagate. Where the id
+ * *is* nullable — `PATH_STEP_SCHEMA`'s `sourceId`/`targetId`, null exactly when the key names a
+ * type — `idText` is the reader, because propagating the null is the whole of what differs.
+ */
+const publishedId = (neuronId: number): string => String(neuronId)
 
 export class MockSource implements DataSource {
   readonly id = 'mock'
@@ -475,10 +477,10 @@ export class MockSource implements DataSource {
           merged.set(mapKey, {
             source: pre.key,
             sourceType: pre.type,
-            sourceId: pre.id === null ? null : publishedId(pre.id),
+            sourceId: idText(pre.id),
             target: post.key,
             targetType: post.type,
-            targetId: post.id === null ? null : publishedId(post.id),
+            targetId: idText(post.id),
             weight: edge.weight,
             pairs: 1,
           })

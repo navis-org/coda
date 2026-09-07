@@ -19,7 +19,7 @@ import { resolveDatasetNames } from '../../../nodes/analysis/compareConnectivity
 import { centralityOptions } from '../../../nodes/analysis/networkCentrality'
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
-import { neuronIds, selectionIds } from './common'
+import { codaIds, neuronIds, selectionIds, selectionIndices } from './common'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { populationCypher } from '../../../data/neuprint/cypher'
 import { schemasFromType } from '../../../nodes/lib/datasetParam'
@@ -995,8 +995,9 @@ registerEmitter('out.dendrogram', (ctx) => {
   const out = ctx.output('out')
   const selected = ctx.output('selected')
   const down = String(ctx.params.orientation ?? 'right') === 'down'
-  // Leaf positions, not names — see the notebook emitter and `out.dendrogram`.
-  const selection = selectionIds(ctx)
+  // Leaf positions, not names — see the notebook emitter and `out.dendrogram`. A different
+  // reader from `selectionIds`, and the type is the point: see `selectionIndices`.
+  const selection = selectionIndices(ctx)
 
   /*
    * The Annotations port. It reaches the *plot* and nothing else — see the notebook emitter for
@@ -1063,18 +1064,10 @@ registerEmitter('out.dendrogram', (ctx) => {
 
   if (selection.length > 0) {
     lines.push(
-      /*
-       * Coda counts observations from 0 and R indexes from 1, so the shift is explicit rather
-       * than left to whoever reads this next.
-       *
-       * `Number(i) + 1`, and the cast is load-bearing: a Linkage selection is a set of **leaf
-       * indices** rather than neuron ids, and `selectionIds` answers exact *text* now because
-       * every other caller compares it against a `character` id column (invariant 8). With `i`
-       * a string, `i + 1` is JavaScript concatenation — it type-checks, and it emitted
-       * `picked_ <- c(01, 21)` for leaves 0 and 2, which is valid R selecting the wrong leaf.
-       * Its Python twin takes `pyLongIntList` for the same reason.
-       */
-      `picked_ <- c(${selection.map((i) => Number(i) + 1).join(', ')})`,
+      // Coda counts observations from 0 and R indexes from 1, so the shift is explicit rather
+      // than left to whoever reads this next. `selectionIndices` is what makes `i + 1`
+      // arithmetic rather than string concatenation — see there.
+      `picked_ <- c(${selection.map((i) => i + 1).join(', ')})`,
       `palette_ <- ${rVector(palette)}`,
       `cl_ <- if (is.null(${out}_clusters)) rep(0L, length(${out}$labels)) else ${out}_clusters`,
       `${selected} <- tibble(`,
@@ -1119,14 +1112,22 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
   if (!neurons) {
     return [
       ...ctx.note(
-        'No neuron table is wired on the canvas, so the labels are read as neuron ids. They stay ' +
-          '`numeric` rather than becoming `integer`: R integers are 32-bit and a neuron id can ' +
-          "exceed that, where a double is exact to 2^53 — which is Coda's own representation.",
+        'No neuron table is wired on the canvas, so the labels are read as neuron ids. Rows that ' +
+          'are not usable ids are dropped, as they are in Coda, and what survives is kept as ' +
+          'character — every Coda id column is text, and an R `numeric` is a double.',
       ),
+      /*
+       * `as.numeric` is the *filter* — how a label that is not an id is found — and `coda_ids`
+       * casts what survives back to text. It used to end there, on the reasoning that a double
+       * is exact to 2^53 "which is Coda's own representation": true when it was written, and
+       * false since every id column became `str` (invariant 8). Left as a double this column
+       * joined against nothing downstream, and rounded a wide id on the way.
+       */
       `${out} <- ${labels} |>`,
       `  mutate(neuronId = suppressWarnings(as.numeric(${col(labelColumn)}))) |>`,
       `  filter(!is.na(neuronId)) |>`,
       `  select(neuronId, everything(), -${col(labelColumn)})`,
+      codaIds(ctx, out, 'neuronId'),
     ]
   }
 

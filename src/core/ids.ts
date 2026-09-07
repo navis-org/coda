@@ -95,25 +95,21 @@ export const ID_COLUMN_NAME = 'neuronId'
  * `nodes/lib/tableOps.ts`, and `src/core` importing `src/nodes` inverts the layering that lets
  * a node registry exist at all.
  *
- * Memoised, because `formatCell` asks it once per *cell*: a 500-row page of ten numeric columns
- * is 5,000 calls per render, each otherwise doing a regex replace, a split and a filter. Keyed
- * on the name because that is the whole input; the set of names in a session is small and
- * bounded, so the map needs no eviction.
+ * Deliberately **not** memoised, which is a change from where it used to live. In `ui/format.ts`
+ * it carried a map because `formatCell` asked it once per *cell* — 5,000 calls for a 500-row page
+ * of ten numeric columns. That caller now goes through `printsExact`, which caches the whole
+ * composition and returns before reaching this, so a map here would be a second cache for the
+ * same question, populated once per name and read almost never. The only other caller is
+ * `inferTableFromCypher`, which asks once per column of a query result.
  */
-const identifierColumns = new Map<string, boolean>()
-
 export function isIdentifierColumn(name: string | undefined): boolean {
   if (!name) return false
-  const cached = identifierColumns.get(name)
-  if (cached !== undefined) return cached
   const words = name
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .split(/[^A-Za-z0-9]+/)
     .filter(Boolean)
   const last = words[words.length - 1]?.toLowerCase()
-  const answer = last === 'id' || last === 'ids'
-  identifierColumns.set(name, answer)
-  return answer
+  return last === 'id' || last === 'ids'
 }
 
 const ID_GRAMMAR = /^-?\d+$/

@@ -15,6 +15,7 @@
  * cross that gap, and it needs the neuron table to do it whenever the labels are not ids.
  */
 
+import { idText } from '../../core/ids'
 import type { TableSchema } from '../../core/types'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { getColumn, makeTable, selectRows } from '../../core/values'
@@ -139,12 +140,24 @@ function labelIndex(labels: TableValue, labelColumn: string): Map<string, number
 /**
  * A cell as a neuron id, or undefined where it cannot be one.
  *
- * The rule `idsFromColumn` applies: an id past the safe range is stored as a *different*
- * integer and would identify a different neuron, so it is not usable rather than merely large.
+ * `idText` plus a digits-only test, and it used to be `Number(cell)` guarded by
+ * `Number.isSafeInteger(value) && value >= 0` — which was two things at once. The sign half is
+ * kept: this reads a *label*, and a negative one is a typo rather than a neuron, which is the
+ * same call `parseIdList` makes about typed text.
+ *
+ * The width half is gone, and that is the change. It dropped every id past the safe range on the
+ * true grounds that `ID_ONLY_SCHEMA` was `i64`, so such an id could only be stored as a
+ * *different* integer — but the schema is `str` now (invariant 8), the id survives intact, and
+ * dropping it would be discarding the exact case the dtype exists for. It also pushed *numbers*
+ * into a column now declaring text, which is invariant 3 broken in the direction nothing checks:
+ * `tableFromRows` validates no cell against its column's dtype.
  */
-function usableId(cell: CellValue | undefined): number | undefined {
-  const value = Number(cell)
-  return Number.isSafeInteger(value) && value >= 0 ? value : undefined
+/** Digits only, `parseIdList`'s rule: a negative label is a typo, most often a `123-456` range. */
+const DIGITS = /^\d+$/
+
+function usableId(cell: CellValue | undefined): string | undefined {
+  const text = idText(cell)
+  return text !== null && DIGITS.test(text) ? text : undefined
 }
 
 export function labelsToNeurons(request: LabelMatchRequest): LabelMatchResult {

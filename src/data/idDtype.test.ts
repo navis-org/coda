@@ -24,13 +24,20 @@
  * `live.test.ts` files are where a server is.
  */
 
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { isIdentifierColumn } from '../core/ids'
 import type { DType, TableSchema } from '../core/types'
 import type { CellValue, TableValue } from '../core/values'
-import { CANONICAL_SCHEMAS, GROUP_TOTALS_SCHEMA, PATH_STEP_SCHEMA } from './source'
-import { SYNAPSE_TOTALS_SCHEMA } from './source'
+import { registerBuiltinSources } from './builtins'
+import {
+  CANONICAL_SCHEMAS,
+  GROUP_TOTALS_SCHEMA,
+  PATH_STEP_SCHEMA,
+  SYNAPSE_TOTALS_SCHEMA,
+  allSources,
+} from './source'
+import type { SourceSchemas } from './source'
 import { CATMAID_SCHEMAS } from './catmaid/schema'
 import { neuronSchemaFor, schemasFor as caveSchemasFor } from './cave/schema'
 import { discoverNeuronSchema, schemasFor as neuprintSchemasFor } from './neuprint/schema'
@@ -60,30 +67,41 @@ function idColumnsOf(schema: TableSchema): Array<{ name: string; dtype: DType }>
   return schema.columns.filter((c) => NEURON_ID_COLUMNS.has(c.name))
 }
 
-/** Every `SourceSchemas` a backend can publish, named so a failure says which. */
+/**
+ * Every `SourceSchemas` a backend can publish, named so a failure says which.
+ *
+ * The registry answers most of it. `registerBuiltinSources` is the one list of the backends —
+ * its own header records what a script registering three of the four cost — so reading
+ * `allSources()` puts a source added later inside this test without anybody remembering, which
+ * is exactly what a hand-written fourth list of the backends does not do.
+ *
+ * The two *discovered* schemas are still built by hand, because they are the interesting ones
+ * and a registered source carries only its default: neuPrint's shape arrives from a dataset's
+ * `neuronProperties`, CAVE's from the annotation kinds a datastack publishes.
+ */
 function everySchema(): Array<[string, TableSchema]> {
-  const named: Array<[string, Record<string, TableSchema>]> = [
-    ['canonical', CANONICAL_SCHEMAS as unknown as Record<string, TableSchema>],
-    [
-      'neuprint',
-      neuprintSchemasFor(discoverNeuronSchema({})) as unknown as Record<string, TableSchema>,
-    ],
-    [
-      'cave',
-      caveSchemasFor(neuronSchemaFor(['cell_type'])) as unknown as Record<string, TableSchema>,
-    ],
-    ['catmaid', CATMAID_SCHEMAS as unknown as Record<string, TableSchema>],
+  const named: Array<[string, SourceSchemas]> = [
+    ['canonical', CANONICAL_SCHEMAS],
+    ['neuprint.discovered', neuprintSchemasFor(discoverNeuronSchema({}))],
+    ['cave.discovered', caveSchemasFor(neuronSchemaFor(['cell_type']))],
+    ...allSources().map((source): [string, SourceSchemas] => [source.id, source.schemas]),
   ]
-  const out: Array<[string, TableSchema]> = []
-  for (const [source, schemas] of named) {
-    for (const [table, schema] of Object.entries(schemas))
-      out.push([`${source}.${table}`, schema])
-  }
-  out.push(['pathStep', PATH_STEP_SCHEMA])
-  out.push(['synapseTotals', SYNAPSE_TOTALS_SCHEMA])
-  out.push(['groupTotals', GROUP_TOTALS_SCHEMA])
-  return out
+  return [
+    ...named.flatMap(([source, schemas]) =>
+      Object.entries(schemas).map(([table, schema]): [string, TableSchema] => [
+        `${source}.${table}`,
+        schema,
+      ]),
+    ),
+    ['pathStep', PATH_STEP_SCHEMA],
+    ['synapseTotals', SYNAPSE_TOTALS_SCHEMA],
+    ['groupTotals', GROUP_TOTALS_SCHEMA],
+  ]
 }
+
+// `allSources()` is empty until something registers them, and `capabilityOf` answers `true` for
+// an unregistered source — so a suite that enumerates backends registers first. See `builtins.ts`.
+registerBuiltinSources({ mockLatencyMs: 0 })
 
 describe('every source declares a neuron id as text', () => {
   it('has no `i64` id column anywhere in a published schema', () => {
@@ -139,18 +157,14 @@ function mismatches(label: string, table: TableValue): string[] {
 
 describe('the values a source actually publishes', () => {
   const dataset = mockDatasetIds()[0]!
-  let source: MockSource
-
-  beforeAll(() => {
-    source = new MockSource({ latencyMs: 0 })
-  })
+  const source = new MockSource({ latencyMs: 0 })
 
   it('matches every declared dtype, on every table the mock can build', async () => {
-    const ids = (await source.findNeurons({ datasetId: dataset, limit: 5 })).data['neuronId']
-    const neuronIds = (ids ?? []).map(String)
+    const neurons = await source.findNeurons({ datasetId: dataset, limit: 5 })
+    const neuronIds = (neurons.data['neuronId'] ?? []).map(String)
 
     const tables: Array<[string, TableValue]> = [
-      ['findNeurons', await source.findNeurons({ datasetId: dataset, limit: 5 })],
+      ['findNeurons', neurons],
       [
         'connectivity',
         await source.fetchConnectivity({ datasetId: dataset, neuronIds, direction: 'outputs' }),

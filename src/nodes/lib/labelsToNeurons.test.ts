@@ -183,7 +183,9 @@ describe('with no neuron table, the labels are ids', () => {
   it('reads them straight off, which is the default NBLAST wiring', () => {
     const out = labelsToNeurons({ labels: byId(), labelColumn: 'label' }).neurons
     expect(out.kind).toBe('neurons')
-    expect(getColumn(out, 'neuronId')).toEqual([722817260, 11])
+    // Text, because `ID_ONLY_SCHEMA` is `str` — see `usableId`, which reads the cell through
+    // `idText` rather than `Number` so the column and its declared dtype agree.
+    expect(getColumn(out, 'neuronId')).toEqual(['722817260', '11'])
     expect(getColumn(out, 'cluster')).toEqual([1, 2])
   })
 
@@ -204,17 +206,28 @@ describe('with no neuron table, the labels are ids', () => {
       { label: '11' },
     ])
     const result = labelsToNeurons({ labels: types, labelColumn: 'label' })
-    expect(getColumn(result.neurons, 'neuronId')).toEqual([11])
+    expect(getColumn(result.neurons, 'neuronId')).toEqual(['11'])
     expect(result.dropped).toBe(1)
     expect(result.matched).toBe(1)
   })
 
-  it('drops an id too big to be exact rather than identifying a different neuron', () => {
-    // 2^53 and beyond is stored as a different integer — the rule `idList.ts` refuses on.
-    const big = tableFromRows(tableSchema(column('label', 'str')), [
-      { label: '9007199254740993' },
+  it('keeps an id too big to be exact as a double, rather than dropping it', () => {
+    /*
+     * This asserted the opposite: past 2^53 an id is stored as a *different* integer, so it was
+     * dropped rather than made to name the wrong neuron — the rule `idList.ts` refuses on.
+     *
+     * That was a fact about the column, not about the id. `ID_ONLY_SCHEMA` is `str` now
+     * (invariant 8), so the digits survive intact and dropping them would discard exactly the
+     * case the dtype exists for — an 18-digit FlyWire root id is the ordinary input here.
+     */
+    const wide = tableFromRows(tableSchema(column('label', 'str')), [
+      { label: '720575940379279312' },
     ])
-    expect(labelsToNeurons({ labels: big, labelColumn: 'label' }).dropped).toBe(1)
+    const result = labelsToNeurons({ labels: wide, labelColumn: 'label' })
+    expect(result.dropped).toBe(0)
+    // As text, never against a numeric literal: `toEqual([720575940379279312])` would compare
+    // with the rounded value and pass for the wrong reason.
+    expect(getColumn(result.neurons, 'neuronId')).toEqual(['720575940379279312'])
   })
 })
 
