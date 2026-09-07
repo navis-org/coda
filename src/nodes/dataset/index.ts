@@ -30,6 +30,7 @@ import {
   sourceIdForServer,
 } from '../../data/neuprint/servers'
 import type { DatasetFamily } from '../lib/datasetFamilies'
+import { datasetChainNote } from '../lib/annotationChain'
 import {
   BACKENDS,
   DATASET_FAMILIES,
@@ -92,6 +93,7 @@ function buildDatasetNode(family: DatasetFamily) {
     label: familyLabel(family),
     category: 'dataset',
     description: family.description,
+    catalogueNote: datasetChainNote(family.annotationChain),
     guide: family.guide,
     ...(family.synthetic ? {} : { companion: DESCRIPTION_COMPANION }),
     // Cheap: it only resolves metadata, so switching version updates every downstream column

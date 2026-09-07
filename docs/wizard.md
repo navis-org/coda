@@ -216,6 +216,29 @@ under the **deepest row** rather than at a fixed height — derived from the row
 placed at, because the fixed one had been chosen when every chain was a single row and the paths
 query's second head landed straight on it.
 
+## A dataset that needs a chain in front of it
+
+`buildWorkflow` opens with the dataset node and whatever the first answer chose. For a family
+declaring `DatasetFamily.annotationChain` it now also builds that chain into the `annotations`
+port — because a CAVE datastack keeps its cell typing in a table, so every wizard workflow on
+FlyWire or BANC used to open on a list of eighteen-digit root ids while `New ▸ …`, built from the
+*same declarations*, opened them fully typed. FlyWire's six cards arrive folded into one frame;
+BANC's single card does not, which is `foldChain`'s rule rather than this file's.
+
+Its rows come from `ChainNode.row` and its columns from `chainGrid`, so the two arms cannot end up
+transposed here relative to the starter — which is what happened when this file derived a row from
+the list index. The negative columns are only a starting arrangement: a generated workflow asks the
+canvas for one ELK pass on arrival, and that is what decides where any of it sits.
+
+The Browse head is pointed at `chain.tagColumn`, or the wizard builds the fold and the Join and
+then draws no tag row — half the chain's second arm doing nothing visible. It follows the chain
+that was *built*, never the family's, so a demo build does not name a column nothing produces.
+
+`BuildOptions.annotationChain: false` is what the node guide's demo links pass on the **append**
+branch — see [datasets.md](datasets.md) for the failure that forced it, which is about cost rather
+than correctness and which no inference score can see, and for why the containment branch (a
+dataset node demoing on itself) wants the opposite.
+
 ## The arrange is a request, not a layout
 
 `buildWorkflow` places its cards as a row of columns — column index times `COL_WIDTH`, plus the

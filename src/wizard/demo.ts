@@ -157,7 +157,7 @@ export function demoGraph(type: string, plan?: DemoPlanRef): CodaGraph | undefin
  */
 function replay(type: string, plan: DemoPlanRef): CodaGraph | undefined {
   const def = getNodeDef(type)
-  const graph = def && workflow(plan)
+  const graph = def && workflow(plan, ownDataset(type, plan.dataset))
   if (!graph) return undefined
   if (plan.rank === undefined) {
     return graph.nodes.some((node) => node.type === type) ? graph : undefined
@@ -191,7 +191,7 @@ function search(
   const own = familyForNodeType(type)?.key
   const held = contains(type, own ? [own, ...buildable] : buildable)
   if (held) {
-    const graph = workflow(held)
+    const graph = workflow(held, ownDataset(type, held.dataset))
     if (graph) return { plan: held, graph }
   }
   return bestAppend(def, scorable)
@@ -420,26 +420,58 @@ const plansFor = keyed((dataset: string): DemoPlan[] => {
  * validator that must agree.
  */
 const workflowFor = keyed((key: string): CodaGraph | undefined => {
-  const [dataset = '', analysis = '', view = ''] = key.split('/')
+  const [dataset = '', analysis = '', view = '', chained = ''] = key.split('/')
   const offers = plansFor(dataset).find(
     (candidate) => candidate.analysis === analysis && candidate.view === view,
   )
   if (!offers) return undefined
-  return buildWorkflow({
-    dataset,
-    start: demoStart(dataset),
-    analysis: offers.analysis,
-    visualisations: [offers.view],
-    // Notes on: a demo is read before it is run, and the wizard's own sentences are what say
-    // which card is doing what. The same choice `demoWorkflow` makes for the tour.
-    notes: true,
-    // A canvas graph, not a dashboard: the point is the chain, and a grid hides the wiring.
-    dashboard: false,
-  })
+  return buildWorkflow(
+    {
+      dataset,
+      start: demoStart(dataset),
+      analysis: offers.analysis,
+      visualisations: [offers.view],
+      // Notes on: a demo is read before it is run, and the wizard's own sentences are what say
+      // which card is doing what. The same choice `demoWorkflow` makes for the tour.
+      notes: true,
+      // A canvas graph, not a dashboard: the point is the chain, and a grid hides the wiring.
+      dashboard: false,
+    },
+    {
+      /*
+       * Without the dataset's annotation preamble. A demo is about *one node*, and a family that
+       * declares a chain would otherwise hand every link landing on it a large download and a
+       * credential prompt — see `BuildOptions`. It also un-rigs the search: six more cards are
+       * six more ports to find a clean fit on, so the best-typed candidate for `core.filterTable`
+       * — a node with nothing to do with FlyWire — was becoming a FlyWire workflow.
+       */
+      annotationChain: chained === 'chain',
+    },
+  )
 })
 
-function workflow(plan: DemoPlanRef): CodaGraph | undefined {
-  return workflowFor(`${plan.dataset}/${plan.analysis}/${plan.view}`)
+/**
+ * One workflow, with or without its dataset's annotation chain.
+ *
+ * **A dataset node demos on itself, and there the chain is the point.** `demo.ts`'s own rule is
+ * that the graph which opens is the one the wizard would have produced had somebody answered its
+ * first question that way — so turning the chain off everywhere made `dataset.flywire`'s link
+ * open a bare card, on the very page whose prose says the wizard opens this dataset with the
+ * full setup in front of it. A page contradicting its own demo link.
+ *
+ * Everywhere else it is off, and the reason is in `BuildOptions`: the append search ranks by
+ * inference issues, six more cards are six more ports to fit cleanly on, and a node with nothing
+ * to do with FlyWire was being drawn into a workflow that costs a credential and three large
+ * fetches. That argument is about the *append* branch; on the containment branch the node has
+ * everything to do with it.
+ */
+function workflow(plan: DemoPlanRef, chained = false): CodaGraph | undefined {
+  return workflowFor(`${plan.dataset}/${plan.analysis}/${plan.view}/${chained ? 'chain' : ''}`)
+}
+
+/** Whether this type is the dataset node of the family the plan opens on. */
+function ownDataset(type: string, dataset: string): boolean {
+  return familyForNodeType(type)?.key === dataset
 }
 
 /**

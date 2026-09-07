@@ -784,6 +784,25 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
   /** One line, sized for a palette row and the node browser. Kept terse on purpose. */
   description?: string
   /**
+   * A fact about this node *type* that the catalogue cannot derive, for the assistant.
+   *
+   * `ParamBase.catalogueNote`'s sibling, and it was missing for the same reason that one exists:
+   * everything the catalogue prints is generated from the registry, so a fact with nowhere to be
+   * declared is a fact the model never learns. The param-level one carries closed vocabularies
+   * (`operatorVocabulary()`, `filtersNote()`); this one carries what a node *needs around it*.
+   *
+   * **Generated, never transcribed.** The one use today is `datasetChainNote`, which renders
+   * `DatasetFamily.annotationChain` — the same declaration the starter graph and the Workflow
+   * Wizard build — so a chain that changes cannot leave a catalogue line describing the old one.
+   * A hand-written sentence here is a second list of what the nodes are, which this file's
+   * catalogue header forbids.
+   *
+   * Rendered at `lean` as well as `full`: it is a fact a plan can be wrong about, not what a
+   * setting means.
+   */
+  catalogueNote?: string
+
+  /**
    * Two or three sentences for the node guide (`nodes.html`) — what the node is for, what it
    * hands on, and the one thing that surprises people about it.
    *

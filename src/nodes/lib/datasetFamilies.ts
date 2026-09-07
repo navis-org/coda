@@ -19,6 +19,9 @@
  */
 
 import type { PopulationFilter } from '../../core/types'
+import type { AnnotationChain } from './annotationChain'
+import { ID_COLUMN_NAME } from '../../core/ids'
+import { aggColumnName } from './tableOps'
 import type { DatasetInfo } from '../../data/source'
 /*
  * `backendOf` used to live here and now lives beside the source registry that mints these ids,
@@ -223,6 +226,16 @@ export interface DatasetFamily {
    * `absentMeans` is what keeps that true for a graph saved before the boxes existed.
    */
   population?: readonly PopulationFilter[]
+  /**
+   * The nodes this family needs in front of it before its neurons have names.
+   *
+   * Declared here rather than in whichever builder needed it first, because three surfaces read
+   * it and they had already diverged into one: the starter graph built the chain, the Workflow
+   * Wizard opened on a bare dataset node — a list of root ids — and the assistant's catalogue,
+   * being generated from the registry, could not know it existed. See
+   * `nodes/lib/annotationChain.ts`, which also has why it is not folded into the node itself.
+   */
+  annotationChain?: AnnotationChain
   synthetic?: boolean
   /**
    * Whether this family is offered as a *starting point*. Absent means yes.
@@ -401,6 +414,146 @@ const MOCK_FAMILIES: DatasetFamily[] = [
  * name — `flywire_fafb_public:783` — and it needs no new control: `compareVersions` orders bare
  * integers correctly, so the existing dropdown reads `Latest (783)` and a pinned 630 stays 630.
  */
+/**
+ * FlyWire's published cell typing, as a URL.
+ *
+ * `raw.githubusercontent.com` rather than the `github.com/.../raw/...` address the repository's
+ * own UI hands you: that one answers `302` with an **empty** `access-control-allow-origin`, and
+ * a browser CORS-checks every hop of a redirect chain, so it never reaches the host that would
+ * have allowed it. The target answers `200` with `*` and gzips. See `core.tableFromUrl`.
+ */
+const FLYWIRE_ANNOTATIONS =
+  'https://raw.githubusercontent.com/flyconnectome/flywire_annotations/main/supplemental_files/Supplemental_file1_neuron_annotations.tsv'
+
+/** The column of `neuron_information_v2` holding the free-form text. */
+const TAG_SOURCE_COLUMN = 'tag'
+
+/**
+ * How the tags are folded, hoisted for `TAG_SOURCE_COLUMN`'s reason.
+ *
+ * `groupByTable` writes `<agg>_<column>`, so `tagColumn` below is derived from both halves. Left
+ * as two literals, changing the aggregation would leave `tagColumn` still saying `join_tag` —
+ * and a wrong `Additional tags` does not fail, it just draws no tag row.
+ */
+const TAG_AGG = 'join'
+
+/**
+ * What FlyWire needs in front of it, and why each step is there.
+ *
+ *   Table from URL ▸ Combine Columns ▸ Update root IDs ──────────┐
+ *                                                                ├─▸ Join ─▸ Dataset
+ *   CAVE table (neuron_information_v2) ▸ Group By (join text) ───┘        ▸ Annotations
+ *
+ * Two sources answering two different questions about one neuron: structured fields down the
+ * top, free-form community text along the bottom. Each step is there for a reason somebody would
+ * otherwise have to discover:
+ *
+ *  - **Combine Columns** because the type has to arrive in a column *called* `type` before
+ *    anything reads it in words: the connectivity tables, Explore's chips and Profile's roll-ups
+ *    all address it by literal name — see `annotationColumn`. Which columns feed it is a call
+ *    about **nomenclature** rather than coverage, and the file says so: `cell_type` covers
+ *    137,720 of 139,248 neurons, `hemibrain_type` 33,271, and only *two* neurons have the second
+ *    without the first.
+ *  - **Update root IDs** because the published file is a snapshot and a root id is retired by any
+ *    proofreading edit; without it the rows whose ids have moved on join to nothing, and the
+ *    dataset merely reads as under-annotated.
+ *  - **Group By, folding `tag` with `join text`**, because `neuron_information_v2` is one row per
+ *    (neuron, tag) and every way of consuming it downstream wants one row per neuron. It is not a
+ *    tidy-up: `joinTables` takes the **first** matching row for a repeated key — deliberately, so
+ *    a many-to-many join cannot multiply the table being annotated — so without this fold a
+ *    neuron carrying eight community tags would show exactly one of them, with nothing saying so.
+ *  - **The Join rather than an annotation chain**, because a chain makes the later source *win* a
+ *    collision rather than sit beside it. `left`, so a neuron nobody has tagged still comes
+ *    through.
+ *  - **`Columns: pt_root_id, tag`** on the CAVE table, because everything else in
+ *    `neuron_information_v2` is bookkeeping — a point, a supervoxel, a user id, a timestamp —
+ *    that would arrive in every neuron table and in every column picker downstream.
+ *
+ * The datastack's *own* `hierarchical_neuron_annotations` is a by-now outdated cut of the first
+ * of these two, which is why this is not simply left to the backend.
+ */
+const FLYWIRE_CHAIN: AnnotationChain = {
+  nodes: [
+    {
+      id: 'annotations',
+      type: 'core.tableFromUrl',
+      params: { url: FLYWIRE_ANNOTATIONS, idColumn: 'root_id' },
+    },
+    {
+      id: 'combine',
+      type: 'core.combineColumns',
+      params: { columns: ['cell_type', 'hemibrain_type'] },
+    },
+    { id: 'repair', type: 'cave.updateRootIds' },
+    {
+      id: 'tags',
+      type: 'annotation.caveTable',
+      row: 1,
+      params: { table: 'neuron_information_v2', columns: `pt_root_id, ${TAG_SOURCE_COLUMN}` },
+    },
+    {
+      id: 'foldTags',
+      type: 'core.groupBy',
+      row: 1,
+      params: { by: [ID_COLUMN_NAME], agg: TAG_AGG, value: [TAG_SOURCE_COLUMN] },
+    },
+    { id: 'join', type: 'core.join', row: 1, params: { leftKey: ID_COLUMN_NAME } },
+  ],
+  links: [
+    ['annotations', 'out', 'combine', 'in'],
+    ['combine', 'out', 'repair', 'in'],
+    ['tags', 'annotations', 'foldTags', 'in'],
+    ['repair', 'out', 'join', 'left'],
+    ['foldTags', 'out', 'join', 'right'],
+  ],
+  datasetRefs: ['repair', 'tags'],
+  output: { id: 'join', port: 'out' },
+  tagColumn: aggColumnName(TAG_AGG, TAG_SOURCE_COLUMN),
+  title: 'FlyWire annotations',
+  why:
+    'This datastack publishes its own cell typing, and it is an outdated cut: the current ' +
+    'hierarchical annotations are a file in the flywire_annotations repository, and the ' +
+    'community annotations are a separate CAVE table.',
+}
+
+/**
+ * What BANC needs in front of it: one card, for the same reason FlyWire needs six.
+ *
+ *   CAVE table (codex_annotations, pivoted) ─▸ Dataset ▸ Annotations
+ *
+ * A CAVE datastack keeps its cell typing in a table rather than on the neuron, so the generic
+ * four nodes open on a list of eighteen-digit root ids. BANC's are already *in* the datastack —
+ * which is the whole difference from FlyWire, whose current annotations are a file published
+ * elsewhere and whose community tags are a second table — so this is one lookup rather than two
+ * sources meeting at a join.
+ *
+ * `codex_annotations` is **long-format**, one row per (neuron, kind, value), which `Pivot on`
+ * folds into a column per kind. Without that the table arrives with a `classification_system`
+ * column and a `cell_type` column holding every kind's value in turn, and nothing downstream can
+ * address a cell type by name.
+ */
+const BANC_CHAIN: AnnotationChain = {
+  nodes: [
+    {
+      id: 'annotations',
+      type: 'annotation.caveTable',
+      params: {
+        table: 'codex_annotations',
+        pivotOn: 'classification_system',
+        valueColumn: 'cell_type',
+      },
+    },
+  ],
+  links: [],
+  datasetRefs: ['annotations'],
+  output: { id: 'annotations', port: 'annotations' },
+  title: 'BANC annotations',
+  why:
+    'This datastack keeps its cell typing in a CAVE table rather than on the neuron, so on its ' +
+    'own it answers with root ids and no names. The table is long-format — one row per (neuron, ' +
+    'kind, value) — so it has to be pivoted into a column per kind.',
+}
+
 const CAVE_FAMILIES: DatasetFamily[] = [
   {
     key: 'flywire',
@@ -412,6 +565,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     guide:
       'Public FlyWire segmentation read through CAVE, so version is a materialization number. Cell annotations download once per dataset and search locally—first query waits, rest are instant. Meshes, synapses and skeletons work, the skeletons only on materialization 783, which is the one that publishes them. Paths and per-region counts do not; nodes that need them decline rather than fail.',
     glyph: 'fly_brain',
+    annotationChain: FLYWIRE_CHAIN,
     /*
      * Python only. `caveclient` is a faithful route in — the dataset cell is a real `CAVEclient`
      * pinned to the materialization the node resolved — where R's would be `fafbseg`, which wraps
@@ -429,6 +583,7 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     guide:
       'The public BANC segmentation read through CAVE. It exposes the full brain-and-nerve-cord volume, and the neuron table is the public cell list published alongside the stack.',
     glyph: 'fly_cns',
+    annotationChain: BANC_CHAIN,
     notebook: { python: 'caveclient' },
   },
   {

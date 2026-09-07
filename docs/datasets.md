@@ -553,6 +553,75 @@ connects it: the auto-wire lands first and `addEdge` evicts it if the drag was a
 socket, so the two agree by construction. A drag from a _table_ output onto, say, Connectivity
 now fills both of its inputs at once.
 
+## The chain a dataset needs in front of it
+
+A neuPrint dataset carries its cell typing as properties on the neuron, so `Dataset ▸ Explore` is
+a browser you can read. A CAVE datastack does not: the labels live in a table, and browsing
+FlyWire without an annotation chain is browsing a list of eighteen-digit root ids.
+
+That chain — six cards, two rows meeting at a Join — was written once, as `examples/starters.ts`'
+bespoke FlyWire starter, **and stayed there**. So the same dataset answered the same question two
+ways depending on which menu you came through: `New ▸ FlyWire FAFB` opened it fully typed, the
+Workflow Wizard opened it on root ids, and the assistant — whose catalogue is generated from the
+registry — could not know the chain existed at all and emitted a lone dataset node every time.
+
+It is now `DatasetFamily.annotationChain` (`nodes/lib/annotationChain.ts`): which nodes, which
+params, which wires, which port takes the dataset as a reference, and which column the fold
+produces. Having **two** members is what keeps the mechanism honest — the tests are asked of every
+family that declares one, so a rule that happens to hold only for the six-card version fails in the
+suite rather than in a browser, and `foldChain` grew its one-card rule (a frame around a single
+node hides nothing and costs a click) because BANC arrived and asked for it. **Only the origin and the step belong to the builder.** That line was first drawn in the wrong
+place: "placement" was left to each of them, and both promptly invented structure the declaration
+knew and did not state — the starter keyed absolute coordinates on the chain's internal ids with a
+fallback that stacked an unmatched card on top of another, and the wizard derived a row from the
+list index, which fills column-major and *interleaves the two arms*, the transpose of what its own
+comment claimed. A row is a fact about the chain (a structured source down the top, a free-form one
+along the bottom, meeting at a join); an origin and a step are facts about a canvas. So `ChainNode`
+carries `row`, `chainGrid` derives the column, and each builder supplies two numbers. `chainLinks`
+and `foldChain` went the same way, for the same reason: how a chain *attaches* — the two reference
+edges, the output wire — and that it folds are not placement either, and were written out twice.
+
+Four things worth keeping.
+
+**The catalogue note is generated from it, not written beside it.** `datasetChainNote` renders the
+declaration into `NodeDefinition.catalogueNote` — the sibling `ParamBase.catalogueNote` had been
+missing, and for the same reason that one exists: everything the assistant is told is derived from
+the registry, so a fact with nowhere to be declared is a fact the model never learns. Measured on
+`gemma4:31b-cloud`, five runs each side: **0/5 → 5/5 on FlyWire, and 0/5 → 5/5 on BANC** — the
+one-card chain is not the easy case it looks like, since without the note the model never reaches
+for `annotation.caveTable` at all. A first draft wrote the chain as
+prose — *"wired in that order"* — which is wrong, because this is not an order but two rows meeting
+at a join; generating from `links` is what makes that impossible to get wrong twice.
+
+**It is deliberately not baked into the node.** Two of FlyWire's six are `expensive` — one fetches
+a third-party file from GitHub, one does a supervoxel lookup per neuron — and a third reads a CAVE
+table of about a million rows. A dataset node doing all that with nothing on the canvas to say so
+is un-inspectable and un-switchable, which is the opposite of what a node-graph editor is for.
+Folded into one frame it buys the same first screen while hiding nothing.
+
+**A demo build leaves it off — except where the demoed node *is* the dataset**, and both halves
+were found by a test rather than by reasoning. The node guide's demo links rank candidate
+workflows by inference issues, and a FlyWire workflow carrying its chain is genuinely better typed
+than a synthetic one: six more cards are six more ports to find a clean fit on. So
+`core.filterTable`'s "Open in a workflow" link silently moved to FlyWire, where opening it
+downloads a 139k-row file, reads that million-row table, and asks for a CAVE token, to demonstrate
+*filtering a table*. Scoring cannot see that, because cost is not an inference issue;
+`BuildOptions.annotationChain` is the narrowing, and it is the same narrowing `demo.ts` already
+makes on the other axis with `scorable`.
+
+**Turning it off everywhere was wrong in the other direction**, though, and the page that catches
+it is the one this same work edited: `demo.ts`'s own rule is that a dataset node's demo is the
+graph the wizard would have produced had somebody answered its first question that way, so
+`dataset.flywire`'s link opened a bare card beside prose saying the wizard opens this dataset with
+the full setup in front of it. The argument for leaving the chain off belongs to the **append**
+branch, where the node has nothing to do with FlyWire; on the **containment** branch it has
+everything to do with it. `ownDataset` is the one predicate, and `workflowFor`'s memo key carries
+the flag so one builder serves both.
+
+**The reason lives on the chain**, as `AnnotationChain.why`. A note saying the built-in typing is
+stale, beside a chain that no longer fetches the replacement, is exactly the drift the shared
+declaration exists to stop.
+
 ## Starter graphs, and the one that is not the generic shape
 
 `examples/starters.ts` — what `New ▸ <dataset>` and the start page's dataset rail both build,

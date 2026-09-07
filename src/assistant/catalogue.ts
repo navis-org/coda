@@ -445,6 +445,10 @@ function renderNode(def: NodeDefinition, detail: CatalogueDetail): string {
 
   lines.push(...producerLines(inputs))
   lines.push(...producedColumns(def))
+  // See `NodeDefinition.catalogueNote`: what this node needs *around* it, which nothing else
+  // printed here can say. After the ports and columns, in the line-per-fact block the rules
+  // teach the model to read.
+  if (def.catalogueNote) lines.push(`note: ${def.catalogueNote}`)
 
   const params = plannableParams(def)
   if (params.length) {

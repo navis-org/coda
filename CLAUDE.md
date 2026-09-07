@@ -808,6 +808,41 @@ Area-specific — the rule, then the doc that holds why:
   implementations are pinned against the same three members by `pnpm probe:helpers` and
   `pnpm probe:r-helpers`. A grouped emit **widens a pin to the whole table**, since a pin under a
   grouping is one group's members. See [docs/widgets.md](docs/widgets.md).
+- **A dataset that keeps its cell typing in a table needs a chain in front of it, and that chain is
+  a declaration rather than a graph.** A neuPrint neuron carries its type as a property; a CAVE
+  datastack does not, so browsing FlyWire without one is browsing eighteen-digit root ids. **Two
+  families need one and they differ by a factor of six** — BANC's Codex annotations are already in
+  the datastack, so one pivoted CAVE table does it; FlyWire's current annotations are a file
+  published elsewhere and its community tags a second table, so six cards in two arms meet at a
+  Join. Both were written once as `examples/starters.ts`' bespoke starters and **stayed there**, so
+  one dataset answered one question two ways depending on the menu you came through: `New ▸ FlyWire`
+  opened it typed, the Workflow Wizard opened it on root ids, and the assistant — catalogue
+  generated from the registry — could not know the chain existed and emitted a lone dataset node
+  every time. `DatasetFamily.annotationChain` is now the one declaration and **only the origin and
+  the step belong to the builder** — that line was first drawn at "placement", and both builders
+  promptly invented structure the declaration knew and did not state, the wizard's version filling
+  column-major and *interleaving the two arms*. A row is a fact about the chain, a step is a fact
+  about a canvas; `chainGrid`, `chainLinks` and `foldChain` are where the rest lives, since how a
+  chain attaches and that it folds are not placement either. Four rules. The catalogue note is **generated** from it
+  (`datasetChainNote` into `NodeDefinition.catalogueNote`, the sibling `ParamBase.catalogueNote`
+  had been missing): **0/5 → 5/5** on `gemma4:31b-cloud`, on *both* families — a one-card chain is
+  not the easy case it looks, since without the note the model never reaches for the table at all, and a prose draft saying *"wired in that
+  order"* was wrong, this being two rows meeting at a join rather than an order — rendering from
+  `links` is what stops that twice. Two members is also what keeps it honest — the tests are asked of every family
+  declaring one, and `foldChain`'s "a single card is left unfolded" rule exists because BANC asked
+  for it. It is **not baked into the node**: two of FlyWire's six are `expensive` and a third reads
+  a ~1M-row table, so a dataset node doing that silently is
+  un-inspectable, where folded into a frame it buys the same first screen hiding nothing. **A demo
+  build leaves it off, except where the demoed node *is* the dataset** — both halves found by a
+  test. The node guide ranks candidate workflows by inference issues, six more cards are six more
+  ports to fit cleanly on, so `core.filterTable`'s demo link silently moved to FlyWire — a 139k-row
+  download, that million-row table and a token prompt, to demonstrate filtering a table; cost is not
+  an inference issue. But off *everywhere* is wrong the other way, since a dataset node's demo is
+  the graph the wizard would have built, so `dataset.flywire` opened a bare card beside prose saying
+  otherwise. The argument belongs to the **append** branch, not the containment one (`ownDataset`).
+  And **the reason lives on the chain** (`AnnotationChain.why`), or a note saying the built-in
+  typing is stale outlives the chain that replaced it. See [docs/datasets.md](docs/datasets.md)
+  and [docs/wizard.md](docs/wizard.md).
 - **A dataset-level filter is not a filter row, the row wins, and the filters OR.** The population
   checkboxes on a neuPrint dataset node are **OR-ed** — a second ticked box lets *more* rows through.
   `typed` matches column names **ending** in `type`. `findNeuronsCypher` drops the `traced` disjunct

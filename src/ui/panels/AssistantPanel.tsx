@@ -382,9 +382,7 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
               <Toggle
                 label="Let the model reason"
                 hint={
-                  'Slower, often by a lot — one measured question took 254s with reasoning and ' +
-                  '49s without, for plans that were as good. Turn it on if a request comes back ' +
-                  'wrong.'
+                  'Slower, especially on local models. Turn it on if a request comes back wrong.'
                 }
                 checked={think}
                 onChange={(next) => setThinking(getProviderId(), next)}

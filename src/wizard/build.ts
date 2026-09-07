@@ -52,6 +52,8 @@ import { ID_COLUMN_NAME } from '../core/ids'
 import { encodeRows } from '../data/filterRows'
 import { inputPorts } from '../core/ports'
 import { getNodeDef } from '../core/registry'
+import type { AnnotationChain } from '../nodes/lib/annotationChain'
+import { chainGrid, chainLinks, chainWidth, foldChain } from '../nodes/lib/annotationChain'
 import type { AnalysisId, VisualisationId, WizardAnswers, WizardHint } from './options'
 import {
   VIEWS,
@@ -160,7 +162,28 @@ const EXPLORE_SHIFT = Math.max(
  * doing and it is wanted — a starter, an example and a hand-added node all open with the credit
  * card, and a wizard has no better claim to be the exception.
  */
-export function buildWorkflow(answers: WizardAnswers): CodaGraph {
+/**
+ * What a caller other than the wizard needs to turn off.
+ *
+ * One member, and it exists because of a failure the type system cannot see. The node guide's
+ * demo links search for the workflow that best *demonstrates* a node, ranking candidates by
+ * inference issues — and a FlyWire workflow carrying its annotation chain is genuinely better
+ * typed than a synthetic one, because six more cards mean six more ports for the search to find
+ * a clean fit on. So `core.filterTable`'s "Open in a workflow" link silently moved from the
+ * synthetic dataset to FlyWire, where opening it downloads a 139k-row file from GitHub, reads a
+ * CAVE table of about a million rows, does a supervoxel lookup per neuron, and asks for a token
+ * — for a demo of *filtering a table*.
+ *
+ * Scoring cannot know that, because cost is not an inference issue. `demo.ts` already narrows
+ * this search once for a neighbouring reason (`scorable`, because `inferGraph` peeks); this is
+ * the same narrowing on the other axis.
+ */
+export interface BuildOptions {
+  /** `false` to leave off `DatasetFamily.annotationChain`. Absent means build it. */
+  annotationChain?: boolean
+}
+
+export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}): CodaGraph {
   const family = datasetFamily(answers.dataset)
   const synthetic = Boolean(family?.synthetic)
   const shift = answers.start === 'browse' ? EXPLORE_SHIFT : 0
@@ -168,8 +191,39 @@ export function buildWorkflow(answers: WizardAnswers): CodaGraph {
   const nodes: Placement[] = [{ id: 'ds', type: `dataset.${answers.dataset}`, col: 0 }]
   const links: Link[] = []
 
+  /*
+   * What this dataset needs in front of it before its neurons have names.
+   *
+   * `DatasetFamily.annotationChain`, which the starter graph also builds — one declaration, two
+   * builders, because the wizard opened every FlyWire workflow on a list of eighteen-digit root
+   * ids while `New ▸ FlyWire FAFB` opened the same dataset fully typed. That is the same graph
+   * answering the same question two ways depending on which menu you came through.
+   *
+   * Placed in the columns *before* the dataset, and folded, for the reason the starter folds it:
+   * six cards of plumbing that has to be right and never has to be touched are the biggest thing
+   * on the canvas and none of them is what the reader asked the wizard for. The negative columns
+   * are only a starting arrangement — a generated workflow asks the canvas for one ELK pass on
+   * arrival, and that is what decides where any of this actually sits.
+   */
+  const chain = options.annotationChain === false ? undefined : family?.annotationChain
+  if (chain) {
+    const width = chainWidth(chain)
+    for (const cell of chainGrid(chain)) {
+      nodes.push({
+        id: cell.node.id,
+        type: cell.node.type,
+        // Right-to-left from the dataset at column 0, so the last card of the widest row is the
+        // one beside it. The row is the chain's own (`ChainNode.row`), not this file's guess.
+        col: cell.col - width,
+        row: cell.row,
+        ...(cell.node.params ? { params: cell.node.params } : {}),
+      })
+    }
+    links.push(...chainLinks(chain, 'ds'))
+  }
+
   // --- the head: whichever way the neurons are chosen ------------------------
-  const head = headOf(answers, synthetic)
+  const head = headOf(answers, synthetic, 1, chain)
   nodes.push(head.node)
   links.push(...head.links)
 
@@ -178,7 +232,7 @@ export function buildWorkflow(answers: WizardAnswers): CodaGraph {
    * inside the arm because it is a *head*: which card it is, and whether its search is capped,
    * are the first question's answers and not the third's.
    */
-  const target = answers.analysis === 'paths' ? headOf(answers, synthetic, 2) : undefined
+  const target = answers.analysis === 'paths' ? headOf(answers, synthetic, 2, chain) : undefined
   if (target) {
     nodes.push(target.node)
     links.push(...target.links)
@@ -224,11 +278,8 @@ export function buildWorkflow(answers: WizardAnswers): CodaGraph {
     dock(body.viewId, visualisationOption(answers.visualisations[0] ?? 'table')?.hint)
   }
 
-  return dashboardFor(
-    assemble(answers, nodes, overview, links, shift, hints),
-    answers,
-    head.node.id,
-  )
+  const graph = assemble(answers, nodes, overview, links, shift, hints)
+  return dashboardFor(chain ? foldChain(graph, chain) : graph, answers, head.node.id)
 }
 
 /**
@@ -311,12 +362,26 @@ function headOf(
   synthetic: boolean,
   /** `2` for the second head of a paths query — see `PATHS_ROW`. Ids gain the suffix. */
   which = 1,
+  /** The chain actually being built, or undefined — never the family's, see `BuildOptions`. */
+  chain?: AnnotationChain | undefined,
 ): { node: Placement; port: [string, string]; links: Link[] } {
   const id = (base: string) => (which === 1 ? base : `${base}${which}`)
   const row = which === 1 ? 0 : PATHS_ROW
   if (answers.start === 'browse') {
+    /*
+     * `Additional tags`, where the dataset's chain folds community text into a column of its own.
+     * Without it the wizard built `foldTags` and the Join and then drew no tag row — half the
+     * chain's second arm doing nothing visible, which is the failure `AnnotationChain.tagColumn`
+     * exists to stop and which the starter had always avoided by setting this by hand.
+     */
     return {
-      node: { id: id('explore'), type: 'neuron.explore', col: 1, row },
+      node: {
+        id: id('explore'),
+        type: 'neuron.explore',
+        col: 1,
+        row,
+        ...(chain?.tagColumn ? { params: { tagColumn: chain.tagColumn } } : {}),
+      },
       // `selected`, not `hits`: an empty search is the whole dataset, and a workflow whose first
       // Run pushes 165,000 rows into a viewer teaches the wrong thing about what to wire.
       port: [id('explore'), 'selected'],

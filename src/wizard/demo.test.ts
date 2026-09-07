@@ -19,6 +19,8 @@ import { getNodeDef, listableNodeDefs } from '../core/registry'
 import { serializeGraph, deserializeGraph, type CodaGraph } from '../core/graph'
 import { demoFragment, parseShareFragment } from '../data/share/fragment'
 import { demoGraph, demoPlan, demoPlans } from './demo'
+import { DEMO_DATASET } from './build'
+import { DATASET_FAMILIES } from '../nodes/lib/datasetFamilies'
 
 registerBuiltinSources()
 
@@ -368,6 +370,36 @@ describe('the synthetic-data hint', () => {
     expect(
       back.graph.nodes.find((node) => node.type === 'dataset.mock.opticlobe')?.hints,
     ).toHaveLength(1)
+  })
+})
+
+describe('a dataset that needs an annotation chain', () => {
+  /*
+   * The two branches of the demo search want opposite answers, and one flag for both got it wrong
+   * in the direction that contradicts the node guide's own prose.
+   */
+  const chained = DATASET_FAMILIES.filter((family) => family.annotationChain)
+  const typesIn = (type: string) => new Set(demoGraph(type)?.nodes.map((n) => n.type) ?? [])
+
+  it.each(chained)(
+    'gives $key’s own node its chain, since that is what the wizard builds',
+    (family) => {
+      const types = typesIn(`dataset.${family.key}`)
+      for (const entry of family.annotationChain!.nodes) {
+        expect(types.has(entry.type), `${entry.type} is in ${family.key}'s own demo`).toBe(true)
+      }
+    },
+  )
+
+  it('keeps it out of a demo the dataset merely happens to host', () => {
+    /*
+     * More cards are more ports for the append search to fit cleanly on, so
+     * `core.filterTable`'s link was moving to FlyWire — where opening it downloads a 139k-row
+     * file, reads a CAVE table of about a million rows and asks for a token, to demonstrate
+     * filtering a table. Cost is not an inference issue, which is why the search cannot see it.
+     */
+    expect(demoPlan('core.filterTable')?.dataset).toBe(DEMO_DATASET)
+    expect(typesIn('core.filterTable').has('cave.updateRootIds')).toBe(false)
   })
 })
 

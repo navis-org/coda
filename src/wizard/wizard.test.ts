@@ -33,7 +33,8 @@ import { Scheduler } from '../core/scheduler'
 import { isMatrixValue, isTableValue } from '../core/values'
 import { registerBuiltinSources } from '../data/builtins'
 import { requireSource } from '../data/source'
-import { starterFamilies } from '../nodes/lib/datasetFamilies'
+import { DATASET_FAMILIES, datasetFamily, starterFamilies } from '../nodes/lib/datasetFamilies'
+import type { BuildOptions } from './build'
 import { parseMarkdown } from '../ui/markdown'
 import '../nodes'
 import { DEMO_DATASET, buildWorkflow, demoWorkflow } from './build'
@@ -758,7 +759,7 @@ describe('the hints it docks', () => {
    */
   const graphs: CodaGraph[] = starterFamilies()
     .flatMap((family) => everyCombination(family.key))
-    .map(buildWorkflow)
+    .map((answers) => buildWorkflow(answers))
 
   /** Every hint in a graph, as `nodeId → texts`. */
   function docked(graph: CodaGraph): Record<string, string[]> {
@@ -829,6 +830,136 @@ describe('the hints it docks', () => {
     }
     // Every option's hint is reachable, so nothing above passed by never being built.
     expect(seen.size).toBeGreaterThan(12)
+  })
+})
+
+describe('a dataset that needs an annotation chain', () => {
+  /*
+   * `DatasetFamily.annotationChain`. A CAVE datastack keeps its cell typing in a table rather
+   * than on the neuron, so a wizard workflow that opened on the bare dataset node opened on a
+   * list of eighteen-digit root ids — while `New ▸ FlyWire FAFB` and `New ▸ BANC public`, both
+   * building the *same* declarations through `examples/starters.ts`, opened them typed. One graph
+   * answering one question two ways depending on which menu you came through.
+   *
+   * **Asked of every family that declares one**, rather than of FlyWire: the two differ in size
+   * by a factor of six — six cards in two arms against one — and the rules below are about the
+   * mechanism, so a third family gets them free and a rule that only holds for the big one fails
+   * here rather than in a browser.
+   */
+  const chained = DATASET_FAMILIES.filter((family) => family.annotationChain)
+
+  /** One workflow, varying only the dataset and the build options the demo path passes. */
+  const build = (dataset: string, options?: BuildOptions) =>
+    buildWorkflow(
+      {
+        dataset,
+        start: 'browse',
+        analysis: 'partners',
+        visualisations: ['table'],
+        notes: true,
+      } as never,
+      options,
+    )
+
+  it('covers more than one family, or these rules are one dataset’s', () => {
+    expect(chained.map((family) => family.key).sort()).toEqual(['banc', 'flywire'])
+  })
+
+  it.each(chained)('builds $key’s chain and wires it into the annotations port', (family) => {
+    const chain = family.annotationChain!
+    const graph = build(family.key)
+    const byId = new Map(graph.nodes.map((n) => [n.id, n.type]))
+    for (const entry of chain.nodes) {
+      expect(byId.get(entry.id), `${entry.id} is on the canvas`).toBe(entry.type)
+    }
+    const ds = graph.nodes.find((n) => n.type === `dataset.${family.key}`)!
+    const wired = graph.edges.find(
+      (e) => e.target === ds.id && e.targetHandle === 'annotations',
+    )
+    expect(byId.get(wired?.source ?? '')).toBe(
+      chain.nodes.find((n) => n.id === chain.output.id)?.type,
+    )
+  })
+
+  it.each(chained)(
+    'takes $key’s dataset as a reference on every member that needs it',
+    (family) => {
+      // Reference edges, or each pair would be a cycle. See `PortDef.reference`.
+      const graph = build(family.key)
+      const ds = graph.nodes.find((n) => n.type === `dataset.${family.key}`)!
+      for (const id of family.annotationChain!.datasetRefs) {
+        expect(
+          graph.edges.some(
+            (e) => e.source === ds.id && e.target === id && e.targetHandle === 'dataset',
+          ),
+          `${id} reads the datastack`,
+        ).toBe(true)
+      }
+    },
+  )
+
+  it.each(chained)(
+    'arrives on $key with nothing to complain about but a late schema',
+    (family) => {
+      /*
+       * FlyWire's one warning is `Column "join_tag" is gone` — `NodeIssue.aboutColumns`, since the
+       * fold's output schema is not known until a run, which is the "unknown, never none" case the
+       * column rules are built around. The **starter carries the identical warning**, which is what
+       * says this is the chain's ordinary state rather than something the wizard does differently.
+       * Anything else would be a badge on a workflow the reader did not build.
+       */
+      const issues = Object.values(inferGraph(build(family.key)).nodes).flatMap((n) => n.issues)
+      expect(issues.filter((issue) => !issue.aboutColumns)).toEqual([])
+    },
+  )
+
+  it.each(chained)('leaves $key’s chain off a demo build', (family) => {
+    /*
+     * `BuildOptions.annotationChain`. More cards are more ports for the demo search to find a
+     * clean fit on, so the best-typed candidate for `core.filterTable` became a FlyWire workflow
+     * — and opening that link downloads a 139k-row file, reads a CAVE table of about a million
+     * rows and asks for a token, to demonstrate filtering a table.
+     */
+    const bare = build(family.key, { annotationChain: false })
+    expect(bare.groups ?? []).toHaveLength(0)
+    expect(bare.edges.some((e) => e.targetHandle === 'annotations')).toBe(false)
+    expect(bare.nodes.length).toBeLessThan(build(family.key).nodes.length)
+  })
+
+  it('folds a chain of several cards and leaves a single card alone', () => {
+    /*
+     * `foldChain`'s rule. Six cards of plumbing are the biggest thing on the canvas and none of
+     * them is what the reader asked for; one card in a frame hides nothing and costs a click to
+     * open, replacing a card whose title says what it does with a box that says roughly the same.
+     */
+    const flywire = datasetFamily('flywire')!.annotationChain!
+    expect(flywire.nodes.length).toBeGreaterThan(1)
+    const group = build('flywire').groups?.find((g) => g.title === flywire.title)
+    expect(group?.collapsed).toBe(true)
+    expect([...(group?.nodeIds ?? [])].sort()).toEqual(flywire.nodes.map((n) => n.id).sort())
+
+    expect(datasetFamily('banc')!.annotationChain!.nodes).toHaveLength(1)
+    expect(build('banc').groups ?? []).toHaveLength(0)
+  })
+
+  it('points Explore at the column the fold produces, where there is one', () => {
+    /*
+     * Otherwise the wizard builds the fold and the Join and then draws no tag row — half
+     * FlyWire's second arm doing nothing visible. It follows the chain that was *built*, not the
+     * family's, so a demo build does not name a column nothing produces. BANC declares no
+     * `tagColumn`, and its Explore is left at the default.
+     */
+    const chain = datasetFamily('flywire')!.annotationChain!
+    const explore = (graph: CodaGraph) => graph.nodes.find((n) => n.type === 'neuron.explore')
+    expect(explore(build('flywire'))?.params.tagColumn).toBe(chain.tagColumn)
+    expect(explore(build('flywire', { annotationChain: false }))?.params.tagColumn).toBe('')
+    expect(explore(build('banc'))?.params.tagColumn).toBe('')
+  })
+
+  it('leaves every family without one exactly as it was', () => {
+    const graph = build('malecns')
+    expect(graph.groups ?? []).toHaveLength(0)
+    expect(graph.edges.some((e) => e.targetHandle === 'annotations')).toBe(false)
   })
 })
 

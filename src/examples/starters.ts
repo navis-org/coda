@@ -41,12 +41,11 @@
 import type { CodaGraph, GraphNode } from '../core/graph'
 import { addNodeWithCompanion } from '../core/companion'
 import { addEdge } from '../core/graph'
-import { createGroup } from '../core/groups'
 import type { Link } from './assemble'
 import { assembleGraph as assemble, graphNode as node } from './assemble'
-import { ID_COLUMN_NAME } from '../core/ids'
 import { findColumn } from '../core/types'
-import { aggColumnName } from '../nodes/lib/tableOps'
+import { datasetFamily } from '../nodes/lib/datasetFamilies'
+import { chainGrid, chainLinks, foldChain } from '../nodes/lib/annotationChain'
 import { capabilityAnywhere, getSource } from '../data/source'
 import { COLLAPSED_SIZE } from '../layout/collapse'
 import { GROUP_PADDING } from '../layout/groupBounds'
@@ -146,17 +145,6 @@ function genericStarter(spec: StarterSpec): CodaGraph {
 // ---------------------------------------------------------------------------
 
 /**
- * The published FlyWire annotations, as their maintainers serve them.
- *
- * `raw.githubusercontent.com` rather than the `github.com/.../raw/...` address the repository's
- * own UI hands you: that one answers `302` with an **empty** `access-control-allow-origin`, and a
- * browser CORS-checks every hop of a redirect chain, so it never reaches the host that would have
- * allowed it. The target answers `200` with `*` and gzips. See `core.tableFromUrl`.
- */
-const FLYWIRE_ANNOTATIONS =
-  'https://raw.githubusercontent.com/flyconnectome/flywire_annotations/main/supplemental_files/Supplemental_file1_neuron_annotations.tsv'
-
-/**
  * The annotation chain's two rows and the column it starts in: the published cell typing on top,
  * the community tags underneath, meeting at the Join.
  *
@@ -182,21 +170,6 @@ const CHAIN_STEP = 268
  */
 const FOLDED_X = CHAIN_X - GROUP_PADDING
 const FOLDED_Y = CHAIN_TOP - GROUP_PADDING
-
-/** The chain's six cards, in the order they run. What the frame holds. */
-const CHAIN_NODES = ['annotations', 'combine', 'repair', 'tags', 'foldTags', 'join']
-
-/** The column of `neuron_information_v2` holding the free-form text. */
-const TAG_SOURCE_COLUMN = 'tag'
-
-/**
- * The column the fold produces, which Explore's `Additional tags` has to be pointed at.
- *
- * Through `aggColumnName` rather than the literal `join_tag`, because that is the rule and a
- * second spelling of it is how the two halves come to disagree — silently, since a wrong
- * `Additional tags` does not fail, it just draws no tag row.
- */
-const TAG_COLUMN = aggColumnName('join', TAG_SOURCE_COLUMN)
 
 /**
  * FlyWire FAFB, opening with its cell typing already wired in.
@@ -244,7 +217,8 @@ const TAG_COLUMN = aggColumnName('join', TAG_SOURCE_COLUMN)
  * never has to be touched. Folded, the starter reads as the four nodes every other one has —
  * labels, dataset, browser, views — with the chain as a single box anybody can open. `collapsed`
  * lives in the document precisely so a graph can *arrive* this way (see `GraphGroup.collapsed`),
- * and the frame is built through `createGroup`, the same call ⌘G makes, so a starter cannot be
+ * and the frame is built through `foldChain`, which wraps the same `createGroup` ⌘G makes, so a
+ * starter cannot be
  * the one surface where a group is assembled by hand.
  *
  * Nothing is `exposed` onto the box: an exposed param is a control worth driving without
@@ -266,6 +240,8 @@ const TAG_COLUMN = aggColumnName('join', TAG_SOURCE_COLUMN)
  * something. `defaultParams` supplies both, so this is a matter of not overriding them.
  */
 function flywireStarter(spec: StarterSpec): CodaGraph {
+  const chain = datasetFamily('flywire')?.annotationChain
+  if (!chain) throw new Error('the FlyWire family declares no annotation chain')
   const graph = assemble(
     spec.label,
     `${spec.label} with the published cell annotations and the community tags wired in as its labels. Search in the Explore Dataset node, tick neurons, then Run.`,
@@ -289,55 +265,25 @@ function flywireStarter(spec: StarterSpec): CodaGraph {
 
         Open the group for details.`,
       }),
-      node(
-        'annotations',
-        'core.tableFromUrl',
-        { x: CHAIN_X, y: CHAIN_TOP },
-        {
-          url: FLYWIRE_ANNOTATIONS,
-          idColumn: 'root_id',
-        },
-      ),
-      node(
-        'combine',
-        'core.combineColumns',
-        { x: CHAIN_X + CHAIN_STEP, y: CHAIN_TOP },
-        {
-          columns: ['cell_type', 'hemibrain_type'],
-        },
-      ),
-      node('repair', 'cave.updateRootIds', { x: CHAIN_X + 2 * CHAIN_STEP, y: CHAIN_TOP }),
-
-      node(
-        'tags',
-        'annotation.caveTable',
-        { x: CHAIN_X, y: CHAIN_BOTTOM },
-        {
-          table: 'neuron_information_v2',
-          columns: 'pt_root_id, tag',
-        },
-      ),
-      node(
-        'foldTags',
-        'core.groupBy',
-        { x: CHAIN_X + CHAIN_STEP, y: CHAIN_BOTTOM },
-        {
-          by: [ID_COLUMN_NAME],
-          agg: 'join',
-          value: ['tag'],
-        },
-      ),
-      node(
-        'join',
-        'core.join',
-        { x: CHAIN_X + 2 * CHAIN_STEP, y: CHAIN_BOTTOM },
-        { leftKey: ID_COLUMN_NAME },
+      /*
+       * The six cards, from `DatasetFamily.annotationChain` — the declaration this starter used
+       * to *be*. Which nodes, which params, how they wire and which arm each sits on are what
+       * the wizard and the assistant catalogue also have to agree with; only the origin and the
+       * step are still this file's, so a card gaining a row needs no edit here at all.
+       */
+      ...chainGrid(chain).map((cell) =>
+        node(
+          cell.node.id,
+          cell.node.type,
+          { x: CHAIN_X + cell.col * CHAIN_STEP, y: cell.row ? CHAIN_BOTTOM : CHAIN_TOP },
+          cell.node.params,
+        ),
       ),
 
       // Beside the folded box rather than after the two rows it would have to clear: the dataset
       // is the card the four visible nodes hang off, so it sits at the box's own height.
       node('dataset', spec.nodeType, { x: 790, y: FOLDED_Y }, spec.params),
-      node('explore', 'neuron.explore', { x: 1070, y: 0 }, { tagColumn: TAG_COLUMN }),
+      node('explore', 'neuron.explore', { x: 1070, y: 0 }, { tagColumn: chain.tagColumn }),
       node('ngl', 'out.neuroglancer', { x: 1610, y: 0 }, undefined, {
         width: 633,
         height: 839,
@@ -351,17 +297,7 @@ function flywireStarter(spec: StarterSpec): CodaGraph {
       ),
     ],
     [
-      ['annotations', 'out', 'combine', 'in'],
-      ['combine', 'out', 'repair', 'in'],
-      ['tags', 'annotations', 'foldTags', 'in'],
-      // A *reference*, so neither pair below is a cycle: `Update root IDs` and the CAVE table both
-      // read the datastack's identity out of the dataset they are about to feed. See
-      // `PortDef.reference`.
-      ['dataset', 'dataset', 'repair', 'dataset'],
-      ['dataset', 'dataset', 'tags', 'dataset'],
-      ['repair', 'out', 'join', 'left'],
-      ['foldTags', 'out', 'join', 'right'],
-      ['join', 'out', 'dataset', 'annotations'],
+      ...chainLinks(chain, 'dataset'),
       ['dataset', 'dataset', 'explore', 'dataset'],
       ['dataset', 'dataset', 'ngl', 'dataset'],
       ['explore', 'all', 'picked', 'in'],
@@ -369,7 +305,7 @@ function flywireStarter(spec: StarterSpec): CodaGraph {
     ],
   )
 
-  return createGroup(graph, CHAIN_NODES, { title: 'FlyWire annotations', collapsed: true })
+  return foldChain(graph, chain)
 }
 
 // ---------------------------------------------------------------------------
@@ -411,6 +347,9 @@ function flywireStarter(spec: StarterSpec): CodaGraph {
  * and overriding it here would suggest it needed to be different.
  */
 function bancStarter(spec: StarterSpec): CodaGraph {
+  const chain = datasetFamily('banc')?.annotationChain
+  if (!chain) throw new Error('the BANC family declares no annotation chain')
+
   let graph = genericStarter(spec)
   graph = {
     ...graph,
@@ -424,15 +363,10 @@ function bancStarter(spec: StarterSpec): CodaGraph {
   // node it is about rather than beside it: there is no second row here to form a margin against.
   const CHAIN_X = -240
   const extra = [
-    node(
-      'annotations',
-      'annotation.caveTable',
-      { x: CHAIN_X, y: 90 },
-      {
-        table: 'codex_annotations',
-        pivotOn: 'classification_system',
-        valueColumn: 'cell_type',
-      },
+    // From `DatasetFamily.annotationChain`, so the card the wizard builds and the one the
+    // assistant is told to build are this card. Only the coordinate is this file's.
+    ...chainGrid(chain).map((cell) =>
+      node(cell.node.id, cell.node.type, { x: CHAIN_X, y: 90 }, cell.node.params),
     ),
     noteNode({
       id: 'annotationsNote',
@@ -448,16 +382,12 @@ function bancStarter(spec: StarterSpec): CodaGraph {
   ]
   for (const one of extra) graph = addNodeWithCompanion(graph, one)
 
-  const links: Link[] = [
-    // A *reference*, so this pair is not a cycle: the CAVE table reads the datastack's identity
-    // out of the dataset it is about to feed. See `PortDef.reference`.
-    ['dataset', 'dataset', 'annotations', 'dataset'],
-    ['annotations', 'annotations', 'dataset', 'annotations'],
-  ]
-  for (const [source, sourceHandle, target, targetHandle] of links) {
+  for (const [source, sourceHandle, target, targetHandle] of chainLinks(chain, 'dataset')) {
     graph = addEdge(graph, { source, sourceHandle, target, targetHandle })
   }
-  return graph
+  // Unfolded, and that is `foldChain`'s own rule rather than this file's: one card in a frame
+  // hides nothing and costs a click.
+  return foldChain(graph, chain)
 }
 
 /**
