@@ -48,8 +48,52 @@ export function neuronIds(frame: string): string {
  */
 export function neuronIdInts(frame: string, limit = 0): string {
   const head = limit > 0 ? `.head(${limit})` : ''
-  return `${frame}['neuronId']${head}.astype('int64').tolist()`
+  // The cap goes *before* the cast, which is the one thing not to tidy into `neuronIdKey`
+  // below: casting the whole column to reach twenty ids is more rows converted than the cell
+  // asked for, and a malformed id past the cap would raise where the fetch never looked.
+  return `${idSeries(frame)}${head}.astype('int64').tolist()`
 }
+
+/**
+ * The same ids as an index-shaped Series, for a `set_index` or a `reindex`.
+ *
+ * Split out when `Carry fields` needed the cast without the `.tolist()` and wrote it by hand two
+ * lines below a `neuronIdInts` call — the `'neuronId'` literal in a third place, where a change
+ * to the id convention would have missed that cell in silence. The column name is `idSeries`'
+ * now; the cast is deliberately spelled in both, since the two differ on where the cap goes.
+ */
+export function neuronIdKey(frame: string): string {
+  return `${idSeries(frame)}.astype('int64')`
+}
+
+/** The id column of a frame that has been through `coda_neurons`. One spelling of the name. */
+function idSeries(frame: string): string {
+  return `${frame}['neuronId']`
+}
+
+/**
+ * Attributes navis computes itself, which `set_neuron_attributes` cannot write.
+ *
+ * **Measured, not recalled**: `setattr` on a `navis.TreeNeuron` was tried for each candidate
+ * against navis 2.0.0-rc.1, and these five raise — `type` and `cable_length` an
+ * `AttributeError` (read-only properties), `soma` a `ValueError`, `nodes` and `connectors` a
+ * `TypeError`. Here rather than in one emitter because two of them turn on the same facts:
+ * `Carry fields` skips these names, and `neuron.splitNeurons` refuses partly because
+ * `NeuronList.summary()`'s `type` is the neuron *class* (`'navis.Skeleton'`) rather than a cell
+ * type. Two copies of a data model measured once is how the two come to disagree.
+ *
+ * Spelled in navis' snake_case while the names checked against it are Coda columns, so only some
+ * are reachable at all: `type` is the one that matters on neuPrint — it is the collision case,
+ * since overriding a stale connectome `type` is the commonest reason to carry a colliding name —
+ * and `nodes` exists only in CATMAID's schema, which these neuPrint-only emitters never see.
+ */
+export const NAVIS_RESERVED: ReadonlySet<string> = new Set([
+  'type',
+  'soma',
+  'connectors',
+  'nodes',
+  'cable_length',
+])
 
 /**
  * A viewer's `ids` selection param, as **exact decimal text**.

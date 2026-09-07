@@ -1470,6 +1470,8 @@ roi_counts <- neuprint_get_roiInfo(find_neurons$neuronId, conn = hemibrain_neupr
 ```{r skeletons}
 # ── Skeletons ──
 skeletons <- neuprint_read_neurons(head(find_neurons$neuronId, 20), conn = hemibrain_neuprint)
+skeletons[, "status"] <- find_neurons[["status"]][match(names(skeletons), find_neurons$neuronId)]
+skeletons[, "type"] <- find_neurons[["type"]][match(names(skeletons), find_neurons$neuronId)]
 ```
 
 ```{r meshes}

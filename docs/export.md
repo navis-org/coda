@@ -85,6 +85,27 @@ Skeletons cell, or merge a neuron frame on the ids and index the list with the m
 `NO_EMITTER` entry, because the fallback's words are "no notebook equivalent *yet*", and this is not
 a matter of nobody having written it.
 
+**`Carry fields` diverges on the same seam, from the other side.** The control on `Skeletons` and
+`Meshes` carries columns of the incoming neuron table onto the fetched geometry, and each language
+writes it the way its library models per-neuron metadata. R has the easier job: a nat `neuronlist`
+carries a `data.frame` beside its neurons, so `nl[, "type"] <- …[match(names(nl), frame$neuronId)]`
+is a column like any other, `NA` where unmatched, and it survives subsetting — checked by running
+the golden's own lines, which is also what shows the carry and `Split Neurons` composing in the
+export as they do on the canvas. Python uses navis' own
+`set_neuron_attributes(dict, name=…, register=True, na='propagate')`, all three arguments read off
+the installed signature and the call run against a synthetic list: `register=True` is what puts the
+attribute in `summary()`, and `na='propagate'` fills `None` for an unmentioned neuron, which is the
+left join. Two things it must get right and one it cannot do. The dict is keyed by
+`neuronIdKey`, the same `astype('int64')` expression that named the bodies — a `str` key matches
+nothing and `na='propagate'` then fills *every* neuron with `None`, a cell that runs and carries an
+empty column. `drop_duplicates(keep='first')` precedes `set_index`, because `to_dict` is last-wins
+where `joinTables` deduplicates first-wins, so a neuron listed twice upstream would otherwise be
+annotated from a different row than on the canvas. And five names cannot be written at all —
+`NAVIS_RESERVED`, measured by `setattr`: `type` and `cable_length` raise `AttributeError`, `soma` a
+`ValueError`, `nodes` and `connectors` a `TypeError` — so the cell notes them and leaves them out.
+`type` is the one that matters, being the collision case the control exists for. That list is shared
+with the `Split Neurons` refusal above, which turns on the same measurements.
+
 ### The softer half: warning that an export will have gaps in it
 
 A refusal says the export is not worth making. Beside it, both surfaces now say how much of a

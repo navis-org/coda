@@ -675,6 +675,41 @@ Area-specific — the rule, then the doc that holds why:
   is gone". The other two `ids` params stay uncovered on purpose: one rule over "ids params" would
   be three grammars under one name. See [docs/nodes.md](docs/nodes.md) and
   [docs/wizard.md](docs/wizard.md).
+- **A collection's attribute table is not the table that named its neurons, and `Carry fields` is
+  the bridge.** Each source builds a geometry value's attributes from `SourceSchemas.morphology` —
+  seven columns on neuPrint, three plus the annotation chain's on CAVE, two on a precomputed bucket
+  — and `neuprint/schema.ts` argues why it does not follow the dataset ("derived from relationships
+  and from `roiInfo`, not from neuron properties"). The Neurons input is read for *ids*. So a
+  connectome publishing 48 properties handed `Split Neurons` seven fields, and the only route to the
+  other 41 was filtering before the fetch, which answers a different question and costs a second
+  fetch. The `columns` picker on `Skeletons`/`Meshes` (`nodes/lib/carryParams.ts`) joins them on at
+  the node. Five rules. **The join is `core.join`'s, both halves** — `joinSchema` + `joinTables`, so
+  duplicate keys annotate rather than multiply, the geometry's *items* order survives, and an
+  unmentioned id keeps its geometry and carries a null. **A carried column wins its name *and keeps the old
+  one's slot*** — `foldNodeColumns`' pair of rules, read by both halves so they cannot drift. The
+  first is `networkMetrics`': `type_r` beside `type` gives a picker two answers and the second is
+  stale, so the name is dropped from the left before the join rather than suffixed after. The
+  second was got wrong first — an overridden column moved to the end, dismissed as something
+  nothing reads, when `TableViewer`, CSV export and GraphML key ids are all `schema.columns` in
+  order.
+  **Empty hands the value back by identity**, so a graph saved before the param produces what it
+  always did; the list *is* in the provenance key, and `geometryCache` absorbs the re-fetch. What it can carry is **what is on the neuron
+  table already**: the port is `T.neurons()`, so neither a `Cut Tree` cluster table nor a
+  `core.join` result can feed it — the latter because `joinTables` keeps its left kind at run time
+  while `core.join`'s `inferOutputs` says `T.table` regardless, which is one line to fix when
+  somebody wants it.
+  **`onPartial` carries too**, or a scene coloured by a carried column draws nothing until the last
+  body lands. And **no bespoke error for a vanished column**: `resolveColumns` drops it and
+  `validateColumnParams` reports `Missing column(s)` at edit time, so the `ctx.warn` written first
+  was unreachable *and* a second spelling. The exporters diverge again on the same seam — navis
+  keeps attributes on the neurons, so Python emits
+  `set_neuron_attributes(dict, register=True, na='propagate')` keyed by the same `astype('int64')`
+  that named the bodies (a `str` key silently fills every neuron `None`) and **notes-and-skips the
+  five names navis computes itself**: `type`, `cable_length`, `soma`, `nodes`, `connectors`, each
+  measured by `setattr`; nat keeps a `data.frame` beside its neurons, so R writes
+  `nl[, "type"] <- …[match(names(nl), frame$neuronId)]` with no restriction at all, and a carried
+  column survives subsetting — the two features composing in the export as on the canvas.
+  See [docs/nodes.md](docs/nodes.md).
 - **A split is one pass, because two filters with opposite conditions are not a partition.**
   `Split Neurons` (`neuron.splitNeurons`) is **`Stack Neurons` run backwards**: it asks the attribute
   table a collection carries a set of Find Neurons rows and hands back both halves, so

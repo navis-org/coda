@@ -31,6 +31,7 @@ import {
   synapseUnitProblem,
 } from '../lib/synapseParams'
 import { idColumn } from '../lib/tableOps'
+import { carriedMorphology, carryParam, carrying } from '../lib/carryParams'
 
 /**
  * Where every neuron-count control starts warning, so one number governs all of them.
@@ -89,7 +90,7 @@ export const skeletonsNode = registerNode({
   category: 'query',
   description: 'Fetch centerline tracings for the incoming neurons.',
   guide:
-    'Centerline tracings for the incoming neurons — encode both the 3D shape and topology of the cell. Coordinates come out in nanometres, so a skeleton and a mesh of the same neuron sit in the same space. Some datasets have more than one place to get a skeleton.',
+    'Centerline tracings for the incoming neurons — encode both the 3D shape and topology of the cell. Coordinates come out in nanometres, so a skeleton and a mesh of the same neuron sit in the same space. Some datasets have more than one place to get a skeleton. A collection carries only the fetch’s own attributes, so use Carry fields for anything else you want to filter or colour by.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -114,6 +115,13 @@ export const skeletonsNode = registerNode({
      * other.
      */
     skeletonSourceParam(),
+    /*
+     * Columns of the incoming neuron table, carried onto the skeletons' own attribute table —
+     * which is otherwise the source's seven-column morphology schema and nothing else. See
+     * `nodes/lib/carryParams.ts` for why a collection does not simply inherit the table that
+     * named its neurons, and for the join's rules.
+     */
+    carryParam('skeleton'),
     warnAboveParam({
       threshold: MAX_NEURONS,
       min: 1,
@@ -122,10 +130,9 @@ export const skeletonsNode = registerNode({
   ],
 
   // Advertising the attribute schema at edit time is what lets the 3D viewer's
-  // "colour by [type]" picker populate before anything has been fetched.
-  inferOutputs: (ctx) => ({
-    skeletons: T.skeletons(schemasFromType(ctx.inputs.dataset).morphology),
-  }),
+  // "colour by [type]" picker populate before anything has been fetched — including the
+  // carried columns, which is what puts them in every picker downstream before a Run.
+  inferOutputs: (ctx) => ({ skeletons: T.skeletons(carriedMorphology(ctx)) }),
 
   validate: (ctx) => {
     /*
@@ -158,6 +165,8 @@ export const skeletonsNode = registerNode({
       'Each skeleton is a separate request, and a few thousand of them is minutes rather than seconds.',
     )
     ctx.progress(0.02, `${neuronIds.length} neurons`)
+    // Bound once rather than per publish — see `carrying`.
+    const carry = carrying(ctx)
     // Narrowed once, here: a document can name a route this build has never heard of, and
     // reading that as "nobody chose" is the degradation every other unknown param value gets.
     const skeletonSource = asSkeletonRoute(ctx.params[SKELETON_SOURCE_PARAM])
@@ -179,10 +188,14 @@ export const skeletonsNode = registerNode({
        * port, because that is what the 3D viewer reads through `nodeInputs` — nothing downstream
        * re-runs, so the value on the port *is* the scene. See `EvalContext.publish`.
        */
-      onPartial: (partial) => ctx.publish({ skeletons: partial }),
+      onPartial: (partial) =>
+        // Carried onto the partial too, or the streamed scene is coloured by a column the
+        // finished one has and this one does not — a picker that draws nothing until the last
+        // body lands.
+        ctx.publish({ skeletons: carry(partial) }),
       signal: ctx.signal,
     })
-    return { skeletons }
+    return { skeletons: carry(skeletons) }
   },
 })
 
@@ -192,7 +205,7 @@ export const meshesNode = registerNode({
   category: 'query',
   description: 'Fetch surface meshes for the incoming neurons.',
   guide:
-    'Neuron surface meshes. Where they come from and the level(s) of detail available varies by source. **Detail** is a triangle budget for the whole batch, so asking for more neurons gets you coarser ones.',
+    'Neuron surface meshes. Where they come from and the level(s) of detail available varies by source. **Detail** is a triangle budget for the whole batch, so asking for more neurons gets you coarser ones. A collection carries only the fetch’s own attributes, so use Carry fields for anything else you want to filter or colour by.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -218,6 +231,7 @@ export const meshesNode = registerNode({
         'about how many — a source with no levels of detail (male-CNS) sends full resolution ' +
         'regardless, a few megabytes per neuron.',
     }),
+    carryParam('mesh'),
     {
       id: 'detail',
       kind: 'enum',
@@ -232,9 +246,7 @@ export const meshesNode = registerNode({
     },
   ],
 
-  inferOutputs: (ctx) => ({
-    meshes: T.meshes(schemasFromType(ctx.inputs.dataset).morphology),
-  }),
+  inferOutputs: (ctx) => ({ meshes: T.meshes(carriedMorphology(ctx)) }),
 
   validate: (ctx) => {
     if (ctx.inputs.dataset && !sourceSupports(ctx.inputs.dataset, 'meshes')) {
@@ -255,6 +267,7 @@ export const meshesNode = registerNode({
       'Each mesh is a separate fetch, and a source without levels of detail sends full resolution.',
     )
     ctx.progress(0.02, `${neuronIds.length} neurons`)
+    const carry = carrying(ctx)
     const meshes = await source.fetchMeshes({
       ...datasetRequest(dataset),
       neuronIds,
@@ -266,10 +279,10 @@ export const meshesNode = registerNode({
       onFetched: ctx.reportFetched,
       // As above. On a multi-resolution source nothing arrives until the manifest sweep is done,
       // because the level cannot be chosen before then — see `fetchMeshes`' `onPartial`.
-      onPartial: (partial) => ctx.publish({ meshes: partial }),
+      onPartial: (partial) => ctx.publish({ meshes: carry(partial) }),
       signal: ctx.signal,
     })
-    return { meshes }
+    return { meshes: carry(meshes) }
   },
 })
 

@@ -26,6 +26,7 @@ import { registerEmitter } from '../registry'
 import type { FieldTerm } from '../../../data/terms'
 import { anchoredPattern, escapeRegex } from '../../../data/terms'
 import { resolveRows } from '../../../data/filterRows'
+import { CARRY_PARAM_ID } from '../../../nodes/lib/carryParams'
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import type { DType } from '../../../core/types'
 import { isNumericDType } from '../../../core/types'
@@ -550,6 +551,31 @@ registerEmitter('neuron.rawCypher', (ctx) => {
 // Morphology
 // ---------------------------------------------------------------------------
 
+/**
+ * `Carry fields`, as columns on the neuronlist's own metadata frame.
+ *
+ * nat's answer to the same question, and a cleaner one than navis': a `neuronlist` carries a
+ * `data.frame` beside its neurons, `nl[, ]` *is* that frame, and assigning a column to it is
+ * `nl[, "name"] <- values`. So there is no reserved-name problem here — the frame is a plain
+ * `data.frame`, and `type` is a column like any other where navis makes it a read-only property.
+ * That is the second place these two exporters diverge on this node's behalf, and it is the
+ * libraries' data models rather than a gap in either cell.
+ *
+ * `match(names(nl), frame$neuronId)` is the join: a neuronlist is named by body id as character,
+ * which is what a Coda id column is on every source, and `match` answers `NA` for a neuron the
+ * table upstream does not mention — Coda's left join exactly. Checked by running it: the columns
+ * land on the frame, `NA` where unmatched, and they **survive subsetting**, so a Split Neurons
+ * chunk downstream can filter on a carried column.
+ */
+function carryLines(ctx: EmitContext, list: string, frame: string): string[] {
+  const carry = ctx.columns(CARRY_PARAM_ID)
+  if (carry.length === 0) return []
+  return carry.map(
+    (name) =>
+      `${list}[, ${rStr(name)}] <- ${frame}[[${rStr(name)}]][match(names(${list}), ${neuronIds(frame)})]`,
+  )
+}
+
 registerEmitter('neuron.skeletons', (ctx) => {
   const conn = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
@@ -557,6 +583,7 @@ registerEmitter('neuron.skeletons', (ctx) => {
   ctx.library('nat')
   const limit = Number(ctx.params.limit ?? 0)
   const ids = limit > 0 ? `head(${neuronIds(neurons)}, ${limit})` : neuronIds(neurons)
+  const out = ctx.output('skeletons')
   // Returns a nat neuronlist, which is what every downstream nat call wants — the same
   // relationship navis has to the Python side, since navis is nat's port.
   return [
@@ -571,7 +598,8 @@ registerEmitter('neuron.skeletons', (ctx) => {
             'that were exported into it.',
         )
       : []),
-    `${ctx.output('skeletons')} <- neuprint_read_neurons(${ids}, conn = ${conn})`,
+    `${out} <- neuprint_read_neurons(${ids}, conn = ${conn})`,
+    ...carryLines(ctx, out, neurons),
   ]
 })
 

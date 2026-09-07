@@ -179,7 +179,19 @@ registerEmitter('core.filterTable', (ctx) => {
  *
  * `cable_length` is the near miss worth naming: it exists, and it is in the neuron's own units,
  * where Coda's `cableLength` is normalised nanometres off the connectome query. Emitting it would
- * compare a number to a threshold measured on a different scale.
+ * compare a number to a threshold measured on a different scale. The five names navis computes
+ * for itself are `NAVIS_RESERVED`, shared with the emitter that *writes* attributes, so the two
+ * cannot come to disagree about a data model measured once.
+ *
+ * **One case has since stopped being refused on the canvas, and this cell says so rather than
+ * guessing.** `Skeletons` and `Meshes` grew a `Carry fields` control, and their emitters write
+ * carried columns onto the neurons with `set_neuron_attributes(..., register=True)` — which puts
+ * them in `summary()`, the very frame this refusal says is not there. So a split whose every
+ * filtered field was carried upstream *is* expressible, as `nl[mask]` over
+ * `nl.summary()[column]`. What this emitter cannot know is which of the columns on its wire were
+ * carried and which came from the fetch: the inferred schema shows both, identically. Guessing
+ * wrong writes a cell that runs and returns an empty half, which is the failure this refusal
+ * exists to avoid — so the TODO names the control and leaves the choice to the reader.
  *
  * So the cell says what to do instead. Both remedies are real: filtering the neuron table *before*
  * the Skeletons or Meshes cell is the same answer on the canvas, and `nl[mask]` is the indexing
@@ -194,7 +206,10 @@ registerEmitter('neuron.splitNeurons', (ctx) => {
       'and a navis NeuronList has none: `fetch_skeletons` attaches no connectome metadata, and ' +
       '`NeuronList.summary()`’s `type` column is the neuron class (`navis.Skeleton`) rather ' +
       'than the cell type — so a filter compiled against it would match nothing and say ' +
-      'nothing. Filter the neuron table above the Skeletons cell instead, or merge your neuron ' +
+      'nothing. If the fields you split on were brought along by `Carry fields` on the ' +
+      'Skeletons or Meshes node, they *are* registered on the neurons and ' +
+      '`nl[nl.summary()[column] == value]` works. Otherwise filter the neuron table above the ' +
+      'Skeletons cell, or merge your neuron ' +
       `frame onto \`[n.id for n in ${src}]\` and index the list with the mask: ` +
       `\`${ctx.output('matched')} = ${src}[mask.to_numpy()]\`, ` +
       `\`${ctx.output('rest')} = ${src}[~mask.to_numpy()]\`.`,

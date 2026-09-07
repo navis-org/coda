@@ -205,8 +205,26 @@ export function everythingGraph(): CodaGraph {
       params: { maxHops: 4, gain: 0.75, denominator: 'all', frontierLimit: 500 },
     },
 
-    { id: 'skel', type: 'neuron.skeletons', col: 2, row: 5, params: { limit: 20 } },
-    { id: 'mesh', type: 'neuron.meshes', col: 2, row: 6, params: { limit: 10 } },
+    /*
+     * `Carry fields` on both collection nodes, and the two columns are chosen to cover the
+     * branch each emitter has: `status` is an ordinary carry, and `type` is the one navis
+     * refuses (it computes `type` itself), so the notebook's note-and-skip path is in the golden
+     * beside R's plain assignment of both.
+     */
+    {
+      id: 'skel',
+      type: 'neuron.skeletons',
+      col: 2,
+      row: 5,
+      params: { limit: 20, carry: ['status', 'type'] },
+    },
+    {
+      id: 'mesh',
+      type: 'neuron.meshes',
+      col: 2,
+      row: 6,
+      params: { limit: 10, carry: ['status'] },
+    },
     { id: 'syn', type: 'neuron.synapses', col: 2, row: 7, params: { polarity: 'pre' } },
     /*
      * A second Synapses node, for the reason there are two NBLAST nodes: both emitters branch on

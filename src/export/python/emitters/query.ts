@@ -26,6 +26,7 @@ import { resolveRows } from '../../../data/filterRows'
 import { asksNothing, noFiltersReason } from '../../../nodes/lib/findNeuronsRows'
 import { rowsFromParams } from '../../../nodes/lib/filterRowParams'
 import { schemasFromType } from '../../../nodes/lib/datasetParam'
+import { CARRY_PARAM_ID } from '../../../nodes/lib/carryParams'
 import { filterMasks } from './tableFilters'
 import type { EmitContext } from '../types'
 
@@ -33,12 +34,14 @@ import type { EmitContext } from '../types'
 const DEFAULT_DEPLOYMENT = 'https://neuprint.janelia.org'
 import { neuprintProperty } from '../../../data/neuprint/schema'
 import {
+  NAVIS_RESERVED,
   caveLabels,
   codaIds,
   codaNeurons,
   codaSynapses,
   isCaveDataset,
   neuronIdInts,
+  neuronIdKey,
   pyMaskFrame,
   pyPopulationMask,
 } from './common'
@@ -639,6 +642,66 @@ registerEmitter('neuron.rawCypher', (ctx) => {
 // Morphology
 // ---------------------------------------------------------------------------
 
+/**
+ * `Carry fields`, as per-neuron attributes on the fetched `NeuronList`.
+ *
+ * The faithful spelling, and it is navis' own: `NeuronList.set_neuron_attributes` takes a
+ * `{neuron.id: value}` dict, and `register=True` is what puts the attribute in
+ * `NeuronList.summary()` — which is where a reader looks for it and what `plot3d(color_by=)`
+ * reads. `na='propagate'` fills `None` for a neuron the dict does not cover, which is exactly
+ * Coda's left join: the neuron keeps its geometry and the field is absent. All three arguments
+ * were read off the installed signature, and the call was run against a synthetic list.
+ *
+ * **The dict is keyed by `neuronIdKey`, the same expression that named the bodies.**
+ * `fetch_skeletons` assigns `n.id = r.bodyId`, an integer, and `neuronIdInts` is what this cell
+ * passed it — so the two are one function now rather than two spellings of a cast. A `str` key
+ * would match nothing and `na='propagate'` would fill every neuron with `None`: a cell that runs
+ * and carries an empty column, which is the failure shape this exporter minds most.
+ *
+ * **`drop_duplicates` before `set_index`, because `to_dict` is last-wins and Coda is first.**
+ * `joinTables` deduplicates the side being matched into with the *first* occurrence winning, and
+ * the node's own test pins it; a bare `set_index(...).to_dict()` keeps the last, so a neuron
+ * listed twice upstream would be annotated from a different row here than on the canvas. Found by
+ * reading the two rules against each other rather than by running it, which is why it is written
+ * out with the reason attached.
+ */
+function carryLines(ctx: EmitContext, list: string, frame: string): string[] {
+  const carry = ctx.columns(CARRY_PARAM_ID)
+  if (carry.length === 0) return []
+
+  const refused = carry.filter((name) => NAVIS_RESERVED.has(name))
+  const writable = carry.filter((name) => !NAVIS_RESERVED.has(name))
+  const lines: string[] =
+    refused.length > 0
+      ? ctx.note(
+          `This node carries ${refused.map((n) => `\`${n}\``).join(', ')} onto the geometry, ` +
+            'and navis computes that attribute itself — `type` is the neuron class, ' +
+            '`cable_length` and `soma` are read off the skeleton — so it cannot be set on a ' +
+            'neuron and is left out here. Rename the column upstream if the notebook needs it.',
+        )
+      : []
+  if (writable.length === 0) return lines
+
+  const keyed = `${ctx.name}_carry`
+  lines.push(
+    `${keyed} = ${frame}.drop_duplicates(subset='neuronId', keep='first')`,
+    `${keyed} = ${keyed}.set_index(${neuronIdKey(keyed)})`,
+  )
+  for (const name of writable) {
+    lines.push(
+      `${list}.set_neuron_attributes(`,
+      `    ${keyed}[${pyStr(name)}].to_dict(),`,
+      `    name=${pyStr(name)},`,
+      // Registered, or the attribute is on the neurons and in no summary a reader would see.
+      `    register=True,`,
+      // Coda's left join: a neuron the table upstream does not mention keeps its geometry.
+      `    na='propagate',`,
+      `)`,
+    )
+  }
+  return lines
+}
+
 registerEmitter('neuron.skeletons', (ctx) => {
   const c = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
@@ -678,6 +741,7 @@ registerEmitter('neuron.skeletons', (ctx) => {
     `    heal=True,`,
     `    client=${c},`,
     `)`,
+    ...carryLines(ctx, out, neurons),
   ]
 })
 
@@ -703,6 +767,7 @@ registerEmitter('neuron.meshes', (ctx) => {
     `    lod=1,`,
     `    client=${c},`,
     `)`,
+    ...carryLines(ctx, out, neurons),
   ]
 })
 

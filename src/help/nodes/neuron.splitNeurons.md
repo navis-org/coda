@@ -6,7 +6,9 @@ neuron.splitNeurons: filters
 
 It is Stack Neurons run backwards. That node puts several collections end to end and writes a column saying which input each neuron came from; this one asks the attribute table a question and hands back both answers — so one row, `source is hemibrain`, takes a stacked scene apart again on the very column the stack wrote.
 
-The filters are [Find Neurons](#neuron.findNeurons)' rows — same three controls, same operators, combined with `AND` — but read against the attribute table the collection carries rather than a dataset's neuron schema. So the fields are what came back with the geometry: `type`, `status`, `size`, `cableLength`, and any column something upstream added.
+The filters are [Find Neurons](#neuron.findNeurons)' rows — same three controls, same operators, combined with `AND` — but read against the attribute table the collection carries rather than a dataset's neuron schema. So the fields are what came back with the geometry: `type`, `status`, `size`, `cableLength`, and whatever else was carried along.
+
+**If the field you want is not offered, carry it.** [Skeletons](#neuron.skeletons) and [Meshes](#neuron.meshes) have a `Carry fields` control that brings columns of their incoming neuron table onto the geometry, matched by `neuronId` — a `cellBodyFiber`, a hemisphere, an annotation, a column a Relabel wrote. That is the intended route to everything the fetch itself does not return.
 
 ## Why not filter upstream twice
 

@@ -17,17 +17,18 @@ import { beforeAll, describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph, setNodeParam } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
-import { defaultParams, makeInferContext } from '../../core/node'
+import { defaultParams, makeInferContext, validateColumnParams } from '../../core/node'
 import type { NodeDefinition } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource, GeometryRequest, SourceCapabilities } from '../../data/source'
 import { registerSource, requireSource } from '../../data/source'
-import { T } from '../../core/types'
-import type { SkeletonProvenance } from '../../core/values'
+import { T, column, columnNames, tableSchema } from '../../core/types'
+import type { MeshesValue, SkeletonProvenance, SkeletonsValue } from '../../core/values'
 import { MAX_NEURONS } from './morphology'
 import { SYNAPSE_UNIT_PARAM } from '../lib/synapseParams'
+import { CARRY_PARAM_ID } from '../lib/carryParams'
 
 import '../index'
 import { searchFor } from '../../test/findNeurons'
@@ -237,6 +238,119 @@ describe('a capability that differs per dataset', () => {
  * CAVE skeleton service — and those are different products, tens of nodes against tens of
  * thousands, radii or none. Until this control existed the node picked and said nothing.
  */
+describe('Carry fields', () => {
+  /*
+   * The control exists on the two nodes whose attribute table is one row per neuron, and not on
+   * Synapses, whose rows are connectors — a neuron-level column there repeats per synapse, so a
+   * Group By over it would count synapses rather than neurons.
+   */
+  it('is on both collection nodes and not on the point cloud', () => {
+    for (const type of ['neuron.skeletons', 'neuron.meshes']) {
+      const param = (requireNodeDef(type).params ?? []).find((p) => p.id === CARRY_PARAM_ID)
+      expect(param?.kind, type).toBe('columns')
+      expect(param?.kind === 'columns' && param.from, type).toBe('neurons')
+    }
+    const synapses = (requireNodeDef('neuron.synapses').params ?? []).map((p) => p.id)
+    expect(synapses).not.toContain(CARRY_PARAM_ID)
+  })
+
+  /* Edit time: the promise a downstream picker is configured against, before any Run. */
+  it('widens the advertised attribute schema before anything is fetched', () => {
+    const def = requireNodeDef('neuron.skeletons')
+    const dataset = T.dataset('mock', 'optic-lobe-mini')
+    const neurons = T.neurons(tableSchema(column('neuronId', 'str'), column('pre', 'i64')))
+    const types = def.inferOutputs!(
+      makeInferContext(
+        def,
+        { ...defaultParams(def), [CARRY_PARAM_ID]: ['pre'] },
+        { dataset, neurons },
+      ),
+    )
+    const schema = types.skeletons?.kind === 'skeletons' ? types.skeletons.schema : undefined
+    expect(columnNames(schema)).toContain('pre')
+    // Still the fetch's own fields, with the carried one added rather than replacing them.
+    expect(columnNames(schema)).toContain('cableLength')
+  })
+
+  /** The pipeline above with a carry list on the geometry node. */
+  const carrying = (type: string, carry: string[]) =>
+    setNodeParam(pipeline(type, MAX_NEURONS), 'geo', CARRY_PARAM_ID, carry)
+
+  it('carries the column onto the fetched geometry, matched by neuronId', async () => {
+    const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
+    await sched.run(carrying('neuron.skeletons', ['status']), { mode: 'full' })
+    const skeletons = sched.output('geo', 'skeletons') as SkeletonsValue
+    expect(skeletons.items.length).toBeGreaterThan(0)
+    expect(columnNames(skeletons.attributes.schema)).toContain('status')
+    expect(skeletons.attributes.length).toBe(skeletons.items.length)
+    // Every row filled from the table one wire back, not left null by a join that missed.
+    expect(skeletons.attributes.data.status?.every((v) => v !== null)).toBe(true)
+  })
+
+  it('does the same for meshes', async () => {
+    const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
+    await sched.run(carrying('neuron.meshes', ['status']), { mode: 'full' })
+    const meshes = sched.output('geo', 'meshes') as MeshesValue
+    expect(columnNames(meshes.attributes.schema)).toContain('status')
+    expect(meshes.attributes.length).toBe(meshes.items.length)
+  })
+
+  /*
+   * A column that has gone upstream is the framework's message, not this node's:
+   * `validateColumnParams` reports it on the card before anything runs, and `resolveColumns`
+   * has already dropped the name by the time `evaluate` reads it. A bespoke `ctx.warn` here was
+   * written first and was dead code twice over — unreachable, and a second spelling of a
+   * sentence the machinery owns.
+   */
+  it('leaves a column that has gone upstream to the generic report', () => {
+    const def = requireNodeDef('neuron.skeletons')
+    const ctx = makeInferContext(
+      def,
+      { ...defaultParams(def), [CARRY_PARAM_ID]: ['hemilineage'] },
+      {
+        dataset: T.dataset('mock', 'optic-lobe-mini'),
+        neurons: T.neurons(tableSchema(column('neuronId', 'str'), column('pre', 'i64'))),
+      },
+    )
+    expect(validateColumnParams(def, ctx)).toEqual(['Missing column(s): hemilineage'])
+    // And the schema half does not promise what the join will not carry.
+    const types = def.inferOutputs!(ctx)
+    const schema = types.skeletons?.kind === 'skeletons' ? types.skeletons.schema : undefined
+    expect(columnNames(schema)).not.toContain('hemilineage')
+  })
+
+  it('says nothing and changes nothing with an empty list', async () => {
+    const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
+    await sched.run(carrying('neuron.skeletons', []), { mode: 'full' })
+    const skeletons = sched.output('geo', 'skeletons') as SkeletonsValue
+    expect(columnNames(skeletons.attributes.schema)).toEqual([
+      'neuronId',
+      'type',
+      'instance',
+      'status',
+      'size',
+      'points',
+      'cableLength',
+    ])
+  })
+
+  /*
+   * It is in the provenance key, because it changes what `evaluate` returns. `pre` rather than
+   * `status`, which the morphology schema already carries — a column the fetch publishes anyway
+   * would pass this test with the param doing nothing.
+   */
+  it('re-runs the node when the list changes', async () => {
+    const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
+    await sched.run(carrying('neuron.skeletons', []), { mode: 'full' })
+    const first = sched.output('geo', 'skeletons') as SkeletonsValue
+    await sched.run(carrying('neuron.skeletons', ['pre']), { mode: 'full' })
+    const second = sched.output('geo', 'skeletons') as SkeletonsValue
+    expect(columnNames(first.attributes.schema)).not.toContain('pre')
+    expect(columnNames(second.attributes.schema)).toContain('pre')
+    expect(second.attributes.data.pre?.length).toBe(second.items.length)
+  })
+})
+
 describe('the Source control', () => {
   const def = requireNodeDef('neuron.skeletons')
 

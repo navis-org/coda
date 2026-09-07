@@ -536,6 +536,15 @@ export interface ColumnsParam extends ParamBase {
   /** As `ColumnParam.dtypes`. */
   dtypes?: DType[] | ((params: ParamValues) => DType[] | undefined)
   schemaFrom?: ColumnSchemaSource
+  /**
+   * As `ColumnParam.excludeIds`.
+   *
+   * Declared by `carryParam`, whose list is joined *on* the id column — so offering it is
+   * offering a no-op, which is the case that rule exists for. It was a post-resolution filter
+   * first, and that version left `neuronId` in the dropdown, let somebody pick it and dropped it
+   * in silence; reaching the options is the whole point.
+   */
+  excludeIds?: boolean
   default: string[]
   /**
    * An empty selection is a legitimate state, so having nothing to offer is not an issue.
@@ -1346,8 +1355,9 @@ export function availableColumns(
   if (!schema) return []
   const dtypes = dtypesOf(param, params)
   const cols = dtypes ? columnsOfType(schema, dtypes) : schema.columns
-  // `ColumnParam.excludeIds`, and only a `column` param declares it — a `columns` picker holds
-  // a list somebody built, where the equivalent mistake needs no rule to prevent.
+  // `ColumnParam.excludeIds` / `ColumnsParam.excludeIds`. Both kinds declare it: a `columns`
+  // picker needed no such rule until one arrived whose list is joined *on* the id column, where
+  // offering it is offering a no-op.
   const names = cols.map((c) => c.name)
   return 'excludeIds' in param && param.excludeIds
     ? names.filter((name) => name !== ID_COLUMN_NAME)
