@@ -59,6 +59,7 @@ import type {
 } from '../source'
 import { reportSourceLearned, requireSkeletonRoute } from '../source'
 import { SYNAPSE_UNITS, confidenceIgnoredWarning } from '../synapseUnits'
+import { schemaFingerprint } from '../cache'
 import type { NeuronIndexRequest } from '../neuronIndex'
 import type { Edge } from '../connectivity'
 import { matrixFromEdges, typesOf } from '../connectivity'
@@ -628,7 +629,7 @@ export class CaveSource implements DataSource {
       : await this.neuronSchema(spec)
     return loadCachedTable({
       key: neuronIndexKey(this.id, req.datasetId, annotations?.key ?? ''),
-      fingerprint: schema.columns.map((c) => c.name).join(','),
+      fingerprint: schemaFingerprint(schema),
       ...(req.refresh ? { refresh: req.refresh } : {}),
       fetch: () => this.buildIndex(spec, version, schema, req),
     })

@@ -340,9 +340,11 @@ whose columns are named by its data and which needs `observesOutputSchema` to sa
 
 **Only numeric columns get numbers, and the id column is not one of them.** A lexicographic minimum
 in a column of minima reads exactly like a numeric one and nothing on the row says which it is, so a
-`str` or `bool` column reports its counts and leaves the rest null. `neuronId` is `i64` on most
-sources and is still not a quantity: a mean neuron id identifies nothing, and `CellValue` is a float64
-(invariant 8), so on an 18-digit id the arithmetic would not even be over the ids. Counts survive
+`str` or `bool` column reports its counts and leaves the rest null. `neuronId` is `str` on every
+source now, which settles it by dtype — but the rule is named rather than inherited, because it was
+`i64` on most of them and was still not a quantity: a mean neuron id identifies nothing, and
+`CellValue` is a float64 (invariant 8), so on an 18-digit id the arithmetic would not even be over
+the ids. An uploaded table can still put numbers in a column of names. Counts survive
 that, comparing cells rather than adding them — the same distinction
 [`isIdentifierColumn`](#an-identifier-is-not-a-quantity) draws one layer up.
 

@@ -126,15 +126,15 @@ registerEmitter(
       lines.push(
         `_selected_ids = ${pySelection(selection)}`,
         /*
-         * Compared as **text** on CAVE, where the id column is `str` — an eighteen-digit root id
-         * is not exact as a float, so a datastack publishes them as text and `isin` against a
-         * list of Python ints matches nothing at all. neuPrint's ids are an `i64` column and are
-         * compared as they are, which is also what keeps the common cell short.
+         * Compared as **text**, on every backend. This was a `cave ?` branch — a datastack
+         * published `neuronId` as `str` because an eighteen-digit root id is not exact as a
+         * float, so its arm cast both sides to text, while neuPrint's `i64` column was compared
+         * as it was. That is one column with two readings, which is exactly what invariant 8
+         * stopped: the id is `str` on both now, `pySelection` emits quoted ids, and the branch
+         * had nothing left to decide. Note that deleting the *wrong* arm would have looked fine
+         * on neuPrint and matched nothing on CAVE.
          */
-        cave
-          ? `${selected} = ${all}[${all}['neuronId'].astype(str).isin(` +
-              `[str(_i) for _i in _selected_ids])]`
-          : `${selected} = ${all}[${all}['neuronId'].isin(_selected_ids)]`,
+        `${selected} = ${all}[${all}['neuronId'].isin(_selected_ids)]`,
       )
     }
 

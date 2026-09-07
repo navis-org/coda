@@ -17,7 +17,7 @@ import type { TableValue } from '../../core/values'
 import { tableFromRows } from '../../core/values'
 import type { Edge } from '../connectivity'
 import type { ConnectionDirection, PathStepRequest } from '../source'
-import { pathStepSchema } from '../source'
+import { PATH_STEP_SCHEMA } from '../source'
 import type { EdgeCsr } from './encode'
 import type { LoadedEdgeSet } from './store'
 
@@ -158,15 +158,17 @@ type StepGroup = {
  *    about traffic between two populations, and cutting each pair first discards the many weak
  *    connections that are precisely what adds up to a strong pathway.
  *
- * The ids go out as **text**, which is why `pathStepSchema` takes a dtype: an edge set is keyed
- * by whatever the file said, and an eighteen-digit id in an `i64` column is a different neuron.
+ * The ids go out as **text**, which is what an edge set has always held: it is keyed by whatever
+ * the file said, and an eighteen-digit id in an `i64` column is a different neuron. This used to
+ * be the one caller asking `pathStepSchema` for the `str` reading while every other source took
+ * `i64`; every source publishes text now, so the schema is a constant and this is simply it.
  */
 export function pathStepFrom(
   set: LoadedEdgeSet,
   req: PathStepRequest,
   types: Map<NeuronId, string>,
 ): TableValue {
-  const schema = pathStepSchema('str')
+  const schema = PATH_STEP_SCHEMA
   const frontier: NeuronId[] = [...(req.neuronIds ?? [])]
   if (req.types?.length) {
     const members = membersOf(types)

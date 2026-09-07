@@ -99,6 +99,7 @@ registerHelper({
 registerHelper({
   name: 'coda_neurons',
   requires: ['dplyr'],
+  needs: ['coda_ids'],
   source: [
     'coda_neurons <- function(df) {',
     '  # neuprintr publishes `bodyid`; Coda calls the id column `neuronId` everywhere.',
@@ -106,6 +107,50 @@ registerHelper({
     '  # reports zero neurons somewhere far from here.',
     '  if (!is.null(df) && "bodyid" %in% names(df) && !("neuronId" %in% names(df))) {',
     '    df <- dplyr::rename(df, neuronId = bodyid)',
+    '  }',
+    '  coda_ids(df, "neuronId")',
+    '}',
+  ],
+})
+
+/**
+ * A backend's ids, as the character column every Coda table holds — invariant 8's R half.
+ *
+ * Three reasons, and only the first is shared with the Python helper of the same name.
+ *
+ * **The document has to agree with the canvas**, which holds every neuron id as text. Without
+ * that, `bind_rows()` on two frames whose id columns are `<integer>` and `<character>` does not
+ * coerce — it **errors**: `Can't combine ..1$neuronId <integer> and ..2$neuronId <character>`.
+ * Measured against dplyr 1.2, and it is the failure that made this necessary rather than tidy;
+ * pandas quietly gives an object column in the same situation, which is worse.
+ *
+ * **`format`, never `as.character`.** R's default numeric printing switches to scientific
+ * notation, so `as.character(7.2e17)` is `"7.20575940628857e+17"` — not an id, and no longer a
+ * key anything can match. `trim = TRUE` is the other half: `format` pads a vector to a common
+ * width by default, and a column of space-padded ids joins against nothing.
+ *
+ * **What it cannot do is recover precision, and that is worth stating here** because it is the
+ * one thing a reader would assume. R has no 64-bit integer type, so a wide id that arrived as a
+ * `numeric` was already a different neuron before this ran — `format()` on it prints the rounded
+ * value. Checked rather than assumed: R parses the literal `720575940628857216` and prints back
+ * `720575940628857344`. The fix for that is to never let it be numeric, which is what
+ * `coda_google_sheet` does with `col_types` at *read* time, and what neuprintr's own
+ * `neuprint_ids()` does by returning a character vector.
+ */
+registerHelper({
+  name: 'coda_ids',
+  source: [
+    "#' Cast id columns to exact text — Coda holds every neuron id as a character vector.",
+    'coda_ids <- function(df, ...) {',
+    '  for (name in c(...)) {',
+    '    if (!name %in% names(df)) next',
+    '    col <- df[[name]]',
+    '    if (is.character(col)) next',
+    '    # `format` rather than `as.character`: the latter gives scientific notation for a',
+    '    # wide id, and `trim` stops a vector being padded to a common width.',
+    '    text <- format(col, scientific = FALSE, trim = TRUE)',
+    '    text[is.na(col)] <- NA_character_',
+    '    df[[name]] <- text',
     '  }',
     '  df',
     '}',

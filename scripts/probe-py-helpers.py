@@ -844,11 +844,19 @@ check("describe: an empty frame keeps the summary's shape",
 
 # ---- coda_endpoint_neurons --------------------------------------------------
 #
-# The `Neuron Set` port's derivation. Two rules in it produce a plausible wrong answer rather
+# The `Neuron Set` port's derivation. Three rules in it produce a plausible wrong answer rather
 # than an error, which is exactly what a golden file cannot see: the seeds are in the result
-# whether or not any edge survived, and the row that fixes a neuron's *order* is not the row
-# that fixes its *type*.
+# whether or not any edge survived, the row that fixes a neuron's *order* is not the row that
+# fixes its *type*, and every id is cast to text before anything is deduplicated.
+#
+# The fixture feeds it **numeric** ids on purpose. That is what `fetch_adjacencies` hands back,
+# and the seeds arrive from a Coda column, which is text — so the frame this is called with
+# genuinely mixes the two, and the cast is the thing under test. Without it `pd.concat` gives an
+# object column holding both `1` and `'1'`, and `drop_duplicates` returns the seed twice: four
+# rows for three neurons, typed on one copy and blank on the other. Measured, not surmised.
 ens = load_cell(FIXTURES / "everything.ipynb", "def coda_endpoint_neurons(", {"pd": pd})
+_ids = load_cell(FIXTURES / "everything.ipynb", "def coda_ids(", {"pd": pd})
+ens["coda_ids"] = _ids["coda_ids"]
 
 conn = pd.DataFrame({
     "preId": [1, 1, 2],
@@ -858,28 +866,34 @@ conn = pd.DataFrame({
     "weight": [5, 5, 5],
 })
 
-eps = ens["coda_endpoint_neurons"](conn, [1, 9])
+# Text seeds against numeric edge ends — the mixture a real document produces.
+eps = ens["coda_endpoint_neurons"](conn.copy(), ["1", "9"])
 check("endpoints: seeds first, then partners in first-appearance order",
-      list(eps["neuronId"]) == [1, 9, 2, 3], str(list(eps["neuronId"])))
+      list(eps["neuronId"]) == ["1", "9", "2", "3"], str(list(eps["neuronId"])))
 check("endpoints: one row per neuron", len(eps) == eps["neuronId"].nunique(), str(len(eps)))
+# The regression the cast exists for: without it the seed is here twice, as `'1'` and as `1`.
+check("endpoints: a seed and its edge end are one neuron, not two",
+      len(eps) == 4, str(len(eps)))
+check("endpoints: every id is text", eps["neuronId"].map(type).eq(str).all(),
+      str(list(eps["neuronId"].map(type))))
 # 9 was seeded and no edge mentions it, so it is here with nothing known about it. Dropping it
 # is the silent hole the port exists to avoid.
 check("endpoints: a seed no edge mentions survives, untyped",
-      pd.isna(eps.loc[eps["neuronId"] == 9, "type"].iloc[0]))
+      pd.isna(eps.loc[eps["neuronId"] == "9", "type"].iloc[0]))
 # 3 arrives first as an untyped post ('' is no type, not a type named blank) and is typed by a
 # later row. Keying the type off the row that fixed the order would leave it empty.
 check("endpoints: the first non-empty type wins, not the first row",
-      eps.loc[eps["neuronId"] == 3, "type"].iloc[0] == "C",
-      str(eps.loc[eps["neuronId"] == 3, "type"].iloc[0]))
+      eps.loc[eps["neuronId"] == "3", "type"].iloc[0] == "C",
+      str(eps.loc[eps["neuronId"] == "3", "type"].iloc[0]))
 check("endpoints: a type from either end is picked up",
-      list(eps.loc[eps["neuronId"].isin([1, 2]), "type"]) == ["A", "B"],
-      str(list(eps.loc[eps["neuronId"].isin([1, 2]), "type"])))
+      list(eps.loc[eps["neuronId"].isin(["1", "2"]), "type"]) == ["A", "B"],
+      str(list(eps.loc[eps["neuronId"].isin(["1", "2"]), "type"])))
 
-bare = ens["coda_endpoint_neurons"](conn)
-check("endpoints: no seeds is the edges alone", list(bare["neuronId"]) == [1, 2, 3],
+bare = ens["coda_endpoint_neurons"](conn.copy())
+check("endpoints: no seeds is the edges alone", list(bare["neuronId"]) == ["1", "2", "3"],
       str(list(bare["neuronId"])))
-empty = ens["coda_endpoint_neurons"](conn.iloc[0:0], [7])
-check("endpoints: an empty edge list is the seeds", list(empty["neuronId"]) == [7],
+empty = ens["coda_endpoint_neurons"](conn.iloc[0:0].copy(), ["7"])
+check("endpoints: an empty edge list is the seeds", list(empty["neuronId"]) == ["7"],
       str(list(empty["neuronId"])))
 
 # --- the heatmap's label order --------------------------------------------------------------

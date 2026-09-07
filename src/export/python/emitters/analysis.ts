@@ -8,7 +8,7 @@
 import { MAX_SERIES } from '../../../ui/colors'
 import { FILTER_NETWORK_DEFAULT_OP, resolveFilterOp } from '../../../nodes/lib/tableOps'
 import { clusterColor } from '../../../ui/encoding'
-import { pyList, pyStr, pyValue } from '../py'
+import { pyList, pyLongIntList, pyStr, pyValue } from '../py'
 import type { LANDMARK_SIDES } from '../../../nodes/transform/landmarkTransform'
 import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmarkTransform'
 import { matchParamsFrom } from '../../../nodes/lib/matchOps'
@@ -25,7 +25,7 @@ import { resolveDatasetNames } from '../../../nodes/analysis/compareConnectivity
 import { centralityOptions } from '../../../nodes/analysis/networkCentrality'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
-import { pySelection, selectionIds } from './common'
+import { selectionIds } from './common'
 import { pyFilterMask } from './table'
 import { findColumn, isNumericDType } from '../../../core/types'
 import { COMMON_SPACE, nerveCordIn } from '../../../data/transforms/spaces'
@@ -863,7 +863,15 @@ registerEmitter('out.dendrogram', (ctx) => {
 
   if (selection.length > 0) {
     lines.push(
-      `_picked = ${pySelection(selection)}`,
+      /*
+       * `pyLongIntList`, not `pySelection`, and this is the one selection in the tree that is
+       * not a set of neuron ids: a Linkage selection is a set of **leaf indices**, used below as
+       * `labels[i]` and as a key into `_position`. So it needs bare integers, where every other
+       * `ids` param here needs quoted text to match a Coda id column (invariant 8). It shared
+       * `pySelection` while that emitted integers, and quoting these would make `labels['0']` a
+       * TypeError — which no golden file and no parse check can see.
+       */
+      `_picked = ${pyLongIntList(selection).join('\n')}`,
       `_position = {int(obs): i for i, obs in enumerate(${outNames.order})}`,
       `_palette = ${pyList(palette)}`,
       `_cluster_of = lambda i: 0 if ${outNames.clusters} is None else int(${outNames.clusters}[i])`,

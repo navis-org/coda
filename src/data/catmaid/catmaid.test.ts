@@ -413,7 +413,7 @@ describe('connectivity', () => {
       direction: 'outputs',
     })
     expect(table.length).toBeGreaterThan(0)
-    expect(new Set(table.data.neuronId)).toEqual(new Set([16]))
+    expect(new Set(table.data.neuronId)).toEqual(new Set(['16']))
     const weights = (table.data.weight ?? []).map(Number)
     // Every weight is a sum of its bucket array, so none can be zero for a listed partner.
     for (const weight of weights) expect(weight).toBeGreaterThan(0)

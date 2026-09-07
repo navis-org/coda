@@ -108,7 +108,7 @@ describe('core.tableFromUrl — fetching', () => {
     // The same shaping pair the upload node uses, so the two nodes cannot drift on what an
     // ID column or a text column means.
     expect(out.kind).toBe('neurons')
-    expect(out.data['neuronId']).toEqual([101, 102])
+    expect(out.data['neuronId']).toEqual(['101', '102'])
     expect(out.data['cluster']).toEqual(['3', '1'])
   })
 

@@ -182,6 +182,22 @@ coda_describe <- function(df) {
 }
 
 
+#' Cast id columns to exact text — Coda holds every neuron id as a character vector.
+coda_ids <- function(df, ...) {
+  for (name in c(...)) {
+    if (!name %in% names(df)) next
+    col <- df[[name]]
+    if (is.character(col)) next
+    # `format` rather than `as.character`: the latter gives scientific notation for a
+    # wide id, and `trim` stops a vector being padded to a common width.
+    text <- format(col, scientific = FALSE, trim = TRUE)
+    text[is.na(col)] <- NA_character_
+    df[[name]] <- text
+  }
+  df
+}
+
+
 coda_edge_list <- function(ids, prepost, min_weight, all_segments, conn) {
   # Coda's Connectivity output: preId -> postId, always oriented the way the synapse
   # points, whichever way the traversal travelled.
@@ -217,14 +233,15 @@ coda_edge_list <- function(ids, prepost, min_weight, all_segments, conn) {
   out <- dplyr::bind_rows(lapply(sides, one))
   if (is.null(out) || nrow(out) == 0) {
     return(tibble::tibble(
-      preId = numeric(0), preType = character(0),
-      postId = numeric(0), postType = character(0),
+      preId = character(0), preType = character(0),
+      postId = character(0), postType = character(0),
       weight = numeric(0), hop = integer(0), direction = character(0)
     ))
   }
   # An edge inside the seed set comes back from each end, and Build Network sums the
   # weight of every row joining a pair -- so a duplicate is a doubled synapse count in
   # the picture rather than a cosmetic repeat.
+  out <- coda_ids(out, "preId", "postId")
   dplyr::distinct(out, preId, postId, .keep_all = TRUE)
 }
 
@@ -235,9 +252,10 @@ coda_endpoint_neurons <- function(connections, seed_ids = NULL) {
   # The seeds are included whether or not any edge survived min_weight -- both ends of
   # the edge list only cover the seeds that turned out to be wired to something.
   parts <- list()
+  connections <- coda_ids(connections, "preId", "postId")
   if (!is.null(seed_ids)) {
     parts[[length(parts) + 1]] <- tibble::tibble(
-      neuronId = seed_ids, type = NA_character_
+      neuronId = as.character(seed_ids), type = NA_character_
     )
   }
   parts[[length(parts) + 1]] <- tibble::tibble(
@@ -527,7 +545,7 @@ coda_neurons <- function(df) {
   if (!is.null(df) && "bodyid" %in% names(df) && !("neuronId" %in% names(df))) {
     df <- dplyr::rename(df, neuronId = bodyid)
   }
-  df
+  coda_ids(df, "neuronId")
 }
 
 
@@ -1290,7 +1308,7 @@ explore_dataset_hits <- coda_search(explore_dataset_all, "status!=Traced pre>100
 # instead.
 explore_dataset_hits <- explore_dataset_hits |> head(500)
 
-explore_dataset_selected <- explore_dataset_all |> filter(neuronId %in% c(1001, 1005))
+explore_dataset_selected <- explore_dataset_all |> filter(neuronId %in% c("1001", "1005"))
 ```
 
 ```{r cypher}
@@ -1487,7 +1505,7 @@ synapses_2 <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn
 ```{r scatter-plot}
 # ── Scatter Plot ──
 scatter_plot_out <- find_neurons
-scatter_plot_selected <- scatter_plot_out |> filter(`neuronId` %in% c(1001))
+scatter_plot_selected <- scatter_plot_out |> filter(`neuronId` %in% c("1001"))
 
 ggplot(scatter_plot_out, aes(x = `pre`, y = `post`, colour = `type`, shape = `type`)) +
   geom_point(alpha = 0.8) +
@@ -1521,10 +1539,10 @@ group_by_df_2 <- find_neurons |>
 ```{r neuron-profile}
 # ── Neuron Profile ──
 neuron_profile_out <- find_neurons
-neuron_profile_current <- neuron_profile_out |> filter(neuronId %in% c(1001))
+neuron_profile_current <- neuron_profile_out |> filter(neuronId %in% c("1001"))
 
 profile <- coda_profile(
-  c(1001),
+  c("1001"),
   min_weight = 1,
   top_n = 10,
   conn = hemibrain_neuprint

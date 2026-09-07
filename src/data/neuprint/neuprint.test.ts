@@ -818,7 +818,9 @@ describe('decoding a neuron query', () => {
       'somaRadius',
     ])
     expect(table.data.type?.[0]).toBe('LC4')
-    expect(typeof table.data.neuronId?.[0]).toBe('number')
+    // Text, not a number: every source publishes the id as `str` (invariant 8), and this is
+    // the assertion that would have caught it silently going back.
+    expect(table.data.neuronId?.[0]).toBe('1158187240')
   })
 
   it('refuses a response whose column count disagrees with the schema', () => {
@@ -856,10 +858,18 @@ describe('decoding an undeclared query (Raw Cypher)', () => {
     ])
   })
 
-  it('sniffs numeric columns so they can drive an encoding', () => {
+  it('sniffs numeric columns so they can drive an encoding — but never an id column', () => {
+    /*
+     * `weight` is sniffed and `bodyId` is not, and the asymmetry is the point. A raw result is
+     * the one table whose columns nothing else declares, so if its ids were typed from the
+     * values it could not be joined or stacked against any *built* query's neuron table, every
+     * one of which publishes `str`. Worse, the values it would be sniffing from have already
+     * been through `JSON.parse`: at CAVE width the "evidence" is a rounded number naming a
+     * different neuron.
+     */
     const table = inferTableFromCypher(connectivity)
     const byName = new Map(table.schema.columns.map((c) => [c.name, c.dtype]))
-    expect(byName.get('bodyId')).toBe('f64')
+    expect(byName.get('bodyId')).toBe('str')
     expect(byName.get('type')).toBe('str')
     expect(byName.get('weight')).toBe('f64')
   })

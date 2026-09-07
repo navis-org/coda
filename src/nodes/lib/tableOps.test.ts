@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { compareIds, idText, isNeuronId } from '../../core/ids'
 import { CRASH_FLOOR_CELLS, SILENT } from '../../core/limits'
-import { column, columnNames, tableSchema } from '../../core/types'
+import { column, columnNames, findColumn, tableSchema } from '../../core/types'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { makeMatrix, makeTable, tableFromRows, JOIN_SEPARATOR } from '../../core/values'
 import {
@@ -206,12 +206,31 @@ describe('upload shaping', () => {
       { root_id: 102, cellType: 'LC6', cluster: null },
     ])
 
-  it('renames the id column and agrees with its schema half', () => {
+  it('renames the id column, types it text, and agrees with its schema half', () => {
+    /*
+     * Text even though these five-digit values sniffed as `i64`, and that is the whole of it:
+     * `csv.ts` already keeps an eighteen-digit FlyWire id as text (`losesMeaningAsNumber`), so
+     * without this the *same* file uploaded from two connectomes arrived under two dtypes and
+     * would not stack against each other or against any source's neuron table.
+     */
     const declared = uploadShapeSchema(UPLOAD, { idColumn: 'root_id' })
     const out = uploadShapeTable(upload(), { idColumn: 'root_id' })
     expectSchemaAgreement(declared, out)
-    expect(out.data.neuronId).toEqual([101, 102])
+    expect(findColumn(out.schema, 'neuronId')?.dtype).toBe('str')
+    expect(out.data.neuronId).toEqual(['101', '102'])
     expect(out.kind).toBe('neurons')
+  })
+
+  it('types a column that already arrived called neuronId, with nobody naming it', () => {
+    // Keyed on the *output* name, so a CSV exported from Coda comes back the way it left.
+    const already = tableSchema(column('neuronId', 'i64'), column('cellType', 'str'))
+    const out = uploadShapeTable(
+      tableFromRows(already, [{ neuronId: 101, cellType: 'LC4' }]),
+      {},
+    )
+    expectSchemaAgreement(uploadShapeSchema(already, {}), out)
+    expect(findColumn(out.schema, 'neuronId')?.dtype).toBe('str')
+    expect(out.data.neuronId).toEqual(['101'])
   })
 
   it('widens a chosen column to text, and agrees there too', () => {
@@ -232,7 +251,9 @@ describe('upload shaping', () => {
     })
     expectSchemaAgreement(declared, out)
     expect(columnNames(out.schema)).toEqual(['neuronId', 'neuronId_2'])
-    expect(out.data.neuronId).toEqual([1])
+    expect(out.data.neuronId).toEqual(['1'])
+    // The suffixed one is *not* retyped: the rule reads the name a column comes out under, and
+    // `neuronId_2` is no longer the id column — it is whatever it always was.
     expect(out.data.neuronId_2).toEqual(['x'])
   })
 

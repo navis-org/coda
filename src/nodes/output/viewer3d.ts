@@ -23,7 +23,7 @@ import { isMeshesValue, isPointsValue, isSkeletonsValue, makeTable } from '../..
 import { colorParams } from '../lib/encodingParams'
 import { rowsWithIds } from '../lib/tableOps'
 
-const FALLBACK_SCHEMA: TableSchema = tableSchema(column('neuronId', 'i64'))
+const FALLBACK_SCHEMA: TableSchema = tableSchema(column('neuronId', 'str'))
 
 /**
  * The whole-channel switch, one per socket.

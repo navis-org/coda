@@ -29,7 +29,7 @@ import { filterNetwork } from '../lib/networkOps'
  */
 function selectionSchema(nodeSchema: TableSchema | undefined): TableSchema {
   const extra = (nodeSchema?.columns ?? []).filter((c) => c.name !== 'neuronId')
-  return tableSchema(column('neuronId', 'i64'), ...extra)
+  return tableSchema(column('neuronId', 'str'), ...extra)
 }
 
 export const networkViewNode = registerNode({

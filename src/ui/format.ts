@@ -1,4 +1,5 @@
 import { AGG_OPTIONS } from '../nodes/lib/tableOps'
+import { isIdentifierColumn } from '../core/ids'
 import type { CellValue } from '../core/values'
 
 /** Compact form for axis ticks and tips: 1,284 / 12.9K / 4.2M. */
@@ -139,49 +140,33 @@ export function formatExact(value: number): string {
 const AGG_PREFIXES = AGG_OPTIONS.map((option) => `${option.value}_`)
 
 /**
- * Whether a column's numbers are *names* rather than quantities.
+ * Whether a column's numbers are *names* rather than quantities, i.e. printed verbatim.
  *
  * Why it matters is `formatExact`'s note; what it costs is that nothing in a `DType` says which
  * of the two a column holds — the same gap `BuildNetwork`'s merge rule documents ("summing added
  * `preId` up to 24093454514") and the one the upload node's `Text columns` exists for. So the
- * answer here is theirs: the *name*.
+ * answer here is the *name*, and the name rule itself is `isIdentifierColumn` in `core/ids.ts`,
+ * where `src/data` can reach it too.
  *
- * The rule is the name's **last word**, split on separators and camelCase boundaries. That
- * covers `neuronId`, `preId`/`postId`, `partnerId`, `sourceId`/`targetId` and the `root_id` /
- * `pt_root_id` spellings an uploaded CSV arrives under, with no list of them to keep in step —
- * and it is why a plain `endsWith('id')` is not enough, since `centroid` and `valid` are words
- * that happen to end that way rather than columns of ids.
+ * What this adds on top is the half that is about **display and nothing else**: an aggregate of
+ * an id column is a quantity again, so `countDistinct_partnerId` counts partners and does want
+ * its separator. The cost is a column somebody else called `max_id`, which reads as an aggregate
+ * and keeps its grouping — taken deliberately, because `sum_neuronId` is a name Coda's own
+ * `groupBy` generates where `max_id` can only arrive in somebody's CSV.
  *
- * An **aggregate of** an id column is a quantity again, and is excluded by its prefix:
- * `countDistinct_partnerId` counts partners and does want its separator. The cost is a column
- * somebody else called `max_id`, which reads as an aggregate and keeps its grouping — taken
- * deliberately, because `sum_neuronId` is a name Coda's own `groupBy` generates where `max_id`
- * can only arrive in somebody's CSV.
- *
- * Memoised, because this is asked once per *cell*: a 500-row page of ten numeric columns is
- * 5,000 calls per render, each otherwise doing a regex replace, a split and a filter — twenty
- * thousand throwaway arrays to answer a question about a handful of distinct strings. The
- * network viewer asks it per edge for one constant name, which is the same waste in one line.
- * Keyed on the name because that is the whole input; the set of names in a session is small
- * and bounded, so the map needs no eviction.
+ * Memoised for `isIdentifierColumn`'s reason, once per *cell*, and separately from it: this
+ * composition is the per-render hot path and the prefix scan is seven `startsWith` calls that
+ * would otherwise run 5,000 times a page.
  */
-const identifierColumns = new Map<string, boolean>()
+const exactColumns = new Map<string, boolean>()
 
-export function isIdentifierColumn(name: string | undefined): boolean {
+export function printsExact(name: string | undefined): boolean {
   if (!name) return false
-  const cached = identifierColumns.get(name)
+  const cached = exactColumns.get(name)
   if (cached !== undefined) return cached
-
-  let answer = false
-  if (!AGG_PREFIXES.some((prefix) => name.startsWith(prefix))) {
-    const words = name
-      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-      .split(/[^A-Za-z0-9]+/)
-      .filter(Boolean)
-    const last = words[words.length - 1]?.toLowerCase()
-    answer = last === 'id' || last === 'ids'
-  }
-  identifierColumns.set(name, answer)
+  const answer =
+    !AGG_PREFIXES.some((prefix) => name.startsWith(prefix)) && isIdentifierColumn(name)
+  exactColumns.set(name, answer)
   return answer
 }
 
@@ -189,12 +174,12 @@ export function isIdentifierColumn(name: string | undefined): boolean {
  * One cell as it should read on screen, given the column it came from.
  *
  * The column name is optional because several callers hold a bare value; passing it is what
- * keeps an id out of `formatNumber`'s hands. See `isIdentifierColumn`.
+ * keeps an id out of `formatNumber`'s hands. See `printsExact`.
  */
 export function formatCell(value: CellValue, columnName?: string): string {
   if (value === null || value === undefined) return '—'
   if (typeof value === 'number')
-    return isIdentifierColumn(columnName) ? formatExact(value) : formatNumber(value)
+    return printsExact(columnName) ? formatExact(value) : formatNumber(value)
   if (typeof value === 'boolean') return value ? 'true' : 'false'
   return value
 }

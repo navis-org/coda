@@ -73,6 +73,49 @@ export type NeuronId = string
  */
 export const ID_COLUMN_NAME = 'neuronId'
 
+/**
+ * Whether a column's name says it holds neuron identities.
+ *
+ * Here rather than in `ui/format.ts`, where it was, because `src/data` needs it and may not
+ * import the UI — `neuprint/decode.ts` types a Raw Cypher result by sniffing the values, and a
+ * column of body ids sniffs as `i64`, which is the one dtype an id must never land in. It sits
+ * beside `ID_COLUMN_NAME` for that entry's reason: this is a cross-layer agreement about a
+ * *name*, and a second spelling of it in another layer is a silent disagreement.
+ *
+ * The rule is the name's **last word**, split on separators and camelCase boundaries. That
+ * covers `neuronId`, `preId`/`postId`, `partnerId`, `sourceId`/`targetId` and the `root_id` /
+ * `pt_root_id` spellings an uploaded CSV arrives under, with no list of them to keep in step —
+ * and it is why a plain `endsWith('id')` is not enough, since `centroid` and `valid` are words
+ * that happen to end that way rather than columns of ids.
+ *
+ * What it deliberately does **not** know about is aggregates. `countDistinct_partnerId` counts
+ * partners, and whether that is printed with a thousands separator is a question about
+ * *display* — so `ui/format.ts` composes this with its own prefix test rather than this
+ * carrying one. It could not carry one anyway: the prefixes are derived from `AGG_OPTIONS` in
+ * `nodes/lib/tableOps.ts`, and `src/core` importing `src/nodes` inverts the layering that lets
+ * a node registry exist at all.
+ *
+ * Memoised, because `formatCell` asks it once per *cell*: a 500-row page of ten numeric columns
+ * is 5,000 calls per render, each otherwise doing a regex replace, a split and a filter. Keyed
+ * on the name because that is the whole input; the set of names in a session is small and
+ * bounded, so the map needs no eviction.
+ */
+const identifierColumns = new Map<string, boolean>()
+
+export function isIdentifierColumn(name: string | undefined): boolean {
+  if (!name) return false
+  const cached = identifierColumns.get(name)
+  if (cached !== undefined) return cached
+  const words = name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean)
+  const last = words[words.length - 1]?.toLowerCase()
+  const answer = last === 'id' || last === 'ids'
+  identifierColumns.set(name, answer)
+  return answer
+}
+
 const ID_GRAMMAR = /^-?\d+$/
 
 /** Whether a string is a well-formed id, i.e. safe to splice into a query unquoted. */

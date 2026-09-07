@@ -20,7 +20,7 @@
  */
 
 import { describeDuration } from '../../core/limits'
-import { ID_COLUMN_NAME, numericIds } from '../../core/ids'
+import { ID_COLUMN_NAME, idText, numericIds } from '../../core/ids'
 import type {
   CellValue,
   GeometryUnits,
@@ -45,6 +45,7 @@ import { geometryFrame } from '../transforms/spaces'
 import { mapWithConcurrency } from '../concurrency'
 import { compileLabelMatch, preparedRows, refuseUnfilterableRoi } from '../neuronFilter'
 import { fieldTermsMatch } from '../terms'
+import { schemaFingerprint } from '../cache'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
 import type { NeuronIndexRequest } from '../neuronIndex'
@@ -380,7 +381,7 @@ export class CatmaidSource implements DataSource {
     const schema = this.schemas.neurons
     return loadCachedTable({
       key: neuronIndexKey(this.id, req.datasetId),
-      fingerprint: schema.columns.map((column) => column.name).join(','),
+      fingerprint: schemaFingerprint(schema),
       ...(req.refresh ? { refresh: req.refresh } : {}),
       fetch: () => this.buildIndex(req),
     })
@@ -428,7 +429,11 @@ export class CatmaidSource implements DataSource {
       const labels = index.labels.get(skeletonId) ?? EMPTY_LABELS
       const summary = summaries[String(skeletonId)]
       rows.push({
-        [ID_COLUMN_NAME]: skeletonId,
+        // `idText`, not `String`: `index.skeletonIds` is CATMAID's own numeric array, and this
+        // is the edge where a number becomes an id. A value past `Number.MAX_SAFE_INTEGER` has
+        // already lost the digits that identified the skeleton, so it drops rather than
+        // publishing a confident wrong id — invariant 8's rule, at this source's own seam.
+        [ID_COLUMN_NAME]: idText(skeletonId),
         name: labels.name,
         type: labels.type,
         instance: labels.instance,
@@ -563,7 +568,9 @@ export class CatmaidSource implements DataSource {
 
     const prepared = preparedRows(index, req, 'CATMAID')
     const labelMatch = compileLabelMatch(req.labels)
-    const wanted = req.neuronIds ? new Set(numericIds(req.neuronIds)) : undefined
+    // Text against text. It was `numericIds` against `Number(ids[i])`, which was right while the
+    // column was `i64` and is now two conversions bracketing a comparison that needs none.
+    const wanted = req.neuronIds ? new Set(req.neuronIds) : undefined
 
     /*
      * Columns are hoisted by `prepareFieldTerms` and the row built **only** for `labelMatch`,
@@ -579,7 +586,7 @@ export class CatmaidSource implements DataSource {
 
     const matched: number[] = []
     for (let i = 0; i < index.length; i += 1) {
-      if (wanted && !wanted.has(Number(ids[i]))) continue
+      if (wanted && !wanted.has(idText(ids[i]) ?? '')) continue
       if (!fieldTermsMatch(prepared, i)) continue
       if (labelMatch && !labelMatch(getRow(index, i))) continue
       matched.push(i)
@@ -611,10 +618,16 @@ export class CatmaidSource implements DataSource {
       for (const [queryId, byConfidence] of Object.entries(entry.skids)) {
         const weight = synapseWeight(byConfidence)
         if (req.minWeight && weight < req.minWeight) continue
+        /*
+         * The ids go into the table as the text `Object.entries` already handed over, never
+         * through `Number` — invariant 8, and the `labels` index beside them is the contrast:
+         * that map is CATMAID's own, keyed by the numeric skeleton id this backend fetches by,
+         * so it is looked up numerically and never published.
+         */
         rows.push({
-          [ID_COLUMN_NAME]: Number(queryId),
+          [ID_COLUMN_NAME]: queryId,
           neuronType: labels.labels.get(Number(queryId))?.type ?? null,
-          partnerId: Number(partnerId),
+          partnerId,
           partnerType: labels.labels.get(Number(partnerId))?.type ?? null,
           weight,
         })
@@ -710,7 +723,7 @@ export class CatmaidSource implements DataSource {
       const rows: Array<Record<string, CellValue>> = pairs.map(([id, item]) => {
         const labels = index?.labels.get(Number(id)) ?? EMPTY_LABELS
         return {
-          [ID_COLUMN_NAME]: Number(id),
+          [ID_COLUMN_NAME]: id,
           name: labels.name,
           type: labels.type,
           instance: labels.instance,
@@ -867,7 +880,7 @@ export class CatmaidSource implements DataSource {
         if (minConfidence > 0 && confidence < minConfidence) continue
         points.push(x, y, z)
         rows.push({
-          [ID_COLUMN_NAME]: skeletonId,
+          [ID_COLUMN_NAME]: idText(skeletonId),
           // A map lookup rather than a derivation: this runs once per *link*, which for a
           // densely traced FAFB neuron is tens of thousands of times.
           type: index?.labels.get(skeletonId)?.type ?? null,

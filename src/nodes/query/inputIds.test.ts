@@ -104,8 +104,10 @@ describe('neuron.inputIds — without a dataset', () => {
     if (!isTableValue(out)) throw new Error('expected a table')
     expect(out.kind).toBe('neurons')
     expect(columnNames(out.schema)).toEqual(['neuronId'])
-    // Numbers, because this branch builds the table itself and `ID_ONLY_SCHEMA` says `i64`.
-    expect(out.data['neuronId']).toEqual([1234, 5678, 9012])
+    // Text, because this branch builds the table itself and `ID_ONLY_SCHEMA` says `str`. It
+    // said `i64` and this said numbers; the dtype moved and the value half had to move with it,
+    // which `tableFromRows` would not have caught (it validates nothing).
+    expect(out.data['neuronId']).toEqual(['1234', '5678', '9012'])
     // The whole point of the optional input: no dataset, no query, ids that need not exist.
     expect(findNeurons).not.toHaveBeenCalled()
   })
@@ -316,12 +318,17 @@ describe('neuron.inputIds — refusals', () => {
     expect(String(req.neuronIds?.[0])).not.toBe(String(Number(wide)))
   })
 
-  it('warns rather than rounds when a wide id has no dataset to go to', () => {
-    // With no Dataset the ids *are* the output, and that table's `neuronId` is an `i64` column —
-    // so this is the one place the width still bites, and it says so instead of rounding.
-    const issue = issues({ ids: '720575940379279312' })
-    expect(issue).toContain('720575940379279312')
-    expect(issue).toContain('wire a Dataset')
+  it('says nothing about a wide id with no dataset, because nothing rounds any more', () => {
+    /*
+     * This used to be "warns rather than rounds": with no Dataset the ids *are* the output, and
+     * that table's `neuronId` was an `i64` column, so the width bit here and only here. The
+     * remedy the message named was to wire a Dataset, which carried the id as text.
+     *
+     * `ID_ONLY_SCHEMA` is `str` now (invariant 8), so the unwired branch holds an eighteen-digit
+     * root id exactly and a warning would be a false alarm on a correct graph. Kept as a test
+     * rather than deleted, because "no complaint" is what a re-added warning would break.
+     */
+    expect(issues({ ids: '720575940379279312' })).toBe('')
   })
 
   it('asks for ids when there are none and nothing is wired', () => {
@@ -397,38 +404,31 @@ describe('neuron.inputIds — a wide id on the wire', () => {
     return { warnings, result: def.evaluate!(context) as Promise<Record<string, Value>> }
   }
 
-  it('says so when a wide id arrives wired, which validate never could', async () => {
-    // The regression. Before this, the only mention of a rounded id was `validate`'s, and
-    // `validate` reads `ctx.params.ids` — so a wire carried one past every surface in silence.
+  /*
+   * This block used to be four warnings and is now two exactness checks, which is the whole of
+   * what the dtype change bought here. `ID_ONLY_SCHEMA` was `i64`, so the unwired branch rounded
+   * a wide id to a different neuron and said so — at edit time from `validate`, and on the run
+   * through `ctx.warn`, both naming "wire a Dataset" as the remedy. It is `str` now, so the id
+   * survives and there is nothing to warn about.
+   *
+   * The checks that replaced them assert the id **as text**, never against a numeric literal:
+   * `toBe(720575940379279312)` would compare against the rounded value and pass for exactly the
+   * wrong reason.
+   */
+  it('carries a wide id that arrived wired through unrounded', async () => {
     const { warnings, result } = run({ inputs: { ids: idTable(WIDE) } })
-    await result
-    expect(warnings.join(' ')).toContain(WIDE)
-    expect(warnings.join(' ')).toContain('rounded')
+    const out = (await result)['neurons']
+    if (!isTableValue(out)) throw new Error('expected a table')
+    expect(out.data['neuronId']).toEqual([WIDE])
+    expect(warnings).toEqual([])
   })
 
-  it('names the fix, not just the problem', async () => {
-    const { warnings, result } = run({ inputs: { ids: idTable(WIDE) } })
-    await result
-    // Wiring a Dataset is the whole remedy — the id then crosses as text and nothing rounds.
-    expect(warnings.join(' ')).toContain('Wire a Dataset')
-  })
-
-  it('counts them and names one, rather than repeating itself per id', async () => {
-    const { warnings, result } = run({
-      inputs: { ids: idTable(WIDE, '720575940379279313', '720575940379279314') },
-    })
-    await result
-    expect(warnings).toHaveLength(1)
-    expect(warnings[0]).toContain('3 IDs')
-    expect(warnings[0]).toContain(WIDE)
-  })
-
-  it('still warns for a typed id, so a Run says it and not only the badge', async () => {
-    // `validate` says this at edit time; an export or a headless run never asks `validate`, so
-    // the same fact has to survive into the run's own warning channel.
+  it('carries a wide id that was typed through unrounded', async () => {
     const { warnings, result } = run({ params: { ids: WIDE } })
-    await result
-    expect(warnings.join(' ')).toContain(WIDE)
+    const out = (await result)['neurons']
+    if (!isTableValue(out)) throw new Error('expected a table')
+    expect(out.data['neuronId']).toEqual([WIDE])
+    expect(warnings).toEqual([])
   })
 
   it('is silent about ids that fit', async () => {
@@ -437,10 +437,9 @@ describe('neuron.inputIds — a wide id on the wire', () => {
     expect(warnings).toEqual([])
   })
 
-  it('says nothing once a Dataset is wired, because nothing rounds there', async () => {
-    // The id crosses the seam as text and the source publishes its own dtype, so the ceiling
-    // this warns about does not exist on that path. Warning anyway would be a false alarm on
-    // the one configuration that is entirely correct.
+  it('says nothing once a Dataset is wired either', async () => {
+    // Both branches agree now, where the point of this case used to be that only one of them
+    // was safe. The id crosses the seam as text whichever way it goes.
     const { warnings, result } = run({
       inputs: {
         ids: idTable(WIDE),
@@ -460,16 +459,16 @@ describe('neuron.inputIds — a wide id on the wire', () => {
     expect(warnings.join(' ')).toContain('skipped')
   })
 
-  it('rounds rather than dropping, so the list stays the length it was given', async () => {
+  it('keeps the list the length it was given, and every id the id it was given', async () => {
     /*
-     * The deliberate half. Dropping would shorten a list whose entire point is that it is the
-     * one the user handed over, and it would contradict `validate`'s "will be rounded" a
-     * keystroke earlier. The warning is what makes rounding honest; it is not a licence to
-     * quietly do something else instead.
+     * This was "rounds rather than dropping": the list somebody hands over has to come back the
+     * length it went in, so a wide id was rounded rather than dropped and the warning is what
+     * made that honest. Neither half applies now — nothing is dropped *and* nothing is rounded —
+     * so the assertion is the stronger one it could not make before.
      */
     const { result } = run({ inputs: { ids: idTable(WIDE, '1234') } })
     const out = (await result)['neurons']
     if (!isTableValue(out)) throw new Error('expected a table')
-    expect(out.data['neuronId']).toHaveLength(2)
+    expect(out.data['neuronId']).toEqual([WIDE, '1234'])
   })
 })

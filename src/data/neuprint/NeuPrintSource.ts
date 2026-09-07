@@ -64,13 +64,14 @@ import {
   GROUP_TOTALS_SCHEMA,
   PATH_STEP_SCHEMA,
   connectivitySchemaWithRoi,
-  synapseTotalsSchema,
+  SYNAPSE_TOTALS_SCHEMA,
   ROI_CONNECTIVITY_SCHEMA,
   ROI_MESH_SCHEMA,
   reportSourceLearned,
   requireSkeletonRoute,
   throwIfAborted,
 } from '../source'
+import { schemaFingerprint } from '../cache'
 import { datasetSummaryKey, loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import { geometryFrame } from '../transforms/spaces'
 import { fetchRoiMeshSet } from './roiMeshes'
@@ -206,10 +207,11 @@ function pushNeuronRow(
   neuronId: string,
   row: NeuronRow | undefined,
 ): void {
-  // The column is `i64` because neuPrint's ids are nine to eleven digits and exact as doubles —
-  // invariant 8's "what a source publishes does not change". A source whose ids are wider
-  // declares `str` and pushes `neuronId` itself.
-  data['neuronId']!.push(Number(neuronId))
+  // Straight through as the text a `NeuronId` already is. It used to be `Number(neuronId)`,
+  // against a column neuPrint declared `i64` on the grounds that its own ids are nine to eleven
+  // digits and exact as doubles — true, and it still made this source's tables unstackable and
+  // unjoinable with a wide-id source's. Invariant 8 is one dtype now, everywhere.
+  data['neuronId']!.push(neuronId)
   data['type']!.push(row?.type ?? null)
   data['instance']!.push(row?.instance ?? null)
   data['status']!.push(row?.status ?? null)
@@ -648,9 +650,7 @@ export class NeuPrintSource implements DataSource {
 
     return loadCachedTable({
       key: neuronIndexKey(this.id, req.datasetId),
-      fingerprint: this.neuronSchema(req.datasetId)
-        .columns.map((c) => c.name)
-        .join(','),
+      fingerprint: schemaFingerprint(this.neuronSchema(req.datasetId)),
       ...(req.refresh ? { refresh: req.refresh } : {}),
       fetch: async () => {
         req.onProgress?.(0.1, 'downloading index')
@@ -721,7 +721,7 @@ export class NeuPrintSource implements DataSource {
    * spends somebody else's database.
    */
   async fetchSynapseTotals(req: SynapseTotalsRequest): Promise<TableValue> {
-    const schema = synapseTotalsSchema('i64')
+    const schema = SYNAPSE_TOTALS_SCHEMA
     if (req.neuronIds.length === 0) return emptyTable(schema)
 
     // Straight into the two column arrays rather than through `tableFromRows`, whose own note
@@ -742,7 +742,9 @@ export class NeuPrintSource implements DataSource {
         // A body with no synapses on this side aggregates to null, and null is what it stays:
         // see `fetchSynapseTotals` on the seam — a zero here would divide into an infinity.
         if (typeof total !== 'number') continue
-        ids.push(Number(row[0]))
+        // `idKey` rather than `Number`: this is the same text every other map here is keyed by,
+        // and the column it lands in is `str`.
+        ids.push(idKey(row[0]))
         totals.push(total)
       }
     }
@@ -921,7 +923,7 @@ export class NeuPrintSource implements DataSource {
       key: datasetSummaryKey('roi-connectivity', this.id, req.datasetId),
       // Nothing per-dataset decides this table's shape, so the schema's own column list is the
       // whole of what could invalidate it.
-      fingerprint: ROI_CONNECTIVITY_SCHEMA.columns.map((c) => c.name).join(','),
+      fingerprint: schemaFingerprint(ROI_CONNECTIVITY_SCHEMA),
       fetch: async () => {
         const response = await fetchRoiConnectivity(req.datasetId, this.options(req.signal))
         return roiConnectivityFromResponse(response)

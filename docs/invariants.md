@@ -136,9 +136,57 @@ verbatim. Read the entry before arguing with the rule.
    length-then-lexicographic: numeric order for non-negative integers of any width, where
    `Number(a) - Number(b)` reports two adjacent wide ids as equal.
 
-   What this does **not** change is what a source _publishes_ as a **dtype**. neuPrint's ids are
-   exact as doubles, so its `neuronId` column is `i64` and holds numbers; a CAVE source will
-   declare `str`. `idColumn` reads either.
+   **A source publishes the id as `str` too, on every backend, and that clause replaced its own
+   opposite.** It used to read: *what this does not change is what a source publishes as a
+   dtype — neuPrint's ids are exact as doubles, so its `neuronId` column is `i64` and holds
+   numbers; a CAVE source will declare `str`; `idColumn` reads either.* Every sentence of that
+   was true and the set of them was wrong, which is the part worth keeping.
+
+   What it cost was **two connectomes in one table**. `mergedDType` refuses `i64` against `str`,
+   so `Stack Tables` and `Stack Neurons` answered `Cannot stack: "neuronId" is i64 above and str
+   below` for every neuPrint + CAVE pair — and the error's two remedies, "convert it upstream, or
+   drop it with a Select", are both unreachable from a *geometry* card, since `Qualify Ids`,
+   `Select` and `Edit Table` all take `T.table()`. The Workflow Wizard's own cross-dataset
+   geometry arms (`xmorphology`, `xnblast`) build exactly that chain, gated only on a shared
+   template space, so FlyWire + MaleCNS was an offered answer that could not run. `Join` had
+   quietly been widening the same pair to `str` all along (`joinKeyDType`), which is the tell:
+   three of `mergedDType`'s four callers already treated the two readings as one column.
+
+   The dtype was never a fact about the data — it was a fact about how *wide* one backend's ids
+   happen to be. So it is one dtype now, `str`, everywhere, and the schemas that took an id dtype
+   as a *parameter* (`pathStepSchema`, `synapseTotalsSchema`) are plain constants: a builder
+   still offering `'i64'` is how the next source reintroduces the rounding one call at a time.
+
+   Three consequences worth knowing, each found by making the change:
+
+   - **A `dtypes: ['str']` picker was getting an id filter for free.** `neuron.idsFromLabel`'s
+     `Field` restricts to text because a label is text, and while `neuronId` was `i64` that also
+     excluded it. Text now, and first in the schema, so `resolveColumn`'s rule 3 handed it to a
+     picker on its declared default: the node looked labels up in the id column, matched nothing,
+     and drew `0 neurons, 0/2 labels` with no error. `ColumnParam.excludeIds` is the declaration
+     that says what the dtype used to imply.
+   - **A cache fingerprint of column *names* is not a fingerprint of the shape.** Nothing here
+     renames a column, so a neuron index cached by the previous build was a *hit* and handed back
+     numbers under a schema now declaring text. `schemaFingerprint` in `data/cache.ts` is one
+     spelling for all five producers, and it carries the dtype and the unit.
+   - **`tableFromRows` and `makeTable` validate nothing.** A source that kept one `Number(id)`
+     publishes numbers under a `str` column and every schema-level check still passes. That is
+     what `data/idDtype.test.ts` walks the mock for, and it is how all four value sites were
+     found.
+
+   The exporters diverge here, in opposite directions, and both were **run** rather than
+   reasoned about. Python casts *out* at a library call — `NeuronCriteria(bodyId=…)` takes
+   integers, so `neuronIdInts` marks that boundary — and casts *in* at every seam that mints a
+   Coda column, because `pd.concat` of an `int64` id column and a text one gives an object column
+   holding both `10001` and `'10001'`, which `drop_duplicates` reads as two neurons (measured:
+   `coda_endpoint_neurons` returned the seed twice). R needs no cast at the call, because
+   neuprintr's own `neuprint_ids()` returns a **character** vector and recommends it — R has no
+   64-bit integer, so a numeric body id is the lossy form there. But R fails harder in the
+   document: `bind_rows` on `<integer>` against `<character>` **errors** rather than coercing.
+   And R's `coda_ids` uses `format(scientific = FALSE, trim = TRUE)`, never `as.character`, which
+   prints a wide id as `7.20575940628857e+17`. What no cast can do in R is recover precision: the
+   literal `720575940628857216` is already `720575940628857344` by the time anything sees it,
+   which is why `coda_google_sheet` forces `col_types` at *read* time.
 
    **The column is called `neuronId`, and that is Coda's word rather than any backend's.** It
    used to be `bodyId`, which is neuPrint's property name, and it is the one column every node

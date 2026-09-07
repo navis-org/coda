@@ -40,7 +40,7 @@ import {
   codaNeurons,
   codaSynapses,
   isCaveDataset,
-  neuronIds,
+  neuronIdInts,
   pyMaskFrame,
   pyPopulationMask,
 } from './common'
@@ -555,8 +555,8 @@ registerEmitter('neuron.adjacency', (ctx) => {
 
   return [
     `_neurons, _conn = fetch_adjacencies(`,
-    `    NeuronCriteria(bodyId=${neuronIds(sources)}, client=${c}),`,
-    `    NeuronCriteria(bodyId=${neuronIds(targets)}, client=${c}),`,
+    `    NeuronCriteria(bodyId=${neuronIdInts(sources)}, client=${c}),`,
+    `    NeuronCriteria(bodyId=${neuronIdInts(targets)}, client=${c}),`,
     `    client=${c},`,
     `)`,
     `_conn = merge_neuron_properties(_neurons, _conn, ['type'])`,
@@ -600,7 +600,7 @@ registerEmitter('neuron.roiCounts', (ctx) => {
         'to `fetch_primary_rois(client=...)` before summing, or the totals roughly double.',
     ),
     `_, ${out} = fetch_neurons(`,
-    `    NeuronCriteria(bodyId=${neuronIds(neurons)}, client=${c}),`,
+    `    NeuronCriteria(bodyId=${neuronIdInts(neurons)}, client=${c}),`,
     `    client=${c},`,
     `)`,
     codaNeurons(ctx, out),
@@ -646,7 +646,10 @@ registerEmitter('neuron.skeletons', (ctx) => {
   ctx.require('navisNeuprint')
   const out = ctx.output('skeletons')
   const limit = Number(ctx.params.limit ?? 0)
-  const ids = limit > 0 ? `${neurons}['neuronId'].head(${limit}).tolist()` : neuronIds(neurons)
+  const ids =
+    limit > 0
+      ? `${neurons}['neuronId'].head(${limit}).astype('int64').tolist()`
+      : neuronIdInts(neurons)
 
   return [
     /*
@@ -686,7 +689,10 @@ registerEmitter('neuron.meshes', (ctx) => {
   ctx.require('navisNeuprint')
   const out = ctx.output('meshes')
   const limit = Number(ctx.params.limit ?? 0)
-  const ids = limit > 0 ? `${neurons}['neuronId'].head(${limit}).tolist()` : neuronIds(neurons)
+  const ids =
+    limit > 0
+      ? `${neurons}['neuronId'].head(${limit}).astype('int64').tolist()`
+      : neuronIdInts(neurons)
 
   return [
     // Coda's `Detail` is a triangle budget it spends across the batch, choosing the finest
@@ -784,7 +790,7 @@ registerEmitter('neuron.synapses', (ctx) => {
 
   return [
     `${out} = fetch_synapses(`,
-    `    NeuronCriteria(bodyId=${neuronIds(neurons)}, client=${c}),`,
+    `    NeuronCriteria(bodyId=${neuronIdInts(neurons)}, client=${c}),`,
     `    SynapseCriteria(${synCriteria.join(', ')}),`,
     `    client=${c},`,
     `)`,

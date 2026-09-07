@@ -28,11 +28,9 @@
  * annotation chain reaches these columns exactly as it reaches every other surface.
  */
 
-import type { CellValue, DatasetEdges, MatrixValue, TableValue } from '../core/values'
+import type { DatasetEdges, MatrixValue, TableValue } from '../core/values'
 import { tableFromRows } from '../core/values'
-import type { DType } from '../core/types'
 import type { NeuronId } from '../core/ids'
-import { numericId } from '../core/ids'
 import type { Edge } from './connectivity'
 import { matrixFromEdges, typesOf } from './connectivity'
 import { edgesBetween, edgesFrom, pathStepFrom } from './edges/query'
@@ -97,42 +95,23 @@ async function typeLookup(
   return typesOf(index)
 }
 
-/**
- * Ids already checked against a dtype, so a hundred-thousand-entry dictionary is walked once.
+/*
+ * There was a width guard here, and it is worth saying what removed it.
  *
- * `WeakMap` on the loaded set, `typesOf`'s idiom — `loadEdgeSet` holds one object per set for
- * the session, so the memo hits across every hop of a traversal.
- */
-const checked = new WeakSet<LoadedEdgeSet>()
-
-/**
- * Refuse an edge set whose ids cannot survive the dataset's own id dtype.
+ * An edge set is keyed by text; a dataset used to publish `neuronId` as `i64` or `str`
+ * depending on the backend, so attaching a FlyWire edge list to a neuPrint dataset wrote
+ * eighteen-digit ids into a float64 column and produced a table of neurons that do not exist.
+ * `requireIdsFit` refused that, and `idCell` converted per the dataset's declared dtype.
  *
- * neuPrint publishes `neuronId` as `i64` because its ids are exact as doubles; CAVE publishes
- * `str`. An eighteen-digit id written into an `i64` column is a **different neuron**, so an edge
- * list from one connectome attached to a dataset from another has to stop here rather than
- * produce a table of neurons that do not exist. Checked against the dictionary — the distinct
- * ids — rather than per row, so it costs one pass over 140,000 entries instead of ten million.
+ * Every source publishes the id as text now, so there is no conversion to make and no width to
+ * lose: both functions had become "if (dtype !== 'i64') return" and the identity. Deleted
+ * rather than left inert, because a dead branch reading `'i64'` is a working example for the
+ * next person adding a source.
+ *
+ * Note what is *not* claimed in its place: attaching an edge set from another connectome is
+ * still a mistake, it just is not this file's to catch any more. It now matches nothing rather
+ * than matching the wrong thing, which is the failure this guard existed to convert it into.
  */
-function requireIdsFit(set: LoadedEdgeSet, dtype: DType): void {
-  // Only `i64` can lose an id, so the memo is "has this set been checked" rather than a set of
-  // dtypes — the early return above means no second one could ever be recorded.
-  if (dtype !== 'i64') return
-  if (checked.has(set)) return
-  const bad = set.ids.find((id) => numericId(id) === undefined)
-  if (bad !== undefined) {
-    throw new Error(
-      `The edge set "${set.meta.name}" holds ids too wide for this dataset's numeric ids — ` +
-        `"${bad}" cannot be stored exactly. It is probably from a different connectome.`,
-    )
-  }
-  checked.add(set)
-}
-
-/** One id as the cell a dataset's own schema calls for. */
-function idCell(id: NeuronId, dtype: DType): CellValue {
-  return dtype === 'i64' ? (numericId(id) ?? null) : id
-}
 
 export async function connectivityFor(
   source: DataSource,
@@ -174,8 +153,6 @@ export async function connectivityFor(
   ])
 
   const schema = schemasOf(source, req.datasetId).connectivity
-  const dtype = schema.columns.find((c) => c.name === 'neuronId')?.dtype ?? 'str'
-  requireIdsFit(set, dtype)
 
   const outward = req.direction === 'outputs'
   const edges = edgesFrom(set, req.neuronIds, req.direction, req.minWeight)
@@ -187,9 +164,9 @@ export async function connectivityFor(
       const self = outward ? edge.pre : edge.post
       const other = outward ? edge.post : edge.pre
       return {
-        neuronId: idCell(self, dtype),
+        neuronId: self,
         neuronType: types.get(self) ?? null,
-        partnerId: idCell(other, dtype),
+        partnerId: other,
         partnerType: types.get(other) ?? null,
         weight: edge.weight,
       }

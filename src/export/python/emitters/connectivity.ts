@@ -14,7 +14,7 @@
 import { pyList, pyStr } from '../py'
 import { regionOptions } from '../../../nodes/lib/connectivityOps'
 import { registerEmitter, registerHelper } from '../registry'
-import { codaNeurons, neuronIds } from './common'
+import { codaNeurons, neuronIdInts, neuronIds } from './common'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import type { EmitContext } from '../types'
 
@@ -90,7 +90,7 @@ function endpointLines(
     '',
     `_endpoints = coda_endpoint_neurons(${edges}, ${seeds})`,
     `${out}, _ = fetch_neurons(`,
-    `    NeuronCriteria(bodyId=${neuronIds('_endpoints')}, client=${client}),`,
+    `    NeuronCriteria(bodyId=${neuronIdInts('_endpoints')}, client=${client}),`,
     `    client=${client},`,
     `)`,
     codaNeurons(ctx, out),
@@ -112,6 +112,20 @@ function endpointLines(
  * chained call: a constant indent is right in one of those places and wrong in the other, and
  * generated code that reads as carelessly formatted is generated code nobody trusts.
  */
+/**
+ * The cast that follows every one of those renames: `preId`/`postId` are Coda columns, and a
+ * Coda id column is text (invariant 8, and `coda_ids`).
+ *
+ * Beside `renameLines` because it is the same seam — `bodyId_pre` is neuprint-python's `int64`
+ * on the way in and `preId` is Coda's string on the way out, so a rename that did not retype
+ * would leave the notebook joining on a column the canvas holds differently. The multi-hop path
+ * gets it from `coda_traverse_connectivity`, which returns already-cast columns.
+ */
+function edgeIdLines(ctx: EmitContext, frame: string): string[] {
+  ctx.helper('coda_ids')
+  return [`${frame} = coda_ids(${frame}, 'preId', 'postId')`]
+}
+
 function renameLines(indent: string): string[] {
   return [
     `${indent}'bodyId_pre': 'preId',`,
@@ -235,7 +249,7 @@ registerEmitter('neuron.connectivity', (ctx) => {
     `)`,
   ]
 
-  const criteria = `NeuronCriteria(bodyId=${ids}, client=${c})`
+  const criteria = `NeuronCriteria(bodyId=${neuronIdInts(neurons)}, client=${c})`
 
   /*
    * The dedupe key, and the region is part of it exactly when a region is part of a row —
@@ -277,6 +291,7 @@ registerEmitter('neuron.connectivity', (ctx) => {
       `    })`,
       `    .assign(hop=1)`,
       `)`,
+      ...edgeIdLines(ctx, out),
       ...endpointLines(ctx, out, ids, c),
     ]
   }
@@ -296,6 +311,7 @@ registerEmitter('neuron.connectivity', (ctx) => {
     `    })`,
     `    .assign(hop=1, direction=${pyStr(label)})`,
     `)`,
+    ...edgeIdLines(ctx, out),
     ...endpointLines(ctx, out, ids, c),
   ]
 })
@@ -313,6 +329,14 @@ registerEmitter('neuron.connectivity', (ctx) => {
 registerHelper({
   name: 'coda_endpoint_neurons',
   requires: [['pandas']],
+  /*
+   * It concatenates the seed ids with both ends of the edge list and then deduplicates. If the
+   * two arrive under different types — text seeds against an `int64` `preId`, which is exactly
+   * what `fetch_adjacencies` hands back — `pd.concat` gives an object column holding `10001`
+   * and `'10001'`, and `drop_duplicates` reads them as two neurons. So both are cast, here,
+   * rather than trusted to have been cast by whoever called it.
+   */
+  needs: ['coda_ids'],
   source: [
     'def coda_endpoint_neurons(connections, seed_ids=None):',
     '    """The neurons an edge list is about: the seeds, then every partner, one row each.',
@@ -326,7 +350,10 @@ registerHelper({
     '    """',
     '    frames = []',
     '    if seed_ids is not None:',
-    "        frames.append(pd.DataFrame({'neuronId': list(seed_ids), 'type': None}))",
+    '        frames.append(',
+    "            coda_ids(pd.DataFrame({'neuronId': list(seed_ids), 'type': None}), 'neuronId')",
+    '        )',
+    "    connections = coda_ids(connections.copy(), 'preId', 'postId')",
     "    for id_col, type_col in (('preId', 'preType'), ('postId', 'postType')):",
     '        frames.append(',
     '            connections[[id_col, type_col]].rename(',
@@ -364,6 +391,8 @@ registerHelper({
     ['pandas'],
     ['neuprint', 'NeuronCriteria', 'fetch_adjacencies', 'merge_neuron_properties'],
   ],
+  // The edge list it returns carries two id columns, and Coda's are text.
+  needs: ['coda_ids'],
   source: [
     'def coda_traverse_connectivity(seed_ids, direction, hops, min_weight, all_segments, client):',
     '    """Coda\'s Connectivity node: a breadth-first walk returning an edge list.',
@@ -452,11 +481,12 @@ registerHelper({
     '                for p, q in zip(out["bodyId_pre"], out["bodyId_post"])]',
     '    out["hop"] = [r[0] for r in resolved]',
     '    out["direction"] = [r[1] for r in resolved]',
-    '    return out.rename(columns={',
+    '    out = out.rename(columns={',
     '        "bodyId_pre": "preId",',
     '        "type_pre": "preType",',
     '        "bodyId_post": "postId",',
     '        "type_post": "postType",',
     '    })',
+    '    return coda_ids(out, "preId", "postId")',
   ],
 })

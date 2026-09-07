@@ -82,12 +82,59 @@ registerHelper({
  */
 registerHelper({
   name: 'coda_neurons',
+  requires: [['pandas']],
   source: [
     'def coda_neurons(df):',
     '    """Rename neuprint-python\'s `bodyId` to the `neuronId` every Coda table uses."""',
-    "    if df is None or 'bodyId' not in df.columns or 'neuronId' in df.columns:",
+    '    if df is None:',
     '        return df',
-    "    return df.rename(columns={'bodyId': 'neuronId'})",
+    "    if 'bodyId' in df.columns and 'neuronId' not in df.columns:",
+    "        df = df.rename(columns={'bodyId': 'neuronId'})",
+    "    return coda_ids(df, 'neuronId')",
+  ],
+})
+
+/**
+ * A backend's integer ids, as the exact text every Coda column holds.
+ *
+ * The document's half of invariant 8. Coda carries a neuron id as a decimal *string* on every
+ * source, because a CAVE root id is eighteen digits and a float64 — which is what a JSON number
+ * and an R `numeric` both are — rounds it into a different neuron. The notebook has to agree,
+ * or the two disagree about the one column everything joins on.
+ *
+ * It matters even where every id is narrow enough to be exact, and that is the half worth
+ * saying: `pd.concat` of an `int64` id column and a `string` one gives an object column holding
+ * both `10001` and `'10001'`, and `drop_duplicates`, `groupby` and `merge` all read those as two
+ * different neurons. So the cast goes at the seam rather than at each comparison — one place,
+ * and the same place the app does it.
+ *
+ * `Int64` then `string`, never `astype(str)`: the nullable-integer step is what keeps a missing
+ * id as `<NA>` rather than the four-letter string `'nan'`, and what stops a column pandas widened
+ * to `float64` for one null printing as `'10001.0'`. A column that is already text is cast
+ * straight through, so applying this twice is safe — which `coda_neurons` relies on.
+ *
+ * Measured against pandas 2.3 rather than reasoned about, including the eighteen-digit case:
+ * `int64` holds `720575940632499757` exactly, which is the whole reason the intermediate step
+ * is an integer type rather than a float one.
+ */
+registerHelper({
+  name: 'coda_ids',
+  requires: [['pandas']],
+  source: [
+    'def coda_ids(df, *columns):',
+    '    """Cast id columns to exact text — Coda holds every neuron id as a string."""',
+    '    if df is None:',
+    '        return df',
+    '    for name in columns:',
+    '        if name not in df.columns:',
+    '            continue',
+    '        col = df[name]',
+    '        df[name] = (',
+    "            col.astype('Int64').astype('string')",
+    '            if pd.api.types.is_numeric_dtype(col)',
+    "            else col.astype('string')",
+    '        )',
+    '    return df',
   ],
 })
 

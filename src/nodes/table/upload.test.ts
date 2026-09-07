@@ -219,7 +219,8 @@ describe('core.uploadTable — evaluate', () => {
     if (!isTableValue(out)) throw new Error('expected a table')
     expect(out.kind).toBe('neurons')
     expect(out.length).toBe(3)
-    expect(out.data['neuronId']).toEqual([101, 102, 103])
+    // Text, because the id column is retyped as it is renamed — see `uploadShapeSchema`.
+    expect(out.data['neuronId']).toEqual(['101', '102', '103'])
     expect(out.data['cellType']).toEqual(['LC4', 'LC6', 'LC4'])
   })
 

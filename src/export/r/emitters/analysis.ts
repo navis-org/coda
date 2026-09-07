@@ -1063,9 +1063,18 @@ registerEmitter('out.dendrogram', (ctx) => {
 
   if (selection.length > 0) {
     lines.push(
-      // Coda counts observations from 0 and R indexes from 1, so the shift is explicit rather
-      // than left to whoever reads this next.
-      `picked_ <- c(${selection.map((i) => i + 1).join(', ')})`,
+      /*
+       * Coda counts observations from 0 and R indexes from 1, so the shift is explicit rather
+       * than left to whoever reads this next.
+       *
+       * `Number(i) + 1`, and the cast is load-bearing: a Linkage selection is a set of **leaf
+       * indices** rather than neuron ids, and `selectionIds` answers exact *text* now because
+       * every other caller compares it against a `character` id column (invariant 8). With `i`
+       * a string, `i + 1` is JavaScript concatenation — it type-checks, and it emitted
+       * `picked_ <- c(01, 21)` for leaves 0 and 2, which is valid R selecting the wrong leaf.
+       * Its Python twin takes `pyLongIntList` for the same reason.
+       */
+      `picked_ <- c(${selection.map((i) => Number(i) + 1).join(', ')})`,
       `palette_ <- ${rVector(palette)}`,
       `cl_ <- if (is.null(${out}_clusters)) rep(0L, length(${out}$labels)) else ${out}_clusters`,
       `${selected} <- tibble(`,

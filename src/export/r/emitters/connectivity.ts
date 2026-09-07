@@ -154,6 +154,14 @@ registerEmitter('neuron.connectivity', (ctx) => {
 registerHelper({
   name: 'coda_endpoint_neurons',
   requires: ['dplyr'],
+  /*
+   * It binds the seed ids to both ends of the edge list and then deduplicates. `bind_rows`
+   * **errors** rather than coercing when the two are `<character>` and `<integer>` — measured
+   * against dplyr 1.2 — so both are cast here rather than trusted to have been cast by
+   * whoever called it. Its pandas twin has the same line for the opposite reason: there the
+   * mismatch is silent and produces one neuron twice.
+   */
+  needs: ['coda_ids'],
   source: [
     'coda_endpoint_neurons <- function(connections, seed_ids = NULL) {',
     '  # The neurons an edge list is about: the seeds, then every partner, one row each.',
@@ -161,9 +169,10 @@ registerHelper({
     '  # The seeds are included whether or not any edge survived min_weight -- both ends of',
     '  # the edge list only cover the seeds that turned out to be wired to something.',
     '  parts <- list()',
+    '  connections <- coda_ids(connections, "preId", "postId")',
     '  if (!is.null(seed_ids)) {',
     '    parts[[length(parts) + 1]] <- tibble::tibble(',
-    '      neuronId = seed_ids, type = NA_character_',
+    '      neuronId = as.character(seed_ids), type = NA_character_',
     '    )',
     '  }',
     '  parts[[length(parts) + 1]] <- tibble::tibble(',
@@ -196,6 +205,8 @@ registerHelper({
 registerHelper({
   name: 'coda_edge_list',
   requires: ['neuprintr', 'dplyr'],
+  // Both id columns are Coda columns, and a Coda id column is text — see `coda_ids`.
+  needs: ['coda_ids'],
   source: [
     'coda_edge_list <- function(ids, prepost, min_weight, all_segments, conn) {',
     "  # Coda's Connectivity output: preId -> postId, always oriented the way the synapse",
@@ -232,14 +243,15 @@ registerHelper({
     '  out <- dplyr::bind_rows(lapply(sides, one))',
     '  if (is.null(out) || nrow(out) == 0) {',
     '    return(tibble::tibble(',
-    '      preId = numeric(0), preType = character(0),',
-    '      postId = numeric(0), postType = character(0),',
+    '      preId = character(0), preType = character(0),',
+    '      postId = character(0), postType = character(0),',
     '      weight = numeric(0), hop = integer(0), direction = character(0)',
     '    ))',
     '  }',
     '  # An edge inside the seed set comes back from each end, and Build Network sums the',
     '  # weight of every row joining a pair -- so a duplicate is a doubled synapse count in',
     '  # the picture rather than a cosmetic repeat.',
+    '  out <- coda_ids(out, "preId", "postId")',
     '  dplyr::distinct(out, preId, postId, .keep_all = TRUE)',
     '}',
   ],

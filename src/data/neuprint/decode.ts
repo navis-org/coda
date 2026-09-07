@@ -12,6 +12,7 @@
  */
 
 import type { NeuronId } from '../../core/ids'
+import { isIdentifierColumn } from '../../core/ids'
 import type { ColumnSchema, DType, TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, ColumnData, SkeletonGeometry, TableValue } from '../../core/values'
@@ -69,14 +70,27 @@ export function tableFromCypher(
 /**
  * Build a table when nothing declared the schema — the Raw Cypher node's case.
  *
- * Types are sniffed from the values actually returned rather than assumed, so a column of
- * body ids stays numeric and can drive a size encoding. A column that is entirely null has
- * no evidence either way and becomes a string, which is the type that renders anything.
+ * Types are sniffed from the values actually returned rather than assumed. A column that is
+ * entirely null has no evidence either way and becomes a string, which is the type that renders
+ * anything.
+ *
+ * **An id column is `str` whatever the values look like**, and that inverts what this used to
+ * say — "a column of body ids stays numeric and can drive a size encoding". Two things were
+ * wrong with it. A raw result is the one table here whose columns nothing else declares, so a
+ * `RETURN n.bodyId` that sniffed as `i64` could not be joined or stacked against any *built*
+ * query's neuron table, every one of which publishes `str` (invariant 8); and the sniff is over
+ * numbers `JSON.parse` has already rounded, so on a CAVE-width id the "evidence" is a value
+ * that names a different neuron. Sizing points by body id is not a use worth either.
+ *
+ * `isIdentifierColumn` reads the *cleaned* name, so it sees `bodyId` rather than `n.bodyId`,
+ * and it is the same rule `formatCell` reads — a query returning `root_id` gets it too.
  */
 export function inferTableFromCypher(response: CypherResponse): TableValue {
   const names = dedupeNames(response.columns.map(cleanColumnName))
   const schema = tableSchema(
-    ...names.map((name, index): ColumnSchema => column(name, sniffDType(response.data, index))),
+    ...names.map((name, index): ColumnSchema =>
+      column(name, isIdentifierColumn(name) ? 'str' : sniffDType(response.data, index)),
+    ),
   )
   const data: Record<string, ColumnData> = {}
   schema.columns.forEach((col, index) => {
@@ -135,7 +149,7 @@ function flatten(value: unknown): unknown {
 // ---------------------------------------------------------------------------
 
 export const ROI_COUNTS_SCHEMA = tableSchema(
-  column('neuronId', 'i64'),
+  column('neuronId', 'str'),
   column('type', 'str'),
   column('roi', 'str'),
   column('pre', 'i64', 'synapses'),

@@ -967,31 +967,23 @@ export interface DataSource {
  * caller whether to feed the key back as a type or as a neuron id. `pairs` is how many
  * neuron→neuron connections were merged into the row — the honest denominator for a
  * type-level weight, and 1 at neuron level.
- */
-export function pathStepSchema(idDType: 'i64' | 'str'): TableSchema {
-  return tableSchema(
-    column('source', 'str'),
-    column('sourceType', 'str'),
-    column('sourceId', idDType),
-    column('target', 'str'),
-    column('targetType', 'str'),
-    column('targetId', idDType),
-    column('weight', 'f64', 'synapses'),
-    column('pairs', 'i64'),
-  )
-}
-
-/**
- * The neuPrint shape, whose ids are exact as doubles.
  *
- * A *builder* rather than one constant, because the id dtype is the one thing here that is a
- * fact about the source rather than about the traversal -- invariant 8's "what a source
- * publishes as a dtype" -- and a source keyed by eighteen-digit text cannot put its ids in an
- * `i64` column without rounding them into different neurons. Safe to vary because this table
- * never reaches a column picker: it is the transport between a source and `pathOps`, which
- * reads both ends through `idText` and so takes either.
+ * One constant, not a builder taking an id dtype. It *was* a builder, on the reasoning that the
+ * dtype is a fact about the source: neuPrint's ids are exact as doubles where a CAVE root id is
+ * not, so each named its own. That is no longer a thing a source varies — every id column here
+ * is `str` — and the parameter had to go rather than default, because a builder still offering
+ * `'i64'` is a way for the next source to reintroduce the rounding one call at a time.
  */
-export const PATH_STEP_SCHEMA: TableSchema = pathStepSchema('i64')
+export const PATH_STEP_SCHEMA: TableSchema = tableSchema(
+  column('source', 'str'),
+  column('sourceType', 'str'),
+  column('sourceId', 'str'),
+  column('target', 'str'),
+  column('targetType', 'str'),
+  column('targetId', 'str'),
+  column('weight', 'f64', 'synapses'),
+  column('pairs', 'i64'),
+)
 
 /**
  * The region column a split connectivity result carries, and the one spelling of its name.
@@ -1022,20 +1014,21 @@ export function connectivitySchemaWithRoi(schema: TableSchema): TableSchema {
  * rather than positionally — an id the source has never heard of is simply absent, which is how
  * "not known" is said without a sentinel that arithmetic would happily consume.
  *
- * The id dtype is the source's, `pathStepSchema`'s rule and invariant 8's reason: an
- * eighteen-digit CAVE root id in an `i64` column is a different neuron.
+ * The id column is `str`, `PATH_STEP_SCHEMA`'s rule and invariant 8's reason, and a constant
+ * rather than a builder for that entry's reason.
  */
-export function synapseTotalsSchema(idDType: 'i64' | 'str'): TableSchema {
-  return tableSchema(column(ID_COLUMN_NAME, idDType), column('total', 'i64', 'synapses'))
-}
+export const SYNAPSE_TOTALS_SCHEMA: TableSchema = tableSchema(
+  column(ID_COLUMN_NAME, 'str'),
+  column('total', 'i64', 'synapses'),
+)
 
 /**
  * What `fetchGroupTotals` returns: one row per group that has an answer.
  *
- * Fixed rather than a builder, unlike the two above, and the difference is the whole point of
- * the request. A group key is a type name or an id *as text* — `PathNode.key`'s union, which the
- * traversal already lives in — so there is no id dtype to vary: the key column is `str` because
- * half of what it holds was never a number. Read as a lookup, never positionally.
+ * A group key is a type name or an id *as text* — `PathNode.key`'s union, which the traversal
+ * already lives in — so the key column is `str` because half of what it holds was never a
+ * number. That used to distinguish this from the two schemas above, which took an id dtype;
+ * they are constants now too, and every id here is text. Read as a lookup, never positionally.
  */
 export const GROUP_TOTALS_SCHEMA: TableSchema = tableSchema(
   column('key', 'str'),
@@ -1144,7 +1137,7 @@ export const ROI_MESH_SCHEMA: TableSchema = tableSchema(
 
 export const CANONICAL_SCHEMAS: SourceSchemas = {
   neurons: tableSchema(
-    column('neuronId', 'i64'),
+    column('neuronId', 'str'),
     column('type', 'str'),
     column('instance', 'str'),
     column('status', 'str'),
@@ -1153,21 +1146,21 @@ export const CANONICAL_SCHEMAS: SourceSchemas = {
     column('post', 'i64', 'synapses'),
   ),
   connectivity: tableSchema(
-    column('neuronId', 'i64'),
+    column('neuronId', 'str'),
     column('neuronType', 'str'),
-    column('partnerId', 'i64'),
+    column('partnerId', 'str'),
     column('partnerType', 'str'),
     column('weight', 'i64', 'synapses'),
   ),
   roiCounts: tableSchema(
-    column('neuronId', 'i64'),
+    column('neuronId', 'str'),
     column('type', 'str'),
     column('roi', 'str'),
     column('pre', 'i64', 'synapses'),
     column('post', 'i64', 'synapses'),
   ),
   morphology: tableSchema(
-    column('neuronId', 'i64'),
+    column('neuronId', 'str'),
     column('type', 'str'),
     column('instance', 'str'),
     column('status', 'str'),
@@ -1178,9 +1171,9 @@ export const CANONICAL_SCHEMAS: SourceSchemas = {
     column('cableLength', 'f64', 'nm'),
   ),
   synapses: tableSchema(
-    column('neuronId', 'i64'),
+    column('neuronId', 'str'),
     column('type', 'str'),
-    column('partnerId', 'i64'),
+    column('partnerId', 'str'),
     column('partnerType', 'str'),
     column('polarity', 'str'),
     column('weight', 'i64', 'synapses'),

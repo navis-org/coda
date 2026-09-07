@@ -850,7 +850,7 @@ export function rankPaths(
 export const PATH_NODE_SCHEMA: TableSchema = tableSchema(
   column('id', 'str'),
   column('type', 'str'),
-  column('neuronId', 'i64'),
+  column('neuronId', 'str'),
   // Where the node sits in the circuit: `source`, `target` or `via`. A categorical colour
   // straight off this is the one encoding every path picture wants.
   column('role', 'str'),

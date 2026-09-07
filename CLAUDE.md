@@ -57,11 +57,12 @@ full. **Read it before deciding a rule does not apply to your case.**
 7. **Selectors must not allocate.** The store is read through `useSyncExternalStore`,
    which compares snapshots by identity. Select primitives, or memoise.
 
-8. **A neuron id crosses the `DataSource` seam as text, never as a number.** `CellValue`
-   is a float64, so an 18-digit CAVE root id parses to a *different neuron* with nothing
-   to say so. The rules are one definition each in `src/core/ids.ts` — `NeuronId`,
-   `isNeuronId`, `idText` (cell → id), `compareIds` (length-then-lexicographic),
-   `numericId`, `ID_COLUMN_NAME` — and there is deliberately **no re-export**, because a
+8. **A neuron id is text everywhere — across the `DataSource` seam and in the column a source
+   publishes.** `CellValue` is a float64, so an 18-digit CAVE root id parses to a *different
+   neuron* with nothing to say so. The rules are one definition each in `src/core/ids.ts` —
+   `NeuronId`, `isNeuronId`, `idText` (cell → id), `compareIds` (length-then-lexicographic),
+   `numericId`, `ID_COLUMN_NAME`, `isIdentifierColumn` (the name rule, which `src/data` needs
+   and so cannot live in `ui/format.ts`) — and there is deliberately **no re-export**, because a
    shim is how a symbol acquires a second spelling. Each source converts at its own edge;
    each backend maps its own id column onto `neuronId` at its own seam. Geometry carries
    the id as plain `id`, as a draw/export key rather than the identity. The UI is where
@@ -69,6 +70,18 @@ full. **Read it before deciding a rule does not apply to your case.**
    only one: neuroglancer's `parseUint64` refuses a sign and a leading zero, which `isNeuronId`
    allows, so a scene goes through `isSegmentId` (`data/neuroglancer/scene.ts`) instead — a
    second predicate rather than a second spelling, because the two really do differ.
+   **The dtype clause replaced its own opposite**, and that is the half to read before
+   relaxing it: each source used to publish the dtype its *own* ids fit — `i64` on neuPrint,
+   whose ids are 9–11 digits and exact as doubles, `str` on CAVE — every one locally right and
+   the set wrong, because `mergedDType` refuses `i64` against `str` and so no neuPrint + CAVE
+   pair could be stacked. `Join` had been widening that same pair to text all along. One dtype
+   now, so `pathStepSchema`/`synapseTotalsSchema` are constants rather than builders taking one.
+   Three traps it left: a `dtypes: ['str']` picker was getting an id filter *for free* and needs
+   `ColumnParam.excludeIds` to keep it; a cache fingerprint of column **names** is a hit across
+   this change and hands back numbers under a text schema (`schemaFingerprint`); and
+   `tableFromRows`/`makeTable` validate nothing, so `data/idDtype.test.ts` walks a real source's
+   values. The two seams that *sniff* a dtype are forced as well — Upload Table's id column and
+   Raw Cypher's `*Id` columns — or the same file from two connectomes still arrives two ways.
 
 ## Gotchas found the hard way
 

@@ -1,4 +1,3 @@
-import { numericId } from '../../core/ids'
 import { datasetRequest } from '../lib/datasetParam'
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
@@ -102,29 +101,18 @@ export const inputIdsNode = registerNode({
     // empty table of the right schema, and this line says which of the two it is.
     if (parsed.ids.length === 0 && !ctx.inputs.ids) return ['No IDs yet — type or paste some']
     /*
-     * With no Dataset the ids *are* the output, and that output's `neuronId` is an `i64` column —
-     * a JS number — so an id wider than `Number.MAX_SAFE_INTEGER` cannot be held exactly and
-     * would identify a different neuron downstream. Wired, nothing here rounds: the id crosses
-     * the seam as text and the source publishes whatever dtype it uses.
+     * There was a width warning here, and it is worth recording what removed it rather than
+     * leaving a gap. With no Dataset the ids *are* the output, and that output's `neuronId` used
+     * to be an `i64` column — a JS number — so an id past `Number.MAX_SAFE_INTEGER` identified a
+     * different neuron downstream, and this said so at edit time while `evaluate` said it again
+     * on the run. The remedy both named was "wire a Dataset", which carried the id as text.
      *
-     * A warning rather than a refusal, because the fix is to wire the Dataset that was almost
-     * certainly meant, and refusing would block a graph somebody is halfway through building.
+     * `ID_ONLY_SCHEMA` is `str` now, on every path (invariant 8), so the unwired branch holds an
+     * eighteen-digit root id exactly and there is nothing left to warn about. Kept as a note
+     * because a *warning that was deleted* is otherwise indistinguishable from one nobody wrote:
+     * the pasted-ids field is exactly where somebody pastes a FlyWire id, and the next reader to
+     * wonder why nothing checks the width should find this rather than add it back.
      */
-    if (!ctx.inputs.dataset) {
-      // The dataset check comes first and the scan short-circuits: `validate` runs on every
-      // graph mutation, the ids field can hold ten thousand ids, and with a Dataset wired this
-      // branch cannot fire at all.
-      // `id.length` *is* the digit count — `parseIdList` has stripped leading zeros and
-      // refused signs — and any id of 15 digits or fewer is under the ceiling, so the common
-      // case never reaches `numericId` at all.
-      const tooWide = parsed.ids.find((id) => id.length >= 16 && numericId(id) === undefined)
-      if (tooWide !== undefined) {
-        return [
-          `${tooWide} is too wide to hold in this node's own table — wire a Dataset, or it ` +
-            `will be rounded to a different neuron.`,
-        ]
-      }
-    }
     return []
   },
 
@@ -176,23 +164,6 @@ export const inputIdsNode = registerNode({
      * the same behaviour or they read as two different problems. `docs/limits.md`: a guard rail
      * warns; it does not refuse.
      */
-    if (!dataset) {
-      // `id.length` *is* the digit count — `parseIdList` has stripped leading zeros and refused
-      // signs — so any id of 15 digits or fewer is under the ceiling and never reaches
-      // `numericId`, which is what keeps this off the common path.
-      const wide = collected.ids.filter((id) => id.length >= 16 && numericId(id) === undefined)
-      if (wide.length > 0) {
-        ctx.warn(
-          wide.length === 1
-            ? `${wide[0]} is too wide to hold exactly in this node’s own table, and has been ` +
-                `rounded to a different neuron. Wire a Dataset to carry it as text.`
-            : `${wide.length} IDs are too wide to hold exactly in this node’s own table, and ` +
-                `have been rounded to different neurons — ${wide[0]} is the first. Wire a ` +
-                `Dataset to carry them as text.`,
-        )
-      }
-    }
-
     /*
      * The schema `inferOutputs` promised, resolved the same way. Read before the empty check so
      * that an unconfigured node still advertises the shape it is about to have — which is what
@@ -221,13 +192,13 @@ export const inputIdsNode = registerNode({
     if (!dataset) {
       ctx.progress(1)
       return {
-        // `Number`, because `ID_ONLY_SCHEMA` declares `neuronId` as `i64` and invariant 3 is
-        // that the schema half and the value half agree. Exact for every id this branch can
-        // usefully carry; the two above say so for the ones it cannot — `validate` at edit time
-        // for what was typed, and the `ctx.warn` above for those *and* whatever arrived wired.
+        // The ids as they are, because `ID_ONLY_SCHEMA` declares `neuronId` as `str` and
+        // invariant 3 is that the schema half and the value half agree. It was `Number(...)`
+        // against an `i64` column, which is the one line that had to move with the dtype — and
+        // the tests did not catch it, `tableFromRows` validating nothing.
         neurons: tableFromRows(
           ID_ONLY_SCHEMA,
-          collected.ids.map((neuronId) => ({ neuronId: Number(neuronId) })),
+          collected.ids.map((neuronId) => ({ neuronId })),
           'neurons',
         ),
       }

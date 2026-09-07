@@ -182,7 +182,7 @@ export function schemasFor(discovered: DiscoveredSchema): SourceSchemas {
     ...CANONICAL_SCHEMAS,
     neurons: discovered.neurons,
     synapses: tableSchema(
-      column('neuronId', 'i64'),
+      column('neuronId', 'str'),
       column('type', 'str'),
       column('polarity', 'str'),
       column('confidence', 'f64'),

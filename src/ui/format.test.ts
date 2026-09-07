@@ -1,25 +1,30 @@
 /**
  * What a number is allowed to look like.
  *
- * The rule under test is `isIdentifierColumn`, and the reason it has a file of its own is that
- * both of its failure modes are silent: a grouped neuron id (`527,536`) is a plausible-looking
- * string that no query accepts, and an ungrouped synapse count is merely untidy. Only the
- * first is a correctness problem, which is why the cases below lean on the names Coda's own
- * nodes generate rather than on a tidy pair of examples.
+ * The rule under test is `printsExact` and the `isIdentifierColumn` it composes, and the reason
+ * it has a file of its own is that both failure modes are silent: a grouped neuron id
+ * (`527,536`) is a plausible-looking string that no query accepts, and an ungrouped synapse
+ * count is merely untidy. Only the first is a correctness problem, which is why the cases below
+ * lean on the names Coda's own nodes generate rather than on a tidy pair of examples.
+ *
+ * The two are tested together and imported from their two homes on purpose: the *name* rule
+ * lives in `core/ids.ts`, because `src/data` types a Raw Cypher result with it and may not
+ * import the UI, and the aggregate exclusion lives here, because it is about a separator.
  */
 
 import { describe, expect, it } from 'vitest'
 
+import { isIdentifierColumn } from '../core/ids'
 import {
   formatAge,
   formatCell,
   formatCompact,
   formatMeasure,
   formatNumber,
-  isIdentifierColumn,
+  printsExact,
 } from './format'
 
-describe('isIdentifierColumn', () => {
+describe('isIdentifierColumn / printsExact', () => {
   it('takes the names every query node publishes', () => {
     // neuronId is the contract name; the rest are what Connectivity, Profile and BuildNetwork
     // emit, and `id`/`root_id` are what an uploaded CSV arrives under.
@@ -38,18 +43,21 @@ describe('isIdentifierColumn', () => {
       'supervoxel_id',
     ]) {
       expect(isIdentifierColumn(name), name).toBe(true)
+      expect(printsExact(name), name).toBe(true)
     }
   })
 
   it('is not `endsWith("id")` — those are words, not columns of ids', () => {
     for (const name of ['centroid', 'valid', 'pyramid', 'lipid', 'grid']) {
       expect(isIdentifierColumn(name), name).toBe(false)
+      expect(printsExact(name), name).toBe(false)
     }
   })
 
   it('leaves ordinary quantities alone', () => {
     for (const name of ['weight', 'pre', 'post', 'n', 'cableLength', 'degreeIn', undefined]) {
       expect(isIdentifierColumn(name), String(name)).toBe(false)
+      expect(printsExact(name), String(name)).toBe(false)
     }
   })
 
@@ -58,10 +66,13 @@ describe('isIdentifierColumn', () => {
    * count of distinct partners is literally called `countDistinct_partnerId` — a quantity
    * that reaches five figures on male-CNS and does want its separator.
    */
-  it('reads an aggregate of an id column as a quantity again', () => {
-    expect(isIdentifierColumn('countDistinct_partnerId')).toBe(false)
-    expect(isIdentifierColumn('sum_neuronId')).toBe(false)
-    expect(isIdentifierColumn('max_preId')).toBe(false)
+  it('reads an aggregate of an id column as a quantity again — for display only', () => {
+    for (const name of ['countDistinct_partnerId', 'sum_neuronId', 'max_preId']) {
+      expect(printsExact(name), name).toBe(false)
+      // And the name rule still says yes, which is the split: `sum_neuronId` is *about* ids,
+      // it just is not one. Only the formatter cares about the difference.
+      expect(isIdentifierColumn(name), name).toBe(true)
+    }
     expect(formatCell(12345, 'countDistinct_partnerId')).toBe(formatNumber(12345))
   })
 })

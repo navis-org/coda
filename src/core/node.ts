@@ -15,6 +15,7 @@
 
 import type { DataSource } from '../data/source'
 import type { CompanionSpec } from './companion'
+import { ID_COLUMN_NAME } from './ids'
 import type { AttributePart, CodaType, DType, TableSchema } from './types'
 import { attributeSchema, columnsOfType, schemaOf } from './types'
 import { inputPorts, outputPorts } from './ports'
@@ -426,6 +427,24 @@ export interface ColumnParam extends ParamBase {
    * document and a branch at every reader.
    */
   dtypes?: DType[] | ((params: ParamValues) => DType[] | undefined)
+  /**
+   * Drop the neuron id column from the options. For a picker that wants a *label*.
+   *
+   * It exists because the filter used to arrive by accident. `neuron.idsFromLabel`'s `Field`
+   * is `dtypes: ['str']`, on the reasoning that a label is text — and while a source published
+   * `neuronId` as `i64`, that one restriction also excluded the id. Every source publishes the
+   * id as text now (invariant 8), so `neuronId` became the *first* `str` column on a neuron
+   * schema and rule 3 below handed it to a picker still on its declared default: the node then
+   * looked labels up in the id column and matched nothing, with a card reading `0 neurons,
+   * 0/2 labels` and no error anywhere.
+   *
+   * Declared rather than inferred from the dtype restriction, and rather than a rule inside
+   * `resolveColumn`, because it is a statement about what *this picker means* — an unrestricted
+   * picker on a neuron table has always resolved to `neuronId` and several nodes want exactly
+   * that. It also has to reach the dropdown, not just the resolution: offering "look these
+   * labels up in `neuronId`" is a choice nobody can use.
+   */
+  excludeIds?: true
   /** Overrides how the schema is found; `from` still says which port must be connected. */
   schemaFrom?: ColumnSchemaSource
   /** Empty string means "first compatible column", resolved consistently at both stages. */
@@ -1284,7 +1303,12 @@ export function availableColumns(
   if (!schema) return []
   const dtypes = dtypesOf(param, params)
   const cols = dtypes ? columnsOfType(schema, dtypes) : schema.columns
-  return cols.map((c) => c.name)
+  // `ColumnParam.excludeIds`, and only a `column` param declares it — a `columns` picker holds
+  // a list somebody built, where the equivalent mistake needs no rule to prevent.
+  const names = cols.map((c) => c.name)
+  return 'excludeIds' in param && param.excludeIds
+    ? names.filter((name) => name !== ID_COLUMN_NAME)
+    : names
 }
 
 /**

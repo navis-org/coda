@@ -11,7 +11,7 @@ import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { column, tableSchema } from '../core/types'
+import { column, findColumn, tableSchema } from '../core/types'
 import type { TableValue } from '../core/values'
 import { makeMatrix, tableFromRows } from '../core/values'
 import { EdgeSetBuilder } from './edges/encode'
@@ -306,23 +306,34 @@ describe('when the edge set is not in this browser', () => {
   })
 })
 
-describe('when the ids cannot survive the dataset', () => {
-  it('refuses an eighteen-digit edge list against a numeric-id dataset', async () => {
-    // Silent otherwise: 720575940628857210 in an `i64` column is 720575940628857344, a different
-    // neuron, and every row downstream would name neurons that do not exist.
+describe('an id of any width, against any dataset', () => {
+  /*
+   * These two used to be "when the ids cannot survive the dataset", pinning a refusal: a
+   * dataset publishing `neuronId` as `i64` could not hold an eighteen-digit edge-set id, so
+   * `requireIdsFit` stopped the query rather than write a different neuron into every row.
+   *
+   * The refusal is gone because the condition is unreachable — every source publishes the id
+   * as `str` (invariant 8), so nothing converts and nothing rounds. Kept, rewritten, because
+   * they are now the regression test for that: the same eighteen-digit id that used to be
+   * refused has to arrive **exactly**, and both widths have to behave the same way.
+   */
+  it('carries an eighteen-digit id through unrounded', async () => {
     const edges = await attach([['720575940628857210', '720575940628857211', 4]], 'flywire')
     const source = stubSource({ schemas: CANONICAL_SCHEMAS })
-    await expect(
-      connectivityFor(source, {
-        datasetId: 'd',
-        neuronIds: ['720575940628857210'],
-        direction: 'outputs',
-        edges,
-      }),
-    ).rejects.toThrow(/too wide/)
+    const table = await connectivityFor(source, {
+      datasetId: 'd',
+      neuronIds: ['720575940628857210'],
+      direction: 'outputs',
+      edges,
+    })
+    // Not 720575940628857344, which is what this id becomes as a float64 — the whole reason
+    // the column is text. Asserted as a string, since `toBe(720575940628857210)` would compare
+    // against the rounded literal and pass for the wrong reason.
+    expect(table.data.neuronId![0]).toBe('720575940628857210')
+    expect(table.data.partnerId![0]).toBe('720575940628857211')
   })
 
-  it('accepts a neuPrint-width edge list against the same dataset', async () => {
+  it('carries a neuPrint-width id through as the same text, not as a number', async () => {
     const edges = await attach([['1001', '1002', 4]], 'hemibrain')
     const source = stubSource({ schemas: CANONICAL_SCHEMAS })
     const table = await connectivityFor(source, {
@@ -331,7 +342,7 @@ describe('when the ids cannot survive the dataset', () => {
       direction: 'outputs',
       edges,
     })
-    // And they arrive as numbers, because that is what the dataset's own schema declares.
-    expect(table.data.neuronId![0]).toBe(1001)
+    expect(table.data.neuronId![0]).toBe('1001')
+    expect(findColumn(table.schema, 'neuronId')?.dtype).toBe('str')
   })
 })

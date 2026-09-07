@@ -48,6 +48,27 @@ interface Envelope {
   fingerprint: string
 }
 
+/**
+ * A table's shape as the fingerprint string a cached copy is judged against.
+ *
+ * Written once because four callers had it inline as `columns.map((c) => c.name).join(',')`,
+ * and names alone are not the shape. That went wrong exactly once and would have gone wrong
+ * silently: moving every source's id columns from `i64` to `str` (invariant 8) changes no
+ * column *name*, so a neuron index cached by the previous build was a **hit** — and handed
+ * back numbers under a schema now declaring text, which is the disagreement between a
+ * declaration and its values that the fingerprint exists to prevent.
+ *
+ * The unit rides along for the same reason: a column that changes from voxels to nanometres
+ * is a column whose stored values mean something else.
+ */
+export function schemaFingerprint(schema: {
+  columns: ReadonlyArray<{ name: string; dtype: string; unit?: string }>
+}): string {
+  return schema.columns
+    .map((c) => `${c.name}:${c.dtype}${c.unit ? `:${c.unit}` : ''}`)
+    .join(',')
+}
+
 export interface CacheGetOptions {
   fingerprint?: string
   maxAgeMs?: number

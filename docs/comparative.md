@@ -498,7 +498,10 @@ label space, where they look exactly like successfully-matched labels. **Default
    nothing, and that a number and its text are one key. What it does *not* fix is
    [invariant 8](invariants.md): the mapper publishes `neuronId` as `str`, and a table carrying
    ids as `i64` carries float64s in which a wide CAVE root id stopped being itself upstream. The
-   node's `validate` says so, because otherwise it reads as a mapping with holes in it.
+   node's `validate` says so, because otherwise it reads as a mapping with holes in it. No
+   *source* publishes such a table any more — that is what made two connectomes stackable in the
+   first place — so what is left to reach here is an upload or a Raw Cypher result, and both of
+   those seams now force an id column to `str` too.
 3. **A repeated key is used once, first winning** — `joinTables`' rule, and for its reason: a
    mapping that disagrees with itself is not grounds to multiply rows.
 4. **The result name is `relabelTarget`'s**, exported for the emitters rather than reconstructed

@@ -1707,9 +1707,16 @@ column is named, so naming the inputs of a stack that is not labelling anything 
 
 Worth knowing that a genuine clash is reachable with nothing but built-in nodes, which is what
 `stack.test.ts` uses: `core.pivot`'s wide table types its label column `str` even when pivoted
-from an `i64`, so a pivot on `preId` stacked onto the connectivity table it came from disagrees
+from an `i64`, so a pivot on `weight` stacked onto the connectivity table it came from disagrees
 about exactly that column. Note also that the pivot publishes no schema until it has run, so
 `validate` cannot see that clash at edit time and does not pretend to.
+
+That fixture used to pivot on **`preId`**, and what changed it is the thing this refusal is most
+often met by. Every source publishes its id columns as `str` now
+([invariant 8](invariants.md)), so `preId` reads `str` on both sides and stacks cleanly — which
+is the whole point, since `neuronId` as a number above and text below was the *example* this
+section led with and was in fact two spellings of one column rather than two columns. `weight` is
+the honest replacement: genuinely `i64` on one side and a row label on the other.
 
 ## Download: a side effect in a reactive graph
 
@@ -2276,9 +2283,12 @@ lookup, which is exactly what `derived` does, so absence and the default already
 Three things about the derivation that a reasonable implementation gets wrong:
 
 - **The schema comes from the *connectivity* schema, not the dataset's neuron schema.** The cells
-  in this table are the cells of `preId`/`postId`, so the declared dtype has to be theirs — a CAVE
-  root id is `str` there and would be declared `i64` by the neuron schema, which is invariant 8
-  with no symptom until an 18-digit id.
+  in this table are the cells of `preId`/`postId`, so the declared dtype has to be theirs. The
+  symptom this used to have is gone — both schemas said `str` for a CAVE root id and `i64` for a
+  neuPrint one, so reading the wrong schema declared an 18-digit id as a float64 with nothing to
+  say so until one arrived. Every source publishes `str` now ([invariant 8](invariants.md)), so
+  the two agree about the id column; the rule stands because the table's *other* columns are
+  still the connectivity schema's and nothing says the two must keep agreeing.
 - **Cells are copied, never rebuilt.** `idText` is used for the dedupe *key* only; the value that
   goes into the column is the cell that came out. Nothing parses, rounds or re-renders an id.
 - **The row that fixes a neuron's order is not the row that fixes its type.** First appearance
@@ -3186,9 +3196,14 @@ predicted has arrived: see invariant 8 above. Ids are now carried as decimal dig
 so there is nothing to lose, and the refusal is a nineteen-digit width — a signed 64-bit maximum,
 which is what both Neo4j and CAVE actually store.
 
-Note what did _not_ move. With **no Dataset wired** the ids are the node's own output, and that
-table's `neuronId` is an `i64` column, so the width still bites there — `validate` warns and names
-the id rather than rounding it, and says to wire the Dataset that was almost certainly meant.
+Note what did _not_ move, and then did. With **no Dataset wired** the ids are the node's own
+output, and that table's `neuronId` was an `i64` column — so the width bit there and only there:
+`validate` warned and named the id rather than rounding it, and said to wire the Dataset that was
+almost certainly meant. `ID_ONLY_SCHEMA` is `str` now, along with every source's id column
+([invariant 8](invariants.md)), so the unwired branch carries an 18-digit root id exactly and both
+the edit-time issue and the run's warning are gone. The value half had to move with it — that
+branch built its rows with `Number(neuronId)` — and nothing in the suite caught the mismatch,
+`tableFromRows` validating no cell against the dtype its column declares.
 
 **The wired column drops what it cannot use instead of refusing**, and the asymmetry is
 deliberate. Typed text is _authored_ — a bad token is a mistake somebody just made and can fix, so

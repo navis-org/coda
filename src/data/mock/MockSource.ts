@@ -18,10 +18,24 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import { ID_COLUMN_NAME, numericIds } from '../../core/ids'
+import { ID_COLUMN_NAME, compareIds, numericIds } from '../../core/ids'
 import type { CellValue } from '../../core/values'
 import { boundsOf, cableLength, makeMatrix, selectRows, tableFromRows } from '../../core/values'
 import { geometryFrame } from '../transforms/spaces'
+
+/**
+ * The generated connectome's numeric key, as the text a published id column holds.
+ *
+ * Written once because this source builds eight tables and every one of them names a neuron:
+ * the generator keys everything by a small integer (`byId`, `out`, `in`, `roiCounts`), and the
+ * `str` id column is the seam invariant 8 puts between that and everything downstream. Spelled
+ * inline at each site, one of the eight would keep a number under a `str` column and nothing
+ * would say so until a join silently matched nothing.
+ *
+ * Deliberately not `idText`: the input here is this module's own `number`, never a cell, so
+ * there is no non-integer case to answer for and no null to propagate.
+ */
+const publishedId = (neuronId: number): string => String(neuronId)
 import type {
   AdjacencyRequest,
   CoarseGeometry,
@@ -53,10 +67,11 @@ import {
   ROI_CONNECTIVITY_SCHEMA,
   connectivitySchemaWithRoi,
   delay,
-  synapseTotalsSchema,
+  SYNAPSE_TOTALS_SCHEMA,
   requireSkeletonRoute,
   throwIfAborted,
 } from '../source'
+import { schemaFingerprint } from '../cache'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import { compileLabelMatch, preparedRows } from '../neuronFilter'
 import { SKELETON_ROUTES, route } from '../skeletonRoutes'
@@ -190,7 +205,7 @@ export class MockSource implements DataSource {
     const all = tableFromRows(
       this.schemas.neurons,
       sorted.map((n) => ({
-        neuronId: n.neuronId,
+        neuronId: publishedId(n.neuronId),
         type: n.type,
         instance: n.instance,
         status: n.status,
@@ -241,7 +256,7 @@ export class MockSource implements DataSource {
   async neuronIndex(req: NeuronIndexRequest): Promise<TableValue> {
     return loadCachedTable({
       key: neuronIndexKey(this.id, req.datasetId),
-      fingerprint: this.schemas.neurons.columns.map((c) => c.name).join(','),
+      fingerprint: schemaFingerprint(this.schemas.neurons),
       ...(req.refresh ? { refresh: req.refresh } : {}),
       fetch: async () => {
         req.onProgress?.(0.1, 'loading neurons')
@@ -319,9 +334,9 @@ export class MockSource implements DataSource {
 
         const partnerId = req.direction === 'outputs' ? edge.post : edge.pre
         const common = {
-          neuronId,
+          neuronId: publishedId(neuronId),
           neuronType: self.type,
-          partnerId,
+          partnerId: publishedId(partnerId),
           partnerType: connectome.byId.get(partnerId)?.type ?? 'unknown',
         }
         if (!split) {
@@ -332,10 +347,12 @@ export class MockSource implements DataSource {
       }
     }
 
+    // `compareIds` on the tie-break, not a subtraction: the id column is text now, and
+    // `Number(a) - Number(b)` over ids is the arithmetic invariant 8 exists to stop.
     rows.sort(
       (a, b) =>
         (b.weight as number) - (a.weight as number) ||
-        (a.neuronId as number) - (b.neuronId as number),
+        compareIds(String(a.neuronId), String(b.neuronId)),
     )
     return tableFromRows(schema, rows)
   }
@@ -358,13 +375,18 @@ export class MockSource implements DataSource {
   async fetchSynapseTotals(req: SynapseTotalsRequest): Promise<TableValue> {
     await delay(this.latencyMs, req.signal)
     const connectome = this.require(req.datasetId)
-    const rows: Array<Record<string, number>> = []
+    const rows: Array<Record<string, CellValue>> = []
     for (const neuronId of numericIds(req.neuronIds)) {
       const neuron = connectome.byId.get(neuronId)
       if (!neuron) continue
-      rows.push({ [ID_COLUMN_NAME]: neuronId, total: synapseTotal(connectome, neuronId, req) })
+      // The generated connectome is keyed by number; the published column is text, so the id
+      // converts here at the source's own edge exactly as every other source's does.
+      rows.push({
+        [ID_COLUMN_NAME]: publishedId(neuronId),
+        total: synapseTotal(connectome, neuronId, req),
+      })
     }
-    return tableFromRows(synapseTotalsSchema('i64'), rows)
+    return tableFromRows(SYNAPSE_TOTALS_SCHEMA, rows)
   }
 
   /**
@@ -397,7 +419,7 @@ export class MockSource implements DataSource {
     for (const neuronId of numericIds(req.neuronIds ?? [])) {
       if (!connectome.byId.has(neuronId)) continue
       // Keyed by the id as text, which is the traversal's key for a neuron standing alone.
-      rows.push({ key: String(neuronId), total: synapseTotal(connectome, neuronId, req) })
+      rows.push({ key: publishedId(neuronId), total: synapseTotal(connectome, neuronId, req) })
     }
     return tableFromRows(GROUP_TOTALS_SCHEMA, rows)
   }
@@ -453,10 +475,10 @@ export class MockSource implements DataSource {
           merged.set(mapKey, {
             source: pre.key,
             sourceType: pre.type,
-            sourceId: pre.id,
+            sourceId: pre.id === null ? null : publishedId(pre.id),
             target: post.key,
             targetType: post.type,
-            targetId: post.id,
+            targetId: post.id === null ? null : publishedId(post.id),
             weight: edge.weight,
             pairs: 1,
           })
@@ -521,7 +543,7 @@ export class MockSource implements DataSource {
     const rows = connectome.roiCounts
       .filter((rc) => wanted.has(rc.neuronId) && (!roiFilter || roiFilter.has(rc.roi)))
       .map((rc) => ({
-        neuronId: rc.neuronId,
+        neuronId: publishedId(rc.neuronId),
         type: connectome.byId.get(rc.neuronId)?.type ?? 'unknown',
         roi: rc.roi,
         pre: rc.pre,
@@ -698,7 +720,7 @@ export class MockSource implements DataSource {
       const skeleton = generateSkeleton(neuronId, rois)
       items.push(skeleton)
       rows.push({
-        neuronId,
+        neuronId: publishedId(neuronId),
         type: neuron.type,
         instance: neuron.instance,
         status: neuron.status,
@@ -773,9 +795,9 @@ export class MockSource implements DataSource {
         const [x, y, z] = synapsePosition(skeleton, index++)
         positions.push(x, y, z)
         rows.push({
-          neuronId,
+          neuronId: publishedId(neuronId),
           type: neuron.type,
-          partnerId,
+          partnerId: publishedId(partnerId),
           partnerType: connectome.byId.get(partnerId)?.type ?? 'unknown',
           polarity,
           weight,

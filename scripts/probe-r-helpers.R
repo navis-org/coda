@@ -510,6 +510,13 @@ check("describe: a frame with no columns keeps the summary's shape",
 #
 # The same fixture the Python probe uses, for the same reason: these two are ports of one
 # derivation, and a case that passes in one language and not the other is the whole point.
+#
+# The edge ids are **numeric** and the seeds are text, which is the mixture a real document
+# produces: `neuprint_connection_table` returns numeric body ids, and a seed arrives from a Coda
+# column, which is character. The cast inside the helper is what reconciles them — and the two
+# languages fail differently without it, which is why both probes carry the case. `bind_rows`
+# here *errors* on `<character>` against `<double>`; `pd.concat` there silently returns the seed
+# twice.
 conn <- data.frame(
   preId = c(1, 1, 2),
   preType = c("A", "A", "B"),
@@ -519,28 +526,32 @@ conn <- data.frame(
   stringsAsFactors = FALSE
 )
 
-eps <- coda_endpoint_neurons(conn, c(1, 9))
+eps <- coda_endpoint_neurons(conn, c("1", "9"))
 check("endpoints: seeds first, then partners in first-appearance order",
-      identical(eps$neuronId, c(1, 9, 2, 3)), paste(eps$neuronId, collapse = " "))
+      identical(eps$neuronId, c("1", "9", "2", "3")), paste(eps$neuronId, collapse = " "))
 check("endpoints: one row per neuron",
       nrow(eps) == length(unique(eps$neuronId)), as.character(nrow(eps)))
+# The regression the cast exists for: a seed and its own edge end are one neuron.
+check("endpoints: a seed and its edge end are one neuron, not two",
+      nrow(eps) == 4L, as.character(nrow(eps)))
+check("endpoints: every id is text", is.character(eps$neuronId), class(eps$neuronId))
 check("endpoints: a seed no edge mentions survives, untyped",
-      is.na(eps$type[eps$neuronId == 9]))
+      is.na(eps$type[eps$neuronId == "9"]))
 # 3 arrives first as an untyped post ("" is no type, not a type named blank) and is typed by a
 # later row. Keying the type off the row that fixed the order would leave it empty.
 check("endpoints: the first non-empty type wins, not the first row",
-      identical(eps$type[eps$neuronId == 3], "C"),
-      paste(eps$type[eps$neuronId == 3]))
+      identical(eps$type[eps$neuronId == "3"], "C"),
+      paste(eps$type[eps$neuronId == "3"]))
 check("endpoints: a type from either end is picked up",
-      identical(eps$type[eps$neuronId %in% c(1, 2)], c("A", "B")),
-      paste(eps$type[eps$neuronId %in% c(1, 2)], collapse = " "))
+      identical(eps$type[eps$neuronId %in% c("1", "2")], c("A", "B")),
+      paste(eps$type[eps$neuronId %in% c("1", "2")], collapse = " "))
 
 bare <- coda_endpoint_neurons(conn)
 check("endpoints: no seeds is the edges alone",
-      identical(bare$neuronId, c(1, 2, 3)), paste(bare$neuronId, collapse = " "))
-empty <- coda_endpoint_neurons(conn[0, ], 7)
+      identical(bare$neuronId, c("1", "2", "3")), paste(bare$neuronId, collapse = " "))
+empty <- coda_endpoint_neurons(conn[0, ], "7")
 check("endpoints: an empty edge list is the seeds",
-      identical(empty$neuronId, 7), paste(empty$neuronId, collapse = " "))
+      identical(empty$neuronId, "7"), paste(empty$neuronId, collapse = " "))
 
 # --- the heatmap's label order --------------------------------------------------------------
 # `coda_natural_order` mirrors `labelOrder` in `matrixOrder.ts` and the Python helper: LC4

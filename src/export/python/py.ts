@@ -92,6 +92,22 @@ export function pyLongIntList(ids: readonly string[], indent = '    ', width = 8
   return wrapList(ids.filter(isNeuronId), indent, width)
 }
 
+/**
+ * The same list as **quoted** ids, for comparing against a Coda column.
+ *
+ * The pair with `pyLongIntList`, and which one a site wants is decided by what is on the other
+ * side of it rather than by taste. A neuPrint *library* parameter takes integers, so
+ * `NeuronCriteria(bodyId=[1001])` is the int list. A **Coda column** holds every id as text
+ * (invariant 8), so `isin` against it needs quoted strings: `isin([1001])` on a string column
+ * matches nothing at all, silently, and nothing type-checks that pairing.
+ *
+ * `pyStr` per id rather than `pyValue`, which is the same call for a string and is the one that
+ * would quietly stop quoting if an id were ever handed over as a number.
+ */
+export function pyIdList(ids: readonly string[], indent = '    ', width = 88): string[] {
+  return wrapList(ids.filter(isNeuronId).map(pyStr), indent, width)
+}
+
 /** The wrapping half of both, over items that are already rendered. */
 function wrapList(items: readonly string[], indent: string, width: number): string[] {
   // Measured rather than built: an Explore select-all is 10,000 ids, and materialising the

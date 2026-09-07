@@ -9,7 +9,7 @@
 import type { PopulationFilter, TableSchema } from '../../../core/types'
 import { datasetRef } from '../../../core/types'
 import { TRACED_STATUS, populationColumns } from '../../../data/neuronFilter'
-import { pyLongIntList, pyStr } from '../py'
+import { pyIdList, pyStr } from '../py'
 import type { EmitContext } from '../types'
 
 /**
@@ -21,6 +21,28 @@ import type { EmitContext } from '../types'
  */
 export function neuronIds(frame: string): string {
   return `${frame}['neuronId'].tolist()`
+}
+
+/**
+ * The same ids, as the **integers a backend library's parameter takes**.
+ *
+ * The two exist because the notebook has two vocabularies in it and only one of them is Coda's.
+ * A Coda column is text — invariant 8, and `coda_neurons` casts it as it renames — so `isin`,
+ * a join, a `groupby` and every helper in this exporter compare text. But
+ * `NeuronCriteria(bodyId=…)` and `neu.fetch_skeletons(…)` are neuprint-python's, and neuPrint's
+ * `bodyId` is an integer: hand it strings and the Cypher it builds quotes them, matching
+ * nothing and raising nothing.
+ *
+ * So the rule for a reader — and for the next emitter — is that the cast marks the boundary.
+ * `neuronIds` inside the document, `neuronIdInts` at the moment it leaves for a library, and a
+ * cell that mixes them up fails loudly at the call rather than quietly in a comparison.
+ *
+ * `int64` rather than Python's `int` because it is a pandas cast on a column: a CAVE root id is
+ * eighteen digits and fits (int64 tops out around 9.2 × 10^18), where the float64 that a plain
+ * `astype(float)` or a JSON round trip would give it does not.
+ */
+export function neuronIdInts(frame: string): string {
+  return `${frame}['neuronId'].astype('int64').tolist()`
 }
 
 /**
@@ -46,12 +68,20 @@ export function selectionIds(ctx: EmitContext, paramId = 'selection'): string[] 
  * A selection as a Python list literal, wrapped if long.
  *
  * Paired with `selectionIds` deliberately, the way `codaNeurons` pairs a declaration with its
- * call: the ids come back as **text** so no digit is lost, and `pyValue` would then *quote*
- * them — `isin(['1001'])` against an `i64` column matches nothing at all, silently. Nothing
- * type-checks that pairing, so it is one function rather than five call sites remembering.
+ * call: the ids come back as **text** so no digit is lost, and the literal has to match the
+ * column it is compared against. Nothing type-checks that pairing, so it is one function rather
+ * than five call sites remembering.
+ *
+ * It emits **quoted** ids, and it used to emit unquoted integers. Every one of these five sites
+ * compares a selection against a *Coda* column — `isin`, or a frame built to be joined — and a
+ * Coda id column is text on every source now (invariant 8). `isin([1001])` against a string
+ * column matches nothing at all and says nothing, which is the same silent shape the previous
+ * spelling avoided in the other direction: `isin(['1001'])` against an `i64` column. A neuPrint
+ * *library* parameter still takes integers and still goes through `pyLongIntList`; the two
+ * literals are `neuronIds` and `neuronIdInts` one level down, and for the same reason.
  */
 export function pySelection(ids: readonly string[]): string {
-  return pyLongIntList(ids).join('\n')
+  return pyIdList(ids).join('\n')
 }
 
 /**

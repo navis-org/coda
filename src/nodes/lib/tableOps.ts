@@ -692,11 +692,18 @@ function renamesOf(shape: UploadShape): Rename[] {
  *    anything ambiguous as text. This is for a column that is genuinely numeric and genuinely
  *    not a *quantity* — a cluster label, a layer index — which has no business offering itself
  *    to a size encoding or being averaged.
- *  - `idColumn` renames one column to `neuronId`. See `ID_COLUMN_NAME`.
+ *  - `idColumn` renames one column to `neuronId` **and types it `str`**. See `ID_COLUMN_NAME`.
  *  - `typeColumn` renames one column to `type`. See `TYPE_COLUMN_NAME`, and note that the two
  *    are a pair rather than a symmetry: an id makes the table *Neurons*, where a type makes it
  *    legible — `typesOf` reads `type` by literal name, so a chain publishing `cell_type` leaves
  *    every connectivity row's type null with the schema still declaring it.
+ *
+ * The id retyping is the one that is not just a rename, and it closes the seam every *source*
+ * already closes. `csv.ts` sniffs a column's dtype, and `losesMeaningAsNumber` already keeps an
+ * eighteen-digit FlyWire id as text — but a hemibrain CSV of five-digit body ids sniffs as
+ * `i64`, so the same file uploaded from two connectomes arrived under two dtypes and would not
+ * stack. Keyed on the **output** name rather than on `shape.idColumn`, so a CSV that already
+ * has a column called `neuronId` is covered without anyone naming it.
  */
 export function uploadShapeSchema(
   schema: TableSchema | undefined,
@@ -709,14 +716,20 @@ export function uploadShapeSchema(
   return {
     columns: schema.columns.map((c, i) =>
       // The unit goes with the dtype: a count of synapses read as text is no longer a count.
-      text.has(c.name) ? column(renamed[i]!, 'str') : { ...c, name: renamed[i]! },
+      text.has(c.name) || renamed[i] === ID_COLUMN_NAME
+        ? column(renamed[i]!, 'str')
+        : { ...c, name: renamed[i]! },
     ),
   }
 }
 
+/** Whether this column comes out as text — the schema half's rule, for the value half. */
+function widensToText(shape: UploadShape, from: string, to: string): boolean {
+  return (shape.textColumns ?? []).includes(from) || to === ID_COLUMN_NAME
+}
+
 export function uploadShapeTable(table: TableValue, shape: UploadShape): TableValue {
   const schema = uploadShapeSchema(table.schema, shape)!
-  const text = new Set(shape.textColumns ?? [])
   const data: Record<string, ColumnData> = {}
   for (let i = 0; i < table.schema.columns.length; i++) {
     const from = table.schema.columns[i]!.name
@@ -724,7 +737,7 @@ export function uploadShapeTable(table: TableValue, shape: UploadShape): TableVa
     const source = getColumn(table, from)
     // Null is absence and stays absence: `String(null)` is the four-letter word "null", which
     // would read as a value everywhere downstream.
-    data[to] = text.has(from)
+    data[to] = widensToText(shape, from, to)
       ? source.map((cell) => (cell === null ? null : String(cell)))
       : source
   }
@@ -2674,8 +2687,21 @@ export function idColumn(table: TableValue, columnName = ID_COLUMN_NAME): string
   return out
 }
 
-/** Schema for a single-column table of ids, used by stub/passthrough paths. */
-export const ID_ONLY_SCHEMA: TableSchema = tableSchema(column(ID_COLUMN_NAME, 'i64'))
+/**
+ * Schema for a single-column table of ids, used by stub/passthrough paths.
+ *
+ * `str`, and it was `i64` — the last id column in the tree that was not, and a documented
+ * exception rather than an oversight: `Input IDs` with no Dataset wired emits this schema, so
+ * an id past `Number.MAX_SAFE_INTEGER` could not be held exactly, and the node warned at edit
+ * time *and* on the run that it had rounded one to a different neuron.
+ *
+ * Making every source publish `str` (invariant 8) left this as the only thing in the app that
+ * still could not carry a CAVE root id — and, being a `Neurons` table, the only one that would
+ * refuse to stack against any real dataset's. So the exception went, and with it both warnings
+ * and the whole "wire a Dataset to carry it as text" remedy: there is nothing left for a
+ * Dataset to fix about the *width*.
+ */
+export const ID_ONLY_SCHEMA: TableSchema = tableSchema(column(ID_COLUMN_NAME, 'str'))
 
 /**
  * Rows whose id column appears in a selection.

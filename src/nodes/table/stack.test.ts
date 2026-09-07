@@ -194,8 +194,14 @@ describe('core.stack — evaluate', () => {
     /*
      * A clash built out of nothing but real nodes: `core.pivot`'s wide table names its label
      * column after the Rows field and types it `str` even when pivoted from an `i64` — so a
-     * pivot on `preId` stacked onto the connectivity table it came from disagrees about exactly
-     * that column. This is the shape the refusal exists for, and it is not contrived.
+     * pivot stacked onto the table it came from disagrees about exactly that column. This is
+     * the shape the refusal exists for, and it is not contrived.
+     *
+     * It pivots on **`weight`**, where it used to pivot on `preId`. That pair stopped clashing
+     * when every source moved its id columns to `str` (invariant 8): `preId` is a rename of
+     * `neuronId`, so both sides read `str` now and stack cleanly. `weight` is the honest
+     * replacement rather than the nearest one — genuinely `i64` on one side and a row *label*
+     * on the other, which is what "two different columns wearing one name" means.
      */
     let g = emptyGraph('clash')
     g = addNode(g, node('ds', 'neuron.dataset', { dataset: DATASET }))
@@ -207,14 +213,14 @@ describe('core.stack — evaluate', () => {
     g = addNode(
       g,
       node('piv', 'core.pivot', {
-        rows: 'preId',
+        rows: 'weight',
         columns: 'postType',
         agg: 'sum',
         value: 'weight',
       }),
     )
     g = addNode(g, node('stack', 'core.stack'))
-    g = addNode(g, node('sort', 'core.sort', { column: 'preId' }))
+    g = addNode(g, node('sort', 'core.sort', { column: 'weight' }))
     g = addEdge(g, {
       source: 'ds',
       sourceHandle: 'dataset',
@@ -259,7 +265,7 @@ describe('core.stack — evaluate', () => {
     expect(scheduler.info('stack').state).toBe('error')
     const message = scheduler.info('stack').error ?? ''
     // Both readings, because the fix depends on which one is wrong.
-    expect(message).toContain('preId')
+    expect(message).toContain('weight')
     expect(message).toContain('i64 above and str below')
     // And it says what to do about it rather than only what happened.
     expect(message).toMatch(/convert it upstream|Select/)
@@ -275,7 +281,7 @@ describe('core.stack — evaluate', () => {
     g = addNode(
       g,
       node('piv', 'core.pivot', {
-        rows: 'preId',
+        rows: 'weight',
         columns: 'postType',
         agg: 'sum',
         value: 'weight',

@@ -34,7 +34,7 @@ import type { SourceSchemas } from '../source'
  * *filters* on one drops every row for a default nobody chose.
  */
 export const CATMAID_NEURON_SCHEMA: TableSchema = tableSchema(
-  column('neuronId', 'i64'),
+  column('neuronId', 'str'),
   column('name', 'str'),
   column('type', 'str'),
   column('instance', 'str'),
@@ -45,15 +45,15 @@ export const CATMAID_NEURON_SCHEMA: TableSchema = tableSchema(
 )
 
 export const CATMAID_CONNECTIVITY_SCHEMA: TableSchema = tableSchema(
-  column('neuronId', 'i64'),
+  column('neuronId', 'str'),
   column('neuronType', 'str'),
-  column('partnerId', 'i64'),
+  column('partnerId', 'str'),
   column('partnerType', 'str'),
   column('weight', 'i64', 'synapses'),
 )
 
 export const CATMAID_MORPHOLOGY_SCHEMA: TableSchema = tableSchema(
-  column('neuronId', 'i64'),
+  column('neuronId', 'str'),
   column('name', 'str'),
   column('type', 'str'),
   column('instance', 'str'),
@@ -72,15 +72,17 @@ export const CATMAID_MORPHOLOGY_SCHEMA: TableSchema = tableSchema(
  * `connectorId` is carried instead, which is what a caller would join on if they wanted it.
  */
 export const CATMAID_SYNAPSE_SCHEMA: TableSchema = tableSchema(
-  column('neuronId', 'i64'),
+  column('neuronId', 'str'),
   column('type', 'str'),
+  // Not a neuron, so not text: a connector is CATMAID's own object and nothing joins it
+  // against an id column. Invariant 8 is about neurons.
   column('connectorId', 'i64'),
   column('polarity', 'str'),
   column('confidence', 'i64'),
 )
 
 export const CATMAID_ROI_COUNTS_SCHEMA: TableSchema = tableSchema(
-  column('neuronId', 'i64'),
+  column('neuronId', 'str'),
   column('type', 'str'),
   column('roi', 'str'),
   column('pre', 'i64', 'synapses'),

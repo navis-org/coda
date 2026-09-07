@@ -339,7 +339,9 @@ describe('the region and normalisation options', () => {
     })
     expect(text).toContain('_endpoints = coda_endpoint_neurons(')
     expect(text).toContain('connectivity_neuron_set, _ = fetch_neurons(')
-    expect(text).toContain("bodyId=_endpoints['neuronId'].tolist()")
+    // `astype('int64')` on the way out: `neuronId` is Coda's text column and `bodyId` is
+    // neuprint-python's integer parameter. See `neuronIdInts`.
+    expect(text).toContain("bodyId=_endpoints['neuronId'].astype('int64').tolist()")
     expect(text).toContain('connectivity_neuron_set = coda_neurons(connectivity_neuron_set)')
     expect(text).toContain("below the dataset's neuron threshold")
   })

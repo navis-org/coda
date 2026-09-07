@@ -69,7 +69,10 @@ export const idsFromLabelNode = registerNode({
       // data-source registry. Restricted to text columns because a label is text; a numeric
       // column would offer `size` and `pre` as things to look neurons up by.
       schemaFrom: (inputs) => schemasFromType(inputs.dataset).neurons,
+      // Text because a label is text, and `excludeIds` because a label is not an id. The
+      // second used to come free from the first — see `ColumnParam.excludeIds`.
       dtypes: ['str'],
+      excludeIds: true,
       help: 'Which neuron property the labels name. Defaults to the type.',
       default: '',
     },
