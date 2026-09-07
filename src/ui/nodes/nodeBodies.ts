@@ -37,6 +37,7 @@ import { FindNeuronsBody } from './FindNeuronsBody'
 import { EditTableBody } from './EditTableBody'
 import { RenameBody } from './RenameBody'
 import { SelectOneBody } from './SelectOneBody'
+import { SplitNeuronsBody } from './SplitNeuronsBody'
 import { ForEachBody } from './ForEachBody'
 import { UploadBody } from './UploadBody'
 
@@ -228,6 +229,11 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * widget, and a fullscreen panel of four of them is whitespace.
    */
   'neuron.findNeurons': { Component: FindNeuronsBody, width: 360 },
+  /*
+   * The same rows on the same width, because it is the same editor — `FilterRowsEditor` draws
+   * both cards, so a width that fits three controls on one card fits them on the other.
+   */
+  'neuron.splitNeurons': { Component: SplitNeuronsBody, width: 360 },
   /*
    * The widest of the list cards, because a rule is three fields on a line rather than two or
    * one: a filter, a column and a value. Measured in a browser rather than guessed, since a

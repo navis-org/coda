@@ -1,10 +1,13 @@
 /**
- * Find Neurons' rows, as they are read off the node's params.
+ * What a set of Find Neurons rows *means*, which is not the same question as what they are.
  *
- * One function, because four surfaces have to agree about what a saved node is asking: the
- * node's `validate`, its `evaluate`, the card that draws the rows, and both export emitters. A
- * second reading of the same params is how a notebook comes to filter differently from the
- * canvas it was exported from — and neither would be wrong on its own.
+ * Reading the param is `filterRowParams.ts`' job and shared with `Split Neurons`; deciding what
+ * an empty read means is this file's, and it is Find Neurons' alone — the rules below are about
+ * a query going to a shared server, where the split node is filtering a table that has already
+ * arrived. One function per rule, because four surfaces have to agree about what a saved node is
+ * asking: the node's `validate`, its `evaluate`, the card that draws the rows, and both export
+ * emitters. A second reading of the same params is how a notebook comes to filter differently
+ * from the canvas it was exported from — and neither would be wrong on its own.
  *
  * ## What used to be here, and why deleting it was the right end
  *
@@ -30,19 +33,7 @@
 
 import type { ParamValues } from '../../core/node'
 import type { FilterRow } from '../../data/filterRows'
-import { decodeRows } from '../../data/filterRows'
-
-/**
- * Every row this node is asking for.
- *
- * A thin read of one param today, and kept as a named function rather than inlined at each call
- * site for the reason the header gives: the value of this file is that six readers cannot come to
- * disagree about what a stored node asks. `decodeRows` spread across `evaluate`, `validate`, the
- * card and two emitters is five chances for one of them to grow a condition.
- */
-export function rowsFromParams(params: ParamValues): FilterRow[] {
-  return decodeRows(params.filters)
-}
+import { rowsFromParams } from './filterRowParams'
 
 /**
  * What kind of question this node is asking, in one word.

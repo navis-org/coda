@@ -675,6 +675,45 @@ Area-specific — the rule, then the doc that holds why:
   is gone". The other two `ids` params stay uncovered on purpose: one rule over "ids params" would
   be three grammars under one name. See [docs/nodes.md](docs/nodes.md) and
   [docs/wizard.md](docs/wizard.md).
+- **A split is one pass, because two filters with opposite conditions are not a partition.**
+  `Split Neurons` (`neuron.splitNeurons`) is **`Stack Neurons` run backwards**: it asks the attribute
+  table a collection carries a set of Find Neurons rows and hands back both halves, so
+  `source is hemibrain` takes a stacked scene apart on the column the stack itself wrote. The
+  hand-built alternative is silently wrong — the negation of several ANDed rows is not one condition,
+  so filtering the table for `type is LC4 AND side is left` beside `type is not LC4` drops the
+  right-side LC4s from **both** arms, two plausible counts and nothing to say a population went
+  missing — and after a stack or a transform there is no table upstream left to filter at all.
+  The question is asked of the attributes and answered in **items**, which is why it is
+  `sliceElements` twice rather than geometry code: bounds **recomputed** (a half claiming the whole
+  box frames a viewer on empty space), `units`/`space`/`provenance`/`detail` **carried**. Four rules.
+  **Skeletons and meshes only, and both exclusions are decisions**: `Points` is refused though
+  `Stack Neurons` takes it, its attribute rows being *connectors*, and a table belongs to
+  `Filter Table` — each refusal names its own remedy (`wrongKindReason`), which the card draws where
+  it would otherwise draw a row count, and `isSplitKind` is a deliberate **fourth** kind list beside
+  `isGeometryKind`, `isIterableKind` and `Collect`'s own. **No rows sends everything to `Rest`** — an empty predicate
+  matched nothing, and the "AND over no clauses is true" reading makes a half-built card
+  indistinguishable from a finished one keeping every neuron; sentence *and* predicate are one
+  declaration each in `splitRows.ts` (`matchesNothing`, `nothingMatchesReason`,
+  `unresolvedRowsReason`), since **four surfaces read each** and the card had been asking
+  `stored.length` while the rest asked `terms.length`. The selection is **`partitionElements` in
+  `iterables.ts`**, beside `groupOf`/`elementAt` — `groupOf` being a one-sided partition already —
+  so `splitRows.ts` holds only what is about filter rows, `sliceElements` stayed private, and the
+  identity fast path (a whole side handed back by reference) sits where the whole family can see
+  it; `cheap` means a typed value re-partitions per keystroke and every intermediate string matches
+  nothing, which now allocates one empty collection and no index array at all. `fieldTermsMatch`
+  being an AND, a `terms.length > 0` guard is what makes no filters mean `Rest` and not its
+  opposite. And **the exporters diverge because the
+  libraries do**: nat keeps a `data.frame` beside its neurons, so R emits one condition into a
+  logical vector both halves index (`nl[, ]`, `nl[mask]`, `nl[!mask]`, all run against a synthetic
+  neuronlist), where navis keeps attributes on the neuron objects — `fetch_skeletons` attaches **no**
+  connectome metadata and `NeuronList.summary()`'s `type` is `'navis.Skeleton'`, the class, so a
+  `type` filter there would match nothing in silence. Both measured, not recalled; the Python cell is
+  a registered emitter returning a TODO with the two real remedies rather than a `NO_EMITTER` entry,
+  whose words are "no equivalent *yet*". The card is `FilterRowsEditor` + `FilterRowsFoot`, shared
+  with Find Neurons and reading **`ctx.attributes('in')`** rather than `ctx.schema('in')`; the
+  param's read *and* write are `nodes/lib/filterRowParams.ts`'. The props are the tell there: an
+  extracted editor taking `fields` and `broken` beside `schema` leaves both cards deriving them and
+  cannot enforce the "one analysis" property it claims. See [docs/nodes.md](docs/nodes.md).
 - **A synaptic partner is usually not a neuron, and a node emitting an edge list has to say which it
   meant.** Connectivity matches its far end as a bare node — right for a weight total, wrong as the
   only option, since the great majority of partners on a real dataset carry no `:Neuron` label and

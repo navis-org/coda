@@ -3,8 +3,9 @@ import { registerNode } from '../../core/registry'
 import { neuronSetRequest } from '../lib/datasetParam'
 import { T } from '../../core/types'
 import { emptyTable, isTableValue } from '../../core/values'
-import { ALL_ROW_OPS, arityOf, encodeRows, resolveRows } from '../../data/filterRows'
-import { asksNothing, noFiltersReason, rowsFromParams } from '../lib/findNeuronsRows'
+import { resolveRows } from '../../data/filterRows'
+import { asksNothing, noFiltersReason } from '../lib/findNeuronsRows'
+import { FILTERS_PARAM_ID, rowGrammarNote, rowsFromParams } from '../lib/filterRowParams'
 import {
   ANY_OPTION,
   datasetInfoFromType,
@@ -16,40 +17,29 @@ import {
 } from '../lib/datasetParam'
 
 /**
- * How a plan writes this node's query, generated rather than transcribed.
+ * How a plan writes this node’s query.
  *
  * `filters` is an `ids` param — a `string[]` whose entries are JSON — and nothing about that kind
  * says so, which until the four legacy scalars were deleted did not matter: a model could set
  * `typePattern` and this was merely the tidy path. It is the only path now, so the catalogue has
  * to carry the grammar (`ParamBase.catalogueNote`).
  *
- * **Every varying part is computed, not written out.** The example comes from `encodeRows`, the
- * operator names from `ALL_ROW_OPS`, and the arity groups from `arityOf` — the last being the one
- * that looked safe to transcribe and is not, since the sentence "isIn takes several, isEmpty
- * takes none, the rest take one" is `arityOf`'s switch copied into prose. Drift in any of them is
- * the bad kind: a plan naming a dead operator, or filling `v` for one that takes none, is refused
- * with a message about the *param*, which a model reads as "filters is wrong" rather than "that
- * detail is stale", so it tries again the same way.
+ * The grammar half is `rowGrammarNote`’s, generated from `ALL_ROW_OPS` and `arityOf` so that a
+ * plan can never be told about an operator that has gone. What is written out here is the pair of
+ * sentences that are about *this* node rather than about the grammar — where a field comes from,
+ * and what an empty list means. `Split Neurons` supplies its own two, which differ on both counts.
  */
 function filtersNote(): string {
-  const byArity = (want: ReturnType<typeof arityOf>) =>
-    ALL_ROW_OPS.filter((op) => arityOf(op) === want)
-      .map((op) => `\`${op}\``)
-      .join('/')
-  return [
-    'A list of JSON *strings*, one per filter row, ANDed. A row is',
-    '`{"f": <field>, "op": <operator>, "v": [<value>, …]}`, plus an optional `"i": true` to',
-    'compare case-insensitively. For "type matches LC.*":',
-    `  ${JSON.stringify(encodeRows([{ field: 'type', op: 'matches', values: ['LC.*'] }]))}`,
-    '`f` is a column of the *dataset\u2019s* neuron schema — read it off the `carries:` line on the',
-    'Dataset wire; a field the dataset does not publish is reported on the card.',
-    `\`op\` is one of: ${ALL_ROW_OPS.join(', ')}.`,
-    `${byArity('many')} take several values in \`v\`; ${byArity('none')} take none; the rest take one.`,
-    '`matches` is a whole-string pattern, so `LC.*` matches `LC4` and not `LPLC1`. Use',
-    '`contains` for a substring and `isIn` for a set — a set is how you say OR, and it is faster.',
-    'An empty list is not "everything": with no filters this node returns **no neurons**. If the',
-    'user wants a whole dataset, say so in your reply rather than inventing a row.',
-  ].join('\n')
+  return rowGrammarNote({
+    fields: [
+      '`f` is a column of the *dataset\u2019s* neuron schema — read it off the `carries:` line on the',
+      'Dataset wire; a field the dataset does not publish is reported on the card.',
+    ],
+    empty: [
+      'An empty list is not "everything": with no filters this node returns **no neurons**. If the',
+      'user wants a whole dataset, say so in your reply rather than inventing a row.',
+    ],
+  })
 }
 
 /**
@@ -139,7 +129,7 @@ export const findNeuronsNode = registerNode({
        * reason: the number of rows is not known when the definition is written, so no generic
        * widget can draw them. Never `presentational`; this is the query.
        */
-      id: 'filters',
+      id: FILTERS_PARAM_ID,
       kind: 'ids',
       label: 'Filters',
       noun: 'filters',

@@ -23,8 +23,10 @@
  *
  * Four marks are shared across families, and each is load-bearing:
  *
- * - **The funnel** is filtering, on `core.filterTable` and on `net.filter`. Reusing it is what
- *   says the two nodes are the same verb on different material.
+ * - **The funnel** is filtering, on `core.filterTable`, on `net.filter` and — forked below the
+ *   spout, since nothing is thrown away — on `neuron.splitNeurons`, where it sits over
+ *   `neuron.stack`'s two arbours because that node is the one it inverts. Reusing it is what says
+ *   the three are the same verb on different material.
  * - **A dashed outline** is a selection the user made — `cluster.selectedToNeurons`,
  *   `cluster.clustersToNeurons` — never an edge and never part of the thing it sits on.
  * - **The four-point spark** is "cleaned", on `neuron.cleanSkeletons` and `neuron.cleanMeshes`.
@@ -416,6 +418,17 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M6.4 19.4v-4.2l-2.4-2.6M6.4 15.2l2.4-2M8.8 13.2l-.4-2.6' }],
     ['path', { d: 'M17.6 19.4v-4.2l2.4-2.6M17.6 15.2l-2.4-2M15.2 13.2l.4-2.6' }],
     ['path', { d: 'M12 8.4v4.4M9.8 10.6h4.4' }],
+  ],
+  // Stack Neurons' composition inverted: the same two arbours, and the plus that combined them
+  // replaced by Filter Table's funnel forking into both. Two shared marks doing the work —
+  // the arbour says the material is neurons rather than rows, the funnel says the verb is
+  // filtering — so the pair reads as one gesture and its opposite. The spout's two arms are
+  // what say nothing is thrown away, which is the only thing separating this from a filter.
+  'neuron.splitNeurons': [
+    ['path', { d: 'M6.4 19.4v-4.2l-2.4-2.6M6.4 15.2l2.4-2M8.8 13.2l-.4-2.6' }],
+    ['path', { d: 'M17.6 19.4v-4.2l2.4-2.6M17.6 15.2l-2.4-2M15.2 13.2l.4-2.6' }],
+    ['path', { d: 'M9 3.8 11.2 6.4V8.2L12.8 7.4V6.4L15 3.8Z' }],
+    ['path', { d: 'M11.4 8.6 8.6 11M12.6 8.6 15.4 11' }],
   ],
   'core.landmarkTransform': [
     ['path', { d: 'M4 7c5.4-2 10.6-2 16 0M4 12.6c5.4-2 10.6-2 16 0M4 18.2c5.4-2 10.6-2 16 0' }],

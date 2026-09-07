@@ -29,11 +29,8 @@ import { resolveRows } from '../../../data/filterRows'
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import type { DType } from '../../../core/types'
 import { isNumericDType } from '../../../core/types'
-import {
-  asksNothing,
-  noFiltersReason,
-  rowsFromParams,
-} from '../../../nodes/lib/findNeuronsRows'
+import { asksNothing, noFiltersReason } from '../../../nodes/lib/findNeuronsRows'
+import { rowsFromParams } from '../../../nodes/lib/filterRowParams'
 import { schemasFromType } from '../../../nodes/lib/datasetParam'
 import { filterPredicates } from './tableFilters'
 import type { EmitContext } from '../types'

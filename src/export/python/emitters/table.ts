@@ -161,6 +161,46 @@ registerEmitter('core.filterTable', (ctx) => {
   return lines
 })
 
+/**
+ * Split Neurons, refused — and this is the refusal `docs/export.md`' policy exists for, because
+ * both halves of it were measured rather than recalled.
+ *
+ * The node filters **the attribute table a collection carries**, and a navis `NeuronList` has no
+ * such table. Two findings, from navis 2.0.0-rc.1 and neuprint-python 0.6.3 with both installed:
+ *
+ *  - `neu.fetch_skeletons` — the call the Skeletons cell makes — attaches **no connectome
+ *    metadata at all**. It reads SWCs, optionally with synapses, and that is the whole of it. So
+ *    `type`, `status`, `size` and a Stack Neurons `source` column simply are not there.
+ *  - `NeuronList.summary()` looks like the missing frame and is a trap: its columns are `type`,
+ *    `name`, `id`, `n_nodes`, `n_connectors`, `n_branches`, `n_leafs`, `cable_length`, `soma`,
+ *    `units`, and **`type` holds `'navis.Skeleton'`** — the neuron class, not the cell type. A
+ *    `type matches LC4.*` row compiled against it matches nothing, in silence, which is the worst
+ *    shape a translation can take: a cell that runs and hands back an empty half.
+ *
+ * `cable_length` is the near miss worth naming: it exists, and it is in the neuron's own units,
+ * where Coda's `cableLength` is normalised nanometres off the connectome query. Emitting it would
+ * compare a number to a threshold measured on a different scale.
+ *
+ * So the cell says what to do instead. Both remedies are real: filtering the neuron table *before*
+ * the Skeletons or Meshes cell is the same answer on the canvas, and `nl[mask]` is the indexing
+ * this node would use — a `NeuronList` takes a boolean list, numpy array or Series, checked by
+ * running it. The R side **does** emit, because nat keeps a data.frame beside the neurons; that
+ * asymmetry is forced by the libraries rather than chosen, and `docs/export.md` records it.
+ */
+registerEmitter('neuron.splitNeurons', (ctx) => {
+  const src = ctx.wired('in')
+  return ctx.todo(
+    'Split Neurons filters the attribute table a collection of skeletons or meshes carries, ' +
+      'and a navis NeuronList has none: `fetch_skeletons` attaches no connectome metadata, and ' +
+      '`NeuronList.summary()`’s `type` column is the neuron class (`navis.Skeleton`) rather ' +
+      'than the cell type — so a filter compiled against it would match nothing and say ' +
+      'nothing. Filter the neuron table above the Skeletons cell instead, or merge your neuron ' +
+      `frame onto \`[n.id for n in ${src}]\` and index the list with the mask: ` +
+      `\`${ctx.output('matched')} = ${src}[mask.to_numpy()]\`, ` +
+      `\`${ctx.output('rest')} = ${src}[~mask.to_numpy()]\`.`,
+  )
+})
+
 // ---------------------------------------------------------------------------
 // Sort
 // ---------------------------------------------------------------------------

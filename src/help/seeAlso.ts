@@ -92,6 +92,10 @@ const RELATED: readonly (readonly string[])[] = [
   // Rows in, fewer rows out. Filter is what people reach for first; the other two are what they
   // wanted about half the time.
   ['core.filterTable', 'core.sample', 'core.dedupe'],
+  // The same verb on the two materials: rows out of a table, neurons out of a collection. A pair
+  // rather than a group, because Split Neurons' other neighbours are geometry and Filter Table's
+  // are table ops — relating those to each other is what makes a See Also list stop being read.
+  ['neuron.splitNeurons', 'core.filterTable'],
   // Same rows, different shape.
   ['core.groupBy', 'core.pivot', 'core.join', 'core.stack'],
   // Choosing by hand rather than by predicate, and where you look at the result.
@@ -122,8 +126,8 @@ const RELATED: readonly (readonly string[])[] = [
   ['compare.matchTypes', 'compare.connectivity', 'core.similarity'],
 
   // --- geometry -------------------------------------------------------------
-  // The three things a dataset will hand you in space.
-  ['neuron.skeletons', 'neuron.meshes', 'neuron.roiMeshes'],
+  // The three things a dataset will hand you in space, and taking a collection of them apart.
+  ['neuron.skeletons', 'neuron.meshes', 'neuron.roiMeshes', 'neuron.splitNeurons'],
   // Both move geometry through a registration; Mirror is Transform with the sides swapped.
   ['neuron.mirror', 'neuron.xform'],
   // The two ways to look at neurons in space: Coda's own scene, and the viewer the field uses.

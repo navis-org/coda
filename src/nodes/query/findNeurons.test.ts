@@ -39,7 +39,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { mockDatasetIds } from '../../data/mock/generate'
 import type { DataSource } from '../../data/source'
 import { CANONICAL_SCHEMAS, registerSource, requireSource } from '../../data/source'
-import { rowsFromParams } from '../lib/findNeuronsRows'
+import { rowsFromParams } from '../lib/filterRowParams'
 import '../index'
 
 const DATASET = mockDatasetIds()[0]!

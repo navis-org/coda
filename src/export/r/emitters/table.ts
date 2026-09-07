@@ -9,12 +9,19 @@
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import type { CellValue } from '../../../core/values'
 import type { DType } from '../../../core/types'
-import { isNumericDType } from '../../../core/types'
+import { columnNames, isNumericDType } from '../../../core/types'
 import { rawFileNote, rawFileUrl } from '../../../data/rawFileUrl'
 import { decodeSetters, disabledEditNote, editPlan } from '../../../nodes/lib/tableEdits'
 import { usesRegex } from '../../../nodes/lib/tableFilter'
+import { resolveRows } from '../../../data/filterRows'
+import { rowsFromParams } from '../../../nodes/lib/filterRowParams'
+import {
+  matchesNothing,
+  nothingMatchesReason,
+  unresolvedRowsReason,
+} from '../../../nodes/lib/splitRows'
 import { codaIds } from './common'
-import { filterPredicates } from './tableFilters'
+import { REGEX_FLAVOUR_NOTE, filterPredicates } from './tableFilters'
 import type { AggFn } from '../../../nodes/lib/tableOps'
 import {
   FILTER_TABLE_DEFAULT_OP,
@@ -145,6 +152,75 @@ registerEmitter('core.filterTable', (ctx) => {
   const lines = built.notes.flatMap((note) => ctx.note(note))
   lines.push(`${out} <- ${src} |> filter(${built.predicate})`)
   return lines
+})
+
+/**
+ * Split Neurons: one condition over the neuronlist's own metadata, read both ways.
+ *
+ * **This emits where the notebook refuses, and the asymmetry is the libraries' rather than
+ * ours.** nat keeps a `data.frame` *beside* the neurons — `nl[,]` is it, one row per neuron in
+ * the same order, which is precisely Coda's own contract for a collection's attribute table —
+ * where navis keeps attributes on the neuron objects and its `summary()` shadows `type` with the
+ * neuron class. So the same node is a working chunk here and a TODO there; `docs/export.md`
+ * records the pair.
+ *
+ * Checked by running it against a synthetic `neuronlist` with an attached frame: `nl[,]` returns
+ * the metadata, a `dplyr` predicate over it pulls a logical vector, `nl[mask]` subsets *and*
+ * carries the matching metadata rows with it, and `nl[!mask]` is the complement. `nl[FALSE]` is
+ * the empty collection, keeping its class and a zero-row frame.
+ *
+ * **The condition is written once**, into a logical vector both halves index with, because two
+ * `filter()` calls — one with the predicates and one negated — is a De Morgan step performed by
+ * hand in the exporter, leaving a reader two expressions to check against each other.
+ * `!mask` cannot disagree with `mask`, which is the property the node itself gets by asking
+ * `fieldTermsMatch` once per item.
+ *
+ * What it cannot promise is the *columns*: the frame holds whatever read the neurons, and
+ * neuprintr was not installed when this was written — so the chunk says that rather than
+ * claiming a column set, on `docs/export.md`' rule about recalled signatures.
+ */
+registerEmitter('neuron.splitNeurons', (ctx) => {
+  const src = ctx.wired('in')
+  const schema = ctx.attributes('in')
+  const rows = rowsFromParams(ctx.params)
+  const { terms, problems } = resolveRows(schema, rows)
+  // The sentence `evaluate` throws — one refusal, one account of it.
+  if (problems.length > 0) {
+    return ctx.todo(unresolvedRowsReason(problems, columnNames(schema)))
+  }
+
+  ctx.library('dplyr')
+  const matched = ctx.output('matched')
+  const rest = ctx.output('rest')
+
+  /* Nothing asked, nothing matched — in code rather than in a note, since a chunk falling
+     through to an all-true mask would hand the reader a `Matching` holding every neuron. */
+  if (matchesNothing(rows)) {
+    return [
+      ...ctx.note(
+        `${nothingMatchesReason()} So this chunk says that — add a filter row on the canvas and ` +
+          're-export, or write the condition in here.',
+      ),
+      `${matched} <- ${src}[FALSE]`,
+      `${rest} <- ${src}`,
+    ]
+  }
+
+  const predicates = filterPredicates(terms, schema)
+  const mask = `${ctx.name}_mask`
+  return [
+    ...ctx.note(
+      'The filter reads the metadata frame attached to the neuronlist (`nl[, ]`), which is ' +
+        'nat’s equivalent of the attribute table Coda splits on. It holds whatever read the ' +
+        'neurons, so a column the canvas has may need adding here first.',
+    ),
+    ...(usesRegex(terms) ? ctx.note(REGEX_FLAVOUR_NOTE) : []),
+    `${mask} <- ${src}[, ] |>`,
+    `    mutate(.coda_match = ${predicates.join(' & ')}) |>`,
+    `    pull(.coda_match)`,
+    `${matched} <- ${src}[${mask}]`,
+    `${rest} <- ${src}[!${mask}]`,
+  ]
 })
 
 // ---------------------------------------------------------------------------

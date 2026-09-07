@@ -1772,6 +1772,22 @@ similarity_matrix <- coda_similarity_wide(
 )
 ```
 
+```{r split-neurons}
+# ── Split Neurons ──
+# NOTE: The filter reads the metadata frame attached to the neuronlist
+# (`nl[, ]`), which is nat’s equivalent of the attribute table Coda splits
+# on. It holds whatever read the neurons, so a column the canvas has may
+# need adding here first.
+# NOTE: Coda matches these regexes with JavaScript semantics. `perl = TRUE`
+# is the closest of R’s engines; the two differ on lookbehind and named
+# groups.
+split_neurons_mask <- skeletons[, ] |>
+    mutate(.coda_match = !is.na(.data[["type"]]) & grepl("^(?:LC4.*)$", as.character(.data[["type"]]), ignore.case = FALSE, perl = TRUE) & (!is.na(.data[["cableLength"]]) & .data[["cableLength"]] >= 100000)) |>
+    pull(.coda_match)
+split_neurons_matched <- skeletons[split_neurons_mask]
+split_neurons_rest <- skeletons[!split_neurons_mask]
+```
+
 ```{r select-one}
 # ── Select One ──
 select_one <- skeletons |> slice(1)

@@ -35,7 +35,7 @@ the thing to watch — an emitter can quietly stop agreeing with the `evaluate` 
 nothing type-checks the pair. `coverage.test.ts` is the tripwire: every registered type either
 has an emitter or is named in `NO_EMITTER` with a reason.
 
-### One node exported asymmetrically, and why that is the honest answer
+### Two nodes exported asymmetrically, and why that is the honest answer
 
 `Connectivity`'s region options are translated in the notebook and refused in the R Markdown, and
 its `Normalize` is refused in both. The split is not about what each library can do — neuprintr can
@@ -66,6 +66,24 @@ denominator**. The `all` basis is reachable — it is the `upstream`/`downstream
 `fetch_neurons` — and emitting only that half under a control that names both would put a number in
 the notebook that is not the number on the canvas, differing by a factor of two and a half on
 male-CNS. That is the substitution the node itself refuses to make, arriving one layer out.
+
+**`Split Neurons` is the second, and its asymmetry is the libraries' data models rather than what
+could be checked.** The node splits a collection of skeletons or meshes on the attribute table it
+carries. nat keeps that table *beside* the neurons — `nl[, ]` is it, one row per neuron in the same
+order, which is exactly Coda's own contract — so the R chunk is one condition written into a logical
+vector both halves index (`nl[mask]`, `nl[!mask]`), checked by running it against a synthetic
+`neuronlist`. navis keeps attributes on the neuron objects instead, and there is no such frame to
+filter: measured with navis 2.0.0-rc.1 and neuprint-python 0.6.3 installed, `neu.fetch_skeletons`
+attaches **no connectome metadata at all**, and `NeuronList.summary()` — which looks like the
+missing frame — reports `type` as `'navis.Skeleton'`, the neuron *class* rather than the cell type.
+A `type matches LC4.*` row compiled against it would match nothing, in silence, handing the reader a
+cell that runs and returns an empty half. `cable_length` is the near miss: it exists, in the
+neuron's own units, where Coda's `cableLength` is normalised nanometres off the connectome query. So
+the notebook cell is a TODO naming the two real remedies — filter the neuron table above the
+Skeletons cell, or merge a neuron frame on the ids and index the list with the mask, which
+`NeuronList` genuinely supports. It is a **registered emitter returning `ctx.todo`** rather than a
+`NO_EMITTER` entry, because the fallback's words are "no notebook equivalent *yet*", and this is not
+a matter of nobody having written it.
 
 ### The softer half: warning that an export will have gaps in it
 

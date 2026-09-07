@@ -367,6 +367,159 @@ hover to tell apart. The type id moved with the label, which broke every stored 
 acceptable only because Coda is pre-release with one user, and the last time it will be: a rename
 after this needs a load-time alias kept forever.
 
+## Split Neurons: both halves of a filter, on a collection
+
+`neuron.splitNeurons` takes one collection of skeletons or meshes and returns two — the neurons
+matching every filter row on `Matching`, the rest on `Rest`. It is **`Stack Neurons` run
+backwards**: that node puts several collections end to end and writes a column saying which input
+each neuron came from, and this one asks the attribute table a question and hands back both
+answers. Taking a stacked scene apart again is the case the pair exists for, and the row that does
+it is `source is hemibrain`, on the very column the stack wrote.
+
+**The question is asked of the attributes and answered in items.** A `SkeletonsValue` carries one
+attribute row per item *in the same order* — the contract `groupOf` and `elementAt` already rest on
+— so one set of indices addresses both halves, and `cableLength >= 50000` is a question about a
+table whose answer is skeletons. That is also why the split is `sliceElements` twice rather than
+geometry code of its own: everything subtle about a subset of geometry is decided there already,
+and the split needs none of it again. Bounds are **recomputed** (a half still claiming the box of
+all five frames a 3D viewer on empty space, which reads as a broken renderer); `units`, `space`,
+`provenance` and mesh `detail` are **carried** (taking neurons out does not change where the
+coordinates came from). One test asserts each direction, because a plausible implementation gets
+one of the two wrong and the symptom is a picture rather than an error.
+
+**Two filters cannot express it, and the failure is silent.** The negation of an ANDed set of rows
+is not a single condition, so the obvious hand-built pair — filter the neuron table for
+`type is LC4 AND side is left`, filter it again for `type is not LC4`, fetch both — drops the
+right-side LC4s from *both* arms. Nothing says so: two plausible counts and a population quietly
+missing between them. Here `fieldTermsMatch` is asked once per item and its answer picks the side,
+so every neuron lands on exactly one port and the counts sum. **And after a stack or a transform
+there is no table upstream left to filter at all**, which is the other half of why this is a node
+rather than advice.
+
+**Skeletons and meshes, and both exclusions are decisions rather than an unfinished list.**
+`Points` is refused although `Stack Neurons` accepts it: a point cloud's attribute rows are
+*connectors*, so splitting one would divide synapses under a name about neurons — `Points` is
+consequently the one kind you can stack but not split. A table is refused because `Filter Table`
+filters tables. Each refusal names its own remedy (`wrongKindReason`), since "wire skeletons or
+meshes" tells somebody holding a neuron table nothing they can act on, and the card draws that
+sentence where it would otherwise draw a row count — being told "0 filters" about a collection the
+node will refuse is an answer to the wrong question. The port itself is `T.any()` on
+`core.selectOne`'s reasoning: "skeletons or meshes" is not something the type system can say, so
+the port says nothing and `validate` refuses. **`isSplitKind` is a fourth kind list** beside
+`isGeometryKind`, `isIterableKind` and `Collect`'s `isCollectableKind`, which is the honest way to
+say a fourth thing: two callers sharing a list that is right for neither is how a node comes to
+refuse a kind its own card offers.
+
+**With no rows, everything goes to `Rest`.** An empty set of rows is a predicate that has matched
+nothing, so the total is preserved and the port doing the asking is the one that answers empty. The
+alternative reading, "an AND over no clauses is true", is defensible and was rejected because it
+makes a half-built card indistinguishable from a finished one whose filters keep every neuron. Both
+the sentence and the predicate behind it live in `splitRows.ts` — `nothingMatchesReason` and
+`matchesNothing` — which is `asksNothing`' arrangement and for its reason: the card had been asking
+`stored.length === 0` while the other surfaces asked `terms.length === 0`, and those agree only
+because `decodeRows` applies `keptRows`, a fact about a different file that nothing here stated.
+The name is deliberately not `noFiltersReason`: Find Neurons exports that one with a different
+sentence, and an emitter importing the wrong of two identically-named functions compiles cleanly
+and writes the other node's explanation into somebody's document.
+
+**A row naming a column the attributes do not have refuses the run.** `resolveFilters` drops an
+unapplicable clause and shows more rows, which `out.table` can afford because it is a tap; a split
+cannot, since dropping the row still returns a partition of a question nobody asked.
+`unresolvedRowsReason` is the one sentence `evaluate` throws and the R emitter renders, with the
+column list appended only where the caller can name it. Written per surface it had already drifted
+before shipping: `evaluate` threw the problems with no explanation while the emitters explained and
+named no columns.
+
+**The selection itself is not here — it is `partitionElements` in `iterables.ts`**, beside
+`groupOf`, `elementAt` and `elementsFrom`, because "which elements, and what comes back" is that
+file's whole subject and `groupOf` is already a one-sided partition by column value. So
+`splitRows.ts` holds only what is about *filter rows*: lowering them to terms and handing over the
+predicate. What that bought, beyond the ten lines: `sliceElements` went back to being private (it
+had been exported purely so a node file could redo the wrapping its own module does three times),
+and the identity fast path now sits where every caller in the family can see it. **A whole side is
+handed back by identity**, which is `filterTableByClauses`' rule — and it matters most here because
+this node is `cheap`, so a value being typed re-partitions per keystroke and every intermediate
+string (`L`, `LC`, `LC4`) matches nothing on the way. Those passes allocate one empty collection and
+nothing else: `matched` is ascending, so the complement is a merge rather than a lookup, and neither
+index array is built for a side that takes everything. One subtlety the predicate carries:
+`fieldTermsMatch` is an AND, so over *no* terms it answers true for every row — the
+`terms.length > 0` guard is what makes "no filters" mean `Rest` rather than its opposite.
+
+### One row editor, two nodes
+
+The card is `FilterRowsEditor` plus `FilterRowsFoot`, extracted from `FindNeuronsBody` when this
+node arrived. What is shared is everything about *drawing* a row — the three controls, the
+blank-row rule (a blank row is component state, never a param), the `(missing)` marker, the
+`resolveRows` call all of those read, the `filters` write, and the foot's markup. What each card
+supplies is its **words**, and they differ on all three counts: a dataset against a collection of
+skeletons, "no neurons" against "nothing matches", and a field missing from a dataset against one
+missing from an attribute table.
+
+What each card keeps in code is what its node means by a row. Find Neurons reads a dataset's own
+discovered neuron schema and has a three-way foot line because `In ROI` is a question that is not a
+row; this reads **`ctx.attributes('in')`**, not `ctx.schema('in')`, because a collection carries its
+table beside the geometry rather than being one — a card reading `schema` here offers nothing at
+all, which looks exactly like a dataset whose listing has not landed.
+
+**The first cut of the extraction stopped two props short**, and the props were the tell: it took
+`schema` *and* `fields` *and* `broken`, the last two derived identically in both cards — so the
+claim that the marker, the tint and the count are "one analysis" was true only by coincidence, and a
+`fields` list disagreeing with `schema` would have degraded in silence, with `rowOpsForDType(undefined)`
+offering `contains` for a numeric column. `resolveRows` is asked in the editor now, once, and `foot`
+is a callback handed the problems. The `filters` write moved for the same reason:
+`encodeRows(next) as unknown as ParamValue` in two cards was the write half of a codec whose read
+half `filterRowParams.ts` centralises. `FILTERS_PARAM_ID` is that param's one spelling, read by both
+declarations and the editor's write — a constant naming a rule it did not enforce would be worse
+than the literal, especially with `out.table`'s unrelated `filters` param next door under a
+different codec.
+
+The param read itself is `filterRowParams.ts`, beside `rowGrammarNote` — the assistant catalogue's
+grammar for `filters`, generated from `ALL_ROW_OPS` and `arityOf` so a plan can never be told about
+an operator that has gone. Each node supplies the two sentences that are about itself: where a field
+comes from, and what an empty list means. `findNeuronsRows.ts` kept the rest, which is entirely
+about what an empty read means at a backend seam — Find Neurons' decision and not this node's.
+
+### The exporters diverge, and the libraries force it
+
+**R emits a working chunk; the notebook refuses.** nat keeps a `data.frame` *beside* the neurons —
+`nl[, ]` is it, one row per neuron in the same order, which is exactly Coda's own contract — so the
+chunk is one condition written into a logical vector both halves index with:
+`mask <- src[, ] |> mutate(.coda_match = …) |> pull(.coda_match)`, then `src[mask]` and `src[!mask]`.
+The condition is written **once**, because two `filter()` calls (one negated) is a De Morgan step
+performed by hand in the exporter, leaving a reader two expressions to check against each other.
+Checked by running it against a synthetic `neuronlist`: `nl[, ]` returns the metadata, `nl[mask]`
+subsets *and* carries the matching metadata rows with it, `nl[!mask]` is the complement, and
+`nl[FALSE]` is the empty collection keeping its class and a zero-row frame. What the chunk cannot
+promise is the *column set* — the frame holds whatever read the neurons, and neuprintr was not
+installed — so it says that rather than claiming one.
+
+**Python refuses, and both halves of the reason were measured** with navis 2.0.0-rc.1 and
+neuprint-python 0.6.3 installed:
+
+- `neu.fetch_skeletons`, the call the Skeletons cell makes, attaches **no connectome metadata at
+  all** — it reads SWCs, optionally with synapses, and that is the whole of it. So `type`, `status`,
+  `size` and a stacked `source` column are simply not there.
+- `NeuronList.summary()` looks like the missing frame and is a trap. Its columns are `type`, `name`,
+  `id`, `n_nodes`, `n_connectors`, `n_branches`, `n_leafs`, `cable_length`, `soma`, `units` — and
+  **`type` holds `'navis.Skeleton'`**, the neuron class rather than the cell type. A
+  `type matches LC4.*` row compiled against it matches nothing, in silence, handing the reader a
+  cell that runs and returns an empty half.
+
+`cable_length` is the near miss worth naming: it exists, and it is in the neuron's own units where
+Coda's `cableLength` is normalised nanometres off the connectome query, so emitting it would compare
+a number against a threshold measured on a different scale. The TODO therefore names the two real
+remedies — filter the neuron table above the Skeletons cell, or merge a neuron frame on the ids and
+index with the mask, `nl[mask.to_numpy()]`, which is indexing a `NeuronList` genuinely supports
+(boolean list, array and Series all checked by running them). A registered emitter returning a TODO
+rather than a `NO_EMITTER` entry, because the fallback's words are "no notebook equivalent **yet**",
+and this one is not a matter of nobody having written it.
+
+Both sides were then run against the same five neurons — a null `type`, a null `cableLength`, and a
+`lc4` that must not match a case-sensitive `LC4.*` — and the R chunk and the node agree on all five,
+with both partitions summing and `Matching`'s bounding box recomputed to its own neurons. The
+fixture carries two rows, one of them a regex, because a single-row node exercises neither the R
+predicate join nor the regex note.
+
 ## Adjacency: a matrix, and the same connections as links
 
 `neuron.adjacency` emits **two outputs describing one fetch**, which is `neuron.roiConnectivity`'s

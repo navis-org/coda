@@ -28,7 +28,7 @@ import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
 import { decodeRanges } from '../../../nodes/lib/chartSelection'
 import { neuronIds, selectionIds, selectionLabels } from './common'
-import { filterPredicates } from './tableFilters'
+import { REGEX_FLAVOUR_NOTE, filterPredicates } from './tableFilters'
 
 registerEmitter('out.table', (ctx) => {
   const src = ctx.wired('in')
@@ -65,12 +65,7 @@ registerEmitter('out.table', (ctx) => {
   }
 
   if (usesRegex(terms)) {
-    lines.push(
-      ...ctx.note(
-        'Coda matches these regexes with JavaScript semantics. `perl = TRUE` is the closest ' +
-          'of R’s engines; the two differ on lookbehind and named groups.',
-      ),
-    )
+    lines.push(...ctx.note(REGEX_FLAVOUR_NOTE))
   }
 
   // A clause the canvas was ignoring is one this document must ignore too — and say so, or the

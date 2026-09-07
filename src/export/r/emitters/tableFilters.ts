@@ -25,6 +25,18 @@ import { rNum, rStr } from '../r'
 import { R_COMPARISON } from './table'
 
 /**
+ * What to say when a chunk compiles one of Coda's regexes, said once.
+ *
+ * Beside `filterPredicates` because it is a fact about the predicate that function emits —
+ * `grepl(..., perl = TRUE)` — rather than about any one node, and two emitters were carrying it
+ * byte-identically. Not every regex note in this tree collapses into it: the edit-plan chunk
+ * deliberately says something narrower about the rules it writes, and says so where it does.
+ */
+export const REGEX_FLAVOUR_NOTE =
+  'Coda matches these regexes with JavaScript semantics. `perl = TRUE` is the closest of R’s ' +
+  'engines; the two differ on lookbehind and named groups.'
+
+/**
  * A column reference inside `dplyr::filter`.
  *
  * `.data[["x"]]` rather than a bare name, because a Coda column can be called anything an

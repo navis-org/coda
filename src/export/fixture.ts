@@ -409,6 +409,24 @@ export function everythingGraph(): CodaGraph {
       col: 4,
       params: { column: 'weight', descending: true, limit: 500 },
     },
+    /*
+     * Fed by `skel` below, since this node splits a *collection* rather than a table. Two rows
+     * rather than one, and one of them a regex: the R chunk joins its predicates with `&`, which
+     * a single-row node would leave untested, and the fields are morphology attributes because
+     * that is what a collection carries.
+     */
+    {
+      id: 'split',
+      type: 'neuron.splitNeurons',
+      col: 3,
+      row: 5,
+      params: {
+        filters: encodeRows([
+          { field: 'type', op: 'matches', values: ['LC4.*'] },
+          { field: 'cableLength', op: 'ge', values: ['100000'] },
+        ]),
+      },
+    },
     {
       id: 'sample',
       type: 'core.sample',
@@ -1302,6 +1320,7 @@ export function everythingGraph(): CodaGraph {
     ['sample', 'out', 'dedupe', 'in'],
     ['dedupe', 'out', 'group', 'in'],
     ['sort', 'out', 'pick', 'in'],
+    ['skel', 'skeletons', 'split', 'in'],
     ['skel', 'skeletons', 'pickSkel', 'in'],
     ['skel', 'skeletons', 'mirror', 'in'],
     ['skel', 'skeletons', 'xform', 'in'],

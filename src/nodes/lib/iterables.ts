@@ -84,7 +84,7 @@ export function elementCount(v: IterableValue): number {
  * whoever now occupies that position. Emptiness is a state every downstream node already
  * handles; a different neuron wearing the same index is not.
  */
-export function emptyElement(v: IterableValue): IterableValue {
+export function emptyElement<V extends IterableValue>(v: V): V {
   return sliceElements(v, [])
 }
 
@@ -96,7 +96,7 @@ export function emptyElement(v: IterableValue): IterableValue {
  * than clamping: clamping answers a question nobody asked, with nothing on screen to say the
  * answer moved.
  */
-export function elementAt(v: IterableValue, index: number): IterableValue {
+export function elementAt<V extends IterableValue>(v: V, index: number): V {
   return elementsFrom(v, index, 1)
 }
 
@@ -113,7 +113,7 @@ export function elementAt(v: IterableValue, index: number): IterableValue {
  * is twelve, not twenty with eight empties, and nothing downstream should have to tell the
  * difference between a short batch and a full one.
  */
-export function elementsFrom(v: IterableValue, start: number, size: number): IterableValue {
+export function elementsFrom<V extends IterableValue>(v: V, start: number, size: number): V {
   const total = elementCount(v)
   const from = Math.max(0, Math.floor(start))
   const to = Math.min(total, from + Math.max(0, Math.floor(size)))
@@ -211,12 +211,67 @@ export function groupKeys(v: IterableValue, column: string): string[] {
  * different type's neurons under the same name is the silent wrong answer `Select One`'s own
  * out-of-range note argues against.
  */
-export function groupOf(v: IterableValue, column: string, key: string): IterableValue {
+export function groupOf<V extends IterableValue>(v: V, column: string, key: string): V {
   return sliceElements(v, groupIndex(v, column).get(key) ?? [])
 }
 
-function sliceElements(v: IterableValue, indices: number[]): IterableValue {
-  if (isTableValue(v)) return selectRows(v, indices)
+/**
+ * The collection holding just these elements, in the order given.
+ *
+ * Private, and everything above is a named question that goes through it: one element, a run of
+ * them, a group, or a partition. Everything subtle about a subset of geometry is decided here —
+ * the attribute table is sliced by the same indices (which is only sound because
+ * `SkeletonsValue` documents one row per item in the same order), `bounds` are recomputed rather
+ * than carried, and `units`/`space`/`provenance`/`detail` *are* carried, each for a reason
+ * written beside it below.
+ *
+ * Generic in the value, which is the family's promise stated in the type: one skeleton out of a
+ * collection of skeletons is skeletons. TypeScript cannot correlate a `kind` branch with a type
+ * parameter, so the three returns carry a cast; they are confined to this function, and no
+ * caller can instantiate `V` in a way the branches falsify.
+ */
+/**
+ * Both halves of a predicate over a collection's elements: the ones it keeps, and the rest.
+ *
+ * `groupOf` widened from one group to two, and it belongs here for that reason — the question is
+ * asked of the element's *row* (`keyTable` above, the attribute table for geometry) and answered
+ * in elements, which is this file's whole subject. `Split Neurons` supplies the predicate;
+ * `nodes/lib/splitRows.ts` is where the filter rows that build it live.
+ *
+ * **It is a partition.** Every element lands in exactly one half and the two counts sum to the
+ * input's, which is the property a caller cannot get by running a one-sided selection twice with
+ * opposite conditions: the negation of an ANDed set of conditions is not one of them, so the
+ * complement is computed here rather than asked for again.
+ *
+ * **A whole side is handed back by identity**, which is `filterTableByClauses`' rule and for its
+ * reason — columns and geometry buffers are immutable by contract, so an unsplit collection *is*
+ * the same collection. That matters most for the caller this was written for: `Split Neurons` is
+ * `cheap`, so a value being typed re-partitions per keystroke and every intermediate string
+ * (`L`, `LC`, `LC4`) matches nothing on the way. Those passes allocate one empty collection and
+ * nothing else — no index array for the side that takes everything, since `matched` is ascending
+ * and the complement is a merge rather than a lookup.
+ */
+export function partitionElements<V extends IterableValue>(
+  v: V,
+  keep: (index: number) => boolean,
+): { matched: V; rest: V } {
+  const total = elementCount(v)
+  const matched: number[] = []
+  for (let i = 0; i < total; i++) if (keep(i)) matched.push(i)
+  if (matched.length === 0) return { matched: sliceElements(v, []), rest: v }
+  if (matched.length === total) return { matched: v, rest: sliceElements(v, []) }
+
+  const rest: number[] = []
+  let next = 0
+  for (let i = 0; i < total; i++) {
+    if (matched[next] === i) next++
+    else rest.push(i)
+  }
+  return { matched: sliceElements(v, matched), rest: sliceElements(v, rest) }
+}
+
+function sliceElements<V extends IterableValue>(v: V, indices: number[]): V {
+  if (isTableValue(v)) return selectRows(v, indices) as V
 
   // The attribute table is one row per item *in the same order* (see `SkeletonsValue`), so the
   // same indices address both halves. That contract is the only reason this is one function.
@@ -237,7 +292,7 @@ function sliceElements(v: IterableValue, indices: number[]): IterableValue {
       ...(v.units ? { units: v.units } : {}),
       ...(v.space ? { space: v.space } : {}),
       ...(v.provenance ? { provenance: v.provenance } : {}),
-    }
+    } as V
   }
 
   const items = indices.map((i) => v.items[i]!)
@@ -252,7 +307,7 @@ function sliceElements(v: IterableValue, indices: number[]): IterableValue {
     ...(v.detail ? { detail: v.detail } : {}),
     ...(v.units ? { units: v.units } : {}),
     ...(v.space ? { space: v.space } : {}),
-  }
+  } as V
 }
 
 /**

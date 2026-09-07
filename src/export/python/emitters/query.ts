@@ -23,11 +23,8 @@ import type { TableSchema } from '../../../core/types'
 import { columnNames } from '../../../core/types'
 import type { FieldTerm } from '../../../data/terms'
 import { resolveRows } from '../../../data/filterRows'
-import {
-  asksNothing,
-  noFiltersReason,
-  rowsFromParams,
-} from '../../../nodes/lib/findNeuronsRows'
+import { asksNothing, noFiltersReason } from '../../../nodes/lib/findNeuronsRows'
+import { rowsFromParams } from '../../../nodes/lib/filterRowParams'
 import { schemasFromType } from '../../../nodes/lib/datasetParam'
 import { filterMasks } from './tableFilters'
 import type { EmitContext } from '../types'
