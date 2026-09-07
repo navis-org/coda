@@ -1700,9 +1700,11 @@ half decide it the same way.
 the source column mean two things: a stack refuses to add a column an input already has, so the
 levels could not share a name, and only the *outermost* one partitioned the whole result. One card
 labels every input once. Both halves of the migration are carried deliberately, because both fail
-quietly — `PortGroupDef.formerIds` rewrites a stored `top`/`bottom` handle onto `in1`/`in2`, so a
-share link keeps its wires, and the first two label params keep their ids and record their old
-defaults in `absentMeans`, so a saved graph's source column holds the same values it did before.
+quietly, and both are **declared rather than spelled**: `PortGroupDef.formerIds` rewrites a stored
+`top`/`bottom` handle onto `in1`/`in2`, so a share link keeps its wires, and `ParamBase.formerId`
+moves a stored `topLabel` onto `label1` — an undeclared param is *ignored* by `normalizeParams`,
+not migrated, so a label somebody typed would otherwise revert with nothing said. The old defaults
+ride along in `absentMeans`, so a saved graph's source column holds the values it always did.
 See [stackParams.ts](../src/nodes/lib/stackParams.ts).
 
 **The source column is off by default and refused on a collision.** Empty adds none; a name adds a

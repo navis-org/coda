@@ -111,21 +111,25 @@ Cross-cutting — these bite in code that is not obviously "about" the area:
   which for a count is almost never true. `ctx.warn` is the channel; `CRASH_FLOOR_BYTES` is
   the only thing left that refuses, and only for an allocation. Time is never a refusal.
   See [docs/limits.md](docs/limits.md).
-- **A port id has a history, and a node that grows a repeat where it had a fixed pair needs it.**
+- **An id has a history, and both halves of a node's saved state need to say so the same way.**
   `Stack Tables` and `Stack Neurons` went from `top`/`bottom` to `in1 … inN` on an `Inputs`
-  spinner. Every stored edge into either socket then names a port the node no longer has, and
-  `deserializeGraph` drops such an edge with a warning — on share links and `.coda.json` files
-  nobody can re-save. So `PortGroupDef.formerIds` is positional (`['top','bottom']`), rides on the
-  resolved port, and is read by `healHandle` **only after every live id has missed**, so a former
-  id cannot shadow one that is live today. `registerNode` refuses it on a group repeating a
-  *tuple*, where a position names two ports and the migration would silently cover half the pair.
-  The **params** need the same care and get it a different way: the first two label ids are kept
-  as they were (`nodes/lib/stackParams.ts`), because `normalizeParams` reads only declared params
-  so a renamed one is ignored rather than migrated — and the new uniform defaults are declared
-  with the old ones in `absentMeans`, absence and the default being different answers about a
-  column of *data*. Not a load-time migration: `storedParams` records why that is the wrong tool,
-  and an edge is worse than a param there, the wizard and thirty tests building edges by hand.
-  See [docs/nodes.md](docs/nodes.md).
+  spinner, and from `topLabel`/`bottomLabel` to `label{n}`. Both renames lose stored state in
+  silence: an edge naming a port the node no longer has is dropped with a warning
+  (`deserializeGraph`), and a param the definition no longer declares is *ignored* by
+  `normalizeParams` — so a label somebody typed reverts to a default with nothing said at all.
+  Hence **two declarations, one shape**: `PortGroupDef.formerIds` (positional, since a group mints
+  its ids) and `ParamBase.formerId` (singular, since a param declares its own), both read at load
+  and both **only after the live id has missed**, so a former id cannot shadow one that is live
+  today. The param half also carries `absentMeans`, absence and the new default being different
+  answers about a column of *data*. `registerNode` refuses `formerIds` on a group repeating a
+  *tuple* (a position names two ports there, so the migration would silently cover half the pair)
+  and refuses a `formerId` that collides with a live param or is claimed twice — both would move a
+  value with the winner picked by declaration order. Deliberately **not** a per-type migration
+  table in the loader: `storedParams` records why that is the wrong tool, and it would put node
+  facts in `deserializeGraph` where the registry holds every other one. The first shape here kept
+  the historical param ids by hand instead, and it cost an exported id scheme that both node
+  files, both emitters and the wizard had to import — a hole in `repeatParams`' scheme that no
+  second rename could have reused. See [docs/nodes.md](docs/nodes.md).
 - **A param added to an existing node type has three states, and a card can only draw two.**
   `defaultParams` writes a default at *creation* and never runs over `deserializeGraph`, so a
   stored node without the key was written by a build that had no such control — not the same as

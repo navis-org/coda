@@ -180,12 +180,9 @@ describe('core.stack — evaluate', () => {
 
   it('labels the rows by input when a source column is named', async () => {
     const scheduler = makeScheduler()
-    await scheduler.run(
-      pipeline({ sourceColumn: 'origin', topLabel: 'LC4', bottomLabel: 'LC6' }),
-      {
-        mode: 'full',
-      },
-    )
+    await scheduler.run(pipeline({ sourceColumn: 'origin', label1: 'LC4', label2: 'LC6' }), {
+      mode: 'full',
+    })
     const out = scheduler.output('stack', 'out')
     if (!isTableValue(out)) throw new Error('expected a table')
     expect(new Set(out.data['origin'] as string[])).toEqual(new Set(['LC4', 'LC6']))
@@ -267,7 +264,7 @@ describe('core.stack — evaluate', () => {
     const message = scheduler.info('stack').error ?? ''
     // Both readings, because the fix depends on which one is wrong.
     expect(message).toContain('weight')
-    expect(message).toContain('i64 on input 1 and str on input 2')
+    expect(message).toContain('i64 on Input 1 and str on Input 2')
     // And it says what to do about it rather than only what happened.
     expect(message).toMatch(/convert it upstream|Select/)
     expect(scheduler.info('sort').state).toBe('blocked')
@@ -308,7 +305,7 @@ describe('core.stack — evaluate', () => {
       targetHandle: 'in2',
     })
     const reported = (inferGraph(g).nodes['stack']?.issues ?? []).map((i) => i.message)
-    expect(reported.join(' ')).not.toContain('on input 1 and')
+    expect(reported.join(' ')).not.toContain('on Input 1 and')
   })
 })
 
@@ -399,7 +396,7 @@ describe('core.stack — the label params', () => {
      * edits would still re-run everything downstream.
      */
     const all = hidden({ ...defaultParams(def()), sourceColumn: '', inputCount: 8 })
-    expect(all).toContain('topLabel')
+    expect(all).toContain('label1')
     expect(all).toContain('label8')
     // And with a column named at full arity, none of them is hidden.
     expect(hidden({ ...defaultParams(def()), sourceColumn: 'origin', inputCount: 8 })).toEqual(
@@ -431,13 +428,29 @@ describe('core.stack — a graph saved before it was variadic', () => {
     expect(graph.edges.map((e) => e.targetHandle)).toEqual(['in1', 'in2'])
   })
 
-  it('keeps a label somebody typed, the first two ids never having moved', () => {
+  it('moves a label somebody typed onto the id that replaced it, and consumes the old key', () => {
+    /*
+     * `ParamBase.formerId`. Without it `normalizeParams` simply ignores the undeclared
+     * `topLabel` — not a migration failure anybody sees, just a name silently reverting to a
+     * default. The old key is *removed* rather than left beside the new one, or every re-save
+     * carries a fossil that outlives the last reader of it.
+     */
     const { graph } = deserializeGraph(
       storedPair({ sourceColumn: 'origin', topLabel: 'MaleCNS', bottomLabel: 'FlyWire' }),
     )
     const stack = graph.nodes.find((n) => n.id === 'stack')!
-    expect(stack.params.topLabel).toBe('MaleCNS')
-    expect(stack.params.bottomLabel).toBe('FlyWire')
+    expect(stack.params.label1).toBe('MaleCNS')
+    expect(stack.params.label2).toBe('FlyWire')
+    expect('topLabel' in stack.params).toBe(false)
+  })
+
+  it('lets a value already under the new id win', () => {
+    // A document written by *this* build has nothing to migrate, and a stale `topLabel` left in
+    // a hand-edited file must not overwrite it.
+    const { graph } = deserializeGraph(
+      storedPair({ sourceColumn: 'origin', topLabel: 'stale', label1: 'current' }),
+    )
+    expect(graph.nodes.find((n) => n.id === 'stack')!.params.label1).toBe('current')
   })
 
   it('keeps the labels an untouched stack was emitting, rather than the new defaults', () => {
@@ -448,12 +461,12 @@ describe('core.stack — a graph saved before it was variadic', () => {
      */
     const { graph } = deserializeGraph(storedPair({ sourceColumn: 'origin' }))
     const stack = graph.nodes.find((n) => n.id === 'stack')!
-    expect(stack.params.topLabel).toBe('Top')
-    expect(stack.params.bottomLabel).toBe('Bottom')
+    expect(stack.params.label1).toBe('Top')
+    expect(stack.params.label2).toBe('Bottom')
 
     // And a *fresh* node gets the uniform scheme, which is what makes it a migration rather
     // than a second vocabulary living on.
-    expect(defaultParams(requireNodeDef('core.stack')).topLabel).toBe('Input 1')
+    expect(defaultParams(requireNodeDef('core.stack')).label1).toBe('Input 1')
   })
 
   it('opens at two inputs, the count being absent', () => {

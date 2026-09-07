@@ -16,5 +16,5 @@ two inputs.
 See also [Join](#core.join) — the horizontal counterpart, adding columns instead of rows.
 
 ```coda-params
-core.stack: inputCount, sourceColumn, topLabel, bottomLabel
+core.stack: inputCount, sourceColumn, label1, label2
 ```

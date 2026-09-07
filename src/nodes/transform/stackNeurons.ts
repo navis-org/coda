@@ -42,12 +42,18 @@
 
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
-import { stackSchema } from '../lib/tableOps'
-import { readStackOptions, stackCountParam, stackLabelParams } from '../lib/stackParams'
+import { STACK_PORT_LABEL, stackSchema } from '../lib/tableOps'
+import {
+  readStackOptions,
+  stackCountParam,
+  stackLabelParams,
+  stackSourceColumn,
+} from '../lib/stackParams'
 import {
   geometryNoun,
   isGeometryKind,
   isGeometryValue,
+  kindClashMessage,
   stackGeometry,
   schemaOfGeometry,
 } from '../lib/transformOps'
@@ -71,7 +77,7 @@ export const stackNeuronsNode = registerNode({
   inputs: [
     {
       repeat: stackCountParam.id,
-      ports: [{ id: 'in', label: 'Input {n}', type: T.any() }],
+      ports: [{ id: 'in', label: STACK_PORT_LABEL, type: T.any() }],
       // What indices 1 and 2 were called when this node had a fixed pair.
       formerIds: ['top', 'bottom'],
     },
@@ -110,10 +116,11 @@ export const stackNeuronsNode = registerNode({
     if (!first || types.some((type) => !type || type.kind !== first.kind))
       return { out: T.any() }
 
-    const schema = stackSchema(
-      types.map(schemaOfGeometry),
-      readStackOptions(ctx.params, ports.length),
-    )
+    // The source column alone, not `readStackOptions`: a label never reaches a *schema*, and
+    // this runs on every graph mutation — see that function on what the labels array costs here.
+    const schema = stackSchema(types.map(schemaOfGeometry), {
+      sourceColumn: stackSourceColumn(ctx.params),
+    })
     if (first.kind === 'skeletons') return { out: T.skeletons(schema) }
     if (first.kind === 'meshes') return { out: T.meshes(schema) }
     if (first.kind === 'points') return { out: T.points(schema) }
@@ -121,16 +128,23 @@ export const stackNeuronsNode = registerNode({
   },
 
   validate: (ctx) => {
-    const ports = ctx.inputPorts()
     const issues: string[] = []
-
-    for (const port of ports) {
-      const type = ctx.inputs[port.id]
-      if (type && !isGeometryKind(type.kind)) {
+    /*
+     * One pass, holding both facts each check needs: whether the socket carries geometry at all,
+     * and what kind it states. `any` states nothing — an unresolved socket is the ordinary state
+     * before anything upstream has run, so it neither answers nor accuses.
+     */
+    const stated: { name: string; noun: string }[] = []
+    for (const port of ctx.inputPorts()) {
+      const kind = ctx.inputs[port.id]?.kind
+      if (kind === undefined) continue
+      if (!isGeometryKind(kind)) {
         issues.push(
           `${port.label} is not geometry — Stack Neurons takes skeletons, meshes or points.`,
         )
+        continue
       }
+      if (kind !== 'any') stated.push({ name: port.label ?? port.id, noun: kind })
     }
 
     /*
@@ -140,20 +154,14 @@ export const stackNeuronsNode = registerNode({
      * value-level facts a type cannot carry, so those wait for `evaluate`.
      *
      * Against the *first stated* kind rather than pairwise, which is `checkStackable`'s rule and
-     * for its reason: a clash at input 4 names the input that has to change, not the one next
-     * to it. `any` states nothing, so an unresolved socket neither answers nor accuses.
+     * for its reason: a clash at input 4 names the input that has to change, not the one next to
+     * it. The sentence is `kindClashMessage`, shared with that check — two layers report this and
+     * a reader who meets both must be able to tell they are one complaint.
      */
-    const stated = ports
-      .map((port) => ({ port, kind: ctx.inputs[port.id]?.kind }))
-      .filter((entry) => entry.kind && entry.kind !== 'any' && isGeometryKind(entry.kind))
-    const first = stated[0]
-    for (const entry of stated) {
-      if (first && entry.kind !== first.kind) {
-        issues.push(
-          `${first.port.label} is ${first.kind} and ${entry.port.label} is ${entry.kind}. ` +
-            'Different kinds of geometry cannot share one collection — the 3D View takes them ' +
-            'on separate ports.',
-        )
+    const [first, ...rest] = stated
+    if (first) {
+      for (const entry of rest) {
+        if (entry.noun !== first.noun) issues.push(kindClashMessage(first, entry))
       }
     }
     return issues

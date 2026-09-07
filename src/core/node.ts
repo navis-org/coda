@@ -288,6 +288,25 @@ interface ParamBase {
    * Only meaningful on a stored document. A node built by `addNode` always has the key.
    */
   absentMeans?: ParamValue
+  /**
+   * The id this param used to have, whose stored value it inherits on load.
+   *
+   * `PortGroupDef.formerIds` for the other half of a node's saved state, and the argument is the
+   * same one: `normalizeParams` reads only *declared* params, so renaming an id does not migrate
+   * a stored value, it **ignores** it — silently, and the value is whatever somebody typed. Both
+   * Stack nodes went from a fixed `topLabel`/`bottomLabel` pair to a repeated `label{n}`, and
+   * those labels are a column of data rather than a preference.
+   *
+   * Read by `storedParams` at load, **before** `absentMeans`, and the old key is consumed rather
+   * than left beside the new one — a rename moves a value, so a document that keeps both would
+   * grow a fossil that outlives every reader of it. A stored value under the *new* id always
+   * wins: a document written by this build has nothing to migrate.
+   *
+   * Like `absentMeans`, only meaningful on a stored document — `addNode` and `defaultParams`
+   * never come through the loader, which is why this is a declaration rather than a migration
+   * pass (see `storedParams`).
+   */
+  formerId?: string
 }
 
 /**

@@ -35,7 +35,7 @@ import { isMatrixValue, isTableValue } from '../core/values'
 import { registerBuiltinSources } from '../data/builtins'
 import { requireSource } from '../data/source'
 import { DATASET_FAMILIES, datasetFamily, starterFamilies } from '../nodes/lib/datasetFamilies'
-import { stackLabelParamId } from '../nodes/lib/stackParams'
+import { STACK_MAX_INPUTS, stackLabelParamId } from '../nodes/lib/stackParams'
 import type { BuildOptions } from './build'
 import { CROSS_SETS, GROWING_CROSS_SETS } from '../test/crossSets'
 import { parseMarkdown } from '../ui/markdown'
@@ -1209,6 +1209,17 @@ describe('the cross-dataset path', () => {
    * exists in either input, so a chain naming them all alike builds a graph that refuses on Run —
    * a failure no amount of inference can see.
    */
+  it('never asks a stack for more inputs than it has sockets', () => {
+    /*
+     * Both ceilings are derived — `maxWizardDatasets()` off the two comparison nodes, the stack's
+     * off its own param — and nothing else makes them agree. Raise a comparison node past the
+     * stack and `buildWorkflow` emits an `inputCount` that `countIn` clamps, so the last datasets
+     * a reader ticked reach no socket and the graph stacks the wrong set with nothing on screen
+     * to say so.
+     */
+    expect(maxWizardDatasets()).toBeLessThanOrEqual(STACK_MAX_INPUTS)
+  })
+
   it('folds every dataset onto one stack, with one source column', () => {
     /*
      * One card at every arity, which is what the `Inputs` spinner bought. The chain it replaced

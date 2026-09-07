@@ -307,7 +307,7 @@ describe('refusing a plan', () => {
     // nothing and would be reported as applied — silent success, which is the outcome this
     // module is arranged to avoid.
     expect(
-      refusal({ add: [{ ref: 's', type: 'core.stack', params: { topLabel: 'Left' } }] }),
+      refusal({ add: [{ ref: 's', type: 'core.stack', params: { label1: 'Left' } }] }),
     ).toContain('does not apply')
   })
 
@@ -322,13 +322,13 @@ describe('refusing a plan', () => {
             {
               ref: 's',
               type: 'core.stack',
-              params: { topLabel: 'Left', sourceColumn: 'origin' },
+              params: { label1: 'Left', sourceColumn: 'origin' },
             },
           ],
         }),
       ),
     )
-    expect(nodeFor(result, 's').params.topLabel).toBe('Left')
+    expect(nodeFor(result, 's').params.label1).toBe('Left')
   })
 
   it('refuses to set an internal param', () => {

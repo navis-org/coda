@@ -1,8 +1,20 @@
 import { registerNode } from '../../core/registry'
 import { T, isTabular, schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
-import { describeConflict, stackColumns, stackSchema, stackTables } from '../lib/tableOps'
-import { readStackOptions, stackCountParam, stackLabelParams } from '../lib/stackParams'
+import {
+  STACK_PORT_LABEL,
+  describeConflict,
+  isKnownSchema,
+  stackColumns,
+  stackSchema,
+  stackTables,
+} from '../lib/tableOps'
+import {
+  readStackOptions,
+  stackCountParam,
+  stackLabelParams,
+  stackSourceColumn,
+} from '../lib/stackParams'
 
 /**
  * Two tables end to end — the vertical counterpart of `Join`.
@@ -48,7 +60,7 @@ export const stackNode = registerNode({
   inputs: [
     {
       repeat: stackCountParam.id,
-      ports: [{ id: 'in', label: 'Input {n}', type: T.table() }],
+      ports: [{ id: 'in', label: STACK_PORT_LABEL, type: T.table() }],
       // What indices 1 and 2 were called when this node had a fixed pair.
       formerIds: ['top', 'bottom'],
     },
@@ -80,9 +92,11 @@ export const stackNode = registerNode({
    */
   inferOutputs: (ctx) => {
     const ports = ctx.inputPorts()
+    // The source column alone, not `readStackOptions`: a label never reaches a *schema*, and
+    // this runs on every graph mutation — see that function on what the labels array costs here.
     const schema = stackSchema(
       ports.map((port) => ctx.schema(port.id)),
-      readStackOptions(ctx.params, ports.length),
+      { sourceColumn: stackSourceColumn(ctx.params) },
     )
     if (!schema) return { out: T.table() }
     // Neurons only when every input is — a `neurons` kind is a claim about the ids, and a plain
@@ -101,7 +115,7 @@ export const stackNode = registerNode({
     const types = ports.map((port) => ctx.inputs[port.id])
     const schemas = types.map(schemaOf)
 
-    const source = String(ctx.params.sourceColumn ?? '').trim()
+    const source = stackSourceColumn(ctx.params)
     if (source) {
       // Checked against each schema that is *known*: an unknown one is not a schema without the
       // column in it, and warning there would fire on every graph downstream of a Pivot.
@@ -116,11 +130,8 @@ export const stackNode = registerNode({
      * down rather than reporting a clash between the inputs that happen to have arrived — which
      * would name a pair that is not the pair the run will refuse on.
      */
-    if (types.every(isTabular) && schemas.every((schema) => schema)) {
-      for (const clash of stackColumns(schemas as NonNullable<(typeof schemas)[number]>[])
-        .conflicts) {
-        issues.push(describeConflict(clash))
-      }
+    if (types.every(isTabular) && schemas.every(isKnownSchema)) {
+      for (const clash of stackColumns(schemas).conflicts) issues.push(describeConflict(clash))
     }
     return issues
   },

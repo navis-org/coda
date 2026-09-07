@@ -8,15 +8,15 @@
  * fills in an absent one said `Top`/`Bottom`, so which name a row ended up carrying depended on
  * whether the param had ever been written.
  *
- * ## The first two ids are historical, and that is the point
+ * ## The rename is declared, not spelled
  *
- * Both nodes had a fixed pair of label params called `topLabel` and `bottomLabel`. Suffixing
- * every index uniformly would have given `label1 … labelN` and quietly dropped a name somebody
- * typed: `normalizeParams` reads only declared params, so an undeclared `topLabel` is not
- * migrated, it is ignored. So index 1 and 2 keep the ids they have always had and only index 3
- * upwards is suffixed. The ids are not user-visible; the labels are, and those are uniform.
- *
- * `PortGroupDef.formerIds` is the same argument one layer over, for the *ports*.
+ * Both nodes had a fixed pair of label params called `topLabel` and `bottomLabel`, and the ids
+ * are `label{n}` now like every other repeated param. Nothing here suffixes them by hand:
+ * `repeatParams` supplies the id and `ParamBase.formerId` carries the stored value across, which
+ * is `PortGroupDef.formerIds` for the *ports* one layer over. Written as a private id scheme
+ * instead — `topLabel` kept at index 1 and `label3` upwards — this module would have had to
+ * export it and both node files, both emitters and the wizard would have had to import it, for a
+ * hole in `repeatParams`' scheme that no future rename could reuse.
  *
  * ## The defaults moved, so the old ones are `absentMeans`
  *
@@ -33,8 +33,8 @@
 
 import type { NumberParam, ParamDef, ParamValues } from '../../core/node'
 import type { StackOptions } from './tableOps'
-import { stackLabelAt } from './tableOps'
-import { repeatParams } from './repeatParams'
+import { stackInputName } from './tableOps'
+import { repeatParamId, repeatParams } from './repeatParams'
 
 /**
  * How many inputs one stack may take.
@@ -44,7 +44,9 @@ import { repeatParams } from './repeatParams'
  * here gets expensive, and the limit is how many sockets fit on a node somebody has to wire. The
  * wizard never asks for more than `maxWizardDatasets()` (four, read off the comparison nodes),
  * so this is deliberately above that rather than equal to it — a hand-built graph combining six
- * datasets is a reasonable thing to want and needs no permission from the wizard.
+ * datasets is a reasonable thing to want and needs no permission from the wizard. That ordering
+ * is asserted in `wizard.test.ts`: derived as it is, raising a comparison node past this would
+ * have `buildWorkflow` emit an `inputCount` the stack clamps, dropping datasets in silence.
  */
 export const STACK_MAX_INPUTS = 8
 
@@ -67,23 +69,24 @@ export const stackCountParam = {
   max: STACK_MAX_INPUTS,
 } as const satisfies NumberParam
 
+/** The label param at one index. `repeatParams`' scheme, with no exceptions in it. */
+export function stackLabelParamId(index: number): string {
+  return repeatParamId('label', index)
+}
+
 /**
- * The label param ids the first indices keep — see the header.
+ * The ids the first two labels answered to before the pair became a repeat.
  *
- * Length 2 because that is how many sockets both nodes had before they were variadic; it is a
- * record of history, not a scheme, and nothing should be appended to it.
+ * Length 2 because that is how many sockets both nodes had; it is a record of history, not a
+ * scheme, and nothing should be appended to it. `registerNode` refuses a `formerId` that collides
+ * with a live param id, so this cannot quietly start shadowing something.
  */
 const FORMER_LABEL_IDS = ['topLabel', 'bottomLabel'] as const
-
-/** The label param at one index: `topLabel`, `bottomLabel`, `label3`, `label4` … */
-export function stackLabelParamId(index: number): string {
-  return FORMER_LABEL_IDS[index - 1] ?? `label${index}`
-}
 
 /**
  * The per-input label params, hidden past the arity **and** while nothing names a column.
  *
- * `repeatParams` supplies the id suffix and the arity `visibleIf`; the source-column condition is
+ * `repeatParams` supplies the id and the arity `visibleIf`; the source-column condition is
  * returned by the builder and ANDed onto it there. Both halves matter to invariant 4: a label for
  * an input that is not connected, or for a stack that is not labelling anything, is a control
  * nobody can see whose edits would still restale every node downstream.
@@ -95,16 +98,18 @@ export function stackLabelParams(formerDefaults: readonly [string, string]): Par
   return repeatParams({
     count: stackCountParam,
     build: (slot) => {
-      const former = formerDefaults[slot.index - 1]
+      const formerId = FORMER_LABEL_IDS[slot.index - 1]
+      const formerDefault = formerDefaults[slot.index - 1]
       return [
         {
-          id: stackLabelParamId(slot.index),
+          id: slot.id('label'),
           kind: 'string',
-          label: `Input ${slot.index} label`,
-          default: stackLabelAt(undefined, slot.index),
+          label: `${stackInputName(slot.index)} label`,
+          default: stackInputName(slot.index),
           advanced: true,
-          ...(former !== undefined ? { absentMeans: former } : {}),
-          visibleIf: (params: ParamValues) => String(params.sourceColumn ?? '').trim() !== '',
+          ...(formerId !== undefined ? { formerId } : {}),
+          ...(formerDefault !== undefined ? { absentMeans: formerDefault } : {}),
+          visibleIf: (params: ParamValues) => stackSourceColumn(params) !== '',
         },
       ]
     },
@@ -112,21 +117,34 @@ export function stackLabelParams(formerDefaults: readonly [string, string]): Par
 }
 
 /**
- * One reader for the schema half and the value half, so they cannot disagree about a name.
+ * The trimmed source column, which is what decides whether one is added at all.
+ *
+ * Here rather than at each of the six call sites for that reason: `'  '` is not a column name,
+ * and a reader that skipped the trim would add one anyway.
+ */
+export function stackSourceColumn(params: ParamValues): string {
+  return String(params.sourceColumn ?? '').trim()
+}
+
+/**
+ * The labels, in socket order — read by `evaluate` and the two emitters, and by nothing on the
+ * inference path.
+ *
+ * Split from `stackSourceColumn` deliberately: `inferOutputs` and `validate` need only the column
+ * name, `stackColumns` never looks at a label, and this allocates an array per call on the pass
+ * that runs on **every graph mutation**. Measured at 196 ns of a 976 ns `inferOutputs`, entirely
+ * discarded. So the schema half asks for what it reads and the value half asks for the rest.
  *
  * `count` comes from `ctx.inputPorts().length` rather than from the param, so the labels are as
- * long as the sockets actually are — `countIn` has already clamped a stored count that was
- * written by a build with a different range, and reading the raw param here would undo that.
+ * long as the sockets actually are — `countIn` has already clamped a stored count written by a
+ * build with a different range, and reading the raw param here would undo that.
  *
- * The trim on the source column is the part that decides whether a column is added at all, which
- * is why it is here rather than at each of the four call sites.
+ * Values are passed through verbatim, blanks included: `stackLabelAt` owns what an unnamed input
+ * is called, and defaulting here as well would put that rule in two layers with only one of them
+ * able to see a *cleared* field.
  */
 export function readStackOptions(params: ParamValues, count: number): StackOptions {
-  return {
-    sourceColumn: String(params.sourceColumn ?? '').trim(),
-    labels: Array.from({ length: count }, (_, i) => {
-      const stored = params[stackLabelParamId(i + 1)]
-      return stored === undefined ? stackLabelAt(undefined, i + 1) : String(stored)
-    }),
-  }
+  const labels = new Array<string>(count)
+  for (let i = 0; i < count; i++) labels[i] = String(params[stackLabelParamId(i + 1)] ?? '')
+  return { sourceColumn: stackSourceColumn(params), labels }
 }

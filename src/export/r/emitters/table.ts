@@ -28,6 +28,7 @@ import { unpivotPlan } from '../../../nodes/lib/tableOps'
 import type { StackOptions } from '../../../nodes/lib/tableOps'
 import { stackLabelAt } from '../../../nodes/lib/tableOps'
 import { readStackOptions } from '../../../nodes/lib/stackParams'
+import type { ResolvedPort } from '../../../core/node'
 import { inputPorts } from '../../../core/ports'
 import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
@@ -524,19 +525,25 @@ function stackFrames(ctx: EmitContext, frames: string[], options: StackOptions):
 }
 
 /**
- * The variable on each of a Stack node's inputs, in socket order.
+ * A Stack node's sockets and the variable on each, in order.
  *
  * Through `inputPorts` rather than a hand-built `in1 … inN`, so the exporter and the canvas read
  * one statement of both the id rule and the clamp on a stored arity — `portIdAt`'s reason, and
  * the one that bites here is a `.coda.json` written by a build whose max was higher.
+ *
+ * Returns the ports as well as the variables because `neuron.stack` needs the first port's *type*
+ * to pick its branch, and returning only the variables is what had it re-spell this body verbatim
+ * 250 lines down — a helper whose one documented job is stating a rule once, bypassed by the
+ * second of its two callers.
  */
-function stackInputs(ctx: EmitContext): string[] {
-  return inputPorts(ctx.def, ctx.node.params).map((port) => ctx.wired(port.id))
+function stackInputs(ctx: EmitContext): { ports: readonly ResolvedPort[]; vars: string[] } {
+  const ports = inputPorts(ctx.def, ctx.node.params)
+  return { ports, vars: ports.map((port) => ctx.wired(port.id)) }
 }
 
 registerEmitter('core.stack', (ctx) => {
-  const frames = stackInputs(ctx)
-  return stackFrames(ctx, frames, readStackOptions(ctx.params, frames.length))
+  const { vars } = stackInputs(ctx)
+  return stackFrames(ctx, vars, readStackOptions(ctx.params, vars.length))
 })
 
 // ---------------------------------------------------------------------------
@@ -792,8 +799,7 @@ registerEmitter('core.tableFromUrl', (ctx) => {
  * object — read off `inputType` rather than guessed, since the two emit unrelated cells.
  */
 registerEmitter('neuron.stack', (ctx) => {
-  const ports = inputPorts(ctx.def, ctx.node.params)
-  const vars = ports.map((port) => ctx.wired(port.id))
+  const { ports, vars } = stackInputs(ctx)
   const out = ctx.output('out')
   const options = readStackOptions(ctx.params, vars.length)
   const source = options.sourceColumn

@@ -30,6 +30,7 @@ export function registerNode<P extends ParamValues>(def: NodeDefinition<P>): Nod
     )
   }
   checkPortGroups(def as unknown as NodeDefinition)
+  checkFormerParamIds(def as unknown as NodeDefinition)
   definitions.set(def.type, def as unknown as NodeDefinition)
   referenceTypes = undefined
   loopTypes = undefined
@@ -138,6 +139,38 @@ function checkPortGroups(def: NodeDefinition): void {
       }
       seen.add(port.id)
     }
+  }
+}
+
+/**
+ * `ParamBase.formerId` checked at registration, for `checkPortGroups`' reason: both ways of
+ * getting it wrong fail silently *on somebody else's saved file*, which is the one place nobody
+ * is looking.
+ *
+ * A `formerId` that is also a live param id would have `storedParams` move a value out from under
+ * the param that legitimately owns it — and the loser depends on declaration order, so the same
+ * document loads differently after an unrelated reshuffle. Two params claiming one `formerId` is
+ * the same failure with the winner picked the same arbitrary way.
+ */
+function checkFormerParamIds(def: NodeDefinition): void {
+  const params = def.params ?? []
+  if (!params.some((param) => param.formerId !== undefined)) return
+  const live = new Set(params.map((param) => param.id))
+  const claimed = new Set<string>()
+  for (const param of params) {
+    const former = param.formerId
+    if (former === undefined) continue
+    if (live.has(former)) {
+      throw new Error(
+        `"${def.type}" param "${param.id}" claims \`formerId\` "${former}", which is a param it still declares. A rename moves a stored value, so this would take it from the param that owns it.`,
+      )
+    }
+    if (claimed.has(former)) {
+      throw new Error(
+        `"${def.type}" has two params claiming \`formerId\` "${former}"; only one can inherit the stored value, and which one would depend on declaration order.`,
+      )
+    }
+    claimed.add(former)
   }
 }
 

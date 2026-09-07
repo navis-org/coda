@@ -1022,7 +1022,7 @@ function droppedHandle(
 }
 
 /**
- * A stored node's params, with any `absentMeans` filled in.
+ * A stored node's params, with any rename followed and any `absentMeans` filled in.
  *
  * The one place "this document predates that control" is turned into a value. It is deliberately
  * **not** a general backfill of declared defaults: `findNeuronsRows.ts` records why a load-time
@@ -1036,12 +1036,23 @@ function droppedHandle(
  * renders an absent param as its default and would otherwise draw a control that disagrees with
  * the query beneath it. See `ParamBase.absentMeans`.
  *
+ * `formerId` is the other half and runs **first**, because the two answer the same question in
+ * order: a value stored under the old id is a value, so `absentMeans` must not have already
+ * decided this param was absent. It is the param-side twin of `PortGroupDef.formerIds`, and the
+ * pair is why neither half of a renamed node needs a migration table in here.
+ *
  * Lenient like everything else here: an unknown type has already been dropped by the time this
- * runs, and a param the definition no longer declares survives untouched.
+ * runs, and a param the definition no longer declares survives untouched — a *renamed* one being
+ * the exception, since a rename moves its value rather than leaving a second copy behind.
  */
 function storedParams(raw: unknown, type: string): ParamValues {
   const params = { ...((raw && typeof raw === 'object' ? raw : {}) as ParamValues) }
   for (const param of getNodeDef(type)?.params ?? []) {
+    // A value already under the new id wins: this document was written by a build that had it.
+    if (param.formerId !== undefined && !(param.id in params) && param.formerId in params) {
+      params[param.id] = params[param.formerId]!
+      delete params[param.formerId]
+    }
     if (param.absentMeans !== undefined && !(param.id in params)) {
       params[param.id] = param.absentMeans
     }

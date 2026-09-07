@@ -591,7 +591,7 @@ export function everythingGraph(): CodaGraph {
       id: 'stack',
       type: 'core.stack',
       col: 10,
-      params: { sourceColumn: 'origin', topLabel: 'Direct', bottomLabel: 'Indirect' },
+      params: { sourceColumn: 'origin', label1: 'Direct', label2: 'Indirect' },
     },
     {
       id: 'pivot',
@@ -758,7 +758,7 @@ export function everythingGraph(): CodaGraph {
       type: 'neuron.stack',
       col: 4,
       row: 11,
-      params: { sourceColumn: 'side', topLabel: 'Original', bottomLabel: 'Mirrored' },
+      params: { sourceColumn: 'side', label1: 'Original', label2: 'Mirrored' },
     },
 
     /*
@@ -816,8 +816,8 @@ export function everythingGraph(): CodaGraph {
       params: {
         inputCount: 3,
         sourceColumn: 'batch',
-        topLabel: 'Run 1',
-        bottomLabel: 'Run 2',
+        label1: 'Run 1',
+        label2: 'Run 2',
         label3: 'Run 3',
       },
     },

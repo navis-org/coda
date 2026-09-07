@@ -656,19 +656,21 @@ interface Band {
  * share one name: level 2 wrote `dataset`, level 3 wrote `dataset3`, and only the *outermost*
  * column partitioned the whole collection — the inner ones split the earlier datasets apart
  * again, and the 3D scene had to be pointed at whichever one happened to be last. One card
- * labels every input once, so there is one column and it means one thing at every arity.
+ * labels every input once, so there is one column and it means one thing at every arity. The
+ * type and the builder are named for what they produce now rather than for that history, which
+ * `docs/wizard.md` carries.
  *
  * `sourceColumn` absent adds none, which is what the table side wants: a co-clustering has
  * already been through `Qualify Ids`, so its rows carry their dataset *in the id* — which is the
  * whole of decision 1, and a second column saying the same thing would be a second key.
  */
-interface StackChain {
+interface StackedInputs {
   nodes: Placement[]
   links: Link[]
   /** What the fold produced: the stack's output, or the lone input where there was one. */
   out: [string, string]
-  /** How many columns it consumed, so the caller can place what comes after it. */
-  cols: number
+  /** The columns it consumed — 1, or 0 where one input needed no card. */
+  cols: 0 | 1
   /** The column that partitions the whole result, or undefined where none was added. */
   sourceColumn?: string
 }
@@ -700,7 +702,7 @@ const VECTOR_SIMILARITY = {
  */
 const VECTOR_CONNECTIVITY = { direction: 'both', minWeight: 3 } as const
 
-function stackChain(spec: {
+function oneStack(spec: {
   type: 'core.stack' | 'neuron.stack'
   /** `[nodeId, port]` per dataset, in the order they were chosen. */
   inputs: readonly [string, string][]
@@ -709,12 +711,12 @@ function stackChain(spec: {
   col: number
   row: number
   sourceColumn?: string
-}): StackChain {
+}): StackedInputs {
   // One input is not a stack. The caller's chain still has to end somewhere, so that input's own
   // socket is the answer — which is what the fold used to return before it ran.
-  const lone = spec.inputs.length < 2
-  const out: [string, string] = lone ? (spec.inputs[0] ?? ['ds', 'dataset']) : ['stack', 'out']
-  if (lone) return { nodes: [], links: [], out, cols: 0 }
+  if (spec.inputs.length < 2) {
+    return { nodes: [], links: [], out: spec.inputs[0] ?? ['ds', 'dataset'], cols: 0 }
+  }
 
   const column = spec.sourceColumn
   return {
@@ -747,7 +749,7 @@ function stackChain(spec: {
       'stack',
       portIdAt('in', i + 1),
     ]),
-    out,
+    out: ['stack', 'out'],
     cols: 1,
     ...(column ? { sourceColumn: column } : {}),
   }
@@ -1301,7 +1303,7 @@ function bodyOf(
        * Which is also why the Stack Tables below adds no source column: the dataset is in the id.
        */
       const mapper = mapperNode(bands, 3, mid)
-      const stacks = stackChain({
+      const stacks = oneStack({
         type: 'core.stack',
         inputs: keys.map((_key, index): [string, string] => [
           suffixed('qual', index + 1),
@@ -1388,7 +1390,7 @@ function bodyOf(
        * a reader into.
        */
       const shape = answers.analysis === 'xnblast'
-      const stacks = stackChain({
+      const stacks = oneStack({
         type: 'neuron.stack',
         inputs: keys.map((_key, index): [string, string] => [suffixed('xf', index + 1), 'out']),
         labels: keys.map((key) => datasetFamily(key)?.label ?? key),

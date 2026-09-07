@@ -44,13 +44,14 @@ import type {
   MeshGeometry,
   MeshesValue,
   PointsValue,
+  SkeletonGeometry,
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import { boundsOf, makeTable } from '../../core/values'
+import { boundsOf, isPointsValue, isSkeletonsValue, makeTable } from '../../core/values'
 import type { MirrorSpec } from '../../data/transforms/spaces'
 import type { StackOptions } from './tableOps'
-import { stackTables } from './tableOps'
+import { stackInputName, stackTables } from './tableOps'
 import type { LandmarkPairs } from '../../data/transforms/landmarks'
 import { warpPoints } from '../../pyodide/warp'
 
@@ -406,6 +407,39 @@ export function checkWarpSize(ctx: Warner, points: number, landmarks: number): v
 // ---------------------------------------------------------------------------
 
 /**
+ * Where a stacked collection is, and in what units — the answer `checkStackable` establishes.
+ *
+ * A partial rather than the two fields optional-on-a-value, because an absent key and a
+ * present-but-undefined one are different round trips through the scheduler's structured clone.
+ */
+export type StackedFrame = Pick<PointsValue, 'units' | 'space'>
+
+/**
+ * The kind clash, worded once for the two layers that report it.
+ *
+ * `checkStackable` refuses it on the *values* at run time; `Stack Neurons`' `validate` reports it
+ * on the *types* at edit time, because it is a wiring mistake — visible from the types alone, it
+ * will not fix itself on a Run, and the remedy is a different wire rather than a different
+ * upstream node. Two layers, one sentence: written out at both, they drifted immediately ("wire
+ * them to separate ports on the 3D View" against "the 3D View takes them on separate ports"), and
+ * a reader who sees the edit-time one and then the run-time one has no way to tell they are the
+ * same complaint.
+ *
+ * Takes the two *nouns* rather than the values, because the type layer has only a kind
+ * (`skeletons`) where the value layer has a count to make it singular (`skeleton`).
+ */
+export function kindClashMessage(
+  first: { name: string; noun: string },
+  other: { name: string; noun: string },
+): string {
+  return (
+    `${first.name} is ${first.noun} and ${other.name} is ${other.noun}. These are different ` +
+    'kinds of geometry and cannot share one collection — wire them to separate ports on the 3D ' +
+    'View instead.'
+  )
+}
+
+/**
  * Whether a set of geometry values can be stacked, and what to say when it cannot.
  *
  * Three questions, in the order that a reader would want them answered — and each of the three
@@ -428,52 +462,64 @@ export function checkWarpSize(ctx: Warner, points: number, landmarks: number): v
  * Absent means unknown throughout: the mock connectome and any Custom dataset produce geometry
  * with no space at all, and refusing on a fact nobody stated would break every example.
  */
-export function checkStackable(inputs: readonly GeometryValue[]): void {
+export function checkStackable(inputs: readonly GeometryValue[]): StackedFrame {
   const first = inputs[0]
-  if (!first) return
+  if (!first) return {}
 
   /*
-   * Each input is checked against the first that *stated* the property, not against its
-   * predecessor. Two things follow, and both are wrong in the chained version. A refusal at
-   * input 4 names the input that actually disagrees rather than the one next to it. And a
-   * collection whose first member states no units at all still catches a nanometre input against
-   * a voxel one three sockets later — where a check against input 1 would pass, and
-   * `stackGeometry` would then stamp the whole collection with whichever unit it saw first.
+   * Each property is measured against the first input that *stated* it, not against the input's
+   * predecessor. Two things follow, and both are wrong in the pairwise version this replaced. A
+   * refusal at input 4 names the input that actually disagrees rather than the one next to it.
+   * And a collection whose first member states no units at all still catches a nanometre input
+   * against a voxel one three sockets later — where a check against input 1 would pass, and the
+   * frame below would then stamp the whole collection with whichever unit it saw first.
+   *
+   * That "first that stated it" is a `find` rather than loop state accumulated with `??=`, which
+   * is what it looked like written out: the value never changes once set, so it is the same
+   * expression `stackGeometry` used to write for itself — and writing it twice is how the check
+   * and the frame come to name different inputs. It is **returned** for that reason.
    */
-  let units: { value: string; input: number } | undefined = undefined
-  let space: { value: string; input: number } | undefined = undefined
+  const stated = <T extends string>(read: (v: GeometryValue) => T | undefined) => {
+    const index = inputs.findIndex((input) => read(input))
+    return index < 0 ? undefined : { value: read(inputs[index]!)!, input: index + 1 }
+  }
+  const units = stated((input) => input.units)
+  const space = stated((input) => input.space)
 
   inputs.forEach((input, i) => {
-    const where = `Input ${i + 1}`
+    const where = stackInputName(i + 1)
     if (input.kind !== first.kind) {
       throw new Error(
-        `Input 1 is ${geometryNoun(first)} and ${where} is ${geometryNoun(input)}. These are ` +
-          'different kinds of geometry and cannot share one collection — wire them to separate ' +
-          'ports on the 3D View instead.',
+        kindClashMessage(
+          { name: stackInputName(1), noun: geometryNoun(first) },
+          { name: where, noun: geometryNoun(input) },
+        ),
       )
     }
-    if (input.units) {
-      if (units && units.value !== input.units) {
-        throw new Error(
-          `Input ${units.input} is in ${units.value} and ${where} is in ${input.units}. ` +
-            'Stacked, part of the collection would be drawn at the wrong scale with nothing to ' +
-            'say so.',
-        )
-      }
-      units ??= { value: input.units, input: i + 1 }
+    if (units && input.units && input.units !== units.value) {
+      throw new Error(
+        `${stackInputName(units.input)} is in ${units.value} and ${where} is in ` +
+          `${input.units}. Stacked, part of the collection would be drawn at the wrong scale ` +
+          'with nothing to say so.',
+      )
     }
-    if (input.space) {
-      if (space && space.value !== input.space) {
-        throw new Error(
-          `Input ${space.input} is in ${space.value} and ${where} is in ${input.space}. Two ` +
-            'template spaces are hundreds of micrometres apart, so this would draw two clouds ' +
-            'in opposite corners of an empty scene. Put every input through Transform Neurons ' +
-            'first.',
-        )
-      }
-      space ??= { value: input.space, input: i + 1 }
+    if (space && input.space && input.space !== space.value) {
+      throw new Error(
+        `${stackInputName(space.input)} is in ${space.value} and ${where} is in ` +
+          `${input.space}. Two template spaces are hundreds of micrometres apart, so this would ` +
+          'draw two clouds in opposite corners of an empty scene. Put every input through ' +
+          'Transform Neurons first.',
+      )
     }
   })
+
+  // Built without the absent keys rather than with explicit `undefined`s: these are
+  // structure-cloned into the scheduler's cache, and an absent key and a present-but-undefined
+  // one are not the same round trip.
+  return {
+    ...(units ? { units: units.value } : {}),
+    ...(space ? { space: space.value } : {}),
+  }
 }
 
 /**
@@ -514,7 +560,10 @@ export function stackGeometry(
   inputs: readonly GeometryValue[],
   options: StackOptions = {},
 ): GeometryValue {
-  checkStackable(inputs)
+  // The frame comes *back* from the check rather than being re-derived here: it is the same
+  // "first input that stated it" either way, and two derivations are how a refusal naming one
+  // input and a collection carrying another's units come to disagree.
+  const frame = checkStackable(inputs)
   const first = inputs[0]
   if (!first) throw new Error('Nothing to stack.')
   const attributes = stackTables(
@@ -522,18 +571,8 @@ export function stackGeometry(
     options,
   )
 
-  // `units` and `space` are equal or unstated across the inputs by the time `checkStackable` has
-  // passed, so the first input that states one answers for the collection. Built without the key
-  // rather than with an explicit `undefined`, for `geometryFrame`'s structured-clone reason.
-  const units = inputs.find((input) => input.units)?.units
-  const space = inputs.find((input) => input.space)?.space
-  const frame = {
-    ...(units ? { units } : {}),
-    ...(space ? { space } : {}),
-  }
-
-  if (first.kind === 'points') {
-    const clouds = inputs as readonly PointsValue[]
+  if (inputs.every(isPointsValue)) {
+    const clouds = inputs
     const positions = new Float32Array(
       clouds.reduce((total, cloud) => total + cloud.positions.length, 0),
     )
@@ -545,9 +584,13 @@ export function stackGeometry(
     return { kind: 'points', positions, attributes, bounds: boundsOf([positions]), ...frame }
   }
 
-  if (first.kind === 'skeletons') {
-    const sets = inputs as readonly SkeletonsValue[]
-    const items = sets.flatMap((set) => set.items)
+  if (inputs.every(isSkeletonsValue)) {
+    const sets = inputs
+    // `concat` rather than `flatMap`, which measures 4–10x slower here: V8 takes a per-element
+    // path for `flatMap` where `concat` takes a bulk one. It matters because `Collect` re-stacks
+    // its whole accumulator once per loop pass (`flow/collect.ts`), so the constant is paid
+    // O(passes²) — at 1000 passes of 10 skeletons, 3.4 ms against 35.9 ms.
+    const items = ([] as SkeletonGeometry[]).concat(...sets.map((set) => set.items))
     /*
      * Kept only where *every* input agrees, which is the rule `detail` follows just below and for
      * the same reason: two routes in one collection is no route. Stacking a traced
@@ -557,10 +600,9 @@ export function stackGeometry(
      *
      * By **id**, not by identity: these come from separate fetches and are equal objects at best.
      */
+    const route = sets[0]!.provenance
     const provenance =
-      first.provenance && sets.every((set) => set.provenance?.id === first.provenance?.id)
-        ? first.provenance
-        : undefined
+      route && sets.every((set) => set.provenance?.id === route.id) ? route : undefined
     return {
       kind: 'skeletons',
       items,
@@ -572,14 +614,12 @@ export function stackGeometry(
   }
 
   const sets = inputs as readonly MeshesValue[]
-  const items = sets.flatMap((set) => set.items)
+  const items = ([] as MeshGeometry[]).concat(...sets.map((set) => set.items))
   // Two levels of detail in one collection is no level of detail. Compared by value rather than
   // by identity: these come from separate fetches and are structurally equal at best.
+  const held = sets[0]!.detail
   const detail =
-    sets[0]!.detail &&
-    sets.every((set) => set.detail && sameDetail(set.detail, sets[0]!.detail!))
-      ? sets[0]!.detail
-      : undefined
+    held && sets.every((set) => set.detail && sameDetail(set.detail, held)) ? held : undefined
   return {
     kind: 'meshes',
     items,

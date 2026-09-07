@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import { compareIds, idText, isNeuronId } from '../../core/ids'
+import { defaultInputPorts } from '../../core/ports'
+import { requireNodeDef } from '../../core/registry'
+import '../index'
 import { CRASH_FLOOR_CELLS, SILENT } from '../../core/limits'
 import { column, columnNames, findColumn, tableSchema } from '../../core/types'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
@@ -37,8 +40,10 @@ import {
   selectSchema,
   selectTable,
   sortTable,
+  STACK_PORT_LABEL,
   describeConflict,
   stackColumns,
+  stackInputName,
   stackSchema,
   stackTables,
   unpivotIssues,
@@ -341,14 +346,14 @@ describe('stack', () => {
       { name: 'neuronId', left: { dtype: 'f64', input: 2 }, right: { dtype: 'str', input: 4 } },
     ])
     expect(describeConflict(clash.conflicts[0]!)).toBe(
-      '"neuronId" is f64 on input 2 and str on input 4',
+      '"neuronId" is f64 on Input 2 and str on Input 4',
     )
   })
 
   it('refuses to build a table over a dtype clash, naming both readings', () => {
     const asText = tableFromRows(tableSchema(column('neuronId', 'str')), [{ neuronId: 'x' }])
     expect(() => stackTables([left(), asText])).toThrow(
-      /"neuronId" is i64 on input 1 and str on input 2/,
+      /"neuronId" is i64 on Input 1 and str on Input 2/,
     )
   })
 
@@ -416,6 +421,22 @@ describe('stack', () => {
     const out = stackTables([left(), empty])
     expect(out.length).toBe(1)
     expect(out.data.hemilineage).toEqual([null])
+  })
+
+  it('spells the socket caption and every message about it the same way', () => {
+    /*
+     * `expandPort` takes a *template* and substitutes `{n}`, so the port label is the one
+     * spelling that cannot call `stackInputName`. This is the binding between the two: rename
+     * the socket and the refusals, the label defaults and the source column's fallback all
+     * follow, or this fails.
+     */
+    expect(STACK_PORT_LABEL.replace('{n}', '3')).toBe(stackInputName(3))
+    for (const def of [requireNodeDef('core.stack'), requireNodeDef('neuron.stack')]) {
+      expect(defaultInputPorts(def).map((port) => port.label)).toEqual([
+        stackInputName(1),
+        stackInputName(2),
+      ])
+    }
   })
 
   it('puts a column first seen on a later input after everything before it', () => {
