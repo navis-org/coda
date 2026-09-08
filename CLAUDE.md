@@ -983,10 +983,12 @@ Area-specific — the rule, then the doc that holds why:
   the root's crossbar on screen; the case the other version served wants a log scale, not a zoom. Its
   price is that **a drag along the distance axis does nothing**, by construction. Three rules exist
   only because this viewer's purpose is *clicking* branches: **pan runs only while zoomed**;
-  **`draggedRef` is a ref, not state**, or `pick`'s identity changes and every bracket re-reconciles on
-  each pointer move; and **pointer capture is taken at the slop, not at the press**, because capturing
-  from `pointerdown` sends the `click` to the capturing element and selection silently stops working
-  the moment anybody zooms in. The wheel is **`useWheelZoom`**, shared with the heatmap. Everything the
+  **the flag saying a drag happened is a ref, not state**, or `pick`'s identity changes and every
+  bracket re-reconciles on each pointer move; and **pointer capture is taken at the slop, not at the
+  press**, because capturing from `pointerdown` sends the `click` to the capturing element and
+  selection silently stops working the moment anybody zooms in. All three are **`usePanGesture`**'s
+  now — shared with the ROI viewer, which is what extracted them — and the hook swallows that click
+  itself in the capture phase rather than handing a caller a ref to remember. The wheel is **`useWheelZoom`**, shared with the heatmap. Everything the
   window feeds is **memoised** — `clampWindow` mints a fresh object and the window is a prop of the
   memoised `DendrogramLinks`, so an unmemoised one fails the shallow compare on every `setHover` and
   voids `visibleLinks`' by-identity return. Two more from the browser: a pan drags across leaf labels

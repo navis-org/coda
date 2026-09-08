@@ -12,16 +12,25 @@ import { describe, expect, it } from 'vitest'
 import type { MeshGeometry } from '../../core/values'
 import { generateRoiMesh } from '../../data/mock/morphology'
 import type { XY } from '../raster'
+import type { ProjectedRegion } from './roiProjection'
 import {
+  MAX_ROI_ZOOM,
   ROI_VIEWS,
+  autoLabelled,
+  explodedShifts,
   homologyKey,
+  regionGeometry,
   regionSide,
   fitFrame,
   meshSurfaceArea,
   meshVolume,
+  panRoiWindow,
+  pointToScene,
   projectPoint,
   projectRegions,
   relaxShifts,
+  windowFrame,
+  zoomRoiWindow,
 } from './roiProjection'
 
 /** A flat plate in the z = depth plane, as two triangles. */
@@ -389,44 +398,123 @@ describe('the explode is symmetrical', () => {
 describe('fitFrame', () => {
   const meshes = ['CA(R)', 'PED(R)', 'AL(R)', 'LH(R)'].map((roi) => generateRoiMesh(roi))
 
-  it('frames the fully exploded scene, so the frame never moves as the slider does', () => {
-    const regions = projectRegions(meshes, 'frontal')
-    const shifts = relaxShifts(regions)
-    const frame = fitFrame(regions, shifts, 600, 400, 10)
-
-    // Every point at full explode lands inside the box…
+  /** Every drawn point of the arrangement `shifts` describes, inside the box. */
+  function framed(regions: ReturnType<typeof projectRegions>, shifts: Float64Array): boolean {
+    const width = 600
+    const height = 400
+    const frame = fitFrame(regionGeometry(regions).bounds, shifts, width, height, 10)
     for (let i = 0; i < regions.length; i++) {
       for (const ring of regions[i]!.rings) {
         for (let at = 0; at < ring.length; at += 2) {
           const px = (ring[at]! + shifts[i * 2]!) * frame.scale + frame.offsetX
           const py = (ring[at + 1]! + shifts[i * 2 + 1]!) * frame.scale + frame.offsetY
-          expect(px).toBeGreaterThanOrEqual(-0.5)
-          expect(px).toBeLessThanOrEqual(600.5)
-          expect(py).toBeGreaterThanOrEqual(-0.5)
-          expect(py).toBeLessThanOrEqual(400.5)
+          if (px < -0.5 || px > width + 0.5 || py < -0.5 || py > height + 0.5) return false
         }
       }
     }
-    // …and so does everything at rest, which is what "held at full" buys.
-    expect(frame.scale).toBeGreaterThan(0)
-  })
+    return true
+  }
 
-  it('costs some size at rest, and reports how much honestly', () => {
+  it('keeps every region in view at every setting of the slider', () => {
+    /*
+     * The property the whole thing exists for, asked across the slider rather than at its ends:
+     * the frame follows the arrangement, so nothing is ever drawn outside the card and nothing
+     * is reserved for an arrangement that is not on screen.
+     */
     const regions = projectRegions(meshes, 'frontal')
     const shifts = relaxShifts(regions)
-    const exploded = fitFrame(regions, shifts, 600, 400, 10)
-    const rest = fitFrame(regions, new Float64Array(regions.length * 2), 600, 400, 10)
-    // The frame held at full explode draws the resting scene smaller than a refit would — that
-    // is the trade, and it is bounded rather than arbitrary.
-    expect(exploded.scale).toBeLessThan(rest.scale)
-    expect(exploded.scale / rest.scale).toBeGreaterThan(0.4)
+    for (const percent of [0, 1, 25, 50, 75, 99, 100]) {
+      expect(framed(regions, explodedShifts(shifts, percent / 100))).toBe(true)
+    }
+  })
+
+  it('spends the whole card at rest, which holding the frame at full explode did not', () => {
+    /*
+     * The bug, and the number is the reported one: 218 nested regions reserved room for an
+     * arrangement several times the brain, so the resting map sat in a corner. A frame fitted to
+     * what is drawn is by definition the largest one that keeps everything in view, so at rest it
+     * *is* the resting fit — where the held frame was a fraction of it.
+     *
+     * The other side of the same inequality is the trade this makes, and it is worth naming
+     * rather than giving a test of its own: the regions do get smaller as they spread. That is
+     * what the old behaviour existed to avoid, and the test below is why avoiding it is no
+     * longer necessary — a refit hides separation only when the explode is a homothety.
+     */
+    const regions = projectRegions(meshes, 'frontal')
+    const shifts = relaxShifts(regions)
+    const rest = fitFrame(
+      regionGeometry(regions).bounds,
+      explodedShifts(shifts, 0),
+      600,
+      400,
+      10,
+    )
+    const held = fitFrame(regionGeometry(regions).bounds, shifts, 600, 400, 10)
+    expect(rest.scale).toBeGreaterThan(held.scale)
+    expect(rest).toEqual(
+      fitFrame(
+        regionGeometry(regions).bounds,
+        new Float64Array(regions.length * 2),
+        600,
+        400,
+        10,
+      ),
+    )
+  })
+
+  it('is not a homothety, so refitting cannot hide the separation', () => {
+    /*
+     * The failure the held frame was defending against, asked directly: under a *radial* explode
+     * the refitted picture is the resting one to within a scale, so nothing on screen moves. It
+     * is asked as the ratio of two inter-centre distances — invariant under any homothety, so a
+     * refit cannot rescue it and cannot disguise it either.
+     */
+    const regions = projectRegions(meshes, 'frontal')
+    const shifts = relaxShifts(regions)
+    const zero = new Float64Array(regions.length * 2)
+
+    /** The ratio of two inter-centre distances — invariant under any homothety. */
+    function shapeRatio(displacements: Float64Array): number {
+      const at = (i: number): [number, number] => [
+        regions[i]!.centre[0] + (displacements[i * 2] ?? 0),
+        regions[i]!.centre[1] + (displacements[i * 2 + 1] ?? 0),
+      ]
+      const span = (i: number, j: number): number => {
+        const [x0, y0] = at(i)
+        const [x1, y1] = at(j)
+        return Math.hypot(x1 - x0, y1 - y0)
+      }
+      return span(0, 1) / span(2, 3)
+    }
+
+    /** A radial push from the centroid — the explode this viewer used to have. */
+    let cx = 0
+    let cy = 0
+    for (const region of regions) {
+      cx += region.centre[0] / regions.length
+      cy += region.centre[1] / regions.length
+    }
+    const radial = new Float64Array(regions.length * 2)
+    for (let i = 0; i < regions.length; i++) {
+      radial[i * 2] = (regions[i]!.centre[0] - cx) * 0.8
+      radial[i * 2 + 1] = (regions[i]!.centre[1] - cy) * 0.8
+    }
+
+    // The instrument first: a homothety really does leave this untouched, which is why a refit
+    // under the old explode left nothing on screen changing but the size.
+    expect(shapeRatio(radial)).toBeCloseTo(shapeRatio(zero), 6)
+    // And the relaxation really does not, which is what makes refitting safe here.
+    expect(shapeRatio(shifts)).not.toBeCloseTo(shapeRatio(zero), 2)
   })
 
   it('degrades to an identity frame when there is nothing to frame', () => {
-    expect(fitFrame([], new Float64Array(0), 100, 100)).toEqual({
+    expect(fitFrame(regionGeometry([]).bounds, new Float64Array(0), 100, 100)).toEqual({
       scale: 1,
       offsetX: 0,
       offsetY: 0,
+      // A degenerate scene has degenerate bounds, which `clampRoiWindow` reads as "nothing to
+      // pan along" and pins to the centre — so an empty map cannot be dragged off itself.
+      bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 },
     })
   })
 })
@@ -506,5 +594,180 @@ describe('what a mesh knows about itself', () => {
   it('answers zero for a mesh with no faces', () => {
     expect(meshVolume(new Float32Array(9), new Uint32Array(0))).toBe(0)
     expect(meshSurfaceArea(new Float32Array(9), new Uint32Array(0))).toBe(0)
+  })
+})
+
+/**
+ * The zoom window.
+ *
+ * A window over the projection rather than a transform over the drawing — the rule
+ * `HeatmapViewer` and `DendrogramViewer` both record, and the reason it matters here is that an
+ * SVG transform would carry the region names and the stroke widths with it. What that buys is
+ * asserted below: the same frame arithmetic, so labels are re-thinned and the export follows.
+ *
+ * Headless because the component's version of any of this is covered by nothing — jsdom performs
+ * no layout.
+ */
+describe('the zoom window', () => {
+  const WIDTH = 600
+  const HEIGHT = 400
+
+  /** A square region, which is all `fitFrame` and `autoLabelled` read of one. */
+  function square(cx: number, cy: number, r: number, label: string): ProjectedRegion {
+    return {
+      index: 0,
+      label,
+      rings: [
+        new Float32Array([cx - r, cy - r, cx + r, cy - r, cx + r, cy + r, cx - r, cy + r]),
+      ],
+      centre: [cx, cy],
+      depth: 0,
+      radius: r,
+    }
+  }
+
+  const scene = [square(-200, 0, 150, 'big'), square(200, 0, 5, 'small')]
+  const noShift = new Float64Array(scene.length * 2)
+  const sceneAreas = regionGeometry(scene).areas
+  const fit = fitFrame(regionGeometry(scene).bounds, noShift, WIDTH, HEIGHT, 10)
+
+  it('hands back the fitted frame itself at magnification 1', () => {
+    // By identity, which is what lets `zoomed` be a `!==` and the ⤢ button's disabled state
+    // agree with the caption without either restating the arithmetic.
+    expect(windowFrame(fit, undefined, WIDTH, HEIGHT)).toBe(fit)
+    expect(windowFrame(fit, { zoom: 1, cx: 0, cy: 0 }, WIDTH, HEIGHT)).toBe(fit)
+  })
+
+  it('holds the point under the pointer still while zooming about it', () => {
+    // The whole of what "zoom about the pointer" means, and the half that is silently wrong if
+    // the anchor is taken from the fitted frame rather than the current one.
+    const at: [number, number] = [420, 130]
+    let window = zoomRoiWindow(fit, undefined, at[0], at[1], 0.5, WIDTH, HEIGHT)
+    const after = pointToScene(windowFrame(fit, window, WIDTH, HEIGHT), at[0], at[1])
+    const before = pointToScene(fit, at[0], at[1])
+    expect(after[0]).toBeCloseTo(before[0], 3)
+    expect(after[1]).toBeCloseTo(before[1], 3)
+
+    /*
+     * And again from a zoomed state, about a *different* pixel — which is the only arrangement
+     * that can see the mistake. Anchoring on the fitted frame rather than the current one gives
+     * the same answer for every zoom about one unmoving pointer, so a test that scrolls twice in
+     * one place passes with the anchor read from the wrong frame.
+     */
+    const elsewhere: [number, number] = [250, 240]
+    const held = pointToScene(
+      windowFrame(fit, window, WIDTH, HEIGHT),
+      elsewhere[0],
+      elsewhere[1],
+    )
+    window = zoomRoiWindow(fit, window, elsewhere[0], elsewhere[1], 0.5, WIDTH, HEIGHT)
+    const moved = pointToScene(
+      windowFrame(fit, window, WIDTH, HEIGHT),
+      elsewhere[0],
+      elsewhere[1],
+    )
+    expect(moved[0]).toBeCloseTo(held[0], 3)
+    expect(moved[1]).toBeCloseTo(held[1], 3)
+  })
+
+  it('stops at the magnification ceiling rather than at nothing', () => {
+    let window = zoomRoiWindow(fit, undefined, 300, 200, 0.5, WIDTH, HEIGHT)
+    for (let i = 0; i < 40; i++)
+      window = zoomRoiWindow(fit, window, 300, 200, 0.5, WIDTH, HEIGHT)
+    expect(window.zoom).toBe(MAX_ROI_ZOOM)
+  })
+
+  it('cannot be panned off the scene', () => {
+    /*
+     * The bound is per axis and it is what is *left over*: a drag that runs a long way past the
+     * edge leaves the scene's own edge at the edge of the box, never an empty card. The failure
+     * without it is a map somebody has to zoom out of to find again.
+     */
+    let window = zoomRoiWindow(fit, undefined, 300, 200, 0.25, WIDTH, HEIGHT)
+    window = panRoiWindow(fit, window, -100000, -100000, WIDTH, HEIGHT)
+    const frame = windowFrame(fit, window, WIDTH, HEIGHT)
+    const [right, bottom] = pointToScene(frame, WIDTH, HEIGHT)
+    expect(right).toBeLessThanOrEqual(fit.bounds.maxX + 1e-6)
+    expect(bottom).toBeLessThanOrEqual(fit.bounds.maxY + 1e-6)
+
+    window = panRoiWindow(fit, window, 100000, 100000, WIDTH, HEIGHT)
+    const [left, top] = pointToScene(windowFrame(fit, window, WIDTH, HEIGHT), 0, 0)
+    expect(left).toBeGreaterThanOrEqual(fit.bounds.minX - 1e-6)
+    expect(top).toBeGreaterThanOrEqual(fit.bounds.minY - 1e-6)
+  })
+
+  it('pins the centre on an axis with nothing to pan along', () => {
+    // The scene is wider than it is tall, so at the fit the vertical has slack — and a window
+    // free to drift down it would let a fitted map be dragged, which is the gesture that must
+    // stay with the regions. This is also what makes magnification 1 reproduce the fit exactly.
+    const window = panRoiWindow(fit, { zoom: 1, cx: 0, cy: 0 }, 0, 5000, WIDTH, HEIGHT)
+    expect(window.cy).toBeCloseTo((fit.bounds.minY + fit.bounds.maxY) / 2, 6)
+  })
+
+  it('re-thins the labels for the window, which is the point of zooming', () => {
+    /*
+     * Ranked over the whole scene, a magnified card spends its budget on regions that are no
+     * longer in the box — so zooming in on a crowded corner showed *fewer* names than the fitted
+     * picture. `small` is a thousandth of this scene and half of what is on screen at ×8.
+     */
+    const atFit = autoLabelled(scene, sceneAreas, noShift, fit, WIDTH, HEIGHT, 18)
+    expect(atFit.map((i) => scene[i]!.label)).toEqual(['big'])
+
+    const window = { zoom: MAX_ROI_ZOOM, cx: 200, cy: 0 }
+    const frame = windowFrame(fit, window, WIDTH, HEIGHT)
+    const zoomed = autoLabelled(scene, sceneAreas, noShift, frame, WIDTH, HEIGHT, 18)
+    expect(zoomed.map((i) => scene[i]!.label)).toEqual(['small'])
+  })
+
+  it('judges a label where the region is drawn, never where a full explode would put it', () => {
+    /*
+     * The frame and the thinning read one array (`explodedShifts`), and this is what the two
+     * coming apart looks like: a region on screen loses its name because the arrangement it is
+     * *not* being drawn in would have put it outside the card.
+     *
+     * Pinned here rather than on the card, and the reason is worth recording — on the mock
+     * connectome the two arrays give the same answer at every setting of the slider, measured at
+     * 0/25/50/75/100%, because its six regions are large next to their displacements and no
+     * anchor ever leaves the box either way. A component test of this passes whatever the
+     * component does.
+     */
+    const pair = [square(0, 0, 120, 'here'), square(0, 0, 60, 'there')]
+    const shifts = new Float64Array([0, 0, 4000, 0])
+    const quarter = explodedShifts(shifts, 0.25)
+    const frame = fitFrame(regionGeometry(pair).bounds, quarter, WIDTH, HEIGHT, 10)
+
+    expect(
+      autoLabelled(pair, regionGeometry(pair).areas, quarter, frame, WIDTH, HEIGHT, 18),
+    ).toHaveLength(2)
+    expect(
+      autoLabelled(pair, regionGeometry(pair).areas, shifts, frame, WIDTH, HEIGHT, 18),
+    ).toHaveLength(1)
+  })
+
+  it('spends a full budget on the biggest of what is on screen', () => {
+    /*
+     * The cap rather than the area threshold, and it has to be asked at the *fit* — at ×8 about
+     * `small` only one region is on screen at all, so a budget of one binds for the same reason
+     * the test above passes and says nothing about ranking.
+     */
+    // Three regions on screen, a budget of two: the two largest, largest first. (That `small`
+    // falls under the area floor at the fit is the test above's, more precisely.)
+    const crowd = [
+      square(-200, 0, 150, 'big'),
+      square(150, 0, 120, 'mid'),
+      square(340, 0, 90, 'least'),
+    ]
+    const none = new Float64Array(crowd.length * 2)
+    const frame = fitFrame(regionGeometry(crowd).bounds, none, WIDTH, HEIGHT, 10)
+    const picked = autoLabelled(
+      crowd,
+      regionGeometry(crowd).areas,
+      none,
+      frame,
+      WIDTH,
+      HEIGHT,
+      2,
+    )
+    expect(picked.map((i) => crowd[i]!.label)).toEqual(['big', 'mid'])
   })
 })

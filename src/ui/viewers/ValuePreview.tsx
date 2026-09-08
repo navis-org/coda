@@ -42,6 +42,7 @@ import { chosenViewerKind } from '../../nodes/output/neuroglancer'
 import { DatasetSummaryViewer } from './DatasetSummaryViewer'
 import { NetworkMetricsViewer } from './NetworkMetricsViewer'
 import { DEFAULT_HISTOGRAM_CHOICE } from '../../nodes/lib/networkMetrics'
+import { roisPrimaryOnly } from '../../nodes/lib/roiViewParams'
 import { RoisViewer } from './RoisViewer'
 import type { RoiColorMode, RoiLabelMode } from './RoisViewer'
 import type { RoiView } from './roiProjection'
@@ -99,15 +100,21 @@ export interface ValuePreviewProps {
 }
 
 /**
+ * One empty list, shared.
+ *
+ * A fresh `[]` per render is a fresh identity, and these reach viewer dep arrays — see the
+ * `superRois` note below for the one that costs a relaxation solve per pointer move.
+ */
+const NO_IDS: string[] = []
+
+/**
  * Picks a viewer for a node's output.
  *
  * Driven by the node's *type* first (an `out.heatmap` renders a heatmap, using its own
  * scale params) and falls back to the value's kind, so selecting any node in the graph
  * shows something useful in the inspector — not just the dedicated output nodes.
- */
-/**
- * Name the node every viewer below is drawing, so `ViewerActions` can publish its picture.
  *
+ * Also names the node every viewer below is drawing, so `ViewerActions` can publish its picture.
  * A wrapper rather than a provider at each `return`: this component dispatches through fourteen
  * of them, and one missed would leave exactly one viewer whose chart the Download node cannot
  * reach — with nothing failing anywhere to say which.
@@ -220,8 +227,13 @@ function ValuePreviewInner({
         colorBy={roiColorMode(node.params.colorBy)}
         labels={roiLabelMode(node.params.labels)}
         hemisphere={roiHemisphere(node.params.hemisphere)}
+        primaryOnly={roisPrimaryOnly(node.params)}
+        // A shared constant, not a fresh `[]`: this prop reaches `shown`'s dep array, and a new
+        // identity per render voids the projection *and* `relaxShifts` — 220 passes over n²/2
+        // pairs — on every pointer move of a pan. `defaultParams` materialises the array for a
+        // node created today, so this only bites a graph saved before the param existed.
         superRois={
-          Array.isArray(node.params.superRois) ? (node.params.superRois as string[]) : []
+          Array.isArray(node.params.superRois) ? (node.params.superRois as string[]) : NO_IDS
         }
         opacity={Number(node.params.opacity ?? 0.12)}
         refresh={Number(node.params.refresh ?? 0)}

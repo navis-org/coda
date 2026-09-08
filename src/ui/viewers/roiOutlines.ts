@@ -28,6 +28,7 @@
 import { cacheGet, cacheSet } from '../../data/cache'
 import { datasetCacheKey } from '../../data/neuronIndex'
 import type { DataSource } from '../../data/source'
+import { regionList } from '../../data/source'
 import type { MeshesValue } from '../../core/values'
 import type { RoiView } from './roiProjection'
 import {
@@ -83,7 +84,16 @@ export interface RoiOutlineSet {
 export interface LoadRoiOutlinesOptions {
   source: DataSource
   datasetId: string
-  /** Which regions to ask for. The source's primary set when omitted. */
+  /**
+   * Which of the dataset's region lists this is. Decides the cache variant, always — so an
+   * explicit `rois` narrows what is fetched without ever putting it on the other shelf.
+   *
+   * Required rather than defaulted: `primaryOnly !== false` is a claim about what an *absent*
+   * key means on a stored document, and `roisPrimaryOnly` is where that claim lives. A default
+   * here would be a second copy of it in a module nobody edits alongside the node.
+   */
+  primaryOnly: boolean
+  /** Which regions to ask for. `roiRegions`' answer for `primaryOnly` when omitted. */
   rois?: readonly string[]
   /** Ignore what is stored and trace again — the card's reload. */
   force?: boolean
@@ -95,11 +105,36 @@ export interface LoadRoiOutlinesOptions {
 const inFlight = new Map<string, Promise<RoiOutlineSet>>()
 
 /**
+ * How many regions a card will download without asking a second time.
+ *
+ * The Load button is already one confirmation, and for the primary set it is the only one
+ * needed: 63 regions on hemibrain, 144 on male-CNS. The *published* list is a different
+ * proposition — 230 and **5,619** — and it is one request per region at a concurrency of four,
+ * so the second of those is well over a thousand sequential rounds against a shared production
+ * server. A button that said `Load 5,619 regions` and started is a button that reads the same
+ * as the one that starts 144.
+ *
+ * **Conventional, not measured**, and this file says so rather than implying a finding: nobody
+ * here has run male-CNS's whole list, which is precisely why the card asks. What the number has
+ * to clear is every *primary* set (144) and hemibrain's whole published list (230), so that the
+ * question is asked where the count has left the range the card was designed around rather than
+ * on every untick. It refuses nothing — the confirm has a Download button on it.
+ */
+export const ROI_CONFIRM_REGIONS = 500
+
+/**
  * Through `datasetCacheKey` rather than spelled out, so the dataset card's ⟳ reaches these too:
  * outlines traced from a release's region meshes are exactly as stale as the release.
+ *
+ * The two region sets are two *shelves*, not two versions of one: `isDatasetCacheKey` already
+ * admits a variant, so unticking the box and ticking it back does not pay for the primary set's
+ * download twice. Primary keeps the bare key it has always had, so outlines traced by an earlier
+ * build are still found. The fingerprint is what validates a shelf's contents — the variant only
+ * stops the two evicting each other — which is why the pair cannot drift into serving one set's
+ * shapes under the other's name.
  */
-function cacheKey(sourceId: string, datasetId: string): string {
-  return datasetCacheKey('roi-outlines', sourceId, datasetId)
+function cacheKey(sourceId: string, datasetId: string, primaryOnly: boolean): string {
+  return datasetCacheKey('roi-outlines', sourceId, datasetId, primaryOnly ? '' : 'all')
 }
 
 function fingerprintOf(rois: readonly string[]): string {
@@ -117,8 +152,9 @@ function fingerprintOf(rois: readonly string[]): string {
  */
 export async function loadRoiOutlines(options: LoadRoiOutlinesOptions): Promise<RoiOutlineSet> {
   const { source, datasetId } = options
-  const rois = options.rois ?? source.peekDataset(datasetId)?.primaryRois ?? []
-  const key = cacheKey(source.id, datasetId)
+  const { primaryOnly } = options
+  const rois = options.rois ?? regionList(source.peekDataset(datasetId), primaryOnly)
+  const key = cacheKey(source.id, datasetId, primaryOnly)
   const fingerprint = fingerprintOf(rois)
 
   if (!options.force) {
@@ -137,7 +173,15 @@ export async function loadRoiOutlines(options: LoadRoiOutlinesOptions): Promise<
 
     const meshes = await fetchMeshes({
       datasetId,
-      ...(options.rois ? { rois: [...options.rois] } : {}),
+      /*
+       * The resolved list, not `options.rois` — the whole published set has to reach the fetch,
+       * where an omitted `rois` means the source's *primary* set by `RoiMeshRequest`'s own rule
+       * and unticking the box would have quietly re-fetched what was already on screen.
+       *
+       * Still omitted when the list is empty, which is the one case where the request's default
+       * is the better answer: a source that lists no regions has not asked for none.
+       */
+      ...(rois.length > 0 ? { rois: [...rois] } : {}),
       ...(options.onProgress ? { onProgress: options.onProgress } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
     })
@@ -245,10 +289,13 @@ export function buildRoiOutlines(
 export async function peekRoiOutlines(
   source: DataSource,
   datasetId: string,
-  rois: readonly string[],
+  primaryOnly: boolean,
 ): Promise<RoiOutlineSet | undefined> {
-  return cacheGet<RoiOutlineSet>(cacheKey(source.id, datasetId), {
-    fingerprint: fingerprintOf(rois),
+  return cacheGet<RoiOutlineSet>(cacheKey(source.id, datasetId, primaryOnly), {
+    // Resolved here rather than taken alongside `primaryOnly`: a list and the boolean it derives
+    // from are two inputs that must agree, and disagreeing is exactly how one set's shapes come
+    // back under the other's key.
+    fingerprint: fingerprintOf(regionList(source.peekDataset(datasetId), primaryOnly)),
   })
 }
 

@@ -29,6 +29,7 @@ import type { Emitter } from '../types'
 import { decodeRanges } from '../../../nodes/lib/chartSelection'
 import { neuronIds, selectionIds, selectionLabels } from './common'
 import { REGEX_FLAVOUR_NOTE, filterPredicates } from './tableFilters'
+import { roisPrimaryOnly } from '../../../nodes/lib/roiViewParams'
 
 registerEmitter('out.table', (ctx) => {
   const src = ctx.wired('in')
@@ -875,7 +876,7 @@ registerEmitter('out.datasetSummary', (ctx) => {
 registerEmitter('out.rois', (ctx) => {
   const conn = ctx.wired('dataset')
   ctx.library('neuprintr')
-  const primaryOnly = ctx.params.primaryOnly !== false
+  const primaryOnly = roisPrimaryOnly(ctx.params)
 
   return [
     ...ctx.note(

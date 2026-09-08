@@ -4649,6 +4649,16 @@ a.viewer-actions__btn {
   background: color-mix(in srgb, var(--surface-1) 88%, transparent);
   border: 1px solid var(--border);
 }
+/*
+ * The fit control's home on a zooming chart, where the strip's usual top-right is spoken for —
+ * the heatmap's column gutter, the dendrogram's label gutter, the ROI map's colour ramp. Three
+ * viewers had this as an inline `style={{ top: 'auto', bottom: 6 }}` each.
+ */
+.network-strip--bottom {
+  top: auto;
+  bottom: 6px;
+}
+
 .network-strip__btn {
   appearance: none;
   border: 1px solid transparent;
@@ -8704,6 +8714,17 @@ details[open] > summary.tile__label {
 .rois__load:disabled {
   color: var(--text-muted);
   cursor: default;
+}
+
+/*
+ * The confirm's two buttons, side by side rather than stacked.
+ *
+ * `.rois--empty` is a centred column, so a bare pair would read as one control above another
+ * — and the second of these is Cancel, which must not look like a step after Download.
+ */
+.rois__confirm {
+  display: flex;
+  gap: 0.5rem;
 }
 
 .rois__note {

@@ -441,7 +441,7 @@ export function HeatmapViewer({
         {zoomable && (
           // Bottom right rather than the strip's usual top right, which here is the column
           // gutter: at ×15 the button sat on the last column's name. Seen in a browser.
-          <div className="network-strip nodrag" style={{ top: 'auto', bottom: 6 }}>
+          <div className="network-strip network-strip--bottom nodrag">
             <button
               type="button"
               className="network-strip__btn"

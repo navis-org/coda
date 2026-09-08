@@ -588,23 +588,130 @@ export interface Frame {
   scale: number
   offsetX: number
   offsetY: number
+  /**
+   * The scene's extent in projection units, as drawn.
+   *
+   * What the fit was computed from, and therefore what a zoom window is clamped against — so
+   * the pan bound and the framing cannot disagree about where the scene ends. Carried on the
+   * frame rather than recomputed by the caller because it is the same sweep either way, and a
+   * second one would be a second answer. It moves with the explode, which is what keeps a
+   * manual zoom clamped to the arrangement actually on screen rather than to a larger one.
+   *
+   * On a frame `windowFrame` returned it is carried through unchanged, so it always means "the
+   * scene this was fitted from" and never "what this frame shows" — which is what the clamp
+   * wants, and the opposite of what the name suggests once a zoom is involved.
+   */
+  bounds: { minX: number; minY: number; maxX: number; maxY: number }
 }
 
 /**
- * The transform that puts the scene in a box, measured at *full* explode.
+ * What part of the projection is on screen.
  *
- * Held there for every value of the slider, and that is the other half of why the explode reads
- * as separation. Refitting per frame means the arrangement grows, the frame chases it down, and
- * the regions' size is the only thing left changing — which is the failure the relaxation above
- * exists to avoid, arriving by a different route.
+ * `HeatmapWindow`'s idea in the units this viewer has: a magnification over the fitted frame
+ * and the projection-unit point held at the centre of the box. **Not a transform over the
+ * drawing** — that is the trap both the heatmap and the dendrogram record, and it bites harder
+ * here: an SVG `transform` on the scene scales the stroke widths and carries every region name
+ * with it, so zooming in would magnify the labels rather than reveal more of them.
  *
- * The cost is that at rest the regions are drawn a little smaller than they could be. Measured
- * on synthetic brains: 71–81% of the available scale on a half brain, 64–87% on a whole one,
- * worst in a lateral view where the two hemispheres are superimposed and the explode has the
- * most work to do.
+ * In projection units and not pixels, for `HeatmapWindow`'s reason: a resize then keeps what is
+ * on screen on screen, where a pan stored in pixels would slide the picture whenever the card
+ * changed size. The fitted state is `undefined` at the viewer, never `{ zoom: 1 }` — one
+ * spelling of "not zoomed", so the ⤢ button's disabled state and the caption cannot disagree.
+ *
+ * Two axes and one magnification, `zoomWindow`'s rule one viewer over: these are real
+ * coordinates in nanometres, so an axis zoomed alone would draw a neuropil the wrong shape.
+ */
+export interface RoiWindow {
+  /** Magnification over the fitted frame. 1 is the fit; below it is clamped away. */
+  zoom: number
+  /** The projection-unit point held at the centre of the box. */
+  cx: number
+  cy: number
+}
+
+/**
+ * How far in a zoom may go.
+ *
+ * A ceiling rather than a taste: what is drawn is a polyline traced on a `TRACE_GRID` raster
+ * spanning the **whole scene**, so its vertices are at best `scene / 512` apart and no zoom can
+ * recover detail finer than that. On a 620px card at magnification Z the spacing on screen is
+ * about `620 · Z / 512` pixels — past 8 that is a visible staircase, and what a further zoom
+ * adds is a larger picture of the tracer's own pixels rather than more of the region.
+ */
+export const MAX_ROI_ZOOM = 8
+
+/**
+ * Per-region bounding boxes and areas, from one pass over the vertices.
+ *
+ * Both are hoisted out of the per-frame work, and for the same reason a shift allows it: a
+ * displacement is a **rigid translation**, so a region's box moves with it and never changes
+ * shape, and its area does not move at all. That makes the whole-scene extent at any explode a
+ * loop over `n` boxes rather than over every vertex, and makes the label ranking free of the
+ * window entirely.
+ *
+ * One function rather than two because they are one traversal — identical iteration over the
+ * same `ring[at]`/`ring[at + 1]` reads, and no caller has ever wanted one without the other. At
+ * 5,619 regions that traversal is on the order of a million point visits, so doing it twice was
+ * paying the whole cost the hoist was for.
+ *
+ * `bounds` is `minX, minY, maxX, maxY` per region; `areas` is one shoelace total per region.
+ */
+export function regionGeometry(regions: readonly ProjectedRegion[]): {
+  bounds: Float64Array
+  areas: Float64Array
+} {
+  const bounds = new Float64Array(regions.length * 4)
+  const areas = new Float64Array(regions.length)
+  for (let i = 0; i < regions.length; i++) {
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    let area = 0
+    for (const ring of regions[i]!.rings) {
+      area += ringArea(ring)
+      for (let at = 0; at < ring.length; at += 2) {
+        const px = ring[at]!
+        const py = ring[at + 1]!
+        if (px < minX) minX = px
+        if (px > maxX) maxX = px
+        if (py < minY) minY = py
+        if (py > maxY) maxY = py
+      }
+    }
+    bounds[i * 4] = minX
+    bounds[i * 4 + 1] = minY
+    bounds[i * 4 + 2] = maxX
+    bounds[i * 4 + 3] = maxY
+    areas[i] = area
+  }
+  return { bounds, areas }
+}
+
+/**
+ * The transform that puts the scene in a box: **the arrangement it is handed, not a future one.**
+ *
+ * This was the other way round, framing at *full* explode for every value of the slider, and the
+ * argument for it does not survive contact with `relaxShifts`. It was a defence against the
+ * **radial** explode, which is a homothety: scaling every centre about one point leaves the
+ * arrangement identical and only larger, so a frame that chased it made size the one thing
+ * changing on screen and the gesture read as pulling the camera back. `relaxShifts` is not a
+ * homothety — regions move *relative to each other* — so refitting reveals separation rather
+ * than hiding it, and the failure that reserved the space belonged to the mechanism that was
+ * replaced.
+ *
+ * What holding it cost was the whole picture. At rest the scene was drawn at 71–81% of the
+ * available scale on a half brain and 64–87% on a whole one — and those were measurements on
+ * *primary* regions. With `Primary regions only` off, the relaxation separates every nested
+ * sub-region as well, so hemibrain's 218 drawn regions reserve room for an arrangement several
+ * times the brain and the resting map occupies a corner of the card.
+ *
+ * The caller passes the shifts it is actually drawing with (`explodedShifts`), so "what is on
+ * screen" has one definition that the frame, the rings and the labels all read. It takes
+ * `regionBounds`' boxes rather than the regions, because that sweep is now per slider step.
  */
 export function fitFrame(
-  regions: readonly ProjectedRegion[],
+  bounds: Float64Array,
   shifts: Float64Array,
   width: number,
   height: number,
@@ -614,21 +721,21 @@ export function fitFrame(
   let minY = Infinity
   let maxX = -Infinity
   let maxY = -Infinity
-  for (let i = 0; i < regions.length; i++) {
+  const count = bounds.length / 4
+  for (let i = 0; i < count; i++) {
     const dx = shifts[i * 2] ?? 0
     const dy = shifts[i * 2 + 1] ?? 0
-    for (const ring of regions[i]!.rings) {
-      for (let at = 0; at < ring.length; at += 2) {
-        const px = ring[at]! + dx
-        const py = ring[at + 1]! + dy
-        if (px < minX) minX = px
-        if (px > maxX) maxX = px
-        if (py < minY) minY = py
-        if (py > maxY) maxY = py
-      }
-    }
+    const x0 = bounds[i * 4]! + dx
+    const y0 = bounds[i * 4 + 1]! + dy
+    const x1 = bounds[i * 4 + 2]! + dx
+    const y1 = bounds[i * 4 + 3]! + dy
+    if (x0 < minX) minX = x0
+    if (x1 > maxX) maxX = x1
+    if (y0 < minY) minY = y0
+    if (y1 > maxY) maxY = y1
   }
-  if (!Number.isFinite(minX)) return { scale: 1, offsetX: 0, offsetY: 0 }
+  if (!Number.isFinite(minX))
+    return { scale: 1, offsetX: 0, offsetY: 0, bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 } }
 
   const innerW = Math.max(1, width - padding * 2)
   const innerH = Math.max(1, height - padding * 2)
@@ -640,7 +747,201 @@ export function fitFrame(
     scale,
     offsetX: padding + (innerW - (maxX - minX) * scale) / 2 - minX * scale,
     offsetY: padding + (innerH - (maxY - minY) * scale) / 2 - minY * scale,
+    bounds: { minX, minY, maxX, maxY },
   }
+}
+
+/**
+ * The projection point under a pixel of the box. `ringPath`'s arithmetic read backwards.
+ */
+export function pointToScene(frame: Frame, x: number, y: number): [number, number] {
+  return [(x - frame.offsetX) / frame.scale, (y - frame.offsetY) / frame.scale]
+}
+
+/**
+ * Keep a window over the scene and inside the magnification range.
+ *
+ * The centre is bounded per axis by what is left over: with the visible span wider than the
+ * scene there is nothing to pan along, so the centre is *pinned* to the scene's — which is what
+ * makes `zoom: 1` reproduce the fit exactly rather than approximately, and why the viewer needs
+ * no separate "is this the fit" arithmetic. Clamped on the way out as well as in, since the
+ * scene changes under a stored window whenever the region filters move.
+ */
+function clampRoiWindow(
+  window: RoiWindow,
+  fit: Frame,
+  width: number,
+  height: number,
+): RoiWindow {
+  const zoom = Math.min(MAX_ROI_ZOOM, Math.max(1, window.zoom))
+  const scale = fit.scale * zoom
+  const { minX, minY, maxX, maxY } = fit.bounds
+  const halfW = width / 2 / Math.max(1e-9, scale)
+  const halfH = height / 2 / Math.max(1e-9, scale)
+  const axis = (lo: number, hi: number, half: number, want: number): number =>
+    hi - lo <= half * 2 ? (lo + hi) / 2 : Math.min(Math.max(want, lo + half), hi - half)
+  return {
+    zoom,
+    cx: axis(minX, maxX, halfW, window.cx),
+    cy: axis(minY, maxY, halfH, window.cy),
+  }
+}
+
+/** The frame a window draws through — the fit restated at its magnification and centre. */
+export function windowFrame(
+  fit: Frame,
+  window: RoiWindow | undefined,
+  width: number,
+  height: number,
+): Frame {
+  if (!window || window.zoom <= 1) return fit
+  const clamped = clampRoiWindow(window, fit, width, height)
+  const scale = fit.scale * clamped.zoom
+  return {
+    scale,
+    offsetX: width / 2 - clamped.cx * scale,
+    offsetY: height / 2 - clamped.cy * scale,
+    bounds: fit.bounds,
+  }
+}
+
+/**
+ * Zoom about a pixel of the box — the point of the scene under it is the one that must not move.
+ *
+ * `factor` above 1 zooms out, `useWheelZoom`'s convention.
+ */
+export function zoomRoiWindow(
+  fit: Frame,
+  window: RoiWindow | undefined,
+  x: number,
+  y: number,
+  factor: number,
+  width: number,
+  height: number,
+): RoiWindow {
+  // `windowFrame` already answers `undefined` with the fit itself, so there is no fitted window
+  // to construct here — at magnification 1 the clamp would only rediscover the fit's own centre.
+  const [ax, ay] = pointToScene(windowFrame(fit, window, width, height), x, y)
+  const zoom = Math.min(MAX_ROI_ZOOM, Math.max(1, (window?.zoom ?? 1) / factor))
+  const scale = fit.scale * zoom
+  return clampRoiWindow(
+    { zoom, cx: ax + (width / 2 - x) / scale, cy: ay + (height / 2 - y) / scale },
+    fit,
+    width,
+    height,
+  )
+}
+
+/**
+ * `relaxShifts`' displacements at the slider's setting.
+ *
+ * One definition of "where a region is drawn", because there are four readers — the frame, the
+ * rings, the labels and the label thinning — and each of them multiplying by the fraction itself
+ * is how the frame comes to be fitted to an arrangement nothing draws. Which is exactly what
+ * this viewer did.
+ *
+ * Returns the input by identity at full explode. Everything else allocates once per (shifts,
+ * slider value) — this is memoised at the caller, not called per frame.
+ */
+export function explodedShifts(shifts: Float64Array, fraction: number): Float64Array {
+  if (fraction >= 1) return shifts
+  const out = new Float64Array(shifts.length)
+  if (fraction <= 0) return out
+  for (let i = 0; i < shifts.length; i++) out[i] = shifts[i]! * fraction
+  return out
+}
+
+/** Below this share of what is on screen, a region is too small to carry its own name. */
+const MIN_LABEL_AREA = 0.004
+
+/**
+ * How many names the automatic mode draws before it starts thinning.
+ *
+ * Beside `MIN_LABEL_AREA` because they are one policy: how crowded a map may get. It lived in
+ * the component and reached this function as an argument, which put half the rule in each of two
+ * modules. Still a parameter, so a test can ask what the ranking does at other budgets.
+ */
+export const MAX_AUTO_LABELS = 18
+
+/** Shoelace, for ranking which regions are big enough to carry a label. */
+function ringArea(ring: Float32Array): number {
+  let sum = 0
+  const points = ring.length / 2
+  for (let i = 0; i < points; i++) {
+    const j = (i + 1) % points
+    sum += ring[i * 2]! * ring[j * 2 + 1]! - ring[j * 2]! * ring[i * 2 + 1]!
+  }
+  return Math.abs(sum) / 2
+}
+
+/**
+ * Which regions get a name drawn on them: the biggest, capped, and **on screen**.
+ *
+ * The window half is what makes a zoom worth doing. Ranked over every region regardless, a
+ * magnified card spends its whole label budget on neuropils that are no longer in the box — so
+ * zooming in on a crowded corner showed *fewer* names than the fitted picture, which is the
+ * opposite of the reason anyone zoomed. `visibleLeaves` is the same rule one viewer over.
+ *
+ * The threshold is a share of what is *visible* rather than of the scene, for the same reason:
+ * a region that is a thousandth of a brain can be half of what is on screen at ×8.
+ *
+ * At the fit this is exactly what it always was — everything `fitFrame` framed is in the box by
+ * construction, so the pool is every region and the denominator is the whole scene.
+ *
+ * Headless because jsdom performs no layout: inside the component none of this is covered.
+ */
+export function autoLabelled(
+  centres: ReadonlyArray<{ centre: readonly [number, number] }>,
+  /** `regionAreas`', which no gesture can change. */
+  areas: Float64Array,
+  /** As drawn — `explodedShifts`', so a label is judged where its region actually is. */
+  shifts: Float64Array,
+  frame: Frame,
+  width: number,
+  height: number,
+  limit = MAX_AUTO_LABELS,
+): number[] {
+  const pool: number[] = []
+  let visible = 0
+  for (let i = 0; i < centres.length; i++) {
+    const centre = centres[i]!.centre
+    const px = (centre[0] + (shifts[i * 2] ?? 0)) * frame.scale + frame.offsetX
+    const py = (centre[1] + (shifts[i * 2 + 1] ?? 0)) * frame.scale + frame.offsetY
+    if (px < 0 || px > width || py < 0 || py > height) continue
+    visible += areas[i]!
+    pool.push(i)
+  }
+  /*
+   * The floor first, then the ranking. That order is what keeps the sort cheap without needing a
+   * bounded insertion in its place: a region under `MIN_LABEL_AREA` of what is on screen cannot
+   * be in the top `limit` of it, so by the time anything is compared the list is the handful of
+   * regions big enough to carry a name rather than the thousands that were projected.
+   */
+  const floor = (visible || 1) * MIN_LABEL_AREA
+  return pool
+    .filter((index) => areas[index]! >= floor)
+    .sort((a, b) => areas[b]! - areas[a]!)
+    .slice(0, limit)
+}
+
+/** Drag by pixels: the scene follows the pointer, so the centre moves against it. */
+export function panRoiWindow(
+  fit: Frame,
+  window: RoiWindow | undefined,
+  dx: number,
+  dy: number,
+  width: number,
+  height: number,
+): RoiWindow {
+  // The clamp pins the centre at magnification 1, so an unzoomed window needs no centre here.
+  const current = window ?? { zoom: 1, cx: 0, cy: 0 }
+  const scale = fit.scale * current.zoom
+  return clampRoiWindow(
+    { zoom: current.zoom, cx: current.cx - dx / scale, cy: current.cy - dy / scale },
+    fit,
+    width,
+    height,
+  )
 }
 
 // ---------------------------------------------------------------------------

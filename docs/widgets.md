@@ -1071,10 +1071,38 @@ and the fill falls again, so it is an optimum rather than "more is better". `EXP
 scales the finished displacements, because the solver stops at *just* separated and that reads on
 screen as regions that have only barely stopped touching.
 
-**The frame is held at full explode for every slider value.** Refitting per frame is the other
+**The frame follows the arrangement, and this was the other way round.** It used to be held at
+full explode for every value of the slider, on the argument that refitting per frame is the other
 half of why a radial explode read as shrinking — the arrangement grows, the frame chases it down,
-and size is the only thing left changing. The cost is that at rest the regions are drawn at 71–81%
-of the available scale on a half brain and 64–87% on a whole one.
+and size is the only thing left changing.
+
+**That argument does not survive the mechanism it was written for being replaced.** A radial
+explode is a *homothety*: every centre scaled about one point, so the arrangement is identical and
+merely larger, and a refit leaves nothing on screen changing but the size. `relaxShifts` is not a
+homothety — regions move relative to each other — so what a refit reveals is the separation. That
+is pinned directly, and the test checks its own instrument first: the ratio of two inter-centre
+distances is invariant under the radial push and is not under the relaxation.
+
+What holding it cost was the picture. At rest the scene was drawn at 71–81% of the available scale
+on a half brain and 64–87% on a whole one — and those were measurements on *primary* regions. With
+`Primary regions only` off the relaxation separates every nested sub-region too, so hemibrain's 218
+drawn regions reserved room for an arrangement several times the brain and the resting map sat in
+a corner of the card. Reported from a canvas card, which is where it is worst: no rail, so the map
+has the width, and nothing beside it to compare against.
+
+**One array, four readers.** `explodedShifts` is where the slider is applied, and the frame, the
+rings, the names and the label thinning all read its result. Each of them multiplying by the
+fraction itself is exactly how the frame came to be fitted to an arrangement nothing was drawing.
+The label half of that is worth stating on its own, because it is silent: judged at full explode
+while drawn at the slider's setting, a region on screen loses its name because the arrangement it
+is *not* in would have put it off the card, and that reads as the label mode being off. It is
+pinned headlessly — on the mock connectome the two arrays agree at every setting of the slider
+(measured at 0/25/50/75/100%), its six regions being large next to their displacements, so a
+component test of it passes whatever the component does.
+
+The trade this makes is real and is the one the old behaviour was avoiding: the regions do get
+smaller as they spread. What is bought is that the resting map — the state the card is in unless
+somebody drags the slider — uses the whole card.
 
 **Homologous regions move as mirror images.** Left unconstrained the solve treats `ME(L)` and
 `ME(R)` as two unrelated discs, so a bilaterally symmetric brain explodes lopsided — which reads
@@ -1100,6 +1128,82 @@ superimposed forever, the one thing the explode is there to fix in that view. Th
 is also why lateral leans on the coincident-centre tie-break, and most of why the `hemisphere`
 filter exists.
 
+### Zoom and pan: a window, never a transform
+
+The gestures are `HeatmapViewer`'s and `DendrogramViewer`'s exactly — wheel through `useWheelZoom`,
+drag to pan, ⤢ or double-click to fit, off the canvas only — and so is the rule underneath them:
+**the zoom is an input to the drawing, not a transform over it.** An SVG `transform` on the scene
+is the obvious version and it is wrong for this viewer twice over, because it scales the stroke
+widths and carries every region name with it: zooming in would magnify the labels rather than
+reveal more of them, which is the one thing a map is zoomed for.
+
+So `RoiWindow` is a magnification plus the projection-unit point held at the centre, and
+`windowFrame` restates the fit at that magnification. **Two frames, and the split is the design**:
+`fitted` is the scene in the box at the slider's current setting — the automatic zoom, which is
+just a fit of what is drawn — and `frame` is the one everything draws through — rings, labels and the SVG export by
+one route, so a zoomed card exports the zoomed picture with no second code path.
+
+**In projection units and not pixels**, `HeatmapWindow`'s reason: a resize then keeps what is on
+screen on screen. The fitted state is `undefined` at the viewer and `windowFrame` returns the
+fitted frame **by identity** at magnification 1, which is what lets `zoomed` be a `!==` rather
+than a third piece of arithmetic the ⤢ button's disabled state and the caption could disagree
+with.
+
+**The pan bound is what is left over on each axis.** With the visible span wider than the scene
+there is nothing to pan along, so the centre is *pinned* to the scene's — which makes
+magnification 1 reproduce the fit exactly rather than approximately, and is why a fitted map
+cannot be dragged at all. Past the edge, the scene's edge stops at the box's; the failure without
+it is a map somebody has to zoom out of to find again.
+
+**`MAX_ROI_ZOOM` is 8 and it is a fact about the data, not a taste.** What is drawn is a polyline
+traced on a `TRACE_GRID` raster spanning the whole scene, so vertices are at best `scene / 512`
+apart; on a 620px card at magnification Z the spacing on screen is about `620 · Z / 512` pixels,
+and past 8 that is a visible staircase. A further zoom magnifies the tracer's pixels rather than
+the region.
+
+**The per-region sweeps are hoisted out of the gestures**, and that is what the frame following
+the slider cost before it was noticed. A shift is a rigid translation: it moves a region's
+bounding box and leaves its area alone. So `regionBounds` and `regionAreas` are computed once per
+projection, `fitFrame` walks `n` boxes rather than every vertex of every ring, and the label pass
+takes the areas rather than recomputing shoelaces from raw geometry — which it was doing on every
+pointer move of a pan, since the window moves the frame and the frame is what that pass is keyed
+on. On a whole published region list each of those was on the order of a million point visits per
+frame. The label pass also keeps its top eighteen by bounded insertion rather than sorting a pool
+of thousands to slice off the head.
+
+**Labels are re-thinned for the window, and that is the point of zooming.** Ranked over every
+region regardless, a magnified card spends its whole budget on neuropils no longer in the box —
+so zooming into a crowded corner showed *fewer* names than the fitted picture. `autoLabelled` is
+the rule, headless, taking the on-screen regions as its pool and their share of the *visible* area
+as its threshold; at the fit that is what it always was, since everything `fitFrame` framed is in
+the box by construction. `all` is still all: a name outside the box simply does not render.
+
+**Being the third copy is what extracted the drag**, which is `useWheelZoom`'s own history one
+gesture over: that hook pulled out the *wheel* half at the third viewer, and the pointer half was
+then copied line-for-line into the third and fourth. `usePanGesture` is now the one place, and the
+copies had already drifted the way the second-consumer rule predicts — Heatmap and Scatter take
+pointer capture on the press, which is exactly what the first rule below says must not happen.
+Dendrogram and ROI are its two callers; Heatmap and Scatter are the next ones rather than a fifth
+and sixth copy. Each of its rules was a silent failure in one of them first:
+
+- **Pointer capture is taken at the slop, not at the press** — captured from `pointerdown`, the
+  following `click` goes to the capturing element rather than to the region under it, and pinning
+  stops working the moment anybody zooms in.
+- **`dragged` is a ref**, because the click that must be swallowed arrives after the gesture has
+  ended, and because a re-render per pointer move would reconcile every region's path. The last
+  pointer position is a ref for the same reason; `panning` is the only piece a caller draws with,
+  and it changes twice per gesture rather than per move.
+- **A pan drags across the region names and the browser selects them**, so `user-select` is
+  suppressed while a pan is live and only then. That one stays at the call site, with
+  `touchAction` and the cursor: they are the caller's own layout.
+
+What each viewer keeps is the one line the gesture is *for* — pixels into matrix cells, leaf
+fractions, or nanometres.
+
+One thing that is *not* carried over: there are no `nowheel`/`nodrag` classes on the map, because
+the zoom is gated on `!compact` and so nothing is attached on the canvas at all — the same
+protection by a different route.
+
 ### Getting the meshes, and why the card asks first
 
 Everything below was established by `scripts/probe-roimeshes.mjs` against the live server. Each
@@ -1119,6 +1223,46 @@ would have produced a plausible wrong result.
   what `capabilities.roiMeshes` declares. Within male-CNS exactly five regions refuse, and every
   one is an `-unspecified` bucket — unassigned synapses, not a shape. So a refusal is counted, not
   raised, and the caption says `139 of 144`.
+
+### The two region lists, and why the second one asks again
+
+**`Primary regions only` chooses which list is downloaded, not which is drawn.** The published
+list nests — hemibrain 230 regions of which 63 tile the volume, male-CNS 5,619 of which 144 — so
+filtering after the fetch would spend the larger download to show the smaller picture. It reaches
+`loadRoiOutlines` for that reason, and `roiRegions` is the one function that answers it, because
+three callers need it: the peek that decides whether there is a button, the download, and the
+count the confirm names.
+
+**It shipped declared, documented and unwired.** The param was on the node from the start, both
+exporters honoured it — `client.primary_rois` against `client.all_rois` — and the loader asked
+for `primaryRois` however the box sat. So unticking it changed the emitted notebook and nothing
+on screen, on every dataset, for as long as the node has existed. Nothing failed and nothing
+looked wrong: the map a user was told listed 230 regions listed 63, and both are plausible
+pictures of a brain. The general shape is the one `refreshStates` records — a param honoured on
+one surface and dropped on another is invisible from either.
+
+**The two sets are two shelves, not two versions of one thing.** `cacheKey` carries a variant and
+the hook's entry key carries the scope, so unticking and ticking back does not pay for the
+primary set's 29–62 MB a second time — and two cards on one dataset with the box set differently
+cannot be handed each other's answer. Primary keeps the bare cache key it has always had, so
+outlines traced by an earlier build are still found. The fingerprint validates a shelf's
+*contents*; the variant only stops the two evicting each other, which is why the pair cannot
+drift into serving one set's shapes under the other's name. The failure the entry key prevents is
+browser-only in the ordinary case and was found by mounting both cards in one test — the shared
+state machine exists so two cards do not each paint a progress bar over one download, and what it
+must never do is hand one of them the other's set.
+
+**Past `ROI_CONFIRM_REGIONS` the card asks a second time.** `Load 144 regions` and
+`Load 5,619 regions` are the same button and not the same wait: one request per region at
+`ROI_MESH_CONCURRENCY` of four is, for male-CNS's published list, well over a thousand sequential
+rounds against a shared production server, and nothing is stored until it finishes. The confirm
+names both numbers — 5,619 against 144 is what makes somebody press Cancel — and refuses nothing.
+The threshold is **conventional, not measured**, and `roiOutlines.ts` says so rather than
+implying a finding: nobody here has run male-CNS's whole list, which is exactly why the card asks.
+What 500 has to clear is every primary set (144) and hemibrain's whole published list (230), so
+that unticking the box on a dataset whose list barely nests still costs one press. It is gated on
+the **count**, not on which box is ticked: a dataset whose primary set were that large would
+deserve the same question.
 
 **It is 29 MB gzipped for hemibrain and 62 MB for male-CNS** — four to nine times Explore Dataset's
 whole-dataset neuron index. So the card opens on an explicit `Load N regions` rather than fetching

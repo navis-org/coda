@@ -142,8 +142,18 @@ describe('loadRoiOutlines', () => {
     })
 
     const rois = getConnectome(DATASET)!.rois
-    const first = await loadRoiOutlines({ source: counting, datasetId: DATASET, rois })
-    const second = await loadRoiOutlines({ source: counting, datasetId: DATASET, rois })
+    const first = await loadRoiOutlines({
+      source: counting,
+      datasetId: DATASET,
+      primaryOnly: true,
+      rois,
+    })
+    const second = await loadRoiOutlines({
+      source: counting,
+      datasetId: DATASET,
+      primaryOnly: true,
+      rois,
+    })
 
     expect(fetches).toBe(1)
     expect(second.regions).toHaveLength(first.regions.length)
@@ -164,8 +174,8 @@ describe('loadRoiOutlines', () => {
     })
     const rois = getConnectome(DATASET)!.rois
     await Promise.all([
-      loadRoiOutlines({ source: counting, datasetId: DATASET, rois }),
-      loadRoiOutlines({ source: counting, datasetId: DATASET, rois }),
+      loadRoiOutlines({ source: counting, datasetId: DATASET, primaryOnly: true, rois }),
+      loadRoiOutlines({ source: counting, datasetId: DATASET, primaryOnly: true, rois }),
     ])
     expect(fetches).toBe(1)
   })
@@ -189,8 +199,13 @@ describe('loadRoiOutlines', () => {
       },
     })
     const rois = getConnectome(DATASET)!.rois
-    await loadRoiOutlines({ source: counting, datasetId: DATASET, rois })
-    await loadRoiOutlines({ source: counting, datasetId: DATASET, rois: rois.slice(0, 3) })
+    await loadRoiOutlines({ source: counting, datasetId: DATASET, primaryOnly: true, rois })
+    await loadRoiOutlines({
+      source: counting,
+      datasetId: DATASET,
+      primaryOnly: true,
+      rois: rois.slice(0, 3),
+    })
     expect(fetches).toBe(2)
   })
 
@@ -202,7 +217,12 @@ describe('loadRoiOutlines', () => {
       },
     })
     await expect(
-      loadRoiOutlines({ source: withoutMeshes, datasetId: DATASET, rois: ['AL(R)'] }),
+      loadRoiOutlines({
+        source: withoutMeshes,
+        datasetId: DATASET,
+        primaryOnly: true,
+        rois: ['AL(R)'],
+      }),
     ).rejects.toThrow(/region meshes/i)
   })
 
@@ -211,6 +231,7 @@ describe('loadRoiOutlines', () => {
     await loadRoiOutlines({
       source,
       datasetId: DATASET,
+      primaryOnly: true,
       rois: getConnectome(DATASET)!.rois,
       onProgress: (fraction) => seen.push(fraction),
     })

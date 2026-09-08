@@ -31,6 +31,13 @@ import { sourceLabel, sourceSupports } from '../lib/datasetParam'
  * stating: `evaluate` returns nothing, so nothing can change what it returns. Unlike Dataset
  * Summary there is no `Status`-shaped exception, because nothing here counts neurons.
  *
+ * `primaryOnly` is the one to read that claim carefully against. It costs no run and re-keys
+ * nothing, so it is presentational by the letter of invariant 4 — and it is the only param here
+ * that decides a *download*, because the published region list nests and the two lists are 63
+ * against 230 on hemibrain and 144 against 5,619 on male-CNS. So it reaches `loadRoiOutlines`
+ * rather than the projection, the two sets are cached apart, and past `ROI_CONFIRM_REGIONS` the
+ * card asks before starting. Presentational is a statement about `evaluate`, not about cost.
+ *
  * ## No outputs
  *
  * `dataset.description`'s call and for the same reason: this is an annotation hanging off a
@@ -162,7 +169,7 @@ export const roisNode = registerNode({
       id: 'primaryOnly',
       kind: 'boolean',
       label: 'Primary regions only',
-      help: 'Keep only the regions that tile the volume. The published list nests, so the rest are drawn inside their parents.',
+      help: 'Keep only the regions that tile the volume. The published list nests, so the rest are drawn inside their parents — and unticking this downloads them, which the card asks about first where there are many.',
       default: true,
       presentational: true,
       advanced: true,

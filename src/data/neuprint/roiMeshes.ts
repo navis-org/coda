@@ -150,10 +150,14 @@ export async function fetchRoiMeshSet(
     },
   )
 
+  // A set, not the array: with `Primary regions only` off this list is the dataset's whole
+  // published one — 5,619 on male-CNS, most of which publish no shape — and an `includes` per
+  // region against a refusal list of the same order is that many string comparisons squared.
+  const refused = new Set(missing)
   return {
     items: results.filter((item): item is MeshGeometry => item !== undefined),
     // Request order, so a caption listing them reads the way the dataset lists them.
-    missing: rois.filter((roi) => missing.includes(roi)),
+    missing: rois.filter((roi) => refused.has(roi)),
     bytes,
   }
 }

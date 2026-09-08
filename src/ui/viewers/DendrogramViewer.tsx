@@ -28,7 +28,8 @@ import {
   windowScale,
   zoomWindow,
 } from './dendrogramLayout'
-import { CLICK_SLOP, tooltipPoint } from './tooltipPoint'
+import { tooltipPoint } from './tooltipPoint'
+import { usePanGesture } from './usePanGesture'
 import { useWheelZoom } from './useWheelZoom'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
@@ -62,12 +63,6 @@ const LABEL_PITCH = { right: 11, down: 7 }
 
 /** Breathing room between the card's edge and the plot, on every side. */
 const PAD = 8
-
-/** A pan in progress: where the pointer was last, in box coordinates. */
-interface Pan {
-  lastX: number
-  lastY: number
-}
 
 /**
  * Above `LEAVES_WARN` the brackets are hairlines and there is nothing to click; above
@@ -125,7 +120,7 @@ const MAX_LEAVES_DRAWN = 20_000
  * Two things here are pointer bookkeeping the heatmap needs none of, because this viewer's
  * whole purpose is *clicking* branches. Pan runs only while zoomed, so a fitted card's pointer
  * belongs entirely to the brackets; and a drag that becomes a pan must not also select the
- * clade it was dragged from, which is `draggedRef` and `CLICK_SLOP`.
+ * clade it was dragged from, which is `usePanGesture`'s capture-phase click guard.
  */
 export function DendrogramViewer({
   linkage,
@@ -147,20 +142,8 @@ export function DendrogramViewer({
   )
   /** Absent means the whole tree, which is what the viewer stores as "not zoomed". */
   const [view, setView] = useState<DendrogramWindow | undefined>(undefined)
-  const [pan, setPan] = useState<Pan | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const clipId = useId()
-  /*
-   * Whether the gesture that is ending was a drag, read by the bracket's own `onClick`.
-   *
-   * A **ref** rather than state, and that is the whole reason this works: `pick` is a
-   * `useCallback` handed to the memoised `<DendrogramLinks>`, so anything it reads that changes
-   * per render would put every bracket back through reconciliation on each pointer move — the
-   * cost that component exists to avoid. A ref has no identity of its own to depend on.
-   *
-   * A click fires after `pointerup`, so by the time `pick` asks, this is the finished gesture.
-   */
-  const draggedRef = useRef(false)
   const mode = currentMode()
   const ink = CHART_INK[mode]
   const surface = chartSurface(mode)
@@ -277,11 +260,10 @@ export function DendrogramViewer({
   // Only the click needs the leaves under a branch, so the walk that finds them happens once
   // per click rather than once per render.
   const pick = useCallback(
+    // A pan that started on a bracket ends with a click on it, and selecting the clade you were
+    // only using as a handle to drag by is `usePanGesture`'s to prevent — it stops that click in
+    // the capture phase, so nothing is needed here.
     (link: DendrogramLink, additive: boolean): void => {
-      // A pan that started on a bracket ends with a click on it. Selecting the clade you were
-      // only using as a handle to drag by is the failure this closes, and it is invisible in
-      // jsdom, which fires no click after a synthetic pointer drag.
-      if (draggedRef.current) return
       commit(observationsUnder(shape, link), additive)
     },
     [commit, shape],
@@ -384,37 +366,15 @@ export function DendrogramViewer({
   const fit = useCallback(() => setView(undefined), [])
 
   /*
-   * Pan, and the click it must not become.
+   * Pan, and the click it must not become — all of it `usePanGesture`'s, which was extracted
+   * from this function when the ROI viewer became its third copy. What stayed here is the one
+   * line that is about a tree.
    *
    * **Only while zoomed** — `HeatmapViewer`'s guard, and here it is load-bearing rather than
    * tidy: this viewer's whole purpose is clicking branches, and a drag handler live at the fit
    * would make every selection a one-pixel gamble. Fitted, the pointer belongs to the brackets.
-   *
-   * **Pointer capture is taken at the slop, not at the press.** Captured from `pointerdown`, the
-   * subsequent `click` is dispatched to the capturing element rather than to the bracket under
-   * it, so selection would stop working the moment anybody zoomed in. Taken once the gesture has
-   * travelled far enough to stop being a click, it does exactly what it is for — a pan that runs
-   * off the edge of the card keeps going — and costs nothing that was still available.
    */
-  const onPointerDown = (event: React.PointerEvent): void => {
-    draggedRef.current = false
-    if (!zoomable || !zoomed || event.button !== 0) return
-    const point = tooltipPoint(event, ref.current)
-    setPan({ lastX: point.x, lastY: point.y })
-  }
-
-  const onPointerMove = (event: React.PointerEvent): void => {
-    if (!pan) return
-    const point = tooltipPoint(event, ref.current)
-    const dx = point.x - pan.lastX
-    const dy = point.y - pan.lastY
-    // `draggedRef` carries the stickiness, so there is no `moved` flag on the pan state saying
-    // the same thing one render later — the ref has to outlive the gesture anyway, since the
-    // click that must be suppressed arrives after `endPan` has cleared the state.
-    if (!draggedRef.current && Math.hypot(dx, dy) > CLICK_SLOP) {
-      draggedRef.current = true
-      event.currentTarget.setPointerCapture(event.pointerId)
-    }
+  const { panning, handlers } = usePanGesture(zoomable && zoomed, (dx: number, dy: number) => {
     /*
      * Screen pixels to unit space, along whichever axis the leaves run down. That is the box's
      * height with the leaves on the right and its width with them at the bottom —
@@ -426,11 +386,8 @@ export function DendrogramViewer({
      */
     const alongLeaf = down ? dx / Math.max(1, box.width) : dy / Math.max(1, box.height)
     setView(panWindow(frame, -alongLeaf * frame.atSpan, leafCount))
-    setPan({ lastX: point.x, lastY: point.y })
     setHover(null)
-  }
-
-  const endPan = (): void => setPan(null)
+  })
 
   if (leafCount === 0) {
     return (
@@ -467,7 +424,7 @@ export function DendrogramViewer({
         style={{
           overflow: 'hidden',
           position: 'relative',
-          cursor: pan ? 'grabbing' : zoomed ? 'grab' : 'default',
+          cursor: panning ? 'grabbing' : zoomed ? 'grab' : 'default',
           ...(zoomable ? { touchAction: 'none' } : {}),
           /*
            * A pan drags across leaf labels, and the browser's default for that is to *select*
@@ -480,14 +437,11 @@ export function DendrogramViewer({
            * cancelling it suppresses the compatibility mouse events, and the click that selects
            * a branch goes with them.
            */
-          ...(pan ? { userSelect: 'none' as const } : {}),
+          ...(panning ? { userSelect: 'none' as const } : {}),
         }}
         {...(zoomable
           ? {
-              onPointerDown,
-              onPointerMove,
-              onPointerUp: endPan,
-              onPointerCancel: endPan,
+              ...handlers,
               onDoubleClick: (event: React.MouseEvent) => {
                 // Stopped, or the canvas underneath takes it as a zoom-to-fit of its own.
                 event.stopPropagation()
@@ -638,7 +592,7 @@ export function DendrogramViewer({
         {zoomable && (
           // Bottom right, `HeatmapViewer`'s placement: leaves-on-the-right — the default —
           // puts the label gutter down the top-right corner the strip usually takes.
-          <div className="network-strip nodrag" style={{ top: 'auto', bottom: 6 }}>
+          <div className="network-strip network-strip--bottom nodrag">
             <button
               type="button"
               className="network-strip__btn"
@@ -652,7 +606,7 @@ export function DendrogramViewer({
           </div>
         )}
 
-        {hover && !pan && (
+        {hover && !panning && (
           <div
             className="chart-tooltip"
             style={{ left: hover.x + 12, top: hover.y + 12 }}

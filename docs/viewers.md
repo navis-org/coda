@@ -2539,7 +2539,7 @@ has no equivalent of:
 
 - **Pan runs only while zoomed.** Fitted, the pointer belongs entirely to the brackets; a drag
   handler live at the fit would make every selection a one-pixel gamble.
-- **A drag that becomes a pan must not select the clade it was dragged from.** `draggedRef` — a
+- **A drag that becomes a pan must not select the clade it was dragged from.** A ref — a
   ref, not state, because `pick` is a `useCallback` handed to the memoised `DendrogramLinks` and
   anything it reads that changes per render would put every bracket back through reconciliation
   on each pointer move. A click fires after `pointerup`, so by the time `pick` asks, the ref
@@ -2547,6 +2547,10 @@ has no equivalent of:
   own: the ref has to outlive the gesture anyway, and two spellings of one fact is one of them
   going stale. `CLICK_SLOP` sits beside `tooltipPoint`, which both gesture handlers already
   import for the other half of the same question.
+These two are `usePanGesture`'s now, extracted when the ROI viewer became the third copy of this
+function — `useWheelZoom`'s history one gesture over. They are recorded here because this is where
+both were found.
+
 - **Pointer capture is taken at the slop, not at the press.** Captured from `pointerdown`, the
   subsequent `click` is dispatched to the capturing element rather than to the bracket under it,
   so selection would silently stop working the moment anybody zoomed in. Taken once the gesture

@@ -1185,6 +1185,29 @@ export const CANONICAL_SCHEMAS: SourceSchemas = {
 // ---------------------------------------------------------------------------
 
 /**
+ * Which of a dataset's two region lists `Primary regions only` names.
+ *
+ * One selector because the rule was written three times — the ROI picker's options, the ROI
+ * Viewer's download, and the reason for it copied alongside each. `roiOptions`' own docstring
+ * already recorded that shape happening once ("Written per node, both carried their own copy of
+ * the rule *and* of the reason for it, which is the shape a third one would have inherited");
+ * the third was duly inherited. It lives beside `DatasetInfo` because that is what owns both
+ * lists, and `primaryRois`' declaration above is where the load-bearing half is already stated.
+ *
+ * **Absent stays empty rather than falling back to `rois`**, which is that declaration read
+ * literally: a source that has not said which of its regions tile the volume has not said these
+ * ones do. The two differ by a lot — male-CNS lists 5,619 regions against 144 that tile — so
+ * this is a choice of vocabulary, never a filter over a list of roughly the same size.
+ */
+export function regionList(
+  info: DatasetInfo | undefined,
+  primaryOnly: boolean,
+): readonly string[] {
+  if (!info) return []
+  return primaryOnly ? (info.primaryRois ?? []) : info.rois
+}
+
+/**
  * The backend behind a source id — a key of `BACKENDS`.
  *
  * The part before the colon, since a non-default deployment registers under a keyed id:

@@ -34,6 +34,7 @@ import {
   canTracePaths,
   capabilityOf,
   getSource,
+  regionList,
 } from '../../data/source'
 
 /** Source referenced by a dataset-typed socket, if it is registered. */
@@ -209,8 +210,7 @@ export function roiOptions(
   type: CodaType | undefined,
   options: { primaryOnly?: boolean } = {},
 ): EnumOption[] {
-  const info = datasetInfoFromType(type)
-  const names = options.primaryOnly ? (info?.primaryRois ?? []) : (info?.rois ?? [])
+  const names = regionList(datasetInfoFromType(type), options.primaryOnly === true)
   return [...names]
     .sort((a, b) => a.localeCompare(b))
     .map((roi) => ({ value: roi, label: roi }))

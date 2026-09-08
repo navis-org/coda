@@ -33,6 +33,7 @@ import type { Emitter } from '../types'
 import { decodeRanges } from '../../../nodes/lib/chartSelection'
 import { codaNeurons, neuronIds, pySelection, selectionIds } from './common'
 import { filterMasks } from './tableFilters'
+import { roisPrimaryOnly } from '../../../nodes/lib/roiViewParams'
 
 // ---------------------------------------------------------------------------
 // Table — the one viewer with nothing to draw
@@ -1029,7 +1030,7 @@ registerEmitter('out.datasetSummary', (ctx) => {
 registerEmitter('out.rois', (ctx) => {
   const client = ctx.wired('dataset')
   const meshes = `${ctx.name}_meshes`
-  const primaryOnly = ctx.params.primaryOnly !== false
+  const primaryOnly = roisPrimaryOnly(ctx.params)
   const rois = primaryOnly ? `${client}.primary_rois` : `${client}.all_rois`
 
   return [
