@@ -5,7 +5,7 @@ import { canExportNotebook } from '../../export/canExport'
 import type { ExportLanguage } from '../../nodes/lib/datasetFamilies'
 import { CodaMark } from '../CodaMark'
 import { peekExportWarnings, requestExportWarnings, useExportWarnings } from '../exportWarnings'
-import { AssistantIcon, BellIcon, InspectorIcon, ShareIcon } from '../Icons'
+import { AssistantIcon, BellIcon, ConnectionsIcon, InspectorIcon, ShareIcon } from '../Icons'
 import type { CustomDatasetNode } from '../../nodes/lib/datasetFamilies'
 import {
   BACKENDS,
@@ -37,7 +37,9 @@ import { SourcesPanel } from './SourcesPanel'
 import type { TourAnchor } from '../tour/steps'
 import { TOURS, startTour } from '../tour/tourState'
 import { restoreHints, useDismissedHints } from '../hints'
+import { shortcutKeys } from '../shortcuts'
 import { useDismissOnOutside } from '../useDismiss'
+import { useNarrowShell } from '../smallScreen'
 
 /*
  * No props. It had two — `onOpenPalette` and `onOpenBrowser`, routed through the store because
@@ -95,6 +97,142 @@ export function Toolbar() {
   const staleCount = useStaleCount()
   const errorCount = useErrorCount()
 
+  /*
+   * The narrow shell — see `smallScreen.ts` for the threshold and `App` for the attribute the
+   * stylesheet reads. Everything below that asks this is choosing *where* a control is drawn,
+   * never whether it exists: each one is either a button on the row or a row of the `⋯` menu.
+   */
+  const narrow = useNarrowShell()
+  const openSources = useGraphStore((s) => s.openSources)
+
+  /*
+   * The controls that fold, declared once and rendered twice.
+   *
+   * Two renderers read this — `ActionButton` for the row, `ActionItem` for the `⋯` menu — which
+   * is what stops the phone's copy of the toolbar drifting from the desktop's. It is the same
+   * rule `shortcuts.ts` follows for a chord and `glyphs.ts` for a drawing: the fact is declared
+   * in one place and each surface renders it. What is *not* here is anything with state of its
+   * own or a shape a menu row cannot take — Run, the workflow name, Auto-run and the bell each
+   * keep their own component, and the last three take a `variant` instead.
+   *
+   * `blurb` is the second line of a menu row. It says what the control does rather than
+   * repeating `title`, which is a tooltip nobody on a touchscreen will ever see.
+   */
+  const actions = {
+    undo: {
+      label: 'Undo',
+      blurb: 'Step back through your edits.',
+      face: '↶',
+      title: locked ? lockedTitle('Undo') : `Undo (${shortcutKeys('undo')})`,
+      disabled: locked || !canUndo,
+      onClick: undo,
+    },
+    redo: {
+      label: 'Redo',
+      blurb: 'Step forward again.',
+      face: '↷',
+      title: locked ? lockedTitle('Redo') : `Redo (${shortcutKeys('redo')})`,
+      disabled: locked || !canRedo,
+      onClick: redo,
+    },
+    share: {
+      label: 'Share workflow',
+      blurb: 'A link that opens this graph.',
+      face: <ShareIcon />,
+      title: 'Share workflow — a link that opens this graph',
+      icon: true,
+      tour: 'share',
+      onClick: requestShare,
+    },
+    /*
+     * The trigger for `SourcesPanel`'s dialog, which is why it is here rather than there: the
+     * `⋯` menu closes on the click that opens the dialog, so a trigger living inside the panel
+     * component would take the dialog down with the menu. `EdgeSetPanel` has had this shape
+     * from the start — the dialog is mounted by the toolbar and opened through the store.
+     */
+    connections: {
+      label: 'Connections',
+      blurb: 'Data sources, API keys and sharing.',
+      face: <ConnectionsIcon />,
+      title: 'Connections — data sources, API keys and sharing',
+      icon: true,
+      tour: 'connections',
+      onClick: openSources,
+    },
+    assistant: {
+      label: 'Assistant',
+      blurb: 'Describe a change and let it build it.',
+      face: <AssistantIcon />,
+      title: `Assistant — describe a change and let it build it (${shortcutKeys('assistant')})`,
+      icon: true,
+      tour: 'assistant',
+      pressed: assistantOpen,
+      onClick: () => togglePanel('assistant'),
+    },
+    inspector: {
+      label: 'Inspector',
+      blurb: "The selected node's settings, in full.",
+      face: <InspectorIcon />,
+      title: inspectorOpen
+        ? `Hide the inspector (${shortcutKeys('inspector')})`
+        : `Show the inspector (${shortcutKeys('inspector')})`,
+      icon: true,
+      tour: 'inspector',
+      pressed: inspectorOpen,
+      onClick: () => togglePanel('inspector'),
+    },
+    dashboard: {
+      label: 'Dashboard',
+      blurb: 'The nodes worth looking at, on a grid.',
+      face: '▦',
+      title: dashboardOpen
+        ? `Back to the canvas (${shortcutKeys('dashboard')})`
+        : `Dashboard — the nodes worth looking at, on a grid (${shortcutKeys('dashboard')})`,
+      tour: 'dashboard',
+      pressed: dashboardOpen,
+      onClick: toggleDashboard,
+    },
+    clear: {
+      label: 'Clear results',
+      blurb: 'Drop every cached result so the next run re-fetches.',
+      face: 'Clear',
+      title: 'Drop every cached result so the next run re-fetches from scratch',
+      disabled: busy,
+      onClick: clearResults,
+    },
+    // No `blurb`: this one stays on the row at every width, so nothing ever draws it as a menu
+    // row. See the field's note.
+    fullscreen: {
+      label: fullscreen ? 'Leave fullscreen' : 'Enter fullscreen',
+      face: fullscreen ? '⤡' : '⛶',
+      title: fullscreen
+        ? `Leave fullscreen (${shortcutKeys('fullscreen')})`
+        : `Fill the screen, hiding the browser's own tabs and address bar (${shortcutKeys(
+            'fullscreen',
+          )})`,
+      pressed: fullscreen,
+      onClick: () => {
+        // `fullscreen` is what distinguishes a refusal from an ordinary exit — both come
+        // back false, and only one of them is worth saying anything about.
+        const entering = !fullscreen
+        void toggleFullscreen(appElement()).then((now) => {
+          if (entering && !now) setNotice('This browser refused fullscreen')
+        })
+      },
+    },
+    theme: {
+      label: 'Theme',
+      blurb: `Currently ${theme}. Cycles dark, light, system.`,
+      face: theme === 'dark' ? '◐' : theme === 'light' ? '◑' : '◒',
+      title: `Theme: ${theme}`,
+      onClick: () =>
+        setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'system' : 'dark'),
+    },
+    // `satisfies` rather than an annotation: each entry is still checked against the shape, and
+    // the keys stay literal, so `actions.dashbord` is a compile error rather than `undefined`
+    // handed to a renderer that would draw an empty button.
+  } satisfies Record<string, ToolbarAction>
+
   return (
     <div className="toolbar">
       <div className="toolbar__brand">
@@ -109,13 +247,9 @@ export function Toolbar() {
         <strong>Coda</strong>
       </div>
 
-      <input
-        className="toolbar__name"
-        value={graph.meta?.name ?? ''}
-        placeholder="Untitled graph"
-        onChange={(e) => setGraphName(e.target.value)}
-        title="Graph name — used as the filename when saving"
-      />
+      {/* On the narrow shell it is the first row of the `⋯` menu instead — 140px of text field
+          is the widest thing here and the least often touched. */}
+      {!narrow && <GraphNameField value={graph.meta?.name ?? ''} onChange={setGraphName} />}
 
       {/*
        * `flyouts` — the panel must not clip, because the datasets are submenus now. Safe here for
@@ -345,26 +479,13 @@ export function Toolbar() {
         )}
       </Dropdown>
 
-      <span style={{ width: 8 }} />
-
-      <button
-        type="button"
-        className="btn btn--ghost"
-        onClick={undo}
-        disabled={locked || !canUndo}
-        title={locked ? lockedTitle('Undo') : 'Undo (⌘Z)'}
-      >
-        ↶
-      </button>
-      <button
-        type="button"
-        className="btn btn--ghost"
-        onClick={redo}
-        disabled={locked || !canRedo}
-        title={locked ? lockedTitle('Redo') : 'Redo (⇧⌘Z)'}
-      >
-        ↷
-      </button>
+      {!narrow && (
+        <>
+          <span style={{ width: 8 }} />
+          <ActionButton action={actions.undo} />
+          <ActionButton action={actions.redo} />
+        </>
+      )}
 
       <div className="toolbar__spacer" />
 
@@ -384,73 +505,18 @@ export function Toolbar() {
        * menus are about too. It was under `Save ▸` and moved here for the reason the whole
        * cluster lost its words: an action reached for by muscle memory does not need a sentence
        * two clicks deep.
+       *
+       * All five fold into `⋯` on the narrow shell, in this order.
        */}
-      <button
-        type="button"
-        className="btn btn--ghost btn--icon"
-        data-tour="share"
-        onClick={requestShare}
-        title="Share workflow — a link that opens this graph"
-        aria-label="Share workflow"
-      >
-        <ShareIcon />
-      </button>
-
-      <SourcesPanel />
-      {/* Opened from a dataset card, mounted here: a modal inside React Flow's transformed
-          pane takes the transform as its containing block. */}
-      <EdgeSetPanel />
-
-      <button
-        type="button"
-        className="btn btn--ghost btn--icon"
-        aria-pressed={assistantOpen}
-        data-tour="assistant"
-        title="Assistant — describe a change and let it build it (/)"
-        aria-label="Assistant"
-        onClick={() => togglePanel('assistant')}
-      >
-        <AssistantIcon />
-      </button>
-      {/*
-       * The chevron pair this used to draw (`▐` against `▕`) said open-or-closed in the glyph
-       * itself. An icon that does not change with the state says it through `aria-pressed`
-       * instead — the same trade `.coda-node__fold` records — and the tooltip still names which
-       * way the click goes.
-       */}
-      <button
-        type="button"
-        className="btn btn--ghost btn--icon"
-        aria-pressed={inspectorOpen}
-        data-tour="inspector"
-        onClick={() => togglePanel('inspector')}
-        title={inspectorOpen ? 'Hide the inspector (I)' : 'Show the inspector (I)'}
-        aria-label="Inspector"
-      >
-        <InspectorIcon />
-      </button>
-
-      {/*
-       * The dashboard toggle. Beside the inspector's rather than in a menu, because it is the
-       * same kind of control — which surface you are looking through — and because a mode with
-       * no visible way back is a mode people get stuck in. `aria-pressed` says which way the
-       * click goes; the dashboard's own bar carries a ← Canvas as well.
-       */}
-      <button
-        type="button"
-        className="btn btn--ghost"
-        data-tour="dashboard"
-        aria-pressed={dashboardOpen}
-        onClick={toggleDashboard}
-        title={
-          dashboardOpen
-            ? 'Back to the canvas (D)'
-            : 'Dashboard — the nodes worth looking at, on a grid (D)'
-        }
-        aria-label="Dashboard"
-      >
-        ▦
-      </button>
+      {!narrow && (
+        <>
+          <ActionButton action={actions.share} />
+          <ActionButton action={actions.connections} />
+          <ActionButton action={actions.assistant} />
+          <ActionButton action={actions.inspector} />
+          <ActionButton action={actions.dashboard} />
+        </>
+      )}
 
       {busy ? (
         <button
@@ -494,80 +560,224 @@ export function Toolbar() {
        * Next to Run because it is a statement about the same action: whether it happens on its
        * own. A real checkbox rather than a toggle button — this is a persistent setting with an
        * on and an off, not a command.
-       */}
-      <label
-        className="autorun"
-        data-tour="autorun"
-        title={
-          autoRun
-            ? 'Re-running the whole graph after every change. Uncheck for expensive workflows.'
-            : 'Re-run the whole graph after every change. Expensive nodes will query on every edit.'
-        }
-      >
-        <input
-          type="checkbox"
-          checked={autoRun}
-          onChange={(e) => setAutoRun(e.target.checked)}
-        />
-        <span>Auto-run</span>
-      </label>
-
-      {/*
+       *
        * Clear is *after* Run because it is about the same thing from the other end — Run brings
        * the stale nodes up to date, Clear makes every node stale again — and reading it before
        * Run put a destructive verb in front of the button people are aiming for. Ghost, not
        * primary, so the pair does not read as two equal choices.
        */}
-      <button
-        type="button"
-        className="btn btn--ghost"
-        onClick={clearResults}
-        disabled={busy}
-        title="Drop every cached result so the next run re-fetches from scratch"
-      >
-        Clear
-      </button>
-
-      <NotifyToggle />
+      {!narrow && (
+        <>
+          <AutoRunToggle checked={autoRun} onChange={setAutoRun} />
+          <ActionButton action={actions.clear} />
+          <NotifyToggle />
+        </>
+      )}
 
       {/*
        * Fullscreen keeps the toolbar and the status bar: what it reclaims is the browser's
        * ~90px of tabs and address bar, not the app's own chrome. Run, Auto-run and the stale
        * count are exactly what you want in view while a graph is running.
+       *
+       * **The one control that earns its place on a phone rather than despite being one.** A
+       * mobile browser's chrome is ~56px of a ~915px screen and it comes back on every scroll
+       * gesture; fullscreen is how the canvas gets it, which is why this stays on the row when
+       * everything beside it folds away.
        */}
-      <button
-        type="button"
-        className="btn btn--ghost"
-        aria-pressed={fullscreen}
-        onClick={() => {
-          // `fullscreen` is what distinguishes a refusal from an ordinary exit — both come
-          // back false, and only one of them is worth saying anything about.
-          const entering = !fullscreen
-          void toggleFullscreen(appElement()).then((now) => {
-            if (entering && !now) setNotice('This browser refused fullscreen')
-          })
-        }}
-        title={
-          fullscreen
-            ? 'Leave fullscreen (F)'
-            : "Fill the screen, hiding the browser's own tabs and address bar (F)"
-        }
-        aria-label={fullscreen ? 'Leave fullscreen' : 'Enter fullscreen'}
-      >
-        {fullscreen ? '⤡' : '⛶'}
-      </button>
+      <ActionButton action={actions.fullscreen} />
+      {!narrow && <ActionButton action={actions.theme} />}
 
-      <button
-        type="button"
-        className="btn btn--ghost"
-        title={`Theme: ${theme}`}
-        onClick={() =>
-          setTheme(theme === 'dark' ? 'light' : theme === 'light' ? 'system' : 'dark')
-        }
-      >
-        {theme === 'dark' ? '◐' : theme === 'light' ? '◑' : '◒'}
-      </button>
+      {/*
+       * The rest of the toolbar, on the narrow shell. Last on the row, and everything in it is
+       * `actions` rendered the other way — see the table for why there are two renderers.
+       *
+       * No `Submenu` anywhere in here, deliberately: a flyout opens at `left: 100%` of a 260px
+       * panel, which on a 412px screen is off the edge in one direction and, flipped, off it in
+       * the other. That is also why New, Open, Save and `?` stay on the row rather than folding
+       * in — three of them are menus of their own, and a menu inside this one is unreachable.
+       */}
+      {narrow && (
+        <Dropdown label="⋯" title="More toolbar controls">
+          {(close) => (
+            <>
+              <div className="dropdown__row">
+                <GraphNameField value={graph.meta?.name ?? ''} onChange={setGraphName} />
+              </div>
+              <ActionItem action={actions.undo} close={close} />
+              <ActionItem action={actions.redo} close={close} />
+              <ActionItem action={actions.share} close={close} />
+              <ActionItem action={actions.connections} close={close} />
+              <ActionItem action={actions.assistant} close={close} />
+              <ActionItem action={actions.inspector} close={close} />
+              <ActionItem action={actions.dashboard} close={close} />
+              {/* Not a command — it stays put when ticked, like the field above it. */}
+              <div className="dropdown__row">
+                <AutoRunToggle checked={autoRun} onChange={setAutoRun} />
+              </div>
+              <ActionItem action={actions.clear} close={close} />
+              <NotifyToggle variant="item" close={close} />
+              <ActionItem action={actions.theme} close={close} />
+            </>
+          )}
+        </Dropdown>
+      )}
+
+      {/*
+       * Two dialogs with no trigger of their own: Connections is opened from `actions`, the edge
+       * set panel from a dataset card. Mounted here because a modal inside React Flow's
+       * transformed pane takes the transform as its containing block — and, for Connections,
+       * because a trigger inside the `⋯` menu would be unmounted by the click that used it.
+       */}
+      <SourcesPanel />
+      <EdgeSetPanel />
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// The controls that fold
+// ---------------------------------------------------------------------------
+
+/**
+ * One toolbar control, in the form both renderers can read.
+ *
+ * The split between what is in here and what is not is about the *shape* a menu row can take,
+ * not about importance or state: Run carries a stale badge, the workflow name is a text field
+ * and Auto-run is a checkbox, so those three keep their own components. Holding state is not a
+ * reason to stay out — `NotifyToggle` keeps its `useState` and builds a descriptor from it.
+ *
+ * **Not `paletteItems.ts`, which is the other command table**, and the overlap is real: undo,
+ * redo, share, clear, dashboard, fullscreen and theme are in both. They stay apart because they
+ * are written for different readers — the palette is searched by typing, so its labels are Title
+ * Case nouns and its hints are sentences; these are read as a tooltip on a glyph or as one line
+ * of a menu. Merging them would mean one string trying to be both. What must not drift is the
+ * *behaviour*, and that does not live in either table: both call the same store actions.
+ */
+interface ToolbarAction {
+  /**
+   * The menu row's first line, **and** the button's accessible name.
+   *
+   * One field for both because they are the same sentence: an icon button's name is what a
+   * menu row's first line already has to be — short, a verb phrase, read without the glyph
+   * beside it. Splitting them is how a control comes to be called two things, and the name is
+   * the half nothing on screen would show you was wrong.
+   */
+  label: string
+  /**
+   * The menu row's second line: what the control does. Never a repeat of `title`.
+   *
+   * Optional, and the absence says something — a control with no blurb is one that never folds,
+   * which today is fullscreen alone. Anything reached through `⋯` needs one.
+   */
+  blurb?: string
+  /** What the button draws — an icon element, or the glyph or word it carries. */
+  face: React.ReactNode
+  /** The button's tooltip and, where `face` is a glyph, its accessible name. */
+  title: string
+  /** `btn--icon`, for the ones drawing an SVG rather than a glyph. */
+  icon?: boolean
+  /** `data-tour` name, for a control the Guided Tour points at. See `tour/steps.ts`. */
+  tour?: TourAnchor
+  pressed?: boolean
+  disabled?: boolean
+  onClick: () => void
+}
+
+/**
+ * A control on the toolbar row.
+ *
+ * `aria-label` is the **label**, not the title: the title is a tooltip that names the shortcut
+ * and the direction of the next click, which is a poor name to hear read aloud. On a control the
+ * tour points at, the anchor rides here — so a control folded into `⋯` has no anchor at all, and
+ * `tour.ts` centres that step's popover rather than spotlighting nothing.
+ */
+function ActionButton({ action }: { action: ToolbarAction }) {
+  return (
+    <button
+      type="button"
+      className={`btn btn--ghost${action.icon ? ' btn--icon' : ''}`}
+      data-tour={action.tour}
+      title={action.title}
+      aria-label={action.label}
+      aria-pressed={action.pressed}
+      disabled={action.disabled}
+      onClick={action.onClick}
+    >
+      {action.face}
+    </button>
+  )
+}
+
+/**
+ * The same control as a row of the `⋯` menu.
+ *
+ * Closing is this renderer's business rather than the action's: every one of these is a command,
+ * and a menu that stayed open over the dialog it just opened would be covering it. The two that
+ * are *not* commands — the workflow name and Auto-run — are rendered as themselves in a
+ * `.dropdown__row` instead, which is what keeps that rule from needing an exception.
+ */
+function ActionItem({ action, close }: { action: ToolbarAction; close: () => void }) {
+  return (
+    <button
+      type="button"
+      className="dropdown__item"
+      aria-pressed={action.pressed}
+      disabled={action.disabled}
+      onClick={() => {
+        action.onClick()
+        close()
+      }}
+    >
+      <strong>{action.label}</strong>
+      {action.blurb && <span>{action.blurb}</span>}
+    </button>
+  )
+}
+
+/**
+ * The workflow's name. The same element in both places — on the row, and as the first row of the
+ * `⋯` menu — so the placeholder, the tooltip and the width rules have one spelling. What differs
+ * is `.dropdown__row`'s CSS, which lets it fill the panel.
+ */
+function GraphNameField({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (next: string) => void
+}) {
+  return (
+    <input
+      className="toolbar__name"
+      value={value}
+      placeholder="Untitled graph"
+      onChange={(e) => onChange(e.target.value)}
+      title="Graph name — used as the filename when saving"
+    />
+  )
+}
+
+/** Auto-run, likewise the same checkbox in both places. */
+function AutoRunToggle({
+  checked,
+  onChange,
+}: {
+  checked: boolean
+  onChange: (next: boolean) => void
+}) {
+  return (
+    <label
+      className="autorun"
+      data-tour="autorun"
+      title={
+        checked
+          ? 'Re-running the whole graph after every change. Uncheck for expensive workflows.'
+          : 'Re-run the whole graph after every change. Expensive nodes will query on every edit.'
+      }
+    >
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span>Auto-run</span>
+    </label>
   )
 }
 
@@ -590,7 +800,18 @@ const NOTIFY_FLOOR_SECONDS = Math.round(NOTIFY_AFTER_MS / 1000)
  * the only way to learn it: it moves when we ask, and the one other way it moves — the user
  * relenting in browser settings — raises nothing anywhere.
  */
-function NotifyToggle() {
+function NotifyToggle({
+  variant = 'button',
+  close,
+}: {
+  /**
+   * `item` draws it as a row of the `⋯` menu instead. A prop rather than a `ToolbarAction`
+   * descriptor because of the local state below: the browser's answer is learned by asking, and
+   * asking is this component's click.
+   */
+  variant?: 'button' | 'item'
+  close?: () => void
+}) {
   const notifyRuns = useGraphStore((s) => s.notifyRuns)
   const setNotifyRuns = useGraphStore((s) => s.setNotifyRuns)
   const setNotice = useGraphStore((s) => s.setNotice)
@@ -611,59 +832,76 @@ function NotifyToggle() {
       ? `Notifying you when a run over ${NOTIFY_FLOOR_SECONDS}s finishes while you are looking elsewhere. Click to stop.`
       : `Notify me when a run over ${NOTIFY_FLOOR_SECONDS}s finishes while I am looking elsewhere`
 
-  return (
-    <button
-      type="button"
-      className="btn btn--ghost btn--icon"
-      aria-pressed={on}
-      disabled={blocked}
-      onClick={() => {
-        // Granted covers both directions: `on` implies granted, so this is the plain toggle and
-        // everything below it is the one-time ask.
-        if (permission === 'granted') {
-          setNotifyRuns(!on)
-          // Every time it is switched on, not only the first time permission was given — the
-          // ask below is skipped entirely once a browser remembers the grant, and that is the
-          // path somebody re-testing this takes.
-          if (!on) showTestNotification()
-          return
-        }
-        void requestNotifyPermission().then((next) => {
-          setPermission(next)
-          if (next === 'granted') {
-            setNotifyRuns(true)
-            // One now, while they are looking. Granting permission is otherwise the only step
-            // in this feature with no visible result, and the next notification is a long run
-            // away on a tab they have left — so a chain broken anywhere (a Focus mode, the
-            // browser not allowed to post at the OS level) presents as silence much later,
-            // which reads as the feature not working rather than as the machine refusing.
-            showTestNotification()
-            setNotice(
-              `Notifications on — runs over ${NOTIFY_FLOOR_SECONDS}s will say so while you are away`,
-            )
-          } else if (next === 'denied') {
-            setNotice('This browser blocked notifications for Coda')
-          } else {
-            /*
-             * Still `default`: the prompt was dismissed rather than answered, or the browser
-             * never showed it — Chrome's "quieter notification permissions" demotes it to an
-             * icon in the address bar, and Firefox can be set to suppress it outright. All
-             * three resolve here, and without this the click is a silent no-op, which reads as
-             * the button being broken. Asking again is allowed from `default`, so say so.
-             */
-            setNotice('Notifications were not allowed yet — click the bell again to ask')
-          }
-        })
-      }}
-      // Named for a screen reader, and named for what pressing it would *do* rather than for
-      // what it currently is — the same call every other toggle in this toolbar makes.
-      aria-label={on ? 'Turn off run notifications' : 'Notify me when a run finishes'}
-      title={title}
-    >
-      <BellIcon slashed={blocked} />
-    </button>
+  const ask = () => {
+    // Granted covers both directions: `on` implies granted, so this is the plain toggle and
+    // everything below it is the one-time ask.
+    if (permission === 'granted') {
+      setNotifyRuns(!on)
+      // Every time it is switched on, not only the first time permission was given — the
+      // ask below is skipped entirely once a browser remembers the grant, and that is the
+      // path somebody re-testing this takes.
+      if (!on) showTestNotification()
+      return
+    }
+    void requestNotifyPermission().then((next) => {
+      setPermission(next)
+      if (next === 'granted') {
+        setNotifyRuns(true)
+        // One now, while they are looking. Granting permission is otherwise the only step
+        // in this feature with no visible result, and the next notification is a long run
+        // away on a tab they have left — so a chain broken anywhere (a Focus mode, the
+        // browser not allowed to post at the OS level) presents as silence much later,
+        // which reads as the feature not working rather than as the machine refusing.
+        showTestNotification()
+        setNotice(
+          `Notifications on — runs over ${NOTIFY_FLOOR_SECONDS}s will say so while you are away`,
+        )
+      } else if (next === 'denied') {
+        setNotice('This browser blocked notifications for Coda')
+      } else {
+        /*
+         * Still `default`: the prompt was dismissed rather than answered, or the browser
+         * never showed it — Chrome's "quieter notification permissions" demotes it to an
+         * icon in the address bar, and Firefox can be set to suppress it outright. All
+         * three resolve here, and without this the click is a silent no-op, which reads as
+         * the button being broken. Asking again is allowed from `default`, so say so.
+         */
+        setNotice('Notifications were not allowed yet — click the bell again to ask')
+      }
+    })
+  }
+
+  /*
+   * A descriptor like every other folding control, built here rather than in the toolbar's table
+   * because the browser's answer is learned by *asking* and asking is this component's click.
+   * That is the only thing local about it — the markup is `ActionButton`'s and `ActionItem`'s,
+   * so a change to a menu row's shape reaches the bell too. Written out by hand, it did not.
+   *
+   * Named for what pressing it would *do* rather than for what it currently is, which is the
+   * call every other toggle in this toolbar makes. The blurb is the tooltip: on a touchscreen
+   * there is no hover, so a control whose state lives in a `title` has no visible state at all.
+   */
+  const action: ToolbarAction = {
+    label: on ? 'Turn off run notifications' : 'Notify me when a run finishes',
+    blurb: title,
+    face: <BellIcon slashed={blocked} />,
+    title,
+    icon: true,
+    pressed: on,
+    disabled: blocked,
+    onClick: ask,
+  }
+
+  return variant === 'item' ? (
+    <ActionItem action={action} close={close ?? noop} />
+  ) : (
+    <ActionButton action={action} />
   )
 }
+
+/** For the bell as a row: `ActionItem` always closes, and a caller outside a menu has nothing
+    to close. */
+const noop = () => {}
 
 // ---------------------------------------------------------------------------
 
@@ -1166,6 +1404,36 @@ function ExportItem({
   )
 }
 
+/**
+ * Whether a panel about to open at `edge` would run off the window, measured from real rects.
+ *
+ * Both menus in this file need it and each had written it out: `Submenu` for its flyouts from
+ * the start, `Dropdown` when the narrow shell put four menus on a 412px row. What they disagree
+ * about is one token — which edge of the trigger the panel hangs from — so that is the argument,
+ * and the 8px gutter, the measure-on-open rule and the null-rect guard are stated once.
+ *
+ * Measured rather than decided at a breakpoint, because what matters is where *this* menu ended
+ * up, which depends on how wide the workflow's name rendered.
+ */
+function useFlipToFit(
+  ref: React.RefObject<HTMLDivElement | null>,
+  open: boolean,
+  panelSelector: string,
+  edge: 'left' | 'right',
+): boolean {
+  const [flip, setFlip] = useState(false)
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const row = ref.current?.getBoundingClientRect()
+    const panel = ref.current?.querySelector(panelSelector)?.getBoundingClientRect()
+    if (!row || !panel) return
+    setFlip(row[edge] + panel.width > window.innerWidth - 8)
+  }, [open, ref, panelSelector, edge])
+
+  return flip
+}
+
 function Dropdown({
   label,
   title,
@@ -1197,6 +1465,14 @@ function Dropdown({
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const close = useCallback(() => setOpen(false), [])
+  /*
+   * A top-level menu opens at its trigger's left edge, so it flips when there is not room to the
+   * right of that. It reaches these menus at all because the narrow shell puts them on a 412px
+   * row: a 260px panel opening two thirds of the way along it runs past the window, and an
+   * absolutely-positioned box past the window is scrollable overflow — which is the thing that
+   * makes a phone zoom out.
+   */
+  const flip = useFlipToFit(ref, open, '.dropdown__panel', 'left')
 
   useDismissOnOutside(ref, close, { enabled: open })
 
@@ -1218,7 +1494,11 @@ function Dropdown({
         {label} ▾
       </button>
       {open && (
-        <div className={`dropdown__panel${flyouts ? ' dropdown__panel--flyouts' : ''}`}>
+        <div
+          className={`dropdown__panel${flyouts ? ' dropdown__panel--flyouts' : ''}${
+            flip ? ' dropdown__panel--right' : ''
+          }`}
+        >
           {children(() => setOpen(false))}
         </div>
       )}
@@ -1254,24 +1534,12 @@ function Submenu({
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  /**
-   * Which side the flyout is on, decided from a real rect on each open.
-   *
-   * The `?` menu sits mid-toolbar, so at an ordinary window width the right side is free — but
-   * the toolbar is not fixed-width and the panel is 260px, so on a narrow window the flyout ran
-   * off the viewport with no scrollbar to reach it by. Measured rather than guessed at a
-   * breakpoint, because what matters is where this particular menu ended up, which depends on
-   * how wide the graph's name rendered.
+  /*
+   * Which side the flyout is on. A flyout opens *beside* its row, so what has to fit is the room
+   * to the right of that row's right edge — the one difference from a top-level menu, and the
+   * reason `useFlipToFit` takes the edge as an argument.
    */
-  const [flip, setFlip] = useState(false)
-
-  useLayoutEffect(() => {
-    if (!open) return
-    const row = ref.current?.getBoundingClientRect()
-    const panel = ref.current?.querySelector('.dropdown__flyout')?.getBoundingClientRect()
-    if (!row || !panel) return
-    setFlip(row.right + panel.width > window.innerWidth - 8)
-  }, [open])
+  const flip = useFlipToFit(ref, open, '.dropdown__flyout', 'right')
 
   return (
     <div

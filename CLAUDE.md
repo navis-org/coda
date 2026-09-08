@@ -470,6 +470,36 @@ Area-specific — the rule, then the doc that holds why:
   `false` to everything. The acknowledgement records **that** the reader answered, never the size;
   growing the viewport dismisses it and writes **nothing**.
   See [docs/ui-shell.md](docs/ui-shell.md).
+- **A row that does not wrap does not clip — it moves the whole page, and only on a phone.** The
+  toolbar's 21 controls come to **973px** of min-content width and it had no `flex-wrap`, so the
+  *document* was 973 wide; a mobile browser answers that by zooming out to fit — 412/973 = **0.42**
+  on a Pixel 7 — and every reported symptom is that number. The app fills the **top 42%** of the
+  screen (visible area 973 × 2161 against a `100dvh` shell of 915), and the status bar is 412 wide
+  under a toolbar painting to 973, because it spans the *tracks* while the row overflows them. It
+  reads as a broken layout. **A desktop browser cannot show it** — at 412px a window has a scrollbar
+  and no minimum scale, which is why the responsive dev tools were "much better behaved" — and
+  neither can jsdom, so the measurement is `pnpm probe:mobile` (Chrome over CDP,
+  `setDeviceMetricsOverride`, no dependency) and the property is **the document is never wider than
+  the viewport**. Below `NARROW_QUERY` (`max-width: 720px`, **width only**, since a short desktop
+  window has all the width it needs) the row keeps the document menus, Run and `⛶` and folds the
+  rest into `⋯`: 973 → 412, one 42px row, 845px of canvas. The threshold is **TypeScript, stamped as
+  `data-narrow`** — a stylesheet cannot import a constant, and the two halves disagreeing by 40px
+  hides controls nothing put in the menu; the rule that survives is **a plain media query wherever no
+  React branch is paired with it, the attribute only where one is** (`editor.css` writes its own 720
+  for the shortcuts dialog, and is right to). Three rules from the fold: a control's **`label` is its
+  menu row *and* its accessible name** (two fields is how a control gets two names, and `title` is
+  the *tooltip*, which is a poor thing to hear read aloud); what stays out of the descriptor table is
+  decided by the **shape a menu row can take**, never by holding state — the bell keeps its
+  `useState` and still builds a descriptor, where written out by hand it was a third copy of both
+  renderers; and the **Connections trigger had to leave `SourcesPanel`**, because the menu unmounts
+  on the click that opens the dialog. Chords come from **`shortcutKeys`**, never typed — a table
+  built by hand is exactly where `⌘Z` gets advertised to Windows. **No `Submenu` inside `⋯`** — a
+  flyout at `left: 100%` of a 260px panel is off a 412px screen either way — which is why
+  New/Open/Save stay on the row, and why both menus now flip through one **`useFlipToFit`**, the
+  gutter and the measure-on-open rule stated once. An open panel takes the **screen**, not a 320px
+  column beside 92px of canvas — off `--inspector-width` and off **stamped attributes, never
+  `:has()`**, so "both open, the inspector wins" is a selector rather than a fact about source
+  order. What none of this touches is **touch**. See [docs/ui-shell.md](docs/ui-shell.md).
 - **A run notification is opt-in, but the tab title is not, and the fallback is the feature.**
   `Notification.requestPermission()` is refused outside a user gesture, so the bell's *click* is the
   prompt. **`denied` is terminal** — a page can never ask twice and hears nothing when the user

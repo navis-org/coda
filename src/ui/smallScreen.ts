@@ -8,6 +8,15 @@
  * of a responsive layout: it says what the app expects, offers the three pages that genuinely do
  * read on a phone, and gets out of the way if the reader wants in regardless.
  *
+ * ## Two thresholds, one number
+ *
+ * There are two questions here, and they share the width. `SMALL_SCREEN_QUERY` decides whether
+ * to put the notice up at all; `NARROW_QUERY` decides whether the shell folds its toolbar into
+ * one row and lets an open panel take the screen — which is what the reader who presses
+ * "Open it anyway" then gets. The second is **width only**, deliberately: a desktop window that
+ * is short is not a window whose toolbar needs collapsing, and folding it there would take the
+ * controls away from somebody with 1400px of room for them.
+ *
  * ## Why a media query and not the user agent
  *
  * What makes the shell unusable is the viewport, and a phone is only the commonest way to have a
@@ -40,28 +49,23 @@ import { useSyncExternalStore } from 'react'
 
 import { channel } from '../data/channel'
 import { loadSmallScreenAck, saveSmallScreenAck } from '../store/persistence'
-
-/** Exported so the test can drive it, and so there is one spelling of the threshold. */
-export const SMALL_SCREEN_QUERY = '(max-width: 720px), (max-height: 560px)'
-
-const changed = channel()
+import { mediaMatches, resetMediaForTest, subscribeMedia, useMediaQuery } from './mediaQuery'
 
 /**
- * The `MediaQueryList`, on first ask. `null` records "asked, and this environment has no
- * `matchMedia`" — jsdom without `installJsdomStubs`, and anything server-rendered — so the
- * lookup is not retried on every render.
+ * The shell is narrow: one toolbar row with the rest behind `⋯`, and an open panel takes the
+ * screen rather than a column of it. Width only — see the module note.
+ *
+ * Read by `App`, which stamps `data-narrow` on `.app` for the CSS half. **The number lives
+ * here and nowhere else**, which is why the CSS asks the attribute rather than repeating the
+ * query: a stylesheet that disagreed with this by 40px would hide the toolbar's controls at a
+ * width where nothing had put them in the menu.
  */
-let query: MediaQueryList | null | undefined
+export const NARROW_QUERY = '(max-width: 720px)'
 
-function media(): MediaQueryList | undefined {
-  if (query === undefined) {
-    query =
-      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-        ? window.matchMedia(SMALL_SCREEN_QUERY)
-        : null
-  }
-  return query ?? undefined
-}
+/** Exported so the test can drive it, and so there is one spelling of the threshold. */
+export const SMALL_SCREEN_QUERY = `${NARROW_QUERY}, (max-height: 560px)`
+
+const changed = channel()
 
 /**
  * The stored answer, on first ask.
@@ -72,15 +76,17 @@ function media(): MediaQueryList | undefined {
  */
 let acknowledged: boolean | undefined
 
-/** Registered once and never removed — the query is a module-level singleton and so is this. */
-let watching = false
-
+/**
+ * Both halves of the answer: the viewport, and whether anybody has waved it away. Two
+ * subscriptions rather than one, because the notice goes down for either reason.
+ */
 function subscribe(listener: () => void): () => void {
-  if (!watching) {
-    watching = true
-    media()?.addEventListener('change', () => changed.notify())
+  const stopMedia = subscribeMedia(SMALL_SCREEN_QUERY, listener)
+  const stopAck = changed.subscribe(listener)
+  return () => {
+    stopMedia()
+    stopAck()
   }
-  return changed.subscribe(listener)
 }
 
 /**
@@ -94,7 +100,7 @@ function subscribe(listener: () => void): () => void {
 function snapshot(): boolean {
   if (acknowledged === undefined) acknowledged = loadSmallScreenAck()
   if (acknowledged) return false
-  return media()?.matches ?? false
+  return mediaMatches(SMALL_SCREEN_QUERY)
 }
 
 /**
@@ -118,16 +124,21 @@ export function acknowledgeSmallScreen(): void {
 }
 
 /**
+ * Is the shell in its narrow arrangement? Unaffected by the acknowledgement — this is about the
+ * window, not about what anybody was told.
+ */
+export function useNarrowShell(): boolean {
+  return useMediaQuery(NARROW_QUERY)
+}
+
+/**
  * Forget the answer and re-read the environment. Tests only.
  *
- * `watching` goes back with the rest, because a suite that swaps `matchMedia` leaves the change
- * listener attached to the `MediaQueryList` it just replaced. The next mount re-attaches; a
- * component still mounted across a reset keeps the stale subscription, which no suite does and
- * the app never can.
+ * The media registry goes with it, because a suite that swaps `matchMedia` leaves it holding a
+ * `MediaQueryList` that belongs to the list it just replaced.
  */
 export function resetSmallScreenForTest(): void {
   acknowledged = undefined
-  query = undefined
-  watching = false
+  resetMediaForTest()
   changed.notify()
 }

@@ -79,7 +79,14 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const open = () => fireEvent.click(screen.getByRole('button', { name: 'Connections' }))
+/*
+ * Through the store rather than through the button, because the button is not this component's:
+ * it is a `ToolbarAction` in `Toolbar`, where it has to be so that the narrow shell can fold it
+ * into the `⋯` menu without the click that opens this dialog unmounting the thing that owns it.
+ * `SourcesPanel` renders the dialog and nothing else — so the suite opens it the way every other
+ * caller does. `panels.test.tsx` is where the button's own name is pinned.
+ */
+const open = () => act(() => useGraphStore.getState().openSources())
 /** Scoped, because the section bar is a tablist too and both hold a tab called by a name. */
 const sourceTabs = () => within(screen.getByRole('tablist', { name: 'Data sources' }))
 const tab = (name: string) => sourceTabs().getByRole('tab', { name })

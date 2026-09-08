@@ -49,8 +49,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { IssueText } from '../IssueText'
 
-import { ConnectionsIcon } from '../Icons'
-
 import { listBases } from '../../data/annotations'
 import {
   SEATABLE_HOSTS,
@@ -497,18 +495,15 @@ export function SourcesPanel() {
     closePanel()
   }, [token, server, notify, closePanel])
 
+  /*
+   * The dialog and nothing else. The button that opens it is a `ToolbarAction` in `Toolbar`,
+   * which is where it is drawn — and it has to be, because on the narrow shell that button is a
+   * row of the `⋯` menu, and a trigger rendered *inside* the menu would be unmounted by the
+   * click that used it, taking this dialog down with it. `EdgeSetPanel` beside it in the toolbar
+   * has had exactly this shape from the start: mounted by the toolbar, opened through the store.
+   */
   return (
     <>
-      <button
-        type="button"
-        className="btn btn--ghost btn--icon"
-        data-tour="connections"
-        onClick={openPanel}
-        title="Connections — data sources, API keys and sharing"
-        aria-label="Connections"
-      >
-        <ConnectionsIcon />
-      </button>
       {open && (
         <Dialog
           onClose={closePanel}

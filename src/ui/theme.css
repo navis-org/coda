@@ -505,10 +505,28 @@
   box-sizing: border-box;
 }
 
-html,
+/*
+ * `dvh` rather than `100%`, and it is the mobile browsers this is for. A percentage height
+ * resolves against the initial containing block, which a phone sizes to the viewport it has
+ * when the page loads — so the shell keeps the height it was born with while the URL bar slides
+ * away underneath it, and the status bar ends up either short of the bottom edge or below it.
+ * `dvh` is the one unit that tracks that chrome as it moves. `100%` is kept as the fallback
+ * line for anything that has never heard of the unit; on a desktop the two are identical.
+ *
+ * Stated on `html` alone: the other two resolve their `100%` against it, so the fact lives at
+ * the one end of the chain that is measured against the viewport rather than against a parent.
+ */
+html {
+  height: 100%;
+  height: 100dvh;
+}
 body,
 #root {
   height: 100%;
+}
+html,
+body,
+#root {
   margin: 0;
 }
 
@@ -607,9 +625,24 @@ button {
   grid-template-columns: minmax(0, 1fr) minmax(min(360px, 60%), var(--dock-width, 50%)) auto;
 }
 
+/*
+ * **`flex-wrap` is load-bearing, and it is the one line that fixes a phone.** This row's
+ * controls come to 973px of min-content width. Without a wrap they simply overflow, which makes
+ * the *document* 973px wide — and a mobile browser answers a document wider than its viewport by
+ * zooming out far enough to fit it: 412/973 = 0.42 on a Pixel 7. At that scale the page is
+ * 2161 CSS px tall against a shell that is `100dvh` = 915, so the app occupies the top 42% of
+ * the screen and the status bar hangs in mid-air over the body's background — which is exactly
+ * how this was reported, and reads as a broken layout rather than as an overflowing toolbar.
+ * Measured, before and after, by `pnpm probe:mobile`.
+ *
+ * The narrow shell below folds most of this into a `⋯` menu, so the wrap is the safety net
+ * rather than the design: it is what covers the band between 720px and 973px, and what keeps a
+ * long workflow name or a wide translation from pushing the row off the edge at any width.
+ */
 .toolbar {
   grid-area: toolbar;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
@@ -724,12 +757,68 @@ button {
 
 .inspector {
   grid-area: inspector;
-  width: 320px;
+  width: var(--inspector-width, 320px);
   background: var(--surface-1);
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+/* --------------------------------------------------------------------------
+ * The narrow shell
+ *
+ * Everything keyed on `data-narrow`, which `App` stamps from `NARROW_QUERY` — the threshold has
+ * one spelling and it is in `smallScreen.ts`, because the other half of this arrangement is a
+ * React branch in `Toolbar` and a stylesheet that disagreed with it by 40px would hide controls
+ * that nothing had put in the `⋯` menu.
+ *
+ * The shape: the toolbar keeps the document menus, Run and fullscreen and folds the rest away,
+ * and a panel that would be a *column* beside the canvas takes the screen instead. At 412px a
+ * 320px inspector leaves 92px of canvas, which is not a split — it is the panel, with a strip of
+ * graph beside it that cannot be read or worked in.
+ * -------------------------------------------------------------------------- */
+
+/* The gap and the padding are worth 24px here, which is the difference between one row and two
+   on a 412px phone. Left alone everywhere else. */
+.app[data-narrow] .toolbar {
+  gap: 4px;
+  padding: 6px;
+}
+
+/* The wordmark goes and the mark stays: the tab already says Coda, and 36px is a control. */
+.app[data-narrow] .toolbar__brand {
+  margin-right: 0;
+}
+.app[data-narrow] .toolbar__brand strong {
+  display: none;
+}
+
+/*
+ * An open dock takes the screen, and so does an open inspector. Written as the grid template
+ * rather than as a width on the panel, because the panel's own column is `auto` — a percentage
+ * width on it would resolve against a track sized by its content, which is the panel. The
+ * inspector's own width comes off `--inspector-width` for the same reason `--dock-width` exists:
+ * a value the arrangement sets, rather than an override of a value it disagrees with.
+ *
+ * Both panels are read from `data-` attributes `App` stamps, never from `:has()`. The third rule
+ * is why: with both open the inspector wins — a pin is something you left open, the inspector is
+ * what you just asked for — and as a selector that is *stated*, where two `:has()` rules of equal
+ * specificity would leave it to whichever was typed second. Hiding the dock rather than shrinking
+ * it is the same argument: 92px of pinned viewer is not a viewer. Closing the inspector brings it
+ * back, and nothing is unmounted, so a live scene keeps its WebGL context throughout.
+ */
+.app[data-narrow] {
+  --inspector-width: auto;
+}
+.app[data-narrow][data-dock='open'] {
+  grid-template-columns: 0 minmax(0, 1fr) auto;
+}
+.app[data-narrow][data-inspector='open'] {
+  grid-template-columns: 0 auto minmax(0, 1fr);
+}
+.app[data-narrow][data-inspector='open'][data-dock='open'] .viewer-dock {
+  display: none;
 }
 
 .statusbar {

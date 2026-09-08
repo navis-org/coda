@@ -24,6 +24,7 @@ import { Toolbar } from './ui/panels/Toolbar'
 import { ViewerDock } from './ui/panels/ViewerDock'
 import { GroupPeek } from './ui/panels/GroupPeek'
 import { ViewerOverlay } from './ui/panels/ViewerOverlay'
+import { useNarrowShell } from './ui/smallScreen'
 
 export function App() {
   const theme = useGraphStore((s) => s.theme)
@@ -35,11 +36,26 @@ export function App() {
   const docked = useGraphStore((s) => s.pinnedNodeId !== undefined)
   const dockFraction = useGraphStore((s) => s.dockFraction)
   /*
+   * The inspector's column is declared on `.app` too, so the same rule applies to it: `.app` is
+   * what has to know. The narrow shell is the first arrangement that needs to *combine* the two
+   * — an open inspector wins over an open dock — and with both stamped that precedence is a
+   * selector rather than a fact about which rule was typed second. Asking the DOM instead
+   * (`:has(.inspector)`) would also be a second mechanism for a question this one already
+   * answers, three lines apart, and the attribute is the half a jsdom test can see.
+   */
+  const inspectorOpen = useGraphStore((s) => s.panels.inspector)
+  /*
    * Which view occupies the canvas column. One or the other, never both — see `DashboardView`
    * for why that is about WebGL contexts rather than about screen space. React Flow unmounts
    * with `Editor`, taking every card's live preview with it.
    */
   const dashboardOpen = useGraphStore((s) => s.dashboardOpen)
+  /*
+   * The narrow shell. Stamped here rather than asked as a media query in the stylesheet, so the
+   * threshold has one spelling (`smallScreen.ts`) — the toolbar's half of it is a React branch
+   * and the two must agree, or the buttons the CSS hides are buttons nothing put in the menu.
+   */
+  const narrow = useNarrowShell()
 
   /*
    * Fullscreen, the inspector, the assistant and the dashboard toggle. Mounted here rather than
@@ -58,6 +74,8 @@ export function App() {
     <div
       className="app"
       data-dock={docked ? 'open' : undefined}
+      data-inspector={inspectorOpen ? 'open' : undefined}
+      data-narrow={narrow ? 'true' : undefined}
       style={{ '--dock-width': `${dockFraction * 100}%` } as React.CSSProperties}
     >
       <Toolbar />

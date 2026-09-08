@@ -3530,6 +3530,19 @@ select.field {
   font-family: var(--font-mono);
 }
 
+/*
+ * Gone on the narrow shell, and the reason is **space**: wrapped over three lines these were
+ * taking more of a phone's screen than the run summary beside them.
+ *
+ * Not "a phone has no keyboard", tempting as that is. Width is a poor proxy for that question —
+ * a 520px desktop window is narrow and has a keyboard, a phone in landscape is 915px and does
+ * not — and the platform half of it already has a home: `shortcuts.ts` picks ⌘ from Ctrl, which
+ * is the incident `StatusBar` records. A stylesheet is not the place for a second answer.
+ */
+.app[data-narrow] .shortcut-hints {
+  display: none;
+}
+
 /* --------------------------------------------------------------------------
  * Full-size viewer overlay
  * -------------------------------------------------------------------------- */
@@ -4071,6 +4084,37 @@ select.field {
   box-shadow: var(--shadow-panel);
   padding: 3px;
 }
+/*
+ * Anchored to the trigger's right edge instead, when opening at its left would run the panel off
+ * the window. Measured on each open — `Dropdown` does what `Submenu` already did, and for the
+ * same reason: the panel is 260px and this row is not fixed-width, so where a given menu ends up
+ * depends on how wide the workflow's name rendered. It matters more than it used to, because an
+ * overflowing panel is *scrollable overflow* — the document grows to hold it and a phone zooms
+ * out to fit the document, which is the failure the toolbar's wrap exists to prevent.
+ */
+.dropdown__panel--right {
+  left: auto;
+  right: 0;
+}
+
+/*
+ * A row of the `⋯` menu holding a control rather than a command: the workflow name and the
+ * Auto-run checkbox, which are the same elements the wide toolbar draws and are rendered here
+ * rather than re-spelt as menu items. Padded to line up with `.dropdown__item`'s text.
+ */
+.dropdown__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+}
+.dropdown__row .toolbar__name {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  border-color: var(--border);
+}
+
 .dropdown__item {
   display: block;
   width: 100%;

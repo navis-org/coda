@@ -931,9 +931,16 @@ says what, the `.small-screen*` block in `editor.css` draws it, and
 canvas of cards you place and wire, an inspector, a dock, and viewers that want every pixel.
 None of that has a phone-sized form, and a workflow you cannot see the shape of is not a
 workflow you can reason about — so the position taken here is that small screens are not
-supported, said once, plainly, with a way through. What was there before was worse than either
-answer: a shell that laid out at whatever width it was given, which on a handset is a toolbar
-wrapped onto three rows and a canvas the reader cannot tell is broken from being empty.
+supported, said once, plainly, with a way through. That position is unchanged. What has changed
+is what is *behind* the button, which is the next section: a notice saying "the layout will not
+hold together" in front of a shell that was genuinely broken was under-selling the problem, and
+"not supported" and "not working" are different promises.
+
+This paragraph used to say the shell behind it laid out "a toolbar wrapped onto three rows",
+and that was a guess — it did not wrap at all, which is the whole of what was wrong with it. The
+guess is left here on purpose: it is the shape of the mistake. A plausible description of a
+failure nobody had measured stood in for the measurement for as long as the notice made it
+somebody else's problem.
 
 **A media query, not the user agent, and both axes.** What makes the shell unusable is the
 viewport, and a phone is only the commonest way to have a small one — a desktop window dragged
@@ -986,9 +993,134 @@ link very often wanted one of those, and offering them beats both "sorry" and a 
 cannot use. Through `import.meta.env.BASE_URL`, like every other in-app link to them, because
 `base` is `'./'` and an absolute path 404s off the domain root on GitHub Pages.
 
-**Not driven in a real browser yet.** The logic is covered; the *look* at 390×844 is not, and
-jsdom performs no layout. Check it with `pnpm dev` and a device emulation preset before trusting
-the padding.
+**Driven in a real browser.** `pnpm probe:mobile` is what does it — see the next section, which
+exists because a device-emulation preset in the desktop dev tools does *not* reproduce what a
+phone does with this page.
+
+## What a phone gets behind the notice: the narrow shell
+
+`NARROW_QUERY` in `src/ui/smallScreen.ts` (`(max-width: 720px)`), stamped onto `.app` as
+`data-narrow` by `App`, read by `Toolbar` for the fold and by `theme.css` for everything else.
+`pnpm probe:mobile` measures it.
+
+**The reported bug was one missing line, and the arithmetic is worth keeping.** The toolbar was
+a flex row with no `flex-wrap` whose 21 controls come to **973px** of min-content width. Below
+that it did not wrap and did not clip: it overflowed, and an overflowing row makes the
+*document* wider than the viewport. A mobile browser answers a document wider than its viewport
+by zooming out far enough to fit it — 412/973 = **0.42** on a Pixel 7 — and every symptom follows
+from that one number. At 0.42 the visible area is 973 × **2161** CSS px while the shell is
+`100dvh` = 915, so the app occupies the **top 42%** of the screen with the body's background
+below it; the status bar spans the grid's tracks, so it is **412px wide under a toolbar painting
+out to 973**. It was reported as "the canvas only fills a fraction of the height, the footer
+hovers above the bottom and doesn't fill the width", which is an exact description of an
+overflowing flex row and reads like nothing of the sort. In landscape the same 973 against 915
+is a scale of 0.94, which is why it was "worse in portrait".
+
+**A desktop browser cannot show you any of this**, and that is the second half of the finding.
+At 412px wide a desktop window has an ordinary scrollbar and no minimum scale, so the same
+document is merely scrollable — "much better behaved", in the report. Nothing in the suite can
+see it either: jsdom performs no layout. So the measurement is `scripts/probe-mobile.mjs`,
+driving Chrome over the DevTools protocol with `Emulation.setDeviceMetricsOverride`, and the
+property it holds is one line — **the document is never wider than the viewport it was given**.
+No dependency: Node 22+ has a global `WebSocket`.
+
+**`flex-wrap: wrap` is the fix and the fold is the design.** The wrap alone takes the document
+from 973 to 412 and puts the status bar back on the bottom edge; what it costs is a toolbar
+three rows deep, 107px of an 832px canvas. So below `NARROW_QUERY` the row keeps the brand mark,
+the three document menus, `?`, Run, `⛶` and a `⋯` menu holding the rest. Measured after:
+
+| viewport | shell | toolbar | canvas | document |
+| --- | --- | --- | --- | --- |
+| Pixel 7 portrait, 412×915 | narrow | 42px, **1 row** | 845px | 412 = viewport |
+| iPhone SE portrait, 375×667 | narrow | 72px, 2 rows | 567px | 375 = viewport |
+| Pixel 7 landscape, 915×412 | wide | 74px, 2 rows | 310px | 915 = viewport |
+| iPad mini portrait, 744×1133 | wide | 74px, 2 rows | 1031px | 744 = viewport |
+
+The tablet row is the one to read twice. 744 is above the narrow threshold, so it keeps the
+whole toolbar — and 744 is below 973, so the wrap gives it two rows. That is not a regression
+from one row: before, a tablet had Run, Auto-run, Clear, the bell and the theme toggle **off the
+right-hand edge**, reachable only by scrolling the document sideways.
+
+**The threshold is width only, where the notice's is both axes.** A phone in landscape is wide,
+which is why `SMALL_SCREEN_QUERY` also asks `max-height` — but a *short* desktop window is not a
+window whose toolbar needs collapsing, and folding it there would take the controls away from
+somebody with 1400px of room for them. So `SMALL_SCREEN_QUERY` is composed from `NARROW_QUERY`
+(`` `${NARROW_QUERY}, (max-height: 560px)` ``).
+
+**The number is in TypeScript and the CSS reads an attribute**, rather than both writing a media
+query. There is no way for a stylesheet to import a constant, and the two halves of this
+arrangement are a React branch and a rule block: a stylesheet that disagreed with the branch by
+40px would hide the keyboard hints and leave a 320px inspector column on a screen where nothing
+had put those controls in the menu. `narrow.test.tsx` pins the attribute for that reason —
+nothing about the toolbar's rendering says whether it went on.
+
+That is not a rule against writing `720` in CSS, and `editor.css` already does, independently,
+for the shortcuts dialog's column count. The rule is narrower and worth stating in the form that
+survives: **a plain media query is right wherever no React branch is paired with it;
+`data-narrow` is right only where one is.** Two rules under the attribute — the toolbar's gap and
+the hidden wordmark — would pass that test as media queries; they are here so that one shell
+arrangement is not assembled from two switches.
+
+**The controls that fold are declared once and rendered twice.** `ToolbarAction` in `Toolbar.tsx`
+is the table; `ActionButton` draws the row, `ActionItem` draws the menu row. Three rules fell
+out of building it:
+
+- **`label` is the menu row's first line *and* the button's accessible name**, one field for
+  both, because they are the same sentence — short, a verb phrase, read without the glyph beside
+  it. Two fields is how a control comes to be called two things, and the name is the half nothing
+  on screen shows you is wrong. It also gave `↶`, `↷`, `◐` and `Clear` accessible names they did
+  not have.
+- **What is *not* in the table is decided by state, not by importance.** A descriptor is a value
+  recomputed every render, so the bell (which holds the browser's permission answer), the
+  workflow name, Auto-run and Run keep their own components. The first three take a `variant`
+  instead; the name field and Auto-run are rendered *as themselves* inside a `.dropdown__row`,
+  which is what lets every other row close the menu on its click with no exception.
+- **The Connections trigger moved from `SourcesPanel` to the table**, leaving that component the
+  dialog and nothing else — the shape `EdgeSetPanel` always had. It had to: the `⋯` menu unmounts
+  on the click that opens the dialog, so a trigger rendered inside the menu would take the dialog
+  down with it. `sources.test.tsx` opens the dialog through the store now, in one line.
+
+**No `Submenu` inside `⋯`, and that is why New/Open/Save stay on the row.** A flyout opens at
+`left: 100%` of a 260px panel, which on a 412px screen is off the edge one way and, flipped, off
+it the other. Three of the four remaining menus *are* menus, so folding them in would make them
+unreachable rather than one tap deeper. Both menus flip through one `useFlipToFit`, which is
+what `Submenu` had written out alone: an absolutely-positioned panel past the window is
+scrollable overflow, which is the thing that makes a phone zoom out, and that is true of every
+menu rather than of this one. What the two disagree about is a single token — a top-level panel
+hangs from its trigger's left edge, a flyout from the row's right — so that is the argument, and
+the 8px gutter is stated once.
+
+**An open panel takes the screen rather than a column of it.** At 412px a 320px inspector leaves
+92px of canvas, which is not a split — it is the panel with a strip of graph beside it that
+cannot be read or worked in. Written as the grid template rather than as a width on the panel,
+because the panel's column is `auto` and a percentage on it would resolve against a track sized
+by its own content; the inspector's own width comes off `--inspector-width`, for the reason
+`--dock-width` exists — a value this arrangement *sets* rather than an override of one it
+disagrees with. Measured on a Pixel 7: dock alone 412 with the canvas at 0; inspector alone the
+same; **both open, the inspector wins and the dock goes to `display: none`** — a pin is something
+you left open, the inspector is what you just asked for, and closing it brings the dock back with
+nothing unmounted, so a live scene keeps its WebGL context throughout.
+
+**Both panels are read from attributes `App` stamps, never from `:has()`**, and the precedence is
+why. `data-dock` already existed on this argument — "the dock's column is declared on `.app`, so
+`.app` is what has to know about it" — and the inspector's column is declared on the same element
+from the same store. Asked with `:has(.inspector)` the two rules are the same specificity, so
+"the inspector wins" would be a fact about which was typed second rather than something stated;
+with both stamped it is a third selector that says so. It is also the only half of this a test
+with no layout can reach, which is what `narrow.test.tsx` asserts.
+
+**`⛶` is the one control that earns its place on a phone rather than despite being one.** A
+mobile browser's chrome is ~56px of a ~915px screen and it comes back on every scroll gesture;
+fullscreen is how the canvas gets it. The height chain is `100dvh` for the other half of that —
+a percentage height resolves against the initial containing block, which a phone sizes to the
+viewport the page loaded with, so the shell would keep a height the chrome no longer agrees with.
+
+**What this does not touch is touch.** A control that fits is not a control a finger can hit:
+wiring by dragging a 20px socket, hover-only affordances, long-press against `contextmenu`, and
+the viewers' own pinch-zoom competing with the page's are all untested and mostly unbuilt. The
+probe cannot see any of it. The tour degrades honestly rather than breaking — a folded control
+has no `data-tour` anchor, `byTour` answers null, and `tour.ts` centres that step's popover
+instead of spotlighting nothing.
 
 ## Start page
 

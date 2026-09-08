@@ -7,9 +7,9 @@
  *
  * **The thresholds.** They are the whole design decision — a tablet must get the app and a phone
  * must get the notice, in both orientations — and jsdom evaluates no media query, so nothing else
- * in the suite can see them. `evaluate` below is a parser for exactly this query's shape and
- * refuses anything else, so the table of real device viewports is checking the *numbers* rather
- * than checking itself.
+ * in the suite can see them. `src/test/matchMedia.ts` is a parser for exactly this query's shape
+ * that refuses anything else, so the table of real device viewports is checking the *numbers*
+ * rather than checking itself.
  *
  * **The guides dialog standing down.** `coda.guidesSeen.v1` is written the moment that dialog
  * mounts, so a first visit on a phone would spend it behind an opaque backdrop and the reader
@@ -31,63 +31,17 @@ import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
 import { loadSmallScreenAck } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
+import type { Viewport } from '../../test/matchMedia'
+import { evaluateQuery, installMatchMedia, setViewport } from '../../test/matchMedia'
 import { SMALL_SCREEN_QUERY, resetSmallScreenForTest } from '../smallScreen'
 
-// ---------------------------------------------------------------------------
-// A matchMedia that actually answers
-// ---------------------------------------------------------------------------
-
-interface Viewport {
-  width: number
-  height: number
-}
-
-/**
- * Evaluate the notice's query against a viewport.
- *
- * Understands one shape — comma-separated `(max-width: Npx)` / `(max-height: Npx)` terms, OR-ed,
- * which is what a comma means in a media query list — and throws on anything else. That refusal
- * is deliberate: a query rewritten into a form this cannot read should fail loudly here rather
- * than quietly answering `false` and turning every case below green.
+/*
+ * The harness is `src/test/matchMedia.ts` — shared with `narrow.test.tsx`, which asks the other
+ * threshold declared in the same module. Its parser is what makes the table below check the
+ * *numbers* rather than check itself; see the note there.
  */
-function evaluate(query: string, view: Viewport): boolean {
-  return query.split(',').some((raw) => {
-    const term = /^\s*\(max-(width|height):\s*(\d+)px\)\s*$/.exec(raw)
-    if (!term) throw new Error(`smallScreen.test cannot read the term "${raw.trim()}"`)
-    const size = term[1] === 'width' ? view.width : view.height
-    return size <= Number(term[2])
-  })
-}
 
-let viewport: Viewport = { width: 1440, height: 900 }
-const listeners = new Set<() => void>()
-
-function installMatchMedia(): void {
-  Object.defineProperty(window, 'matchMedia', {
-    configurable: true,
-    writable: true,
-    value: (query: string) => ({
-      get matches() {
-        return evaluate(query, viewport)
-      },
-      media: query,
-      onchange: null,
-      addEventListener: (_: string, fn: () => void) => listeners.add(fn),
-      removeEventListener: (_: string, fn: () => void) => listeners.delete(fn),
-      addListener: () => {},
-      removeListener: () => {},
-      dispatchEvent: () => false,
-    }),
-  })
-}
-
-/** Resize, and tell whoever is watching — the browser fires `change` on the list itself. */
-function setViewport(next: Viewport): void {
-  viewport = next
-  act(() => {
-    for (const fn of [...listeners]) fn()
-  })
-}
+// ---------------------------------------------------------------------------
 
 const PHONE_PORTRAIT = { width: 390, height: 844 }
 const PHONE_LANDSCAPE = { width: 844, height: 390 }
@@ -102,8 +56,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   clearStorage()
-  listeners.clear()
-  viewport = DESKTOP
+  setViewport(DESKTOP)
   resetSmallScreenForTest()
   act(() => {
     // The state a first visit is in — the guides dialog's turn, which is what this has to get
@@ -145,7 +98,7 @@ describe('the small-screen thresholds', () => {
   ]
 
   it.each(devices)('%s', (_label, view, warned) => {
-    expect(evaluate(SMALL_SCREEN_QUERY, view)).toBe(warned)
+    expect(evaluateQuery(SMALL_SCREEN_QUERY, view)).toBe(warned)
   })
 })
 
@@ -158,13 +111,13 @@ describe('the small-screen notice', () => {
   })
 
   it('covers the app on a phone, in either orientation', () => {
-    viewport = PHONE_PORTRAIT
+    setViewport(PHONE_PORTRAIT)
     render(<App />)
     expect(notice()).toBeTruthy()
 
     cleanup()
     resetSmallScreenForTest()
-    viewport = PHONE_LANDSCAPE
+    setViewport(PHONE_LANDSCAPE)
     render(<App />)
     expect(notice()).toBeTruthy()
   })
@@ -174,7 +127,7 @@ describe('the small-screen notice', () => {
    * would burn the single visit it gets on a modal nobody saw.
    */
   it('holds back the first-run guides dialog, without spending it', () => {
-    viewport = PHONE_PORTRAIT
+    setViewport(PHONE_PORTRAIT)
     render(<App />)
     expect(guides()).toBeNull()
 
@@ -184,7 +137,7 @@ describe('the small-screen notice', () => {
   })
 
   it('stays away once, and stays away next visit', () => {
-    viewport = PHONE_PORTRAIT
+    setViewport(PHONE_PORTRAIT)
     render(<App />)
     fireEvent.click(proceed())
     expect(loadSmallScreenAck()).toBe(true)
@@ -201,15 +154,15 @@ describe('the small-screen notice', () => {
    * they pick up later.
    */
   it('gets out of the way when the viewport grows, and remembers nothing', () => {
-    viewport = PHONE_PORTRAIT
+    setViewport(PHONE_PORTRAIT)
     render(<App />)
     expect(notice()).toBeTruthy()
 
-    setViewport(DESKTOP)
+    act(() => setViewport(DESKTOP))
     expect(notice()).toBeNull()
     expect(loadSmallScreenAck()).toBe(false)
 
-    setViewport(PHONE_PORTRAIT)
+    act(() => setViewport(PHONE_PORTRAIT))
     expect(notice()).toBeTruthy()
   })
 })

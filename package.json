@@ -24,6 +24,7 @@
     "probe:skeletons": "node scripts/probe-skeletons.mjs",
     "probe:split": "python3 scripts/probe-split.py",
     "probe:meshes": "node scripts/probe-meshes.mjs",
+    "probe:mobile": "node scripts/probe-mobile.mjs",
     "probe:matches": "node scripts/probe-matches.mjs",
     "check:mirror": "python3 scripts/check-mirror.py",
     "probe:helpers": "python3 scripts/probe-py-helpers.py",
