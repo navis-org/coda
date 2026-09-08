@@ -206,3 +206,63 @@ describe('the same grid on a group frame', () => {
     expect(Object.values(positions()).map((p) => p.y)).toEqual([0, 0, 0])
   })
 })
+
+/**
+ * A folded group in the selection.
+ *
+ * The one case where the ids the menu holds and the cards on screen are different sets: taking
+ * hold of a box selects its *members*, and folding a frame leaves them selected, so a selection
+ * that reads as "one card and one box" is three ids of which two name nothing anybody can see.
+ * Aligning those aligned the drawing inside the box.
+ */
+describe('with a folded group in the selection', () => {
+  /** a on the canvas; b and c folded into one box. Padding puts its corner at (476, 16). */
+  function fold() {
+    render(<App />)
+    act(() => {
+      store().setSelection(['b', 'c'])
+      store().groupSelection()
+      const group = store().graph.groups?.[0]
+      store().toggleGroupCollapsed(group!.id)
+      store().setSelection(['a', 'b', 'c'])
+    })
+  }
+
+  it('aligns the box, and its members keep their arrangement inside it', () => {
+    fold()
+    fireEvent.contextMenu(card('a'))
+    fireEvent.click(tool('Align left edges'))
+    // The frame's corner is 500 − 24, so bringing it onto a's edge shifts both members by 476:
+    // b lands on the padding and c stays its own 400 units to the right of b.
+    expect(positions()).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 24, y: 40 },
+      c: { x: 424, y: 90 },
+    })
+  })
+
+  /*
+   * Three ids, two things on the canvas. The minimums are about what somebody can see, so a card
+   * beside a folded box is two cards to align and not three to distribute — counted off `ids`,
+   * the grid offered a distribute that would have evened the gaps between two hidden cards.
+   */
+  it('counts the box as one card towards the minimums', () => {
+    fold()
+    fireEvent.contextMenu(card('a'))
+    expect(tool('Align left edges').disabled).toBe(false)
+    expect(tool('Distribute horizontally').disabled).toBe(true)
+    expect(tool('Distribute horizontally').title).toMatch(/at least 3 cards/)
+  })
+
+  /*
+   * The frame's own menu, where the members are the whole argument. Folded, acting on them
+   * rearranges a picture nobody is looking at — nothing moves on screen and the change turns up
+   * whenever somebody unfolds it — so the grid dims with the reason rather than disappearing.
+   */
+  it('stands the frame’s own grid down while it is folded, and says why', () => {
+    fold()
+    fireEvent.contextMenu(document.querySelector('.group-collapsed')!)
+    expect(tool('Align top edges').disabled).toBe(true)
+    expect(tool('Align top edges').title).toMatch(/expand this frame/i)
+  })
+})

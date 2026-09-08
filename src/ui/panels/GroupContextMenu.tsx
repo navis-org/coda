@@ -208,6 +208,11 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
        * The same grid the node menu carries, pointed at the frame's members rather than at the
        * selection: a group *is* a set of cards somebody has already picked out, which is the
        * only argument these tools take.
+       *
+       * **Folded, the grid stands itself down** — every member is inside the one box it draws, so
+       * what it condenses to is a single card and the tools dim with the reason. Said there rather
+       * than passed in from here: the condition is the grid's own, and a surface that has to
+       * remember to declare it is a surface that will forget.
        */}
       <div className="context-menu__caption">Align &amp; distribute</div>
       <AlignTools ids={group.nodeIds} />

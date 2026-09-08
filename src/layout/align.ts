@@ -11,6 +11,11 @@
  * reach `moveNodes`, which mints a fresh graph whatever it is handed and would leave an undo
  * step for a menu press that did nothing.
  *
+ * **What they align is the canvas' vocabulary, which the caller supplies.** A folded group is one
+ * box on screen and half a dozen ids in the selection, so `AlignTools` condenses before it aligns
+ * and expands afterwards — `condense`/`expandPositions` in `layout/collapse.ts`, the pair the
+ * arrange pass already uses. Nothing here knows that feature exists, which is the point.
+ *
  * Nothing here is React, and nothing here commits: the caller reads sizes, calls one of these,
  * and hands the result to `moveNodes(moves, true)` — the *drag* path, deliberately, not
  * `arrangeNodes`. An alignment is a position somebody chose, so it ends auto-layout and becomes

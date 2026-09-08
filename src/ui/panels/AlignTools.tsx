@@ -12,6 +12,12 @@
  * vertical gaps" is one thought and two presses, and a menu that vanished after the first would
  * make the second a fresh right-click on a card that had just moved.
  *
+ * **What it acts on is `alignUnits`' answer, not the ids it is handed.** A folded group's
+ * members stay in the selection while the canvas draws one box, so a selection reading "this card
+ * and that box" is half a dozen ids naming cards that are not on screen. Handed straight to
+ * `alignNodes` those were what moved — an alignment of the drawing inside the box, invisible until
+ * somebody unfolded it. A folded group is one unit here, aligned as the box and moved whole.
+ *
  * The arithmetic is `layout/align.ts` and the commit is `moveNodes(moves, true)` — the *drag*
  * path rather than `arrangeNodes`, so an alignment ends auto-layout and becomes one undo step,
  * exactly as dragging the cards there by hand would. Sizes come from `measureCardSizes`, read at
@@ -19,11 +25,15 @@
  * measurement should be cached.
  */
 
+import type { CodaGraph } from '../../core/graph'
 import type { Move } from '../../layout/align'
 import { MIN_ALIGN, MIN_DISTRIBUTE, alignNodes, distributeNodes } from '../../layout/align'
+import type { CollapsedView } from '../../layout/collapse'
+import { COLLAPSED_TYPE, collapsedView, condense, expandPositions } from '../../layout/collapse'
+import type { LayoutNode, MeasuredSizes } from '../../layout/elkGraph'
 import { useGraphStore } from '../../store/graphStore'
 import { measureCardSizes } from '../cardSizes'
-import { LOCKED_HINT } from '../lockCopy'
+import { lockedTitle } from '../lockCopy'
 
 /**
  * The glyphs, on a 16-unit grid.
@@ -176,6 +186,45 @@ const TOOLS: Tool[][] = [
   ],
 ]
 
+/**
+ * Why the grid stands down on a folded frame's own menu.
+ *
+ * Lower case and no label, because it is rendered after the tool's own name — `lockCopy.ts`'
+ * `LOCKED_HINT` form, one line down from the `lockedTitle` the lock takes.
+ */
+const FOLDED_HINT = 'expand this frame to align the cards inside it'
+
+/**
+ * The cards to act on, in the canvas' own vocabulary: one entry per card, and **one per folded
+ * group**.
+ *
+ * A folded group's members stay in the selection while the canvas draws one box — `useGroupDrag`
+ * selects them, and folding a selection leaves them there — so the ids and the things on screen
+ * are not the same set. Aligned as ids, what moved was the cards *inside* the box, invisibly.
+ *
+ * `condense` is the fold, the same call `useArrange` makes before it lays anything out, so align
+ * and arrange cannot come to disagree about what a folded group counts as. Edges are none of this
+ * pass's business, hence the empty list.
+ */
+function drawnCards(
+  graph: CodaGraph,
+  ids: readonly string[],
+  view: CollapsedView,
+): LayoutNode[] {
+  const wanted = new Set(ids)
+  return condense(
+    graph.nodes.filter((n) => wanted.has(n.id)),
+    [],
+    view,
+  ).nodes
+}
+
+/** A box's move as its members' moves, and every other move as itself — `expandPositions`'. */
+function spread(moves: readonly Move[], view: CollapsedView): Move[] {
+  const placed = expandPositions(new Map(moves.map((m) => [m.id, m.position])), view)
+  return [...placed].map(([id, position]) => ({ id, position }))
+}
+
 export interface AlignToolsProps {
   /** The cards to act on — the selection, or a group's members. */
   ids: readonly string[]
@@ -183,14 +232,34 @@ export interface AlignToolsProps {
 
 export function AlignTools({ ids }: AlignToolsProps) {
   const locked = useGraphStore((s) => s.locked)
+  const graph = useGraphStore((s) => s.graph)
+
+  /*
+   * What is on the canvas, which is not `ids`: five ids that are one folded box are one card to
+   * align, and two cards to align are not three to distribute.
+   *
+   * Derived per render rather than memoised, and sizes are not asked for. `NodeContextMenu` mints
+   * a fresh `ids` array whenever the clicked card is unselected, so a memo keyed on it would miss
+   * exactly where it was meant to pay; what it would save is one `collapsedView` on a menu that is
+   * open for a moment, against the `foldedNodeCount` note's case, which is auto-layout on every
+   * frame of a drag. Sizes move a box's corner, never which unit is which.
+   */
+  const cards = drawnCards(graph, ids, collapsedView(graph))
+  /*
+   * A folded frame's own menu, where every id is a member of the one box: the tools are already
+   * dimmed by the count, and what this changes is the sentence — "select at least 2 cards" is not
+   * true of a frame holding five, and aligning them rearranges a picture nobody is looking at.
+   * Read off what was condensed rather than taken as a prop, so the reason belongs to the
+   * condition rather than to the surface that happens to raise it.
+   */
+  const foldedAlone = cards.length === 1 && cards[0]?.type === COLLAPSED_TYPE
 
   const apply = (tool: Tool) => {
     const store = useGraphStore.getState()
-    const wanted = new Set(ids)
-    // Graph order, not selection order: every one of these is a set operation, and two people
-    // who selected the same cards in a different sequence must get the same answer.
-    const nodes = store.graph.nodes.filter((n) => wanted.has(n.id))
-    const moves = tool.run(nodes, measureCardSizes())
+    const measured: MeasuredSizes = measureCardSizes()
+    // Condense, align, expand — `useArrange`'s three steps, minus the layout in the middle.
+    const view = collapsedView(store.graph, measured)
+    const moves = spread(tool.run(drawnCards(store.graph, ids, view), measured), view)
     // Nothing to do is *nothing to do*: `moveNodes` mints a fresh graph whatever it is handed,
     // so calling it here would leave an undo step for a press that changed no position.
     if (moves.length > 0) store.moveNodes(moves, true)
@@ -201,21 +270,26 @@ export function AlignTools({ ids }: AlignToolsProps) {
       {TOOLS.map((row, index) => (
         <div className="context-menu__tool-row" key={index}>
           {row.map((tool) => {
-            const tooShort = ids.length < tool.min
+            const refusal = foldedAlone
+              ? FOLDED_HINT
+              : cards.length < tool.min
+                ? `select at least ${tool.min} cards`
+                : undefined
             return (
               <button
                 key={tool.id}
                 type="button"
                 className="context-menu__tool"
                 aria-label={tool.label}
+                // The lock leads with the tool's name too, in `lockCopy.ts`' own spelling of it.
                 title={
                   locked
-                    ? LOCKED_HINT
-                    : tooShort
-                      ? `${tool.label} — select at least ${tool.min} cards`
+                    ? lockedTitle(tool.label)
+                    : refusal
+                      ? `${tool.label} — ${refusal}`
                       : `${tool.label}: ${tool.hint}`
                 }
-                disabled={locked || tooShort}
+                disabled={locked || refusal !== undefined}
                 onClick={() => apply(tool)}
               >
                 {tool.icon}

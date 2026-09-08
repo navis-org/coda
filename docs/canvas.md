@@ -649,7 +649,7 @@ edge, `force`/`stress` bend none and `radial` returns no `sections` at all, all 
 
 Eight tools in a grid inside the node's right-click menu — align left / centre / right, align top
 / centre / bottom, distribute horizontally, distribute vertically — and the same grid on a group
-frame's menu, pointed at its members. `ui/panels/AlignTools.tsx` draws it; `layout/align.ts` is
+frame's menu, pointed at its members (dimmed while that frame is folded; see below). `ui/panels/AlignTools.tsx` draws it; `layout/align.ts` is
 the arithmetic, headless and sized from `resolveSize` like everything else here.
 
 **No new store action, and that is the design.** An alignment is a position somebody chose, so it
@@ -679,6 +679,28 @@ is one key away.
 **Nothing is filtered out by node kind.** Mute, collapse and fold all go through `liveNodes`,
 which drops annotations — a text note has no dataflow state to toggle. Alignment is purely
 geometric, so a note lines up with the cards it labels like anything else on the canvas.
+
+**A folded group is one card, and it is `condense`'s answer rather than a second one.** Taking
+hold of a box selects its *members* (`useGroupDrag`), and folding a frame leaves them selected,
+so a selection reading "this card and that box" is half a dozen ids of which most name cards
+nobody is drawing. Handed straight to `alignNodes` those were what moved: the cards *inside*
+the box were brought onto one edge, invisibly, while the box wandered to wherever its derived
+corner then sat and the one card on screen stayed put. The fix is the three steps `useArrange`
+already takes, minus the layout in the middle — `collapsedView`, `condense(selected, [],
+view)`, align, `expandPositions` — so align and arrange cannot come to disagree about what a
+folded group counts as, and `layout/align.ts` goes on knowing nothing about the feature. Two
+properties come with the pair rather than being written again here: a box is aligned by *its
+own* geometry, the frame's corner and the box's size, since that is what somebody sees; and its
+members move by the **delta**, so the arrangement inside the frame survives exactly as it does
+under an arrange pass. What is new is only that the minimums count **condensed** cards, so a
+card beside a folded box is two cards to align and not three to distribute.
+
+The frame's own menu needs no argument for this: every id it passes is a member of the one box
+it draws, so what the grid condenses to is a single card and the tools dim themselves. The
+reason is worded for the case — "expand this frame to align the cards inside it" rather than
+"select at least 2 cards", which is not true of a frame holding five — and it is read off the
+condensed set rather than passed in as a prop, so it belongs to the condition instead of to the
+surface that happens to raise it.
 
 Two smaller decisions, both visible in `ui/panels/alignTools.test.tsx`. A press that changes no
 position **does not reach the store at all**: `moveNodes` mints a fresh graph whatever it is
