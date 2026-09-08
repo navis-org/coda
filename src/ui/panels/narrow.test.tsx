@@ -40,7 +40,7 @@ import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/
 import type { Viewport } from '../../test/matchMedia'
 import { evaluateQuery, installMatchMedia, setViewport } from '../../test/matchMedia'
 import { NARROW_QUERY, resetSmallScreenForTest } from '../smallScreen'
-import { submenuPlacement } from './Toolbar'
+import { menuShift, submenuPlacement } from './Toolbar'
 
 const PHONE = { width: 412, height: 915 }
 const DESKTOP = { width: 1440, height: 900 }
@@ -184,6 +184,42 @@ describe('where a submenu opens', () => {
 
   it('defaults to the right until it has been measured', () => {
     expect(submenuPlacement(undefined, false)).toBe('right')
+  })
+})
+
+/*
+ * The other half of the same geometry: a top-level panel is nudged back inside the window rather
+ * than re-anchored to the trigger's other edge. Numbers again, for the reason above.
+ */
+describe('how far a menu is nudged to fit', () => {
+  const panel = (rowLeft: number, width: number, viewport: number) => ({
+    width,
+    rowLeft,
+    rowRight: rowLeft + 56,
+    viewport,
+  })
+
+  it('leaves a menu alone wherever it already fits, which is every desktop', () => {
+    expect(menuShift(panel(229, 315, 1440))).toBe(0)
+  })
+
+  /*
+   * The reported case: `Save` at 149 with a 315px panel on a 412px screen. Anchoring to the
+   * trigger's right edge put it at -110 — 110px off the left, where staying put was 52px off the
+   * right. It fits at 89, so it goes to 89.
+   */
+  it('slides a menu left rather than hanging it off either edge', () => {
+    expect(menuShift(panel(149, 315, 412))).toBe(-60)
+  })
+
+  it('never slides one past the near gutter, where no scroll could reach it', () => {
+    // A panel wider than the window has to overflow somewhere, and right is the reachable side.
+    expect(menuShift(panel(20, 500, 412))).toBe(-12)
+    expect(menuShift(panel(4, 500, 412))).toBe(4)
+  })
+
+  it('does nothing until it has been measured', () => {
+    expect(menuShift(undefined)).toBe(0)
   })
 })
 

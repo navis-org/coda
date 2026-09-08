@@ -501,7 +501,13 @@ Area-specific — the rule, then the doc that holds why:
   involved. So placement is **measured** (`submenuPlacement` over `useMenuFit`, a pure function
   the jsdom suite can pin) and `narrow` only short-circuits it. Hover inverts with it: inline, the
   row is a **toggle**, because "opens and does not toggle" holds only while something else — a
-  pointer, focus — has already opened it. An open panel takes the **screen**, not a 320px
+  pointer, focus — has already opened it. A **top-level** menu is *nudged* rather than
+  re-anchored (`menuShift`), the same two-answer failure one level up — `Save` at **-110** on a
+  412px screen against 52 past the right, where the panel fits perfectly well at 89 — and it must
+  measure **`documentElement.clientWidth`, never `window.innerWidth`**: on a phone `innerWidth` is
+  the visual viewport at minimum scale, so a panel hanging off the right widens the document, the
+  browser zooms out, and the number grows to include the overflow being measured. That shifted
+  `Save` by 8px instead of 60 and looked like the fix not working. An open panel takes the **screen**, not a 320px
   column beside 92px of canvas — off `--inspector-width` and off **stamped attributes, never
   `:has()`**, so "both open, the inspector wins" is a selector rather than a fact about source
   order. What none of this touches is **touch**. See [docs/ui-shell.md](docs/ui-shell.md).

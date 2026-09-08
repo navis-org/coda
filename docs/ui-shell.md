@@ -1115,12 +1115,42 @@ New, Open, Save and `?` still stay on the row rather than folding into `⋯` —
 about depth now, not because a submenu cannot be reached. The geometry that made that argument is
 what this section fixed.
 
+**A top-level menu is nudged, not re-anchored**, which is the same lesson one level up.
+`Dropdown` had the same two-answer shape — open at the trigger's left edge, else at its right —
+and the same failure fell out of it: on a 412px screen `Save` opened at **-110**, 110px off the
+left, where staying put would have been 52px off the right. But a menu panel is 260–315px and a
+phone is 375–412, so it *fits*; it just does not fit aligned to either edge of a trigger two
+thirds of the way along the row. `menuShift` puts it where it fits and returns 0 wherever it
+already does, which is every window wide enough never to have had the problem. Measured after:
+`Save` and `?` at 89–404 inside 412, 52–367 inside 375, unmoved at 744 and 1440.
+
+**And it has to measure `documentElement.clientWidth`, not `window.innerWidth`** — the first
+version shifted `Save` by 8px instead of 60 and left it off screen. On a phone `innerWidth` is
+the visual viewport at minimum scale, so the panel hanging past the right edge widened the
+document, the browser zoomed out to fit it, and `innerWidth` grew to include the very overflow
+being measured. The clamp then computed against a window that did not exist. It is the same
+mechanism as the toolbar bug at the top of this section, arriving as a wrong number rather than
+as a wrong picture.
+
 The measurement itself is shared: `useMenuFit` is what `Submenu` had written out alone and
 `Dropdown` had copied, and it answers in *numbers* rather than a placement because the two ask
 different questions of them — a top-level panel hangs from an edge of its trigger and has no
 inline fallback, a flyout opens beside a row and does. The `MENU_GUTTER` of 8px is stated once.
-`narrow.test.tsx` pins `submenuPlacement` directly, both failures above included, which is the
-half of this a suite with no layout can reach.
+`narrow.test.tsx` pins `submenuPlacement` and `menuShift` directly, every failure above included,
+which is the half of this a suite with no layout can reach.
+
+**The welcome dialog** needed four rules of its own, all measured at 412. Its keys box is gone —
+the rule above it says it "already wraps, so a narrow panel costs it a line", and at 412 it cost
+six, in a 150px column beside a checkbox and a button that will not give ground; six shortcut
+pairs stacked two words to a line is less use than the space they take, which is the trade the
+status bar's hints already make here. The credits row wraps, so the three funder marks
+(`flex: none`, ~136px each against a ~330px panel) drop to a centred row of their own instead of
+overflowing. **The colophon then needs `flex: 1 1 100%`, and that is the half that looked like
+the bug**: `flex: 1` is `1 1 0%`, so on the wrapped line its base size is zero — it measured
+**7px wide** with its sentence painted straight through the logos underneath, which reads as an
+overlap and is a collapsed flex item. And the padding drops from 34px a side to 16, in the scroll
+area as well as the bar: 68px of a 412px screen is a sixth of it, spent on the one dialog a
+first-time visitor reads.
 
 **An open panel takes the screen rather than a column of it.** At 412px a 320px inspector leaves
 92px of canvas, which is not a split — it is the panel with a strip of graph beside it that

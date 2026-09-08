@@ -4085,19 +4085,6 @@ select.field {
   padding: 3px;
 }
 /*
- * Anchored to the trigger's right edge instead, when opening at its left would run the panel off
- * the window. Measured on each open — `Dropdown` does what `Submenu` already did, and for the
- * same reason: the panel is 260px and this row is not fixed-width, so where a given menu ends up
- * depends on how wide the workflow's name rendered. It matters more than it used to, because an
- * overflowing panel is *scrollable overflow* — the document grows to hold it and a phone zooms
- * out to fit the document, which is the failure the toolbar's wrap exists to prevent.
- */
-.dropdown__panel--right {
-  left: auto;
-  right: 0;
-}
-
-/*
  * A row of the `⋯` menu holding a control rather than a command: the workflow name and the
  * Auto-run checkbox, which are the same elements the wide toolbar draws and are rendered here
  * rather than re-spelt as menu items. Padded to line up with `.dropdown__item`'s text.
@@ -7122,6 +7109,50 @@ p.sources__hint {
 .start__bar-row > .start__dismiss,
 .start__bar-row > .btn {
   flex: none;
+}
+
+/*
+ * The narrow shell's version of the bar, and of the panel around it. Three rules, each for
+ * something that was measured overlapping or squeezed at 412px.
+ *
+ * **The keys box goes.** The rule above says it "already wraps, so a narrow panel costs it a
+ * line" — at 412 it cost six, in a 150px column beside a checkbox and a button that will not
+ * give ground. Six shortcut pairs stacked two words to a line is less use than the space they
+ * take, which is the same trade the status bar's hints make on this shell.
+ *
+ * **The credits wrap**, and the colophon takes a whole line rather than a share of one.
+ * `.start__logos` is `flex: none` around three marks at ~136px each, so against a ~330px panel
+ * they could only overflow; wrapping puts them on their own row, and the row centres because a
+ * half-full second row of logos hard-left under a full one reads as a mistake. See the basis
+ * below for the half that made it *look* like an overlap.
+ *
+ * **The padding halves**, in the scroll area as well as the bar. 34px a side is 68px of a 412px
+ * screen — a sixth of it — spent on the one dialog a first-time visitor reads.
+ */
+.app[data-narrow] .start__keys {
+  display: none;
+}
+.app[data-narrow] .start__credits {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+/*
+ * A whole line for the colophon, and the basis is what does it. `flex: 1` is `1 1 0%`, so on the
+ * wrapped line the item's *base* size is zero — it measured 7px wide with its sentence painted
+ * straight through the logos underneath, which is the overlap this looked like. Growing does not
+ * fix that; a basis of 100% does, by making it a line rather than a share of one.
+ */
+.app[data-narrow] .start__credits > .start__links {
+  flex: 1 1 100%;
+}
+.app[data-narrow] .start__logos {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.app[data-narrow] .start__bar,
+.app[data-narrow] .start__scroll {
+  padding-left: 16px;
+  padding-right: 16px;
 }
 
 .start__dismiss {

@@ -1427,6 +1427,31 @@ export interface MenuFit {
  * *beside* the row, and only one of the two has an inline fallback. Those decisions sit at the
  * call sites; what is shared, and was written out twice before, is this.
  */
+/**
+ * How far to shift a top-level menu's panel so it stays inside the window, in px from where it
+ * would otherwise open — which is its trigger's left edge.
+ *
+ * A *shift*, not a flip, and the difference is the bug this replaced. Anchoring to the trigger's
+ * right edge instead is only a second fixed position, so a panel that fits neither is placed at
+ * whichever edge was asked about last: `Save` opened at **-110** on a 412px screen, 110px off the
+ * left, where staying put would have been 52px off the right. But a menu panel is 260–315px and
+ * a phone is 375–412 — it *fits*, just not aligned to either edge of a trigger two thirds of the
+ * way along the row. So the answer is neither edge: put it where it fits and leave it alone
+ * wherever it already does, which is every window wide enough to have never had the problem.
+ *
+ * Pure, and exported, because it is the half a suite with no layout can pin: jsdom measures
+ * nothing, so the rects have to be handed in.
+ */
+export function menuShift(fit: MenuFit | undefined): number {
+  if (!fit) return 0
+  // The furthest left it may start and still clear the far gutter — floored at the near one, so
+  // a panel wider than the window overflows to the right rather than off the left, where a
+  // scroll cannot reach it.
+  const rightmost = Math.max(MENU_GUTTER, fit.viewport - MENU_GUTTER - fit.width)
+  const wanted = Math.min(Math.max(fit.rowLeft, MENU_GUTTER), rightmost)
+  return Math.round(wanted - fit.rowLeft)
+}
+
 export type FlyoutPlacement = 'right' | 'left' | 'inline'
 
 /**
@@ -1474,7 +1499,16 @@ function useMenuFit(
       width: panel.width,
       rowLeft: row.left,
       rowRight: row.right,
-      viewport: window.innerWidth,
+      /*
+       * `clientWidth`, **not `window.innerWidth`** — and the difference is the bug that made the
+       * first version of this shift a panel by 8px instead of 60. On a phone `innerWidth` is the
+       * visual viewport at minimum scale, so a panel hanging past the right edge widens the
+       * document, the browser zooms out to fit it, and `innerWidth` grows to include the very
+       * overflow being measured. The clamp then computes against the wrong window and leaves the
+       * panel off screen. `documentElement.clientWidth` is the layout viewport, which does not
+       * move.
+       */
+      viewport: document.documentElement.clientWidth,
     })
   }, [open, ref, panelSelector])
 
@@ -1513,14 +1547,12 @@ function Dropdown({
   const ref = useRef<HTMLDivElement>(null)
   const close = useCallback(() => setOpen(false), [])
   /*
-   * A top-level menu opens at its trigger's left edge, so it flips when there is not room to the
-   * right of that. It reaches these menus at all because the narrow shell puts them on a 412px
-   * row: a 260px panel opening two thirds of the way along it runs past the window, and an
-   * absolutely-positioned box past the window is scrollable overflow — which is the thing that
-   * makes a phone zoom out.
+   * A top-level menu opens at its trigger's left edge and is nudged back inside the window when
+   * that would hang it over an edge — `menuShift` holds the reasoning. It matters here at all
+   * because the narrow shell puts four menus on a 412px row, and an absolutely-positioned box
+   * past the window is scrollable overflow, which is the thing that makes a phone zoom out.
    */
-  const fit = useMenuFit(ref, open, '.dropdown__panel')
-  const flip = fit !== undefined && fit.rowLeft + fit.width > fit.viewport - MENU_GUTTER
+  const shift = menuShift(useMenuFit(ref, open, '.dropdown__panel'))
 
   useDismissOnOutside(ref, close, { enabled: open })
 
@@ -1543,9 +1575,10 @@ function Dropdown({
       </button>
       {open && (
         <div
-          className={`dropdown__panel${flyouts ? ' dropdown__panel--flyouts' : ''}${
-            flip ? ' dropdown__panel--right' : ''
-          }`}
+          className={`dropdown__panel${flyouts ? ' dropdown__panel--flyouts' : ''}`}
+          /* Inline because it is a measurement, not a state: there is no class for "60px to the
+             left of where you would have been". Absent whenever the panel already fits. */
+          style={shift === 0 ? undefined : { left: shift }}
         >
           {children(() => setOpen(false))}
         </div>
