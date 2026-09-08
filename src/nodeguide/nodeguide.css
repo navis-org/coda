@@ -435,29 +435,13 @@ a:hover {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: var(--socket-scalar);
+  background: var(--sock, var(--socket-scalar));
   flex: none;
   display: inline-block;
 }
-.pip[data-fam='table'] {
-  background: var(--socket-table);
-}
-.pip[data-fam='matrix'] {
-  background: var(--socket-matrix);
-}
-.pip[data-fam='dataset'],
-.pip[data-fam='geometry'] {
-  background: var(--socket-dataset);
-}
 .pip[data-shape='ring'] {
   background: var(--surface-2);
-  border: 2px solid var(--socket-table);
-}
-.pip[data-shape='ring'][data-fam='matrix'] {
-  border-color: var(--socket-matrix);
-}
-.pip[data-shape='ring'][data-fam='any'] {
-  border-color: var(--socket-scalar);
+  border: 2px solid var(--sock, var(--socket-scalar));
 }
 .pip[data-shape='square'] {
   border-radius: 2px;
@@ -874,7 +858,7 @@ button.setting__row[aria-expanded='true'] .setting__name {
   height: 11px;
   border-radius: 50%;
   border: 1.5px solid var(--surface-2);
-  background: var(--socket-scalar);
+  background: var(--sock, var(--socket-scalar));
   top: 50%;
   transform: translateY(-50%);
 }
@@ -884,26 +868,10 @@ button.setting__row[aria-expanded='true'] .setting__name {
 .sock--out {
   right: -6px;
 }
-.sock[data-fam='table'] {
-  background: var(--socket-table);
-}
-.sock[data-fam='matrix'] {
-  background: var(--socket-matrix);
-}
-.sock[data-fam='dataset'],
-.sock[data-fam='geometry'] {
-  background: var(--socket-dataset);
-}
 .sock[data-shape='ring'] {
   background: var(--surface-2);
   border-width: 2.5px;
-  border-color: var(--socket-table);
-}
-.sock[data-shape='ring'][data-fam='matrix'] {
-  border-color: var(--socket-matrix);
-}
-.sock[data-shape='ring'][data-fam='any'] {
-  border-color: var(--socket-scalar);
+  border-color: var(--sock, var(--socket-scalar));
 }
 .sock[data-shape='square'] {
   border-radius: 2px;

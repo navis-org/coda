@@ -27,7 +27,7 @@ import {
 } from '../../nodes/lib/datasetFamilies'
 import { GLYPH_BOX, GLYPH_STROKE_WIDTH, glyphShapes } from '../glyphs'
 import { glyphElements } from '../glyphElements'
-import { nodeTintVar, socketStyle } from '../socketStyle'
+import { familyColorVar, nodeTintVar, socketStyle } from '../socketStyle'
 import type { SocketShape } from '../socketStyle'
 import { plural } from '../format'
 import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
@@ -149,7 +149,14 @@ function dotY(index: number, count: number): number {
 
 function SocketDot({ port, x, y }: { port: PortDef; x: number; y: number }) {
   const { family, shape } = socketStyle(port.type)
-  const color = `var(--socket-${family === 'any' ? 'scalar' : family})`
+  /*
+   * `familyColorVar`, not a token name built from the family. The interpolated form was a sixth
+   * spelling of the family table with no fallback, so a family whose token did not exist —
+   * `geometry`, `transform` and `layers` all did not — resolved to nothing and the shape fell
+   * back to inherited ink. Invalid at computed-value time is silent, and this surface is a 17px
+   * thumbnail nobody inspects.
+   */
+  const color = familyColorVar(family)
   return renderShape(shape, x, y, color)
 }
 

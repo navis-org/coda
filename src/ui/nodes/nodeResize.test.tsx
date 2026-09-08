@@ -4,7 +4,7 @@
  * Resizable viewer cards.
  *
  * Two things here fail silently rather than loudly. The handles sit *on* the card's edge and
- * `.coda-node` clips with `overflow: hidden`, so rendering the resizer inside the card leaves
+ * `.coda-node` clips its content, so rendering the resizer inside the card leaves
  * corners that look grabbable and are half cut off — the same trap the run outline hit. And a
  * resize must not touch results: it is a view decision, and if it invalidated the node every
  * drag would throw away a fetch.

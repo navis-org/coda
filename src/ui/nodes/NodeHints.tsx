@@ -2,7 +2,7 @@
  * The hint boxes docked to a card's top and bottom borders.
  *
  * **A sibling of the card, not a child**, for the reason `NodeRunRing` and `NodeResizer` are:
- * `.coda-node` clips with `overflow: hidden`, so anything drawn outside its border would be cut
+ * `.coda-node` clips its content, so anything drawn outside its border would be cut
  * off at it. React Flow's wrapper is the positioned ancestor and is sized by the card alone —
  * these are absolutely positioned, so they contribute nothing to what the library measures and a
  * hint can neither move a wire nor change what `placeGuards` checks.

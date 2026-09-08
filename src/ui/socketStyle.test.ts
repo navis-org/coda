@@ -12,17 +12,15 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
+import { cssRule } from '../test/cssRule'
+
 import { T } from '../core/types'
-import { socketStyle } from './socketStyle'
+import { draggedWireStyle, familyColorVar, socketStyle, typeColorVar } from './socketStyle'
+import type { SocketFamily } from './socketStyle'
 
 const CSS = readFileSync('src/ui/editor.css', 'utf8')
 
-/** One CSS rule's body, comments stripped. */
-function rule(selector: string): string {
-  const start = CSS.indexOf(`${selector} {`)
-  expect(start, selector).toBeGreaterThan(-1)
-  return CSS.slice(start, CSS.indexOf('}', start)).replace(/\/\*[\s\S]*?\*\//g, '')
-}
+const rule = (selector: string) => cssRule(CSS, selector)
 
 describe('socketStyle', () => {
   it('gives a matrix its own shape as well as its own hue', () => {
@@ -54,5 +52,87 @@ describe('the stylesheet half', () => {
       expect(body, side).toMatch(/transform:\s*translate\([^)]*\)\s+rotate\(45deg\)/)
     }
     expect(rule(".socket[data-shape='diamond']")).not.toMatch(/transform:/)
+  })
+})
+
+/**
+ * Every family a socket can be, and the token the stylesheet must paint it with.
+ *
+ * `familyColorVar` is the one answer, and it is what the *wire* reads — the socket reads a CSS
+ * rule keyed on `data-family`, which is a second transcription of the same table. They
+ * disagreed: `geometry` had no arm at all, so every Skeletons, Meshes, Points and Transform
+ * socket fell through to `--socket-any` and drew grey while the wire leaving it drew
+ * `--socket-dataset` green. It read as one bad wire on one NBLAST card and was a whole family.
+ *
+ * Asked of the list rather than of the four families that were right, because the failure is
+ * *silent by construction*: a missing arm is a socket that still paints, in a colour that still
+ * belongs to the palette, on a card where nothing else looks wrong.
+ */
+describe('a socket and its wire agree on the hue', () => {
+  const FAMILIES: SocketFamily[] = [
+    'table',
+    'matrix',
+    'dataset',
+    'geometry',
+    'transform',
+    'layers',
+    'scalar',
+    'any',
+  ]
+  const THEME = readFileSync('src/ui/theme.css', 'utf8')
+
+  /*
+   * `familyColorVar` decides a *wire*; a `--sock` rule in `theme.css` decides the socket, the
+   * help figure's pip, the node guide's, the inspector's chip and the add-menu thumbnail. Those
+   * were six transcriptions of one table and they had drifted twice — `geometry` had no arm at
+   * all in `editor.css`, and `NodeThumbnail` built the token by interpolating the family name,
+   * so the three newest families resolved nothing. A missing arm paints a legal-looking socket
+   * in a real palette colour, which is why neither showed.
+   *
+   * There is one table now, so this is one assertion over it rather than a parser per
+   * stylesheet — and the second test below is what keeps it the only one.
+   */
+  it('gives every family the token its wire would use, under both spellings', () => {
+    for (const family of FAMILIES) {
+      for (const attr of ['data-family', 'data-fam']) {
+        const start = THEME.indexOf(`[${attr}='${family}']`)
+        expect(start, `${attr}=${family}`).toBeGreaterThan(-1)
+        const body = THEME.slice(start, THEME.indexOf('}', start))
+        expect(body, `${attr}=${family}`).toContain(`--sock: ${familyColorVar(family)}`)
+      }
+    }
+  })
+
+  it('is read, never transcribed, by the surfaces that draw a socket', () => {
+    // Any per-family `--socket-*` arm outside the table is a seventh spelling in the making.
+    for (const path of [
+      'src/ui/editor.css',
+      'src/help/figure.css',
+      'src/nodeguide/nodeguide.css',
+      'src/overview/overview.css',
+      'src/tutorial/tutorial.css',
+    ]) {
+      const css = readFileSync(path, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+      for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        if (!/\[data-fam(?:ily)?='/.test(selector ?? '')) continue
+        expect(body ?? '', `${path}: ${(selector ?? '').trim()}`).not.toMatch(
+          /var\(--socket-|var\(--t-/,
+        )
+      }
+    }
+  })
+})
+
+describe('draggedWireStyle', () => {
+  it('is the origin type colour, and nothing else', () => {
+    expect(draggedWireStyle(T.matrix())).toEqual({ stroke: typeColorVar(T.matrix()) })
+    // No width and no dasharray: those live in `editor.css` and say *in flight*, not what is
+    // flowing, so a wire that lands must not inherit them.
+    expect(Object.keys(draggedWireStyle(T.table()))).toEqual(['stroke'])
+  })
+
+  it('falls back to the achromatic token rather than to the accent', () => {
+    // A drag from a port whose type has not resolved is grey, which is what its socket is.
+    expect(draggedWireStyle(undefined).stroke).toBe('var(--socket-scalar)')
   })
 })

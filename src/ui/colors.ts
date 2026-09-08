@@ -8,11 +8,15 @@
  *    Worst adjacent CVD ΔE 8.4 dark / 9.1 light; worst normal-vision 19.3 / 19.6.
  *    Stacked segments also carry the mandated 2px surface gap, which is the secondary
  *    encoding the 6–8 CVD band requires.
- *  - Socket families (any two can appear side by side, so all-pairs applies): only
- *    THREE chromatic slots clear all-pairs on the dark surface. Adding any fourth hue
- *    from these ramps fails the normal-vision floor (best candidate: red, ΔE 7.1 vs
- *    orange). Hence three hues + achromatic gray, with socket *shape* and an
- *    always-visible socket label carrying identity. See theme.css.
+ *  - Socket families: only THREE chromatic slots clear **all-pairs** on the dark surface,
+ *    and there are six. That finding still holds and was re-measured — the ceiling for six
+ *    hues is ΔE 14.4 dark / 13.5 light against a floor of 15, at any chroma. What changed is
+ *    the pair list: "any two can appear side by side" was the assumption, and the pairs a
+ *    reader actually compares are the ones sharing a card, read off the registry. Every one
+ *    of those clears the floor (worst 17.2 / 17.1); all-pairs FAILs on table-blue against
+ *    transform-teal alone, which no node puts together. CVD sits in the 6-8 band, legal only
+ *    with a secondary encoding — socket *shape* and an always-visible label are it.
+ *    theme.css carries the full argument; do not add a seventh without re-running the sweep.
  *  - Sequential: blue or red, each a single hue monotonic in lightness. Direction flips by
  *    mode so "near zero" always recedes toward the surface it's drawn on. The two are never
  *    shown at once - a viewer picks one per measure - so this is not an all-pairs case.

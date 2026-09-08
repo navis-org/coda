@@ -20,7 +20,25 @@
   --t-table: var(--socket-table);
   --t-matrix: var(--socket-matrix);
   --t-dataset: var(--socket-dataset);
+  --t-geometry: var(--socket-geometry);
+  --t-transform: var(--socket-transform);
+  --t-layers: var(--socket-layers);
   --t-scalar: var(--socket-scalar);
+
+  /*
+   * The two type words that cannot wear their socket hue.
+   *
+   * A socket is a mark and clears the 3:1 floor; `.ty` is 13px at weight 650 and wants 4.5:1.
+   * This page is dark-only — the legend sits on #171716 whatever the reader's colour scheme —
+   * so it is one set rather than the per-mode pair `overview.css` needs for its code figures.
+   * Four families pass on their socket value unchanged: table 4.93, matrix 4.62, dataset 5.27,
+   * transform 5.99. Geometry and layers do not — they are the two darkest members of the socket
+   * palette (measured for a mark, not for text) and land at 3.35 and 3.34. A lighter step of the
+   * same hue with the chroma held reads as the same colour and measures 4.75 and 4.68, which is
+   * the lightness-ladder move `theme.css` already makes for the dataset backends.
+   */
+  --ty-geometry: #8f6bf3;
+  --ty-layers: #cb57aa;
   --status-ring: var(--status-running-ring);
 }
 
@@ -103,6 +121,16 @@ code {
 }
 .ty--dataset {
   color: var(--t-dataset);
+}
+.ty--transform {
+  color: var(--t-transform);
+}
+/* The two that take a lighter step than their socket; see the tokens for the measurement. */
+.ty--geometry {
+  color: var(--ty-geometry);
+}
+.ty--layers {
+  color: var(--ty-layers);
 }
 
 .shell {
@@ -371,9 +399,22 @@ code {
   transition: transform 1s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/*
+ * The same calibration `overview.css` carries, and the same measurement — see the note there for
+ * how to re-take it. This page scales its canvas (`--k`), so the offset is read in the SVG's own
+ * units rather than in screen pixels: **+4.5 down and 0.5 left at all twelve endpoints**, the
+ * same number at every one, so this is one offset rather than twelve edited paths.
+ *
+ * **Take the measurement at a settled beat.** Every card carries an entry animation
+ * (`.js .node` above: `translateY(10px) scale(0.97)`, opacity 0) and only arrives at the beat its
+ * `data-from` names, so a card measured before then is 10px low and 3% small — reading as an
+ * offset of its own, in the opposite direction, on a card the reader cannot see yet. Measured at
+ * beat 1 the twelve endpoints split into two groups that no single shift can fix; measured at
+ * beat 5 they are all one number. That trap cost a wrong correction once.
+ */
 .wires {
   position: absolute;
-  inset: 0;
+  inset: -4.5px 0 0 0.5px;
   width: 1300px;
   height: 440px;
   overflow: visible;
@@ -402,8 +443,20 @@ code {
   border-radius: var(--radius);
   box-shadow: var(--shadow-node);
   font-size: 12px;
-  overflow: hidden;
+  /* `editor.css`'s rule, for its reason: a socket sits centred on the card's edge and
+     `overflow: hidden` cut half of every one of them off. The bleed is the reach of the
+     largest thing that has to escape. */
+  overflow: clip;
+  overflow-clip-margin: var(--card-bleed);
   --state-bar: 3px;
+}
+/* The two corners the card's own clip used to round for free. */
+.node__head {
+  border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+}
+.node > :last-child {
+  border-bottom-left-radius: calc(var(--radius) - 1px);
+  border-bottom-right-radius: calc(var(--radius) - 1px);
 }
 .js .node {
   opacity: 0;
@@ -441,7 +494,11 @@ code {
   align-items: center;
   gap: 6px;
   padding: 5px 8px 5px calc(8px + var(--state-bar));
-  background: color-mix(in srgb, var(--cat) 16%, var(--surface-2));
+  /* Solid, and the corners are stated: both are `editor.css`'s, and the fill and the ink come
+   from the one table in `theme.css` so a page cannot advertise a header the app stopped
+   drawing. */
+  background: var(--cat-head, var(--cat-utility-head));
+  color: var(--cat-ink, var(--cat-ink-light));
   border-bottom: 1px solid var(--border);
 }
 .node[data-cat='dataset'] {
@@ -520,35 +577,36 @@ code {
   height: 11px;
   border-radius: 50%;
   border: 1.5px solid var(--surface-2);
-  background: var(--t-scalar);
+  /* One read of the family table in `theme.css`; the `--t-*` aliases stay for the prose. */
+  background: var(--sock, var(--t-scalar));
   top: 50%;
   transform: translateY(-50%);
 }
+/* Centred on the card's edge and shown whole, as in the editor: the card clips with
+   `overflow: clip` and a 10px bleed rather than at its own border. */
 .sock--in {
-  left: calc(-6px + var(--state-bar));
+  left: -6.5px;
 }
 .sock--out {
-  right: -6px;
-}
-.sock[data-fam='table'] {
-  background: var(--t-table);
-}
-.sock[data-fam='matrix'] {
-  background: var(--t-matrix);
-}
-.sock[data-fam='dataset'] {
-  background: var(--t-dataset);
+  right: -6.5px;
 }
 .sock[data-shape='ring'] {
   background: var(--surface-2);
   border-width: 2.5px;
-  border-color: var(--t-table);
-}
-.sock[data-shape='ring'][data-fam='matrix'] {
-  border-color: var(--t-matrix);
+  border-color: var(--sock, var(--t-scalar));
 }
 .sock[data-shape='square'] {
   border-radius: 2px;
+}
+/* The other two shapes the app draws, transcribed from `editor.css` as the rest of this mock
+   card is. Without them a hex socket keeps the base 50% radius and draws as a circle. */
+.sock[data-shape='hex'] {
+  border-radius: 1px;
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+.sock[data-shape='dot'] {
+  width: 8px;
+  height: 8px;
 }
 .sock[data-shape='diamond'] {
   border-radius: 2px;
@@ -783,12 +841,28 @@ code {
   height: 11px;
   flex: none;
 }
+/*
+ * One material, several shapes — the Geometries row draws all three of its marks rather than
+ * standing in with one, which is the caption's own rule shown instead of asserted. Sized by its
+ * content, so the row stays aligned with the single-mark ones above it.
+ */
+.legend__row .swatch--set {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+}
+/*
+ * `display` is the load-bearing half. `.sock` is an `<i>`, and it gets its box from
+ * `position: absolute` everywhere else on this page; taking that away here returns it to
+ * `display: inline`, where `width` and `height` **do not apply** — so every swatch in the legend
+ * rendered as an 11px-tall sliver of border with no shape at all. Which is a poor way to teach a
+ * figure whose whole subject is that shape carries the identity.
+ */
 .legend__row .sock {
   position: static;
+  display: inline-block;
   transform: none;
-}
-.legend__row .sock[data-shape='diamond'] {
-  transform: rotate(45deg);
 }
 .legend__row .sock[data-shape='diamond'] {
   transform: rotate(45deg);

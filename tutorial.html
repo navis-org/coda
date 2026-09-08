@@ -236,13 +236,21 @@
       <div class="fig">
         <div class="legend">
           <div class="legend__row"><span class="swatch"><i class="sock" data-fam="dataset" data-shape="square"></i></span> <b class="ty ty--dataset">Dataset</b> &mdash; a connectome at a version</div>
-          <div class="legend__row"><span class="swatch"><i class="sock" data-fam="table" data-shape="circle"></i></span> <b class="ty ty--table">Neurons</b> &mdash; a table guaranteed to carry <code>bodyId</code></div>
+          <div class="legend__row"><span class="swatch"><i class="sock" data-fam="table" data-shape="circle"></i></span> <b class="ty ty--table">Neurons</b> &mdash; a table guaranteed to carry <code>neuronId</code></div>
           <div class="legend__row"><span class="swatch"><i class="sock" data-fam="table" data-shape="ring"></i></span> <b class="ty ty--table">Table</b> &mdash; any rows and columns</div>
           <div class="legend__row"><span class="swatch"><i class="sock" data-fam="matrix" data-shape="diamond"></i></span> <b class="ty ty--matrix">Matrix</b> &mdash; rows &times; columns of numbers</div>
+          <div class="legend__row"><span class="swatch swatch--set"><i class="sock" data-fam="geometry" data-shape="circle"></i><i class="sock" data-fam="geometry" data-shape="hex"></i><i class="sock" data-fam="geometry" data-shape="dot"></i></span> <b class="ty ty--geometry">Geometries</b> &mdash; skeletons, meshes and point clouds, drawn in 3D</div>
+          <div class="legend__row"><span class="swatch"><i class="sock" data-fam="transform" data-shape="diamond"></i></span> <b class="ty ty--transform">Transform</b> &mdash; a mapping between template spaces</div>
+          <div class="legend__row"><span class="swatch"><i class="sock" data-fam="layers" data-shape="ring"></i></span> <b class="ty ty--layers">Layers</b> &mdash; extra neuroglancer layers to draw alongside</div>
         </div>
         <p class="fig__cap">
-          Colour, shape and label &mdash; three channels. Only three hues clear an all-pairs
-          colourblind check when any two may sit adjacent, so <b>shape carries the rest</b>.
+          Colour, shape and label &mdash; three channels, and none of them is decoration. Colour
+          names the <b>material</b> and shape separates the members within it, so a shape repeats
+          <em>across</em> materials and never inside one: a skeleton and a table of Neurons are
+          both filled circles, Matrix and Transform both diamonds, and the hue says which. One
+          material can hold several shapes &mdash; the three marks above are all Geometries. Six
+          hues is past what an all-pairs colourblind check passes, which is exactly why the other
+          two channels carry the identity.
         </p>
       </div>
       <p>

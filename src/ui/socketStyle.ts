@@ -1,24 +1,38 @@
 /**
  * Socket appearance: which colour family and which shape a type gets.
  *
- * Colour cannot carry type identity on its own here — see `colors.ts`, only three
- * chromatic families clear the all-pairs CVD gate, and Coda has more than three types.
- * So the mapping is deliberately many-to-one on colour and distinguished by SHAPE, with
- * the socket's text label always visible beside it as the third channel.
+ * Six chromatic families and one achromatic. `theme.css` carries the measurement and the
+ * argument for why six is past the validated all-pairs gate and shipped anyway; read it before
+ * adding a seventh. The short version: the floor is met on every pair that can share a card,
+ * and colour is never the only channel — shape and an always-visible label are the other two.
  *
- *   filled circle  Neurons  (a table guaranteed to have neuronId)
- *   hollow ring    Table    (same family, different shape)
- *   diamond        Matrix
- *   square         Dataset
- *   small dot      Number / String / Boolean — recessive, achromatic
- *   diamond        Transform (geometry hue — a mapping applied to geometry)
+ * Colour names the **material**; shape separates the members within one material.
+ *
+ *   filled circle  Neurons  (a table guaranteed to have neuronId)   table   blue
+ *   hollow ring    Table    (same material, different shape)         table   blue
+ *   diamond        Matrix                                            matrix  orange
+ *   hex            Network                                           matrix  orange
+ *   square         Layout                                            matrix  orange
+ *   ring           Linkage  (a clustering *of* a matrix)             matrix  orange
+ *   square         Dataset                                           dataset green
+ *   filled circle  Skeletons                                         geometry violet
+ *   hex            Meshes                                            geometry violet
+ *   small dot      Points                                            geometry violet
+ *   diamond        Transform (a mapping applied to geometry)         transform teal
+ *   hollow ring    Layers   (neuroglancer's own layer stack)         layers  magenta
+ *   small dot      Number / String / Boolean                         scalar  gray
+ *
+ * A shape repeats **across** materials and never within one, which is the rule that keeps the
+ * two channels independent: a diamond means Matrix or Transform and the hue says which, where
+ * two orange diamonds would mean nothing at all.
  */
 
 import { getNodeDef } from '../core/registry'
 import type { CodaType } from '../core/types'
 import { backendForNodeType } from '../nodes/lib/datasetFamilies'
 
-export type SocketFamily = 'table' | 'matrix' | 'dataset' | 'geometry' | 'scalar' | 'any'
+export type SocketFamily =
+  'table' | 'matrix' | 'dataset' | 'geometry' | 'transform' | 'layers' | 'scalar' | 'any'
 export type SocketShape = 'circle' | 'ring' | 'diamond' | 'square' | 'dot' | 'hex'
 
 export interface SocketStyle {
@@ -34,13 +48,20 @@ export function socketStyle(type: CodaType | undefined): SocketStyle {
       return { family: 'table', shape: 'ring' }
     case 'matrix':
       return { family: 'matrix', shape: 'diamond' }
+    // Network, Layout and Linkage share the matrix hue: all three are *about* a matrix, and
+    // shape separates them. That is the one place the many-to-one mapping is still load-bearing
+    // — every other family is now one material with one colour.
     case 'network':
-      // Shares the matrix hue: both are connectivity, and a fourth chromatic family would
-      // fail the all-pairs colourblind gate (see colors.ts). Shape carries the difference.
       return { family: 'matrix', shape: 'hex' }
     case 'dataset':
       return { family: 'dataset', shape: 'square' }
-    // 3D geometry shares the dataset hue for the same reason; shapes separate them.
+    /*
+     * Geometry is its own hue, and used not to be — it shared the dataset green, which meant a
+     * Skeletons output, a Dataset input, a Warp and an Extra-layers port were four different
+     * kinds of thing wearing one colour. It reads as a chain that keeps changing its mind. The
+     * split cost the all-pairs gate; `theme.css` carries what was measured and why it was still
+     * the right trade.
+     */
     case 'skeletons':
       return { family: 'geometry', shape: 'circle' }
     case 'meshes':
@@ -48,36 +69,30 @@ export function socketStyle(type: CodaType | undefined): SocketStyle {
     case 'points':
       return { family: 'geometry', shape: 'dot' }
     // A layout is about a network, so it takes the network's hue; square separates it from the
-    // diamond and hex already spoken for. Adding a fifth chromatic family would fail the
-    // all-pairs colourblind gate — see colors.ts.
+    // diamond and hex already spoken for.
     case 'layout':
       return { family: 'matrix', shape: 'square' }
-    // A linkage is a clustering *of* a matrix, so it takes the matrix hue and the one shape
-    // that family has left. `ring` is also the table family's, which is the existing trade
-    // rather than a new one — geometry and table both draw a circle, and hue plus the always
-    // visible label carry the difference. A sixth chromatic family would fail the all-pairs
-    // colourblind gate; see colors.ts.
+    // A linkage is a clustering *of* a matrix, so it takes the matrix hue and the one shape that
+    // family has left. `ring` is also the table family's, which is the shape channel repeating
+    // across materials as it is meant to.
     case 'linkage':
       return { family: 'matrix', shape: 'ring' }
     /*
-     * A transform is a thing you apply *to* geometry, so it takes geometry's hue — and diamond
-     * is the shape that family has left. Diamond is also the matrix family's, which is the
-     * existing many-to-one trade rather than a new one (see `linkage` above): hue plus the
-     * always-visible label carry the difference. A seventh chromatic family would fail the
-     * all-pairs colourblind gate; see colors.ts.
+     * A Warp is applied *to* geometry and is not geometry, which is exactly why it stopped
+     * wearing geometry's colour: on a Mirror card the two sockets are the thing and the
+     * operation, and they were the same green. Teal, and the diamond it already had — a shape
+     * the matrix family also uses, which is the channel working as intended.
      */
     case 'transform':
-      return { family: 'geometry', shape: 'diamond' }
+      return { family: 'transform', shape: 'diamond' }
     /*
-     * Layers take the dataset hue, because what a Layers wire carries is a *place to read data
-     * from* rather than data — the same thing a Dataset socket carries, said in neuroglancer's
-     * vocabulary. `ring` is the one shape that hue had left. It is also the table family's and
-     * the matrix family's, which is the existing many-to-one trade rather than a new one (see
-     * `linkage` above): hue plus the always-visible label carry the difference. An eighth
-     * chromatic family would fail the all-pairs colourblind gate; see colors.ts.
+     * Layers used to take the dataset hue on the argument that both carry *a place to read from*
+     * rather than data. True, and it made `out.neuroglancer` — Dataset, Neurons, Extra layers —
+     * a card with two identical green sockets meaning different things. Its own hue now; the
+     * ring is unchanged.
      */
     case 'layers':
-      return { family: 'dataset', shape: 'ring' }
+      return { family: 'layers', shape: 'ring' }
     case 'number':
     case 'string':
     case 'boolean':
@@ -95,8 +110,13 @@ export function familyColorVar(family: SocketFamily): string {
     case 'matrix':
       return 'var(--socket-matrix)'
     case 'dataset':
-    case 'geometry':
       return 'var(--socket-dataset)'
+    case 'geometry':
+      return 'var(--socket-geometry)'
+    case 'transform':
+      return 'var(--socket-transform)'
+    case 'layers':
+      return 'var(--socket-layers)'
     default:
       return 'var(--socket-scalar)'
   }
@@ -151,4 +171,21 @@ export function nodeTintVar(type: string, fallback = 'var(--border)'): string {
   if (backend) return `var(--cat-dataset-${backend.id}, var(--cat-dataset))`
   const def = getNodeDef(type)
   return def ? `var(--cat-${def.category})` : fallback
+}
+
+/**
+ * The stroke an in-flight wire wears while it is being dragged.
+ *
+ * It used to be `--accent` in CSS, so every new wire was blue until the moment it landed and
+ * then became its type's colour — the one gesture where knowing the type early is worth most,
+ * since what you are looking for is the socket that will take it. The colour is the *origin*
+ * port's, both directions: dragged from an output that is the wire's final colour exactly, and
+ * dragged backwards from an input it is the colour of what that port accepts, the final wire
+ * being its source's and unknowable until the drop.
+ *
+ * Stroke only. The width and the dashes stay in `editor.css`, because they say *in flight*
+ * rather than what is flowing, and a dropped wire must not inherit them.
+ */
+export function draggedWireStyle(type: CodaType | undefined): { stroke: string } {
+  return { stroke: typeColorVar(type) }
 }

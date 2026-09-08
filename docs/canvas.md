@@ -1309,13 +1309,280 @@ prose. A real trade, taken deliberately for a state somebody chooses and reverse
 
 **This one _was_ looked at in a browser**, unlike most of the canvas — playwright against the dev
 server, folding and collapsing a Connectivity node and a boxed Scatter. Worth recording, because
-it settled something the CSS alone could not: **folded sockets are not clipped and expanded ones
-are.** Expanded, a handle's containing block is `.port-row` inside `.coda-node`'s
-`overflow: hidden`, so the discs render as half-circles flush with the border; the folded band is
-absolute against React Flow's wrapper, which is _outside_ that clip, so they come out whole. It
-reads fine — arguably better — but the two states genuinely differ, and anyone matching one to
-the other should know why. `collapsedPorts.test.tsx` still pins only the DOM and the
-declarations, since jsdom performs no layout.
+it settled something the CSS alone could not: **folded sockets were not clipped and expanded ones
+were.** Expanded, a handle's containing block is `.port-row` inside the card's clip, so the discs
+rendered as half-circles flush with the border; the folded band is absolute against React Flow's
+wrapper, which is _outside_ that clip, so they came out whole. Recorded at the time as a
+difference to know about rather than a bug — and it was the tell. A socket is centred on the
+card's edge, so the clip was taking half of every symbol on the card that has room to show one,
+and the shapes are the port's type channel precisely because colour cannot carry it alone.
+**Both states show the whole symbol now**; see "Letting a socket out" below.
+`collapsedPorts.test.tsx` still pins only the DOM and the declarations, since jsdom performs no
+layout.
+
+### The static pages carry the vocabulary too, and their figures are hand-drawn
+
+`overview.html` and `tutorial.html` draw node cards with the app's own tokens, so they follow a
+palette change for free — but three things about them do not, and all three were wrong.
+
+**A wire overlay is calibrated by hand, and the calibration had drifted.** Both pages draw their
+links as authored `<path>` coordinates in an SVG laid over cards the browser lays out, so the two
+agree only for as long as somebody keeps them agreeing. Measured in Chrome with `getScreenCTM`
+against each socket's centre: **exactly −5 at all fourteen endpoints on the overview**, **+4.5 and
+0.5 left at all twelve on the tutorial** (in the SVG's own units, since that page scales its
+canvas). One number each, therefore one offset on `.wires` rather than twenty-six edited path
+strings. It predates the socket work — the same numbers come back on the tree before it.
+
+**Measure the tutorial at a settled beat, and this is the part worth keeping.** Every card there
+carries an entry animation and only arrives at the beat its `data-from` names, so a card measured
+before then sits 10px low at 97% scale — which reads as an offset of its own, *in the opposite
+direction*, on a card the reader cannot see yet. Measured at the first beat the twelve endpoints
+split into two groups no single shift can fix, and averaging them produced a correction of −6.5
+that was wrong in both sign and size; the same twelve at a settled beat are one number. The first
+attempt shipped that wrong number and looked plausible in the numbers while being visibly worse on
+screen, which is the whole argument for opening a screenshot as well as a measurement.
+
+**A socket drawn in prose is `display: inline`, where width and height do not apply.** Both pages
+reuse `.sock` in running chrome — the tutorial's type legend, the overview's port cells and
+surface bar — and each undid its `position: absolute` without putting a box back. Every one of
+those rendered as an 11px sliver of border with no shape at all, which is a poor way to illustrate
+a figure whose subject is that shape carries the identity. `display: inline-block` is the whole
+fix; it is recorded because the failure looks like a spacing bug and is a display-type one.
+
+**A shape the table declares and a stylesheet never drew.** `hex` had no rule in `editor.css`, so
+it kept the base `border-radius: 50%` and drew as a circle — Meshes indistinguishable from
+Skeletons, Network from Neurons, on the canvas itself. The same failure as the missing `geometry`
+colour arm, in the same file, found while correcting the overview's Network from a diamond to the
+hex it actually is; `figure.css` and `nodeguide.css` had it and the canvas did not. `clip-path`
+cuts the socket's halo on the four diagonal edges, which is what a hex on a bordered box costs.
+
+**Chapter 2's caption was a claim about the palette**, and the palette moved under it: "only three
+hues clear an all-pairs colourblind check, so shape carries the rest". The rule now is that colour
+names the material and shape separates the members within it, which the legend demonstrates by
+including the pairs that make the point — Neurons and Skeletons are both filled circles, Matrix
+and Transform both diamonds. A figure that states a measured finding has to be on the list of
+things a measurement changes.
+
+**One more thing the type words needed.** A socket is a mark and clears a 3:1 floor; `.ty` in the
+legend is 13px at weight 650 and wants 4.5:1. Against the tutorial's `#171716`, four families pass
+on their socket value unchanged (table 4.93, matrix 4.62, dataset 5.27, transform 5.99) and two do
+not — geometry and layers are the two darkest members of the socket palette and land at 3.35 and
+3.34. They take a lighter step of the same hue with the chroma held, at 4.75 and 4.68: the same
+lightness-ladder move `theme.css` makes for the dataset backends, and the same one `overview.css`
+already makes for its code figures.
+
+### Six socket families, and the gate that says there may be three
+
+**Four different things wore one green** — a Dataset, a Skeletons/Meshes/Points collection, a
+Warp, and a neuroglancer Layers stack — because `socketStyle.ts` folded geometry and layers onto
+the dataset hue and transform onto geometry's. Each fold had a reason recorded beside it, and the
+reason was always the same one: only **three** chromatic families clear the all-pairs
+colourblind gate, so the fourth onwards had to borrow. Split into six, they are violet, teal and
+magenta beside the blue, orange and green.
+
+**The three-hue finding was re-measured and it holds.** With the `dataviz` validator, sweeping
+every in-gamut hue at every lightness in the mode's band: the ceiling for six hues is a worst
+all-pairs normal-vision **ΔE 14.4 dark / 13.5 light against a floor of 15** — at any chroma,
+because six hues 35° or more apart always leave one pair at about 14. Six chromatic families is
+not a tuning problem. It is outside what the gate passes, and this ships failing it.
+
+**What changed is the pair list, and that is the whole of the argument.** "Any two sockets can
+appear side by side, so all-pairs applies" was an assumption, not a measurement. The pairs a
+reader actually compares are the ones on one card, and that set is derivable: sweeping the
+registry — 105 node types, every family pair sharing a node — gives nine. **Every one of them
+clears the floor with margin: worst 17.2 dark / 17.1 light**, against the 20.9 / 24.0 the
+three-hue set already shipped for its own tightest pair. So no card got harder to read; several
+got easier. All-pairs FAILs on exactly one pair — table blue against transform teal, ΔE 10.5 /
+12.4 — and no node in the registry has both: `transform` occurs on Mirror Neurons and Transform
+Neurons, whose only other socket is geometry. CVD separation lands in the **6–8 band** (7.7 /
+7.2), which the validator calls legal *only* with a secondary encoding; shape and the
+always-visible port label are that encoding, which is what this palette has always relied on.
+
+**Violet / teal / magenta, and they are nameable on purpose.** They are what the wheel has left
+between blue 255, orange 40 and green 163. Three hues packed into the magenta arc instead score
+better on paper — the optimiser prefers them — and read as one family to a person, which is the
+failure being fixed rather than a new measure of it. Teal's chroma is 0.11 against the others'
+0.16–0.26: that is sRGB's ceiling at this lightness, not a choice, and it is why teal went to the
+family with the fewest neighbours.
+
+**The shape channel got sharper as a side effect.** The rule is now that a shape repeats *across*
+materials and never within one — a diamond means Matrix or Transform and the hue says which —
+where before, two of the folds put two meanings on one hue *and* one shape.
+
+`socketStyle.test.ts` asks every family for the token `familyColorVar` gives it, in all four
+stylesheets that draw a socket. Do not add a seventh family without re-running the sweep;
+`theme.css` carries the numbers.
+
+### A socket's hue is written down twice
+
+**`familyColorVar` answers it for the wire and a `data-family` rule answers it for the socket,
+and they disagreed.** `socketStyle.ts` maps six families onto four tokens — geometry shares the
+dataset hue, since only three chromatic families clear the all-pairs colourblind gate and shape
+carries the rest (see [colors.ts](../src/ui/colors.ts)). `editor.css` transcribed that table and
+**had no `geometry` arm**, so every Skeletons, Meshes, Points and Transform socket fell through
+to the base rule's `--socket-any` and drew grey, while the wire leaving it drew
+`--socket-dataset` green.
+
+It survived because of how it presents. A grey socket is a legal socket — `any` and the scalars
+are grey — and the colour it fell through to is a real member of the palette, so nothing on the
+card looks broken; it was reported as one green wire between two grey ports on an NBLAST card,
+and it was six sockets on every geometry node in the registry. **`figure.css` and
+`nodeguide.css` both had the arm**, which is the tell worth keeping: the two surfaces
+transcribed *from* the table got it right and the one that grew alongside it did not — and a
+sixth surface, `NodeThumbnail`, had a different failure of the same table.
+
+**The fix that stuck was deleting the transcription, not testing it.** The first version added
+the missing arm and a test asserting the stylesheets agree with `familyColorVar` — which freezes
+the drift rather than removing it: a seventh family would still mean eight new arms across four
+files, and the test tells you afterwards. There were also *six* copies, not four: `NodeThumbnail`
+built the token by interpolating the family name (`var(--socket-${family})`), so the three
+families whose tokens did not yet exist resolved to nothing and the shape fell back to inherited
+ink — the same bug in a fifth site, equally invisible. `theme.css` now carries one
+`[data-family]/[data-fam]` → `--sock` table, modelled on the header table beside it; every
+stylesheet reads `var(--sock, …)` once for the fill and once for the ring, `NodeThumbnail` and
+the inspector's chip call `familyColorVar`, and the test checks the single table plus the
+absence of any per-family `--socket-*` arm anywhere else.
+
+**And fixing it exposed the half that mattered more: an output socket was drawn from the
+inferred type and an input socket from the *declared* one.** Those are different questions —
+what is flowing versus what is accepted — and while geometry fell through to grey the two
+answers happened to coincide, because an `any` port and an unpainted geometry port were the same
+colour. With geometry green, every `any`-typed port in a geometry chain stayed grey between two
+green neighbours: Skeletons (green) into `Neurons` on Split Neurons (grey), out of `Matching`
+(green), into `Neurons` on Mirror (grey), out of `Mirrored` (green), into `Input 2` on Stack
+(grey). No single socket was wrong. The reading flipped at every port.
+
+**A socket shows what it carries, and falls back to what it accepts.** One sentence for both
+sides: an output takes its inferred type, an input takes the type inference resolved *into* it,
+and either falls back to the declaration when nothing is flowing — which is what keeps an
+unwired port describing itself. That is also the rule the socket's `title` had used all along,
+so the tooltip and the fill had been disagreeing on these ports too. It costs the shape channel
+some churn — a `Table` input fed by Neurons draws a filled circle rather than a ring — which is
+the same churn an output has always had, and it says something true.
+
+**`portTypeOf` is deliberately not what the fill reads.** It answers the *other* question: what
+a port accepts is what the palette filters on when a drag starts and what the socket-dimming
+compares against, so a wired `any` input reporting `skeletons` there would grey out every output
+it can still legally take. Two questions, two call sites, and the comment on each says which.
+
+`socketAgreement.test.tsx` asserts both ends of every wire in a graph are drawn alike, and does
+it on a graph with `any` ports **in** it — the morphology demo alone declares exactly the type
+every port gets, so the assertion is true there whatever the card does, which is how it would
+come to pass for the wrong reason.
+
+### The in-flight wire is its origin's colour
+
+**It was `--accent` for every drag**, so a new wire was blue until the moment it landed and then
+became its type's colour — worst in the one gesture where the type is what you are looking for,
+since what you are hunting is a socket that will take it. `connectionLineStyle` on `<ReactFlow>`
+now carries `draggedWireStyle(portTypeOf(...))`; the **stroke only**, because the width and the
+dashes say *in flight* rather than what is flowing, and a wire that lands must not keep them.
+
+**The colour is the origin port's, both directions.** Dragged from an output that is the wire's
+final colour exactly. Dragged backwards from an input it is the colour of what that port
+*accepts* — the final wire takes its source's type, which nothing knows until the drop, and the
+input's declared type is both the best available answer and the one its own socket is already
+drawing.
+
+**`portTypeOf` moved to `socketStyle.ts` and there is one of it.** Three surfaces ask "what does
+this port carry": the wire's colour, this, and the socket-dimming a card does during a drag —
+and two of them had their own copy of the rule (prefer the inferred type on an *output*, the
+declared type otherwise; an input has no inferred type to prefer). A card dimming sockets
+against a different reading of the origin than the line arriving at them is the same class of
+bug as the one directly above.
+
+**The subscription is three primitives, not the connection object.** `useStore` compares
+snapshots by identity, so a selector minting `{nodeId, portId}` loops (invariant 7). All three
+name the handle the drag *started* on and are fixed for the gesture, so the canvas re-renders
+once when a drag begins and once when it ends rather than on every pointer move.
+
+### Letting a socket out
+
+**A socket is centred on the card's edge, so a card that clips at its edge shows half of one.**
+That was the state for as long as there were sockets: `.coda-node` clipped with
+`overflow: hidden`, an 11px disc centred on the border came out as a 5.5px tab, and it looked
+deliberate — a tab flush with the card is a perfectly plausible design. What it actually cost is
+a channel. Colour cannot carry type identity here (only three chromatic families clear the
+all-pairs colourblind gate — see [colors.ts](../src/ui/colors.ts)), so the *shape* is load-bearing:
+`socketStyle.ts` distinguishes circle, ring, diamond, square, hex and dot, and half a diamond and
+half a square are the same silhouette. Blender draws the whole symbol; so do we.
+
+**`overflow: clip` with `overflow-clip-margin: 10px`, not `overflow: visible`.** The visible
+version was the obvious one and is worse: every child that paints to an edge — the header, the
+footer, the issue band, a viewer's preview — would then need its own clip and its own corners,
+and the *next* band added would be found by looking wrong. A clip margin keeps one clip and
+moves it out by a fixed amount, so everything that overflowed before still does. **10px is the
+reach of the largest thing that must escape, and it is not the disc**: it is the 20px hit target
+centred on it (see "Hitting a socket"), because a clip bounds hit-testing as well as paint.
+
+**Three things it costs, all of them silent.** The clip edge grows with the margin *and so do its
+radii*, so a card no longer rounds off a child painting to its own edge — `.coda-node__header`,
+`.coda-node > :last-child` and the state bar `::before` state the four corners that used to come
+free, and the bar's 3px width scales its radius down to about the curve the clip used to cut. The
+**state bar had to change paint order**: it was `z-index: 1` *over* the input sockets, which kept
+the strip continuous at the cost of a socket drawn whole over it dashing the line — a fine trade
+while the discs were half-cut and the wrong one now, since a disc that clears a 3px bar is a disc
+3px off the edge its partner sits on. Sockets are `z-index: 2`; the strip is dashed where they
+cross it, which is what Blender's own left edge looks like. And **an engine without
+`overflow-clip-margin` degrades to the old picture rather than a broken one** — `clip` with no
+margin is `hidden`.
+
+**Both offsets are `-1px` now.** The left one used to be `calc(-1px + var(--state-bar))`, pushed
+in so it cleared the strip; with both halves visible that asymmetry is what you see first.
+Measured in Chrome at canvas zoom 0.62: 3.4px of a 6.8px disc outside the card on both sides.
+
+`cardChrome.test.ts` pins the declarations — the bleed against the target's own width, the two
+offsets, and the socket outranking the bar — because jsdom performs no layout and every one of
+these fails by looking fine.
+
+### The header is the category colour, not a tint of it
+
+**It was `color-mix(in srgb, var(--cat) 16%, var(--surface-2))`: 1.2:1 against the card body**, a
+band you can find once you know it is there. It is the whole colour now, which puts it at
+4.9–7.8:1 on the light card and 2.7–3.3:1 on the dark one. Blender's headers, and the reason to
+copy them is that a category is the first thing you want off a card you are scanning past.
+
+**A second palette, not a bigger percentage** — `--cat-*-head` beside `--cat-*`, and the split is
+about what each is read at. `--cat-*` is a 17px thumbnail, a filter chip, a minimap cell and the
+add-menu tint: a hue there has to stay visible *against* its surface, which is why it lightens in
+the dark theme. Fold the two together and the dark values break the header (white ink on
+`#9085e9` is 3.1:1) while the header values break the icons (`--cat-analysis-head` on the dark
+canvas is 1.9:1, under the 3:1 non-text floor). So they are two tokens with two jobs.
+
+**One palette for both themes, which is what makes a card the same object in either** — and it
+forces the ink to be a literal. `--text-primary`/`--text-inverse` flip with the theme and the fill
+under them does not, so a themed ink is white on `mock` in the light theme and black on `analysis`
+in the dark one: legible in exactly one, and it reads as a rendering fault rather than a colour
+choice. `--cat-ink-light` / `--cat-ink-dark` are the two values, and each category names one.
+
+**The hue mapping did not move** — dataset green, query blue, analysis violet, visualisation
+orange, transform and utility grey — because four surfaces read it and a hue change is a change to
+all four. What moved is strength, and the **dataset ladder lost its span**: cave darkest, then
+catmaid, then neuPrint, still in that order, but living between 4.8 and 7.8 rather than reaching
+toward white, because the pale end now has to carry text. `mock` is the one member with dark ink
+and that is the point of it — the palest green says "not a real connectome" at a glance — taken
+from `#7fb3a0` to `#5f9884`, the last step that still clears 3:1 against the light card (3.24).
+
+Ink contrast, measured, white unless stated: dataset 4.84, cave 7.75, catmaid 5.97, mock 8.56
+(dark), query 5.13, analysis 5.74, visualisation 5.16, transform/utility 5.30. Worth knowing that
+**Blender's own headers do not clear AA** — `#4989ad` is 3.84:1 and `#07926f` 3.93:1 against white
+— so this is the register rather than the values.
+
+**Everything in the band had to stop naming a text token.** `--text-muted` on the query blue is
+1.5:1. The four header controls inherit `--cat-ink` and rank by opacity instead (0.72, the run
+button 0.85); the exceptions are the state badge, a filled disc carrying its own contrast, and any
+control that has grown a `--surface-3` chip — both pressed states, the stop button, and the three
+node states that advertise the run button — which are back to full strength because what is behind
+*them* is not the header.
+
+**The mapping is one table, in `theme.css`, keyed on attributes rather than classes.** Four
+stylesheets draw a node card: `editor.css`, `help/figure.css` (the figures in a help document,
+which draw real registry objects) and `overview.css` / `tutorial.css` (the static pages, whose own
+comments say they must not drift from the editor). Each keeps its own list mapping a category to
+`--cat`, because they name different elements and two of them spell the attribute `data-cat` — but
+a fifth copy of the *header* mapping is exactly how a page comes to be advertising a card the app
+no longer draws. `cardChrome.test.ts` asserts every surface reads `--cat-head`, that no fill is
+declared without an ink, and that no fill is overridden in a dark block.
 
 ### Hitting a socket
 
@@ -1345,24 +1612,26 @@ takes every pointer event, and aiming at a particular input stops working — th
 fanned folded band above exists to avoid. Scanning `elementFromPoint` around a socket in Chrome
 shows the two regions meeting on the pixel, with no gap either.
 
-**Sideways it grows inwards only, and that is the card's clip rather than a choice.**
-`.coda-node` clips with `overflow: hidden` — which is why an expanded card's discs render as
-half circles, above — and hit-testing follows that clip exactly as the paint does, so the half
-of the circle hanging over the canvas is simply cut off. Nothing is taken from the
-`reconnectRadius: 14` anchors that pull a wire off its socket, which sit outside the card; those
-were measured to be above the handles in the paint order anyway.
+**Sideways it used to grow inwards only, and that was the card's clip rather than a choice.**
+Hit-testing follows a clip exactly as the paint does, so while the card clipped at its own edge
+the outer half of every one of these circles was cut off with the disc it sits under. That is
+the second half of what "Letting a socket out" below buys: the bleed is 10px because the target
+is 20px, not because the disc is 11. Nothing is taken from the `reconnectRadius: 14` anchors
+that pull a wire off its socket, which sit further out still.
 
 **The other half of the input target was the state bar.** `.coda-node::before` is 3px wide with
 `z-index: 1`, and an input handle sits on it — so hit-testing gave the bar the left half of every
 input disc, leaving 5px of catchable width. `pointer-events: none` on the bar separates the paint
-from the hit: the strip still draws over the socket, which keeps it continuous down the card, and
-a point on it with no socket under lands on the card itself, so dragging a card by its left edge
-is unchanged.
+from the hit, and it is still what keeps this a paint decision only, now that the sockets are the
+ones painting on top. A point on the bar with no socket under it lands on the card itself, so
+dragging a card by its left edge is unchanged.
 
-**Measured in Chrome at zoom 1, per handle**: 5×11px catchable before, 12×20 for an input and
-9×19 for an output after — 50px² of target to 233 and 148. And a pointer 9px above and 4px inside
-an output socket's centre, dead space before, now starts a link: `.react-flow__connection-path`
-in flight, anchored at the real socket rather than at the grab point.
+**Measured in Chrome at zoom 1, per handle**: 5×11px catchable before the pseudo-element existed,
+12×20 for an input and 9×19 for an output once it did — 50px² of target to 233 and 148 — and the
+full 20×20 it was drawn for once the clip stopped cutting it. And a pointer 9px above and 4px
+inside an output socket's centre, dead space before, now starts a link:
+`.react-flow__connection-path` in flight, anchored at the real socket rather than at the grab
+point.
 
 **Folded, the enlargement is off** (`content: none`). The pitch there is 8px and the discs
 already overlap by 3, so a 20px target would put every socket on the card under whichever one

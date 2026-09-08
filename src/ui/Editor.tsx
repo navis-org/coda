@@ -37,11 +37,11 @@ import type {
 } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { CodaGraph, GraphNode } from '../core/graph'
+import type { GraphNode } from '../core/graph'
 import type { NodeSize } from '../layout/elkGraph'
 import { getNodeDef } from '../core/registry'
 import type { CodaType } from '../core/types'
-import { nodePorts, referenceEdgeIds } from '../core/graph'
+import { referenceEdgeIds } from '../core/graph'
 import { groupsTouching } from '../core/groups'
 import type { CollapsedEdge } from '../layout/collapse'
 import { COLLAPSED_TYPE, collapsedView, isFolded } from '../layout/collapse'
@@ -78,7 +78,8 @@ import { isTourActive, refreshTour } from './tour/tourState'
 import { TOUR_DECLINES, isTypingTarget } from './appShortcuts'
 import { useClipboardShortcuts } from './clipboard'
 import { LOCKED_NOTICE } from './lockCopy'
-import { wireStyle } from './socketStyle'
+import { draggedWireStyle, wireStyle } from './socketStyle'
+import { dragPortType, useDragOrigin } from './dragOrigin'
 import { useArrange } from './useArrange'
 import { useDownloads } from './useDownloads'
 import { useRunNotify } from './notify'
@@ -152,6 +153,9 @@ interface MenuState {
   connectFrom?: { nodeId: string; portId: string; handleType: 'source' | 'target' }
 }
 
+/** The in-flight wire when there is no origin type to read; see `draggedWireStyle`. */
+const IDLE_WIRE = draggedWireStyle(undefined)
+
 function EditorCanvas() {
   const graph = useGraphStore((s) => s.graph)
   const selection = useGraphStore((s) => s.selection)
@@ -163,6 +167,10 @@ function EditorCanvas() {
   const minimapOpen = useGraphStore((s) => s.panels.minimap)
 
   const { screenToFlowPosition, setViewport } = useReactFlow()
+
+  // Which handle a connection drag started on; a card reads the same answer to dim its sockets.
+  const dragOrigin = useDragOrigin()
+
   /*
    * The canvas transform, saved into the active document and put back when it comes round again.
    *
@@ -396,6 +404,17 @@ function EditorCanvas() {
    * selection: the box is how you drag those cards now.
    */
   const foldedSelection = selection.some((id) => collapse.hidden.has(id))
+
+  /*
+   * The wire in flight takes its origin port's colour. Not memoised: outside a drag this is one
+   * shared constant, and inside one nothing this component subscribes to moves — React Flow
+   * replaces `state.connection` per pointer frame but `useDragOrigin` reads only the handle the
+   * gesture began on. A dep array here would be allocated and compared per render to buy an
+   * identity that `GraphView`'s own `memo` is already losing on four inline props.
+   */
+  const connectionLineStyle = dragOrigin
+    ? draggedWireStyle(dragPortType(graph, inference, dragOrigin))
+    : IDLE_WIRE
 
   const rfEdges = useMemo<Edge[]>(() => {
     const wires: Edge[] = graph.edges.map((edge) => {
@@ -631,13 +650,13 @@ function EditorCanvas() {
           : { x: event.touches[0]?.clientX ?? 0, y: event.touches[0]?.clientY ?? 0 }
 
       const handle = connectionState.fromHandle
-      const type = portTypeOf(
-        graph,
-        inference,
-        handle.nodeId,
-        handle.id ?? '',
-        handle.type === 'source' ? 'output' : 'input',
-      )
+      // The palette filters on what this drag can connect to, which is the same answer the
+      // in-flight wire is coloured by and the same one every card dims its sockets against.
+      const type = dragPortType(graph, inference, {
+        nodeId: handle.nodeId,
+        portId: handle.id ?? null,
+        handleType: handle.type,
+      })
       if (!type) return
 
       setMenu({
@@ -1246,6 +1265,9 @@ function EditorCanvas() {
          * editor.css widens that to a 20px circle.
          */
         connectionRadius={26}
+        /* The in-flight wire takes the colour of what is being dragged; see `draggedWireStyle`.
+           Width and dashes stay in `editor.css`, which is what says "in flight". */
+        connectionLineStyle={connectionLineStyle}
         /*
          * Navigation model: left-drag on empty canvas pans; Shift+left-drag draws a
          * selection box. Panning is the far more frequent action, so it gets the bare
@@ -1490,23 +1512,6 @@ function collapsedWire(
     className: 'coda-edge--collapsed',
     style: wireStyle(only),
   }
-}
-
-/** Static type of a port, used when a drag starts so the palette can filter. */
-function portTypeOf(
-  graph: CodaGraph,
-  inference: ReturnType<typeof useGraphStore.getState>['inference'],
-  nodeId: string,
-  portId: string,
-  side: 'input' | 'output',
-): CodaType | undefined {
-  if (side === 'output') {
-    const resolved = inference.nodes[nodeId]?.outputs[portId]
-    if (resolved) return resolved
-  }
-  const node = graph.nodes.find((n) => n.id === nodeId)
-  if (!node) return undefined
-  return nodePorts(node, side).find((p) => p.id === portId)?.type
 }
 
 export function Editor() {

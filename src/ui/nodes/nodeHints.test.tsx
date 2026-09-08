@@ -21,7 +21,7 @@
  * The geometry is not tested here and cannot be: jsdom performs no layout, so "docked above the
  * card" is a CSS rule (`bottom: 100%` against React Flow's wrapper) that only a browser can
  * check. What is checkable is that the boxes are **siblings of the card rather than children of
- * it** — `.coda-node` clips with `overflow: hidden`, so a hint rendered inside it would be
+ * it** — `.coda-node` clips its content, so a hint rendered inside it would be
  * invisible in exactly the way jsdom cannot see.
  */
 

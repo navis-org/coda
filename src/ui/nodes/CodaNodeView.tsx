@@ -10,13 +10,13 @@
  * text in the footer — so state is never communicated by colour alone.
  */
 
-import { Handle, NodeResizer, Position, useStore, useUpdateNodeInternals } from '@xyflow/react'
+import { Handle, NodeResizer, Position, useUpdateNodeInternals } from '@xyflow/react'
 
 import { backendForNodeType } from '../../nodes/lib/datasetFamilies'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { GraphNode } from '../../core/graph'
-import type { InferenceResult, NodeIssue } from '../../core/inference'
+import type { NodeIssue } from '../../core/inference'
 import type { NodeDefinition } from '../../core/node'
 import type { ParamDef, ParamValues } from '../../core/node'
 import {
@@ -27,7 +27,6 @@ import {
 } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
 import { hasHelp } from '../../help/registry'
-import type { CodaType } from '../../core/types'
 import { datasetRef, isAssignable, typeLabel } from '../../core/types'
 import { describeValue, isDatasetValue } from '../../core/values'
 import { useGraphStore } from '../../store/graphStore'
@@ -37,6 +36,7 @@ import { ParamField } from '../params/ParamField'
 import { IssueText } from '../IssueText'
 import { bucketParams } from '../params/paramGroups'
 import { socketStyle } from '../socketStyle'
+import { dragPortType, useDragOrigin } from '../dragOrigin'
 import { ValuePreview } from '../viewers/ValuePreview'
 import { CacheAge } from './CacheAge'
 import { DatasetCacheAge } from './DatasetCacheAge'
@@ -47,7 +47,6 @@ import { NodeRunRing } from './NodeRunRing'
 import { STATE_GLYPH, STATE_TEXT } from './runState'
 import { ResultDownload } from './ResultDownload'
 import { firstOutputPort, inputPorts, outputPorts } from '../../core/ports'
-import { nodePorts } from '../../core/graph'
 
 export interface CodaNodeData {
   [key: string]: unknown
@@ -198,27 +197,9 @@ function CodaNodeViewImpl({
   // than subscribed to; `runVersion` above already ties this component to scheduler ticks.
   const nodeInputs = useGraphStore((s) => s.nodeInputs)
 
-  /**
-   * Live drag state, used to dim sockets that cannot accept the in-flight connection.
-   * Selected as three primitives rather than one object: `useSyncExternalStore` compares
-   * snapshots by identity, so returning a fresh object per call would loop.
-   */
-  const dragNodeId = useStore((s) =>
-    s.connection.inProgress ? (s.connection.fromHandle?.nodeId ?? null) : null,
-  )
-  const dragPortId = useStore((s) =>
-    s.connection.inProgress ? (s.connection.fromHandle?.id ?? null) : null,
-  )
-  const dragHandleType = useStore((s) =>
-    s.connection.inProgress ? (s.connection.fromHandle?.type ?? null) : null,
-  )
-  const dragOrigin = useMemo(
-    () =>
-      dragNodeId && dragHandleType
-        ? { nodeId: dragNodeId, portId: dragPortId, handleType: dragHandleType }
-        : undefined,
-    [dragNodeId, dragPortId, dragHandleType],
-  )
+  // Which handle a connection drag started on — shared with the canvas, which colours the
+  // wire in flight from the same answer. See `dragOrigin.ts`.
+  const dragOrigin = useDragOrigin()
 
   /*
    * Collapsing *or* folding moves the sockets onto the header, and React Flow caches each
@@ -449,7 +430,9 @@ function CodaNodeViewImpl({
 
   // The type being dragged, resolved once per render rather than per socket.
   const draggedType =
-    dragOrigin && dragOrigin.nodeId !== id ? draggedPortType(inference, dragOrigin) : undefined
+    dragOrigin && dragOrigin.nodeId !== id
+      ? dragPortType(useGraphStore.getState().graph, inference, dragOrigin)
+      : undefined
 
   return (
     <>
@@ -698,6 +681,20 @@ function CodaNodeViewImpl({
               outputType !== undefined &&
               !isAssignable(outputType, draggedType)
 
+            /*
+             * **What it carries, falling back to what it accepts** — one rule, both sides, and
+             * the same one the `title` uses. An input drawn from `input.type` alone showed the
+             * declaration only, so a port typed `any` stayed grey while the wire arriving at it
+             * and the socket that wire left were both the colour of what was flowing: Skeletons
+             * out of a Skeletons card into a grey `Neurons`, back out green, into a grey
+             * `Input 2`. No single socket was wrong; the reading flipped at every port because
+             * one side of each pair answered a different question.
+             *
+             * Not `dragPortType`, which answers that *other* question and has to keep doing so:
+             * what a port accepts is what the dimming above compares against.
+             */
+            const inStyle = socketStyle(inputType ?? input?.type)
+            const outStyle = socketStyle(outputType)
             return (
               <div className="port-row" key={row}>
                 <div
@@ -712,8 +709,8 @@ function CodaNodeViewImpl({
                         position={Position.Left}
                         id={input.id}
                         className="socket"
-                        data-family={socketStyle(input.type).family}
-                        data-shape={socketStyle(input.type).shape}
+                        data-family={inStyle.family}
+                        data-shape={inStyle.shape}
                         data-compatible={dimInput ? 'false' : undefined}
                         title={`${input.label ?? input.id}: ${typeLabel(inputType ?? input.type)}`}
                       />
@@ -730,8 +727,8 @@ function CodaNodeViewImpl({
                         position={Position.Right}
                         id={output.id}
                         className="socket"
-                        data-family={socketStyle(outputType).family}
-                        data-shape={socketStyle(outputType).shape}
+                        data-family={outStyle.family}
+                        data-shape={outStyle.shape}
                         data-compatible={dimOutput ? 'false' : undefined}
                         title={`${output.label ?? output.id}: ${typeLabel(outputType)}`}
                       />
@@ -928,20 +925,6 @@ function CodaNodeViewImpl({
 /** Whether this param holds something other than what its definition declared. */
 function isChanged(param: ParamDef, values: ParamValues): boolean {
   return changedParams([param], values).length > 0
-}
-
-/** Resolve the type sitting at the far end of an in-flight connection drag. */
-function draggedPortType(
-  inference: InferenceResult,
-  origin: { nodeId: string; portId: string | null; handleType: 'source' | 'target' },
-): CodaType | undefined {
-  if (!origin.portId) return undefined
-  if (origin.handleType === 'source') {
-    return inference.nodes[origin.nodeId]?.outputs[origin.portId]
-  }
-  const graph = useGraphStore.getState().graph
-  const node = graph.nodes.find((n) => n.id === origin.nodeId)
-  return node ? nodePorts(node, 'input').find((p) => p.id === origin.portId)?.type : undefined
 }
 
 export const CodaNodeView = memo(CodaNodeViewImpl)

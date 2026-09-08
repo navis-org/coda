@@ -39,18 +39,8 @@
 
 .cfig__wire {
   fill: none;
-  stroke: var(--socket-scalar);
+  stroke: var(--sock, var(--socket-scalar));
   stroke-width: 1.6;
-}
-.cfig__wire[data-fam='table'] {
-  stroke: var(--socket-table);
-}
-.cfig__wire[data-fam='matrix'] {
-  stroke: var(--socket-matrix);
-}
-.cfig__wire[data-fam='dataset'],
-.cfig__wire[data-fam='geometry'] {
-  stroke: var(--socket-dataset);
 }
 
 .cfig__card {
@@ -59,7 +49,11 @@
   background: var(--surface-2);
   border: 1px solid var(--border-strong);
   border-radius: 5px;
-  overflow: hidden;
+  /* `editor.css`'s rule, for its reason: a socket sits centred on the card's edge and
+     `overflow: hidden` cut half of every one of them off. The bleed is the reach of the
+     largest thing that has to escape. */
+  overflow: clip;
+  overflow-clip-margin: var(--card-bleed);
   font-size: 10px;
   line-height: 1.2;
 }
@@ -78,11 +72,15 @@
   height: 25px;
   padding: 0 7px;
   gap: 5px;
-  background: color-mix(in srgb, var(--cat) 16%, var(--surface-2));
+  /* Solid, and the corners are stated: both are `editor.css`'s, and the fill and the ink come
+   from the one table in `theme.css` so a page cannot advertise a header the app stopped
+   drawing. */
+  background: var(--cat-head, var(--cat-utility-head));
   border-bottom: 1px solid var(--border);
+  border-radius: 4px 4px 0 0;
   font-size: 10.5px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--cat-ink, var(--cat-ink-light));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -152,7 +150,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--socket-scalar);
+  background: var(--sock, var(--socket-scalar));
   flex: none;
   /* Half outside the card, like a real handle sitting on the card's edge. */
   margin-left: -10px;
@@ -162,30 +160,9 @@
   margin-left: 0;
   margin-right: -10px;
 }
-.cfig__pip[data-fam='table'] {
-  background: var(--socket-table);
-}
-.cfig__pip[data-fam='matrix'] {
-  background: var(--socket-matrix);
-}
-.cfig__pip[data-fam='dataset'],
-.cfig__pip[data-fam='geometry'] {
-  background: var(--socket-dataset);
-}
 .cfig__pip[data-shape='ring'] {
   background: var(--surface-2);
-  border: 2px solid var(--socket-table);
-}
-.cfig__pip[data-shape='ring'][data-fam='matrix'] {
-  border-color: var(--socket-matrix);
-}
-.cfig__pip[data-shape='ring'][data-fam='dataset'],
-.cfig__pip[data-shape='ring'][data-fam='geometry'] {
-  border-color: var(--socket-dataset);
-}
-.cfig__pip[data-shape='ring'][data-fam='scalar'],
-.cfig__pip[data-shape='ring'][data-fam='any'] {
-  border-color: var(--socket-scalar);
+  border: 2px solid var(--sock, var(--socket-scalar));
 }
 .cfig__pip[data-shape='square'] {
   border-radius: 2px;

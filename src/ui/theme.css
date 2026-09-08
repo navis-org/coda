@@ -38,17 +38,50 @@
   --accent-soft: rgba(42, 120, 214, 0.14);
 
   /* --- socket families --------------------------------------------------
-   * Only three chromatic families plus achromatic gray. Eight hues cannot be told
-   * apart when any two may sit side by side (validated: all-pairs CVD ΔE fails past
-   * three slots on the dark surface), so shape + the always-visible socket label carry
-   * the rest of the identity. Skeleton/Mesh deliberately have no colour yet — nothing
-   * produces them, and inventing an unvalidated fourth hue now would be a lie.
+   * Six chromatic families plus achromatic gray, and the third paragraph is the reason
+   * this comment is long: **the all-pairs gate cannot be met at six, and was not.**
+   * Measured with the `dataviz` validator, not reasoned about; re-run it before
+   * touching a value here.
+   *
+   * What the three-hue set said was right: past three slots the all-pairs normal-vision
+   * floor fails. Re-measured while adding these — the ceiling for six hues is ΔE 14.4
+   * dark / 13.5 light against a floor of 15, whatever chroma you spend, because six hues
+   * 35° or more apart always leave one pair at about 14. A sixth family is not a tuning
+   * problem; it is outside what the gate passes.
+   *
+   * What was done instead of giving up or pretending: the floor is applied to the pairs
+   * that can actually meet. A socket is hue **plus shape plus an always-visible label**
+   * (`socketStyle.ts`), so the case the floor is really about is two sockets a reader
+   * compares — in practice, two on one card. That set was read off the registry: 105
+   * node types, every family pair sharing a node. **Every one of those pairs clears the
+   * floor with margin — worst 17.2 dark / 17.1 light** — against 20.9 / 24.0 for the
+   * tightest pair the three-hue set already shipped. All-pairs still FAILs, on exactly
+   * one pair: table blue against transform teal, ΔE 10.5 dark / 12.4 light. Those two
+   * never appear on one card — `transform` occurs on Mirror and Transform Neurons, whose
+   * only other socket is geometry. CVD lands in the 6–8 band (7.7 / 7.2), legal *only*
+   * with a secondary encoding, and shape plus the label is that encoding.
+   *
+   * Violet / teal / magenta because that is what the wheel has left between blue 255,
+   * orange 40 and green 163, and because they are nameable: three more hues packed into
+   * the magenta arc score better and read as one family. Teal's chroma is 0.11 against
+   * the others' 0.16–0.26 — sRGB's ceiling at this lightness, not a choice.
    */
   --socket-table: #2a78d6; /* Table / Neurons — the dominant currency */
-  --socket-matrix: #eb6834;
-  --socket-dataset: #1baf7a;
+  --socket-matrix: #eb6834; /* Matrix / Network / Layout / Linkage */
+  --socket-dataset: #1baf7a; /* Dataset — a place to read from */
+  --socket-geometry: #6f27e1; /* Skeletons / Meshes / Points */
+  --socket-transform: #0f9fbe; /* a Warp: a mapping applied to geometry */
+  --socket-layers: #9e3081; /* neuroglancer layers */
   --socket-scalar: #898781; /* number / string / boolean — recessive plumbing */
   --socket-any: #898781;
+
+  /*
+   * How far a card lets its own content past its edge, which is what shows a socket whole.
+   * Sized from the 20px hit target centred on the socket, not from the 11px disc — a clip bounds
+   * hit-testing as well as paint. Here rather than in each stylesheet because four of them clip
+   * a card and the number means nothing on its own; `cardChrome.test.ts` ties it to the target.
+   */
+  --card-bleed: 10px;
 
   /* --- categorical chip hues --------------------------------------------
    * The eight validated categorical slots from `colors.ts`, mirrored here because the
@@ -134,6 +167,42 @@
   --cat-visualisation: #eb6834;
   --cat-utility: #898781;
   /*
+   * The header *fill*, and the ink on it — Blender's node headers rather than a tint of one.
+   *
+   * A second palette, not a strength dial on the one above, because the two are read at
+   * different sizes. `--cat-*` is a 17px thumbnail, a filter chip and a minimap cell: a hue
+   * there has to stay visible *against* the surface behind it, which is why it lightens in the
+   * dark theme. A header is a 28px band carrying 12px/550 text, where the ink decides
+   * legibility and the fill only has to separate from the card. So this set is **one palette
+   * for both themes** — which is what makes a card read as the same object in either — and each
+   * member is picked so its ink clears 4.5:1, not so the fill clears 3:1. Measured, white ink
+   * unless stated: dataset 4.84, cave 7.75, catmaid 5.97, query 5.13, analysis 5.74,
+   * visualisation 5.16, transform/utility 5.30.
+   *
+   * The ink is a literal and must stay one. `--text-primary`/`--text-inverse` flip with the
+   * theme and the fill under them does not, so a themed ink is white on `mock` in the light
+   * theme and black on `analysis` in the dark one — legible in exactly one of the two, and it
+   * presents as a rendering fault rather than as a colour choice.
+   *
+   * The dataset ladder keeps its direction (cave darkest, then catmaid, then neuPrint) and
+   * loses its span: the pale end now has to carry text, so the three real backends live between
+   * 4.8 and 7.8 rather than reaching toward white. `mock` is the one member with dark ink and
+   * that is the point of it — the palest green says "not a real connectome" at a glance — taken
+   * from the tint's #7fb3a0 down to #5f9884, the last step that still clears 3:1 against the
+   * light card (3.24) while staying obviously the palest of the four.
+   */
+  --cat-ink-light: #fbfbfa;
+  --cat-ink-dark: #131313;
+  --cat-dataset-head: #0d7f57;
+  --cat-dataset-cave-head: #0a5c40;
+  --cat-dataset-catmaid-head: #0b6f4d;
+  --cat-dataset-mock-head: #5f9884;
+  --cat-query-head: #2a6bbf;
+  --cat-transform-head: #6b6963;
+  --cat-analysis-head: #6152c6;
+  --cat-visualisation-head: #b8461a;
+  --cat-utility-head: #6b6963;
+  /*
    * The Text note — a framed box of prose, not a node.
    *
    * The paper barely separates from the canvas (1.13:1), so the *frame* is what says "a
@@ -207,6 +276,9 @@
     --socket-table: #3987e5;
     --socket-matrix: #d95926;
     --socket-dataset: #199e70;
+    --socket-geometry: #7f3df8;
+    --socket-transform: #27a2c0;
+    --socket-layers: #ae3f90;
     --socket-scalar: #898781;
     --socket-any: #898781;
 
@@ -269,6 +341,9 @@
   --socket-table: #3987e5;
   --socket-matrix: #d95926;
   --socket-dataset: #199e70;
+  --socket-geometry: #7f3df8;
+  --socket-transform: #27a2c0;
+  --socket-layers: #ae3f90;
   --socket-scalar: #898781;
   --socket-any: #898781;
 
@@ -304,6 +379,120 @@
   --start-image-opacity: 0.55;
   --shadow-node: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 18px rgba(0, 0, 0, 0.35);
   --shadow-panel: 0 8px 32px rgba(0, 0, 0, 0.55);
+}
+
+/* --------------------------------------------------------------------------
+ * Socket family -> hue
+ * -------------------------------------------------------------------------- */
+
+/*
+ * One table, for the reason the header table below is one: five surfaces draw a socket — the
+ * canvas, the help figures, the node guide, the inspector's type chip and the add-menu
+ * thumbnail — and every one of them used to transcribe this mapping. `familyColorVar` in
+ * `socketStyle.ts` is the sixth spelling, in TypeScript, and it is the one that decides a
+ * *wire*.
+ *
+ * They had drifted, twice, and both failures look like nothing: `geometry` had no arm at all in
+ * `editor.css`, so every Skeletons, Meshes, Points and Transform socket fell through to grey
+ * while its wire drew green; and `NodeThumbnail` built the token by interpolating the family
+ * name, which silently resolved nothing for the three families that had no token yet. A missing
+ * arm paints a legal-looking socket in a real palette colour, so nothing on the card is visibly
+ * wrong. Adding the seventh family is now one line here and no line anywhere else.
+ *
+ * `data-fam` as well as `data-family` because the surfaces disagree on the spelling. As with the
+ * header table, this also lands on elements that never read it; see the note there.
+ */
+[data-family='table'],
+[data-fam='table'] {
+  --sock: var(--socket-table);
+}
+[data-family='matrix'],
+[data-fam='matrix'] {
+  --sock: var(--socket-matrix);
+}
+[data-family='dataset'],
+[data-fam='dataset'] {
+  --sock: var(--socket-dataset);
+}
+[data-family='geometry'],
+[data-fam='geometry'] {
+  --sock: var(--socket-geometry);
+}
+[data-family='transform'],
+[data-fam='transform'] {
+  --sock: var(--socket-transform);
+}
+[data-family='layers'],
+[data-fam='layers'] {
+  --sock: var(--socket-layers);
+}
+[data-family='scalar'],
+[data-fam='scalar'],
+[data-family='any'],
+[data-fam='any'] {
+  --sock: var(--socket-scalar);
+}
+
+/* --------------------------------------------------------------------------
+ * Category -> header fill
+ * -------------------------------------------------------------------------- */
+
+/*
+ * One table, because four stylesheets draw a node card: `editor.css` (the real one),
+ * `help/figure.css` (the figures inside a help document, which draw real registry objects),
+ * and `overview.css` / `tutorial.css` (the mock cards on the static pages). Each already keeps
+ * its own list mapping a category to `--cat`, and those lists have to stay — they name different
+ * elements — but a *fifth* copy of the header mapping is exactly how a page comes to be
+ * advertising a card the app no longer draws. So the header pair is declared once, here, and a
+ * card's stylesheet only reads `--cat-head` / `--cat-ink`.
+ *
+ * Attribute selectors rather than classes, since the four disagree about the class names and two
+ * of them spell the attribute `data-cat`. The pair therefore also lands on elements that never
+ * read it — a filter chip, a browser tile — which costs nothing: an unread custom property is
+ * not painted. Backend rules come last so a dataset card's backend wins over its category, the
+ * same source order the `--cat` lists already rely on.
+ */
+/* The ink almost every fill takes; `mock` below is the one that does not, and pulling the
+   default out is what lets that show. */
+[data-category],
+[data-cat],
+[data-backend] {
+  --cat-ink: var(--cat-ink-light);
+}
+[data-category='dataset'],
+[data-cat='dataset'] {
+  --cat-head: var(--cat-dataset-head);
+}
+[data-category='query'],
+[data-cat='query'] {
+  --cat-head: var(--cat-query-head);
+}
+[data-category='transform'],
+[data-cat='transform'] {
+  --cat-head: var(--cat-transform-head);
+}
+[data-category='analysis'],
+[data-cat='analysis'] {
+  --cat-head: var(--cat-analysis-head);
+}
+[data-category='visualisation'],
+[data-cat='visualisation'] {
+  --cat-head: var(--cat-visualisation-head);
+}
+[data-category='utility'],
+[data-cat='utility'] {
+  --cat-head: var(--cat-utility-head);
+}
+[data-backend='cave'] {
+  --cat-head: var(--cat-dataset-cave-head);
+}
+[data-backend='catmaid'] {
+  --cat-head: var(--cat-dataset-catmaid-head);
+}
+/* The one member with dark ink; see the token block for why that is deliberate. */
+[data-backend='mock'] {
+  --cat-head: var(--cat-dataset-mock-head);
+  --cat-ink: var(--cat-ink-dark);
 }
 
 /* --------------------------------------------------------------------------
