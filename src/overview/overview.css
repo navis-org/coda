@@ -723,6 +723,131 @@ code {
 }
 
 /* --------------------------------------------------------------------------
+ * The analysis chains
+ *
+ * A chip is a node card reduced to its header: the same `--cat-head` / `--cat-ink` pair out of
+ * `theme.css` that the real card, the help figures and the mock cards above all read, so a
+ * chip cannot advertise a colour the editor stopped drawing. It is deliberately *not* a card —
+ * the section above already draws four of those, and repeating them at quarter size would say
+ * the chain is a screenshot when it is a claim about which nodes wire together.
+ *
+ * The connector carries the three channels a socket gets on a card: colour (`--sock`, off
+ * `data-fam`), shape (`data-shape`) and the port's own visible label. A wire with only the
+ * colour would fail exactly the readers the socket vocabulary exists for.
+ * -------------------------------------------------------------------------- */
+
+.anagrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(1.1rem, 2.2vw, 1.6rem);
+  align-items: start;
+}
+.ana {
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+  padding: clamp(1.1rem, 2vw, 1.5rem);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  /* `--surface-1`, matching the other figure frames on this page — and it is also what the
+     inline sockets below take as their rim, so the two must move together. */
+  background: var(--surface-1);
+}
+.ana h3 {
+  font-size: 1.15rem;
+  font-weight: 750;
+}
+.ana p {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+.ana p b {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+/* The variant line: an aside about the same chain, so it is set smaller and keeps the mono
+   voice the captions use. */
+.ana__also {
+  font-size: 0.88rem;
+}
+.ana__also em {
+  font-style: normal;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.chain {
+  display: grid;
+  justify-items: start;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--cat-head, var(--cat-utility-head));
+  color: var(--cat-ink, var(--cat-ink-light));
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.5;
+}
+/* The same chip inside a sentence, where it names a node rather than standing in a chain. */
+.chip--inline {
+  padding: 1px 7px;
+  font-size: 0.82em;
+  vertical-align: baseline;
+}
+
+/*
+ * The connector. The rule is a `::before` rather than a border so it can run the full height of
+ * a row whose label wraps, and it is inset to sit under the chip's rounded corner rather than
+ * at its edge — a wire leaving a card leaves from a socket, and there is no socket at a corner.
+ */
+.chain__wire {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 26px;
+  padding-left: 32px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.chain__wire::before {
+  content: '';
+  position: absolute;
+  left: 17px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--sock, var(--t-scalar));
+}
+/*
+ * `.sock` gets its box from `position: absolute`; `.sock--inline` returns it to static, which
+ * costs the diamond its rotation — the transform that centred it also turned it. Restored here
+ * rather than in the `.sock--inline` rule itself, which two other figures already share.
+ */
+.chain__wire .sock {
+  border-color: var(--surface-1);
+}
+/*
+ * A ring's border *is* its colour and its fill is the hole — the swap `.sock[data-shape='ring']`
+ * makes. So a card's surface goes to the *background* there, and the rule above, written flat,
+ * painted every ring socket invisible: `Connections`, `Vectors` and `Tree` all drew as a faint
+ * grey circle on a coloured wire, which reads as a rendering artefact rather than as a socket.
+ */
+.chain__wire .sock[data-shape='ring'] {
+  background: var(--surface-1);
+  border-color: var(--sock, var(--t-scalar));
+}
+.sock--inline[data-shape='diamond'] {
+  transform: rotate(45deg);
+}
+
+/* --------------------------------------------------------------------------
    Backends
    -------------------------------------------------------------------------- */
 
@@ -1233,6 +1358,9 @@ code {
   .split,
   .split--wide,
   .split--narrow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .anagrid {
     grid-template-columns: minmax(0, 1fr);
   }
   .pipe {

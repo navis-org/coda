@@ -15,7 +15,7 @@
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { listableNodeDefs } from '../core/registry'
+import { getNodeDef, listableNodeDefs } from '../core/registry'
 import { BACKENDS, DATASET_FAMILIES } from '../nodes/lib/datasetFamilies'
 import '../nodes'
 
@@ -64,6 +64,37 @@ describe('the overview page', () => {
     for (const family of DATASET_FAMILIES) {
       if (family.synthetic) continue
       expect(TEXT, `${family.label} is missing from the page`).toContain(family.label)
+    }
+  })
+
+  /*
+   * The analysis chains name real nodes, and say two things about each: what it
+   * is called, and — through `data-cat`, which is what `theme.css` colours the
+   * chip from — which category it is in. Both drift silently. A renamed node
+   * leaves a chip advertising a card the app no longer draws, and a
+   * recategorised one leaves a chip in the wrong colour on a page whose whole
+   * chromatic vocabulary is that colour meaning something.
+   *
+   * Attribute order is fixed by the pattern rather than parsed, which is the
+   * trade jsdom-free matching has made everywhere else in this file. A chip
+   * written with the attributes the other way round is then invisible to the
+   * test, so the count is asserted too — there are four chains plus the inline
+   * chips in their variant lines, and zero would otherwise pass everything.
+   */
+  it('names real nodes in the analysis chains', () => {
+    const chips = [
+      ...HTML.matchAll(
+        /<span class="chip[^"]*" data-cat="([^"]+)" data-node="([^"]+)">([^<]+)<\/span>/g,
+      ),
+    ]
+    expect(chips.length, 'no node chips found — has the markup changed shape?').toBeGreaterThan(
+      15,
+    )
+    for (const [, category, type, text] of chips) {
+      const def = getNodeDef(type!)
+      expect(def, `${type} is not a registered node`).toBeTruthy()
+      expect(text!.replace(/&#8209;|\u2011/g, '-')).toBe(def!.label)
+      expect(def!.category, `${type} is drawn as ${category}`).toBe(category)
     }
   })
 

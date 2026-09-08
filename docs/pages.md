@@ -11,7 +11,8 @@ each node does. Somebody deciding whether to open the editor at all reads this a
 
 Same construction as the other two: plain TypeScript, no React and no store import, importing
 nothing from `src/ui` but `theme.css`. Verify with `pnpm build` — `overview-*.js` is **0.8 kB
-raw / 0.46 kB gzipped**, its CSS is 25 kB (nearly all of it `theme.css`), and
+raw / 0.46 kB gzipped**, its CSS is 30 kB (nearly all of it `theme.css`;
+the analyses section cost 1.3 kB of it), and
 `dist/overview.html` must reference no `main-*` chunk. If it ever does, something reached into
 `src/ui` past the stylesheet.
 
@@ -25,6 +26,35 @@ wrong kind of copy of the thing it illustrates. Its neuroglancer panel takes the
 black the tutorial's does, and its viewBox is **landscape**, because the cell it fills is — a
 portrait one under `slice` crops the arbours off at the top, which reads as a mistake rather than
 as a close-up.
+
+The **analyses** section sits between the editor thesis and the dashboard, because the thesis
+shows *that* nodes compose and this shows *what they compose into*: partners, clustering by
+shape, clustering by connectivity, and influence/paths. Four cards, each a vertical chain of
+node **chips** with the value between them named and typed.
+
+**A grid, not a carousel** — the shape that was asked for and the shape that was built are
+different. Tabs would be the first state this page's script has ever held, and three of four
+chains would be behind a click for a reader who is still deciding whether to open the editor;
+they would also repeat the stage figure directly above them four times over. A chip is a node
+card reduced to its **header**, reading the same `--cat-head` / `--cat-ink` pair out of
+`theme.css` that the real card and the mock cards above already read, so a chip cannot advertise
+a colour the editor stopped drawing. The connector between two chips carries all three socket
+channels — colour (`--sock` off `data-fam`), shape (`data-shape`) and the port's own visible
+label — because a wire with only the colour fails exactly the readers the socket vocabulary
+exists for.
+
+Two things it forced, both found in a browser and neither visible to the suite. **A ring
+socket's border is its colour and its fill is the hole**, which `.sock[data-shape='ring']` swaps;
+the rule blending a socket's rim into the card's surface was written flat and therefore painted
+every ring invisible — `Connections`, `Vectors` and `Tree` all drew as a faint grey circle on a
+coloured wire, which reads as a rendering artefact rather than as a socket. Its arm is separate
+now. And **`.sock--inline` returns the socket to `position: static`, which costs the diamond its
+rotation**, the transform that centred it having also turned it; `.ports__cell` two figures away
+already carried the same restoration.
+
+Its icon is the **dendrogram bracket out of `glyphs.ts`** — `cluster.linkage`'s own drawing
+rather than a fifth icon set — restroked from that table's 1.6 to this page's 2, which is the one
+thing a section icon does not share with a node's glyph.
 
 **Its script is a scroll reveal and a theme read, and that is the whole of it.** The page has no
 camera and no pinned canvas — the field guide already owns that idiom, and repeating it here
@@ -58,6 +88,13 @@ claims are asserted against the registry rather than against a snapshot:
 - **The node count is a floor** (`60+ nodes`), compared against `listableNodeDefs().length`.
   A floor rather than an exact count, so adding a node does not fail a test that is about the
   page being *wrong*.
+- **Every chip in the analyses section names a real node, and says its category.** Each carries
+  `data-node`, and the label and the `data-cat` are both checked against the registry — the
+  second because `theme.css` colours the chip from it, so a recategorised node leaves a chip in
+  the wrong colour on a page whose whole chromatic vocabulary is that colour meaning something.
+  Both arms confirmed by mutation. The count is asserted too: the chips are matched with a
+  pattern rather than parsed, so one written with its attributes in another order is invisible to
+  the test and zero chips would otherwise pass everything.
 
 The test flattens the markup before matching, because the typography and the prose disagree about
 how to spell a hyphen — `FIB-19` in the dataset card and `FIB&#8209;19` in the sentence beside it

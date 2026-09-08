@@ -34,6 +34,15 @@
       <circle cx="18" cy="6" r="2.5"/>
       <path d="M18 8.5a9.5 9.5 0 0 1-9.5 9.5"/>
     </g>
+    <!-- Analyses: the dendrogram bracket, which is `cluster.linkage`'s own glyph out of
+         `src/ui/glyphs.ts` rather than a fifth icon set — restroked from that table's 1.6 to
+         this page's 2, the one thing a section icon does not share with a node's drawing. -->
+    <g id="i-analyses" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 19.5v-4.5h4.5v4.5"/>
+      <path d="M14.5 19.5v-6.5h5v6.5"/>
+      <path d="M7.25 15V8.5H17V13"/>
+      <path d="M12.1 8.5V4.6"/>
+    </g>
     <!-- Dashboard: the grid itself, in the proportions the section's figure draws —
          two cells down the left, one full-height on the right. -->
     <g id="i-dashboard" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -110,7 +119,7 @@
         Coda is a node-based editor for <b>co</b>nnectome <b>d</b>ata <b>a</b>nalysis. Each node is a step
         &mdash; data fetching, analysis or visualisation &mdash; and can be freely combined to enable
         complex pipelines: search <em>Neurons</em>, run <em>NBLASTs</em>,
-        visualise data <em>Neuroglancer</em>, explore <em>Networks</em> and more.
+        visualise data in <em>Neuroglancer</em>, explore <em>Networks</em> and more.
       </p>
     </div>
 
@@ -253,6 +262,183 @@
 </section>
 
 <!-- ==========================================================================
+     Analyses
+
+     Directly after the editor thesis, because the thesis shows *that* nodes
+     compose and this shows *what they compose into*. Four cards, each a chain
+     of node chips with the value flowing between them named and typed — the
+     same three channels a socket gets on a card above (colour, shape, a
+     visible label), at chip scale.
+
+     A grid rather than a carousel: the tabs would be the first state this
+     page's script has ever held, and three of four chains would be behind a
+     click for a reader who is deciding whether to open the editor at all.
+
+     Every chip carries `data-node`, and `overview.test.ts` checks the label
+     and the category against the registry — a renamed or recategorised node
+     is then a failing test rather than a chip in the wrong colour.
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise" style="max-width: 40rem">
+      <h2>
+        <span class="h2icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-analyses"/></svg></span>
+        The analyses come with it
+      </h2>
+      <p class="lede">
+        The standard connectome analyses are chains of nodes rather than scripts you have to
+        write: partner tables, clustering by shape, clustering by connectivity, influence scores
+        and path searches. Each is a just handful of nodes &mdash; including support for cross-dataset
+        comparisons.
+      </p>
+    </div>
+
+    <div class="anagrid">
+      <article class="ana rise">
+        <h3>Who talks to whom</h3>
+        <p>
+          <b>Connectivity</b> fetches synaptic partners one or more hops out and hands back two
+          things: the edge list, and the neuron set it reached. <b>Adjacency</b> takes that set
+          onto itself &mdash; synapse counts from one group of neurons onto another, grouped by
+          cell type if you want it &mdash; which is a matrix, so the <b>Heatmap</b> is the next
+          card and nothing in between needs configuring.
+        </p>
+        <div class="chain">
+          <span class="chip" data-cat="query" data-node="neuron.findNeurons">Find Neurons</span>
+          <span class="chain__wire" data-fam="table">
+            <i class="sock sock--inline" data-fam="table" data-shape="circle"></i>Neurons
+          </span>
+          <span class="chip" data-cat="query" data-node="neuron.connectivity">Connectivity</span>
+          <span class="chain__wire" data-fam="table">
+            <i class="sock sock--inline" data-fam="table" data-shape="circle"></i>Neuron Set
+          </span>
+          <span class="chip" data-cat="query" data-node="neuron.adjacency">Adjacency</span>
+          <span class="chain__wire" data-fam="matrix">
+            <i class="sock sock--inline" data-fam="matrix" data-shape="diamond"></i>Matrix
+          </span>
+          <span class="chip" data-cat="visualisation" data-node="out.heatmap">Heatmap</span>
+        </div>
+        <p class="ana__also">
+          <em>For a bird's eye view:</em>
+          <span class="chip chip--inline" data-cat="visualisation" data-node="out.profile">Neuron Profile</span>
+          answers the same question for one neuron or one cell type &mdash; inputs, outputs,
+          regions and transmitters on a single card, fetching for itself.
+        </p>
+      </article>
+
+      <article class="ana rise" data-delay="1">
+        <h3>Morphological clustering</h3>
+        <p>
+          <b>NBLAST</b> scores neurons, all&#8209;by&#8209;all or query&#8209;target.
+          <b>Linkage</b> turns the score matrix into a tree, and the <b>Dendrogram</b> hands a
+          clade you click back out as a neuron set &mdash; so the clustering stays something you
+          can steer rather than a number you have to accept.
+        </p>
+        <div class="chain">
+          <span class="chip" data-cat="query" data-node="neuron.skeletons">Skeletons</span>
+          <span class="chain__wire" data-fam="geometry">
+            <i class="sock sock--inline" data-fam="geometry" data-shape="circle"></i>Skeletons
+          </span>
+          <span class="chip" data-cat="analysis" data-node="neuron.nblast">NBLAST</span>
+          <span class="chain__wire" data-fam="matrix">
+            <i class="sock sock--inline" data-fam="matrix" data-shape="diamond"></i>Scores
+          </span>
+          <span class="chip" data-cat="analysis" data-node="cluster.linkage">Linkage</span>
+          <span class="chain__wire" data-fam="matrix">
+            <i class="sock sock--inline" data-fam="matrix" data-shape="ring"></i>Tree
+          </span>
+          <span class="chip" data-cat="visualisation" data-node="out.dendrogram">Dendrogram</span>
+        </div>
+        <p class="ana__also">
+          <em>Across datasets:</em> drop
+          <span class="chip chip--inline" data-cat="transform" data-node="neuron.xform">Transform Neurons</span>
+          in after the skeletons to bridge each dataset into one template space &mdash; JRC2018
+          unisex, say &mdash; so the comparison is between shapes rather than between coordinate
+          frames.
+          <span class="chip chip--inline" data-cat="transform" data-node="neuron.mirror">Mirror Neurons</span>
+          is the left/right version of the same move.
+        </p>
+      </article>
+
+      <article class="ana rise">
+        <h3>Connectivity-based clustering</h3>
+        <p>
+          <b>Partner Vectors</b> turns each neuron's connectivity into a feature vector and
+          <b>Similarity Matrix</b> scores every pair against every other &mdash; cosine, Pearson,
+          Jaccard or Euclidean. From there it is the same <b>Linkage</b> as above, and
+          <b>Cut Tree</b> hands the groups back as an ordinary table you can join onto anything.
+        </p>
+        <div class="chain">
+          <span class="chip" data-cat="query" data-node="neuron.connectivity">Connectivity</span>
+          <span class="chain__wire" data-fam="table">
+            <i class="sock sock--inline" data-fam="table" data-shape="ring"></i>Connections
+          </span>
+          <span class="chip" data-cat="analysis" data-node="neuron.partnerVectors">Partner Vectors</span>
+          <span class="chain__wire" data-fam="table">
+            <i class="sock sock--inline" data-fam="table" data-shape="ring"></i>Vectors
+          </span>
+          <span class="chip" data-cat="analysis" data-node="core.similarity">Similarity Matrix</span>
+          <span class="chain__wire" data-fam="matrix">
+            <i class="sock sock--inline" data-fam="matrix" data-shape="diamond"></i>Matrix
+          </span>
+          <span class="chip" data-cat="analysis" data-node="cluster.linkage">Linkage</span>
+          <span class="chain__wire" data-fam="matrix">
+            <i class="sock sock--inline" data-fam="matrix" data-shape="ring"></i>Tree
+          </span>
+          <span class="chip" data-cat="visualisation" data-node="out.dendrogram">Dendrogram</span>
+        </div>
+        <p class="ana__also">
+          Use <span class="chip chip--inline" data-cat="analysis" data-node="cluster.cut">Cut Tree</span>
+          to create clusters from the linkage or
+          <span class="chip chip--inline" data-cat="analysis" data-node="core.embedding">Embedding</span>
+          to produce a 2D embedding that you can plug into a scatter plot.
+          <em>Across datasets:</em>
+          <span class="chip chip--inline" data-cat="analysis" data-node="compare.matchTypes">Match Cell Types</span>
+          derives the correspondence between two connectomes' type names first, so both
+          datasets' vectors are written on one shared feature axis.
+        </p>
+      </article>
+
+      <article class="ana rise" data-delay="1">
+        <h3>Incluence metrics & path analyses</h3>
+        <p>
+          <b>Influence</b> runs the influence score of Bates et al. &mdash;
+          <code>r = (I &minus; gW)<sup>&minus;1</sup>s</code>, walked to a hop budget, so what
+          comes back is that score <em>truncated</em> rather than approximated, with the unwalked
+          tail reported as a number rather than a caveat.
+        </p>
+        <div class="chain">
+          <span class="chip" data-cat="query" data-node="neuron.influence">Influence</span>
+          <span class="chain__wire" data-fam="table">
+            <i class="sock sock--inline" data-fam="table" data-shape="circle"></i>Influence
+          </span>
+          <span class="chip" data-cat="visualisation" data-node="out.barChart">Bar Chart</span>
+        </div>
+        <p>
+          <b>Paths</b> is the other half: every route from your sources to your targets within
+          <em>N</em> hops, ranked by its weakest link, optionally collapsing neurons to cell types
+          on the way. It comes out as a network, so the viewer is already wired.
+        </p>
+        <div class="chain">
+          <span class="chip" data-cat="query" data-node="neuron.paths">Paths</span>
+          <span class="chain__wire" data-fam="matrix">
+            <i class="sock sock--inline" data-fam="matrix" data-shape="hex"></i>Network
+          </span>
+          <span class="chip" data-cat="visualisation" data-node="out.network">Network Viewer</span>
+        </div>
+      </article>
+    </div>
+
+    <p class="fig__cap" style="max-width: 44rem; margin-top: 1.1rem">
+      The chip's colour is the node's category, exactly as on a card; the line between two chips
+      is the value that flows along it, named and typed the way its socket is. <b>Every one of
+      these is a real node</b> &mdash; the page is checked against the registry, so a renamed node
+      is a failing test rather than a stale figure.
+    </p>
+  </div>
+</section>
+
+<!-- ==========================================================================
      Dashboards
 
      Sits directly after the editor thesis because it is the same claim turned
@@ -265,17 +451,16 @@
     <div class="chapter__head rise" style="max-width: 34rem">
       <h2>
         <span class="h2icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-dashboard"/></svg></span>
-        Build your own dashboard
+        Build a dashboard
       </h2>
       <p class="lede">
-        A pipeline is for building. A dashboard is for looking. Press <kbd>D</kbd> and the canvas
-        gives way to a grid of only the nodes worth watching &mdash; no wires, no viewport.
+        A pipeline defines the individual steps. A dashboard boils it down to the essential elements.
+        When you press <kbd>D</kbd>, the canvas transforms into a grid where you can lay out the most
+        important nodes.
       </p>
       <p>
         Pick any nodes off the graph and arrange them: drag to reorder, drag a corner to resize.
-        Each cell is a <b>reference</b> to a node, not a copy, so the graph stays the one source of
-        truth &mdash; press Run and every cell updates at once. Cells stay live, too: sort the
-        table, rotate the scene, tick a neuron in Explore and watch the others follow.
+        Cells stay <b>live</b>: sort the table, rotate the scene, tick a neuron in Explore and watch the others follow.
       </p>
       <p>
         The layout is saved with the workflow, so a shared link can open straight into the
