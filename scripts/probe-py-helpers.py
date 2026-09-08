@@ -1000,6 +1000,108 @@ check("group fold: a column every member agrees on has a spread of zero",
       keyless["downstream_synapses_sd"].iloc[0] == 0.0,
       str(keyless["downstream_synapses_sd"].iloc[0]))
 
+# ---- coda_umap_knn, and the two shapes the Embedding node calls umap-learn with ----------
+#
+# The only helper here whose *caller* is also probed, and the reason is that this node's export
+# is a third implementation rather than a translation: umap-learn is the reference, the canvas
+# runs a JavaScript port of it, and `check-export.py` can only tell us `umap.UMAP` resolves. Two
+# call shapes reach it — `metric='precomputed'` on a square matrix and `precomputed_knn=` on a
+# graph — and the second is the one this node exists for, so a signature change there would take
+# out the route that avoids the all-by-all matrix while the other kept working.
+def _raises(fn):
+    """Did it refuse? A helper that answers plausibly where it should stop is the failure here."""
+    try:
+        fn()
+    except Exception:
+        return True
+    return False
+
+
+umns = load_cell(FIXTURES / "everything.ipynb", "def coda_umap_knn(", {"pd": pd, "np": np})
+
+# Four neurons in two pairs, plus one that is only ever named as a neighbour. Interleaved
+# rather than blocked, so a repeated pair is not adjacent to its own duplicate.
+knn_rows = pd.DataFrame({
+    "queryId": ["a", "b", "a", "c", "d", "b", "c", "d", "a"],
+    "targetId": ["b", "a", "c", "d", "c", "c", "a", "b", "b"],
+    "score":   [0.9,  0.9,  0.2,  0.8,  0.8,  0.1,  0.2,  0.1,  0.4],
+})
+labels, idx, dists = umns["coda_umap_knn"](knn_rows, "queryId", "targetId", "score", k=3)
+check("umap knn: the rows are the queries, in first-appearance order",
+      labels == ["a", "b", "c", "d"], str(labels))
+check("umap knn: row i names itself first, at distance 0",
+      list(idx[:, 0]) == [0, 1, 2, 3] and list(dists[:, 0]) == [0, 0, 0, 0],
+      f"{idx[:, 0]} {dists[:, 0]}")
+# a→b is listed twice, at 0.9 and at 0.4. Coda keeps the *closest*, where `dict(zip(...))` and
+# `match()` both keep whichever came first in the table.
+check("umap knn: a repeated pair keeps its smallest distance",
+      abs(dists[0, 1] - (1 - 0.9)) < 1e-9, str(dists[0, 1]))
+check("umap knn: similarities become distances", abs(dists[2, 1] - (1 - 0.8)) < 1e-9,
+      str(dists[2, 1]))
+check("umap knn: every row is exactly k wide", idx.shape == (4, 3), str(idx.shape))
+
+# A neighbour that is never itself a query has no row to be placed in. `e` is dropped rather
+# than growing the label list, which is what makes an NBLAST k-NN with a Target wired come back
+# short rather than bipartite.
+with_stranger = pd.concat([knn_rows, pd.DataFrame({
+    "queryId": ["a"], "targetId": ["e"], "score": [0.99],
+})], ignore_index=True)
+labels2, idx2, _ = umns["coda_umap_knn"](with_stranger, "queryId", "targetId", "score", k=3)
+check("umap knn: a neighbour that is never a query is dropped", labels2 == labels, str(labels2))
+check("umap knn: and takes no place in the row it was named in", (idx2 < len(labels2)).all(),
+      str(idx2))
+
+# A short row pads with -1, which umap-learn's `fuzzy_simplicial_set` skips on, and repeats the
+# row's furthest real distance rather than an infinity — which would make the row's mean
+# infinite and destroy its own neighbourhood.
+short = pd.DataFrame({
+    "queryId": ["a", "b", "c", "d", "a", "b"],
+    "targetId": ["b", "a", "a", "a", "c", "c"],
+    "score":   [0.9,  0.9,  0.5,  0.5,  0.2,  0.3],
+})
+_, sidx, sdists = umns["coda_umap_knn"](short, "queryId", "targetId", "score", k=3)
+check("umap knn: a short row pads with -1", (sidx == -1).any(), str(sidx))
+check("umap knn: and its padded distance is finite", np.isfinite(sdists).all(), str(sdists))
+
+check("umap knn: negative distances are refused rather than embedded",
+      _raises(lambda: umns["coda_umap_knn"](
+          pd.DataFrame({"q": ["a", "b", "c", "d"], "t": ["b", "a", "d", "c"],
+                        "s": [1.5, 1.5, 1.5, 1.5]}),
+          "q", "t", "s")),
+      "no error")
+
+# ---- and the calls themselves, against the real umap-learn -------------------------------
+try:
+    import umap as _umap
+except ImportError:  # pragma: no cover - CI installs it; a bare checkout may not
+    print("skip umap-learn call shapes: not installed")
+else:
+    import warnings
+    _rng = np.random.default_rng(0)
+    _pts = _rng.normal(size=(40, 5))
+    _pts[:20] += 5
+    _sq = np.sqrt(((_pts[:, None, :] - _pts[None, :, :]) ** 2).sum(-1))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _xy = _umap.UMAP(n_neighbors=min(8, 39), n_components=2, min_dist=0.15, spread=1,
+                         random_state=7, metric="precomputed").fit_transform(_sq)
+    check("umap call: metric='precomputed' takes a square distance matrix",
+          _xy.shape == (40, 2) and np.isfinite(_xy).all(), str(_xy.shape))
+
+    _long = pd.DataFrame([
+        {"queryId": f"n{i}", "targetId": f"n{j}", "score": 1 - _sq[i, j] / _sq.max()}
+        for i in range(40) for j in np.argsort(_sq[i])[1:7]
+    ])
+    _labels, _idx, _dists = umns["coda_umap_knn"](_long, "queryId", "targetId", "score", k=6)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _xy2 = _umap.UMAP(n_neighbors=_idx.shape[1], n_components=2, min_dist=0.15, spread=1,
+                          random_state=7,
+                          precomputed_knn=(_idx, _dists, None)).fit_transform(
+                              np.zeros((len(_labels), 1)))
+    check("umap call: precomputed_knn takes the helper's arrays as they are",
+          _xy2.shape == (40, 2) and np.isfinite(_xy2).all(), str(_xy2.shape))
+
 print()
 print(f'{len(fails)} failed' if fails else 'all passed')
 sys.exit(1 if fails else 0)

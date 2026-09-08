@@ -499,7 +499,17 @@ function append(
   let out = graph
   let fresh = rank === 0
   const wires = new Map<string, Source>()
+  /*
+   * Ports that are alternatives rather than a set that composes — see `PortDef.exclusiveGroup`.
+   * Every wiring pass here reads optional ports as additive, which is right for the Connectivity
+   * node's `neurons` and `labels` and wrong for `core.embed`, whose three inputs are three ways
+   * of arriving at one k-NN graph: all three were wired from the same neuron table and the demo
+   * opened on the node's own refusal. First wired wins, which is declaration order — the node
+   * lists its routes in the order its own message names them.
+   */
+  const claimed = new Set<string>()
   for (const port of defaultInputPorts(def)) {
+    if (port.exclusiveGroup && claimed.has(port.exclusiveGroup)) continue
     const candidates = sourcesFor(out, port.type)
     // Clamped rather than wrapped: past the end of a short list the port keeps its last
     // candidate while a longer list beside it goes on being explored. `fresh` is what ends the
@@ -513,7 +523,10 @@ function append(
       out = grown.graph
       source = grown.source
     }
-    if (source) wires.set(port.id, source)
+    if (source) {
+      wires.set(port.id, source)
+      if (port.exclusiveGroup) claimed.add(port.exclusiveGroup)
+    }
   }
   if (!fresh) return undefined
 

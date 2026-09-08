@@ -407,6 +407,32 @@ function producerLines(inputs: readonly PortDef[]): string[] {
   return lines
 }
 
+/**
+ * `wire exactly one of: matrix, features, neighbours` — ports that are alternatives.
+ *
+ * `PortDef.exclusiveGroup`, rendered, and it borrows `producerLines`' proven shape rather than
+ * inventing one: a whole sentence on its own line, in the block `RULES` teaches the model to
+ * read, saying what to *do* rather than stating a property.
+ *
+ * **Unlike `producerLines`, this has not been measured**, and the distinction is worth keeping
+ * rather than letting the neighbouring docstring's numbers rub off on it. One node declares a
+ * group today, so a five-runs-per-side comparison would be measuring one prompt line against
+ * the noise of a single case. What makes it worth shipping unmeasured is that there is already
+ * a backstop: `applyPlan` type-checks a plan and would accept two of these wired, but `runTurn`
+ * previews it and hands back `ApplyOk.warnings` — which is where this node's own `validate`
+ * says which port to disconnect. This is the cheaper half of that loop, not the only one.
+ */
+function exclusiveLines(inputs: readonly PortDef[]): string[] {
+  const groups = new Map<string, string[]>()
+  for (const port of inputs) {
+    if (!port.exclusiveGroup) continue
+    groups.set(port.exclusiveGroup, [...(groups.get(port.exclusiveGroup) ?? []), port.id])
+  }
+  return [...groups.values()]
+    .filter((ports) => ports.length > 1)
+    .map((ports) => `wire exactly one of: ${ports.join(', ')} — they are alternatives.`)
+}
+
 /** `connections carries: a, b` — or `network carries (links): …` where a port has two tables. */
 export function carriesLines(outputs: Readonly<Record<string, CodaType>>): string[] {
   const lines: string[] = []
@@ -444,6 +470,7 @@ function renderNode(def: NodeDefinition, detail: CatalogueDetail): string {
   lines.push(`outputs: ${list(outputs, 'out')}`)
 
   lines.push(...producerLines(inputs))
+  lines.push(...exclusiveLines(inputs))
   lines.push(...producedColumns(def))
   // See `NodeDefinition.catalogueNote`: what this node needs *around* it, which nothing else
   // printed here can say. After the ports and columns, in the line-per-fact block the rules

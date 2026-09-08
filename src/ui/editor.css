@@ -1045,11 +1045,32 @@
 .socket[data-shape='ring'][data-family='any'] {
   border-color: var(--socket-scalar);
 }
+/*
+ * The diamond has to restate React Flow's centring, because `transform` is one property.
+ *
+ * React Flow places a left/right handle with `top: 50%` and `transform: translate(∓50%, -50%)`,
+ * so a rule setting `transform: rotate(45deg)` does not *add* a rotation — it replaces the
+ * centring outright. Every diamond socket therefore hung 3.97px below its own row and 3.97px
+ * off the card edge, measured in Chrome against a circle in the row beside it; every other
+ * shape reads `matrix(1, 0, 0, 1, ±5.5, -5.5)` and the diamond read a bare rotation.
+ *
+ * Written out per side rather than through the independent `rotate` property, which looks like
+ * the tidy fix and is wrong: the individual `translate`/`rotate`/`scale` properties compose
+ * *before* `transform`, so the centring gets rotated with the element — measured at dy −1.64 on
+ * the left and an unmoved +3.97 on the right, which is the asymmetry a rotated offset produces.
+ * The order that works is translate-then-rotate, and spelling it out is what makes that legible
+ * to whoever touches this next.
+ */
 .socket[data-shape='diamond'] {
   border-radius: 2px;
-  transform: rotate(45deg);
   width: 10px;
   height: 10px;
+}
+.socket[data-shape='diamond'].react-flow__handle-left {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.socket[data-shape='diamond'].react-flow__handle-right {
+  transform: translate(50%, -50%) rotate(45deg);
 }
 .socket[data-shape='square'] {
   border-radius: 2px;

@@ -79,6 +79,10 @@ export default tseslint.config(
       // A compute backend, same deal as `src/data`. It runs in a worker, where there is no
       // React and no store to reach for anyway — which is exactly when a boundary erodes.
       'src/pyodide/**/*.ts',
+      // The second compute backend, in for the first one's reason. It is JavaScript rather than
+      // Python only because `umap-learn` needs numba and Pyodide has none; that is a fact about
+      // the runtime available, not a reason for it to sit closer to the UI than the others.
+      'src/umap/**/*.ts',
     ],
     rules: {
       'no-restricted-imports': [

@@ -765,6 +765,166 @@ that every name was chosen to be spelled the same way in Python and in R's virid
 ColorBrewer, so the exporters **name** the palette somebody picked. Coda's own two have no name
 there, so `Blues` and `RdBu_r` stand in with a note saying so.
 
+## Embedding: three ways in, one k-NN graph
+
+`core.embed`, `Add ▸ Analysis ▸ Embedding`. Linkage answers what the *groups* are; this answers
+what the *neighbourhood* looks like, as two coordinates per neuron for a `Scatter Plot`.
+
+### Why it is JavaScript, and what that costs
+
+`umap-learn` requires `numba`, numba requires LLVM, and Pyodide ships neither — checked against
+the pinned v314.0.5 lock rather than recalled: 356 packages, and none of them is `numba`,
+`llvmlite`, `pynndescent` or `umap-learn`. So this could not have been the eighth Python
+capability at any download budget, and it is PAIR-code's `umap-js`, dynamically imported into a
+chunk of its own (30.5 kB gzipped; verified against `pnpm build` rather than assumed — the
+library lands in a separate chunk and `main` carries only the wrapper).
+
+**scikit-learn *is* there**, which is the road not taken and worth recording with its number:
+t-SNE, PCA, MDS and spectral embedding, all with `metric='precomputed'`, for **scipy's 14.0 MB
+plus scikit-learn's 4.4 MB** measured off the CDN — against a backend whose whole existing cost
+is ten megabytes and whose seven capabilities declare the same two packages. A different answer
+to the same question, priced.
+
+What that costs is a claim this file makes about every other computed node and cannot make here.
+`docs/python-pyodide.md` can say *fastcore's linkage **is** SciPy's*, merge order identical on
+sixty trials and heights agreeing to 1.3e-15. Two UMAP implementations do not agree cell for
+cell, and neither do two seeds of one. What is reproducible is **this implementation at this
+seed**, which is what `Seed` is for: without it invariant 4 would need a nonce param, since the
+cache key is provenance and a stochastic `evaluate` is exactly the hidden mutable state that
+rule is about.
+
+The seed is also what lets the **Annotations pickers be data** where `out.dendrogram`'s are
+presentational. There a leaf's name is a drawing, so `Match on`/`Label by` stay out of the key
+and trying `type`, then `hemilineage` re-runs no expensive Linkage. Here the label leaves the
+node **in a table** that a Scatter Plot's colour picker reads, so it has to be in the key —
+which means relabelling re-runs the embedding, and at a fixed seed the identical arrangement
+comes back. A time cost rather than a moving picture.
+
+### The three ports, and the one that is not a shortcut
+
+Every route converges on a **k-NN graph**, because that is all UMAP consumes. A score matrix, a
+table of feature vectors and a long table of nearest neighbours are three ways of writing one
+down, so `nodes/lib/embedOps.ts` holds three adapters and `src/umap/run.ts` holds the one call —
+rather than three code paths each of which has to be right about `minDist`.
+
+| Port | Cost |
+| --- | --- |
+| `Matrix` | the n² is already paid by NBLAST or `core.similarity`; reading k per row off it is cheap |
+| `Features` | builds that matrix **here**, through `similarityOps` |
+| `Neighbours` | never builds one |
+
+**The Features port is a convenience, not a scaling win**, and the guide says so rather than
+letting the wording imply otherwise. Densifying the vectors and letting umap-js find its own
+neighbours would escape the quadratic and is not available: umap-js takes `number[][]`, and
+`Partner Vectors` keyed by partner id is a hundred thousand features wide, so the dense form is
+refused by the crash floor long before the boxing is the problem. The port that escapes it is
+`Neighbours`, fed by `NBLAST k-NN`, which scores `n × nCandidates` pairs.
+
+**More than one wired is refused rather than ranked.** Nothing here makes "the matrix wins" a
+defensible rule, and a silent precedence on an `expensive` node is a picture somebody believes
+was computed from an input it ignored. Both `validate` and `evaluate` say it, naming the ports.
+
+### Two conventions that fail silently, and one arbitrary choice
+
+Neither of the first two is checkable from inside the library, and both produce a slightly wrong
+picture rather than an error.
+
+- **Row `i` names itself first, at distance 0.** `smoothKNNDistance` sums from index *1*
+  (umap-js `umap.ts:363`, and umap-learn's `smooth_knn_dist` does the same), because the
+  reference convention is that a point is its own nearest neighbour. Hand it `k` real neighbours
+  with no self entry and the closest one is dropped from every bandwidth search.
+- **Every row is exactly `k` long.** umap-js reads `knnIndices[0].length` in
+  `computeMembershipStrengths` while `fuzzySimplicialSet` is handed `nNeighbors`, so a ragged set
+  makes the two disagree about `log2(k)`. Short rows pad with `-1`, which the library already
+  skips (`umap.ts:757`) — the same value `knnTable` drops on the way out of NBLAST k-NN, so both
+  ends of that wire already meant the same thing by it.
+- The arbitrary one: **a padded slot takes the row's own furthest real distance**, not infinity.
+  `computeMembershipStrengths` skips a `-1` index outright, so the padded *distance* reaches only
+  `smoothKNNDistance` — where an infinity makes the row's mean infinite and `result[i]` with it,
+  one short row quietly destroying its own neighbourhood.
+
+Three guards are `linkageOps`' rather than restated, because they are the same questions asked of
+the same matrices: `transformFor` reads `MatrixValue.measure`; `checkLinkageDistances` refuses a
+matrix of counts read as similarities before anything is laid out, UMAP embedding negative
+distances as happily as fastcore clusters them; and `checkSquarePopulation` is the square-plus-
+same-labels pair, which this file had forked into its own wording — two statements of one rule,
+and the way they come to disagree about *what* is checked. Only the size rule differs, and
+genuinely: a tree needs two observations and a neighbourhood needs four.
+
+### Two numbers, both from the `n²` pass
+
+Neither is a micro-optimisation; both are synchronous main-thread work in front of a progress bar
+that has not moved yet, where the run they precede yields every 24 ms.
+
+**The two matrix guards were two walks, and both used `for…of` over a `Float64Array`** — several
+times slower than an indexed loop in V8. They take a shared `matrixStats` now, computed once:
+**105 ms → 52 ms** on a 5000 × 5000 matrix, best of three. A **default argument** rather than a
+second pair of functions, so a caller with nothing to save omits it and there is one spelling of
+each guard. Linkage takes the same saving.
+
+**The top-k per row is a bounded max-heap, not a rescan.** Rescanning all `k − 1` slots for the
+new worst is fine on random data and bad on the data this node actually gets — a similarity
+matrix ordered by cell type displaces the running top-k over and over. At `Neighbours`' maximum
+of 200 and n = 3000: **325 ms random and 584 ms ordered against 195 and 124**; below about k = 20
+the two are a wash, and there what pays is hoisting the `transform === 'one_minus'` string
+compare out of the `n²` loop and dropping a per-cell running maximum that only a *short* row ever
+reads — a short row is one where every finite cell was kept, so the largest kept distance already
+is that number.
+
+`Min distance` above `Spread` is refused at edit time. umap-learn refuses it outright; umap-js
+does not, so an unfittable pair there comes back as an arrangement that merely looks wrong.
+
+### The output, and why the columns are named that way
+
+`label`, `umap1`, `umap2`, `annotation` — a **constant** schema, which is invariant 3 rather than
+tidiness: a column named after whichever `Label by` was picked would make this the one node whose
+output schema depends on a param's *value*, and every downstream picker would empty whenever the
+pickers moved. `annotation` is present whether or not the port is wired, `partnerVectorSchema`'s
+rule.
+
+`label` rather than `neuronId` because **`cluster.cut` already emits `label`**, so
+`Embedding ⋈ Cut Tree` on it is an ordinary `Join` with nothing configured — the embedding
+coloured by cluster, which is the picture most of these workflows are after. An unannotated row
+is `null` rather than its own label back, inverting `out.dendrogram`'s rule on purpose: there a
+blank leaf is worse than the id it replaced because the name *is* the drawing, and here the label
+is still in its own column, so a copy would put raw ids in a legend somebody is colouring by cell
+type and give every unmatched neuron its own key.
+
+### What it cost `out.scatter`
+
+`resolveColumn`'s rule 3 hands a required picker still on its declared default the **first**
+compatible column, and Scatter's `x` and `y` default to `pre`/`post`, which this table does not
+have. So a freshly wired Scatter took `umap1` for both axes and drew a diagonal — on the pairing
+this node exists for. Scatter's own `validate` had a check for exactly that symptom and could not
+see it, because the check counted numeric columns (one was the case it knew about) rather than
+asking what the two pickers resolved to. It asks now.
+
+Fixed there rather than in `resolveColumn` deliberately: a "fall back to the *second* compatible
+column" rule would have to be read identically by `scheduler.ts`'s cache-key pass, and a second
+spelling of a column resolution is the disagreement invariant 5 exists to prevent.
+
+The second thing that pairing wants is `Aspect: equal scale`, and only a browser shows it: a
+scatter fills its card by default, and on a wide one that stretched a compact cloud of 401
+neurons into a horizontal band. A UMAP's two axes carry the same units and nothing else, so
+scaling them differently is a claim about the data. Not changed as a *default* — `out.scatter`'s
+`aspect` help has named UMAP since before this node existed and the default serves every plot of
+two real measurements — so it is said in the help document instead.
+
+### The exporters
+
+Both emit the reference rather than a translation, which is the reverse of every other node here:
+`umap-learn` in the notebook, `uwot` in the R Markdown, hyperparameters carried across by name and
+a `NOTE` saying the arrangement will differ in detail. Three implementations of one algorithm, and
+no two of them draw the same picture — which two seeds of any one of them already do.
+
+Four seams were read off a **running** package rather than off a manual, and are covered by
+`pnpm probe:helpers` and `pnpm probe:r-helpers`: umap-learn's `metric='precomputed'` and its
+`precomputed_knn=(idx, dists, None)`, and uwot's `dist` object and `nn_method = list(idx, dist)`
+with `X = NULL`. The two `coda_umap_knn` helpers differ in exactly one thing, and it is the one
+worth knowing: **uwot's `idx` is 1-based with no `-1` sentinel**, so a short row there pads with
+its *own* index — which every implementation of this algorithm scores as a zero-weight self edge,
+so it means what the sentinel means.
+
 ## Network Metrics and Network Centrality: two nodes because cost is a node property
 
 `net.metrics` answers "what shape is this graph?" and `net.centrality` answers "which node

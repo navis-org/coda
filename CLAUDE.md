@@ -976,6 +976,42 @@ Area-specific — the rule, then the doc that holds why:
   `core.relabel` already emits, because hand-rolling it on `.astype(str)` matches *nothing* when an
   `i64` column with one null becomes `float64` and prints `'101.0'`.
   See [docs/viewers.md](docs/viewers.md).
+- **An embedding is a k-NN graph laid out, and the three ports are three ways of writing one down.**
+  `core.embed` is UMAP, and it is **JavaScript** rather than the eighth Pyodide capability because
+  `umap-learn` needs numba and the pinned v314.0.5 lock has none of numba, llvmlite, pynndescent or
+  umap-learn in its 356 packages — sklearn *is* there (t-SNE, PCA, MDS, all `metric='precomputed'`)
+  for **scipy's 14.0 MB plus 4.4 MB**, which is what would end the seven-identical-rows property in
+  `MODULES`. So `src/umap/` is a second compute backend in the same boundary group, dynamically
+  imported, 30.5 kB gzipped in its own chunk. What it costs is a claim nothing here can make: two
+  UMAP implementations do not agree cell for cell and neither do two seeds of one, so **`Seed` is
+  what makes invariant 4 hold without a nonce** — and what lets the Annotations pickers be *data*
+  where `out.dendrogram`'s are presentational, since the label leaves this node in a table a Scatter
+  colours by. `Matrix`, `Features` and `Neighbours` converge on one adapter set: **more than one
+  wired is refused rather than ranked**, and the **`Features` port is a convenience, not a scaling
+  win** — it builds the n² here, and only `NBLAST k-NN → Neighbours` escapes it (densifying is not
+  an option: umap-js takes `number[][]` and Partner Vectors by partner id is 100k features wide).
+  Two library conventions fail silently and are checkable from nowhere inside: **row `i` names
+  itself first at distance 0**, because `smoothKNNDistance` sums from index 1 as umap-learn's
+  `smooth_knn_dist` does, so `k` real neighbours with no self drops the closest from every
+  bandwidth search; and **every row is exactly `k` long**, padded with `-1` — which the library
+  already skips and which is the value `knnTable` drops on the way out of NBLAST k-NN. A padded
+  *distance* is the row's own furthest, never infinity, which would make the row's mean infinite.
+  `transformFor`/`checkLinkageDistances` are reused verbatim: UMAP embeds negative distances as
+  happily as fastcore clusters them. Output is `label`/`umap1`/`umap2`/`annotation`, constant
+  (invariant 3) and keyed `label` so **`Embedding ⋈ Cut Tree`** needs no configuration. It cost
+  `out.scatter` a fix: `resolveColumn`'s rule 3 gave *both* axes `umap1` and the node's own check
+  counted numeric columns instead of asking what the pickers resolved to — fixed there rather than
+  in `resolveColumn`, whose fallback `scheduler.ts`' cache-key pass would have to re-spell.
+  Both exporters emit the **reference** (`umap-learn`, `uwot`) with a NOTE, and all four call
+  shapes plus both `coda_umap_knn` helpers were checked by **running** them. Last, the general
+  half: **optional input ports normally compose, and these do not** — every automatic wiring pass
+  here fills each port with a compatible source, which is right for Connectivity's `neurons` and
+  `labels`, so the node guide's demo builder wired all three of these from one neuron table and
+  the "Open in a workflow" link opened on the node's own refusal. `PortDef.exclusiveGroup` is the
+  declaration, read by `wizard/demo.ts` and rendered in the assistant catalogue — a *declaration*
+  and not a canvas constraint, since a second wire is where `validate` can say which port to
+  disconnect and why; `demo.test.ts` holds it for every node rather than for this one.
+  See [docs/nodes.md](docs/nodes.md) and [docs/python-pyodide.md](docs/python-pyodide.md).
 - **The graph metrics are two nodes because `cost` is a property of a node type.** `net.metrics` is
   `cheap` and every measure on it is O(V + E); `net.centrality` is `expensive` and runs only on Run.
   One node holding both would have to be `expensive`, and then reading a graph's node count and density

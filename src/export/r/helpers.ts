@@ -9,6 +9,7 @@
 
 import { QUALIFIED_SEPARATOR } from '../../core/ids'
 import { JOIN_SEPARATOR } from '../../core/values'
+import { MIN_EMBED_OBSERVATIONS } from '../../nodes/lib/embedOps'
 import { registerHelper } from './registry'
 
 /**
@@ -1128,6 +1129,69 @@ registerHelper({
     '    tolower(paste(parts, collapse = ""))',
     '  }, character(1), USE.NAMES = FALSE)',
     '  order(key, seq_along(labels), method = "radix")',
+    '}',
+  ],
+})
+
+/**
+ * A long `(query, neighbour, score)` table as uwot's `nn_method` pair.
+ *
+ * `coda_umap_knn`'s counterpart, and the two differ in exactly one thing that matters: **uwot's
+ * `idx` is 1-based and has no `-1` sentinel**, so a row with fewer than `k` neighbours pads with
+ * its *own* index rather than with a miss. That is not a fudge — `compute_membership_strengths`
+ * scores a self-edge as 0 in every implementation of this algorithm, umap-learn's `== i` branch
+ * and umap-js's alike, so a repeated self is the same "no neighbour here" the sentinel means.
+ * Checked by running it (`pnpm probe:r-helpers`) rather than reasoned from the source.
+ *
+ * The observation floor is spliced from `MIN_EMBED_OBSERVATIONS` rather than transcribed —
+ * `QUALIFIED_SEPARATOR`'s idiom — so the emitted cell refuses exactly what the card refuses.
+ *
+ * The rest is the Python helper's rules, which are Coda's: the rows are the queries in
+ * first-appearance order, a neighbour that is never itself a query is dropped, row `i` names
+ * itself first at distance 0, and a repeated pair keeps its smallest distance — where `match()`
+ * would keep the first listed rather than the closest.
+ */
+registerHelper({
+  name: 'coda_umap_knn',
+  needs: ['coda_match_keys'],
+  source: [
+    "#' A long neighbour table as uwot's list(idx, dist). Coda's Embedding node.",
+    'coda_umap_knn <- function(df, query, target, score = NULL,',
+    '                          scores_are = "similarity", k = 15) {',
+    '  q <- coda_match_keys(df[[query]])',
+    '  t <- coda_match_keys(df[[target]])',
+    '  # First-appearance order, which is the order the canvas lays the points out in.',
+    '  labels <- unique(q)',
+    '  n <- length(labels)',
+    `  if (n < ${MIN_EMBED_OBSERVATIONS}) stop("an embedding needs at least ${MIN_EMBED_OBSERVATIONS} observations, got ", n)`,
+    '  k <- max(2, min(as.integer(k), n - 1))',
+    '  from <- match(q, labels)',
+    '  to <- match(t, labels)',
+    '  d <- if (is.null(score)) rep(1, nrow(df)) else suppressWarnings(as.numeric(df[[score]]))',
+    '  if (scores_are == "similarity") d <- 1 - d',
+    '  keep <- !is.na(from) & !is.na(to) & from != to & is.finite(d)',
+    '  if (any(d[keep] < 0)) stop("scores give negative distances; check `scores_are`")',
+    '  from <- from[keep]; to <- to[keep]; d <- d[keep]',
+    '  # Closest first, so the duplicate a pair may have keeps its smallest distance and the',
+    '  # per-row head below is already in order.',
+    '  ord <- order(d)',
+    '  from <- from[ord]; to <- to[ord]; d <- d[ord]',
+    '  dup <- duplicated(cbind(from, to))',
+    '  from <- from[!dup]; to <- to[!dup]; d <- d[!dup]',
+    '  idx <- matrix(seq_len(n), nrow = n, ncol = k)',
+    '  dist <- matrix(0, nrow = n, ncol = k)',
+    '  by_row <- split(seq_along(from), from)',
+    '  for (row in names(by_row)) {',
+    '    i <- as.integer(row)',
+    '    take <- head(by_row[[row]], k - 1)',
+    "    # The padded slots keep the row's furthest real neighbour; an infinity would make the",
+    "    # row's mean infinite and destroy its own neighbourhood.",
+    '    dist[i, ] <- d[take[length(take)]]',
+    '    dist[i, 1] <- 0',
+    '    idx[i, seq_along(take) + 1] <- to[take]',
+    '    dist[i, seq_along(take) + 1] <- d[take]',
+    '  }',
+    '  list(labels = labels, idx = idx, dist = dist)',
     '}',
   ],
 })

@@ -215,6 +215,25 @@ entirely its `import numpy` / `import navis_fastcore`. Its packages cost **0 ms*
 same two. So the honest price of the *third* Python-backed node is a few kilobytes of source,
 and the ten megabytes stays a one-off for the backend rather than a tax per capability.
 
+### The first capability that could not come here, and the number that decided it
+
+`core.embed` is UMAP, and it is **JavaScript**. Not a preference: `umap-learn` requires `numba`,
+numba requires LLVM, and Pyodide ships neither — checked against the pinned v314.0.5 lock rather
+than recalled, 356 packages with no `numba`, `llvmlite`, `pynndescent` or `umap-learn` in them.
+There is no download budget at which that node could have been the eighth row of `MODULES`.
+
+The road not taken is worth pricing, because it is the one somebody will reach for next.
+**scikit-learn is in the lock**, with t-SNE, PCA, MDS and spectral embedding, every one of them
+taking `metric='precomputed'` — for **scipy's 14.0 MB plus scikit-learn's 4.4 MB**, measured off
+the CDN. That is nearly twice the whole existing backend, and it is the first thing that would
+break the seven-identical-rows property above: every capability here declares numpy and one 1.1
+MB wheel, which is what makes the second through seventh nearly free. A capability declaring
+scipy would not be, and the row after it would inherit the cost.
+
+So the second compute backend is `src/umap/`, in the same eslint boundary group as this one and
+for the same reason. What it costs in *fidelity* is recorded in [nodes.md](nodes.md): nothing
+there can make the claim the next section makes about fastcore and SciPy.
+
 ## Clustering: Linkage, Cut Tree, Dendrogram
 
 `cluster.linkage`, `cluster.cut` (both `Add ▸ Analysis`) and `out.dendrogram`

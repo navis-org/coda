@@ -219,6 +219,20 @@ second one: `neuron.partnerVectors` wants the same declaration on a port called 
 `compare.matchTypes`' `labels1`. **That second member is deliberately not declared yet**, because
 every number on this page was measured and that one has not been.
 
+**A second line borrows that shape, and is deliberately labelled unmeasured.**
+`PortDef.exclusiveGroup` says that a node's optional inputs are *alternatives* rather than a set
+that composes, and `exclusiveLines` renders it in the same block, in the same imperative form:
+`wire exactly one of: matrix, features, neighbours — they are alternatives.` One node declares a
+group today (`core.embed`), so five runs per side would be measuring one prompt line against the
+noise of a single case, and the honest thing is to say so rather than let the numbers above rub
+off on it.
+
+What makes it worth shipping unmeasured is that it is the *cheap* half of a loop that already
+closes: `applyPlan` type-checks a plan and accepts two of those wired, and the advisory round
+below is what then hands back the node's own `validate` line naming the port to disconnect. The
+same fact reaches the model twice, once before the plan and once after — which is not true of
+`producedBy`, whose absence produced a graph nothing complained about.
+
 ### A plan that is legal and still wrong — the advisory round
 
 `applyPlan` checks types, ports, params and cycles. It cannot check meaning, and the case above is

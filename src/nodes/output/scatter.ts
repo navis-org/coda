@@ -275,14 +275,28 @@ export const scatterNode = registerNode({
   validate: (ctx) => {
     const schema = schemaOf(ctx.inputs.in)
     if (!ctx.inputs.in || !schema) return []
-    const numeric = columnsOfType(schema, NUMERIC_DTYPES)
-    // Nothing said about *none*: `validateColumnParams` already names X and Y for that, and
-    // three badges for one fact is how a list of issues stops being read. One numeric column
-    // is the case it cannot see — both pickers fall back to the first compatible column, so
-    // the plot comes out as a diagonal that reads as a broken viewer rather than as a table
-    // with nothing to say.
-    if (numeric.length !== 1) return []
-    return [`Only "${numeric[0]!.name}" is numeric — X and Y would be the same column`]
+    /*
+     * Nothing said about *none*: `validateColumnParams` already names X and Y for that, and
+     * three badges for one fact is how a list of issues stops being read.
+     *
+     * What it cannot see is the two pickers landing on the **same** column, which draws a
+     * diagonal line that reads as a broken viewer rather than as a table with nothing to say.
+     * Asked of the resolution rather than of the column count, which is the half that moved:
+     * `resolveColumn`'s rule 3 hands a required picker still on its declared default the
+     * *first* compatible column, and `pre`/`post` are absent from most tables — so `Embedding`,
+     * whose whole purpose is to be plotted, gave a fresh Scatter `umap1` for both axes while a
+     * count of two numeric columns said everything was fine. One numeric column is still the
+     * case worth naming specially, because there the answer is upstream rather than in the
+     * picker.
+     */
+    const x = ctx.column('x')
+    const y = ctx.column('y')
+    // Before `columnsOfType`, which allocates: this runs on every keystroke and the two pickers
+    // naming different columns is the case that always holds.
+    if (!x || !y || x !== y) return []
+    return columnsOfType(schema, NUMERIC_DTYPES).length === 1
+      ? [`Only "${x}" is numeric — X and Y would be the same column`]
+      : [`X and Y are both "${x}", which draws a diagonal — pick a different Y`]
   },
 
   /**

@@ -224,8 +224,13 @@ export function useArrange(): ArrangeHandle {
    * the zoom cancels the camera exactly. The offset walk that would avoid the division cannot be
    * used: a handle is positioned with `top: 50%` and centred by a `transform`, and `offsetTop`
    * is the pre-transform border-box top — so the correction differs by side (`translate(-50%)`
-   * on the left against `translate(50%)` on the right) and the diamond sockets add a `rotate`
-   * on top of it. A rect has already applied all three.
+   * on the left against `translate(50%)` on the right) and the diamond sockets carry a `rotate`
+   * after it. A rect has already applied all three.
+   *
+   * That last clause is true by construction rather than by luck, and it was not always: since
+   * `transform` is one property, `editor.css`' diamond rule *replaced* the centring instead of
+   * adding to it, and every Matrix socket sat 4px low. It restates the translate now — see the
+   * comment there.
    *
    * **React Flow's own `handleBounds` would be the obvious source and is unusable here**, for
    * exactly the reason `measure` cannot use `node.measured`: `parseHandles` returns

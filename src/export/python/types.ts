@@ -62,6 +62,7 @@ export type PyModule =
   | 'scipyCluster'
   | 'scipyDistance'
   | 'scipySparse'
+  | 'umap'
 
 export interface ModuleSpec {
   /** Emitted verbatim when the module is imported whole. */
@@ -160,6 +161,20 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
    * the call `fastcore` above already makes.
    */
   scipySparse: { statement: 'import scipy.sparse as sparse', pip: 'scipy' },
+  /*
+   * The one module here that is a **reimplementation the other way round**. Everywhere else the
+   * emitted call either *is* what Coda ran (`fastcore`) or has been checked to agree with it to
+   * fifteen digits (`scipyCluster`); `umap-learn` is the reference and Coda runs PAIR-code's
+   * `umap-js`, because umap-learn needs numba and Pyodide ships none. So the notebook's
+   * embedding is the canonical answer and the card's is the port of it, and neither is a
+   * rounding error away from the other — two UMAP runs at different seeds already are not.
+   * `core.embed`'s cell says so in a `NOTE` rather than leaving a reader to discover it by
+   * comparing two pictures.
+   *
+   * `import umap` rather than `from umap import UMAP`: `umap.UMAP(...)` is how every tutorial
+   * and the package's own README write it, and a notebook is read as much as it is run.
+   */
+  umap: { statement: 'import umap', pip: 'umap-learn' },
 }
 
 // ---------------------------------------------------------------------------

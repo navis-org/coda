@@ -383,6 +383,37 @@ describe('out.scatter — what it warns about once it can see', () => {
     ])
   })
 
+  it('says so when two numeric columns are on offer and both pickers still took the first', () => {
+    /*
+     * The case a count of numeric columns cannot see, and the one the flagship pairing walks
+     * into: `Embedding` publishes `umap1` and `umap2`, neither of which is `pre` or `post`, so
+     * `resolveColumn`'s rule 3 hands *both* required pickers the first compatible column and
+     * the plot opens as a diagonal. Two numeric columns and nothing gone, so the count-based
+     * check said nothing at all — until it moved from counting to asking what the pickers
+     * actually resolved to.
+     *
+     * The two drift lines below are `validateColumnParams`', and they are what the third one
+     * adds to rather than repeats: each says where *one* picker went, and neither says they
+     * went to the same place. Same shape as the one-numeric-column case above, which also
+     * sits beside a drift message rather than replacing it.
+     */
+    let g = pipeline()
+    g = addNode(g, node('em', 'core.embed'))
+    g = { ...g, edges: g.edges.filter((e) => e.target !== 'plot') }
+    g = addEdge(g, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'em',
+      targetHandle: 'features',
+    })
+    g = addEdge(g, { source: 'em', sourceHandle: 'out', target: 'plot', targetHandle: 'in' })
+    expect(issues(g, 'plot')).toEqual([
+      'Column "pre" is gone — using "umap1"',
+      'Column "post" is gone — using "umap1"',
+      'X and Y are both "umap1", which draws a diagonal — pick a different Y',
+    ])
+  })
+
   it('names the column when only one is numeric, which the shared check cannot see', () => {
     // Two, and both true: `post` really is gone and `pre` really is what Y falls back to —
     // a non-optional picker does reach for the first column, so that message is honest here

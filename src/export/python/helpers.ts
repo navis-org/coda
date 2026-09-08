@@ -13,6 +13,7 @@
  */
 
 import { QUALIFIED_SEPARATOR } from '../../core/ids'
+import { MIN_EMBED_OBSERVATIONS } from '../../nodes/lib/embedOps'
 import { JOIN_SEPARATOR } from '../../core/values'
 import { registerHelper } from './registry'
 
@@ -1072,5 +1073,80 @@ registerHelper({
     "        for part in re.split(r'(\\d+)', str(label))",
     "        if part != ''",
     '    ]',
+  ],
+})
+
+/**
+ * A long `(query, neighbour, score)` table as umap-learn's `precomputed_knn` pair.
+ *
+ * Coda's Embedding node, Neighbours port — the route that exists to skip the all-by-all matrix,
+ * so pivoting to one here and letting `metric='precomputed'` sort it out would be emitting the
+ * cost the node was reached for to avoid.
+ *
+ * Every rule in it is one the obvious pandas spelling gets *plausibly* wrong, which is
+ * `coda_relabel`'s reason for existing one node over:
+ *
+ * - **The rows are the queries**, in first-appearance order, and a neighbour that is never
+ *   itself a query has no row to be placed in and is dropped. With a Target wired, NBLAST k-NN
+ *   compares two populations and nearly every reference goes; the canvas warns about the count
+ *   and a notebook cannot, so the docstring says it.
+ * - **Row `i` names itself first, at distance 0.** umap-learn's `smooth_knn_dist` sums from
+ *   index 1, because the reference convention is that a point is its own nearest neighbour;
+ *   without the self entry the closest real neighbour is silently dropped from every bandwidth
+ *   search.
+ * - **`-1` pads a short row** — the value `fuzzy_simplicial_set` skips on ("we didn't get the
+ *   full knn for i"), and the same one `umap-js` skips on, so the two implementations agree
+ *   about this without either being told. The *distance* at a padded slot is the row's own
+ *   furthest real neighbour rather than infinity, which would make the row's mean infinite and
+ *   destroy its neighbourhood.
+ * - **A repeated pair keeps its smallest distance**, where `dict(zip(...))` keeps the last.
+ *
+ * Checked by running it: `pnpm probe:helpers`.
+ *
+ * The observation floor is spliced from `MIN_EMBED_OBSERVATIONS` rather than transcribed —
+ * `QUALIFIED_SEPARATOR`'s idiom — so the emitted cell refuses exactly what the card refuses.
+ */
+registerHelper({
+  name: 'coda_umap_knn',
+  requires: [['pandas'], ['numpy']],
+  needs: ['coda_match_keys'],
+  source: [
+    "def coda_umap_knn(df, query, target, score=None, scores_are='similarity', k=15):",
+    '    """A long neighbour table as umap-learn\'s (indices, distances). Coda\'s Embedding node."""',
+    '    q = list(coda_match_keys(df[query]))',
+    '    t = list(coda_match_keys(df[target]))',
+    '    # First-appearance order, which is the order the canvas lays the points out in.',
+    '    labels = list(dict.fromkeys(q))',
+    '    row_of = {label: i for i, label in enumerate(labels)}',
+    '    n = len(labels)',
+    `    if n < ${MIN_EMBED_OBSERVATIONS}:`,
+    `        raise ValueError(f"an embedding needs at least ${MIN_EMBED_OBSERVATIONS} observations, got {n}")`,
+    '    k = max(2, min(int(k), n - 1))',
+    '    if score is None:',
+    '        values = np.ones(len(df))',
+    '    else:',
+    "        values = pd.to_numeric(df[score], errors='coerce').to_numpy(dtype=float)",
+    "    if scores_are == 'similarity':",
+    '        values = 1.0 - values',
+    '    if np.nanmin(values, initial=0.0) < 0:',
+    '        raise ValueError("scores give negative distances; check `scores_are`")',
+    '    buckets = [{} for _ in range(n)]',
+    '    for a, b, d in zip(q, t, values):',
+    '        i, j = row_of.get(a), row_of.get(b)',
+    '        # A self-match is added back at position 0; kept here it would be a duplicate.',
+    '        if i is None or j is None or i == j or not np.isfinite(d):',
+    '            continue',
+    '        seen = buckets[i].get(j)',
+    '        if seen is None or d < seen:',
+    '            buckets[i][j] = d',
+    '    indices = np.full((n, k), -1, dtype=np.int32)',
+    '    dists = np.zeros((n, k), dtype=np.float32)',
+    '    for i, bucket in enumerate(buckets):',
+    '        found = sorted(bucket.items(), key=lambda pair: pair[1])[: k - 1]',
+    '        dists[i, :] = found[-1][1] if found else 1.0',
+    '        indices[i, 0], dists[i, 0] = i, 0.0',
+    '        for s, (j, d) in enumerate(found):',
+    '            indices[i, s + 1], dists[i, s + 1] = j, d',
+    '    return labels, indices, dists',
   ],
 })

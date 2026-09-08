@@ -122,6 +122,10 @@ const RELATED: readonly (readonly string[])[] = [
   ],
   // All-by-all, and the same measure asked for one neuron's nearest matches.
   ['neuron.nblast', 'neuron.nblastKnn', 'neuron.skeletons'],
+  // A square matrix's structure as a tree, and the same structure as somewhere to put a point.
+  ['cluster.linkage', 'core.embed', 'out.scatter'],
+  // The three things an Embedding will take, one at a time.
+  ['core.embed', 'neuron.nblastKnn', 'neuron.partnerVectors'],
   // Putting two connectomes in one table.
   ['compare.matchTypes', 'compare.connectivity', 'core.similarity'],
 

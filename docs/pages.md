@@ -264,6 +264,18 @@ running `inferGraph` over candidate graphs whose dataset nodes belong to every b
 CATMAID servers and a datastack listing at CAVE, and opened a Connections dialog demanding a token
 over a workflow about filtering a table. Seen in a browser; jsdom reaches none of it.
 
+**Optional ports compose, until one node's do not.** The wiring pass fills every input port that
+has a compatible source, which is right for `neuron.connectivity`'s `neurons` and `labels` — a
+second wire there adds something. `core.embed`'s three inputs are *alternatives*: a score matrix, a
+feature table and a k-NN table are three ways of arriving at one k-NN graph, so all three were wired
+from the same neuron table and the demo opened on the node's own refusal, `Features and Neighbours
+are both wired`. `PortDef.exclusiveGroup` is what a node says it with and `append` skips a group
+already claimed, first wired winning, which is declaration order. Two things about the shape: the
+node still keeps its **own** refusal message rather than the builder silencing it, because a second
+wire made by hand deserves a sentence naming the port to disconnect; and `demo.test.ts` asks it of
+**every** node rather than of this one, since a rule tested where it was found is a rule the second
+case escapes.
+
 **The "Seen in" chips are chips, not links, and that is a repair.** They were `<a href="./index.html">`
 — every one of them, on every node — from the commit that added this page, when they named the four
 bundled example graphs the start page listed. The examples became wizard analyses, whose names appear

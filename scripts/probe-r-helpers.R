@@ -619,5 +619,81 @@ check("group fold: an unmapped neuron is not counted", isTRUE(outside$synapses_m
 check("group fold: an empty frame answers NULL", is.null(
   coda_group_means(per_neuron[0, ], lc4, "type", "synapses")))
 
+# ---- coda_umap_knn, and the two shapes the Embedding chunk calls uwot with -------------------
+#
+# The only helper here whose *caller* is also probed, and for `probe-py-helpers.py`'s reason: this
+# node's export is a third implementation rather than a translation of the second, so what has to
+# hold is that uwot still takes what the helper builds. Two seams reach it — a `dist` object and
+# `nn_method = list(idx, dist)` with `X = NULL` — and both were read off a running uwot rather than
+# off its manual. The one place this differs from the Python helper is the padding, and it is the
+# check below that says so: uwot's `idx` is 1-based with no `-1` sentinel, so a short row repeats
+# its own index, which every implementation of this algorithm scores as a zero-weight self edge.
+knn_rows <- data.frame(
+  queryId = c("a", "b", "a", "c", "d", "b", "c", "d", "a"),
+  targetId = c("b", "a", "c", "d", "c", "c", "a", "b", "b"),
+  score = c(0.9, 0.9, 0.2, 0.8, 0.8, 0.1, 0.2, 0.1, 0.4),
+  stringsAsFactors = FALSE
+)
+knn <- coda_umap_knn(knn_rows, "queryId", "targetId", "score", k = 3)
+check("umap knn: the rows are the queries, in first-appearance order",
+      isTRUE(all(knn$labels == c("a", "b", "c", "d"))), paste(knn$labels, collapse = ","))
+check("umap knn: row i names itself first, at distance 0",
+      isTRUE(all(knn$idx[, 1] == seq_len(4)) && all(knn$dist[, 1] == 0)),
+      paste(knn$idx[, 1], collapse = ","))
+# a->b is listed twice, at 0.9 and at 0.4. `match()` would keep whichever came first in the
+# table; Coda keeps the closest.
+check("umap knn: a repeated pair keeps its smallest distance",
+      isTRUE(abs(knn$dist[1, 2] - 0.1) < 1e-9), knn$dist[1, 2])
+check("umap knn: every row is exactly k wide", isTRUE(all(dim(knn$idx) == c(4, 3))),
+      paste(dim(knn$idx), collapse = "x"))
+
+stranger <- rbind(knn_rows, data.frame(queryId = "a", targetId = "e", score = 0.99,
+                                       stringsAsFactors = FALSE))
+knn2 <- coda_umap_knn(stranger, "queryId", "targetId", "score", k = 3)
+check("umap knn: a neighbour that is never a query is dropped",
+      isTRUE(all(knn2$labels == knn$labels)), paste(knn2$labels, collapse = ","))
+check("umap knn: and takes no place in the row it was named in",
+      isTRUE(all(knn2$idx <= length(knn2$labels))), paste(knn2$idx, collapse = ","))
+
+short <- data.frame(
+  queryId = c("a", "b", "c", "d", "a", "b"),
+  targetId = c("b", "a", "a", "a", "c", "c"),
+  score = c(0.9, 0.9, 0.5, 0.5, 0.2, 0.3),
+  stringsAsFactors = FALSE
+)
+sknn <- coda_umap_knn(short, "queryId", "targetId", "score", k = 3)
+check("umap knn: a short row pads with its own index, uwot having no -1",
+      isTRUE(any(sknn$idx[3, -1] == 3)), paste(sknn$idx[3, ], collapse = ","))
+check("umap knn: and its padded distance is finite",
+      isTRUE(all(is.finite(sknn$dist))), paste(sknn$dist, collapse = ","))
+check("umap knn: negative distances are refused rather than embedded",
+      inherits(try(coda_umap_knn(
+        data.frame(q = c("a", "b", "c", "d"), t = c("b", "a", "d", "c"),
+                   s = c(1.5, 1.5, 1.5, 1.5), stringsAsFactors = FALSE),
+        "q", "t", "s"), silent = TRUE), "try-error"))
+
+if (!requireNamespace("uwot", quietly = TRUE)) {
+  cat("skip uwot call shapes: not installed\n")
+} else {
+  set.seed(0)
+  pts <- matrix(rnorm(40 * 5), 40, 5)
+  pts[1:20, ] <- pts[1:20, ] + 5
+  sq <- as.matrix(dist(pts))
+  xy <- uwot::umap(as.dist(sq), n_neighbors = 8, n_components = 2, min_dist = 0.15,
+                   spread = 1, verbose = FALSE)
+  check("umap call: a dist object is the precomputed-matrix route",
+        isTRUE(all(dim(xy) == c(40, 2)) && all(is.finite(xy))), paste(dim(xy), collapse = "x"))
+
+  ord <- t(apply(sq, 1, function(row) order(row)[1:6]))
+  long <- do.call(rbind, lapply(seq_len(40), function(i) data.frame(
+    queryId = paste0("n", i), targetId = paste0("n", ord[i, -1]),
+    score = 1 - sq[i, ord[i, -1]] / max(sq), stringsAsFactors = FALSE)))
+  g <- coda_umap_knn(long, "queryId", "targetId", "score", k = 6)
+  xy2 <- uwot::umap(X = NULL, nn_method = list(idx = g$idx, dist = g$dist),
+                    n_components = 2, min_dist = 0.15, spread = 1, verbose = FALSE)
+  check("umap call: nn_method takes the helper's matrices as they are",
+        isTRUE(all(dim(xy2) == c(40, 2)) && all(is.finite(xy2))), paste(dim(xy2), collapse = "x"))
+}
+
 cat("\n", if (fails > 0L) paste(fails, "failed") else "all passed", "\n", sep = "")
 quit(status = if (fails > 0L) 1L else 0L)

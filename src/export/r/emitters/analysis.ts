@@ -9,6 +9,7 @@ import { rCol as col, rStr, rValue, rVector } from '../r'
 import type { LANDMARK_SIDES } from '../../../nodes/transform/landmarkTransform'
 import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmarkTransform'
 import { matchParamsFrom } from '../../../nodes/lib/matchOps'
+import { embedRoute } from '../../../nodes/lib/embedOps'
 import { effectiveOutput, isLongLayout } from '../../../nodes/lib/similarityOps'
 import type { SimilarityMetric, SimilarityOutput } from '../../../nodes/lib/similarityOps'
 import { ID_COLUMN_NAME } from '../../../core/ids'
@@ -1476,58 +1477,83 @@ registerEmitter('neuron.partnerVectors', (ctx) => {
   ]
 })
 
-registerEmitter('core.similarity', (ctx) => {
-  const src = ctx.wired('in')
-  const metric = String(ctx.params.metric ?? 'cosine') as SimilarityMetric
-  // Through `effectiveOutput`: Euclidean hides the Output param, so reading it raw would put an
-  // argument in the document that the run it mirrors never used.
-  const output = effectiveOutput(
-    metric,
-    String(ctx.params.output ?? 'similarity') as SimilarityOutput,
-  )
-  const out = ctx.output('matrix')
-  const tail = [`  metric = ${rStr(metric)},`, `  output = ${rStr(output)}`, `)`]
-  // Through the same predicate the node's `visibleIf` uses, rather than this emitter's own
+/**
+ * The refusal, if this node cannot be translated. Kept apart from the call below so the guard
+ * runs *before* `ctx.helper` — a misconfigured node that emits a TODO should not still pull two
+ * hundred lines of helper, and an `install.packages` line for Matrix, into the document.
+ */
+function similarityIssue(
+  ctx: EmitContext,
+  label: string,
+  featureParam: string,
+): string[] | undefined {
+  // Through the same predicate the nodes' `visibleIf` uses, rather than this emitter's own
   // literal — the pair were testing `layout === 'wide'` in three places with three spellings.
-  const long = isLongLayout(ctx.params)
+  if (!isLongLayout(ctx.params)) {
+    return ctx.column('idColumn') && ctx.columns('wideFeatures').length > 0
+      ? undefined
+      : ctx.todo(`This ${label} needs an Id column and at least one feature column.`)
+  }
+  return ctx.column('observations') && ctx.column(featureParam)
+    ? undefined
+    : ctx.todo(`This ${label} needs an Observations and a Features column.`)
+}
 
-  const idColumn = long ? undefined : ctx.column('idColumn')
-  const picked = long ? [] : ctx.columns('wideFeatures')
-  const observations = long ? ctx.column('observations') : undefined
-  const features = long ? ctx.column('features') : undefined
-  // Guards before `ctx.helper`, matching Partner Vectors above: a misconfigured node that emits
-  // a TODO should not still pull two hundred lines of helper — and, here, an `install.packages`
-  // line for Matrix — into the document.
-  if (!long && (!idColumn || picked.length === 0)) {
-    return ctx.todo(
-      'This Similarity Matrix needs an Id column and at least one feature column.',
-    )
-  }
-  if (long && (!observations || !features)) {
-    return ctx.todo('This Similarity Matrix needs an Observations and a Features column.')
-  }
-  // No `ctx.library('Matrix')`: the helper declares its own package through `requires`, which is
-  // what makes it impossible to pull the helper in without it.
+/**
+ * `coda_similarity_long|wide(...)`, for the two nodes that reach it.
+ *
+ * `core.similarity` is one; `core.embed`'s Features port is the other, and it had this block
+ * copied — differing only in which param holds the long feature picker and in pinning
+ * `output = "distance"`. Two spellings of one call is how a fix reaches one document and not
+ * the other.
+ *
+ * No `ctx.library('Matrix')`: the helper declares its own package through `requires`, which is
+ * what makes it impossible to pull the helper in without it.
+ */
+function similarityCall(
+  ctx: EmitContext,
+  options: { out: string; src: string; featureParam: string; output: SimilarityOutput },
+): string[] {
   ctx.helper('coda_similarity')
-
-  if (!long) {
+  const tail = [
+    `  metric = ${rStr(String(ctx.params.metric ?? 'cosine'))},`,
+    `  output = ${rStr(options.output)}`,
+    `)`,
+  ]
+  if (!isLongLayout(ctx.params)) {
     return [
-      `${out} <- coda_similarity_wide(`,
-      `  ${src},`,
-      `  id_column = ${rStr(idColumn!)},`,
-      `  columns = ${rVector(picked)},`,
+      `${options.out} <- coda_similarity_wide(`,
+      `  ${options.src},`,
+      `  id_column = ${rStr(ctx.column('idColumn')!)},`,
+      `  columns = ${rVector(ctx.columns('wideFeatures'))},`,
       ...tail,
     ]
   }
   const value = ctx.column('value')
   return [
-    `${out} <- coda_similarity_long(`,
-    `  ${src},`,
-    `  observations = ${rStr(observations!)},`,
-    `  features = ${rStr(features!)},`,
+    `${options.out} <- coda_similarity_long(`,
+    `  ${options.src},`,
+    `  observations = ${rStr(ctx.column('observations')!)},`,
+    `  features = ${rStr(ctx.column(options.featureParam)!)},`,
     ...(value ? [`  value = ${rStr(value)},`] : []),
     ...tail,
   ]
+}
+
+registerEmitter('core.similarity', (ctx) => {
+  const issue = similarityIssue(ctx, 'Similarity Matrix', 'features')
+  if (issue) return issue
+  return similarityCall(ctx, {
+    out: ctx.output('matrix'),
+    src: ctx.wired('in'),
+    featureParam: 'features',
+    // Through `effectiveOutput`: Euclidean hides the Output param, so reading it raw would put
+    // an argument in the document that the run it mirrors never used.
+    output: effectiveOutput(
+      String(ctx.params.metric ?? 'cosine') as SimilarityMetric,
+      String(ctx.params.output ?? 'similarity') as SimilarityOutput,
+    ),
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -1580,4 +1606,153 @@ registerEmitter('compare.connectivity', (ctx) => {
     `${ctx.output('comparison')} <- ${cmp_}$comparison`,
     `${ctx.output('counts')} <- ${cmp_}$counts`,
   ]
+})
+
+// ---------------------------------------------------------------------------
+// Embedding
+// ---------------------------------------------------------------------------
+
+/**
+ * UMAP through `uwot`, which is **a third implementation rather than a translation of the
+ * second**.
+ *
+ * The canvas runs `umap-js` because umap-learn needs numba and Pyodide has none; the notebook
+ * runs umap-learn; this runs Melville's R implementation. All three are McInnes' algorithm and
+ * take the same four numbers by name, and none of them will draw the same picture as another —
+ * nor would one of them twice at different seeds. That is the honest state of this node's
+ * export, and the `NOTE` says it rather than leaving a reader with two plots to reconcile.
+ *
+ * Two of uwot's seams were checked by running them rather than read off the manual: `X` may be a
+ * `dist` object, which is the precomputed-matrix route; and `nn_method = list(idx, dist)` takes
+ * a graph with `X = NULL`, which is the route that skips the matrix. See `coda_umap_knn` for the
+ * one place its convention differs from Python's.
+ */
+registerEmitter('core.embed', (ctx) => {
+  // The node's own decision rather than a fourth copy of the port list — see the notebook
+  // emitter for why, and `embedRoute` for the one statement of it.
+  const selected = embedRoute((port) => ctx.input(port) !== undefined)
+  if (!selected.ok) return ctx.todo(`This Embedding cannot be translated: ${selected.refusal}`)
+  const route = selected.route
+
+  const out = ctx.output('out')
+  const neighbours = Number(ctx.params.neighbors ?? 15)
+  const epochs = Number(ctx.params.epochs ?? 0)
+  const settings = [
+    `  n_components = 2,`,
+    `  min_dist = ${rValue(Number(ctx.params.minDist ?? 0.1))},`,
+    `  spread = ${rValue(Number(ctx.params.spread ?? 1))},`,
+    ...(epochs > 0 ? [`  n_epochs = ${epochs},`] : []),
+  ]
+
+  const lines: string[] = ctx.note(
+    'Coda runs umap-js and the notebook exporter runs umap-learn; this is uwot. All three are ' +
+      'the same algorithm with the same settings, and all three draw different arrangements of ' +
+      'the same neighbourhoods — as two seeds of any one of them do.',
+  )
+
+  if (route === 'neighbours') {
+    const src = ctx.input('neighbours')!
+    const query = ctx.column('queryColumn')
+    const target = ctx.column('targetColumn')
+    if (!query || !target) {
+      return ctx.todo('This Embedding needs the two columns naming each neighbour pair.')
+    }
+    const score = ctx.column('scoreColumn')
+    ctx.library('uwot')
+    ctx.helper('coda_umap_knn')
+    lines.push(
+      `.knn <- coda_umap_knn(`,
+      `  ${src},`,
+      `  query = ${rStr(query)},`,
+      `  target = ${rStr(target)},`,
+      ...(score ? [`  score = ${rStr(score)},`] : []),
+      `  scores_are = ${rStr(String(ctx.params.scoreIs ?? 'similarity'))},`,
+      `  k = ${neighbours}`,
+      `)`,
+      `.labels <- .knn$labels`,
+      // `X = NULL` with a supplied graph, which is uwot's own spelling for "the neighbours are
+      // already known" — the vectors it would otherwise index are exactly what this route skips.
+      `.xy <- umap(`,
+      `  X = NULL,`,
+      `  nn_method = list(idx = .knn$idx, dist = .knn$dist),`,
+      ...settings,
+      `  verbose = FALSE`,
+      `)`,
+    )
+  } else {
+    let source: string
+    if (route === 'matrix') {
+      source = ctx.input('matrix')!
+    } else {
+      // The same call the Similarity Matrix chunk emits, through the same function — so a graph
+      // that does this in two cards and one that does it in one produce the same matrix.
+      const issue = similarityIssue(ctx, 'Embedding', 'featureColumn')
+      if (issue) return issue
+      lines.push(
+        ...similarityCall(ctx, {
+          out: '.features',
+          src: ctx.input('features')!,
+          featureParam: 'featureColumn',
+          output: 'distance',
+        }),
+      )
+      source = '.features'
+    }
+
+    const distance = String(ctx.params.distance ?? 'auto')
+    const invert = route === 'features' ? false : distance !== 'none'
+    ctx.library('uwot')
+    lines.push(
+      `.m <- as.matrix(${source})`,
+      `.labels <- rownames(.m)`,
+      `.d <- ${invert ? '1 - .m' : '.m'}`,
+      // `as.dist` reads the lower triangle, which is uwot's precomputed route. It is the same
+      // half `squareform` reads for the Linkage export — on a symmetric matrix, all of it.
+      `.xy <- umap(`,
+      `  X = as.dist(.d),`,
+      `  n_neighbors = min(${neighbours}, length(.labels) - 1),`,
+      ...settings,
+      `  verbose = FALSE`,
+      `)`,
+    )
+    if (invert && distance === 'auto') {
+      lines.push(
+        ...ctx.note(
+          'Scores are similarities, so the distance is 1 − score — the same reading the ' +
+            'Linkage chunk makes.',
+        ),
+      )
+    }
+  }
+
+  lines.push(
+    `${out} <- data.frame(`,
+    `  label = .labels,`,
+    `  umap1 = .xy[, 1],`,
+    `  umap2 = .xy[, 2],`,
+    `  stringsAsFactors = FALSE`,
+    `)`,
+  )
+
+  const annotations = ctx.input('annotations')
+  const labelBy = ctx.column('labelBy')
+  if (annotations && labelBy) {
+    ctx.helper('coda_relabel')
+    lines.push(
+      `${out} <- coda_relabel(`,
+      `  ${out},`,
+      `  "label",`,
+      `  ${annotations},`,
+      `  key = ${rStr(ctx.column('matchOn') ?? ID_COLUMN_NAME)},`,
+      `  value = ${rStr(labelBy)},`,
+      `  into = "annotation",`,
+      `  unmatched = "null"`,
+      `)`,
+    )
+  } else {
+    // Present whether or not the port is wired, matching the node's own schema — see the
+    // notebook emitter for why that is invariant 3 rather than tidiness.
+    lines.push(`${out}$annotation <- NA_character_`)
+  }
+  return lines
 })

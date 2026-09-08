@@ -43,6 +43,7 @@ export type RPackage =
   | 'ggplot2'
   | 'igraph'
   | 'Matrix'
+  | 'uwot'
 
 export interface PackageSpec {
   /** Where it comes from, for the install comment. CRAN unless stated. */
@@ -68,6 +69,16 @@ export const PACKAGES: Record<RPackage, PackageSpec> = {
    * `Matrix::sparseMatrix` resolve under `--vanilla`.
    */
   Matrix: {},
+  /*
+   * UMAP, for `core.embed`. On CRAN, and the *reference* rather than a translation of what Coda
+   * ran — the canvas runs PAIR-code's `umap-js` because umap-learn needs numba and the
+   * in-browser Python runtime has none, so both exporters emit a third implementation of the
+   * published algorithm. uwot is McInnes' method as Melville implemented it in R, and the
+   * hyperparameters carry over by name; the arrangement will not match either of the other two
+   * in detail, which is what two seeds of one implementation already do. The emitted cell says
+   * so rather than leaving a reader comparing two plots to conclude one is broken.
+   */
+  uwot: {},
 }
 
 export interface EmitContext<P extends ParamValues = ParamValues> {

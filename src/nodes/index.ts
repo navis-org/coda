@@ -71,6 +71,7 @@ export { networkCentralityNode } from './analysis/networkCentrality'
 export { similarityNode } from './analysis/similarity'
 export { linkageNode } from './analysis/linkage'
 export { cutTreeNode } from './analysis/cutTree'
+export { embedNode } from './analysis/embed'
 
 export { tableViewNode } from './output/table'
 export { describeNode } from './output/describe'

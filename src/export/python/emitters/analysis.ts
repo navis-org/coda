@@ -14,6 +14,7 @@ import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmar
 import { matchParamsFrom } from '../../../nodes/lib/matchOps'
 import { meshCleanParamsFrom, skeletonCleanParamsFrom } from '../../../nodes/lib/cleanOps'
 import { NM_PER_UM } from '../../../nodes/lib/nblastOps'
+import { embedRoute } from '../../../nodes/lib/embedOps'
 import { effectiveOutput, isLongLayout } from '../../../nodes/lib/similarityOps'
 import type { SimilarityMetric, SimilarityOutput } from '../../../nodes/lib/similarityOps'
 import { ID_COLUMN_NAME } from '../../../core/ids'
@@ -1640,56 +1641,89 @@ registerEmitter('neuron.partnerVectors', (ctx) => {
   ]
 })
 
-registerEmitter('core.similarity', (ctx) => {
-  const src = ctx.wired('in')
-  const metric = String(ctx.params.metric ?? 'cosine') as SimilarityMetric
-  // Through `effectiveOutput`, not `params.output`: a metric with no similarity form hides that
-  // param, so reading it raw would emit `output='similarity'` for a node whose run could only
-  // produce distances.
-  const output = effectiveOutput(
-    metric,
-    String(ctx.params.output ?? 'similarity') as SimilarityOutput,
-  )
-  const out = ctx.output('matrix')
-  const tail = [`    metric=${pyStr(metric)},`, `    output=${pyStr(output)},`, `)`]
-  // Through the same predicate the node's `visibleIf` uses, rather than this emitter's own
+/**
+ * `coda_similarity_long|wide(...)`, for the two nodes that reach it.
+ *
+ * `core.similarity` is one; `core.embed`'s Features port is the other, and it had this whole
+ * block copied — the same `isLongLayout` split, the same two `ctx.todo` guards, the same
+ * argument construction — differing only in which param holds the long feature picker and in
+ * pinning `output='distance'`. Two spellings of one call is how a fix to the guard reaches one
+ * notebook and not the other.
+ *
+ * Returns the `ctx.todo` lines directly when the node is misconfigured, so the guard stays
+ * *before* `ctx.helper` — a node that emits a TODO should not still pull two hundred lines of
+ * helper into the document, which is Partner Vectors' rule above.
+ */
+function similarityIssue(
+  ctx: EmitContext,
+  label: string,
+  featureParam: string,
+): string[] | undefined {
+  // Through the same predicate the nodes' `visibleIf` uses, rather than this emitter's own
   // literal — the pair were testing `layout === 'wide'` in three places with three spellings.
-  const long = isLongLayout(ctx.params)
+  if (!isLongLayout(ctx.params)) {
+    return ctx.column('idColumn') && ctx.columns('wideFeatures').length > 0
+      ? undefined
+      : ctx.todo(`This ${label} needs an Id column and at least one feature column.`)
+  }
+  return ctx.column('observations') && ctx.column(featureParam)
+    ? undefined
+    : ctx.todo(`This ${label} needs an Observations and a Features column.`)
+}
 
-  const idColumn = long ? undefined : ctx.column('idColumn')
-  const picked = long ? [] : ctx.columns('wideFeatures')
-  const observations = long ? ctx.column('observations') : undefined
-  const features = long ? ctx.column('features') : undefined
-  // Guards before `ctx.helper`, matching Partner Vectors above: a misconfigured node that emits
-  // a TODO should not still pull two hundred lines of helper into the document.
-  if (!long && (!idColumn || picked.length === 0)) {
-    return ctx.todo(
-      'This Similarity Matrix needs an Id column and at least one feature column.',
-    )
-  }
-  if (long && (!observations || !features)) {
-    return ctx.todo('This Similarity Matrix needs an Observations and a Features column.')
-  }
+function similarityCall(
+  ctx: EmitContext,
+  options: {
+    out: string
+    src: string
+    /** The long feature picker's param id: `features` here, `featureColumn` on `core.embed`. */
+    featureParam: string
+    output: SimilarityOutput
+  },
+): string[] {
   ctx.helper('coda_similarity')
-
-  if (!long) {
+  const tail = [
+    `    metric=${pyStr(String(ctx.params.metric ?? 'cosine'))},`,
+    `    output=${pyStr(options.output)},`,
+    `)`,
+  ]
+  if (!isLongLayout(ctx.params)) {
     return [
-      `${out} = coda_similarity_wide(`,
-      `    ${src},`,
-      `    id_column=${pyStr(idColumn!)},`,
-      `    columns=${pyList(picked)},`,
+      `${options.out} = coda_similarity_wide(`,
+      `    ${options.src},`,
+      `    id_column=${pyStr(ctx.column('idColumn')!)},`,
+      `    columns=${pyList(ctx.columns('wideFeatures'))},`,
       ...tail,
     ]
   }
   const value = ctx.column('value')
   return [
-    `${out} = coda_similarity_long(`,
-    `    ${src},`,
-    `    observations=${pyStr(observations!)},`,
-    `    features=${pyStr(features!)},`,
+    `${options.out} = coda_similarity_long(`,
+    `    ${options.src},`,
+    `    observations=${pyStr(ctx.column('observations')!)},`,
+    `    features=${pyStr(ctx.column(options.featureParam)!)},`,
     ...(value ? [`    value=${pyStr(value)},`] : []),
     ...tail,
   ]
+}
+
+registerEmitter('core.similarity', (ctx) => {
+  // The guard runs before `ctx.helper`, matching Partner Vectors above: a misconfigured node
+  // that emits a TODO should not still pull two hundred lines of helper into the document.
+  const issue = similarityIssue(ctx, 'Similarity Matrix', 'features')
+  if (issue) return issue
+  return similarityCall(ctx, {
+    out: ctx.output('matrix'),
+    src: ctx.wired('in'),
+    featureParam: 'features',
+    // Through `effectiveOutput`, not `params.output`: a metric with no similarity form hides
+    // that param, so reading it raw would emit `output='similarity'` for a node whose run could
+    // only produce distances.
+    output: effectiveOutput(
+      String(ctx.params.metric ?? 'cosine') as SimilarityMetric,
+      String(ctx.params.output ?? 'similarity') as SimilarityOutput,
+    ),
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -1747,4 +1781,168 @@ registerEmitter('compare.connectivity', (ctx) => {
     ...specs,
     `], min_weight=${spec.minWeight})`,
   ]
+})
+
+// ---------------------------------------------------------------------------
+// Embedding
+// ---------------------------------------------------------------------------
+
+/**
+ * UMAP, and **the one emitter in this file whose cell is the reference rather than the
+ * translation**.
+ *
+ * Everywhere else the emitted call either *is* what Coda ran (`fastcore`) or has been measured
+ * to agree with it — fastcore's linkage against SciPy's, merge order identical on 60 trials.
+ * Here it is the other way round: `umap-learn` needs numba, Pyodide ships none, so the canvas
+ * runs PAIR-code's `umap-js` and this cell runs the package it was ported from. The
+ * hyperparameters carry over exactly; the picture does not, and neither would two seeds of one
+ * implementation. The `NOTE` says so, because a reader comparing two plots is otherwise left to
+ * conclude one of them is broken.
+ *
+ * The three routes stay three cells' worth of one emitter rather than three emitters, for the
+ * node's own reason: they differ only in how the k-NN graph is arrived at, and everything after
+ * that — the frame, the annotation join, the parameters — is shared.
+ */
+registerEmitter('core.embed', (ctx) => {
+  // The node's own decision, not a fourth copy of the port list: `embedRoute` is what
+  // `validate` and `evaluate` ask too, so a fourth route cannot arrive without both notebooks
+  // noticing. Its refusal becomes a TODO — emitting the first of two would put a picture in the
+  // notebook computed from an input the canvas never used.
+  const selected = embedRoute((port) => ctx.input(port) !== undefined)
+  if (!selected.ok) return ctx.todo(`This Embedding cannot be translated: ${selected.refusal}`)
+  const route = selected.route
+
+  ctx.require('numpy')
+  ctx.require('pandas')
+  ctx.require('umap')
+
+  const out = ctx.output('out')
+  const neighbours = Number(ctx.params.neighbors ?? 15)
+  const epochs = Number(ctx.params.epochs ?? 0)
+  const settings = [
+    `    n_components=2,`,
+    `    min_dist=${pyValue(Number(ctx.params.minDist ?? 0.1))},`,
+    `    spread=${pyValue(Number(ctx.params.spread ?? 1))},`,
+    ...(epochs > 0 ? [`    n_epochs=${epochs},`] : []),
+    // The seed is the node's, so the notebook is at least reproducible *with itself* — which is
+    // the property the card offers and the one a reader is most likely to want back.
+    `    random_state=${Number(ctx.params.seed ?? 42)},`,
+  ]
+
+  const lines: string[] = ctx.note(
+    'Coda runs umap-js, a JavaScript port, because umap-learn needs numba and the in-browser ' +
+      'Python runtime has none. The settings below are the ones the card used and the ' +
+      'neighbourhoods are the same; the arrangement will differ in detail, exactly as two ' +
+      'seeds of one implementation do.',
+  )
+
+  if (route === 'neighbours') {
+    const src = ctx.input('neighbours')!
+    const query = ctx.column('queryColumn')
+    const target = ctx.column('targetColumn')
+    if (!query || !target) {
+      return ctx.todo('This Embedding needs the two columns naming each neighbour pair.')
+    }
+    const score = ctx.column('scoreColumn')
+    ctx.helper('coda_umap_knn')
+    lines.push(
+      `_labels, _idx, _dists = coda_umap_knn(`,
+      `    ${src},`,
+      `    query=${pyStr(query)},`,
+      `    target=${pyStr(target)},`,
+      ...(score ? [`    score=${pyStr(score)},`] : []),
+      `    scores_are=${pyStr(String(ctx.params.scoreIs ?? 'similarity'))},`,
+      `    k=${neighbours},`,
+      `)`,
+      // `X` is read only for its length once the neighbours are precomputed, which is the whole
+      // point of this route — the vectors it would otherwise hold are what was skipped.
+      `_xy = umap.UMAP(`,
+      `    n_neighbors=_idx.shape[1],`,
+      ...settings,
+      `    precomputed_knn=(_idx, _dists, None),`,
+      `).fit_transform(np.zeros((len(_labels), 1)))`,
+    )
+  } else {
+    let source: string
+    if (route === 'matrix') {
+      source = ctx.input('matrix')!
+    } else {
+      /*
+       * The same call the Similarity Matrix node emits, through the same function — so a graph
+       * that does this in two cards and one that does it in one produce the same matrix, and a
+       * fix to the guard reaches both notebooks. `output: 'distance'` rather than the node's own
+       * control, which it does not have: the Features route asks for distances so the `Distance`
+       * setting below resolves through one path rather than a branch.
+       */
+      const issue = similarityIssue(ctx, 'Embedding', 'featureColumn')
+      if (issue) return issue
+      lines.push(
+        ...similarityCall(ctx, {
+          out: '_features',
+          src: ctx.input('features')!,
+          featureParam: 'featureColumn',
+          output: 'distance',
+        }),
+      )
+      source = '_features'
+    }
+
+    // `auto` on a wired matrix means "read `measure` off it", which a DataFrame does not carry —
+    // so the emitter resolves it the way the node's own `transformFor` does, against the
+    // measure the *inferred* input had, and falls to the same similarity default.
+    const distance = String(ctx.params.distance ?? 'auto')
+    const invert = route === 'features' ? false : distance !== 'none'
+    lines.push(
+      `_m = np.asarray(${source}, dtype=float)`,
+      `_labels = [str(x) for x in getattr(${source}, 'index', range(len(_m)))]`,
+      `_d = ${invert ? '1.0 - _m' : '_m'}`,
+      `_xy = umap.UMAP(`,
+      `    n_neighbors=min(${neighbours}, len(_labels) - 1),`,
+      ...settings,
+      `    metric='precomputed',`,
+      `).fit_transform(_d)`,
+    )
+    if (invert && distance === 'auto') {
+      lines.push(
+        ...ctx.note(
+          'Scores are similarities, so the distance is 1 − score — the same reading the ' +
+            'Linkage node makes. A matrix that already carries distances is used as it stands.',
+        ),
+      )
+    }
+  }
+
+  lines.push(
+    `${out} = pd.DataFrame({`,
+    `    'label': _labels,`,
+    `    'umap1': _xy[:, 0],`,
+    `    'umap2': _xy[:, 1],`,
+    `})`,
+  )
+
+  const annotations = ctx.input('annotations')
+  const labelBy = ctx.column('labelBy')
+  if (annotations && labelBy) {
+    ctx.helper('coda_relabel')
+    // The same join the canvas does, through the helper `core.relabel` already emits rather
+    // than a hand-rolled `.map`: an `i64` id column with one null becomes `float64` in pandas
+    // and prints `'101.0'`, which matches nothing. `coda_relabel` carries `coda_match_keys`.
+    lines.push(
+      `${out} = coda_relabel(`,
+      `    ${out},`,
+      `    'label',`,
+      `    ${annotations},`,
+      `    key=${pyStr(ctx.column('matchOn') ?? ID_COLUMN_NAME)},`,
+      `    value=${pyStr(labelBy)},`,
+      `    into='annotation',`,
+      `    unmatched='null',`,
+      `)`,
+    )
+  } else {
+    // Written unconditionally, because the node's schema carries it whether or not the port is
+    // wired — a column that appears with the wire would empty every picker downstream of a
+    // graph reopened without it.
+    lines.push(`${out}['annotation'] = None`)
+  }
+  return lines
 })

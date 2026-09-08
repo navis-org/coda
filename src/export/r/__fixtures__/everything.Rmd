@@ -12,7 +12,7 @@ Every node type that emits, wired up once.
 *Exported from Coda.*
 
 ```{r setup}
-# install.packages(c("nat", "nat.nblast", "dplyr", "tidyr", "readr", "ggplot2", "igraph", "Matrix"))
+# install.packages(c("nat", "nat.nblast", "dplyr", "tidyr", "readr", "ggplot2", "igraph", "Matrix", "uwot"))
 # remotes::install_github("natverse/neuprintr")  # not on CRAN
 
 library(neuprintr)
@@ -24,6 +24,7 @@ library(readr)
 library(ggplot2)
 library(igraph)
 library(Matrix)
+library(uwot)
 ```
 
 ```{r coda-helpers}
@@ -1161,6 +1162,46 @@ coda_traverse_connectivity <- function(seed_ids, direction, hops, min_weight,
   }
   found
 }
+
+
+#' A long neighbour table as uwot's list(idx, dist). Coda's Embedding node.
+coda_umap_knn <- function(df, query, target, score = NULL,
+                          scores_are = "similarity", k = 15) {
+  q <- coda_match_keys(df[[query]])
+  t <- coda_match_keys(df[[target]])
+  # First-appearance order, which is the order the canvas lays the points out in.
+  labels <- unique(q)
+  n <- length(labels)
+  if (n < 4) stop("an embedding needs at least 4 observations, got ", n)
+  k <- max(2, min(as.integer(k), n - 1))
+  from <- match(q, labels)
+  to <- match(t, labels)
+  d <- if (is.null(score)) rep(1, nrow(df)) else suppressWarnings(as.numeric(df[[score]]))
+  if (scores_are == "similarity") d <- 1 - d
+  keep <- !is.na(from) & !is.na(to) & from != to & is.finite(d)
+  if (any(d[keep] < 0)) stop("scores give negative distances; check `scores_are`")
+  from <- from[keep]; to <- to[keep]; d <- d[keep]
+  # Closest first, so the duplicate a pair may have keeps its smallest distance and the
+  # per-row head below is already in order.
+  ord <- order(d)
+  from <- from[ord]; to <- to[ord]; d <- d[ord]
+  dup <- duplicated(cbind(from, to))
+  from <- from[!dup]; to <- to[!dup]; d <- d[!dup]
+  idx <- matrix(seq_len(n), nrow = n, ncol = k)
+  dist <- matrix(0, nrow = n, ncol = k)
+  by_row <- split(seq_along(from), from)
+  for (row in names(by_row)) {
+    i <- as.integer(row)
+    take <- head(by_row[[row]], k - 1)
+    # The padded slots keep the row's furthest real neighbour; an infinity would make the
+    # row's mean infinite and destroy its own neighbourhood.
+    dist[i, ] <- d[take[length(take)]]
+    dist[i, 1] <- 0
+    idx[i, seq_along(take) + 1] <- to[take]
+    dist[i, seq_along(take) + 1] <- d[take]
+  }
+  list(labels = labels, idx = idx, dist = dist)
+}
 ```
 
 ```{r hemibrain-neuprint}
@@ -1409,6 +1450,37 @@ google_sheet <- coda_google_sheet(
   columns = c("cell_type", "side")
 )
 google_sheet <- coda_join_annotations(upload_table, google_sheet)
+```
+
+```{r embedding}
+# ── Embedding ──
+# NOTE: Coda runs umap-js and the notebook exporter runs umap-learn; this is
+# uwot. All three are the same algorithm with the same settings, and all
+# three draw different arrangements of the same neighbourhoods — as two
+# seeds of any one of them do.
+.knn <- coda_umap_knn(
+  table_from_url,
+  query = "queryId",
+  target = "targetId",
+  scores_are = "similarity",
+  k = 5
+)
+.labels <- .knn$labels
+.xy <- umap(
+  X = NULL,
+  nn_method = list(idx = .knn$idx, dist = .knn$dist),
+  n_components = 2,
+  min_dist = 0.1,
+  spread = 1,
+  verbose = FALSE
+)
+embedding <- data.frame(
+  label = .labels,
+  umap1 = .xy[, 1],
+  umap2 = .xy[, 2],
+  stringsAsFactors = FALSE
+)
+embedding$annotation <- NA_character_
 ```
 
 ```{r rename-columns}
@@ -1974,6 +2046,40 @@ similarity_matrix_2 <- coda_similarity_long(
 )
 ```
 
+```{r embedding-2}
+# ── Embedding ──
+# NOTE: Coda runs umap-js and the notebook exporter runs umap-learn; this is
+# uwot. All three are the same algorithm with the same settings, and all
+# three draw different arrangements of the same neighbourhoods — as two
+# seeds of any one of them do.
+.features <- coda_similarity_long(
+  partner_vectors,
+  observations = "neuronId",
+  features = "feature",
+  value = "weight",
+  metric = "cosine",
+  output = "distance"
+)
+.m <- as.matrix(.features)
+.labels <- rownames(.m)
+.d <- .m
+.xy <- umap(
+  X = as.dist(.d),
+  n_neighbors = min(6, length(.labels) - 1),
+  n_components = 2,
+  min_dist = 0.1,
+  spread = 1,
+  verbose = FALSE
+)
+embedding_2 <- data.frame(
+  label = .labels,
+  umap1 = .xy[, 1],
+  umap2 = .xy[, 2],
+  stringsAsFactors = FALSE
+)
+embedding_2$annotation <- NA_character_
+```
+
 ```{r stack-neurons-2}
 # ── Stack Neurons ──
 # TODO: nothing upstream produced a value — "Mirror Neurons" was not
@@ -2051,6 +2157,42 @@ d_ <- as.dist(1 - ((m_ + t(m_)) / 2))
 linkage_tree <- hclust(d_, method = "average")
 linkage_ordered <- nblast_df[linkage_tree$order, linkage_tree$order]
 linkage_tree_clusters <- NULL
+```
+
+```{r embedding-3}
+# ── Embedding ──
+# NOTE: Coda runs umap-js and the notebook exporter runs umap-learn; this is
+# uwot. All three are the same algorithm with the same settings, and all
+# three draw different arrangements of the same neighbourhoods — as two
+# seeds of any one of them do.
+.m <- as.matrix(nblast_df)
+.labels <- rownames(.m)
+.d <- 1 - .m
+.xy <- umap(
+  X = as.dist(.d),
+  n_neighbors = min(8, length(.labels) - 1),
+  n_components = 2,
+  min_dist = 0.15,
+  spread = 1,
+  verbose = FALSE
+)
+# NOTE: Scores are similarities, so the distance is 1 − score — the same
+# reading the Linkage chunk makes.
+embedding_3 <- data.frame(
+  label = .labels,
+  umap1 = .xy[, 1],
+  umap2 = .xy[, 2],
+  stringsAsFactors = FALSE
+)
+embedding_3 <- coda_relabel(
+  embedding_3,
+  "label",
+  find_neurons,
+  key = "neuronId",
+  value = "type",
+  into = "annotation",
+  unmatched = "null"
+)
 ```
 
 ```{r sample-df}

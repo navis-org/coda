@@ -846,6 +846,21 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['rect', { x: '9', y: '13', width: '6', height: '6' }],
     ['line', { x1: '12', y1: '13', x2: '12', y2: '19' }],
   ],
+  /*
+   * The same point cloud as Scatter Plot with **the axes taken away**, which is the one true
+   * thing a drawing can say about UMAP: a scatter's axes are measurements and an embedding's
+   * are not, so a picture of one with axes on it would be claiming something the node refuses
+   * to. Two loose groups and a straggler — near is near, and everything else is arrangement.
+   */
+  'core.embed': [
+    ['circle', { cx: '7.2', cy: '15.4', r: '1.4', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '9.8', cy: '17.6', r: '1.4', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '6.2', cy: '18.8', r: '1.4', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '15.4', cy: '6.4', r: '1.4', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '18.2', cy: '8.4', r: '1.4', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '14.8', cy: '10', r: '1.4', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '5.4', cy: '6.2', r: '1.4', fill: 'currentColor', stroke: 'none' }],
+  ],
   'out.scatter': [
     ['line', { x1: '5', y1: '5', x2: '5', y2: '19' }],
     ['line', { x1: '5', y1: '19', x2: '19', y2: '19' }],

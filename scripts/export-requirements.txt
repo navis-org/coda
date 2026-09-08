@@ -28,6 +28,11 @@ navis-fastcore
 # explicitly because `probe-py-helpers.py` *runs* the generated helpers rather than only
 # resolving their names — the one check here that executes anything.
 caveclient
+# UMAP, for the Embedding node. The one package here whose call the notebook makes is the
+# *reference* rather than a translation — the canvas runs `umap-js` because `umap-learn` needs
+# numba and Pyodide ships none — so `probe-py-helpers.py` runs both emitted call shapes against
+# it, `metric='precomputed'` and `precomputed_knn=`, rather than only resolving their names.
+umap-learn
 # SeaTable, for the annotation sources. The distribution is `sea-serpent` and the module
 # `seaserpent`, which is the mismatch `MODULES` exists to record.
 sea-serpent

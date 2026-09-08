@@ -127,6 +127,33 @@ describe('the graphs themselves', () => {
     }
   })
 
+  /*
+   * The half `required` cannot say. Every wiring pass here reads an optional port as additive,
+   * which is right for `neuron.connectivity`'s `neurons` and `labels` and wrong for a node
+   * whose optional ports are *alternatives* — `core.embed`'s three inputs are three ways of
+   * arriving at one k-NN graph, and the first build of it wired all three from one neuron table
+   * and opened the demo on the node's own refusal. Asked of every node rather than of that one:
+   * `PortDef.exclusiveGroup` is what a node says it with, and this is what makes saying it work.
+   */
+  it('wires at most one port of a set the node declares as alternatives', () => {
+    for (const [type, graph] of DEMOS) {
+      const def = getNodeDef(type)!
+      const grouped = defaultInputPorts(def).filter((port) => port.exclusiveGroup)
+      if (grouped.length === 0) continue
+      for (const node of graph.nodes.filter((n) => n.type === type)) {
+        const wired = new Map<string, string[]>()
+        for (const port of grouped) {
+          if (!graph.edges.some((e) => e.target === node.id && e.targetHandle === port.id))
+            continue
+          wired.set(port.exclusiveGroup!, [...(wired.get(port.exclusiveGroup!) ?? []), port.id])
+        }
+        for (const [group, ports] of wired) {
+          expect(ports, `${type} wired ${ports.join(' and ')} of "${group}"`).toHaveLength(1)
+        }
+      }
+    }
+  })
+
   /* A demo travels as a `demo://` link and arrives through `deserializeGraph`, so it has to
      survive that round trip like any other document — a node the loader drops is a demo that
      opens missing the thing it was about. */

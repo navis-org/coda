@@ -364,6 +364,41 @@ export function everythingGraph(): CodaGraph {
       params: { mode: 'count', cutoff: 'threshold', threshold: 0.4, skipSelf: false },
     },
 
+    /*
+     * Three, and for the fixture's stated reason rather than for redundancy: this emitter
+     * branches on **which port is wired**, and the three branches are three different calls —
+     * a precomputed distance matrix, a similarity built here first, and a k-NN graph that never
+     * builds one. A single instance would leave two of them uncovered by any golden file.
+     */
+    {
+      id: 'embed',
+      type: 'core.embed',
+      col: 5,
+      row: 7,
+      params: { neighbors: 8, minDist: 0.15, seed: 7 },
+    },
+    {
+      id: 'embedFeatures',
+      type: 'core.embed',
+      col: 10,
+      row: 3,
+      params: {
+        neighbors: 6,
+        layout: 'long',
+        observations: 'neuronId',
+        featureColumn: 'feature',
+        value: 'weight',
+        metric: 'cosine',
+      },
+    },
+    {
+      id: 'embedKnn',
+      type: 'core.embed',
+      col: 5,
+      row: 8,
+      params: { neighbors: 5, scoreIs: 'similarity' },
+    },
+
     { id: 'linkage', type: 'cluster.linkage', col: 4, row: 5, params: { method: 'average' } },
     { id: 'cut', type: 'cluster.cut', col: 5, row: 5, params: { mode: 'count', count: 4 } },
     {
@@ -1418,6 +1453,20 @@ export function everythingGraph(): CodaGraph {
     ['skel', 'skeletons', 'nblastPair', 'query'],
     ['skel', 'skeletons', 'nblastPair', 'target'],
     ['nblast', 'scores', 'linkage', 'in'],
+    ['nblast', 'scores', 'embed', 'matrix'],
+    // Wired, so the golden shows the join rather than the `annotation = None` branch — which is
+    // the half that can silently disagree with `core.relabel`'s helper.
+    ['find', 'neurons', 'embed', 'annotations'],
+    ['pvec', 'out', 'embedFeatures', 'features'],
+    /*
+     * From the URL table rather than from `NBLAST k-NN`, which is the pairing this port exists
+     * for and is a TODO in R — `nat.nblast` has no k-NN equivalent, so wiring it there would
+     * leave the whole neighbours branch, `coda_umap_knn` included, unreachable in one of the two
+     * languages and therefore unrunnable by `probe:r-helpers`. The port takes any table, which
+     * is what makes this a legitimate route rather than a stand-in: a hand-built neighbour list
+     * reaches it exactly this way.
+     */
+    ['url', 'out', 'embedKnn', 'neighbours'],
     ['linkage', 'tree', 'cut', 'in'],
     ['linkage', 'tree', 'cutH', 'in'],
     // Through the Cut rather than off the Linkage, so the golden shows a Dendrogram reading a
