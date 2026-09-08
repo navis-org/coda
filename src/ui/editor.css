@@ -4254,6 +4254,45 @@ a.dropdown__item {
   left: auto;
   right: 100%;
 }
+
+/*
+ * The narrow shell's submenu: under its row rather than beside it.
+ *
+ * A panel is `min-width: 260px`, so a row plus a flyout is 520px against a 412px viewport —
+ * neither side fits, and the flip could only choose which edge to hang off (measured at 229px
+ * past the left, against 135px past the right). Inline, the question does not arise: no
+ * position, no border and no shadow, since it is inside the panel that already has all three,
+ * and a left rule plus the `▸` turned down is what says it is a level in.
+ */
+.dropdown__flyout--inline {
+  position: static;
+  min-width: 0;
+  padding: 0 0 3px 10px;
+  margin-left: 9px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+/*
+ * Scroll is back on for the outer panel, and it has to be: `--flyouts` turns `overflow-y` off so
+ * a *side* flyout is not clipped into a scrollbar, and inline there is no side flyout to clip —
+ * only a panel that has just grown by a submenu's worth of rows on the shortest screen there is.
+ * Higher specificity than the rule above so the inline block itself keeps overflowing into it.
+ */
+.app[data-narrow] .dropdown__panel--flyouts {
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+}
+.app[data-narrow] .dropdown__flyout--inline {
+  max-height: none;
+  overflow: visible;
+}
+/* Turned down when the rows are underneath rather than to the right. */
+.app[data-narrow] .dropdown__item--parent[aria-expanded='true']::after {
+  transform: translateY(-50%) rotate(90deg);
+}
 .dropdown__heading {
   padding: 3px 8px;
   font-size: 10px;

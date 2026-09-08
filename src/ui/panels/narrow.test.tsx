@@ -40,6 +40,7 @@ import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/
 import type { Viewport } from '../../test/matchMedia'
 import { evaluateQuery, installMatchMedia, setViewport } from '../../test/matchMedia'
 import { NARROW_QUERY, resetSmallScreenForTest } from '../smallScreen'
+import { submenuPlacement } from './Toolbar'
 
 const PHONE = { width: 412, height: 915 }
 const DESKTOP = { width: 1440, height: 900 }
@@ -135,6 +136,54 @@ describe('the narrow threshold', () => {
 
   it.each(cases)('%s', (_label, view, narrow) => {
     expect(evaluateQuery(NARROW_QUERY, view)).toBe(narrow)
+  })
+})
+
+/*
+ * The geometry, handed in as numbers. This is the half of the fix a jsdom suite can reach — the
+ * component only supplies rects, and jsdom measures nothing — and both failing cases below were
+ * measured in a real browser before they were written down here.
+ */
+describe('where a submenu opens', () => {
+  const PANEL = 260
+
+  /** A row whose panel is `PANEL` wide, at `left` in a `viewport`-wide window. */
+  const at = (left: number, viewport: number) => ({
+    width: PANEL,
+    rowLeft: left,
+    rowRight: left + PANEL,
+    viewport,
+  })
+
+  it('opens to the right when there is room, which is the desktop case', () => {
+    expect(submenuPlacement(at(229, 1440), false)).toBe('right')
+  })
+
+  it('opens to the left when only that side fits', () => {
+    // A menu near the right edge: 900 + 260 runs past 1000, 900 - 260 clears the gutter.
+    expect(submenuPlacement(at(640, 1000), false)).toBe('left')
+  })
+
+  /*
+   * The tablet case, and the reason this is not a phone rule. At 744 the New menu's panel sits
+   * at 229, so the flyout misses on the right by 9px and on the left by 27 — a two-answer flip
+   * had to pick one, and picked the 27.
+   */
+  it('goes inline when neither side fits, rather than picking the less bad one', () => {
+    expect(submenuPlacement(at(229, 744), false)).toBe('inline')
+  })
+
+  /*
+   * The reported case. Answered before any measurement, so the flyout is never painted beside
+   * the row and then moved: no shell this narrow can seat a 260px panel next to a 260px one.
+   */
+  it('goes inline on the narrow shell without waiting to measure', () => {
+    expect(submenuPlacement(undefined, true)).toBe('inline')
+    expect(submenuPlacement(at(27, 412), true)).toBe('inline')
+  })
+
+  it('defaults to the right until it has been measured', () => {
+    expect(submenuPlacement(undefined, false)).toBe('right')
   })
 })
 

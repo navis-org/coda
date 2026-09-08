@@ -1404,34 +1404,81 @@ function ExportItem({
   )
 }
 
+/** The margin a menu keeps from the window's edge. One number, both menus. */
+const MENU_GUTTER = 8
+
+export interface MenuFit {
+  /** The panel's own width — content-driven above `min-width`, so it has to be measured. */
+  width: number
+  rowLeft: number
+  rowRight: number
+  viewport: number
+}
+
 /**
- * Whether a panel about to open at `edge` would run off the window, measured from real rects.
+ * The numbers a menu needs to decide where to open, measured from real rects once it is open.
  *
- * Both menus in this file need it and each had written it out: `Submenu` for its flyouts from
- * the start, `Dropdown` when the narrow shell put four menus on a 412px row. What they disagree
- * about is one token — which edge of the trigger the panel hangs from — so that is the argument,
- * and the 8px gutter, the measure-on-open rule and the null-rect guard are stated once.
+ * Measuring rather than deciding at a breakpoint, because what matters is where *this* menu
+ * ended up — which depends on how wide the workflow's name rendered — and how wide its panel
+ * turned out. In a `useLayoutEffect`, so a correction lands before paint rather than as a flash.
  *
- * Measured rather than decided at a breakpoint, because what matters is where *this* menu ended
- * up, which depends on how wide the workflow's name rendered.
+ * It answers with numbers rather than a placement because the two callers ask different
+ * questions of them: a top-level panel hangs *from* an edge of its trigger, a flyout opens
+ * *beside* the row, and only one of the two has an inline fallback. Those decisions sit at the
+ * call sites; what is shared, and was written out twice before, is this.
  */
-function useFlipToFit(
+export type FlyoutPlacement = 'right' | 'left' | 'inline'
+
+/**
+ * Where a submenu's flyout goes: right of its row, else left of it, else **under** it.
+ *
+ * Exported, and pure, because it is the part worth pinning and the part a test with no layout
+ * can reach — jsdom measures nothing, so the numbers have to be handed in. `submenuPlacement`
+ * is the whole of the geometry; the component only supplies rects.
+ *
+ * The third answer is what this grew. A panel is `min-width: 260px`, so a row plus a flyout is
+ * 520px, and on a 412px viewport neither side fits — asked as a flip ("does the right fit? no,
+ * then left") that is a choice between two impossible positions, and it picked the worse:
+ * `New ▸ neuPrint` opened at **-229**, where not flipping would have been 135 past the right.
+ * Two answers went wrong at 744 on a tablet as well, where the right side misses by 9px and the
+ * left by 27 — so this was never a phone rule, and a breakpoint would not have caught it. Both
+ * measured in a browser.
+ *
+ * `narrow` short-circuits ahead of the measurement rather than beside it: no shell that narrow
+ * can seat a 260px panel beside a 260px one, and answering before the first render is what keeps
+ * a flyout from being painted at the wrong place and corrected.
+ */
+export function submenuPlacement(fit: MenuFit | undefined, narrow: boolean): FlyoutPlacement {
+  if (narrow) return 'inline'
+  // Not measured yet: the flyout has to be somewhere to be measured, and right is where it
+  // belongs whenever there is room. `useLayoutEffect` corrects it before paint.
+  if (!fit) return 'right'
+  if (fit.rowRight + fit.width <= fit.viewport - MENU_GUTTER) return 'right'
+  if (fit.rowLeft - fit.width >= MENU_GUTTER) return 'left'
+  return 'inline'
+}
+
+function useMenuFit(
   ref: React.RefObject<HTMLDivElement | null>,
   open: boolean,
   panelSelector: string,
-  edge: 'left' | 'right',
-): boolean {
-  const [flip, setFlip] = useState(false)
+): MenuFit | undefined {
+  const [fit, setFit] = useState<MenuFit | undefined>(undefined)
 
   useLayoutEffect(() => {
     if (!open) return
     const row = ref.current?.getBoundingClientRect()
     const panel = ref.current?.querySelector(panelSelector)?.getBoundingClientRect()
     if (!row || !panel) return
-    setFlip(row[edge] + panel.width > window.innerWidth - 8)
-  }, [open, ref, panelSelector, edge])
+    setFit({
+      width: panel.width,
+      rowLeft: row.left,
+      rowRight: row.right,
+      viewport: window.innerWidth,
+    })
+  }, [open, ref, panelSelector])
 
-  return flip
+  return fit
 }
 
 function Dropdown({
@@ -1472,7 +1519,8 @@ function Dropdown({
    * absolutely-positioned box past the window is scrollable overflow — which is the thing that
    * makes a phone zoom out.
    */
-  const flip = useFlipToFit(ref, open, '.dropdown__panel', 'left')
+  const fit = useMenuFit(ref, open, '.dropdown__panel')
+  const flip = fit !== undefined && fit.rowLeft + fit.width > fit.viewport - MENU_GUTTER
 
   useDismissOnOutside(ref, close, { enabled: open })
 
@@ -1535,30 +1583,45 @@ function Submenu({
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   /*
-   * Which side the flyout is on. A flyout opens *beside* its row, so what has to fit is the room
-   * to the right of that row's right edge — the one difference from a top-level menu, and the
-   * reason `useFlipToFit` takes the edge as an argument.
+   * Where the flyout opens — `submenuPlacement` holds the reasoning. Inline, it is an ordinary
+   * block in the panel it is already inside, so it always fits, and the panel scrolls, having
+   * nothing beside it left to clip (see `.dropdown__panel--flyouts`).
    */
-  const flip = useFlipToFit(ref, open, '.dropdown__flyout', 'right')
+  const narrow = useNarrowShell()
+  const placement = submenuPlacement(useMenuFit(ref, open, '.dropdown__flyout'), narrow)
+  const inline = placement === 'inline'
+
+  /*
+   * Hover is the other half of the same change. Opening on `pointerenter` is right for a flyout
+   * you travel across to and wrong on a touchscreen, where there is no hover to leave and the
+   * only gesture is the tap — so inline, the row is a plain toggle and nothing else opens it.
+   *
+   * That inverts the rule below deliberately. "Opens, and does not toggle" is true *because*
+   * something has already opened the flyout by the time the click lands; with no pointer or
+   * focus handler attached, nothing has, and a row that only ever opens is a row that cannot be
+   * shut.
+   */
+  const hover = inline
+    ? {}
+    : {
+        onPointerEnter: () => setOpen(true),
+        onPointerLeave: () => setOpen(false),
+        onFocus: () => setOpen(true),
+        onBlur: (event: React.FocusEvent) => {
+          if (!ref.current?.contains(event.relatedTarget)) setOpen(false)
+        },
+      }
 
   return (
-    <div
-      className="dropdown__sub"
-      ref={ref}
-      onPointerEnter={() => setOpen(true)}
-      onPointerLeave={() => setOpen(false)}
-      onFocus={() => setOpen(true)}
-      onBlur={(event) => {
-        if (!ref.current?.contains(event.relatedTarget)) setOpen(false)
-      }}
-    >
+    <div className="dropdown__sub" ref={ref} {...hover}>
       <button
         type="button"
         className="dropdown__item dropdown__item--parent"
         aria-haspopup="true"
         aria-expanded={open}
         /*
-         * Opens, and deliberately does not toggle.
+         * Opens, and deliberately does not toggle — beside its row. See `hover` above for why
+         * inline is the other way round.
          *
          * A toggle looked right and was wrong in all three input paths, because in every one of
          * them something has *already* opened the flyout by the time the click lands: a pointer
@@ -1568,7 +1631,7 @@ function Submenu({
          * and this stays as the fallback for the browsers that fire neither (Safari does not
          * focus a button on click).
          */
-        onClick={() => setOpen(true)}
+        onClick={() => setOpen(inline ? !open : true)}
       >
         <strong>{label}</strong>
         <span>{blurb}</span>
@@ -1576,7 +1639,11 @@ function Submenu({
       {open && (
         <div
           className={`dropdown__panel dropdown__panel--flyouts dropdown__flyout${
-            flip ? ' dropdown__flyout--left' : ''
+            placement === 'inline'
+              ? ' dropdown__flyout--inline'
+              : placement === 'left'
+                ? ' dropdown__flyout--left'
+                : ''
           }`}
         >
           {children}

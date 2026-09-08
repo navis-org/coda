@@ -493,10 +493,15 @@ Area-specific — the rule, then the doc that holds why:
   `useState` and still builds a descriptor, where written out by hand it was a third copy of both
   renderers; and the **Connections trigger had to leave `SourcesPanel`**, because the menu unmounts
   on the click that opens the dialog. Chords come from **`shortcutKeys`**, never typed — a table
-  built by hand is exactly where `⌘Z` gets advertised to Windows. **No `Submenu` inside `⋯`** — a
-  flyout at `left: 100%` of a 260px panel is off a 412px screen either way — which is why
-  New/Open/Save stay on the row, and why both menus now flip through one **`useFlipToFit`**, the
-  gutter and the measure-on-open rule stated once. An open panel takes the **screen**, not a 320px
+  built by hand is exactly where `⌘Z` gets advertised to Windows. **A submenu opens right, else left, else
+  *under* its row**, and the third answer is not a phone rule: a 260px panel beside a 260px one is
+  520px, so a *flip* is a choice between two impossible positions and it picked the worse —
+  `New ▸ neuPrint` at **-229** on a 412px screen, against 135 past the right — while the same two
+  answers put an iPad mini's flyout at **-27**, off screen in the wide shell with no phone
+  involved. So placement is **measured** (`submenuPlacement` over `useMenuFit`, a pure function
+  the jsdom suite can pin) and `narrow` only short-circuits it. Hover inverts with it: inline, the
+  row is a **toggle**, because "opens and does not toggle" holds only while something else — a
+  pointer, focus — has already opened it. An open panel takes the **screen**, not a 320px
   column beside 92px of canvas — off `--inspector-width` and off **stamped attributes, never
   `:has()`**, so "both open, the inspector wins" is a selector rather than a fact about source
   order. What none of this touches is **touch**. See [docs/ui-shell.md](docs/ui-shell.md).

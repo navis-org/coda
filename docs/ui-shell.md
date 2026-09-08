@@ -1080,15 +1080,47 @@ out of building it:
   on the click that opens the dialog, so a trigger rendered inside the menu would take the dialog
   down with it. `sources.test.tsx` opens the dialog through the store now, in one line.
 
-**No `Submenu` inside `⋯`, and that is why New/Open/Save stay on the row.** A flyout opens at
-`left: 100%` of a 260px panel, which on a 412px screen is off the edge one way and, flipped, off
-it the other. Three of the four remaining menus *are* menus, so folding them in would make them
-unreachable rather than one tap deeper. Both menus flip through one `useFlipToFit`, which is
-what `Submenu` had written out alone: an absolutely-positioned panel past the window is
-scrollable overflow, which is the thing that makes a phone zoom out, and that is true of every
-menu rather than of this one. What the two disagree about is a single token — a top-level panel
-hangs from its trigger's left edge, a flyout from the row's right — so that is the argument, and
-the 8px gutter is stated once.
+**A submenu opens right of its row, else left of it, else under it — and the third answer is
+the one this cost.** `submenuPlacement` decides, `useMenuFit` supplies the rects, and both are
+worth reading before touching either.
+
+A panel is `min-width: 260px`, so a row plus a flyout is 520px. On a 412px viewport neither side
+fits, and asked as a *flip* — "does the right fit? no, then left" — that is a choice between two
+impossible positions. It picked the worse one: `New ▸ neuPrint` opened at **-229**, 94% off the
+left edge, where not flipping would have been 135px past the right. Reported from a phone, and
+the flip was doing exactly what it was written to do.
+
+**The same two-answer question was also wrong at 744**, which is the part worth keeping. On an
+iPad mini the New menu's panel sits at 229, so its flyout misses on the right by 9px and on the
+left by 27 — off screen on a tablet, in the wide shell, with no phone involved. A fix keyed to
+`NARROW_QUERY` would have shipped that untouched. So placement is **measured** and the narrow
+shell only short-circuits it: no shell that narrow can seat a 260px panel beside a 260px one, and
+answering before the first measurement is what keeps the flyout from being painted beside the row
+and then moved.
+
+Inline, the flyout is an ordinary block in the panel it is already inside, indented under a left
+rule with its `▸` turned down, so it always fits — and the panel scrolls again, `--flyouts`
+having turned `overflow-y` off only so that a *side* flyout would not be clipped into a
+scrollbar. Measured after: 40–283 inside 412, 242–485 inside 744, 485–745 inside 1440, nothing
+off screen at 375, 412, 744, 915 or 1440.
+
+Hover goes with it. Opening on `pointerenter` is right for a flyout you travel across to and
+wrong on a touchscreen, where there is no hover to leave — so on the narrow shell the row is a
+plain toggle and nothing else opens it. That **inverts** `Submenu`'s "opens, and deliberately
+does not toggle", and the note there is what explains why: that rule holds *because* something
+has already opened the flyout by the time the click lands. With no pointer or focus handler
+attached, nothing has, and a row that only ever opens is a row that cannot be shut.
+
+New, Open, Save and `?` still stay on the row rather than folding into `⋯` — but as a decision
+about depth now, not because a submenu cannot be reached. The geometry that made that argument is
+what this section fixed.
+
+The measurement itself is shared: `useMenuFit` is what `Submenu` had written out alone and
+`Dropdown` had copied, and it answers in *numbers* rather than a placement because the two ask
+different questions of them — a top-level panel hangs from an edge of its trigger and has no
+inline fallback, a flyout opens beside a row and does. The `MENU_GUTTER` of 8px is stated once.
+`narrow.test.tsx` pins `submenuPlacement` directly, both failures above included, which is the
+half of this a suite with no layout can reach.
 
 **An open panel takes the screen rather than a column of it.** At 412px a 320px inspector leaves
 92px of canvas, which is not a split — it is the panel with a strip of graph beside it that
