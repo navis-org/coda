@@ -8,6 +8,37 @@ It reads each neuron's dataset from its **qualified id** — `flywire:7205759406
 
 **Two outputs for two jobs.** `Clusters` is the table — one row per neuron with its cluster number — so you can join it back onto a neuron table and colour every downstream view by cluster. `Tree` is the same tree with the cut recorded on it, so a [Dendrogram](#out.dendrogram) wired to it is coloured by group automatically, without a second input or column picker.
 
+## An example workflow
+
+The shape almost every cut sits in: cluster once, then keep changing this card while you look at
+the picture.
+
+```coda-graph
+caption: One cut, two jobs. Not shown: the neuron table `Clusters to Neurons` matches against, and Neuroglancer's `Dataset`.
+neuron.nblast as nb
+cluster.linkage as link
+cluster.cut as cut { mode: count, count: 6 }
+out.dendrogram as dend
+cluster.clustersToNeurons as back
+out.neuroglancer as ng
+nb -> link
+link:tree -> cut
+cut:tree -> dend
+cut:clusters -> back:labels
+back -> ng:neurons
+```
+
+Everything left of this node is `expensive` and runs once; everything right of it is cheap. So the
+loop you actually work in is: read the [Dendrogram](#out.dendrogram) — now coloured by group,
+because it is wired to `Tree` — change `Clusters` or `Distance`, look again. The
+[NBLAST](#neuron.nblast) above never re-runs, because none of that touches its provenance.
+
+The lower branch is the other half: [Clusters to Neurons](#cluster.clustersToNeurons) joins the
+`Clusters` table back onto a neuron table, so every neuron carries its cluster number and
+[Neuroglancer](#out.neuroglancer) — or a [3D View](#out.viewer3d), a [Network](#out.network), a
+[Scatter](#out.scatter) — colours by it. Wire that branch from `Clusters`, not from a Dendrogram's
+`Selected`: `Selected` is whatever you clicked, and only `Clusters` covers every neuron.
+
 ```coda-params
 cluster.cut: mode, count, height, maxShare
 ```

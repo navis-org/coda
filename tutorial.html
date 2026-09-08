@@ -216,12 +216,12 @@
         against a dataset. Here, traced lobula columnar cells &mdash; <code>^LC\d+$</code>.
       </p>
       <p>
-        Four regions, the same on every card. Inputs left, outputs right, parameters between them,
+        Inputs left, outputs right, parameters between them,
         the last result along the bottom. <strong>&#9654;</strong> in the header runs this node and
-        whatever it depends on, nothing else.
+        whatever is upstream of it.
       </p>
       <p>
-        The stripe down the left edge is run state. Grey here: the
+        The stripe down the left edge is run state. Grey here because the
         <span class="ty ty--dataset">Dataset</span> input is empty, so there is nothing to run yet.
       </p>
     </article>
@@ -253,36 +253,24 @@
           two channels carry the identity.
         </p>
       </div>
-      <p>
-        Types also carry their <strong>column schema</strong>. <code>Connectivity&nbsp;Graph</code> publishes
-        <code>preType</code>, <code>postType</code>, <code>weight</code> and the rest the moment it
-        is wired, so every column dropdown downstream is populated before a row is fetched.
-      </p>
     </article>
 
     <article class="beat" data-beat="2">
       <span class="beat__n">Chapter 3</span>
       <h2>Execution model</h2>
       <p>
-        Cost is declared per node. <strong>Cheap</strong> ones &mdash; <code>Filter</code>,
-        <code>Sort</code>, <code>Group&nbsp;By</code> &mdash; re-run about 180&nbsp;ms after you stop
-        editing. <strong>Expensive</strong> ones hit a backend and go <em>stale</em> instead: a
-        reactive editor pointed at a shared production Neo4j would fire a query per keystroke.
+        Each node has a cost. <strong>Cheap</strong> ones &mdash; <code>Filter</code>,
+        <code>Sort</code>, <code>Group&nbsp;By</code> &mdash; re-run automatically after you
+        edited them. <strong>Expensive</strong> nodes query e.g. a backend and go <em>stale</em> instead.
       </p>
       <p>
         <strong>Run</strong> (<kbd>&#8679;R</kbd>) executes everything stale, in dependency order.
-        <strong>&#9654;</strong> on a card executes that node and only its upstream. Both report
+        <strong>&#9654;</strong> on the card itself executes that node and only its upstream. Both report
         progress as a gold ring round the card.
       </p>
       <p>
-        <strong>Auto-run</strong> opts out of the split entirely: every edit re-runs the whole graph,
-        expensive nodes included, debounced so a burst of edits sends one query. Off by default and
-        remembered, so an expensive workflow stays on manual.
-      </p>
-      <p>
-        Freshness is a <strong>provenance key</strong> &mdash;
-        <code>hash(type, params, upstream keys)</code> &mdash; not a comparison of data. Undo an edit
-        and the old cached results are valid again, with no re-query.
+        <strong>Auto-run</strong> means every edit re-runs the whole graph, expensive nodes included.
+        On by default but can be turned off, so an expensive workflow is under your control.
       </p>
     </article>
 
@@ -290,15 +278,15 @@
       <span class="beat__n">Chapter 4</span>
       <h2>A node for every question</h2>
       <p>
-        <code>Filter</code> cuts weights under ten, <code>Group&nbsp;By</code> sums onto
-        <code>postType</code>: 18,206 rows down to 214. Alongside them
-        <code>Join</code>, <code>Pivot</code>, <code>Sample</code>, <code>Stack</code>,
-        <code>Paths</code>, <code>Adjacency</code>, <code>ROI&nbsp;Counts</code>,
-        <code>Build&nbsp;Network</code>, <code>Skeletons</code>, <code>Meshes</code>.
+        Coda provides nodes for many complex operations such as <code>Find&nbsp;Neurons</code>,
+        <code>Connectivity</code>, <code>Paths</code> or <code>Skeletons</code>. It also contains
+        primitives for many data processing steps - e.g.  <code>Filter</code>, <code>Group&nbsp;By</code>,
+        <code>Join</code>, <code>Pivot</code> and so on.
       </p>
       <p>
-        <kbd>Tab</kbd> opens the browser. Search, category chips, and a <strong>port signature</strong>
-        on every row, so you can see what a node takes and returns before inserting it.
+        Use the "<strong>+</strong>" button to add new nodes, or press <kbd>Tab</kbd> to open the node browser.
+        Search, category chips, and a <strong>port signature</strong> on every row, so you can
+        see what a node takes and returns before inserting it.
       </p>
       <div class="surface" style="margin-top:.35rem">
         <div class="surface__bar"><strong>Add a node</strong><span>Tab</span></div>
@@ -385,12 +373,13 @@
       <span class="beat__n">Chapter 6</span>
       <h2>Save it, send it</h2>
       <p>
-        The graph <em>is</em> the method: every step, every parameter, the exact dataset version.
-        <strong>Save&nbsp;&#9656;&nbsp;Download</strong> writes it as a <code>.coda.json</code>
-        &mdash; plain JSON, so it belongs in a repository or a supplement.
+        A workflow is a simple JSON file that captures every step, every parameter.
+        <strong>Save&nbsp;&#9656;&nbsp;Download</strong> writes it as a <code>.coda.json</code>.
+        <strong>Save&nbsp;&#9656;&nbsp;Save</strong> stores it in your browser&rsquo;s local storage,
+        so you can close the tab and come back later. <strong>Share</strong>
       </p>
       <p>
-        Results are not in the file; it stores the recipe. Whoever opens it gets this pipeline
+        A workflow file never contains data/results or your credentials! Whoever opens it gets this pipeline
         exactly as you left it, presses Run, and can move a threshold to see what changes.
       </p>
     </article>
@@ -405,9 +394,9 @@
   <div class="shell">
     <div class="chapter__head rise">
       <span class="beat__n">Chapter 7</span>
-      <h2>Browsing a connectome</h2>
+      <h2>Exploring a connectome</h2>
       <p class="lede">
-        <code>Find&nbsp;Neurons</code> needs a pattern up front. <code>Explore&nbsp;Dataset</code> does not.
+        Connectomes are complex datasets. Coda provides a few simple widgets to get started.
       </p>
     </div>
 
@@ -416,32 +405,38 @@
         <div class="point rise">
           <h3><code>Explore&nbsp;Dataset</code> enables fuzzy search</h3>
           <p>
-            The dataset&rsquo;s whole neuron table is downloaded once and searched locally &mdash;
-            male&#8209;CNS is 165,122 traced cells &times; 20 properties, ~7&nbsp;MB gzipped, about
-            five seconds, after which a scan costs ~6&nbsp;ms and the server nothing. Bare terms
-            match any field; <code>!x</code> excludes, <code>class==sensory</code> compares,
-            <code>post&gt;1000</code> is numeric, <code>type~^LC[0-9]+$</code> is a regex. Terms are
-            ANDed. A query with no hits retries as a subsequence match and says so.
+            A dataset&rsquo;s whole neuron table is downloaded once and searched locally. Type something into
+            the search box and the table filters down to matching rows. Alternatively, use the
+            simple query language to match on specific columns: <code>type==LC4</code>. Regex also
+            works: <code>type~^LC[0-9]+$</code>. Select neurons of interest to send them downstream into
+            your analysis.
           </p>
         </div>
         <div class="point rise" data-delay="1">
-          <h3>Select neurons of interest and they flow downstream</h3>
+          <h3><code>Find&nbsp;Neurons</code> for structured search</h3>
           <p>
-            Three outputs. <b class="ty ty--table">Hits</b> is everything matching the query,
-            <b class="ty ty--table">Selected</b> only the ticked rows, and
-            <b class="ty ty--table">All</b> the index untouched &mdash; the whole
-            neuron&#8209;by&#8209;property table, ready for a <code>Group&nbsp;By</code> or a chart
-            with no second query.
+            Define and combine filters on any column, and the table updates in real time.
+            Where the backend supports it, this will run a live query and return the results.
+            Otherwise, it will filter the local table.
           </p>
         </div>
       </div>
-      <div class="point rise" data-delay="2" style="max-width:var(--measure)">
-        <h3><code>Neuron&nbsp;Profile</code> provides neuron-level summaries</h3>
-        <p>
-          Identity, transmitter, synapse totals, strongest partners, the per&#8209;ROI split and the
-          morphology &mdash; one neuron at a time. Page through a collection freely; pin one and it
-          leaves by <b class="ty ty--table">Current</b>.
-        </p>
+      <div class="split">
+        <div class="point rise" data-delay="2" style="max-width:var(--measure)">
+          <h3><code>Dataset&nbsp;Summary</code> provides a birds-eye view</h3>
+          <p>
+            This nodes summarizes the dataset: annotations, neuron counts, completion rate, etc.
+            What is shown depends on what the dataset publishes.
+          </p>
+        </div>
+        <div class="point rise" data-delay="2" style="max-width:var(--measure)">
+          <h3><code>Neuron&nbsp;Profile</code> provides neuron-level summaries</h3>
+          <p>
+            Identity, transmitter, synapse totals, strongest partners, the per&#8209;ROI split and the
+            morphology &mdash; one neuron at a time. Page through a collection freely; pin one and it
+            leaves by <b class="ty ty--table">Current</b>.
+          </p>
+        </div>
       </div>
     </div>
 
@@ -549,50 +544,50 @@
       <span class="beat__n">Chapter 8</span>
       <h2>Point it at a real connectome</h2>
       <p class="lede">
-        Coda ships with a synthetic connectome generated in the browser, so every example runs with
-        no account and no network. Real data takes one more step.
+        Coda does not host any connectomes itself. Instead, we fetch the data from the primary
+        sources, such as <a href="https://neuprint.janelia.org">neuprint.janelia.org</a>.
       </p>
     </div>
 
     <div class="split">
       <div class="stack">
         <div class="point rise">
-          <h3>Paste a token once</h3>
+          <h3>Login or paste a token once</h3>
           <p>
-            Sign in at <strong>neuprint.janelia.org</strong> and copy your auth token from the
-            account menu. In Coda: <strong>Sources</strong> in the toolbar, paste, Test.
+            Even public connectome datasets often require you to make an account.
+            When trying to access them via Coda, you will be prompted to either log in with
+            the same account or paste an authentication token.
           </p>
         </div>
         <div class="point rise" data-delay="1">
-          <h3>It stays in this browser</h3>
+          <h3>Credentials stay in this browser</h3>
           <p>
-            Held in local storage, never written into a saved workflow &mdash; so a
-            <code>.coda.json</code> you send a colleague carries the analysis and not your
+            Held in local storage, never sent to a third party or written into a saved workflow.
+            A <code>.coda.json</code> you send a colleague carries the analysis and not your
             credentials.
           </p>
         </div>
         <div class="point rise" data-delay="2">
-          <h3>One node per dataset</h3>
+          <h3>Multiple nodes per dataset</h3>
           <p>
-            No backend to choose. <strong>Add &#9656; Dataset &#9656; Hemibrain</strong> arrives
-            pointed somewhere and asks only for a version, defaulting to the newest release the
-            server reports &mdash; named in full, so a shared workflow never leaves anyone guessing
-            which one it used.
+            Some datasets are hosted on multiple backends. For example, the public release of the
+            FlyWire dataset is available via both neuPrint and CAVE. Coda supports both but note that
+            each of these backends has slightly different data and capabilities.
           </p>
         </div>
         <div class="point rise" data-delay="3">
           <h3>Credit comes attached</h3>
           <p>
             Every published dataset node arrives with a <code>Description</code> card wired to it:
-            what the dataset covers and the papers its authors ask you to cite, as neuPrint
-            publishes it. An ordinary node &mdash; delete it if you would rather not have it.
+            what the dataset covers and the papers its authors ask you to cite. Delete it if you
+            like but please do not forget to give credit where it is due.
           </p>
         </div>
       </div>
 
       <div class="stack">
         <div class="surface rise" data-delay="1">
-          <div class="surface__bar"><strong>Sources</strong><span>neuPrint</span></div>
+          <div class="surface__bar"><strong>Connections</strong><span>neuPrint</span></div>
           <div class="field">
             <label for="tok">Token</label>
             <div class="input" id="tok" data-filled="true">eyJhbGciOiJSUzI1NiIsImtpZCI6IjNkZTgw&hellip;</div>
@@ -610,9 +605,8 @@
           </div>
         </div>
         <p class="fig__cap rise" data-delay="2" style="max-width:30rem">
-          Live queries need Coda running from your own machine: neuPrint sends no CORS headers, so
-          the browser is blocked before the request leaves &mdash; the dev server proxies it. The
-          synthetic connectome and every bundled example work either way.
+          Each type of backend requires a different token. Coda will prompt you the first time
+          you try to access a dataset, and then store it in local storage for future sessions.
         </p>
       </div>
     </div>
@@ -628,8 +622,8 @@
       <span class="beat__n">Chapter 9</span>
       <h2>Getting around the canvas</h2>
       <p class="lede">
-        Two keys do almost everything: <kbd>Space</kbd> for commands and nodes by name,
-        <kbd>Tab</kbd> for the browser.
+        Everything can be done with the mouse, but keyboard shortcuts speed up the workflow.
+        For power-users: <kbd>Space</kbd> brings up a command palette.
       </p>
     </div>
 
@@ -692,7 +686,7 @@
     <div class="chapter__head rise">
       <span class="beat__n">Chapter 10</span>
       <h2>Where a workflow goes</h2>
-      <p class="lede">Two places, and only one of them is durable.</p>
+      <p class="lede">Four places, and one of them has strings attached.</p>
     </div>
 
     <div class="cards2 rise">
@@ -700,7 +694,7 @@
         <span class="savecard__tag">Save &#9656; Download &middot; durable</span>
         <h3>A <code>.coda.json</code> file</h3>
         <p>
-          The real artefact. Plain JSON &mdash; it goes in a repository, a supplement, an email, and
+          Plain JSON &mdash; put it in a repository, a supplement, an email, and
           reproduces the pipeline wherever it lands. Results are not in it: the recipe, not the meal.
         </p>
       </div>
@@ -708,22 +702,36 @@
         <span class="savecard__tag">Save &#9656; In this browser &middot; convenient</span>
         <h3>The browser shelf</h3>
         <p>
-          A named copy on this machine, listed under Open and on the start page. Good for picking up
-          where you left off.
+          A named copy in this machine, listed under <em>Open</em> and on the start page.
+          Good for picking up where you left off.
         </p>
         <p>
-          <strong>Not a backup.</strong> Per browser and per profile, not synced, empty in a private
+          <strong>Not a backup!</strong> Per browser and per profile, not synced, empty in a private
           window, and cleared with the site data. Anything you would be sorry to lose, download.
         </p>
       </div>
     </div>
 
-    <p class="fig__cap rise" data-delay="1" style="max-width:38rem; margin-top:1.25rem">
-      Data comes out separately: any viewer exports what it is showing &mdash; CSV from a table, SVG
-      or PNG from a chart &mdash; and a <b style="color:var(--text-primary)">Download</b> node at the
-      end of a chain writes its file on every run, so a pipeline re&#8209;run tomorrow refreshes its
-      own outputs.
-    </p>
+    <div class="cards2 rise">
+      <div class="savecard" data-durable="true">
+        <span class="savecard__tag">Share workflow &#9656; Copy to clipboard</span>
+        <h3>A workflow link</h3>
+        <p>
+          The JSON encoded into a shareable link. Paste it into an email or a chat,
+          or just save it in a note for yourself.
+        </p>
+      </div>
+      <div class="savecard">
+        <span class="savecard__tag">Save &#9656; In this browser &middot; convenient</span>
+        <h3>The data</h3>
+        <p>
+          A workflow file never contains results. If you want to keep the outputs you
+          have to download them as CSV, SVG, PNG, etc. via the either the
+          <strong>Download button</strong> in a node's footer, or via the dedicated
+          <strong>Download node</strong>.
+        </p>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -734,7 +742,7 @@
   <div class="shell">
     <h2 class="rise">Open it and add one node.</h2>
     <p class="rise" data-delay="1">
-      Nothing to install, and the bundled examples run with no account. Start from one, take it
+      Nothing to install, and the demo data needs no accounts. Start from one, take it
       apart, point it at your own question.
     </p>
     <div class="outro__actions rise" data-delay="2">
@@ -755,7 +763,8 @@
 <footer class="colophon">
   <div class="shell">
     Coda &mdash; connectome data analysis &middot; Fly Connectomics Group, Cambridge<br>
-    Connectome data published by the FlyEM project at Janelia Research Campus, via neuPrint.<br>
+    Connectome data published by the FlyEM project at Janelia Research Campus, by the FlyWire
+    consortium, and by Virtual Fly Brain.<br>
     Page views are counted with <a href="https://coda-science.goatcounter.com/">GoatCounter</a>
     &mdash; no cookies, nothing kept in your browser, and the dashboard is public.
   </div>

@@ -85,7 +85,7 @@ claims are asserted against the registry rather than against a snapshot:
 - **Every backend with a name, and every non-synthetic dataset family, must appear in the text.**
   A fourth backend or a seventh neuPrint dataset is then a failing test rather than a page that
   quietly under-reports what Coda reads. Both were confirmed by mutation.
-- **The node count is a floor** (`60+ nodes`), compared against `listableNodeDefs().length`.
+- **The node count is a floor** (`100+ nodes`), compared against `listableNodeDefs().length`.
   A floor rather than an exact count, so adding a node does not fail a test that is about the
   page being *wrong*.
 - **Every chip in the analyses section names a real node, and says its category.** Each carries
