@@ -43,6 +43,7 @@ import { DatasetCacheAge } from './DatasetCacheAge'
 import { nodeBody } from './nodeBodies'
 import { nodeIssues } from './nodeIssues'
 import { NodeHints } from './NodeHints'
+import { OutputPort } from './OutputPort'
 import { NodeRunRing } from './NodeRunRing'
 import { STATE_GLYPH, STATE_TEXT } from './runState'
 import { ResultDownload } from './ResultDownload'
@@ -718,23 +719,13 @@ function CodaNodeViewImpl({
                     </>
                   )}
                 </div>
-                <div className="port-row__side port-row__side--out">
-                  {output && (
-                    <>
-                      <span className="port-label">{output.label ?? output.id}</span>
-                      <Handle
-                        type="source"
-                        position={Position.Right}
-                        id={output.id}
-                        className="socket"
-                        data-family={outStyle.family}
-                        data-shape={outStyle.shape}
-                        data-compatible={dimOutput ? 'false' : undefined}
-                        title={`${output.label ?? output.id}: ${typeLabel(outputType)}`}
-                      />
-                    </>
-                  )}
-                </div>
+                <OutputPort
+                  nodeId={id}
+                  port={output}
+                  outputType={outputType}
+                  style={outStyle}
+                  dimmed={dimOutput}
+                />
               </div>
             )
           })}

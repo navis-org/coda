@@ -159,12 +159,90 @@ export async function launchChrome({ port, profile, width = 1600, height = 1000,
     waitFor,
     screenshot,
     setDevice,
+    /**
+     * Move the real mouse.
+     *
+     * A dispatched `MouseEvent` does not carry `pointerType`, and every hover in this app is
+     * mouse-only on purpose — a tap synthesises `pointerenter` too. `Input.dispatchMouseEvent`
+     * goes in at the browser's own input pipeline, so the pointer really is over the element
+     * and really does leave.
+     */
+    mouseTo(x, y) {
+      return send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0 })
+    },
+    /** Press, move in six steps a frame apart, release. */
+    async drag(from, to) {
+      await send('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x: from.x,
+        y: from.y,
+        button: 'left',
+        buttons: 1,
+        clickCount: 1,
+      })
+      for (let i = 1; i <= 6; i++) {
+        await send('Input.dispatchMouseEvent', {
+          type: 'mouseMoved',
+          x: from.x + ((to.x - from.x) * i) / 6,
+          y: from.y + ((to.y - from.y) * i) / 6,
+          button: 'left',
+          buttons: 1,
+        })
+        await sleep(16)
+      }
+      await send('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x: to.x,
+        y: to.y,
+        button: 'left',
+        buttons: 0,
+        clickCount: 1,
+      })
+    },
+    /** One element's rounded viewport rect, or null. */
+    rect(selector) {
+      return evaluate(`(${RECT})(${JSON.stringify(selector)})`)
+    },
     close() {
       ws.close()
       bye()
     },
   }
 }
+
+/**
+ * An element's rect, as an expression to be pasted into a larger page-side function.
+ *
+ * Exported as source rather than only through `rect()` above because a probe that reads several
+ * things at once — a box, what is hit-tested at its centre, a computed style — has to do it in
+ * **one** page-side evaluation, or the page has moved between the reads.
+ *
+ * Rounded, because these numbers are printed and compared and a browser reports fractional
+ * coordinates for anything on a scaled pane.
+ */
+export const RECT = `(selector) => {
+  const el = document.querySelector(selector)
+  if (!el) return null
+  const r = el.getBoundingClientRect()
+  return {
+    left: Math.round(r.left),
+    top: Math.round(r.top),
+    width: Math.round(r.width),
+    height: Math.round(r.height),
+    right: Math.round(r.right),
+    bottom: Math.round(r.bottom),
+  }
+}`
+
+/**
+ * React Flow's current pane scale, as a page-side expression.
+ *
+ * The pane is zoomed by writing a `transform` onto `.react-flow__viewport`, and that transform is
+ * also what makes an ancestor the containing block for `position: fixed` — so every probe about a
+ * portalled overlay needs this number to say what the answer would have been if the portal were
+ * not working.
+ */
+export const PANE_ZOOM = `Number(/scale\\((.*?)\\)/.exec(document.querySelector('.react-flow__viewport')?.style.transform ?? '')?.[1] ?? 1)`
 
 /** The DevTools page target, once Chrome is listening. */
 async function firstPage(port) {

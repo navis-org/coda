@@ -570,7 +570,9 @@ figures are all to the *right* of the thumbnail — opening rightwards covers th
 compared against. To the left is the checkbox gutter and then backdrop. `previewPlacement` is a
 pure function over rectangles for the same reason `submenuPlacement` is: jsdom performs no layout
 and reports one rect for every element, so a placement decided inside an effect has no coverage at
-all.
+all. The arithmetic under it is `hoverPlacement`, shared with the output port preview, which
+prefers the *other* side for the same reason this one prefers this side — see
+[canvas.md](canvas.md); what stays here is the measurement that picks the side.
 
 **The right-hand fallback was built, measured and deleted, and that is the finding.** It existed
 on sound-looking reasoning — the panel is centred with 28px of padding, so a 1440px window has no
@@ -587,9 +589,11 @@ survives from that version is `covers`, the property the whole rule trades and t
 assert without a browser.
 
 
-**Four event rules, three of them found by asking what closes it.** A **130 ms** delay, or a
-pointer swept down 25 rows opens 25 previews and the list reads as flashing. **Mouse only** — a
-tap synthesises `pointerenter` too and there is no gesture that would close it. **The tile moving
+**Four event rules, three of them found by asking what closes it.** They live in
+`useHoverPanel` now, shared with the output port preview, which is where the arguments below were
+re-derived and then extracted — see [canvas.md](canvas.md). A **130 ms** delay, or a pointer swept
+down 25 rows opens 25 previews and the list reads as flashing. **Mouse only** — a tap synthesises
+`pointerenter` too and there is no gesture that would close it. **The tile moving
 dismisses it** — see below. And the hover state is **local to the thumbnail**: a `hoveredId` on
 `ExploreBody` buys back the exact bug `NeuronRow`'s `memo` exists for, one pointer move
 re-rendering twenty-five rows to change one.

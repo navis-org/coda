@@ -2091,3 +2091,119 @@ every node.
 measured, and the anchors are SVG circles driven by pointer capture. `store/links.test.ts` pins
 the semantics and `ui/panels/edgeMenu.test.tsx` the menu — but the gestures themselves have not
 been driven by a real pointer over a real wire by anyone yet, same standing as the WebGL viewers.
+
+## Previewing an output port
+
+Hovering an output socket puts up a small panel showing what is actually on that wire — the
+headline the card's own footer draws, the facts a count implies nothing about, and the first five
+rows. `OutputPort` owns the gesture, `portPreview` decides the content, `PortPreviewPanel` draws
+it, and `hoverPlacement` puts it somewhere. Measured with `pnpm probe:port-preview`; the unit
+coverage is `ui/nodes/portPreview.test.ts`, `ui/nodes/portPreviewHover.test.tsx` and
+`ui/hoverPlacement.test.ts`.
+
+**It is silent where nothing has run, and that is the decision the whole component is shaped
+around.** A port's value exists only once its node has run. Hovering may not cause a run and may
+not fetch — invariant 6 is the record of what a per-keystroke request at a shared production
+server costs — and a panel offering a Run button is that button an inch from every socket on the
+canvas. The alternative considered was falling back to the *inferred* schema, labelled as
+not-run: real information, free, and rejected because a hover that answers on a port with no
+value and a hover that answers on a port with one are two different promises under one gesture,
+and the second is the one somebody acts on. So the store is asked at the moment the delay
+elapses, and where it answers nothing the socket's own `title` is what the reader gets, exactly
+as before.
+
+That read is also why **nothing subscribes**: `getState()` at open time rather than a selector per
+port. A sixty-node graph has a couple of hundred sockets, and a selector on each would put a
+scheduler-cache lookup per socket on every run tick to serve the one the pointer is over. The
+*panel* subscribes, because it is mounted one at a time and a hover can outlive a run — a preview
+of a wire showing what used to be on it is the one thing this may not do.
+
+**Outputs only.** An input's value is the upstream output's, one socket away and already answered
+there; giving both sides a panel doubles the surface for a duplicate answer.
+
+**The hover target is the whole port row side, not the disc.** A socket is 11px with a 20px hit
+box, which is a fine target for a wire and a poor one for a pointer at rest. The delay is
+**260 ms** against the thumbnail preview's 130, because the gestures differ: a thumbnail is
+hovered deliberately, where a pointer crosses several sockets on the way to the one it wants and a
+panel per socket would strobe down the side of the card.
+
+**Three dismissals, and each covers something the others cannot.** The pointer leaving is the
+ordinary one. A **press** is a wire drag starting on this very socket, so the panel goes *and
+stays gone* until the pointer has left and come back — the flag is a ref, since a re-entry with no
+intervening leave is exactly what a drag ending here produces. And the socket **moving** has no
+event at all: React Flow pans and zooms by writing a transform onto the pane, and an auto-layout
+pass moves the card outright, so the rect is watched per frame while a panel is open.
+
+**All of which is `useHoverPanel`, because it was written twice first.** The delay, the mouse-only
+guard, the portal to `document.fullscreenElement ?? document.body`, the rect measured at open
+rather than on arrival, and the rAF watch above are Explore's thumbnail preview's too — about
+forty lines that matched near token for token, comments included. `useDismiss`'s own note records
+the same lesson one gesture over ("written out five times before this — a fix to that reached
+exactly one popover at a time"), and the watch is exactly the piece where that bites: it has no
+event to key off, so its tolerance and its "must not outlive the placement" rule are the subtle
+part, and a fix to either used to reach one surface. What each caller keeps is what is its own —
+the thumbnail's finer body, fetched on open and released on close; this port's store read, which
+is also its `canOpen`. The press dismissal is an option because only a socket needs it.
+
+**It opens right, where the thumbnail preview opens left, and the two rules are one rule.** Open
+into the empty half: a thumbnail's row text is to its right, and an output socket's *card* is to
+its left. That is why `hoverPlacement` is one function taking a `prefer` side rather than two
+copies of a clamp — the second copy is where one side would get a fix the other did not. Neither
+caller flips to the other side when the preferred one runs out: a clamp slides the box *partly*
+over the anchor's content, a flip puts it *wholly* over it, and Explore measured that in a browser
+before this feature existed.
+
+**The panel measures itself and then places itself.** Its height is its content — two facts, or
+two tables — so there is no size to hand `hoverPlacement` before the thing exists. Mount hidden,
+measure, place, show; jsdom measures zero, which is why the arithmetic is a pure function tested
+apart from the component.
+
+**A network is two tables, and that is the shape the content model is built for.** Its nodes and
+its edges have separate schemas, so a panel showing one of them shows the wrong one about half the
+time. Geometry is the same one level down: a collection's attribute table is the collection's own,
+which after a `Carry fields` join is not the table that named its neurons.
+
+**The headline is `describeValue` rather than a second spelling of it** — that string is already
+the card's footer, and two answers to "what is on this wire", one under the card and one beside
+the socket, is exactly how they drift apart. **Which is also what the facts may not restate.** The
+first version drew `Leaves 128 / Method ward / Cut 6 clusters` under a headline reading
+"128 leaves · ward · 6 clusters" — `describeValue`'s own line taken apart and set again
+underneath itself, and a second derivation of the same fields (two `new Set(clusters)`, two
+`Object.keys(positions)`) free to drift from the first. So a fact has to be something the headline
+cannot say: `directed` on a network, the backend behind a dataset, a matrix's `measure`, and for a
+linkage the one thing `describeValue` says by *omission* — an uncut tree. Layout, transform and
+layers are headline-only in consequence.
+
+Every other kind answers something under its headline, and that totality is asserted, because a
+kind that fell through to an empty panel would look on screen exactly like the not-run case the
+hover is deliberately silent about — with the headline-only kinds listed in the test rather than
+derived from the output, or the exemption could not tell a deliberate one from a fall-through. A
+scalar is headline-only for the same reason, its headline being the value; a long string comes
+back as wrapped text cut to `TEXT_PREVIEW_CHARS`, since a Neuroglancer link is 70 kB and hiding
+the rest in CSS still builds it — a few thousand line boxes to paint six, synchronously, on the
+frame the panel measures itself.
+
+**Which columns fit is decided in the builder, and the reason is that the panel counts what it
+drops.** The first version took six columns and let `max-width` and `overflow: hidden` do the
+rest. In a browser on a neuron table that is six columns wanting ~420px in a 360px panel: the
+sixth was drawn as half a column of digits with no header, *underneath a footer saying "+1 more
+columns"*. A count is only honest if nothing else is dropping columns behind it. So `fitColumns`
+takes columns from the left while an estimated width allows — left to right, because a table's
+leading columns are the ones a reader is looking for, and always at least one — and `moreColumns`
+counts everything not drawn whichever reason it went. The estimate is characters times a
+per-character width, deliberately erring high; `pnpm probe:port-preview` asserts in a real browser
+that the drawn table never overflows the panel, which is the half the estimate cannot promise.
+
+Measured at 1600×1000 on the synthetic connectome:
+
+| | panel | drawn | note |
+|---|---|---|---|
+| `Find Neurons ▸ Neurons`, 0.659× pane | 349×192 at 565,403 | 5 rows × 5 cols | 401 rows × 7 col; `+396 more rows · +2 more columns` |
+| the same, 0.243× pane | 349×192 | 5 × 5 | identical, and 11px type at both — no transformed ancestor |
+| `Paths ▸ Network` | 276×401 | Nodes and Edges, captioned | the tallest case, against a 1000px window |
+
+349 and not 129 is the transform question answered — the panel is portalled to
+`document.fullscreenElement ?? document.body`, which is also what gets it out of `.coda-node`'s
+`overflow: clip`, and the hit test at its own centre is what says so. `pointer-events: none` is
+load-bearing for a sharper reason than the thumbnail preview's: the panel opens beside a socket,
+which is where the next wire is dropped.

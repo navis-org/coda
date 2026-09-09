@@ -33,7 +33,7 @@
 
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import { launchChrome, probeArgs, probeReport } from './lib/browserProbe.mjs'
+import { launchChrome, probeArgs, probeReport, PANE_ZOOM, RECT } from './lib/browserProbe.mjs'
 
 /** What `NeuronThumbnail` declares. A mismatch here is the finding, not a stale constant. */
 const PREVIEW_SIZE = 320
@@ -44,58 +44,12 @@ const args = probeArgs()
 const url = args.value('--url') ?? 'http://localhost:5177/'
 const keep = args.keep
 
-const { send, evaluate, waitFor, screenshot, close } = await launchChrome({
+const { send, evaluate, waitFor, screenshot, mouseTo, drag, close } = await launchChrome({
   port: 9423,
   profile: '/tmp/coda-probe-explore-preview',
   width: 1600,
   height: 1000,
 })
-
-/*
- * A real mouse, not a synthetic event: the preview opens on `pointerenter` with
- * `pointerType === 'mouse'`, which is a distinction a dispatched `MouseEvent` does not carry —
- * the same trap the jsdom suite has its own note about. `Input.dispatchMouseEvent` goes in at the
- * browser's own input pipeline, so the pointer really is over the tile and really does leave.
- */
-async function moveMouseTo(x, y) {
-  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0 })
-}
-
-async function drag(from, to) {
-  await send('Input.dispatchMouseEvent', {
-    type: 'mousePressed',
-    x: from.x,
-    y: from.y,
-    button: 'left',
-    buttons: 1,
-    clickCount: 1,
-  })
-  for (let i = 1; i <= 6; i++) {
-    await send('Input.dispatchMouseEvent', {
-      type: 'mouseMoved',
-      x: from.x + ((to.x - from.x) * i) / 6,
-      y: from.y + ((to.y - from.y) * i) / 6,
-      button: 'left',
-      buttons: 1,
-    })
-    await sleep(16)
-  }
-  await send('Input.dispatchMouseEvent', {
-    type: 'mouseReleased',
-    x: to.x,
-    y: to.y,
-    button: 'left',
-    buttons: 0,
-    clickCount: 1,
-  })
-}
-
-const RECT = `(selector) => {
-  const el = document.querySelector(selector)
-  if (!el) return null
-  const r = el.getBoundingClientRect()
-  return { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height), right: Math.round(r.right) }
-}`
 
 /**
  * The preview as measured, plus what is actually hit-tested at its centre.
@@ -177,9 +131,9 @@ async function hoverFirstTile(scope = '') {
   const y = tile.top + tile.height / 2
   // Two moves: the first parks the pointer elsewhere, so a tile the pointer is *already* over
   // still gets a `pointerenter`. One move only worked by luck of where the last one left it.
-  await moveMouseTo(x, y - 200)
+  await mouseTo(x, y - 200)
   await sleep(30)
-  await moveMouseTo(x, y)
+  await mouseTo(x, y)
   await waitFor(
     `!!document.querySelector('.explore-thumb-preview')`,
     `the preview to open over ${JSON.stringify(tile)} — ` +
@@ -191,14 +145,12 @@ async function hoverFirstTile(scope = '') {
 }
 
 async function leave() {
-  await moveMouseTo(4, 990)
+  await mouseTo(4, 990)
   await waitFor(`!document.querySelector('.explore-thumb-preview')`, 'the preview to close')
 }
 
 // ── On the card, at the canvas's own zoom ────────────────────────────────────────────────────
-const zoom = await evaluate(
-  `Number(/scale\\((.*?)\\)/.exec(document.querySelector('.react-flow__viewport')?.style.transform ?? '')?.[1] ?? 1)`,
-)
+const zoom = await evaluate(PANE_ZOOM)
 const card = await evaluate(EXPLORE_CARD)
 const onCard = await hoverFirstTile()
 console.log(

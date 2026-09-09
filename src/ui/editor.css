@@ -1261,6 +1261,139 @@
   opacity: 0.28;
 }
 
+/*
+ * --- the output port's hover preview ---
+ *
+ * Portalled to the body and positioned in viewport coordinates by `PortPreviewPanel`, so it is
+ * drawn at screen scale whatever the canvas is zoomed to — inheriting React Flow's transform is
+ * the one thing it must not do.
+ *
+ * `z-index: 55` is above the canvas and everything anchored to it (a context menu is 45) and
+ * below the viewer overlay's 60, which is not a stacking compromise: while an overlay is up the
+ * canvas is behind it and no socket can be hovered at all.
+ *
+ * `pointer-events: none` is load-bearing rather than tidy, and for a sharper reason than the
+ * thumbnail preview's. The panel opens beside a socket, which is where a wire is dragged from
+ * and where the next one is dropped; taking the pointer there would eat the drop.
+ */
+.port-preview {
+  position: fixed;
+  z-index: 55;
+  pointer-events: none;
+  width: max-content;
+  /* The panel is sized to its content; what bounds the content is `TABLE_BUDGET_PX` in
+     `nodes/portPreview.ts`, which is what keeps the "+N more columns" count honest. This is the
+     backstop for a long headline or a wide fact, not the thing that decides how many columns are
+     drawn — but the two are related by hand, so **lowering this, the padding below or the font
+     size means lowering that**, and `pnpm probe:port-preview` is what would catch it. */
+  max-width: 440px;
+  max-height: 70vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-panel);
+  font-size: 11px;
+  color: var(--text-primary);
+  animation: hover-panel-appear 90ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .port-preview {
+    animation: none;
+  }
+}
+
+.port-preview__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  justify-content: space-between;
+}
+.port-preview__port {
+  font-weight: 600;
+}
+.port-preview__headline {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.port-preview__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 0;
+}
+.port-preview__fact {
+  display: flex;
+  gap: 5px;
+}
+.port-preview__fact dt {
+  color: var(--text-muted);
+}
+.port-preview__fact dd {
+  margin: 0;
+}
+
+.port-preview__caption {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 9px;
+  margin-bottom: 2px;
+}
+
+.port-preview__table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.port-preview__table th {
+  text-align: left;
+  padding: 0 8px 3px 0;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.port-preview__table th:last-child,
+.port-preview__table td:last-child {
+  padding-right: 0;
+}
+.port-preview__col {
+  display: block;
+}
+/* The dtype under its column name rather than beside it: six columns of `name f64` wrap the
+   panel where six of `name` over `f64` do not. */
+.port-preview__dtype {
+  display: block;
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 9px;
+}
+.port-preview__table td {
+  padding: 2px 8px 2px 0;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.port-preview__more {
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+/* A long scalar — a Neuroglancer URL is 70 kB, so it wraps, breaks anywhere, and is cut by the
+   panel's own `max-height`. */
+.port-preview__text {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  max-height: 6.5em;
+  overflow: hidden;
+}
+
 /* --- params --- */
 
 .coda-node__params {
@@ -2375,7 +2508,7 @@ select.field {
   background: var(--surface-3);
   box-shadow: var(--shadow-panel);
   line-height: 0;
-  animation: explore-thumb-appear 90ms ease-out;
+  animation: hover-panel-appear 90ms ease-out;
 }
 
 /*
@@ -2401,10 +2534,12 @@ select.field {
  * built at all, so this never runs there.
  */
 .explore-thumb-preview__canvas[data-fading] {
-  animation: explore-thumb-appear 140ms ease-out;
+  animation: hover-panel-appear 140ms ease-out;
 }
 
-@keyframes explore-thumb-appear {
+/* One fade, three callers: the thumbnail preview, its canvas swap, and the port preview. Named
+   for what it does rather than for the first surface that wanted it. */
+@keyframes hover-panel-appear {
   from {
     opacity: 0;
   }

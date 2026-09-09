@@ -26,6 +26,7 @@
     "probe:meshes": "node scripts/probe-meshes.mjs",
     "probe:mobile": "node scripts/probe-mobile.mjs",
     "probe:explore-preview": "node scripts/probe-explore-preview.mjs",
+    "probe:port-preview": "node scripts/probe-port-preview.mjs",
     "probe:matches": "node scripts/probe-matches.mjs",
     "check:mirror": "python3 scripts/check-mirror.py",
     "probe:helpers": "python3 scripts/probe-py-helpers.py",

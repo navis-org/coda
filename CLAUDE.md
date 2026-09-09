@@ -350,6 +350,35 @@ Area-specific — the rule, then the doc that holds why:
   on screen — and the synthetic dataset carries a dismissable **hint** saying the card is
   replaceable, which the wizard's own Demo Data workflows do not, that dataset having been asked
   for. See [docs/pages.md](docs/pages.md) and [docs/persistence.md](docs/persistence.md).
+- **An output socket previews what is on it, and the hover is silent where nothing has run.** A
+  port's value exists only once its node has, and hovering may neither fetch nor run (invariant 6),
+  so the store is asked at the moment the delay elapses and a port with nothing cached keeps its
+  plain `title` — an inferred-schema fallback was considered and refused, one gesture promising two
+  different things being the half somebody acts on. Nothing subscribes either: `getState()` per
+  hover, not a selector per socket, since a sixty-node graph has a couple of hundred; the *panel*
+  subscribes, a preview of a wire outliving a run being the one thing it may not show. Outputs
+  only. **The target is the port row's side, not the 11px disc**, and the delay is 260ms against the
+  thumbnail's 130 because a pointer crosses sockets on the way to the one it wants. Three
+  dismissals: leaving, a **press** (a wire drag starting there — kept away by a ref until the
+  pointer leaves, since a drag ending here re-enters with no leave), and the socket **moving**,
+  which fires no event at all and so is a per-frame rect watch. All of it is **`useHoverPanel`**,
+  shared with `NeuronThumbnail` — written twice first, forty lines matching token for token
+  including the comments, and the watch is the piece where a fix used to reach one surface; each
+  caller keeps only what is its own (a fetch to start and release, or a store read as `canOpen`).
+  It opens **right** where the thumbnail preview opens left, which is one rule (open into the
+  empty half) and therefore one function: `hoverPlacement` with a `prefer` side, neither caller
+  flipping when that side runs out. Content: `describeValue`'s own line as the headline, never a
+  second spelling — **and no fact may restate it either**, which is what makes layout, transform and
+  layers headline-only and leaves a linkage the one thing that line says by omission (an uncut
+  tree); a network is **two** captioned tables, geometry is its attribute table; every other kind
+  answers *something*, or an unhandled kind is indistinguishable from not-run, with the
+  headline-only set listed in the test rather than derived from the output. And **the column fit is
+  in the builder because the panel counts what it drops** — `max-width` plus `overflow: hidden`
+  clipped a sixth column of digits under a footer reading "+1 more columns", so `fitCount` takes
+  columns left to right while an estimated width allows and `moreColumns` counts everything not
+  drawn. `pnpm probe:port-preview` is the browser half: 349px and 11px type at both
+  0.659× and 0.243× is the transform question, the hit test at its own centre is `.coda-node`'s
+  clip. See [docs/canvas.md](docs/canvas.md).
 - **A hint is docked to a card and dismissing it is not an edit.** `NodeHint` is a field on
   `GraphNode`, not a document-level list, so duplicate, copy/paste, `subgraphOf` and delete carry it
   free. It draws as a **sibling of `.coda-node`** (which clips), so `bottom: 100%` / `top: 100%`

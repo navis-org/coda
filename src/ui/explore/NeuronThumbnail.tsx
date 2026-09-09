@@ -36,8 +36,7 @@
  *    than megabytes per row.
  */
 
-import type { PointerEvent as ReactPointerEvent } from 'react'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import type { CoarseGeometry, CoarseRefusal } from '../../data/source'
@@ -46,8 +45,8 @@ import type { Mode } from '../colors'
 import { CHART_INK } from '../colors'
 import { cacheGet, cacheSet } from '../../data/cache'
 import { usePrefersReducedMotion, useThemeMode } from '../useThemeMode'
-import type { PreviewPlacement } from './previewPlacement'
 import { previewPlacement } from './previewPlacement'
+import { useHoverPanel } from '../useHoverPanel'
 import { buildOrder, createRotation, decimateSkeleton, rockFrame } from './rotation'
 import { keyedCache } from '../viewers/keyedCache'
 import type { Silhouette } from './thumbnail'
@@ -779,7 +778,7 @@ export function NeuronThumbnail({
    * `ui/fullscreen.ts` writes out: Escape and F11 both leave fullscreen without passing through
    * this app.
    */
-  const [open, setOpen] = useState<{ placement: PreviewPlacement; host: Element } | null>(null)
+
   /**
    * The still picture of the finer body — **only where there is going to be no motion.**
    *
@@ -831,11 +830,58 @@ export function NeuronThumbnail({
    * twenty-five rows to change one.
    */
   /*
+   * The gesture is `useHoverPanel`'s — the delay, the mouse-only guard, the portal host, and the
+   * per-frame rect watch that dismisses when the list scrolls or the canvas pans underneath.
+   * What stays here is what is this component's: the finer body, asked for when the preview
+   * opens and released when it closes.
+   */
+  const { open, handlers } = useHoverPanel({
+    anchorRef: tileRef,
+    delayMs: PREVIEW_DELAY_MS,
+    canOpen: () => hoverPreview && !!sourceId && !!datasetId,
+    onOpen: () => {
+      /*
+       * The finer body is asked for **here**, when the preview opens, and never on pointer
+       * arrival. A sweep down the list is 25 pointerenters and no requests; only a deliberate
+       * rest is a fetch. It is not awaited — the preview opens immediately with the tile's own
+       * mask enlarged and swaps when this lands, so a slow source shows a soft picture rather
+       * than no picture. One fetch, whichever of the still picture and the sweep is drawn from it.
+       */
+      if (!sourceId || !datasetId) return
+      void loadFineGeometry(sourceId, datasetId, neuronId).then(setGeometry)
+    },
+    onClose: () => {
+      /*
+       * **The caches are not the ceiling unless the rows let go.** `ExploreBody` renders a whole
+       * page at once and these are per-row state, so a hovered row held its 0.5 MB body for as
+       * long as the page stayed mounted — evicting from `fineGeometry` frees nothing while the
+       * row that fetched it still points at it. Measured against the declared bounds, a page of
+       * 25 hovered rows overshoots `MAX_FINE_GEOMETRY` by 8×. Both re-resolve from the cache in
+       * one microtask on the next hover, and where they have been evicted that is exactly what
+       * the cap was for.
+       */
+      setGeometry(undefined)
+    },
+  })
+
+  /*
+   * Placed at render rather than at open, which the anchor rect makes free: `previewPlacement`
+   * is a pure function over rectangles, and the rect it is given is the one measured when the
+   * panel opened — see `useHoverPanel`, which measures then and not on pointer arrival.
+   */
+  const placement =
+    open &&
+    previewPlacement(open.anchor, PREVIEW_SIZE, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    })
+
+  /*
    * Gated on the preview being open, so nothing is rasterised for a row nobody rested on — and
    * torn down when it closes, which frees the 6.3 MB of frames. That is the whole of why the
    * frames are transient: the geometry they are built from is what `loadFineGeometry` keeps.
    */
-  const turning = useRotation(geometry, PREVIEW_RASTER, open !== null)
+  const turning = useRotation(geometry, PREVIEW_RASTER, open !== undefined)
 
   /*
    * Derived, and only where the rock will not run — see `fine`'s own note. Kept in state rather
@@ -848,107 +894,6 @@ export function NeuronThumbnail({
     }
     setFine(silhouetteOf(geometry, PREVIEW_RASTER))
   }, [geometry, reduced])
-
-  const timer = useRef<number | undefined>(undefined)
-
-  const hide = useCallback(() => {
-    window.clearTimeout(timer.current)
-    timer.current = undefined
-    setOpen(null)
-    /*
-     * **The caches are not the ceiling unless the rows let go.** `ExploreBody` renders a whole
-     * page at once and these are per-row state, so a hovered row held its 0.5 MB body for as long
-     * as the page stayed mounted — evicting from `fineGeometry` frees nothing while the row that
-     * fetched it still points at it. Measured against the declared bounds, a page of 25 hovered
-     * rows overshoots `MAX_FINE_GEOMETRY` by 8×. Both re-resolve from the cache in one microtask
-     * on the next hover, and where they have been evicted that is exactly what the cap was for.
-     */
-    setGeometry(undefined)
-  }, [])
-
-  const show = useCallback(() => {
-    const tile = tileRef.current
-    if (!tile || !sourceId || !datasetId) return
-    /*
-     * The finer body is asked for **here**, when the preview opens, and never on pointer arrival.
-     * A sweep down the list is 25 pointerenters and no requests; only a deliberate rest is a
-     * fetch. It is not awaited — the preview opens immediately with the tile's own mask enlarged
-     * and swaps when this lands, so a slow source shows a soft picture rather than no picture.
-     */
-    // One fetch, whichever of the still picture and the sweep is drawn from it.
-    void loadFineGeometry(sourceId, datasetId, neuronId).then(setGeometry)
-    // Measured at the moment it opens, never at the press: the list scrolls under the pointer
-    // and a rect read on enter would be stale by the time the delay elapsed.
-    const box = tile.getBoundingClientRect()
-    setOpen({
-      placement: previewPlacement(
-        { left: box.left, top: box.top, width: box.width, height: box.height },
-        PREVIEW_SIZE,
-        { width: window.innerWidth, height: window.innerHeight },
-      ),
-      host: document.fullscreenElement ?? document.body,
-    })
-  }, [sourceId, datasetId, neuronId])
-
-  const onEnter = useCallback(
-    (event: ReactPointerEvent) => {
-      // Mouse only. A tap synthesises `pointerenter` too, and a preview that opens on touch has
-      // no gesture that closes it — the pointer never leaves.
-      if (!hoverPreview || event.pointerType !== 'mouse') return
-      window.clearTimeout(timer.current)
-      timer.current = window.setTimeout(show, PREVIEW_DELAY_MS)
-    },
-    [hoverPreview, show],
-  )
-
-  // Unmounting mid-hover — a page turn, a search that drops this row — must not leave a timer
-  // holding a reference to a dead component.
-  useEffect(() => () => window.clearTimeout(timer.current), [])
-
-  /*
-   * **The tile moving dismisses it, and that is a watch on the rect rather than a list of the
-   * events that can move one.**
-   *
-   * This was `scroll` in the capture phase, which is right for the overlay and only there:
-   * `.explore__list` is the one thing that moves, and `scroll` does not bubble out of it. On a
-   * node card nothing scrolls. React Flow pans and zooms by writing a `transform` onto the pane,
-   * so a canvas drag slides the tile out from under a preview that fires no event at all — and
-   * adding `wheel` and `pointerdown` beside `scroll` would cover those two while still missing a
-   * keyboard fit-view, a resize, an auto-layout pass, a row re-flowed by a search.
-   *
-   * So the property is asked directly. The placement was measured against a rect
-   * (`previewPlacement`), and it must not outlive it: one `getBoundingClientRect` per frame while
-   * a preview is open, and there is at most one open at a time. Layout is clean by then — the
-   * rock paints a canvas, which dirties none of it.
-   *
-   * Dismissing rather than repositioning is the half that predates this: once the list has moved,
-   * the tile under the pointer is a different neuron, and a preview that follows the pointer down
-   * a scrolling list is the strobe `PREVIEW_DELAY_MS` exists to prevent.
-   */
-  useEffect(() => {
-    const tile = tileRef.current
-    if (!open || !tile) return
-    const from = tile.getBoundingClientRect()
-    let handle = requestAnimationFrame(function check() {
-      const now = tile.getBoundingClientRect()
-      // A pixel of tolerance, because a card on a scaled pane lands on fractional coordinates and
-      // the browser is free to round them differently between frames.
-      if (Math.abs(now.left - from.left) > 1 || Math.abs(now.top - from.top) > 1) hide()
-      else handle = requestAnimationFrame(check)
-    })
-    /*
-     * A right-click closes it too, and that one is a stacking fact rather than a movement, which
-     * is why it stays an event — the preview is `z-index: 65` and `.context-menu` is 45, so a
-     * preview left up would sit *over* the row menu it was opened from. Dismissing rather than
-     * restacking: a right-click is a deliberate act that has finished with the transient thing a
-     * hover put on screen, whether or not a menu follows.
-     */
-    window.addEventListener('contextmenu', hide, true)
-    return () => {
-      cancelAnimationFrame(handle)
-      window.removeEventListener('contextmenu', hide, true)
-    }
-  }, [open, hide])
 
   if (entry === undefined) {
     return (
@@ -1012,12 +957,12 @@ export function NeuronThumbnail({
       ref={tileRef}
       className="explore-thumb-slot"
       style={{ width: size, height: size }}
-      onPointerEnter={onEnter}
-      onPointerLeave={hide}
+      {...handlers}
       aria-hidden="true"
     >
       <SilhouetteCanvas entry={entry} mode={mode} size={size} className="explore-thumb" />
       {open &&
+        placement &&
         createPortal(
           /*
            * Portalled out of the list, and both clips it escapes are real: `.explore__list` is
@@ -1029,7 +974,7 @@ export function NeuronThumbnail({
            */
           <div
             className="explore-thumb-preview"
-            style={{ left: open.placement.left, top: open.placement.top }}
+            style={{ left: placement.left, top: placement.top }}
             aria-hidden="true"
           >
             {/*
