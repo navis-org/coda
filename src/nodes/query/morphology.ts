@@ -125,7 +125,7 @@ export const skeletonsNode = registerNode({
     warnAboveParam({
       threshold: MAX_NEURONS,
       min: 1,
-      cost: 'the fetch goes ahead either way, one request per skeleton.',
+      counting: 'fetching more than this many skeletons',
     }),
   ],
 
@@ -226,10 +226,7 @@ export const meshesNode = registerNode({
     warnAboveParam({
       threshold: MAX_NEURONS,
       min: 1,
-      cost:
-        'the fetch goes ahead either way. Detail governs how heavy each mesh is and this is ' +
-        'about how many — a source with no levels of detail (male-CNS) sends full resolution ' +
-        'regardless, a few megabytes per neuron.',
+      counting: 'fetching more than this many meshes',
     }),
     carryParam('mesh'),
     {
@@ -341,16 +338,12 @@ export const synapsesNode = registerNode({
       min: 0,
       step: 0.05,
       advanced: true,
-      help:
-        'Drop synapses scoring below this. 0 keeps every one. The scale belongs to the data ' +
-        'source: neuPrint scores 0–1, CATMAID is a tracer’s 1–5, and a CAVE datastack uses its ' +
-        'synapse table’s own column where it has one (FlyWire’s cleft_score, cut by convention ' +
-        'at 50). Sources without such a column say so and return everything.',
+      help: 'Drop synapses scoring below this; 0 keeps every one. The scale belongs to the data source — 0–1 on neuPrint, a tracer’s 1–5 on CATMAID, cleft_score on FlyWire. Sources without one say so and return everything.',
     },
     warnAboveParam({
       threshold: MAX_NEURONS,
       min: 1,
-      cost: 'the query goes ahead either way, and it returns a row per synapse.',
+      counting: 'fetching synapses for more than this many neurons',
     }),
   ],
 

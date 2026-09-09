@@ -63,10 +63,7 @@ export const synblastNode = registerNode({
       label: 'Symmetry',
       default: 'mean',
       options: SYMMETRY_OPTIONS,
-      help:
-        'A neuron with few synapses can sit entirely inside the cloud of one with many, so ' +
-        'the two directions of a pair disagree. The mean is the usual choice and is what ' +
-        'makes an all-by-all matrix read the same on both sides of its diagonal.',
+      help: 'A neuron with few synapses can sit entirely inside the cloud of one with many, so the two directions of a pair disagree. The mean is the usual choice and makes an all-by-all matrix symmetric.',
     },
     {
       id: 'polarityColumn',
@@ -75,11 +72,7 @@ export const synblastNode = registerNode({
       from: 'query',
       default: 'polarity',
       optional: true,
-      help:
-        'Which column says whether a synapse is an input or an output. Set, a presynapse is ' +
-        'only ever compared against presynapses — which is the standard way to run this, and ' +
-        'why it defaults to the column the Synapses node emits. Cleared, every connector is ' +
-        'one pool.',
+      help: 'Which column says whether a synapse is an input or an output. Set, a presynapse is only compared against presynapses, which is the standard way to run this. Cleared, every connector is one pool.',
     },
     {
       id: 'labelColumn',
@@ -88,10 +81,7 @@ export const synblastNode = registerNode({
       from: 'query',
       default: '',
       optional: true,
-      help:
-        'Which attribute names each row. Read at each neuron’s first synapse, so a column ' +
-        'that varies within a neuron gives whichever value came back first. Neuron ids where ' +
-        'this is empty or unset.',
+      help: 'Which attribute names each row. Read at each neuron’s first synapse, so a column that varies within a neuron gives whichever value came back first. Neuron ids when empty.',
     },
     {
       id: 'normalize',
@@ -104,9 +94,7 @@ export const synblastNode = registerNode({
     warnAboveParam({
       threshold: MAX_NEURONS,
       min: 2,
-      cost:
-        'the comparison runs either way. Note the cost here grows with the *synapse* count ' +
-        'rather than the neuron count, and the node warns about that separately.',
+      counting: 'comparing more than this many neurons',
     }),
   ],
 

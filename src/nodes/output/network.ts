@@ -142,10 +142,7 @@ export const networkViewNode = registerNode({
         { value: 'circle', label: 'circle' },
         { value: 'spectral', label: 'spectral embedding' },
       ],
-      help:
-        'Where the force layout begins. A spectral start should hand it the global ' +
-        'arrangement and leave only local refinement — worth trying on a large graph, though ' +
-        'no synthetic benchmark here could show the win, so the circle remains the default.',
+      help: 'Where the force layout begins. A spectral start is worth trying on a large graph.',
       presentational: true,
       advanced: true,
       group: 'layout',
@@ -163,8 +160,8 @@ export const networkViewNode = registerNode({
         { value: 'off', label: 'never' },
       ],
       help:
-        'Barnes-Hut approximation of the repulsion. Worth about 3× at 3,000 nodes and 5× at ' +
-        '6,000; on automatically above 2,000, where the approximation stops being visible.',
+        'Barnes-Hut approximation of the repulsion — about 3× faster at 3,000 nodes. On ' +
+        'automatically above 2,000.',
       presentational: true,
       advanced: true,
       group: 'layout',
@@ -180,10 +177,8 @@ export const networkViewNode = registerNode({
       max: 1,
       step: 0.1,
       help:
-        'How much a link’s weight pulls its endpoints together. Synapse counts are heavy-tailed, ' +
-        'so a proportional pull lets a few very strong links dominate — lower it if strongly ' +
-        'connected pairs collapse onto each other. Note 0 removes weight from the pull only: a ' +
-        'node’s mass stays its weighted degree, so weight still tells in the spacing.',
+        'How much a link’s weight pulls its endpoints together. Lower it if strongly ' +
+        'connected pairs collapse onto each other; 0 leaves weight in the node spacing.',
       presentational: true,
       advanced: true,
       group: 'layout',
@@ -253,9 +248,8 @@ export const networkViewNode = registerNode({
         { value: 'together', label: 'all at once' },
       ],
       help:
-        'Disconnected pieces share no link, so no force decides where one sits relative to ' +
-        'another and they end up piled together. Laying each out on its own and packing the ' +
-        'results is what separates them.',
+        'Lay each disconnected piece out on its own and pack the results, instead of piling ' +
+        'them together.',
       presentational: true,
       // Inspector and styling panel, not the card — see the note above. It was briefly not
       // `advanced`, on the grounds that partitioning is the whole point of this layout; making

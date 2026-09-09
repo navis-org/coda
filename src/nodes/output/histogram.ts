@@ -62,9 +62,7 @@ export const histogramNode = registerNode({
         { value: 'auto', label: 'automatic' },
         { value: 'fixed', label: 'a fixed number' },
       ],
-      help:
-        'Automatic is the Freedman–Diaconis rule, capped at 80 — on a heavy-tailed integer ' +
-        'column it would otherwise ask for thousands of mostly empty bars.',
+      help: '"Automatic" is the Freedman–Diaconis rule, capped at 80 bins.',
       presentational: true,
     },
     {
@@ -91,10 +89,7 @@ export const histogramNode = registerNode({
       id: 'logX',
       kind: 'boolean',
       label: 'Log axis',
-      help:
-        'Synapse counts and connection weights span orders of magnitude, where linear bins ' +
-        'pile most of the data into the first one. Values at or below zero have no logarithm ' +
-        'and are dropped; the caption says how many.',
+      help: 'For data spanning orders of magnitude, where linear bins pile most of it into the first. Values at or below zero are dropped; the caption says how many.',
       default: false,
       presentational: true,
       advanced: true,
@@ -109,9 +104,7 @@ export const histogramNode = registerNode({
         { value: 'percent', label: 'percent of rows' },
         { value: 'density', label: 'density' },
       ],
-      help:
-        'Density divides each bar by its own width, which is the only scaling that stays ' +
-        'comparable when a log axis makes the bars unequal.',
+      help: '"Density" divides each bar by its own width, which stays comparable when a log axis makes the bars unequal.',
       presentational: true,
       advanced: true,
     },
@@ -133,9 +126,7 @@ export const histogramNode = registerNode({
       label: 'Selected',
       noun: 'bins',
       default: [],
-      help:
-        'Set by clicking bars in the viewer. Holds the value ranges they covered rather than ' +
-        'bar numbers, so a stored selection survives a change to the bin count. Feeds Selected.',
+      help: 'Set by clicking bars in the viewer. Holds the value ranges they covered, so a selection survives a change to the bin count. Feeds Selected.',
     },
   ],
 

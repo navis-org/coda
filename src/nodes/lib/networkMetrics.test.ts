@@ -126,7 +126,7 @@ describe('the undirected projection', () => {
     expect([...perNode]).toEqual([1, 1, 1])
   })
 
-  it('measures the triangle count`s cost before running it', () => {
+  it('measures the triangle count’s cost before running it', () => {
     // Σ over pairs (u, v), u < v, of d(v). On a triangle every node has degree 2 and there are
     // three forward pairs, so the walk is six steps — the number the warn threshold compares.
     const p = projectUndirected(
@@ -300,7 +300,7 @@ describe('the summary row', () => {
     expect(summaryOf(net)['meanClustering']).toBeNull()
   })
 
-  it('numbers components largest-first and carries each node`s size', () => {
+  it('numbers components largest-first and carries each node’s size', () => {
     const net = network(
       ['a', 'b', 'c', 'lonely'],
       [

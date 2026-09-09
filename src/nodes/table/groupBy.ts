@@ -76,7 +76,7 @@ export const groupByNode = registerNode({
        * a value column" while `validate` here still said "numeric".
        */
       dtypes: (params) => (params.agg === 'join' ? undefined : NUMERIC_DTYPES),
-      help: 'One aggregate per column, named `<agg>_<column>`. For "join text": distinct values, joined with "; " in the order they first appear. Absences are skipped and a repeat is folded away — this cell is meant to be read.',
+      help: 'One aggregate per column, named "<agg>_<column>". "Join text" gives distinct values joined with "; " in first-appearance order; absences are skipped and repeats folded away.',
       default: [],
       visibleIf: (params) => params.agg !== 'count',
     },

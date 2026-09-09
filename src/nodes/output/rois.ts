@@ -169,7 +169,7 @@ export const roisNode = registerNode({
       id: 'primaryOnly',
       kind: 'boolean',
       label: 'Primary regions only',
-      help: 'Keep only the regions that tile the volume. The published list nests, so the rest are drawn inside their parents — and unticking this downloads them, which the card asks about first where there are many.',
+      help: 'Keep only the regions that tile the volume. The published list nests, so the rest are drawn inside their parents; unticking this downloads them.',
       default: true,
       presentational: true,
       advanced: true,

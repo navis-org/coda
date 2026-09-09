@@ -84,11 +84,7 @@ export function skeletonSourceParam(): ParamDef {
     id: SKELETON_SOURCE_PARAM,
     kind: 'enum',
     label: 'Source',
-    help:
-      'Where the skeletons come from. Datasets often have more than one — a published ' +
-      'precomputed layer, a backend’s own traced skeletons, a chunk-graph reconstruction — and ' +
-      'they differ in how detailed they are and whether they carry radii. Automatic takes the ' +
-      'best one this dataset has; the result says which it used.',
+    help: 'Where the skeletons come from. A dataset often has more than one, differing in detail and in whether they carry radii. "Automatic" takes the best available and says which it used.',
     default: '',
     /*
      * The vocabulary the catalogue cannot get from the options function, which is dynamic and

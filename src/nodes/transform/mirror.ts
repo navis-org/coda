@@ -132,10 +132,7 @@ export const mirrorNode = registerNode({
       kind: 'boolean',
       label: 'Warp',
       default: true,
-      help:
-        'Correct for the brain’s left/right asymmetry with a landmark spline, rather than ' +
-        'flipping and leaving it. Off is a few micrometres out — fine for a picture, not for ' +
-        'NBLAST. On needs the Python runtime, which is a ~10 MB download the first time.',
+      help: 'Correct for the brain’s left/right asymmetry with a landmark spline rather than flipping and leaving it. Off is a few micrometres out — fine for a picture, not for NBLAST. On needs the Python runtime.',
     },
     {
       id: 'space',
@@ -143,10 +140,7 @@ export const mirrorNode = registerNode({
       label: 'Space',
       default: '',
       options: [FROM_DATA, ...mirrorableSpaces().map((s) => ({ value: s.id, label: s.label }))],
-      help:
-        'Which template space to mirror in. Leave on “From the data” unless the geometry ' +
-        'arrived without one — a Custom dataset node, usually — in which case naming it here ' +
-        'is a claim you are making about coordinates nobody else can identify.',
+      help: 'Which template space to mirror in. Leave on "From the data" unless the geometry arrived without one, since naming it here is a claim about coordinates nobody else can identify.',
     },
   ],
 

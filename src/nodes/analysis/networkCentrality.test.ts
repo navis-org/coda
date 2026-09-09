@@ -180,7 +180,7 @@ describe('net.centrality — values', () => {
     expect(Number(summary.data['modularity']?.[0])).toBeGreaterThan(0)
   })
 
-  it('gives the same answer twice — the seed is the node`s, not Math.random`s', async () => {
+  it('gives the same answer twice — the seed is the node’s, not Math.random’s', async () => {
     // Invariant 4: the cache key is provenance, so `evaluate` has to be deterministic. Louvain's
     // random walk and the pivot draw are the two places that could quietly not be.
     const graph = pipeline({ samples: 4, seed: 3 })

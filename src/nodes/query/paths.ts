@@ -119,7 +119,7 @@ export const pathsNode = registerNode({
       id: 'maxHops',
       kind: 'int',
       label: 'Max hops',
-      help: 'Longest route to look for, in synapses. The search runs from both ends at once, so this costs about half what the number suggests — but each hop still multiplies the frontier, and Min synapses is what divides it.',
+      help: 'Longest route to look for, in synapses. The search runs from both ends at once, so it costs about half what the number suggests. Each hop still multiplies the frontier.',
       default: 3,
       min: 1,
       max: 8,
@@ -129,7 +129,7 @@ export const pathsNode = registerNode({
       id: 'minWeight',
       kind: 'int',
       label: 'Min synapses',
-      help: 'Discard connections below this many synapses. Applied after the grouping, so with Collapse types on it is a threshold on the total traffic between two cell types — a much larger number than a single connection carries.',
+      help: 'Discard connections below this many synapses. Applied after the grouping, so with Collapse types on it is a threshold on the total traffic between two cell types.',
       default: 10,
       min: 1,
       step: 1,
@@ -147,7 +147,7 @@ export const pathsNode = registerNode({
       id: 'collapseTypes',
       kind: 'boolean',
       label: 'Collapse types',
-      help: 'Trace the circuit between cell types rather than between individual neurons. This changes what is searched, not only what is drawn: a pathway through a population is found even when no single neuron carries the whole route.',
+      help: 'Trace the circuit between cell types rather than individual neurons. This changes what is searched: a pathway through a population is found even when no single neuron carries the whole route.',
       default: true,
     },
     {
@@ -160,7 +160,7 @@ export const pathsNode = registerNode({
        * every PLP1 neuron receives, which is what `GroupTotalsRequest` exists to answer: the
        * frontier carries a type name and a per-neuron total cannot be asked about one.
        */
-      help: 'Add weightNorm, each connection as a fraction of one group\u2019s total synapses, and weightTotal, the denominator it was divided by. With Collapse types on the denominator is the whole population\u2019s total, not one neuron\u2019s.',
+      help: 'Add weightNorm, each connection as a fraction of one group’s total synapses, and weightTotal, the denominator. With Collapse types on that denominator is the whole population’s.',
       default: false,
     },
     {
@@ -179,7 +179,7 @@ export const pathsNode = registerNode({
       id: 'normalizeBasis',
       kind: 'enum',
       label: 'Denominator',
-      help: 'All synapses counts everything the group makes, including synapses onto fragments nobody reconstructed. Reconstructed partners only counts synapses onto partners the dataset calls neurons, which is the denominator to use when comparing routes across connectomes proofread to different depths.',
+      help: '"All synapses" counts everything the group makes, fragments included. "Reconstructed partners only" counts synapses onto named neurons, which is the denominator for comparing routes across connectomes.',
       default: 'all',
       options: [
         { value: 'all', label: 'all synapses' },
@@ -198,7 +198,7 @@ export const pathsNode = registerNode({
        * ranking by synapses prefers the route through the biggest population, which is the
        * failure normalising is usually reached for in the first place.
        */
-      help: 'Which weakest link decides the ranking, and so which routes N strongest keeps. The two are different steps of the route as soon as the populations differ in size \u2014 synapses prefers a route through a large population, fraction prefers one that is a large share of what the next population receives.',
+      help: 'Which weakest link decides the ranking, and so which routes N strongest keeps. "Synapses" prefers a route through a large population; "fraction" prefers one that is a large share of what the next population receives.',
       default: 'synapses',
       options: [
         { value: 'synapses', label: 'synapses (weakest link)' },
@@ -221,7 +221,7 @@ export const pathsNode = registerNode({
        * No `max`: `connected` denominators can produce a fraction above 1, legitimately, for
        * `normalizeConnectivity`'s recorded reason.
        */
-      help: 'Discard connections carrying less than this share of the denominator, and do not follow them. Applied per hop as the search grows, so it bounds the frontier the way Min synapses does. 0 is off, and a connection whose denominator the dataset does not publish is never dropped by it.',
+      help: 'Discard connections carrying less than this share of the denominator, and do not follow them. Applied per hop, so it bounds the frontier as Min synapses does. 0 is off.',
       default: 0,
       min: 0,
       step: 0.01,

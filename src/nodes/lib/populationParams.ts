@@ -59,19 +59,19 @@ const POPULATION_PARAMS: readonly PopulationParamSpec[] = [
     filter: 'traced',
     id: 'tracedOnly',
     label: 'Traced only',
-    help: 'Keep neurons whose status is "Traced" — the convention for a proofread body. Combined with the other two by OR, so ticking a second box lets more neurons through rather than fewer.',
+    help: 'Keep neurons whose status is "Traced". OR-ed with the other two boxes, so ticking another lets more neurons through.',
   },
   {
     filter: 'typed',
     id: 'typedOnly',
     label: 'Typed only',
-    help: 'Keep neurons carrying a cell type — any column whose name ends in "type", so a neuron named only in another dataset’s nomenclature still counts. Combined with the other two by OR.',
+    help: 'Keep neurons carrying a cell type — any column whose name ends in "type". OR-ed with the other two boxes.',
   },
   {
     filter: 'superclass',
     id: 'superclassOnly',
     label: 'Superclass only',
-    help: 'Keep neurons with a superclass — the coarsest classification, which some datasets publish and others do not. Combined with the other two by OR.',
+    help: 'Keep neurons with a superclass, the coarsest classification, which not every dataset publishes. OR-ed with the other two boxes.',
   },
 ]
 

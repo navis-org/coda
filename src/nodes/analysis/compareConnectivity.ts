@@ -299,7 +299,7 @@ export const compareConnectivityNode = registerNode({
       group: 'shared',
       kind: 'int',
       label: 'Min weight',
-      help: 'Drop a type pair no dataset reaches. Per row rather than per dataset on purpose: a pair that is 1 here and 40 there is the asymmetry you set a threshold hoping to see past, not the noise you meant to trim.',
+      help: 'Drop a type pair no dataset reaches. Applied per row rather than per dataset, so a pair that is 1 here and 40 there survives.',
       default: 0,
       min: 0,
     },

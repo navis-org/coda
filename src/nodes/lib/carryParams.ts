@@ -117,10 +117,8 @@ export function carryParam(noun: CarryNoun): ColumnsParam {
     default: [],
     help:
       `Columns of the incoming neuron table to carry onto the ${PLURAL[noun]}, matched by ` +
-      `neuronId. A ${noun} collection otherwise carries only what the fetch itself returns, so ` +
-      'this is what ' +
-      'puts a cell type, a hemisphere or an annotation within reach of Split Neurons, the 3D ' +
-      'View’s colour picker and Download. A carried column replaces one of the same name.',
+      'neuronId — a cell type or an annotation for Split Neurons, the 3D View and Download. ' +
+      'A carried column replaces one of the same name.',
   }
 }
 

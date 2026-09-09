@@ -68,10 +68,7 @@ export const nblastNode = registerNode({
       default: 1,
       min: 0,
       step: 0.5,
-      help:
-        'Space the points evenly before comparing, in micrometres. Too fine and your NBLAST will ' +
-        'take forever. Too coarse and your scores will be meaningless. 1 µm is the convention, and the default. ' +
-        ' Setting it to 0 leaves each skeleton exactly as it was traced.',
+      help: 'Space the points evenly before comparing, in micrometres. Too fine is slow, too coarse is meaningless; 1 µm is the convention. 0 leaves each skeleton as it was traced.',
     },
     {
       id: 'symmetry',
@@ -79,10 +76,7 @@ export const nblastNode = registerNode({
       label: 'Symmetry',
       default: 'mean',
       options: SYMMETRY_OPTIONS,
-      help:
-        'A small neuron can lie entirely inside a large one, so the two directions of a pair ' +
-        'disagree. The mean is the usual choice and is what makes an all-by-all matrix read ' +
-        'the same on both sides of its diagonal.',
+      help: 'A small neuron can lie entirely inside a large one, so the two directions of a pair disagree. The mean is the usual choice and makes an all-by-all matrix symmetric.',
     },
     {
       id: 'labelColumn',
@@ -124,9 +118,7 @@ export const nblastNode = registerNode({
     warnAboveParam({
       threshold: MAX_NEURONS,
       min: 2,
-      cost:
-        'the comparison runs either way, and the node says what the pair count comes to in ' +
-        'minutes as well.',
+      counting: 'comparing more than this many neurons',
     }),
   ],
 

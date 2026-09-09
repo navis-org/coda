@@ -62,9 +62,9 @@ export const networkCentralityNode = registerNode({
   type: 'net.centrality',
   label: 'Network Centrality',
   category: 'analysis',
-  description: 'Betweenness, closeness, PageRank and communities for a network`s nodes.',
+  description: 'Betweenness, closeness, PageRank and communities for a network’s nodes.',
   guide:
-    'Adds centrality columns to a network`s nodes: betweenness and harmonic closeness from a ' +
+    'Adds centrality columns to a network’s nodes: betweenness and harmonic closeness from a ' +
     'shortest-path sweep, PageRank, eigenvector centrality and Louvain communities. Expensive ' +
     'by nature — the sweep walks every link once per source node — so it runs only on Run, and ' +
     'Sample trades an exact answer for a much faster one. The network passes through carrying ' +
@@ -89,7 +89,7 @@ export const networkCentralityNode = registerNode({
       kind: 'boolean',
       label: 'Closeness',
       default: true,
-      help: 'Harmonic closeness: how short the paths *into* a node are, averaged. Free once betweenness is running.',
+      help: 'Harmonic closeness: how short the incoming paths to a node are, averaged. Free once betweenness is running.',
     },
     {
       id: 'pagerank',
@@ -123,7 +123,7 @@ export const networkCentralityNode = registerNode({
       label: 'Weighted paths',
       default: false,
       visibleIf: (params) => params['betweenness'] !== false || params['closeness'] !== false,
-      help: 'Treat a link`s length as 1/weight instead of one hop, so a strong connection is a short path.',
+      help: 'Treat a link’s length as 1/weight instead of one hop, so a strong connection is a short path.',
     },
     {
       /*
@@ -148,7 +148,7 @@ export const networkCentralityNode = registerNode({
       advanced: true,
       visibleIf: (params) =>
         Number(params['samples'] ?? 0) > 0 || params['communities'] !== false,
-      help: 'Pins the pivot draw and Louvain`s walk, so a re-run gives the same answer.',
+      help: 'Pins the pivot draw and Louvain’s walk, so a re-run gives the same answer.',
     },
     {
       id: 'resolution',
@@ -160,7 +160,7 @@ export const networkCentralityNode = registerNode({
       step: 0.1,
       advanced: true,
       visibleIf: (params) => params['communities'] !== false,
-      help: 'Louvain`s resolution. Above 1 finds more, smaller communities.',
+      help: 'Louvain’s resolution. Above 1 finds more, smaller communities.',
     },
     {
       id: 'damping',
@@ -172,7 +172,7 @@ export const networkCentralityNode = registerNode({
       step: 0.05,
       advanced: true,
       visibleIf: (params) => params['pagerank'] !== false,
-      help: 'PageRank`s damping factor — the chance of following a link rather than restarting.',
+      help: 'PageRank’s damping factor — the chance of following a link rather than restarting.',
     },
   ],
 

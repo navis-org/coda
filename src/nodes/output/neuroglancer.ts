@@ -175,7 +175,7 @@ export const neuroglancerNode = registerNode({
       label: 'Layers',
       default: 'all',
       advanced: true,
-      help: 'How much of what the *dataset* publishes to carry — EM, ROI meshes, synapses — or just the neurons. Neurons-only makes a far shorter link; male-CNS publishes 38 layers. Anything on the Extra layers socket is added either way: you wired it up, so it is not published context to trim.',
+      help: 'How much of what the dataset publishes to carry — EM, ROI meshes, synapses — or just the neurons, which makes a far shorter link. Extra layers are added either way.',
       options: [
         { value: 'all', label: 'as published' },
         { value: 'segmentation', label: 'neurons only' },
@@ -194,7 +194,7 @@ export const neuroglancerNode = registerNode({
        * panels take less of the card and the scene gets the room. It also means more pixels
        * to render, which is the trade at the bottom of the range.
        */
-      help: "Scales neuroglancer's whole frame, so its toolbar and panels take up less of the card. Nothing to do with the camera zoom inside it.",
+      help: 'Scales neuroglancer’s whole frame, so its toolbar and panels take up less of the card. Not the camera zoom inside it.',
       default: 0.75,
       min: 0.5,
       max: 1.5,
@@ -213,9 +213,7 @@ export const neuroglancerNode = registerNode({
     warnAboveParam({
       threshold: SEGMENTS_WARN,
       min: 1,
-      cost:
-        'the scene is built either way, and what it costs is neuroglancer’s own drawing plus ' +
-        'the length of the link.',
+      counting: 'putting more than this many segments in the scene',
     }),
     {
       id: 'viewer',
@@ -226,7 +224,7 @@ export const neuroglancerNode = registerNode({
       default: '',
       advanced: true,
       placeholder: DEFAULT_NEUROGLANCER_URL,
-      help: 'Which neuroglancer deployment to open. Empty uses the one the dataset names, and otherwise the default above. The whole scene travels in the URL fragment, so the instance never sees your data, but it must allow being embedded.',
+      help: 'Which neuroglancer deployment to open. Empty uses the one the dataset names. The scene travels in the URL fragment, so the instance must allow being embedded.',
     },
     {
       id: 'viewerType',
@@ -245,7 +243,7 @@ export const neuroglancerNode = registerNode({
        * with no segmentation in it and nothing naming the cause — which has happened once
        * already, in the other direction.
        */
-      help: 'How a CAVE segmentation is authenticated. Spelunker builds need a middleauth+ prefix on the source; the Seung-lab fork runs its own login and refuses it. Automatic reads it off the deployment, and is right for every viewer this app knows about.',
+      help: 'How a CAVE segmentation is authenticated. Spelunker builds need a middleauth+ prefix on the source; the Seung-lab fork runs its own login and refuses it. "Automatic" reads it off the deployment.',
     },
   ],
 

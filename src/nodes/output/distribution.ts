@@ -65,7 +65,7 @@ export const distributionNode = registerNode({
       // whole-table distribution is a real thing to ask for.
       optional: true,
       // Not presentational: it decides which rows a selected box names. See the header.
-      help: 'One box per distinct value; empty draws a single box over every row. Also what a selected box means, so changing it re-runs anything downstream of Selected.',
+      help: 'One box per distinct value; empty draws a single box over every row. Also what a selected box means.',
     },
     {
       id: 'style',
@@ -79,11 +79,7 @@ export const distributionNode = registerNode({
         { value: 'swarm', label: 'swarm' },
         { value: 'swarmBox', label: 'swarm + box' },
       ],
-      help:
-        'A box is five numbers, a violin is the shape behind them — bimodality is invisible in ' +
-        'the first and obvious in the second — and a swarm is the observations themselves, ' +
-        'which is the one that shows you how few of them there are. Above 300 per group the ' +
-        'swarm is thinned and the caption says so.',
+      help: 'A box is five numbers, a violin the shape behind them, a swarm the observations themselves. Above 300 per group the swarm is thinned and the caption says so.',
       presentational: true,
     },
     {
@@ -95,11 +91,7 @@ export const distributionNode = registerNode({
         { value: 'rows', label: 'groups down the side' },
         { value: 'columns', label: 'groups along the bottom' },
       ],
-      help:
-        'Groups down the side is the default because these names are ROI and cell-type names, ' +
-        'which read straight along a left-hand gutter and need rotating as columns. Groups ' +
-        'along the bottom is the conventional orientation and the one to export into a figure ' +
-        'beside other vertical panels; its labels are rotated 45°.',
+      help: '"Groups down the side" reads long names straight along a left-hand gutter. "Groups along the bottom" is the conventional orientation for a figure; its labels are rotated 45°.',
       presentational: true,
     },
     {
@@ -124,9 +116,7 @@ export const distributionNode = registerNode({
         { value: 'p5p95', label: '5th–95th percentile' },
         { value: 'minmax', label: 'full range' },
       ],
-      help:
-        'The whisker ends at the most extreme value inside the fence, not at the fence — so it ' +
-        'never sticks out past data that exists.',
+      help: 'The whisker ends at the most extreme value inside the fence, not at the fence itself.',
       presentational: true,
       advanced: true,
     },
@@ -134,10 +124,7 @@ export const distributionNode = registerNode({
       id: 'logAxis',
       kind: 'boolean',
       label: 'Log axis',
-      help:
-        'Quartiles are unchanged by it — a quantile survives any monotone transform — so only ' +
-        'the axis and the violin’s shape move. Values at or below zero are dropped; the ' +
-        'caption says how many.',
+      help: 'Quartiles are unchanged by it, so only the axis and the violin’s shape move. Values at or below zero are dropped; the caption says how many.',
       default: false,
       presentational: true,
       advanced: true,
@@ -157,9 +144,7 @@ export const distributionNode = registerNode({
       default: 24,
       min: 1,
       max: 100,
-      help:
-        'The largest groups are kept and the tail is dropped rather than pooled — a box over ' +
-        'fifty pooled cell types describes nothing. The caption says how many there were.',
+      help: 'The largest groups are kept and the tail is dropped rather than pooled. The caption says how many there were.',
       presentational: true,
       advanced: true,
     },
@@ -169,9 +154,7 @@ export const distributionNode = registerNode({
       label: 'Selected',
       noun: 'groups',
       default: [],
-      help:
-        'Set by clicking boxes in the viewer. Holds group labels rather than row ids, so it ' +
-        'stays small and survives an upstream re-run. Feeds Selected.',
+      help: 'Set by clicking boxes in the viewer. Holds group labels rather than row ids, so it survives an upstream re-run. Feeds Selected.',
     },
   ],
 

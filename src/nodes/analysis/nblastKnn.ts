@@ -65,9 +65,7 @@ export const nblastKnnNode = registerNode({
       // multiplies the result rather than the search — 10,000 neurons at k=1,000 is ten million
       // rows, which is a table Coda can build and a person can filter.
       max: 1000,
-      help:
-        'How many neighbours to keep for each neuron, best first. With a Target wired, a ' +
-        'neuron that appears in both sets spends one of these on itself.',
+      help: 'How many neighbours to keep for each neuron, best first. With a Target wired, a neuron in both sets spends one on itself.',
     },
     {
       id: 'symmetry',
@@ -75,9 +73,7 @@ export const nblastKnnNode = registerNode({
       label: 'Symmetry',
       default: 'mean',
       options: SYMMETRY_OPTIONS,
-      help:
-        'Applied before the top-k cut, which is why it matters more here than on a matrix: ' +
-        'once only k neighbours survive there is no transpose left to symmetrise against.',
+      help: 'Applied before the top-k cut: once only k neighbours survive there is no transpose left to symmetrise against.',
     },
     {
       id: 'labelColumn',
@@ -96,10 +92,7 @@ export const nblastKnnNode = registerNode({
       min: 0,
       step: 0.5,
       advanced: true,
-      help:
-        'Space the points evenly before comparing, in micrometres. Too fine and your NBLAST will ' +
-        'take forever. Too coarse and your scores will be meaningless. 1 µm is the convention, and the default. ' +
-        ' Setting it to 0 leaves each skeleton exactly as it was traced.',
+      help: 'Space the points evenly before comparing, in micrometres. Too fine is slow, too coarse is meaningless; 1 µm is the convention. 0 leaves each skeleton as it was traced.',
     },
     {
       id: 'nCandidates',
@@ -113,10 +106,7 @@ export const nblastKnnNode = registerNode({
       max: MAX_NEURONS,
       step: 10,
       advanced: true,
-      help:
-        'Shortlist size per neuron — the one control trading recall against cost. Measured by ' +
-        'fastcore on 163,976 neurons, recall of the true top 20 is 0.911 at 50, 0.969 at 100, ' +
-        '0.990 at 200 and 0.996 at 400.',
+      help: 'Shortlist size per neuron — the one control trading recall against cost. fastcore measured recall of the true top 20 at 0.911 for 50, 0.969 for 100 and 0.990 for 200.',
     },
     {
       id: 'tangentK',
@@ -149,9 +139,7 @@ export const nblastKnnNode = registerNode({
     warnAboveParam({
       threshold: MAX_NEURONS,
       min: 2,
-      cost:
-        'the search runs either way. This is the node built for large sets — its cost grows ' +
-        'with Candidates rather than with the square of the population.',
+      counting: 'searching more than this many neurons',
     }),
   ],
 

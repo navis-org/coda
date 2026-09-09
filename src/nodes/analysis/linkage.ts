@@ -63,11 +63,7 @@ export const linkageNode = registerNode({
       label: 'Method',
       default: 'ward',
       options: LINKAGE_METHODS,
-      help:
-        'How the distance between two groups is measured. Ward keeps groups compact and is ' +
-        'what the NBLAST paper uses; average is the other common choice and is less eager to ' +
-        'split off outliers; single chains, and will happily join two clusters through one ' +
-        'intermediate neuron.',
+      help: 'How the distance between two groups is measured. "Ward" keeps groups compact and is what the NBLAST paper uses; "average" is less eager to split off outliers; "single" chains through one intermediate neuron.',
     },
     {
       id: 'symmetry',
@@ -75,11 +71,7 @@ export const linkageNode = registerNode({
       label: 'Symmetry',
       default: 'mean',
       options: LINKAGE_SYMMETRY_OPTIONS,
-      help:
-        'A distance has to be symmetric and an NBLAST score is not, so the two directions of ' +
-        'each pair are combined first. Note that "use the matrix as it is" reads only the ' +
-        'upper triangle — on a matrix that is not already symmetric, the lower half is ' +
-        'discarded rather than used.',
+      help: 'A distance has to be symmetric and an NBLAST score is not, so the two directions of each pair are combined first. "Use the matrix as it is" reads only the upper triangle.',
     },
     {
       id: 'distance',
@@ -92,11 +84,7 @@ export const linkageNode = registerNode({
         { value: 'one_minus', label: '1 − value' },
         { value: 'none', label: 'the values are already distances' },
       ],
-      help:
-        'Clustering needs distances. Auto asks the matrix: NBLAST says it carries ' +
-        'similarities, so they are inverted; a matrix that says it carries distances is used ' +
-        'as it stands. A matrix that says nothing — a Pivot cannot know — is treated as ' +
-        'similarities.',
+      help: 'Clustering needs distances. "Auto" asks the matrix, inverting it if it carries similarities; a matrix that says nothing — a Pivot cannot know — is treated as similarities.',
     },
   ],
 

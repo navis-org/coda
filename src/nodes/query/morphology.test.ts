@@ -87,7 +87,7 @@ describe('Warn above', () => {
     // afterwards — which is the one way this control can lie about what it does.
     for (const type of MORPHOLOGY_NODES) {
       expect(limitParam(type).label, type).toBe('Warn above')
-      expect(limitParam(type).help ?? '', type).toMatch(/threshold, not a cap/)
+      expect(limitParam(type).help ?? '', type).toMatch(/Nothing is capped/)
     }
   })
 

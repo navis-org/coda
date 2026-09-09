@@ -143,10 +143,7 @@ export const topologyNode = registerNode({
       id: 'split',
       kind: 'boolean',
       label: 'Split axon/dendrite',
-      help:
-        'Run navis’s synapse flow centrality and label every node axon, dendrite or linker. ' +
-        'Adds per-compartment columns to Morphometrics, so it marks the graph stale — and it ' +
-        'needs the Python runtime, which is a one-off download the first time anything uses it.',
+      help: 'Run navis’s synapse flow centrality and label every node axon, dendrite or linker. Adds per-compartment columns to Morphometrics, and needs the Python runtime.',
       default: false,
       /*
        * `advanced`, like every other control on this node, and for the reason the three
@@ -173,10 +170,7 @@ export const topologyNode = registerNode({
       id: 'flowThresh',
       kind: 'number',
       label: 'Linker threshold',
-      help:
-        'The linker is every node at or above this fraction of peak synapse flow. navis’s ' +
-        'default is 0.9; lower it to cut more of the arbour away as linker, which is what ' +
-        'separates a poorly segregated neuron into compartments at all.',
+      help: 'The linker is every node at or above this fraction of peak synapse flow. navis’s default is 0.9; lower it to cut more of the arbour away as linker.',
       default: 0.9,
       min: 0.1,
       max: 1,
@@ -195,10 +189,7 @@ export const topologyNode = registerNode({
       id: 'splitVal',
       kind: 'number',
       label: 'Axon threshold',
-      help:
-        'A fragment is called axon when it holds at least this much of the neuron’s outputs ' +
-        'for each unit of its inputs. navis’s default is 1 — an even share both ways; below 1 ' +
-        'biases towards axon, above 1 towards dendrite.',
+      help: 'A fragment is axon when it holds at least this much output per unit of input. navis’s default is 1; below 1 biases towards axon, above 1 towards dendrite.',
       default: 1,
       min: 0.1,
       max: 3,
@@ -219,7 +210,7 @@ export const topologyNode = registerNode({
     warnAboveParam({
       threshold: MAX_NEURONS,
       min: 1,
-      cost: 'each skeleton is a separate request, and the split adds a synapse query on top.',
+      counting: 'fetching more than this many skeletons',
     }),
     {
       /*
@@ -270,9 +261,7 @@ export const topologyNode = registerNode({
       id: 'pointSize',
       kind: 'number',
       label: 'Synapse size',
-      help:
-        'Diameter of a synapse dot, in screen pixels — it stays the same size whatever the ' +
-        'neuron’s extent, unlike the 3D View card’s nanometre dots.',
+      help: 'Diameter of a synapse dot, in screen pixels, so it stays the same size whatever the neuron’s extent.',
       default: 6,
       min: 1,
       max: 24,
@@ -308,9 +297,7 @@ export const topologyNode = registerNode({
        */
       kind: 'number',
       label: 'Unlit synapses',
-      help:
-        'How visible the synapses of every other partner stay while one partner is lit. 0 hides ' +
-        'them; 1 draws them as solidly as the lit ones. Does nothing until a partner is lit.',
+      help: 'How visible the other partners’ synapses stay while one partner is lit. 0 hides them, 1 draws them as solidly as the lit ones.',
       default: 0.1,
       min: 0,
       max: 1,
@@ -377,9 +364,7 @@ export const topologyNode = registerNode({
       id: 'skeletonOpacity',
       kind: 'number',
       label: 'Skeleton opacity',
-      help:
-        'How solid the skeleton is drawn. Below 1 it stops hiding what is behind it, which is ' +
-        'the point — a synapse inside a thick branch, or the mesh shell around the arbour.',
+      help: 'How solid the skeleton is drawn. Below 1 it stops hiding what is behind it — a synapse inside a thick branch, or the mesh shell around the arbour.',
       default: 1,
       min: 0,
       max: 1,
@@ -440,9 +425,7 @@ export const topologyNode = registerNode({
       id: 'showMesh',
       kind: 'boolean',
       label: 'Mesh',
-      help:
-        'Draw the neuron’s mesh as a translucent shell around the skeleton. It is fetched while ' +
-        'this is on, once per neuron you page to, so turning it off is a real saving.',
+      help: 'Draw the neuron’s mesh as a translucent shell around the skeleton. It is fetched while this is on, once per neuron you page to.',
       default: true,
       presentational: true,
       advanced: true,
@@ -506,9 +489,7 @@ export const topologyNode = registerNode({
         { value: 'typed', label: 'Cell type, untyped apart' },
         { value: 'neuron', label: 'One row per neuron' },
       ],
-      help:
-        'How the partner list is rolled up. Cell type puts every untyped partner in one “—” ' +
-        'row; the other two give those partners, or all of them, a row each keyed by id.',
+      help: 'How the partner list is rolled up. "Cell type" puts every untyped partner in one "—" row; the other two give partners a row each, keyed by id.',
       default: 'type',
       presentational: true,
       advanced: true,

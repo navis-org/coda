@@ -150,7 +150,7 @@ describe('betweenness', () => {
   })
 })
 
-describe('the sweep`s graph-level numbers', () => {
+describe('the sweep’s graph-level numbers', () => {
   it('reports mean path length over reachable pairs and refuses a sampled diameter', async () => {
     const path = network(
       ['a', 'b', 'c'],
@@ -202,7 +202,7 @@ describe('pagerank', () => {
     for (const value of rank) expect(value).toBeCloseTo(1 / 3, 10)
   })
 
-  it('keeps a sink`s mass in the graph rather than losing it', () => {
+  it('keeps a sink’s mass in the graph rather than losing it', () => {
     // `c` has no outgoing links. Dropping its rank instead of redistributing it makes the
     // vector stop summing to one, and then every score is scaled by however much of the graph
     // happened to be a sink — which after a filter is a lot of it.
@@ -300,7 +300,7 @@ describe('the schema follows the switches', () => {
     expect(result.summary.schema).toEqual(centralitySummarySchema())
   })
 
-  it('writes its columns onto the network`s node table, keeping what was there', async () => {
+  it('writes its columns onto the network’s node table, keeping what was there', async () => {
     const schema = tableSchema(column('id', 'str'), column('type', 'str'))
     const net: NetworkValue = {
       kind: 'network',

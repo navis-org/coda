@@ -141,7 +141,7 @@ export const findNeuronsNode = registerNode({
       id: 'roi',
       kind: 'enum',
       label: 'In ROI',
-      help: 'Restrict to neurons with synapses in this region. Not a field: a region is a property per ROI rather than a column, so it cannot be a filter row \u2014 but it is a filter, so a node whose only setting is a region still queries.',
+      help: 'Restrict to neurons with synapses in this region. A region cannot be a filter row, but it is still a filter: a node whose only setting is a region does query.',
       default: '',
       advanced: true,
       optionsWithoutPeek: true,

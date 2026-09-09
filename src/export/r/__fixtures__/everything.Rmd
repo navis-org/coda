@@ -2503,7 +2503,7 @@ filter_network_2 <- induced_subgraph(build_network, keep)
 # igraph has no pivot sampling — its `cutoff` bounds path length instead —
 # so this runs the exact sweep: a more precise answer, and a considerably
 # slower one on a large graph.
-# NOTE: igraph`s Louvain is undirected only, so the community pass runs on
+# NOTE: igraph’s Louvain is undirected only, so the community pass runs on
 # the collapsed graph. The partition and the modularity are the undirected
 # ones.
 network_centrality_out <- build_network

@@ -75,11 +75,7 @@ export const cleanMeshesNode = registerNode({
       kind: 'boolean',
       label: 'Drop internal membrane',
       default: false,
-      help:
-        'Cut away the surface that is folded inside the cell rather than bounding it, and cap ' +
-        'what that opens. This is what makes a surface area or a volume mean anything on a ' +
-        'segmentation mesh. Off by default because it is the expensive one: a ray cast per ' +
-        'face per pass, single-threaded.',
+      help: 'Cut away the surface folded inside the cell rather than bounding it, and cap what that opens — which is what makes a surface area or a volume mean anything. Off by default: it is the expensive one.',
     },
     {
       id: 'openness',
@@ -91,11 +87,7 @@ export const cleanMeshesNode = registerNode({
       step: 0.01,
       advanced: true,
       visibleIf: (params) => params.dropInternals === true,
-      help:
-        'A face is cut when this fraction or fewer of the rays leaving it escape the mesh. ' +
-        'Barely a tuning parameter: outer membrane lands at 0.5–1.0 and pocket wall at exactly ' +
-        '0, so anything in 0.05–0.10 finds the same faces. Above about 0.1 the cut starts ' +
-        'eating real membrane.',
+      help: 'A face is cut when this fraction or fewer of the rays leaving it escape the mesh. Anything in 0.05–0.10 finds the same faces; above about 0.1 the cut starts eating real membrane.',
     },
     {
       id: 'rays',
@@ -107,9 +99,7 @@ export const cleanMeshesNode = registerNode({
       step: 4,
       advanced: true,
       visibleIf: (params) => params.dropInternals === true,
-      help:
-        'The signal is bimodal, so this only has to tell “none got out” from “some did”. 8 ' +
-        'halves the cost for no measured difference; 4 is visibly past the edge.',
+      help: 'The signal is bimodal, so this only has to tell "none got out" from "some did". 8 halves the cost for no measured difference; 4 is visibly too few.',
     },
     {
       id: 'passes',
@@ -121,20 +111,14 @@ export const cleanMeshesNode = registerNode({
       step: 1,
       advanced: true,
       visibleIf: (params) => params.dropInternals === true,
-      help:
-        'Capping a pocket mouth turns a partly-open neighbour into a fully buried one, so this ' +
-        'repeats. It converges fast — 18.7% of faces buried on the first pass, 0.5% on the ' +
-        'second, 0.2% on the third.',
+      help: 'Capping a pocket mouth turns a partly-open neighbour into a buried one, so this repeats. It converges fast: 18.7% of faces buried on the first pass, 0.5% on the second.',
     },
     {
       id: 'fillHoles',
       kind: 'boolean',
       label: 'Fill holes',
       default: false,
-      help:
-        'Triangulate every boundary ring, including the ones the mesh arrived with — a ' +
-        'neurite cut off at the edge of the dataset, say. Needed before anything asks the ' +
-        'mesh for an enclosed volume, since an open surface does not have one.',
+      help: 'Triangulate every boundary ring, including the ones the mesh arrived with. Needed before anything asks the mesh for an enclosed volume, since an open surface does not have one.',
     },
     {
       id: 'ratio',
@@ -144,11 +128,7 @@ export const cleanMeshesNode = registerNode({
       min: 0.01,
       max: 1,
       step: 0.05,
-      help:
-        'Fraction of the triangles to keep, collapsing whichever edge costs least at each ' +
-        'step. 1 leaves the mesh alone. This is the control that makes a large scene draw; ' +
-        'note that a small disconnected fragment can be consumed entirely at a tight budget, ' +
-        'because nothing is reserved per piece.',
+      help: 'Fraction of the triangles to keep, collapsing whichever edge costs least; 1 leaves the mesh alone. This is what makes a large scene draw. A small disconnected fragment can be consumed entirely at a tight budget.',
     },
     {
       id: 'smooth',
@@ -158,10 +138,7 @@ export const cleanMeshesNode = registerNode({
       min: 0,
       max: 50,
       step: 1,
-      help:
-        'How many passes of the filter below. 0 leaves the vertices alone. Vertex count, face ' +
-        'array and vertex order all come back unchanged, so anything indexed by vertex is ' +
-        'still attached to the vertex it was attached to.',
+      help: 'How many passes of the filter below; 0 leaves the vertices alone. Vertex count, face array and vertex order all come back unchanged.',
     },
     {
       id: 'method',
@@ -175,11 +152,7 @@ export const cleanMeshesNode = registerNode({
       ],
       advanced: true,
       visibleIf: (params) => Number(params.smooth ?? 0) > 0,
-      help:
-        'Taubin alternates a shrink and an inflate pass tuned to cancel, which is why it is ' +
-        'the default. Plain Laplacian is the one to be careful with: at five passes a neuron ' +
-        'mesh loses most of its enclosed volume, so reach for it when the mesh is a means to ' +
-        'an end rather than when its volume means something.',
+      help: 'Taubin alternates a shrink and an inflate pass tuned to cancel, which is why it is the default. Plain Laplacian loses most of a neuron’s enclosed volume at five passes.',
     },
     {
       id: 'volumeCorrection',
@@ -188,10 +161,7 @@ export const cleanMeshesNode = registerNode({
       default: false,
       advanced: true,
       visibleIf: (params) => Number(params.smooth ?? 0) > 0,
-      help:
-        'Rescale the smoothed mesh about its own centroid so the enclosed volume matches what ' +
-        'went in. Worth turning on with Laplacian and rarely needed with Taubin. A mesh with ' +
-        'no usable volume — a flat sheet — comes back smoothed and unscaled.',
+      help: 'Rescale the smoothed mesh about its own centroid so the enclosed volume matches what went in. Worth turning on with Laplacian, rarely needed with Taubin. A mesh with no usable volume comes back unscaled.',
     },
   ],
 

@@ -279,10 +279,8 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
       ...(options.allowHash
         ? {
             help:
-              'A colour each hashes the chosen column — neuroglancer’s own hash, so a neuron ' +
-              'keeps the colour it has in a neuroglancer view. By category uses the eight ' +
-              'validated palette slots and folds the rest into grey, which is the better ' +
-              'choice when the colour stands for a group rather than for an individual.',
+              '"A colour each" gives every value its own colour, using neuroglancer’s hash. ' +
+              '"By category" takes colours from the palette, commonest value first.',
           }
         : {}),
       options: [
@@ -351,12 +349,9 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
             default: 'coda',
             options: [...PALETTE_OPTIONS],
             help:
-              'Which colours a category encoding cycles through. The number is how many ' +
-              'categories get a colour of their own before it comes round again — pick a ' +
-              'bigger one when the legend says colours repeat. Okabe–Ito is the set to use ' +
-              'when the figure has to survive colour-blindness; only Coda is tuned for both ' +
-              'the light and the dark background, so the pale members of Paired and tab20 are ' +
-              'weak on a light one.',
+              'Which colours "by category" cycles through; the number is how many values get ' +
+              'their own before it repeats. Okabe–Ito is colour-blind safe; only Coda suits ' +
+              'both the light and the dark background.',
             /*
              * Only where a palette is what is being cycled. `constant` and `literal` name their
              * own colours, `sequential` is a ramp rather than a set, `hash` derives a colour per
@@ -589,10 +584,8 @@ export function shapeParams(options: ShapeParamOptions): ParamDef[] {
       label,
       default: defaultMode,
       help:
-        'Shape is a coarser channel than colour: six marks, and everything past the sixth ' +
-        'commonest value folds into a dash rather than reusing one. Pointing shape and ' +
-        'colour at the same column is the usual reason to set it — two channels saying one ' +
-        'thing is what makes a picture readable without colour.',
+        'Six marks, with everything past the sixth commonest value drawn as a dash. Pointing ' +
+        'shape and colour at the same column keeps a picture readable without colour.',
       options: [
         { value: 'constant', label: 'single shape' },
         { value: 'categorical', label: 'by category' },

@@ -133,10 +133,7 @@ export const dendrogramNode = registerNode({
         { value: 'right', label: 'leaves on the right' },
         { value: 'down', label: 'leaves at the bottom' },
       ],
-      help:
-        'Leaves on the right reads labels horizontally and takes as many as the card is tall, ' +
-        'which is the one that scales. Leaves at the bottom is the conventional orientation ' +
-        'and the one to export.',
+      help: '"Leaves on the right" reads labels horizontally and fits more of them. "Leaves at the bottom" is the conventional orientation.',
     },
     {
       id: 'showLabels',
@@ -166,10 +163,7 @@ export const dendrogramNode = registerNode({
       default: ID_COLUMN_NAME,
       optional: true,
       presentational: true,
-      help:
-        'Which column of the wired table is compared with the leaf label. Leaf labels are ' +
-        'whatever named the matrix, so this is `neuronId` unless NBLAST was told to label by ' +
-        'something else — set it to the same column in that case. Compared as text.',
+      help: 'Which column of the wired table is compared with the leaf label. Leaf labels are whatever named the matrix, usually "neuronId". Compared as text.',
     },
     {
       id: 'labelColumn',
@@ -179,11 +173,7 @@ export const dendrogramNode = registerNode({
       default: TYPE_COLUMN_NAME,
       optional: true,
       presentational: true,
-      help:
-        'Which column names each leaf on the drawing — `type` for cell types, or any other ' +
-        'annotation the table carries. Only the picture changes: the tree, its Selected output ' +
-        'and everything downstream keep the labels the matrix arrived with. A leaf the table ' +
-        'says nothing about keeps its own label, and the caption counts those.',
+      help: 'Which column names each leaf on the drawing. Only the picture changes — the tree, its Selected output and everything downstream keep the matrix’s labels. Unmatched leaves keep their own.',
     },
     {
       id: 'selection',
@@ -191,9 +181,7 @@ export const dendrogramNode = registerNode({
       label: 'Selected',
       noun: 'leaves',
       default: [],
-      help:
-        'Set by clicking a branch in the viewer. Holds leaf positions rather than names, ' +
-        'because a label column can name two neurons the same thing. Feeds Selected.',
+      help: 'Set by clicking a branch in the viewer. Holds leaf positions rather than names, since a label can repeat. Feeds Selected.',
     },
   ],
 

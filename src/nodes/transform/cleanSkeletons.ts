@@ -85,10 +85,7 @@ export const cleanSkeletonsNode = registerNode({
       kind: 'boolean',
       label: 'Heal fragments',
       default: false,
-      help:
-        'Reconnect the disconnected pieces a reconstruction arrived in, by the shortest set ' +
-        'of bridges that joins them. Off by default because it is a claim about the data: a ' +
-        'skeleton is sometimes several fragments because it genuinely is.',
+      help: 'Reconnect the disconnected pieces a reconstruction arrived in, by the shortest set of bridges. Off by default because it is a claim about the data: a skeleton is sometimes several fragments because it genuinely is.',
     },
     {
       id: 'healMaxDist',
@@ -98,10 +95,7 @@ export const cleanSkeletonsNode = registerNode({
       min: 0,
       step: 1,
       visibleIf: (params) => params.heal === true,
-      help:
-        'Refuse to build a bridge longer than this, leaving those fragments apart. 0 means no ' +
-        'limit, which will always produce one tree — including where the nearest fragment is ' +
-        'a hundred micrometres away and belongs to somebody else.',
+      help: 'Refuse to build a bridge longer than this, leaving those fragments apart. 0 means no limit, which always produces one tree — including where the nearest fragment belongs to somebody else.',
     },
     {
       id: 'smooth',
@@ -110,10 +104,7 @@ export const cleanSkeletonsNode = registerNode({
       default: 0,
       min: 0,
       step: 0.5,
-      help:
-        'Gaussian kernel width, measured *along* the neurite rather than through space, so ' +
-        'the far arm of a hairpin does not pull on the near one. Roots, branch points and ' +
-        'leaves stay put. 0 leaves the coordinates exactly as traced.',
+      help: 'Gaussian kernel width, measured along the neurite rather than through space. Roots, branch points and leaves stay put; 0 leaves the coordinates as traced.',
     },
     {
       id: 'method',
@@ -125,12 +116,7 @@ export const cleanSkeletonsNode = registerNode({
         { value: 'resample', label: 're-sample to an even spacing' },
         { value: 'downsample', label: 'keep every Nth node' },
       ],
-      help:
-        'Re-sampling lays fresh nodes down at a fixed distance apart, so a neuron traced ' +
-        'finely in one arbor and coarsely in another comes out even throughout. Keeping every ' +
-        'Nth node is the cheap version: it pays no attention to geometry, but roots, branch ' +
-        'points and leaves always survive so the tree is the same tree. One or the other — ' +
-        'doing both means re-sampling and then discarding most of the result.',
+      help: '"Re-sampling" lays fresh nodes at a fixed distance apart, so an unevenly traced neuron comes out even. "Every Nth node" ignores geometry but always keeps roots, branch points and leaves. One or the other.',
     },
     {
       id: 'spacing',
@@ -140,10 +126,7 @@ export const cleanSkeletonsNode = registerNode({
       min: 0,
       step: 0.5,
       visibleIf: (params) => params.method === 'resample',
-      help:
-        'Target distance between adjacent nodes. 1 µm is the convention NBLAST uses. Note the ' +
-        'node count is total cable length divided by this, so halving it doubles the ' +
-        'geometry — the node says what that comes to before it allocates it.',
+      help: 'Target distance between adjacent nodes; 1 µm is the convention NBLAST uses. The node count is total cable length divided by this, so halving it doubles the geometry.',
     },
     {
       id: 'factor',
@@ -154,10 +137,7 @@ export const cleanSkeletonsNode = registerNode({
       max: 100,
       step: 1,
       visibleIf: (params) => params.method === 'downsample',
-      help:
-        'Keep one node in every N along each unbranched stretch, counting from its far end. ' +
-        'A factor nothing can satisfy leaves just the roots, branch points and leaves, which ' +
-        'is still the same neuron — only straight.',
+      help: 'Keep one node in every N along each unbranched stretch, counting from its far end. A factor nothing can satisfy leaves just the roots, branch points and leaves.',
     },
   ],
 

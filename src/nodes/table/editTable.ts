@@ -102,10 +102,7 @@ export const editTableNode = registerNode({
       id: 'edits',
       kind: 'ids',
       label: 'Edits',
-      help:
-        'One rule per row, set on the card: which rows, which column, what to write. The ' +
-        'filter is Explore terms ANDed — type==LC4, status!=Traced, pre>100, type~^LC[0-9]+$ ' +
-        '— and blank means every row. Bare terms are refused: write column==value.',
+      help: 'One rule per row, set on the card: which rows, which column, what to write. The filter is Explore terms ANDed — type==LC4, pre>100 — and blank means every row. Bare terms are refused.',
       noun: 'edits',
       default: [],
     },

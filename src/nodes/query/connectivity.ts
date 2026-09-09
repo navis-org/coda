@@ -119,7 +119,7 @@ export const connectivityNode = registerNode({
       id: 'minWeight',
       kind: 'int',
       label: 'Min weight',
-      help: 'Discard connections below this synapse count. Raise it to cut noise — and, past one hop, to keep the traversal from expanding every weak partner. Applied to the connection before any region split, so splitting never changes which partners are found.',
+      help: 'Discard connections below this synapse count. Applied to the connection before any region split, so splitting never changes which partners are found.',
       default: 1,
       min: 1,
       step: 1,
@@ -137,7 +137,7 @@ export const connectivityNode = registerNode({
       id: 'splitByRoi',
       kind: 'boolean',
       label: 'Split by region',
-      help: 'One row per connection per region, with a roi column naming it. A decomposition rather than extra rows: the parts sum back to the connection\u2019s weight, give or take the few synapses that sit in no primary region at all (none on male-CNS or MANC, under 1% on hemibrain and optic-lobe).',
+      help: 'One row per connection per region, with a roi column naming it. The parts sum back to the connection’s weight, give or take synapses in no primary region.',
       default: false,
     },
     {
@@ -153,7 +153,7 @@ export const connectivityNode = registerNode({
        * synapses that fall outside all of them, where no restriction keeps the whole weight.
        */
       emptyLabel: 'the whole connection',
-      help: 'Restrict every weight to these regions. A row\u2019s weight becomes the synapses inside them rather than the connection\u2019s total, and a connection with none is dropped.',
+      help: 'Restrict every weight to these regions. A row’s weight becomes the synapses inside them, and a connection with none is dropped.',
       default: [],
       optionsWithoutPeek: true,
       options: (ctx) =>
@@ -174,7 +174,7 @@ export const connectivityNode = registerNode({
        * substituting. A region picked while this was off and left in place when it went back on
        * is still honoured, and the warning below is what says so.
        */
-      help: 'Regions nest \u2014 a synapse in LAL(L) is also counted in LX(L) and in CentralBrain. On, only the set that tiles the volume is offered, so a split adds nothing that is not there. Off, the whole published list is available and rows can sum to several times what the connection has.',
+      help: 'Regions nest — a synapse in LAL(L) is also counted in LX(L). On, only the set that tiles the volume is offered. Off, rows can sum to several times what the connection has.',
       default: true,
       visibleIf: usesRegions,
     },
@@ -207,7 +207,7 @@ export const connectivityNode = registerNode({
        * neuron's outgoing synapses — the difference is the 14,091 that land on fragments the
        * segmentation never promoted to a neuron.
        */
-      help: 'All synapses counts everything the neuron makes, including synapses onto fragments nobody reconstructed \u2014 it matches the total the dataset publishes for that neuron. Reconstructed partners only counts synapses onto partners the dataset calls neurons, which is the denominator to use when comparing edge weights across connectomes proofread to different depths.',
+      help: '"All synapses" counts everything the neuron makes, matching the dataset’s published total. "Reconstructed partners only" counts synapses onto named neurons, which is the denominator for comparing across connectomes.',
       default: 'all',
       options: [
         { value: 'all', label: 'all synapses' },
@@ -251,7 +251,7 @@ export const connectivityNode = registerNode({
       id: 'includeFragments',
       kind: 'boolean',
       label: 'Include fragments',
-      help: 'Off, only proofread neurons come back \u2014 what counts as proofread is set on the Dataset node. On, everything the query finds does, small neuron fragments included. Those fragments are most of what a connectivity query returns: on male-CNS they are 88% of the partners and 45% of the synapse weight, and none of them has a row in the neuron table for the Neuron Set port to fill.',
+      help: 'Off, only proofread neurons come back — set what counts on the Dataset node. On, fragments do too; they are most of what a query returns, and none has a row for the Neuron Set port.',
       default: false,
       absentMeans: true,
     },
@@ -276,7 +276,7 @@ export const connectivityNode = registerNode({
       id: 'neuronRows',
       kind: 'enum',
       label: 'Neuron Set',
-      help: 'Minimal reads the IDs and types straight off the edges and costs nothing. Full meta data looks every neuron up in the dataset for the columns the edge list has no room for \u2014 status, size, instance \u2014 which is a second query over every neuron this result touched, and it runs whether or not the port is wired.',
+      help: '"Minimal" reads ids and types off the edges and costs nothing. "Full metadata" looks every neuron up for status, size and instance — a second query, run whether or not the port is wired.',
       default: 'derived',
       options: [
         { value: 'derived', label: 'minimal (IDs + types)' },

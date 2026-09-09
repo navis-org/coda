@@ -83,7 +83,7 @@ export const caveTablesNode = registerNode({
       id: 'includeViews',
       kind: 'boolean',
       label: 'Include views',
-      help: 'Views are a separate endpoint from tables — a server-side query somebody saved, usually a join or a roll-up. Off lists only the annotation tables, which is caveclient’s `get_tables` exactly.',
+      help: 'Views are a separate endpoint from tables — a server-side query somebody saved, usually a join or a roll-up. Off lists only the annotation tables.',
       default: true,
     },
   ],

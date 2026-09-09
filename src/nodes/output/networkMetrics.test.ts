@@ -110,7 +110,7 @@ describe('net.metrics — types', () => {
     expect(types?.outputs['summary']).toEqual({ kind: 'table', schema: networkSummarySchema() })
   })
 
-  it('folds the metric columns into the pass-through network`s node schema', () => {
+  it('folds the metric columns into the pass-through network’s node schema', () => {
     const types = inferGraph(pipeline()).nodes['metrics']
     const names = columnNames(attributeSchema(types?.outputs['out'], 'nodes'))
     for (const metric of METRIC_COLUMNS) expect(names).toContain(metric)
@@ -127,7 +127,7 @@ describe('net.metrics — types', () => {
     ).toEqual(columnNames(attributeSchema(inference.nodes['net']?.outputs['network'], 'edges')))
   })
 
-  it('offers the metrics to the scatter`s pickers, not just the incoming columns', () => {
+  it('offers the metrics to the scatter’s pickers, not just the incoming columns', () => {
     /*
      * The `schemaFrom` test, and the reason it is worth its own case: without it the pickers
      * read the *input* network, which has no `clustering` at all, and the node's declared

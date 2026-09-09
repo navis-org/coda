@@ -6,12 +6,12 @@
  * 500), each picked at a different time for a different reason. Converging them on one
  * threshold converged everything else too, leaving six copies of a block whose only real
  * variation is a floor and a sentence. That is the moment to factor: the alternative is that
- * the next edit to "A threshold, not a cap" is six edits, and a seventh node copies whichever
+ * the next edit to "Nothing is capped" is six edits, and a seventh node copies whichever
  * of the six it happens to land beside.
  *
  * The shared half is the part that carries the policy — `Warn above` as the label, the
  * threshold as its own maximum, `advanced` because nobody sets it on the way past — and the
- * per-node half is `cost`, which is the whole point of a warning and cannot be shared.
+ * per-node half is `counting`, which names what the threshold is over and cannot be shared.
  *
  * Follows `encodingParams.ts`'s `colorParams`, which is the same shape of thing for the same
  * reason.
@@ -25,13 +25,13 @@ export interface WarnAboveOptions {
   /** Smallest sensible value. 1 for a fetch; 2 for a comparison, which needs two sides. */
   min: number
   /**
-   * What is being counted and what it costs past the threshold, as one sentence.
+   * What is being counted, as a clause completing "Show a warning before …".
    *
-   * Appended to the shared "a threshold, not a cap" clause rather than replacing it, so every
-   * one of the six says the load-bearing half in the same words — `core/limits.ts` records why
-   * that clause has to survive being copied.
+   * The per-node half of one sentence: the shared half says a warning is all that happens, and
+   * `core/limits.ts` records why that has to survive being copied. Kept a clause rather than a
+   * sentence so every one of the six reads the same way.
    */
-  cost: string
+  counting: string
 }
 
 export function warnAboveParam(options: WarnAboveOptions): ParamDef {
@@ -39,7 +39,7 @@ export function warnAboveParam(options: WarnAboveOptions): ParamDef {
     id: 'limit',
     kind: 'int',
     label: 'Warn above',
-    help: `Say so before going past this many. A threshold, not a cap: ${options.cost}`,
+    help: `Show a warning before ${options.counting}. Nothing is capped.`,
     default: options.threshold,
     min: options.min,
     max: options.threshold,

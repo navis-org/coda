@@ -78,9 +78,7 @@ export const nblastMatchesNode = registerNode({
       label: 'Extract',
       default: 'top',
       options: MATCH_MODES,
-      help:
-        'A ranked shortlist per neuron, everything clearing a cutoff, or — when you do not yet ' +
-        'know what cutoff to use — how many each neuron would yield at one.',
+      help: 'A ranked shortlist per neuron, everything clearing a cutoff, or how many each neuron would yield at one.',
     },
     {
       id: 'n',
@@ -90,9 +88,7 @@ export const nblastMatchesNode = registerNode({
       min: 1,
       max: 1000,
       visibleIf: (params) => String(params.mode ?? 'top') === 'top',
-      help:
-        'How many to keep, best first. Cut down to what the matrix can offer if it is ' +
-        'narrower than this, with a warning saying so rather than an error.',
+      help: 'How many to keep, best first. Cut down to what the matrix can offer if it is narrower, with a warning rather than an error.',
     },
     {
       id: 'cutoff',
@@ -101,10 +97,7 @@ export const nblastMatchesNode = registerNode({
       default: 'threshold',
       options: MATCH_CUTOFFS,
       visibleIf: (params) => String(params.mode ?? 'top') !== 'top',
-      help:
-        'An absolute score applies one number to every neuron. A percentage band applies to ' +
-        'each neuron’s *own* best match, which is what you want when some neurons have a ' +
-        'near-perfect match and others have nothing better than 0.3.',
+      help: 'An absolute score applies one number to every neuron. A percentage band applies to each neuron’s own best match, for when some have a near-perfect match and others nothing above 0.3.',
     },
     {
       id: 'threshold',
@@ -115,10 +108,7 @@ export const nblastMatchesNode = registerNode({
       visibleIf: (params) =>
         String(params.mode ?? 'top') !== 'top' &&
         String(params.cutoff ?? 'threshold') === 'threshold',
-      help:
-        'Keep every cell at or above this — at or *below*, on a distance matrix. A normalised ' +
-        'NBLAST score runs to 1 for a perfect match, and around 0.5 is the usual place to ' +
-        'start looking for a same-type hit.',
+      help: 'Keep every cell at or above this — at or below, on a distance matrix. A normalised NBLAST score runs to 1, and around 0.5 is the usual place to start.',
     },
     {
       id: 'percentage',
@@ -140,11 +130,7 @@ export const nblastMatchesNode = registerNode({
       kind: 'boolean',
       label: 'Skip self-matches',
       default: true,
-      help:
-        'Drop each neuron’s own diagonal cell, which is 1.00 on a normalised all-by-all and ' +
-        'would otherwise take one of the places you asked for. This is the diagonal ' +
-        'specifically, so it needs a square matrix — and on a square matrix built from two ' +
-        'different sets it drops a cell that is not a self-match. Turn it off there.',
+      help: 'Drop each neuron’s own diagonal cell, which is 1.00 on a normalised all-by-all. On a square matrix built from two different sets it drops a cell that is not a self-match.',
     },
     {
       id: 'axis',
@@ -153,10 +139,7 @@ export const nblastMatchesNode = registerNode({
       default: '0',
       options: MATCH_AXES,
       advanced: true,
-      help:
-        'Which way the matrix is scanned. Rows is the usual answer and is what an all-by-all ' +
-        'makes symmetric anyway; columns is for a query-against-target matrix read from the ' +
-        'target’s side.',
+      help: 'Which way the matrix is scanned. "Rows" is the usual answer; "columns" is for a query-against-target matrix read from the target’s side.',
     },
     {
       id: 'direction',
@@ -165,10 +148,7 @@ export const nblastMatchesNode = registerNode({
       default: 'auto',
       options: MATCH_DIRECTIONS,
       advanced: true,
-      help:
-        'Whether a high score or a low one is a good match. “From the matrix” reads what the ' +
-        'matrix says it is — NBLAST says similarity, a distance matrix says distance — and ' +
-        'assumes higher is better where nothing said, which a Pivot never does.',
+      help: 'Whether a high score or a low one is a good match. "From the matrix" reads what the matrix says it is, and assumes higher is better where nothing said — which a Pivot never does.',
     },
   ],
 

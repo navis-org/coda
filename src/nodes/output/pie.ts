@@ -76,9 +76,7 @@ export const pieNode = registerNode({
         { value: 'donut', label: 'donut' },
         { value: 'pie', label: 'pie' },
       ],
-      help:
-        'The hole is where the total goes, and a ring compares arc lengths where a wheel asks ' +
-        'you to compare angles at a point.',
+      help: 'The hole is where the total goes, and a ring compares arc lengths rather than angles.',
       presentational: true,
     },
     {
@@ -98,10 +96,7 @@ export const pieNode = registerNode({
       default: 8,
       min: 2,
       max: 24,
-      help:
-        'Past this the tail folds into one achromatic residual rather than repeating a hue, ' +
-        'which would imply two categories are the same thing. Clicking it selects everything ' +
-        'inside it.',
+      help: 'Past this the tail folds into one grey residual rather than repeating a hue. Clicking it selects everything inside it.',
       presentational: true,
       advanced: true,
     },
@@ -125,9 +120,7 @@ export const pieNode = registerNode({
       label: 'Selected',
       noun: 'slices',
       default: [],
-      help:
-        'Set by clicking slices in the viewer. Holds category labels rather than row ids, so ' +
-        'it stays small and survives an upstream re-run. Feeds Selected.',
+      help: 'Set by clicking slices in the viewer. Holds category labels rather than row ids, so it survives an upstream re-run. Feeds Selected.',
     },
   ],
 

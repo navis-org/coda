@@ -124,7 +124,7 @@ export const forEachNode = registerNode({
       id: 'batch',
       kind: 'int',
       label: 'Batch size',
-      help: 'Elements per pass. Raising it lets the backend fetch several at once — much faster for downloads — at the cost of holding that many at a time. Leave at 1 when each pass renders a picture.',
+      help: 'Elements per pass. Raising it lets the backend fetch several at once — much faster for downloads — at the cost of holding that many. Leave at 1 when each pass renders a picture.',
       default: 1,
       min: 1,
       advanced: true,

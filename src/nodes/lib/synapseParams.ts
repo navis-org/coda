@@ -124,10 +124,7 @@ export function synapseUnitParam(): ParamDef {
     id: SYNAPSE_UNIT_PARAM,
     kind: 'enum',
     label: 'Rows',
-    help:
-      'What one point counts. A presynaptic site drives several partners, so “one row per ' +
-      'connection” repeats it once each while “one row per site” returns it once. Backends ' +
-      'differ in which they can answer; Automatic takes the one this source has.',
+    help: 'What one point counts. A presynaptic site drives several partners, so "one row per connection" repeats it once each while "one row per site" returns it once. "Automatic" takes what this source has.',
     default: '',
     catalogueNote: synapseUnitVocabulary(),
     optionsWithoutPeek: true,

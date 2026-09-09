@@ -58,7 +58,7 @@ export const cutTreeNode = registerNode({
         { value: 'height', label: 'distance' },
         { value: 'mixed', label: 'groups drawing from every dataset' },
       ],
-      help: 'The third is for co-clustering two connectomes: it cuts wherever a group is lopsided rather than to a number, because a group of forty neurons all from one brain is not a correspondence.',
+      help: 'The third is for co-clustering two connectomes: it cuts wherever a group is lopsided rather than to a number.',
     },
     {
       id: 'count',
@@ -71,9 +71,7 @@ export const cutTreeNode = registerNode({
       // limit standing in for the tree's.
       max: 10_000,
       visibleIf: (params) => params.mode === 'count',
-      help:
-        'Exactly this many groups come back. A tree of fewer leaves than this gives one ' +
-        'cluster per leaf, which is as far as it can be cut.',
+      help: 'Exactly this many groups come back. A tree with fewer leaves gives one cluster per leaf.',
     },
     {
       id: 'height',
@@ -83,9 +81,7 @@ export const cutTreeNode = registerNode({
       min: 0,
       step: 0.05,
       visibleIf: (params) => params.mode === 'height',
-      help:
-        'Everything joined at or below this distance stays together. With NBLAST scores a ' +
-        'distance of 0.5 is a score of 0.5, so smaller means stricter and more groups.',
+      help: 'Everything joined at or below this distance stays together. With NBLAST scores a distance of 0.5 is a score of 0.5, so smaller means stricter.',
     },
     {
       id: 'maxShare',
@@ -97,10 +93,7 @@ export const cutTreeNode = registerNode({
       step: 0.05,
       slider: true,
       visibleIf: (params) => params.mode === 'mixed',
-      help:
-        'A group is kept once no single dataset holds more than this much of it and every ' +
-        'dataset is present; anything more lopsided is split again. 0.8 means no group may be ' +
-        'more than four-fifths one brain.',
+      help: 'A group is kept once no dataset holds more than this much of it and every dataset is present. 0.8 means no group may be more than four-fifths one brain.',
     },
   ],
 

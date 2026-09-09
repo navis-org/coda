@@ -139,7 +139,7 @@ registerEmitter('net.centrality', (ctx) => {
       : []),
     ...(options.communities
       ? ctx.note(
-          'igraph`s Louvain is undirected only, so the community pass runs on the collapsed ' +
+          'igraph’s Louvain is undirected only, so the community pass runs on the collapsed ' +
             'graph. The partition and the modularity are the undirected ones.',
         )
       : []),

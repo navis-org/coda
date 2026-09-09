@@ -71,7 +71,7 @@ export const partnerVectorsNode = registerNode({
       label: 'Partners by',
       default: 'type',
       options: PARTNER_BY_OPTIONS,
-      help: 'What counts as one feature. Cell type is the usual choice — comparing by neuron id only finds neurons that share literal partners, which across hemispheres or animals is nothing.',
+      help: 'What counts as one feature. Cell type is the usual choice — comparing by neuron id only finds neurons sharing literal partners.',
     },
     {
       id: 'untyped',
@@ -80,7 +80,7 @@ export const partnerVectorsNode = registerNode({
       default: 'id',
       options: UNTYPED_OPTIONS,
       visibleIf: (params) => params.partnerBy !== 'id',
-      help: 'A partner the dataset has not named. Using its id keeps it as its own feature, which is what it is; dropping it means the vectors no longer account for all of a neuron’s synapses.',
+      help: 'A partner the dataset has not named. Using its id keeps it as its own feature; dropping it means the vectors no longer account for all of a neuron’s synapses.',
     },
     {
       id: 'weight',
@@ -97,7 +97,7 @@ export const partnerVectorsNode = registerNode({
       label: 'Weights',
       default: 'raw',
       options: WEIGHTING_OPTIONS,
-      help: 'Fractions are per direction, so a neuron with far more input than output still has both halves of its vector count. Worth knowing that Cosine already ignores overall magnitude — this changes the balance between the two directions, not the scale.',
+      help: 'Fractions are per direction, so a neuron with far more input than output still has both halves of its vector count. Cosine already ignores overall magnitude; this changes the balance between the directions.',
     },
     /*
      * Two pickers rather than one per role on a repeated port: there is exactly one Labels table

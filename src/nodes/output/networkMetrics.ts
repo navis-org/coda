@@ -117,7 +117,7 @@ export const networkMetricsNode = registerNode({
       default: 'degree',
       presentational: true,
       advanced: true,
-      help: 'The x axis of the card`s scatter. Any numeric node column, including the metrics.',
+      help: 'The x axis of the card’s scatter. Any numeric node column, including the metrics.',
     },
     {
       id: 'plotY',
@@ -129,7 +129,7 @@ export const networkMetricsNode = registerNode({
       default: 'clustering',
       presentational: true,
       advanced: true,
-      help: 'The y axis of the card`s scatter.',
+      help: 'The y axis of the card’s scatter.',
     },
     {
       /*
@@ -157,7 +157,7 @@ export const networkMetricsNode = registerNode({
         ),
       advanced: true,
       presentational: true,
-      help: 'Which distribution the card`s histogram draws. Any numeric node column, any link column, or the component sizes.',
+      help: 'Which distribution the card’s histogram draws. Any numeric node column, any link column, or the component sizes.',
     },
     {
       id: 'bins',

@@ -393,7 +393,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     family: 'fib19',
     label: 'FIB-19',
     description:
-      'Partial reconstruction of a female fly`s visual system: medulla, lobula and lobula plate.',
+      'Partial reconstruction of a female fly’s visual system: medulla, lobula and lobula plate.',
     guide:
       'A partial reconstruction covering portions of the fly medulla, lobula, and lobula plate to reveal connectivity patterns in the visual motion detection pathway.',
     glyph: 'fly_optic',
@@ -407,7 +407,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
     notebook: NEUPRINT_NOTEBOOK,
     family: 'mushroombody',
     label: 'Mushroom Body',
-    description: 'Reconstruction of the mushroom body`s alpha lobe.',
+    description: 'Reconstruction of the mushroom body’s alpha lobe.',
     guide:
       'Dense reconstruction of the alpha (vertical) lobe of the mushroom body in a male Drosophila. One of the earliest fly connectomes, contains 983 neurons.',
     glyph: 'specimen',

@@ -59,7 +59,7 @@ export const datasetSummaryNode = registerNode({
   description:
     'What is in a dataset: neuron counts, how they are classified, and how completely each region is traced.',
   guide:
-    'High-level summary of what`s in the dataset: neuron counts, annotations, reconstruction completeness and so on. What can be shown depends on the input dataset.',
+    'High-level summary of what’s in the dataset: neuron counts, annotations, reconstruction completeness and so on. What can be shown depends on the input dataset.',
   cost: 'cheap',
   // Profile's box. The two are the same kind of card — a grid of tiles read at a glance — and a
   // summary that opened narrower than the thing it is a sibling of would read as less important.
@@ -125,7 +125,7 @@ export const datasetSummaryNode = registerNode({
       id: 'chartsMode',
       kind: 'enum',
       label: 'Chosen charts',
-      help: 'Whether the fields above are added to the automatic charts or are the whole list. Only the automatic set can be replaced — neither mode can drop a chart you did not ask for.',
+      help: 'Whether the fields above are added to the automatic charts or replace them. Only the automatic set can be replaced.',
       default: 'add',
       absentMeans: 'replace',
       options: [

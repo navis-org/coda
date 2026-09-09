@@ -143,11 +143,7 @@ export const buildNetworkNode = registerNode({
       from: 'edges',
       default: [],
       optional: true,
-      help:
-        'Edge attributes to carry onto the links — an ROI, a transmitter, a sign. ' +
-        'Empty carries every column the links do not already represent. ' +
-        'Where parallel links are merged, a value is kept only if the merged rows agree on ' +
-        'it, and left empty otherwise; only Weight is added up.',
+      help: 'Edge attributes to carry onto the links — an ROI, a transmitter, a sign. Empty carries every column not already represented. Merging parallel links keeps a value only if the rows agree; only Weight is summed.',
     },
     {
       id: 'nodeKey',

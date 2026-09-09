@@ -62,10 +62,7 @@ function define(flavour: Flavour): NodeDefinition {
         label: 'Label column',
         from: 'labels',
         default: 'label',
-        help:
-          'Which column names the neurons. Both the Dendrogram and Cut Tree call it "label", ' +
-          'which is what a matrix axis carried — a neuron id unless NBLAST was told to label by ' +
-          'something else.',
+        help: 'Which column names the neurons. Both the Dendrogram and Cut Tree call it "label", which is what a matrix axis carried — a neuron id unless NBLAST was told otherwise.',
       },
       {
         id: 'matchColumn',
@@ -73,10 +70,7 @@ function define(flavour: Flavour): NodeDefinition {
         label: 'Match on',
         from: 'neurons',
         default: 'neuronId',
-        help:
-          'Which column of the wired neuron table a label is compared with. Set this to the ' +
-          'same column NBLAST used for "Label by" — `type` where the tree is labelled by cell ' +
-          'type. Compared as text, so a number and a name both work.',
+        help: 'Which column of the wired neuron table a label is compared with. Set it to the same column NBLAST used for "Label by" — "type" where the tree is labelled by cell type. Compared as text.',
       },
       {
         id: 'suffix',

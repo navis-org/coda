@@ -62,7 +62,7 @@ export const similarityNode = registerNode({
       label: 'Layout',
       default: 'long',
       options: SIMILARITY_LAYOUT_OPTIONS,
-      help: 'Long is a table of triplets — observation, feature, value — which is what Partner Vectors and Group By produce and the only form that scales. Wide is one row per observation with a column per feature, which is what an uploaded embedding looks like.',
+      help: '"Long" is a table of triplets — observation, feature, value — as Partner Vectors and Group By produce, and the only form that scales. "Wide" is one row per observation, a column per feature.',
     },
     {
       id: 'observations',
@@ -80,7 +80,7 @@ export const similarityNode = registerNode({
       from: 'in',
       default: '',
       visibleIf: isLongLayout,
-      help: 'What they are being compared over. From Partner Vectors this is `feature`, which already keeps upstream and downstream apart.',
+      help: 'What they are being compared over. From Partner Vectors this is "feature", which already keeps upstream and downstream apart.',
     },
     {
       id: 'value',
@@ -91,7 +91,7 @@ export const similarityNode = registerNode({
       default: '',
       optional: true,
       visibleIf: isLongLayout,
-      help: 'How strong each pair is. Left empty the vector is 1 wherever a pair is listed at all, however many rows list it — which asks whether two observations touch the same features rather than how hard.',
+      help: 'How strong each pair is. Left empty the vector is 1 wherever a pair is listed, which asks whether two observations touch the same features rather than how hard.',
     },
     {
       id: 'idColumn',
@@ -118,7 +118,7 @@ export const similarityNode = registerNode({
       label: 'Metric',
       default: 'cosine',
       options: SIMILARITY_METRIC_OPTIONS,
-      help: 'Cosine ignores overall magnitude, so a strongly and a weakly connected neuron with the same partners come out alike. Jaccard (presence) ignores the weights entirely. Jaccard (weighted) and Pearson both keep them; Euclidean keeps the magnitude too, so it separates by how much as well as by what.',
+      help: 'Cosine ignores overall magnitude, so a strongly and a weakly connected neuron with the same partners come out alike. Jaccard (presence) ignores the weights; the rest keep them, and Euclidean keeps the magnitude too.',
     },
     {
       /*
@@ -135,7 +135,7 @@ export const similarityNode = registerNode({
       options: SIMILARITY_OUTPUT_OPTIONS,
       visibleIf: (params) =>
         hasSimilarityForm(String(params.metric ?? 'cosine') as SimilarityMetric),
-      help: 'Distance is 1 − the similarity. Either works into Linkage, which reads which one this is off the matrix; a Heatmap is usually easier to read as similarities.',
+      help: 'Distance is 1 − the similarity. Either works into Linkage; a Heatmap is usually easier to read as similarities.',
     },
   ],
 

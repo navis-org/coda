@@ -88,10 +88,7 @@ export const heatmapNode = registerNode({
       group: 'colour',
       options: SEQUENTIAL_PALETTE_OPTIONS,
       visibleIf: (p) => p.scale !== 'diverging',
-      help:
-        'Coda blue is the validated ramp and reverses with the theme so an empty cell always ' +
-        'recedes into the surface. The rest are matplotlib’s and seaborn’s, drawn as published ' +
-        '— dark end low — on both themes, and named the same way in the exported notebook.',
+      help: 'Coda blue reverses with the theme, so an empty cell always recedes. The rest are matplotlib’s, drawn as published on both themes.',
     },
     {
       id: 'divergingPalette',
@@ -102,9 +99,7 @@ export const heatmapNode = registerNode({
       group: 'colour',
       options: DIVERGING_PALETTE_OPTIONS,
       visibleIf: (p) => p.scale === 'diverging',
-      help:
-        'Coda’s pair puts blue on the negative arm. The ColorBrewer sets run as published — ' +
-        'RdBu has red at the negative end — so the name means what it means everywhere else.',
+      help: 'Coda’s pair puts blue on the negative arm. The ColorBrewer sets run as published — RdBu has red at the negative end.',
     },
     /*
      * The two ends of the ramp, and empty means "ask the data". `string` rather than `number`
@@ -122,10 +117,7 @@ export const heatmapNode = registerNode({
       advanced: true,
       group: 'colour',
       visibleIf: (p) => p.scale !== 'diverging',
-      help:
-        'The value at the bottom of the colour ramp. Empty lets the data decide — zero, or the ' +
-        'lowest cell where the matrix goes negative. Cells below it are drawn in the end ' +
-        'colour rather than dropped, and the caption says so.',
+      help: 'The value at the bottom of the colour ramp. Empty lets the data decide. Cells below it are drawn in the end colour, not dropped.',
     },
     {
       id: 'colorMax',
@@ -136,11 +128,7 @@ export const heatmapNode = registerNode({
       presentational: true,
       advanced: true,
       group: 'colour',
-      help:
-        'The value at the top of the colour ramp; empty lets the data decide. Useful for ' +
-        'holding one scale across two heatmaps you mean to compare. On a diverging scale this ' +
-        'is the magnitude of both arms, since they have to match for the middle colour to keep ' +
-        'meaning zero.',
+      help: 'The value at the top of the colour ramp; empty lets the data decide. Set both ends to hold one scale across two heatmaps. On a diverging scale this is the magnitude of both arms.',
     },
     {
       id: 'logColor',
@@ -151,11 +139,7 @@ export const heatmapNode = registerNode({
       advanced: true,
       group: 'colour',
       visibleIf: (p) => p.scale !== 'diverging',
-      help:
-        'Spread the colour over a log scale — the mapping only. The printed cells, the tooltip ' +
-        'and the two ends of the colour bar stay the values themselves. This is the setting ' +
-        'for connectivity, where a few strong pairs otherwise paint the whole tail as empty. ' +
-        'Not offered on a diverging scale, whose two arms are already a signed magnitude.',
+      help: 'Spread the colour over a log scale — the mapping only; the printed cells, the tooltip and the colour bar keep the values. Not offered on a diverging scale.',
     },
     {
       id: 'showValues',
@@ -182,12 +166,7 @@ export const heatmapNode = registerNode({
       default: '',
       placeholder: 'LC   or   /^LC[0-9]+$',
       group: 'filter',
-      help:
-        'Keep only the rows whose label matches. A plain term matches anywhere in the label, ' +
-        'ignoring case; a term starting with / is a regular expression (the closing / is ' +
-        'optional), and one starting with ! or - keeps everything that does not match. Same ' +
-        'spelling as the search box on Explore Dataset. For several names at once, use a ' +
-        'pattern: /^(LC4|LC6|LPLC2)$',
+      help: 'Keep only rows whose label matches. A plain term matches anywhere, ignoring case; "/" starts a regular expression; "!" or "-" negates. For several names: /^(LC4|LC6|LPLC2)$',
     },
     {
       id: 'colFilter',
@@ -196,10 +175,7 @@ export const heatmapNode = registerNode({
       default: '',
       placeholder: 'LC   or   /^LC[0-9]+$',
       group: 'filter',
-      help:
-        'Keep only the columns whose label matches, with the same spelling as the row filter. ' +
-        'On a square matrix over one population, filtering both axes to the same expression is ' +
-        'what keeps it square.',
+      help: 'Keep only columns whose label matches, with the same spelling as the row filter.',
     },
 
     // --- order ------------------------------------------------------------
@@ -210,12 +186,7 @@ export const heatmapNode = registerNode({
       default: 'none',
       group: 'order',
       options: SORT_BY_OPTIONS,
-      help:
-        'Reorders the matrix this node outputs, not just the picture, so a Table or a Linkage ' +
-        'downstream sees the same order. Total is the sum of each row or column; one row or ' +
-        'column sorts the other axis by that line’s values; clustering is seaborn’s clustermap ' +
-        '— each row as a vector across the columns, nearest together. For clustering a score ' +
-        'matrix by its own scores, use Linkage → Ordered instead.',
+      help: 'Reorders the matrix this node outputs, not just the picture. "Total" sums each row or column; "clustering" is seaborn’s clustermap. To cluster a score matrix by its own scores, use Linkage.',
     },
     {
       id: 'sortKey',
@@ -225,10 +196,7 @@ export const heatmapNode = registerNode({
       placeholder: 'a label',
       group: 'order',
       visibleIf: (p) => p.sortBy === 'value',
-      help:
-        'Ordering rows, the column whose values decide; ordering columns, the row. Typed, ' +
-        'because a matrix’s labels are decided by the run. A label the matrix does not have ' +
-        'leaves that axis as it arrived and says so on the card.',
+      help: 'Ordering rows, the column whose values decide; ordering columns, the row. A label the matrix lacks leaves that axis untouched and says so on the card.',
     },
     {
       id: 'sortAxis',
@@ -249,11 +217,7 @@ export const heatmapNode = registerNode({
       advanced: true,
       group: 'order',
       visibleIf: (p) => ordering(p) && p.sortAxis !== 'both',
-      help:
-        'The other axis takes the same order, matched by label — on a square matrix over one ' +
-        'population that keeps the diagonal on the diagonal. Labels the sorted axis does not ' +
-        'have keep their place after them, so on a matrix whose axes share no labels this ' +
-        'changes nothing.',
+      help: 'The other axis takes the same order, matched by label. Labels the sorted axis does not have keep their place after them.',
     },
     {
       id: 'sortReverse',
@@ -284,10 +248,7 @@ export const heatmapNode = registerNode({
       group: 'order',
       options: CLUSTER_METRIC_OPTIONS,
       visibleIf: (p) => p.sortBy === 'cluster',
-      help:
-        'How two rows are compared. Euclidean is seaborn’s default and is swayed by how much a ' +
-        'row connects; correlation and cosine compare the shape of its profile instead. A row ' +
-        'with nothing in it is unlike everything and lands at the end.',
+      help: 'How two rows are compared. Euclidean is seaborn’s default and is swayed by how much a row connects; correlation and cosine compare the shape of its profile instead.',
     },
   ],
 

@@ -136,7 +136,7 @@ export const profileNode = registerNode({
       kind: 'column',
       label: 'Group by',
       from: 'neurons',
-      help: 'Profile every neuron sharing this column’s value together — means and spreads across a cell type rather than one cell. Leave empty for one neuron at a time.',
+      help: 'Profile every neuron sharing this column’s value together — means and spreads across a cell type. Leave empty for one neuron at a time.',
       default: '',
       optional: true,
       presentational: true,
@@ -151,9 +151,7 @@ export const profileNode = registerNode({
       kind: 'ids',
       label: 'Pinned',
       noun: 'neurons',
-      help:
-        'The neurons the Current port emits. Written by the widget’s pin control — one neuron, ' +
-        'or every member of the group when Group by is set. Kept when you page away.',
+      help: 'The neurons the Current port emits. Written by the widget’s pin control — one neuron, or every member of the group when Group by is set.',
       default: [],
     },
     {

@@ -169,7 +169,7 @@ export const viewer3dNode = registerNode({
       'showSkeletons',
       'Show skeletons',
       'skeletons',
-      'Draw the Skeletons socket. Off removes the geometry rather than hiding it, so it costs nothing and cannot be clicked.',
+      'Draw the Skeletons socket. Off removes the geometry rather than hiding it.',
     ),
     ...colorParams({
       prefix: 'skeleton',
@@ -231,11 +231,8 @@ export const viewer3dNode = registerNode({
       advanced: true,
       composite: { key: 'skeletonLineWidth', role: 'primary', label: 'Line width' },
       help:
-        'By radius and To scale both draw each neurite at the calibre it was traced or ' +
-        'segmented at, which is what makes a primary neurite read as one. They differ in the ' +
-        'unit: by radius is in pixels and looks the same at every zoom, to scale is in ' +
-        'nanometres and thickens as you zoom in. Sources that publish no radii fall back to ' +
-        'one width.',
+        '"By radius" (in pixels) and "To scale" (in nanometres, so it thickens as you zoom) ' +
+        'draw each neurite at its recorded radius. Missing radii fall back to one width.',
     },
     widthParam('uniform', {
       id: 'skeletonWidth',
@@ -243,7 +240,7 @@ export const viewer3dNode = registerNode({
       min: 1,
       max: 8,
       step: 0.5,
-      help: 'Above 1 the skeletons are drawn as camera-facing quads instead of hairlines, which costs more per segment.',
+      help: 'Width of every skeleton, in pixels. Above 1 costs more to draw.',
     }),
     widthParam('radius', {
       /*
@@ -259,9 +256,8 @@ export const viewer3dNode = registerNode({
       max: 16,
       step: 0.5,
       help:
-        'How wide the thickest neurites are drawn, in pixels. Everything thinner is drawn in ' +
-        'proportion, down to a one-pixel floor — so this sets the top of the range rather ' +
-        'than a width every node gets.',
+        'Width of the thickest neurites, in pixels. Thinner ones scale in proportion, down ' +
+        'to a one-pixel floor.',
     }),
     widthParam('world', {
       /*
@@ -277,15 +273,14 @@ export const viewer3dNode = registerNode({
       max: 8,
       step: 0.25,
       help:
-        'Multiplies the recorded radius. At 1 a 200 nm neurite is drawn 200 nm across, so the ' +
-        'picture is to scale and a neurite thickens as you zoom into it. Nodes whose source ' +
-        'recorded no radius stay a hairline rather than disappearing.',
+        'Multiplies the recorded radius; 1 draws every neurite at its true calibre. Nodes ' +
+        'with no recorded radius stay a hairline.',
     }),
     showParam(
       'showMeshes',
       'Show meshes',
       'meshes',
-      'Draw the Meshes socket. Useful with skeletons on the same neurons: turn the surfaces off to see the arbour inside them.',
+      'Draw the Meshes socket. Turn it off to see skeletons inside the same neurons.',
     ),
     ...colorParams({
       prefix: 'mesh',
@@ -319,7 +314,7 @@ export const viewer3dNode = registerNode({
       'showPoints',
       'Show points',
       'points',
-      'Draw the Points socket. A synapse cloud is often what is in the way of the morphology under it.',
+      'Draw the Points socket. A synapse cloud often hides the morphology under it.',
     ),
     ...colorParams({
       prefix: 'point',
@@ -344,7 +339,7 @@ export const viewer3dNode = registerNode({
       'showVolumes',
       'Show volumes',
       'volumes',
-      'Draw the Volumes socket. The one channel with no per-key eye to reach it — a constant colour has no legend keys — which is what this row is for.',
+      'Draw the Volumes socket. The only way to hide it: a constant colour has no legend keys.',
     ),
     ...colorParams({
       prefix: 'volume',
@@ -372,7 +367,7 @@ export const viewer3dNode = registerNode({
        */
       alpha: {
         default: 0.12,
-        help: 'Neuropil shells are context, so they start nearly transparent. Raise it to make the region the subject.',
+        help: 'Neuropil shells start nearly transparent, as context. Raise it to make the region the subject.',
       },
     }),
     {
@@ -386,7 +381,7 @@ export const viewer3dNode = registerNode({
       step: 5,
       presentational: true,
       advanced: true,
-      help: 'Diameter of a synapse dot, in nanometres — so it scales with the scene rather than staying a fixed number of pixels.',
+      help: 'Diameter of a synapse dot, in nanometres, so it scales with the scene.',
     },
     {
       /*
@@ -413,7 +408,7 @@ export const viewer3dNode = registerNode({
       default: false,
       presentational: true,
       advanced: true,
-      help: 'Re-frame the camera whenever what is on screen changes. Off keeps one camera, which is what you want for a set of images meant to be compared — and on is what you want when a For Each steps through neurons that are nowhere near each other.',
+      help: 'Re-frame the camera whenever the scene changes. Off keeps one camera, so a set of images can be compared.',
     },
     {
       /*
@@ -464,7 +459,7 @@ export const viewer3dNode = registerNode({
       slider: true,
       presentational: true,
       advanced: true,
-      help: 'Brightness of the scene lighting, over both the fill and the key light together. 1 is the calibrated default. Past about 1.4 the brightest surfaces start to clip — at 2 roughly a quarter of the visible surface is white rather than its own colour, which is a look rather than more light.',
+      help: 'Brightness of the scene lighting; 1 is the calibrated default. Past about 1.4 the brightest surfaces start to clip.',
     },
     {
       /*
@@ -507,7 +502,7 @@ export const viewer3dNode = registerNode({
       slider: true,
       presentational: true,
       advanced: true,
-      help: 'How strongly creases, cavities and the places surfaces meet are darkened — 0 turns the effect off entirely, and the pass is not run at all. Only opaque meshes and volumes can cast it; a scene of skeletons alone has no surface to occlude.',
+      help: 'How strongly creases and cavities are darkened; 0 turns the effect off. Only opaque meshes and volumes can cast it.',
     },
     {
       /*
@@ -534,7 +529,7 @@ export const viewer3dNode = registerNode({
       default: false,
       presentational: true,
       advanced: true,
-      help: 'Let a click in the scene select the neuron under it. Off by default, because a selection is a real output — a stray click while turning the view re-runs everything downstream of this node. Legend labels select either way.',
+      help: 'Let a click in the scene select the neuron under it, which re-runs everything downstream. Legend labels select either way.',
     },
     {
       group: 'scene',
@@ -544,7 +539,7 @@ export const viewer3dNode = registerNode({
       default: 'theme',
       presentational: true,
       advanced: true,
-      help: 'Pin the canvas light or dark instead of following the app. A figure for a paper usually wants light whatever the editor is set to.',
+      help: 'Pin the canvas light or dark instead of following the app theme.',
       options: [
         { value: 'theme', label: 'follow theme' },
         { value: 'dark', label: 'dark' },

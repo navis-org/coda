@@ -44,7 +44,7 @@ export const datasetNode = registerNode({
       id: 'refresh',
       kind: 'int',
       label: 'Refresh',
-      help: 'Bumped by the Refresh button. Forces a re-fetch even when nothing else changed — needed because cache keys are provenance-based and cannot see server-side changes.',
+      help: 'Bumped by the Refresh button. Forces a re-fetch even when nothing else changed.',
       default: 0,
       min: 0,
       advanced: true,

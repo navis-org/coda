@@ -87,11 +87,7 @@ export const ngSourceNode = registerNode({
       label: 'Source',
       default: '',
       placeholder: EXAMPLE,
-      help:
-        'A neuroglancer source URL. All of `gs://bucket/path`, `precomputed://gs://bucket/path` ' +
-        'and `gs://bucket/path|neuroglancer-precomputed:` name the same directory. Point it at a ' +
-        'segmentation and its mesh directory is followed automatically, or at the mesh ' +
-        'directory itself.',
+      help: 'A neuroglancer source URL. "gs://bucket/path", "precomputed://gs://bucket/path" and "gs://bucket/path|neuroglancer-precomputed:" all name the same directory. Point it at a segmentation or at the mesh directory itself.',
     },
     /*
      * Everything below is for the Layers output only, and all of it is `advanced` — the card's
@@ -107,7 +103,7 @@ export const ngSourceNode = registerNode({
       default: '',
       advanced: true,
       placeholder: '(from the URL)',
-      help: 'What the layer is called in neuroglancer. Empty names it after the last path segment. A name already in the scene is suffixed rather than silently replacing it.',
+      help: 'What the layer is called in neuroglancer. Empty names it after the last path segment. A name already in the scene is suffixed rather than replacing it.',
     },
     {
       id: 'layerType',
@@ -121,7 +117,7 @@ export const ngSourceNode = registerNode({
         { value: 'image', label: 'Image' },
         { value: 'annotation', label: 'Annotation' },
       ],
-      help: 'Automatic reads it off the source: an image volume becomes an image layer, meshes and skeletons a segmentation. Override it for a source whose `info` says something this build has not met.',
+      help: '"Automatic" reads it off the source: an image volume becomes an image layer, meshes and skeletons a segmentation. Override it where the source’s "info" says something unfamiliar.',
     },
     {
       id: 'segments',

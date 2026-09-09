@@ -121,10 +121,8 @@ export const embedNode = registerNode({
       min: 2,
       max: 200,
       help:
-        'How local the structure is. Small values keep fine detail and break the picture into ' +
-        'many islands; large ones preserve the overall shape and smear the small groups ' +
-        'together. 15 is umap-learn’s default. It counts the neuron itself, so 15 means 14 ' +
-        'neighbours.',
+        'How local the structure is. Small values keep fine detail, large ones the overall ' +
+        'shape. Counts the neuron itself, so 15 means 14 neighbours.',
     },
     {
       id: 'minDist',
@@ -136,9 +134,8 @@ export const embedNode = registerNode({
       step: 0.05,
       slider: true,
       help:
-        'How tightly points may pack. Near zero gives dense clumps that show cluster membership ' +
-        'clearly; larger values spread them out and show the broader arrangement. It changes ' +
-        'the drawing, not the neighbourhoods.',
+        'How tightly points may pack. Near zero gives dense clumps, larger values spread them ' +
+        'out. Changes the drawing, not the neighbourhoods.',
     },
     {
       id: 'seed',
@@ -148,10 +145,8 @@ export const embedNode = registerNode({
       min: 0,
       max: 1_000_000,
       help:
-        'UMAP is stochastic, so this is part of the result rather than a detail: the same seed ' +
-        'gives the same arrangement, and a different one gives a different — equally valid — ' +
-        'picture of the same neighbourhoods. Change it to check that a group you are reading ' +
-        'off the plot is real.',
+        'UMAP is stochastic: the same seed gives the same arrangement. Change it to check ' +
+        'that a group you read off the plot is real.',
     },
     {
       id: 'spread',
@@ -173,8 +168,8 @@ export const embedNode = registerNode({
       max: 5000,
       advanced: true,
       help:
-        'How long the layout is optimised for. 0 means the reference default — 500 below ten ' +
-        'thousand points and 200 above, which is what umap-learn does.',
+        'How long the layout is optimised for. 0 uses umap-learn’s default: 500 below ten ' +
+        'thousand points, 200 above.',
     },
 
     // --- the Matrix route ------------------------------------------------
@@ -190,9 +185,8 @@ export const embedNode = registerNode({
         { value: 'none', label: 'the values are already distances' },
       ],
       help:
-        'UMAP needs distances. Auto asks the matrix: NBLAST says it carries similarities, so ' +
-        'they are inverted; a matrix that says it carries distances is used as it stands. Same ' +
-        'control, and the same reading, as the Linkage node’s.',
+        'UMAP needs distances. "Auto" asks the matrix, inverting it if it carries ' +
+        'similarities. Same as the Linkage node’s.',
     },
 
     // --- the Features route ----------------------------------------------
@@ -203,7 +197,7 @@ export const embedNode = registerNode({
       default: 'long',
       advanced: true,
       options: SIMILARITY_LAYOUT_OPTIONS,
-      help: 'How the Features table is written down. Long is a table of triplets, which is what Partner Vectors produces; wide is one row per neuron with a column per feature.',
+      help: '"Long" is a table of triplets, as Partner Vectors produces; "wide" is one row per neuron with a column per feature.',
     },
     {
       id: 'observations',
@@ -223,7 +217,7 @@ export const embedNode = registerNode({
       default: '',
       advanced: true,
       visibleIf: isLongLayout,
-      help: 'What they are being compared over. From Partner Vectors this is `feature`.',
+      help: 'What they are being compared over. From Partner Vectors this is "feature".',
     },
     {
       id: 'value',
@@ -265,7 +259,7 @@ export const embedNode = registerNode({
       default: 'cosine',
       advanced: true,
       options: SIMILARITY_METRIC_OPTIONS,
-      help: 'How two feature vectors are compared, before UMAP sees them. The same list, and the same meanings, as the Similarity Matrix node’s.',
+      help: 'How two feature vectors are compared, before UMAP sees them. Same list as the Similarity Matrix node’s.',
     },
 
     // --- the Neighbours route --------------------------------------------
@@ -285,7 +279,7 @@ export const embedNode = registerNode({
       from: 'neighbours',
       default: 'targetId',
       advanced: true,
-      help: 'The column naming its neighbour. A neighbour that never appears as a *from* has no point of its own and is dropped — the card says how many.',
+      help: 'The column naming its neighbour. A neighbour that never appears as a "from" is dropped; the card says how many.',
     },
     {
       id: 'scoreColumn',
@@ -296,7 +290,7 @@ export const embedNode = registerNode({
       default: 'score',
       optional: true,
       advanced: true,
-      help: 'How close the pair is. Left empty, every listed neighbour counts the same, which makes this a plain graph rather than a ranking.',
+      help: 'How close the pair is. Left empty, every listed neighbour counts the same.',
     },
     {
       id: 'scoreIs',
@@ -330,7 +324,7 @@ export const embedNode = registerNode({
       default: 'type',
       optional: true,
       advanced: true,
-      help: 'What to write into the `annotation` column — cell type, hemilineage, a cluster from Cut Tree. It is what a Scatter Plot downstream colours by.',
+      help: 'What to write into the "annotation" column — cell type, hemilineage, a Cut Tree cluster. A Scatter Plot downstream colours by it.',
     },
   ],
 

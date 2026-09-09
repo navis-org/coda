@@ -282,7 +282,7 @@ export const customCaveNode = registerNode({
       id: 'version',
       kind: 'enum',
       label: 'Materialization',
-      help: 'Which materialization to query. Empty tracks the newest the datastack reports. These expire, so a pinned one eventually stops working — the card says so when it does.',
+      help: 'Which materialization to query. Empty tracks the newest the datastack reports. These expire, so a pinned one eventually stops working; the card says so.',
       default: '',
       /*
        * Filled from `peekMaterializations`, which is empty until the datastack has been named
@@ -324,7 +324,7 @@ export const customCaveNode = registerNode({
       kind: 'string',
       label: 'Neuron table',
       placeholder: 'proofread_neurons',
-      help: 'Any table with one row per neuron carrying a root id — a proofreading list, a nuclei table. Nothing in CAVE marks one, so it has to be named. Leave empty where the datastack has none: the Annotations source then supplies the neuron list.',
+      help: 'Any table with one row per neuron carrying a root id — a proofreading list, a nuclei table. Nothing in CAVE marks one, so it has to be named. Leave empty where the datastack has none.',
       default: '',
     },
     {
@@ -332,7 +332,7 @@ export const customCaveNode = registerNode({
       kind: 'string',
       label: 'ID column',
       placeholder: 'pt_root_id',
-      help: 'Column holding the root id. `pt_root_id` on every CAVE table Coda has seen.',
+      help: 'Column holding the root id. "pt_root_id" on every CAVE table Coda has seen.',
       default: 'pt_root_id',
     },
     {
@@ -600,7 +600,7 @@ export const customNeuPrintNode = registerNode({
       kind: 'string',
       label: 'Server',
       placeholder: DEFAULT_SERVER,
-      help: 'neuPrint deployment URL. Anything other than the default needs a proxy that can reach it; `pnpm dev` provides one.',
+      help: 'neuPrint deployment URL. Anything other than the default needs a proxy that can reach it; "pnpm dev" provides one.',
       default: DEFAULT_SERVER,
     },
     {

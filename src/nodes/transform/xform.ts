@@ -147,11 +147,7 @@ export const xformNode = registerNode({
         { value: COMMON_SPACE.id, label: `${COMMON_SPACE.label} (shared)` },
         ...bridgeableSpaces().map((s) => ({ value: s.id, label: s.label })),
       ],
-      help:
-        'Where to transform into. The shared template is one hop; another dataset’s space goes ' +
-        'out through it and back, which costs a second fit in time but little in accuracy. ' +
-        'What does cost accuracy is a target that does not cover the neuron — the hemibrain is ' +
-        'one hemisphere, so most of a whole-brain neuron has no coordinate there at all.',
+      help: 'Where to transform into. The shared template is one hop; another dataset’s space goes out through it and back. A target that does not cover the neuron costs accuracy — the hemibrain is one hemisphere.',
     },
     {
       id: 'space',
@@ -159,10 +155,7 @@ export const xformNode = registerNode({
       label: 'Space',
       default: '',
       options: [FROM_DATA, ...bridgeableSpaces().map((s) => ({ value: s.id, label: s.label }))],
-      help:
-        'Which space the geometry is coming *from*. Leave on “From the data” unless it ' +
-        'arrived without one — a Custom dataset node, usually — in which case naming it here ' +
-        'is a claim you are making about coordinates nobody else can identify.',
+      help: 'Which space the geometry is coming from. Leave on "From the data" unless it arrived without one, since naming it here is a claim about coordinates nobody else can identify.',
     },
   ],
 

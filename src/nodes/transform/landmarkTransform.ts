@@ -151,10 +151,7 @@ export const landmarkTransformNode = registerNode({
         { value: COMMON_SPACE.id, label: COMMON_SPACE.label },
         ...allSpaces().map((space) => ({ value: space.id, label: space.label })),
       ],
-      help:
-        'Which template space the second three columns are in, if it is one Coda knows. ' +
-        'Geometry transformed through this is stamped with it, which is what lets a later ' +
-        'Mirror or NBLAST check that two sets are comparable. Leave Unknown if it is your own.',
+      help: 'Which template space the second three columns are in, if it is one Coda knows. Geometry transformed through this is stamped with it, which lets a later Mirror or NBLAST check that two sets are comparable.',
     },
   ],
 

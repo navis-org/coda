@@ -153,7 +153,7 @@ export const influenceNode = registerNode({
       id: 'direction',
       kind: 'enum',
       label: 'Direction',
-      help: 'Upstream asks what influences your neurons; downstream asks what they influence. Upstream is the usual question and the only one every backend can answer \u2014 downstream needs published synapse totals.',
+      help: '"Upstream" asks what influences your neurons, "downstream" what they influence. Downstream needs published synapse totals, which not every backend has.',
       default: 'inputs',
       options: [
         { value: 'inputs', label: 'upstream (what influences them)' },
@@ -164,7 +164,7 @@ export const influenceNode = registerNode({
       id: 'maxHops',
       kind: 'int',
       label: 'Max hops',
-      help: 'How many synapses of indirect effect to include. More hops can only raise a score, never lower one, and the node reports a ceiling on what the hops it did not walk could have added.',
+      help: 'How many synapses of indirect effect to include. More hops can only raise a score, and the node reports a ceiling on what the hops it skipped could have added.',
       default: 4,
       min: 1,
       max: 12,
@@ -181,7 +181,7 @@ export const influenceNode = registerNode({
        * raising it does not merely drop rows — it redistributes the shares of the ones that
        * remain.
        */
-      help: 'Ignore connections below this many synapses. Under the default denominator it is applied before each connection\u2019s share is worked out, so raising it also raises the share of every connection that survives.',
+      help: 'Ignore connections below this many synapses. Under the default denominator it is applied before each connection’s share is worked out, so raising it also raises the surviving shares.',
       default: 5,
       min: 1,
       step: 1,
@@ -206,7 +206,7 @@ export const influenceNode = registerNode({
        * measures the consequence against the exact solve on 300 neurons: at 0.5 and four hops,
        * 97% of the score and 19 of the exact top 20; at 0.99 and four hops, 6.5% and 6 of 20.
        */
-      help: 'How much of a signal survives each further synapse; 0.5 means half. This is the published lambda_max. Its 0.99 default reaches a hundred hops, far more than a bounded walk can see, so this defaults lower \u2014 at 0.5 four hops covers 97% of the score against 6% at 0.99.',
+      help: 'How much of a signal survives each further synapse; 0.5 means half. This is the published lambda_max. At 0.5 four hops cover 97% of the score, against 6% at its 0.99 default.',
       default: 0.5,
       min: 0.01,
       max: 0.99,
@@ -230,7 +230,7 @@ export const influenceNode = registerNode({
        * the moment a CAVE user created it. The cost of that choice is that the two things it
        * cannot do have to say so, which `validate` does, naming the fix.
        */
-      help: 'How each connection\u2019s share of a neuron\u2019s input is worked out. Summed within the traversal uses the input list the walk already fetched \u2014 free, works everywhere, and is what the reference implementation computes, but it rules out downstream and meeting in the middle. Published totals ask the dataset instead: a query per hop, and both become available.',
+      help: 'How each connection’s share of a neuron’s input is worked out. "Summed within the traversal" reuses what the walk fetched but rules out downstream. "Published totals" costs a query per hop and allows both.',
       default: 'traversal',
       options: [
         { value: 'traversal', label: 'summed within the traversal' },
@@ -253,14 +253,14 @@ export const influenceNode = registerNode({
        * of the key means something other than the default. See `ParamBase.absentMeans` for the
        * case where there is.
        */
-      help: 'Off, only proofread neurons carry the signal onwards \u2014 what counts as proofread is set on the Dataset node. Drive that reaches a fragment is reported as lost rather than shared out among the rest, which would be an invented number.',
+      help: 'Off, only proofread neurons carry the signal onwards — what counts as proofread is set on the Dataset node. Drive reaching a fragment is reported as lost rather than shared out.',
       default: false,
     },
     {
       id: 'frontierLimit',
       kind: 'int',
       label: 'Frontier limit',
-      help: 'Carry at most this many neurons into the next hop, strongest first. This is what bounds the cost, and whatever it discards is reported as a share of the signal so a limit that is biting is visible. 0 is no limit.',
+      help: 'Carry at most this many neurons into the next hop, strongest first; 0 is no limit. What it discards is reported as a share of the signal.',
       default: 2000,
       min: 0,
       step: 500,
@@ -275,14 +275,14 @@ export const influenceNode = registerNode({
        * end. Which is also why the two cannot both be on: the channels index one set, and asking
        * for both would be an outer product per reached neuron rather than a vector.
        */
-      help: 'Emit one row per query neuron per influencer, before the scores are summed across your neurons — which is what a Pivot needs to build a queries x influencers matrix for a Heatmap. Group By on the influencer gets you back to the plain ranking. It costs one row per reached neuron per query neuron, and the result is no longer a neuron set, so it is off by default.',
+      help: 'Emit one row per query neuron per influencer, before the scores are summed — which is what a Pivot needs for a queries × influencers Heatmap. The result is no longer a neuron set.',
       default: false,
     },
     {
       id: 'seedWeighting',
       kind: 'enum',
       label: 'Seed weighting',
-      help: 'Whether a score is the sum or the mean across the neurons you wired in. One each gives every seed its own unit, so a score is their sum \u2014 the reference implementation\u2019s choice, and a bigger seed set gives bigger scores. Share of one divides one unit between them, making a score their mean, which is what lets two runs over different-sized sets be compared.',
+      help: 'Whether a score is the sum or the mean across the neurons you wired in. "One each" makes a bigger seed set score higher; "share of one" divides one unit between them, so different-sized runs compare.',
       default: 'each',
       options: [
         { value: 'each', label: 'one each' },

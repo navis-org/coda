@@ -86,10 +86,7 @@ export const scatterNode = registerNode({
       id: 'xLog',
       kind: 'boolean',
       label: 'Log X',
-      help:
-        'Synapse counts and connection weights span orders of magnitude, where a linear ' +
-        'axis piles most of the data into one corner. Values at or below zero have no ' +
-        'logarithm and are dropped; the caption says how many.',
+      help: 'For data spanning orders of magnitude, where a linear axis piles most of it into one corner. Values at or below zero are dropped; the caption says how many.',
       default: false,
       presentational: true,
       advanced: true,
@@ -108,9 +105,7 @@ export const scatterNode = registerNode({
       id: 'aspect',
       kind: 'enum',
       label: 'Aspect',
-      help:
-        'Equal gives both axes the same units per pixel, which is what makes distance in a ' +
-        'UMAP or t-SNE embedding mean the same thing in every direction. Fit fills the card.',
+      help: '"Equal" gives both axes the same units per pixel, which is what a UMAP or t-SNE embedding needs. "Fit" fills the card.',
       default: 'fit',
       options: [
         { value: 'fit', label: 'fit the card' },
@@ -192,10 +187,7 @@ export const scatterNode = registerNode({
       id: 'maxPoints',
       kind: 'int',
       label: 'Max points',
-      help:
-        'Above this, a stable stride through the rows is drawn and the caption says how many ' +
-        'of how many. It thins the picture only — the table passes through whole and a ' +
-        'lasso still catches every row inside it.',
+      help: 'Above this, a stable stride through the rows is drawn and the caption says how many of how many. It thins the picture only — the table passes through whole.',
       default: 50000,
       min: 100,
       step: 1000,
@@ -214,9 +206,7 @@ export const scatterNode = registerNode({
         { value: 'none', label: 'none' },
         { value: 'linear', label: 'linear fit' },
       ],
-      help:
-        'Least squares in the space the axes are drawn in, so a log-log fit is a power law ' +
-        'and the line is straight on screen.',
+      help: 'Least squares in the space the axes are drawn in, so a log-log fit is a power law.',
       presentational: true,
       advanced: true,
       group: 'trend',
@@ -237,10 +227,7 @@ export const scatterNode = registerNode({
       id: 'idColumn',
       kind: 'column',
       label: 'ID column',
-      help:
-        'What a selected point is called downstream. An id survives an upstream re-run where ' +
-        'a row position does not, so this is preferred — with the row index as the fallback ' +
-        'when the table carries no usable id, which the caption admits to.',
+      help: 'What a selected point is called downstream. An id survives an upstream re-run where a row position does not; the row index is the fallback, and the caption says so.',
       from: 'in',
       // `neuronId` when the table has one; `optional` is what makes the resolver answer
       // "nothing" rather than reaching for the first column when it does not.
