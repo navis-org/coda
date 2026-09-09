@@ -238,16 +238,16 @@ change under `src/nodes`, `src/core` or `src/examples`, or dev would keep servin
 registry said when the page first loaded — the one failure that would make this worse than a
 committed file.
 
-Verify with `pnpm build`: `nodes-*.js` is **230.4 kB (56.9 kB gzipped)**, almost all of it the
+Verify with `pnpm build`: `nodes-*.js` is **225.1 kB (54.7 kB gzipped)**, almost all of it the
 inlined registry, so the page's own logic is a few kB of that; `dist/nodes.html` must reference no
-`main-*` chunk. (Earlier figures here said ~86 kB and then 198.8 kB; the registry keeps growing,
-and each number was re-measured rather than reasoned forward.)
+`main-*` chunk. (Earlier figures here said ~86 kB, then 198.8 kB, then 230.4; the registry keeps
+growing and shrinking under it, and each number was re-measured rather than reasoned forward.)
 
 **The page is not a 5 kB document and has not been one since the registry dump landed**, which is
 worth saying because the sentence above still calls 660 kB unaffordable and both are true. The
-whole entry costs **343 kB raw / 86.5 kB gzipped** — `nodes.html` 104.1/23.6, `nodes-*.js`
-230.4/56.9, the shared `glyphs-*.js` 31.6/8.7 — against the field guide's 43.8/10.5 plus 4.4 kB of
-script. What survives from the 5 kB argument is the *rule*, not the number: the page must import
+whole entry costs **423 kB raw / 100.1 kB gzipped** — `nodes.html` 128.0/28.5, `nodes-*.js`
+225.1/54.7, `nodes-*.css` 37.9/8.0, the shared `glyphs-*.js` 32.6/8.9 — against the field guide's
+43.8/10.5 plus 4.4 kB of script. What survives from the 5 kB argument is the *rule*, not the number: the page must import
 nothing from `src/nodes`, `src/core` or `src/ui` beyond the glyph table, and the check for that is
 the chunk list rather than a byte count.
 
@@ -320,6 +320,99 @@ on no surface in the app, and the link went on pointing at a page where the word
 exist. `nodeGuide.test.ts` asserted the names were derived correctly and never that they resolved to
 anything, which is why nothing caught it.
 
+### "Reading a card": the annotated pair at the top
+
+Everything else on the page answers *which node do I want*. Nothing answered **what are all these
+little buttons** — and a card carries eleven of them: a run badge, `▶`, `⤢`, `⇥`, `?`, `☰`, `▾`, a
+cache clause, an edge-set button, a `… N more` line and a selection row. Each has a `title`, which
+is a fine answer to "what is *this* one" and no answer at all to "what is on a card", because a
+tooltip is only read by somebody who already suspected the control was there.
+
+So the page opens with two real cards wired together — a neuPrint dataset feeding an Explore
+Dataset — with eighteen parts boxed, a leader to each, and a note that opens on hover.
+`src/nodeguide/anatomy.ts` is the markup and the table; `src/nodeguide/anatomyStage.ts` is the
+geometry.
+
+**Two cards, because the chrome is not the same on every card.** An edge set and a cache age exist
+only on a dataset node; `⤢`, `⇥` and `?` appear only on a node with a result to open and a document
+to open beside it. Which card carries which callout follows from that, and the two run states are
+picked to make the controls honest: the dataset is `✓` and its `▶` is drawn at the disabled 0.4
+opacity a card really uses for *Already up to date*, while Explore is `!` and its `▶ ⤢ ⇥` carry the
+`--surface-3` chip a stale card really gives them. Getting that pair the other way round would have
+meant drawing a live-looking Run on a node with nothing to do.
+
+**Hand-written, like the socket legend and unlike everything else here.** `main.ts` names no node,
+no socket and no parameter. This section names two, and it is the same exception `LEGEND` already
+is: a *lesson* rather than an inventory. A figure generated from whatever two nodes sorted first
+would draw whichever chrome those two happened to carry, which is the one thing this section may
+not leave to chance. What *is* derived is the run-state table — `STATE_GLYPH` / `STATE_TEXT`, in the
+app's own order, so a state added to the scheduler appears here rather than leaving the guide one
+glyph short.
+
+**Spliced in at build time, on the appendix's route** (`<!--@node-anatomy-->`, the second marker
+`vite/nodeGuideData.ts` handles). Not for weight — the module would cost about a kilobyte in the
+page — but because the notes are *content*: they are the paragraph that says what a Coda card is,
+and rendering them after load would put them in the shipped file nowhere. That decision also fixes
+the fallback: the notes are ordinary text in the document, and the stylesheet folds them into hover
+panels only under `.js` and above its own breakpoint, so a phone, a reader with no script and a
+crawler all get the same words as a numbered list under two stacked cards.
+
+**Labels are authored, boxes and the wire are measured.** Where a label goes is a composition, so
+the eighteen coordinates are typed into the table. Where a *box* goes is a fact about an element,
+and a rectangle typed out beside a label drifts the first time a font falls back or a card grows a
+row — silently, pointing an inch below the button it names. So every box and every leader endpoint
+comes from `getBoundingClientRect`, re-taken on a resize and once more when the web fonts land; the
+wire's `d` is generated from its two sockets, with React Flow's own cubic. Three things this cost:
+
+- **The box lives in the item's coordinate space and the measurement in the stage's.** The box is a
+  child of its callout so that hovering the label can light it with a selector rather than a third
+  class toggle — and a positioned callout is then the box's containing block. That subtraction was
+  missing first, and eighteen boxes drew in the wrong place while every leader was correct.
+- **A hover panel is `visibility: hidden`, not absent, so it still takes part in layout.** One
+  hanging off the right of a right-hand label made the *document* 1130px wide in a 1024px viewport —
+  at every width, invisibly, with a sideways scrollbar traceable to nothing on screen. `NOTE_W` and
+  a per-callout `data-notex` hang each panel from whichever end keeps it on the stage.
+- **The breakpoint is asked of the stylesheet rather than restated.** `anatomyStage.ts` reads
+  `display` off the leader canvas instead of repeating the media query in a `matchMedia` string:
+  the labels are positioned by CSS and the lines by that file, so a disagreement between the two
+  numbers leaves labels scattered round two cards with nothing pointing at anything.
+
+**Two boxes, because two things want different widths.** The canvas (`.anat__canvas`) is the page's
+own column — the same width as the node grid below it, so the section shares the document's left and
+right edge rather than sitting in a narrower one of its own. The stage inside it is the fixed px
+world every label is placed in, centred there and **never stretched**: `--x` and `--y` are authored
+against exactly that box, so widening it would move every label away from the part it names. The
+extra width goes to the canvas, which is the one part of this figure that still means something when
+it is empty. Nor does the stage *scale* — it stands down to the list below 1060px instead. A leader
+pointing at a 14px button has to be authored against a fixed geometry, and scaling a 10.5px mono
+label down to fit a phone makes a figure *about small controls* unreadable rather than smaller. The
+breakpoint sits above 940 plus two gutters with room to spare, since the gutter is a `clamp` on
+`vw` and "just fits" would be a coincidence of one viewport rather than a property.
+
+**It also repaired the preview card's header.** `.node__head` was a 16% tint of the category
+colour — what the editor's card looked like when this page was written and has not looked like
+since. `theme.css` declares `--cat-head` / `--cat-ink` once, listing the stylesheets that read it,
+and this file was the fifth copy that comment warns about. A section about *reading* a card cannot
+be the one place a header is the wrong colour, so the guide's card now reads the pair off its own
+`data-cat` like every other surface.
+
+Cost: `dist/nodes.html` 106.2 → 128.1 kB raw and 24.0 → 28.5 kB gzipped, `nodes-*.css` +9.0/+1.5,
+`nodes-*.js` +2.8/+1.2 for the geometry pass — **+7.2 kB gzipped** for the section.
+
+`anatomy.test.ts` pins what a table can pin: every callout points at a part and every marked part
+has a callout, the notes are sentences rather than captions, every run state is named, no two
+labels share a coordinate (checked with an estimated wrapped height, which is the collision that
+happened twice while this was being arranged), and — the one that matters most — **every glyph and
+`title` the figure draws still appears in `CodaNodeView.tsx`, `DatasetBody.tsx`, `CacheAge.tsx` and
+`ExploreBody.tsx`**. The figure is a *copy* of the editor's chrome, so a renamed button leaves a
+guide confidently describing a control that no longer says that, and nothing breaks.
+
+The arrangement is `pnpm probe:node-anatomy`, in a browser at four widths: the document never wider
+than the viewport, the canvas sharing the node grid's own content edges, every box landing on its
+part, no two rendered labels overlapping, every hover panel inside the stage, the wire ending on both
+sockets, and — below the breakpoint — every note visible with the figure stood down. jsdom performs no layout, so every one of those is zero against
+zero there.
+
 ### The static index at the foot of the page
 
 Everything above is drawn *after load*, and what the tiles carry is a **label** — a node's
@@ -332,7 +425,7 @@ crawler, and `SECTIONS`/`CAT_LABEL` moved to `src/nodeguide/sections.ts` so the 
 cannot disagree about which section a node is in. Cost: `dist/nodes.html` 5.4 kB → 87.8 kB raw,
 2.1 kB → 22.2 kB gzipped, with `nodes-*.js` unchanged — which is the number to re-check after any
 edit here, since importing `appendix.ts` from `main.ts` would land the whole registry in the page.
-(104.1 kB / 23.6 kB now, with a demo link per entry.)
+(128.0 kB / 28.5 kB now, with a demo link per entry and the anatomy figure above it.)
 See [seo.md](seo.md).
 
 ### Smaller decisions, each of which was wrong first

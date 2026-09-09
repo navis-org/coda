@@ -795,13 +795,24 @@ button.setting__row[aria-expanded='true'] .setting__name {
   background: var(--status-ok);
   z-index: 1;
 }
+/*
+ * `--cat-head` / `--cat-ink`, off the card's own `data-cat` — not a wash mixed here.
+ *
+ * This header was a 16% tint of the category colour, which is what the editor's card looked
+ * like when this page was written and has not looked like since. `theme.css` states the pair
+ * once for exactly this reason and lists the stylesheets that read it; this file was the fifth
+ * copy it warns about, advertising a card the app no longer draws. The anatomy figure above is
+ * what made it worth fixing rather than noting: a section about *reading* a card cannot be the
+ * one place a header is the wrong colour.
+ */
 .node__head {
   display: flex;
   align-items: center;
   gap: 6px;
   line-height: 1.5;
   padding: 5px 8px 5px calc(8px + var(--state-bar));
-  background: color-mix(in srgb, var(--cat) 16%, var(--surface-2));
+  background: var(--cat-head, var(--cat-utility-head));
+  color: var(--cat-ink, var(--cat-ink-light));
   border-bottom: 1px solid var(--border);
 }
 .node__title {
@@ -809,11 +820,17 @@ button.setting__row[aria-expanded='true'] .setting__name {
   font-weight: 650;
   font-size: 12px;
   letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+/* Inherits, like the real header's controls: `--text-muted` on `#0d7f57` is 1.5:1, and the
+   hierarchy between a header's controls is opacity rather than a second colour. */
 .node__play {
   font-size: 10px;
-  color: var(--text-muted);
-  border: 1px solid var(--border);
+  color: inherit;
+  opacity: 0.7;
+  border: 1px solid currentColor;
   border-radius: 3px;
   padding: 0 4px;
   line-height: 1.5;
@@ -1229,4 +1246,646 @@ button.setting__row[aria-expanded='true'] .setting__name {
 }
 .entry__open a:hover {
   color: var(--text-primary);
+}
+
+/* ==========================================================================
+   "Reading a card" — the annotated pair above the grid.
+
+   Two layouts of one document, and which one is drawn is decided by two
+   things: `main.ts` claiming `.js` on the root, and a viewport wide enough
+   for the stage. Below either, the callouts are a plain numbered list with
+   every note visible and the cards sit above it in flow — which is also what
+   a crawler and a reader with no script get. The annotated version is the
+   enhancement, never the source of the words.
+
+   The stage is a fixed px world (`STAGE_W` × `STAGE_H` in `anatomy.ts`) and
+   deliberately does not scale: a leader line pointing at a 14px button has to
+   be authored against a fixed geometry, and scaling a 10.5px label down to fit
+   a phone makes a figure about small controls unreadable rather than smaller.
+
+   The cards themselves reuse the preview card's classes, so the socket
+   shapes, the category header and the param rows are the same declarations
+   the detail pane draws — a guide that drew its own approximation of a card
+   would be the one place a reader could learn something untrue.
+   ========================================================================== */
+
+.anat {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  padding-block: clamp(1.4rem, 3.2vw, 2.6rem);
+}
+.anat__h {
+  font-size: clamp(1.2rem, 2.1vw, 1.6rem);
+}
+.anat__lede {
+  max-width: 74ch;
+  margin-top: 0.55rem;
+  color: var(--text-secondary);
+}
+
+/* --- the fallback layout: cards, then the parts as a list ----------------- */
+
+.anat__stage {
+  margin-top: 1.5rem;
+  display: grid;
+  gap: 1.5rem;
+}
+.anat__cards {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1.2rem;
+}
+.anat__card {
+  position: relative;
+  width: var(--w);
+  max-width: 100%;
+}
+/* Drawn only on the stage: one is a diagonal between two absolute positions
+   and the other is measured from them. Both are meaningless in flow. */
+.anat__wire,
+.anat__leads,
+.anat__box {
+  display: none;
+}
+.anat__marks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.9rem 1.6rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  counter-reset: anat;
+}
+.anat__item {
+  min-width: 0;
+}
+.anat__label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-weight: 650;
+  font-size: 0.95rem;
+  text-align: left;
+  cursor: default;
+}
+.anat__n {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.anat__note {
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+/* The run states, as the card draws them. Also the one note with a figure in
+   it, which is why it is a grid rather than a sentence listing six glyphs. */
+.anat__states {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 0.2rem 0.6rem;
+  margin-top: 0.5rem;
+}
+.anat__state {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+/* `state-badge` is `editor.css`'s class name, borrowed rather than renamed:
+   this is the same mark, and the two files reading one set of `--status-*`
+   tokens is what stops the guide advertising a colour the card stopped using. */
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-inverse);
+  background: var(--status-muted);
+}
+.state-badge[data-state='ok'] {
+  background: var(--status-ok);
+}
+.state-badge[data-state='stale'] {
+  background: var(--status-stale);
+  color: #0b0b0b;
+}
+.state-badge[data-state='running'] {
+  background: var(--status-running);
+  color: #fff;
+}
+.state-badge[data-state='error'] {
+  background: var(--status-error);
+  color: #fff;
+}
+
+/* --- the two cards -------------------------------------------------------- */
+
+/* The preview card is one width and these are two, and both let their sockets
+   out the way the real card does — `overflow: clip` with a bleed, not the
+   `hidden` the detail pane's card uses, because there the clipped half-disc is
+   the faithful picture and here the socket is the thing being pointed at. */
+.anat__card.node {
+  width: var(--w);
+  overflow: clip;
+  overflow-clip-margin: var(--card-bleed, 12px);
+}
+/* The preview card's bar is always green; these two carry a state. */
+.anat__card.node::before {
+  display: none;
+}
+.node__bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--state-bar);
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: var(--status-muted);
+  z-index: 1;
+}
+.node__bar[data-state='ok'] {
+  background: var(--status-ok);
+}
+.node__bar[data-state='stale'] {
+  background: var(--status-stale);
+}
+.node__bar[data-state='error'] {
+  background: var(--status-error);
+}
+
+/* The header's controls. Matched on the element rather than on a list of
+   names, which is `editor.css`'s own rule for the same row: the hierarchy
+   between them is opacity, so it survives nine category fills. */
+.node__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  flex: none;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.85;
+}
+.node__btn--bare {
+  font-size: 10px;
+  opacity: 0.72;
+}
+/* A node waiting on an explicit Run advertises it — and so do the two
+   controls beside it, which share the run button's class in the app. */
+.node[data-state='stale'] .node__btn:not(.node__btn--bare) {
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  opacity: 1;
+}
+.node[data-state='ok'] .node__btn:not(.node__btn--bare) {
+  opacity: 0.4;
+}
+
+/* One box round a side's sockets: those two callouts are about the row of
+   them rather than about any one port. They paint nothing — the box the
+   callout draws is the whole of what is seen — and they are sized to the
+   labels rather than to the port cell, which is half the card wide and mostly
+   empty on the side away from its text. */
+.node__ports {
+  position: relative;
+}
+.port__group {
+  position: absolute;
+  right: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 30%;
+}
+/* The input side of this card is one row of three, so it takes that row's
+   height rather than the whole band's. */
+.port__group--in {
+  left: 0;
+  right: auto;
+  bottom: auto;
+  height: 20px;
+}
+
+.node__issue {
+  padding: 3px 8px 4px calc(8px + var(--state-bar));
+  font-size: 10px;
+  line-height: 1.35;
+  background: color-mix(in srgb, var(--status-error) 13%, var(--surface-2));
+  border-top: 1px solid color-mix(in srgb, var(--status-error) 30%, transparent);
+  color: var(--text-primary);
+}
+.node__issue[data-severity='warning'] {
+  background: color-mix(in srgb, var(--status-stale) 15%, var(--surface-2));
+  border-top-color: color-mix(in srgb, var(--status-stale) 32%, transparent);
+}
+
+.node__cache,
+.node__timing {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.node__cache {
+  border: 0;
+  background: none;
+  padding: 0;
+  white-space: nowrap;
+}
+
+/* --- the dataset card's body --------------------------------------------- */
+
+.ds {
+  display: grid;
+  gap: 5px;
+  padding: 6px 8px 5px calc(8px + var(--state-bar));
+  border-top: 1px solid var(--border);
+}
+.ds__art {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 74px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-3);
+  color: var(--cat-dataset);
+}
+.ds__art svg {
+  width: 58px;
+  height: 52px;
+}
+.ds__caption {
+  position: absolute;
+  right: 5px;
+  bottom: 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+}
+.ds__pop {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+.ds__foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.ds__id {
+  font-family: var(--font-mono);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ds__btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* --- the Explore card's body --------------------------------------------- */
+
+.ex {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px 0 calc(8px + var(--state-bar));
+  border-top: 1px solid var(--border);
+}
+.ex__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ex__search span {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  padding: 2px 6px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  background: var(--surface-1);
+}
+.ex__search i {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.ex__row {
+  display: grid;
+  grid-template-columns: 13px 30px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  border-top: 1px solid var(--border);
+}
+.ex__tick {
+  width: 11px;
+  height: 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--surface-1);
+}
+.ex__tick[data-on='1'] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.ex__thumb {
+  width: 30px;
+  height: 24px;
+  color: var(--text-secondary);
+  background: var(--surface-3);
+  border-radius: 3px;
+}
+.ex__name {
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  line-height: 1.25;
+}
+.ex__name b {
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.ex__id {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+.ex__sub {
+  display: block;
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+.ex__num {
+  text-align: right;
+  font-size: 9.5px;
+  color: var(--text-muted);
+  line-height: 1.15;
+}
+.ex__num b {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.ex__foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0 4px;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.ex__count {
+  flex: 1;
+  white-space: nowrap;
+}
+.ex__link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 10px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.ex__pager {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --- the stage ------------------------------------------------------------ */
+
+/*
+ * The breakpoint the figure stands down at, and it is one number in one place.
+ *
+ * `anatomyStage.ts` does not restate it — it reads `display` off the leader canvas — so this is
+ * the only declaration of where the arrangement begins. Set above the stage's own width plus the
+ * shell's gutters with room to spare: at exactly `--stage-w` the two would meet with nothing
+ * between them, and the gutter is a `clamp` on `vw`, so "just fits" is a coincidence of one
+ * viewport rather than a property.
+ */
+@media (min-width: 1060px) {
+  /*
+   * The canvas is the page's column — the same width as the node grid below, so the section
+   * shares the document's left and right edge instead of sitting in a narrower one of its own.
+   * It carries the dot grid, which is what says these are cards on a canvas rather than two
+   * diagrams; the same declaration as the preview panel in the detail pane.
+   */
+  .js .anat__canvas {
+    margin-top: 1.8rem;
+    background:
+      radial-gradient(var(--canvas-dot) 1px, transparent 1px) 0 0 / 20px 20px,
+      var(--canvas);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  /*
+   * The stage is the fixed px world the eighteen labels are placed in, centred in that column
+   * and never stretched. Widening it would move every label away from the part it names —
+   * `--x` and `--y` are authored against this exact box — so the extra width goes to the canvas
+   * around it, which is the one part of the figure that means something when it is empty.
+   */
+  .js .anat__stage {
+    position: relative;
+    display: block;
+    width: var(--stage-w);
+    height: var(--stage-h);
+    margin: 0 auto;
+  }
+  /* Static, so the cards inside it resolve against the stage rather than
+     against a second containing block that would have to be the same size. */
+  .js .anat__cards {
+    display: block;
+    position: static;
+  }
+  .js .anat__card {
+    position: absolute;
+    left: var(--x);
+    top: var(--y);
+    z-index: 1;
+  }
+  .js .anat__wire,
+  .js .anat__leads {
+    display: block;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
+  .js .anat__wire {
+    z-index: 0;
+  }
+  .js .anat__leads {
+    z-index: 2;
+  }
+  .js .anat__wire path {
+    fill: none;
+    stroke: var(--sock, var(--socket-scalar));
+    stroke-width: 1.5;
+  }
+  .js .anat__wire path.is-hot {
+    stroke-width: 3;
+  }
+  .js .anat__leads line {
+    stroke: var(--border-strong);
+    stroke-width: 1;
+  }
+  .js .anat__leads line.is-hot {
+    stroke: var(--accent);
+    stroke-width: 1.5;
+  }
+  .js .anat__leads circle {
+    fill: var(--border-strong);
+  }
+  .js .anat__leads circle.is-hot {
+    fill: var(--accent);
+  }
+
+  .js .anat__marks {
+    display: block;
+    position: static;
+  }
+  .js .anat__item {
+    position: absolute;
+    left: var(--x);
+    top: var(--y);
+    width: var(--w);
+    z-index: 3;
+  }
+  .js .anat__item:hover,
+  .js .anat__item:focus-within {
+    z-index: 9;
+  }
+  .js .anat__label {
+    display: block;
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 400;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    color: var(--text-secondary);
+    cursor: help;
+  }
+  .js .anat__item[data-align='right'] .anat__label {
+    text-align: right;
+  }
+  .js .anat__item[data-align='center'] .anat__label {
+    text-align: center;
+  }
+  .js .anat__label:hover,
+  .js .anat__item:focus-within .anat__label {
+    color: var(--text-primary);
+  }
+  /* The number is what a leader line resolves to when two labels sit close
+     enough that which line belongs to which is ambiguous. */
+  .js .anat__n {
+    display: inline-block;
+    min-width: 13px;
+    margin-right: 3px;
+    border-radius: 3px;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    text-align: center;
+  }
+  .js .anat__label:hover .anat__n,
+  .js .anat__item:focus-within .anat__n {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--text-inverse);
+  }
+
+  /* The box round the part, positioned by `main.ts` from the element's own
+     measured rect — never from a coordinate typed out beside the label, which
+     is how a figure comes to point an inch below the button it names. */
+  .js .anat__box {
+    display: block;
+    position: absolute;
+    left: var(--bx);
+    top: var(--by);
+    width: var(--bw);
+    height: var(--bh);
+    border: 1px dashed var(--border-strong);
+    border-radius: 3px;
+    pointer-events: none;
+    z-index: 4;
+  }
+  .js .anat__item[data-mark='point'] .anat__box {
+    border-radius: 50%;
+  }
+  .js .anat__item:hover .anat__box,
+  .js .anat__item:focus-within .anat__box {
+    border-style: solid;
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+
+  .js .anat__note {
+    position: absolute;
+    width: 252px;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 6px);
+    background: var(--surface-2);
+    box-shadow: var(--shadow-node);
+    font-size: 0.8rem;
+    line-height: 1.45;
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      opacity 0.12s,
+      visibility 0.12s;
+  }
+  .js .anat__item[data-notex='l'] .anat__note {
+    left: 0;
+  }
+  .js .anat__item[data-notex='r'] .anat__note {
+    right: 0;
+  }
+  .js .anat__item[data-note='down'] .anat__note {
+    top: calc(100% + 7px);
+  }
+  .js .anat__item[data-note='up'] .anat__note {
+    bottom: calc(100% + 7px);
+  }
+  .js .anat__item:hover .anat__note,
+  .js .anat__item:focus-within .anat__note {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anat__note {
+    transition: none;
+  }
 }

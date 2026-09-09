@@ -53,9 +53,11 @@ const VIRTUAL_ID = 'virtual:node-guide-data'
 const RESOLVED_ID = '\0' + VIRTUAL_ID
 const DATA_ENTRY = '/src/nodeguide/data.ts'
 const APPENDIX_ENTRY = '/src/nodeguide/appendix.ts'
+const ANATOMY_ENTRY = '/src/nodeguide/anatomy.ts'
 
-/** The marker `nodes.html` carries where the static index goes. */
+/** The markers `nodes.html` carries where the two rendered sections go. */
 const APPENDIX_SLOT = '<!--@node-appendix-->'
+const ANATOMY_SLOT = '<!--@node-anatomy-->'
 
 export function nodeGuideData(): Plugin {
   /** The dev server, when there is one. */
@@ -85,15 +87,27 @@ export function nodeGuideData(): Plugin {
     },
 
     /**
-     * The static index, spliced into `nodes.html`.
+     * The two rendered sections, spliced into `nodes.html`.
      *
-     * Returns the html untouched when the marker is absent, which is every other entry — and is
-     * also what makes removing the marker a way to turn this off without touching the plugin.
+     * Each marker is handled on its own, so the html comes back untouched for every other entry
+     * — and removing a marker is how either section is turned off without touching the plugin.
+     *
+     * `anatomy.ts` reads no registry at all: it is two hand-built cards and the run-state table,
+     * and it is here rather than written into `nodes.html` by hand because its notes are
+     * *content*. Rendering them in the browser would put the paragraph that says what a Coda
+     * card is in the shipped file nowhere, which is the failure the index below was written for.
      */
     async transformIndexHtml(html) {
-      if (!html.includes(APPENDIX_SLOT)) return
-      const mod = await ssr<{ appendixHTML: () => string }>(APPENDIX_ENTRY)
-      return html.replace(APPENDIX_SLOT, mod.appendixHTML())
+      let out = html
+      if (out.includes(ANATOMY_SLOT)) {
+        const mod = await ssr<{ anatomyHTML: () => string }>(ANATOMY_ENTRY)
+        out = out.replace(ANATOMY_SLOT, mod.anatomyHTML())
+      }
+      if (out.includes(APPENDIX_SLOT)) {
+        const mod = await ssr<{ appendixHTML: () => string }>(APPENDIX_ENTRY)
+        out = out.replace(APPENDIX_SLOT, mod.appendixHTML())
+      }
+      return out === html ? undefined : out
     },
     resolveId(id) {
       return id === VIRTUAL_ID ? RESOLVED_ID : undefined

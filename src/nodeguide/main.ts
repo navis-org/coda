@@ -18,6 +18,7 @@
 
 import './nodeguide.css'
 import NODE_DATA from 'virtual:node-guide-data'
+import { mountAnatomy } from './anatomyStage'
 import type { GuideData, GuideNode, GuideParam, GuidePort } from './data'
 import { CAT_LABEL, SECTIONS, appHref } from './sections'
 /*
@@ -200,7 +201,10 @@ function previewHTML(n: GuideNode): string {
     : ''
   const more = hidden > 0 ? `<div class="node__more">… ${hidden} more</div>` : ''
 
-  return `<div class="node" style="--cat: var(--cat-${n.category})">
+  /* `data-cat` as well as `--cat`: the header reads `--cat-head` / `--cat-ink`, which
+     `theme.css` declares off that attribute so five stylesheets cannot disagree about what a
+     card's header looks like. `--cat` is still what the rest of the pane tints with. */
+  return `<div class="node" data-cat="${n.category}" style="--cat: var(--cat-${n.category})">
     <div class="node__head"><span class="node__title">${esc(n.label)}</span><span class="node__play">▶</span></div>
     ${ports ? `<div class="node__ports">${ports}</div>` : ''}
     ${params}${more}
@@ -497,3 +501,10 @@ document.getElementById('stamp')!.textContent =
 
 apply()
 select(selected)
+
+/*
+ * The annotated pair at the top of the page. Its markup and its words are already in the
+ * document — `anatomy.ts`, spliced in at build time — and this only arranges them; see
+ * `anatomyStage.ts` for why the boxes are measured rather than authored.
+ */
+mountAnatomy()

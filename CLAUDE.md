@@ -350,6 +350,27 @@ Area-specific — the rule, then the doc that holds why:
   on screen — and the synthetic dataset carries a dismissable **hint** saying the card is
   replaceable, which the wizard's own Demo Data workflows do not, that dataset having been asked
   for. See [docs/pages.md](docs/pages.md) and [docs/persistence.md](docs/persistence.md).
+- **A figure that explains a card is a copy of that card, and a copy goes stale silently.** The node
+  guide opens on two wired cards with eighteen parts boxed and a note on each (`nodeguide/anatomy.ts`),
+  and **two** because the chrome differs: an edge set and a cache age exist only on a dataset node,
+  `⤢`/`⇥`/`?` only on one with a result to open. Hand-written, which is `LEGEND`'s exception (a lesson,
+  not an inventory) — but the run states are `STATE_GLYPH`/`STATE_TEXT`, and `anatomy.test.ts` holds
+  every glyph and `title` against `CodaNodeView`'s source, since a renamed button leaves a guide
+  describing a control that no longer says that and nothing breaks. **Labels are authored, boxes and
+  the wire are measured**: where a label goes is a composition, where a *box* goes is a fact about an
+  element, and one typed out drifts on a font fallback, pointing an inch under the button it names.
+  Three traps. A box is a child of its callout so hover can light it with a selector, and a positioned
+  callout is then its containing block — so the measurement needs the stage→item subtraction that was
+  missing first. The section is **two boxes**: a canvas at the page's own column width, and the fixed
+  world centred in it that is never stretched, since widening it moves every label off the part it
+  names — the spare width goes to the canvas, the one thing here that means something when empty. **A hover panel is `visibility: hidden`, not absent**, so one hanging off the right of
+  a right-hand label made the *document* 1130px wide in a 1024px viewport, at every width, with a
+  scrollbar traceable to nothing on screen. And the breakpoint is asked of the **stylesheet**
+  (`display` on the leader canvas), never restated as a `matchMedia` string: CSS places the labels and
+  JS the lines, so a disagreement leaves labels round two cards pointing at nothing. Spliced in at
+  build time on the appendix's route because the notes are *content*, and the fallback under it is the
+  same words as a list. It also repaired the guide's `.node__head`, still `theme.css`'s fifth copy of a
+  header tint the editor stopped drawing. See [docs/pages.md](docs/pages.md).
 - **An output socket previews what is on it, and the hover is silent where nothing has run.** A
   port's value exists only once its node has, and hovering may neither fetch nor run (invariant 6),
   so the store is asked at the moment the delay elapses and a port with nothing cached keeps its
