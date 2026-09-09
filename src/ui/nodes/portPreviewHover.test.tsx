@@ -120,9 +120,27 @@ describe('the output port preview', () => {
     pointer(out, 'pointerover')
     await new Promise((resolve) => setTimeout(resolve, 400))
     expect(panel()).toBeNull()
-    // And the tooltip that was there before this feature is still there.
+    /*
+     * And the tooltip that was there before this feature is still there — now carrying the one
+     * thing the silence cannot say for itself. Without it, "this node has not run" and "there is
+     * no preview on this port" look identical from the outside.
+     */
     const socket = out.querySelector('.socket')
     expect(socket?.getAttribute('title')).toContain('Neurons')
+    expect(socket?.getAttribute('title')).toContain('Run this node')
+  })
+
+  it('drops the run hint once the node has one, so it is never a stale instruction', async () => {
+    render(<App />)
+    const { find } = await ranChain()
+    const out = await waitFor(() => {
+      const found = side(find, 'neurons', 'out')
+      if (!found) throw new Error('no output socket yet')
+      return found
+    })
+    const title = out.querySelector('.socket')?.getAttribute('title')
+    expect(title).toContain('Neurons')
+    expect(title).not.toContain('Run this node')
   })
 
   it('offers nothing on an input socket', async () => {

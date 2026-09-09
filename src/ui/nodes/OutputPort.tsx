@@ -14,7 +14,9 @@
  * server is the failure this class of feature has already caused once), and a panel offering to
  * make one is a Run button an inch from every socket on the canvas. So the store is asked at the
  * moment the delay elapses, and where it answers nothing the hover does nothing at all — the
- * socket's own `title` is what the reader gets, exactly as before.
+ * socket's own `title` is what the reader gets, and it carries a line saying a Run would change
+ * that. A hint costs nothing and refuses nothing, where a control would be the button this rule
+ * exists to keep off the canvas.
  *
  * That read is also why nothing here subscribes: `getState()` at open time rather than a
  * selector per port. A sixty-node graph has a couple of hundred sockets and the value behind
@@ -63,9 +65,23 @@ export interface OutputPortProps {
   style: SocketStyle | undefined
   /** Dimmed because a drag from an input cannot land here. */
   dimmed: boolean
+  /**
+   * Whether a Run would give this node a result it does not have.
+   *
+   * Passed down rather than read here, because the card already subscribes to it — this file's
+   * whole arrangement is that a couple of hundred sockets subscribe to nothing.
+   */
+  needsRun: boolean
 }
 
-export function OutputPort({ nodeId, port, outputType, style, dimmed }: OutputPortProps) {
+export function OutputPort({
+  nodeId,
+  port,
+  outputType,
+  style,
+  dimmed,
+  needsRun,
+}: OutputPortProps) {
   const socketRef = useRef<HTMLDivElement | null>(null)
   const { open, handlers } = useHoverPanel({
     anchorRef: socketRef,
@@ -93,9 +109,29 @@ export function OutputPort({ nodeId, port, outputType, style, dimmed }: OutputPo
         data-family={style?.family}
         data-shape={style?.shape}
         data-compatible={dimmed ? 'false' : undefined}
-        // Dropped while the panel is up, or the browser's own tooltip arrives on top of a panel
-        // that already says everything it does.
-        title={open ? undefined : `${label}: ${typeLabel(outputType)}`}
+        /*
+         * Dropped while the panel is up, or the browser's own tooltip arrives on top of a panel
+         * that already says everything it does.
+         *
+         * **The second line is what the silence is otherwise missing.** A port with nothing
+         * cached says nothing on hover, deliberately — but a reader who has seen a preview
+         * elsewhere and gets none here has no way to tell "this node has not run" from "this
+         * feature does not work on this port". The native tooltip is the right place for it and
+         * costs nothing: a panel opens at 260ms where a tooltip appears at about a second, so on
+         * a port that *has* a value the tooltip is dropped before it is ever seen, and this line
+         * is read almost only where it is true.
+         *
+         * `needsRun` rather than "is there a value": it is the card's own word for what a Run
+         * would change, it is already subscribed, and it excludes annotation nodes — which have
+         * nothing to compute, so telling somebody to run one is telling them to do the one thing
+         * that cannot help.
+         */
+        title={
+          open
+            ? undefined
+            : `${label}: ${typeLabel(outputType)}` +
+              (needsRun ? '\nRun this node to preview its output' : '')
+        }
       />
       {open &&
         createPortal(

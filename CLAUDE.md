@@ -374,8 +374,12 @@ Area-specific — the rule, then the doc that holds why:
 - **An output socket previews what is on it, and the hover is silent where nothing has run.** A
   port's value exists only once its node has, and hovering may neither fetch nor run (invariant 6),
   so the store is asked at the moment the delay elapses and a port with nothing cached keeps its
-  plain `title` — an inferred-schema fallback was considered and refused, one gesture promising two
-  different things being the half somebody acts on. Nothing subscribes either: `getState()` per
+  `title` — an inferred-schema fallback was considered and refused, one gesture promising two
+  different things being the half somebody acts on. That title carries **`Run this node to preview
+  its output`**, gated on `needsRun`: silence alone cannot be told from a feature that does not
+  work here, a tooltip appears at about a second where the panel opens at 260ms (so the line is
+  read almost only where it is true), and `needsRun` is the card's own already-subscribed word for
+  what a Run would change — annotation nodes excluded, they having nothing to compute. Nothing subscribes either: `getState()` per
   hover, not a selector per socket, since a sixty-node graph has a couple of hundred; the *panel*
   subscribes, a preview of a wire outliving a run being the one thing it may not show. Outputs
   only. **The target is the port row's side, not the 11px disc**, and the delay is 260ms against the

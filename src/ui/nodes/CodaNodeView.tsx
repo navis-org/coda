@@ -725,6 +725,7 @@ function CodaNodeViewImpl({
                   outputType={outputType}
                   style={outStyle}
                   dimmed={dimOutput}
+                  needsRun={needsRun}
                 />
               </div>
             )

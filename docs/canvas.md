@@ -2109,8 +2109,18 @@ canvas. The alternative considered was falling back to the *inferred* schema, la
 not-run: real information, free, and rejected because a hover that answers on a port with no
 value and a hover that answers on a port with one are two different promises under one gesture,
 and the second is the one somebody acts on. So the store is asked at the moment the delay
-elapses, and where it answers nothing the socket's own `title` is what the reader gets, exactly
-as before.
+elapses, and where it answers nothing the socket's own `title` is what the reader gets.
+
+**With a second line on it, which is what the silence was otherwise missing.** A port with
+nothing cached says nothing, deliberately — and a reader who has seen a preview on one socket and
+gets none on the next cannot tell "this node has not run" from "this does not work here". So the
+tooltip carries `Run this node to preview its output`, and the native tooltip is the right place
+for it rather than a panel: a panel opens at 260 ms where a tooltip appears at about a second, so
+on a port that *has* a value the title is dropped before it is ever seen and the line is read
+almost only where it is true. It is gated on **`needsRun`** rather than on "is there a value" —
+the card's own word for what a Run would change, already subscribed there so no socket subscribes
+to anything, and it excludes annotation nodes, which have nothing to compute and for which the
+sentence would be an instruction that cannot help.
 
 That read is also why **nothing subscribes**: `getState()` at open time rather than a selector per
 port. A sixty-node graph has a couple of hundred sockets, and a selector on each would put a
