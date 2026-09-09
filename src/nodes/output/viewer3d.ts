@@ -61,9 +61,13 @@ type WidthMode = 'uniform' | 'radius' | 'world'
  * The stored width mode, defaulting the way a graph saved before the mode existed needs.
  *
  * One reading of the param, used by the three `visibleIf`s and by `ValuePreview`'s coercion —
- * it was written out four times, and the `'uniform'` in it has to stay in step with
- * `skeletonWidthMode`'s own `default`. It also removes a small divergence: written inline, a
+ * it was written out four times. It also removes a small divergence: written inline, a
  * nonsense stored value showed *no* width control at all while the viewer drew it as uniform.
+ *
+ * The `'uniform'` in it is `skeletonWidthMode`'s **`absentMeans`**, not its `default`, and the
+ * two deliberately differ: a new card opens `by radius`, where a document with no key for the
+ * mode was written by a build that drew every neurite the same. `deserializeGraph` writes that
+ * in, so this is the belt to that document's braces.
  */
 function widthModeOf(params: ParamValues): WidthMode {
   const mode = String(params.skeletonWidthMode ?? 'uniform')
@@ -205,7 +209,19 @@ export const viewer3dNode = registerNode({
       id: 'skeletonWidthMode',
       kind: 'enum',
       label: 'Line width',
-      default: 'uniform',
+      /*
+       * `by radius`, because the radii are data every backend already publishes and a
+       * constant-calibre wire is the one thing a neuron is not. A source that has none falls
+       * back to the uniform path on its own (`skeletonWidthPlan`), so the default costs
+       * nothing where it cannot be honoured.
+       *
+       * Which makes absence a third state rather than the default: a graph saved before this
+       * control existed drew one width, and would otherwise reopen looking different. See
+       * `ParamBase.absentMeans` — presentational, so nothing downstream stales either way,
+       * but the picture is the whole of what this node produces.
+       */
+      default: 'radius',
+      absentMeans: 'uniform',
       options: [
         { value: 'uniform', label: 'one width' },
         { value: 'radius', label: 'by radius' },

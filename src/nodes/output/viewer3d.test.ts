@@ -43,7 +43,13 @@ describe('the card stays a picture', () => {
     const params = defaultParams(def())
     const inPanel = (def().params ?? []).filter((p) => !p.visibleIf || p.visibleIf(params))
     expect(inPanel.length).toBeGreaterThan(10)
-    for (const id of ['skeletonColorMode', 'skeletonWidth', 'background', 'meshOpacity']) {
+    // `skeletonRadiusWidth` rather than `skeletonWidth`: the mode defaults to `by radius`.
+    for (const id of [
+      'skeletonColorMode',
+      'skeletonRadiusWidth',
+      'background',
+      'meshOpacity',
+    ]) {
       expect(
         inPanel.map((p) => p.id),
         id,
@@ -195,12 +201,19 @@ describe('the rest of the surface', () => {
     expect(width.min).toBe(1)
   })
 
-  it('starts on one width, so a saved graph draws what it drew before', () => {
+  it('starts by radius, and says absence means the one width a saved graph drew', () => {
+    /*
+     * The default and `absentMeans` differ on purpose. A new card opens on the calibre every
+     * backend already publishes; a document with no key for the mode was written by a build
+     * that drew every neurite the same, and must keep doing so. A source with no radii falls
+     * back to the uniform path inside `skeletonWidthPlan`, so the default is safe everywhere.
+     */
     const mode = param('skeletonWidthMode')
     if (mode.kind !== 'enum' || typeof mode.options === 'function') {
       throw new Error('expected static options')
     }
-    expect(mode.default).toBe('uniform')
+    expect(mode.default).toBe('radius')
+    expect(mode.absentMeans).toBe('uniform')
     expect(mode.options.map((o) => o.value)).toEqual(['uniform', 'radius', 'world'])
   })
 

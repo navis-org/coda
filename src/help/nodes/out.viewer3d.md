@@ -132,9 +132,9 @@ out.viewer3d: meshOpacity, pointSize, background
 
 **Background** pins the canvas regardless of the app's theme, which is the setting a figure wants. `black` is its own option and not the same as `dark`: the dark theme's surface is a very dark grey, and a figure usually wants the real thing.
 
-**`Line width` has three modes.** `one width` draws every neurite the same. `by radius` and `to scale` both draw each one at the calibre it was traced or segmented at — so a primary neurite reads as one and the twigs at the edge of an arbour read as twigs. The radius is data your source already published: CATMAID's annotated radii, CAVE's level-2 chunk sizes, neuPrint's SWC column.
+**`Line width` has three modes, and a new card opens on `by radius`.** `one width` draws every neurite the same. `by radius` and `to scale` both draw each one at the calibre it was traced or segmented at — so a primary neurite reads as one and the twigs at the edge of an arbour read as twigs. The radius is data your source already published: CATMAID's annotated radii, CAVE's level-2 chunk sizes, neuPrint's SWC column.
 
-Under `by radius` the number is the width of the **thickest** neurites, not a width every node gets. Everything thinner is drawn in proportion, down to a one-pixel floor — so raising it stretches the range rather than thickening the whole picture. A source that publishes no radii falls back to one width on its own.
+Under `by radius` the number is the width of the **thickest** neurites, not a width every node gets. Everything thinner is drawn in proportion, down to a one-pixel floor — so raising it stretches the range rather than thickening the whole picture. A source that publishes no radii falls back to one width on its own, which is what makes this a safe default. (A workflow saved before this control existed keeps the `one width` it was drawn with.)
 
 `to scale` is the same radii in the scene's own units instead of in pixels: a 200 nm neurite is drawn 200 nm across, and thickens as you zoom into it. Nothing is rescaled, so the number here is a **multiplier** — 1 is the arbour exactly as the source recorded it, which is the one setting you could measure a neurite off. Nodes with no recorded radius stay a hairline rather than disappearing.
 

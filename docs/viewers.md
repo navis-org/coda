@@ -1348,6 +1348,16 @@ and every source here has nodes this catches: CATMAID stores −1 for "unset" an
 clamps it to 0, and a CAVE L2 chunk too small to have a `max_dt_nm` is 0 as well. Without the
 floor the twigs leave the picture and it reads as a fetch that returned only trunks.
 
+**`by radius` is the default, and the fallback below is what makes that safe.** A card opens on
+the calibre every backend already publishes rather than on a constant-calibre wire, which is the
+one thing a neuron is not; a source with no radii lands on the uniform path with nothing said,
+and nothing is refused. What the change needed was `absentMeans: 'uniform'` on
+`skeletonWidthMode`: a document with no key for the mode was written by a build that drew one
+width, so absence and the default differ and a saved graph would otherwise reopen looking
+different. Presentational either way, so nothing downstream stales — but the picture is the whole
+of what this node produces, which is why the third state is written in rather than left to read
+as the default.
+
 **A source with no radii at all gets `undefined`, not a buffer of floors**, and the caller falls
 back to the uniform path. The two are not the same picture: a uniform 1px hairline is what the
 thin path already draws cheaply, where a *fat* line of width 1 everywhere is that same picture at
