@@ -296,9 +296,11 @@ export function Toolbar() {
        * and both tours. A menu rather than a bare button because a lone "?" says nothing about
        * what it does until you press it.
        *
-       * **Six rows, two of which open a submenu.** Flat, it was nine — and nine two-line rows is
-       * a wall you read rather than scan, in the one menu whose whole job is to be scannable by
-       * somebody who is already lost. The two groupings are the two questions actually being
+       * **Six rows, two of which open a submenu — and six whatever the reader has done.** Flat,
+       * it was nine — and nine two-line rows is a wall you read rather than scan, in the one menu
+       * whose whole job is to be scannable by somebody who is already lost. Which is also why
+       * **Show Hints Again** sits at the foot of Guides rather than here: a conditional seventh
+       * row moves every row under it depending on whether a hint was ever dismissed. The two groupings are the two questions actually being
        * asked ("show me around" and "where is it written down"), and both are collapsed rather
        * than only the second, because a menu with one submenu in it reads as an afterthought.
        *
@@ -329,28 +331,6 @@ export function Toolbar() {
               <span>Quick start plus a few useful links.</span>
             </button>
             {/*
-             * Beside it for the same reason it is first: this is the other way back to something
-             * a reader put away, and a hint is dismissed **for good** — keyed on its own text so
-             * a new workflow does not re-teach the same sentence (`ui/hints.ts`). Without a row
-             * here, tidying up a canvas is irreversible; the node menu has the per-card version.
-             *
-             * Rendered only when there is something to restore, so it is not a permanent row
-             * advertising a feature the reader has never met.
-             */}
-            {dismissedHints.size > 0 && (
-              <button
-                type="button"
-                className="dropdown__item"
-                onClick={() => {
-                  restoreHints()
-                  close()
-                }}
-              >
-                <strong>Show Hints Again</strong>
-                <span>Bring back every guidance box you have dismissed.</span>
-              </button>
-            )}
-            {/*
              * The two "teach me" groups, adjacent and in the order somebody meets them: the
              * tours happen on this canvas, the documents open a tab and go wider.
              *
@@ -373,6 +353,34 @@ export function Toolbar() {
                   <span>{tour.blurb}</span>
                 </button>
               ))}
+              {/*
+               * Last row, under a rule, because it is the one entry here that starts no tour:
+               * this is the way back to something a reader put away, and a hint is dismissed
+               * **for good** — keyed on its own text so a new workflow does not re-teach the
+               * same sentence (`ui/hints.ts`). Without a row here, tidying up a canvas is
+               * irreversible; the node menu has the per-card version.
+               *
+               * `dropdown__group` is the separator, the same hairline the New menu draws
+               * between its groups, so a reader does not read it as a fourth walkthrough.
+               *
+               * Rendered only when there is something to restore, so it is not a permanent row
+               * advertising a feature the reader has never met.
+               */}
+              {dismissedHints.size > 0 && (
+                <div className="dropdown__group">
+                  <button
+                    type="button"
+                    className="dropdown__item"
+                    onClick={() => {
+                      restoreHints()
+                      close()
+                    }}
+                  >
+                    <strong>Show Hints Again</strong>
+                    <span>Bring back every guidance box you have dismissed.</span>
+                  </button>
+                </div>
+              )}
             </Submenu>
             {/*
              * Links rather than buttons, so they open in a new tab the ordinary way. Through

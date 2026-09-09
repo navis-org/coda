@@ -32,7 +32,7 @@
  * for everybody. Deliberate: a reworded hint is usually one that is now saying something else.
  *
  * Nothing is ever forgotten, so both escape hatches matter — the node menu's **Show hints** for
- * one card, and the `?` menu's **Show Hints Again** for the lot. A box dismissed for good with no
+ * one card, and the `?` ▸ **Guides** menu's **Show Hints Again** for the lot. A box dismissed for good with no
  * way back is the failure this file is one line away from at all times.
  */
 

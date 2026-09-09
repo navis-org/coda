@@ -23,6 +23,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { demoWorkflow } from '../../wizard/build'
 import { loadStartPageDismissed } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
+import { dismissHint, resetHintsForTest } from '../hints'
 import { resetDocuments } from '../../test/storeReset'
 import { StartPage } from './StartPage'
 import { buildCommandItems } from './paletteItems'
@@ -582,6 +583,41 @@ describe('Start page', () => {
       openHelp('Guides')
       expect(screen.getByRole('button', { name: /Basics/ })).toBeTruthy()
       expect(screen.getByRole('button', { name: /Learn to Build/ })).toBeTruthy()
+    })
+
+    /*
+     * **Show Hints Again** is the one row in Guides that starts no tour, so it sits last and
+     * under a rule. Two halves worth pinning, because both fail quietly: at the top level it was
+     * a *conditional* row, so its return there would move every row beneath it depending on
+     * whether the reader had ever dismissed a hint; and it renders only when there is something
+     * to bring back, so a regression that made it permanent advertises a feature nobody has met.
+     */
+    it('offers Show Hints Again at the foot of Guides, and only once a hint is put away', () => {
+      act(() => useGraphStore.getState().closeStartPage())
+      const hint = { text: 'Press **Run**.' }
+      // `dismissed` is a module-level cache, so `clearStorage` alone does not empty it.
+      act(() => resetHintsForTest())
+      render(<App />)
+
+      openHelp('Guides')
+      expect(screen.queryByRole('button', { name: /Show Hints Again/ })).toBeNull()
+
+      act(() => dismissHint(hint))
+      // Never at the top level — the six rows there are six whatever the reader has done.
+      openHelp()
+      expect(screen.queryByRole('button', { name: /Show Hints Again/ })).toBeNull()
+
+      openHelp('Guides')
+      const row = screen.getByRole('button', { name: /Show Hints Again/ })
+      const rows = Array.from(
+        row.closest('.dropdown__flyout')!.querySelectorAll('.dropdown__item'),
+      )
+      expect(rows.at(-1)).toBe(row)
+      // The rule itself, which is what tells it apart from the tours above it.
+      expect(row.parentElement?.className).toBe('dropdown__group')
+
+      act(() => fireEvent.click(row))
+      expect(screen.queryByRole('button', { name: /Show Hints Again/ })).toBeNull()
     })
 
     it('reopens from the palette, and that command is disabled while it is open', () => {

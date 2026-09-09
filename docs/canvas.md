@@ -754,8 +754,9 @@ has been read is a fact about the reader, so it lives in `localStorage`
   workflow they generate. The trade is that two hints saying exactly the same words are one hint —
   right, since the reader has in fact read it, but it makes reworded copy come back for everybody.
 - **Nothing is ever forgotten, so both ways back matter.** The node menu's **Show Hints** restores
-  the clicked card's; the `?` menu's **Show Hints Again** restores the lot. Each row appears only
-  when there is something to bring back. A box dismissed for good with no route back is the
+  the clicked card's; the `?` ▸ **Guides** menu's **Show Hints Again**, its last row and under a
+  rule since it is the one entry there that starts no tour, restores the lot. Each row appears
+  only when there is something to bring back. A box dismissed for good with no route back is the
   failure this feature is one deleted row away from at all times.
 
 Both are live under the lock, and neither is an undo step — freezing the canvas changes nothing
