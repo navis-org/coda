@@ -1423,7 +1423,12 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
 - [docs/pages.md](docs/pages.md) — overview, tutorial and node guide. Extra vite entries;
   each must stay out of the main chunk.
 - [docs/help.md](docs/help.md) — the `?` on a node: the in-app overlay, the documents in
-  `src/help/nodes/`, and the figures that draw real registry objects.
+  `src/help/nodes/`, and the figures that draw real registry objects. **Read `## Voice` before
+  writing or editing one** — the corpus was cut 34,060 → 28,528 words once and the five things
+  that were in the way are recorded there, along with the rule that a **callout is for behaviour
+  a reader would not predict, never for a design decision**. Two ways to mistype a callout marker
+  render as ordinary text and are invisible in the parsed document, so `help.test.ts` checks the
+  raw source.
 
 Two notes cut across all of them. **jsdom performs no layout and has no WebGL**, so anything
 about geometry or pixels must be driven in a real browser. And **every measurement here was

@@ -190,7 +190,7 @@ describe('the help overlay', () => {
     act(() => {
       link.click()
     })
-    await waitFor(() => expect(screen.getByText(/What's a linkage/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/What a linkage is/)).toBeTruthy())
     // The store still holds where the reader came in, so Back has somewhere to go.
     expect(useGraphStore.getState().helpType).toBe('neuron.nblast')
 
@@ -269,7 +269,7 @@ describe('opening a workflow from the overlay', () => {
         .getByRole('button', { name: /Linkage/i })
         .click()
     })
-    await waitFor(() => expect(screen.getByText(/What's a linkage/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/What a linkage is/)).toBeTruthy())
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Open in a workflow' }))
     await waitFor(() => {

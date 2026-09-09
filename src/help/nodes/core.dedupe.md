@@ -2,9 +2,9 @@
 
 Which row of a repeated set survives:
 
-- **first**: The first row in sort order (sort upstream if a different order matters).
-- **last**: The last row in sort order.
-- **none**: No duplicates at all—the conservative read for conflicts. Keeps only rows whose comparison columns appear in no other row in the input. All other kept columns must agree across the set for it to survive; if other columns disagree, all copies are dropped. This leaves only "the rows nobody disagrees about."
+- **first** — the first in sort order. Sort upstream if a different order matters.
+- **last** — the last in sort order.
+- **none** — the conservative read for conflicts. Only rows whose comparison columns appear nowhere else in the input survive, and every other kept column must agree across the set; where they disagree, all copies are dropped. What is left is the rows nobody disagrees about.
 
 ```coda-params
 core.dedupe: columns, keep

@@ -1,23 +1,18 @@
 ## FlyTable
 
-FlyTable is the LMB's SeaTable deployment, used for FlyWire and Aedes cell typing — currently **internal only**. Reads a base using an account token (set in Connections ▸ FlyTable) and
-publishes it as neuron labels for a Dataset.
+FlyTable is the LMB's SeaTable deployment, used for FlyWire and Aedes cell typing — currently **internal only**. It reads a base using an account token, set in Connections ▸ FlyTable, and publishes it as neuron labels for a Dataset.
 
 ### Not a live view
 
-Because downloading the full tables can be slow, the node caches them in the browser. Look at the bottom right of the node for a cache status indicator: it tells you how long ago the table was fetched. Clicking it triggers a re-fetch.
+Downloading full tables is slow, so the node caches them in the browser. The cache status indicator at the bottom right of the card says how long ago the table was fetched; clicking it re-fetches.
 
-### Chaining Annotation Sources
+### Chaining annotation sources
 
-This node chains with [SeaTable](#annotation.seaTable), [CAVE table](#annotation.caveTable), and
-Google Sheets: later sources win name collisions. Wire them in series; order on the canvas means
-something.
+This node chains with [SeaTable](#annotation.seaTable), [CAVE table](#annotation.caveTable) and Google Sheets: later sources win name collisions. Wire them in series — order on the canvas means something.
 
-### Workspace Ambiguity
+### Workspace ambiguity
 
-The Workspace parameter is optional; it works out the workspace from the base name. Empty is
-enough unless two different workspaces hold a base of the same name — then name it to
-disambiguate.
+`Workspace` is optional; the node works it out from the base name. Name it only when two different workspaces hold a base of the same name.
 
 ```coda-params
 caption: Selecting base and table

@@ -48,6 +48,39 @@ node's `guide` and move the detail into the file — NBLAST's was 830 characters
 other node's document *in the same overlay*, with a Back button. The target must itself have a
 document — a cross-reference that opens an empty page is a broken link, and the test says so.
 
+## Voice
+
+The corpus was rewritten to this once, across all 66 documents: **34,060 words to 28,528**, and
+the cut tracked how much of a document was not about the node. `out.viewer3d` went 2,952 → 1,806
+and `core.sample` 176 → 96, where `neuron.skeletons` moved 4%. So these are not a length target.
+They are five things that were in the way, in the order they cost the most.
+
+**Write for somebody who knows the field.** The reader is a connectomics researcher who came to
+this node from a workflow they are building. They know what sorting, clustering, a regex and a
+synapse are. `core.sample` read *"**Top** takes the first N rows — the strongest results after a
+Sort"*; the clause after the dash is a definition of Sort, and it is now *"**Top** takes the first
+N rows."*
+
+**Cut why the code is the way it is; keep why the node behaves the way it does.** The distinction
+is whether it changes what the reader would *do*. "Clicking is off by default because a stray
+click while turning the scene re-runs everything downstream" stays — it tells you when to turn it
+on. "`Volumes` is a second socket because sharing one would mean one opacity and one colour
+encoding for both" was a four-line callout and is now half a sentence; the rest of that argument
+belongs in [canvas.md](canvas.md), where the decision was made.
+
+**No historical notes.** A reader arriving today has no "before" to compare against, so *"until
+this it was the one thing on screen with no control that could remove it"* and *"a framing is
+something you arrange, and the two of those used to throw it away"* are sentences about a diff.
+The exception is a fact about *their* saved file — "a workflow saved before this control existed
+included fragments and still does" is behaviour they can observe.
+
+**Say it once.** `out.viewer3d` stated that the selection is presentational and joins the
+provenance key in three places, which reads as three different claims until you notice it is one.
+
+**Name a setting in the UI's own words**, in double quotes or backticks, and let the option list
+do the rest: `"Leaves on the right" reads labels horizontally`, not a paragraph reconstructing
+what the dropdown already says.
+
 ## "See also"
 
 A Python docstring's See Also section, at the foot of the document: a **table of Node and
@@ -155,6 +188,25 @@ the card. `parseMarkdown(text, { extended: true })` opts in, and only `src/help`
   one has no honest meaning. The alt text doubles as the caption, so a figure cannot end up
   captioned and unreadable to a screen reader at the same time. An image with no file draws its
   alt text, and `help.test.ts` fails the build.
+
+**A callout is for behaviour a reader would not predict**, not for a design decision. The test of
+one is whether somebody could be *surprised* by it: "with no filters, nothing matches", "a browser
+stops honouring downloads past about fifty from one gesture", "seed applies to Random only". A
+callout explaining why the code is arranged the way it is belongs in prose, or in the area doc —
+`out.viewer3d` carried eight and now carries three, `out.network` seven and now four, while
+`flow.forEach` gained two because both of its real traps were buried in paragraphs. The count is
+not the target; what the callout is *about* is.
+
+**Two ways to mistype the marker, both of which render as ordinary text**, and neither is visible
+in the parsed document — a mistyped marker produces a perfectly valid paragraph, so there is
+nothing for a test to compare against `blocks`. `help.test.ts` checks the raw source for both.
+
+- `> ![WARNING]` — `![` is the *image* marker, so the line is a blockquote holding the literal
+  text `![WARNING]`, printed above the sentence it was meant to label. Four callouts, across
+  three documents, shipped that way.
+- A body written on the marker line behind an inline `>`, rather than on its own `>` line.
+  Everything after the tone is read as the **title**, so a four-line warning draws as one long
+  bold heading with an empty body. One document shipped that way.
 
 A callout's **title is parsed as inline markdown**, which is not a nicety: a warning is very
 often about a named setting, and `` `Normalise` `` in one was rendering as three literal

@@ -12,11 +12,11 @@ find -> skel:neurons
 skel -> v3d:skeletons
 ```
 
-Each skeleton carries its own attributes, so colouring by e.g. cell type downstream is just a matter of selecting the corresponding column.
+Each skeleton carries its own attributes, so colouring by cell type downstream is a column picker.
 
-## Skeleton flavors
+## Skeleton flavours
 
-Some datasets offer multiple sources for skeletons, and they aren't necessarily the same:
+Some datasets offer more than one source, and they are not the same:
 
 | Route                 | What it is                                                                 |
 | --------------------- | -------------------------------------------------------------------------- |
@@ -24,8 +24,7 @@ Some datasets offer multiple sources for skeletons, and they aren't necessarily 
 | neuPrint SWC          | neuPrint's own traced skeleton — the only neuPrint route with radii        |
 | CAVE skeleton service | generated on demand and cached; a cold neuron is 10–45 s                   |
 | level-2 chunk graph   | one node per L2 chunk — coarser but faster to generate                     |
-| CATMAID tracing       | always manually traced                                                            |
-
+| CATMAID tracing       | always manually traced                                                     |
 
 ```coda-params
 caption: `Source` is per dataset, and the card footer repeats whichever it used.
@@ -33,9 +32,8 @@ neuron.skeletons: skeletonSource
 ```
 
 > [!NOTE] The list is dynamic
-> Skeletons sources are probed per dataset. A fresh session offers `Automatic` initially, and will populate the list after the first run.
-
-## Cost
+> Sources are probed per dataset. A fresh session offers `Automatic` and populates the list after
+> the first run.
 
 Expensive, one request per neuron. `Warn above` (10,000) is a threshold, not a cap.
 
@@ -48,7 +46,8 @@ caption: Whatever you carry is what [Split Neurons](#neuron.splitNeurons), the 3
 neuron.skeletons: carry
 ```
 
-It carries what is on that table already — the dataset's own properties, an annotation chain's labels, a column a Relabel rewrote. A neuron the incoming table has no row for keeps its geometry and carries a blank. A neuron listed twice annotates from the first row rather than doubling. And a carried column **replaces** one of the same name, keeping its position, which is how you override a stale `type` with one a Relabel upstream wrote.
+It carries what is on that table already — the dataset's own properties, an annotation chain's labels, a column a Relabel rewrote. A neuron the incoming table has no row for keeps its geometry and carries a blank; a neuron listed twice annotates from the first row rather than doubling. A carried column **replaces** one of the same name, keeping its position, which is how you override a stale `type`.
 
 > [!WARNING] It is part of the provenance key, so changing it re-runs the fetch
-> The per-neuron geometry cache answers most of that without going back to the server, but the node does go stale.
+> The per-neuron geometry cache answers most of that without going back to the server, but the
+> node does go stale.

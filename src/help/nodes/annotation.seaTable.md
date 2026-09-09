@@ -1,19 +1,18 @@
-SeaTable ([`cloud.seatable.io`](https://cloud.seatable.io)) is a hosted service for collaborative spreadsheets and databases - a kind of Google sheets on steroids that can handle larger datasets (10k+ rows). This node reads a "base" (a table) using an account token (set in Connections ▸ SeaTable) and publishes it as neuron labels for a Dataset.
+SeaTable ([`cloud.seatable.io`](https://cloud.seatable.io)) is a hosted service for collaborative spreadsheets and databases, handling larger datasets than a spreadsheet will (10k+ rows). This node reads a "base" using an account token — set it in Connections ▸ SeaTable — and publishes it as neuron labels for a Dataset.
 
-> [!NOTE]
-> There is a separate node for the LMB's SeaTable deployment, [FlyTable](#annotation.flyTable). This is for internal use only.
+There is a separate node for the LMB's SeaTable deployment, [FlyTable](#annotation.flyTable).
 
 ### Not a live view
 
-Because downloading the full tables can be slow, the node caches them in the browser. Look at the bottom right of the node for a cache status indicator: it tells you how long ago the table was fetched. Clicking it triggers a re-fetch.
+Downloading full tables is slow, so the node caches them in the browser. The cache status indicator at the bottom right of the card says how long ago the table was fetched; clicking it re-fetches.
 
-### Chaining Annotation Sources
+### Chaining annotation sources
 
-This node chains with [FlyTable](#annotation.flyTable), CAVE Table, and Google Sheets: later sources win name collisions. Wire them in series; order on the canvas means something. The output is ordinary neuron table data, so Filter or Sort can edit the chain.
+This node chains with [FlyTable](#annotation.flyTable), CAVE Table and Google Sheets: later sources win name collisions. Wire them in series — order on the canvas means something. The output is ordinary neuron table data, so Filter or Sort can edit the chain.
 
-### Workspace Ambiguity
+### Workspace ambiguity
 
-The Workspace parameter is optional; it works out the workspace from the base name. Empty is enough unless two different workspaces hold a base of the same name — then name it to disambiguate.
+`Workspace` is optional; the node works it out from the base name. Name it only when two different workspaces hold a base of the same name.
 
 ```coda-params
 caption: Selecting base and table

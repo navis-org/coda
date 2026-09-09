@@ -17,15 +17,18 @@ Output: `preLabel`, `postLabel`, then `weight_<name>` and `present_<name>` per d
 ## Read `present` before `weight`
 
 > [!WARNING] Zero and empty mean opposite things
-> - **`weight` 0 with `present` true** — that dataset holds both types and but the connection is absent in one of them.
-> - **`weight` empty** — either pre- and/or postynaptic type doesn't exist in that dataset (e.g. sex-specific or simply not labeled). Take absence of a connection with a grain of salt.
+> - **`weight` 0 with `present` true** — that dataset holds both types, and the connection is
+>   genuinely absent in it.
+> - **`weight` empty** — the pre- or postsynaptic type does not exist in that dataset, whether
+>   because it is sex-specific or simply not labelled. Take the absence with a grain of salt.
 >
 > A filter or a chart that treats an empty cell as 0 turns "not measured" into "measured as none".
 
 ## Be careful with raw synapse counts
 
-> [!WARNING] Difference in completeness, dataset-specific issues, precision/recall synapse detection can introduce systematic bias.
-> The usual fix for this is to use (input-)normalised weights. The `Counts` output carries what that needs: `label`, `dataset`, `nNeurons`, `outWeight`, `inWeight`.
+> [!WARNING] Completeness, dataset-specific issues and synapse-detection precision all bias a raw count
+> The usual fix is (input-)normalised weights. The `Counts` output carries what that needs:
+> `label`, `dataset`, `nNeurons`, `outWeight`, `inWeight`.
 
 ```coda-params
 compare.connectivity: datasetCount, minWeight

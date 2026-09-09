@@ -1,5 +1,6 @@
-> [!WARNING]
-> This widget is based on the summary statistics offered by neuPrint. Other backends will not provide the same information and the node will only show the subset of that's there.
+> [!WARNING] Built on neuPrint's summary statistics
+> Other backends do not publish the same information, and the node shows only the subset that is
+> there.
 
 ```coda-graph
 caption: Dataset summary
@@ -11,4 +12,3 @@ ds -> s
 ```coda-params
 out.datasetSummary: completenessMeasure, topTypes
 ```
-

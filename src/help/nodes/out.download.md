@@ -1,12 +1,13 @@
 ## Inputs are passed through
 
-Inputs are passed through untouched, so it works as a tap mid-chain like the viewers — writing whatever arrives to a file (CSV, SWC, OBJ, or an upstream chart as SVG/PNG) is a side effect, not a transformation.
+Inputs pass through untouched, so this works as a tap mid-chain like the viewers. Writing whatever arrives to a file — CSV, SWC, OBJ, or an upstream chart as SVG/PNG — is a side effect, not a transformation.
 
 ## What triggers a download
 
-When a download gets triggered depends on the `On run` parameter:
+The `On run` parameter decides:
+
 - Checked (default): every time the node runs, it writes the file.
-- Unchecked: Only pressing the `Download now` button on the card writes the file.
+- Unchecked: only the `Download now` button on the card writes it.
 
 ```coda-params
 caption: Parameters that control what gets written

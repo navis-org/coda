@@ -153,6 +153,40 @@ describe('the documents in src/help/nodes', () => {
       expect(tops).toEqual([])
     },
   )
+
+  /*
+   * The two ways a callout is mistyped, both of which render as ordinary text.
+   *
+   * Neither can be caught by looking at the parsed document, which is the point: a mistyped
+   * marker produces a *valid* paragraph, so `blocks` holds exactly what a paragraph would and
+   * there is nothing to compare it against. They are checked against the raw source instead.
+   *
+   * `> ![WARNING]` is the first, and it is one keystroke from the real thing — `![` is the image
+   * marker, so the line is a blockquote holding literal text and the reader sees `![WARNING]`
+   * printed above the sentence it was meant to label. Four callouts, in three documents,
+   * shipped that way.
+   *
+   * The second is a body written on the marker line behind an inline `>` rather than on its own
+   * line. The parser reads everything after the tone as the *title*, so a four-line warning drew
+   * as one long bold heading with an empty body. One document shipped that way.
+   */
+  it.each(TYPES)(
+    '%s: every callout marker is spelled the way the parser reads',
+    async (type) => {
+      const lines = (await loadHelpDoc(type))!.source.split('\n')
+      for (const [i, line] of lines.entries()) {
+        const at = `${type}:${i + 1}`
+        expect(
+          /^\s*>\s*!\[/.test(line),
+          `${at}: '![' is the image marker — write '> [!NOTE]'`,
+        ).toBe(false)
+        expect(
+          /^\s*>\s*\[![A-Za-z]+\].*\s>\s/.test(line),
+          `${at}: a callout body goes on its own '>' line, not behind an inline '>'`,
+        ).toBe(false)
+      }
+    },
+  )
 })
 
 describe('the figure source', () => {
