@@ -24,6 +24,7 @@
  * If you swap these values, re-run the validator — do not reason about ΔE.
  */
 
+import { mediaMatches } from './mediaQuery'
 import type { PaletteName } from '../nodes/lib/encodingParams'
 import type { DivergingPalette, SequentialPalette } from '../nodes/lib/heatmapParams'
 
@@ -976,12 +977,28 @@ export function inkOn(background: string): string {
   return luminance > 0.55 ? '#0b0b0b' : '#ffffff'
 }
 
-/** Read the mode the document is actually rendering in. */
+/** The OS half of the theme, for the `system` preference where nothing is stamped. */
+export const DARK_SCHEME = '(prefers-color-scheme: dark)'
+
+/**
+ * Read the mode the document is actually rendering in.
+ *
+ * **Through `mediaMatches`, because this is a snapshot and snapshots are read constantly.** It is
+ * `useThemeMode`'s `getSnapshot`, which React calls a few times per subscriber per render pass —
+ * and a `window.matchMedia(…)` here mints a fresh `MediaQueryList` every one of those. Measured on
+ * an expanded Explore page with 26 subscribers: **79 constructions on mount and 78 per re-render**,
+ * i.e. per search keystroke, at 0.46–0.69 µs each against 0.035–0.055 µs for a cached list's
+ * `.matches`. `DatasetSummaryViewer` reads it during render too.
+ *
+ * `useThemeMode`'s own header claimed this was already fixed — "read once and handed down, it is
+ * one" — and the *subscription* was; the snapshot was still minting one per call. Which is why the
+ * registry read belongs here rather than in the hook: `currentMode` is what everything calls.
+ */
 export function currentMode(): Mode {
   if (typeof document === 'undefined') return 'dark'
   const stamped = document.documentElement.dataset.theme
   if (stamped === 'light' || stamped === 'dark') return stamped
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  return mediaMatches(DARK_SCHEME) ? 'dark' : 'light'
 }
 
 /** Surface the charts are drawn on — the colour the 2px spacers are painted in. */

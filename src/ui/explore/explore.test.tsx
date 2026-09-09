@@ -37,7 +37,8 @@ import type { Value } from '../../core/values'
 import { makeTable } from '../../core/values'
 import { column, tableSchema } from '../../core/types'
 import { SELECT_ALL_WARN } from '../../nodes/query/explore'
-import { cacheGet, cacheSet, resetCache } from '../../data/cache'
+import { cacheGet, cacheKeys, cacheSet, resetCache } from '../../data/cache'
+import { resetMediaForTest } from '../mediaQuery'
 import { getConnectome } from '../../data/mock/generate'
 import { resetIndexLoads } from '../../data/neuronIndex'
 import type { DataSource } from '../../data/source'
@@ -49,6 +50,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { resetNeuronIndexState } from '../useNeuronIndex'
 import { ExploreBody } from './ExploreBody'
 import { NeuronThumbnail } from './NeuronThumbnail'
+import * as rotationModule from './rotation'
 import { NeuronRow } from './NeuronRow'
 import { rowFields } from './rowFields'
 import { resetThumbnailCache } from './NeuronThumbnail'
@@ -631,7 +633,7 @@ describe('an annotated dataset', () => {
  *
  * The 2D stub is deliberately not a recording spy (`jsdomStubs.ts` says why), so the recorder
  * is put on for this one describe and taken off again. What it records is real output — the
- * RGBA bytes `silhouetteToRgba` produced — rather than a transcript of calls into a fake.
+ * RGBA bytes the paint produced — rather than a transcript of calls into a fake.
  */
 function recordPaints(): { frames: ImageData[]; restore: () => void } {
   const frames: ImageData[] = []
@@ -659,6 +661,394 @@ function recordPaints(): { frames: ImageData[]; restore: () => void } {
     },
   }
 }
+
+/**
+ * The row menu in the expanded view.
+ *
+ * Its commands act on the *index*, not on the page — `Select all of this type` is the one worth
+ * pinning for that, since a version that ticked only the visible rows would look right on a
+ * single-page dataset and be silently wrong on every real one.
+ */
+/**
+ * The expanded view's aligned half.
+ *
+ * jsdom performs no layout, so *where* a column lands is the browser probe's business and the
+ * `rowTemplate` doc's. What is checkable here is the shape: that a header exists, that it names
+ * the same fields the rows draw, and that a card gets neither.
+ */
+describe('aligned columns', () => {
+  /**
+   * A source whose neuron table carries annotations, which the plain mock deliberately does not.
+   *
+   * `class` on every neuron and `dimorphism` on one in five, which is the split the layout is
+   * about: the first earns a column, the second is chip material. Ten rows, so the fill rates are
+   * exactly 1.0 and 0.2 against `FILL_MIN`.
+   */
+  const ANNOTATED = makeTable(
+    tableSchema(
+      column('neuronId', 'i64'),
+      column('type', 'str'),
+      column('class', 'str'),
+      column('dimorphism', 'str'),
+    ),
+    {
+      neuronId: Array.from({ length: 10 }, (_, i) => 1000 + i),
+      type: Array.from({ length: 10 }, (_, i) => (i === 3 ? '' : `T${i}`)),
+      class: Array.from({ length: 10 }, () => 'descending'),
+      dimorphism: Array.from({ length: 10 }, (_, i) => (i < 2 ? 'male-specific' : '')),
+    },
+    'neurons',
+  )
+
+  function richSource(id: string): DataSource {
+    const base: DataSource = new MockSource({ latencyMs: 0 })
+    const source = Object.assign(Object.create(base) as DataSource, {
+      id,
+      neuronIndex: async () => ANNOTATED,
+    })
+    registerSource(source)
+    return source
+  }
+
+  /** Column and figure labels — the marks' own labels live nested and are counted apart. */
+  const head = () =>
+    [...document.querySelectorAll('.explore-head > .explore-head__cell')].map(
+      (e) => e.textContent,
+    )
+  const markHead = () =>
+    [...document.querySelectorAll('.explore-head__marks .explore-head__cell')].map(
+      (e) => e.textContent,
+    )
+
+  async function ready() {
+    await waitFor(() => expect(document.querySelector('.explore-head')).not.toBeNull())
+  }
+
+  it('aligns the well-filled field and leaves the sparse one as a chip', async () => {
+    richSource('mock-rich')
+    setup({}, 'mock-rich')
+    await ready()
+    // `class`, on every neuron, earns a column; `dimorphism`, on one in five, does not.
+    expect(head()).toContain('class')
+    expect(head()).not.toContain('dimorphism')
+    const chips = [...document.querySelectorAll('.explore-chip')].map((c) =>
+      c.getAttribute('title'),
+    )
+    expect(chips).toContain('dimorphism')
+  })
+
+  it('draws one header cell per column and per figure', async () => {
+    richSource('mock-rich2')
+    setup({}, 'mock-rich2')
+    await ready()
+    const row = document.querySelectorAll('.explore-row')[0]!
+    // The header and the rows are one grid; a count that disagreed would put every label a
+    // track off the values it names. Where they land is the browser probe's business.
+    expect(head()).toHaveLength(
+      row.querySelectorAll('.explore-cell').length +
+        row.querySelectorAll('.explore-stat').length,
+    )
+    /*
+     * The marks' labels are their own track and must not be counted among the column labels.
+     *
+     * **One slot per label, always** — this used to assert `drawn <= labels`, which passes
+     * precisely when the bug is present. Both rows are fixed-pitch flex boxes matched by
+     * position, so a row that skipped a mark it had no value for slid every later mark under the
+     * wrong label; `regions` is absent for the whole settle of every page, so that was the
+     * ordinary case rather than an edge one. The slot is reserved from what the *dataset* can
+     * answer and filled when it does.
+     */
+    expect(markHead()).toContain('regions')
+    const slots = row.querySelectorAll('.explore-marks > *')
+    expect(slots).toHaveLength(markHead().length)
+  })
+
+  it('keeps a slot for a mark it has no value for yet, so labels stay over their marks', async () => {
+    /*
+     * The region query settles after the row is drawn, so for the first stretch of every page
+     * there is a supported mark with nothing in it. Dropping the child packs the later marks left
+     * under earlier labels — browser-only, since jsdom reports no layout, which is why this
+     * counts children rather than measuring them.
+     */
+    richSource('mock-rich-slots')
+    setup({}, 'mock-rich-slots')
+    await ready()
+    const row = document.querySelectorAll('.explore-row')[0]!
+    const drawn = row.querySelectorAll('.explore-marks .explore-plot').length
+    const empty = row.querySelectorAll('.explore-marks .explore-mark--empty').length
+    // At least one mark has no value this early, which is the case worth having.
+    expect(empty).toBeGreaterThan(0)
+    expect(drawn + empty).toBe(markHead().length)
+  })
+
+  it('draws an em dash for a value the dataset never annotated', async () => {
+    /*
+     * The half a chip cannot do. An absent chip is invisible; an empty cell sits at the same
+     * position as every other value in its column and says nobody filled this one in.
+     */
+    richSource('mock-rich3')
+    setup({}, 'mock-rich3')
+    await ready()
+    const empty = document.querySelectorAll('.explore-cell[data-empty]')
+    for (const cell of empty) {
+      expect(cell.textContent).toBe('—')
+      expect(cell.getAttribute('title')).toMatch(/not annotated$/)
+    }
+  })
+
+  it('gives a card no columns and no header — it has no width to align in', async () => {
+    richSource('mock-rich4')
+    const def = requireNodeDef('neuron.explore')
+    const params: ParamValues = { ...defaults(def.params) }
+    function Card() {
+      const ctx = makeInferContext(def, params, {
+        dataset: T.dataset('mock-rich4', DATASET, undefined, false),
+      })
+      return (
+        <ExploreBody
+          node={{ id: 'n1', type: 'neuron.explore', position: { x: 0, y: 0 }, params }}
+          ctx={ctx}
+          compact
+          setParam={() => {}}
+          onError={() => {}}
+        />
+      )
+    }
+    render(<Card />)
+    await waitFor(() =>
+      expect(document.querySelectorAll('.explore-row').length).toBeGreaterThan(2),
+    )
+    expect(document.querySelector('.explore-head')).toBeNull()
+    expect(document.querySelector('.explore-cell')).toBeNull()
+    // The annotations are still there, as chips — which is the card's whole shape.
+    expect(document.querySelectorAll('.explore-chip').length).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * Paging faster than the thumbnails can load.
+ *
+ * The queue behind `MAX_CONCURRENT` used to be strict FIFO, so clicking through five pages put
+ * every earlier page's work ahead of the one actually on screen — the page you stopped on filled
+ * last, after a hundred requests nobody was looking at any more.
+ */
+describe('thumbnail queue under fast paging', () => {
+  /** A source whose geometry never resolves on its own, so the queue can be inspected. */
+  function stalledSource(id: string) {
+    const base: DataSource = new MockSource({ latencyMs: 0 })
+    const asked: string[] = []
+    const release: Array<() => void> = []
+    const source = Object.assign(Object.create(base) as DataSource, {
+      id,
+      fetchCoarseGeometry: (req: { neuronId: string }) => {
+        asked.push(req.neuronId)
+        return new Promise((resolve) => release.push(() => resolve(undefined)))
+      },
+    })
+    registerSource(source)
+    return { asked, release }
+  }
+
+  it('serves the page the reader stopped on before the ones they clicked past', async () => {
+    const { asked, release } = stalledSource('mock-queue')
+    // One page exactly fills the concurrency gate, so every later page is queued behind it.
+    setup({ pageSize: 4 }, 'mock-queue')
+    await waitFor(() => expect(asked.length).toBe(4))
+    const firstPage = [...asked]
+
+    // Click past three pages without waiting, as somebody hunting for a row does.
+    for (let click = 0; click < 3; click++) {
+      await act(async () => {
+        fireEvent.click(screen.getByLabelText('Next page'))
+      })
+    }
+    await waitFor(() => expect(document.querySelectorAll('.explore-row').length).toBe(4))
+
+    // Nothing new can start until a slot frees.
+    expect(asked.length).toBe(4)
+    const onScreen = [...document.querySelectorAll('.explore-row__id')].map(
+      (e) => e.textContent!,
+    )
+
+    // Free every slot at once and see which page the queue reaches for.
+    await act(async () => {
+      for (const done of release.splice(0)) done()
+    })
+    await waitFor(() => expect(asked.length).toBeGreaterThan(4))
+
+    const next = asked.slice(firstPage.length, firstPage.length + 4)
+    expect(next.sort()).toEqual([...onScreen].sort())
+  })
+
+  it('still fills a page in its own order, not backwards', async () => {
+    /*
+     * The half a plain LIFO would break. Serving the newest batch first fixes the across-page
+     * problem; popping the stack would also reverse the rows *within* a page, so a screenful
+     * would fill bottom-up. Newest batch, first waiter in it.
+     */
+    const { asked, release } = stalledSource('mock-queue-order')
+    setup({ pageSize: 4 }, 'mock-queue-order')
+    await waitFor(() => expect(asked.length).toBe(4))
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('Next page'))
+    })
+    await waitFor(() => expect(document.querySelectorAll('.explore-row').length).toBe(4))
+    const onScreen = [...document.querySelectorAll('.explore-row__id')].map(
+      (e) => e.textContent!,
+    )
+
+    await act(async () => {
+      for (const done of release.splice(0)) done()
+    })
+    await waitFor(() => expect(asked.length).toBe(8))
+    // Top row first, exactly as the list is read.
+    expect(asked.slice(4)).toEqual(onScreen)
+  })
+})
+
+describe('row context menu', () => {
+  /** jsdom has no clipboard, and `copyText` reports that rather than throwing into the void. */
+  function stubClipboard() {
+    const written: string[] = []
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          written.push(text)
+          return Promise.resolve()
+        },
+      },
+    })
+    return {
+      written,
+      restore: () => {
+        if (original) Object.defineProperty(navigator, 'clipboard', original)
+        else Reflect.deleteProperty(navigator, 'clipboard')
+      },
+    }
+  }
+
+  const menu = () => document.querySelector('.context-menu')
+
+  function row(at = 0) {
+    return document.querySelectorAll('.explore-row')[at]!
+  }
+
+  async function openMenu(at = 0) {
+    await screen.findAllByText(/neurons$/)
+    await waitFor(() =>
+      expect(document.querySelectorAll('.explore-row').length).toBeGreaterThan(2),
+    )
+    fireEvent.contextMenu(row(at))
+    await waitFor(() => expect(menu()).not.toBeNull())
+  }
+
+  it('opens on a right-click and names the neuron it landed on', async () => {
+    setup()
+    await screen.findAllByText(/neurons$/)
+    await waitFor(() =>
+      expect(document.querySelectorAll('.explore-row').length).toBeGreaterThan(2),
+    )
+    // `fireEvent` reports whether the default was prevented — the browser's own menu offers
+    // nothing about a neuron, and leaving it is how one gesture comes to mean two things.
+    expect(fireEvent.contextMenu(row(0))).toBe(false)
+    await waitFor(() => expect(menu()).not.toBeNull())
+    const id = row(0).querySelector('.explore-row__id')!.textContent
+    expect(menu()!.querySelector('.context-menu__caption')!.textContent).toContain(id!)
+  })
+
+  it('puts the id on the clipboard as text', async () => {
+    const clipboard = stubClipboard()
+    try {
+      setup()
+      await openMenu()
+      const id = row(0).querySelector('.explore-row__id')!.textContent!
+      fireEvent.click(within(menu() as HTMLElement).getByText('Copy ID'))
+      await waitFor(() => expect(clipboard.written).toEqual([id]))
+      // Text, verbatim — a wide root id does not survive a round trip through a double, which is
+      // why nothing here reads the cell as a number. See invariant 8.
+      expect(clipboard.written[0]).toBe(id)
+    } finally {
+      clipboard.restore()
+    }
+  })
+
+  it('offers the selection as a second row, disabled until something is ticked', async () => {
+    const clipboard = stubClipboard()
+    try {
+      const { external } = setup()
+      await openMenu()
+      const disabled = within(menu() as HTMLElement).getByText(/Copy selected/)
+      expect(disabled.closest('button')!.hasAttribute('disabled')).toBe(true)
+
+      // Two ticked, as the checkboxes would leave it.
+      fireEvent.click(document.querySelector('.context-menu')!)
+      external('selection', ['1047397108', '1047397435'])
+      await openMenu()
+      fireEvent.click(within(menu() as HTMLElement).getByText(/Copy selected/))
+      // `joinIds`' default separator, so this and the Copy IDs node agree.
+      await waitFor(() => expect(clipboard.written).toEqual(['1047397108\n1047397435']))
+    } finally {
+      clipboard.restore()
+    }
+  })
+
+  it('selects every hit of the row’s type, not just the page', async () => {
+    const { writes } = setup({ pageSize: 3 })
+    await openMenu()
+    const label = row(0).querySelector('strong')!.textContent!
+    fireEvent.click(within(menu() as HTMLElement).getByText(/Select all of this type/))
+
+    const written = writes.filter(([id]) => id === 'selection').at(-1)
+    const chosen = written?.[1] as string[]
+    // More than the three on screen, and every one of them really is that type.
+    expect(chosen.length).toBeGreaterThan(3)
+    expect(label.length).toBeGreaterThan(0)
+  })
+
+  it('searches for the type, which re-runs the list', async () => {
+    setup()
+    await openMenu()
+    const label = row(0).querySelector('strong')!.textContent!
+    fireEvent.click(within(menu() as HTMLElement).getByText('Search for this type'))
+    await waitFor(() =>
+      expect((screen.getByLabelText('Search neurons') as HTMLInputElement).value).toBe(label),
+    )
+  })
+
+  it('is the overlay’s alone — a card row has no menu', async () => {
+    /*
+     * Through a whole `ExploreBody` with `compact`, because the gate is there and not on the row:
+     * a test that renders `NeuronRow` without an `onContextMenu` prop asserts nothing about who
+     * decides to pass one, and passes just as happily with the gate removed. Checked by removing
+     * it.
+     */
+    const def = requireNodeDef('neuron.explore')
+    const params: ParamValues = { ...defaults(def.params) }
+    function Card() {
+      const ctx = makeInferContext(def, params, {
+        dataset: T.dataset('mock', DATASET, undefined, false),
+      })
+      return (
+        <ExploreBody
+          node={{ id: 'n1', type: 'neuron.explore', position: { x: 0, y: 0 }, params }}
+          ctx={ctx}
+          compact
+          setParam={() => {}}
+          onError={() => {}}
+        />
+      )
+    }
+    render(<Card />)
+    await waitFor(() =>
+      expect(document.querySelectorAll('.explore-row').length).toBeGreaterThan(2),
+    )
+    fireEvent.contextMenu(row(0))
+    expect(menu()).toBeNull()
+  })
+})
 
 describe('thumbnail ink', () => {
   const BODY = getConnectome(DATASET)!.neurons[0]!.neuronId
@@ -708,9 +1098,542 @@ describe('thumbnail ink', () => {
   })
 })
 
+/**
+ * The hover preview.
+ *
+ * jsdom performs no layout — every element reports the same rect from `installJsdomStubs` — so
+ * where the preview lands is `previewPlacement`'s test and not this one. What is checkable here
+ * is the half that is about events: that it waits, that it is a mouse gesture, that it leaves,
+ * and that it reaches a card's row as well as the overlay's.
+ */
+describe('thumbnail hover preview', () => {
+  const BODY = getConnectome(DATASET)!.neurons[0]!.neuronId
+
+  const preview = () => document.querySelector('.explore-thumb-preview')
+
+  /**
+   * A pointer event carrying a `pointerType`, which `fireEvent` cannot make here.
+   *
+   * jsdom implements no `PointerEvent`, so testing-library falls back to a `MouseEvent` and
+   * every init key the fallback does not know — `pointerType` above all — is dropped silently.
+   * A test written the obvious way therefore exercises the *touch* branch while reading as the
+   * mouse one, and passes for the wrong reason in both directions.
+   *
+   * `pointerover`/`pointerout` rather than `pointerenter`/`pointerleave`: React derives the
+   * enter/leave pair from the over/out pair at the root, so the non-bubbling ones never arrive.
+   */
+  function pointer(target: Element, type: 'pointerover' | 'pointerout', pointerType: string) {
+    const event = new MouseEvent(type, { bubbles: true })
+    Object.defineProperty(event, 'pointerType', { value: pointerType })
+    fireEvent(target, event)
+  }
+
+  async function drawTile(hoverPreview: boolean) {
+    render(
+      <NeuronThumbnail
+        sourceId="mock"
+        datasetId={DATASET}
+        neuronId={String(BODY)}
+        size={76}
+        hoverPreview={hoverPreview}
+      />,
+    )
+    const slot = await waitFor(() => {
+      const found = document.querySelector('.explore-thumb-slot')
+      if (!found) throw new Error('no tile yet')
+      return found
+    })
+    return slot
+  }
+
+  it('opens an enlarged copy of the mask the tile already has', async () => {
+    const slot = await drawTile(true)
+    expect(preview()).toBeNull()
+
+    pointer(slot, 'pointerover', 'mouse')
+    // Not immediately: the delay is what stops a pointer swept down 25 rows opening 25 previews.
+    expect(preview()).toBeNull()
+
+    await waitFor(() => expect(preview()).not.toBeNull())
+    /*
+     * It opens on the tile's own 304px mask — no wait — and swaps to the 640px one the finer
+     * fetch brings back. Both are drawn at `PREVIEW_SIZE`, which is the assertion that matters:
+     * a stand-in at its own size would make the picture jump rather than sharpen when the fetch
+     * lands.
+     */
+    const canvas = () => preview()!.querySelector('canvas') as HTMLCanvasElement
+    expect(canvas().style.width).toBe('320px')
+    await waitFor(() => expect(canvas().width).toBe(640))
+    expect(canvas().style.width).toBe('320px')
+
+    pointer(slot, 'pointerout', 'mouse')
+    await waitFor(() => expect(preview()).toBeNull())
+  })
+
+  /**
+   * A source that records what detail each call asked for, and can be told to have nothing finer.
+   *
+   * Delegation, not a subclass, for the reason `oversizedSource` gives: `MockSource.id` is the
+   * literal `'mock'` and registering that id would replace the real mock for every other case in
+   * this file.
+   */
+  function recordingSource(id: string, finer = true): DataSource {
+    const base: DataSource = new MockSource({ latencyMs: 0 })
+    const asked: Array<string | undefined> = []
+    const source = Object.assign(Object.create(base) as DataSource, {
+      id,
+      asked,
+      async fetchCoarseGeometry(req: { detail?: string }) {
+        asked.push(req.detail)
+        if (!finer && req.detail === 'fine') return undefined
+        return base.fetchCoarseGeometry!(req as never)
+      },
+    })
+    registerSource(source)
+    return source as DataSource & { asked: Array<string | undefined> }
+  }
+
+  it('asks for the coarsest body for a tile and a finer one only once the preview opens', async () => {
+    const source = recordingSource('mock-detail') as DataSource & {
+      asked: Array<string | undefined>
+    }
+    render(
+      <NeuronThumbnail
+        sourceId="mock-detail"
+        datasetId={DATASET}
+        neuronId={String(BODY)}
+        size={76}
+        hoverPreview
+      />,
+    )
+    const slot = await waitFor(() => {
+      const found = document.querySelector('.explore-thumb-slot')
+      if (!found) throw new Error('no tile yet')
+      return found
+    })
+    // The tile alone. A row that nobody rests on costs one coarse body and nothing else.
+    expect(source.asked).toEqual(['coarsest'])
+
+    pointer(slot, 'pointerover', 'mouse')
+    await waitFor(() => expect(preview()).not.toBeNull())
+    await waitFor(() => expect(source.asked).toEqual(['coarsest', 'fine']))
+  })
+
+  it('keeps the tile mask when the source has nothing finer to give', async () => {
+    /*
+     * CATMAID hands back the whole traced arbor already and CAVE's chunk-graph route has no
+     * finer level, so `undefined` here is the ordinary answer rather than a failure — and the
+     * preview must stay up on the tile's own mask. Written as a wait on the refusal having been
+     * asked for and answered, since the fallback is the *absence* of a swap.
+     */
+    const source = recordingSource('mock-nofiner', false) as DataSource & {
+      asked: Array<string | undefined>
+    }
+    render(
+      <NeuronThumbnail
+        sourceId="mock-nofiner"
+        datasetId={DATASET}
+        neuronId={String(BODY)}
+        size={76}
+        hoverPreview
+      />,
+    )
+    const slot = await waitFor(() => {
+      const found = document.querySelector('.explore-thumb-slot')
+      if (!found) throw new Error('no tile yet')
+      return found
+    })
+    pointer(slot, 'pointerover', 'mouse')
+    await waitFor(() => expect(source.asked).toEqual(['coarsest', 'fine']))
+
+    const canvas = preview()!.querySelector('canvas') as HTMLCanvasElement
+    expect(canvas.width).toBe(304)
+    // Still drawn at the full preview size, which is the whole of what those two sources get.
+    expect(canvas.style.width).toBe('320px')
+  })
+
+  it('ignores touch, which has no gesture that would close it', async () => {
+    const slot = await drawTile(true)
+    pointer(slot, 'pointerover', 'touch')
+    await new Promise((resolve) => setTimeout(resolve, 220))
+    expect(preview()).toBeNull()
+  })
+
+  /*
+   * The dismissal is a watch on the tile's rect, not a `scroll` listener, because a node card is
+   * moved by a `transform` on React Flow's pane and fires no event at all. jsdom reports one
+   * constant rect for every element, so the watch is reachable here only by making *this* tile
+   * answer differently — which is the whole mechanism: scrolling the list is one way for that to
+   * happen and panning the canvas is another.
+   */
+  it('closes when the tile moves, the neuron under the pointer now being a different one', async () => {
+    const slot = await drawTile(true)
+    pointer(slot, 'pointerover', 'mouse')
+    await waitFor(() => expect(preview()).not.toBeNull())
+
+    // Defined rather than assigned: the stub puts a non-writable `getBoundingClientRect` on
+    // `HTMLElement.prototype`, so a plain assignment throws under strict mode.
+    const before = slot.getBoundingClientRect()
+    Object.defineProperty(slot, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ ...before, top: before.top - 40 }) as DOMRect,
+    })
+
+    await waitFor(() => expect(preview()).toBeNull())
+  })
+
+  it('stays up while the tile does not move, or a rested pointer would flicker', async () => {
+    const slot = await drawTile(true)
+    pointer(slot, 'pointerover', 'mouse')
+    await waitFor(() => expect(preview()).not.toBeNull())
+
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    expect(preview()).not.toBeNull()
+  })
+
+  /*
+   * The sweep, at the only layer jsdom can reach.
+   *
+   * What is checkable here is the plumbing — that one fetch serves both the mask and the frames,
+   * that nothing is built for a row nobody rested on, and that a reader asking for less motion
+   * pays for none of it. Whether it *looks* like a rotation is `rotation.test.ts` for the
+   * arithmetic and the browser probe for the picture.
+   */
+  it('builds the sweep from the same body the mask was drawn from, not a second fetch', async () => {
+    const source = recordingSource('mock-sweep') as DataSource & {
+      asked: Array<string | undefined>
+    }
+    await hover('mock-sweep', BODY)
+    // One coarse body for the tile, one fine body serving both the static mask and every frame.
+    await waitFor(() => expect(source.asked).toEqual(['coarsest', 'fine']))
+  })
+
+  it('builds nothing for a row the pointer only passes over', async () => {
+    const source = recordingSource('mock-sweep-pass') as DataSource & {
+      asked: Array<string | undefined>
+    }
+    render(
+      <NeuronThumbnail
+        sourceId="mock-sweep-pass"
+        datasetId={DATASET}
+        neuronId={String(BODY)}
+        size={76}
+        hoverPreview
+      />,
+    )
+    const slot = await waitFor(() => {
+      const found = document.querySelector('.explore-thumb-slot')
+      if (!found) throw new Error('no tile yet')
+      return found
+    })
+    // In and straight out again, inside `PREVIEW_DELAY_MS`.
+    pointer(slot, 'pointerover', 'mouse')
+    pointer(slot, 'pointerout', 'mouse')
+    await new Promise((resolve) => setTimeout(resolve, 260))
+    expect(preview()).toBeNull()
+    expect(source.asked).toEqual(['coarsest'])
+  })
+
+  it('frees the frames when the preview closes, and rebuilds them on the next look', async () => {
+    /*
+     * The whole cost model in one assertion. Sixteen masks are 6.3 MB and ~22 ms to rasterise
+     * from a cached mesh, so they are cheap to rebuild and expensive to keep — the geometry is
+     * what `loadFineGeometry` holds, and the frames live only while the pointer is on the row.
+     *
+     * Observed through `createRotation` being reached twice for one neuron, because the frames
+     * themselves are not visible from the DOM: drop the gate on the preview being open and the
+     * build effect stops re-running, the frames stay in state, and this is called once.
+     */
+    const built = vi.spyOn(rotationModule, 'createRotation')
+    try {
+      await hover('mock', BODY)
+      await waitFor(() => expect(built).toHaveBeenCalledTimes(1))
+
+      const slot = document.querySelector('.explore-thumb-slot')!
+      pointer(slot, 'pointerout', 'mouse')
+      await waitFor(() => expect(preview()).toBeNull())
+
+      pointer(slot, 'pointerover', 'mouse')
+      await waitFor(() => expect(preview()).not.toBeNull())
+      await waitFor(() => expect(built).toHaveBeenCalledTimes(2))
+    } finally {
+      built.mockRestore()
+    }
+  })
+
+  it('builds no frames at all under prefers-reduced-motion', async () => {
+    /*
+     * Not "built and not played". The frames are the whole cost — 6.3 MB and a rasterisation
+     * pass — so a reader who has asked for less motion should not be paying for an animation they
+     * will never see. Asserted through `createRotation` never being reached, since the drawn
+     * picture is the static mask either way and the two are indistinguishable from the DOM.
+     *
+     * `resetMediaForTest` is what makes the swap take: `ui/mediaQuery.ts` keeps one
+     * `MediaQueryList` per query in a module registry, so a suite that replaces `matchMedia`
+     * without dropping the registry keeps being answered by the list belonging to the one it
+     * replaced — which is exactly what that seam exists for.
+     */
+    const built = vi.spyOn(rotationModule, 'createRotation')
+    const media = window.matchMedia
+    window.matchMedia = ((query: string) =>
+      ({
+        matches: query.includes('prefers-reduced-motion'),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }) as unknown as MediaQueryList) as typeof window.matchMedia
+    resetMediaForTest()
+    try {
+      await hover('mock', BODY)
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(built).not.toHaveBeenCalled()
+      // And it still draws the sharp still picture, which is the *only* thing `fine` is for now:
+      // where the rock runs, rasterising it would just delay the centre frame that replaces it.
+      expect((preview()!.querySelector('canvas') as HTMLCanvasElement).width).toBe(640)
+    } finally {
+      built.mockRestore()
+      window.matchMedia = media
+      resetMediaForTest()
+    }
+  })
+
+  /**
+   * Hover a tile and wait for the finer mask to land, returning the recording source.
+   *
+   * Takes the neuron so the eviction case can walk a page of them.
+   */
+  async function hover(sourceId: string, neuronId: number) {
+    render(
+      <NeuronThumbnail
+        sourceId={sourceId}
+        datasetId={DATASET}
+        neuronId={String(neuronId)}
+        size={76}
+        hoverPreview
+      />,
+    )
+    const slot = await waitFor(() => {
+      const found = document.querySelector('.explore-thumb-slot')
+      if (!found) throw new Error('no tile yet')
+      return found
+    })
+    pointer(slot, 'pointerover', 'mouse')
+    await waitFor(() => expect(preview()).not.toBeNull())
+    // Both the static fine mask and every rotation frame are 640, so this waits for "the finer
+    // body has landed" either way. Under reduced motion there is no sweep to wait past.
+    await waitFor(() =>
+      expect((preview()!.querySelector('canvas') as HTMLCanvasElement).width).toBe(640),
+    )
+  }
+
+  it('persists a tile mask and never a preview mask', async () => {
+    await hover('mock', BODY)
+
+    // The tile's, written as it always was. `cacheGet` returning it is what makes a second visit
+    // to a dataset cheap.
+    expect(
+      await cacheGet<{ coverage: Uint8Array }>(`thumb:mock:${DATASET}:${BODY}:304`, {
+        fingerprint: 'coverage-8bit-1',
+      }),
+    ).toBeDefined()
+
+    /*
+     * The preview's, deliberately absent. 400 KiB an entry against the tile's 90 kB, earned by
+     * resting a pointer rather than by scrolling — and `cache.ts` evicts nothing and this caller
+     * passes no `maxAgeMs`, so a write here is a write forever.
+     */
+    expect(
+      await cacheGet<{ coverage: Uint8Array }>(`thumb:mock:${DATASET}:${BODY}:640`, {
+        fingerprint: 'coverage-8bit-1',
+      }),
+    ).toBeUndefined()
+    // And nothing at the preview raster was written under any spelling. The preview's mask has
+    // no cache namespace at all now — it is derived from the body `fineGeometry` holds.
+    expect((await cacheKeys()).filter((k) => k.includes(':640'))).toEqual([])
+  })
+
+  it('still remembers a preview for the session, so re-hovering does not refetch', async () => {
+    const source = recordingSource('mock-session') as DataSource & {
+      asked: Array<string | undefined>
+    }
+    await hover('mock-session', BODY)
+    expect(source.asked).toEqual(['coarsest', 'fine'])
+
+    cleanup()
+    await hover('mock-session', BODY)
+    // Memory-only is about surviving a *reload*. Within the session the map still answers, or
+    // every pass down a list would re-fetch the finer body.
+    expect(source.asked).toEqual(['coarsest', 'fine'])
+  })
+
+  it('forgets the oldest body past the cap, because memory-only is not bounded', async () => {
+    /*
+     * `MAX_FINE_GEOMETRY` is 3. The bound moved down a layer when the preview's mask stopped
+     * having a cache of its own: the mask is derived from the body, so the body is the only thing
+     * worth capping, and without a cap the session holds ~0.5 MB per neuron ever hovered until
+     * the tab closes.
+     */
+    const source = recordingSource('mock-evict') as DataSource & {
+      asked: Array<string | undefined>
+    }
+    const bodies = getConnectome(DATASET)!
+      .neurons.slice(0, 4)
+      .map((n) => n.neuronId)
+    const first = bodies[0]!
+
+    for (const body of bodies) {
+      await hover('mock-evict', body)
+      cleanup()
+    }
+    const before = source.asked.filter((d) => d === 'fine').length
+    expect(before).toBe(4)
+
+    await hover('mock-evict', first)
+    // Asked again: four distinct bodies do not fit in three.
+    expect(source.asked.filter((d) => d === 'fine').length).toBe(before + 1)
+  })
+
+  /*
+   * Asked through a whole row rather than of the prop, because the prop is not the wire.
+   *
+   * The default is `false` — `ProfileViewer`'s shape tile wants it that way — so a test handing
+   * the component `hoverPreview` by hand says nothing about whether a *row* passes it. Both
+   * modes are asked because for a while only one of them did, and the compact tile is the one
+   * with something to go wrong: it is 56px on a pane React Flow has scaled, and the preview it
+   * opens is portalled out to `document.body` at viewport coordinates.
+   */
+  function renderRow(compact: boolean) {
+    const table = makeTable(
+      tableSchema(column('neuronId', 'i64'), column('type', 'str')),
+      { neuronId: [BODY], type: ['DNp01'] },
+      'neurons',
+    )
+    render(
+      <NeuronRow
+        table={table}
+        row={0}
+        fields={rowFields(table.schema)}
+        sourceId="mock"
+        datasetId={DATASET}
+        selected={false}
+        onToggle={() => {}}
+        compact={compact}
+        mode="dark"
+      />,
+    )
+    return waitFor(() => {
+      const found = document.querySelector('.explore-thumb-slot')
+      if (!found) throw new Error('no tile yet')
+      return found
+    })
+  }
+
+  it('reaches a row in the overlay', async () => {
+    const slot = await renderRow(false)
+    pointer(slot, 'pointerover', 'mouse')
+    await waitFor(() => expect(preview()).not.toBeNull())
+  })
+
+  it('reaches a row on a card too, at the same preview size off a smaller tile', async () => {
+    const slot = await renderRow(true)
+    expect(slot.getAttribute('style')).toContain('56px')
+    pointer(slot, 'pointerover', 'mouse')
+    const shown = await waitFor(() => {
+      const found = preview()
+      if (!found) throw new Error('no preview yet')
+      return found
+    })
+    // Portalled out of the row, which is what escapes `.coda-node`'s clip and the list's.
+    expect(shown.parentElement).toBe(document.body)
+    // The stand-in is the 224px tile mask, but it is drawn at the full preview size on both.
+    const canvas = shown.querySelector('canvas') as HTMLCanvasElement
+    expect(canvas.style.width).toBe('320px')
+  })
+})
+
+/**
+ * What a blank tile says, and why it is worth saying anything.
+ *
+ * A tile with no picture used to mean one thing — "nothing cheap here" — and now means two, told
+ * apart at `readKey`: the dataset never meshed this neuron, or it has a mesh and the byte ceiling
+ * turned it down. On a flat mesh store the second is the *common* case rather than the rare one
+ * (fish2's median body is 0.54 MB against a 12 MB ceiling), and the two are actionable in
+ * opposite directions, so the tile carries the reason.
+ *
+ * Asserted on the hook and not on the sentence: `data-blank` is stable where the tooltip's prose
+ * is the thing most likely to be reworded, and its wording proves nothing.
+ */
+describe('a blank tile says which kind of blank', () => {
+  const BODY = getConnectome(DATASET)!.neurons[0]!.neuronId
+
+  /** A source answering exactly one way, for a neuron the mock connectome really has. */
+  function answering(id: string, answer: undefined | { kind: 'refused'; reason: 'too-large' }) {
+    const base: DataSource = new MockSource({ latencyMs: 0 })
+    registerSource(
+      Object.assign(Object.create(base) as DataSource, {
+        id,
+        async fetchCoarseGeometry() {
+          return answer
+        },
+      }),
+    )
+  }
+
+  async function tile(sourceId: string) {
+    render(
+      <NeuronThumbnail
+        sourceId={sourceId}
+        datasetId={DATASET}
+        neuronId={String(BODY)}
+        size={76}
+        hoverPreview
+      />,
+    )
+    return waitFor(() => {
+      const found = document.querySelector('.explore-thumb--empty')
+      if (!found) throw new Error('no blank tile yet')
+      return found
+    })
+  }
+
+  it('marks a body the ceiling refused, and says so where a reader can ask', async () => {
+    answering('mock-refused', { kind: 'refused', reason: 'too-large' })
+    const blank = await tile('mock-refused')
+    expect(blank.getAttribute('data-blank')).toBe('too-large')
+    expect(blank.getAttribute('title')).toMatch(/larger than/)
+    // Announced, because this is a fact no other part of the row carries.
+    expect(blank.getAttribute('aria-label')).toMatch(/too large/)
+  })
+
+  it('leaves an ordinary absence unmarked and unannounced', async () => {
+    answering('mock-nothing', undefined)
+    const blank = await tile('mock-nothing')
+    expect(blank.getAttribute('data-blank')).toBeNull()
+    expect(blank.getAttribute('title')).toMatch(/no cheap geometry/)
+    /*
+     * Decorative on purpose: it says what the row already says. A dataset that publishes no cheap
+     * geometry at all makes *every* row this tile, and announcing each one spends a screen
+     * reader's attention on nothing.
+     */
+    expect(blank.getAttribute('aria-hidden')).toBe('true')
+    expect(blank.getAttribute('aria-label')).toBeNull()
+  })
+
+  it('does not offer a preview for a tile with no picture behind it', async () => {
+    // The hover machinery hangs off `.explore-thumb-slot`, which a blank never renders — so a
+    // refused body cannot be hovered into fetching the very mesh the ceiling just declined.
+    answering('mock-refused-hover', { kind: 'refused', reason: 'too-large' })
+    await tile('mock-refused-hover')
+    expect(document.querySelector('.explore-thumb-slot')).toBeNull()
+  })
+})
+
 describe('thumbnail caching', () => {
   const BODY = getConnectome(DATASET)!.neurons[0]!.neuronId
-  /** Displayed at 76, rasterised at `RASTER_SCALE` — the key carries the raster size. */
+  /**
+   * Displayed at 76, rasterised at `RASTER_SCALE` — the key carries the raster size, and the
+   * detail beside it, since a preview asks the same source for a finer body at 640.
+   */
   const KEY = `thumb:mock:${DATASET}:${BODY}:304`
 
   function renderThumb(sourceId = 'mock') {
@@ -790,6 +1713,7 @@ describe('annotation chips', () => {
         selected={false}
         onToggle={() => {}}
         compact={compact}
+        mode="dark"
       />,
     )
     return Array.from(document.querySelectorAll('.explore-chip')) as HTMLElement[]
@@ -882,11 +1806,23 @@ describe('the Tags param', () => {
     expect(chipTexts()).toEqual([])
   })
 
+  /** Every annotation a row draws, chip or aligned cell, by the field it names. */
+  function annotations(): string[] {
+    const row = rows()[0]!
+    return [...row.querySelectorAll('.explore-chip, .explore-cell')].map(
+      (el) => (el.getAttribute('title') ?? '').split(':')[0]!,
+    )
+  }
+
   it('shows a field chosen in the inspector, even one the automatic list would never pick', async () => {
     setup({ chips: ['status'] })
     await ready()
-    expect(chipTexts()).toHaveLength(1)
-    expect(rows()[0]!.querySelector('.explore-chip')?.getAttribute('title')).toBe('status')
+    /*
+     * In whichever shape the layout gives it. In the expanded view a well-filled field is
+     * aligned into a column rather than drawn as a chip — the chosen list decides *which* fields,
+     * `splitByFill` decides which of them are worth a column, and this test is about the first.
+     */
+    expect(annotations()).toEqual(['status'])
   })
 
   it('ignores a chosen field this dataset does not have', async () => {
@@ -894,7 +1830,7 @@ describe('the Tags param', () => {
     // dataset it was set on, and a stale name must not become an empty tag.
     setup({ chips: ['superclass', 'status'] })
     await ready()
-    expect(chipTexts()).toHaveLength(1)
+    expect(annotations()).toEqual(['status'])
   })
 
   it('lives in the inspector and not on the card, and stales nothing', () => {

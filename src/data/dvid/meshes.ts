@@ -39,6 +39,7 @@
 import { parseLegacyFragment } from '../precomputed/legacy'
 import type { MeshBodyReader, MeshSource } from '../precomputed/index'
 import type { DvidOptions } from './client'
+import { OVERSIZE } from '../precomputed/transport'
 import { readKey, requireInstance } from './client'
 import type { DvidRef } from './refs'
 import { meshInstance } from './refs'
@@ -59,11 +60,14 @@ export async function openDvidMeshSource(
 }
 
 /**
- * One body's mesh, or undefined when it has none or is over `maxBytes`.
+ * One body's mesh, `OVERSIZE` when it is past `maxBytes`, or undefined when it has none.
  *
  * Both absences are ordinary and neither fails a scene: a body may be a fragment nobody meshed,
- * and a body may be the 107 MB one. They are reported the same way — as `missing` — because from
- * the caller's side they are the same fact, that this neuron is not in the result.
+ * and a body may be the 107 MB one. A scene still reports them the same way — as `missing` —
+ * because from its side they are the same fact, that this neuron is not in the result. **A
+ * thumbnail is the caller that can say something**, and it is the caller for which the two are
+ * routinely different: a blank tile that knows it was refused for size can say so, where one
+ * that was handed a bare `undefined` can only draw the same glyph as an unmeshed body.
  *
  * **The ceiling bounds the download, not the decode**, and it has to. DVID publishes no manifest,
  * answers `HEAD` with no `Content-Length` and ignores `Range` — all measured — so a body's size
@@ -75,5 +79,6 @@ export async function openDvidMeshSource(
 export const readNgMesh: MeshBodyReader = async (source, neuronId, options = {}) => {
   // `.ngmesh` is neuroglancer's own spelling for this key.
   const bytes = await readKey(source.base, `${neuronId}.ngmesh`, options)
-  return bytes ? parseLegacyFragment(bytes) : undefined
+  if (!bytes) return undefined
+  return bytes === OVERSIZE ? OVERSIZE : parseLegacyFragment(bytes)
 }

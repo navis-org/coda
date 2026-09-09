@@ -18,7 +18,15 @@ import fragmentFixture from './__fixtures__/dracoFragment.json'
 import manifestFixture from './__fixtures__/hemibrainManifest.json'
 import type { RestoreFetch } from '../../test/precomputedStubs'
 import { serveDracoWasmFromDisk } from '../../test/precomputedStubs'
-import { meshProgress } from './index'
+import type { MeshSource } from './index'
+import {
+  FINE_TRIANGLE_BUDGET,
+  fetchCoarseMesh,
+  fetchMeshes,
+  meshProgress,
+  thumbnailCeiling,
+  withinCeiling,
+} from './index'
 import { concatMeshes, parseLegacyFragment } from './legacy'
 import type { MultiResInfo } from './multires'
 import { chooseLod, fragmentOffset, fragmentTransform, parseMultiResManifest } from './multires'
@@ -26,6 +34,7 @@ import { hashUint64, murmurHash3x86_128 } from './murmur'
 import type { ShardingSpec } from './sharded'
 import { locate } from './sharded'
 import {
+  OVERSIZE,
   PrecomputedFetchError,
   fetchBytes,
   gcsJsonApiUrl,
@@ -245,6 +254,27 @@ describe('chooseLod', () => {
 
   it('falls back to the coarsest level rather than refusing when nothing fits', () => {
     expect(chooseLod([pyramid([2_000_000, 280_000])], 1)).toBe(1)
+  })
+
+  /*
+   * The two budgets `fetchCoarseMesh` actually passes, against hemibrain's real pyramid.
+   *
+   * A thumbnail asks with 1, which no level can meet, and that is how the coarsest is requested —
+   * there is no "coarsest" argument. Explore's hover preview asks with
+   * `FINE_TRIANGLE_BUDGET`, and the whole of what that buys is this one step: LOD 3's 11 kB to
+   * LOD 2's 48 kB, about 28k triangles.
+   *
+   * **One step and not two, deliberately.** 150k triangles is a 255 kB allowance, which clears
+   * LOD 2 and stops short of LOD 1's 280 kB — a quarter of a megabyte per hover, for a picture
+   * 320 CSS pixels across that cannot show the difference. Pinned here because it is invisible
+   * from the component: both calls return a mesh and only the triangle count differs.
+   */
+  it('separates a tile from a hover preview by one level of hemibrain', () => {
+    const m = [pyramid([2_000_000, 280_000, 48_000, 11_000])]
+    expect(chooseLod(m, 1)).toBe(3)
+    expect(chooseLod(m, FINE_TRIANGLE_BUDGET)).toBe(2)
+    // The step above is a download this deliberately does not make.
+    expect(chooseLod(m, 200_000)).toBe(1)
   })
 })
 
@@ -758,4 +788,138 @@ describe('draco decoding', () => {
       ),
     ).rejects.toThrow()
   }, 60_000)
+})
+
+/**
+ * Which absences a caller's byte ceiling is responsible for.
+ *
+ * Both were `missing` and nothing more, which is right for a scene — a body that is not in the
+ * result is not in the result — and leaves a blank Explore tile with nothing to say. The two are
+ * routinely different on a flat store: fish2's median body is 0.54 MB, so the ceiling is the
+ * common reason a tile is blank rather than the rare one.
+ *
+ * Driven through an injected `readBody`, which is the port `data/dvid` fills, so this exercises
+ * the accounting in `fetchMeshes` without a server or a fixture. The DVID reader's own half — a
+ * 413 becoming `OVERSIZE` rather than `undefined` — needs a real server and is in
+ * `data/dvid/live.test.ts`.
+ */
+describe('oversize accounting', () => {
+  const TRIANGLE = {
+    positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+    indices: new Uint32Array([0, 1, 2]),
+  }
+
+  /** A flat store whose three bodies answer in the three ways one can. */
+  function flatSource(base: string): MeshSource {
+    return {
+      base,
+      format: 'dvid-ngmesh',
+      levels: 1,
+      readBody: async (_source, neuronId) => {
+        if (neuronId === 'huge') return OVERSIZE
+        if (neuronId === 'absent') return undefined
+        return TRIANGLE
+      },
+    }
+  }
+
+  it('names the refused subset of the missing, and only that', async () => {
+    const result = await fetchMeshes(flatSource('mem://a'), ['ok', 'huge', 'absent'], {
+      refresh: true,
+      maxBytesPerBody: 1,
+    })
+    expect(result.meshes.map((m) => m.neuronId)).toEqual(['ok'])
+    // Both absences still count as missing — nothing downstream has to add two numbers.
+    expect(result.missing.sort()).toEqual(['absent', 'huge'])
+    // A subset of `missing` and not a second accounting of the same absences.
+    expect(result.oversize).toEqual(['huge'])
+    expect(result.missing).toEqual(expect.arrayContaining(result.oversize))
+  })
+
+  it('says so again on a second call, since the cache remembers values and not absences', async () => {
+    const source = flatSource('mem://b')
+    await fetchMeshes(source, ['ok', 'huge'], { refresh: true, maxBytesPerBody: 1 })
+    // `ok` is now cached and `huge` is not, which is the case the subset filter has to survive:
+    // a refusal recorded on this call against a `missing` list assembled partly from the cache.
+    const again = await fetchMeshes(source, ['ok', 'huge'], { maxBytesPerBody: 1 })
+    expect(again.meshes.map((m) => m.neuronId)).toEqual(['ok'])
+    expect(again.oversize).toEqual(['huge'])
+  })
+
+  it('reports nothing oversize when no ceiling was set', async () => {
+    // The reader still answers `OVERSIZE` for `huge` here, which is the honest thing for a stub
+    // to do — what is asserted is that a caller who set no ceiling is told about no refusals.
+    const result = await fetchMeshes(flatSource('mem://c'), ['ok', 'absent'], { refresh: true })
+    expect(result.missing).toEqual(['absent'])
+    expect(result.oversize).toEqual([])
+  })
+
+  it('hands a thumbnail caller the refusal rather than a bare absence', async () => {
+    // The step the tile's whole message depends on: `fetchCoarseMesh` asks for one body, so it
+    // has to turn `oversize` back into an answer its caller can tell from "there is no mesh".
+    // Distinct bases rather than `refresh`, which `fetchCoarseMesh` does not take: the cache key
+    // carries the base, so a fresh one is a cold cache.
+    expect(await fetchCoarseMesh(flatSource('mem://d'), 'huge')).toBe(OVERSIZE)
+    expect(await fetchCoarseMesh(flatSource('mem://e'), 'absent')).toBeUndefined()
+    const mesh = await fetchCoarseMesh(flatSource('mem://f'), 'ok')
+    if (!mesh || mesh === OVERSIZE) throw new Error('expected a mesh')
+    expect(mesh.indices.length).toBe(3)
+  })
+
+  /*
+   * The multi-resolution branch's half of the same accounting, which is where the ceiling
+   * normally fires: a pyramid names each level's byte count in its manifest, so the refusal is
+   * free and happens before anything is downloaded. Asked of `withinCeiling` directly because
+   * reaching it through `fetchMeshes` means driving a whole sharded manifest sweep past a stubbed
+   * transport — which is why the line had no offline coverage until it was pulled out.
+   */
+  describe('withinCeiling', () => {
+    const bytes = { small: 1000, big: 5000 }
+    const bytesOf = (id: string) => bytes[id as keyof typeof bytes]
+
+    it('splits the ids the ceiling admits from the ones it turns down', () => {
+      expect(withinCeiling(['small', 'big'], bytesOf, 2000)).toEqual({
+        wanted: ['small'],
+        refused: ['big'],
+      })
+    })
+
+    it('admits a body exactly at the ceiling, which is a boundary and not a taste', () => {
+      // `<=`: a level whose manifest says it is exactly the ceiling has not exceeded it, and a
+      // strict comparison would refuse a body for being the size somebody chose to allow.
+      expect(withinCeiling(['small'], bytesOf, 1000).wanted).toEqual(['small'])
+    })
+
+    it('admits everything when no ceiling was set, refusing nothing', () => {
+      // Only the thumbnail path sets one; a scene must not inherit a refusal from it.
+      expect(withinCeiling(['small', 'big'], bytesOf, undefined)).toEqual({
+        wanted: ['small', 'big'],
+        refused: [],
+      })
+    })
+
+    it("keeps the caller's order on both lists", () => {
+      // `missing` is appended to from here, and a list a reader compares against the page order
+      // is worth keeping in it.
+      const { wanted, refused } = withinCeiling(['big', 'small', 'big'], bytesOf, 2000)
+      expect(wanted).toEqual(['small'])
+      expect(refused).toEqual(['big', 'big'])
+    })
+  })
+
+  it('judges a pyramid by its level and a flat store by its whole body', () => {
+    /*
+     * The two ceilings answer different questions and the format is what picks between them: a
+     * coarsest-of-four level at 2 MB is an unsplit blob, where a *only* level at 2 MB is an
+     * ordinary neuron in a dataset whose neurons are big. One function, because a second caller
+     * choosing for itself is a silently blank tile.
+     */
+    expect(thumbnailCeiling({ base: '', format: 'multilod-draco', levels: 4 })).toBe(
+      2 * 1024 * 1024,
+    )
+    expect(thumbnailCeiling({ base: '', format: 'dvid-ngmesh', levels: 1 })).toBe(
+      12 * 1024 * 1024,
+    )
+    expect(thumbnailCeiling({ base: '', format: 'legacy', levels: 1 })).toBe(12 * 1024 * 1024)
+  })
 })

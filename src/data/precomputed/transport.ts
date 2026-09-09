@@ -239,6 +239,22 @@ export function gcsJsonApiUrl(url: string): string | undefined {
   return `https://${GCS_HOST}${GCS_API_PREFIX}b/${bucket}/o/${encodeURIComponent(key)}?alt=media`
 }
 
+/**
+ * A `maxBytes` refusal, once it stops being an exception.
+ *
+ * The 413 the transport throws says *why* a body did not arrive, and every layer above used to
+ * fold it into the same `undefined` a 404 gets — right for a scene, where a body that is not in
+ * the result is not in the result whatever the reason, and wrong for a thumbnail, where the two
+ * answers are "this dataset never meshed this neuron" and "this picture is bigger than the
+ * ceiling you set". A reader that says which is what lets a blank tile explain itself.
+ *
+ * A string rather than a class, because it travels as a *value* through readers whose other
+ * answer is a decoded body: `MeshBody | Oversize | undefined` narrows on `===`, where a second
+ * error type would put a `try` around every call site that currently has none.
+ */
+export const OVERSIZE = 'oversize'
+export type Oversize = typeof OVERSIZE
+
 export class PrecomputedFetchError extends Error {
   readonly url: string
   readonly status: number

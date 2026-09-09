@@ -544,9 +544,33 @@ export interface ViewerSceneRequest {
   signal?: AbortSignal
 }
 
+/**
+ * How much geometry to spend on one body.
+ *
+ * One definition, no second spelling — invariant 8's rule for the id vocabulary, applied to a
+ * seam that grew three spellings on the day it was introduced (here, `fetchCoarseMesh`'s
+ * parameter, and a local union in the component). A third level added here would have typechecked
+ * in both of the others while neither handled it.
+ */
+export type GeometryDetail = 'coarsest' | 'fine'
+
 export interface CoarseGeometryRequest {
   datasetId: string
   neuronId: NeuronId
+  /**
+   * How much geometry to spend on this one body. `'coarsest'` — the default, and what a list of
+   * rows asks for — is the cheapest level the source has. `'fine'` is one deliberate look at one
+   * neuron: Explore's hover preview, which draws it four times the size of a row's tile.
+   *
+   * **Only a source with a pyramid can honour it, and the rest are not failing to.** A published
+   * multi-resolution mesh has levels to trade against, so `'fine'` raises the triangle budget
+   * `chooseLod` reads and a genuinely finer body comes back. CAVE's `graphene://` route answers
+   * a level-2 chunk skeleton, whose resolution is a property of the chunk graph, and CATMAID
+   * already returns the whole traced arbor — for those two there is nothing finer to ask for and
+   * the enlargement is the raster alone. So this is a *budget*, not a promise, and a source that
+   * ignores it is answering correctly rather than degrading.
+   */
+  detail?: GeometryDetail
   signal?: AbortSignal
 }
 
@@ -580,6 +604,28 @@ export type CoarseGeometry =
    * renaming a field at the seam rather than passing a value through it.
    */
   | ({ kind: 'skeleton' } & SkeletonGeometry)
+
+/**
+ * The source has a picture of this neuron and declined to fetch it.
+ *
+ * Distinct from `undefined`, which is every other way there is nothing to draw — the dataset
+ * publishes nothing cheap, the id is not in the store, a request failed. The difference is not
+ * academic on a flat mesh store: `thumbnailCeiling` is what keeps a 107 MB body out of a list of
+ * rows, and on a dataset whose ordinary bodies are megabytes it is the *common* reason a tile is
+ * blank rather than a rare one. Folded into `undefined` a blank tile can only draw the same glyph
+ * as an unmeshed neuron and say nothing; kept apart it can say which.
+ *
+ * `kind` for the same reason the geometry arms carry one: the three travel as one union, so a
+ * caller that forgets this case is a compile error rather than a fall-through to the mesh branch.
+ *
+ * It deliberately carries **no byte figure**. Which ceiling applied is a fact about the source's
+ * format, the number is a constant this layer would have to restate, and no reader of a
+ * thumbnail wants a megabyte count — what they want to know is that asking again will not help.
+ */
+export interface CoarseRefusal {
+  kind: 'refused'
+  reason: 'too-large'
+}
 
 export interface SourceSchemas {
   /** Output of findNeurons. Must include a `neuronId` column. */
@@ -833,8 +879,13 @@ export interface DataSource {
    * only full-resolution meshes would hand back several megabytes each. Returning undefined
    * says "draw a placeholder" rather than quietly downloading 25 neurons at full detail to
    * fill one page of a list.
+   *
+   * `CoarseRefusal` is the same placeholder with a reason attached — see its own note. A source
+   * that has no ceiling of its own never returns one, and a caller may treat it as `undefined`.
    */
-  fetchCoarseGeometry?(req: CoarseGeometryRequest): Promise<CoarseGeometry | undefined>
+  fetchCoarseGeometry?(
+    req: CoarseGeometryRequest,
+  ): Promise<CoarseGeometry | CoarseRefusal | undefined>
 
   /**
    * The neuroglancer scene a dataset publishes, verbatim.

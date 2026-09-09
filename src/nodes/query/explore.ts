@@ -170,6 +170,37 @@ export const exploreNode = registerNode({
     },
     {
       /*
+       * Whether `Fields` adds to the automatic list or stands in for it.
+       *
+       * **`absentMeans` is the whole reason this is safe to add.** The chosen list *replaced* the
+       * automatic one for as long as the control has existed, so a saved graph naming `status`
+       * shows exactly `status` — and shipping a new default of `add` without saying so would
+       * quietly redraw somebody else's stored workflow with eight more fields on every row.
+       * `defaultParams` writes the default at *creation* and never runs over `deserializeGraph`,
+       * so absence here is a third state and it means the old behaviour. A node made today gets
+       * `add`, which is the better default for the question people actually ask — "also show me
+       * this" far more often than "show me only this".
+       *
+       * Presentational for the same reason `chips` is, and hidden while `Fields` is empty: a mode
+       * governing an empty list has nothing to govern, and a control that does nothing is a
+       * control somebody has to work out is doing nothing.
+       */
+      id: 'fieldsMode',
+      kind: 'enum',
+      label: 'Fields mode',
+      help: 'Whether the fields above are added to the automatic ones or shown instead of them.',
+      options: [
+        { value: 'add', label: 'Add to the automatic fields' },
+        { value: 'replace', label: 'Replace the automatic fields' },
+      ],
+      default: 'add',
+      absentMeans: 'replace',
+      visibleIf: (params) => Array.isArray(params.chips) && params.chips.length > 0,
+      presentational: true,
+      advanced: true,
+    },
+    {
+      /*
        * A column whose *values* are free-form tags — a CAVE community-annotation table folded
        * into one cell per neuron, which is what Group By's `join` produces.
        *

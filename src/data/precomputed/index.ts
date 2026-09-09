@@ -22,9 +22,10 @@ import {
   readMultiResInfo,
   fragmentsUrl,
 } from './multires'
-import type { FetchOptions } from './transport'
-import { PrecomputedFetchError, fetchBytes, fetchInfo } from './transport'
+import type { FetchOptions, Oversize } from './transport'
+import { OVERSIZE, PrecomputedFetchError, fetchBytes, fetchInfo } from './transport'
 import { mapWithConcurrency } from '../concurrency'
+import type { GeometryDetail } from '../source'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
 
 /**
@@ -62,7 +63,7 @@ export type MeshBodyReader = (
   source: MeshSource,
   neuronId: string,
   options: FetchOptions,
-) => Promise<RawMesh | undefined>
+) => Promise<RawMesh | Oversize | undefined>
 
 export interface MeshSource {
   /** Absolute URL of the mesh directory. */
@@ -207,6 +208,16 @@ export interface FetchMeshesResult {
   triangles: number
   /** Neuron ids the source had no mesh for. */
   missing: string[]
+  /**
+   * The subset of `missing` that the caller's own `maxBytesPerBody` turned down.
+   *
+   * A subset rather than a separate list, so anything counting absences keeps counting all of
+   * them and nothing has to remember to add two numbers. Empty unless a ceiling was set, which
+   * only the thumbnail path does — and that path asks about **one** body, which is why this is a
+   * plain list in whatever order the refusals arrived: it exists so `fetchCoarseMesh` can tell a
+   * refusal from an absence, not so anybody can read it against a page.
+   */
+  oversize: string[]
 }
 
 /** Default budget. ~1.5M triangles renders comfortably and holds a few dozen neurons coarse. */
@@ -236,6 +247,60 @@ export const DEFAULT_TRIANGLE_BUDGET = 1_500_000
  * only the tail is, and the tail is the part worth looking at.
  */
 export const THUMBNAIL_MAX_BYTES = 2 * 1024 * 1024
+
+/**
+ * The same guard rail for a store with **no pyramid**, where it is a different question.
+ *
+ * The 2 MB above is an argument about a *level*: a whole hemibrain neuron at full resolution
+ * costs that, so a body whose **coarsest of four levels** is 2 MB is an unsplit blob rather than
+ * a large neuron. A flat store has no levels — DVID's `.ngmesh` is the only mesh there is — so
+ * the same number is being asked to separate a big neuron at full resolution from a blob at full
+ * resolution, and 2 MB is hemibrain's answer to a question about somebody else's dataset. It
+ * blanked one Explore row in twelve on `neuprint-fish2`, a whole-brain larval zebrafish
+ * segmentation, and the neurons it blanked were the big ones.
+ *
+ * **12 MB, measured on fish2 rather than chosen**: its real arbors stop at 8.31 MB and it holds
+ * bodies four times denser than their own volume explains, which is what an unsplit merge looks
+ * like. The ceiling sits between them. [docs/backends.md](../../../docs/backends.md) has the
+ * distributions and `neuprint.test.ts`'s `FISH2_NGMESH_BYTES` is where they are machine-checked —
+ * one place to re-measure rather than three prose copies that drift apart.
+ *
+ * **On a flat store a refusal costs the ceiling, where on a pyramid it costs nothing.** DVID sends
+ * no `Content-Length`, so `readCapped` streams and cancels: a body this turns down is downloaded
+ * up to 12 MB and thrown away, against 2 MB before. Once per session — the verdict is held in
+ * memory, though deliberately not persisted — and the alternative was measured and does not exist:
+ * `HEAD` carries no length and `Range` is ignored. Worth knowing when reading the number, not a
+ * reason to lower it: the bodies that pay it are the ones nobody can draw anyway.
+ */
+export const THUMBNAIL_MAX_FLAT_BYTES = 12 * 1024 * 1024
+
+/**
+ * Which of the two a source is judged by.
+ *
+ * A function rather than two call sites choosing, because the choice *is* the distinction the
+ * pair exists to draw and one caller getting it wrong is a silent blank tile. `multilod-draco`
+ * is the only format with levels to trade; both flat ones are read whole.
+ *
+ * **Exhaustive rather than `format === 'multilod-draco' ? … : …`**, and the direction a default
+ * would fall is why. `MeshFormat` has three members today; a fourth — a second pyramid spelling,
+ * a sharded multi-LOD variant — would land in the *permissive* arm of a ternary and quietly get
+ * six times the level ceiling, which is not a blank tile but 12 MB a row, admitting exactly the
+ * unsplit blobs `THUMBNAIL_MAX_BYTES` exists to refuse. Written this way it is a compile error,
+ * which is the rule `CoarseRefusal.kind` follows one file over.
+ */
+export function thumbnailCeiling(source: MeshSource): number {
+  switch (source.format) {
+    case 'multilod-draco':
+      return THUMBNAIL_MAX_BYTES
+    case 'legacy':
+    case 'dvid-ngmesh':
+      return THUMBNAIL_MAX_FLAT_BYTES
+    default: {
+      const unreachable: never = source.format
+      throw new Error(`no thumbnail ceiling declared for ${String(unreachable)}`)
+    }
+  }
+}
 
 /**
  * How many bodies are read at once, in each of the two phases.
@@ -376,6 +441,8 @@ export async function fetchMeshes(
    */
   if (source.format === 'legacy' || source.format === 'dvid-ngmesh') {
     const readBody = source.readBody ?? readLegacyBody
+    /** Bodies this call's ceiling turned down, as opposed to bodies the store does not have. */
+    const refused: string[] = []
     let done = 0
     const { ordered, missing } = await cachedGeometry<MeshBody>({
       ids: neuronIds,
@@ -391,7 +458,8 @@ export async function fetchMeshes(
         await mapWithConcurrency(want, concurrency, async (neuronId) => {
           const mesh = await readBody(source, neuronId, readOptions)
           options.onProgress?.(++done, want.length, 'fragments')
-          if (mesh) deliver(neuronId, mesh)
+          if (mesh === OVERSIZE) refused.push(neuronId)
+          else if (mesh) deliver(neuronId, mesh)
         })
       },
     })
@@ -401,6 +469,7 @@ export async function fetchMeshes(
       levels: 1,
       triangles: meshes.reduce((n, m) => n + m.indices.length / 3, 0),
       missing,
+      oversize: [...refused],
     }
   }
 
@@ -447,22 +516,12 @@ export async function fetchMeshes(
    */
   const levelOf = (neuronId: string) => Math.min(lod, pyramids.get(neuronId)!.levels.length - 1)
 
-  /*
-   * The size refusal is applied *before* the cache is consulted, not inside the fetch.
-   *
-   * It is a property of the caller rather than of the body — only the thumbnail path sets it —
-   * so a mesh cached for a scene must not become visible to a caller that had asked for it to be
-   * skipped, and a body skipped for one caller must not be remembered as missing for the next.
-   */
-  const wanted = manifests.ordered
-    .map(([neuronId]) => neuronId)
-    .filter((neuronId) => {
-      if (options.maxBytesPerBody === undefined) return true
-      const totalBytes = pyramids.get(neuronId)!.levels[levelOf(neuronId)]?.totalBytes ?? 0
-      if (totalBytes <= options.maxBytesPerBody) return true
-      missing.push(neuronId)
-      return false
-    })
+  const { wanted, refused } = withinCeiling(
+    manifests.ordered.map(([neuronId]) => neuronId),
+    (neuronId) => pyramids.get(neuronId)!.levels[levelOf(neuronId)]?.totalBytes ?? 0,
+    options.maxBytesPerBody,
+  )
+  missing.push(...refused)
 
   let done = 0
   const fragments = await cachedGeometry<MeshBody>({
@@ -499,7 +558,38 @@ export async function fetchMeshes(
     levels,
     triangles: meshes.reduce((n, m) => n + m.indices.length / 3, 0),
     missing,
+    oversize: refused,
   }
+}
+
+/**
+ * Which bodies a byte ceiling admits, and which it turned down.
+ *
+ * Extracted from the multi-resolution branch for one reason: inline it had **no offline test at
+ * all** — reaching it means getting a whole sharded manifest sweep past a stubbed transport — so
+ * a mutation that stopped recording a refusal passed the entire suite. It is pure arithmetic over
+ * numbers the caller already has, which is the shape a test can ask about directly.
+ *
+ * Two rules it carries, both from the code it replaced. The refusal is applied **before the cache
+ * is consulted** rather than inside the fetch, because a ceiling is a property of the *caller* —
+ * only the thumbnail path sets one — so a mesh cached for a scene must not become visible to a
+ * caller that asked for it to be skipped, and a body skipped for one caller must not be
+ * remembered as missing for the next. And `refused` is the *reason* half of `missing`: every id
+ * here also belongs in that list, which is why the caller appends rather than choosing.
+ */
+export function withinCeiling(
+  ids: readonly string[],
+  bytesOf: (neuronId: string) => number,
+  maxBytesPerBody: number | undefined,
+): { wanted: string[]; refused: string[] } {
+  if (maxBytesPerBody === undefined) return { wanted: [...ids], refused: [] }
+  const wanted: string[] = []
+  const refused: string[] = []
+  for (const neuronId of ids) {
+    if (bytesOf(neuronId) <= maxBytesPerBody) wanted.push(neuronId)
+    else refused.push(neuronId)
+  }
+  return { wanted, refused }
 }
 
 async function readLodFragments(
@@ -535,13 +625,38 @@ async function readLodFragments(
 }
 
 /**
+ * Triangle budget behind `CoarseGeometryRequest.detail = 'fine'`.
+ *
+ * Named for what the data layer knows — a detail level — rather than for Explore's hover preview,
+ * which is one caller and not this module's business.
+ *
+ * `chooseLod` walks from the finest level down and returns the first that fits, so this is the
+ * whole of what makes a hover preview show more than its tile did — the coarsest level is what a
+ * budget of 1 asks for, and there is no other knob.
+ *
+ * 150,000 triangles is a ~255 kB allowance at `DRACO_BYTES_PER_TRIANGLE`. On hemibrain's real
+ * pyramid (2.0 MB / 280 kB / 48 kB / 11 kB) that is **one step**: it clears LOD 2 and stops short
+ * of LOD 1, which is the number doing the work rather than an accident. 48 kB against 11 kB is
+ * about 28k triangles, more than a 320 CSS-pixel picture can show; LOD 1 would be a quarter of a
+ * megabyte per hover for a difference nothing on screen could resolve. The point is a bigger
+ * *picture*, not the mesh a 3D scene would draw.
+ *
+ * Under `THUMBNAIL_MAX_BYTES` by a factor of eight, so the per-body ceiling still governs the
+ * pathological bodies and this only decides which level is asked for first.
+ */
+export const FINE_TRIANGLE_BUDGET = 150_000
+
+/**
  * The coarsest level of one body, for a thumbnail — or nothing cheap enough to draw.
  *
  * Every caller of this is a list of rows, so the two refusals matter more than the success. A
  * source with no pyramid answers `undefined` rather than its only level: `DataSource
  * .fetchCoarseGeometry` promises a browsable list ~10 kB a row, and a legacy directory would
- * hand back several megabytes each. And `THUMBNAIL_MAX_BYTES` turns down a single pathological
- * body, off the manifest, so the refusal costs no download.
+ * hand back several megabytes each. And `thumbnailCeiling` turns down a single pathological
+ * body — off the manifest where there is one, so the refusal costs no download.
+ *
+ * **A refusal is `OVERSIZE` and an absence is `undefined`**, which every layer below this folded
+ * into one until a tile needed to say which. See `readKey`.
  *
  * Shared because it was written twice: neuPrint reads a published bucket and CAVE reads the flat
  * segmentation beside a datastack, and both want exactly this call. A triangle budget of one
@@ -552,7 +667,8 @@ export async function fetchCoarseMesh(
   source: MeshSource,
   neuronId: string,
   options: FetchOptions = {},
-): Promise<MeshBody | undefined> {
+  detail: GeometryDetail = 'coarsest',
+): Promise<MeshBody | Oversize | undefined> {
   /*
    * `legacy` is still refused and `dvid-ngmesh` is not, which is not an inconsistency: the
    * question is whether the *download* can be bounded, not whether the format has levels.
@@ -571,10 +687,13 @@ export async function fetchCoarseMesh(
   if (source.format === 'legacy') return undefined
   const result = await fetchMeshes(source, [neuronId], {
     ...options,
-    triangleBudget: 1,
+    // A budget of one cannot be met by any level, which is how `chooseLod` is asked for the
+    // coarsest. Raising it is the only way to ask for a finer one, and the only reason to.
+    triangleBudget: detail === 'fine' ? FINE_TRIANGLE_BUDGET : 1,
     concurrency: 1,
-    maxBytesPerBody: THUMBNAIL_MAX_BYTES,
+    maxBytesPerBody: thumbnailCeiling(source),
   })
+  if (result.oversize.length > 0) return OVERSIZE
   const mesh = result.meshes[0]
   // Untagged, and the caller adds `kind`. This module's own header promises it knows nothing
   // about any particular source, and importing `CoarseGeometry` to stamp one word would spend

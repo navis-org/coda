@@ -120,7 +120,31 @@ const CHIPS: ChipSpec[] = [
   { name: 'cellBodyFiber', slot: 7 },
   { name: 'entryNerve', slot: 7, family: 'nerve' },
   { name: 'nerve', slot: 7, family: 'nerve' },
+  // Where a neuron *leaves*, which is not where it entered — the same reason `somaSide` and
+  // `rootSide` are two entries rather than one family. MANC and male-CNS publish both.
+  { name: 'exitNerve', slot: 6 },
   { name: 'flywireType', slot: 2 },
+  /*
+   * The annotation-rich tail, added when the expanded view gained columns.
+   *
+   * These sit below everything above them on purpose: `MAX_CHIPS` still caps the automatic list,
+   * so on a dataset carrying the whole set these are what the *columns* take once the well-filled
+   * ones above are placed, and what falls off the end on a dataset that also has the rest.
+   * Ordered by how often somebody browsing is looking for them rather than by how complete they
+   * are — `splitByFill` already answers completeness, and letting it reorder as well would put
+   * whichever field happens to be filled first at the front of a hierarchy.
+   *
+   * `supertype` is above `type`'s siblings because it is the rank *above* the primary label, so
+   * on a row whose headline is already `type` it is the one that adds something. `dimorphism`,
+   * `synonyms` and `fruDsx` are sparse by nature — filled only where they mean anything — so the
+   * fill rule will hand all three to the chip tail on male-CNS, which is where a field that
+   * applies to a minority belongs.
+   */
+  { name: 'supertype', slot: 1, family: 'supertype' },
+  { name: 'dimorphism', slot: 3 },
+  { name: 'fruDsx', slot: 5 },
+  { name: 'synonyms', slot: 7 },
+  { name: 'subcluster', slot: 2 },
 ]
 
 const CHIP_BY_NAME = new Map(CHIPS.map((chip) => [chip.name, chip]))
@@ -149,12 +173,78 @@ const STATS = [
 const MAX_CHIPS = 8
 const MAX_STATS = 3
 
+/**
+ * How many annotations the expanded row aligns into columns before the rest become chips.
+ *
+ * Bounded by width rather than by taste: the row keeps a checkbox, a 76px tile, a name block, the
+ * inline plots and the right-aligned figures, which leaves room for about this many readable
+ * columns at the 1500px the overlay panel caps at. Past it the columns are too narrow to hold a
+ * `superclass` value and the alignment stops paying for itself.
+ */
+const MAX_COLUMNS = 5
+
+/**
+ * How many annotations the *expanded* row's automatic list may hold.
+ *
+ * `MAX_CHIPS` is a limit on **colour** — its own note says eight is the size of the palette — and
+ * the aligned columns are plain text with no slot at all. So the expanded view can afford the
+ * chip budget *plus* the columns that never spend one, which is what brings a well-annotated
+ * dataset's tail into view at all: on a male-CNS-shaped schema the first eight candidates are
+ * used up by `class` through `cellBodyFiber`, and `dimorphism`, `fruDsx` and `exitNerve` fell off
+ * the end however sparse or interesting they were.
+ *
+ * The card keeps `MAX_CHIPS`, and that is not an oversight: it is the narrow surface, every one of
+ * its annotations *is* a coloured chip, and thirteen of them is not a row anybody can read. Either
+ * way the `chips` param overrides the lot.
+ */
+const MAX_AUTO_COLUMNS_AND_CHIPS = MAX_COLUMNS + MAX_CHIPS
+
+/**
+ * How full a field has to be, across the dataset, to be worth a column.
+ *
+ * **This is the whole column-versus-chip rule, and it is measured rather than curated.** A field
+ * most neurons have is worth aligning — the eye runs down it and compares, which is the one thing
+ * the expanded view's width buys and the one thing chips cannot do, since a chip that is absent
+ * shifts every chip after it. A field only a few neurons have is the opposite: as a column it is
+ * a stripe of blanks eating width that a filled column wanted, and as a chip it simply appears
+ * where it applies.
+ *
+ * The two failure modes are worth naming because they are the argument. `class` on male-CNS is
+ * filled on nearly everything, and as a chip it is in a different horizontal position on every
+ * row. `dimorphism` is filled only on the types where it means anything, and as a column it would
+ * be blank almost everywhere — but a blank *within* a column still says "not annotated", which is
+ * why the threshold is a half rather than a nine-tenths: a field two neurons in three carry is
+ * still worth comparing, and the third's blank is information.
+ */
+const FILL_MIN = 0.5
+
+/**
+ * How many rows the fill rate is measured over.
+ *
+ * Strided across the whole table rather than the first N, because a neuron table arrives in
+ * whatever order the backend returned it and the head of one is not a sample of it — male-CNS
+ * comes back ordered by body id, which correlates with when a neuron was traced and therefore
+ * with how well it is annotated. 2,000 strided rows settle a half-versus-not question to well
+ * inside the margin that matters, against 165,122 cells per candidate for the exact answer.
+ */
+const FILL_SAMPLE = 2000
+
+/** Whether a hand-picked field list stands in for the automatic one or is added to it. */
+export type FieldsMode = 'add' | 'replace'
+
 export interface RowFields {
   /** Headline label — the neuron's name. Undefined for a table with no string columns. */
   primary: string | undefined
   /** One quieter line under the headline. */
   secondary: string[]
-  /** Categorical annotations, rendered as chips. */
+  /**
+   * Annotations worth aligning, drawn as columns at the same position on every row.
+   *
+   * Empty for the card, which has no width to align in — `rowFields` is handed a table only by
+   * the expanded view. See `FILL_MIN` for what earns a column.
+   */
+  columns: string[]
+  /** The tail: annotations present but too sparse to align, rendered as chips. */
   chips: string[]
   /** Numeric columns, rendered as a right-aligned figure list. */
   stats: string[]
@@ -186,11 +276,24 @@ export function splitTags(cell: CellValue): string[] {
 /**
  * @param chosen Fields the user picked in the inspector. Empty means "decide for me", which is
  * what every dataset starts as and what the priority list above is for.
+ * @param mode Whether `chosen` stands in for the automatic list or is added to it. `'replace'` is
+ * the default here rather than the node's, and deliberately: it is what the control meant before
+ * the mode existed, so every caller holding only a schema — and every stored graph, through
+ * `absentMeans` — keeps the behaviour it had.
  */
 export function rowFields(
   schema: TableSchema | undefined,
   chosen: readonly string[] = [],
   tagColumn = '',
+  /**
+   * The expanded view's table, for splitting the annotations into aligned columns and a tail.
+   *
+   * Absent — which is the card, and every caller that only has a schema — keeps every annotation
+   * as a chip, exactly as before. The split needs *values*, not a schema: how full a field is is
+   * the only thing that says whether aligning it pays. See `FILL_MIN`.
+   */
+  aligned?: { data: Record<string, readonly CellValue[] | undefined>; length: number },
+  mode: FieldsMode = 'replace',
 ): RowFields {
   const byName = new Map((schema?.columns ?? []).map((c) => [c.name, c]))
   const has = (name: string) => byName.has(name)
@@ -202,7 +305,28 @@ export function rowFields(
   // A chosen field is still filtered against the schema: the param outlives the dataset it was
   // set on, and a graph repointed at hemibrain should lose `superclass` rather than show a
   // column of blanks. Uncapped, unlike the automatic list — see `MAX_CHIPS`.
-  const chips = chosen.length ? chosen.filter(has) : automaticChips(has, primary)
+  const cap = aligned ? MAX_AUTO_COLUMNS_AND_CHIPS : MAX_CHIPS
+  const picked = chosen.filter(has)
+  /*
+   * A chosen field comes **first**, and is never trimmed.
+   *
+   * First because an explicit choice outranks a default: it is what guarantees the field is
+   * visible at all rather than sitting past the cap, and what gives it a shot at a column instead
+   * of the chip tail. Never trimmed because that is already this control's rule — trimming what
+   * was asked for is how a control stops being believed. `splitByFill` still decides its *shape*,
+   * so asking for a field nine neurons in ten lack still gets a chip rather than a column of
+   * blanks; position buys prominence, not an exemption from the fill rule.
+   */
+  const annotations =
+    picked.length === 0
+      ? automaticChips(has, primary, cap)
+      : mode === 'replace'
+        ? picked
+        : [...picked, ...automaticChips(has, primary, cap, picked)]
+  const withoutTags = annotations.filter((name) => name !== tags)
+  const split = aligned
+    ? splitByFill(withoutTags, aligned)
+    : { columns: [], chips: withoutTags }
 
   return {
     primary,
@@ -212,7 +336,8 @@ export function rowFields(
       0,
       2,
     ),
-    chips: chips.filter((name) => name !== tags),
+    columns: split.columns,
+    chips: split.chips,
     stats: STATS.filter((name) => {
       const column = byName.get(name)
       return column !== undefined && isNumericDType(column.dtype)
@@ -222,18 +347,85 @@ export function rowFields(
 }
 
 /**
+ * Split annotations into the ones worth aligning and the tail.
+ *
+ * Priority order is kept — the candidates arrive already ranked by `automaticChips`, or chosen by
+ * hand — and the fill rate is a *filter* on that order rather than a re-ranking. Ranking by fill
+ * would put whichever field happens to be most complete first, which is not the order anybody
+ * reads a neuron in: `type` before `class` before `superclass` is a hierarchy, and sorting it by
+ * completeness scrambles it.
+ *
+ * Measured over the whole dataset and not over the current hits, or the columns would reshuffle
+ * as somebody types — a layout that moves while you search is worse than a layout that is
+ * slightly wrong.
+ */
+export function splitByFill(
+  names: readonly string[],
+  table: { data: Record<string, readonly CellValue[] | undefined>; length: number },
+): { columns: string[]; chips: string[] } {
+  const columns: string[] = []
+  const chips: string[] = []
+  for (const name of names) {
+    if (columns.length < MAX_COLUMNS && fillRate(table.data[name], table.length) >= FILL_MIN) {
+      columns.push(name)
+    } else {
+      chips.push(name)
+    }
+  }
+  return { columns, chips }
+}
+
+/**
+ * What fraction of a column has something in it.
+ *
+ * Strided rather than sampling the head — see `FILL_SAMPLE`. A blank string counts as empty: a
+ * neuPrint property that is present but unset arrives as `''`, and a column of empty strings is
+ * a column of blanks whatever the schema says about it.
+ */
+function fillRate(column: readonly CellValue[] | undefined, length: number): number {
+  if (!column || length === 0) return 0
+  const stride = Math.max(1, Math.floor(length / FILL_SAMPLE))
+  let seen = 0
+  let filled = 0
+  for (let row = 0; row < length; row += stride) {
+    seen++
+    const value = column[row]
+    if (value !== null && value !== undefined && value !== '') filled++
+  }
+  return seen === 0 ? 0 : filled / seen
+}
+
+/**
  * The default list: candidates this dataset has, one per family, capped at the palette.
  *
  * The family pass is what stops a dataset that names one fact twice from pushing a different
  * fact off the end — which is exactly how `consensusNt` went missing on male-CNS once
  * `itoleeHl` joined `hemilineage` in the list.
  */
-function automaticChips(has: (name: string) => boolean, primary: string | undefined): string[] {
+function automaticChips(
+  has: (name: string) => boolean,
+  primary: string | undefined,
+  limit: number,
+  /**
+   * Fields already chosen by hand, which this list must not duplicate — nor answer twice.
+   *
+   * Their *families* are claimed as well as their names, so somebody who asked for `predictedNt`
+   * does not also get `consensusNt` appended: two chips saying one thing is exactly what the
+   * family rule exists to prevent, and it would be odd for choosing a field to be the thing that
+   * reintroduces it.
+   */
+  alreadyPicked: readonly string[] = [],
+): string[] {
   const families = new Set<string>()
+  for (const name of alreadyPicked) {
+    const family = CHIP_BY_NAME.get(name)?.family
+    if (family) families.add(family)
+  }
   const out: string[] = []
   for (const chip of CHIPS) {
-    if (out.length >= MAX_CHIPS) break
+    if (out.length >= limit) break
     if (!has(chip.name) || chip.name === primary) continue
+    if (alreadyPicked.includes(chip.name)) continue
     if (chip.family) {
       if (families.has(chip.family)) continue
       families.add(chip.family)

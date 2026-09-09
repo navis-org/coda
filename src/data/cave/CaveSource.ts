@@ -47,6 +47,7 @@ import type {
   AdjacencyRequest,
   CoarseGeometry,
   CoarseGeometryRequest,
+  CoarseRefusal,
   ConnectivityRequest,
   DataSource,
   DatasetInfo,
@@ -76,6 +77,7 @@ import {
   readGrapheneMesh,
 } from './meshes'
 import type { MeshResult, MeshSource } from '../precomputed'
+import { OVERSIZE } from '../precomputed/transport'
 import {
   DEFAULT_TRIANGLE_BUDGET,
   fetchCoarseMesh,
@@ -1724,7 +1726,9 @@ export class CaveSource implements DataSource {
    * component and every source for a picture that is already gated at four concurrent and cached
    * in IndexedDB after the first look.
    */
-  async fetchCoarseGeometry(req: CoarseGeometryRequest): Promise<CoarseGeometry | undefined> {
+  async fetchCoarseGeometry(
+    req: CoarseGeometryRequest,
+  ): Promise<CoarseGeometry | CoarseRefusal | undefined> {
     const parsed = splitDatasetId(req.datasetId)
     const spec = parsed ? specFor(parsed.datastack) : undefined
     if (!spec || !parsed) return undefined
@@ -1732,7 +1736,8 @@ export class CaveSource implements DataSource {
 
     const pyramid = await this.flatMeshDir(spec, parsed.version, req.signal)
     if (pyramid) {
-      const mesh = await fetchCoarseMesh(pyramid, req.neuronId, options)
+      const mesh = await fetchCoarseMesh(pyramid, req.neuronId, options, req.detail)
+      if (mesh === OVERSIZE) return { kind: 'refused', reason: 'too-large' }
       return mesh && { kind: 'mesh', ...mesh }
     }
 

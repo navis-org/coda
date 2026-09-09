@@ -38,11 +38,7 @@
  * finger can hit, and none of that is visible from here. See docs/ui-shell.md.
  */
 
-import { spawn } from 'node:child_process'
-import { existsSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { setTimeout as sleep } from 'node:timers/promises'
+import { launchChrome, probeArgs, probeReport } from './lib/browserProbe.mjs'
 
 /*
  * Real CSS-pixel viewports, in the two orientations that behave differently — portrait is where
@@ -58,97 +54,6 @@ const DEVICES = [
   { name: 'iPhone SE portrait', width: 375, height: 667, dpr: 2 },
   { name: 'iPad mini portrait', width: 744, height: 1133, dpr: 2 },
 ]
-
-const CHROME =
-  process.env.CHROME_PATH ??
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-const PORT = 9422
-
-const args = process.argv.slice(2)
-const url = valueOf('--url') ?? 'http://localhost:5177/'
-const keep = args.includes('--keep')
-
-function valueOf(flag) {
-  const at = args.indexOf(flag)
-  return at >= 0 ? args[at + 1] : undefined
-}
-
-if (!existsSync(CHROME)) {
-  console.error(`No Chrome at ${CHROME}. Set CHROME_PATH.`)
-  process.exit(2)
-}
-
-const chrome = spawn(
-  CHROME,
-  [
-    `--remote-debugging-port=${PORT}`,
-    '--headless=new',
-    '--no-first-run',
-    '--user-data-dir=/tmp/coda-probe-mobile',
-    'about:blank',
-  ],
-  { stdio: 'ignore' },
-)
-
-/** The DevTools page target, once Chrome is listening. */
-async function firstPage() {
-  for (let i = 0; i < 80; i++) {
-    try {
-      const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()
-      const page = list.find((t) => t.type === 'page')
-      if (page) return page
-    } catch {
-      // Not listening yet.
-    }
-    await sleep(250)
-  }
-  throw new Error('Chrome never opened a page target')
-}
-
-const page = await firstPage()
-const ws = new WebSocket(page.webSocketDebuggerUrl)
-await new Promise((resolve, reject) => {
-  ws.onopen = resolve
-  ws.onerror = reject
-})
-
-let nextId = 0
-const pending = new Map()
-ws.onmessage = (event) => {
-  const message = JSON.parse(event.data)
-  const settle = pending.get(message.id)
-  if (settle) {
-    pending.delete(message.id)
-    settle(message)
-  }
-}
-
-function send(method, params = {}) {
-  const id = ++nextId
-  ws.send(JSON.stringify({ id, method, params }))
-  return new Promise((resolve) => pending.set(id, resolve))
-}
-
-/** Poll an expression until it answers truthily. Beats a fixed sleep on both ends: a fast
-    machine does not wait 3.5s, a slow one is not measured half-built. */
-async function waitFor(expression, what) {
-  for (let i = 0; i < 100; i++) {
-    if (await evaluate(expression)) return
-    await sleep(100)
-  }
-  throw new Error(`timed out waiting for ${what}`)
-}
-
-async function evaluate(expression) {
-  const reply = await send('Runtime.evaluate', {
-    expression,
-    awaitPromise: true,
-    returnByValue: true,
-  })
-  const failed = reply.result?.exceptionDetails
-  if (failed) throw new Error(failed.exception?.description ?? failed.text)
-  return reply.result?.result?.value
-}
 
 /*
  * Read back in one round trip. `scrollWidth` against `clientWidth` is the property; the rest is
@@ -202,19 +107,26 @@ const MEASURE = `(() => {
   }
 })()`
 
-await send('Page.enable')
-await send('Runtime.enable')
+const args = probeArgs()
+const url = args.value('--url') ?? 'http://localhost:5177/'
+const keep = args.keep
+const { check, finish } = probeReport()
 
-let failures = 0
+/*
+ * One browser walking every device, which is what the numbers in the header above were taken
+ * with: `setDeviceMetricsOverride` then `Page.navigate` gives each device a fresh document at its
+ * own metrics, and relaunching per device buys nothing this measures.
+ */
+const { evaluate, send, waitFor, screenshot, setDevice, close } = await launchChrome({
+  port: 9422,
+  profile: '/tmp/coda-probe-mobile',
+  width: DEVICES[0].width,
+  height: DEVICES[0].height,
+  dpr: DEVICES[0].dpr,
+})
+
 for (const device of DEVICES) {
-  await send('Emulation.setDeviceMetricsOverride', {
-    width: device.width,
-    height: device.height,
-    deviceScaleFactor: device.dpr,
-    mobile: device.width < 744,
-    screenWidth: device.width,
-    screenHeight: device.height,
-  })
+  await setDevice(device.width, device.height, device.dpr)
   await send('Page.navigate', { url })
   await waitFor(`!!document.querySelector('.app .toolbar')`, 'the shell to mount')
   /*
@@ -236,9 +148,9 @@ for (const device of DEVICES) {
 
   const m = await evaluate(MEASURE)
   const overflows = m.docW > m.viewW
-  if (overflows) failures++
-  console.log(
-    `${overflows ? '✗' : '✓'} ${device.name.padEnd(20)} ` +
+  check(
+    !overflows,
+    `${device.name.padEnd(20)} ` +
       `document ${String(m.docW).padStart(4)} / viewport ${String(m.viewW).padStart(4)}  ` +
       `toolbar ${String(m.toolbar?.h ?? 0).padStart(3)}px (${m.rows} row${m.rows === 1 ? '' : 's'}, ` +
       `min-content ${m.toolbar?.scrollW ?? 0})  ` +
@@ -255,23 +167,15 @@ for (const device of DEVICES) {
   if (overflows && m.past.length > 0) console.log(`    past the edge: ${m.past.join(', ')}`)
 
   if (keep) {
-    const shot = await send('Page.captureScreenshot', { format: 'png' })
-    // Into the temp dir, not the working directory — this is run from the repo root, and a
-    // handful of untracked PNGs there is the kind of thing that gets committed by accident.
-    const file = join(tmpdir(), `probe-mobile-${device.name.replace(/\s+/g, '-').toLowerCase()}.png`)
-    writeFileSync(file, Buffer.from(shot.result.data, 'base64'))
-    console.log(`    → ${file}`)
+    const name = `probe-mobile-${device.name.replace(/\s+/g, '-').toLowerCase()}`
+    console.log(`    → ${await screenshot(name)}`)
   }
 }
 
-ws.close()
-chrome.kill()
+close()
 
-if (failures > 0) {
-  console.error(
-    `\n${failures} device(s) laid out wider than the viewport. A mobile browser answers that by ` +
-      `zooming out to fit, which is what puts the status bar in mid-air — see the note at the ` +
-      `top of this file.`,
-  )
-  process.exit(1)
-}
+finish(
+  'Those device(s) laid out wider than the viewport. A mobile browser answers that by zooming ' +
+    'out to fit, which is what puts the status bar in mid-air — see the note at the top of this ' +
+    'file.',
+)

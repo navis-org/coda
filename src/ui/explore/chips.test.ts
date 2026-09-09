@@ -235,12 +235,114 @@ describe('the automatic chip list', () => {
     ])
   })
 
+  /**
+   * A male-CNS-shaped schema, which is the dataset this table is stretched by.
+   *
+   * The expanded view gets the chip budget *plus* the aligned columns, because a column is plain
+   * text and spends no palette slot — see `MAX_AUTO_COLUMNS_AND_CHIPS`. Without that the first
+   * eight candidates are used up by `class` through `cellBodyFiber` and the annotation-rich tail
+   * is unreachable however interesting it is.
+   */
+  const MALE_CNS = [
+    'neuronId',
+    'type',
+    'instance',
+    'class',
+    'subclass',
+    'superclass',
+    'somaSide',
+    'rootSide',
+    'itoleeHl',
+    'trumanHl',
+    'consensusNt',
+    'predictedNt',
+    'cellBodyFiber',
+    'entryNerve',
+    'exitNerve',
+    'supertype',
+    'dimorphism',
+    'fruDsx',
+    'synonyms',
+  ]
+
+  /** Every row is filled, so the split is decided by the caps rather than by the fill rate. */
+  const filled = (names: readonly string[], rows = 10) => ({
+    data: Object.fromEntries(names.map((n) => [n, Array.from({ length: rows }, () => 'x')])),
+    length: rows,
+  })
+
+  it('reaches the annotation-rich tail in the expanded view', () => {
+    const fields = rowFields(schema(...MALE_CNS), [], '', filled(MALE_CNS))
+    const shown = [...fields.columns, ...fields.chips]
+    // The three asked for by name, which the eight-candidate cap put out of reach.
+    expect(shown).toContain('dimorphism')
+    expect(shown).toContain('fruDsx')
+    expect(shown).toContain('exitNerve')
+  })
+
+  it('leaves the card at the palette’s eight, which is all a narrow row can hold', () => {
+    // No table handed over — the card's shape. Every annotation there *is* a coloured chip.
+    const { chips, columns } = rowFields(schema(...MALE_CNS))
+    expect(columns).toEqual([])
+    expect(chips).toHaveLength(8)
+  })
+
+  it('keeps the entry and exit nerves apart, being different facts', () => {
+    // A neuron does not leave by the nerve it entered through — the same reason `somaSide` and
+    // `rootSide` are two entries rather than one family.
+    const both = ['neuronId', 'entryNerve', 'exitNerve']
+    const { columns, chips } = rowFields(schema(...both), [], '', filled(both))
+    expect([...columns, ...chips]).toEqual(['entryNerve', 'exitNerve'])
+  })
+
   it('shows one chip where a dataset somehow published both spellings', () => {
     // What the families buy, and the reason they are families rather than separate entries:
     // two chips saying one thing spend two of eight slots and push off one that says something
     // new — how `consensusNt` went missing on male-CNS.
     const { chips } = rowFields(schema('neuronId', 'class', 'cell_class', 'side', 'somaSide'))
     expect(chips).toEqual(['class', 'somaSide'])
+  })
+
+  it('adds a chosen field to the automatic ones, in front of them', () => {
+    /*
+     * First because an explicit choice outranks a default — it is what puts the field in view at
+     * all rather than past the cap, and what gives it a shot at a column rather than the tail.
+     */
+    const names = ['neuronId', 'type', 'class', 'subclass', 'status']
+    const { chips } = rowFields(schema(...names), ['status'], '', undefined, 'add')
+    expect(chips[0]).toBe('status')
+    expect(chips).toContain('class')
+    expect(chips).toContain('subclass')
+  })
+
+  it('does not answer one fact twice when a chosen field claims a family', () => {
+    // Choosing `predictedNt` must not append `consensusNt` beside it: two chips saying one thing
+    // is what the families exist to prevent, and it would be odd for choosing to reintroduce it.
+    const names = ['neuronId', 'type', 'consensusNt', 'predictedNt', 'class']
+    const { chips } = rowFields(schema(...names), ['predictedNt'], '', undefined, 'add')
+    expect(chips).toContain('predictedNt')
+    expect(chips).not.toContain('consensusNt')
+  })
+
+  it('never lists a chosen field twice when the automatic list wanted it too', () => {
+    const names = ['neuronId', 'type', 'class', 'subclass']
+    const { chips } = rowFields(schema(...names), ['class'], '', undefined, 'add')
+    expect(chips.filter((c) => c === 'class')).toHaveLength(1)
+  })
+
+  it('replaces when asked to, which is what every stored graph means', () => {
+    /*
+     * The compatibility half, and the reason `absentMeans` is on the param. The chosen list stood
+     * in for the automatic one for as long as the control has existed, so a graph naming `status`
+     * shows exactly `status` — a new default of `add` shipped without that would silently redraw
+     * somebody else's saved workflow with eight more fields on every row.
+     */
+    const names = ['neuronId', 'type', 'class', 'subclass', 'status']
+    expect(rowFields(schema(...names), ['status'], '', undefined, 'replace').chips).toEqual([
+      'status',
+    ])
+    // And the default, for every caller holding only a schema.
+    expect(rowFields(schema(...names), ['status']).chips).toEqual(['status'])
   })
 
   it('still takes a chosen list literally, both spellings included', () => {

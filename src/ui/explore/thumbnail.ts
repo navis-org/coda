@@ -46,6 +46,7 @@
  * volume bounds and is a later refinement.
  */
 
+import type { Bounds3 } from '../../core/values'
 import { boundsOf } from '../../core/values'
 import { drawSegment, fillTriangle } from '../raster'
 
@@ -130,9 +131,15 @@ type Project = (index: number) => [number, number, number]
 function fitToTile(
   positions: Float32Array,
   size: number,
-  padding: number,
+  bounds?: Bounds3,
 ): Project | undefined {
-  const box = boundsOf([positions])
+  const padding = PADDING
+  /*
+   * A supplied box is how a rotation frames every frame alike. Left to derive its own, this
+   * re-frames each rotated copy to that copy's bounds, so the neuron pulses in size as it turns
+   * and its depth ramp breathes with it — one box, and both go away. See `rotation.ts`.
+   */
+  const box = bounds ?? boundsOf([positions])
   const spanX = box.max[0] - box.min[0]
   const spanY = box.max[1] - box.min[1]
   // A single point or a perfectly flat axis would divide by zero; one shared scale keeps the
@@ -164,18 +171,20 @@ function shadeFor(depth: number): number {
 /**
  * Rasterise a projected, depth-shaded silhouette from triangles.
  *
- * `padding` keeps the shape off the tile edge; it is a fraction of the tile, not pixels, so a
- * thumbnail rendered at two sizes looks like the same drawing.
+ * `PADDING` keeps the shape off the tile edge; it is a fraction of the tile, not pixels, so a
+ * thumbnail rendered at two sizes looks like the same drawing. Read from the constant rather than
+ * taken as a parameter — no caller in the repo ever passed one, and its own note says two literals
+ * for one visual property is how mesh rows and skeleton rows come to sit differently in one list.
  */
 export function rasteriseSilhouette(
   positions: Float32Array,
   indices: Uint32Array,
   size: number,
-  padding = PADDING,
+  bounds?: Bounds3,
 ): Silhouette {
   const result = emptySilhouette(size)
   if (positions.length < 9 || indices.length < 3) return result
-  const project = fitToTile(positions, size, padding)
+  const project = fitToTile(positions, size, bounds)
   if (!project) return result
 
   const coverage = result.coverage
@@ -216,13 +225,13 @@ export function rasteriseSkeleton(
   positions: Float32Array,
   parents: Int32Array,
   size: number,
-  padding = PADDING,
+  bounds?: Bounds3,
 ): Silhouette {
   const result = emptySilhouette(size)
   const points = Math.floor(positions.length / 3)
   // No emptiness guard: `fitToTile` already answers undefined for nothing and for a single point,
   // and a `parents` of length zero runs the loop zero times to the same empty mask.
-  const project = fitToTile(positions, size, padding)
+  const project = fitToTile(positions, size, bounds)
   if (!project) return result
 
   const coverage = result.coverage
@@ -255,21 +264,40 @@ export function coverageFraction(silhouette: Silhouette): number {
   return painted / silhouette.coverage.length
 }
 
-/** Paint a mask into RGBA bytes of one colour. The component hands these to a canvas. */
-export function silhouetteToRgba(
-  silhouette: Silhouette,
+/**
+ * Fill the colour channels of a paint buffer, leaving alpha alone.
+ *
+ * Split from the coverage write because the two change at different rates: the ink moves only
+ * when the theme does, where the coverage moves on every frame of the rocking preview. Measured
+ * at 640², writing all four channels is 0.695 ms against 0.303 ms for alpha alone — at the
+ * rock's 13 repaints a second that is 8.7 ms/s of main thread against 3.9.
+ */
+export function inkInto(
+  out: Uint8ClampedArray,
   color: { r: number; g: number; b: number },
-): Uint8ClampedArray {
-  const rgba = new Uint8ClampedArray(silhouette.coverage.length * 4)
-  for (let i = 0; i < silhouette.coverage.length; i++) {
-    const alpha = silhouette.coverage[i]!
-    if (alpha === 0) continue
-    rgba[i * 4] = color.r
-    rgba[i * 4 + 1] = color.g
-    rgba[i * 4 + 2] = color.b
-    rgba[i * 4 + 3] = alpha
+): void {
+  for (let at = 0; at < out.length; at += 4) {
+    out[at] = color.r
+    out[at + 1] = color.g
+    out[at + 2] = color.b
   }
-  return rgba
+}
+
+/**
+ * Write a mask's coverage into a paint buffer's alpha channel.
+ *
+ * Every pixel, unconditionally. A reused buffer still holds the previous frame, so skipping the
+ * empty ones — which is what a freshly allocated buffer could afford — would leave the last
+ * frame's neuron behind wherever this one has nothing. Writing through is also what lets the
+ * caller drop its `clearRect`: `putImageData` replaces destination pixels wholesale rather than
+ * compositing, so a clear before it was never doing anything.
+ *
+ * The mask carries no colour, which is the property the whole cache rests on — one stored
+ * thumbnail paints correctly in either theme, because the ink is applied at paint by `inkInto`.
+ */
+export function coverageInto(out: Uint8ClampedArray, silhouette: Silhouette): void {
+  const { coverage } = silhouette
+  for (let i = 0; i < coverage.length; i++) out[i * 4 + 3] = coverage[i]!
 }
 
 /** `#rrggbb` to channels. Falls back to mid-grey rather than throwing on a bad string. */

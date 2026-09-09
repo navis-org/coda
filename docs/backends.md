@@ -2221,6 +2221,33 @@ cheap — which blanked the giant fibres and big tracts, i.e. both the heaviest 
 the bodies someone browsing is most likely to want. A page is priced by the median, not by the
 ceiling, so raising it costs the typical page nothing.
 
+**There are two ceilings, because a level and a whole body are not the same measurement.** Every
+word of the argument above is about a _level_ — it compares the coarsest of four against what all
+four cost. A flat store has no levels: DVID's `.ngmesh` is the only mesh there is, so the same
+number is being asked to tell a big neuron at full resolution from a blob at full resolution, and
+2 MB is hemibrain's answer to a question about somebody else's dataset. On `neuprint-fish2`, a
+whole-brain larval zebrafish segmentation whose meshes come from a DVID keyvalue store, it blanked
+**one Explore row in twelve**, and the rows it blanked were the big neurons — the reported symptom
+was "some neurons never get a thumbnail". `THUMBNAIL_MAX_FLAT_BYTES` is **12 MB** and
+`thumbnailCeiling(source)` is the one place that chooses, since a second caller choosing for
+itself is a silently blank tile.
+
+12 was measured on fish2 rather than picked. Over the top 200 bodies by voxel count (40 read, the
+99.91st percentile upwards) the meshes run to a **maximum of 8.31 MB**, median 3.01 — and the
+single largest body in the dataset, at 1.1 billion voxels, is only 3.37 MB. A random 120 across
+the whole 224,385-row index: median **0.54 MB**, p90 1.92, none over 3.56. So the real arbors stop
+around 8 MB and the ceiling clears them with room. What it still refuses is what it is for: one
+stratified sample turned up a **27.4 MB body at 846M voxels whose same-size neighbours are 6–8
+MB** — four times the bytes for the same volume, which is what an unsplit merge looks like — and
+the 107 MB body below. Both stay placeholders.
+
+It costs almost nothing, which is the other half of the measurement. fish2's *mean* body is
+~0.8 MB, so a 25-row page came to **~19.4 MB truncated at 2 MB and ~20.5 MB at 12** — the old
+ceiling was blanking 8% of rows to save 5% of the bytes. Nothing else moves: mushroombody, the
+other DVID repo, tops out at 487 kB and never approaches either number. (The page cost is itself
+worth knowing — `fetchCoarseGeometry` is documented as ~10 kB a row and fish2 runs ~800 kB a row
+whether or not anything is refused. That is a fact about the dataset, and no ceiling fixes it.)
+
 **100 bodies in flight, which is neuroglancer's own number** (`data_management_context.ts`:
 `download: { defaultItemLimit: 100 }`). It was 6, which had never been measured and cost about an
 order of magnitude. Measured in a real browser against the hemibrain bucket with the HTTP cache
@@ -2376,18 +2403,31 @@ level to ask for. Worse, its size is unknowable in advance. All three ways of as
 So `fetchMeshes`' `maxBytesPerBody`, which elsewhere refuses from a manifest for free, had
 nothing to read. `FetchOptions.maxBytes` in `precomputed/transport.ts` is the answer: it checks
 `Content-Length` where a store sends one, otherwise streams and **cancels the reader** past the
-ceiling, reporting **413** — which `readKey` folds into the same "not available" as a 404, so
-`fetchMeshes` counts it as `missing`. The bound is on the *download*, not the decode; a check
-after `arrayBuffer()` has already spent the bytes.
+ceiling, reporting **413**. The bound is on the *download*, not the decode; a check after
+`arrayBuffer()` has already spent the bytes.
+
+**413 and 404 used to be one answer, and separating them is what lets a blank tile explain
+itself.** `readKey` folded both into `undefined`, which is right for a scene — a body that is not
+in the result is not in the result, whatever the reason — and leaves an Explore tile drawing the
+same glyph for "this neuron was never meshed" and "this neuron's picture is over your ceiling".
+On a flat store the second is the *common* case rather than the rare one, so the reader answers
+`OVERSIZE` for a 413, `fetchMeshes` reports `oversize` as a labelled subset of `missing`, and
+`DataSource.fetchCoarseGeometry` hands back a `CoarseRefusal`. `oversize` is a plain list in
+whatever order the refusals arrived, deliberately: its only reader is `fetchCoarseMesh`, which asks
+about **one** body, so it exists to tell a refusal from an absence rather than to be read against a
+page. An ordered version was built, and the test that justified it was written after a mutation
+showed the ordering made no difference to any caller — which is the wrong way round. Everything that only wants "not
+available" writes `!bytes || bytes === OVERSIZE` and is unchanged — `dvid/skeletons.ts` is the
+one such caller. See [widgets.md](widgets.md) for what the tile does with it.
 
 That is what makes thumbnails possible. `fetchCoarseMesh` takes `dvid-ngmesh` under
-`THUMBNAIL_MAX_BYTES` and still refuses `legacy`, and the asymmetry is deliberate: the question
+`THUMBNAIL_MAX_FLAT_BYTES` and still refuses `legacy`, and the asymmetry is deliberate: the question
 is whether the **download** can be bounded, not whether the format has levels. A DVID body is one
 key a cut-off can stop; a legacy body is a manifest plus N fragments already mostly spent by the
 time a ceiling could bite. Worth having rather than theoretical — sampled on mushroombody, 40
 random bodies: **median 16 kB, p90 92 kB, max 487 kB**, so a page of 25 is about 0.4 MB, less
 than hemibrain's coarsest *precomputed* level costs. A repo whose bodies are the 107 MB kind
-draws placeholders instead, at 2 MB apiece rather than 107.
+draws placeholders instead, at the flat ceiling apiece rather than 107.
 
 ### Where it plugs in
 

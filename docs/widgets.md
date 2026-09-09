@@ -96,7 +96,28 @@ entry carried neither a fingerprint nor an expiry. The session's in-memory map s
 refusals, which is all that was ever needed to stop a page turn re-requesting; forgetting them
 across reloads costs one manifest read. Stored masks now carry a `MASK_FORMAT` fingerprint, and
 a stored mask with nothing in it is read as a miss rather than as a refusal — either one alone
-retires the bad entries, and `explore.test.tsx` seeds a real one to prove it.
+retires the bad entries, and `explore.test.tsx` seeds a real one to prove it. The rule paid for
+itself a second time on the raise to `THUMBNAIL_MAX_FLAT_BYTES`: every fish2 row the 2 MB ceiling
+had blanked came back on the next reload, with nothing to purge.
+
+**A blank tile says which kind of blank it is.** There are two, and until `readKey` was made to
+tell 413 from 404 there was one: the dataset has no cheap geometry for this neuron — unmeshed,
+full-resolution-only, a failed request — or it *has* a picture and the byte ceiling turned it
+down. `DataSource.fetchCoarseGeometry` answers `undefined` for the first and a `CoarseRefusal`
+for the second, and the tile's `Entry` carries `null` or `'too-large'` accordingly. Worth the
+seam because on a flat mesh store the refusal is the **common** case rather than the rare one —
+fish2's median body is 0.54 MB — and because the two are actionable in opposite directions:
+nothing will ever make an unmeshed body draw, where a refused one is a picture a ceiling
+declined.
+
+**It differs in what it says, not in what it draws**, which is a decision rather than an
+omission. At 56–76px there is no second glyph a reader could tell from the first without being
+told what it meant — a badge at that size is a smudge — where the sentence fits in a `title` and
+reads the same on both tile sizes. The refused one is also the only one **announced**: an empty
+tile is decorative, saying what the row already says, so on a dataset that publishes no cheap
+geometry at all every row would read out once more for nothing; a refusal is a fact carried on no
+other surface. `data-blank="too-large"` is the hook the tests use, since the tooltip's prose is
+the part most likely to be reworded and its wording proves nothing.
 
 **Thumbnails are the coarsest published mesh, projected.** No token — meshes come from public
 buckets, so they work in a static deploy where the Cypher API cannot reach. `thumbnail.ts` is
@@ -231,6 +252,497 @@ It is local to `NeuronThumbnail.tsx` on the second-consumer rule; the viewers al
 that is one lift rather than eleven. The test flips `data-theme` and asserts the second frame's
 ink, recording `putImageData` for that one case — real RGBA bytes, not a transcript of calls into
 the 2D stub, which is deliberately not a spy.
+
+### The expanded row: columns, and marks
+
+**The expanded view's width buys vertical scanning, and only alignment can spend it.** A chip that
+is absent shifts every chip after it, so a row of twenty chips is *harder* to read than a row of
+eight — you cannot run your eye down a column and compare, which is the one thing the extra width
+was ever going to give. So the expanded row is a grid with a header, and the card keeps its chips.
+
+**Which annotations get a column is measured, not curated.** `splitByFill` takes `rowFields`'
+already-ranked candidates and keeps the ones filled on at least `FILL_MIN` of the dataset, up to
+`MAX_COLUMNS`; the rest fall through to chips. That is the rule the two failure modes argue for:
+`class` on male-CNS is on nearly every neuron and belongs in a column, where `dimorphism` is filled
+only where it means anything and as a column would be a stripe of blanks eating width a filled
+column wanted. As a chip it simply appears where it applies. **The inversion is the point** — an
+absent chip says nothing, where an *empty cell* sits at the same position as every other value in
+its column and says nobody annotated this one, which on an annotation-rich dataset is information.
+Measured dataset-wide and strided (`FILL_SAMPLE`), never over the current hits, or the columns
+would reshuffle as somebody types; and the fill rate is a *filter* on the priority order rather
+than a re-ranking, since `type` before `class` before `superclass` is a hierarchy and sorting it by
+completeness scrambles it.
+
+**`Fields` adds to the automatic list rather than replacing it — and `absentMeans` is what makes
+that safe to ship.** The chosen list *stood in for* the automatic one for as long as the control
+has existed, so a saved graph naming `status` shows exactly `status`; a new default of `add`
+without saying so would quietly redraw somebody else's stored workflow with eight more fields on
+every row. `defaultParams` writes the default at *creation* and never runs over
+`deserializeGraph`, so absence here is a third state and it means the old behaviour —
+`out.datasetSummary`'s `chartsMode` is the identical call for the identical reason. A node made
+today gets `add`, which answers the question people actually ask: "also show me this" far more
+often than "show me only this".
+
+**A chosen field comes first and is never trimmed.** First because an explicit choice outranks a
+default: it is what puts the field in view rather than past the cap, and what gives it a shot at a
+column instead of the chip tail. Never trimmed because that is already this control's rule —
+trimming what was asked for is how a control stops being believed. `splitByFill` still decides its
+*shape*, so asking for a field nine neurons in ten lack still gets a chip rather than a column of
+blanks: position buys prominence, not an exemption from the fill rule. Choosing a field also claims
+its **family**, so asking for `predictedNt` does not append `consensusNt` beside it — two chips
+saying one thing is what the families exist to prevent, and it would be odd for choosing a field to
+be the thing that reintroduces it. Inspector-only and hidden while `Fields` is empty: a mode
+governing an empty list is a control somebody has to work out is doing nothing.
+
+**The automatic list is capped by *colour*, so the expanded view can afford a longer one.**
+`MAX_CHIPS` is eight because that is the palette, and an aligned column is plain text with no slot
+at all — so the expanded view's cap is `MAX_COLUMNS + MAX_CHIPS`, the chip budget plus the columns
+that never spend one. Without that the first eight candidates on a male-CNS-shaped schema are used
+up by `class` through `cellBodyFiber`, and the annotation-rich tail is unreachable however
+interesting it is: `dimorphism`, `fruDsx` and `exitNerve` were all candidates and none of them
+could ever appear. The card keeps the eight, which is not an oversight — it is the narrow surface,
+every annotation there *is* a coloured chip, and thirteen of them is not a row anybody can read.
+`entryNerve` and `exitNerve` are two entries rather than one family for the reason `somaSide` and
+`rootSide` are: a neuron does not leave by the nerve it entered through.
+
+**Nothing here needed a new fetch except one thing.** `neuronIndex` is `findNeurons` with the
+*discovered* schema, and discovery admits up to `MAX_EXTRA_COLUMNS` = 200 properties — so `size`,
+`dimorphism`, `synonyms`, `fruDsx`, `itoleeHl`, `supertype`, the whole `superclass`→`class`→
+`subclass` hierarchy and the neurotransmitter confidence are *already in the browser* as part of
+the 26 MB index. Showing them costs layout. The exception is the region breakdown: `roiInfo` is
+suppressed from the neuron schema as a kilobyte of JSON per neuron, so that one is a query — see
+below.
+
+**One template, three ways to get it wrong, all browser-only.** `rowTemplate` is shared by the
+header and every row, and *every track but the name block is a fixed size*, which took three goes:
+an `auto` track sizes to its own row's content, so the header — which has no checkbox and no tile —
+collapsed its first two tracks and sat its labels 110px right of the values they named; the
+trailing `auto` held the figures, whose width follows the digits (`400` against `1,496`), so a
+row's own columns drifted against each other; and `minmax(0, 8rem)` let a column shrink by a
+different amount per row. The marks track is fixed for a fourth reason of its own: it is sized from
+how many marks the **dataset** draws, not the row, because a neuron missing `pre` draws no balance
+bar and a track that shrank for it would pull that row's figures left of everybody else's — and
+because the region bar arrives a query *after* the row, so a track that grew when it landed would
+shift the page sideways as the fetch returned. Measured in a browser: header and values at
+identical x on every track.
+
+**The header also lifted the figure labels out of the rows.** `pre` under twenty-five figures is
+the same word twenty-five times down a column that already says it once.
+
+### The inline marks
+
+Four, and three of them cost nothing because Explore already holds the whole table. **The balance
+bar** is `pre` against `post` as one split bar with a shared left baseline — the proportion is what
+varies down the column, where a centred diverging mark would make the *total* vary and the figures
+already say that. Both or neither: a bar drawn from one half would read as entirely presynaptic,
+which is a claim the data did not make. **The percentile tick** shows where a neuron sits in its
+dataset's own spread, which nothing else in Coda can do cheaply — no other surface holds the
+column, so nowhere else could answer without a query. A track with a tick and not a filled bar,
+because a filled bar reads as a quantity and this is a rank. **The confidence bar** is drawn only
+where the dataset publishes a confidence *and* the prediction it qualifies, and goes achromatic
+below `LOW`: a weak prediction should not look like a category.
+
+**The region mark is a donut, and the one that reaches a server.** A ring rather than a pie
+because the slices are small: a pie's segments all meet at the centre, where the three narrowest
+are a few pixels of shared point, while a ring gives every segment the same radial thickness
+however thin its arc. Drawn as **dash offsets on one circle, not `A` path arcs**, and that is not a
+style choice — a segment covering the whole ring is a 360° arc whose start and end coincide, which
+SVG draws as *nothing*, and a neuron wholly within one region is the ordinary case for a fragment
+rather than an edge case. Offsets accumulate rather than being computed per segment, so rounding
+cannot open a hairline gap between two arcs meant to touch. It occupies the same `MARK_W` slot as
+every other mark, centred, so the header's labels keep sitting over what they name and
+`rowTemplate` never learns about a mark of its own shape.
+
+Two rules decide whether it means anything. `roiInfo` nests — a synapse in `LO(R)` is counted again in `OL(R)` — so only the primary
+set may be summed, and an *absent* primary list is not an empty one: it means discovery has not
+answered, and `regionShares` then draws nothing rather than a plausible picture built on a total
+nobody could reproduce. And the regions are **ranked across the page, not per row**: a bar whose
+first segment is `ME(R)` on one line and `LO(L)` on the next is five colours meaning five different
+things per row, which is worse than no bar. The tail folds into one `other` segment rather than
+being dropped — a bar whose segments did not sum to the neuron's synapses would be a proportion of
+nothing in particular, and **fold where the mark folds** is `colors.ts`' rule for exactly this
+shape — and a ring folds. `useRowRois` fetches a page at a time in one round trip, settled and cached by the page's
+own ids, and a missing `capabilities.roiCounts` is a missing mark rather than a broken list — every
+other field on the row came out of the index and is perfectly good.
+
+**Each mark is labelled in the header, in the marks' own geometry.** Four small bars are
+unreadable otherwise, and a `title` per mark only helps somebody who already suspects there is
+something to hover.
+
+**Right-clicking a row opens a menu, and it wears `NodeContextMenu`'s clothes rather than its
+own.** `.context-menu` and its rows, `useDismissOnOutside` for the dismissal — a right-click should
+not look like a different kind of thing depending on which surface it landed on, which is the rule
+`NetworkContextMenu` already follows. Two things come free from that: `ViewerOverlay`'s
+capture-phase Escape already stands aside for anything matching `.context-menu`, so Escape closes
+the menu rather than the whole overlay; and the menu is `position: fixed` in client coordinates,
+clamped, because it belongs to the pointer rather than to the list that would clip it.
+
+**Copy is two rows, which is where it departs from the network menu on purpose.** There, a
+right-click *inside* the selection acts on the whole selection and one outside it acts on the mark
+alone — right for a canvas, where the selection is an outline visible under the pointer. Here the
+selection is a column of ticks that may be scrolled off screen entirely, so one gesture would
+silently copy one id or four hundred depending on something the reader cannot see. `Copy ID` and
+`Copy selected N` are always both drawn, the second disabled when nothing is ticked rather than
+hidden, so the menu keeps its height between two right-clicks. Ids join through **`joinIds`'** own
+default, so this and the Copy IDs node cannot put ids on a clipboard two different ways, and the
+write is `ui/export.ts`'s `copyText` — the one place that knows the API is absent in jsdom and on
+any non-secure origin.
+
+**The type-shaped rows act on the index, never on the page.** `Select all of this type` ticks every
+*hit* sharing the row's type; a version that took the visible rows would look right on a small
+dataset and be silently wrong on every real one, since the page is only where you stopped
+scrolling. The count rides in the row's `kbd` slot so the number is visible before it is committed
+to — a selection travels in every downstream cache key — and it shares `selectMatching` with the
+foot's Select-all, so the two cannot disagree about when a selection is worth warning about. The
+scan is a `useMemo` keyed on the open menu rather than on every render: it walks every hit, which
+is 165,122 rows on male-CNS, and once per right-click is nothing where once per keystroke would not
+be.
+
+**A right-click dismisses the hover preview, and that is a stacking fact rather than a courtesy.**
+The preview is `z-index: 65` and `.context-menu` is 45, so a preview left up sits *over* the menu it
+was opened from. Dismissing rather than restacking, because a right-click has finished with the
+transient thing a hover put on screen whether or not a menu follows. Verified in a browser: the
+preview is up before the press and gone after.
+
+**Clicking through pages used to make the page you stopped on load last.** The queue behind
+`MAX_CONCURRENT` was a plain FIFO, which is the right shape only if every waiter is equally
+wanted — and while somebody clicks through pages hunting for a row, they are not. Five pages is
+125 queued bodies with the screenful actually in front of the reader at the *back* of them, so it
+filled after a hundred requests for rows that had scrolled away several clicks earlier. It reads
+as the widget being slow; it is the widget being polite in the wrong order.
+
+**Newest batch first, insertion order within it**, and both halves are load-bearing: serving the
+newest batch fixes the across-page problem, and a plain `queue.pop()` would fix that while
+reversing the rows *within* a page, so a screenful would fill bottom-up. A batch is a counter
+advanced on a microtask, so nothing here has to know what a page is — React runs a commit's
+effects in one synchronous pass, so every row of a page asks before control returns to the event
+loop. Captured at the *top* of the loader rather than at `acquire`, because by then a row has
+awaited an IndexedDB read and its neighbours are scattered across ticks; that capture point is
+not pinned by a test and cannot easily be, since under jsdom the read resolves fast enough that
+either place passes. A hover preview asks later than the page it is over, so it outranks it —
+which is right, and falls out rather than being special-cased.
+
+**What this does not do is cancel.** The pages clicked past still load, behind the visible one,
+and they are not wasted: the mask cache is what makes paging back instant. The region query needs
+none of this — `useRowRois` is settled at 180 ms, so pages clicked through never ask at all and
+only the one the reader rests on does.
+
+**The semaphore is module state, so the test seam resets it too.** A case that leaves a fetch in
+flight holds its slot for every case after it, and the next suite's thumbnails queue behind a
+request nobody can resolve — which is how the second of these tests failed before
+`resetThumbnailCache` learned about `active` and `queue`.
+
+**Hover enlarges a thumbnail, and past a point that means asking the source for a finer body.**
+The first version was free: `RASTER_SCALE` rasterises at `size * 4`, so behind a 76px tile there
+is a 304px mask and the downscale throws three quarters of it away — drawing that same mask at
+176px is the detail the tile could not hold, at no fetch and no new cache key. That ceiling is
+where it stopped, and it is the wrong place to stop, because there is a second knob one layer
+down.
+
+**`fetchCoarseMesh` had `triangleBudget: 1` hardcoded, and a budget of one is how `chooseLod` is
+asked for the coarsest level** — there is no "coarsest" argument, only a budget no level can meet.
+Raising it therefore asks for a genuinely finer body from the same pyramid, which is what
+`CoarseGeometryRequest.detail` now carries. Measured against hemibrain's real pyramid
+(2.0 MB / 280 kB / 48 kB / 11 kB), `PREVIEW_TRIANGLE_BUDGET` of 150,000 triangles is a ~255 kB
+allowance and moves LOD 3 → **LOD 2**: one step, about 28k triangles against 11 kB's worth. One and
+not two on purpose — LOD 1 is a quarter of a megabyte per hover for a difference a 320px picture
+cannot resolve.
+
+**It is a budget, not a promise, and the two sources that ignore it are answering correctly.** A
+published mesh pyramid has levels to trade against. CAVE's `graphene://` route answers a level-2
+chunk skeleton whose resolution is a property of the chunk graph, and CATMAID already returns the
+whole traced arbor — for those two there is nothing finer in existence and the enlargement is the
+raster alone. Which is why the preview *falls back* rather than waiting: `fine === null` is the
+ordinary answer on two of the four routes, and the tile's own mask stays up forever there.
+
+**The preview opens on the tile's mask and swaps when the finer one lands, at one size
+throughout.** Drawing the stand-in at its natural 304 and the replacement at 640 would change the
+box when the fetch returned, which reads as the picture jumping rather than sharpening — so the
+stand-in is knowingly upscaled 5% for as long as it is up. Confirmed on a cold cache in a browser:
+`304@320px → 640@320px`. The fine fetch is started **when the preview opens**, never on pointer
+arrival, so a sweep down 25 rows is 25 pointerenters and no requests at all.
+
+**`PREVIEW_RASTER` is 640 and deliberately not `PREVIEW_SIZE * RASTER_SCALE`.** Four times a 320px
+box is 1280², 1.6 MB per mask against the tile's 90 kB. 640² is *exactly* native at
+`devicePixelRatio` 2, 2× supersampled at 1×, and 400 KiB. The tile needs four because its problem
+is a hairline neurite landing on one pixel or none at a size where the geometry outruns the raster;
+at 320px that inversion is over and the detail comes from the finer body instead.
+
+**A tile's mask is cached; the preview's is not, because it is derived.** The preview's mask and
+its sweep both come from one `loadFineGeometry`, so the mask is
+`silhouetteOf(geometry, PREVIEW_RASTER)` — a pure function of state the component already holds.
+That was not obvious at first, and holding it as a *second detail level inside the tile cache* cost
+a second cache namespace, a `persists()` predicate consulted at four sites, a second eviction
+policy with its own 24-entry cap, and a branch on the concurrency semaphore. All of it was
+bookkeeping around a derived value; deriving it deleted the lot and left `loadSilhouette`
+single-purpose. **The bound moved down a layer with it**: the body is the only thing worth capping
+(`MAX_FINE_GEOMETRY`, 3, through `keyedCache`), since the mask is one rasterisation away from it.
+
+**And the still picture is only drawn where there will be no motion.** The centre frame arrives one
+build tick after the body does, so rasterising a static mask first *delays* the sharp picture by
+exactly its own cost — 28 ms on a decimated arbor — to show something for one frame that the rock
+then replaces. Under `prefers-reduced-motion` there is no rock and it is the whole feature. So the
+preview has three sources in order of what they know — the frame the rock is on, the still picture
+where there will be none, and the tile's own mask enlarged — and the last is not a failure state:
+on CATMAID and CAVE's chunk-graph route there is nothing finer in existence, so the tile's mask
+*is* the honest picture.
+
+**Caches are not ceilings unless the rows let go.** `ExploreBody` renders a whole page at once and
+the body is per-row React state, so a hovered row held its ~0.5 MB geometry for as long as the page
+stayed mounted — evicting from `fineGeometry` frees nothing while the row that fetched it still
+points at it. Measured against the declared bound, a page of 25 hovered rows overshot
+`MAX_FINE_GEOMETRY` **eight-fold**. `hide()` drops both references; they re-resolve from the cache
+in one microtask on the next hover, and where they have been evicted that is exactly what the cap
+was for.
+
+**The paint is one buffer, and it is a layout effect.** An `ImageData` wraps its array rather than
+copying it, so writing the buffer is writing the image; the ink is filled only when the theme
+moves and the coverage on every frame, which at 640² is 0.303 ms against 0.695 for all four
+channels — 3.9 ms/s against 8.7 at the rock's 13 repaints a second. `useLayoutEffect` rather than
+`useEffect` because assigning `width` or `height` **clears a canvas**, and React commits that before
+a passive effect runs: seen in a browser, the swap from the 304px stand-in to the sweep's first
+640px frame sampled at *zero* coverage for one frame.
+
+**`PREVIEW_SIZE` is 320 because that is the largest that still clears the row on a 1920 screen**,
+which is measured and not chosen. Box edges include the 6px padding and 1px border:
+
+| window | tile | row name at | preview box | covers the name |
+| --- | --- | --- | --- | --- |
+| 1920 | 268..344 | 351 | 8..342 | no |
+| 1440 | 86..162 | 169 | 8..342 | yes, by 173px |
+| 1100 | 86..162 | 169 | 8..342 | yes, by 173px |
+
+The panel is centred under a 1500px cap, so at 1920 the gutter plus the tile's own column is 344px
+and a 334px box fits with 9px to spare; one step larger starts covering the name there. **Below
+1440 it covers whatever its size** — the name begins 169px in and nothing wider than ~147px clears
+it, so the 176 this replaced already covered by 21px. The choice at those widths is between
+covering 173px and covering 21px, against a picture 4.2× the tile rather than 2.3×. 232 takes the
+other side; there is no size that avoids the trade.
+
+**It runs on a node card too, and the objection that kept it off turned out to be already
+answered.** It was the overlay's alone on two counts: a card's tile is 56px against a 224px mask,
+and inside a card the preview has `.coda-node`'s clip to escape as well as the list's, from inside
+React Flow's *transformed* pane — which is the interesting half, a `transform` being what makes an
+ancestor the containing block for `position: fixed`. But the portal already goes to
+`document.fullscreenElement ?? document.body`, which has no transformed ancestor, and
+`getBoundingClientRect` reports viewport coordinates through one. So the machinery the overlay
+needed is the machinery a card needs, and neither clip was ever in the way.
+
+Measured rather than argued, since every word of it is about layout and jsdom performs none —
+`pnpm probe:explore-preview`, on a card at the demo workflow's own 0.452 pane zoom:
+
+| | tile | preview box | canvas | hit-tested at its centre |
+|---|---|---|---|---|
+| card, 0.452× pane | 25×25 at 1200,556 (56 unscaled) | 334×334 at 870,409 | 320px | `canvas.explore-thumb-preview__canvas` |
+| overlay, 1600px | 76×76 at 108,187 | 334×334 at 8,65 (clamped) | 320px | `canvas.explore-thumb-preview__canvas` |
+
+320 and not 145 is the transform question answered; the hit test is the clip question, and it has
+to lift `pointer-events` to mean anything — the preview declares `none` so the list stays drivable
+underneath it, and the first run of that probe reported a `td` in another card, which reads
+exactly like a clip.
+
+**What compact really costs is the stand-in, and only until the fine body lands.** The tile's own
+mask is `56 × RASTER_SCALE` = 224 against the overlay's 304, so the picture held up in the meantime
+is upscaled 1.43× rather than 1.05×. The settled picture is identical on both surfaces — a 640
+raster drawn at `PREVIEW_SIZE`, off a body neither tile fetched — which is the last column of the
+table. The 176-versus-130 arithmetic the gate rested on was written before `detail: 'fine'` existed
+and stopped being true when it did.
+
+The prop's default stays `false`, and that is for the other caller rather than for the card:
+`ProfileViewer`'s shape tile stands for a *group* by drawing its first member, so an enlargement
+there would offer a closer look at a neuron the header is not about.
+
+**Three clips and a portal.** `.explore__list` is `overflow-y: auto`, which clips the *other* axis
+too, and `.overlay__panel` is `overflow: hidden` — so an in-place enlargement is cut off at the
+left edge and at both scroll edges, and growing the tile in flow would break the rule the row is
+built around (every row the same height is what makes a list scannable). Hence a portal, and
+`position: fixed` is right here for exactly the reason `.chart-tooltip` says it is wrong there: a
+portal has no transformed ancestor, so viewport coordinates mean what they say. The third clip is
+the silent one — `.overlay__panel:fullscreen` becomes the fullscreen root, and the top layer shows
+that element's subtree and nothing else, so a preview portalled to `body` would be built,
+positioned correctly and **invisible**. The host is `document.fullscreenElement ?? document.body`,
+read off the document rather than off the ⛶ click for the reason [ui-shell.md](ui-shell.md)
+records: Escape and F11 both leave fullscreen without passing through this app.
+
+**It opens left, which is the opposite of a submenu's rule, and the reason is what is behind
+it.** The preview is a picture of the row the pointer is on, and that row's name, chips and
+figures are all to the *right* of the thumbnail — opening rightwards covers the thing being
+compared against. To the left is the checkbox gutter and then backdrop. `previewPlacement` is a
+pure function over rectangles for the same reason `submenuPlacement` is: jsdom performs no layout
+and reports one rect for every element, so a placement decided inside an effect has no coverage at
+all.
+
+**The right-hand fallback was built, measured and deleted, and that is the finding.** It existed
+on sound-looking reasoning — the panel is centred with 28px of padding, so a 1440px window has no
+190px gutter to open into and needs a real second answer. Driven in a browser it does the exact
+thing the left preference exists to prevent: at 1440 the tile sits 85px in, the fallback lands at
+**171**, and the preview covers the hovered row's own name *and* the two rows either side.
+Clamping to the left margin instead lands it at **8** — over the tile and the checkbox, clear of
+every row's text. It is not close at any width, which is why the branch is gone rather than
+reordered: text begins at the tile's right edge, so a clamped-left preview covers
+`MARGIN + size - tile.right` of it (23px here) against a right-hand one's whole 176. The right
+answer only starts winning if the thumbnail moves to the right-hand end of the row, and it is then
+not a fallback — `tile.left - GAP - size` fits outright and the function already returns it. What
+survives from that version is `covers`, the property the whole rule trades and the one a test can
+assert without a browser.
+
+
+**Four event rules, three of them found by asking what closes it.** A **130 ms** delay, or a
+pointer swept down 25 rows opens 25 previews and the list reads as flashing. **Mouse only** — a
+tap synthesises `pointerenter` too and there is no gesture that would close it. **The tile moving
+dismisses it** — see below. And the hover state is **local to the thumbnail**: a `hoveredId` on
+`ExploreBody` buys back the exact bug `NeuronRow`'s `memo` exists for, one pointer move
+re-rendering twenty-five rows to change one.
+
+**The dismissal is a watch on the rect, not a list of the events that can move one.** It was
+`scroll` in the capture phase, which is right for the overlay and only there: `.explore__list` is
+the one thing that moves and `scroll` does not bubble out of it. On a node card *nothing scrolls*
+— React Flow pans and zooms by writing a `transform` onto the pane, so the tile slides out from
+under the pointer having fired no event at all, and the preview is left hanging beside where the
+row used to be. Adding `wheel` and `pointerdown` beside `scroll` would have covered those two
+while still missing a keyboard fit-view, a resize, an auto-layout pass, a row re-flowed by a
+search. So the property is asked directly: the placement was measured against a rect
+(`previewPlacement`) and must not outlive it, which is one `getBoundingClientRect` per frame while
+a preview is open — at most one at a time, against layout the rock leaves clean by painting a
+canvas. A pixel of tolerance, because a card on a scaled pane lands on fractional coordinates.
+
+Dismissing rather than repositioning is the half that predates it: once the list has moved, the
+tile under the pointer is a different neuron, and a preview following the pointer down a scrolling
+list is the strobe the delay exists to prevent. The right-click dismissal stays an *event*,
+because it is about stacking rather than movement — the preview is `z-index: 65` against
+`.context-menu`'s 45. **jsdom can still see the watch**, which is why it is not browser-only
+coverage: the stub reports one constant rect for every element, so the test makes *that tile*
+answer differently, which is the whole mechanism. Panning the canvas is the case only the probe
+can reach.
+
+### The rocking preview
+
+**A neuron turns about its own centre, not the volume's origin.** `rotateY` took no pivot at
+first, which means the world origin — and positions are nanometres in *dataset* space, so a neuron
+sits hundreds of microns away from it. The result swings the neuron round an enormous arc instead
+of turning it in place, and because `sweptBounds` then has to cover the whole arc, the fit shrinks
+it to a smudge sliding across the tile. Measured in a browser, fixing it took the painted area from
+7.2–7.7k pixels to 10.6–27.8k. `pivotOf` is the **bounding-box centre** of two defensible answers:
+a vertex centroid is mass-weighted, so it sits inside whichever part is most densely tessellated
+and turning about it leaves that part still while the long axon sweeps hardest — asymmetric, and
+wider through the sweep. The box centre keeps the motion even and `sweptBounds` tightest, so the
+neuron is drawn as large as the tile allows. Swapping it is one function.
+
+**The rock starts on the thumbnail's own view and departs from it both ways.** `rockFrame` is a
+sine from the middle, which is two decisions at once. It begins at the centre frame — the
+unrotated one the static picture already shows — where a ping-pong from phase 0 begins at frame 0,
+i.e. the −45° extreme, so the animation cut to the far side and travelled back. And a sine *is* an
+eased ping-pong: it slows at each turning point, where a linear triangle reverses instantly and
+reads as a judder. The shape it replaced needed a `pingPong` and a smoothstep to get half of that
+and still started at an end. `ROTATION_FRAMES` is **odd** so there is a frame at exactly 0°; at 16
+the nearest sit at ±2.8° and the rock would open on a view that is visibly not the static picture.
+
+**Frames are built centre-first, because the framing has to settle once and early.** A sweep is
+framed by `sweptBounds` and the static mask by its own bounds, and a rotating body needs more room
+than a still one — measured, 1.6× smaller linearly and 2.6× the painted area once it turns. So
+`buildOrder` puts the frame the rock opens on first and it replaces the static mask as soon as it
+exists: measured in a browser, the static framing is up for **one animation frame, ~16 ms**, and
+from there to the rock there is no change at all. Built left to right instead, the first frame shown
+would be −45° — a change of framing *and* a jump to the far extreme.
+
+**A resting pointer sweeps the neuron ±45° about the vertical screen axis.** A silhouette is a
+projection, and the one thing a projection cannot show is which of two crossing neurites is in
+front; `DEPTH_FLOOR` shades for it, which reads as *some* depth but not as structure. Motion
+parallax does. About the **vertical** axis specifically, because horizontal parallax is the
+component the visual system uses for depth — a nod about the horizontal also foreshortens the long
+descending axon that is usually the thing being looked at. 17 frames across the 90°, 5.6° a step, played
+**there and back**, so one sweep's worth of masks buys a whole cycle where a 360° turntable would
+need every frame.
+
+**Frames are transient and the geometry is cached — the inversion is the design.** Sixteen 640²
+masks are 6.3 MB and take ~22 ms to rasterise from a mesh: cheap to rebuild, expensive to keep. The
+body behind them is ~0.5 MB and cost a network round trip. So `fineGeometry` holds three neurons'
+geometry and the frames live only while the pointer is on the row, freed when the preview closes.
+Both the still picture and the sweep come from one `loadFineGeometry`, which is what stops them
+being two requests for one body — and, once the mask became a derived value rather than a second
+cached one, what stops the two from ever disagreeing about which body they drew. Memory only, so a
+preview does not survive a reload and neither does what it is drawn from.
+
+**Two things the static path could ignore.** `fitToTile` derives its box from the positions handed
+to it, so a per-frame fit re-frames each rotated copy to its own bounds and the neuron **pulses**
+as it turns — and its depth ramp breathes with it, since the same box normalises z. `sweptBounds`
+computes one box over every angle that will be drawn and every frame goes through it; the
+rasterisers take an optional box rather than this module owning a second projection, because the
+fit is where the visual identity lives and two of them drift. `rotation.test.ts` pins it by
+measuring the drawn vertical extent across the sweep and asserting it takes exactly one value.
+
+**A bounded, order-independent ancestor walk, because `parents[i] < i` is not universal.**
+Decimation reparents a kept node onto its nearest kept ancestor, which is the first thing in this
+area to walk a parent *chain* — `rasteriseSkeleton` only ever draws `i → parents[i]`, one hop, so
+it was immune. `spanningForest` guarantees a parent precedes its child for CAVE's L2 skeletons and
+the precomputed ones, but **CATMAID's `decodeCompactSkeleton` does not go through it** and maps the
+server's own node order straight across, so a parent may appear after its child — on exactly the
+route decimation exists for. The walk is capped at 64 steps, because a malformed skeleton with a
+cycle is the failure `data/skeletonTree.ts` exists to prevent and here it would hang the tab.
+
+**Decimation bought 2.7×, and then the rasteriser stopped wasting the other 5×.** The cap was
+chosen against a measurement of 76.5 ms a frame undecimated and 28.0 decimated on a 16,840-node
+arbor at 640², and the conclusion recorded here was that the remainder was fill whose only lever
+was the raster. That was wrong, and finding out why is the useful part: `drawSegment` re-stamped
+the whole `thickness × thickness` square at every pixel step, where the walk advances at most one
+pixel per axis — 169 writes per step at the preview raster of which about 13 were new. Marking only
+the newly covered edge is **byte-identical** (`value` is constant within a segment and `markPixel`
+keeps the larger, so every skipped write was already a no-op; verified over 7,200 random segments
+across three raster sizes and six thicknesses) and takes a sweep from 357 ms to 70.
+
+With that gone the cap buys almost nothing: **4.8 ms a frame undecimated against 4.7 decimated**,
+because the cost is the drawn path and thinning a run conserves it. Decimation stays — the mask and
+the sweep must be drawn from one body — but nobody should expect a lower cap to buy frame time, and
+`BUILD_BUDGET_MS` finally means something now that a frame fits inside it rather than overrunning
+both the budget and the 16.7 ms deadline on every tick.
+
+**Built against a time budget, not a frame count.** The two ends of the range differ by twenty
+times, so `BUILD_BUDGET_MS` (8 ms) decides how long a tick lasts and the frame count follows: a mesh
+finishes in three ticks, a decimated arbor in sixteen. At least one frame per tick regardless, or a
+frame more expensive than the whole budget never finishes — which is the dense case, where each 28 ms
+frame overruns a tick on its own. The preview shows the static mask throughout, so a slow build is a
+picture that starts moving a moment later rather than an empty box.
+
+**Nothing is built under `prefers-reduced-motion`** — not built-and-not-played. The frames *are* the
+cost, and a reader who asked for less motion should not pay for an animation they will not see.
+
+**The sweep crossfades in over the static picture, covering two real discontinuities.** It is framed
+by `sweptBounds` where the static mask is framed by its own, so the neuron is drawn slightly smaller
+once it turns; and a dense skeleton is decimated for the sweep and not for the mask. Both are right
+on their own side, and neither survives a hard cut.
+
+**How all of that was measured, since none of it is in the suite.** A throwaway page mounting real
+`NeuronRow`s against the mock source inside a reproduction of the two clips (`.overlay__panel`'s
+`overflow: hidden`, `.explore__list`'s `overflow-y: auto`), driven over the DevTools protocol the
+way `scripts/probe-mobile.mjs` drives the shell — real `Input.dispatchMouseEvent` moves at real
+coordinates, then `getBoundingClientRect` on the preview, the tile and the row's name, and
+`getImageData` on the canvas. What it confirmed: the portal lands on `body`, and at 1920 the
+preview sits outside the panel entirely, on the backdrop; the box is inside the viewport at 1920,
+1440 and 1100; the tile/name/box columns in the table above; the cold-cache swap from
+`304@320px` to `640@320px` with no change of size; 6.8% of the preview painted, so it is a neuron
+rather than a blank tile; and that it closes on leave. **Two corrections came out of it**, both in
+the direction that matters — a right-hand fallback that the arithmetic liked and the browser
+showed covering the hovered row, and a coverage table for 320px that was computed rather than
+measured and wrong at 1920, where the preview in fact clears the name. The harness is not
+committed, because it drives a reproduction rather than the app — the same reason the ASCII mask
+check above is not in the suite. The mock is the one route by which any of this is visible at all:
+it has no pyramid, so `detail: 'fine'` there is five radial segments and four times the points, a
+stand-in for what `chooseLod` does on a real one.
+
+The sweep was driven the same way, by fingerprinting the drawn canvas across one cycle: 640px
+backing store, **16 of 17 distinct frames**, projected width swinging 262 → 563 — which is the
+parallax. Screenshots at three points show clearly different views, all framed identically and none
+clipped, which is `sweptBounds` doing its job. The same probe is what found both faults the first
+version shipped with, neither of which any unit test could have: the painted area was 7.2–7.7k
+pixels because the neuron was being swung around the volume's origin, and sampling every 16 ms
+showed the framing settling in one frame only *after* the build was reordered centre-first.
+
+**jsdom implements no `PointerEvent`**, so `fireEvent.pointerOver(el, { pointerType: 'mouse' })`
+falls back to a `MouseEvent` and drops `pointerType` in silence — a test written that way
+exercises the *touch* branch while reading as the mouse one. The suite builds the event by hand
+and defines the property on it. It also fires `pointerover`/`pointerout`, never the enter/leave
+pair, because React derives those at the root and the non-bubbling ones never arrive. Placement,
+sharpness and the fullscreen host are all browser-only.
 
 **No visual verification exists for the thumbnails either** — jsdom has no canvas. What _was_
 done once, by hand: rasterising real hemibrain, MANC and male-CNS neurons and printing the mask

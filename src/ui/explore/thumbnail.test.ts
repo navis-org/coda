@@ -25,7 +25,8 @@ import {
   hexToRgb,
   rasteriseSilhouette,
   rasteriseSkeleton,
-  silhouetteToRgba,
+  coverageInto,
+  inkInto,
 } from './thumbnail'
 
 /** A unit square at a single depth: two triangles filling most of the tile. */
@@ -261,26 +262,53 @@ describe('rasteriseSkeleton', () => {
   })
 })
 
-describe('silhouetteToRgba', () => {
+describe('painting a mask', () => {
+  /** The pair the canvas uses: ink once per theme, coverage once per frame. */
+  function paint(
+    silhouette: ReturnType<typeof emptySilhouette>,
+    color: { r: number; g: number; b: number },
+  ) {
+    const rgba = new Uint8ClampedArray(silhouette.coverage.length * 4)
+    inkInto(rgba, color)
+    coverageInto(rgba, silhouette)
+    return rgba
+  }
+
   it('paints one colour at the mask’s alpha', () => {
     const silhouette = emptySilhouette(2)
     silhouette.coverage[0] = 255
     silhouette.coverage[3] = 128
-    const rgba = silhouetteToRgba(silhouette, { r: 10, g: 20, b: 30 })
+    const rgba = paint(silhouette, { r: 10, g: 20, b: 30 })
     expect([...rgba.slice(0, 4)]).toEqual([10, 20, 30, 255])
-    // Untouched pixels stay fully transparent, so the tile's background shows through.
-    expect([...rgba.slice(4, 8)]).toEqual([0, 0, 0, 0])
+    // Untouched pixels stay fully transparent, so the tile's background shows through. The ink
+    // is written there too — `inkInto` fills every pixel — which is invisible at alpha 0 and is
+    // what lets the per-frame path write alpha alone.
+    expect(rgba[7]).toBe(0)
     expect(rgba[15]).toBe(128)
   })
 
   it('stores no colour in the mask itself, so a cached tile survives a theme switch', () => {
     const silhouette = emptySilhouette(2)
     silhouette.coverage[0] = 200
-    const light = silhouetteToRgba(silhouette, { r: 0, g: 0, b: 0 })
-    const dark = silhouetteToRgba(silhouette, { r: 255, g: 255, b: 255 })
+    const light = paint(silhouette, { r: 0, g: 0, b: 0 })
+    const dark = paint(silhouette, { r: 255, g: 255, b: 255 })
     expect(light[0]).toBe(0)
     expect(dark[0]).toBe(255)
     expect(light[3]).toBe(dark[3])
+  })
+
+  it('overwrites a reused buffer rather than leaving the last frame behind', () => {
+    // The property the allocating version could not have: a buffer that already holds a neuron
+    // must come back empty where the next mask has nothing.
+    const rgba = new Uint8ClampedArray(4 * 4)
+    const first = emptySilhouette(2)
+    first.coverage[1] = 255
+    inkInto(rgba, { r: 1, g: 2, b: 3 })
+    coverageInto(rgba, first)
+    expect(rgba[7]).toBe(255)
+
+    coverageInto(rgba, emptySilhouette(2))
+    expect(rgba[7]).toBe(0)
   })
 })
 
@@ -470,8 +498,12 @@ describe('rowFields', () => {
     expect(rowFields(undefined)).toEqual({
       primary: undefined,
       secondary: [],
+      // No table handed over, so nothing is aligned — the card's shape, and the fallback
+      // wherever only a schema is known.
+      columns: [],
       chips: [],
       stats: [],
+      tags: undefined,
     })
   })
 

@@ -35,6 +35,8 @@ import {
   translateRoutes,
 } from '../layout/place'
 import { useGraphStore } from '../store/graphStore'
+import { mediaMatches } from './mediaQuery'
+import { REDUCED_MOTION } from './useThemeMode'
 
 /** How long the cards take to glide to their new places. */
 const ANIMATION_MS = 300
@@ -54,12 +56,14 @@ const AUTO_DELAY_MS = 120
  */
 const MEASURE_RETRIES = 10
 
+/**
+ * `mediaQuery.ts`'s registry rather than a `matchMedia` of this file's own: it already handles the
+ * absent-`matchMedia` case this try/catch was for, shares one `MediaQueryList` per query, and is
+ * reachable from `resetMediaForTest`. The query string has one declaration now that `useThemeMode`
+ * names it.
+ */
 function prefersReducedMotion(): boolean {
-  try {
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  } catch {
-    return false
-  }
+  return mediaMatches(REDUCED_MOTION)
 }
 
 /**

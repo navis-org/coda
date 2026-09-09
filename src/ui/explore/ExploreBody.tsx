@@ -31,9 +31,19 @@ import {
   SEARCH_SYNTAX_HELP,
 } from '../../nodes/lib/neuronSearch'
 import type { NodeBodyProps } from '../nodes/nodeBodies'
-import { formatNumber } from '../format'
-import { NeuronRow } from './NeuronRow'
-import { rowFields } from './rowFields'
+import { formatCell, formatNumber } from '../format'
+import { copyText } from '../export'
+import { errorMessage } from '../../core/errors'
+import { joinIds } from '../../nodes/lib/copyIds'
+import { NeuronRow, rowTemplate } from './NeuronRow'
+import type { FieldsMode } from './rowFields'
+import { distributionsFor, markSlots, plotSpec } from './rowPlots'
+import { capabilityOf, getSource } from '../../data/source'
+import { regionShares } from './rowRois'
+import { clearRowRoiCache, useRowRois } from './useRowRois'
+import { useThemeMode } from '../useThemeMode'
+import { RowContextMenu } from './RowContextMenu'
+import { rowFields, statUnit } from './rowFields'
 import { useNeuronIndex } from '../useNeuronIndex'
 
 /**
@@ -168,9 +178,31 @@ export function ExploreBody({
   // Resolved the same way, and for the same reason: a tag column the current dataset does not
   // have must drop out rather than draw an empty row.
   const tagColumn = ctx.column('tagColumn') ?? ''
+  /** Once for the page, not once per mark per row — see `RowMarks`. */
+  const mode = useThemeMode()
+
+  /*
+   * Absence is read as `replace` here as well as in `deserializeGraph`, so a graph loaded by a
+   * build that predates the control behaves the same whichever path it arrived by — a node put on
+   * the canvas today carries `add` from `defaultParams`.
+   */
+  const fieldsMode: FieldsMode = node.params.fieldsMode === 'add' ? 'add' : 'replace'
+
+  /*
+   * The table is handed over only in the expanded view, which is what splits the annotations into
+   * aligned columns and a chip tail — a card has no width to align in. Memoised on the table
+   * identity, so the fill-rate pass runs once per dataset rather than per keystroke.
+   */
   const fields = useMemo(
-    () => rowFields(table?.schema, chosenKey ? chosenKey.split('\u0000') : [], tagColumn),
-    [table, chosenKey, tagColumn],
+    () =>
+      rowFields(
+        table?.schema,
+        chosenKey ? chosenKey.split('\u0000') : [],
+        tagColumn,
+        compact ? undefined : table,
+        fieldsMode,
+      ),
+    [table, chosenKey, tagColumn, compact, fieldsMode],
   )
 
   /*
@@ -198,13 +230,57 @@ export function ExploreBody({
   // Clamped rather than stored-and-corrected: a query that shrinks the hit set would otherwise
   // leave the node parked on a page that no longer exists, showing nothing.
   const page = Math.min(Math.max(0, Number(node.params.page ?? 0)), pageCount - 1)
-  const visible = result.rows.slice(page * pageSize, page * pageSize + pageSize)
+  /*
+   * Memoised, or every hook downstream of it re-runs on each render: `pageIds` and
+   * `selectVisible` both key on this array, and a fresh `slice` each time made both of them
+   * stability theatre.
+   */
+  const visible = useMemo(
+    () => result.rows.slice(page * pageSize, page * pageSize + pageSize),
+    [result.rows, page, pageSize],
+  )
 
   const selection = useMemo(
     () =>
       new Set((Array.isArray(node.params.selection) ? node.params.selection : []).map(String)),
     [node.params.selection],
   )
+
+  /**
+   * Whether this dataset can answer a region breakdown at all.
+   *
+   * Read here rather than where the query is issued, because the *track* is reserved from it —
+   * see `PlotSpec.regions`. `capabilityOf` and not `source.capabilities`, so the per-dataset
+   * override is honoured.
+   */
+  const roiSupported =
+    !compact &&
+    !!ref?.sourceId &&
+    capabilityOf(getSource(ref.sourceId), ref.datasetId, 'roiCounts')
+
+  /**
+   * The inline marks this dataset supports, and the spread they read against.
+   *
+   * Both derived from the whole table and memoised on it, never on the hits: a percentile is a
+   * neuron's place in its *dataset*, so recomputing it per search would make the same neuron move
+   * as somebody types. Expanded only, like the columns — a card has no room for a mark.
+   */
+  const plots = useMemo(() => {
+    if (compact || !table) return undefined
+    const names = new Set(table.schema.columns.map((c) => c.name))
+    // The region slot is reserved on the *capability*, so the track is the right width before the
+    // query answers — passed in rather than written over the result, so the spec is built once.
+    const spec = plotSpec((name) => names.has(name), roiSupported)
+    // The slot list is built once and carried, not derived at each of the three sites that want
+    // it — the header, the grid template and every row all read the same array.
+    const slots = markSlots(spec)
+    if (slots.length === 0) return undefined
+    return {
+      spec,
+      slots,
+      distributions: distributionsFor(table, spec.percentile ? [spec.percentile] : []),
+    }
+  }, [table, compact, roiSupported])
 
   const setPage = useCallback(
     (next: number) => setParam('page', Math.min(Math.max(0, next), pageCount - 1)),
@@ -245,6 +321,20 @@ export function ExploreBody({
     [table],
   )
 
+  /*
+   * The region bar's one query, for the neurons on screen.
+   *
+   * Everything else on a row came out of the index; `roiInfo` is suppressed from that table as a
+   * JSON blob, so this is the only thing here that reaches a server. A page at a time, settled,
+   * and cached by the ids themselves — see `useRowRois`.
+   */
+  const pageIds = useMemo(
+    () => visible.map((row) => neuronIdAt(row)).filter((id): id is string => !!id),
+    [visible, neuronIdAt],
+  )
+  const roiData = useRowRois(ref?.sourceId, ref?.datasetId, pageIds, roiSupported)
+  const regions = useMemo(() => regionShares(roiData?.rows, roiData?.primaryRois), [roiData])
+
   const selectRowsInto = useCallback(
     (rows: readonly number[]) => {
       const next = new Set(selection)
@@ -266,16 +356,73 @@ export function ExploreBody({
    * asking for "every VPN in the dataset" that the answer was too big to be had; the cost is
    * real (every id lands in every downstream cache key) but it is a cost, not an impossibility.
    */
-  const selectAll = useCallback(() => {
-    if (result.rows.length > SELECT_ALL_WARN) {
-      onError(
-        `Selecting ${formatNumber(result.rows.length)} neurons. Every id travels in the saved ` +
-          `file and in the cache key of every node downstream, so editing this graph will feel ` +
-          `slower — narrow the search and select again if that is not what you meant.`,
-      )
-    }
-    selectRowsInto(result.rows)
-  }, [selectRowsInto, result.rows, onError])
+  /**
+   * Tick a set of rows, saying so when the number is one that will be felt.
+   *
+   * Shared by the foot's Select-all and the row menu's Select-all-of-this-type, or the two
+   * disagree about when a selection is worth warning about — and the menu's is the one that can
+   * surprise, since "every LC4" is a number nobody typed.
+   */
+  const selectMatching = useCallback(
+    (rows: readonly number[]) => {
+      if (rows.length > SELECT_ALL_WARN) {
+        onError(
+          `Selecting ${formatNumber(rows.length)} neurons. Every id travels in the saved ` +
+            `file and in the cache key of every node downstream, so editing this graph will feel ` +
+            `slower — narrow the search and select again if that is not what you meant.`,
+        )
+      }
+      selectRowsInto(rows)
+    },
+    [selectRowsInto, onError],
+  )
+
+  const selectAll = useCallback(
+    () => selectMatching(result.rows),
+    [selectMatching, result.rows],
+  )
+
+  /*
+   * The row a right-click landed on, or nothing.
+   *
+   * Held as a row *index* rather than the resolved id and type: the index is what reaches every
+   * column, and resolving at open time would mean the menu kept showing a label from before the
+   * search that has since moved under it.
+   */
+  const [menu, setMenu] = useState<{ at: { x: number; y: number }; row: number } | null>(null)
+
+  const openMenu = useCallback(
+    (row: number, at: { x: number; y: number }) => setMenu({ at, row }),
+    [],
+  )
+
+  /**
+   * Everything the menu needs about the row under the pointer.
+   *
+   * Computed only while it is open, which is what makes the `sharing` count affordable — it is a
+   * scan of every hit, and on male-CNS that is 165,122 rows. Once per right-click is nothing;
+   * per render it would be a scan on every keystroke.
+   */
+  const menuRow = useMemo(() => {
+    if (!menu || !table) return null
+    const id = neuronIdAt(menu.row)
+    if (!id) return null
+    const column = fields.primary ? table.data[fields.primary] : undefined
+    const raw = column?.[menu.row] ?? null
+    // The label as the row draws it, so the menu names what is on screen rather than the stored
+    // cell — they differ wherever `formatCell` does anything.
+    const type = raw === null || raw === '' ? null : formatCell(raw, fields.primary)
+    const sharing =
+      type === null || !column ? [] : result.rows.filter((row) => column[row] === raw)
+    return { id, type, sharing }
+  }, [menu, table, fields.primary, neuronIdAt, result.rows])
+
+  const copyOrReport = useCallback(
+    (text: string) => {
+      void copyText(text).catch((error) => onError(errorMessage(error)))
+    },
+    [onError],
+  )
 
   const accept = useCallback(
     (index: number) => {
@@ -368,6 +515,9 @@ export function ExploreBody({
           aria-label="Reload index"
           onClick={() => {
             reload()
+            // The region pages too. A reload that re-downloaded the index and left every row's
+            // region donut on the answers from before it is a reload that did not reload.
+            clearRowRoiCache()
             // Bumps the provenance nonce so downstream re-runs against the new index rather
             // than surviving on a cached result built from the old one.
             setParam('refresh', Number(node.params.refresh ?? 0) + 1)
@@ -432,6 +582,59 @@ export function ExploreBody({
 
       {table && (
         <>
+          {/*
+            The header, drawn only where there are columns to name. It shares `rowTemplate` with
+            every row below it, or it sits half a column off the values it labels.
+          */}
+          {fields.columns.length > 0 && (
+            <div
+              className="explore-head"
+              style={rowTemplate(
+                fields.columns.length,
+                fields.stats.length,
+                plots?.slots.length ?? 0,
+              )}
+            >
+              {/* The checkbox, tile and name-block tracks, named by nothing. */}
+              <span />
+              <span />
+              <span />
+              {fields.columns.map((name) => (
+                <span key={name} className="explore-head__cell" title={name}>
+                  {name}
+                </span>
+              ))}
+              {/*
+                The marks' track, labelled in the same geometry the marks are drawn in — four
+                small bars are unreadable without it, and a `title` per mark only helps somebody
+                who already suspects there is something to hover.
+              */}
+              {plots && (
+                <span className="explore-head__marks">
+                  {plots.slots.map((slot) => (
+                    <span key={slot.kind} className="explore-head__cell" title={slot.label}>
+                      {slot.label}
+                    </span>
+                  ))}
+                </span>
+              )}
+              {/* The figures' labels live here rather than under every value. */}
+              {fields.stats.map((name) => (
+                <span
+                  key={name}
+                  className="explore-head__cell explore-head__cell--stat"
+                  title={
+                    statUnit(table?.schema, name)
+                      ? `${name} (${statUnit(table?.schema, name)})`
+                      : name
+                  }
+                >
+                  {name}
+                </span>
+              ))}
+            </div>
+          )}
+
           {/* `nowheel` lets the list scroll instead of zooming the canvas under it. */}
           <div className="explore__list nowheel">
             {visible.length === 0 ? (
@@ -452,11 +655,37 @@ export function ExploreBody({
                     selected={selection.has(neuronId)}
                     onToggle={toggle}
                     compact={compact}
+                    // The menu is the overlay's, and it is now the only thing that is: the hover
+                    // preview used to be gated the same way and runs on a card too. What still
+                    // divides them is that a menu wants a pointer the canvas has already claimed
+                    // for panning and selection, where a preview only wants somewhere to draw.
+                    onContextMenu={compact ? undefined : openMenu}
+                    mode={mode}
+                    {...(plots ? { plots } : {})}
+                    {...(regions.size ? { regions } : {})}
                   />
                 )
               })
             )}
           </div>
+
+          {menu && menuRow && (
+            <RowContextMenu
+              at={menu.at}
+              caption={`${menuRow.type ?? 'untyped'} · ${menuRow.id}`}
+              type={menuRow.type}
+              selected={selection.size}
+              sharing={menuRow.sharing.length}
+              onCopyId={() => copyOrReport(menuRow.id)}
+              // `joinIds`' own default, so the menu and the Copy IDs node cannot put ids on the
+              // clipboard two different ways.
+              onCopySelected={() => copyOrReport(joinIds([...selection]))}
+              onCopyType={() => menuRow.type && copyOrReport(menuRow.type)}
+              onSelectSharing={() => selectMatching(menuRow.sharing)}
+              onSearchType={() => menuRow.type && setText(menuRow.type)}
+              onClose={() => setMenu(null)}
+            />
+          )}
 
           <div className="explore__foot" id={listId}>
             <span className="explore__count">

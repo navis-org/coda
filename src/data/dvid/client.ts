@@ -35,7 +35,13 @@
  */
 
 import type { FetchOptions } from '../precomputed/transport'
-import { PrecomputedFetchError, fetchBytes, fetchInfo } from '../precomputed/transport'
+import type { Oversize } from '../precomputed/transport'
+import {
+  OVERSIZE,
+  PrecomputedFetchError,
+  fetchBytes,
+  fetchInfo,
+} from '../precomputed/transport'
 import type { DvidRef } from './refs'
 import { instanceUrl, keyUrl, serverOf } from './refs'
 
@@ -108,30 +114,31 @@ export async function requireInstance(
 }
 
 /**
- * One key's bytes, or undefined when the body is not in the store.
+ * One key's bytes, `OVERSIZE` when the caller's ceiling turned it down, or undefined when the
+ * body is not in the store.
  *
  * Undefined rather than a throw for 404, because a body with no geometry is the ordinary case —
  * a fragment, an unproofread segment — and a scene of two hundred neurons must not fail because
  * one of them was never meshed. `fetchMeshes` counts them as `missing`.
+ *
+ * **The two used to be one answer, and folding them was a real loss.** 404 is "this body is not
+ * in the store"; 413 is `maxBytes` giving up on one that is. For a scene they *are* the same
+ * fact and `fetchMeshes` still reports both as missing — but a blank Explore tile has no way to
+ * say anything at all if the reason stops here, and on a repo whose bodies are big (fish2's
+ * median is 0.54 MB) the ceiling is the common reason rather than the rare one. Anything that
+ * only wants "not available" writes `!bytes || bytes === OVERSIZE` and is unchanged.
  */
 export async function readKey(
   base: string,
   key: string,
   options: DvidOptions = {},
-): Promise<ArrayBuffer | undefined> {
+): Promise<ArrayBuffer | Oversize | undefined> {
   try {
     return await fetchBytes(keyUrl(base, key), fetchOptions(options))
   } catch (error) {
-    /*
-     * 404 is "this body is not in the store"; 413 is `maxBytes` giving up on one that is. From
-     * the caller's side they are the same fact — this neuron is not in the result — and
-     * `fetchMeshes` reports both as `missing`.
-     */
-    if (
-      error instanceof PrecomputedFetchError &&
-      (error.status === 404 || error.status === 413)
-    ) {
-      return undefined
+    if (error instanceof PrecomputedFetchError) {
+      if (error.status === 413) return OVERSIZE
+      if (error.status === 404) return undefined
     }
     throw describeFailure(error, base)
   }

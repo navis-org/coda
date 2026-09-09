@@ -19,7 +19,8 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { THUMBNAIL_MAX_BYTES, fetchCoarseMesh, fetchMeshes } from '../precomputed/index'
+import { THUMBNAIL_MAX_FLAT_BYTES, fetchCoarseMesh, fetchMeshes } from '../precomputed/index'
+import { OVERSIZE } from '../precomputed/transport'
 import { meshSourceFromState } from '../neuprint/nglayers'
 import { parseNgSource } from '../neuroglancer/sourceUrl'
 import { readInstanceInfo } from './client'
@@ -65,13 +66,40 @@ live('DVID meshes, live', () => {
     expect(await readNgMesh(source, '5813020600', {})).toBeUndefined()
   }, 60_000)
 
+  /** A decoded body, refusing to let `OVERSIZE` or a miss reach an assertion as a cast. */
+  async function decoded(neuronId: string, options = {}) {
+    const mesh = await readNgMesh(source, neuronId, options)
+    if (!mesh || mesh === OVERSIZE) throw new Error(`no mesh for ${neuronId}: ${String(mesh)}`)
+    return mesh
+  }
+
   it('decodes .ngmesh with the legacy fragment parser and nothing else', async () => {
-    const mesh = await readNgMesh(source, BIGGER, {})
-    expect(mesh).toBeTruthy()
+    const mesh = await decoded(BIGGER)
     // Measured 2026-08-31: 106,360 bytes, 2,966 vertices, 5,897 triangles.
-    expect(mesh!.positions.length / 3).toBe(2966)
-    expect(mesh!.indices.length / 3).toBe(5897)
-    expect(mesh!.indices.length % 3).toBe(0)
+    expect(mesh.positions.length / 3).toBe(2966)
+    expect(mesh.indices.length / 3).toBe(5897)
+    expect(mesh.indices.length % 3).toBe(0)
+  }, 60_000)
+
+  /*
+   * The split that lets a blank tile explain itself, against a real server.
+   *
+   * Both answers used to be `undefined`, which is right for a scene and useless for a thumbnail:
+   * on a repo whose bodies are big — fish2's median mesh is 0.54 MB — the ceiling is the *common*
+   * reason a tile is blank, not the rare one. A ceiling of one byte is how a body that certainly
+   * exists is made to hit it without depending on any body's size staying what it was.
+   */
+  it('tells a body over the ceiling from a body that is not there', async () => {
+    expect(await readNgMesh(source, BIGGER, { maxBytes: 1 })).toBe(OVERSIZE)
+    expect(await readNgMesh(source, '5813020600', { maxBytes: 1 })).toBeUndefined()
+
+    const result = await fetchMeshes(source, [BIGGER, '5813020600'], {
+      refresh: true,
+      maxBytesPerBody: 1,
+    })
+    expect(result.missing.sort()).toEqual([BIGGER, '5813020600'].sort())
+    // Only one of the two absences is a refusal, and `oversize` is the half that says so.
+    expect(result.oversize).toEqual([BIGGER])
   }, 60_000)
 
   it('puts mesh vertices in nanometres, not voxels', async () => {
@@ -81,8 +109,8 @@ live('DVID meshes, live', () => {
      * nanometre range and an order of magnitude outside the voxel one. `skeletons.ts` scales;
      * this does not, and neither may assume the other's rule.
      */
-    const mesh = await readNgMesh(source, BIGGER, {})
-    const xs = mesh!.positions.filter((_, i) => i % 3 === 0)
+    const mesh = await decoded(BIGGER)
+    const xs = mesh.positions.filter((_: number, i: number) => i % 3 === 0)
     expect(Math.min(...xs)).toBeGreaterThan(19_968)
     expect(Math.max(...xs)).toBeLessThan(44_024)
   }, 60_000)
@@ -114,10 +142,14 @@ live('DVID meshes, live', () => {
      * 16 kB, p90 92 kB, max 487 kB — a page of 25 is about 0.4 MB.
      */
     const mesh = await fetchCoarseMesh(source, BIGGER)
-    expect(mesh).toBeTruthy()
-    expect(mesh!.positions.length / 3).toBe(2966)
-    // And a body over the ceiling draws a placeholder rather than downloading itself.
-    expect(THUMBNAIL_MAX_BYTES).toBeGreaterThan(487 * 1024)
+    if (!mesh || mesh === OVERSIZE) throw new Error(`no coarse mesh: ${String(mesh)}`)
+    expect(mesh.positions.length / 3).toBe(2966)
+    /*
+     * And a body over the ceiling draws a placeholder rather than downloading itself. The flat
+     * ceiling is the one that governs here — a DVID body has no pyramid — and it must clear this
+     * repo's maximum with room, which at 487 kB against 12 MB it does by a factor of 25.
+     */
+    expect(THUMBNAIL_MAX_FLAT_BYTES).toBeGreaterThan(487 * 1024)
   }, 60_000)
 })
 

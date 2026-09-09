@@ -39,6 +39,7 @@ import type {
   AdjacencyRequest,
   CoarseGeometry,
   CoarseGeometryRequest,
+  CoarseRefusal,
   ConnectivityRequest,
   DataSource,
   DatasetInfo,
@@ -77,6 +78,7 @@ import { geometryFrame } from '../transforms/spaces'
 import { fetchRoiMeshSet } from './roiMeshes'
 import { superRoisFrom } from './roiHierarchy'
 import type { MeshResult, MeshSource } from '../precomputed'
+import { OVERSIZE } from '../precomputed/transport'
 import {
   DEFAULT_TRIANGLE_BUDGET,
   fetchCoarseMesh,
@@ -669,24 +671,33 @@ export class NeuPrintSource implements DataSource {
    *
    * Two guard rails, both measured rather than guessed:
    *
-   *  - **Multi-resolution only.** A dataset serving `neuroglancer_legacy_mesh` has exactly one
-   *    level, so the same call would pull megabytes per row and a 25-row page would be a
-   *    hundred-megabyte page. Undefined means "draw a placeholder".
+   *  - **Bounded, one way or the other.** A `neuroglancer_legacy_mesh` directory is refused
+   *    outright: it has one level, and a body is a manifest plus N fragments where a ceiling can
+   *    only bite per fragment, so a 25-row page would be a hundred-megabyte page. Undefined means
+   *    "draw a placeholder". A DVID `.ngmesh` store has one level too and is *not* refused,
+   *    because a body there is a single key a streaming cut-off can abandon — the question is
+   *    whether the download can be bounded, not whether the format has levels.
    *  - **A per-body byte cap**, set above every size seen rather than at a percentile. Even
    *    the coarsest level has a long tail — sampled across hemibrain it is 264 bytes at the
    *    median, 14 kB at p90 and 508 kB at the maximum (male-CNS: 7.3 kB, 23 kB, 169 kB) — and
    *    a cap pitched into that tail blanks the giant fibres and tracts, which are both the
-   *    heaviest coarse meshes and the ones anyone is looking for. See `THUMBNAIL_MAX_BYTES`.
-   *    The manifest carries the size, so a refusal costs no download either way.
+   *    heaviest coarse meshes and the ones anyone is looking for. Which cap is
+   *    `thumbnailCeiling`'s: a pyramid is judged on its coarsest *level* and a flat store on its
+   *    whole body, which are different measurements. On a pyramid the manifest carries the size,
+   *    so a refusal costs no download; on a flat store it costs the ceiling.
    */
-  async fetchCoarseGeometry(req: CoarseGeometryRequest): Promise<CoarseGeometry | undefined> {
+  async fetchCoarseGeometry(
+    req: CoarseGeometryRequest,
+  ): Promise<CoarseGeometry | CoarseRefusal | undefined> {
     const source = await this.meshSourceFor(req.datasetId, req.signal)
     if (!source) return undefined
     const mesh = await fetchCoarseMesh(
       source,
       req.neuronId,
       req.signal ? { signal: req.signal } : {},
+      req.detail,
     )
+    if (mesh === OVERSIZE) return { kind: 'refused', reason: 'too-large' }
     return mesh && { kind: 'mesh', ...mesh }
   }
 

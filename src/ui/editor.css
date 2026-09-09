@@ -2190,6 +2190,120 @@ select.field {
   background: var(--accent-soft);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
+/*
+ * The expanded view's aligned half.
+ *
+ * A row is `display: flex` on a card and a **grid** wherever it has columns — the template is
+ * written inline from `rowTemplate`, because the column count is a property of the dataset and a
+ * stylesheet cannot ask. Every row and the header share that one function, which is the whole of
+ * why the columns line up.
+ */
+/*
+ * Keyed on the stamped attribute, not on `:has(.explore-cell)`. The component already computes
+ * `aligned` and uses it to choose the inline template and to branch the figures, so deriving the
+ * *mode* from a descendant query was a second source for one fact — and anything that changed how
+ * cells are emitted would leave a grid template applied to a flex row, which is a total collapse
+ * visible only in a browser.
+ */
+.explore-row[data-aligned] {
+  display: grid;
+  align-items: center;
+}
+.explore-cell {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 8px;
+}
+/*
+ * A blank is drawn, not skipped — an em dash at the same position as every other value in the
+ * column. That is the difference this layout is for: a chip that is absent says nothing, where a
+ * cell that is empty says "nobody annotated this one".
+ */
+.explore-cell[data-empty] {
+  color: var(--text-muted);
+  opacity: 0.55;
+}
+
+.explore-head {
+  display: grid;
+  align-items: center;
+  gap: 7px;
+  /*
+   * The row's own padding *plus* its 1px border, as transparent border here — a row draws a
+   * border for its hover state and the header does not, and a one-pixel disagreement is a header
+   * sitting a pixel left of everything it names.
+   */
+  padding: 0 5px 4px;
+  border: 1px solid transparent;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+/*
+ * The marks' labels, on the marks' own pitch, so each label sits over the bar it names.
+ *
+ * `--mark-w`, `--mark-gap` and `--mark-pad` are painted onto the row and the header by
+ * `rowTemplate`, out of the single declaration in `rowPlots.ts` — a stylesheet cannot import a
+ * constant, and this is the repo's own answer to that (`--dash-row`, `data-narrow`). Written out
+ * here as literals they were a third home for a number three files have to agree on, and every
+ * way of disagreeing is browser-only.
+ */
+.explore-marks,
+.explore-head__marks {
+  display: flex;
+  gap: var(--mark-gap);
+  padding-right: var(--mark-pad);
+}
+.explore-head__marks .explore-head__cell {
+  width: var(--mark-w);
+  flex: 0 0 auto;
+  padding-right: 0;
+  font-size: 9px;
+}
+
+/* The marks' track: one row of small bars, vertically centred against the text beside them. */
+/* The row's marks are centred against the text beside them; the header's labels sit on the line. */
+.explore-marks {
+  align-items: center;
+}
+/*
+ * A supported mark this row has no value for. Drawn as an empty box of the mark's own width
+ * rather than skipped: both this row and the header's labels are fixed-pitch flex rows matched by
+ * *position*, so a dropped child slides everything after it under the wrong label — which
+ * `regions` does on every page for as long as its query is settling.
+ */
+.explore-mark--empty {
+  flex: 0 0 auto;
+  width: var(--mark-w);
+}
+.explore-plot {
+  display: block;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.explore-head__cell {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 8px;
+}
+/*
+ * After the base rule, not before it. Equal specificity, so source order is what decides — and
+ * declared first, this modifier's `padding-right` lost to the very rule it modifies while looking
+ * exactly as though it applied.
+ */
+.explore-head__cell--stat {
+  text-align: right;
+  padding-right: 0;
+}
+
 .explore-row__pick {
   flex: 0 0 auto;
   display: flex;
@@ -2208,10 +2322,14 @@ select.field {
   background: var(--surface-3);
   image-rendering: auto;
 }
+/*
+ * No width/height here: both placeholders size themselves from the `size` prop, the same one the
+ * loaded canvas uses, so `TILE_PX`/`TILE_COMPACT_PX` is the single home for the number. These
+ * rules used to carry 56 with a `.overlay__body` override at 76 — a second spelling of `compact`
+ * and a third and fourth of the size.
+ */
 .explore-thumb--loading,
 .explore-thumb--empty {
-  width: 56px;
-  height: 56px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2220,6 +2338,81 @@ select.field {
 .explore-thumb--loading {
   /* Deliberately inert: a spinner per row would make a page of 25 look like it was on fire. */
   opacity: 0.6;
+}
+
+/*
+ * The tile's hover target.
+ *
+ * A wrapper rather than the canvas itself, because the canvas is replaced by a `div` in both the
+ * loading and the refusal state and only one of the three carries a preview. Sized inline from
+ * the `size` prop, which is where the 56/76 split already lives.
+ */
+.explore-thumb-slot {
+  flex: 0 0 auto;
+  display: block;
+  line-height: 0;
+}
+
+/*
+ * The enlarged copy, portalled to the body (or to the fullscreen root) and positioned in
+ * viewport coordinates.
+ *
+ * `z-index: 65` sits above the viewer overlay's 60 and below the start page's 70, which is the
+ * only thing that can be up over an open overlay.
+ *
+ * `pointer-events: none` is load-bearing rather than tidy. The preview opens beside the tile and
+ * on a narrow window over the row itself; taking the pointer there would drop the `pointerleave`
+ * that closes it, and the row would flicker between hovered and not for as long as the pointer
+ * sat still.
+ */
+.explore-thumb-preview {
+  position: fixed;
+  z-index: 65;
+  pointer-events: none;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-panel);
+  line-height: 0;
+  animation: explore-thumb-appear 90ms ease-out;
+}
+
+/*
+ * `auto`, for the same reason `.explore-thumb` says: the mask is rasterised well above the box
+ * it is drawn in and the downscale is what turns those samples into antialiasing. This is the
+ * surface with the least headroom left — 0.86× of the mask on a HiDPI display — so `pixelated`
+ * here would be visible where it merely wastes work on the tile.
+ */
+.explore-thumb-preview__canvas {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  image-rendering: auto;
+}
+
+/*
+ * The sweep fading in over the static picture.
+ *
+ * Covering a real discontinuity rather than decorating one: the rotation is framed by
+ * `sweptBounds` where the static mask is framed by its own, and a dense skeleton is decimated for
+ * the sweep and not for the mask — so the first turning frame is a slightly different drawing at a
+ * slightly smaller scale, and a hard cut shows it. Under `prefers-reduced-motion` no frames are
+ * built at all, so this never runs there.
+ */
+.explore-thumb-preview__canvas[data-fading] {
+  animation: explore-thumb-appear 140ms ease-out;
+}
+
+@keyframes explore-thumb-appear {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .explore-thumb-preview {
+    animation: none;
+  }
 }
 
 .explore-row__main {
@@ -2469,11 +2662,6 @@ select.field {
 .overlay__body .explore__input {
   font-size: 13px;
   padding: 6px 9px;
-}
-.overlay__body .explore-thumb--loading,
-.overlay__body .explore-thumb--empty {
-  width: 76px;
-  height: 76px;
 }
 .overlay__body .explore__foot {
   font-size: 12px;

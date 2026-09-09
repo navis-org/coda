@@ -46,6 +46,7 @@ function drawRow(table: TableValue, fields: RowFields) {
       selected={false}
       onToggle={() => undefined}
       compact={false}
+      mode="dark"
     />,
   )
 }

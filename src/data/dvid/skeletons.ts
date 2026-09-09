@@ -48,6 +48,7 @@ import { parseSwcText } from '../swc'
 import type { VoxelScale } from '../units'
 import { scalePositions, scaleRadii, voxelScale } from '../units'
 import type { DvidOptions } from './client'
+import { OVERSIZE } from '../precomputed/transport'
 import { readInstanceInfo, readKey, requireInstance } from './client'
 import type { DvidRef } from './refs'
 import { instanceUrl, serverOf, skeletonInstance } from './refs'
@@ -136,7 +137,10 @@ export async function readDvidSkeleton(
     : KEY_SUFFIXES
   for (const suffix of order) {
     const bytes = await readKey(source.base, `${neuronId}${suffix}`, options)
-    if (!bytes) continue
+    // `OVERSIZE` is a `maxBytes` refusal, which nothing sets on this path — and if a server sends
+    // its own 413 it means what a 404 means here: try the next spelling, then give up. Only the
+    // thumbnail tile has anything to say about the difference.
+    if (!bytes || bytes === OVERSIZE) continue
     source.spelling = suffix
     const skeleton = parseSwcText(neuronId, new TextDecoder().decode(bytes))
     return {

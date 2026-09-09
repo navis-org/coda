@@ -277,6 +277,11 @@ export class MockSource implements DataSource {
    *
    * Three radial segments rather than the viewer's five: a 96px thumbnail cannot show the
    * difference, and this is called once per visible row.
+   *
+   * `detail: 'fine'` gets the viewer's five and four times the points. The mock has no pyramid
+   * to trade against, so this is a stand-in for what `chooseLod` does on a real one — but it is
+   * a stand-in worth having, because it is the only route by which anything in this repo can
+   * *see* a hover preview that differs from its tile.
    */
   async fetchCoarseGeometry(req: CoarseGeometryRequest): Promise<CoarseGeometry | undefined> {
     const connectome = this.require(req.datasetId)
@@ -287,8 +292,9 @@ export class MockSource implements DataSource {
     const rois = connectome.roiCounts
       .filter((rc) => rc.neuronId === neuronId && rc.pre + rc.post > 0)
       .map((rc) => rc.roi)
-    const skeleton = generateSkeleton(neuronId, rois, { targetPoints: 160 })
-    const mesh = skeletonToTubeMesh(skeleton, 3)
+    const fine = req.detail === 'fine'
+    const skeleton = generateSkeleton(neuronId, rois, { targetPoints: fine ? 640 : 160 })
+    const mesh = skeletonToTubeMesh(skeleton, fine ? 5 : 3)
     // A mesh rather than the skeleton it was tubed from, deliberately: the mock stands in for a
     // source that publishes a mesh pyramid, and answering with the shape that happens to be
     // cheaper here would leave `rasteriseSilhouette` with no end-to-end caller at all.

@@ -18,7 +18,7 @@ import type { FilterRow } from '../filterRows'
 
 import { NeuPrintSource } from './NeuPrintSource'
 import { SYNAPSE_UNITS } from '../synapseUnits'
-import { THUMBNAIL_MAX_BYTES } from '../precomputed'
+import { THUMBNAIL_MAX_BYTES, THUMBNAIL_MAX_FLAT_BYTES } from '../precomputed'
 import {
   datasetSegment,
   forgetRoutes,
@@ -1810,6 +1810,8 @@ describe('voxel to nanometre conversion', () => {
 
 // ---------------------------------------------------------------------------
 
+const MB = 1024 * 1024
+
 describe('thumbnail byte ceiling', () => {
   /**
    * The coarsest level's size, sampled over each dataset's own bucket. The maximum is the
@@ -1827,6 +1829,43 @@ describe('thumbnail byte ceiling', () => {
     for (const sample of Object.values(COARSEST_LEVEL_BYTES)) {
       expect(THUMBNAIL_MAX_BYTES).toBeGreaterThan(sample.max)
     }
+  })
+
+  /**
+   * The flat store's own ceiling, which is a different question with a different answer.
+   *
+   * `THUMBNAIL_MAX_BYTES` is an argument about a *level*: a whole hemibrain neuron costs 2 MB at
+   * full resolution, so a coarsest-of-four level that big is an unsplit blob. A DVID `.ngmesh`
+   * store has no levels, so the same number is asked to tell a big neuron at full resolution from
+   * a blob at full resolution — and hemibrain's answer is the wrong scale for a whole-brain
+   * larval zebrafish segmentation. Measured on `neuprint-fish2`, whose meshes come from one.
+   */
+  const FISH2_NGMESH_BYTES = {
+    /** 120 bodies spread across the whole 224,385-row index. */
+    typical: { median: 0.54 * MB, p90: 1.92 * MB, max: 3.56 * MB },
+    /** 40 of the top 200 by voxel count — the 99.91st percentile upwards, where a ceiling bites. */
+    tail: { median: 3.01 * MB, max: 8.31 * MB },
+    /** One stratified sample's outlier: 846M voxels where its same-size neighbours are 6–8 MB. */
+    unsplit: 27.4 * MB,
+  }
+
+  it('lets the biggest real arbor through on a store with no pyramid', () => {
+    // The neurons the old ceiling blanked were the big ones, which is the failure it was raised
+    // for — one Explore row in twelve on fish2, and every one of them a large arbor.
+    expect(THUMBNAIL_MAX_FLAT_BYTES).toBeGreaterThan(FISH2_NGMESH_BYTES.tail.max)
+    expect(THUMBNAIL_MAX_FLAT_BYTES).toBeGreaterThan(FISH2_NGMESH_BYTES.typical.max)
+  })
+
+  it('still refuses what the ceiling is actually for', () => {
+    // Four times the bytes of its same-size neighbours is what an unsplit merge looks like, and
+    // `data/dvid/meshes.ts` records a 107 MB body on another repo. Both stay placeholders.
+    expect(THUMBNAIL_MAX_FLAT_BYTES).toBeLessThan(FISH2_NGMESH_BYTES.unsplit)
+  })
+
+  it('keeps the two apart, since a level and a whole body are not the same measurement', () => {
+    // The pyramid ceiling must not drift up with the flat one: raising it there would admit the
+    // unsplit blobs it exists to refuse, on datasets that have a cheaper level to offer instead.
+    expect(THUMBNAIL_MAX_FLAT_BYTES).toBeGreaterThan(THUMBNAIL_MAX_BYTES)
   })
 
   it('still refuses a body whose coarsest level costs a whole neuron at full resolution', () => {
