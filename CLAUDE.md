@@ -397,11 +397,23 @@ Area-specific — the rule, then the doc that holds why:
   layers headline-only and leaves a linkage the one thing that line says by omission (an uncut
   tree); a network is **two** captioned tables, geometry is its attribute table; every other kind
   answers *something*, or an unhandled kind is indistinguishable from not-run, with the
-  headline-only set listed in the test rather than derived from the output. And **the column fit is
-  in the builder because the panel counts what it drops** — `max-width` plus `overflow: hidden`
-  clipped a sixth column of digits under a footer reading "+1 more columns", so `fitCount` takes
-  columns left to right while an estimated width allows and `moreColumns` counts everything not
-  drawn. `pnpm probe:port-preview` is the browser half: 349px and 11px type at both
+  headline-only set listed in the test rather than derived from the output. **The panel is
+  pivoted** — columns down it, one row across — because which columns a value carries is what a
+  reader cannot get elsewhere, and across the page a wide table spent its width on four of them
+  (5 of 7 before, all 7 after, 8px shorter). **One value column, fixed**: spending the leftover
+  width drew four on a narrow table, two on a neuron table and none on an empty one, one feature
+  looking like three, and one is the count that always fits (408px of 416 at its widest) without
+  cutting an eighteen-digit id, which invariant 8 says is then not an id. An empty table keeps the
+  column and draws it **blank, not a dash** — no first row to be absent from. A **matrix keeps
+  four and is not turned**, being a grid already whose single column would say nothing, which is
+  what `fitCount` still guards and why `PreviewTable` carries a `fieldNoun`. **The head names all
+  three** (`column · type · first row`) off that same noun, pivoted rows being otherwise three
+  unlabelled things; and the footer counts **fields only** — a "+N more rows" there read as
+  counting the fields and said nothing the headline and the head had not. `MAX_FIELDS` (24, halved
+  for a network's two tables) is the height bound. **The fit is in the builder because the panel
+  counts what it drops** — `max-width` plus `overflow: hidden` clipped a sixth column of digits
+  under a footer reading "+1 more columns" — with the probe asserting no overflow on *either*
+  axis, since a field list has a `max-height` over it. `pnpm probe:port-preview` is the browser half: 349px and 11px type at both
   0.659× and 0.243× is the transform question, the hit test at its own centre is `.coda-node`'s
   clip. See [docs/canvas.md](docs/canvas.md).
 - **A hint is docked to a card and dismissing it is not an edit.** `NodeHint` is a field on

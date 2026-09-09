@@ -61,13 +61,15 @@ const READ_PANEL = `(() => {
     box,
     hit: at ? at.tagName.toLowerCase() + (typeof at.className === 'string' && at.className ? '.' + at.className.split(' ')[0] : '') : null,
     host: el.parentElement === document.body ? 'body' : el.parentElement?.className ?? null,
-    rows: el.querySelectorAll('.port-preview__table tbody tr').length,
-    columns: el.querySelectorAll('.port-preview__table thead th').length,
+    fields: el.querySelectorAll('.port-preview__field').length,
+    values: el.querySelector('.port-preview__table tbody tr')?.querySelectorAll('td').length ?? 0,
     // The property TABLE_BUDGET_PX exists for: the panel counts the columns it drops, so
     // nothing else may be dropping any. A table wider than the box it sits in is CSS cutting one
     // in half underneath a footer that says otherwise.
     overflow: Math.max(0, ...[...el.querySelectorAll('.port-preview__table')].map((t) => t.scrollWidth)) - el.clientWidth + 20,
     fontPx: Math.round(parseFloat(getComputedStyle(el).fontSize) * 10) / 10,
+    clipped: Math.max(0, el.scrollHeight - el.clientHeight),
+    heads: [...el.querySelectorAll('.port-preview__table th')].map((th) => th.textContent),
     text: (el.textContent ?? '').slice(0, 80),
   }
 })()`
@@ -175,7 +177,7 @@ console.log(
 )
 console.log(
   `      panel ${first.panel.box.width}×${first.panel.box.height} at ${first.panel.box.left},${first.panel.box.top}  ` +
-    `${first.panel.rows} rows × ${first.panel.columns} cols  ${first.panel.fontPx}px  host ${first.panel.host}  hit ${first.panel.hit}  ` +
+    `${first.panel.fields} fields × ${first.panel.values - 2} value(s)  heads ${JSON.stringify(first.panel.heads)}  ${first.panel.fontPx}px  hit ${first.panel.hit}  ` +
     `table ${first.panel.overflow <= 0 ? `${-first.panel.overflow}px spare` : `${first.panel.overflow}px OVER`}`,
 )
 console.log(`      “${first.panel.text.replace(/\s+/g, ' ')}…”`)
@@ -192,7 +194,15 @@ check(
   first.panel.box.left >= first.card.right - first.socket.width,
   `opens clear of the card it belongs to (panel at ${first.panel.box.left}, card ends ${first.card.right})`,
 )
-check(first.panel.rows > 0, `draws ${first.panel.rows} real rows under ${first.panel.columns} columns`)
+check(
+  first.panel.fields > 5,
+  `draws all ${first.panel.fields} of the table's columns down the panel, ` +
+    `with ${first.panel.values - 2} value each`,
+)
+check(
+  first.panel.heads.join() === 'column,type,first row',
+  `each of the three named (${first.panel.heads.join(' · ')}), so a pivoted row is not three unlabelled things`,
+)
 check(
   first.panel.overflow <= 0,
   `no column is clipped — the widest table is ${-first.panel.overflow}px inside the panel, ` +
@@ -201,6 +211,15 @@ check(
 check(
   first.panel.box.right <= 1600 && first.panel.box.bottom <= 1000 && first.panel.box.top >= 0,
   `inside the window (${first.panel.box.left},${first.panel.box.top} → ${first.panel.box.right},${first.panel.box.bottom})`,
+)
+/*
+ * The pivot put the pressure on height, so this is the check that matters now: the panel is
+ * `max-height: 70vh` with `overflow: hidden`, and a field list cut by CSS is the same unadmitted
+ * truncation the column budget exists to prevent, one axis over.
+ */
+check(
+  first.panel.clipped === 0,
+  `no field is clipped — the panel is ${first.panel.box.height}px against a 700px ceiling`,
 )
 if (keep) console.log(`      → ${await screenshot('probe-port-preview-zoom1')}`)
 await leave()
@@ -286,7 +305,8 @@ if (!netSocket) {
     net.box.bottom <= 1000 && net.box.top >= 0,
     `the tallest case still fits the window (${net.box.height}px against 1000)`,
   )
-  check(net.overflow <= 0, `neither table is clipped (${-net.overflow}px spare)`)
+  check(net.overflow <= 0, `neither table is clipped across (${-net.overflow}px spare)`)
+  check(net.clipped === 0, `nor down it — two schemas stacked, ${net.box.height}px of them`)
   if (keep) console.log(`      → ${await screenshot('probe-port-preview-network')}`)
 }
 

@@ -28,25 +28,55 @@ import { describeValue } from '../../core/values'
 import { formatCell, truncateLabel } from '../format'
 
 /**
- * How many rows of a table are drawn.
+ * The most fields drawn down the panel, across every table in it.
  *
- * Five, because the panel is a transient thing beside a socket rather than a table viewer: it
- * answers "what does a row look like" and hands the rest to the Table node and the overlay,
- * which is the same division `TableSummary` draws.
+ * **The panel is turned ninety degrees: a table's columns run down it and its first rows run
+ * across.** Which columns a value carries is the thing a reader cannot get anywhere else — a
+ * count is on the card already, and the values themselves are the Table node's job — and read
+ * across the page a wide table spends the whole width on four of them. Down the page a schema is
+ * a list, which is `TableSummary`'s finding on a surface with the same shape.
+ *
+ * So this is a *height* budget where `TABLE_BUDGET_PX` is a width one. Divided between the
+ * tables in a panel, because a network draws two and 48 rows is taller than the window; the
+ * remainder is counted and said out loud like everything else the panel does not draw.
  */
-export const MAX_ROWS = 5
+export const MAX_FIELDS = 24
 
 /**
- * The most columns drawn, before width is considered at all.
+ * How many of a table's rows are drawn across: **one, always**.
  *
- * A ceiling rather than the rule: which columns fit is decided by `fitColumns` below, because an
- * annotation table's sixty columns and a Paths table's four are different problems. This bounds
- * the intrinsic-width pass the panel's `<table>` does.
+ * A fixed number rather than as many as fit, and the fixed number is one, for a reason that is
+ * not taste. The first pivot spent whatever width the field names left over, which drew four
+ * sample rows on a two-column table, two on a neuron table and none on a table with no rows at
+ * all — so the same feature looked like three different features depending on the value under
+ * the pointer, and the arithmetic behind that was invisible.
+ *
+ * One is the count that always fits: a field name, its type and one value come to 408px at their
+ * widest against a budget of 416, where a *second* value column would have to be paid for by
+ * cutting the first — and the cell most often under a pointer here is an eighteen-digit id,
+ * which invariant 8 says is not an id once it is truncated. So the choice was between one honest
+ * example and two mutilated ones.
+ *
+ * It is also `TableSummary`'s answer on the surface with the same shape and the same job: a
+ * schema readout with an example, where reading the table itself belongs to the Table node and
+ * the overlay.
  */
-export const MAX_COLUMNS = 6
+const TABLE_ROWS = 1
+
+/**
+ * How many of a matrix's columns are drawn across.
+ *
+ * More than a table's one because a matrix is not a schema — a single column of a grid says
+ * nothing about it — and it can afford them: its labels are short and its cells are numbers,
+ * where a table pays for a name and a type before it reaches a value.
+ */
+const MATRIX_COLUMNS = 4
 
 /** How much of one cell is drawn before it is cut. Ids survive whole; free text does not. */
 const MAX_CELL = 22
+
+/** How much of a column's `dtype · unit` is drawn. `i64 · synapses` is 14. */
+const MAX_TYPE = 16
 
 /**
  * How much of a long scalar reaches the DOM.
@@ -60,20 +90,20 @@ const MAX_CELL = 22
 const TEXT_PREVIEW_CHARS = 600
 
 /**
- * How wide the drawn columns may come to, in CSS pixels.
+ * How wide the drawn table may come to, in CSS pixels.
  *
- * **The panel counts what it drops and must therefore not drop anything else.** Fitting six
- * columns by CSS instead — `max-width` and `overflow: hidden` — cuts the last one mid-cell while
- * the footer underneath says "+1 more columns", which is a second truncation that nothing on
- * screen admits to. Measured in a browser at 1600×1000 on a neuron table: six columns wanted
- * ~420px in a 360px panel, and the sixth was half a column of digits with no header.
+ * **The panel counts what it drops and must therefore not drop anything else.** Fitting by CSS
+ * instead — `max-width` and `overflow: hidden` — cuts the last column mid-cell while the footer
+ * underneath says "+1 more", which is a second truncation that nothing on screen admits to.
+ * Measured in a browser at 1600×1000 before the pivot: six columns wanted ~420px in a 360px
+ * panel, and the sixth was half a column of digits with no header.
  *
- * So the panel is sized to its content up to `.port-preview`'s `max-width`, and the *content* is
- * what is bounded here. `pnpm probe:port-preview` is what keeps the two agreeing: it asserts the
- * drawn table never overflows the panel, which is the half this estimate cannot promise on its
- * own.
+ * Since the pivot this bounds how many *rows* run across, on top of the field name and its type,
+ * which are the fixed cost. `pnpm probe:port-preview` is what keeps the estimate and the
+ * stylesheet agreeing: it asserts in a real browser that the drawn table never overflows the
+ * panel, which is the half this cannot promise on its own.
  */
-const TABLE_BUDGET_PX = 396
+const TABLE_BUDGET_PX = 416
 
 /**
  * Width of one character at the panel's 11px, and the padding beside each column.
@@ -91,29 +121,59 @@ export interface PreviewFact {
   value: string
 }
 
-export interface PreviewColumn {
+/**
+ * One row of the pivoted table: a column of the value, drawn down the panel.
+ *
+ * A matrix has no schema, so its fields are its row labels and they carry no `dtype` — which is
+ * the whole of the difference between the two things this shape describes. Both are a label
+ * column and a few value columns, so both are one rendering.
+ */
+export interface PreviewField {
   name: string
-  /** Absent for a matrix, whose columns are labels rather than typed fields. */
-  dtype?: string
-  unit?: string
+  /**
+   * The column's type and unit as one string — `i64 · synapses`.
+   *
+   * Joined and cut here rather than in the panel, so that the width this costs is a number this
+   * file knows: the fit below is an estimate of *drawn* text, and a panel free to assemble its
+   * own strings is a panel free to draw something wider than the estimate allowed for. Absent
+   * for a matrix, whose rows are labels rather than typed columns.
+   */
+  type?: string
+  /** One per drawn value column, already formatted. */
+  values: string[]
 }
 
-export interface PreviewRows {
+export interface PreviewTable {
   /** Names the table where a value has more than one. Absent where it has one. */
   caption?: string
-  columns: PreviewColumn[]
-  /** Row-major, already formatted for display. */
-  cells: string[][]
-  /** Columns and rows this value has that the panel is not drawing. Both are said out loud. */
-  moreColumns: number
-  moreRows: number
+  /**
+   * What one field is — the head over the names, and the noun the footer counts in.
+   *
+   * `column` for a table, `row` for a matrix, and one field rather than two because they are the
+   * same word said in two places: a footer reading "+36 more columns" under a heading reading
+   * "column" cannot be misread, where the two written separately could drift into contradicting
+   * each other.
+   */
+  fieldNoun: string
+  /** Head of each value column: `first row` for a table, its own label for a matrix's column. */
+  headers: string[]
+  fields: PreviewField[]
+  /**
+   * Fields the panel is not drawing. Said out loud; nothing else is dropped silently.
+   *
+   * There is deliberately no companion count for the *rows* not drawn. The headline above
+   * already says how many the value has and the head says which one is shown, so a second
+   * statement in the footer added nothing — and sitting under a list of fields it read as
+   * labelling them, which is exactly the confusion the pivot introduced.
+   */
+  moreFields: number
 }
 
 export interface PortPreview {
   /** `describeValue`'s line — the same one the card's footer draws. */
   headline: string
   facts: PreviewFact[]
-  rows: PreviewRows[]
+  tables: PreviewTable[]
   /**
    * A long scalar, drawn as wrapped text rather than as a row.
    *
@@ -136,13 +196,13 @@ export function portPreview(value: Value): PortPreview {
   switch (value.kind) {
     case 'table':
     case 'neurons':
-      return { headline, facts: [], rows: [previewRows(value)] }
+      return { headline, facts: [], tables: [previewTable(value, MAX_FIELDS)] }
 
     case 'network':
       return {
         headline,
         facts: [{ label: 'Direction', value: value.directed ? 'directed' : 'undirected' }],
-        rows: networkRows(value),
+        tables: networkTables(value),
       }
 
     case 'skeletons':
@@ -150,10 +210,10 @@ export function portPreview(value: Value): PortPreview {
     case 'points':
       // The attributes table *is* the summary of the items — one row per skeleton, per mesh, per
       // point — so there is nothing to add beside it that `describeValue` has not already said.
-      return { headline, facts: [], rows: [previewRows(value.attributes)] }
+      return { headline, facts: [], tables: [previewTable(value.attributes, MAX_FIELDS)] }
 
     case 'matrix':
-      return { headline, facts: matrixFacts(value), rows: [matrixRows(value)] }
+      return { headline, facts: matrixFacts(value), tables: [matrixTable(value)] }
 
     case 'linkage':
       /*
@@ -165,7 +225,7 @@ export function portPreview(value: Value): PortPreview {
       return {
         headline,
         facts: value.clusters ? [] : [{ label: 'Cut', value: 'not cut' }],
-        rows: [],
+        tables: [],
       }
 
     case 'dataset':
@@ -179,7 +239,7 @@ export function portPreview(value: Value): PortPreview {
           ...(value.annotations ? [{ label: 'Annotations', value: 'wired' }] : []),
           ...(value.edges ? [{ label: 'Connectivity', value: 'attached edge set' }] : []),
         ],
-        rows: [],
+        tables: [],
       }
 
     /*
@@ -193,18 +253,18 @@ export function portPreview(value: Value): PortPreview {
     case 'layout':
     case 'transform':
     case 'layers':
-      return { headline, facts: [], rows: [] }
+      return { headline, facts: [], tables: [] }
 
     default: {
       // A scalar, whose headline *is* the value — so there is nothing to add unless it is a
       // string `describeValue` had to elide, in which case the head of it goes in `text`.
       const text = String(value.value)
       const long = typeof value.value === 'string' && text.length > 60
-      if (!long) return { headline, facts: [], rows: [] }
+      if (!long) return { headline, facts: [], tables: [] }
       return {
         headline,
         facts: [{ label: 'Length', value: `${text.length.toLocaleString()} characters` }],
-        rows: [],
+        tables: [],
         text: text.slice(0, TEXT_PREVIEW_CHARS),
       }
     }
@@ -212,64 +272,72 @@ export function portPreview(value: Value): PortPreview {
 }
 
 /** A network's two tables, each captioned, because neither one alone answers the question. */
-function networkRows(value: NetworkValue): PreviewRows[] {
+function networkTables(value: NetworkValue): PreviewTable[] {
+  // Halved, or a network is two full-height schemas stacked and the panel outgrows the window.
+  const each = Math.floor(MAX_FIELDS / 2)
   return [
-    { ...previewRows(value.nodes), caption: 'Nodes' },
-    { ...previewRows(value.edges), caption: 'Edges' },
+    { ...previewTable(value.nodes, each), caption: 'Nodes' },
+    { ...previewTable(value.edges, each), caption: 'Edges' },
   ]
 }
 
-function previewRows(table: TableValue): PreviewRows {
-  const candidates = table.schema.columns.slice(0, MAX_COLUMNS)
-  const rowCount = Math.min(table.length, MAX_ROWS)
-  const cells = Array.from({ length: rowCount }, (_, row) =>
-    candidates.map((col) => cut(formatCell(table.data[col.name]?.[row] ?? null, col.name))),
-  )
-  const shown = fitCount(
-    candidates.map((col, index) =>
-      // The type sits *under* the name in the head, so a column is as wide as the wider of the
-      // two, not as wide as both.
-      widthOf(
-        Math.max(col.name.length, col.dtype.length + (col.unit ? col.unit.length + 3 : 0)),
-        cells,
-        index,
-      ),
-    ),
-  )
+/**
+ * A table pivoted: its columns down the panel, its first row across.
+ *
+ * Three columns, always the same three — the name, the type, one value — so that every table
+ * preview in the app is the same shape whatever is in it. What varies is only how many fields
+ * there are to list.
+ */
+function previewTable(table: TableValue, maxFields: number): PreviewTable {
+  const columns = table.schema.columns.slice(0, maxFields)
+  const shown = Math.min(table.length, TABLE_ROWS)
   return {
-    columns: candidates
-      .slice(0, shown)
-      .map((col) => ({ name: col.name, dtype: col.dtype, unit: col.unit })),
-    cells: cells.map((line) => line.slice(0, shown)),
-    moreColumns: Math.max(0, table.schema.columns.length - shown),
-    moreRows: Math.max(0, table.length - rowCount),
+    fieldNoun: 'column',
+    // Named rather than blank, because a bare value beside a type is ambiguous about *which*
+    // row it came from — and the head is where the reader is told there is only one.
+    headers: ['first row'],
+    fields: columns.map((col) => ({
+      name: cut(col.name),
+      type: truncateLabel(col.dtype + (col.unit ? ` · ${col.unit}` : ''), MAX_TYPE, 1),
+      values: Array.from({ length: TABLE_ROWS }, (_, row) =>
+        /*
+         * Empty rather than a dash for a table with no rows: there is no first row to be absent
+         * from, and a dash would read as a null in one. `TableSummary` draws the same
+         * distinction. The column itself stays, so an empty table is recognisably the same
+         * drawing as a full one with the values missing.
+         */
+        row < shown ? cut(formatCell(table.data[col.name]?.[row] ?? null, col.name)) : '',
+      ),
+    })),
+    moreFields: Math.max(0, table.schema.columns.length - columns.length),
   }
 }
 
-/** Characters across the widest of a column's head and its drawn cells. */
-function widthOf(head: number, cells: string[][], index: number): number {
-  let chars = Math.max(head, 1)
-  for (const line of cells) chars = Math.max(chars, line[index]?.length ?? 0)
+/** Characters across the longest of a set of strings. */
+function widest(texts: string[]): number {
+  let chars = 0
+  for (const text of texts) chars = Math.max(chars, text.length)
   return chars
 }
 
+/** What a label column costs, in pixels. */
+function labelWidth(labels: string[]): number {
+  return widest(labels) * CHAR_PX + COLUMN_PAD_PX
+}
+
 /**
- * How many columns fit, taken from the left.
+ * How many value columns fit beside a label column costing `fixed` pixels.
  *
- * Left to right rather than by width: a table's leading columns are the ones a reader is looking
- * for — `neuronId`, `type` — and a fit that reordered them would answer a different question
- * from the one the Table node answers about the same value. Always at least one, since a single
- * column wider than the whole budget is still the only thing there is to show.
- *
- * A count rather than the columns themselves, because the answer is always a prefix and both
- * callers hold their columns and their cells in different shapes.
+ * A matrix's guard alone since a table was fixed at one value column — `TABLE_ROWS` records why —
+ * and left to right rather than by width, these being the matrix's *first* columns in order.
+ * **Zero is a real answer**: a matrix whose row labels fill the panel is a list of its rows,
+ * where one column forced in is the clipped cell this budget exists to prevent.
  */
-function fitCount(widths: number[]): number {
-  let used = 0
+function fitCount(widths: number[], fixed: number): number {
+  let used = fixed
   for (let i = 0; i < widths.length; i++) {
-    const next = used + widths[i]! * CHAR_PX + COLUMN_PAD_PX
-    if (i > 0 && next > TABLE_BUDGET_PX) return i
-    used = next
+    used += widths[i]! * CHAR_PX + COLUMN_PAD_PX
+    if (used > TABLE_BUDGET_PX) return i
   }
   return widths.length
 }
@@ -284,28 +352,35 @@ function matrixFacts(value: MatrixValue): PreviewFact[] {
 }
 
 /**
- * A matrix's top-left corner, with the row labels in a leading column.
+ * A matrix's top-left corner: row labels down the panel, column labels across.
  *
- * Labelled rather than bare because a matrix is the one value whose axes are named data: a grid
- * of numbers with no labels says nothing that `describeValue`'s dimensions have not already said.
+ * The same rendering as a pivoted table and, unlike one, the same *orientation* it always had — a
+ * matrix is already a grid with a label on each axis, so nothing is turned. What it does not have
+ * is a schema, which is why its fields carry no type and why its field noun is `row` where a
+ * table's is `column`.
  */
-function matrixRows(value: MatrixValue): PreviewRows {
-  const cols = value.colLabels.slice(0, MAX_COLUMNS - 1)
-  const rowCount = Math.min(value.rowLabels.length, MAX_ROWS)
-  const cells = Array.from({ length: rowCount }, (_, row) => [
-    cut(value.rowLabels[row] ?? ''),
-    ...cols.map((_, col) =>
+function matrixTable(value: MatrixValue): PreviewTable {
+  const rowLabels = value.rowLabels.slice(0, MAX_FIELDS).map((label) => cut(label))
+  const colCount = Math.min(value.colLabels.length, MATRIX_COLUMNS)
+  const cells = rowLabels.map((_, row) =>
+    Array.from({ length: colCount }, (_, col) =>
       cut(formatCell(value.values[row * value.colLabels.length + col] ?? null)),
     ),
-  ])
-  const heads = ['', ...cols]
-  const shown = fitCount(heads.map((head, index) => widthOf(head.length, cells, index)))
+  )
+  const headers = value.colLabels.slice(0, colCount).map((label) => cut(label))
+  // Unlike a table's three fixed columns, a matrix's are as many as fit: its labels are its own
+  // and can be any length, so this is where the width guard still earns its keep.
+  const shown = fitCount(
+    Array.from({ length: colCount }, (_, col) =>
+      Math.max(headers[col]?.length ?? 0, widest(cells.map((values) => values[col] ?? ''))),
+    ),
+    labelWidth(rowLabels),
+  )
   return {
-    columns: heads.slice(0, shown).map((name) => ({ name })),
-    cells: cells.map((line) => line.slice(0, shown)),
-    // `shown` counts the label column, which is not one of the matrix's own.
-    moreColumns: Math.max(0, value.colLabels.length - (shown - 1)),
-    moreRows: Math.max(0, value.rowLabels.length - rowCount),
+    fieldNoun: 'row',
+    headers: headers.slice(0, shown),
+    fields: rowLabels.map((name, index) => ({ name, values: cells[index]!.slice(0, shown) })),
+    moreFields: Math.max(0, value.rowLabels.length - rowLabels.length),
   }
 }
 

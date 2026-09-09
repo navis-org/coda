@@ -1347,36 +1347,50 @@
   margin-bottom: 2px;
 }
 
+/*
+ * The panel is pivoted: one row per column of the value, its first rows across.
+ *
+ * So the leading cell is a *field name* and carries the weight — it is what the reader came for
+ * — while the sample values beside it are secondary. That is the inverse of the pre-pivot
+ * layout, where the column names were the head and the values the body.
+ */
 .port-preview__table {
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
+/* The head names the three things a pivoted row holds. Quieter than the field names under it:
+   it is read once and then not again, where they are what the reader is scanning. */
 .port-preview__table th {
   text-align: left;
   padding: 0 8px 3px 0;
   border-bottom: 1px solid var(--border);
-  font-weight: 600;
+  font-weight: 400;
   white-space: nowrap;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 9px;
+}
+.port-preview__table tbody tr:first-child td {
+  padding-top: 3px;
 }
 .port-preview__table th:last-child,
 .port-preview__table td:last-child {
   padding-right: 0;
 }
-.port-preview__col {
-  display: block;
-}
-/* The dtype under its column name rather than beside it: six columns of `name f64` wrap the
-   panel where six of `name` over `f64` do not. */
-.port-preview__dtype {
-  display: block;
-  color: var(--text-muted);
-  font-weight: 400;
-  font-size: 9px;
-}
 .port-preview__table td {
-  padding: 2px 8px 2px 0;
+  padding: 1px 8px 1px 0;
   white-space: nowrap;
   color: var(--text-secondary);
+}
+/* The name of one of the value's columns. */
+.port-preview__field {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.port-preview__dtype {
+  color: var(--text-muted);
+  font-weight: 400;
 }
 
 .port-preview__more {

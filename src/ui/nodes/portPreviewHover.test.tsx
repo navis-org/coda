@@ -93,10 +93,24 @@ describe('the output port preview', () => {
     // The port it belongs to, the line the card's own footer draws, and real column names.
     expect(text).toContain('Neurons')
     expect(text).toContain('rows')
-    expect(text).toContain('neuronId')
-    // And real data under those headers — the whole point of the feature, and the half a schema
-    // readout has never been able to answer.
-    expect(panel()!.querySelectorAll('.port-preview__table tbody tr').length).toBeGreaterThan(0)
+    /*
+     * Every column of the table, down the panel, with a real value beside it — the pivot's whole
+     * point. Read across the page these four were four of five drawn and the rest were a count.
+     */
+    for (const column of ['neuronId', 'type', 'instance', 'status']) {
+      expect(text).toContain(column)
+    }
+    const fields = panel()!.querySelectorAll('.port-preview__field')
+    expect(fields.length).toBeGreaterThan(4)
+    expect(panel()!.querySelector('.port-preview__field')?.textContent).toBe('neuronId')
+    // And its type, and a value from the first row.
+    expect(panel()!.querySelector('.port-preview__dtype')?.textContent).toBe('str')
+    expect(text).toMatch(/\d{9,}/)
+    // Each of the three named, since pivoted they are otherwise three unlabelled things in a row.
+    const heads = [...panel()!.querySelectorAll('.port-preview__table th')].map(
+      (th) => th.textContent,
+    )
+    expect(heads).toEqual(['column', 'type', 'first row'])
 
     pointer(out, 'pointerout')
     await waitFor(() => expect(panel()).toBeNull())

@@ -27,7 +27,7 @@ import { plural } from '../format'
 import { hoverPlacement } from '../hoverPlacement'
 import type { Rect } from '../hoverPlacement'
 import { portPreview } from './portPreview'
-import type { PreviewRows } from './portPreview'
+import type { PreviewTable } from './portPreview'
 
 /** Gap between the socket and the panel. */
 const GAP = 12
@@ -112,8 +112,8 @@ export function PortPreviewPanel({ nodeId, portId, label, anchor }: PortPreviewP
         </dl>
       )}
 
-      {preview.rows.map((rows, index) => (
-        <PreviewTable key={rows.caption ?? index} rows={rows} />
+      {preview.tables.map((table, index) => (
+        <FieldTable key={table.caption ?? index} table={table} />
       ))}
 
       {preview.text !== undefined && <p className="port-preview__text">{preview.text}</p>}
@@ -122,52 +122,56 @@ export function PortPreviewPanel({ nodeId, portId, label, anchor }: PortPreviewP
 }
 
 /**
- * One table's head and first rows.
+ * A value's fields down the panel, with its first row across.
  *
- * A real `<table>` here, unlike `TableSummary`'s deliberate block layout: that component turns a
- * sixty-column table ninety degrees to fit a 320px inspector, where this one is showing the first
- * few rows *as rows* — which is the question it exists to answer — and the intrinsic-width pass
- * is what lines the columns up. The panel is capped at six columns, so the pass is bounded.
+ * A real `<table>`, unlike `TableSummary`'s deliberate block layout: that component draws one
+ * value per column name, where this has a head to keep in line with three body cells. Bounded at
+ * both ends — `MAX_FIELDS` rows, `TABLE_BUDGET_PX` across — so the intrinsic-width pass is too.
+ *
+ * **The head names all three, and that is not decoration.** Pivoted, a panel of `neuronId str
+ * 1047576697` is three unlabelled things in a row, and the first column of a table drawn as rows
+ * invites exactly the wrong reading of anything underneath it. `column · type · first row` says
+ * what each is, and the field noun doubles as the footer's, so the count beneath cannot contradict
+ * the heading above it.
  */
-function PreviewTable({ rows }: { rows: PreviewRows }) {
+function FieldTable({ table }: { table: PreviewTable }) {
+  const typed = table.fields.some((field) => field.type !== undefined)
   /*
-   * One line, said out loud rather than trailing off: a panel drawing five of sixty columns and
-   * not saying so has answered a question it was not asked.
+   * Fields only. What is *not* here is a count of the rows not drawn: the headline says how many
+   * the value has and the head says which one is shown, so a third statement added nothing — and
+   * under a list of fields it read as counting them.
    */
   const footer =
-    rows.cells.length === 0
-      ? 'no rows'
-      : [
-          rows.moreRows > 0 ? `+${plural(rows.moreRows, 'more row')}` : undefined,
-          rows.moreColumns > 0 ? `+${plural(rows.moreColumns, 'more column')}` : undefined,
-        ]
-          .filter(Boolean)
-          .join(' · ')
+    table.fields.length === 0
+      ? `no ${table.fieldNoun}s`
+      : table.moreFields > 0
+        ? `+${plural(table.moreFields, `more ${table.fieldNoun}`)}`
+        : ''
 
   return (
     <div className="port-preview__table-wrap">
-      {rows.caption && <div className="port-preview__caption">{rows.caption}</div>}
+      {table.caption && <div className="port-preview__caption">{table.caption}</div>}
       <table className="port-preview__table">
         <thead>
           <tr>
-            {rows.columns.map((col, index) => (
-              <th key={col.name || `c${index}`} title={col.name}>
-                <span className="port-preview__col">{col.name}</span>
-                {col.dtype && (
-                  <span className="port-preview__dtype">
-                    {col.dtype}
-                    {col.unit ? ` · ${col.unit}` : ''}
-                  </span>
-                )}
+            <th>{table.fieldNoun}</th>
+            {typed && <th>type</th>}
+            {table.headers.map((head, index) => (
+              <th key={index} title={head}>
+                {head}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.cells.map((line, row) => (
-            <tr key={row}>
-              {line.map((cell, col) => (
-                <td key={col}>{cell}</td>
+          {table.fields.map((field) => (
+            <tr key={field.name}>
+              <td className="port-preview__field" title={field.name}>
+                {field.name}
+              </td>
+              {typed && <td className="port-preview__dtype">{field.type}</td>}
+              {field.values.map((value, index) => (
+                <td key={index}>{value}</td>
               ))}
             </tr>
           ))}

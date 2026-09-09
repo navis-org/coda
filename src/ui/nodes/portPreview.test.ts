@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { NetworkValue, SkeletonsValue, Value } from '../../core/values'
 import { describeValue, makeMatrix, tableFromRows } from '../../core/values'
-import { MAX_COLUMNS, MAX_ROWS, portPreview } from './portPreview'
+import { MAX_FIELDS, portPreview } from './portPreview'
 
 const NEURONS = tableFromRows(
   {
@@ -34,68 +34,123 @@ describe('portPreview', () => {
     expect(portPreview(NEURONS).headline).toBe(describeValue(NEURONS))
   })
 
-  it('draws a table as rows, with each column typed', () => {
+  it('draws every column down the panel, typed, with one row across', () => {
+    /*
+     * The pivot. Which columns a table carries is the thing a reader cannot get anywhere else —
+     * the count is on the card already and the values are the Table node's job — and read across
+     * the page a wide table spent its whole width on four of them.
+     */
     const preview = portPreview(NEURONS)
-    expect(preview.rows).toHaveLength(1)
-    const rows = preview.rows[0]!
-    expect(rows.columns.map((c) => c.name)).toEqual(['neuronId', 'type', 'size'])
-    expect(rows.columns[2]).toMatchObject({ dtype: 'i64', unit: 'nm^3' })
-    expect(rows.cells).toHaveLength(2)
+    expect(preview.tables).toHaveLength(1)
+    const table = preview.tables[0]!
+    expect(table.fields.map((f) => f.name)).toEqual(['neuronId', 'type', 'size'])
+    expect(table.fields[2]!.type).toBe('i64 · nm^3')
     // An id survives whole. It is text everywhere (invariant 8), and a truncated id is not an id.
-    expect(rows.cells[0]![0]).toBe('720575940621039145')
-    expect(rows.moreRows).toBe(0)
-    expect(rows.moreColumns).toBe(0)
+    expect(table.fields[0]!.values).toEqual(['720575940621039145'])
+    expect(table.moreFields).toBe(0)
+    // The head names all three, and the field noun is the footer's too, so they cannot disagree.
+    expect(table.fieldNoun).toBe('column')
+    expect(table.headers).toEqual(['first row'])
   })
 
-  it('drops a column it cannot fit, and counts that one too', () => {
+  it('draws one row across whatever the table is, so every preview is the same shape', () => {
     /*
-     * The defect a browser found and the unit suite could not: six columns of ids wanted ~420px
-     * in a 360px panel, so CSS cut the sixth mid-cell while the footer said "+1 more columns".
-     * A count is only honest if nothing else is dropping columns behind it.
+     * A fixed one, not as many as fit. Spending the leftover width drew four sample rows on a
+     * narrow table, two on a neuron table and none on an empty one — the same feature looking
+     * like three, off arithmetic nothing on screen explained. One is also the only count that
+     * never has to cut an eighteen-digit id in half to make room (invariant 8).
      */
+    const narrow = tableFromRows({ columns: [{ name: 'n', dtype: 'i64' }] }, [
+      { n: 1 },
+      { n: 2 },
+      { n: 3 },
+      { n: 4 },
+      { n: 5 },
+    ])
     const wide = tableFromRows(
       {
-        columns: Array.from({ length: 8 }, (_, i) => ({
-          name: `a_long_column_${i}`,
-          dtype: 'str' as const,
+        columns: [
+          { name: 'a_rather_long_column', dtype: 'str' },
+          { name: 'another_long_column', dtype: 'str' },
+        ],
+      },
+      Array.from({ length: 9 }, (_, i) => ({
+        a_rather_long_column: `72057594062103914${i}`,
+        another_long_column: `72057594060866525${i}`,
+      })),
+    )
+    for (const value of [NEURONS, narrow, wide]) {
+      for (const field of portPreview(value).tables[0]!.fields) {
+        expect(field.values).toHaveLength(1)
+      }
+    }
+  })
+
+  it('keeps the value column on a table with no rows, drawn empty rather than as a null', () => {
+    // The Explore card's `Selected` port with nothing ticked. An empty table is recognisably the
+    // same drawing as a full one with the value missing; a dash would read as a null in a row
+    // that does not exist. `TableSummary` draws the same distinction.
+    const empty = tableFromRows(
+      {
+        columns: [
+          { name: 'neuronId', dtype: 'str' },
+          { name: 'type', dtype: 'str' },
+        ],
+      },
+      [],
+    )
+    const table = portPreview(empty).tables[0]!
+    expect(table.headers).toEqual(['first row'])
+    expect(table.fields.map((f) => f.values)).toEqual([[''], ['']])
+  })
+
+  it('keeps every column of a wide table, where the pre-pivot panel kept five', () => {
+    const wide = tableFromRows(
+      {
+        columns: Array.from({ length: 18 }, (_, i) => ({
+          name: `field_${i}`,
+          dtype: 'i64' as const,
         })),
       },
-      [
-        Object.fromEntries(
-          Array.from({ length: 8 }, (_, i) => [`a_long_column_${i}`, 'x'.repeat(20)]),
-        ),
-      ],
+      [Object.fromEntries(Array.from({ length: 18 }, (_, i) => [`field_${i}`, i]))],
     )
-    const rows = portPreview(wide).rows[0]!
-    expect(rows.columns.length).toBeLessThan(MAX_COLUMNS)
-    expect(rows.columns.length).toBeGreaterThan(0)
-    // Every column the table has and the panel does not draw, whichever reason it was dropped for.
-    expect(rows.columns.length + rows.moreColumns).toBe(8)
-    expect(rows.cells[0]).toHaveLength(rows.columns.length)
+    const table = portPreview(wide).tables[0]!
+    expect(table.fields).toHaveLength(18)
+    expect(table.moreFields).toBe(0)
   })
 
-  it('keeps one column even where that one column is wider than the budget', () => {
-    const huge = tableFromRows({ columns: [{ name: 'note', dtype: 'str' }] }, [
-      { note: 'x'.repeat(400) },
-    ])
-    expect(portPreview(huge).rows[0]!.columns).toHaveLength(1)
-  })
-
-  it('counts what it is not drawing rather than trailing off', () => {
-    const wide = tableFromRows(
+  it('counts the columns past the height budget rather than drawing them', () => {
+    const huge = tableFromRows(
       {
-        columns: Array.from({ length: 20 }, (_, i) => ({
+        columns: Array.from({ length: 60 }, (_, i) => ({
           name: `c${i}`,
           dtype: 'i64' as const,
         })),
       },
-      Array.from({ length: 40 }, () => ({ c0: 1 })),
+      [Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`c${i}`, 1]))],
     )
-    const rows = portPreview(wide).rows[0]!
-    expect(rows.columns).toHaveLength(MAX_COLUMNS)
-    expect(rows.cells).toHaveLength(MAX_ROWS)
-    expect(rows.moreColumns).toBe(20 - MAX_COLUMNS)
-    expect(rows.moreRows).toBe(40 - MAX_ROWS)
+    const table = portPreview(huge).tables[0]!
+    expect(table.fields).toHaveLength(MAX_FIELDS)
+    expect(table.moreFields).toBe(60 - MAX_FIELDS)
+  })
+
+  it('cuts a field name and its type, since both are paid for before any value', () => {
+    const verbose = tableFromRows(
+      {
+        columns: [
+          {
+            name: 'a_column_name_of_some_considerable_length',
+            dtype: 'i64',
+            unit: 'a_long_unit',
+          },
+        ],
+      },
+      [{ a_column_name_of_some_considerable_length: 1 }],
+    )
+    const field = portPreview(verbose).tables[0]!.fields[0]!
+    expect(field.name.length).toBeLessThanOrEqual(22)
+    expect(field.type!.length).toBeLessThanOrEqual(16)
+    expect(field.values).toEqual(['1'])
   })
 
   it('shows a network as two tables, because one of them is always the wrong one', () => {
@@ -123,9 +178,9 @@ describe('portPreview', () => {
       ),
     }
     const preview = portPreview(network)
-    expect(preview.rows.map((r) => r.caption)).toEqual(['Nodes', 'Edges'])
-    expect(preview.rows[0]!.columns.map((c) => c.name)).toEqual(['id', 'type'])
-    expect(preview.rows[1]!.columns.map((c) => c.name)).toContain('weight')
+    expect(preview.tables.map((t) => t.caption)).toEqual(['Nodes', 'Edges'])
+    expect(preview.tables[0]!.fields.map((f) => f.name)).toEqual(['id', 'type'])
+    expect(preview.tables[1]!.fields.map((f) => f.name)).toContain('weight')
     // Direction is not derivable from any count, so it is said.
     expect(preview.facts).toContainEqual({ label: 'Direction', value: 'directed' })
   })
@@ -142,7 +197,7 @@ describe('portPreview', () => {
       bounds: { min: [0, 0, 0], max: [1, 1, 1] },
     }
     const preview = portPreview(skeletons)
-    expect(preview.rows[0]!.columns.map((c) => c.name)).toEqual(['neuronId', 'type', 'size'])
+    expect(preview.tables[0]!.fields.map((f) => f.name)).toEqual(['neuronId', 'type', 'size'])
   })
 
   it('labels a matrix corner, since a bare grid of numbers says nothing', () => {
@@ -153,9 +208,18 @@ describe('portPreview', () => {
       'synapses',
       'similarity',
     )
-    const rows = portPreview(matrix).rows[0]!
-    expect(rows.cells[0]).toEqual(['LC4', '1', '2'])
-    expect(rows.cells[1]).toEqual(['LC6', '3', '4'])
+    const table = portPreview(matrix).tables[0]!
+    // Not turned: a matrix is already a grid with a label on each axis, so its rows stay rows —
+    // and its nouns are therefore the other way round from a table's.
+    expect(table.headers).toEqual(['PLP1', 'PLP2'])
+    expect(table.fields.map((f) => f.name)).toEqual(['LC4', 'LC6'])
+    expect(table.fields[0]!.values).toEqual(['1', '2'])
+    expect(table.fields[1]!.values).toEqual(['3', '4'])
+    expect(table.fields[0]!.type).toBeUndefined()
+    expect(table.fieldNoun).toBe('row')
+    // Four columns across where a table gets one: a matrix's labels are short and its cells are
+    // numbers, and a single column of a grid says nothing about it.
+    expect(table.fields[0]!.values).toHaveLength(2)
     expect(portPreview(matrix).facts).toContainEqual({ label: 'Measure', value: 'similarity' })
   })
 
@@ -266,7 +330,7 @@ describe('portPreview', () => {
       expect(preview.headline.length, value.kind).toBeGreaterThan(0)
       if (HEADLINE_ONLY.has(value.kind)) continue
       const said =
-        preview.facts.length + preview.rows.length + (preview.text === undefined ? 0 : 1)
+        preview.facts.length + preview.tables.length + (preview.text === undefined ? 0 : 1)
       expect(said, value.kind).toBeGreaterThan(0)
     }
   })

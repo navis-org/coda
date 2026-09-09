@@ -2095,8 +2095,8 @@ been driven by a real pointer over a real wire by anyone yet, same standing as t
 ## Previewing an output port
 
 Hovering an output socket puts up a small panel showing what is actually on that wire — the
-headline the card's own footer draws, the facts a count implies nothing about, and the first five
-rows. `OutputPort` owns the gesture, `portPreview` decides the content, `PortPreviewPanel` draws
+headline the card's own footer draws, the facts a count implies nothing about, and the value's
+**columns down the panel with its first row across**, under a head naming all three. `OutputPort` owns the gesture, `portPreview` decides the content, `PortPreviewPanel` draws
 it, and `hoverPlacement` puts it somewhere. Measured with `pnpm probe:port-preview`; the unit
 coverage is `ui/nodes/portPreview.test.ts`, `ui/nodes/portPreviewHover.test.tsx` and
 `ui/hoverPlacement.test.ts`.
@@ -2193,24 +2193,55 @@ back as wrapped text cut to `TEXT_PREVIEW_CHARS`, since a Neuroglancer link is 7
 the rest in CSS still builds it — a few thousand line boxes to paint six, synchronously, on the
 frame the panel measures itself.
 
-**Which columns fit is decided in the builder, and the reason is that the panel counts what it
-drops.** The first version took six columns and let `max-width` and `overflow: hidden` do the
-rest. In a browser on a neuron table that is six columns wanting ~420px in a 360px panel: the
-sixth was drawn as half a column of digits with no header, *underneath a footer saying "+1 more
-columns"*. A count is only honest if nothing else is dropping columns behind it. So `fitColumns`
-takes columns from the left while an estimated width allows — left to right, because a table's
-leading columns are the ones a reader is looking for, and always at least one — and `moreColumns`
-counts everything not drawn whichever reason it went. The estimate is characters times a
-per-character width, deliberately erring high; `pnpm probe:port-preview` asserts in a real browser
-that the drawn table never overflows the panel, which is the half the estimate cannot promise.
+**The panel is pivoted, and that is a claim about which question it answers.** Which columns a
+value carries is the thing a reader cannot get anywhere else — the row count is on the card
+already and the values themselves are the Table node's job — and read across the page a wide table
+spends its whole width on four of them. Turned ninety degrees a schema is a list, which is
+`TableSummary`'s finding on a surface with the same shape. On the demo's neuron table that is 5 of
+7 columns before against **all 7** after, in a panel 8px shorter.
+
+**One value column, always, and the fixed number is the finding.** The first pivot spent whatever
+width the field names left over, which drew four sample rows on a two-column table, two on a
+neuron table and none at all on a table with no rows — the same feature looking like three
+different ones depending on what the pointer was over, off arithmetic nothing on screen explained.
+One is the count that always fits: a name, a type and a value come to 408px at their widest
+against a 416px budget, so a *second* value column would have to be paid for by cutting the first,
+and the cell most often under a pointer here is an eighteen-digit id, which invariant 8 says is
+not an id once it is truncated. One honest example beats two mutilated ones — and it is
+`TableSummary`'s answer for the same job. A table with **no** rows keeps the column and draws it
+empty rather than as a dash: there is no first row to be absent from, and an empty table stays
+recognisably the same drawing as a full one.
+
+A **matrix keeps four columns and is not turned**: it is already a grid with a label on each axis,
+a single column of one says nothing about it, and its short labels and numeric cells can afford
+them. It is the same rendering all the same — a label column and some value columns — which is why
+`fitCount` survives as its guard alone, and why `PreviewTable` carries a `fieldNoun` rather than
+assuming one: a matrix's field is a row where a table's is a column.
+
+**The head names all three, because pivoted they are otherwise three unlabelled things in a row.**
+`column · type · first row`, and the field noun is *the same string* the footer counts in, so
+"+36 more columns" cannot end up under a heading that calls them something else. That footer is
+now the only thing in it: a count of the rows **not** drawn used to sit there too, and under a
+list of fields it read as counting the fields — while saying nothing the headline (`401 rows × 7
+col`) and the head (`first row`) had not already said between them.
+
+`MAX_FIELDS` (24, halved between a network's two tables) is the height bound and the one thing
+still counted, since a schema really can run past the panel. The rule it answers to is older than
+the pivot and was earned before it: the first version took six columns across and let `max-width`
+and `overflow: hidden` do the rest, which on a neuron table meant six columns wanting ~420px in a
+360px panel — the sixth drawn as half a column of digits with no header, *underneath a footer
+saying "+1 more columns"*. **A count is only honest if nothing else is dropping anything behind
+it.** So the builder decides, and `pnpm probe:port-preview` asserts in a real browser that the
+table overflows the panel on neither axis — the half an estimate of character widths cannot
+promise, and two halves since the pivot put a field list under a `max-height` too.
 
 Measured at 1600×1000 on the synthetic connectome:
 
 | | panel | drawn | note |
 |---|---|---|---|
-| `Find Neurons ▸ Neurons`, 0.659× pane | 349×192 at 565,403 | 5 rows × 5 cols | 401 rows × 7 col; `+396 more rows · +2 more columns` |
-| the same, 0.243× pane | 349×192 | 5 × 5 | identical, and 11px type at both — no transformed ancestor |
-| `Paths ▸ Network` | 276×401 | Nodes and Edges, captioned | the tallest case, against a 1000px window |
+| `Find Neurons ▸ Neurons`, 0.659× pane | 250×185 at 565,407 | all 7 columns, one value each | 401 rows × 7 col, and no footer at all |
+| the same, 0.243× pane | 250×185 | 7 × 1 | identical, and 11px type at both — no transformed ancestor |
+| `Paths ▸ Network` | 211×351 | Nodes and Edges, both schemas whole | the tallest case, against a 1000px window |
 
 349 and not 129 is the transform question answered — the panel is portalled to
 `document.fullscreenElement ?? document.body`, which is also what gets it out of `.coda-node`'s
