@@ -1,0 +1,295 @@
+/*
+ * The Screen Map — see `ScreenMap.tsx`.
+ *
+ * Everything here is `position: fixed` in viewport coordinates, because that is the coordinate
+ * space the placement works in: `getBoundingClientRect` is viewport-relative, so a stage that
+ * were `absolute` inside anything the app has transformed would put every box at an offset
+ * nothing here could see. The app does not scroll, which is what makes that safe.
+ *
+ * `z-index: 75` — above the welcome page's 70, which is what a guide launched from the guides
+ * dialog is standing in front of, and below the small-screen notice's 80, which is a claim that
+ * the window is too small for any of this and wins over it.
+ */
+
+.smap {
+  position: fixed;
+  inset: 0;
+  z-index: 75;
+  /* The stage itself takes no clicks: the scrim below is the only thing under the pointer, so a
+     click anywhere but the panel dismisses however it looks. */
+  pointer-events: none;
+}
+
+.smap__scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  /*
+   * Enough to separate the labels from a busy canvas without hiding what is being labelled — the
+   * whole point is that the reader can see the control each box is round, so this is lighter than
+   * every other scrim in the app.
+   *
+   * No `backdrop-filter`. One was here at `blur(1px)`, which is imperceptible against the tint
+   * already doing the separating and asks the compositor to snapshot and blur the whole viewport
+   * — including the canvas — on every frame the page repaints. The tint is the whole effect.
+   */
+  background: color-mix(in srgb, var(--canvas) 48%, transparent);
+}
+
+/* --- the boxes ------------------------------------------------------------ */
+
+.smap__box {
+  position: absolute;
+  pointer-events: none;
+  border: 1.5px solid var(--accent);
+  border-radius: 7px;
+  /* The control shows through: a filled box would be a box where a button used to be. */
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--canvas) 70%, transparent);
+}
+
+/*
+ * A region — the canvas, the inspector — is drawn as an outline and nothing else. At the size of
+ * half the window, the tint that reads as a highlight on a 28px button reads as a colour cast
+ * over the app, and the blur under it is already saying "this is the layer you are reading".
+ */
+.smap__box[data-region] {
+  background: none;
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+/* --- the leaders ---------------------------------------------------------- */
+
+.smap__leaders {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.smap__leaders polyline {
+  fill: none;
+  /* A property, not a presentation attribute: an attribute does not resolve `var()`, which is the
+     trap both static pages record — a stroke that silently comes out black. */
+  stroke: var(--accent);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.75;
+}
+
+/* --- the labels ----------------------------------------------------------- */
+
+/*
+ * `width` is set inline from `LABEL_W`, which is the one number the placement is told. It is not
+ * repeated here: the placement and the drawing disagreeing by a few pixels is a label that
+ * overlaps its neighbour on screen and does not in the arithmetic, which is the class of bug that
+ * only a browser can show.
+ */
+.smap__label {
+  position: absolute;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  box-shadow: 0 3px 12px rgb(0 0 0 / 22%);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.smap__label strong {
+  font-size: 11.5px;
+  color: var(--accent);
+  letter-spacing: 0.01em;
+}
+
+.smap__label span {
+  color: var(--text-muted);
+}
+
+/* --- hover: one spot at a time -------------------------------------------- */
+
+/*
+ * **After the three blocks above, and that is load-bearing.** `.smap__label` sets
+ * `pointer-events: none` at the same specificity this section overrides it with, so written
+ * higher up the file the labels would keep the pointer they are being handed here — half the
+ * hover targets silently inert, the boxes still working, and nothing in a jsdom test able to see
+ * it (no styles are computed there). Found by reading the cascade, not by running it.
+ */
+
+/*
+ * The stage is `pointer-events: none` so a click anywhere lands on the scrim and dismisses; these
+ * two opt back in, which changes nothing about that — `useDismissOnOutside` listens on `window`
+ * in the capture phase and asks whether the target is inside the *panel*, so a press on a box or
+ * a label still closes.
+ *
+ * A region box is deliberately left out. The canvas's is most of the window and the inspector's
+ * a whole column, so making them hover targets would mean the pointer is always on something and
+ * every other spot spends its life dimmed. Their labels are the way in.
+ */
+.smap__box:not([data-region]),
+.smap__label {
+  pointer-events: auto;
+}
+
+/*
+ * Everything not in the hovered triple recedes. `opacity` rather than a colour swap, because the
+ * three parts are drawn in three different ways — a bordered box, an SVG stroke, a filled panel —
+ * and one property is the only thing that dims all three by the same amount.
+ */
+.smap[data-hover] .smap__box:not([data-hot]),
+.smap[data-hover] .smap__label:not([data-hot]),
+.smap[data-hover] .smap__leaders polyline:not([data-hot]) {
+  opacity: 0.28;
+}
+
+.smap__box,
+.smap__label,
+.smap__leaders polyline {
+  transition:
+    opacity 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.smap__box[data-hot] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--canvas) 70%, transparent),
+    0 0 0 6px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+/* A region draws no tint at any time — at half the window it reads as a colour cast rather than
+   as a highlight — so its hover is the border going solid. */
+.smap__box[data-region][data-hot] {
+  border-style: solid;
+  border-color: var(--accent);
+  background: none;
+}
+
+.smap__label[data-hot] {
+  border-color: var(--accent);
+  box-shadow:
+    0 3px 12px rgb(0 0 0 / 22%),
+    0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.smap__leaders polyline[data-hot] {
+  opacity: 1;
+  stroke-width: 2;
+}
+
+/*
+ * The pointer is what drives this, so the whole effect is off where there is none. Not a
+ * degradation: every label is already joined to its box by a drawn leader, which is the figure's
+ * actual claim — the hover is a way of reading it faster, not the only way of reading it.
+ */
+@media (hover: none) {
+  .smap__box:not([data-region]),
+  .smap__label {
+    pointer-events: none;
+  }
+}
+
+/* --- the panel ------------------------------------------------------------ */
+
+.smap__panel {
+  position: absolute;
+  left: 50%;
+  bottom: 44px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 12px 10px 16px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 30%);
+}
+
+.smap__panelText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.smap__panelText span {
+  color: var(--text-muted);
+}
+
+/* --- the narrow shell's list ---------------------------------------------- */
+
+.smap--list .smap__scrim {
+  background: color-mix(in srgb, var(--canvas) 88%, transparent);
+}
+
+/*
+ * Its own sheet rather than `.overlay__panel`: this one is inset on all four sides and scrolls a
+ * list, where `.overlay` centres a fixed-width dialog. The dismissal is the shared hook's either
+ * way, which is the half that was worth sharing.
+ */
+.smap__sheet {
+  position: absolute;
+  inset: 12px;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 34%);
+  overflow: hidden;
+}
+
+.smap__lede {
+  margin: 0;
+  padding: 10px 14px 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.smap__rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 8px 14px 12px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.smap__rows li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.smap__rows strong {
+  color: var(--accent);
+}
+
+.smap__rows span {
+  color: var(--text-muted);
+}
+
+.smap__sheetFoot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}

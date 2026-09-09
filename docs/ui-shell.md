@@ -859,9 +859,159 @@ implementation while only a tour that *builds* wanted one; the Guided Tour spans
 merely found, so the arithmetic moved and `Builder.span` is now the same call with the ids looked
 up by node type.
 
+## The Screen Map: the guide with no steps
+
+The fourth entry in `TOURS`, and the only one that is not a driver.js tour. It draws a box round
+every control on the shell, hangs a label with one sentence off each, and waits. `ScreenMap.tsx`
+is the lifecycle and the measurement, `mapSpots.ts` the table of what is labelled,
+`mapLayout.ts` the arithmetic, `screenMap.css` the drawing, `probe:screen-map` the browser half.
+
+**It shares three things rather than re-deriving them, and one of those was a chunk regression.**
+The borrow/restore of the inspector and the selection, and the graph opened onto an empty canvas,
+are `guideState.ts`' — lifted out of `tour.ts` when the map arrived, because `tour.ts`'s first
+import is driver.js and the map is mounted eagerly, so it could not reach them and wrote its own.
+That included the announcement sentence, which briefly existed three times in two wordings. The
+`data-tour` vocabulary is `anchors.ts`' for the same reason and a sharper one: `byTour` lived in
+`steps.ts` beside the Guided Tour's prose, and `mapSpots.ts` importing it pulled that whole module
+into the main chunk — verified against a real build, the Guided Tour's step bodies were in
+`main-*.js` while `build.ts`'s and `dashboard.ts`'s were not. Splitting the vocabulary out put
+them back and cost the entry chunk a string tuple and two lines. Dismissal is
+`useDismissOnOutside`'s, which gained an `escapeCapture` option: the canvas binds Escape too, and
+two bubble-phase listeners are resolved by mount order, which is not a thing a component should
+have to reason about.
+
+**The question it answers is not the question a tour answers.** A tour walks: each stop hides
+the rest of the app behind a scrim and says one thing, which is the right shape for teaching a
+sequence and the wrong one for *what is all of this*. Somebody looking at the editor for the
+first time has no sequence in mind — they have eleven buttons in front of them. So there is no
+next, no progress counter, and nothing to abandon half way through, which is why closing it is
+what earns the checkmark: everything it has to say is on screen the moment it opens.
+
+**It is `nodeguide/anatomy.ts` pointed at the shell instead of at a card**, and that is also the
+division of labour between them — the node guide's figure explains a *node*, this explains
+everything round one, and the canvas spot's own sentence is what sends a reader from here to
+there. But the figure it resembles is *drawn*: eighteen labels placed by hand against a world
+940 × 552 that never stretches, which is the only way a leader pointing at a 14px button can be
+authored. This labels the running app at whatever width the window is, with a toolbar that folds
+two thirds of itself into `⋯` below 720px, so **the placement has to be computed** — and that is
+the one part of the feature that can be wrong without anybody noticing, because a label two
+pixels over the button it names renders perfectly.
+
+**A spot that is not on screen is not on the map**, and that is the feature rather than a
+degradation: the inspector is labelled when it is open, a control folded into `⋯` has no box
+because it has no place. Every finder may return nothing and several return more than one
+element — `New`, `Open` and `Save` are three menus and one idea, so they share a box.
+`screenMap.test.tsx` mounts the real `App` and asserts every finder resolves, which is what
+stands between a renamed anchor and a map with a hole in it: nothing in the app fails when a spot
+stops matching, it simply stops labelling that control, once, for whoever opens it next. Same
+failure `tour.test.tsx` exists for. One spot is a class selector rather than an anchor and only
+one — `.react-flow__controls` is React Flow's own markup, and anchoring it would mean wrapping a
+library element.
+
+**Two passes, because a label's height is its text.** The boxes are measured — that is the whole
+point — and so are the labels, whose width is fixed and whose one sentence wraps to two lines or
+three depending on the words in it. So: find the spots and take their rects, render the labels
+unplaced and invisible at their real width and measure them, then place and draw. One extra
+commit for something that appears once, against estimating a height from a character count,
+which is the kind of number that is right on the machine it was tuned on.
+
+There is a third ordering trap under that, and it shipped broken first: **React runs layout
+effects child-first**, so a stage mounted in the same commit as the borrow measures *before* the
+inspector has been opened — its spot finds nothing and the map comes up one label short with
+nothing to say so. The count was 15 against 16 and every spot resolved when asked afterwards.
+`ScreenMap` holds the stage back for one commit, and a `setState` from a layout effect
+re-renders before paint, so nothing flashes.
+
+**What it borrows and what it does not hand back.** The inspector, so the panel has a box; a
+selection, so the panel has something in it; and a graph on an empty canvas, so the canvas is not
+an empty rectangle labelled "the canvas". The first two come back — they are a persisted
+preference and the reader's own selection, which is `tour.ts`'s argument exactly — and the graph
+does not, for `ensureGraph`'s reason: the map says it opened one, and taking it away would remove
+the thing somebody has just been shown how to read. **Borrow before prepare**, the same ordering
+`drive` records, or the restore faithfully puts back what the map itself just wrote.
+
+**`isTourActive()` counts it, and it needs that more than a tour does.** driver holds its
+spotlit element by reference and re-reads its rect, so a shell that re-lays itself out under a
+tour recovers on the next `refresh`. The map has measured every box once and drawn a leader to
+each, and `f`, `i` and `d` each move or unmount half of what it is pointing at with no event it
+could learn from. Asked of the store rather than mirrored into a flag in `tourState`.
+
+**Hovering either end lights the triple.** Sixteen labels and sixteen leaders is a figure a
+reader has to *trace*, and the question they are asking at any moment is which label goes with
+which box — so the leader stops being decoration and becomes the answer: the box, its leader and
+its label go to full strength and everything else drops to 0.28. The three parts are three
+elements in three containers, tied together only by `data-spot`, which is what the tests assert
+against; a version that lit the right *number* of things while pairing them wrongly would look
+correct in a screenshot.
+
+Three things about it are not obvious. **A region is lit from its label only** — the canvas's box
+is most of the window and the inspector's a whole column, so making them hover targets would mean
+the pointer is always on something and every other spot would spend its life dimmed; the CSS
+withholds the pointer from them. **The rule has to sit below `.smap__label`'s own**, which sets
+`pointer-events: none` at equal specificity — written higher up the file, half the hover targets
+are silently inert while the boxes still work, and jsdom computes no styles, so nothing in the
+suite could see it. That is why `probe:screen-map` reads the resolved `opacity` through
+`getComputedStyle` rather than trusting the attribute: it makes the check one about the cascade
+rather than about the JSX. And the whole effect is **off under `@media (hover: none)`**, which
+costs nothing — every label is already joined to its box by a drawn leader, and the hover only
+makes that faster to read.
+
+### Where the labels go
+
+Every label is placed by **first free candidate**: a spot proposes positions in its own preferred
+direction and each is tested against everything already placed — the other labels, and the boxes
+of the controls themselves. That is what makes the sides compose; the inspector's label and the
+toolbar's are placed by different rules and checked against one list, so the case that would look
+broken cannot arise while any candidate is free. Authoring order in `MAP_SPOTS` is priority
+order.
+
+Four things about the candidate sequence were measured rather than reasoned about, and three of
+them were wrong first.
+
+- **A row is filled before a row is dropped.** Eleven toolbar buttons are about 34px apart and
+  their labels are 176px wide, so a placer that only moves *down* puts one label per row: the
+  band came out **567px deep on a 1000px window**, most of it empty screen either side of a
+  single column. Sliding sideways first — `SLIDE`, up to 0.6 of a label's width each way — packs
+  the same eleven into two or three rows, and the elbow leader is what keeps each attached to its
+  button. A slide of a whole width is a leader that crosses its neighbour's, which is what makes
+  a figure like this unreadable.
+- **A "next row" is a label's own height down, not `STEP`.** At 24px, five of every six rows were
+  positions the collision test threw away, and a spot could run out of candidates and land on its
+  neighbour with the screen below it empty.
+- **The band is the row, not the side.** One band per side is the obvious rule and is worse: it
+  reads "the extreme box on this side" as "the row", so a single `below` spot elsewhere on the
+  screen drags every other label down to its level. `bandFor` groups boxes that are level within
+  `BAND_TOL`; `mapLayout.test.ts` still carries the spot that showed it.
+- **The lattice can be full while the window is not.** On a 1024 × 720 shell sixteen labels
+  exhausted the rows under the toolbar and three landed on each other with the left third of the
+  canvas empty. `sweep` appends every position the window has room for, nearest the box first, and
+  when even that is full the fallback is the position that collides *least* — not the last one
+  tried, which on a distance-sorted sweep is the opposite corner of the window from the control
+  being named.
+
+Nothing is ever dropped. A map that silently stopped labelling a control would contradict its own
+claim, and an overlap is at least visible.
+
+`mapLayout.test.ts` asks the arithmetic the properties — no two labels overlapping, no label over
+a control, nothing off the window, every leader landing on its own label — over rects it invents,
+and each of those tests was checked by mutation. `pnpm probe:screen-map` asks the same questions
+of the real screen at three window sizes and after a resize, plus the two only a browser can
+answer: whether each box is really *over* the control it names (`elementFromPoint` at its own
+centre, with the scrim's, the boxes' and the labels' pointer events all lifted — a rect is
+reported happily for an element some ancestor has clipped away) and how deep the band actually
+gets. A real pointer then drives the hover, which is six more properties. Readings at the time of writing:
+the toolbar's band ends at **545px of 1000**, 445 of 800, 437 of 720.
+
+**Below `NARROW_QUERY` it stands down to a list.** Not the map with smaller labels: at 412px two
+thirds of what it names is inside `⋯` and has no box, so more than half the boxes would be
+missing — and a map with holes in it is worse than a list, because the holes are invisible. The
+list carries every spot, including the ones not on screen at that width, which is the one thing
+it can do that the map cannot. Same answer `nodeguide.css` gives the anatomy figure below its own
+breakpoint, for the same reason.
+
 ## The first-run guides dialog
 
-What a first-time visitor actually opens on, in front of the start page: three rows, one per
+What a first-time visitor actually opens on, in front of the start page: four rows, one per
 entry in `TOURS`, with the first one badged. `GuidesDialog.tsx`, `launchStage.ts`, the guides
 half of the store slice beside `startPageOpen`, and the `.guides*` block in `editor.css`.
 
@@ -898,7 +1048,9 @@ tour borrowed is back before a modal goes over the canvas again.
 **A checkmark means finished, not started.** `drive` sets `completed` in the one place that can
 tell the difference — `go` walking off the end of the step list, which is what both the Done
 button and a Right arrow on the last step do. The ×, Escape and any other `destroy` reach
-`onDestroyed` too and none of them is a guide somebody read. An abandoned guide still returns to
+`onDestroyed` too and none of them is a guide somebody read. The Screen Map ticks however it was
+closed, which is the same rule and not an exception to it: it has no steps, so there is nothing
+to abandon half way through — see its own section above. An abandoned guide still returns to
 the dialog, unticked, which is the honest reading and leaves it inviting rather than crossed off.
 Completions are kept in `coda.guidesDone.v1` as ids, so a guide added later starts unticked
 instead of arriving already marked; nothing validates them against `TOURS`, because the dialog
@@ -911,7 +1063,7 @@ over the 3:1 floor for a graphical mark, under the 4.5:1 one for 11px prose — 
 glyph, "Completed" takes `--text-secondary`, and the state is carried by the glyph swapping from
 a step number to a tick rather than by hue.
 
-**Keyboard focus lands on the first guide not yet taken**, which is the Basics on the first
+**Keyboard focus lands on the first guide not yet taken**, which is the Screen Map on the first
 visit and the next one along on the way back from it, so Enter always does what the dialog is
 currently suggesting.
 

@@ -4,7 +4,7 @@
  * Every other tile on that page derives its picture from something the app already draws:
  * `nodeGlyph` for a graph's terminal viewer, `datasetGlyph` for a family. That rule exists so a
  * rail which *grows* never ships a blank tile — a workflow saved next year gets a correct picture
- * for free. This rail cannot grow on its own: it is the wizard, three tours from a fixed table
+ * for free. This rail cannot grow on its own: it is the wizard, four guides from a fixed table
  * and one Zoo, and none of them is a node or a dataset, so there is nothing to derive from. A
  * door added here arrives with its own drawing or it does not arrive.
  *
@@ -87,6 +87,21 @@ const GLYPHS: Record<string, ReactNode> = {
       <circle cx={8.6} cy={7.4} r={1.3} />
       <circle cx={14.4} cy={7.4} r={1.3} />
       <path d="M9.9 7.4 H13.1" />
+    </>
+  ),
+  /*
+   * The screen itself, with two callouts hooked into it from outside — which is exactly what the
+   * Screen Map draws, a box round a control and a label on a leader. The whiskers crossing the
+   * frame's edge are what keep the silhouette off the Dashboard's divided rectangle at 44px; a
+   * plain frame would be that shape with a line missing.
+   */
+  'tour:map': (
+    <>
+      <rect x={4.5} y={6.4} width={15} height={11.2} rx={1.6} />
+      <path d="M2 3.2 H7.6 V9.2" />
+      <circle cx={7.6} cy={9.2} r={1.2} />
+      <path d="M22 20.8 H16.4 V14.8" />
+      <circle cx={16.4} cy={14.8} r={1.2} />
     </>
   ),
   /*

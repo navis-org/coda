@@ -14,6 +14,15 @@ export interface DismissOptions {
   /** Also close on Escape. The context menus want it; the dropdowns leave it to their button. */
   onEscape?: boolean
   /**
+   * Take Escape on the capture phase, for a surface that is on top of everything.
+   *
+   * The canvas binds Escape too (it clears the open menus), and two bubble-phase listeners are
+   * resolved by registration order — which is mount order, which is not a thing a component
+   * should have to reason about. A full-screen overlay is unambiguously the one that should
+   * answer, so it says so. Off by default: a popover inside the page has no such claim.
+   */
+  escapeCapture?: boolean
+  /**
    * Close on a pointer-down outside the ref. On by default, and turned off by the one dialog
    * where dismissing is destructive: the share gate asks whether to replace the canvas, and a
    * stray click on the backdrop is not an answer to that.
@@ -26,7 +35,12 @@ export interface DismissOptions {
 export function useDismissOnOutside(
   ref: RefObject<HTMLElement | null>,
   onClose: () => void,
-  { onEscape = false, outside = true, enabled = true }: DismissOptions = {},
+  {
+    onEscape = false,
+    escapeCapture = false,
+    outside = true,
+    enabled = true,
+  }: DismissOptions = {},
 ): void {
   useEffect(() => {
     if (!enabled) return
@@ -37,10 +51,10 @@ export function useDismissOnOutside(
       if (event.key === 'Escape') onClose()
     }
     if (outside) window.addEventListener('pointerdown', onPointerDown, true)
-    if (onEscape) window.addEventListener('keydown', onKey)
+    if (onEscape) window.addEventListener('keydown', onKey, escapeCapture)
     return () => {
       if (outside) window.removeEventListener('pointerdown', onPointerDown, true)
-      if (onEscape) window.removeEventListener('keydown', onKey)
+      if (onEscape) window.removeEventListener('keydown', onKey, escapeCapture)
     }
-  }, [ref, onClose, onEscape, outside, enabled])
+  }, [ref, onClose, onEscape, escapeCapture, outside, enabled])
 }

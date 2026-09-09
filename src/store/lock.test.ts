@@ -293,6 +293,14 @@ describe('every store action is on one side of the lock', () => {
     'closeGuides',
     'beginGuide',
     'finishGuide',
+    // The Screen Map is the fourth guide and the only one that is not a driver.js tour, so its
+    // open and close are the store's rather than `tour.ts`'. Live for the same reason as the
+    // three above: it reads the shell and labels it, and it puts back the panel and the
+    // selection it borrowed. The graph it opens onto an empty canvas goes through `loadGraph`,
+    // which is LIVE for its own reason a few lines down — a document load is not a canvas
+    // gesture — so the map behaves the same way whether the lock is on or not.
+    'openScreenMap',
+    'closeScreenMap',
     // The canvas's **+** menu. Live, because unfolding a menu is not an edit — and the menu
     // closes itself when the lock arrives, so on a frozen canvas this only ever runs to shut it.
     'setAddMenu',

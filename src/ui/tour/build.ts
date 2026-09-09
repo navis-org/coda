@@ -50,7 +50,7 @@ import type { NodeCategory } from '../../core/node'
 import { useGraphStore } from '../../store/graphStore'
 import { hasNode, makeBuilder, ranClean, runIfStale } from './builder'
 import type { TourSpec, TourStep } from './steps'
-import { byTour } from './steps'
+import { byTour } from './anchors'
 
 /**
  * The add menu's band for one category, or null.

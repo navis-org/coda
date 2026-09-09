@@ -37,7 +37,8 @@ import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 import { BUILD_SPEC, FIND, LEARN_TO_BUILD, PARAMS } from './build'
 import { BUILD_A_DASHBOARD, DASHBOARD_SPEC } from './dashboard'
-import { GUIDED_TOUR, TOUR_ANCHORS, byTour } from './steps'
+import { TOUR_ANCHORS, byTour } from './anchors'
+import { GUIDED_TOUR } from './steps'
 
 beforeAll(() => {
   installJsdomStubs({ width: 360, height: 220 })

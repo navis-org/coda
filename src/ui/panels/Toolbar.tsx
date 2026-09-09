@@ -34,7 +34,7 @@ import {
 } from '../notify'
 import { EdgeSetPanel } from './EdgeSetPanel'
 import { SourcesPanel } from './SourcesPanel'
-import type { TourAnchor } from '../tour/steps'
+import type { TourAnchor } from '../tour/anchors'
 import { TOURS, startTour } from '../tour/tourState'
 import { restoreHints, useDismissedHints } from '../hints'
 import { shortcutKeys } from '../shortcuts'
@@ -123,6 +123,7 @@ export function Toolbar() {
       label: 'Undo',
       blurb: 'Step back through your edits.',
       face: '↶',
+      tour: 'undo',
       title: locked ? lockedTitle('Undo') : `Undo (${shortcutKeys('undo')})`,
       disabled: locked || !canUndo,
       onClick: undo,
@@ -131,6 +132,7 @@ export function Toolbar() {
       label: 'Redo',
       blurb: 'Step forward again.',
       face: '↷',
+      tour: 'redo',
       title: locked ? lockedTitle('Redo') : `Redo (${shortcutKeys('redo')})`,
       disabled: locked || !canRedo,
       onClick: redo,
@@ -205,6 +207,7 @@ export function Toolbar() {
     fullscreen: {
       label: fullscreen ? 'Leave fullscreen' : 'Enter fullscreen',
       face: fullscreen ? '⤡' : '⛶',
+      tour: 'fullscreen',
       title: fullscreen
         ? `Leave fullscreen (${shortcutKeys('fullscreen')})`
         : `Fill the screen, hiding the browser's own tabs and address bar (${shortcutKeys(
@@ -222,6 +225,7 @@ export function Toolbar() {
     },
     theme: {
       label: 'Theme',
+      tour: 'theme',
       blurb: `Currently ${theme}. Cycles dark, light, system.`,
       face: theme === 'dark' ? '◐' : theme === 'light' ? '◑' : '◒',
       title: `Theme: ${theme}`,
@@ -257,7 +261,7 @@ export function Toolbar() {
        * never to need it, and folding a dozen dataset rows into three took this menu from about
        * twenty rows to six. The two facts are the same change.
        */}
-      <Dropdown label="New" flyouts>
+      <Dropdown label="New" tour="new" flyouts>
         {(close) => (
           <NewMenu
             onEmpty={() => {
@@ -284,10 +288,10 @@ export function Toolbar() {
        * file, and the browser's own shelf. Reading the shelf is deferred to the moment a menu
        * opens — someone who never uses it never touches IndexedDB.
        */}
-      <Dropdown label="Open" onOpen={() => void refreshLibrary()}>
+      <Dropdown label="Open" tour="open" onOpen={() => void refreshLibrary()}>
         {(close) => <OpenMenu close={close} />}
       </Dropdown>
-      <Dropdown label="Save" onOpen={() => void refreshLibrary()}>
+      <Dropdown label="Save" tour="save" onOpen={() => void refreshLibrary()}>
         {(close) => <SaveMenu close={close} />}
       </Dropdown>
 
@@ -684,7 +688,8 @@ interface ToolbarAction {
   title: string
   /** `btn--icon`, for the ones drawing an SVG rather than a glyph. */
   icon?: boolean
-  /** `data-tour` name, for a control the Guided Tour points at. See `tour/steps.ts`. */
+  /** `data-tour` name, for a control a guide points at or the Screen Map labels. See
+   * `tour/steps.ts`. */
   tour?: TourAnchor
   pressed?: boolean
   disabled?: boolean
@@ -757,6 +762,7 @@ function GraphNameField({
   return (
     <input
       className="toolbar__name"
+      data-tour="workflow-name"
       value={value}
       placeholder="Untitled graph"
       onChange={(e) => onChange(e.target.value)}

@@ -11,7 +11,7 @@ export function StatusBar() {
   const staleCount = useStaleCount()
 
   return (
-    <div className="statusbar">
+    <div className="statusbar" data-tour="statusbar">
       <span>
         {plural(nodeCount, 'node')} · {plural(edgeCount, 'link')}
         {selection > 0 && ` · ${selection} selected`}

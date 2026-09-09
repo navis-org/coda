@@ -56,7 +56,7 @@ import { getToken } from '../../data/neuprint/credentials'
 import { useGraphStore } from '../../store/graphStore'
 import { fan, makeBuilder, ranClean, runIfStale } from './builder'
 import type { TourSpec, TourStep } from './steps'
-import { byTour } from './steps'
+import { byTour } from './anchors'
 
 const DATASET = 'dataset.malecns'
 const EXPLORE = 'neuron.explore'

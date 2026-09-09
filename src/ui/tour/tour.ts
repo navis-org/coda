@@ -46,28 +46,13 @@ import 'driver.js/dist/driver.css'
 import './tour.css'
 
 import { useGraphStore } from '../../store/graphStore'
-import { demoWorkflow } from '../../wizard/build'
 import { BUILD_SPEC } from './build'
 import { DASHBOARD_SPEC } from './dashboard'
 import type { TourSpec, TourStep } from './steps'
 import { GUIDED_SPEC } from './steps'
-import type { TourId } from './tourState'
+import { borrow, ensureGraph, restore } from './guideState'
+import type { DriverTourId } from './tourState'
 import { setTourHandle } from './tourState'
-
-/**
- * What the tour opens on an empty canvas.
- *
- * A wizard workflow on the synthetic dataset, so a tour taken before any dataset is connected
- * still has cards, sockets, a wire and a run state to point at, and reaches no network doing it.
- * A tour of an empty canvas would spend a third of its stops explaining chrome that has nothing
- * to act on.
- *
- * It used to be a bundled example. The examples are gone — the wizard replaced them — and this is
- * the honest replacement rather than a fixture kept alive for the tour: the graph the tour points
- * at is one a reader can produce for themselves from four answers, which is the thing the tour is
- * ultimately teaching.
- */
-const fallbackGraph = () => demoWorkflow('partners')
 
 /**
  * How long a step waits for an element its `before` is bringing into existence.
@@ -88,45 +73,6 @@ const WAIT_MS = 600
  * between 0 ms and 150 ms.
  */
 const POLL_MS = 150
-
-/** State the tour changes for its own purposes and hands back at the end. */
-interface Borrowed {
-  inspector: boolean
-  selection: string[]
-  /**
-   * Auto-run, which "Learn to Build" has to switch off to be able to teach anything about Run.
-   *
-   * With it on, every edit re-runs the graph, so the stale count is permanently zero — and the
-   * Run button is `disabled` at exactly that. The step that says "your turn: press Run" was
-   * pointing at a control that could not be pressed, for anybody who had ever ticked the box.
-   * Like the inspector, it is a persisted preference (`coda.autorun.v1`) and a tour is not a
-   * reason to have changed it, so it comes back.
-   */
-  autoRun: boolean
-}
-
-function borrow(): Borrowed {
-  const state = useGraphStore.getState()
-  return {
-    inspector: state.panels.inspector,
-    selection: state.selection,
-    autoRun: state.autoRun,
-  }
-}
-
-function restore(held: Borrowed, selection: boolean): void {
-  const state = useGraphStore.getState()
-  if (state.panels.inspector !== held.inspector) state.togglePanel('inspector')
-  if (state.autoRun !== held.autoRun) state.setAutoRun(held.autoRun)
-  if (!selection) return
-  // Compared by content, not identity: `setSelection` mints a fresh array, so the snapshot is
-  // never the same object as what is in the store by the time we get back here.
-  const current = state.selection
-  const same =
-    current.length === held.selection.length &&
-    current.every((id, i) => id === held.selection[i])
-  if (!same) state.setSelection(held.selection)
-}
 
 /**
  * Mark the spotlit element live or inert, in a way React will not undo.
@@ -201,20 +147,7 @@ function toDriveStep(step: TourStep, index: number, total: number): DriveStep {
   }
 }
 
-/**
- * Put a graph on the canvas if there is none, and say so if we did.
- *
- * Returns the sentence to append to the welcome step, or nothing. The tour announcing its own
- * side effect in its first paragraph is the whole of the consent here: it is a mutation, it is
- * only ever made to an empty canvas, and it is undoable by the ordinary means.
- */
-function ensureGraph(): string {
-  if (useGraphStore.getState().graph.nodes.length > 0) return ''
-  useGraphStore.getState().loadGraph(fallbackGraph())
-  return ' The canvas was empty, so a small workflow has been opened to point at.'
-}
-
-async function drive(id: TourId, spec: TourSpec): Promise<void> {
+async function drive(id: DriverTourId, spec: TourSpec): Promise<void> {
   /*
    * **Before `prepare`, and that ordering is the whole of whether `restore` works.**
    *
@@ -393,13 +326,17 @@ async function drive(id: TourId, spec: TourSpec): Promise<void> {
  * of the Guided Tour's preparation that has to live in this module — it is the only thing that
  * reaches for `FALLBACK_EXAMPLE`. A table plus one exported function, rather than a wrapper each
  * and a ternary in `startTour`: a third tour is then one entry.
+ *
+ * `DriverTourId` because the fourth guide is not a tour: the Screen Map has no steps and never
+ * loads this module — `startTour` answers it before the `import()`. A missing spec for a real
+ * tour is still a compile error, which is what the `Record` is for.
  */
-const SPECS: Record<TourId, TourSpec> = {
+const SPECS: Record<DriverTourId, TourSpec> = {
   guided: { ...GUIDED_SPEC, prepare: ensureGraph },
   build: BUILD_SPEC,
   dashboard: DASHBOARD_SPEC,
 }
 
-export async function runTour(id: TourId): Promise<void> {
+export async function runTour(id: DriverTourId): Promise<void> {
   await drive(id, SPECS[id])
 }

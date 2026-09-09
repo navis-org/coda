@@ -24,6 +24,7 @@ import { Toolbar } from './ui/panels/Toolbar'
 import { ViewerDock } from './ui/panels/ViewerDock'
 import { GroupPeek } from './ui/panels/GroupPeek'
 import { ViewerOverlay } from './ui/panels/ViewerOverlay'
+import { ScreenMap } from './ui/tour/ScreenMap'
 import { useNarrowShell } from './ui/smallScreen'
 
 export function App() {
@@ -127,6 +128,14 @@ export function App() {
        * the more useful thing to be looking at on the visit where it can happen.
        */}
       <GuidesDialog />
+      {/*
+       * The Screen Map, above every dialog it can be launched from and below the small-screen
+       * notice, which is a claim that none of this fits. Mounted here rather than lazily: it has
+       * no dependency of its own — the whole reason the tours are behind an `import()` is
+       * driver.js — and a guide that arrives a frame after the click is a guide that flashes an
+       * unlabelled shell at the reader first.
+       */}
+      <ScreenMap />
       {/*
        * Above the start page, which is one of the three surfaces that open it — `openWizard`
        * closes that page on the way in, so the two are never both up, and the ordering only

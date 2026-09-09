@@ -538,6 +538,20 @@ export interface GraphState {
    */
   finishGuide(id: TourId, completed: boolean): void
   /**
+   * Whether the Screen Map is up — the guide with no steps, which labels the shell in place.
+   *
+   * A plain boolean owned by the store for `zooOpen`'s reason: four surfaces start it (the
+   * guides dialog, the `?` menu, the palette and the welcome page's rail) and none of them is an
+   * ancestor of where it mounts. It is the one guide that is not a driver.js tour, so `startTour`
+   * branches on its id rather than importing anything — see `tourState.ts`.
+   *
+   * Read by `isTourActive`, which is what keeps `f`, `i` and `d` from re-laying-out the shell
+   * underneath a map whose boxes were measured a moment ago.
+   */
+  screenMapOpen: boolean
+  openScreenMap(): void
+  closeScreenMap(): void
+  /**
    * The canvas's **+** menu: whether the rail is unfolded, and which category's band is out.
    *
    * Here rather than in `AddMenu`'s own `useState`, for `sourcesOpen`'s two reasons exactly.
@@ -2080,6 +2094,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
         ...(returning ? { startPageOpen: true } : {}),
       })
     },
+
+    screenMapOpen: false,
+    openScreenMap: () => set({ screenMapOpen: true }),
+    closeScreenMap: () => set({ screenMapOpen: false }),
 
     zooOpen: false,
     // Closes the start page on the way in: both are full-screen modals, and the New menu

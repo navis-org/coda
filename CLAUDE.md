@@ -519,6 +519,43 @@ Area-specific — the rule, then the doc that holds why:
   **absent means nobody judged** — minnie65 has no typing, BANC's names come from its own pivot.
   See [docs/wizard.md](docs/wizard.md), [docs/datasets.md](docs/datasets.md) and
   [docs/comparative.md](docs/comparative.md).
+- **The fourth guide has no steps, and its labels are placed rather than authored.** The Screen
+  Map boxes every control on the shell at once and hangs a one-sentence label off each — a tour
+  walks and this one *waits*, which is the right shape for "what is all of this" and the reason
+  closing it is what earns the checkmark: there is nothing to abandon half way through. It is
+  `nodeguide/anatomy.ts` pointed at the shell, and the difference is the whole engineering
+  problem: that figure places eighteen labels **by hand** against a world that never stretches,
+  this one labels the running app at every width, so the placement is computed and is the part
+  that can be wrong with nothing failing — a label two pixels over the button it names renders
+  perfectly. Hence `mapLayout.ts` is **pure over rects handed in** (jsdom lays out nothing, so a
+  component test could only assert a label exists) and `pnpm probe:screen-map` asks the same
+  properties of a real screen. Four measured findings, three of them wrong first: a row is
+  **filled sideways before it is dropped** (labels 176px wide on buttons 34px apart put one label
+  per row and a band **567px deep on a 1000px window**); a next row is a label's **own height**
+  down, not `STEP`, or five of six candidates are positions the collision test throws away; the
+  band is **the row, not the side** (`bandFor` — one band per side lets a lone `below` spot
+  elsewhere drag every label down to it); and the lattice **can be full while the window is not**,
+  so `sweep` appends every position there is room for, nearest first, and the last resort is the
+  position that collides *least* rather than the last one tried, which on a distance-sorted sweep
+  is the opposite corner. Nothing is ever dropped — a map that stopped labelling a control would
+  contradict its own claim. Three more: **a spot that is not on screen is not on the map**, which
+  is the feature (a control folded into `⋯` has no box), and `screenMap.test.tsx` mounting the
+  real `App` is what stands between a renamed anchor and a hole; **hovering either end of a leader
+  lights the triple** and dims the rest, which is what the leaders are *for* — tied by `data-spot`,
+  since lighting the right number of things while pairing them wrongly looks right in a
+  screenshot, with a **region lit from its label only** (a box the size of the window means the
+  pointer is always on something) and the rule placed **below `.smap__label`'s own**
+  `pointer-events`, which it overrides at equal specificity and which jsdom cannot see; **React runs layout effects
+  child-first**, so the stage is held back one commit or it measures before the borrowed inspector
+  exists — 15 boxes against 16, with every spot resolving when asked afterwards; and
+  `isTourActive()` counts it, needing the guard **more** than a tour does, since driver re-reads
+  its element's rect and this has measured every box once. Below `NARROW_QUERY` it stands down to
+  a **list**, `nodeguide.css`' answer to the same problem: a map with invisible holes in it is
+  worse than a list. What it must **not** do is re-derive what a guide already knows: `byTour` and
+  `TOUR_ANCHORS` are `anchors.ts`' because importing them from `steps.ts` put the Guided Tour's
+  whole step prose in the main chunk (verified against a build), and borrow/restore/`ensureGraph`
+  are `guideState.ts`' because `tour.ts` cannot be imported by anything outside the driver.js
+  `import()`. See [docs/ui-shell.md](docs/ui-shell.md).
 - **The launch sequence is one boolean and a stage, and the guides dialog is the first stop.**
   `startPageOpen` means the sequence is showing, `guidesOpen` that it is at its first stop, and
   `useLaunchStage` is the only place both are read — a second independent boolean would have taught

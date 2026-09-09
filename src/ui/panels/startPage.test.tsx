@@ -28,6 +28,7 @@ import { resetDocuments } from '../../test/storeReset'
 import { StartPage } from './StartPage'
 import { buildCommandItems } from './paletteItems'
 import { DOOR_CARDS, WIZARD_CARD, ZOO_CARD, datasetCards } from './startCards'
+import { doorGlyph } from './startGlyphs'
 import type * as TourState from '../tour/tourState'
 import { TOURS } from '../tour/tourState'
 
@@ -137,8 +138,8 @@ describe('Start page', () => {
     })
 
     /*
-     * The blurbs are `TOURS`' own. Three surfaces launch these — this rail, the `?` menu and the
-     * palette — and each used to carry its own wording, which had already drifted before the
+     * The blurbs are `TOURS`' own. Four surfaces launch these — this rail, the `?` menu, the
+     * palette and the first-visit dialog — and each used to carry its own wording, which had already drifted before the
      * table existed. A card that restates one is that drift starting again.
      */
     it('takes the tour copy from the one table, not a second spelling of it', () => {
@@ -196,6 +197,19 @@ describe('Start page', () => {
         if (art?.classList.contains('start-card__glyph')) {
           expect(art.childElementCount).toBeGreaterThan(0)
         }
+      }
+    })
+
+    /*
+     * `doorGlyph` falls back to the Zoo's lens for an id it does not know, which is the right
+     * behaviour — a blank tile is worse — and is therefore silent. A guide added to `TOURS`
+     * without a drawing gets the Zoo's picture on the same rail as the Zoo, which reads as two
+     * doors to one place. Identity is the check: the fallback is that exact object.
+     */
+    it('draws each guide its own picture rather than the fallback', () => {
+      const fallback = doorGlyph('no such door')
+      for (const tour of TOURS) {
+        expect(doorGlyph(`tour:${tour.id}`), tour.id).not.toBe(fallback)
       }
     })
 

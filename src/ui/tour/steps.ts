@@ -39,27 +39,7 @@ import type { NodeSize } from '../../layout/elkGraph'
 import { boundsOf } from '../../layout/place'
 import { useGraphStore } from '../../store/graphStore'
 import { requestFitSelected } from '../fitView'
-
-/**
- * Every `data-tour` value the app carries. A union rather than a bare string so a step naming
- * an anchor nobody publishes is a type error, not a silent no-op at runtime.
- */
-export const TOUR_ANCHORS = [
-  'canvas',
-  'add',
-  'run',
-  'autorun',
-  'inspector',
-  'inspector-panel',
-  'connections-panel',
-  'dashboard',
-  'connections',
-  'assistant',
-  'share',
-  'help',
-] as const
-
-export type TourAnchor = (typeof TOUR_ANCHORS)[number]
+import { byTour } from './anchors'
 
 /** One stop. `anchor` returning nothing means the popover is centred with no spotlight. */
 export interface TourStep {
@@ -156,11 +136,6 @@ export interface TourSpec {
    * select nodes that no longer exist.
    */
   restoreSelection: boolean
-}
-
-/** The element carrying a `data-tour` name, or null. */
-export function byTour(anchor: TourAnchor): Element | null {
-  return document.querySelector(`[data-tour="${anchor}"]`)
 }
 
 /**

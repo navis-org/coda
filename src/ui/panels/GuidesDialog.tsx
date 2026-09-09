@@ -17,14 +17,16 @@
  *
  * **A guide taken from here comes back here.** `beginGuide` takes the launch sequence off
  * screen, the guide runs over the canvas, and `finishGuide` puts it back — so somebody who
- * takes the Basics is offered the next one rather than being dropped on an empty canvas having
+ * takes the first is offered the next one rather than being dropped on an empty canvas having
  * to find it again. A guide started from the `?` menu ends where it always did; the difference
  * is `beginGuide` having run, not anything the tour knows.
  *
- * **A checkmark means finished, not started.** driver's Done button is the only thing that
- * earns one — see `finishGuide`'s caller in `tour.ts`. A guide abandoned halfway still returns
- * here, unticked, which is the honest reading of what happened and leaves it inviting rather
- * than crossed off.
+ * **A checkmark means finished, not started.** For the three tours, driver's Done button is the
+ * only thing that earns one — see `finishGuide`'s caller in `tour.ts` — and a guide abandoned
+ * halfway still returns here, unticked, which is the honest reading of what happened and leaves
+ * it inviting rather than crossed off. The Screen Map ticks however it was closed, and that is
+ * the same rule rather than an exception to it: it has no steps, so there is no half-way through
+ * to abandon. Everything it has to say is on screen the moment it opens.
  *
  * The list itself is `TOURS`, for the reason that table exists: four surfaces now launch these
  * and none of them writes its own name for one.
@@ -78,7 +80,7 @@ function Dialog() {
   const allDone = TOURS.every((tour) => completed.includes(tour.id))
   /*
    * Where the keyboard lands: the first guide not yet taken. On the first visit that is the
-   * Basics, which is the one being recommended; on the way back from it, it is the next one
+   * Screen Map, which is the one being recommended; on the way back from it, it is the next one
    * along — so Enter always does the thing the dialog is currently suggesting.
    */
   const next = TOURS.find((tour) => !completed.includes(tour.id))
@@ -116,8 +118,8 @@ function Dialog() {
         <div className="guides__body">
           <p className="guides__lede">
             Coda has {TOURS.length} short guides that run <strong>inside the editor</strong>,
-            pointing at things in place. If you only take one, take the first — it is about a
-            minute, and everything else assumes it.
+            pointing at things in place. If you only take one, take the first — it is twenty
+            seconds, and it names every control the other three talk about.
           </p>
 
           <ul className="guides__list">
