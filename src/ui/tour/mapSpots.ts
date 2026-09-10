@@ -46,8 +46,12 @@ export interface MapSpot {
   /**
    * The elements this box goes round, unioned. Empty or all-missing means the spot is not on
    * this screen and is simply left off the map.
+   *
+   * `root` is where to look: the document for the shell, whose spots ignore it and ask `byTour`,
+   * and a surface's own body for a node's map — see `MapStageProps.scope` for why a node's
+   * finders must not ask the document.
    */
-  find: () => readonly (Element | null | undefined)[]
+  find: (root: ParentNode) => readonly (Element | null | undefined)[]
   /** Two or three words. The sentence is in `note`. */
   label: string
   /** One sentence. Rendered as text, never as markup. */

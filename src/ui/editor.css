@@ -4158,6 +4158,12 @@ select.field {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+/* The screen map's button (`ViewerSurface`): a door glyph at the height of the header's text. */
+.overlay__glyph {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
 
 .overlay__rail {
   display: flex;

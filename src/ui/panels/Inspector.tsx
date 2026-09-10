@@ -130,7 +130,7 @@ export function Inspector() {
           <button
             type="button"
             className="btn btn--ghost inspector__help"
-            title={`What ${def.label} does, and what it assumes`}
+            title="Show help for this node."
             aria-label={`Help for ${def.label}`}
             onClick={() => openHelp(def.type)}
           >

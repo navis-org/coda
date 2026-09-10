@@ -41,10 +41,10 @@
 .smap__box {
   position: absolute;
   pointer-events: none;
-  border: 1.5px solid var(--accent);
+  border: 1.5px solid var(--guide-ink);
   border-radius: 7px;
   /* The control shows through: a filled box would be a box where a button used to be. */
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: color-mix(in srgb, var(--guide-ink) 10%, transparent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--canvas) 70%, transparent);
 }
 
@@ -56,7 +56,7 @@
 .smap__box[data-region] {
   background: none;
   border-style: dashed;
-  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  border-color: color-mix(in srgb, var(--guide-ink) 70%, transparent);
 }
 
 /* --- the leaders ---------------------------------------------------------- */
@@ -74,7 +74,7 @@
   fill: none;
   /* A property, not a presentation attribute: an attribute does not resolve `var()`, which is the
      trap both static pages record — a stroke that silently comes out black. */
-  stroke: var(--accent);
+  stroke: var(--guide-ink);
   stroke-width: 1.25;
   stroke-linejoin: round;
   stroke-linecap: round;
@@ -106,7 +106,7 @@
 
 .smap__label strong {
   font-size: 11.5px;
-  color: var(--accent);
+  color: var(--guide-ink);
   letter-spacing: 0.01em;
 }
 
@@ -160,26 +160,26 @@
 }
 
 .smap__box[data-hot] {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: var(--guide-ink);
+  background: color-mix(in srgb, var(--guide-ink) 20%, transparent);
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--canvas) 70%, transparent),
-    0 0 0 6px color-mix(in srgb, var(--accent) 42%, transparent);
+    0 0 0 6px color-mix(in srgb, var(--guide-ink) 42%, transparent);
 }
 
 /* A region draws no tint at any time — at half the window it reads as a colour cast rather than
    as a highlight — so its hover is the border going solid. */
 .smap__box[data-region][data-hot] {
   border-style: solid;
-  border-color: var(--accent);
+  border-color: var(--guide-ink);
   background: none;
 }
 
 .smap__label[data-hot] {
-  border-color: var(--accent);
+  border-color: var(--guide-ink);
   box-shadow:
     0 3px 12px rgb(0 0 0 / 22%),
-    0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+    0 0 0 2px color-mix(in srgb, var(--guide-ink) 40%, transparent);
 }
 
 .smap__leaders polyline[data-hot] {
@@ -280,7 +280,7 @@
 }
 
 .smap__rows strong {
-  color: var(--accent);
+  color: var(--guide-ink);
 }
 
 .smap__rows span {

@@ -1009,6 +1009,44 @@ list carries every spot, including the ones not on screen at that width, which i
 it can do that the map cannot. Same answer `nodeguide.css` gives the anatomy figure below its own
 breakpoint, for the same reason.
 
+### A node's own map
+
+The same stage pointed at one body. A body declaring `NodeBodyEntry.screenMap` gets a header
+button — the Guides entry's own glyph, so the two ways in look like one thing — on every full-size
+surface that draws it: the overlay, the dock and a dashboard cell, since a map is a question about
+the body rather than the frame, and the rule is the `?` button's. Explore Dataset is the first
+(`explore/exploreMap.ts`). `MapStage.tsx` is what both maps share — the measurement, the
+placement, the hover, the dismissal and the narrow list — and what each caller keeps is its
+lifecycle. The guide borrows the inspector and earns a checkmark; a node's map borrows nothing,
+because the surface is already showing what it labels, so it is not in `TOURS` and
+`isTourActive()` does not count it. It is a child of the surface, so the keys that move what it
+measured either leave the panel where it is or unmount the map along with it.
+
+Four things differ from the shell's map, and each is silent when wrong:
+
+- **The finders are scoped to the surface's body** (`MapStageProps.scope`). The card on the canvas
+  is the same `ExploreBody`, with the same search box and rows, so a finder asking the document
+  finds both and `union` draws one box round the pair — the width of the window. The finders
+  being right is not enough; the stage has to be *handed* the scope. jsdom reports one rect for
+  everything, so `exploreMap.test.tsx` pushes every element outside the overlay 4000px away and
+  asserts no box is that wide. Removing the scope fails that test and nothing else. The probe
+  asserts every box's centre hits something inside `.overlay`.
+- **It is portalled**, into `document.fullscreenElement ?? document.body` (`useHoverPanel`'s rule).
+  `.overlay` has a `backdrop-filter`, which makes it the containing block for every fixed
+  descendant, so a stage rendered in place would be offset by the overlay's origin while its rects
+  were measured against the viewport.
+- **Escape is the map's first.** The viewer's listener and the map's are both capture-phase on
+  `window`, where `stopPropagation` does not stop a sibling, so one press shut both. The viewer
+  now stands aside while `.smap` is up, exactly as it does for `.context-menu`; the test was
+  checked by mutation.
+- **A repeated control is boxed on the first row only** — the checkbox, the tile, and the name for
+  the right-click, since the menu names the neuron. Chips take the first row that has any, which
+  on the synthetic dataset is none, so the probe expects seven boxes there. The name is boxed by
+  its *children*: `.explore-row__name` is a flex row stretching to the first column, and a box
+  round it ran most of the way across the row. Classes rather than anchors, extending
+  `mapSpots.ts`' one exception: a row is repeated markup, and an anchor on it would be twenty-five
+  of one name.
+
 ## The first-run guides dialog
 
 What a first-time visitor actually opens on, in front of the start page: four rows, one per

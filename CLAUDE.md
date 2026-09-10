@@ -571,7 +571,13 @@ Area-specific — the rule, then the doc that holds why:
   `TOUR_ANCHORS` are `anchors.ts`' because importing them from `steps.ts` put the Guided Tour's
   whole step prose in the main chunk (verified against a build), and borrow/restore/`ensureGraph`
   are `guideState.ts`' because `tour.ts` cannot be imported by anything outside the driver.js
-  `import()`. See [docs/ui-shell.md](docs/ui-shell.md).
+  `import()`. **A node body can carry a map of its own** (`NodeBodyEntry.screenMap`, Explore first,
+  a header button wherever `?` is), on the same `MapStage`. Three traps are specific to it. Its
+  finders are **scoped to the surface's body**, because the card on the canvas draws the same
+  markup and a document-wide finder boxes both as one. It is **portalled**, because `.overlay`'s
+  `backdrop-filter` is the containing block for fixed children. And the viewer's capture-phase
+  Escape **stands aside while `.smap` is up**, since two capture listeners on `window` both fire.
+  See [docs/ui-shell.md](docs/ui-shell.md).
 - **The launch sequence is one boolean and a stage, and the guides dialog is the first stop.**
   `startPageOpen` means the sequence is showing, `guidesOpen` that it is at its first stop, and
   `useLaunchStage` is the only place both are read — a second independent boolean would have taught

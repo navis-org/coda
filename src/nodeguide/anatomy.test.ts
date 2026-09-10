@@ -159,7 +159,7 @@ describe('the chrome it draws is the chrome the editor draws', () => {
     ['ds-run', 'card', 'Already up to date'],
     ['expand', 'card', 'Open this result full size'],
     ['pin', 'card', 'Pin this result to the side of the canvas'],
-    ['help', 'card', 'does, and what it assumes'],
+    ['help', 'card', 'Show help for this node.'],
     ['fold', 'card', 'Hide the parameters and ports, giving the space to what is below them'],
     ['collapse', 'card', 'Collapse'],
     ['edges', 'dataset', 'Attach a user-supplied edge list'],

@@ -34,6 +34,12 @@
  *    them at all is `pointer-events` — which jsdom computes no styles for, and whose rule for the
  *    labels collides with the one above it at equal specificity. Driven with a real pointer.
  *
+ * 7. **A node's own map holds to all of the above, inside its surface.** Explore Dataset's, opened
+ *    from the header button on its full-size overlay: the same stage, so the same properties —
+ *    plus that every box is over something *in the overlay*, since the card on the canvas draws
+ *    the same markup and a finder that asked the document would box that instead; and that
+ *    Escape shuts the map and not the viewer, both listening on `window` in the capture phase.
+ *
  * It runs on the wizard's synthetic dataset, so it needs no credential and reaches no server.
  */
 
@@ -75,6 +81,7 @@ const READ = `(() => {
       box,
       spot: el.getAttribute('data-spot'),
       region: el.hasAttribute('data-region'),
+      inOverlay: Boolean(at?.closest('.overlay')),
       hit: at ? at.tagName.toLowerCase() + (typeof at.className === 'string' && at.className ? '.' + at.className.trim().split(/\\s+/)[0] : '') : null,
     }
   })
@@ -201,9 +208,9 @@ async function closeMap() {
   await waitFor(`!document.querySelector('.smap')`, 'the map to close')
 }
 
-/** Every property but the resize, at one window size. */
-function assess(map, where) {
-  check(map.boxes.length >= 14, `${where}: ${map.boxes.length} boxes drawn`)
+/** Every property but the resize, at one window size. `min` is how many boxes there must be. */
+function assess(map, where, min = 14) {
+  check(map.boxes.length >= min, `${where}: ${map.boxes.length} boxes drawn`)
   check(map.labels.length === map.boxes.length, `${where}: a label for every box`)
 
   const missed = map.boxes.filter((entry) => !entry.hit)
@@ -315,6 +322,81 @@ if (target) {
   check(!away.hovering && away.lit.length === 0, 'hover: leaving puts everything back')
 }
 await closeMap()
+
+/*
+ * 7. Explore Dataset's own map. Opened on a `demo://` link, which builds the wizard's browse
+ * workflow on the synthetic dataset — the same route the node guide's button takes — and then
+ * the way a reader does: ⤢ on the card, the map button in the overlay's header.
+ *
+ * Via `about:blank`, because a navigation that changes only the fragment is a same-document one
+ * and the app reads the link at boot.
+ */
+await setDevice(1600, 1000)
+await send('Page.navigate', { url: 'about:blank' })
+await sleep(100)
+await send('Page.navigate', { url: new URL('#!demo://neuron.explore', url).href })
+await waitFor(`!!document.querySelector('.react-flow .explore')`, 'the Explore card')
+await clearLaunch()
+await evaluate(
+  `document.querySelector('.react-flow__node:has(.explore) [aria-label="Expand output"]').click()`,
+)
+// Rows, and the first row's tile past its loading state — a box round a placeholder is a box
+// round the wrong size.
+await waitFor(
+  `!!document.querySelector('.overlay .explore-row .explore-thumb-slot, .overlay .explore-row .explore-thumb--empty')`,
+  'the overlay’s rows and first tile',
+)
+
+async function openNodeMap() {
+  await evaluate(`document.querySelector('[aria-label^="Screen map of"]').click()`)
+  await waitFor(
+    `[...document.querySelectorAll('.smap__label')].some((el) => el.style.visibility !== 'hidden')`,
+    'the node map’s labels to be placed',
+  )
+  return evaluate(READ)
+}
+
+/** Every Explore spot but chips, which the synthetic dataset's automatic list has none of. */
+const EXPLORE_SPOTS = ['search', 'columns', 'add', 'pick', 'thumbnail', 'menu', 'bulk']
+
+for (const [w, h, name] of [
+  [1600, 1000, 'Explore 1600×1000'],
+  [1280, 800, 'Explore 1280×800'],
+  [1024, 720, 'Explore 1024×720'],
+]) {
+  await setDevice(w, h)
+  await sleep(250)
+  const map = await openNodeMap()
+  assess(map, name, EXPLORE_SPOTS.length)
+  const drawn = map.boxes.map((entry) => entry.spot)
+  const absent = EXPLORE_SPOTS.filter((spot) => !drawn.includes(spot))
+  check(absent.length === 0, `${name}: every spot is boxed${absent.length ? ` — missing ${absent.join(', ')}` : ''}`)
+  const outside = map.boxes.filter((entry) => !entry.inOverlay).map((entry) => entry.spot)
+  check(outside.length === 0, `${name}: every box is over the overlay, not the card${outside.length ? ` — ${outside.join(', ')}` : ''}`)
+  console.log(`  ${name}: ${await screenshot(`explore-map-${w}`)}`)
+  await closeMap()
+}
+
+await setDevice(1600, 1000)
+await sleep(250)
+const exploreMap = await openNodeMap()
+const tile = exploreMap.boxes.find((entry) => entry.spot === 'thumbnail')
+if (tile) {
+  await mouseTo(tile.box.x + tile.box.w / 2, tile.box.y + tile.box.h / 2)
+  await sleep(160)
+  const lit = await evaluate(READ_HOT)
+  check(
+    lit.lit.length === 3 && lit.lit.every((part) => part.spot === 'thumbnail'),
+    `Explore hover: the thumbnail's box, leader and label light together (${lit.lit.map((p) => p.kind).join(', ') || 'nothing'})`,
+  )
+  console.log(`  Explore hover: ${await screenshot('explore-map-hover')}`)
+  await mouseTo(6, 6)
+  await sleep(120)
+}
+await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`)
+await sleep(120)
+const after = await evaluate(`({ map: !!document.querySelector('.smap'), overlay: !!document.querySelector('.overlay') })`)
+check(!after.map && after.overlay, `Explore: Escape shuts the map and leaves the viewer (map ${after.map}, overlay ${after.overlay})`)
 
 finish('Run `pnpm dev --port 5177` first if the shell never mounted.')
 await close()

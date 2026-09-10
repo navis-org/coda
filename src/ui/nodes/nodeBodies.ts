@@ -24,6 +24,8 @@ import type { Value } from '../../core/values'
 import type { InferContext, ParamValue } from '../../core/node'
 import { DATASET_FAMILIES } from '../../nodes/lib/datasetFamilies'
 import { ExploreBody } from '../explore/ExploreBody'
+import { EXPLORE_MAP_SPOTS } from '../explore/exploreMap'
+import type { MapSpot } from '../tour/mapSpots'
 import { CaveTableInfoBody } from './CaveTableInfoBody'
 import { DatasetBody } from './DatasetBody'
 import { DescriptionBody } from './DescriptionBody'
@@ -76,6 +78,12 @@ export interface NodeBodyEntry {
    * whitespace, and its button sits where a viewer's would, so the two get confused.
    */
   expandable?: boolean
+  /**
+   * What this body's screen map labels, if it has one — a header button on every full-size
+   * surface drawing it. See `NodeMap.tsx`. Only for a body with enough controls that "what is all
+   * of this" is a real question; a map of two fields is a tooltip with a scrim.
+   */
+  screenMap?: readonly MapSpot[]
 }
 
 /**
@@ -125,7 +133,12 @@ export function cardWidth(type: string): number {
 const DATASET_CARD_WIDTH = 248
 
 export const NODE_BODIES: Record<string, NodeBodyEntry> = {
-  'neuron.explore': { Component: ExploreBody, width: 520, expandable: true },
+  'neuron.explore': {
+    Component: ExploreBody,
+    width: 520,
+    expandable: true,
+    screenMap: EXPLORE_MAP_SPOTS,
+  },
   /*
    * Wider than a default card because the Labels field is a paste target — a list of cell types
    * wrapped into a 232px box is unreadable — and because the unmatched line names labels rather

@@ -615,7 +615,7 @@ function CodaNodeViewImpl({
             <button
               type="button"
               className="coda-node__help nodrag"
-              title={`What ${def.label} does, and what it assumes`}
+              title="Show help for this node."
               aria-label={`Help for ${def.label}`}
               onClick={(e) => {
                 e.stopPropagation()

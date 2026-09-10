@@ -37,7 +37,7 @@
  * `.overlay` as an *ancestor*; those are the only ones that could not be shared.
  */
 
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 
 import type { GraphNode } from '../../core/graph'
 import type { NodeDefinition } from '../../core/node'
@@ -53,7 +53,9 @@ import { nodeBody } from '../nodes/nodeBodies'
 import { ParamField } from '../params/ParamField'
 import { ParamRows } from '../params/ParamRows'
 import { panelTabs, railParams } from '../params/paramGroups'
+import { NodeMap } from '../tour/NodeMap'
 import { ValuePreview } from '../viewers/ValuePreview'
+import { GlyphSvg, doorGlyph } from './startGlyphs'
 
 /**
  * The node a full-size surface is drawing, and its definition.
@@ -154,6 +156,13 @@ export function ViewerSurface({
     return s.nodeInfo(nodeId)
   })
   const [tabId, setTabId] = useState<string | undefined>(undefined)
+  /*
+   * The node's screen map, per surface rather than in the store: it is a child of this component,
+   * so a surface that closes or unmounts takes its map with it, and nothing else ever needs to
+   * know one is up. The body ref is what its finders are scoped to — see `MapStageProps.scope`.
+   */
+  const [mapOpen, setMapOpen] = useState(false)
+  const bodyRef = useRef<HTMLDivElement>(null)
 
   const found = useViewerNode(nodeId)
   const node = found?.node
@@ -204,6 +213,7 @@ export function ViewerSurface({
   if (!node || !def || !ctx) return null
 
   const body = nodeBody(node.type)
+  const spots = body?.screenMap
   // `railParams` in `paramGroups.ts`, which is where this policy is stated and tested. Note it
   // answers empty for a node with `ownControls`, which takes the tabbed sidebar with it below —
   // both are built from the same params, and a body that already carries them needs neither.
@@ -231,6 +241,24 @@ export function ViewerSurface({
           </span>
         </div>
 
+        {spots && (
+          /*
+           * The Guides entry's own drawing, so the two ways into a screen map look like one
+           * thing. Wherever `?` is — the overlay, the dock, a dashboard cell — since all three
+           * draw the same body and a map is a question about the body, not about the frame.
+           */
+          <button
+            type="button"
+            className="btn btn--ghost"
+            title="Show guides"
+            aria-label={`Screen map of ${def.label}`}
+            onClick={() => setMapOpen(true)}
+          >
+            <GlyphSvg viewBox="0 0 24 24" className="overlay__glyph">
+              {doorGlyph('tour:map')}
+            </GlyphSvg>
+          </button>
+        )}
         {tabs.length > 0 && (
           /*
            * Lives in the header, outside the sidebar it controls. A toggle that vanishes
@@ -250,7 +278,7 @@ export function ViewerSurface({
           <button
             type="button"
             className="btn btn--ghost"
-            title={`What ${def.label} does, and what it assumes`}
+            title="Show help for this node."
             aria-label={`Help for ${def.label}`}
             onClick={() => openHelp(node.type)}
           >
@@ -259,6 +287,15 @@ export function ViewerSurface({
         )}
         {actions}
       </div>
+
+      {mapOpen && spots && (
+        <NodeMap
+          spots={spots}
+          scope={bodyRef}
+          label={def.label}
+          onClose={() => setMapOpen(false)}
+        />
+      )}
 
       {showRail && (
         <div className="overlay__rail">
@@ -289,7 +326,7 @@ export function ViewerSurface({
       )}
 
       <div className="overlay__main">
-        <div className="overlay__body">
+        <div className="overlay__body" ref={bodyRef}>
           {/* Same component as the card renders, with `compact` off: a node that draws its own
               body is expanded by giving that body room, not by showing a viewer of its output. */}
           {body ? (

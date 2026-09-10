@@ -436,7 +436,7 @@ function exploreCard(): string {
       ${chrome('run', '&#9654;', 'Run this node and everything it needs')}
       ${chrome('expand', '&#10530;', 'Open this result full size')}
       ${chrome('pin', '&#8677;', 'Pin this result to the side of the canvas')}
-      ${chrome('help', '?', 'What Explore Dataset does, and what it assumes', true)}
+      ${chrome('help', '?', 'Show help for this node.', true)}
       ${chrome('ex-fold', '&#9776;', 'Hide the parameters and ports, giving the space to what is below them', true)}
       ${chrome('ex-collapse', '&#9662;', 'Collapse', true)}
     </div>

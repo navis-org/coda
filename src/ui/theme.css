@@ -35,6 +35,12 @@
 
   /* --- accent (selection, focus, progress) ------------------------------- */
   --accent: #2a78d6;
+  /*
+   * The screen maps' ink — box outlines, leaders, and each label's headline (`screenMap.css`). The
+   * accent in the light theme; the dark theme's bright gold, which a figure drawn *over* the app
+   * needs so it does not read as one more blue control among the ones it is pointing at.
+   */
+  --guide-ink: var(--accent);
   --accent-soft: rgba(42, 120, 214, 0.14);
 
   /* --- socket families --------------------------------------------------
@@ -272,6 +278,7 @@
     --status-warn: #fab219;
     --status-refused: #e05c5c;
     --accent: #3987e5;
+    --guide-ink: #fab219;
     --accent-soft: rgba(57, 135, 229, 0.2);
     --socket-table: #3987e5;
     --socket-matrix: #d95926;
@@ -337,6 +344,7 @@
   --status-warn: #fab219;
   --status-refused: #e05c5c;
   --accent: #3987e5;
+  --guide-ink: #fab219;
   --accent-soft: rgba(57, 135, 229, 0.2);
   --socket-table: #3987e5;
   --socket-matrix: #d95926;

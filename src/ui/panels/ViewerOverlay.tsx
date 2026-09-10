@@ -59,8 +59,12 @@ export function ViewerOverlay() {
        *
        * By class rather than by a registry, because `.context-menu` is what all four of them
        * are, and a dialog knowing which popovers exist is the coupling being avoided.
+       *
+       * A node's screen map (`.smap`) is the same case one level up. It takes Escape on the
+       * capture phase too, but both listeners are on `window`, where `stopPropagation` does not
+       * stop a sibling — so without this one press shut the map *and* the viewer under it.
        */
-      if (document.querySelector('.context-menu')) return
+      if (document.querySelector('.context-menu, .smap')) return
       event.stopPropagation()
       close()
     }

@@ -68,9 +68,9 @@ describe('the Screen Map', () => {
   it('finds every spot it means to label', async () => {
     render(<App />)
     await open()
-    const missing = MAP_SPOTS.filter((spot) => spot.find().filter(Boolean).length === 0).map(
-      (spot) => spot.id,
-    )
+    const missing = MAP_SPOTS.filter(
+      (spot) => spot.find(document).filter(Boolean).length === 0,
+    ).map((spot) => spot.id)
     expect(missing).toEqual([])
   })
 
