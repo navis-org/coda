@@ -252,11 +252,12 @@ export function rasteriseSkeleton(
 /**
  * How much of the tile the shape covers.
  *
- * Used to reject a thumbnail that decoded to essentially nothing — a single stray fragment at the
- * coarsest level of detail, or a skeleton that turned out to be one node — so the row shows a
- * placeholder instead of a near-blank tile that looks like a rendering failure. The floor is
- * `NeuronThumbnail`'s, at 0.002; for scale, four real BANC skeletons came out between 3.3% and
- * 11.7%, so nothing legitimate is anywhere near it.
+ * `NeuronThumbnail` refuses a mask only when this is **zero** — nothing painted at all, which is
+ * what no geometry, a collapsed triangle and a one-node skeleton all come to. It used to refuse
+ * below 0.002 on the reading that "nothing legitimate is anywhere near it", taken from four BANC
+ * skeletons at 3.3–11.7%. That held for skeletons, which carry a stroke, and failed for meshes of
+ * long thin neurons: one fish2 body in ten landed under it. Because every shape is fitted to the
+ * tile, a fraction here measures thinness rather than size — see `silhouetteOf`.
  */
 export function coverageFraction(silhouette: Silhouette): number {
   let painted = 0

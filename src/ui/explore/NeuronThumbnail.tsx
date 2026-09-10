@@ -375,8 +375,20 @@ function silhouetteOf(geometry: CoarseGeometry, pixels: number): Silhouette | nu
     geometry.kind === 'skeleton'
       ? rasteriseSkeleton(geometry.positions, geometry.parents, pixels)
       : rasteriseSilhouette(geometry.positions, geometry.indices, pixels)
-  // A tile with almost nothing painted reads as a broken renderer rather than a neuron.
-  return coverageFraction(silhouette) < 0.002 ? null : silhouette
+  /*
+   * Only a mask with **nothing** painted is refused, and that is the whole of what a floor here
+   * can honestly say. This was `< 0.002`, written to hide "a single stray fragment" behind a
+   * placeholder — but `fitToTile` scales every shape to fill the tile, so coverage measures how
+   * *thin* a shape is, not how small or how broken. Measured on `neuprint-fish2`: its 12 smallest
+   * bodies (8–43 vertices) cover 17–58% of the tile, so the floor never rejected a fragment, while
+   * 5 of 49 random real neurons came in under it (0.00083–0.00193) — long axons across a square
+   * tile, legible when drawn, and blanked with a tooltip saying the dataset had no geometry. It
+   * also disagreed with itself across tile sizes: 100006807 passes at the card's 224 (0.00219) and
+   * failed at the overlay's 304 (0.00193). What genuinely has nothing to draw — no geometry, a
+   * collapsed triangle, a one-node skeleton — rasterises to exactly zero, and `thumbnail.test.ts`
+   * pins each.
+   */
+  return coverageFraction(silhouette) === 0 ? null : silhouette
 }
 
 /**

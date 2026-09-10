@@ -1567,7 +1567,10 @@ describe('a blank tile says which kind of blank', () => {
   const BODY = getConnectome(DATASET)!.neurons[0]!.neuronId
 
   /** A source answering exactly one way, for a neuron the mock connectome really has. */
-  function answering(id: string, answer: undefined | { kind: 'refused'; reason: 'too-large' }) {
+  function answering(
+    id: string,
+    answer: Awaited<ReturnType<NonNullable<DataSource['fetchCoarseGeometry']>>>,
+  ) {
     const base: DataSource = new MockSource({ latencyMs: 0 })
     registerSource(
       Object.assign(Object.create(base) as DataSource, {
@@ -1617,6 +1620,53 @@ describe('a blank tile says which kind of blank', () => {
      */
     expect(blank.getAttribute('aria-hidden')).toBe('true')
     expect(blank.getAttribute('aria-label')).toBeNull()
+  })
+
+  /*
+   * A thin body is a picture, not a blank — the coverage floor's own case, and the one it got
+   * backwards.
+   *
+   * Every shape is fitted to fill the tile, so what a coverage fraction measures is how *thin* a
+   * shape is. The floor was 0.002, and on `neuprint-fish2` it blanked about one real neuron in ten
+   * — a soma and a long axon across a square tile — while the dataset's smallest fragments scored
+   * 17–58% and sailed past it. This bar is 500 long and 3 tall in a box 1000 wide, which covers
+   * 0.00146 of the 304 raster and 0.00197 of the 224: under the old floor at both sizes, and in
+   * the same band as the two reported bodies (0.00159, 0.00193). Both sizes, because the old floor
+   * also disagreed with itself between the card and the overlay.
+   */
+  it('draws a long thin body rather than calling it empty, at both tile sizes', async () => {
+    // A bar, plus one tiny triangle far off that stretches the box the way an arbor's far end does.
+    answering('mock-thin', {
+      kind: 'mesh',
+      positions: new Float32Array([
+        0, 0, 0, 500, 0, 0, 500, 3, 0, 0, 3, 0, 1000, 1000, 0, 1001, 1000, 0, 1000, 1001, 0,
+      ]),
+      indices: new Uint32Array([0, 1, 2, 0, 2, 3, 4, 5, 6]),
+    })
+    render(
+      <>
+        <NeuronThumbnail
+          sourceId="mock-thin"
+          datasetId={DATASET}
+          neuronId={String(BODY)}
+          size={76}
+        />
+        <NeuronThumbnail
+          sourceId="mock-thin"
+          datasetId={DATASET}
+          neuronId={String(BODY)}
+          size={56}
+        />
+      </>,
+    )
+    await waitFor(() => {
+      const settled =
+        document.querySelectorAll('canvas.explore-thumb').length +
+        document.querySelectorAll('.explore-thumb--empty').length
+      if (settled < 2) throw new Error('tiles still loading')
+    })
+    expect(document.querySelectorAll('.explore-thumb--empty')).toHaveLength(0)
+    expect(document.querySelectorAll('canvas.explore-thumb')).toHaveLength(2)
   })
 
   it('does not offer a preview for a tile with no picture behind it', async () => {

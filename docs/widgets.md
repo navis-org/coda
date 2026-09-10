@@ -220,9 +220,31 @@ What 4× costs, measured rather than reasoned:
 
 It buys **no detail**: the geometry is coarse by construction and `STROKE_FRACTION` is a
 fraction, so a skeleton's stroke is 6 raster pixels rather than 3 and lands at the same 1.5 CSS
-pixels. Antialiasing is the entire product. The refusal floor is unaffected for the same reason —
-coverage fraction is flat across the scales (0.399 / 0.413 / 0.406 / 0.418 at 112 / 152 / 224 /
-304 for one skeleton), so 0.002 still means what it meant.
+pixels. Antialiasing is the entire product. The refusal floor is unaffected: it refuses only a mask
+with **nothing** painted, which is zero at every scale.
+
+**That floor was 0.002 of the tile, and it measured the wrong thing.** It was written to hide a
+stray fragment behind a placeholder and argued from skeletons — four BANC ones at 3.3–11.7%, and
+coverage flat across scales for one of them (0.399 / 0.413 / 0.406 / 0.418 at 112 / 152 / 224 /
+304). But `fitToTile` scales every shape to fill the tile, so a fraction measures how *thin* a
+shape is rather than how small or how broken, and a mesh of a long thin neuron has no stroke to
+hold it up. Measured on `neuprint-fish2`, through the app's own fetch and rasteriser:
+
+| population | n | coverage at 304 | under 0.002 |
+|---|---|---|---|
+| the smallest bodies (8–43 vertices) | 12 | 0.172 – 0.580 | 0 |
+| random bodies | 49 | min 0.00083, p10 0.00180, p50 0.00834 | 5 |
+| the two reported blanks | 2 | 0.00159, 0.00193 | 2 |
+
+So it **never rejected a fragment** — those score highest — and blanked about one real neuron in
+ten, each of which renders (drawn and looked at) as a soma and a long axon, faint and legible. It
+also disagreed with itself across tile sizes: 100006807 is 0.00219 on the card's 224 raster and
+0.00193 on the overlay's 304, so it drew on one surface and not the other. And it fell into the
+unnamed blank, so the tooltip told the reader the dataset *published no geometry* for a body it had
+just downloaded. What genuinely has nothing to draw rasterises to exactly zero, and
+`thumbnail.test.ts` pins each case. A smaller number was the other option and was not taken:
+nothing measured sits between zero and the thinnest real neuron (77 painted pixels at 304), so it
+would be a threshold with no case under it — the same mistake at a lower value.
 
 **The ink is `CHART_INK[mode].primary`, and the reason is the ramp rather than the near end.**
 A silhouette is mostly *not* full coverage — `DEPTH_FLOOR` shades the far surfaces to 70/255 —
