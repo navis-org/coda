@@ -22,13 +22,19 @@ Two passes, matching the node's two halves:
 
     python3 scripts/check-mirror.py
 
-Needs navis, flybrains and navis-fastcore, and skips with a notice where they are missing — the
-same bargain `check-export.py` makes about its third pass. It needs no H5 registrations; a
-landmark mirror consults none.
+Needs navis, navis-fastcore and each space's template package (flybrains; fishbrains for `Fish2`),
+and skips with a notice where they are missing — the same bargain `check-export.py` makes about
+its third pass. It needs no H5 registrations; a landmark mirror consults none.
+
+**The axis is passed to navis explicitly**, from the manifest. navis' `"auto"` reads the template's
+own `mirror_axis` only in recent versions and falls back to `x` otherwise, so leaving it out would
+make the exact-flip comparison pass or fail on Fish2 (flipped across y) depending on which navis is
+installed rather than on what the manifest says.
 """
 
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 from pathlib import Path
@@ -66,10 +72,9 @@ def main() -> int:
         import numpy as np
         import navis
         import navis_fastcore as fc
-        import flybrains
     except ImportError as exc:
-        print(f"skipped: needs navis and flybrains ({exc})")
-        print("  pip install navis flybrains navis-fastcore")
+        print(f"skipped: needs navis and navis-fastcore ({exc})")
+        print("  pip install navis navis-fastcore flybrains fishbrains")
         return 0
 
     manifest = json.loads(MANIFEST.read_text())
@@ -83,9 +88,18 @@ def main() -> int:
         if not mirror:
             continue
 
-        template = getattr(flybrains, sid, None)
+        # Importing the package is also what registers its templates and mirror transforms with
+        # navis, which the two `mirror_brain` calls below look up by name.
+        package_name = space["package"]
+        try:
+            package = importlib.import_module(package_name)
+        except ImportError:
+            print(f"  skip  {sid}: needs {package_name} (pip install {package_name})")
+            continue
+
+        template = getattr(package, sid, None)
         if template is None:
-            print(f"  FAIL  {sid}: flybrains has no template of that name")
+            print(f"  FAIL  {sid}: {package_name} has no template of that name")
             failures += 1
             continue
 
@@ -94,7 +108,9 @@ def main() -> int:
         bbox = np.asarray(template.boundingbox).reshape(3, 2)
         points = rng.uniform(bbox[:, 0], bbox[:, 1], size=(SAMPLES, 3))
 
-        expected = np.asarray(navis.mirror_brain(points, template=sid, warp=False))
+        expected = np.asarray(
+            navis.mirror_brain(points, template=sid, mirror_axis=mirror["axis"], warp=False)
+        )
 
         axis = AXIS_INDEX[mirror["axis"]]
         actual = points.copy()
@@ -110,7 +126,9 @@ def main() -> int:
         # --- the whole thing, through the CSV this build actually ships ---------
         source, target = read_landmarks(mirror)
         warped = fc.TpsTransform(source, target).xform(actual)
-        expected_warp = np.asarray(navis.mirror_brain(points, template=sid, warp=True))
+        expected_warp = np.asarray(
+            navis.mirror_brain(points, template=sid, mirror_axis=mirror["axis"], warp=True)
+        )
         warp_error = float(np.abs(expected_warp - warped).max())
 
         print(
@@ -121,7 +139,7 @@ def main() -> int:
             # 1e6 nm this is generous by orders of magnitude. What it catches is the landmark
             # file having parted company with flybrains' — which lands micrometres out, not
             # nanometres.
-            print(f"  FAIL  {sid}: the shipped landmarks disagree with navis-flybrains'")
+            print(f"  FAIL  {sid}: the shipped landmarks disagree with navis-{package_name}'s")
             failures += 1
 
     if failures:

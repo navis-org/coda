@@ -18,8 +18,9 @@ registrations — without that, `--only` would leave five landmark files in this
 nothing in the manifest pointing at them.
 
 Needs `navis`, `flybrains` and the Saalfeld H5 registrations
-(`flybrains.download_jrc_transforms()`; check with `flybrains.report()`). About 25 seconds for
-the whole set.
+(`flybrains.download_jrc_transforms()`; check with `flybrains.report()`), plus `fishbrains` for
+`Fish2`. A run imports only the template packages its spaces name. About 25 seconds for the
+whole set.
 
 ## Why these are served rather than bundled
 
@@ -31,8 +32,9 @@ loading path.
 ## What is in each file
 
 `<SPACE>_mirror.csv` — `x_flip,y_flip,z_flip` → `x_mirr,y_mirr,z_mirr`, both in nanometres.
-Copied from navis-flybrains, which registers a **direct** mirror landmark set for each of these
-spaces. The source side is *already affine-flipped*: Coda applies `x' = flipAt - x` itself (the
+Copied from navis-flybrains — navis-fishbrains for `Fish2` — which registers a **direct** mirror
+landmark set for each of these spaces. The source side is *already affine-flipped*: Coda applies
+`x' = flipAt - x` itself along the entry's `axis` (the
 constant is in the manifest, read off the template's bounding box) and the spline corrects only
 the left/right asymmetry that is left. That split is navis's, and it is what the files were
 fitted against — a different flip constant hands the spline a pre-image it has never seen.
@@ -47,6 +49,11 @@ template; there is no bridging graph in the browser.
 build one from — that entry carries a mirror and no `toCommon`, and `Transform Neurons` leaves the
 space out of both its dropdowns rather than offering it and then refusing. A midline is a property
 of the volume itself, so mirroring is unaffected.
+
+**`Fish2` is the second such space, and the first with its midline across `y`.** A zebrafish, from
+navis-fishbrains, so no route into JRC2018U for the mosquito's reason. Its neuPrint deployment is
+private and reached through Custom neuPrint, so no dataset is bound to it in `spaces.ts`: its
+geometry arrives with no space and the Mirror node's Space override names it.
 
 Accuracy of the shortcut against the full navis route, 3,000 independent shell vertices each:
 
@@ -66,7 +73,8 @@ half instead.
 
 ## Provenance
 
-The mirror files are copies of navis-flybrains' own, named in each manifest entry's `origin`.
+The mirror files are copies of navis-flybrains' own (navis-fishbrains' for `Fish2`), named in each
+manifest entry's `origin`.
 The JRC2018U sets are derived from the Saalfeld lab's registrations via navis. The
 `JRCVNC2018U → JRC2018U` affine that places a nerve cord beside a brain is lifted verbatim from
 navis-flybrains' `maleCNS_JRC2018U_landmarks.ipynb`, so the two agree; **it is a layout, not a

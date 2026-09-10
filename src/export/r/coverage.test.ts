@@ -57,7 +57,8 @@ const NO_EMITTER: Record<string, string> = {
     'emitter can pass Coda\u2019s space id straight through. The natverse spreads the same set ' +
     'across a package each: FAFB14 is in nat.flybrains, FlyWire is in fafbseg, MANC is in ' +
     'malevnc, MaleCNS is in malecns, the hemibrain has no templatebrain object in R at all, and ' +
-    'the Aedes brain \u2014 a mosquito, and the newest of them \u2014 has none either. ' +
+    'the Aedes brain \u2014 a mosquito \u2014 has none either, nor does Fish2, whose template ' +
+    'package (fishbrains) has no natverse counterpart. ' +
     'A faithful emitter therefore needs a space-to-package table, and an unfaithful one emits a ' +
     'bare symbol that does not resolve \u2014 which is the `navis.interfaces` failure ' +
     'check-export.py was written for, in a language whose equivalent check cannot run here ' +

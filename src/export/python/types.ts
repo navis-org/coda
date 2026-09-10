@@ -56,6 +56,7 @@ export type PyModule =
   | 'navisNeuprint'
   | 'fastcore'
   | 'flybrains'
+  | 'fishbrains'
   | 'networkx'
   | 'matplotlib'
   | 'seaborn'
@@ -121,6 +122,12 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
   flybrains: {
     statement: 'import flybrains  # noqa: F401  (registers the fly templates)',
     pip: 'flybrains',
+  },
+  // The same side effect for the fish templates — `Fish2` today. Which of the two a space needs
+  // is `TemplateSpace.package`, generated into the manifest beside its landmarks.
+  fishbrains: {
+    statement: 'import fishbrains  # noqa: F401  (registers the fish templates)',
+    pip: 'fishbrains',
   },
   neuprint: { from: 'neuprint', pip: 'neuprint-python' },
   /*

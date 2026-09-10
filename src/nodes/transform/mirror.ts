@@ -36,8 +36,8 @@
  * reads, so it cannot drift from the landmark sets fitted against it. `scripts/check-mirror.py`
  * holds the two to exact agreement.
  *
- * **The correction** is a thin-plate spline through a few thousand landmark pairs, because an
- * insect brain is not symmetric: flipped and left there, a neuron sits about 7 µm from its
+ * **The correction** is a thin-plate spline through a few thousand landmark pairs, because a
+ * brain is not symmetric: flipped and left there, a neuron sits about 7 µm from its
  * contralateral partner on FlyWire and 33 µm on MaleCNS. That is the residual `Warp` removes,
  * and it is roughly the width of a small neuropil — enough to make NBLAST score a homologue as
  * a stranger.
@@ -78,8 +78,8 @@ import { FROM_DATA, resolveSpace } from '../lib/spaceParam'
  *
  * `neuron.xform`'s `bridgeableSpaces()`, the other way round, and the pair is the point: a
  * space's two halves are separately optional, so each node offers the half it can actually
- * perform. Every space ships both today except `AEDES`, which has a mirror and no bridge — so
- * this filter is inert now and stops being inert the first time the reverse arrives.
+ * perform. Every space ships both today except `AEDES` and `Fish2`, which have a mirror and no
+ * bridge — so this filter is inert now and stops being inert the first time the reverse arrives.
  */
 function mirrorableSpaces() {
   return allSpaces().filter((space) => space.mirror)
@@ -206,6 +206,23 @@ registerNode({
         'These coordinates do not say which template space they are in, so there is no ' +
           'midline to mirror about. Fetch them from a dataset Coda has a registration for, ' +
           'or name the space on this node if you know it.',
+      )
+    }
+    /*
+     * Reachable only through the override. A source stamps a space only on nanometres
+     * (`geometryFrame`), because every midline and landmark set is in nanometres — so geometry in
+     * voxels of a size nobody read arrives spaceless, and the override is how a space gets named
+     * for it anyway. That is the ordinary route for a private deployment with no binding (Fish2,
+     * through Custom neuPrint), and mirroring voxels about a nanometre midline puts every neuron
+     * somewhere plausible and wrong. So the rule `geometryFrame` keeps for a source, this keeps
+     * for the override.
+     */
+    if (value.units && value.units !== 'nm') {
+      throw new Error(
+        `These coordinates are in ${value.units} of a size Coda could not read, and ` +
+          `${spaceName(spaceId)}’s midline is in nanometres, so mirroring them would put every ` +
+          'neuron somewhere plausible and wrong. The dataset did not say its voxel size; fetch ' +
+          'from a deployment that publishes it.',
       )
     }
 

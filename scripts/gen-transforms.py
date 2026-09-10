@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Coda's landmark transform files from navis + flybrains.
+"""Generate Coda's landmark transform files from navis + flybrains (and fishbrains).
 
 Coda cannot run CMTK, Elastix or the Saalfeld H5 registrations — those are
 native libraries and multi-gigabyte files. What it *can* run is a thin-plate
@@ -11,8 +11,9 @@ transform stack once, on a machine that has it, and writes down the answer.
 Two kinds are produced:
 
   <SPACE>_mirror.csv     x_flip,y_flip,z_flip -> x_mirr,y_mirr,z_mirr
-                         Copied from navis-flybrains, which already registers a
-                         direct mirror landmark set for each of these spaces.
+                         Copied from navis-flybrains (or, for a fish, from
+                         navis-fishbrains), which already registers a direct
+                         mirror landmark set for each of these spaces.
                          The *source* side is already affine-flipped, so Coda
                          does the flip itself and the spline only corrects the
                          left/right asymmetry.
@@ -40,12 +41,14 @@ know what exists and may not fetch).
 
 Requires navis, flybrains, and the Saalfeld H5 registrations
 (`flybrains.download_jrc_transforms()`); check with `flybrains.report()`.
-The mirror half needs only flybrains.
+The mirror half needs only the template package — flybrains, plus fishbrains for
+`Fish2`.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import shutil
 import sys
@@ -81,13 +84,20 @@ VNC_IN_BRAIN_FRAME = "JRC2018Uvnc"
 class Space:
     """One coordinate space Coda has datasets in."""
 
-    #: flybrains template name. Also Coda's space id.
+    #: Template name in `package`. Also Coda's space id.
     id: str
     #: What a reader calls it.
     label: str
-    #: Which axis a mirror flips about.
+    #: The navis template package that registers this space — its bounding box,
+    #: its mirror landmarks, and the template name `navis.mirror_brain` looks
+    #: up. Written into the manifest because the notebook exporter has to import
+    #: the same package for that lookup to resolve.
+    package: str = "flybrains"
+    #: Which axis a mirror flips about. Must agree with the template's own
+    #: `mirror_axis`; `check-mirror.py` compares against navis passing this
+    #: explicitly, so a disagreement shows as a flip that is not exact.
     mirror_axis: str = "x"
-    #: Mirror landmark file in navis-flybrains' data directory, if one exists.
+    #: Mirror landmark file in the package's data directory, if one exists.
     mirror_file: str | None = None
     #: Column names in that file: source triple then target triple.
     mirror_columns: tuple[str, ...] = (
@@ -159,6 +169,20 @@ SPACES: list[Space] = [
         # space out of its dropdowns rather than offering it and refusing.
         to_common=False,
     ),
+    Space(
+        id="Fish2",
+        label="Fish2 (zebrafish)",
+        package="fishbrains",
+        mirror_file="fish2_mirror_landmarks_nm.csv",
+        # The first space whose midline is not across x: the volume is imaged
+        # with the fish's left/right along y, and fishbrains' template says so.
+        mirror_axis="y",
+        # A fish, so no route into a *Drosophila* template for the same reason
+        # as the mosquito. No dataset is bound to it either (`spaces.ts`): the
+        # neuPrint deployment is private and reached through Custom neuPrint, so
+        # its geometry arrives spaceless and the Space override names this.
+        to_common=False,
+    ),
 ]
 
 
@@ -167,14 +191,14 @@ SPACES: list[Space] = [
 # --------------------------------------------------------------------------
 
 
-def shells(space: Space, flybrains):
+def shells(space: Space, package):
     """The mesh(es) to sample inside, keyed by region.
 
     A template that spans the whole CNS publishes its two shells separately
     (`mesh_brain` / `mesh_vnc`); everything else has one `mesh` and the region
     it belongs to is declared rather than discovered.
     """
-    tb = getattr(flybrains, space.id)
+    tb = getattr(package, space.id)
     if space.regions == ("brain",):
         return {"brain": tb.mesh}
     if space.regions == ("vnc",):
@@ -239,7 +263,7 @@ def register_vnc_placement(navis) -> None:
 AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
 
-def flip_constant(space_id: str, axis: str, flybrains) -> float:
+def flip_constant(space_id: str, axis: str, package) -> float:
     """`c` in `x' = c - x`, read off the same bounding box navis uses.
 
     navis calls this `mirror_axis_size` and derives it as `min + max` of the
@@ -249,7 +273,7 @@ def flip_constant(space_id: str, axis: str, flybrains) -> float:
     different one hands the spline a pre-image it was never fitted for. Read
     rather than typed for that reason.
     """
-    tb = getattr(flybrains, space_id)
+    tb = getattr(package, space_id)
     bbox = np.asarray(tb.boundingbox)
     bbox = bbox.reshape(3, 2) if bbox.ndim == 1 else bbox
     if bbox.shape == (2, 3):
@@ -318,15 +342,21 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    wanted = [s for s in SPACES if not args.only or s.id in args.only]
+
+    # Only the template packages this run needs: a `--only JRCFIB2018F` should
+    # not demand fishbrains, any more than it demands the H5 registrations.
     try:
         import navis
-        import flybrains
+
+        packages = {
+            name: importlib.import_module(name) for name in sorted({s.package for s in wanted})
+        }
     except ImportError as exc:  # pragma: no cover - operator feedback
-        print(f"needs navis and flybrains: {exc}", file=sys.stderr)
-        print("  pip install navis flybrains", file=sys.stderr)
+        print(f"needs navis and the template packages: {exc}", file=sys.stderr)
+        print("  pip install navis flybrains fishbrains", file=sys.stderr)
         return 1
 
-    data_dir = Path(flybrains.__file__).parent / "data"
     out: Path = args.out
     out.mkdir(parents=True, exist_ok=True)
 
@@ -347,11 +377,11 @@ def main() -> int:
     if not args.skip_common:
         register_vnc_placement(navis)
 
-    wanted = [s for s in SPACES if not args.only or s.id in args.only]
     manifest: dict = {
         "comment": (
             "Generated by scripts/gen-transforms.py. Do not edit by hand; every number "
-            "here is read off navis/flybrains rather than typed, so a regeneration is "
+            "here is read off navis and its template packages rather than typed, so a "
+            "regeneration is "
             "the only way to change one."
         ),
         "commonSpace": {
@@ -372,11 +402,17 @@ def main() -> int:
         # not — `spaces.ts` declares both optional (`mirror?`, `toCommon?`) and
         # casts the JSON to that shape without checking, so a null would be
         # read as a spec by everything downstream of the cast.
-        entry: dict = {"id": space.id, "label": space.label, "units": "nm"}
+        package = packages[space.package]
+        entry: dict = {
+            "id": space.id,
+            "label": space.label,
+            "units": "nm",
+            "package": space.package,
+        }
 
-        # --- mirror: copy what flybrains already ships -----------------------
+        # --- mirror: copy what the template package already ships ------------
         if space.mirror_file:
-            src = data_dir / space.mirror_file
+            src = Path(package.__file__).parent / "data" / space.mirror_file
             if not src.exists():
                 print(f"  ! {space.id}: no {space.mirror_file}", file=sys.stderr)
             else:
@@ -387,12 +423,12 @@ def main() -> int:
                     "file": dest.name,
                     "landmarks": rows,
                     "axis": space.mirror_axis,
-                    "flipAt": flip_constant(space.id, space.mirror_axis, flybrains),
+                    "flipAt": flip_constant(space.id, space.mirror_axis, package),
                     "sourceColumns": list(space.mirror_columns[:3]),
                     "targetColumns": list(space.mirror_columns[3:]),
                     "sourceUnits": "nm",
                     "targetUnits": "nm",
-                    "origin": f"navis-flybrains/{space.mirror_file}",
+                    "origin": f"navis-{space.package}/{space.mirror_file}",
                 }
                 print(f"  {space.id} mirror: {rows} landmarks -> {dest.name}")
 
@@ -400,7 +436,7 @@ def main() -> int:
         if space.to_common and not args.skip_common:
             res = args.res or space.res
             pieces_src, pieces_tgt, per_region = [], [], {}
-            for region, mesh in shells(space, flybrains).items():
+            for region, mesh in shells(space, package).items():
                 t0 = time.perf_counter()
                 pts = sample_inside(mesh, res, space.pad, navis)
                 xf = to_common(pts, space.id, region, navis)

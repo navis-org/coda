@@ -25,6 +25,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
+import type { EvalContext } from '../../core/node'
+import { requireNodeDef } from '../../core/registry'
 import type { Scheduler } from '../../core/scheduler'
 import { schemaOf } from '../../core/types'
 import { isSkeletonsValue } from '../../core/values'
@@ -222,6 +224,55 @@ describe('neuron.mirror — the override, which is the only way through here', (
     // three negated.
     expect(mirrored.items[0]!.positions[1]).toBe(source.items[0]!.positions[1])
     expect(mirrored.items[0]!.positions[2]).toBe(source.items[0]!.positions[2])
+  })
+
+  it('flips Fish2 across y, leaving x and z alone', async () => {
+    /*
+     * The one space whose midline is not across x — fishbrains' template puts the fish's
+     * left/right along y, `bbox.y.min + bbox.y.max` = 917504. Every other test here flips x, so
+     * a node that ignored `MirrorSpec.axis` would pass all of them and mirror a fish about the
+     * wrong plane. Fish2 is also the space that is *only* reached this way: its neuPrint
+     * deployment is private, so its geometry arrives spaceless through Custom neuPrint.
+     */
+    const scheduler = await run(pipeline({ space: 'Fish2', warp: false }))
+    expect(scheduler.info('mirror').error).toBeUndefined()
+    const source = scheduler.output('geo', 'skeletons')
+    const mirrored = scheduler.output('mirror', 'out')
+    if (!isSkeletonsValue(source) || !isSkeletonsValue(mirrored))
+      throw new Error('not skeletons')
+
+    const [x, y, z] = source.items[0]!.positions
+    // Within half a float32 ULP at 917504 (0.03125 nm), for `mirrors about the named space's
+    // midline`'s reason.
+    expect(mirrored.items[0]!.positions[1]).toBeCloseTo(917504 - y!, 1)
+    expect(mirrored.items[0]!.positions[0]).toBe(x)
+    expect(mirrored.items[0]!.positions[2]).toBe(z)
+    expect(mirrored.space).toBe('Fish2')
+  })
+
+  it('refuses voxel coordinates rather than mirroring them about a nanometre midline', async () => {
+    /*
+     * A source never stamps a space on voxels (`geometryFrame`), so the override is the only way
+     * a space gets named for them — and for an override-only space like Fish2 it is the ordinary
+     * route. A deployment whose voxel size could not be read would otherwise be mirrored about a
+     * midline eight or thirty times too far away, and still draw. Driven through `evaluate`
+     * directly because the mock connectome only ever produces nanometres.
+     */
+    const skeletons = (await run(pipeline({ space: 'Fish2', warp: false }))).output(
+      'geo',
+      'skeletons',
+    )
+    if (!isSkeletonsValue(skeletons)) throw new Error('not skeletons')
+    const context = {
+      input: (port: string) => (port === 'in' ? { ...skeletons, units: 'voxels' } : undefined),
+      params: { space: 'Fish2', warp: false },
+      progress: () => {},
+      warn: () => {},
+    } as unknown as EvalContext
+
+    await expect(requireNodeDef('neuron.mirror').evaluate(context)).rejects.toThrow(
+      /in voxels of a size Coda could not read, and Fish2 \(zebrafish\)’s midline/,
+    )
   })
 
   it('marks the rows, and leaves the ids alone', async () => {

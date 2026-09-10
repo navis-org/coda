@@ -25,7 +25,7 @@ skel -> nb:target
 where `c` is a property of the volume rather than of your data. One pass over a buffer, and free.
 
 **The correction** is a thin-plate spline through a few thousand landmark pairs, and it is there
-because *an insect brain is not symmetric*. Flipped and left there, a neuron sits about **7 µm**
+because *a brain is not symmetric*. Flipped and left there, a neuron sits about **7 µm**
 from its contralateral partner on FlyWire and **33 µm** on MaleCNS — roughly the width of a small
 neuropil, comfortably enough for NBLAST to score a homologue as a stranger.
 
@@ -48,20 +48,23 @@ The fit is cubic in the landmark count: the hemibrain's 1,484 landmarks fit in 0
 
 ## Which brains it works in
 
-Coda ships direct mirror landmarks for six spaces — hemibrain, MaleCNS, MANC, FlyWire and FAFB,
-plus the *Aedes aegypti* brain. **Only direct ones.** navis can mirror a brain by routing through
+Coda ships direct mirror landmarks for seven spaces — hemibrain, MaleCNS, MANC, FlyWire and FAFB,
+plus the *Aedes aegypti* brain and the Fish2 zebrafish brain. **Only direct ones.** navis can mirror a brain by routing through
 another template; that needs registration files which are native libraries and gigabytes of data.
 
 A dataset outside that list — the optic lobe, a synthetic connectome, a Custom node pointed at your
 own server — has no midline anywhere, and this node says so instead of guessing one.
 
-> [!note] The mosquito brain has no route into the shared template
-> `Transform Neurons` does not offer it: JRC2018U is a *Drosophila* template, and there is no
-> registration between the two animals to build one from. Mirroring is unaffected — a midline is a
-> property of the volume itself, and this one has its own.
+> [!note] The mosquito and fish brains have no route into the shared template
+> `Transform Neurons` does not offer them: JRC2018U is a *Drosophila* template, and there is no
+> registration between other animals and a fly to build one from. Mirroring is unaffected — a
+> midline is a property of the volume itself, and each of these has its own.
 
 The Aedes volume is the `wclee_aedes_brain` CAVE datastack, which Coda ships no dataset node for:
 reach it through **Custom CAVE**, and the space is stamped on the geometry from there.
+
+Fish2 is a private neuPrint deployment, reached through **Custom neuPrint**. Coda does not know
+that deployment, so the geometry arrives with no space: set **Space** to *Fish2 (zebrafish)*.
 
 ## Two things worth knowing
 
@@ -77,6 +80,7 @@ the neuron came from, not where it now is.
 
 The flip constant is generated from the same template bounding box `navis.mirror_brain` reads, by a
 script in this repository, and a check holds the two to *exact* agreement on every space. The
-landmarks are navis-flybrains' own, and the spline is the same `navis-fastcore` implementation
+landmarks are navis-flybrains' own (navis-fishbrains' for Fish2), and the spline is the same
+`navis-fastcore` implementation
 navis itself uses — so a mirror here and a mirror in a notebook are the same operation. The
 exported cell reads `navis.mirror_brain(..., warp=True)`.

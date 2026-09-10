@@ -38,7 +38,7 @@ import {
 const UNITS = ['nm', 'um']
 
 describe('the generated manifest', () => {
-  it('describes the six spaces Coda has datasets in, by name', () => {
+  it('describes the seven spaces Coda has datasets in, by name', () => {
     /*
      * Named rather than counted. A count passes whatever the generator emitted, which is the
      * assertion-against-the-expression-it-is-built-from that `starterFamilies`' tests avoid —
@@ -53,7 +53,20 @@ describe('the generated manifest', () => {
       allSpaces()
         .map((s) => s.id)
         .sort(),
-    ).toEqual(['AEDES', 'FAFB14', 'FLYWIRE', 'JRCFIB2018F', 'JRCFIB2022M', 'MANC'])
+    ).toEqual(['AEDES', 'FAFB14', 'FLYWIRE', 'Fish2', 'JRCFIB2018F', 'JRCFIB2022M', 'MANC'])
+  })
+
+  it('names the template package that registers each space', () => {
+    /*
+     * The notebook exporter imports this package so `navis.mirror_brain(template=…)` resolves,
+     * and the boundary cast in `spaces.ts` would believe a misspelt one — which then reaches a
+     * setup cell as a module the export has never heard of.
+     */
+    for (const space of allSpaces()) {
+      expect(['flybrains', 'fishbrains'], space.id).toContain(space.package)
+    }
+    expect(spaceById('Fish2')!.package).toBe('fishbrains')
+    expect(spaceById('FLYWIRE')!.package).toBe('flybrains')
   })
 
   it('names JRC2018U as the common space, in micrometres', () => {
@@ -72,11 +85,12 @@ describe('the generated manifest', () => {
     }
   })
 
-  it('routes every fly space into the common frame, and the mosquito nowhere', () => {
+  it('routes every fly space into the common frame, and the mosquito and the fish nowhere', () => {
     /*
      * Named rather than derived: a `toCommon` missing from a *fly* space is a regeneration that
      * half-finished, and a loop over whatever the manifest happens to carry cannot tell that
-     * from the mosquito, which has no route by nature. See `public/transforms/README.md`.
+     * from the mosquito or the fish, which have no route by nature. See
+     * `public/transforms/README.md`.
      */
     const bridged = allSpaces()
       .filter((space) => space.toCommon)
@@ -87,6 +101,7 @@ describe('the generated manifest', () => {
     // omits a half it did not produce, because `spaces.ts` casts this JSON to `toCommon?`
     // without checking and a null would be read as a spec.
     expect('toCommon' in spaceById('AEDES')!).toBe(false)
+    expect('toCommon' in spaceById('Fish2')!).toBe(false)
   })
 
   it('gives every landmark set three source and three target columns', () => {
@@ -113,9 +128,23 @@ describe('the generated manifest', () => {
     for (const space of allSpaces()) {
       const mirror = space.mirror!
       expect(['x', 'y', 'z']).toContain(mirror.axis)
-      // Every fly template's bounding box sits in the positive octant, so `min + max` is
+      // Every template's bounding box sits in the positive octant, so `min + max` is
       // positive. A zero here is the signature of a bounding box that was never read.
       expect(mirror.flipAt, space.id).toBeGreaterThan(0)
+    }
+  })
+
+  it('flips Fish2 across y, the one space whose midline is not across x', () => {
+    /*
+     * The fish is imaged with its left/right along y, and fishbrains' template says so. An `x`
+     * here would still flip, still warp and still draw a fish — about the wrong plane. The
+     * constant is `bbox.y.min + bbox.y.max` = 0 + 917504, which `check-mirror.py` holds to
+     * `navis.mirror_brain` exactly.
+     */
+    expect(spaceById('Fish2')!.mirror!.axis).toBe('y')
+    expect(spaceById('Fish2')!.mirror!.flipAt).toBe(917504)
+    for (const space of allSpaces()) {
+      if (space.id !== 'Fish2') expect(space.mirror!.axis, space.id).toBe('x')
     }
   })
 
@@ -210,9 +239,15 @@ describe('which space a dataset is in', () => {
     expect(spaceForDataset('mock', 'optic-lobe-mini')).toBeUndefined()
   })
 
-  it('binds every space in the manifest to at least one dataset', () => {
+  it('binds every space in the manifest to at least one dataset, bar the override-only ones', () => {
     // A landmark set nothing can reach is 100 kB nobody will ever download and a mirror nobody
     // can run. Catches a binding removed without its manifest entry, and vice versa.
+    //
+    // `Fish2` is reached on purpose through Mirror's Space override instead: its neuPrint
+    // deployment is private, so it has no dataset node, and its geometry arrives spaceless
+    // through Custom neuPrint. Named here rather than skipped by a rule, so a second
+    // unbound space is a decision somebody writes down.
+    const OVERRIDE_ONLY = ['Fish2']
     const bound = new Set(
       [
         spaceForDataset('neuprint', 'hemibrain:v1.2.1'),
@@ -223,7 +258,10 @@ describe('which space a dataset is in', () => {
         spaceForDataset('catmaid', '1'),
       ].filter(Boolean),
     )
-    for (const space of allSpaces()) expect([...bound]).toContain(space.id)
+    for (const space of allSpaces()) {
+      if (OVERRIDE_ONLY.includes(space.id)) expect([...bound]).not.toContain(space.id)
+      else expect([...bound]).toContain(space.id)
+    }
   })
 })
 

@@ -30,7 +30,7 @@ import { decodeIndices } from '../../../nodes/lib/chartSelection'
 import { codaIds } from './common'
 import { pyFilterMask } from './table'
 import { findColumn, isNumericDType } from '../../../core/types'
-import { COMMON_SPACE, nerveCordIn } from '../../../data/transforms/spaces'
+import { COMMON_SPACE, nerveCordIn, spaceById } from '../../../data/transforms/spaces'
 
 // ---------------------------------------------------------------------------
 // Build Network
@@ -993,8 +993,15 @@ registerEmitter('cluster.clustersToNeurons', labelsToNeuronsEmitter)
  * agreement — so any discrepancy is the spline and is bounded by what the landmarks disagree
  * about.
  *
- * Coda's space ids **are** flybrains' template names, which is not luck: `spaces.ts` took them
- * from flybrains so this translation could be a variable rather than a lookup table.
+ * Coda's space ids **are** the template names flybrains and fishbrains register, which is not
+ * luck: `spaces.ts` took them from those packages so this translation could be a variable rather
+ * than a lookup table. What *does* need looking up is which package to import — importing it is
+ * what registers the template — and the manifest carries that as `package`.
+ *
+ * **`mirror_axis` is passed explicitly for the same reason `warp` is.** navis' `"auto"` reads the
+ * template's own axis only in recent versions and falls back to `x` otherwise, and `Fish2` is
+ * flipped across `y`: an omitted argument would mirror a fish about the wrong plane on an older
+ * navis, landing a plausible neuron somewhere else entirely.
  */
 registerEmitter('neuron.mirror', (ctx) => {
   const src = ctx.wired('in')
@@ -1013,8 +1020,17 @@ registerEmitter('neuron.mirror', (ctx) => {
     )
   }
 
+  // The node's `validate` reports this too; here it would be a cell naming a template no
+  // package registers, which fails in the notebook rather than on the canvas.
+  const template = spaceById(space)
+  if (!template?.mirror) {
+    return ctx.todo(
+      `Coda ships no mirror for "${space}", so there is no template to name here.`,
+    )
+  }
+
   ctx.require('navis')
-  ctx.require('flybrains')
+  ctx.require(template.package)
   /*
    * `warp=` takes a Transform as readily as a bool — that is navis' own signature — so a wired
    * Landmark Transform translates by *name* rather than by being approximated. The flip still
@@ -1022,7 +1038,10 @@ registerEmitter('neuron.mirror', (ctx) => {
    */
   const supplied = ctx.input('warp')
   const warp = supplied ?? (ctx.params.warp === false ? 'False' : 'True')
-  return [`${out} = navis.mirror_brain(${src}, template="${space}", warp=${warp})`]
+  return [
+    `${out} = navis.mirror_brain(${src}, template="${space}", ` +
+      `mirror_axis="${template.mirror.axis}", warp=${warp})`,
+  ]
 })
 
 /**

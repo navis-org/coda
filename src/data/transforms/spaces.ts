@@ -10,8 +10,9 @@
  * ## The table is generated, not typed
  *
  * Everything in `manifest.json` — the flip constants, the landmark counts, the column names,
- * the units per side — is written by `scripts/gen-transforms.py`, which reads it off
- * navis/flybrains. The flip constant especially: navis calls it `mirror_axis_size` and derives
+ * the units per side — is written by `scripts/gen-transforms.py`, which reads it off navis and
+ * the template package registering each space (flybrains; fishbrains for `Fish2`). The flip
+ * constant especially: navis calls it `mirror_axis_size` and derives
  * it as `min + max` of the template's bounding box, which is *twice the midline* whatever the
  * name suggests. It is **not a free parameter** — each mirror landmark set was fitted against
  * exactly that pre-image, so a different number hands the spline coordinates it has never seen
@@ -49,9 +50,19 @@ export interface MirrorSpec extends LandmarkSetSpec {
    * is how navis splits it and how the landmark files were built.
    */
   readonly flipAt: number
-  /** Which navis-flybrains file this is a copy of, for the credit. */
+  /** Which template-package file this is a copy of (`navis-flybrains/…`), for the credit. */
   readonly origin: string
 }
+
+/**
+ * The navis template package that registers a space.
+ *
+ * Carried because the notebook exporter has to `import` it: importing the package is what
+ * registers the template with navis, and `navis.mirror_brain(template=…)` resolves the name out
+ * of that registry. A closed set rather than a string, so `transforms.test.ts` can hold the
+ * generated manifest to it and the exporter can pass it to `require` as a module it knows.
+ */
+export type TemplatePackage = 'flybrains' | 'fishbrains'
 
 export interface ToCommonSpec extends LandmarkSetSpec {
   /** How many landmarks came from each anatomical region. See `COMMON_SPACE`. */
@@ -61,11 +72,12 @@ export interface ToCommonSpec extends LandmarkSetSpec {
 }
 
 export interface TemplateSpace {
-  /** flybrains' template name, and Coda's space id. In every saved geometry value. */
+  /** The template's name in `package`, and Coda's space id. In every saved geometry value. */
   readonly id: string
   readonly label: string
   /** What coordinates in this space are in, as Coda holds them. Always `nm` today. */
   readonly units: SpaceUnits
+  readonly package: TemplatePackage
   readonly mirror?: MirrorSpec
   readonly toCommon?: ToCommonSpec
 }
