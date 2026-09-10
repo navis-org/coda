@@ -12,7 +12,7 @@ import { resolveDatasetId, resolveSourceId } from '../lib/datasetParam'
  * before that change still loads with its params intact — an unregistered type renders as
  * "Unknown node" and loses them.
  */
-export const datasetNode = registerNode({
+registerNode({
   type: 'neuron.dataset',
   label: 'Dataset (generic)',
   category: 'dataset',

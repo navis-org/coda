@@ -58,7 +58,7 @@ export function centralityOptions(params: ParamValues): CentralityOptions {
   }
 }
 
-export const networkCentralityNode = registerNode({
+registerNode({
   type: 'net.centrality',
   label: 'Network Centrality',
   category: 'analysis',

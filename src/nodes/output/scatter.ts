@@ -28,7 +28,7 @@ import { colorParams, shapeParams, sizeParams } from '../lib/encodingParams'
 import { rowsWithKeys } from '../lib/rowIds'
 import { tapPorts } from '../lib/tapPorts'
 
-export const scatterNode = registerNode({
+registerNode({
   type: 'out.scatter',
   label: 'Scatter Plot',
   category: 'visualisation',

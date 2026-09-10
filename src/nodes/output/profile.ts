@@ -62,7 +62,7 @@ function profileSchema(ctx: InferContext): TableSchema {
   return schemaOf(ctx.inputs.neurons) ?? schemasFromType(ctx.inputs.dataset).neurons
 }
 
-export const profileNode = registerNode({
+registerNode({
   type: 'out.profile',
   label: 'Neuron Profile',
   category: 'visualisation',

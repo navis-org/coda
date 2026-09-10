@@ -1,0 +1,18 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  // The three pages besides index.html (which knip's vite plugin finds), and the scripts and vite plugins run by name.
+  "entry": [
+    "src/overview/main.ts",
+    "src/tutorial/main.ts",
+    "src/nodeguide/main.ts",
+    "scripts/**/*.{ts,mjs}",
+    "vite/**/*.ts"
+  ],
+  "project": ["src/**/*.{ts,tsx}", "scripts/**/*.{ts,mjs}", "vite/**/*.ts"],
+  // Ambient declarations: nothing imports a `.d.ts`, it is in scope by being there.
+  "ignore": ["src/**/*.d.ts"],
+  // Run by package.json scripts, never installed from npm.
+  "ignoreBinaries": ["python3", "Rscript", "rsvg-convert"],
+  // An export used in its own file is a module's vocabulary, not dead code.
+  "ignoreExportsUsedInFile": true
+}

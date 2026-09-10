@@ -23,7 +23,7 @@ import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isDatasetValue } from '../../core/values'
 
-export const datasetDescriptionNode = registerNode({
+registerNode({
   type: 'dataset.description',
   label: 'Description',
   category: 'dataset',

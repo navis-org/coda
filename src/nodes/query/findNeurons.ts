@@ -111,7 +111,7 @@ const FOUND_NEURONS_WARN = 10_000
  * query on every keystroke in a value field.
  */
 
-export const findNeuronsNode = registerNode({
+registerNode({
   type: 'neuron.findNeurons',
   label: 'Find Neurons',
   category: 'query',

@@ -574,9 +574,6 @@ export function num(value: number): ScalarValue {
 export function str(value: string): ScalarValue {
   return { kind: 'string', value }
 }
-export function bool(value: boolean): ScalarValue {
-  return { kind: 'boolean', value }
-}
 
 // ---------------------------------------------------------------------------
 // Accessors

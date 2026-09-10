@@ -87,7 +87,7 @@ function selectionSchema(): ReturnType<typeof tableSchema> {
  */
 const EMITTED_MODE = 'dark' as const
 
-export const dendrogramNode = registerNode({
+registerNode({
   type: 'out.dendrogram',
   label: 'Dendrogram',
   category: 'visualisation',

@@ -62,7 +62,7 @@ const outputNodeSchema = (inputs: Readonly<Record<string, CodaType | undefined>>
  * *is*, the same call `out.describe` makes, and a summary missing whichever numbers somebody
  * unticked is a table that no longer matches its own name.
  */
-export const networkMetricsNode = registerNode({
+registerNode({
   type: 'net.metrics',
   label: 'Network Metrics',
   category: 'visualisation',

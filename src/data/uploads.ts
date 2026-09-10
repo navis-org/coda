@@ -41,6 +41,8 @@
  * on inference's behalf, and being re-run when it lands is what closes the loop.
  */
 
+import type { RefusalWords } from './idb'
+import { commit, database, readKey } from './idb'
 import { hashString } from '../core/hash'
 import type { TableSchema } from '../core/types'
 import type { TableValue } from '../core/values'
@@ -86,102 +88,28 @@ export interface UploadMeta {
 // Database
 // ---------------------------------------------------------------------------
 
-let dbPromise: Promise<IDBDatabase> | undefined
+/** The connection — `idb.ts`, which records the opener's rules. The words are this module's. */
+const db = database({ name: DB_NAME, version: DB_VERSION, stores: [META_STORE, TABLE_STORE] })
 
-function open(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    // `typeof` rather than truthiness: the identifier is simply absent under node.
-    if (typeof indexedDB === 'undefined') return reject(new Error(NO_STORAGE))
-    let request: IDBOpenDBRequest
-    try {
-      request = indexedDB.open(DB_NAME, DB_VERSION)
-    } catch {
-      return reject(new Error(NO_STORAGE))
-    }
-    request.onupgradeneeded = () => {
-      const database = request.result
-      if (!database.objectStoreNames.contains(META_STORE))
-        database.createObjectStore(META_STORE)
-      if (!database.objectStoreNames.contains(TABLE_STORE))
-        database.createObjectStore(TABLE_STORE)
-    }
-    request.onsuccess = () => resolve(request.result)
-    // Private-mode Firefox rejects here; so does a browser with storage switched off.
-    request.onerror = () => reject(new Error(NO_STORAGE))
-    request.onblocked = () => reject(new Error(NO_STORAGE))
-  })
+const REFUSAL: RefusalWords = {
+  unavailable: NO_STORAGE,
+  rolledBack: 'The upload was rolled back',
+  failed: 'The upload failed',
+  quota: 'No room left in browser storage. Remove an upload and try again.',
 }
 
 /**
- * The open database, memoised on success only. A cached rejection would make one transient
- * failure permanent for the life of the tab, and the next attempt is exactly when to retry.
+ * One read-write transaction across both stores, resolving when it *commits* — `commit`'s
+ * policy. For an upload, a save reported before its rollback means claiming to hold a file that
+ * is gone.
  */
-function db(): Promise<IDBDatabase> {
-  dbPromise ??= open().catch((err: unknown) => {
-    dbPromise = undefined
-    throw err
-  })
-  return dbPromise
-}
-
-function asError(err: unknown, fallback: string): Error {
-  if (err instanceof Error) {
-    if (err.name === 'QuotaExceededError') {
-      return new Error('No room left in browser storage. Remove an upload and try again.')
-    }
-    return err
-  }
-  return new Error(fallback)
-}
-
-/**
- * One read-write transaction across both stores, resolving when it *commits*.
- *
- * Waiting for `complete` rather than for the requests is load-bearing: a quota failure lets
- * the `put` succeed and then aborts, so awaiting the request would report a save that was
- * rolled back — which for an upload means claiming to hold a file that is gone.
- */
-async function write(
-  run: (meta: IDBObjectStore, tables: IDBObjectStore) => void,
-): Promise<void> {
-  const database = await db()
-  await new Promise<void>((resolve, reject) => {
-    let tx: IDBTransaction
-    try {
-      tx = database.transaction([META_STORE, TABLE_STORE], 'readwrite')
-    } catch (err) {
-      return reject(asError(err, NO_STORAGE))
-    }
-    tx.oncomplete = () => resolve()
-    tx.onabort = () => reject(asError(tx.error, 'The upload was rolled back'))
-    tx.onerror = () => reject(asError(tx.error, 'The upload failed'))
-    try {
-      run(tx.objectStore(META_STORE), tx.objectStore(TABLE_STORE))
-    } catch (err) {
-      reject(asError(err, 'The upload failed'))
-    }
-  })
-}
-
-/** One read, resolving to `fallback` on any failure — broken storage reads as empty storage. */
-async function read<T>(store: string, key: string, fallback: T): Promise<T> {
-  try {
-    const database = await db()
-    return await new Promise<T>((resolve) => {
-      let tx: IDBTransaction
-      try {
-        tx = database.transaction(store, 'readonly')
-      } catch {
-        return resolve(fallback)
-      }
-      const request = tx.objectStore(store).get(key)
-      request.onsuccess = () => resolve((request.result as T | undefined) ?? fallback)
-      request.onerror = () => resolve(fallback)
-      tx.onabort = () => resolve(fallback)
-    })
-  } catch {
-    return fallback
-  }
+function write(run: (meta: IDBObjectStore, tables: IDBObjectStore) => void): Promise<void> {
+  return commit(
+    db,
+    [META_STORE, TABLE_STORE],
+    (tx) => run(tx.objectStore(META_STORE), tx.objectStore(TABLE_STORE)),
+    REFUSAL,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +199,7 @@ export function uploadPeekSettled(id: string): boolean {
 }
 
 async function loadMeta(id: string): Promise<void> {
-  const meta = await read<UploadMeta | undefined>(META_STORE, id, undefined)
+  const meta = await readKey<UploadMeta | undefined>(db, META_STORE, id, undefined)
   metaMirror.set(id, meta)
   // Fire even on a miss: a node whose data is absent has stopped waiting, and the card's
   // "not in this browser" state is only reachable once inference has been told.
@@ -319,13 +247,13 @@ export async function putUpload(
 /** The stored table, or undefined when this browser does not have it. */
 export async function getUpload(id: string): Promise<TableValue | undefined> {
   if (!id) return undefined
-  return read<TableValue | undefined>(TABLE_STORE, id, undefined)
+  return readKey<TableValue | undefined>(db, TABLE_STORE, id, undefined)
 }
 
 /** The stored descriptor, awaited rather than peeked. Also warms the peek's mirror. */
 export async function getUploadMeta(id: string): Promise<UploadMeta | undefined> {
   if (!id) return undefined
-  const meta = await read<UploadMeta | undefined>(META_STORE, id, undefined)
+  const meta = await readKey<UploadMeta | undefined>(db, META_STORE, id, undefined)
   metaMirror.set(id, meta)
   started.add(id)
   return meta
@@ -363,7 +291,7 @@ function uploadId(table: TableValue): string {
 export function resetUploads(): void {
   metaMirror.clear()
   started.clear()
-  dbPromise = undefined
+  db.reset()
   // Not the revision: it only ever has to move, and rewinding it could hand a mounted
   // component the snapshot it is already holding.
   revision++

@@ -35,7 +35,7 @@ import { idColumn } from '../lib/tableOps'
 import { labelsByNeuron } from '../lib/typeMapping'
 import { ID_COLUMN_NAME } from '../../core/ids'
 
-export const partnerVectorsNode = registerNode({
+registerNode({
   type: 'neuron.partnerVectors',
   label: 'Partner Vectors',
   category: 'analysis',

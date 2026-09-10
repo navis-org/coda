@@ -44,7 +44,7 @@ const MEASURES = [
  */
 const DEFAULT_MEASURE: (typeof MEASURES)[number]['value'] = 'weight'
 
-export const roiConnectivityNode = registerNode({
+registerNode({
   type: 'neuron.roiConnectivity',
   label: 'ROI Connectivity',
   category: 'query',

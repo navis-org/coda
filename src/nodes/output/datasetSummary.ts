@@ -52,7 +52,7 @@ import { ANY_OPTION, datasetInfoFromType, schemasFromType } from '../lib/dataset
 const STATUS_HELP =
   'Which neurons the counts are over. Empty means every neuron the dataset publishes, which is what the index carries — unlike Find Neurons, which defaults to Traced.'
 
-export const datasetSummaryNode = registerNode({
+registerNode({
   type: 'out.datasetSummary',
   label: 'Dataset Summary',
   category: 'visualisation',

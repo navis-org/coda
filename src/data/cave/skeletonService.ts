@@ -40,6 +40,7 @@
 import type { NeuronId } from '../../core/ids'
 import type { SkeletonGeometry } from '../../core/values'
 import { mapWithConcurrency } from '../concurrency'
+import { memoPromise } from '../memoPromise'
 import { reportSourceLearned } from '../source'
 import type { CaveRequestOptions } from './client'
 import { CaveError, caveGet, caveGetBytes, cavePostRaw } from './client'
@@ -194,26 +195,23 @@ export function skeletonServiceFor(
   const known = services.get(key)
   if (known !== undefined) return Promise.resolve(known ?? undefined)
 
-  let pending = loading.get(key)
-  if (!pending) {
-    pending = resolve(datastack, options)
-      .then((service) => {
+  return memoPromise(
+    loading,
+    key,
+    () =>
+      resolve(datastack, options).then((service) => {
         const before = services.get(key)
         services.set(key, service ?? null)
         // Only when the answer *changed* — `l2SourceFor`'s rule, and for its reason: fired
         // unconditionally it costs a whole-graph re-inference per Run.
         if (before === undefined) reportSourceLearned('cave')
         return service
-      })
-      .finally(() => {
-        // Not remembered as a verdict: a failed read is transient and a sticky `null` would
-        // report "no service" for the life of the tab. `asked` is what stops the *peek* retrying
-        // it; a caller that wants geometry is allowed to.
-        loading.delete(key)
-      })
-    loading.set(key, pending)
-  }
-  return pending
+      }),
+    // In flight only, and a failure is not remembered as a verdict: a failed read is transient
+    // and a sticky `null` would report "no service" for the life of the tab. `asked` is what
+    // stops the *peek* retrying it; a caller that wants geometry is allowed to.
+    { keep: 'inflight' },
+  )
 }
 
 async function resolve(

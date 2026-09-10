@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 import { addNode, emptyGraph } from './graph'
 import type { CodaGraph } from './graph'
 import type { ParamValues } from './node'
-import { visibleParams, withDefaults } from './node'
+import { enumValue, visibleParams, withDefaults } from './node'
 import { registerNode } from './registry'
 import { Scheduler } from './scheduler'
 import { T, column, tableSchema } from './types'
@@ -85,6 +85,13 @@ describe('withDefaults', () => {
     const ids = (params: ParamValues) => visibleParams(def, params).map((p) => p.id)
     expect(ids({})).toContain('seed')
     expect(ids({ mode: 'tail' })).not.toContain('seed')
+  })
+
+  it('reads an enum off its declared options, and an unknown one as the default', () => {
+    expect(enumValue(def, { mode: 'tail' }, 'mode')).toBe('tail')
+    expect(enumValue(def, {}, 'mode')).toBe('head')
+    // A renamed option, or a hand edit: the definition's default, never a second list's guess.
+    expect(enumValue(def, { mode: 'sideways' }, 'mode')).toBe('head')
   })
 
   it('does not consult `absentMeans`, which describes a stored document and the loader applies', () => {

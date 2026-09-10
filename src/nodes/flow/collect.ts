@@ -45,7 +45,7 @@ import { isTableValue } from '../../core/values'
 import { stackTables } from '../lib/tableOps'
 import { isGeometryValue, stackGeometry } from '../lib/transformOps'
 
-export const collectNode = registerNode({
+registerNode({
   type: 'flow.collect',
   label: 'Collect',
   category: 'utility',

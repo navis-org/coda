@@ -42,7 +42,7 @@ import { parseIdList } from '../lib/idList'
 /** What the placeholder shows, and what the guide quotes. One spelling of the example. */
 const EXAMPLE = 'precomputed://gs://flyem-male-cns/v1.0/segmentation/'
 
-export const ngSourceNode = registerNode({
+registerNode({
   type: 'dataset.ngsource',
   label: 'Neuroglancer Source',
   category: 'dataset',

@@ -52,34 +52,15 @@ export function pyValue(value: ParamValue | null | undefined): string {
   return pyStr(value)
 }
 
-/** A Python list literal, one line. Callers wanting a wrapped list use `pyLongList`. */
+/** A Python list literal, one line. */
 export function pyList(values: readonly ParamValue[]): string {
   return `[${values.map((v) => pyValue(v)).join(', ')}]`
 }
 
 /**
- * A list literal wrapped across lines once it stops fitting.
- *
- * An `ids` param routinely holds thousands of neuron ids, and a single line that long is a
- * cell nobody can read and no diff can show. Returns lines rather than a string, since the
- * caller has to indent them into whatever expression it is building.
- */
-export function pyLongList(
-  values: readonly ParamValue[],
-  indent = '    ',
-  width = 88,
-): string[] {
-  return wrapList(
-    values.map((v) => pyValue(v)),
-    indent,
-    width,
-  )
-}
-
-/**
  * A wrapped list literal of ids, from their exact decimal text.
  *
- * Separate from `pyLongList` because a `NeuronId` is a **string**, and `pyValue` would quote
+ * Not a `pyList` of the values because a `NeuronId` is a **string**, and `pyValue` would quote
  * it — `NeuronCriteria(bodyId=['1001'])` matches nothing at all, silently. That is the same
  * trap `idList` in `data/neuprint/cypher.ts` exists to avoid one layer down, and it produces a
  * notebook that runs, reports zero neurons, and blames the dataset.

@@ -59,7 +59,7 @@ import {
 } from '../lib/cleanOps'
 import { NM_PER_UM } from '../lib/nblastOps'
 
-export const cleanSkeletonsNode = registerNode({
+registerNode({
   type: 'neuron.cleanSkeletons',
   label: 'Clean Skeletons',
   category: 'transform',

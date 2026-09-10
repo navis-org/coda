@@ -34,7 +34,7 @@ import { idColumn, matrixLinksSchema, matrixToLinks } from '../lib/tableOps'
  *
  * `Matrix` stays first, so a link dragged off the node starts there and the footer reads `N × M`.
  */
-export const adjacencyNode = registerNode({
+registerNode({
   type: 'neuron.adjacency',
   label: 'Adjacency',
   category: 'query',

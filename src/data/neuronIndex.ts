@@ -27,6 +27,7 @@
 
 import type { DatasetAnnotations, TableValue } from '../core/values'
 import { cacheDelete, cacheGetEntry, cacheKeys, cachePeek, cacheSet } from './cache'
+import { memoPromise } from './memoPromise'
 
 export interface NeuronIndexRequest {
   datasetId: string
@@ -82,31 +83,30 @@ const inFlight = new Map<string, Promise<TableValue>>()
  * value is already in hand and already in the in-memory half of the cache.
  */
 export function loadCachedTable(spec: CachedTableSpec): Promise<TableValue> {
-  const existing = inFlight.get(spec.key)
-  if (existing && !spec.refresh) return existing
-
-  const load = (async () => {
-    if (!spec.refresh) {
-      const hit = await cacheGetEntry<TableValue>(spec.key, {
-        fingerprint: spec.fingerprint,
-        maxAgeMs: spec.maxAgeMs ?? NEURON_INDEX_MAX_AGE_MS,
-      })
-      if (hit) {
-        spec.onFetched?.(hit.savedAt)
-        return hit.value
+  // A refresh never joins a load already running: that is the copy it asked to replace.
+  if (spec.refresh) inFlight.delete(spec.key)
+  return memoPromise(
+    inFlight,
+    spec.key,
+    async () => {
+      if (!spec.refresh) {
+        const hit = await cacheGetEntry<TableValue>(spec.key, {
+          fingerprint: spec.fingerprint,
+          maxAgeMs: spec.maxAgeMs ?? NEURON_INDEX_MAX_AGE_MS,
+        })
+        if (hit) {
+          spec.onFetched?.(hit.savedAt)
+          return hit.value
+        }
       }
-    }
-    const table = await spec.fetch()
-    const at = Date.now()
-    spec.onFetched?.(at)
-    void cacheSet(spec.key, table, spec.fingerprint)
-    return table
-  })().finally(() => {
-    inFlight.delete(spec.key)
-  })
-
-  inFlight.set(spec.key, load)
-  return load
+      const table = await spec.fetch()
+      const at = Date.now()
+      spec.onFetched?.(at)
+      void cacheSet(spec.key, table, spec.fingerprint)
+      return table
+    },
+    { keep: 'inflight' },
+  )
 }
 
 /**

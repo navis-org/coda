@@ -31,7 +31,7 @@ import { DEFAULT_SEPARATOR, SEPARATOR_OPTIONS } from '../lib/copyIds'
  * pass-through that made a chain need a Run it did not need before would be a tax charged for
  * dropping a copy button on it.
  */
-export const copyIdsNode = registerNode({
+registerNode({
   type: 'out.copyIds',
   label: 'Copy IDs',
   category: 'utility',

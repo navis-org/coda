@@ -54,7 +54,7 @@ import {
   meshesFromResult,
 } from '../lib/cleanOps'
 
-export const cleanMeshesNode = registerNode({
+registerNode({
   type: 'neuron.cleanMeshes',
   label: 'Clean Meshes',
   category: 'transform',

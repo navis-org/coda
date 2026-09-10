@@ -43,7 +43,7 @@ import { collectLabels, labelMatch, parseTypedLabels } from '../lib/labelLookup'
  * agree and the reason this one gave is the reason both give. Worth recording rather than
  * deleting: the argument here was made first, and the other node was brought to it.
  */
-export const idsFromLabelNode = registerNode({
+registerNode({
   type: 'neuron.idsFromLabel',
   label: 'IDs from Label',
   category: 'query',

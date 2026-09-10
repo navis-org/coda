@@ -65,7 +65,7 @@ import {
 } from '../lib/similarityOps'
 import type { SimilarityMetric } from '../lib/similarityOps'
 
-export const embedNode = registerNode({
+registerNode({
   type: 'core.embed',
   label: 'Embedding',
   category: 'analysis',

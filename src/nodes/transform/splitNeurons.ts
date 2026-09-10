@@ -74,7 +74,7 @@ function filtersNote(): string {
  * Cheap: item references and one attribute-table pass, no geometry copied and nothing fetched,
  * so it re-splits as you type a value with nothing waiting for Run.
  */
-export const splitNeuronsNode = registerNode({
+registerNode({
   type: 'neuron.splitNeurons',
   label: 'Split Neurons',
   category: 'transform',

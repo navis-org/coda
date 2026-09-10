@@ -818,7 +818,7 @@ export function NetworkViewer({
           import('@sigma/edge-curve'),
           // Dynamic for the same reason sigma is: it extends `NodeProgram`, so importing it
           // evaluates `sigma/rendering`, which touches WebGL globals jsdom has none of.
-          import('./nodeShapeProgram'),
+          import('./nodeShapeProgram').then((m) => m.NodeShapeProgram),
           // A remembered layout skips the computation outright — including, for the force
           // layout, the settling that earned it.
           remembered?.positions ??
@@ -932,7 +932,7 @@ export function NetworkViewer({
            * drawers over the settings, so supplying them here would quietly discard the haloed
            * labels and the selection ring.
            */
-          nodeProgramClasses: { circle: shapeProgram.NodeShapeProgram },
+          nodeProgramClasses: { circle: shapeProgram },
           /*
            * Everything outside the focused ego network *recedes*; nothing is erased.
            *

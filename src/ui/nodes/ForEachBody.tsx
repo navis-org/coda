@@ -26,7 +26,7 @@
 
 import { useMemo, useState } from 'react'
 
-import { getNodeDef } from '../../core/registry'
+import { filledParams, getNodeDef } from '../../core/registry'
 import { elementNoun, isIterableKind, isIterableValue } from '../../nodes/lib/iterables'
 import { batchSize, isGroupMode, loopPlanOf } from '../../nodes/flow/plan'
 import { useGraphStore } from '../../store/graphStore'
@@ -95,7 +95,7 @@ export function ForEachBody({ node, ctx, setParam }: NodeBodyProps) {
   const iterable = isIterableKind(kind)
 
   const items = isIterableValue(input) ? input : undefined
-  const grouping = isGroupMode(node.params)
+  const grouping = isGroupMode(filledParams(node))
   const groupBy = ctx.column('groupBy')
 
   /*
@@ -107,7 +107,7 @@ export function ForEachBody({ node, ctx, setParam }: NodeBodyProps) {
   const total = plan.count
   const first = total > 0 ? plan.label(0) : ''
 
-  const batch = batchSize(node.params)
+  const batch = batchSize(filledParams(node))
   const noun = grouping ? 'group' : batch > 1 ? 'batch' : elementNoun(items)
   const running = info.state === 'running'
   const fraction = running ? (info.progress ?? 0) : 0

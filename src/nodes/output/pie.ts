@@ -28,7 +28,7 @@ import { isTableValue } from '../../core/values'
 import { rowsWithLabels } from '../lib/chartSelection'
 import { tapPorts } from '../lib/tapPorts'
 
-export const pieNode = registerNode({
+registerNode({
   type: 'out.pie',
   label: 'Pie Chart',
   category: 'visualisation',

@@ -85,7 +85,7 @@ function mirrorableSpaces() {
   return allSpaces().filter((space) => space.mirror)
 }
 
-export const mirrorNode = registerNode({
+registerNode({
   type: 'neuron.mirror',
   label: 'Mirror Neurons',
   category: 'transform',

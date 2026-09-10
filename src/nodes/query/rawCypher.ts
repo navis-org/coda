@@ -19,7 +19,7 @@ import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { requireDataset, sourceLabel, sourceSupports } from '../lib/datasetParam'
 
-export const rawCypherNode = registerNode({
+registerNode({
   type: 'neuron.rawCypher',
   label: 'Cypher',
   category: 'query',

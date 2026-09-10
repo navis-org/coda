@@ -48,7 +48,7 @@ import {
  */
 export const REGIONS_WARN = 60
 
-export const roiMeshesNode = registerNode({
+registerNode({
   type: 'neuron.roiMeshes',
   label: 'ROI Meshes',
   category: 'query',

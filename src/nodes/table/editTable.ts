@@ -74,7 +74,7 @@ function planFor(ctx: {
   return plan
 }
 
-export const editTableNode = registerNode({
+registerNode({
   type: 'core.editTable',
   label: 'Edit Table',
   category: 'transform',

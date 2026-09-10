@@ -84,7 +84,7 @@ export function chosenViewerKind(params: ParamValues): ViewerKind | undefined {
   return chosen === 'auto' ? undefined : (chosen as ViewerKind)
 }
 
-export const neuroglancerNode = registerNode({
+registerNode({
   type: 'out.neuroglancer',
   label: 'Neuroglancer',
   category: 'visualisation',

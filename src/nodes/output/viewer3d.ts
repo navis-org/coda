@@ -68,7 +68,7 @@ type WidthMode = 'uniform' | 'radius' | 'world'
  * declared `by radius`, and a document saved before the mode existed carries its `absentMeans`,
  * `uniform`, which `deserializeGraph` writes in.
  */
-function widthModeOf(params: ParamValues): WidthMode {
+export function widthModeOf(params: ParamValues): WidthMode {
   const mode = String(params.skeletonWidthMode)
   return mode === 'radius' || mode === 'world' ? mode : 'uniform'
 }
@@ -107,7 +107,7 @@ function selectionSourceSchema(ctx: InferContext): TableSchema {
   )
 }
 
-export const viewer3dNode = registerNode({
+registerNode({
   type: 'out.viewer3d',
   label: '3D View',
   category: 'visualisation',

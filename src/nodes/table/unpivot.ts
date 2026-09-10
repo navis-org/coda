@@ -55,7 +55,7 @@ export function readUnpivotSpec(ctx: {
   }
 }
 
-export const unpivotNode = registerNode({
+registerNode({
   type: 'core.unpivot',
   label: 'Unpivot',
   category: 'transform',

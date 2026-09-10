@@ -88,7 +88,7 @@ const SELECTION_SCHEMA = tableSchema(
   column('relabel', 'str'),
 )
 
-export const heatmapNode = registerNode({
+registerNode({
   type: 'out.heatmap',
   label: 'Heatmap',
   category: 'visualisation',

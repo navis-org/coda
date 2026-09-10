@@ -25,7 +25,7 @@ import {
  * every stored graph naming it, and was the right trade only because Coda is pre-release with
  * one user. A rename after that is a load-time alias kept forever.
  */
-export const filterNode = registerNode({
+registerNode({
   type: 'core.filterTable',
   label: 'Filter Table',
   category: 'transform',

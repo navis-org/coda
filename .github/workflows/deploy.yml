@@ -48,6 +48,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      # Dead code against the committed baseline; see scripts/knip-check.mjs.
+      - run: pnpm knip:check
 
       # Formatting, phrased as "run the fix and prove it changed nothing" rather than as a
       # second `prettier --check` script. A check script would have to repeat `format`'s glob,

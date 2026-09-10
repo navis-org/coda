@@ -14,6 +14,7 @@
  * mesh whose bounding box matches that neuron's skeleton.
  */
 
+import { memoPromise } from '../memoPromise'
 import { hashUint64 } from './murmur'
 import type { FetchOptions } from './transport'
 import { fetchBytes, gunzip } from './transport'
@@ -105,15 +106,14 @@ export function readMinishard(
   options: FetchOptions = {},
 ): Promise<readonly MinishardEntry[]> {
   const key = `${location.url}#${location.minishard}`
-  const hit = minishardCache.get(key)
-  if (hit) return hit
-  const pending = loadMinishard(location, spec, options)
-  minishardCache.set(key, pending)
-  // A rejection must not be remembered: an abort or a transient network failure says nothing
-  // about the bytes, and a poisoned entry would make every later reader fail for free.
-  void pending.catch(() => {
-    if (minishardCache.get(key) === pending) minishardCache.delete(key)
-  })
+  // A rejection is not remembered (`memoPromise`): an abort or a transient network failure says
+  // nothing about the bytes, and a poisoned entry would make every later reader fail for free.
+  const pending = memoPromise(
+    minishardCache,
+    key,
+    () => loadMinishard(location, spec, options),
+    { keep: 'resolved' },
+  )
   if (minishardCache.size > MAX_CACHED_MINISHARDS) {
     const oldest = minishardCache.keys().next()
     if (!oldest.done) minishardCache.delete(oldest.value)

@@ -58,7 +58,7 @@ function chosenDType(ctx: InferContext): DType | undefined {
   return name ? findColumn(ctx.attributes('in', 'nodes'), name)?.dtype : undefined
 }
 
-export const filterNetworkNode = registerNode({
+registerNode({
   type: 'net.filter',
   label: 'Filter Network',
   category: 'analysis',

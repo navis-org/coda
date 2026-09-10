@@ -35,7 +35,7 @@ import { renamePlan, renameTable } from '../lib/tableOps'
  * two rows naming one target suffix the second, which is `renamedColumns`' collision rule and
  * the only alternative to a table whose schema claims two columns its data has one of.
  */
-export const renameNode = registerNode({
+registerNode({
   type: 'core.rename',
   label: 'Rename Columns',
   category: 'transform',

@@ -109,7 +109,7 @@ function qualifySchema(
   return layout ? tableSchema(...layout.columns) : schema
 }
 
-export const qualifyIdsNode = registerNode({
+registerNode({
   type: 'core.qualifyIds',
   label: 'Qualify Ids',
   category: 'transform',

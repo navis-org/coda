@@ -26,7 +26,7 @@ import { isTableValue } from '../../core/values'
 import { rowsInRanges } from '../lib/chartSelection'
 import { tapPorts } from '../lib/tapPorts'
 
-export const histogramNode = registerNode({
+registerNode({
   type: 'out.histogram',
   label: 'Histogram',
   category: 'visualisation',

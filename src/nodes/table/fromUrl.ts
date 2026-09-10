@@ -70,7 +70,7 @@ export function resetFetchedSchemas(): void {
   schemaByUrl.clear()
 }
 
-export const tableFromUrlNode = registerNode({
+registerNode({
   type: 'core.tableFromUrl',
   label: 'Table from URL',
   category: 'utility',

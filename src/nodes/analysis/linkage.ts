@@ -35,7 +35,7 @@ import {
   warnUnrecordedCells,
 } from '../lib/linkageOps'
 
-export const linkageNode = registerNode({
+registerNode({
   type: 'cluster.linkage',
   label: 'Linkage',
   category: 'analysis',

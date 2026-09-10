@@ -23,9 +23,10 @@ import type { SkeletonGeometry } from '../../core/values'
 import { mapWithConcurrency } from '../concurrency'
 import type { TreePoint } from '../skeletonTree'
 import { spanningForest } from '../skeletonTree'
-import { caveGet, cavePost } from './client'
+import { CaveError, caveGet, cavePost } from './client'
 import type { GrapheneSource } from './graphene'
 import type { CaveRequestOptions } from './client'
+import { memoPromise } from '../memoPromise'
 
 /**
  * How many neurons are built at once.
@@ -83,15 +84,24 @@ export function l2TableMapping(
   server: string,
   options: CaveRequestOptions = {},
 ): Promise<Record<string, unknown>> {
-  let pending = mappings.get(server)
-  if (!pending) {
-    pending = caveGet<Record<string, unknown>>(
-      `${server}/l2cache/api/v1/table_mapping`,
-      options,
-    ).catch(() => ({}))
-    mappings.set(server, pending)
-  }
-  return pending
+  /*
+   * Only a 404 is the verdict "no L2 cache here", and a verdict is kept for the session like any
+   * answer. Anything else — a 5xx, a timeout, a dropped connection — still reads as no cache for
+   * *this* caller, as it always did, but is not kept (`memoPromise`): cached, one bad moment
+   * read as a missing L2 cache on that server until a reload.
+   */
+  return memoPromise(
+    mappings,
+    server,
+    () =>
+      caveGet<Record<string, unknown>>(`${server}/l2cache/api/v1/table_mapping`, options).catch(
+        (err: unknown) => {
+          if (err instanceof CaveError && err.status === 404) return {}
+          throw err
+        },
+      ),
+    { keep: 'resolved' },
+  ).catch(() => ({}))
 }
 
 /** Test seam, and what a changed global server drops. */

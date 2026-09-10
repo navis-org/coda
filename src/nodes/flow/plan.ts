@@ -15,7 +15,7 @@
 import type { GraphNode } from '../../core/graph'
 import type { LoopPlan, ParamValues } from '../../core/node'
 import { findParam, resolveColumn } from '../../core/node'
-import { getNodeDef } from '../../core/registry'
+import { filledParams, getNodeDef } from '../../core/registry'
 import type { CodaType } from '../../core/types'
 import type { Value } from '../../core/values'
 import type { IterableValue } from '../lib/iterables'
@@ -34,7 +34,7 @@ const NOTHING: LoopPlan = { count: 0, label: () => '', size: () => 0 }
 
 /** Whether the node is dividing by element or by a column's values. */
 export function isGroupMode(params: ParamValues): boolean {
-  return String(params.mode ?? 'element') === 'group'
+  return String(params.mode) === 'group'
 }
 
 /**
@@ -46,7 +46,7 @@ export function isGroupMode(params: ParamValues): boolean {
  */
 export function batchSize(params: ParamValues): number {
   if (isGroupMode(params)) return 1
-  return Math.max(1, Math.floor(Number(params.batch ?? 1)))
+  return Math.max(1, Math.floor(Number(params.batch)))
 }
 
 /**
@@ -59,7 +59,7 @@ export function batchSize(params: ParamValues): number {
  */
 function extent(params: ParamValues, value: Value | undefined, column: string | undefined) {
   if (!isIterableValue(value)) return undefined
-  const limit = Math.max(0, Math.floor(Number(params.limit ?? 0)))
+  const limit = Math.max(0, Math.floor(Number(params.limit)))
   const cap = (n: number) => (limit > 0 ? Math.min(limit, n) : n)
 
   if (isGroupMode(params)) {
@@ -158,7 +158,7 @@ export function loopPlanOf(
   value: Value | undefined,
   inputTypes: Readonly<Record<string, CodaType | undefined>> = {},
 ): LoopPlan {
-  return loopPlanFor(node.params, value, columnOf(node, inputTypes))
+  return loopPlanFor(filledParams(node), value, columnOf(node, inputTypes))
 }
 
 /** How `groupBy` resolves for a node the UI is drawing — one spelling, two surfaces. */
@@ -168,7 +168,7 @@ export function columnOf(
 ): string | undefined {
   const def = getNodeDef(node.type)
   const param = def ? findParam(def, 'groupBy') : undefined
-  return param?.kind === 'column'
-    ? resolveColumn(param, node.params, inputTypes as Record<string, never>)
+  return def && param?.kind === 'column'
+    ? resolveColumn(param, filledParams(node), inputTypes as Record<string, never>)
     : undefined
 }

@@ -77,7 +77,7 @@ const VIEWS = [
   { value: 'lateral', label: 'Lateral' },
 ] as const
 
-export const roisNode = registerNode({
+registerNode({
   type: 'out.rois',
   label: 'ROI Viewer',
   category: 'visualisation',

@@ -12,6 +12,7 @@
  * editor re-infers when they arrive. That is exactly what `peekDataset` was designed for.
  */
 
+import { DatasetListing } from '../datasetListing'
 import type { TableSchema } from '../../core/types'
 import type {
   ColumnData,
@@ -322,10 +323,11 @@ export class NeuPrintSource implements DataSource {
   readonly schemas: SourceSchemas = CANONICAL_SCHEMAS
 
   private states = new Map<string, DatasetState>()
-  private ordered: DatasetInfo[] | undefined
-  private listing: Promise<DatasetInfo[]> | undefined
-  /** Whether a peek has already asked for the listing. See `peekDatasets`. */
-  private listingRequested = false
+  /**
+   * The listing — `DatasetListing`, re-fetched on every awaited call, which is how the Sources
+   * panel refreshes it. `loadDatasets` is what makes a re-list keep what discovery learned.
+   */
+  private readonly listing: DatasetListing
 
   /**
    * One instance per deployment.
@@ -344,6 +346,9 @@ export class NeuPrintSource implements DataSource {
       this.server === DEFAULT_SERVER
         ? 'Janelia neuPrint (neuprint.janelia.org) — hemibrain, MANC, optic-lobe, male-CNS and more. Needs a token and a same-origin proxy.'
         : `neuPrint at ${host}. Needs a token and a same-origin proxy.`
+    this.listing = new DatasetListing(this.id, (signal) => this.loadDatasets(signal), {
+      keep: 'inflight',
+    })
   }
 
   /**
@@ -362,12 +367,7 @@ export class NeuPrintSource implements DataSource {
   // -------------------------------------------------------------------------
 
   async listDatasets(signal?: AbortSignal): Promise<DatasetInfo[]> {
-    // Deduplicated: the dataset picker, the connection panel and inference can all ask at
-    // once on first load.
-    this.listing ??= this.loadDatasets(signal).finally(() => {
-      this.listing = undefined
-    })
-    return this.listing
+    return this.listing.get(signal)
   }
 
   private async loadDatasets(signal?: AbortSignal): Promise<DatasetInfo[]> {
@@ -430,11 +430,8 @@ export class NeuPrintSource implements DataSource {
         }
       else this.states.set(info.id, { info })
     }
-    this.ordered = infos.map((info) => this.states.get(info.id)!.info)
-    // `peekDatasets` answers differently from here on, and a dataset node's "Latest" resolves
-    // through it — so anything already inferred against the empty listing is now wrong.
-    reportSourceLearned(this.id)
-    return this.ordered
+    // Published and announced by `DatasetListing`, in that order.
+    return infos.map((info) => this.states.get(info.id)!.info)
   }
 
   /**
@@ -452,16 +449,11 @@ export class NeuPrintSource implements DataSource {
    *
    * Once per instance, not once per peek: inference runs on every graph mutation, and a
    * failed listing that retried from here would be a request per keystroke. An explicit
-   * `listDatasets()` — the Sources panel, a node's `evaluate` — still retries.
+   * `listDatasets()` — the Sources panel, a node's `evaluate` — still retries. Both rules are
+   * `DatasetListing`'s.
    */
   peekDatasets(): DatasetInfo[] | undefined {
-    if (!this.ordered && !this.listingRequested) {
-      this.listingRequested = true
-      // Swallowed: a peek has no caller to report to, and a 401 already goes out on its own
-      // channel to the Sources panel.
-      void this.listDatasets().catch(() => undefined)
-    }
-    return this.ordered
+    return this.listing.peek()
   }
 
   peekDataset(datasetId: string): DatasetInfo | undefined {
@@ -561,8 +553,7 @@ export class NeuPrintSource implements DataSource {
    * the canonical seven columns until something unrelated makes the graph change.
    */
   private republish(datasetId: string, state: DatasetState): void {
-    const index = this.ordered?.findIndex((d) => d.id === datasetId) ?? -1
-    if (this.ordered && index >= 0) this.ordered[index] = state.info
+    this.listing.revise(datasetId, () => state.info)
     reportSourceLearned(this.id)
   }
 

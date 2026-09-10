@@ -415,11 +415,16 @@ variable, so tabs drift rather than losing anything. Three are worth knowing abo
   `refreshLibrary` resolves can mint a second entry under a name that already exists — which
   `library.ts`'s own header says cannot happen.
 
-And one that is inert today and will not stay that way: **only `session.ts` installs
-`onversionchange`** — the other four openers still do not, so the first `DB_VERSION` bump with an old tab open has the old tab block the
-upgrade while the new one degrades — permanently in `cache.ts`, which memoises the failed
-`dbPromise`, and as "this browser has no storage" in the three that reject. Cheap insurance to add
-before the schema moves.
+One that used to be on this list: **only `session.ts` installed `onversionchange`**, so the first
+`DB_VERSION` bump with an old tab open would have had the old tab block the upgrade while the new
+one degraded — permanently in `cache.ts`, which memoised its failed open (so did `session.ts`), and
+as "this browser has no storage" in the three that reject. All five openers now go through
+`data/idb.ts`: every connection closes itself on `onversionchange` and drops the memo, and a failed
+open is never memoised, so the next call retries. What stays per module is deliberate — each keeps
+**its own database** (the reasons are in `library.ts` and `session.ts`) and **its own failure
+policy**: `library.ts`, `uploads.ts` and `edges/store.ts` refuse a write that did not commit, in
+their own words (`commit`), while `cache.ts` and `session.ts` swallow one and every read degrades
+to "nothing stored" (`attempt`).
 
 ## What comes back is a graph, not a session — freshness has to be re-derived
 

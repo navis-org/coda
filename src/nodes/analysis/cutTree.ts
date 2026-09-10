@@ -30,7 +30,7 @@ import {
   withClusters,
 } from '../lib/linkageOps'
 
-export const cutTreeNode = registerNode({
+registerNode({
   type: 'cluster.cut',
   label: 'Cut Tree',
   category: 'analysis',

@@ -4,7 +4,7 @@
  */
 
 import type { NodeCategory, NodeDefinition, ParamValues } from './node'
-import { findParam } from './node'
+import { findParam, withDefaults } from './node'
 import { allInputPorts, allOutputPorts, isPortGroup } from './ports'
 
 const definitions = new Map<string, NodeDefinition>()
@@ -279,4 +279,14 @@ export function nodeDefsByCategory(): Array<{
         .sort((a, b) => a.label.localeCompare(b.label)),
     }))
     .filter((group) => group.defs.length > 0)
+}
+
+/**
+ * A node's params as its code reads them (`withDefaults`), for a surface holding the node rather
+ * than a context. One spelling, because the UI kept writing `def ? withDefaults(def, node.params)
+ * : node.params` — and a caller that did not is how the loop card read `NaN` for a batch size.
+ */
+export function filledParams(node: { type: string; params: ParamValues }): ParamValues {
+  const def = getNodeDef(node.type)
+  return def ? withDefaults(def, node.params) : node.params
 }

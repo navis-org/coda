@@ -29,7 +29,7 @@ import { registerNode } from '../../core/registry'
 /** Wide enough for a sentence to breathe, short enough not to bury the node it sits beside. */
 export const NOTE_DEFAULT_SIZE = { width: 320, height: 140 }
 
-export const textNoteNode = registerNode({
+registerNode({
   type: 'note.text',
   label: 'Text',
   category: 'utility',

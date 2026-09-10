@@ -42,7 +42,7 @@ import {
 } from '../lib/similarityOps'
 import type { SimilarityMetric, SimilarityOutput } from '../lib/similarityOps'
 
-export const similarityNode = registerNode({
+registerNode({
   type: 'core.similarity',
   label: 'Similarity Matrix',
   category: 'analysis',

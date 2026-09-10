@@ -60,7 +60,7 @@ import { T } from '../../core/types'
 import { elementNoun, emptyElement, isIterableKind, isIterableValue } from '../lib/iterables'
 import { isGroupMode, loopPlanFor, loopSliceFor } from './plan'
 
-export const forEachNode = registerNode({
+registerNode({
   type: 'flow.forEach',
   label: 'For Each',
   category: 'utility',

@@ -17,7 +17,7 @@ import { SAMPLE_OPTIONS, sampleTable } from '../lib/tableOps'
  * on an ordering, applied where the ordering is decided, and taking rows off a table nobody
  * sorted is a different act.
  */
-export const sampleNode = registerNode({
+registerNode({
   type: 'core.sample',
   label: 'Sample',
   category: 'transform',

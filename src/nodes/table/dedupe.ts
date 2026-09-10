@@ -23,7 +23,7 @@ import { KEEP_OPTIONS, dedupeTable } from '../lib/tableOps'
  * *aggregate*. This keeps whole rows, so every column survives with the values it had; that
  * difference is what stops the two being one node with a mode.
  */
-export const dedupeNode = registerNode({
+registerNode({
   type: 'core.dedupe',
   label: 'Deduplicate',
   category: 'transform',

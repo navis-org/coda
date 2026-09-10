@@ -85,7 +85,7 @@ export function seedNodes(table: TableValue, collapseTypes: boolean): PathNode[]
   return [...seen.values()]
 }
 
-export const pathsNode = registerNode({
+registerNode({
   type: 'neuron.paths',
   label: 'Paths',
   category: 'query',

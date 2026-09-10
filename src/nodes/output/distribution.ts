@@ -30,7 +30,7 @@ import { isTableValue } from '../../core/values'
 import { rowsWithLabels } from '../lib/chartSelection'
 import { tapPorts } from '../lib/tapPorts'
 
-export const distributionNode = registerNode({
+registerNode({
   type: 'out.distribution',
   label: 'Box Plot',
   category: 'visualisation',

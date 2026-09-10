@@ -1085,6 +1085,13 @@ function absentValue(p: ParamDef): ParamValue | undefined {
   return p.default
 }
 
+/**
+ * The one empty list an absent list param reads as — shared, and frozen so sharing is safe. A
+ * fresh `[]` per fill hands a keyless node a new identity on every edit, and these reach viewer
+ * dependency arrays: the ROI viewer's projection re-solves on each.
+ */
+const NO_VALUES = Object.freeze([]) as unknown as string[]
+
 const FILLED = new WeakMap<ParamValues, ParamValues>()
 
 /**
@@ -1120,7 +1127,7 @@ export function withDefaults<P extends ParamValues>(def: NodeDefinition, params:
     const value = absentValue(p)
     if (value === undefined) continue
     filled ??= { ...params }
-    filled[p.id] = Array.isArray(value) ? [...value] : value
+    filled[p.id] = Array.isArray(value) ? (value.length ? [...value] : NO_VALUES) : value
   }
   if (!filled) return params
   FILLED.set(params, filled)
@@ -1143,6 +1150,28 @@ export function visibleParams(def: NodeDefinition, params: ParamValues): ParamDe
 
 export function findParam(def: NodeDefinition, paramId: string): ParamDef | undefined {
   return (def.params ?? []).find((p) => p.id === paramId)
+}
+
+/**
+ * An enum param's value when the declaration offers it, else the declared default.
+ *
+ * A stored value is whatever text reached the file — a hand edit, an option since renamed — and a
+ * viewer handed one it does not know has to decide what it means. The honest answer is the
+ * definition's own default, so it is read here, off the declaration, rather than written out as a
+ * fallback beside a copy of the option list: `ValuePreview` had nine such readers, each a second
+ * list that a new option would silently fall through. Options computed from an input cannot be
+ * checked here and pass through as they are.
+ */
+export function enumValue<T extends string>(
+  def: NodeDefinition,
+  params: ParamValues,
+  id: string,
+): T {
+  const param = findParam(def, id)
+  const value = withDefaults(def, params)[id]
+  if (param?.kind !== 'enum' || typeof param.options === 'function') return String(value) as T
+  // `validateParamValue` is the one statement of what an enum may hold.
+  return (validateParamValue(param, value ?? '') === undefined ? value : param.default) as T
 }
 
 /**

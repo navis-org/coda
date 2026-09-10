@@ -1600,7 +1600,10 @@ column that arrives null on every row breaks every picker that believed it.
   `discoveryRequested` flag every failure was retried on every graph mutation: one 52 kB request
   per keystroke, or one auth-failure popup per keystroke with no token. Exactly the rule
   `peekDatasets` already states for the listing beside it, and the reason neither flag is cleared
-  on failure. Pressing Run still retries, because the index path calls `discover` regardless.
+  on failure. The listing's half is `data/datasetListing.ts`, one class for neuPrint, CAVE and
+  CATMAID: a peek starts the listing once per instance, and a failed listing is retried by the
+  next *awaited* caller — the three had been doing that retry three different ways. Pressing Run
+  still retries, because the index path calls `discover` regardless.
 - **The index's two legs run together.** The annotation queries depend on nothing from the neuron
   table — only on the server and the discovered kinds — so awaiting it first cost a round trip
   plus 139,255 rows of transfer. Measured against live CAVE: 5.76 s to 4.04 s.

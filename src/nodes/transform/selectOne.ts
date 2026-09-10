@@ -54,7 +54,7 @@ import {
   isIterableValue,
 } from '../lib/iterables'
 
-export const selectOneNode = registerNode({
+registerNode({
   type: 'core.selectOne',
   label: 'Select One',
   category: 'transform',

@@ -25,7 +25,7 @@ import { NUMERIC_AGG_OPTIONS, matrixToTable, pivotTable } from '../lib/tableOps'
  * lifetime: unknown-shaped until the first run and again after a reload, which reads
  * downstream as "columns unknown" rather than as a table with none.
  */
-export const pivotNode = registerNode({
+registerNode({
   type: 'core.pivot',
   label: 'Pivot',
   category: 'transform',

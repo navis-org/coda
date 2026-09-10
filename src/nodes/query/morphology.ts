@@ -84,7 +84,7 @@ export function neuronIdsFrom(
   return ids
 }
 
-export const skeletonsNode = registerNode({
+registerNode({
   type: 'neuron.skeletons',
   label: 'Skeletons',
   category: 'query',
@@ -199,7 +199,7 @@ export const skeletonsNode = registerNode({
   },
 })
 
-export const meshesNode = registerNode({
+registerNode({
   type: 'neuron.meshes',
   label: 'Meshes',
   category: 'query',
@@ -283,7 +283,7 @@ export const meshesNode = registerNode({
   },
 })
 
-export const synapsesNode = registerNode({
+registerNode({
   type: 'neuron.synapses',
   label: 'Synapses',
   category: 'query',

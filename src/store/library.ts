@@ -41,6 +41,8 @@
 
 import type { CodaGraph } from '../core/graph'
 import { deserializeGraph, graphName, newId, serializeGraph } from '../core/graph'
+import type { RefusalWords } from '../data/idb'
+import { attempt, commit, database } from '../data/idb'
 
 const DB_NAME = 'coda-library'
 const DB_VERSION = 1
@@ -78,109 +80,46 @@ export interface WorkflowSummary {
 const NO_STORAGE =
   'This browser is not storing data for Coda — a private window does this. Use Save ▸ Download instead.'
 
-let dbPromise: Promise<IDBDatabase> | undefined
+/**
+ * The connection. `idb.ts` is where the opener's rules are argued — a rejected open is not
+ * memoised, and another tab's upgrade closes it — so what is this module's own is the words.
+ */
+const db = database({ name: DB_NAME, version: DB_VERSION, stores: [META_STORE, GRAPH_STORE] })
 
-function open(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    // `typeof` rather than truthiness: the identifier is simply absent under node.
-    if (typeof indexedDB === 'undefined') return reject(new Error(NO_STORAGE))
-    let request: IDBOpenDBRequest
-    try {
-      request = indexedDB.open(DB_NAME, DB_VERSION)
-    } catch {
-      return reject(new Error(NO_STORAGE))
-    }
-    request.onupgradeneeded = () => {
-      const db = request.result
-      if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE)
-      if (!db.objectStoreNames.contains(GRAPH_STORE)) db.createObjectStore(GRAPH_STORE)
-    }
-    request.onsuccess = () => resolve(request.result)
-    // Private-mode Firefox rejects here; so does a browser with storage switched off.
-    request.onerror = () => reject(new Error(NO_STORAGE))
-    request.onblocked = () => reject(new Error(NO_STORAGE))
-  })
+/** How a write that did not commit is reported. Decision 3 in the header is why it is. */
+const REFUSAL: RefusalWords = {
+  unavailable: NO_STORAGE,
+  rolledBack: 'The save was rolled back',
+  failed: 'The save failed',
+  quota: 'No room left in browser storage. Delete a stored workflow and try again.',
 }
 
 /**
- * The open database, memoised — but only on success. A cached rejection would make one
- * transient failure permanent for the life of the tab, and the user's next attempt is exactly
- * when it is worth trying again.
+ * Run one read-write transaction across both stores, resolving when it *commits* and rejecting
+ * otherwise. Why it waits for `complete` rather than for the requests is recorded on `commit`.
  */
-function db(): Promise<IDBDatabase> {
-  dbPromise ??= open().catch((err: unknown) => {
-    dbPromise = undefined
-    throw err
-  })
-  return dbPromise
-}
-
-function asError(err: unknown, fallback: string): Error {
-  if (err instanceof Error) {
-    // Quota is the one failure worth naming: it is actionable, and the platform's own message
-    // for it says nothing about what to do.
-    if (err.name === 'QuotaExceededError') {
-      return new Error(
-        'No room left in browser storage. Delete a stored workflow and try again.',
-      )
-    }
-    return err
-  }
-  return new Error(fallback)
-}
-
-/**
- * Run one read-write transaction across both stores, resolving when it *commits*.
- *
- * Waiting for `complete` rather than for the individual requests is the load-bearing part: a
- * quota failure lets the `put` succeed and then aborts the transaction, so a caller awaiting
- * the request would report a save that was rolled back.
- */
-async function write(
-  run: (meta: IDBObjectStore, graphs: IDBObjectStore) => void,
-): Promise<void> {
-  const database = await db()
-  await new Promise<void>((resolve, reject) => {
-    let tx: IDBTransaction
-    try {
-      tx = database.transaction([META_STORE, GRAPH_STORE], 'readwrite')
-    } catch (err) {
-      return reject(asError(err, NO_STORAGE))
-    }
-    tx.oncomplete = () => resolve()
-    tx.onabort = () => reject(asError(tx.error, 'The save was rolled back'))
-    tx.onerror = () => reject(asError(tx.error, 'The save failed'))
-    try {
-      run(tx.objectStore(META_STORE), tx.objectStore(GRAPH_STORE))
-    } catch (err) {
-      reject(asError(err, 'The save failed'))
-    }
-  })
+function write(run: (meta: IDBObjectStore, graphs: IDBObjectStore) => void): Promise<void> {
+  return commit(
+    db,
+    [META_STORE, GRAPH_STORE],
+    (tx) => run(tx.objectStore(META_STORE), tx.objectStore(GRAPH_STORE)),
+    REFUSAL,
+  )
 }
 
 /** Run one read, resolving to `fallback` on any failure — a broken shelf reads as an empty one. */
-async function read<T>(
+function read<T>(
   store: string,
   make: (s: IDBObjectStore) => IDBRequest,
   fallback: T,
 ): Promise<T> {
-  try {
-    const database = await db()
-    return await new Promise<T>((resolve) => {
-      let tx: IDBTransaction
-      try {
-        tx = database.transaction(store, 'readonly')
-      } catch {
-        return resolve(fallback)
-      }
-      const request = make(tx.objectStore(store))
-      request.onsuccess = () => resolve((request.result as T | undefined) ?? fallback)
-      request.onerror = () => resolve(fallback)
-      tx.onabort = () => resolve(fallback)
-    })
-  } catch {
-    return fallback
-  }
+  return attempt(
+    db,
+    store,
+    'readonly',
+    (tx) => make(tx.objectStore(store)) as IDBRequest<T>,
+    fallback,
+  )
 }
 
 /**
@@ -284,5 +223,5 @@ export async function deleteWorkflow(id: string): Promise<void> {
 
 /** Test seam: forget the open database so a fresh `indexedDB` is picked up. */
 export function resetLibrary(): void {
-  dbPromise = undefined
+  db.reset()
 }

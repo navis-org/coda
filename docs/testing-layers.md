@@ -8,12 +8,20 @@ byte in forty-five files), `scheduler.ts` (`mockScheduler` — a Scheduler refus
 the one it is given, once in nineteen), `findNeurons.ts` (`searchFor`), `jsdomStubs.ts`,
 `storeReset.ts` and `caveStubs.ts`.
 
+Dead code is checked in CI by `pnpm knip:check` (`scripts/knip-check.mjs`): knip's findings,
+one line each and without line numbers, compared with the committed `knip-baseline.txt`. The
+baseline holds what is kept on purpose — a symbol reached through a dynamically imported
+module, which knip cannot follow, or an alias a suite depends on. A new finding fails until the
+symbol is used, deleted or accepted with `pnpm knip:update`; a fixed one fails until the
+baseline is refreshed. `knip.jsonc` sets `ignoreExportsUsedInFile`, so an export a module also
+uses itself is its vocabulary rather than dead code.
+
 ## Testing layers
 
 | File                                     | Covers                                                                                                                           |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `core/graph.test.ts`                     | topo sort, cycles (incl. two wires between one pair), serialisation, lenient loading                                             |
-| `core/withDefaults.test.ts`              | a param nothing stored reads as its declared default: null as absent, a column picker as `resolveColumn` reads its absence, `absentMeans` left alone, `visibleIf` asked of the filled view, the stored object handed back untouched, and a node missing its keys evaluated and keyed exactly as one carrying the defaults |
+| `core/withDefaults.test.ts`              | a param nothing stored reads as its declared default: null as absent, a column picker as `resolveColumn` reads its absence, `absentMeans` left alone, `visibleIf` asked of the filled view, an enum read off its declared options, the stored object handed back untouched, and a node missing its keys evaluated and keyed exactly as one carrying the defaults |
 | `core/ports.test.ts`                     | variadic ports: expansion and tuple ordering, the three resolution modes, what registration refuses, an arity that shrinks pruning its edges, a file naming a socket past the arity, a group that used to be a fixed pair rewriting a stored `top`/`bottom` handle onto the port that replaced it (and the two shapes registration refuses it in), and auto-wire filling one port per group |
 | `core/reference.test.ts`                 | reference edges: the round trip sorting, the identity without its own schema, evaluate not waiting, and that a real cycle and two wires between one pair are unchanged |
 | `core/scheduler.test.ts`                 | (also) loops: one pass per element and per group, `First N`, the region waiting for a branch that joins it from outside, a Collect gathering every pass rather than the last, that a settled loop iterates nothing on a second Run, that a failing element does not end the loop, that the auto pass defers a loop whole, and that running one leaves the document byte-identical |

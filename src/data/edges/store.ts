@@ -39,6 +39,9 @@
  * earns its place at the writing end.
  */
 
+import type { RefusalWords } from '../idb'
+import { attempt, commit, database, readKey } from '../idb'
+import { memoPromise } from '../memoPromise'
 import { hashBytes } from '../../core/hash'
 import { channel } from '../channel'
 import type { EdgeCsr, EdgeReport, EncodedEdges, IdArray, WeightArray } from './encode'
@@ -110,103 +113,32 @@ export interface LoadedEdgeSet {
 }
 
 // ---------------------------------------------------------------------------
-// Storage plumbing — the `uploads.ts` shape, deliberately
+// Storage plumbing — `idb.ts`, in this module's own words
 // ---------------------------------------------------------------------------
 
-let dbPromise: Promise<IDBDatabase> | undefined
+const db = database({ name: DB_NAME, version: DB_VERSION, stores: [SET_STORE, PART_STORE] })
 
-function open(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') return reject(new Error(NO_STORAGE))
-    let request: IDBOpenDBRequest
-    try {
-      request = indexedDB.open(DB_NAME, DB_VERSION)
-    } catch {
-      return reject(new Error(NO_STORAGE))
-    }
-    request.onupgradeneeded = () => {
-      const database = request.result
-      if (!database.objectStoreNames.contains(SET_STORE)) database.createObjectStore(SET_STORE)
-      if (!database.objectStoreNames.contains(PART_STORE))
-        database.createObjectStore(PART_STORE)
-    }
-    request.onsuccess = () => resolve(request.result)
-    // Private-mode Firefox rejects here; so does a browser with storage switched off.
-    request.onerror = () => reject(new Error(NO_STORAGE))
-    request.onblocked = () => reject(new Error(NO_STORAGE))
-  })
-}
-
-/** Memoised on success only: a cached rejection makes one transient failure permanent. */
-function db(): Promise<IDBDatabase> {
-  dbPromise ??= open().catch((err: unknown) => {
-    dbPromise = undefined
-    throw err
-  })
-  return dbPromise
-}
-
-function asError(err: unknown, fallback: string): Error {
-  if (err instanceof Error) {
-    if (err.name === 'QuotaExceededError') {
-      return new Error(
-        'No room left in browser storage. Delete an edge set and try again — an edge set is ' +
-          'far larger than anything else Coda keeps.',
-      )
-    }
-    return err
-  }
-  return new Error(fallback)
+const REFUSAL: RefusalWords = {
+  unavailable: NO_STORAGE,
+  rolledBack: 'The edge set was rolled back',
+  failed: 'The edge set could not be saved',
+  quota:
+    'No room left in browser storage. Delete an edge set and try again — an edge set is ' +
+    'far larger than anything else Coda keeps.',
 }
 
 /**
- * One read-write transaction across both stores, resolving when it **commits**.
- *
- * Waiting for `complete` rather than for the requests is load-bearing: a quota failure lets a
- * `put` succeed and then aborts, so awaiting the request would report an import that was rolled
- * back — a catalogue entry naming edges that are not there.
+ * One read-write transaction across both stores, resolving when it **commits** — `commit`'s
+ * policy. An import reported before its rollback would be a catalogue entry naming edges that
+ * are not there.
  */
-async function write(
-  run: (sets: IDBObjectStore, parts: IDBObjectStore) => void,
-): Promise<void> {
-  const database = await db()
-  await new Promise<void>((resolve, reject) => {
-    let tx: IDBTransaction
-    try {
-      tx = database.transaction([SET_STORE, PART_STORE], 'readwrite')
-    } catch (err) {
-      return reject(asError(err, NO_STORAGE))
-    }
-    tx.oncomplete = () => resolve()
-    tx.onabort = () => reject(asError(tx.error, 'The edge set was rolled back'))
-    tx.onerror = () => reject(asError(tx.error, 'The edge set could not be saved'))
-    try {
-      run(tx.objectStore(SET_STORE), tx.objectStore(PART_STORE))
-    } catch (err) {
-      reject(asError(err, 'The edge set could not be saved'))
-    }
-  })
-}
-
-/** One read, resolving to `fallback` on any failure — broken storage reads as empty storage. */
-async function read<T>(store: string, key: IDBValidKey, fallback: T): Promise<T> {
-  try {
-    const database = await db()
-    return await new Promise<T>((resolve) => {
-      let tx: IDBTransaction
-      try {
-        tx = database.transaction(store, 'readonly')
-      } catch {
-        return resolve(fallback)
-      }
-      const request = tx.objectStore(store).get(key)
-      request.onsuccess = () => resolve((request.result as T | undefined) ?? fallback)
-      request.onerror = () => resolve(fallback)
-      tx.onabort = () => resolve(fallback)
-    })
-  } catch {
-    return fallback
-  }
+function write(run: (sets: IDBObjectStore, parts: IDBObjectStore) => void): Promise<void> {
+  return commit(
+    db,
+    [SET_STORE, PART_STORE],
+    (tx) => run(tx.objectStore(SET_STORE), tx.objectStore(PART_STORE)),
+    REFUSAL,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +173,7 @@ export function edgeSetsRevision(): number {
 
 /** The in-memory mirror the synchronous peek answers from. */
 let catalogue: Map<string, EdgeSetMeta> | undefined
-let listing: Promise<EdgeSetMeta[]> | undefined
+const listings = new Map<'catalogue', Promise<EdgeSetMeta[]>>()
 
 /**
  * Every entry, or `undefined` while the first read is still in flight.
@@ -280,40 +212,30 @@ export function edgeSetsKnown(): boolean {
 /** Read the catalogue, sharing one read between concurrent callers. */
 export function listEdgeSets(): Promise<EdgeSetMeta[]> {
   if (catalogue) return Promise.resolve([...catalogue.values()])
-  listing ??= (async () => {
-    const entries = await readAllSets()
-    catalogue = new Map(entries.map((meta) => [meta.id, meta]))
-    reportEdgeSetsLearned()
-    return entries
-  })().finally(() => {
-    listing = undefined
-  })
-  return listing
+  return memoPromise(
+    listings,
+    'catalogue',
+    async () => {
+      const entries = await readAllSets()
+      catalogue = new Map(entries.map((meta) => [meta.id, meta]))
+      reportEdgeSetsLearned()
+      return entries
+    },
+    { keep: 'inflight' },
+  )
 }
 
 async function readAllSets(): Promise<EdgeSetMeta[]> {
-  try {
-    const database = await db()
-    return await new Promise<EdgeSetMeta[]>((resolve) => {
-      let tx: IDBTransaction
-      try {
-        tx = database.transaction(SET_STORE, 'readonly')
-      } catch {
-        return resolve([])
-      }
-      const request = tx.objectStore(SET_STORE).getAll()
-      request.onsuccess = () => {
-        const all = (request.result as EdgeSetMeta[] | undefined) ?? []
-        // A set written by an older layout cannot be read by this one, and reading it wrongly
-        // is worse than not offering it. Same rule as the cache fingerprint.
-        resolve(all.filter((meta) => meta.format === EDGE_FORMAT))
-      }
-      request.onerror = () => resolve([])
-      tx.onabort = () => resolve([])
-    })
-  } catch {
-    return []
-  }
+  const all = await attempt<EdgeSetMeta[]>(
+    db,
+    SET_STORE,
+    'readonly',
+    (tx) => tx.objectStore(SET_STORE).getAll() as IDBRequest<EdgeSetMeta[]>,
+    [],
+  )
+  // A set written by an older layout cannot be read by this one, and reading it wrongly is worse
+  // than not offering it. Same rule as the cache fingerprint.
+  return all.filter((meta) => meta.format === EDGE_FORMAT)
 }
 
 // ---------------------------------------------------------------------------
@@ -556,81 +478,81 @@ export function releaseEdgeSet(id: string): void {
 export function loadEdgeSet(id: string): Promise<LoadedEdgeSet | undefined> {
   const held = loaded.get(id)
   if (held) return Promise.resolve(held)
-  const inFlight = loading.get(id)
-  if (inFlight) return inFlight
+  return memoPromise(
+    loading,
+    id,
+    async () => {
+      const meta =
+        (await readKey<EdgeSetMeta | undefined>(db, SET_STORE, id, undefined)) ?? undefined
+      if (!meta || meta.format !== EDGE_FORMAT) return undefined
 
-  const load = (async () => {
-    const meta = (await read<EdgeSetMeta | undefined>(SET_STORE, id, undefined)) ?? undefined
-    if (!meta || meta.format !== EDGE_FORMAT) return undefined
-
-    const ids: string[] = []
-    for (let i = 0; i < meta.idChunks; i++) {
-      // Appended rather than spread: `push(...chunk)` passes 50,000 arguments at a time, which
-      // is a lot of stack for nothing and is near the engine's own limit.
-      for (const text of await read<string[]>(PART_STORE, `${id}/ids/${i}`, [])) ids.push(text)
-    }
-    if (ids.length !== meta.neurons) return undefined
-
-    const read_ = async (name: PartName) => {
-      const part = meta.parts[name]
-      const array = allocate(part.kind, part.length)
-      let at = 0
-      for (let i = 0; i < part.chunks; i++) {
-        const chunk = await read<ArrayLike<number> | undefined>(
-          PART_STORE,
-          `${id}/${name}/${i}`,
-          undefined,
-        )
-        if (!chunk) return undefined
-        array.set(chunk as never, at)
-        at += chunk.length
+      const ids: string[] = []
+      for (let i = 0; i < meta.idChunks; i++) {
+        // Appended rather than spread: `push(...chunk)` passes 50,000 arguments at a time, which
+        // is a lot of stack for nothing and is near the engine's own limit.
+        for (const text of await readKey<string[]>(db, PART_STORE, `${id}/ids/${i}`, []))
+          ids.push(text)
       }
-      return at === part.length ? array : undefined
-    }
+      if (ids.length !== meta.neurons) return undefined
 
-    /*
-     * A part that is missing or came back short means the entry and its chunks disagree, which is
-     * a torn write. Answering with a truncated edge set is the silent wrong connectome this whole
-     * module is arranged to avoid; not having it is a state the caller already handles — so the
-     * loop stops at the first bad part rather than pulling the other hundred megabytes first.
-     */
-    const columns = {} as Record<PartName, IdArray | WeightArray | Uint32Array>
-    for (const name of PART_NAMES) {
-      const array = await read_(name)
-      if (!array) return undefined
-      columns[name] = array
-    }
+      const read_ = async (name: PartName) => {
+        const part = meta.parts[name]
+        const array = allocate(part.kind, part.length)
+        let at = 0
+        for (let i = 0; i < part.chunks; i++) {
+          const chunk = await readKey<ArrayLike<number> | undefined>(
+            db,
+            PART_STORE,
+            `${id}/${name}/${i}`,
+            undefined,
+          )
+          if (!chunk) return undefined
+          array.set(chunk as never, at)
+          at += chunk.length
+        }
+        return at === part.length ? array : undefined
+      }
 
-    const set: LoadedEdgeSet = {
-      meta,
-      ids,
-      index: new Map(ids.map((text, at) => [text, at])),
-      out: {
-        offsets: columns['out.offsets'] as Uint32Array,
-        targets: columns['out.targets'] as IdArray,
-        weights: columns['out.weights'] as WeightArray,
-      },
-      in: {
-        offsets: columns['in.offsets'] as Uint32Array,
-        targets: columns['in.targets'] as IdArray,
-        weights: columns['in.weights'] as WeightArray,
-      },
-    }
-    loaded.set(id, set)
-    return set
-  })().finally(() => {
-    loading.delete(id)
-  })
+      /*
+       * A part that is missing or came back short means the entry and its chunks disagree, which is
+       * a torn write. Answering with a truncated edge set is the silent wrong connectome this whole
+       * module is arranged to avoid; not having it is a state the caller already handles — so the
+       * loop stops at the first bad part rather than pulling the other hundred megabytes first.
+       */
+      const columns = {} as Record<PartName, IdArray | WeightArray | Uint32Array>
+      for (const name of PART_NAMES) {
+        const array = await read_(name)
+        if (!array) return undefined
+        columns[name] = array
+      }
 
-  loading.set(id, load)
-  return load
+      const set: LoadedEdgeSet = {
+        meta,
+        ids,
+        index: new Map(ids.map((text, at) => [text, at])),
+        out: {
+          offsets: columns['out.offsets'] as Uint32Array,
+          targets: columns['out.targets'] as IdArray,
+          weights: columns['out.weights'] as WeightArray,
+        },
+        in: {
+          offsets: columns['in.offsets'] as Uint32Array,
+          targets: columns['in.targets'] as IdArray,
+          weights: columns['in.weights'] as WeightArray,
+        },
+      }
+      loaded.set(id, set)
+      return set
+    },
+    { keep: 'inflight' },
+  )
 }
 
 /** Test seam: forget the opened database, the catalogue and everything resident. */
 export function resetEdgeSets(): void {
-  dbPromise = undefined
+  db.reset()
   catalogue = undefined
-  listing = undefined
+  listings.clear()
   loaded.clear()
   loading.clear()
   revision = 0

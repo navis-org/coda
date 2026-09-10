@@ -3,7 +3,7 @@ import { T, isTabular, schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { sortTable } from '../lib/tableOps'
 
-export const sortNode = registerNode({
+registerNode({
   type: 'core.sort',
   label: 'Sort',
   category: 'transform',

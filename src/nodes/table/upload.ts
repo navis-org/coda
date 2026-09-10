@@ -33,7 +33,7 @@ import { uploadIsNeurons, uploadShapeSchema, uploadShapeTable } from '../lib/tab
  * would key the node one way before the peek landed and another way after, and mark a node
  * that had just run stale.
  */
-export const uploadTableNode = registerNode({
+registerNode({
   type: 'core.uploadTable',
   label: 'Upload Table',
   category: 'utility',

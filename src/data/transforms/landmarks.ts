@@ -21,6 +21,7 @@
  * order 1e5, both directions.
  */
 
+import { memoPromise } from '../memoPromise'
 import { spaceById } from './spaces'
 import type { LandmarkSetSpec, SpaceUnits } from './spaces'
 
@@ -139,14 +140,7 @@ async function fetchLandmarks(spec: LandmarkSetSpec): Promise<LandmarkPairs> {
 
 /** Load a landmark set, once per session. Safe to call from several nodes at once. */
 export function loadLandmarks(spec: LandmarkSetSpec): Promise<LandmarkPairs> {
-  const existing = loading.get(spec.file)
-  if (existing) return existing
-  const started = fetchLandmarks(spec).catch((error: unknown) => {
-    loading.delete(spec.file)
-    throw error
-  })
-  loading.set(spec.file, started)
-  return started
+  return memoPromise(loading, spec.file, () => fetchLandmarks(spec), { keep: 'resolved' })
 }
 
 /** Forget everything loaded. Tests only — a landmark file does not change under a session. */

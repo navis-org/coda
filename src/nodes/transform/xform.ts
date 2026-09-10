@@ -103,7 +103,7 @@ function bridgeableSpaces() {
   return allSpaces().filter((space) => space.toCommon)
 }
 
-export const xformNode = registerNode({
+registerNode({
   type: 'neuron.xform',
   label: 'Transform Neurons',
   category: 'transform',

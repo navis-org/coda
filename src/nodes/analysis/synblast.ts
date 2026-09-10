@@ -39,7 +39,7 @@ import {
 import { warnAboveParam } from '../lib/limitParams'
 import { MAX_NEURONS } from '../query/morphology'
 
-export const synblastNode = registerNode({
+registerNode({
   type: 'neuron.synblast',
   label: 'syNBLAST',
   category: 'analysis',

@@ -30,7 +30,7 @@ import { isTableValue, makeTable } from '../../core/values'
 import { rootsForSupervoxels, staleRoots } from '../../data/cave/rootIds'
 import { foreignBackend } from '../lib/datasetParam'
 
-export const updateRootIdsNode = registerNode({
+registerNode({
   type: 'cave.updateRootIds',
   label: 'Update root IDs',
   category: 'transform',

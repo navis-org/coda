@@ -96,7 +96,7 @@ function percent(fraction: number): string {
   return fraction < 0.001 ? '<0.1%' : `${(fraction * 100).toFixed(fraction < 0.1 ? 1 : 0)}%`
 }
 
-export const influenceNode = registerNode({
+registerNode({
   type: 'neuron.influence',
   label: 'Influence',
   category: 'query',

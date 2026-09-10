@@ -27,7 +27,7 @@ import { requireDataset, sourceLabel, sourceSupports } from '../lib/datasetParam
  * rule because the nested rows are real data and somebody comparing sub-regions of one antennal
  * lobe wants exactly them; what they must not be is the *default*.
  */
-export const roiCompletenessNode = registerNode({
+registerNode({
   type: 'neuron.roiCompleteness',
   label: 'ROI Completeness',
   category: 'query',

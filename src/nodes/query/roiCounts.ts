@@ -15,7 +15,7 @@ import { idColumn } from '../lib/tableOps'
  * Long form rather than wide: it composes with GroupBy and Pivot instead of needing a
  * bespoke reshape, and the column set doesn't change with the dataset's ROI list.
  */
-export const roiCountsNode = registerNode({
+registerNode({
   type: 'neuron.roiCounts',
   label: 'ROI Counts',
   category: 'query',

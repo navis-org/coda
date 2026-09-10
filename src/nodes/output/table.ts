@@ -28,7 +28,7 @@ import { decodeClauses, filterTableByClauses, resolveFilters } from '../lib/tabl
  * provenance key would stale the graph every time somebody looked at their data a different
  * way. The caption says which of the two is which.
  */
-export const tableViewNode = registerNode({
+registerNode({
   type: 'out.table',
   label: 'Table',
   category: 'visualisation',

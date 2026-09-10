@@ -62,7 +62,7 @@ function nglayersPath(datasetId: string): string {
 /**
  * The whole published state for a dataset.
  *
- * The same document `fetchMeshSource` reads, kept whole rather than reduced to a mesh URL —
+ * The same document `meshSourceFromState` reads, kept whole rather than reduced to a mesh URL —
  * it also carries the curated camera, the ROI meshes and the synapse layers, which is
  * everything an embedded viewer wants. Needs no token; it does need the proxy, like every
  * other neuPrint path.
@@ -212,19 +212,4 @@ export function volumeSourceFromState(
   // `info`", and a DVID node has no such document. DVID skeletons live in a sibling keyvalue
   // instance and are found by name — see `data/dvid/refs.ts`.
   return url && source ? { url, source, scheme: 'precomputed' } : undefined
-}
-
-/**
- * Convenience for callers holding no state of their own.
- *
- * `NeuPrintSource` deliberately does *not* use this: it caches the published document once
- * per dataset and derives the mesh source from that, because the same 38 kB (male-CNS, 38
- * layers) would otherwise be downloaded twice for a graph that both draws meshes and emits a
- * neuroglancer link.
- */
-export async function fetchMeshSource(
-  datasetId: string,
-  options?: RequestOptions,
-): Promise<MeshSourceRef | undefined> {
-  return meshSourceFromState(await fetchNgState(datasetId, options), datasetId)
 }

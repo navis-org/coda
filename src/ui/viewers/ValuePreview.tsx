@@ -2,6 +2,8 @@ import { useMemo } from 'react'
 
 import type { GraphNode } from '../../core/graph'
 import type { InferContext, ParamValue } from '../../core/node'
+import { enumValue } from '../../core/node'
+import { filledParams, getNodeDef } from '../../core/registry'
 import { schemaOf } from '../../core/types'
 import type { Value } from '../../core/values'
 import type { PartnerGrouping } from '../../nodes/lib/profileStats'
@@ -36,12 +38,12 @@ import {
   readColorLimits,
 } from '../../nodes/lib/heatmapParams'
 import { LazyNetworkViewer, LazyViewer3D } from './LazyViewers'
-import type { BackgroundChoice, SkeletonWidthMode } from './viewer3dScene'
+import type { BackgroundChoice } from './viewer3dScene'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
 import { chosenViewerKind } from '../../nodes/output/neuroglancer'
+import { widthModeOf } from '../../nodes/output/viewer3d'
 import { DatasetSummaryViewer } from './DatasetSummaryViewer'
 import { NetworkMetricsViewer } from './NetworkMetricsViewer'
-import { DEFAULT_HISTOGRAM_CHOICE } from '../../nodes/lib/networkMetrics'
 import { roisPrimaryOnly } from '../../nodes/lib/roiViewParams'
 import { readWeightProperty } from '../../nodes/lib/datasetParam'
 import { RoisViewer } from './RoisViewer'
@@ -150,13 +152,24 @@ function ValuePreviewInner({
   }
 
   /*
+   * The params every branch reads, each declared default filled (`withDefaults`), so a branch
+   * reads `params.x` rather than writing the default out a second time beside it — the copy
+   * invariant 4 names, which drifts the day a declaration changes. An enum is read off its
+   * declared options (`enumValue`), for the same reason.
+   */
+  const def = getNodeDef(node.type)
+  const params = filledParams(node)
+  const choice = <T extends string>(id: string): T =>
+    def ? enumValue<T>(def, params, id) : (String(params[id]) as T)
+
+  /*
    * Up here rather than in the table branch below, because this component returns early a
    * dozen times and a hook after a conditional return is not a hook. Keyed on the stored
    * `string[]`, which changes only when somebody edits a filter — decoding inline would mint a
    * fresh array every store tick, and `TableViewer` resets its draft whenever this changes
    * identity, so it would discard what was being typed and re-filter and re-page on each one.
    */
-  const filterClauses = useMemo(() => decodeClauses(node.params.filters), [node.params.filters])
+  const filterClauses = useMemo(() => decodeClauses(params.filters), [params.filters])
 
   /*
    * Up here for the same reason, and keyed the same way — on the stored `string[]`, which
@@ -164,7 +177,7 @@ function ValuePreviewInner({
    * effects on the result, and a heatmap rectangle over a wide matrix is thousands of entries:
    * minted fresh per render it would defeat every one of those memos on every store tick.
    */
-  const selection = useMemo(() => idList(node.params.selection), [node.params.selection])
+  const selection = useMemo(() => idList(params.selection), [params.selection])
 
   /*
    * A summary means "no second renderer", not just "no grid".
@@ -203,18 +216,18 @@ function ValuePreviewInner({
       <DatasetSummaryViewer
         sourceId={isDatasetValue(dataset) ? dataset.sourceId : undefined}
         datasetId={isDatasetValue(dataset) ? dataset.datasetId : undefined}
-        status={String(node.params.status ?? '')}
+        status={String(params.status)}
         attributes={ctx.columns('attributes')}
         // Absence spelled the way `absentMeans` spells it, never as the default: a stored node
         // with no key predates the control and meant the whole list. `deserializeGraph` writes
         // it in, so this is the belt to that document's braces.
-        chartsMode={node.params.chartsMode === 'add' ? 'add' : 'replace'}
-        topTypes={Number(node.params.topTypes ?? 10)}
-        measure={node.params.completenessMeasure === 'pre' ? 'pre' : 'post'}
+        chartsMode={params.chartsMode === 'add' ? 'add' : 'replace'}
+        topTypes={Number(params.topTypes)}
+        measure={choice<'pre' | 'post'>('completenessMeasure')}
         onMeasure={(measure) => onParamChange?.('completenessMeasure', measure)}
-        sort={node.params.completenessSort === 'label' ? 'label' : 'value'}
+        sort={choice<'label' | 'value'>('completenessSort')}
         onSort={(sort) => onParamChange?.('completenessSort', sort)}
-        onReload={() => onParamChange?.('refresh', Number(node.params.refresh ?? 0) + 1)}
+        onReload={() => onParamChange?.('refresh', Number(params.refresh) + 1)}
         {...shared}
       />
     )
@@ -231,21 +244,19 @@ function ValuePreviewInner({
       <RoisViewer
         sourceId={isDatasetValue(dataset) ? dataset.sourceId : undefined}
         datasetId={isDatasetValue(dataset) ? dataset.datasetId : undefined}
-        view={roiView(node.params.view)}
-        explode={Number(node.params.explode ?? 0)}
-        colorBy={roiColorMode(node.params.colorBy)}
-        labels={roiLabelMode(node.params.labels)}
-        hemisphere={roiHemisphere(node.params.hemisphere)}
-        primaryOnly={roisPrimaryOnly(node.params)}
+        view={choice<RoiView>('view')}
+        explode={Number(params.explode)}
+        colorBy={choice<RoiColorMode>('colorBy')}
+        labels={choice<RoiLabelMode>('labels')}
+        hemisphere={choice<'both' | 'left' | 'right'>('hemisphere')}
+        primaryOnly={roisPrimaryOnly(params)}
         // A shared constant, not a fresh `[]`: this prop reaches `shown`'s dep array, and a new
         // identity per render voids the projection *and* `relaxShifts` — 220 passes over n²/2
-        // pairs — on every pointer move of a pan. `defaultParams` materialises the array for a
-        // node created today, so this only bites a graph saved before the param existed.
-        superRois={
-          Array.isArray(node.params.superRois) ? (node.params.superRois as string[]) : NO_IDS
-        }
-        opacity={Number(node.params.opacity ?? 0.12)}
-        refresh={Number(node.params.refresh ?? 0)}
+        // pairs — on every pointer move of a pan. `withDefaults` fills an absent key with its own
+        // shared empty list, so this now guards only a value that is not a list at all.
+        superRois={Array.isArray(params.superRois) ? (params.superRois as string[]) : NO_IDS}
+        opacity={Number(params.opacity)}
+        refresh={Number(params.refresh)}
         {...(onParamChange ? { onParamChange } : {})}
         {...shared}
       />
@@ -277,50 +288,44 @@ function ValuePreviewInner({
           meshes={isMeshesValue(meshes) ? meshes : undefined}
           points={isPointsValue(points) ? points : undefined}
           volumes={isMeshesValue(volumes) ? volumes : undefined}
-          skeletonColor={readColorSpec('skeleton', node.params, ctx.column)}
-          meshColor={readColorSpec('mesh', node.params, ctx.column)}
-          pointColor={readColorSpec('point', node.params, ctx.column)}
-          volumeColor={readColorSpec('volume', node.params, ctx.column)}
-          skeletonWidth={Number(node.params.skeletonWidth ?? 1)}
-          skeletonWidthMode={skeletonWidthMode(node.params.skeletonWidthMode)}
-          skeletonRadiusWidth={Number(node.params.skeletonRadiusWidth ?? 4)}
-          skeletonWorldWidth={Number(node.params.skeletonWorldWidth ?? 1)}
-          lightIntensity={Number(node.params.lightIntensity ?? 1)}
+          skeletonColor={readColorSpec('skeleton', params, ctx.column)}
+          meshColor={readColorSpec('mesh', params, ctx.column)}
+          pointColor={readColorSpec('point', params, ctx.column)}
+          volumeColor={readColorSpec('volume', params, ctx.column)}
+          skeletonWidth={Number(params.skeletonWidth)}
+          skeletonWidthMode={widthModeOf(params)}
+          skeletonRadiusWidth={Number(params.skeletonRadiusWidth)}
+          skeletonWorldWidth={Number(params.skeletonWorldWidth)}
+          lightIntensity={Number(params.lightIntensity)}
           // Defaults to false, so a graph saved before this param existed opens with the
           // scene unpickable — which is the new default rather than a migration.
-          selectByClick={node.params.selectByClick === true}
+          selectByClick={params.selectByClick === true}
           // `Number` rather than a cast, and it covers the alpha graphs that stored this as a
           // boolean before it became a strength: `true` is 1 and `false` is 0, which is exactly
           // what those two meant.
-          ambientOcclusion={Number(node.params.ambientOcclusion ?? 1)}
-          // Every fallback here has to equal the node's declared default: a graph saved before a
-          // param existed has no key for it, and this is the value it then gets.
-          meshOpacity={Number(node.params.meshOpacity ?? 1)}
-          pointSize={Number(node.params.pointSize ?? 60)}
-          volumeOpacity={Number(node.params.volumeOpacity ?? 0.12)}
+          ambientOcclusion={Number(params.ambientOcclusion)}
+          meshOpacity={Number(params.meshOpacity)}
+          pointSize={Number(params.pointSize)}
+          volumeOpacity={Number(params.volumeOpacity)}
           // The node id, so the card and the overlay share one camera instead of resetting each
           // other — the same prop the network viewer takes for its layout and camera.
           viewerId={node.id}
-          background={String(node.params.background ?? 'theme') as BackgroundChoice}
-          refit={node.params.refit === true}
-          // Read defensively rather than cast: these three are written by the legend, so a graph
-          // saved before it existed has no key for them at all.
+          background={choice<BackgroundChoice>('background')}
+          refit={params.refit === true}
           // Through the reader beside `readColorSpec`, because `colorParams({ legend })` is what
           // names these params — spelling `skeletonHidden` here is a fifth place that has to agree
           // with the factory that generates it and the viewer that writes it back.
           hidden={{
-            skeleton: readHiddenKeys('skeleton', node.params),
-            mesh: readHiddenKeys('mesh', node.params),
-            point: readHiddenKeys('point', node.params),
-            volume: readHiddenKeys('volume', node.params),
+            skeleton: readHiddenKeys('skeleton', params),
+            mesh: readHiddenKeys('mesh', params),
+            point: readHiddenKeys('point', params),
+            volume: readHiddenKeys('volume', params),
           }}
-          // `!== false`, so a graph saved before these existed draws everything — which is what
-          // it did. Reading them as `=== true` would open every old file with an empty scene.
           shown={{
-            skeletons: node.params.showSkeletons !== false,
-            meshes: node.params.showMeshes !== false,
-            points: node.params.showPoints !== false,
-            volumes: node.params.showVolumes !== false,
+            skeletons: params.showSkeletons !== false,
+            meshes: params.showMeshes !== false,
+            points: params.showPoints !== false,
+            volumes: params.showVolumes !== false,
           }}
           selection={selection}
           onSelectionChange={onSelectionChange}
@@ -347,16 +352,10 @@ function ValuePreviewInner({
         network={inputValues.in}
         plotX={ctx.column('plotX')}
         plotY={ctx.column('plotY')}
-        // Every fallback here has to equal the node's declared default: a graph saved before a
-        // param existed has no key for it, and this is the value it then gets.
-        histColumn={
-          typeof node.params.histColumn === 'string'
-            ? node.params.histColumn
-            : DEFAULT_HISTOGRAM_CHOICE
-        }
-        bins={Number(node.params.bins ?? 10)}
-        histVertical={node.params.histVertical === true}
-        logScale={node.params.logScale === true}
+        histColumn={String(params.histColumn)}
+        bins={Number(params.bins)}
+        histVertical={params.histVertical === true}
+        logScale={params.logScale === true}
         /*
          * The param ids stay in the dispatcher, where every other node's are — the card knows
          * it is changing an axis, not which key that is stored under.
@@ -402,39 +401,35 @@ function ValuePreviewInner({
         {...(isNetworkValue(source)
           ? { sourceCounts: { nodes: source.nodes.length, links: source.edges.length } }
           : {})}
-        layout={String(node.params.layout ?? 'prefuse') as LayoutName}
-        iterations={Number(node.params.iterations ?? 220)}
+        layout={choice<LayoutName>('layout')}
+        iterations={Number(params.iterations)}
         xColumn={ctx.column('xColumn')}
         yColumn={ctx.column('yColumn')}
-        orientation={node.params.layoutOrientation === 'tb' ? 'tb' : 'lr'}
+        orientation={choice<'tb' | 'lr'>('layoutOrientation')}
         layerColumn={ctx.column('layerColumn')}
         groupColumn={ctx.column('groupColumn')}
-        seed={node.params.seed === 'spectral' ? 'spectral' : 'circle'}
-        barnesHut={
-          node.params.barnesHut === 'on' || node.params.barnesHut === 'off'
-            ? node.params.barnesHut
-            : 'auto'
-        }
-        weightInfluence={Number(node.params.weightInfluence ?? 1)}
+        seed={choice<'spectral' | 'circle'>('seed')}
+        barnesHut={choice<'on' | 'off' | 'auto'>('barnesHut')}
+        weightInfluence={Number(params.weightInfluence)}
         // `separate` is the default and the reason the layout is here; anything else is the
         // explicit "all at once" comparison. See `prefusePositions`.
-        partition={node.params.partition !== 'together'}
-        springLength={Number(node.params.springLength ?? 50)}
+        partition={params.partition !== 'together'}
+        springLength={Number(params.springLength)}
         // Keyed to the graph node, so a layout settled in the overlay is still there when it
         // is reopened — and is shared with the card and the inspector.
         viewerId={node.id}
-        nodeColor={readColorSpec('node', node.params, ctx.column)}
-        nodeSize={readSizeSpec('node', node.params, ctx.column, { min: 4, max: 18 })}
-        nodeShape={readShapeSpec('node', node.params, ctx.column)}
+        nodeColor={readColorSpec('node', params, ctx.column)}
+        nodeSize={readSizeSpec('node', params, ctx.column, { min: 4, max: 18 })}
+        nodeShape={readShapeSpec('node', params, ctx.column)}
         {...(onParamChange ? { onParamChange } : {})}
-        nodeBorderWidth={Number(node.params.nodeBorderWidth ?? 1)}
-        edgeColor={readColorSpec('edge', node.params, ctx.column)}
-        edgeSize={readSizeSpec('edge', node.params, ctx.column, { min: 0.5, max: 6 })}
-        edgeOpacity={Number(node.params.edgeOpacity ?? 1)}
-        showLabels={node.params.showLabels !== false}
+        nodeBorderWidth={Number(params.nodeBorderWidth)}
+        edgeColor={readColorSpec('edge', params, ctx.column)}
+        edgeSize={readSizeSpec('edge', params, ctx.column, { min: 0.5, max: 6 })}
+        edgeOpacity={Number(params.edgeOpacity)}
+        showLabels={params.showLabels !== false}
         labelColumn={ctx.column('labelColumn')}
-        arrows={node.params.arrows !== false}
-        edgeLabels={node.params.edgeLabels === true}
+        arrows={params.arrows !== false}
+        edgeLabels={params.edgeLabels === true}
         edgeLabelColumn={ctx.column('edgeLabelColumn')}
         selection={selection}
         onSelectionChange={onSelectionChange}
@@ -460,13 +455,13 @@ function ValuePreviewInner({
         // Resolved through `ctx.column` like every other picker, so the profile's subject and
         // the inspector's control cannot disagree about which column is set.
         groupBy={ctx.column('groupBy')}
-        page={Number(node.params.page ?? 0)}
+        page={Number(params.page)}
         onPage={(next) => onParamChange?.('page', next)}
         pinned={selection}
         onPin={(ids) => onParamChange?.('selection', ids)}
-        minWeight={Number(node.params.minWeight ?? 1)}
-        countBy={readWeightProperty(node.params.countBy)}
-        topN={Number(node.params.topN ?? 10)}
+        minWeight={Number(params.minWeight)}
+        countBy={readWeightProperty(params.countBy)}
+        topN={Number(params.topN)}
         chips={ctx.columns('chips')}
         {...shared}
       />
@@ -485,43 +480,43 @@ function ValuePreviewInner({
         datasetId={isDatasetValue(dataset) ? dataset.datasetId : undefined}
         annotations={isDatasetValue(dataset) ? dataset.annotations : undefined}
         edges={isDatasetValue(dataset) ? dataset.edges : undefined}
-        page={Number(node.params.page ?? 0)}
+        page={Number(params.page)}
         onPage={(next) => onParamChange?.('page', next)}
         pinned={selection}
         onPin={(ids) => onParamChange?.('selection', ids)}
-        colorBy={String(node.params.colorBy ?? 'compartment')}
+        colorBy={choice('colorBy')}
         onColorBy={(value) => onParamChange?.('colorBy', value)}
-        showMesh={node.params.showMesh !== false}
-        showSkeleton={node.params.showSkeleton !== false}
-        showSynapses={node.params.showSynapses !== false}
+        showMesh={params.showMesh !== false}
+        showSkeleton={params.showSkeleton !== false}
+        showSynapses={params.showSynapses !== false}
         onLayer={(id, on) => onParamChange?.(id, on)}
-        partners={idList(node.params.partners)}
+        partners={idList(params.partners)}
         onPartners={(next) => onParamChange?.('partners', next)}
-        grouping={String(node.params.grouping ?? 'type') as PartnerGrouping}
+        grouping={choice<PartnerGrouping>('grouping')}
         onGrouping={(value) => onParamChange?.('grouping', value)}
-        direction={String(node.params.direction ?? 'outputs')}
+        direction={choice('direction')}
         onDirection={(value) => onParamChange?.('direction', value)}
-        partnerQuery={String(node.params.partnerQuery ?? '')}
+        partnerQuery={String(params.partnerQuery)}
         onPartnerQuery={(value) => onParamChange?.('partnerQuery', value)}
-        tab={String(node.params.tab ?? 'partners')}
+        tab={choice('tab')}
         onTab={(value) => onParamChange?.('tab', value)}
-        railOpen={node.params.railOpen !== false}
+        railOpen={params.railOpen !== false}
         onRailOpen={(open) => onParamChange?.('railOpen', open)}
         // The one control here that is data rather than presentation: it adds columns to the
         // Morphometrics port, so writing it marks the graph stale.
-        split={node.params.split === true}
+        split={params.split === true}
         onSplit={(on) => onParamChange?.('split', on)}
-        flowThresh={Number(node.params.flowThresh ?? 0.9)}
-        splitVal={Number(node.params.splitVal ?? 1)}
+        flowThresh={Number(params.flowThresh)}
+        splitVal={Number(params.splitVal)}
         onSplitParam={(id, value) => onParamChange?.(id, value)}
-        heal={node.params.heal === true}
+        heal={params.heal === true}
         onHeal={(on) => onParamChange?.('heal', on)}
-        pointSize={Number(node.params.pointSize ?? 6)}
-        skeletonWidth={Number(node.params.skeletonWidth ?? 2)}
-        skeletonOpacity={Number(node.params.skeletonOpacity ?? 1)}
-        dimOpacity={Number(node.params.dimOpacity ?? 0.1)}
-        meshOpacity={Number(node.params.meshOpacity ?? 0.05)}
-        skeletonColor={String(node.params.skeletonColor ?? '#000000')}
+        pointSize={Number(params.pointSize)}
+        skeletonWidth={Number(params.skeletonWidth)}
+        skeletonOpacity={Number(params.skeletonOpacity)}
+        dimOpacity={Number(params.dimOpacity)}
+        meshOpacity={Number(params.meshOpacity)}
+        skeletonColor={String(params.skeletonColor)}
         onSkeletonColor={(hex) => onParamChange?.('skeletonColor', hex)}
         onVisual={(id, value) => onParamChange?.(id, value)}
         {...shared}
@@ -544,9 +539,9 @@ function ValuePreviewInner({
       <NeuroglancerViewer
         url={asString(value)}
         neurons={isTableValue(neurons) ? neurons : undefined}
-        color={readColorSpec('segment', node.params, ctx.column)}
-        scale={Number(node.params.uiScale ?? 0.75)}
-        viewerType={chosenViewerKind(node.params)}
+        color={readColorSpec('segment', params, ctx.column)}
+        scale={Number(params.uiScale)}
+        viewerType={chosenViewerKind(params)}
         datasetId={dataset?.kind === 'dataset' ? dataset.datasetId : undefined}
         extraLayers={extra?.kind === 'layers' ? extra.items.length : 0}
         // The node id, so the card and the overlay are one continuous viewer session rather than
@@ -570,8 +565,8 @@ function ValuePreviewInner({
     return (
       <DendrogramViewer
         linkage={value}
-        orientation={node.params.orientation === 'down' ? 'down' : 'right'}
-        showLabels={node.params.showLabels !== false}
+        orientation={choice<'down' | 'right'>('orientation')}
+        showLabels={params.showLabels !== false}
         {...(isTableValue(annotations) ? { annotations } : {})}
         {...(matchColumn ? { matchColumn } : {})}
         {...(labelColumn ? { labelColumn } : {})}
@@ -586,11 +581,11 @@ function ValuePreviewInner({
     return (
       <HeatmapViewer
         matrix={value}
-        scale={node.params.scale === 'diverging' ? 'diverging' : 'sequential'}
-        palette={heatmapPaletteOf(node.params)}
-        limits={readColorLimits(node.params)}
-        logColor={heatmapLogColor(node.params)}
-        showValues={node.params.showValues === true}
+        scale={choice<'diverging' | 'sequential'>('scale')}
+        palette={heatmapPaletteOf(params)}
+        limits={readColorLimits(params)}
+        logColor={heatmapLogColor(params)}
+        showValues={params.showValues === true}
         // The param verbatim: both axes live in one `ids` param, so a rectangle is one commit
         // and an undo takes back the whole of it. `chartSelection.ts` owns the grammar.
         selection={selection}
@@ -614,19 +609,19 @@ function ValuePreviewInner({
         table={value}
         xColumn={x}
         yColumn={y}
-        xScale={node.params.xLog === true ? 'log' : 'linear'}
-        yScale={node.params.yLog === true ? 'log' : 'linear'}
-        aspect={node.params.aspect === 'equal' ? 'equal' : 'fit'}
-        color={readColorSpec('point', node.params, ctx.column)}
-        size={readSizeSpec('point', node.params, ctx.column, { min: 3, max: 12 })}
-        shape={readShapeSpec('point', node.params, ctx.column)}
+        xScale={params.xLog === true ? 'log' : 'linear'}
+        yScale={params.yLog === true ? 'log' : 'linear'}
+        aspect={choice<'equal' | 'fit'>('aspect')}
+        color={readColorSpec('point', params, ctx.column)}
+        size={readSizeSpec('point', params, ctx.column, { min: 3, max: 12 })}
+        shape={readShapeSpec('point', params, ctx.column)}
         {...(onParamChange ? { onParamChange } : {})}
         {...(label ? { labelColumn: label } : {})}
         {...(id ? { idColumn: id } : {})}
-        opacity={Number(node.params.opacity ?? 0.8)}
-        maxPoints={Number(node.params.maxPoints ?? 50000)}
-        trend={node.params.trend === 'linear' ? 'linear' : 'none'}
-        trendPerGroup={node.params.trendPerGroup !== false}
+        opacity={Number(params.opacity)}
+        maxPoints={Number(params.maxPoints)}
+        trend={choice<'linear' | 'none'>('trend')}
+        trendPerGroup={params.trendPerGroup !== false}
         selection={selection}
         {...(onSelectionChange ? { onSelectionChange } : {})}
         {...shared}
@@ -637,7 +632,7 @@ function ValuePreviewInner({
   if (node.type === 'out.barChart' && isTableValue(value)) {
     const category = ctx.column('category')
     const valueColumn = ctx.column('value')
-    const series = node.params.useSeries === true ? ctx.column('series') : undefined
+    const series = params.useSeries === true ? ctx.column('series') : undefined
     if (!category || !valueColumn) {
       return (
         <NoColumns
@@ -652,7 +647,7 @@ function ValuePreviewInner({
         categoryColumn={category}
         valueColumn={valueColumn}
         {...(series && series !== category ? { seriesColumn: series } : {})}
-        sortBars={node.params.sortBars !== false}
+        sortBars={params.sortBars !== false}
         {...shared}
       />
     )
@@ -678,11 +673,11 @@ function ValuePreviewInner({
         table={value}
         valueColumn={valueColumn}
         {...(series && series !== valueColumn ? { seriesColumn: series } : {})}
-        binMode={node.params.binMode === 'fixed' ? 'fixed' : 'auto'}
-        bins={Number(node.params.bins ?? 30)}
-        log={node.params.logX === true}
-        normalize={readNormalize(node.params.normalize)}
-        cumulative={node.params.cumulative === true}
+        binMode={choice<'fixed' | 'auto'>('binMode')}
+        bins={Number(params.bins)}
+        log={params.logX === true}
+        normalize={choice<Normalize>('normalize')}
+        cumulative={params.cumulative === true}
         selection={selection}
         {...(onSelectionChange ? { onSelectionChange } : {})}
         {...shared}
@@ -700,10 +695,10 @@ function ValuePreviewInner({
         table={value}
         categoryColumn={category}
         {...(valueColumn && valueColumn !== category ? { valueColumn } : {})}
-        shape={node.params.shape === 'pie' ? 'pie' : 'donut'}
-        sortSlices={node.params.sortSlices !== false}
-        maxSlices={Number(node.params.maxSlices ?? 8)}
-        sliceLabels={readSliceLabels(node.params.sliceLabels)}
+        shape={choice<'pie' | 'donut'>('shape')}
+        sortSlices={params.sortSlices !== false}
+        maxSlices={Number(params.maxSlices)}
+        sliceLabels={choice<'percent' | 'value' | 'none'>('sliceLabels')}
         selection={selection}
         {...(onSelectionChange ? { onSelectionChange } : {})}
         {...shared}
@@ -722,13 +717,13 @@ function ValuePreviewInner({
         table={value}
         valueColumn={valueColumn}
         {...(group && group !== valueColumn ? { groupColumn: group } : {})}
-        style={readBoxStyle(node.params.style)}
-        orientation={node.params.orientation === 'columns' ? 'columns' : 'rows'}
-        points={node.params.points === 'none' ? 'none' : 'outliers'}
-        whiskers={readWhiskers(node.params.whiskers)}
-        log={node.params.logAxis === true}
-        sortByMedian={node.params.sortGroups !== false}
-        maxGroups={Number(node.params.maxGroups ?? 24)}
+        style={choice<DistributionStyle>('style')}
+        orientation={choice<'columns' | 'rows'>('orientation')}
+        points={choice<'none' | 'outliers'>('points')}
+        whiskers={choice<WhiskerRule>('whiskers')}
+        log={params.logAxis === true}
+        sortByMedian={params.sortGroups !== false}
+        maxGroups={Number(params.maxGroups)}
         selection={selection}
         {...(onSelectionChange ? { onSelectionChange } : {})}
         {...shared}
@@ -742,7 +737,7 @@ function ValuePreviewInner({
 
   if (isTableValue(value)) {
     // out.table declares its page size; other nodes fall back to a sensible default.
-    const pageSize = Number(node.params.pageSize)
+    const pageSize = Number(params.pageSize)
     /*
      * The filter controls are `out.table`'s alone, because it is the only node with a port to
      * put the result on. This same component draws the preview for *every* table in the app —
@@ -762,7 +757,7 @@ function ValuePreviewInner({
             filters: filterClauses,
             onFiltersChange: (next: FilterClause[]) =>
               onParamChange?.('filters', encodeClauses(next)),
-            showFilters: node.params.showFilters === true,
+            showFilters: params.showFilters === true,
             onShowFiltersChange: (show: boolean) => onParamChange?.('showFilters', show),
           }
         : {}
@@ -882,55 +877,6 @@ function DrawnElsewhere({ type, onExpand }: { type: string; onExpand?: () => voi
  */
 function idList(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : []
-}
-
-/**
- * Params arrive as `ParamValue`, so every enum has to be narrowed back to its union somewhere.
- * Here rather than in the viewer: a component that accepted a bare string would have to decide
- * what an unrecognised one means, and the honest answer — the definition's default — is a fact
- * about the node rather than about the drawing.
- */
-function roiView(value: unknown): RoiView {
-  return value === 'dorsal' || value === 'lateral' ? value : 'frontal'
-}
-
-function roiColorMode(value: unknown): RoiColorMode {
-  return value === 'preCompleteness' ||
-    value === 'region' ||
-    value === 'side' ||
-    value === 'flat'
-    ? value
-    : 'postCompleteness'
-}
-
-function roiLabelMode(value: unknown): RoiLabelMode {
-  return value === 'all' || value === 'off' ? value : 'auto'
-}
-
-function skeletonWidthMode(value: unknown): SkeletonWidthMode {
-  return value === 'radius' || value === 'world' ? value : 'uniform'
-}
-
-function roiHemisphere(value: unknown): 'both' | 'left' | 'right' {
-  return value === 'left' || value === 'right' ? value : 'both'
-}
-
-function readNormalize(value: unknown): Normalize {
-  return value === 'percent' || value === 'density' ? value : 'count'
-}
-
-function readSliceLabels(value: unknown): 'percent' | 'value' | 'none' {
-  return value === 'value' || value === 'none' ? value : 'percent'
-}
-
-function readBoxStyle(value: unknown): DistributionStyle {
-  return value === 'violin' || value === 'both' || value === 'swarm' || value === 'swarmBox'
-    ? value
-    : 'box'
-}
-
-function readWhiskers(value: unknown): WhiskerRule {
-  return value === 'minmax' || value === 'p5p95' ? value : 'tukey'
 }
 
 /**

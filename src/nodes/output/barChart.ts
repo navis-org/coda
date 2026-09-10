@@ -3,7 +3,7 @@ import { NUMERIC_DTYPES, T } from '../../core/types'
 import { tapPorts } from '../lib/tapPorts'
 import { isTableValue } from '../../core/values'
 
-export const barChartNode = registerNode({
+registerNode({
   type: 'out.barChart',
   label: 'Bar Chart',
   category: 'visualisation',

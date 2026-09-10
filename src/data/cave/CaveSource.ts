@@ -22,6 +22,7 @@
  * datastack without one refuses rather than downloading 244 million synapse rows to count them.
  */
 
+import { DatasetListing } from '../datasetListing'
 import { errorMessage } from '../../core/errors'
 import { describeDuration } from '../../core/limits'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
@@ -243,7 +244,7 @@ interface DatastackState {
   /**
    * Whether inference has already asked for discovery. Never cleared on failure.
    *
-   * The same rule, and the same reason, as `listingRequested`: inference runs on every graph
+   * The same rule, and the same reason, as `DatasetListing.peek`: inference runs on every graph
    * mutation, so a discovery that failed and was retried from there is a request per keystroke —
    * or, with no token, an auth-failure popup per keystroke. `runDiscovery` sets `schemas` only
    * on the success path, so without this flag every failure is retried forever.
@@ -356,12 +357,17 @@ export class CaveSource implements DataSource {
   readonly capabilitiesAnywhere = CAVE_CEILING
   readonly schemas: SourceSchemas = defaultSchemas()
 
-  private datasets: DatasetInfo[] | undefined
-  /** Why each specced datastack is absent from `datasets`, from the last listing. */
+  /**
+   * The listing — `DatasetListing`, re-fetched on every awaited call. Unlike the neuron index it
+   * is not persisted: it is small, and it is the one thing that would tell us a materialization
+   * has expired.
+   */
+  private readonly listing = new DatasetListing(this.id, (signal) => this.runListing(signal), {
+    keep: 'inflight',
+  })
+  /** Why each specced datastack is absent from the last listing. */
   private failures = new Map<string, string>()
-  private listing: Promise<DatasetInfo[]> | undefined
-  private listingRequested = false
-  /** Which global server produced `datasets`. A changed setting invalidates everything. */
+  /** Which global server produced the listing. A changed setting invalidates everything. */
   private listedFrom: string | undefined
   private readonly states = new Map<string, DatastackState>()
 
@@ -370,29 +376,30 @@ export class CaveSource implements DataSource {
   // -------------------------------------------------------------------------
 
   async listDatasets(signal?: AbortSignal): Promise<DatasetInfo[]> {
-    const server = getServer()
-    if (this.listedFrom !== server) this.reset(server)
-    // Concurrent callers share one listing — a graph can hold several dataset nodes and each
-    // one's inference peeks. Unlike the neuron index this is not persisted: it is small, and it
-    // is the one thing that would tell us a materialization has expired.
-    this.listing ??= this.runListing(signal).finally(() => {
-      this.listing = undefined
-    })
-    return this.listing
+    this.followServer()
+    return this.listing.get(signal)
   }
 
+  /**
+   * `DatasetListing.peek`: starts the listing once per instance, and answers what has landed.
+   *
+   * The server is checked here as well as in `listDatasets`. The peek used to reach the check only
+   * through `listDatasets`, and only when it had nothing to answer with — so after a change of
+   * server, a listing already in hand kept handing out the previous deployment's datastacks.
+   */
   peekDatasets(): DatasetInfo[] | undefined {
-    if (!this.datasets && !this.listingRequested) {
-      this.listingRequested = true
-      // Swallowed: a peek has no caller to report to, and a 401 already travels on its own
-      // channel to the Connections panel. Same trade as `NeuPrintSource.peekDatasets`.
-      void this.listDatasets().catch(() => undefined)
-    }
-    return this.datasets
+    this.followServer()
+    return this.listing.peek()
   }
 
   peekDataset(datasetId: string): DatasetInfo | undefined {
-    return this.datasets?.find((d) => d.id === datasetId)
+    return this.listing.find(datasetId)
+  }
+
+  /** Forget everything if the global server is no longer the one the listing came from. */
+  private followServer(): void {
+    const server = getServer()
+    if (this.listedFrom !== server) this.reset(server)
   }
 
   /**
@@ -406,12 +413,10 @@ export class CaveSource implements DataSource {
    */
   private reset(server: string): void {
     this.listedFrom = server
-    this.datasets = undefined
     // With the rest: an explanation of why a datastack was missing from the *previous* server's
     // listing is not an explanation of anything on this one.
     this.failures = new Map()
-    this.listing = undefined
-    this.listingRequested = false
+    this.listing.reset()
     this.states.clear()
   }
 
@@ -471,7 +476,7 @@ export class CaveSource implements DataSource {
         }),
       ),
     )
-    this.datasets = perSpec.flat()
+    const datasets = perSpec.flat()
     this.failures = failures
     /*
      * The backstop, and only when nothing at all came back: a token the info service accepts and
@@ -480,9 +485,10 @@ export class CaveSource implements DataSource {
      * them refusing is a fact about the credential, and is said once rather than once per
      * datastack.
      */
-    if (this.datasets.length === 0 && refused) reportAuthFailure(refused)
-    reportSourceLearned(this.id)
-    return this.datasets
+    if (datasets.length === 0 && refused) reportAuthFailure(refused)
+    // Stored and announced by `DatasetListing`, in that order — and only if no change of server
+    // has reset it meanwhile.
+    return datasets
   }
 
   /**
@@ -840,10 +846,11 @@ export class CaveSource implements DataSource {
    * absent until then, which `DatasetInfo` already allows for.
    */
   private noteNeuronCount(spec: DatastackSpec, version: number, count: number): void {
-    const info = this.datasets?.find((d) => d.id === datasetIdFor(spec.datastack, version))
-    if (!info || info.neuronCount === count) return
-    info.neuronCount = count
-    reportSourceLearned(this.id)
+    const id = datasetIdFor(spec.datastack, version)
+    if (this.listing.find(id)?.neuronCount === count) return
+    if (this.listing.revise(id, (info) => ({ ...info, neuronCount: count }))) {
+      reportSourceLearned(this.id)
+    }
   }
 
   async findNeurons(req: FindNeuronsRequest): Promise<TableValue> {

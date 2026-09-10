@@ -45,6 +45,7 @@
  * this card because it is a fact about one query rather than about the table.
  */
 
+import { memoPromise } from '../memoPromise'
 import { reportSourceLearned } from '../source'
 import type { TableMetadata, ViewInfo } from './api'
 import {
@@ -224,18 +225,15 @@ function namesFor(
   version: number,
   options: CaveRequestOptions,
 ): Promise<string[]> {
-  const key = keyFor(datastack, version)
-  let pending = tableNames.get(key)
-  if (!pending) {
-    pending = caveServerFor(datastack, options)
-      .then((server) => listTables(server, datastack, version, options))
-      .catch((error: unknown) => {
-        tableNames.delete(key)
-        throw error
-      })
-    tableNames.set(key, pending)
-  }
-  return pending
+  return memoPromise(
+    tableNames,
+    keyFor(datastack, version),
+    () =>
+      caveServerFor(datastack, options).then((server) =>
+        listTables(server, datastack, version, options),
+      ),
+    { keep: 'resolved' },
+  )
 }
 
 /**
@@ -250,18 +248,15 @@ function viewsFor(
   version: number,
   options: CaveRequestOptions,
 ): Promise<Record<string, ViewInfo>> {
-  const key = keyFor(datastack, version)
-  let pending = viewInfos.get(key)
-  if (!pending) {
-    pending = caveServerFor(datastack, options)
-      .then((server) => listViews(server, datastack, version, options))
-      .catch((error: unknown) => {
-        viewInfos.delete(key)
-        throw error
-      })
-    viewInfos.set(key, pending)
-  }
-  return pending
+  return memoPromise(
+    viewInfos,
+    keyFor(datastack, version),
+    () =>
+      caveServerFor(datastack, options).then((server) =>
+        listViews(server, datastack, version, options),
+      ),
+    { keep: 'resolved' },
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -362,24 +357,20 @@ export function tableFactsFor(
   options: CaveRequestOptions = {},
 ): Promise<CaveTableFacts> {
   const key = `${keyFor(datastack, version)}|${name}`
-  let pending = factsLoading.get(key)
-  if (!pending) {
-    pending = loadFacts(datastack, version, name, options)
-      .then((facts) => {
+  return memoPromise(
+    factsLoading,
+    key,
+    () =>
+      loadFacts(datastack, version, name, options).then((facts) => {
         factsKnown.set(key, facts)
-        // The promise is kept on success, so this runs once per key however many callers there
-        // are — no "only the first time" guard, unlike `l2SourceFor`, which drops its promise in
-        // a `finally` and so really can load twice.
+        // The promise is kept on success (`keep: 'resolved'`), so this runs once per key however
+        // many callers there are — no "only the first time" guard, unlike `l2SourceFor`, which
+        // keeps its promise only in flight and so really can load twice.
         reportSourceLearned('cave')
         return facts
-      })
-      .catch((error: unknown) => {
-        factsLoading.delete(key)
-        throw error
-      })
-    factsLoading.set(key, pending)
-  }
-  return pending
+      }),
+    { keep: 'resolved' },
+  )
 }
 
 async function loadFacts(
@@ -548,15 +539,12 @@ export function referenceTableFor(
   const key = `${keyFor(datastack, version)}|${name}`
   const known = factsKnown.get(`${keyFor(datastack, version)}|table|${name}`)
   if (known) return Promise.resolve(known.referenceTable)
-  let pending = referencesLoading.get(key)
-  if (!pending) {
-    pending = loadReferenceTable(datastack, version, name, options).catch((error: unknown) => {
-      referencesLoading.delete(key)
-      throw error
-    })
-    referencesLoading.set(key, pending)
-  }
-  return pending
+  return memoPromise(
+    referencesLoading,
+    key,
+    () => loadReferenceTable(datastack, version, name, options),
+    { keep: 'resolved' },
+  )
 }
 
 async function loadReferenceTable(
@@ -583,15 +571,12 @@ export function tableColumnsFor(
   options: CaveRequestOptions = {},
 ): Promise<CaveColumnSample[]> {
   const key = `${keyFor(datastack, version)}|${kind}|${name}`
-  let pending = columnsLoading.get(key)
-  if (!pending) {
-    pending = loadColumns(datastack, version, name, kind, options).catch((error: unknown) => {
-      columnsLoading.delete(key)
-      throw error
-    })
-    columnsLoading.set(key, pending)
-  }
-  return pending
+  return memoPromise(
+    columnsLoading,
+    key,
+    () => loadColumns(datastack, version, name, kind, options),
+    { keep: 'resolved' },
+  )
 }
 
 async function loadColumns(

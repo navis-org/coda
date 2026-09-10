@@ -19,6 +19,8 @@
  *     the one place this backend needs a ceiling the others do not.
  */
 
+import { DatasetListing } from '../datasetListing'
+import { memoPromise } from '../memoPromise'
 import { describeDuration } from '../../core/limits'
 import { ID_COLUMN_NAME, idText, numericIds } from '../../core/ids'
 import type {
@@ -148,14 +150,6 @@ const CATMAID_CAPABILITIES: SourceCapabilities = {
   roiMeshes: true,
 }
 
-interface ProjectState {
-  /** Every skeleton id in the project — needed before the labels, and by itself. */
-  skeletonIds?: Promise<number[]>
-  /** The whole-instance annotation index, once built. */
-  labels?: Promise<LabelIndex>
-  volumes?: Promise<VolumeEntry[]>
-}
-
 interface VolumeEntry {
   id: number
   name: string
@@ -245,39 +239,26 @@ export class CatmaidSource implements DataSource {
   readonly schemas: SourceSchemas = CATMAID_SCHEMAS
 
   private readonly server: string
-  private projects: DatasetInfo[] | undefined
-  private listing: Promise<DatasetInfo[]> | undefined
-  private listingRequested = false
-  private readonly states = new Map<string, ProjectState>()
+  /**
+   * The project list — `DatasetListing`, **kept for the session** once it lands: `evaluate` lists
+   * on every Run, and a community server's project list does not move under one. A failed listing
+   * is still retried by the next caller; the helper this replaced existed because a `??=` had kept
+   * the failure instead.
+   */
+  private readonly listing: DatasetListing
+  /** Every skeleton id per project — needed before the labels, and by itself. */
+  private readonly skeletonIdLists = new Map<string, Promise<number[]>>()
+  /** The whole-project annotation index, derived once. */
+  private readonly labelIndexes = new Map<string, Promise<LabelIndex>>()
+  private readonly volumeLists = new Map<string, Promise<VolumeEntry[]>>()
 
   constructor(server: string, id: string, label: string) {
     this.server = server
     this.id = id
     this.label = label
-  }
-
-  /**
-   * Memoise a promise on a slot, **dropping it if it rejects**.
-   *
-   * One helper rather than three spellings of `slot ??= run()`, because the three had already
-   * diverged on the half that matters: a plain `??=` caches a *rejection* and replays it for the
-   * life of the tab, so one failed listing on a flaky connection means the dataset picker stays
-   * empty until a reload. Keeping the resolved value is the whole point; keeping the failure is
-   * never what anybody wanted.
-   */
-  private once<T>(
-    read: () => Promise<T> | undefined,
-    write: (value: Promise<T> | undefined) => void,
-    run: () => Promise<T>,
-  ): Promise<T> {
-    const held = read()
-    if (held) return held
-    const started = run().catch((error: unknown) => {
-      write(undefined)
-      throw error
+    this.listing = new DatasetListing(id, (signal) => this.runListing(signal), {
+      keep: 'resolved',
     })
-    write(started)
-    return started
   }
 
   // -------------------------------------------------------------------------
@@ -285,13 +266,7 @@ export class CatmaidSource implements DataSource {
   // -------------------------------------------------------------------------
 
   async listDatasets(signal?: AbortSignal): Promise<DatasetInfo[]> {
-    return this.once(
-      () => this.listing,
-      (value) => {
-        this.listing = value
-      },
-      () => this.runListing(signal),
-    )
+    return this.listing.get(signal)
   }
 
   /**
@@ -304,11 +279,7 @@ export class CatmaidSource implements DataSource {
    * listing retried from there is a request per keystroke.
    */
   peekDatasets(): DatasetInfo[] | undefined {
-    if (!this.projects && !this.listingRequested) {
-      this.listingRequested = true
-      void this.listDatasets().catch(() => undefined)
-    }
-    return this.projects
+    return this.listing.peek()
   }
 
   peekDataset(datasetId: string): DatasetInfo | undefined {
@@ -317,9 +288,8 @@ export class CatmaidSource implements DataSource {
 
   private async runListing(signal?: AbortSignal): Promise<DatasetInfo[]> {
     const projects = await listProjects(this.server, signal ? { signal } : {})
-    this.projects = projects.map((project) => this.describeProject(project))
-    reportSourceLearned(this.id)
-    return this.projects
+    // Published and announced by `DatasetListing`, in that order.
+    return projects.map((project) => this.describeProject(project))
   }
 
   /**
@@ -350,15 +320,6 @@ export class CatmaidSource implements DataSource {
       rois: [],
       statuses: [],
     }
-  }
-
-  private state(datasetId: string): ProjectState {
-    let state = this.states.get(datasetId)
-    if (!state) {
-      state = {}
-      this.states.set(datasetId, state)
-    }
-    return state
   }
 
   private projectId(datasetId: string): number {
@@ -447,13 +408,11 @@ export class CatmaidSource implements DataSource {
 
   /** Every skeleton id in the project, fetched once. Both index legs start from it. */
   private skeletonIds(datasetId: string, options: { signal?: AbortSignal }): Promise<number[]> {
-    const state = this.state(datasetId)
-    return this.once(
-      () => state.skeletonIds,
-      (value) => {
-        state.skeletonIds = value
-      },
+    return memoPromise(
+      this.skeletonIdLists,
+      datasetId,
       () => listSkeletons(this.server, this.projectId(datasetId), undefined, options),
+      { keep: 'resolved' },
     )
   }
 
@@ -463,13 +422,11 @@ export class CatmaidSource implements DataSource {
     options: { signal?: AbortSignal },
     onProgress?: (fraction: number, note?: string) => void,
   ): Promise<LabelIndex> {
-    const state = this.state(datasetId)
-    return this.once(
-      () => state.labels,
-      (value) => {
-        state.labels = value
-      },
+    return memoPromise(
+      this.labelIndexes,
+      datasetId,
       () => this.runLabelIndex(datasetId, options, onProgress),
+      { keep: 'resolved' },
     )
   }
 
@@ -942,35 +899,34 @@ export class CatmaidSource implements DataSource {
     datasetId: string,
     options: { signal?: AbortSignal },
   ): Promise<{ id: number; name: string; comment: string | null }[]> {
-    const state = this.state(datasetId)
-    state.volumes ??= (async () => {
-      const body = await listVolumes(this.server, this.projectId(datasetId), options)
-      const idAt = body.columns.indexOf('id')
-      const nameAt = body.columns.indexOf('name')
-      const commentAt = body.columns.indexOf('comment')
-      if (idAt === -1 || nameAt === -1) {
-        throw new Error('CATMAID volume list is missing an id or name column')
-      }
-      const volumes = body.data.map((row) => ({
-        id: Number(row[idAt]),
-        name: String(row[nameAt]),
-        comment: commentAt === -1 ? null : ((row[commentAt] as string | null) ?? null),
-      }))
-      // The listing publishes no ROI names until something asks; fill them in now that we know,
-      // so the region pickers populate. Re-infers through `reportSourceLearned`.
-      const dataset = this.projects?.find((entry) => entry.id === datasetId)
-      if (dataset) {
+    return memoPromise(
+      this.volumeLists,
+      datasetId,
+      async () => {
+        const body = await listVolumes(this.server, this.projectId(datasetId), options)
+        const idAt = body.columns.indexOf('id')
+        const nameAt = body.columns.indexOf('name')
+        const commentAt = body.columns.indexOf('comment')
+        if (idAt === -1 || nameAt === -1) {
+          throw new Error('CATMAID volume list is missing an id or name column')
+        }
+        const volumes = body.data.map((row) => ({
+          id: Number(row[idAt]),
+          name: String(row[nameAt]),
+          comment: commentAt === -1 ? null : ((row[commentAt] as string | null) ?? null),
+        }))
+        // The listing publishes no ROI names until something asks; fill them in now that we know,
+        // so the region pickers populate. Re-infers through `reportSourceLearned`.
         const named = volumes.map((volume) => volume.name).sort()
-        this.projects = this.projects?.map((entry) =>
-          entry.id === datasetId ? { ...entry, rois: named, primaryRois: named } : entry,
-        )
-        reportSourceLearned(this.id)
-      }
-      return volumes
-    })().catch((error: unknown) => {
-      state.volumes = undefined
-      throw error
-    })
-    return state.volumes
+        const listed = this.listing.revise(datasetId, (entry) => ({
+          ...entry,
+          rois: named,
+          primaryRois: named,
+        }))
+        if (listed) reportSourceLearned(this.id)
+        return volumes
+      },
+      { keep: 'resolved' },
+    )
   }
 }

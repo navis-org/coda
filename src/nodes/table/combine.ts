@@ -48,7 +48,7 @@ function readSpec(ctx: {
   }
 }
 
-export const combineColumnsNode = registerNode({
+registerNode({
   type: 'core.combineColumns',
   label: 'Combine Columns',
   category: 'transform',

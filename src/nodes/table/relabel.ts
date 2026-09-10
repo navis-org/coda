@@ -57,7 +57,7 @@ function specOf(ctx: {
  * wrong default: an unmapped `LC4` sitting in a column of cross-dataset labels is indistinguishable
  * from one the mapper matched, which is precisely the confusion this whole area exists to prevent.
  */
-export const relabelNode = registerNode({
+registerNode({
   type: 'core.relabel',
   label: 'Relabel',
   category: 'transform',

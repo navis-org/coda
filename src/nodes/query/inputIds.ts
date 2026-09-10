@@ -38,7 +38,7 @@ import { ID_ONLY_SCHEMA } from '../lib/tableOps'
  * explicit set: dropping one for its status would remove a neuron somebody named *and* then
  * report it as missing from the dataset. Filtering belongs downstream, where it is visible.
  */
-export const inputIdsNode = registerNode({
+registerNode({
   type: 'neuron.inputIds',
   label: 'Input IDs',
   category: 'query',

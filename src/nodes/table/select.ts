@@ -3,7 +3,7 @@ import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { selectSchema, selectTable } from '../lib/tableOps'
 
-export const selectNode = registerNode({
+registerNode({
   type: 'core.select',
   label: 'Select Columns',
   category: 'transform',

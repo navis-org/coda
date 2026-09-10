@@ -32,7 +32,7 @@ function selectionSchema(nodeSchema: TableSchema | undefined): TableSchema {
   return tableSchema(column('neuronId', 'str'), ...extra)
 }
 
-export const networkViewNode = registerNode({
+registerNode({
   type: 'out.network',
   label: 'Network Viewer',
   category: 'visualisation',

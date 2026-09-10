@@ -34,7 +34,7 @@ function specOf(ctx: {
  * has to be repointed to try the other one. See `joinTables` for what each direction does
  * about a duplicated key, and for the one key column a row from the right alone arrives with.
  */
-export const joinNode = registerNode({
+registerNode({
   type: 'core.join',
   label: 'Join',
   category: 'transform',

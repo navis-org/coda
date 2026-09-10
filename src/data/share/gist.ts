@@ -22,6 +22,7 @@
  * anything, which is the entire point of sharing one.
  */
 
+import { memoPromise } from '../memoPromise'
 import {
   getGithubToken,
   reportGithubAuthFailure,
@@ -94,7 +95,7 @@ async function refuse(response: Response, what: string): Promise<never> {
  * somebody else's, make a new one". Without it, pressing Share on a workflow you were *sent*
  * would PATCH the original author's gist and get a 404 with nothing explaining why.
  */
-let inFlightLogin: { token: string; promise: Promise<string | undefined> } | undefined
+const loginRequests = new Map<string, Promise<string | undefined>>()
 
 export async function githubLogin(): Promise<string | undefined> {
   const cached = getGithubLogin()
@@ -102,23 +103,23 @@ export async function githubLogin(): Promise<string | undefined> {
   const token = getGithubToken()
   if (!token) return undefined
   /*
-   * One request for concurrent askers, the idiom `loadCachedTable` uses. The cache is written
-   * when the answer *lands*, so two callers starting a tick apart both miss it — which is not
-   * hypothetical: `StrictMode` invokes the dialog's effect twice, and observed live that is two
-   * `GET /user` calls against a rate-limited API for one dialog opening.
+   * One request for concurrent askers, per token and only while in flight (`memoPromise`). The
+   * cache is written when the answer *lands*, so two callers starting a tick apart both miss it
+   * — which is not hypothetical: `StrictMode` invokes the dialog's effect twice, and observed
+   * live that is two `GET /user` calls against a rate-limited API for one dialog opening.
    */
-  if (inFlightLogin?.token === token) return inFlightLogin.promise
-  const promise = (async () => {
-    const response = await fetch(`${API}/user`, { headers: headers(token) })
-    if (!response.ok) return refuse(response, 'The signed-in account')
-    const body = (await response.json()) as { login?: string }
-    setGithubLogin(body.login)
-    return body.login
-  })().finally(() => {
-    inFlightLogin = undefined
-  })
-  inFlightLogin = { token, promise }
-  return promise
+  return memoPromise(
+    loginRequests,
+    token,
+    async () => {
+      const response = await fetch(`${API}/user`, { headers: headers(token) })
+      if (!response.ok) return refuse(response, 'The signed-in account')
+      const body = (await response.json()) as { login?: string }
+      setGithubLogin(body.login)
+      return body.login
+    },
+    { keep: 'inflight' },
+  )
 }
 
 /**

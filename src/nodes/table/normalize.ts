@@ -8,7 +8,7 @@ import { NORMALIZE_OPTIONS, normalizeMatrix } from '../lib/tableOps'
  * Rescale a matrix. Raw synapse counts are dominated by whichever cell type happens to be
  * numerous, so row-fraction is usually what makes a connectivity matrix readable.
  */
-export const normalizeNode = registerNode({
+registerNode({
   type: 'core.normalize',
   label: 'Normalize',
   category: 'analysis',

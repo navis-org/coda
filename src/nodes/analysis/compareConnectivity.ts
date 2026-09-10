@@ -235,7 +235,7 @@ const LABEL_PICKERS: ParamDef[] = [
   },
 ]
 
-export const compareConnectivityNode = registerNode({
+registerNode({
   type: 'compare.connectivity',
   label: 'Compare Connectivity',
   category: 'analysis',

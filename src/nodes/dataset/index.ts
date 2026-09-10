@@ -240,7 +240,7 @@ function buildDatasetNode(family: DatasetFamily) {
  * configuration whose whole consequence is that Connectivity declines, said elsewhere, on the
  * node that declines.
  */
-export const customCaveNode = registerNode({
+registerNode({
   type: 'dataset.cave',
   label: 'Custom CAVE',
   category: 'dataset',
@@ -570,7 +570,7 @@ function registerCustomCaveSpec(params: Record<string, unknown>): void {
   })
 }
 
-export const datasetNodes = DATASET_FAMILIES.map(buildDatasetNode)
+for (const family of DATASET_FAMILIES) buildDatasetNode(family)
 
 /**
  * Any neuPrint deployment, any dataset.
@@ -580,7 +580,7 @@ export const datasetNodes = DATASET_FAMILIES.map(buildDatasetNode)
  * *deployment* URL rather than a base path — `servers.ts` maps it to something a browser can
  * actually fetch, which is not the same string, because neuPrint sends no CORS headers.
  */
-export const customNeuPrintNode = registerNode({
+registerNode({
   type: 'dataset.neuprint',
   label: 'Custom neuPrint',
   category: 'dataset',
@@ -704,7 +704,7 @@ export const customNeuPrintNode = registerNode({
  * company. CATMAID carries its labels as annotations *on* the neuron, so there is nothing for an
  * external table to replace; the edge set is a product judgement stated on the flag.
  */
-export const customCatmaidNode = registerNode({
+registerNode({
   type: 'dataset.catmaid',
   label: 'Custom CATMAID',
   category: 'dataset',

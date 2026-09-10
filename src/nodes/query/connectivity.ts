@@ -53,7 +53,7 @@ const NOISY_HOPS = 3
  * `lib/connectivityOps.ts` for why the source's query-relative shape is reoriented here
  * rather than at the seam.
  */
-export const connectivityNode = registerNode({
+registerNode({
   type: 'neuron.connectivity',
   /*
    * `Connectivity`, not `Connectivity`. What it emits is an edge list — a table of

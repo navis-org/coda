@@ -49,7 +49,7 @@ import {
  * graph keeps its wires; the label params keep their ids for the same reason. See
  * `nodes/lib/stackParams.ts`.
  */
-export const stackNode = registerNode({
+registerNode({
   type: 'core.stack',
   label: 'Stack Tables',
   category: 'transform',

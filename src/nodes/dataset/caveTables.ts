@@ -58,7 +58,7 @@ import {
  */
 const LISTING_SCHEMA: TableSchema = tableSchema(column('table', 'str'), column('kind', 'str'))
 
-export const caveTablesNode = registerNode({
+registerNode({
   type: 'cave.tables',
   label: 'List CAVE tables',
   category: 'dataset',
@@ -135,7 +135,7 @@ const COLUMNS_SCHEMA: TableSchema = tableSchema(
   column('example', 'str'),
 )
 
-export const caveTableInfoNode = registerNode({
+registerNode({
   type: 'cave.tableInfo',
   label: 'CAVE table info',
   category: 'dataset',

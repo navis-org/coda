@@ -146,7 +146,7 @@ const typeColumnParams = repeatParams({
   ],
 })
 
-export const matchTypesNode = registerNode({
+registerNode({
   type: 'compare.matchTypes',
   label: 'Match Cell Types',
   category: 'analysis',

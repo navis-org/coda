@@ -37,7 +37,7 @@ import {
 import { warnAboveParam } from '../lib/limitParams'
 import { MAX_NEURONS } from '../query/morphology'
 
-export const nblastNode = registerNode({
+registerNode({
   type: 'neuron.nblast',
   label: 'NBLAST',
   category: 'analysis',

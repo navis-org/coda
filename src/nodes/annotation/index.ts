@@ -84,7 +84,7 @@ function chainSchema(
 // CAVE table
 // ---------------------------------------------------------------------------
 
-export const caveTableNode = registerNode({
+registerNode({
   type: 'annotation.caveTable',
   label: 'CAVE table',
   category: 'dataset',
@@ -359,7 +359,7 @@ function seaRef(
   }
 }
 
-export const flyTableNode = buildSeaTableNode({
+buildSeaTableNode({
   key: 'flyTable',
   label: 'FlyTable',
   host: SEATABLE_HOSTS.flytable,
@@ -370,7 +370,7 @@ export const flyTableNode = buildSeaTableNode({
     'you got, and Filter or Sort can tidy it before the Dataset.',
 })
 
-export const seaTableNode = buildSeaTableNode({
+buildSeaTableNode({
   key: 'seaTable',
   label: 'SeaTable',
   host: SEATABLE_HOSTS.seatable,
@@ -400,7 +400,7 @@ function sheetRef(params: Record<string, unknown>): AnnotationRef | undefined {
   return config ? { provider: GOOGLE_SHEET_PROVIDER, config } : undefined
 }
 
-export const googleSheetNode = registerNode({
+registerNode({
   type: 'annotation.googleSheet',
   label: 'Google Sheet',
   category: 'dataset',

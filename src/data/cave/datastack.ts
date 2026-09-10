@@ -19,6 +19,7 @@ import type { VersionInfo } from './api'
 import { datastackInfo, listDatastacks, versionsMetadata } from './api'
 import type { CaveRequestOptions } from './client'
 import { getServer, getToken } from './credentials'
+import { memoPromise } from '../memoPromise'
 import { reportSourceLearned } from '../source'
 import type { GrapheneSource } from './graphene'
 import { parseGrapheneSource } from './graphene'
@@ -54,15 +55,9 @@ export function datastackRecord(
   options: CaveRequestOptions = {},
 ): Promise<DatastackInfo> {
   const server = currentServer()
-  let record = records.get(datastack)
-  if (!record) {
-    record = datastackInfo(server, datastack, options).catch((error: unknown) => {
-      records.delete(datastack)
-      throw error
-    })
-    records.set(datastack, record)
-  }
-  return record
+  return memoPromise(records, datastack, () => datastackInfo(server, datastack, options), {
+    keep: 'resolved',
+  })
 }
 
 /** The server that answers queries for a datastack. */
@@ -124,10 +119,11 @@ export function materializationsFor(
   options: CaveRequestOptions = {},
 ): Promise<number[]> {
   const server = currentServer()
-  let pending = loading.get(datastack)
-  if (!pending) {
-    pending = load(datastack, options)
-      .then((versions) => {
+  return memoPromise(
+    loading,
+    datastack,
+    () =>
+      load(datastack, options).then((versions) => {
         if (server === filledFrom) {
           materializations.set(datastack, versions)
           // Not a data-changed event: nothing cached is invalidated and no run is scheduled. It
@@ -135,13 +131,9 @@ export function materializationsFor(
           reportSourceLearned('cave')
         }
         return versions
-      })
-      .finally(() => {
-        loading.delete(datastack)
-      })
-    loading.set(datastack, pending)
-  }
-  return pending
+      }),
+    { keep: 'inflight' },
+  )
 }
 
 async function load(datastack: string, options: CaveRequestOptions): Promise<number[]> {
@@ -372,10 +364,11 @@ export function l2SourceFor(
   const known = l2Sources.get(datastack)
   if (known !== undefined) return Promise.resolve(known ?? undefined)
 
-  let pending = l2Loading.get(datastack)
-  if (!pending) {
-    pending = resolveL2(datastack, options)
-      .then((source) => {
+  return memoPromise(
+    l2Loading,
+    datastack,
+    () =>
+      resolveL2(datastack, options).then((source) => {
         if (server !== filledFrom) return source
         const before = l2Sources.get(datastack)
         l2Sources.set(datastack, source ?? null)
@@ -383,13 +376,9 @@ export function l2SourceFor(
         // Fired unconditionally it costs a whole-graph re-inference per Run of a Skeletons node.
         if (before === undefined) reportSourceLearned('cave')
         return source
-      })
-      .finally(() => {
-        l2Loading.delete(datastack)
-      })
-    l2Loading.set(datastack, pending)
-  }
-  return pending
+      }),
+    { keep: 'inflight' },
+  )
 }
 
 async function resolveL2(

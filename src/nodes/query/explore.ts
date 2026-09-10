@@ -103,7 +103,7 @@ export function excludedFromSearch(
   return params.searchTags === false ? tagColumn || undefined : undefined
 }
 
-export const exploreNode = registerNode({
+registerNode({
   type: 'neuron.explore',
   label: 'Explore Dataset',
   category: 'query',

@@ -38,7 +38,7 @@ import { T } from '../../core/types'
  * to whatever node feeds this one — which is why they work only while that card is on screen
  * and not collapsed. That is a real limit and the card states it rather than failing quietly.
  */
-export const downloadNode = registerNode({
+registerNode({
   type: 'out.download',
   label: 'Download',
   category: 'utility',

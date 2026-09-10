@@ -3,8 +3,9 @@
  *
  * Three of these had accumulated — `useNeuronProfile`, `useNeuronTopology` and `useSynapseLinks`
  * — identical down to the eviction loop and the `finally` that clears the in-flight entry only if
- * it is still the current one. None of it is obvious, which is exactly why it should not be
- * retyped: the same call `fetchText.ts` records ("Copied twice already; don't").
+ * it is still the current one (`memoPromise`'s now, shared with the data layer). None of it is
+ * obvious, which is exactly why it should not be retyped: the same call `fetchText.ts` records
+ * ("Copied twice already; don't").
  *
  * Two rules are worth stating because both were learned rather than designed:
  *
@@ -26,6 +27,8 @@
  *   in memory. `weigh` is how a caller says what an entry costs, and it is measured in whatever
  *   unit that caller finds honest — rows, here. A cache without it behaves exactly as before.
  */
+
+import { memoPromise } from '../../data/memoPromise'
 
 export interface KeyedCache<T> {
   get(key: string): T | undefined
@@ -85,30 +88,23 @@ export function keyedCache<T>(
     get: (key) => memory.get(key),
 
     share(key, load) {
-      const shared = pending.get(key) ?? load()
-      pending.set(key, shared)
       const issued = generation
-      return shared
-        .then((value) => {
-          // Still handed to the caller — it asked for this and the answer is good. What a
-          // `clear()` in between forbids is *remembering* it.
-          if (issued !== generation) return value
-          remember(key, value)
-          /*
-           * Map iterates in insertion order, so the first key is the least recently *added*. Good
-           * enough here: paging moves forward, and a revisit is served without reordering.
-           */
-          while (overBudget()) {
-            const oldest = memory.keys().next().value
-            if (oldest === undefined) break
-            forget(oldest)
-          }
-          return value
-        })
-        .finally(() => {
-          // Only if it is still ours: a later call for the same key has already replaced it.
-          if (pending.get(key) === shared) pending.delete(key)
-        })
+      return memoPromise(pending, key, load, { keep: 'inflight' }).then((value) => {
+        // Still handed to the caller — it asked for this and the answer is good. What a
+        // `clear()` in between forbids is *remembering* it.
+        if (issued !== generation) return value
+        remember(key, value)
+        /*
+         * Map iterates in insertion order, so the first key is the least recently *added*. Good
+         * enough here: paging moves forward, and a revisit is served without reordering.
+         */
+        while (overBudget()) {
+          const oldest = memory.keys().next().value
+          if (oldest === undefined) break
+          forget(oldest)
+        }
+        return value
+      })
     },
 
     clear() {

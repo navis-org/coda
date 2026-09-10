@@ -12,6 +12,7 @@ pnpm test           # vitest
 pnpm test:watch
 pnpm typecheck      # tsc -b --noEmit
 pnpm lint           # eslint, includes the core/UI boundary rule
+pnpm knip:check     # dead code against knip-baseline.txt; knip:update to accept a change
 pnpm format         # prettier, over src/**/*.{ts,tsx,css} and nothing else
 pnpm build          # tsc -b && vite build
 ```

@@ -29,6 +29,9 @@
  * again, and nothing has to be re-downloaded to get there.
  */
 
+import { attempt, database } from './idb'
+import { memoPromise } from './memoPromise'
+
 const DB_NAME = 'coda'
 const DB_VERSION = 2
 const STORE = 'cache'
@@ -87,74 +90,42 @@ export interface CacheEntryMeta {
 
 const memory = new Map<string, Envelope>()
 
-let dbPromise: Promise<IDBDatabase | undefined> | undefined
-
-function openDb(): Promise<IDBDatabase | undefined> {
-  dbPromise ??= new Promise<IDBDatabase | undefined>((resolve) => {
-    // `typeof` rather than a truthiness check: the identifier is simply absent in node.
-    if (typeof indexedDB === 'undefined') return resolve(undefined)
-    try {
-      const request = indexedDB.open(DB_NAME, DB_VERSION)
-      request.onupgradeneeded = () => {
-        const db = request.result
-        // Created, never recreated: a version bump that dropped `STORE` would make every user
-        // re-download a dataset to gain a feature that only reads a timestamp.
-        if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE)
-        if (!db.objectStoreNames.contains(META)) db.createObjectStore(META)
-      }
-      request.onsuccess = () => resolve(request.result)
-      // Private-mode Firefox rejects here; so does a browser with storage disabled.
-      request.onerror = () => resolve(undefined)
-      request.onblocked = () => resolve(undefined)
-    } catch {
-      resolve(undefined)
-    }
-  })
-  return dbPromise
-}
+/**
+ * The connection — `idb.ts`, which also retries an open that failed, where this module used to
+ * keep the failure for the life of the tab. Every operation below resolves whatever happens: the
+ * header's "never fatal".
+ */
+const db = database({
+  name: DB_NAME,
+  version: DB_VERSION,
+  // Created, never recreated: a version bump that dropped `STORE` would make every user
+  // re-download a dataset to gain a feature that only reads a timestamp.
+  stores: [STORE, META],
+})
 
 /** Promisify one IDB read, resolving to undefined on any failure. */
 function read<T>(store: string, make: (store: IDBObjectStore) => IDBRequest<T>) {
-  return openDb().then(
-    (db) =>
-      new Promise<T | undefined>((resolve) => {
-        if (!db) return resolve(undefined)
-        try {
-          const tx = db.transaction(store, 'readonly')
-          const req = make(tx.objectStore(store))
-          req.onsuccess = () => resolve(req.result)
-          req.onerror = () => resolve(undefined)
-          tx.onabort = () => resolve(undefined)
-        } catch {
-          resolve(undefined)
-        }
-      }),
-  )
+  return attempt(db, store, 'readonly', (tx) => make(tx.objectStore(store)), undefined)
 }
 
 /**
  * One write across both stores, so a value and its timestamp cannot disagree.
  *
  * The value goes first on every path that writes both. `put` throws synchronously on something
- * that cannot be structured-cloned — a function, a DOM node — which this catches and drops; if
- * the meta record had been queued first it would already be in the transaction, and the store
- * would then claim a timestamp for a value it does not hold.
+ * that cannot be structured-cloned — a function, a DOM node — and the runner aborts whatever the
+ * transaction already held; value-first is kept regardless, so the order alone would still stop
+ * the store claiming a timestamp for a value it does not hold. Resolves either way: a failure to
+ * remember is not a failure to compute.
  */
 function write(make: (cache: IDBObjectStore, meta: IDBObjectStore) => void): Promise<void> {
-  return openDb().then(
-    (db) =>
-      new Promise<void>((resolve) => {
-        if (!db) return resolve()
-        try {
-          const tx = db.transaction([STORE, META], 'readwrite')
-          make(tx.objectStore(STORE), tx.objectStore(META))
-          tx.oncomplete = () => resolve()
-          tx.onerror = () => resolve()
-          tx.onabort = () => resolve()
-        } catch {
-          resolve()
-        }
-      }),
+  return attempt(
+    db,
+    [STORE, META],
+    'readwrite',
+    (tx) => {
+      make(tx.objectStore(STORE), tx.objectStore(META))
+    },
+    undefined,
   )
 }
 
@@ -255,39 +226,36 @@ export function cachePeek(
         : undefined,
     )
   }
-  const existing = peeks.get(key)
-  if (existing) return existing.then((entry) => (fresh(entry, options) ? entry : undefined))
-
-  const load = (async () => {
-    const meta = await read<CacheEntryMeta>(
-      META,
-      (store) => store.get(key) as IDBRequest<CacheEntryMeta>,
-    )
-    if (meta) return meta
-    /*
-     * No sidecar: either there is nothing here, or this entry predates the `meta` store. Only a
-     * full read can tell the two apart, so pay it once and leave a sidecar behind — the next
-     * peek, this session or any later one, takes the cheap path.
-     */
-    const stored = await read<Envelope>(
-      STORE,
-      (store) => store.get(key) as IDBRequest<Envelope>,
-    )
-    if (!stored) return undefined
-    const backfilled: CacheEntryMeta = {
-      savedAt: stored.savedAt,
-      fingerprint: stored.fingerprint,
-    }
-    await write((_cache, metaStore) => {
-      metaStore.put(backfilled, key)
-    })
-    return backfilled
-  })().finally(() => {
-    peeks.delete(key)
-  })
-
-  peeks.set(key, load)
-  return load.then((entry) => (fresh(entry, options) ? entry : undefined))
+  return memoPromise(
+    peeks,
+    key,
+    async () => {
+      const meta = await read<CacheEntryMeta>(
+        META,
+        (store) => store.get(key) as IDBRequest<CacheEntryMeta>,
+      )
+      if (meta) return meta
+      /*
+       * No sidecar: either there is nothing here, or this entry predates the `meta` store. Only a
+       * full read can tell the two apart, so pay it once and leave a sidecar behind — the next
+       * peek, this session or any later one, takes the cheap path.
+       */
+      const stored = await read<Envelope>(
+        STORE,
+        (store) => store.get(key) as IDBRequest<Envelope>,
+      )
+      if (!stored) return undefined
+      const backfilled: CacheEntryMeta = {
+        savedAt: stored.savedAt,
+        fingerprint: stored.fingerprint,
+      }
+      await write((_cache, metaStore) => {
+        metaStore.put(backfilled, key)
+      })
+      return backfilled
+    },
+    { keep: 'inflight' },
+  ).then((entry) => (fresh(entry, options) ? entry : undefined))
 }
 
 /**
@@ -345,5 +313,5 @@ export async function cacheClear(): Promise<void> {
 export function resetCache(): void {
   memory.clear()
   peeks.clear()
-  dbPromise = undefined
+  db.reset()
 }

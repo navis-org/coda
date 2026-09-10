@@ -90,7 +90,7 @@ function unitsOf(raw: unknown): SpaceUnits {
   return raw === 'um' ? 'um' : 'nm'
 }
 
-export const landmarkTransformNode = registerNode({
+registerNode({
   type: 'core.landmarkTransform',
   label: 'Landmark Transform',
   category: 'transform',

@@ -42,7 +42,7 @@ import { AGG_OPTIONS, groupBySchema, groupByTable } from '../lib/tableOps'
  * one param's history is invariant 8's shim — and it is loud: the picker is visibly empty and
  * the node carries `"sum" needs at least one value column` until it is re-picked.
  */
-export const groupByNode = registerNode({
+registerNode({
   type: 'core.groupBy',
   label: 'Group By',
   category: 'transform',

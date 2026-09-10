@@ -58,7 +58,7 @@ import {
   schemaOfGeometry,
 } from '../lib/transformOps'
 
-export const stackNeuronsNode = registerNode({
+registerNode({
   type: 'neuron.stack',
   label: 'Stack Neurons',
   category: 'transform',

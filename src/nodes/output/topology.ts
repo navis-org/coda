@@ -99,7 +99,7 @@ function neuronSchema(ctx: { inputs: { neurons?: unknown; dataset?: unknown } })
   )
 }
 
-export const topologyNode = registerNode({
+registerNode({
   type: 'out.topology',
   label: 'Neuron Topology',
   category: 'visualisation',

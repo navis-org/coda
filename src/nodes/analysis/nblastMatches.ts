@@ -57,7 +57,7 @@ import {
   matchTable,
 } from '../lib/matchOps'
 
-export const nblastMatchesNode = registerNode({
+registerNode({
   type: 'neuron.nblastMatches',
   label: 'NBLAST Matches',
   category: 'analysis',

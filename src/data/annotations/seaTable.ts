@@ -34,6 +34,7 @@
  * of invariant 8 that was free, and it is why these two backends can be joined.
  */
 
+import { memoPromise } from '../memoPromise'
 import type { DType, TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import { ID_COLUMN_NAME } from '../../core/ids'
@@ -232,23 +233,19 @@ const listed = new Map<string, SeaTableBase[]>()
 
 function basesFor(host: string, signal?: AbortSignal): Promise<SeaTableBase[]> {
   const root = normaliseHost(host)
-  let pending = listings.get(root)
-  if (!pending) {
-    pending = listBases(root, signal)
-      .then((bases) => {
+  return memoPromise(
+    listings,
+    root,
+    () =>
+      listBases(root, signal).then((bases) => {
         listed.set(root, bases)
         // A workspace that could not be resolved a moment ago now can, and `validate` reads the
         // settled listing — the same channel a landed column list uses.
         reportAnnotationsLearned()
         return bases
-      })
-      .catch((error: unknown) => {
-        listings.delete(root)
-        throw error
-      })
-    listings.set(root, pending)
-  }
-  return pending
+      }),
+    { keep: 'resolved' },
+  )
 }
 
 /**

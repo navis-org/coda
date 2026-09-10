@@ -33,7 +33,7 @@ import { tapPorts } from '../lib/tapPorts'
  * control that turns one off is a control that makes the card disagree with its own name. A
  * summary of some of the columns is a Select node upstream, which is where it already was.
  */
-export const describeNode = registerNode({
+registerNode({
   type: 'out.describe',
   label: 'Describe Table',
   category: 'visualisation',

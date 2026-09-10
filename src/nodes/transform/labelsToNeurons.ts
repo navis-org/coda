@@ -153,7 +153,7 @@ function define(flavour: Flavour): NodeDefinition {
   })
 }
 
-export const selectedToNeuronsNode = define({
+define({
   type: 'cluster.selectedToNeurons',
   label: 'Selected to Neurons',
   inputLabel: 'Selected',
@@ -165,7 +165,7 @@ export const selectedToNeuronsNode = define({
     'id (the default), leave Neurons unwired.',
 })
 
-export const clustersToNeuronsNode = define({
+define({
   type: 'cluster.clustersToNeurons',
   label: 'Clusters to Neurons',
   inputLabel: 'Clusters',

@@ -97,7 +97,7 @@ function edgeSchemaFor(
   )
 }
 
-export const buildNetworkNode = registerNode({
+registerNode({
   type: 'net.build',
   label: 'Build Network',
   category: 'analysis',
