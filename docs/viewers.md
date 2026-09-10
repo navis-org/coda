@@ -2448,16 +2448,52 @@ rendered), but only one of them needs that to hold in every renderer an exported
 and jsdom cannot answer the question either way — it concatenates descendant text, so a test
 asserting the drawn label reads `aLC4`. The form with no question is the one to ship.
 
-**The Heatmap deliberately does not get the same port**, though the wizard pairs the two
-(`tree` → dendrogram, `ordered` → heatmap) and a reader therefore sees types on one and ids on
-the other. Its row labels are **data**: the Filter tab matches on them and the Order tab sorts by
-them, both declared `affectsData`, and both run in `evaluate`. A presentational rename there
-would put `LC4` on screen while a filter typed `LC4` matched nothing — a silent mismatch, and the
-worse kind because the picture looks right. The honest answer for the heatmap is a matrix-level
-relabel that also feeds the filter and the sort, i.e. a `Relabel Matrix` node on
-[core.relabel](../src/nodes/table/relabel.ts)'s exact shape, which is a separate decision with a
-different cost: it rewrites the axis, so it spends the identity that this port exists to keep.
-Both at once would be two answers to one question with nothing saying which won.
+**The Heatmap has the same port and it is the opposite kind of thing**, which is the pairing
+worth reading together — the wizard offers both (`tree` → dendrogram, `ordered` → heatmap), and a
+reader who has met one will assume the other behaves the same way. It does not. A heatmap's axis
+labels are **data**: the Filter tab matches on them and the Order tab sorts by them, both declared
+`affectsData` and both running in `evaluate`. A presentational rename there would put `LC4` on
+screen while a filter typed `LC4` matched nothing — a silent mismatch, and the worse kind because
+the picture looks right. So `out.heatmap`'s `Annotations` joins in `evaluate`, ahead of the filter
+and the sort, and the names reach the CSV, the notebook and every node below. `NBLAST`'s
+`Label by` is the standing precedent for that direction: "the labels are part of the matrix that
+leaves the port, not a way of drawing it."
+
+What it spends is exactly what this port exists to keep. A relabelled axis no longer carries the
+id it arrived with, so a `Linkage` below a named Heatmap clusters lines called `LC4` and
+`Selected to Neurons` under *that* would match cell types against a neuron table — the failure
+this port was designed around, one node further down. It is a decision the user makes by wiring
+a table rather than one the node makes for them, the node counts what the table did not name, and
+the help says to put a Linkage that needs ids above rather than below. What was rejected is a
+third spelling: a separate `Relabel Matrix` node on [core.relabel](../src/nodes/table/relabel.ts)'s
+shape would have been the same operation reached through a card, with two answers to one question
+and nothing saying which won.
+
+**The two halves are one function.** `displayLabels` is the join plus the guard — four ways of
+having nothing to look anything up in, all of which mean "keep the labels that arrived" — and
+each caller decides whether the answer is a drawing or the value. `relabelMatrix`
+(`nodes/lib/matrixShape.ts`) is the write half, beside `takeMatrix` because the three tabs are one
+module: it hands the matrix back **by identity** when nothing changed, and passes the cells
+through **by reference**, an axis rename that copied four million doubles to change two strings
+being a fold's worth of work for nothing.
+
+**No `Unmatched` control, inverting `core.relabel` for a sharper reason than the dendrogram's.**
+There a blank leaf is merely worse than the id it replaced; on an axis it is worse than that —
+several blanks collide, the Filter box can no longer address those lines, and `Order by: one row
+or column` loses a key it could have named. So an unnamed line keeps its own label, and the
+*count* is what is said out loud, in two messages that are two different states: **none** named on
+an axis is a control pointed at the wrong place (`Apply to` covering an axis of ROI names, say)
+and the message names the two controls that fix it; **some** named is an ordinary incomplete
+annotation table and gets a count. All named says nothing.
+
+**Both exporters write into the pass-through**, which is the one line where they diverge from the
+dendrogram's emitters — there the relabel reaches `dendrogram(labels=…)` and a copy of the tree,
+and nowhere else. Python needed `set_axis` and a rebind rather than `df.index = …`: the
+pass-through is bound by reference, `heatmap = similarity_matrix` is one frame under two names,
+and assigning to `.index` renames the upstream variable so a later cell reads axes the canvas
+never gave it. R is safe by copy-on-modify and still assigns `rownames`/`colnames` on the local
+matrix. Both were **run** rather than parsed — `probe:helpers` and `probe:r-helpers` carry the
+whole emitted shape, including the aliasing check and the filter that follows it.
 
 **Both exporters emit the relabel, into the plot and nowhere else.** `dendrogram(labels=…)` in
 Python and a copy of the tree with its `labels` replaced in R — never an assignment back into the
@@ -2797,6 +2833,77 @@ zoom** where a pixel viewport would keep the pixels; a new matrix, on the other 
 frame, since a zoom framed on one result says nothing about the next. Driven in a real browser
 on the 34 × 34 demo Adjacency: ×15 in six wheel steps, a drag that panned, ⤢ that fitted, no
 console errors.
+
+### Selecting a rectangle, and why it is stored as positions
+
+Shift- or ⌘/Ctrl-drag draws a box; the rows and columns it covered leave the node as
+`Selected Rows` and `Selected Columns`. Bare drag still pans — `ScatterViewer`'s division and
+React Flow's `panOnDrag`/`selectionKeyCode`, so the hand does not change modes crossing into a
+card, and navigation keeps the frequent gesture. Expanded only, where the zoom and pan already
+live: on a card `compact` is true and shift-drag belongs to the pane's own selection box.
+
+**The selection is a set of positions, and it was labels first.** `chartSelection.ts`'s standing
+rule is to store what a mark *means* so it survives a re-run, and the argument for names here was
+real: the Order and Filter tabs are on the *same card as the gesture*, so positions re-point the
+moment somebody sorts the picture they just selected from. It shipped that way and was reported
+as a bug within the hour, because **a heatmap's names are not identities**. The Labels tab exists
+to replace root ids with cell types — one-to-many by design — so a box drawn round one cell of a
+fourteen-row `LC4` block selected all fourteen. That is not a defensible reading of a rectangle:
+a rectangle is a statement about the lines under it and nothing else.
+
+So the cost is taken the other way round, and it is the smaller one. **A re-point is visible on
+the card the instant it happens**; a name quietly widening a selection is visible nowhere and
+reaches `Selected Rows`. The help says to select after arranging the matrix rather than before,
+and the caption's count is what shows the change. The general shape is worth keeping: "store the
+meaning, not the position" assumes the mark *has* a meaning that is unique, and a viewer whose
+whole job is to rename things is where that assumption stops holding.
+
+**Alt adds** — the scatter's modifier for the same thing — as a union rather than a toggle: a
+second box overlapping the first is somebody extending a selection, not asking for the overlap
+back, and a toggle over a folded block where one grid cell stands for a hundred lines is a
+gesture whose result nobody could predict. Clearing is the **⌫ button** in the strip beside ⤢,
+or a modifier-click with no drag — but not while Alt is down, where the gesture was "add" and
+adding nothing should take nothing away.
+
+**One param, both axes**, `r:`/`c:`-prefixed. Two params would be two commits, so an undo would
+take back the columns and leave the rows — `attachEdgeSet` records that trap one layer down. The
+two *outputs* stay separate because a row and a column are different populations downstream.
+Entries are **sorted**, so two gestures selecting the same lines write the same param and a
+re-selection that changed nothing does not move a provenance key. A non-integer entry is dropped
+rather than resolved, which is what a selection stored by the label-based build degrades to:
+`r:LC4` is not a position, and reading it as one would select whichever line sat at a plausible
+index.
+
+**The drawing is bands, and they are outlined rather than tinted.** Colour is the data on this
+viewer, so a translucent wash over the selection would change what every cell inside it appears
+to say. Runs rather than one rect per line: an added block is a second run by construction, and a
+folded axis puts hundreds of lines on one grid cell. Rows span the plot's width and columns its
+height, which draws a **cross** rather than the box that was dragged — honest, since the two axes
+leave as two independent lists, and the same picture a spreadsheet draws.
+
+**`label` and `relabel` are two columns because the Labels tab spends the identity.** `label` is
+what the line was called on the way in (the id), `relabel` what the card showed; where nothing
+renamed anything they are the same string. Keeping them aligned is the whole of why `evaluate`
+tracks the *arrival* names through the filter and the sort — through the identical index lists,
+which is what `orderIndices` exists for — it hands back the index lists and the caller applies
+them, so the follower's derived list reaches both. Deriving `label` at the end
+from the drawn name is impossible by construction: naming by type is one-to-many.
+
+**Seven properties only a browser could check**, which is `pnpm probe:heatmap-select`: that a
+shift-drag selects what it covered *and only that*, that a bare drag does not select, that the
+bands land on the rows they cover, that the marquee appears and goes, that a shift-click clears,
+that alt-shift-drag adds and leaves two bands, and that ⌫ clears and then goes dim. jsdom performs
+no layout, so the spec there is degenerate and `linesInRect` has no geometry to convert.
+
+**Two of them were wrong before they were right, and both wrongnesses were the probe's.** The
+band check, read by *shape*, passed against the column band — which spans the plot's whole height
+and therefore contains every row tick on the card; `data-axis` on the rect is what distinguishes
+them, and the wrong reading reported 23 of 23 rows correctly banded where they need not have
+been. And the count check compared against tick centres strictly inside the box, reporting 10
+rows selected against 9 — `linesInRect` takes every line the rectangle *touches*, so a row whose
+centre is just outside is genuinely selected. That is the near-miss that invites a tolerance where
+what is wanted is the right rule; the pitch comes off the ticks and the comparison is against the
+rows the box overlaps.
 
 ### The palettes are transcribed, and the stop count was measured
 

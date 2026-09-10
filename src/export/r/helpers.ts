@@ -1109,6 +1109,42 @@ registerHelper({
 })
 
 /**
+ * The Heatmap's "other axis follows", as positions.
+ *
+ * `followOrder` in `matrixShape.ts`, and a helper for the rule a one-liner cannot express: the
+ * **first unclaimed** line of a repeated name wins. What this emitted before was
+ * `c(intersect(lead, follower), setdiff(follower, lead))`, and both halves are wrong once axis
+ * labels can repeat — which naming rows by cell type makes routine. `intersect` and `setdiff`
+ * **de-duplicate**, so a follower with two lines called `LC4` came back with one.
+ *
+ * Positions rather than labels for the same reason the caller now subscripts with integers:
+ * `m[c("LC4", "LC4"), ]` matches the *first* `LC4` twice and silently drops the second row.
+ * Measured against a real 3x3, not reasoned about — R and pandas get this wrong in two
+ * different directions and both look plausible.
+ */
+registerHelper({
+  name: 'coda_follow_order',
+  source: [
+    'coda_follow_order <- function(lead, follower) {',
+    "  # Positions putting `follower` in `lead`'s order, matched by label. Coda's rule.",
+    '  taken <- rep(FALSE, length(follower))',
+    '  out <- integer(0)',
+    '  for (label in lead) {',
+    '    hits <- which(follower == label & !taken)',
+    '    if (length(hits) > 0) {',
+    "      # Every untaken line of that name, not just the first — `followOrder`'s rule: one",
+    '      # lead label may stand for several follower lines and takes all of them.',
+    '      taken[hits] <- TRUE',
+    '      out <- c(out, hits)',
+    '    }',
+    '  }',
+    '  # Everything the leader did not name, in the order it already had.',
+    '  c(out, which(!taken))',
+    '}',
+  ],
+})
+
+/**
  * Coda's label order: `LC4` before `LC10`, case ignored — `labelOrder` in `matrixShape.ts`.
  *
  * Base R's `order` is neither natural nor locale-stable, and the packages that are
@@ -1129,6 +1165,37 @@ registerHelper({
     '    tolower(paste(parts, collapse = ""))',
     '  }, character(1), USE.NAMES = FALSE)',
     '  order(key, seq_along(labels), method = "radix")',
+    '}',
+  ],
+})
+
+/**
+ * The Heatmap's `Selected Rows` / `Selected Columns`.
+ *
+ * The notebook helper's twin — see it for why this is a helper, why `picked` is positions rather
+ * than names, and what the three columns mean. **Coda counts from 0 and R subscripts from 1**,
+ * and both ends of that are here: `picked` arrives zero-based and is shifted to subscript with,
+ * and `index` goes back out zero-based because it is Coda's position rather than an R one. A
+ * document that quietly dropped either shift would disagree with the canvas beside it.
+ */
+registerHelper({
+  name: 'coda_matrix_selection',
+  source: [
+    'coda_matrix_selection <- function(labels, picked, arrival = NULL) {',
+    "  # Coda's Selected Rows / Selected Columns: the lines a rectangle covered.",
+    '  labels <- as.character(labels)',
+    '  if (is.null(arrival)) arrival <- labels',
+    '  # `as.integer` because `picked` arrives as R numerics: without it `index` below is a',
+    '  # double column, and a document writing 1 where the canvas writes 1L is a column a join',
+    '  # downstream reads differently.',
+    '  keep <- as.integer(sort(unique(picked[picked >= 0 & picked < length(labels)]))) + 1L',
+    '  data.frame(',
+    '    label = as.character(arrival)[keep],',
+    "    # Zero-based: Coda counts positions from 0 and this column is Coda's, not R's.",
+    '    index = keep - 1L,',
+    '    relabel = labels[keep],',
+    '    stringsAsFactors = FALSE',
+    '  )',
     '}',
   ],
 })

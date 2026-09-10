@@ -22,11 +22,15 @@ import {
 } from '../../../nodes/lib/heatmapParams'
 import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
 import {
+  axesOf,
+  labelledAxes,
   orderPlan,
   parseLabelFilter,
   readFilterOptions,
+  readLabelOptions,
   readOrderOptions,
 } from '../../../nodes/lib/matrixShape'
+import { decodeMatrixSelection, matrixSelectionOrder } from '../../../nodes/lib/chartSelection'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
@@ -408,8 +412,10 @@ registerEmitter('out.heatmap', (ctx) => {
 
   const lines = [
     `${out} = ${src}`,
+    ...heatmapLabelLines(ctx, out),
     ...heatmapFilterLines(ctx, out),
     ...heatmapOrderLines(ctx, out),
+    ...heatmapSelectionLines(ctx, out),
   ]
 
   /*
@@ -492,6 +498,126 @@ registerEmitter('out.heatmap', (ctx) => {
 })
 
 /**
+ * The Labels tab, as pandas: the axis rewritten through `coda_relabel` and assigned back.
+ *
+ * **Into `${out}` itself, and that is the whole difference from `out.dendrogram`'s emitter.**
+ * There the relabel reaches `dendrogram(labels=…)` and nothing else, because the canvas names
+ * leaves presentationally and a later chunk reading the renamed tree would hand
+ * `Selected to Neurons` cell types to merge on. Here the canvas writes the names into the
+ * matrix — the Filter and Order tabs match and sort on them — so the notebook has to as well,
+ * or the filter two lines below runs against labels the card no longer has.
+ *
+ * Emitted **before** the filter lines for the same reason it runs first in `evaluate`.
+ *
+ * `coda_relabel` carries first-occurrence-wins and `coda_match_keys`, which is why it is called
+ * rather than spelled out: written inline the key is `.astype(str)`, and an `i64` column with
+ * one null is `float64` in pandas and prints `'101.0'` against a label of `'101'`. Blanks are
+ * dropped here, the one rule the helper does not carry — `dropna` keeps the empty string, and
+ * an untyped body would otherwise take a blank axis label where the canvas kept its id.
+ */
+function heatmapLabelLines(ctx: Parameters<Emitter>[0], out: string): string[] {
+  const options = readLabelOptions(ctx)
+  const annotations = ctx.input('annotations')
+  if (!annotations || !options.match || !options.label) return []
+  const tracked = trackedAxes(ctx)
+  // `pd.DataFrame` below, which the heatmap emitter itself has no other reason to ask for.
+  ctx.require('pandas')
+  ctx.helper('coda_relabel')
+
+  const lines = [
+    `${ctx.name}_named = ${annotations}.loc[`,
+    `    ${annotations}[${pyStr(options.label)}].notna()`,
+    `    & (${annotations}[${pyStr(options.label)}].astype(str) != '')`,
+    `]`,
+  ]
+  for (const axis of axesOf(options.axis)) {
+    const attribute = axis === 'rows' ? 'index' : 'columns'
+    // The arrival names, captured before they are overwritten — `Selected Rows` carries them in
+    // `label`, and after `set_axis` there is nothing left to recover them from. Only where a
+    // selection actually reads them, since this is the one thing here that costs a line for
+    // nothing when nobody has dragged a rectangle.
+    if (tracked.has(axis)) {
+      lines.push(`${sourceName(axis)} = list(${out}.${attribute}.astype(str))`)
+    }
+    /*
+     * `set_axis` and a rebind, never `${out}.index = …`.
+     *
+     * The pass-through is bound by reference — `heatmap = similarity_matrix` is one frame under
+     * two names — so assigning to `.index` renames the *upstream* variable as well, and a cell
+     * further down reading it would find axes the canvas never gave it. Coda's `evaluate`
+     * returns a new value and leaves the upstream node's cached matrix alone; this is that,
+     * spelled the way the filter and order lines below already spell it.
+     *
+     * A one-column frame in and a column out, because an axis is an Index rather than a column
+     * of the frame being rewritten — `out.dendrogram`'s shape, whose labels are a list.
+     * `.astype(str)` because a pivot's index may be numeric where Coda's labels are always text.
+     */
+    lines.push(
+      `${out} = ${out}.set_axis(`,
+      `    coda_relabel(`,
+      `        pd.DataFrame({'label': ${out}.${attribute}.astype(str)}),`,
+      `        'label',`,
+      `        ${ctx.name}_named,`,
+      `        ${pyStr(options.match)},`,
+      `        ${pyStr(options.label)},`,
+      `        unmatched='keep',`,
+      `    )['label'].tolist(),`,
+      `    axis=${pyStr(attribute)},`,
+      `)`,
+    )
+  }
+  return lines
+}
+
+/**
+ * Which axes carry their arrival names through the reshaping.
+ *
+ * `labelledAxes` is the shared half — whether the Labels tab names an axis at all — and lives in
+ * `matrixShape.ts` beside the readers it composes, because it is a decision about params with no
+ * language in it and it had been spelled out in TypeScript inside *both* emitters. What is local
+ * is the `size > 0` gate: the canvas tracks unconditionally because an index list costs nothing,
+ * where here every tracked axis is two more lines in somebody's document.
+ */
+function trackedAxes(ctx: Parameters<Emitter>[0]): Set<MatrixAxis> {
+  const picked = decodeMatrixSelection(ctx.params.selection)
+  const named = labelledAxes(readLabelOptions(ctx), Boolean(ctx.input('annotations')))
+  return new Set(named.filter((axis) => picked[axis].size > 0))
+}
+
+/** Where an axis's arrival names live while the pipeline reshapes them. */
+function sourceName(axis: MatrixAxis): string {
+  return axis === 'rows' ? '_rowsrc' : '_colsrc'
+}
+
+/**
+ * `Selected Rows` and `Selected Columns`.
+ *
+ * **Both bound whatever the selection is**, including empty, because an emitter cannot ask who
+ * is downstream and a cell further on naming an unbound variable is a `NameError` rather than
+ * an empty table. `coda_matrix_selection` is the whole of the logic; what is decided here is
+ * only whether it is handed the tracked arrival names or reads the axis itself.
+ */
+function heatmapSelectionLines(ctx: Parameters<Emitter>[0], out: string): string[] {
+  const picked = decodeMatrixSelection(ctx.params.selection)
+  const tracked = trackedAxes(ctx)
+  ctx.require('pandas')
+  ctx.helper('coda_matrix_selection')
+  const lines: string[] = ['']
+  for (const axis of ['rows', 'columns'] as const) {
+    const attribute = axis === 'rows' ? 'index' : 'columns'
+    const arrival = tracked.has(axis) ? `, ${sourceName(axis)}` : ''
+    // Ascending, so the cell reads in the card's own order and two gestures selecting the same
+    // lines emit the same text — `chartSelection.ts` owns that rule for the param as well.
+    const positions = matrixSelectionOrder(picked[axis])
+    lines.push(
+      `${ctx.output(axis)} = coda_matrix_selection(` +
+        `${out}.${attribute}, ${pyList(positions)}${arrival})`,
+    )
+  }
+  return lines
+}
+
+/**
  * The Filter tab, as pandas: one boolean mask per filtered axis, then one `.loc`.
  *
  * Emitted **before** the order lines, which is the node's own rule — an order is computed
@@ -499,6 +625,7 @@ registerEmitter('out.heatmap', (ctx) => {
  * Coda's labels are always text, and `.str.contains` on an Int64Index raises.
  */
 function heatmapFilterLines(ctx: Parameters<Emitter>[0], out: string): string[] {
+  const tracked = trackedAxes(ctx)
   const filters = readFilterOptions(ctx.params)
   const lines: string[] = []
   const masks: Partial<Record<MatrixAxis, string>> = {}
@@ -523,6 +650,11 @@ function heatmapFilterLines(ctx: Parameters<Emitter>[0], out: string): string[] 
       filter.regex ? 'True' : 'False'
     })`
     lines.push(`${name} = ${filter.negate ? `~${test}` : test}`)
+    // The arrival names go through the *same* mask, which is the only way the two stay aligned
+    // — the node tracks them through the identical index lists for the identical reason.
+    if (tracked.has(axis)) {
+      lines.push(`${sourceName(axis)} = list(pd.Series(${sourceName(axis)})[${name}.values])`)
+    }
     masks[axis] = name
   }
 
@@ -534,11 +666,19 @@ function heatmapFilterLines(ctx: Parameters<Emitter>[0], out: string): string[] 
 }
 
 /**
- * The Order tab, as pandas: one index per sorted axis, the follower derived from the leader,
- * then one `.loc`. The order is applied to the frame the node *outputs*, which is the node's
- * own rule — a Table cell downstream of this one sees the sorted frame here too.
+ * The Order tab, as pandas: **positions** per sorted axis, the follower derived from the
+ * leader, then one `.iloc`. The order is applied to the frame the node *outputs*, which is the
+ * node's own rule — a Table cell downstream of this one sees the sorted frame here too.
+ *
+ * **Positions, and that is a bug fix rather than a style.** This emitted label indexes into
+ * `.loc`, which is correct only while axis labels are unique — and the Labels tab makes repeats
+ * routine, since naming rows by cell type is what it is for. Measured on a 3x3 with two rows
+ * called `LC4`: `df.loc[['DN', 'LC4', 'LC4']]` returns **five rows**, because `.loc` with a
+ * duplicated label returns every match for each occurrence. The R emitter had the same bug and
+ * failed the other way, silently dropping a row; neither looks wrong in the output.
  */
 function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
+  const tracked = trackedAxes(ctx)
   const order = readOrderOptions(ctx.params)
   if (order.by === 'none') return []
   const plan = orderPlan(order)
@@ -551,13 +691,16 @@ function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
     let expr: string | undefined
     switch (order.by) {
       case 'total':
-        expr = `${out}.sum(axis=${axis === 'rows' ? 1 : 0}).sort_values(ascending=False).index`
+        ctx.require('numpy')
+        // Negated and stable, which is Coda's `orderByScores`: descending, ties in arrival
+        // order, and anything non-finite last — `argsort` puts NaN at the end either way.
+        expr = `list(np.argsort(-${out}.sum(axis=${axis === 'rows' ? 1 : 0}).values, kind='stable'))`
         break
       case 'label':
         ctx.helper('coda_natural_key')
-        expr = `sorted(${labels}, key=coda_natural_key)`
+        expr = `sorted(range(len(${labels})), key=lambda i: coda_natural_key(${labels}[i]))`
         break
-      case 'value':
+      case 'value': {
         if (!order.key) {
           lines.push(
             ...ctx.note(
@@ -567,11 +710,14 @@ function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
           )
           break
         }
-        expr =
-          axis === 'rows'
-            ? `${out}[${pyStr(order.key)}].sort_values(ascending=False).index`
-            : `${out}.loc[${pyStr(order.key)}].sort_values(ascending=False).index`
+        ctx.require('numpy')
+        // The *first* line of that name, which is `axisVector`'s `indexOf` — a repeated key is
+        // not an error and picking the last of them would be a different question.
+        const other = axis === 'rows' ? `${out}.columns` : `${out}.index`
+        lines.push(`_key = list(${other}).index(${pyStr(order.key)})`)
+        expr = `list(np.argsort(-${out}.${axis === 'rows' ? 'iloc[:, _key]' : 'iloc[_key, :]'}.values, kind='stable'))`
         break
+      }
       case 'cluster': {
         ctx.require('scipyCluster', 'leaves_list', 'linkage')
         ctx.require('scipyDistance', 'pdist')
@@ -594,7 +740,8 @@ function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
           ctx.require('numpy')
           distances = `np.nan_to_num(${distances}, nan=1.0)`
         }
-        expr = `${labels}[leaves_list(linkage(${distances}, method=${pyStr(order.method)}))]`
+        // `leaves_list` already answers in positions, so this arm got *simpler* for the fix.
+        expr = `list(leaves_list(linkage(${distances}, method=${pyStr(order.method)})))`
         break
       }
       default:
@@ -606,21 +753,35 @@ function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
   }
 
   if (plan.follower && plan.lead[0] && chosen[plan.lead[0]]) {
-    const lead = chosen[plan.lead[0]]!
+    const leader = plan.lead[0]!
+    const lead = chosen[leader]!
     const name = plan.follower === 'rows' ? '_rows' : '_cols'
     const labels = plan.follower === 'rows' ? `${out}.index` : `${out}.columns`
-    // The leader's labels in the leader's order, where the follower has them, then the rest
-    // as they were — `followOrder` in `matrixShape.ts`.
+    const leadLabels = leader === 'rows' ? `${out}.index` : `${out}.columns`
+    // The leader's labels in the leader's *new* order, matched onto the follower — the first
+    // unclaimed line of a repeated name winning, which is `followOrder` and is the rule a list
+    // comprehension cannot state. See `coda_follow_order`.
+    ctx.helper('coda_follow_order')
     lines.push(
-      `${name} = [l for l in ${lead} if l in ${labels}] + [l for l in ${labels} if l not in set(${lead})]`,
+      `${name} = coda_follow_order([${leadLabels}[i] for i in ${lead}], list(${labels}))`,
     )
     chosen[plan.follower] = name
   }
 
+  // The arrival names take the same positions, both axes, after the follower is derived.
+  for (const axis of ['rows', 'columns'] as const) {
+    const list = chosen[axis]
+    if (list && tracked.has(axis)) {
+      lines.push(`${sourceName(axis)} = [${sourceName(axis)}[i] for i in ${list}]`)
+    }
+  }
+
+  // `.iloc`, never `.loc` — see the header. Two lists select the cross product, which is what
+  // a reordered matrix is.
   if (chosen.rows && chosen.columns)
-    lines.push(`${out} = ${out}.loc[${chosen.rows}, ${chosen.columns}]`)
-  else if (chosen.rows) lines.push(`${out} = ${out}.loc[${chosen.rows}]`)
-  else if (chosen.columns) lines.push(`${out} = ${out}.loc[:, ${chosen.columns}]`)
+    lines.push(`${out} = ${out}.iloc[${chosen.rows}, ${chosen.columns}]`)
+  else if (chosen.rows) lines.push(`${out} = ${out}.iloc[${chosen.rows}]`)
+  else if (chosen.columns) lines.push(`${out} = ${out}.iloc[:, ${chosen.columns}]`)
   return lines
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import type { MatrixValue } from '../../core/values'
+import { decodeMatrixSelection, encodeMatrixSelection } from '../../nodes/lib/chartSelection'
 import type { ColorLimits, HeatmapPalette } from '../../nodes/lib/heatmapParams'
 import { CHART_INK, chartSurface, currentMode } from '../colors'
 import { exportBaseName as makeBaseName, matrixToCsv } from '../export'
@@ -19,16 +20,20 @@ import {
   colorDomain,
   fullWindow,
   isFullWindow,
+  linesInRect,
   matrixExtent,
   panWindow,
   pointToMatrix,
   rampColors,
+  selectionBands,
   valueMarks,
   windowScale,
   zoomWindow,
 } from './heatmapPlot'
 import { prepareCanvas } from './canvas2d'
-import { tooltipPoint } from './tooltipPoint'
+import { GestureMarquee } from './GestureMarquee'
+import { CLICK_SLOP, tooltipPoint } from './tooltipPoint'
+import { isAdditive } from './useMarkSelection'
 import { useWheelZoom } from './useWheelZoom'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
@@ -48,6 +53,15 @@ export interface HeatmapViewerProps {
   compact?: boolean
   /** Filename stem for CSV/SVG/PNG export. */
   baseName?: string
+  /**
+   * The node's `selection` param, verbatim — `r:`/`c:`-prefixed axis labels.
+   *
+   * Passed and returned encoded rather than as two arrays, because it is one param: a rectangle
+   * is one gesture and has to be one commit. `chartSelection.ts` owns the grammar, so the label
+   * this writes and the label `evaluate` matches are one string.
+   */
+  selection?: string[]
+  onSelectionChange?: (ids: string[]) => void
   onExpand?: () => void
   onError?: (message: string) => void
 }
@@ -66,12 +80,26 @@ const BAR_STEPS = 9
 /** Stable identity, so an absent `limits` prop does not re-run the domain memo every render. */
 const EMPTY_LIMITS: ColorLimits = {}
 
-/** A pan in progress: where the pointer was last, in box coordinates. */
-interface Pan {
-  lastX: number
-  lastY: number
-  moved: boolean
-}
+/**
+ * A gesture in progress, in box coordinates.
+ *
+ * The division is `ScatterViewer`'s, stated in its header and kept here deliberately: bare drag
+ * pans, Shift- or ⌘/Ctrl-drag selects — the same assignment React Flow's `panOnDrag` and
+ * `selectionKeyCode` give the canvas underneath, so the hand does not change modes when the
+ * pointer crosses into a card. Bare drag is the frequent one and keeps the bare gesture.
+ */
+type Gesture =
+  | { kind: 'pan'; lastX: number; lastY: number; moved: boolean }
+  | {
+      kind: 'box'
+      x0: number
+      y0: number
+      x1: number
+      y1: number
+      moved: boolean
+      /** Alt held at the press: add to the standing selection rather than replacing it. */
+      additive: boolean
+    }
 
 /**
  * Matrix heatmap.
@@ -109,6 +137,27 @@ interface Pan {
  * are fixed and the ticks are re-thinned for the pitch the zoom gives them, which is what "the
  * labels stay visible" means here. The colour domain is memoised apart from the window, so a
  * pan neither rescans the matrix nor changes what a colour means.
+ *
+ * ## Selecting rows and columns
+ *
+ * Shift- or ⌘/Ctrl-drag draws a rectangle and hands back the **positions** it covered, one list
+ * per axis, which the node turns into its `Selected Rows` and `Selected Columns` ports. Alt held
+ * at the press adds to the standing selection instead of replacing it — the scatter's modifier
+ * for the same thing. Bare drag still pans, which is `ScatterViewer`'s division and React
+ * Flow's: navigation is the frequent gesture and keeps the bare one.
+ *
+ * **Positions, not the labels under the box**, and `encodeMatrixSelection` carries the argument:
+ * the Labels tab exists to put one name on many lines, so resolving by name selected every row
+ * of a cell type when a box was drawn round one of them.
+ *
+ * Two things follow for the drawing. It is **bands rather than the box that was dragged**, since
+ * an additive selection is several blocks and a folded axis puts many lines on one grid cell.
+ * And they are **outlined, never tinted**, because colour is the data on this viewer.
+ *
+ * Clearing is the ⌫ button, or a modifier-click with no drag — but not while Alt is down, where
+ * the gesture was "add" and adding nothing should take nothing away. A **bare click clears
+ * nothing** either: it is the start of a pan, and reading a cell's tooltip is not a request to
+ * lose a selection.
  */
 export function HeatmapViewer({
   matrix,
@@ -119,13 +168,15 @@ export function HeatmapViewer({
   showValues = false,
   compact = false,
   baseName,
+  selection = [],
+  onSelectionChange,
   onExpand,
   onError,
 }: HeatmapViewerProps) {
   const [ref, size] = useElementSize<HTMLDivElement>()
   const [hover, setHover] = useState<Hover | null>(null)
   const [view, setView] = useState<HeatmapWindow | undefined>(undefined)
-  const [pan, setPan] = useState<Pan | null>(null)
+  const [gesture, setGesture] = useState<Gesture | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const clipId = useId()
   const mode = currentMode()
@@ -158,6 +209,14 @@ export function HeatmapViewer({
    * viewers were both bitten by it first.
    */
   const limits = useStable(rawLimits)
+
+  /*
+   * By value, `limits`' rule one line down and for its reason: `idList` hands the card a fresh
+   * array every render, and the bands below are drawn from this.
+   */
+  const stableSelection = useStable(selection)
+  const picked = useMemo(() => decodeMatrixSelection(stableSelection), [stableSelection])
+  const selectable = !compact && drawable && Boolean(onSelectionChange)
 
   const extent = useMemo(() => matrixExtent(matrix.values), [matrix])
   const domain = useMemo(
@@ -240,10 +299,29 @@ export function HeatmapViewer({
 
   // --- pointer -----------------------------------------------------------
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!zoomable || !view || event.button !== 0) return
-    event.currentTarget.setPointerCapture(event.pointerId)
+    if (event.button !== 0) return
     const point = tooltipPoint(event, ref.current)
-    setPan({ lastX: point.x, lastY: point.y, moved: false })
+    // `isAdditive` is the canvas's own modifier chord, which is what it means here too — the
+    // one gesture that is not a pan. Its name is the four other viewers' use of it.
+    if (selectable && isAdditive(event)) {
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setGesture({
+        kind: 'box',
+        x0: point.x,
+        y0: point.y,
+        x1: point.x,
+        y1: point.y,
+        moved: false,
+        // Alt adds, which is `ScatterViewer`'s modifier for the same thing one gesture over.
+        additive: event.altKey,
+      })
+      setHover(null)
+      return
+    }
+    // A pan is only meaningful zoomed in, which is where it has always been gated.
+    if (!zoomable || !view) return
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setGesture({ kind: 'pan', lastX: point.x, lastY: point.y, moved: false })
     setHover(null)
   }
 
@@ -251,9 +329,19 @@ export function HeatmapViewer({
     if (!spec) return
     // Container coordinates, not the viewport's — see `tooltipPoint`.
     const point = tooltipPoint(event, ref.current)
-    if (pan) {
-      const dx = point.x - pan.lastX
-      const dy = point.y - pan.lastY
+    if (gesture?.kind === 'box') {
+      setGesture({
+        ...gesture,
+        x1: point.x,
+        y1: point.y,
+        moved:
+          gesture.moved || Math.hypot(point.x - gesture.x0, point.y - gesture.y0) > CLICK_SLOP,
+      })
+      return
+    }
+    if (gesture) {
+      const dx = point.x - gesture.lastX
+      const dy = point.y - gesture.lastY
       setView(
         panWindow(
           spec.window,
@@ -262,11 +350,53 @@ export function HeatmapViewer({
           (-dx / Math.max(1, spec.plot.width)) * spec.window.cols,
         ),
       )
-      setPan({ lastX: point.x, lastY: point.y, moved: true })
+      setGesture({ kind: 'pan', lastX: point.x, lastY: point.y, moved: true })
       return
     }
     const hit = cellAt(spec, point.x, point.y)
     setHover(hit ? { ...hit, ...point } : null)
+  }
+
+  /**
+   * The rectangle committed, as positions.
+   *
+   * **Positions, and every line the box touched** — the two rules this feature rests on, and
+   * both live in modules a test can reach: `linesInRect` walks the window rather than the drawn
+   * grid, so a box over a folded block means the block, and `encodeMatrixSelection` owns the
+   * grammar `evaluate` decodes.
+   *
+   * Additive is a union rather than a toggle. A second box that overlaps the first is somebody
+   * extending a selection, not asking for the overlap back — and a toggle over a folded block,
+   * where one grid cell stands for a hundred lines, is a gesture whose result nobody could
+   * predict. Clearing is the ⌫ button and a modifier-click.
+   */
+  const commitBox = (box: Extract<Gesture, { kind: 'box' }>) => {
+    if (!spec || !onSelectionChange) return
+    const covered = linesInRect(spec, box.x0, box.y0, box.x1, box.y1)
+    const rows = box.additive ? new Set(picked.rows) : new Set<number>()
+    const cols = box.additive ? new Set(picked.columns) : new Set<number>()
+    for (let i = covered.rows[0]; i <= covered.rows[1]; i++) rows.add(i)
+    for (let i = covered.cols[0]; i <= covered.cols[1]; i++) cols.add(i)
+    onSelectionChange(encodeMatrixSelection(rows, cols))
+  }
+
+  const clear = () => onSelectionChange?.([])
+
+  const onPointerUp = () => {
+    const current = gesture
+    setGesture(null)
+    if (current?.kind !== 'box') return
+    if (current.moved) {
+      commitBox(current)
+      return
+    }
+    /*
+     * A modifier-click with no drag clears, which is `ScatterViewer`'s rule — except while Alt
+     * is held, where the gesture in progress was "add", and adding nothing is nothing rather
+     * than a request to lose what is there. A *bare* click deliberately clears nothing either:
+     * it is the start of a pan, and reading a cell's tooltip is not asking to lose a selection.
+     */
+    if (!current.additive) clear()
   }
 
   /*
@@ -284,6 +414,80 @@ export function HeatmapViewer({
         : [],
     [spec, matrix.values, ramp, ink.secondary, showValues],
   )
+
+  /*
+   * The caption's two numbers, apart from the bands: they depend on the selection and the axis
+   * lengths and not on the spec, so a pan or a zoom — which mints a new spec every frame — must
+   * not re-walk both picked sets to recompute a caption that cannot have changed.
+   *
+   * Counted over the whole axis rather than over the window, because the caption is about what
+   * leaves the node: scrolling a selected row off screen does not deselect it. And counted
+   * against the axis's *length* rather than as `picked.size`, because an index the matrix no
+   * longer has carries no row — the node drops those for the same reason.
+   */
+  const selectedCount = useMemo(() => {
+    const count = (length: number, set: ReadonlySet<number>) => {
+      let n = 0
+      for (const i of set) if (i < length) n++
+      return n
+    }
+    return {
+      rows: count(matrix.rowLabels.length, picked.rows),
+      columns: count(matrix.colLabels.length, picked.columns),
+    }
+  }, [matrix.rowLabels.length, matrix.colLabels.length, picked])
+
+  /*
+   * The bands, measured and built as elements in one memo — this component re-renders at
+   * pointer-poll rate on hover and on every frame of a box drag, and an unmemoised group
+   * rebuilds one `<rect>` per run on each axis for React to diff against an identical tree.
+   * `spec` does not depend on the hover or the gesture, so neither does this.
+   *
+   * A band per run of selected lines, outlined rather than tinted: colour *is* the data here, so
+   * a translucent wash over the cells would change what every cell in the selection appears to
+   * say. Rows span the plot's width and columns its height, which draws a cross rather than the
+   * rectangle that was dragged — and that is the honest picture, since the two axes leave this
+   * node as two independent lists.
+   *
+   * `data-axis` because the two are indistinguishable by shape once a selection is wide: a
+   * column band spans the plot's whole height, so every row tick's y falls inside one.
+   * `pnpm probe:heatmap-select` reads it, and read it wrongly first — the check passed against
+   * the column band.
+   */
+  const bandRects = useMemo(() => {
+    if (!spec) return null
+    const { plot } = spec
+    const bands = {
+      rows: selectionBands(spec.rowMap, picked.rows),
+      columns: selectionBands(spec.colMap, picked.columns),
+    }
+    return (
+      // The clip id spelled out rather than through `clip()`, which is declared below the early
+      // returns — a hook may not close over it.
+      <g clipPath={`url(#${clipId}-plot)`} className="heatmap-band">
+        {bands.rows.map((band) => (
+          <rect
+            key={`r${band.from}`}
+            data-axis="rows"
+            x={plot.x}
+            y={band.from}
+            width={plot.width}
+            height={Math.max(1, band.to - band.from)}
+          />
+        ))}
+        {bands.columns.map((band) => (
+          <rect
+            key={`c${band.from}`}
+            data-axis="columns"
+            x={band.from}
+            y={plot.y}
+            width={Math.max(1, band.to - band.from)}
+            height={plot.height}
+          />
+        ))}
+      </g>
+    )
+  }, [spec, picked, clipId])
 
   const exportSource: ExportSource = useMemo(
     () => ({
@@ -359,7 +563,14 @@ export function HeatmapViewer({
         ref={ref}
         style={{
           background: surface,
-          cursor: pan ? 'grabbing' : view ? 'grab' : 'default',
+          cursor:
+            gesture?.kind === 'pan'
+              ? 'grabbing'
+              : gesture
+                ? 'crosshair'
+                : view
+                  ? 'grab'
+                  : 'default',
           ...(zoomable ? { touchAction: 'none' } : {}),
         }}
         {...(zoomable
@@ -375,8 +586,8 @@ export function HeatmapViewer({
           ref={canvasRef}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
-          onPointerUp={() => setPan(null)}
-          onPointerCancel={() => setPan(null)}
+          onPointerUp={onPointerUp}
+          onPointerCancel={() => setGesture(null)}
           onPointerLeave={() => setHover(null)}
         />
 
@@ -422,6 +633,8 @@ export function HeatmapViewer({
               </g>
             ))}
 
+            {bandRects}
+
             {hoverBox && (
               <g clipPath={clip('plot')}>
                 <rect
@@ -438,14 +651,39 @@ export function HeatmapViewer({
           </svg>
         )}
 
+        {/* The marquee, outside the overlay's clip and out of the canvas repaint: a gesture
+            that re-folded the matrix per pointer move is not a gesture. */}
+        {gesture?.kind === 'box' && gesture.moved && (
+          <GestureMarquee {...gesture} width={size.width} height={size.height} />
+        )}
+
         {zoomable && (
           // Bottom right rather than the strip's usual top right, which here is the column
           // gutter: at ×15 the button sat on the last column's name. Seen in a browser.
           <div className="network-strip network-strip--bottom nodrag">
+            {/*
+              Only where a selection can be made at all, which is `selectable` and not
+              `zoomable`: on a surface with no `onSelectionChange` — a dashboard cell reading a
+              node it cannot write to — a clear button would be a control that does nothing.
+              `disabled` says the rest, so the button does not appear and vanish under the
+              pointer as a selection comes and goes. `ScatterViewer`'s button, one viewer over.
+            */}
+            {selectable && (
+              <button
+                type="button"
+                className="network-strip__btn"
+                title="Clear the selection (or shift-click the plot)"
+                aria-label="Clear selection"
+                disabled={picked.rows.size === 0 && picked.columns.size === 0}
+                onClick={clear}
+              >
+                ⌫
+              </button>
+            )}
             <button
               type="button"
               className="network-strip__btn"
-              title="Show the whole matrix (or double-click). Scroll to zoom, drag to pan."
+              title="Show the whole matrix (or double-click). Scroll to zoom, drag to pan; shift-drag to select, alt-shift-drag to add."
               aria-label="Fit to view"
               disabled={!view}
               onClick={fit}
@@ -540,6 +778,17 @@ export function HeatmapViewer({
             title={`The colour limits are being ignored because ${limits.problem}. The scale is the one the data gives.`}
           >
             limits ignored
+          </span>
+        )}
+        {(selectedCount.rows > 0 || selectedCount.columns > 0) && !compact && (
+          // The count is the caption's, where the scatter puts its own: the inspector's field
+          // says how many *lines* are stored, and only this knows how many of them the matrix
+          // on screen still has.
+          <span
+            className="viewer__note"
+            title="Shift-drag to select a rectangle, alt-shift-drag to add another; ⌫ or shift-click to clear. Rows and columns leave the node on their own ports."
+          >
+            {formatNumber(selectedCount.rows)} × {formatNumber(selectedCount.columns)} selected
           </span>
         )}
         {view && spec && (

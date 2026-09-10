@@ -30,6 +30,24 @@ out.heatmap: colorMin, colorMax, logColor
 > [!NOTE] Put a [Normalize](#core.normalize) in front if one row dominates
 > A heatmap of raw synapse counts is usually a picture of which cell type is numerous.
 
+## Labels
+
+```coda-params
+out.heatmap: matchColumn, labelColumn, labelAxis
+```
+
+On most routes into a heatmap an axis is a column of root ids — `Adjacency`, `Pivot` and `Similarity Matrix` all label their rows with whatever identified the observation. Wire a neuron table to **Annotations** and the axes take a column of it instead: `Match on` is compared with the axis label, `Label by` supplies the name. Unmatched lines keep their own, and the card counts them.
+
+> [!WARNING] This changes the matrix, where the Dendrogram's port does not
+> [Dendrogram](#out.dendrogram) has the same two pickers and they only decorate. Here the names
+> are real: the Filter tab matches on them, the Order tab sorts by them, and the CSV and the
+> notebook carry them. The other side of that is what the axis gives up — the id it arrived with
+> — so a [Linkage](#cluster.linkage) whose leaves need ids goes *above* this node.
+
+`Apply to` is `both` by default, which is right for a square matrix over one population. Narrow it when the two axes are different kinds of thing — neurons down, regions across — or the card will tell you that nothing named the columns.
+
+Naming by type routinely gives several lines the same name, which is what makes a filter of `/^LC4$` useful. The one thing it costs: `Order by: one row or column` takes the first line of a repeated name.
+
 ## Filter
 
 ```coda-params
@@ -68,6 +86,33 @@ out.heatmap: sortBy, sortAxis, sortFollow, sortReverse
 
 > [!NOTE] Clustering here is not Linkage's
 > [Linkage](#cluster.linkage) reads the matrix *as* the distances, which is right for a score matrix; this reads each row as a profile and compares profiles, which is right for a connectivity matrix. For a score matrix, wire `Linkage → Ordered` instead.
+
+## Selecting rows and columns
+
+Expand the card and **shift-drag a rectangle** (⌘- or Ctrl-drag does the same). The rows and columns it covers leave the node on their own two ports, `Selected Rows` and `Selected Columns`, ready for [Selected to Neurons](#cluster.selectedToNeurons) or a filter.
+
+| gesture | what it does |
+| --- | --- |
+| shift-drag | select the rows and columns the box covers |
+| alt-shift-drag | add another block to the selection |
+| shift-click, or ⌫ | clear it |
+| drag | pan, as before — selection needs the modifier |
+
+Each table carries three columns:
+
+| column | what it is |
+| --- | --- |
+| `label` | what the line was called **on the way in** — the neuron id, unless something upstream named it |
+| `index` | its position in the matrix this node outputs, so a Sort downstream can restore this order |
+| `relabel` | what the card showed — the same as `label` unless the Labels tab renamed the axis |
+
+> [!WARNING] Sorting or filtering after selecting moves the selection
+> It holds the *positions* the box covered, so a box round one row of a repeated cell type takes
+> that row and not its namesakes. The price is at the other end: change the Order or Filter tab
+> under a standing selection and it names whatever now sits at those positions. The card shows it
+> the moment it happens — select after you have arranged the matrix, not before.
+
+The picture is **bands rather than the box you drew**, because an added block is a second run and a matrix folded to fit puts many lines on one block. The two ports are independent lists rather than the block where they cross, which is why a wide drag reads as a cross. To take whole rows, drag the full width of the plot.
 
 ## More cells than pixels
 

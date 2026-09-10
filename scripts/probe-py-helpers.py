@@ -442,6 +442,108 @@ fm = pd.DataFrame({'from': ['3'], 'to': ['three']})
 floats = cns['coda_relabel'](ff, 'cluster', fm, 'from', 'to')
 check('relabel: a whole float matches its integer text', floats['cluster'].iloc[0] == 'three', str(floats['cluster'].iloc[0]))
 
+# ---- the Heatmap's Labels tab, as the notebook spells it ----------------------
+#
+# `coda_relabel` above is the join; what is checked here is the *shape the heatmap emitter wraps
+# it in*, which is the part that is new and the part a parse check cannot see. Three things could
+# be wrong and all three would produce a plausible picture: an axis is an `Index` rather than a
+# column, so it goes in as a one-column frame and comes back as a list; the pass-through is bound
+# by reference, so `df.index = ...` would rename the *upstream* frame as well; and the filter that
+# runs next has to see the names, which is the whole reason this is data rather than a drawing.
+mat = pd.DataFrame(
+    [[1, 9, 2], [0, 0, 3], [5, 1, 0]],
+    index=['720575940623374218', '720575940628861548', '720575940611111111'],
+    columns=['720575940623374218', '720575940628861548', '720575940611111111'],
+)
+anno = pd.DataFrame({
+    'neuronId': ['720575940623374218', '720575940628861548', '720575940699999999'],
+    'type': ['LC4', 'LC4', 'DNp01'],
+})
+named = anno.loc[anno['type'].notna() & (anno['type'].astype(str) != '')]
+upstream = mat
+drawn = mat
+for attribute in ('index', 'columns'):
+    drawn = drawn.set_axis(
+        cns['coda_relabel'](
+            pd.DataFrame({'label': getattr(drawn, attribute).astype(str)}),
+            'label',
+            named,
+            'neuronId',
+            'type',
+            unmatched='keep',
+        )['label'].tolist(),
+        axis=attribute,
+    )
+check('heatmap labels: both axes take the annotation table\'s names', list(drawn.index) == ['LC4', 'LC4', '720575940611111111'], str(list(drawn.index)))
+check('heatmap labels: the columns take them too', list(drawn.columns) == ['LC4', 'LC4', '720575940611111111'], str(list(drawn.columns)))
+# The rule the canvas states as "an unnamed line keeps its own label": blank would collide with
+# every other blank, and the filter could no longer address those lines.
+check('heatmap labels: an unnamed line keeps its own', drawn.index[2] == '720575940611111111', str(drawn.index[2]))
+# `set_axis` rather than an assignment: the pass-through and the upstream frame are one object.
+check('heatmap labels: the upstream frame is not renamed', list(upstream.index) == ['720575940623374218', '720575940628861548', '720575940611111111'], str(list(upstream.index)))
+check('heatmap labels: the cells are where they were', drawn.iloc[0].tolist() == [1, 9, 2], str(drawn.iloc[0].tolist()))
+# And the filter, which is the next thing the cell emits, matches what a reader now sees.
+kept = drawn.loc[drawn.index.astype(str).str.contains('^LC', case=False, regex=True)]
+check('heatmap labels: the filter below matches the names, not the ids', len(kept) == 2, str(len(kept)))
+
+# ---- the Heatmap's Order tab and its two Selected ports -----------------------
+#
+# The whole emitted pipeline for a matrix whose axis labels **repeat**, which naming rows by cell
+# type makes the ordinary state. Two bugs live here and neither is visible in the generated text.
+#
+# `.loc[[label, ...]]` returns every match for *each* occurrence, so a 3x3 with two rows called
+# LC4 came back with five rows — checked below by running the fixed form and the broken one side
+# by side. And the follower's order was a list comprehension, which cannot express "the first
+# *unclaimed* line of a repeated name wins" and so took one follower line twice.
+dup = pd.DataFrame(
+    [[1, 9, 2], [4, 0, 3], [5, 1, 0]],
+    index=['720575940623374218', '720575940628861548', '720575940611111111'],
+    columns=['720575940623374218', '720575940628861548', '720575940611111111'],
+)
+dup_src = list(dup.index.astype(str))
+dup_names = {'720575940623374218': 'LC4', '720575940628861548': 'LC4', '720575940611111111': 'DN'}
+drawn = [dup_names[label] for label in dup.index]
+dup = dup.set_axis(drawn, axis='index').set_axis(drawn, axis='columns')
+dup_colsrc = list(dup_src)
+
+# What the emitter used to write, kept here as the thing the fix is measured against.
+check('heatmap order: label indexing explodes a repeated name', len(dup.loc[sorted(dup.index, key=cns['coda_natural_key'])]) == 5, str(len(dup.loc[sorted(dup.index, key=cns['coda_natural_key'])])))
+
+_rows = sorted(range(len(dup.index)), key=lambda i: cns['coda_natural_key'](dup.index[i]))
+_cols = cns['coda_follow_order']([dup.index[i] for i in _rows], list(dup.columns))
+_rowsrc = [dup_src[i] for i in _rows]
+_colsrc = [dup_colsrc[i] for i in _cols]
+ordered = dup.iloc[_rows, _cols]
+check('heatmap order: positional indexing keeps every line once', len(ordered) == 3, str(len(ordered)))
+check('heatmap order: and orders them by name', list(ordered.index) == ['DN', 'LC4', 'LC4'], str(list(ordered.index)))
+# The follower takes each repeated name's *own* line rather than the first one twice.
+check('heatmap order: the other axis follows without duplicating a line', _cols == [2, 0, 1], str(_cols))
+check('heatmap order: the arrival names travelled with the rows', _rowsrc == ['720575940611111111', '720575940623374218', '720575940628861548'], str(_rowsrc))
+# Cell (DN, DN) was 0 and (LC4#1, LC4#1) was 1: a wrong follower puts the wrong number here.
+check('heatmap order: the cells moved with their labels', ordered.iloc[0].tolist() == [0, 5, 1], str(ordered.iloc[0].tolist()))
+
+# The bug the selection grammar was changed for: `ordered` has two rows called LC4, and a box
+# round one of them must take one of them. Positions can say that; names cannot.
+sel = cns['coda_matrix_selection'](ordered.index, [1], _rowsrc)
+check('heatmap selection: one line of a repeated name, not every line sharing it', len(sel) == 1, str(len(sel)))
+# The whole point of `label` and `relabel` being two columns: the selection was made on a card
+# showing cell types and still says which neuron it caught.
+check('heatmap selection: label is the id the matrix arrived with', list(sel['label']) == ['720575940623374218'], str(list(sel['label'])))
+check('heatmap selection: relabel is what the card drew', list(sel['relabel']) == ['LC4'], str(list(sel['relabel'])))
+check('heatmap selection: index is the position in the output matrix', list(sel['index']) == [1], str(list(sel['index'])))
+both = cns['coda_matrix_selection'](ordered.index, [1, 2], _rowsrc)
+check('heatmap selection: and takes both when both are in the box', list(both['label']) == ['720575940623374218', '720575940628861548'], str(list(both['label'])))
+# Built up by an alt-drag: two blocks with a gap, which is what the run merging in the viewer is
+# for and what a rectangle-shaped selection could not have held.
+apart = cns['coda_matrix_selection'](ordered.index, [0, 2], _rowsrc)
+check('heatmap selection: two blocks with a gap between them', list(apart['index']) == [0, 2], str(list(apart['index'])))
+empty = cns['coda_matrix_selection'](ordered.index, [])
+check('heatmap selection: nothing selected is an empty table, not every line', len(empty) == 0, str(len(empty)))
+check('heatmap selection: which still has all three columns', list(empty.columns) == ['label', 'index', 'relabel'], str(list(empty.columns)))
+# A sort or a filter under a standing selection, or an upstream change of shape.
+stale = cns['coda_matrix_selection'](ordered.index, [1, 99], _rowsrc)
+check('heatmap selection: a position the axis does not reach carries no row', len(stale) == 1, str(len(stale)))
+
 # ---- coda_join, the `join` aggregation --------------------------------------
 #
 # Read out of the same cell. `', '.join(...)` is the obvious spelling and is a different rule

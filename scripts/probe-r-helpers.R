@@ -362,6 +362,110 @@ bmap <- data.frame(from = c("true", "false"), to = c("yes", "no"), stringsAsFact
 rbool <- coda_relabel(bdf, "flag", bmap, "from", "to")
 check("relabel: a boolean matches its JavaScript text", identical(rbool$flag, c("yes", "no")), paste(rbool$flag))
 
+# ---- the Heatmap's Labels tab, as the document spells it ---------------------
+#
+# `coda_relabel` above is the join; what runs here is the *shape the heatmap emitter wraps it
+# in*, which is the new part and the part a parse check cannot see. An axis is a character
+# vector rather than a column, so it goes in as a one-column frame and comes back as `$label` —
+# and the filter emitted on the next line has to match the names, which is the whole reason
+# this is data on the canvas rather than a drawing.
+hm <- matrix(c(1, 0, 5, 9, 0, 1, 2, 3, 0), nrow = 3,
+             dimnames = list(c("720575940623374218", "720575940628861548", "720575940611111111"),
+                             c("720575940623374218", "720575940628861548", "720575940611111111")))
+hm_anno <- data.frame(neuronId = c("720575940623374218", "720575940628861548", "720575940699999999"),
+                      type = c("LC4", "LC4", "DNp01"), stringsAsFactors = FALSE)
+hm_named <- hm_anno |> filter(!is.na(type) & type != "")
+rownames(hm) <- coda_relabel(data.frame(label = rownames(hm)), "label", hm_named,
+                             "neuronId", "type", unmatched = "keep")$label
+colnames(hm) <- coda_relabel(data.frame(label = colnames(hm)), "label", hm_named,
+                             "neuronId", "type", unmatched = "keep")$label
+check("heatmap labels: both axes take the annotation table's names",
+      identical(rownames(hm), c("LC4", "LC4", "720575940611111111")), paste(rownames(hm), collapse = ", "))
+check("heatmap labels: the columns take them too",
+      identical(colnames(hm), c("LC4", "LC4", "720575940611111111")), paste(colnames(hm), collapse = ", "))
+# "An unnamed line keeps its own label": a blank would collide with every other blank, and the
+# filter could no longer address those lines.
+check("heatmap labels: an unnamed line keeps its own",
+      rownames(hm)[3] == "720575940611111111", rownames(hm)[3])
+# A repeated name is the ordinary state after naming by type, and subscripting still works.
+check("heatmap labels: the cells are where they were",
+      identical(as.numeric(hm[1, ]), c(1, 9, 2)), paste(hm[1, ], collapse = ", "))
+hm_kept <- hm[grepl("^LC", rownames(hm), ignore.case = TRUE), , drop = FALSE]
+check("heatmap labels: the filter below matches the names, not the ids",
+      nrow(hm_kept) == 2L, nrow(hm_kept))
+
+# ---- the Heatmap's Order tab and its two Selected ports -----------------------
+#
+# The emitted pipeline for a matrix whose axis labels **repeat**, which naming rows by cell type
+# makes the ordinary state. R got this wrong in the opposite direction from pandas and just as
+# quietly: `m[c("DN", "LC4", "LC4"), ]` matches the *first* LC4 twice and drops the second row,
+# keeping the row count right so nothing looks amiss.
+dup_ids <- c("720575940623374218", "720575940628861548", "720575940611111111")
+dup <- matrix(c(1, 9, 2, 4, 0, 3, 5, 1, 0), nrow = 3, byrow = TRUE,
+              dimnames = list(dup_ids, dup_ids))
+dup_drawn <- c("LC4", "LC4", "DN")
+rowSrc_ <- rownames(dup)
+colSrc_ <- colnames(dup)
+rownames(dup) <- dup_drawn
+colnames(dup) <- dup_drawn
+
+# What the emitter used to write, kept as the thing the fix is measured against: the row count
+# is right and one of the rows is a copy of another.
+was <- dup[rownames(dup)[coda_natural_order(rownames(dup))], , drop = FALSE]
+check("heatmap order: label subscripting silently duplicates a line",
+      identical(as.numeric(was[2, ]), as.numeric(was[3, ])), paste(was[2, ], collapse = ", "))
+
+rows_ <- coda_natural_order(rownames(dup))
+cols_ <- coda_follow_order(rownames(dup)[rows_], colnames(dup))
+rowSrc_ <- rowSrc_[rows_]
+colSrc_ <- colSrc_[cols_]
+ordered <- dup[rows_, cols_, drop = FALSE]
+check("heatmap order: positional indexing keeps every line once",
+      nrow(ordered) == 3L && !identical(as.numeric(ordered[2, ]), as.numeric(ordered[3, ])),
+      paste(nrow(ordered)))
+check("heatmap order: and orders them by name",
+      identical(rownames(ordered), c("DN", "LC4", "LC4")), paste(rownames(ordered), collapse = ", "))
+check("heatmap order: the other axis follows without duplicating a line",
+      identical(cols_, c(3L, 1L, 2L)), paste(cols_, collapse = ", "))
+check("heatmap order: the arrival names travelled with the rows",
+      identical(rowSrc_, dup_ids[c(3, 1, 2)]), paste(rowSrc_, collapse = ", "))
+check("heatmap order: the cells moved with their labels",
+      identical(as.numeric(ordered[1, ]), c(0, 5, 1)), paste(ordered[1, ], collapse = ", "))
+
+# The bug the selection grammar was changed for: `ordered` has two rows called LC4, and a box
+# round one of them must take one of them. **Zero-based going in**, which is the seam this pins —
+# Coda counts from 0 and R subscripts from 1, and the shift lives inside the helper.
+sel <- coda_matrix_selection(rownames(ordered), c(1), rowSrc_)
+check("heatmap selection: one line of a repeated name, not every line sharing it",
+      nrow(sel) == 1L, nrow(sel))
+check("heatmap selection: label is the id the matrix arrived with",
+      identical(sel$label, dup_ids[1]), paste(sel$label, collapse = ", "))
+check("heatmap selection: relabel is what the card drew",
+      identical(sel$relabel, "LC4"), paste(sel$relabel, collapse = ", "))
+# Zero-based coming out too, because it is Coda's position rather than an R subscript.
+# `identical` and not `==`: the column has to be an *integer*, since a double `index` is a
+# column a join downstream reads differently from the canvas's.
+check("heatmap selection: index is the position in the output matrix",
+      identical(sel$index, 1L), paste(sel$index, collapse = ", "))
+check("heatmap selection: and stays an integer column when empty",
+      is.integer(coda_matrix_selection(rownames(ordered), integer(0))$index), "integer")
+both <- coda_matrix_selection(rownames(ordered), c(1, 2), rowSrc_)
+check("heatmap selection: and takes both when both are in the box",
+      identical(both$label, dup_ids[1:2]), paste(both$label, collapse = ", "))
+# Built up by an alt-drag: two blocks with a gap between them.
+apart <- coda_matrix_selection(rownames(ordered), c(0, 2), rowSrc_)
+check("heatmap selection: two blocks with a gap between them",
+      identical(apart$index, c(0L, 2L)), paste(apart$index, collapse = ", "))
+# The empty case, which is what an unselected heatmap emits.
+empty <- coda_matrix_selection(rownames(ordered), integer(0))
+check("heatmap selection: nothing selected is an empty table, not every line",
+      nrow(empty) == 0L, nrow(empty))
+check("heatmap selection: which still has all three columns",
+      identical(names(empty), c("label", "index", "relabel")), paste(names(empty), collapse = ", "))
+stale <- coda_matrix_selection(rownames(ordered), c(1, 99), rowSrc_)
+check("heatmap selection: a position the axis does not reach carries no row",
+      nrow(stale) == 1L, nrow(stale))
+
 # The shared label space, and what it costs each neuron — the same arithmetic the TypeScript
 # tests and the Python probe assert against the same fixture, which is what makes a drift
 # between the three visible as a disagreement rather than as three plausible answers.

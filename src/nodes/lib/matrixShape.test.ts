@@ -1,5 +1,5 @@
 /**
- * The Heatmap node's Order tab, without the drawing and without Python.
+ * The Heatmap node's Labels, Filter and Order tabs, without the drawing and without Python.
  *
  * What is pinned is the *meaning* of each criterion and of "the other axis follows", because
  * every one of them has an obvious wrong reading: a total that read the colour scale, a
@@ -10,17 +10,19 @@ import { describe, expect, it } from 'vitest'
 
 import { makeMatrix } from '../../core/values'
 import {
-  applyOrderPlan,
   axisTotals,
   axisVector,
   followOrder,
   labelOrder,
   orderAxis,
+  orderIndices,
   orderByScores,
   orderPlan,
   keptLabels,
   parseLabelFilter,
   readFilterOptions,
+  readLabelOptions,
+  relabelMatrix,
   takeMatrix,
   readOrderOptions,
   reverseOrder,
@@ -35,6 +37,16 @@ function square() {
     Float64Array.from([1, 9, 2, 0, 0, 3, 5, 1, 0]),
     'synapses',
   )
+}
+
+/** `orderIndices` then `takeMatrix`, which is the pair `evaluate` writes. */
+function applied(
+  matrix: Parameters<typeof orderIndices>[0],
+  plan: Parameters<typeof orderIndices>[1],
+  orders: Parameters<typeof orderIndices>[2],
+) {
+  const chosen = orderIndices(matrix, plan, orders)
+  return takeMatrix(matrix, chosen.rows, chosen.columns)
 }
 
 describe('the criteria', () => {
@@ -167,6 +179,78 @@ describe('taking rows and columns', () => {
   })
 })
 
+describe('renaming an axis', () => {
+  const names = new Map([
+    ['LC4', 'visual'],
+    ['LC10', 'visual'],
+    ['LPLC2', 'unused'],
+  ])
+
+  it('rewrites both axes and keeps every cell where it was', () => {
+    const input = square()
+    const { matrix } = relabelMatrix(input, names, 'both')
+    expect(matrix.rowLabels).toEqual(['visual', 'visual', 'DNp02'])
+    expect(matrix.colLabels).toEqual(['visual', 'visual', 'DNp02'])
+    expect(Array.from(matrix.values)).toEqual([1, 9, 2, 0, 0, 3, 5, 1, 0])
+    // The same buffer, not a copy of it: an axis rename that copied four million cells to
+    // change two strings would be a fold's worth of work for nothing.
+    expect(matrix.values).toBe(input.values)
+    expect(matrix.valueLabel).toBe('synapses')
+  })
+
+  it('touches only the axis it was asked for', () => {
+    const { matrix, counts } = relabelMatrix(square(), names, 'rows')
+    expect(matrix.rowLabels).toEqual(['visual', 'visual', 'DNp02'])
+    expect(matrix.colLabels).toEqual(['LC4', 'LC10', 'DNp02'])
+    // No entry for an axis nobody asked about, which is what lets the caller tell "named
+    // nothing" from "was not asked".
+    expect(counts.columns).toBeUndefined()
+    expect(counts.rows).toEqual({ named: 2, total: 3 })
+  })
+
+  /*
+   * An unnamed line keeps its own label, which inverts `core.relabel`'s `Unmatched` default and
+   * for a sharper reason: blanks on an axis collide, and the Filter box could no longer address
+   * the lines that took one.
+   */
+  it('leaves a line the table does not cover under its own name', () => {
+    const { matrix } = relabelMatrix(square(), names, 'both')
+    expect(matrix.rowLabels[2]).toBe('DNp02')
+  })
+
+  it('hands the matrix back untouched when the names change nothing', () => {
+    const input = square()
+    expect(relabelMatrix(input, new Map(), 'both').matrix).toBe(input)
+    // Named what it is already called: covered, and still nothing to allocate.
+    const same = new Map([['LC4', 'LC4']])
+    const answer = relabelMatrix(input, same, 'rows')
+    expect(answer.matrix).toBe(input)
+    expect(answer.counts.rows).toEqual({ named: 1, total: 3 })
+  })
+
+  it('reads the axis param, defaulting to both and ignoring anything else', () => {
+    const read = (labelAxis: unknown) =>
+      readLabelOptions({ params: { labelAxis } as never, column: () => undefined }).axis
+    expect(read(undefined)).toBe('both')
+    expect(read('rows')).toBe('rows')
+    expect(read('columns')).toBe('columns')
+    expect(read('sideways')).toBe('both')
+  })
+
+  /*
+   * Invariant 5, and the reason `readLabelOptions` takes a resolver rather than reading the
+   * params: a picker sitting on its own declared default resolves to a column nobody typed, so
+   * infer, validate, evaluate and the cache key have to ask the same way.
+   */
+  it('takes both columns from the resolver, never from the params', () => {
+    const options = readLabelOptions({
+      params: { matchColumn: 'typed', labelColumn: 'typed' } as never,
+      column: (id) => (id === 'matchColumn' ? 'neuronId' : 'type'),
+    })
+    expect(options).toEqual({ axis: 'both', match: 'neuronId', label: 'type' })
+  })
+})
+
 describe('the label filter', () => {
   const labels = ['LC4', 'LC10', 'lc6', 'DNp02', 'SMP001(a)']
   const keep = (query: string) => {
@@ -228,7 +312,7 @@ describe('the whole thing on an adjacency', () => {
     const options = readOrderOptions({ sortBy: 'total' })
     const rows = orderAxis(m, 'rows', options)
     expect(rows.order && [...rows.order]).toEqual([0, 2, 1]) // 12, 6, 3 → LC4, DNp02, LC10
-    const out = applyOrderPlan(m, orderPlan(options), { rows: rows.order })
+    const out = applied(m, orderPlan(options), { rows: rows.order })
     expect(out.rowLabels).toEqual(['LC4', 'DNp02', 'LC10'])
     // The columns followed by label, so the diagonal is still the diagonal.
     expect(out.colLabels).toEqual(out.rowLabels)
@@ -246,7 +330,7 @@ describe('the whole thing on an adjacency', () => {
     const cols = orderAxis(m, 'columns', options)
     // LC4's row is [1, 9, 2] → LC10, DNp02, LC4.
     expect(cols.order && [...cols.order]).toEqual([1, 2, 0])
-    const out = applyOrderPlan(m, orderPlan(options), { columns: cols.order })
+    const out = applied(m, orderPlan(options), { columns: cols.order })
     expect(out.colLabels).toEqual(['LC10', 'DNp02', 'LC4'])
     expect(out.rowLabels).toEqual(['LC4', 'LC10', 'DNp02'])
   })
@@ -264,7 +348,7 @@ describe('the whole thing on an adjacency', () => {
       problem: expect.stringContaining('"nope"'),
     })
     // …and a follower cannot follow an axis that did not move.
-    const out = applyOrderPlan(m, orderPlan(readOrderOptions({ sortBy: 'value' })), {})
+    const out = applied(m, orderPlan(readOrderOptions({ sortBy: 'value' })), {})
     expect(out).toBe(m)
   })
 

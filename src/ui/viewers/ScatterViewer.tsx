@@ -27,6 +27,7 @@ import type { MarkerShape } from '../encoding'
 import { resolveColor, resolveShape, resolveSize } from '../encoding'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
 import { formatCell, formatCompact, formatNumber, plural } from '../format'
+import { GestureMarquee } from './GestureMarquee'
 import { ColorKey, ShapeKey, SizeKey } from './LegendKeys'
 import type { LegendItem } from './scatterDraw'
 import { drawScatter, scatterToSvg } from './scatterDraw'
@@ -546,17 +547,10 @@ export function ScatterViewer({
         {/* The marquee and the lasso trail, as an overlay rather than in the repaint: a
             gesture redrawing fifty thousand marks per pointer move is not a gesture. */}
         {gesture?.kind === 'box' && gesture.moved && (
-          <svg className="scatter-gesture" width={box.width} height={box.height}>
-            <rect
-              x={Math.min(gesture.x0, gesture.x1)}
-              y={Math.min(gesture.y0, gesture.y1)}
-              width={Math.abs(gesture.x1 - gesture.x0)}
-              height={Math.abs(gesture.y1 - gesture.y0)}
-            />
-          </svg>
+          <GestureMarquee {...gesture} width={box.width} height={box.height} />
         )}
         {gesture?.kind === 'lasso' && gesture.moved && (
-          <svg className="scatter-gesture" width={box.width} height={box.height}>
+          <svg className="chart-gesture" width={box.width} height={box.height}>
             <polygon points={pairs(gesture.points)} />
           </svg>
         )}

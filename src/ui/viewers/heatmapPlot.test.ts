@@ -28,11 +28,13 @@ import {
   fullWindow,
   isFullWindow,
   labelTicks,
+  linesInRect,
   matrixExtent,
   normalize,
   panWindow,
   pointToMatrix,
   rampColors,
+  selectionBands,
   valueMarks,
   windowScale,
   zoomWindow,
@@ -275,6 +277,72 @@ describe('axis labels', () => {
     )
     expect(ticks[0]!.index).toBe(41)
     expect(thinned).toBe(0)
+  })
+})
+
+describe('selecting a rectangle', () => {
+  const values = (n: number) => Float64Array.from({ length: n }, (_, i) => i)
+
+  it('names every line the box touched', () => {
+    const s = spec(10, 10, values(100))
+    const { plot } = s
+    const picked = linesInRect(
+      s,
+      plot.x + plot.width * 0.05,
+      plot.y + plot.height * 0.05,
+      plot.x + plot.width * 0.35,
+      plot.y + plot.height * 0.25,
+    )
+    expect(picked.rows).toEqual([0, 2])
+    expect(picked.cols).toEqual([0, 3])
+  })
+
+  /*
+   * The rule `rowsInPolygon` states for the scatter: above the drawing budget a gesture still
+   * means the region it enclosed. Folded, one grid cell stands for many lines and only the
+   * strongest is on screen — a box over it means all of them.
+   */
+  it('takes every line under a folded block, not the one that was drawn', () => {
+    const s = spec(2000, 10, values(20_000))
+    expect(s.rowMap.folded).toBe(true)
+    const picked = linesInRect(s, s.plot.x, s.plot.y, s.plot.x + 1, s.plot.y + s.rowMap.pitch)
+    expect(picked.rows[1] - picked.rows[0]).toBeGreaterThan(0)
+  })
+
+  it('clamps a box dragged off the plot rather than naming a line that is not there', () => {
+    const s = spec(4, 4, values(16))
+    const picked = linesInRect(s, -500, -500, 5000, 5000)
+    expect(picked.rows).toEqual([0, 3])
+    expect(picked.cols).toEqual([0, 3])
+  })
+
+  it('draws one band per run of selected lines', () => {
+    const s = spec(6, 6, values(36))
+    const bands = selectionBands(s.rowMap, new Set([1, 2, 4]))
+    expect(bands.length).toBe(2)
+    // Adjacent lines merge; the gap at row 3 is a real gap.
+    expect(bands[0]!.to - bands[0]!.from).toBeCloseTo(s.rowMap.pitch * 2, 5)
+    expect(bands[1]!.to - bands[1]!.from).toBeCloseTo(s.rowMap.pitch, 5)
+  })
+
+  it('draws nothing for a line the axis no longer has', () => {
+    const s = spec(4, 4, values(16))
+    expect(selectionBands(s.rowMap, new Set([99]))).toEqual([])
+    expect(selectionBands(s.rowMap, new Set())).toEqual([])
+  })
+
+  /*
+   * Adding a second box is what makes a selection non-contiguous, which is the case the run
+   * merging exists for — one rect per line would stack outlines on a folded axis.
+   */
+  it('bands two blocks separately when a selection was built up', () => {
+    const s = spec(5, 5, values(25))
+    expect(selectionBands(s.rowMap, new Set([0, 2, 4])).length).toBe(3)
+  })
+
+  it('collapses to one band where a fold puts the selected lines on one block', () => {
+    const s = spec(2000, 10, values(20_000))
+    expect(selectionBands(s.rowMap, new Set([0, 1, 2])).length).toBe(1)
   })
 })
 

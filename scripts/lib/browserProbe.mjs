@@ -149,6 +149,51 @@ export async function launchChrome({ port, profile, width = 1600, height = 1000,
       screenHeight: h,
     })
 
+  /**
+   * Press and move, leaving the button down; the caller releases.
+   *
+   * `drag` is this plus the release. Split because a probe that has to look at what is on screen
+   * *during* a gesture — a marquee, a drag preview — would otherwise hand-roll the three events,
+   * and the modifier rule below is exactly what such a copy drifts from.
+   *
+   * `modifiers` is CDP's bitmask — 1 alt, 2 ctrl, 4 meta, **8 shift** — and it has to be on
+   * every event of the gesture, not only the press: a viewer that reads `event.shiftKey` on the
+   * move (or one that starts a gesture on the press and confirms it on the move) sees a
+   * different chord otherwise, which is exactly the kind of thing this exists to catch.
+   */
+  async function dragHold(from, to, modifiers = 0) {
+    await send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: from.x,
+      y: from.y,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1,
+      modifiers,
+    })
+    for (let i = 1; i <= 6; i++) {
+      await send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: from.x + ((to.x - from.x) * i) / 6,
+        y: from.y + ((to.y - from.y) * i) / 6,
+        button: 'left',
+        buttons: 1,
+        modifiers,
+      })
+      await sleep(16)
+    }
+    return () =>
+      send('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x: to.x,
+        y: to.y,
+        button: 'left',
+        buttons: 0,
+        clickCount: 1,
+        modifiers,
+      })
+  }
+
   await send('Page.enable')
   await send('Runtime.enable')
   await setDevice(width, height, dpr)
@@ -170,35 +215,14 @@ export async function launchChrome({ port, profile, width = 1600, height = 1000,
     mouseTo(x, y) {
       return send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0 })
     },
-    /** Press, move in six steps a frame apart, release. */
-    async drag(from, to) {
-      await send('Input.dispatchMouseEvent', {
-        type: 'mousePressed',
-        x: from.x,
-        y: from.y,
-        button: 'left',
-        buttons: 1,
-        clickCount: 1,
-      })
-      for (let i = 1; i <= 6; i++) {
-        await send('Input.dispatchMouseEvent', {
-          type: 'mouseMoved',
-          x: from.x + ((to.x - from.x) * i) / 6,
-          y: from.y + ((to.y - from.y) * i) / 6,
-          button: 'left',
-          buttons: 1,
-        })
-        await sleep(16)
-      }
-      await send('Input.dispatchMouseEvent', {
-        type: 'mouseReleased',
-        x: to.x,
-        y: to.y,
-        button: 'left',
-        buttons: 0,
-        clickCount: 1,
-      })
+    /** Press, move in six steps a frame apart, release. See `dragHold` for the modifier rule. */
+    async drag(from, to, modifiers = 0) {
+      // Not `this.dragHold`: every probe destructures this object, so `this` is undefined by
+      // the time the method runs.
+      const release = await dragHold(from, to, modifiers)
+      await release()
     },
+    dragHold,
     /** One element's rounded viewport rect, or null. */
     rect(selector) {
       return evaluate(`(${RECT})(${JSON.stringify(selector)})`)

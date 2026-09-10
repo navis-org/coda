@@ -652,15 +652,38 @@ rather than melting the matrix back down, and the two agree because a connection
 rows to drop. R melts `neuprint_get_adjacency_matrix`'s result and strips the zeros, which is
 `matrixToLinks` transcribed.
 
-## Heatmap: the Order tab is data, the Colour tab is not
+## Heatmap: three tabs are data, the Colour tab is not
 
-`out.heatmap` grew two things at once, and the split between them is the design. **Colour** —
-scale, palette, printed values — is presentational: none of it enters the provenance key, so
-restyling a four-million-cell picture is a repaint. **Order** reorders the matrix the node
-*outputs*, so it is in the key, the tab says downstream nodes go stale, and a Table wired beside
-the heatmap, the CSV export and the notebook all show what the card shows. The obvious
-alternative — a sort that lives in the drawing — was rejected for exactly that reason: a picture
-sorted one way beside a table sorted another is two answers to one question.
+`out.heatmap` grew two things at once and a third later, and the split between them is the
+design. **Colour** — scale, palette, printed values — is presentational: none of it enters the
+provenance key, so restyling a four-million-cell picture is a repaint. **Labels**, **Filter** and
+**Order** each change the matrix the node *outputs*, so all three are in the key, their tabs say
+downstream nodes go stale, and a Table wired beside the heatmap, the CSV export and the notebook
+all show what the card shows. The obvious alternative — a sort that lives in the drawing — was
+rejected for exactly that reason: a picture sorted one way beside a table sorted another is two
+answers to one question.
+
+### The Labels tab is the same argument reaching the opposite answer from the Dendrogram's
+
+`out.dendrogram` names its leaves from a wired annotation table **presentationally**: `evaluate`
+never reads the port, both pickers are `presentational`, and the tree keeps the identity
+`Selected to Neurons` matches on. That port is the reason this one exists, and copying it here was
+refused. A heatmap's axis labels are read by the two tabs above, in `evaluate`, so a name only the
+drawing knew about would put `LC4` on screen while a filter typed `LC4` matched nothing. So the
+join runs **first**, ahead of the filter that matches on it and the order that sorts by it, and
+`NBLAST`'s `Label by` is the standing precedent — "the labels are part of the matrix that leaves
+the port, not a way of drawing it."
+
+What it costs is stated rather than hidden: the axis stops carrying the id it arrived with, so a
+`Linkage` below a named Heatmap clusters lines called `LC4`. That is the user's decision, made by
+wiring a table, and the help says to put such a Linkage above rather than below. The join is
+`displayLabels`, shared with the dendrogram — one operation whose two callers differ only in what
+they do with the answer — and the write is `relabelMatrix` beside `takeMatrix`, identity return
+and cells by reference. There is deliberately **no `Unmatched` control**: an unnamed line keeps
+its own label, because blanks on an axis collide and the Filter box could no longer address them,
+and the *count* is what the card says. Why the port is not a separate `Relabel Matrix` node, what
+the two warnings are for, and what the exporters had to do differently are in
+[viewers.md](viewers.md).
 
 ### The filter and the sort are one mechanism
 
@@ -694,7 +717,8 @@ narrowed it.
 ### Four criteria, one plan
 
 `nodes/lib/matrixShape.ts` is the headless half. A criterion produces an order for one axis;
-`orderPlan` says which axes lead and which follows; `applyOrderPlan` permutes. Every criterion,
+`orderPlan` says which axes lead and which follows; `orderIndices` turns that into one index
+list per axis and `takeMatrix` applies them. Every criterion,
 including the one that comes back from Python, goes through the same three steps.
 
 - **`total`** is the plain sum of the finite cells, largest first. Not a magnitude, and that is
@@ -752,6 +776,75 @@ end of the tree. scipy answers `NaN` there and `linkage` then refuses the whole 
 answers `NA` and `hclust` does the same. Both exporters write the NaN as 1 before clustering
 rather than reproducing the refusal, and say so in a note, because a zero row in a connectivity
 matrix is a neuron with no partners among these columns — a thing with no profile, not an error.
+
+### Selecting rows and columns, and a bug the Labels tab exposed
+
+A shift-dragged rectangle leaves the node as two tables. The gesture, why the selection is stored
+as **labels** rather than as a rectangle, and how the bands are drawn are in
+[viewers.md](viewers.md); what belongs here is the node half.
+
+The selection is **positions** into the matrix this node outputs. It was the drawn labels first,
+which survives a sort where positions do not — and it was reported as a bug within the hour,
+because the Labels tab's whole purpose is to put one name on many lines: a box round one cell of
+a fourteen-row `LC4` block took all fourteen. `chartSelection.ts` carries that argument and
+[viewers.md](viewers.md) the gesture; what matters here is that `selectedLines` walks the *lines*
+and asks whether each position is in the set, so the result is in the card's own order and a
+position the matrix no longer reaches carries no row (invariant 5's corollary).
+
+`SELECTION_SCHEMA` is three constant columns — `label`, `index`, `relabel` — and the first and
+last exist because the Labels tab spends the axis's identity: `label` is what the line was called
+on the way *in* (the id, on every route that does not name its axes), `relabel` what the card
+showed. Positions made that pair more useful rather than less: selecting one row of an `LC4`
+block now yields one row, and `label` is what says *which* `LC4` it was. Spelled `label` on purpose, since `Selected to Neurons` defaults its picker to exactly
+that, so `Selected Rows → Selected to Neurons → 3D` wires with nothing to set. Keeping the pair
+aligned is why `evaluate` carries the arrival names through the filter and the sort *through the
+identical index lists*, which is what `orderIndices` returning lists rather than a matrix makes
+possible — deriving `label` at the end from the drawn name cannot work, naming by type being
+one-to-many by design.
+
+**A selection is in the provenance key, so the reshaping is memoised.** It has to be in the key —
+it decides two output ports — which means every drag, every alt-add and every ⌫ re-enters
+`evaluate`. What it must not do is re-*run* the pipeline, and the top of that bill is not the
+filter: with `Order by: clustering` it is `runClusterOrder`, which marshals the whole matrix
+across the Pyodide bridge and caches nothing, so dragging a rectangle on a clustered heatmap
+re-clustered it once per gesture. `SHAPED` is a `WeakMap` on the input value's identity keyed by
+a signature of the params that actually reshape — `editTable.ts`'s `PLANS` idiom — with the
+**warnings cached and replayed**, or a card would drop the "12 of 40 rows are not named" line it
+had been showing the moment somebody selected something. It buys more than the arithmetic: the
+reshaped matrix keeps its *identity* across a selection-only change, and the viewer keys its
+extent scan, its fold and its zoom window on that object. A test pins it by counting bridge
+calls, and was checked by mutation.
+
+The join underneath it is memoised too, one layer down: `displayLabels` holds its answer against
+the table it read (`WeakMap`, keyed inside by the column pair). `labelsByNeuron` is an `idText`
+call per row, and both callers ask far more often than the answer changes — this node re-joins on
+every keystroke in its Filter box, and `out.dendrogram` builds it during *render*, so a hover over
+a tree re-walked the neuron table that named it.
+
+**Both outputs are bound in the exporters whether or not anything is wired to them**, because an
+emitter cannot ask who is downstream and a later cell naming an unbound variable is an error
+rather than an empty table. `coda_matrix_selection` is the whole of the logic in both languages,
+so a heatmap cell costs two lines for it. R's copy owns the **0-based/1-based seam** at both ends
+— positions arrive as Coda's and are shifted to subscript with, `index` goes back out as Coda's —
+and both halves of that are pinned by running the helper rather than by reading it. The type is
+the part that bites: `picked` arrives as R numerics, so without an `as.integer` the `index` column
+comes out a *double*, which a join downstream reads differently from the canvas's. `probe:r-helpers`
+caught exactly that, on a change made to simplify the line.
+
+**And it exposed a real bug in both exporters, which is the part worth keeping.** The Order tab
+emitted *label* indexing — `df.loc[[...]]` in pandas, `m[c(...), ]` in R — which is correct only
+while axis labels are unique, and the Labels tab makes repeats routine since naming rows by cell
+type is what it is for. Measured on a 3×3 with two rows called `LC4`: **pandas returns five
+rows**, because `.loc` with a duplicated label returns every match for each occurrence, and **R
+silently drops one**, matching the first `LC4` twice while keeping the row count right so nothing
+looks wrong. Two different wrong answers, both plausible, neither visible in a golden file. Every
+arm is positional now — which made three of them *shorter*, since `leaves_list`, `hclust()$order`
+and `order()` were answering in positions already and were being converted back to labels — and
+the follower needed a helper (`coda_follow_order`) for the rule a comprehension cannot state:
+the first **unclaimed** line of a repeated name wins. R's old spelling used `intersect`/`setdiff`,
+which de-duplicate, so a follower with two lines of one name came back with one. Both are run
+against a repeated-label matrix by `pnpm probe:helpers` and `pnpm probe:r-helpers`, including the
+broken form, so the fix is measured rather than asserted.
 
 ### The palettes
 

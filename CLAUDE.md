@@ -1062,6 +1062,48 @@ Area-specific — the rule, then the doc that holds why:
   **monotonic**, so the fold's strongest-cell rule needed no case. seaborn's **`annot` takes a frame of
   its own** and ggplot gets a `fill_` column beside the untouched `value`: that is how the numbers stay
   raw under a transformed fill, and both were run. See [docs/viewers.md](docs/viewers.md).
+- **A heatmap's rectangle selection is a set of positions, and "store the meaning, not the
+  position" is the rule that had to bend.** Shift- or ⌘/Ctrl-drag selects, **alt-shift-drag adds**,
+  ⌫ or a modifier-click clears, bare drag still pans (`ScatterViewer`'s division and React Flow's),
+  expanded only. It was **labels** first, which is `chartSelection.ts`' standing rule and survives
+  the Order and Filter tabs sitting on the same card as the gesture — and it was reported as a bug
+  within the hour, because **a heatmap's names are not identities**: the Labels tab exists to
+  replace ids with cell types, one-to-many by design, so a box round one cell of a fourteen-row
+  `LC4` block selected all fourteen. The cost is taken the other way now and it is the smaller one
+  — **a re-point is visible on the card the instant it happens**, where a name quietly widening a
+  selection is visible nowhere and reaches `Selected Rows`. The general half: that rule assumes the
+  mark *has* a unique meaning, and a viewer whose job is renaming is where that stops holding.
+  **One param, both axes** (`r:`/`c:` prefixes, sorted so a re-selection that changed nothing does
+  not move a key; a non-integer is dropped, which is what a label-era selection degrades to),
+  because two params are two commits and an undo would take back the columns and leave the rows
+  (`attachEdgeSet`'s trap); the two *outputs* stay separate, a row and a column being different
+  populations downstream. Adding is a **union, never a toggle** — a toggle over a folded block
+  standing for a hundred lines has a result nobody can predict. The drawing is **bands, outlined
+  never tinted** (colour is the data), rows spanning the width and columns the height — a cross
+  rather than the box dragged, honest since the two leave as two lists. **`label` and `relabel` are
+  two columns** because the Labels tab spends the axis's identity, and keeping them aligned is why
+  `evaluate` carries the *arrival* names through the filter and the sort on the identical index
+  lists — `orderIndices` hands back lists rather than a matrix for exactly that. Seven properties only a
+  browser shows (`pnpm probe:heatmap-select`), and **two of them were the probe's own arithmetic
+  first**: the band check read by *shape* passed against the column band, which spans the plot's
+  whole height and so contains every row tick (`data-axis` tells them apart); and the count check
+  compared tick centres strictly inside the box, 10 against 9, where `linesInRect` takes every line
+  the box *touches* — the near-miss that invites a tolerance instead of the right rule. **It also
+  exposed two real exporter bugs.** The Order tab emitted *label* indexing, correct only while axis
+  labels are unique — on a 3×3 with two `LC4` rows **pandas returns five rows** and **R silently
+  drops one**; positional now in every arm (three got *shorter*), with `coda_follow_order` for the
+  rule a comprehension cannot state (the first **unclaimed** line of a repeated name wins, where
+  `intersect`/`setdiff` de-duplicate). And R's selection helper owns the **0-based/1-based seam**
+  at both ends — positions in, `index` out — where the trap is the *type*: `picked` arrives as R
+  numerics, so without an `as.integer` that column is a **double**, which a join downstream reads
+  differently from the canvas's. `probe:r-helpers` caught it, on a change made to shorten the line.
+  Last, because the key forces it: **a selection in the provenance key means the reshaping has to
+  be memoised** (`SHAPED`, `editTable.ts`'s `PLANS` idiom, warnings cached and replayed) — the
+  bill is not the filter but `runClusterOrder`, which crosses the Pyodide bridge and caches
+  nothing, so a drag on a clustered heatmap re-clustered it once per gesture; and it holds the
+  matrix's *identity* steady, which is what stops the viewer rescanning and re-folding four
+  million cells to redraw the picture already on screen.
+  See [docs/viewers.md](docs/viewers.md) and [docs/nodes.md](docs/nodes.md).
 - **The heatmap's zoom is a window in matrix units, and the window is what gets folded.** Not a scaled
   canvas: scaling keeps the fitted fold's blocks and enlarges them, and scales the labels, which is the
   one thing they must not do. `HeatmapWindow` goes into `buildHeatmapSpec`, so zooming in folds *fewer*
@@ -1114,9 +1156,20 @@ Area-specific — the rule, then the doc that holds why:
   *identically to an unwired port* and is what the `validate` line exists for. An **unnamed leaf keeps
   its own label**, inverting `core.relabel`'s `Unmatched` default because a blank leaf is worse than
   the id it replaced; the caption counts them. The identity moves to an SVG `<title>` in a `<g>`
-  **beside** the `<text>`, not inside it. **The Heatmap deliberately gets no such port**: its row
-  labels are *data*, matched by the Filter tab and sorted by the Order tab, so a presentational rename
-  there shows `LC4` while a filter typed `LC4` matches nothing. Last trap, found by **running** the
+  **beside** the `<text>`, not inside it. **The Heatmap has the same port and it is the opposite kind
+  of thing**, which is the pairing to read together: its axis labels are *data*, matched by the Filter
+  tab and sorted by the Order tab, so a presentational rename there would show `LC4` while a filter
+  typed `LC4` matched nothing. `displayLabels` is shared and each caller decides what the answer is —
+  drawn there, written into the matrix here, ahead of both tabs, `NBLAST`'s `Label by` being the
+  precedent. What that spends is the identity this port exists to keep, one node further down
+  (`Linkage → Selected to Neurons`), which is why it takes a wire and why the help says a Linkage
+  needing ids goes *above* it; a separate `Relabel Matrix` node was the rejected third spelling.
+  No `Unmatched` control either — blanks on an axis collide and the Filter box could no longer address
+  them — so an unnamed line keeps its label and the **count** is what is said, in two messages that
+  are two states (*none* named names the two controls that fix it, *some* named is a count). Both
+  exporters write into the pass-through, which is where they diverge from this node's: pandas needed
+  **`set_axis` and a rebind**, since `heatmap = similarity_matrix` is one frame under two names and
+  `df.index = …` renames the upstream variable. Last trap, found by **running** the
   emitted cell: pandas' `dropna` keeps the empty string, so an untyped body drew a blank leaf in the
   notebook where the canvas drew its id — **the join the emitters do is `coda_relabel`**, the helper
   `core.relabel` already emits, because hand-rolling it on `.astype(str)` matches *nothing* when an

@@ -158,6 +158,14 @@ function ValuePreviewInner({
   const filterClauses = useMemo(() => decodeClauses(node.params.filters), [node.params.filters])
 
   /*
+   * Up here for the same reason, and keyed the same way — on the stored `string[]`, which
+   * changes only when a viewer writes a selection. `idList` copies, six viewers key memos and
+   * effects on the result, and a heatmap rectangle over a wide matrix is thousands of entries:
+   * minted fresh per render it would defeat every one of those memos on every store tick.
+   */
+  const selection = useMemo(() => idList(node.params.selection), [node.params.selection])
+
+  /*
    * A summary means "no second renderer", not just "no grid".
    *
    * `summary` was introduced for the table — a 60-column grid in a 320px panel is three
@@ -242,8 +250,6 @@ function ValuePreviewInner({
       />
     )
   }
-
-  const selection = idList(node.params.selection)
 
   /*
    * Above the `!value` guard, on `out.rois`' terms and for a sharper reason.
@@ -581,6 +587,10 @@ function ValuePreviewInner({
         limits={readColorLimits(node.params)}
         logColor={heatmapLogColor(node.params)}
         showValues={node.params.showValues === true}
+        // The param verbatim: both axes live in one `ids` param, so a rectangle is one commit
+        // and an undo takes back the whole of it. `chartSelection.ts` owns the grammar.
+        selection={selection}
+        {...(onSelectionChange ? { onSelectionChange } : {})}
         {...shared}
       />
     )

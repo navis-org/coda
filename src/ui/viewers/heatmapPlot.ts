@@ -798,6 +798,76 @@ export function cellAt(spec: HeatmapSpec, x: number, y: number): CellHit | null 
   return { row: Math.floor(index / spec.cols), col: index % spec.cols, index }
 }
 
+/** A run of adjacent selected lines, as a pixel span along that axis. */
+export interface Band {
+  from: number
+  to: number
+}
+
+/**
+ * The visible selected lines, merged into runs and measured in pixels.
+ *
+ * Runs rather than one rect per line, and that is not only tidiness: an additive selection is
+ * several blocks by construction, and a folded axis would otherwise stack hundreds of identical
+ * 1px outlines on one grid cell.
+ *
+ * Only the window is walked, so this costs the plot rather than the matrix, like everything else
+ * downstream of `axisMap`. Spans come off `gridIndexOf`, the same mapping the fold and the hit
+ * test use, so a band cannot be drawn where its cells are not.
+ */
+export function selectionBands(map: AxisMap, picked: ReadonlySet<number>): Band[] {
+  const bands: Band[] = []
+  if (picked.size === 0) return bands
+  const end = map.first + map.visible
+  for (let i = map.first; i < end; i++) {
+    if (!picked.has(i)) continue
+    const g = gridIndexOf(map, i)
+    const from = map.origin + g * map.pitch
+    const to = from + map.pitch
+    const last = bands[bands.length - 1]
+    // Merged on touching rather than on adjacency of *indices*: a folded axis puts several
+    // lines on one grid cell, so two selected lines with an unselected one between them can
+    // land on the same block, and two rects there would draw one outline twice.
+    if (last && from <= last.to + 0.5) last.to = Math.max(last.to, to)
+    else bands.push({ from, to })
+  }
+  return bands
+}
+
+/** An inclusive run of matrix lines, `[first, last]`; `last < first` means none. */
+export type LineSpan = [number, number]
+
+/**
+ * The matrix lines a pixel rectangle covers, clamped to the matrix.
+ *
+ * Every line the box touched, not the ones that happened to be *drawn*: folded, one grid cell
+ * stands for many lines and only the strongest of them is on screen, so a rectangle over a
+ * folded block means the block — `rowsInPolygon`'s rule on the scatter, where a lasso above the
+ * point budget still means the region it enclosed.
+ *
+ * Bounds rather than the indices between them, because a rectangle is always contiguous: on a
+ * 20,000-row matrix a fit-view drag would otherwise build a 20,000-element array for a caller
+ * that immediately loops it into a `Set`.
+ */
+export function linesInRect(
+  spec: HeatmapSpec,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): { rows: LineSpan; cols: LineSpan } {
+  const a = pointToMatrix(spec, Math.min(x0, x1), Math.min(y0, y1))
+  const b = pointToMatrix(spec, Math.max(x0, x1), Math.max(y0, y1))
+  const span = (lo: number, hi: number, total: number): LineSpan => [
+    Math.max(0, Math.floor(lo)),
+    Math.min(total - 1, Math.ceil(hi) - 1),
+  ]
+  return {
+    rows: span(a.row, b.row, spec.rows),
+    cols: span(a.col, b.col, spec.cols),
+  }
+}
+
 /**
  * The size a cell is actually painted at — the grid pitch less the separator.
  *

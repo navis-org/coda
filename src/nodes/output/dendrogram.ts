@@ -32,22 +32,23 @@
  *   neurons resolves to every neuron of those five types in the connectome. The annotation is
  *   already one node downstream anyway — `Selected to Neurons` carries the whole neuron table's
  *   columns onto its output — so nothing is lost by leaving the identity alone.
- * - **The Heatmap does not get the same port**, though the wizard pairs the two. Its row labels
- *   are *data*: the Filter tab matches on them and the Order tab sorts by them, both
- *   `affectsData`, so a presentational rename there would show `LC4` on screen while a filter
- *   typed `LC4` matched nothing. A matrix-level relabel is the answer to that one and it is a
- *   different node. See `docs/viewers.md`.
+ * - **The Heatmap has the same port and writes it into the matrix**, which is the same argument
+ *   reaching the opposite answer. Its axis labels are *data*: the Filter tab matches on them and
+ *   the Order tab sorts by them, both `affectsData`, so a presentational rename there would show
+ *   `LC4` on screen while a filter typed `LC4` matched nothing. `displayLabels` is shared; what
+ *   differs is that `out.heatmap`'s `evaluate` reads the port and this one does not, and it pays
+ *   for that with the identity the axis arrived with. See `docs/viewers.md`.
  * - **An unnamed leaf keeps its own label**, which inverts `core.relabel`'s `Unmatched` default
  *   on purpose: there, a value that passes for mapped is the confusion being prevented, where
  *   here a blank leaf is strictly worse than the id it replaced. The caption counts them.
  */
 
 import { registerNode } from '../../core/registry'
-import { ID_COLUMN_NAME } from '../../core/ids'
-import { T, column, findColumn, schemaOf, tableSchema } from '../../core/types'
+import { T, column, tableSchema } from '../../core/types'
 import { isLinkageValue, tableFromRows } from '../../core/values'
-import { TYPE_COLUMN_NAME } from '../../data/annotations/types'
+import { ANNOTATIONS_INPUT } from '../lib/annotationParams'
 import { decodeIndices } from '../lib/chartSelection'
+import { labelPickerIssues, labelPickerParams } from '../lib/displayLabels'
 import { leafPositions } from '../lib/linkageOps'
 /*
  * The one `nodes -> ui` edge this node has, and the same one `out.neuroglancer` takes for the
@@ -111,12 +112,11 @@ export const dendrogramNode = registerNode({
   inputs: [
     { id: 'in', label: 'Tree', type: T.linkage() },
     /*
-     * An ordinary table, not `T.neurons()`. Everything wanted here is a neuron table in
-     * practice, but the join is "match this column against the leaf's label" and a two-column
-     * upload or a `Group By` answers it just as well — the standing `core.relabel`'s `Mapping`
-     * port takes, and declaring `neurons` would refuse those for a rule nothing here relies on.
+     * `ANNOTATIONS_INPUT`, the same socket a dataset node takes: an ordinary table rather than
+     * `T.neurons()`, because the join is "match this column against the leaf's label" and a
+     * two-column upload or a `Group By` answers that as well as a neuron table does.
      */
-    { id: 'annotations', label: 'Annotations', type: T.table(), required: false },
+    ANNOTATIONS_INPUT,
   ],
   outputs: [
     { id: 'out', label: 'Tree', type: T.linkage() },
@@ -143,38 +143,13 @@ export const dendrogramNode = registerNode({
       presentational: true,
       help: 'Dropped automatically where there is not room for them; the caption says so.',
     },
-    /*
-     * Both `optional`, and that is the load-bearing half rather than a shrug.
-     *
-     * `resolveColumn`'s rule 3 substitutes the *first compatible column* for a required picker
-     * whose declared default the schema does not have — which here would name every leaf after
-     * whatever column happens to come first in somebody's annotation table, silently and
-     * plausibly. `optional` answers "off" instead, and off draws the tree's own labels. The
-     * declared defaults still land at creation through `defaultParams`, so wiring a neuron
-     * table and getting cell types needs nothing set; a stored graph from before this port
-     * existed has neither key, reads as off, and draws exactly what it drew before — absence and
-     * the default agreeing, which is why this is not `absentMeans`' case.
-     */
-    {
-      id: 'matchColumn',
-      kind: 'column',
-      label: 'Match on',
-      from: 'annotations',
-      default: ID_COLUMN_NAME,
-      optional: true,
+    ...labelPickerParams({
       presentational: true,
-      help: 'Which column of the wired table is compared with the leaf label. Leaf labels are whatever named the matrix, usually "neuronId". Compared as text.',
-    },
-    {
-      id: 'labelColumn',
-      kind: 'column',
-      label: 'Label by',
-      from: 'annotations',
-      default: TYPE_COLUMN_NAME,
-      optional: true,
-      presentational: true,
-      help: 'Which column names each leaf on the drawing. Only the picture changes — the tree, its Selected output and everything downstream keep the matrix’s labels. Unmatched leaves keep their own.',
-    },
+      matchHelp:
+        'Which column of the wired table is compared with the leaf label. Leaf labels are whatever named the matrix, usually "neuronId". Compared as text.',
+      labelHelp:
+        'Which column names each leaf on the drawing. Only the picture changes — the tree, its Selected output and everything downstream keep the matrix’s labels. Unmatched leaves keep their own.',
+    }),
     {
       id: 'selection',
       kind: 'ids',
@@ -187,51 +162,7 @@ export const dendrogramNode = registerNode({
 
   inferOutputs: () => ({ out: T.linkage(), selected: T.table(selectionSchema()) }),
 
-  /**
-   * The one thing a wired-but-useless Annotations port can be told at edit time.
-   *
-   * Nothing here can tell an unannotated tree from a mistyped one — the leaf labels are data
-   * the run decided and `T.linkage()` carries none — so what is checkable is the *table*: a
-   * picker that resolves to nothing, and invariant 8's dtype trap, which presents identically
-   * to "no annotations wired" and is the reason this is worth a line at all.
-   */
-  validate: (ctx) => {
-    const annotations = schemaOf(ctx.inputs.annotations)
-    // A port that is not wired is not a port whose columns are missing, and an unwired one is
-    // the ordinary state of this node. Nothing to say until a table has actually arrived.
-    if (!annotations) return []
-
-    const issues: string[] = []
-    const match = ctx.column('matchColumn')
-    const label = ctx.column('labelColumn')
-    if (!match || !label) {
-      issues.push(
-        'Annotations is wired but Match on and Label by are not both set, so the leaves keep ' +
-          'the labels the matrix arrived with',
-      )
-      return issues
-    }
-
-    const key = findColumn(annotations, match)
-    if (key && key.dtype !== 'str') {
-      /*
-       * `relabelTable`'s warning, one node over and for the same reason: this is never fatal,
-       * because a narrow id read as a number still resolves. What it is about is the wide one —
-       * an 18-digit root id in an `i64` column is a float64 that has already lost the digits
-       * identifying it, so `idText` **drops** it rather than naming whichever neuron owns the
-       * rounded value (invariant 8). The leaf keeps its own label, which is indistinguishable
-       * from having wired no annotations at all: hence a line here rather than silence.
-       */
-      issues.push(
-        `"${match}" is ${key.dtype} — a wide neuron id read as a number has already lost the ` +
-          `digits that identified it, so those leaves keep their own labels (see invariant 8)`,
-      )
-    }
-    if (match === label) {
-      issues.push(`Match on and Label by are both "${match}" — every leaf keeps its own name`)
-    }
-    return issues
-  },
+  validate: (ctx) => labelPickerIssues(ctx, { plural: 'leaves', singular: 'leaf' }),
 
   /*
    * **Nothing here reads `annotations`**, which is the property the port was designed around

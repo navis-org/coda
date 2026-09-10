@@ -1077,6 +1077,76 @@ registerHelper({
 })
 
 /**
+ * The Heatmap's `Selected Rows` / `Selected Columns`.
+ *
+ * A helper rather than seven lines in every heatmap cell, because both outputs are bound
+ * whether or not anything is wired to them — an emitter cannot ask who is downstream — and this
+ * node already emits four other things.
+ *
+ * **`picked` is positions into the matrix the cell has just finished reshaping**, which is what
+ * a rectangle on the card means: the lines under it and no others. It was the drawn *labels*
+ * first, and that is the bug it was reported as — naming rows by cell type is one-to-many, so a
+ * box round one cell of a fourteen-row `LC4` block took all fourteen.
+ *
+ * `arrival` is the axis before the Labels tab renamed it and is what `label` carries; where
+ * nothing renamed anything the two are the same string, which is the honest reading of "what the
+ * card showed". `index` is the position itself, so a sort downstream can put the lines back in
+ * the order the card had them. An index the axis does not reach is skipped rather than raising —
+ * the canvas drops it too, and a document that failed where the card carried on would be the
+ * disagreement these helpers exist to prevent.
+ */
+registerHelper({
+  name: 'coda_matrix_selection',
+  requires: [['pandas']],
+  source: [
+    'def coda_matrix_selection(labels, picked, arrival=None):',
+    '    """Coda\'s Selected Rows / Selected Columns: the lines a rectangle covered."""',
+    '    labels = [str(label) for label in labels]',
+    '    arrival = labels if arrival is None else [str(label) for label in arrival]',
+    '    keep = [i for i in sorted(set(picked)) if 0 <= i < len(labels)]',
+    '    return pd.DataFrame({',
+    "        'label': [arrival[i] for i in keep],",
+    "        'index': keep,",
+    "        'relabel': [labels[i] for i in keep],",
+    '    })',
+  ],
+})
+
+/**
+ * The Heatmap's "other axis follows", as positions.
+ *
+ * `followOrder` in `matrixShape.ts`, and it is a helper rather than a comprehension because of
+ * the one rule a comprehension cannot express: **the first unclaimed line of a repeated name
+ * wins**. The obvious spelling — `[l for l in lead if l in follower] + [l for l in follower if
+ * l not in set(lead)]` — was what this emitted, and it is wrong twice over once axis labels can
+ * repeat, which naming rows by cell type makes routine: a lead label appearing twice takes the
+ * same follower line twice, and every follower line sharing a name with it is dropped.
+ *
+ * Positions rather than labels for the same reason the callers now use `.iloc`: `df.loc[[…]]`
+ * with a repeated label returns the *cross product*, so a 3x3 matrix ordered by name came back
+ * with five rows. Measured, not reasoned about.
+ */
+registerHelper({
+  name: 'coda_follow_order',
+  source: [
+    'def coda_follow_order(lead, follower):',
+    '    """Positions putting `follower` in `lead`\'s order, matched by label. Coda\'s rule."""',
+    '    where = {}',
+    '    for i, label in enumerate(follower):',
+    '        where.setdefault(label, []).append(i)',
+    '    taken = set()',
+    '    out = []',
+    '    for label in lead:',
+    '        for i in where.get(label, []):',
+    '            if i not in taken:',
+    '                taken.add(i)',
+    '                out.append(i)',
+    '    # Everything the leader did not name, in the order it already had.',
+    '    return out + [i for i in range(len(follower)) if i not in taken]',
+  ],
+})
+
+/**
  * A long `(query, neighbour, score)` table as umap-learn's `precomputed_knn` pair.
  *
  * Coda's Embedding node, Neighbours port — the route that exists to skip the all-by-all matrix,

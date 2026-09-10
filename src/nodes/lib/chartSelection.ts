@@ -30,6 +30,7 @@
 
 import type { CellValue, TableValue } from '../../core/values'
 import { selectRows } from '../../core/values'
+import type { MatrixAxis } from './matrixShape'
 import { rowsMatching } from './rowIds'
 
 /**
@@ -145,6 +146,91 @@ export function decodeRanges(selection: unknown): ValueRange[] {
 export function decodeIndices(selection: unknown): number[] {
   if (!Array.isArray(selection)) return []
   return selection.map(Number).filter(Number.isInteger)
+}
+
+// ---------------------------------------------------------------------------
+// Matrix lines — a position, and which axis it is on
+// ---------------------------------------------------------------------------
+
+/**
+ * One row or column of a heatmap, as the thing that identifies it.
+ *
+ * **A position, not a label — and this module's own rule bends here for the reason
+ * `out.dendrogram`'s does.** A matrix line has a name, so labels were the first answer and the
+ * survivability argument for them is real: the Order and Filter tabs sit on the same card as the
+ * gesture, and positions re-point the moment somebody sorts the picture they just selected from.
+ * What decided it against them is that **a heatmap's names are not identities**. The Labels tab
+ * exists to replace root ids with cell types, which is one-to-many by design, so a box drawn
+ * round one cell of a fourteen-row `LC4` block selected all fourteen — reported as a bug, and it
+ * is one: a rectangle is a statement about the lines under it and nothing else.
+ *
+ * So the cost is taken the other way round, and it is the smaller one. A sort or a filter under a
+ * standing selection re-points it, which is visible on the card the instant it happens — where a
+ * label quietly widening a selection is not visible at all, and reaches `Selected Rows`.
+ *
+ * Positions are into the matrix this node **outputs** — what the viewer draws and can address.
+ * Everything else about a line (its arrival id, its drawn name) is the node's to resolve, which
+ * is what `label` and `relabel` on the two Selected ports are for.
+ *
+ * **One param, both axes**, which is `out.table`'s filter clauses and `core.rename`'s pairs
+ * again: a gesture that wrote two params would be two commits, so an undo would leave half a
+ * rectangle behind (`attachEdgeSet` records that trap one layer down).
+ *
+ * The axis type is `matrixShape.ts`' `MatrixAxis` rather than one of this module's own: a second
+ * spelling of `'rows' | 'columns'` is how two files come to index each other's records.
+ */
+const AXIS_PREFIX: Record<MatrixAxis, string> = { rows: 'r:', columns: 'c:' }
+
+/**
+ * The positions of one axis in ascending order.
+ *
+ * Ascending everywhere it is written down — the param, and both emitted documents — so two
+ * gestures that select the same lines produce the same text, which keeps a provenance key from
+ * moving over a re-selection that changed nothing and keeps a golden file readable.
+ */
+export function matrixSelectionOrder(picked: ReadonlySet<number>): number[] {
+  return [...picked].sort((a, b) => a - b)
+}
+
+export function encodeMatrixSelection(
+  rows: ReadonlySet<number>,
+  columns: ReadonlySet<number>,
+): string[] {
+  return [
+    ...matrixSelectionOrder(rows).map((i) => `${AXIS_PREFIX.rows}${i}`),
+    ...matrixSelectionOrder(columns).map((i) => `${AXIS_PREFIX.columns}${i}`),
+  ]
+}
+
+/**
+ * A stored matrix selection, split by axis.
+ *
+ * Sets rather than arrays, because every reader asks "is this line in it" once per line and none
+ * of them cares what order the gesture recorded.
+ *
+ * An entry with an unknown prefix is dropped rather than guessed at — `decodeRange`'s rule for
+ * its third part, and for its reason: a spelling this build does not know is how a stored
+ * selection quietly comes to mean something else. **A non-integer is dropped for the same
+ * reason**, and that is what a selection stored by the label-based build degrades to: `r:LC4`
+ * is not a position, and resolving it as one would select whichever line happened to sit at a
+ * plausible index. `decodeIndices` states the other half of this rule — an emitter splices these
+ * into a document, where `NaN` is a name Python and R both refuse.
+ */
+export function decodeMatrixSelection(selection: unknown): Record<MatrixAxis, Set<number>> {
+  const payloads: Record<MatrixAxis, string[]> = { rows: [], columns: [] }
+  if (Array.isArray(selection)) {
+    for (const entry of selection) {
+      if (typeof entry !== 'string') continue
+      if (entry.startsWith(AXIS_PREFIX.rows)) payloads.rows.push(entry.slice(2))
+      else if (entry.startsWith(AXIS_PREFIX.columns)) payloads.columns.push(entry.slice(2))
+    }
+  }
+  // Split by prefix here, then the *payload* through `decodeIndices` — which is where this
+  // module already states the integer rule and why (an emitter splices these into a document,
+  // where `NaN` is a name Python and R both refuse). A negative is dropped on top of it: no
+  // line sits at one, and `-1` is what a padded neighbour row carries elsewhere.
+  const keep = (list: string[]) => new Set(decodeIndices(list).filter((i) => i >= 0))
+  return { rows: keep(payloads.rows), columns: keep(payloads.columns) }
 }
 
 /**

@@ -277,6 +277,24 @@ coda_endpoint_neurons <- function(connections, seed_ids = NULL) {
 }
 
 
+coda_follow_order <- function(lead, follower) {
+  # Positions putting `follower` in `lead`'s order, matched by label. Coda's rule.
+  taken <- rep(FALSE, length(follower))
+  out <- integer(0)
+  for (label in lead) {
+    hits <- which(follower == label & !taken)
+    if (length(hits) > 0) {
+      # Every untaken line of that name, not just the first — `followOrder`'s rule: one
+      # lead label may stand for several follower lines and takes all of them.
+      taken[hits] <- TRUE
+      out <- c(out, hits)
+    }
+  }
+  # Everything the leader did not name, in the order it already had.
+  c(out, which(!taken))
+}
+
+
 #' Rename an annotation table's columns to the two names Coda addresses by name.
 coda_annotation_columns <- function(df, id_column) {
   if (id_column %in% names(df)) names(df)[names(df) == id_column] <- "neuronId"
@@ -338,6 +356,24 @@ coda_join_annotations <- function(left, right) {
     merged[[paste0(name, ".coda_later")]] <- NULL
   }
   merged
+}
+
+
+coda_matrix_selection <- function(labels, picked, arrival = NULL) {
+  # Coda's Selected Rows / Selected Columns: the lines a rectangle covered.
+  labels <- as.character(labels)
+  if (is.null(arrival)) arrival <- labels
+  # `as.integer` because `picked` arrives as R numerics: without it `index` below is a
+  # double column, and a document writing 1 where the canvas writes 1L is a column a join
+  # downstream reads differently.
+  keep <- as.integer(sort(unique(picked[picked >= 0 & picked < length(labels)]))) + 1L
+  data.frame(
+    label = as.character(arrival)[keep],
+    # Zero-based: Coda counts positions from 0 and this column is Coda's, not R's.
+    index = keep - 1L,
+    relabel = labels[keep],
+    stringsAsFactors = FALSE
+  )
 }
 
 
@@ -2205,6 +2241,58 @@ sample_df <- sort_df |> slice(coda_sample_rows(nrow(sort_df), 200, 7))
 select_one_2 <- sort_df |> slice(4)
 ```
 
+```{r heatmap}
+# ── Heatmap ──
+heatmap_out <- as.matrix(similarity_matrix_2)
+named_ <- find_neurons |>
+  filter(!is.na(`type`) & `type` != "")
+rowSrc_ <- rownames(heatmap_out)
+rownames(heatmap_out) <- coda_relabel(
+  data.frame(label = rownames(heatmap_out)),
+  "label",
+  named_,
+  "neuronId",
+  "type",
+  unmatched = "keep"
+)$label
+colSrc_ <- colnames(heatmap_out)
+colnames(heatmap_out) <- coda_relabel(
+  data.frame(label = colnames(heatmap_out)),
+  "label",
+  named_,
+  "neuronId",
+  "type",
+  unmatched = "keep"
+)$label
+keepRows_ <- grepl("^LC", rownames(heatmap_out), ignore.case = TRUE)
+rowSrc_ <- rowSrc_[keepRows_]
+heatmap_out <- heatmap_out[keepRows_, , drop = FALSE]
+rows_ <- coda_natural_order(rownames(heatmap_out))
+cols_ <- coda_follow_order(rownames(heatmap_out)[rows_], colnames(heatmap_out))
+rowSrc_ <- rowSrc_[rows_]
+colSrc_ <- colSrc_[cols_]
+heatmap_out <- heatmap_out[rows_, cols_, drop = FALSE]
+
+heatmap_rows <- coda_matrix_selection(rownames(heatmap_out), c(0, 1, 3), rowSrc_)
+heatmap_columns <- coda_matrix_selection(colnames(heatmap_out), c(0), colSrc_)
+# NOTE: Coda draws this in its own blue ramp, which has no name here; Blues
+# is the nearest published one.
+
+heatmap_out |>
+  as.data.frame() |>
+  tibble::rownames_to_column("row") |>
+  pivot_longer(-row, names_to = "column", values_to = "value") |>
+  mutate(
+    row = factor(row, levels = rev(rownames(heatmap_out))),
+    column = factor(column, levels = colnames(heatmap_out))
+  ) |>
+  ggplot(aes(column, row, fill = value)) +
+  geom_tile() +
+  scale_fill_distiller(palette = "Blues", direction = 1) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
 ```{r cut-tree}
 # ── Cut Tree ──
 # TODO: This Cut Tree groups by which datasets each cluster draws from,
@@ -2578,30 +2666,33 @@ normalize <- pivot_matrix_df / ifelse(totals_ > 0, totals_, NA_real_)
 normalize[empty_, ] <- 0
 ```
 
-```{r heatmap}
+```{r heatmap-2}
 # ── Heatmap ──
-heatmap <- as.matrix(pivot_matrix_df)
+heatmap_2_out <- as.matrix(pivot_matrix_df)
 # NOTE: The clustering is seaborn’s clustermap: each row a vector across the
 # columns, clustered by the distance between vectors. Coda reads an empty
 # cell as 0 for this, and puts a constant vector — no correlation, no cosine
 # — at distance 1 from everything rather than letting `cor`’s NA stop
 # `hclust`.
-x_ <- heatmap
+x_ <- heatmap_2_out
 x_[!is.finite(x_)] <- 0
 d_ <- 1 - cor(t(x_))
 d_[!is.finite(d_)] <- 1
 diag(d_) <- 0
-rows_ <- rownames(heatmap)[hclust(as.dist(d_), method = "average")$order]
-cols_ <- c(intersect(rows_, colnames(heatmap)), setdiff(colnames(heatmap), rows_))
-heatmap <- heatmap[rows_, cols_, drop = FALSE]
+rows_ <- hclust(as.dist(d_), method = "average")$order
+cols_ <- coda_follow_order(rownames(heatmap_2_out)[rows_], colnames(heatmap_2_out))
+heatmap_2_out <- heatmap_2_out[rows_, cols_, drop = FALSE]
 
-heatmap |>
+heatmap_2_rows <- coda_matrix_selection(rownames(heatmap_2_out), integer(0))
+heatmap_2_columns <- coda_matrix_selection(colnames(heatmap_2_out), integer(0))
+
+heatmap_2_out |>
   as.data.frame() |>
   tibble::rownames_to_column("row") |>
   pivot_longer(-row, names_to = "column", values_to = "value") |>
   mutate(
-    row = factor(row, levels = rev(rownames(heatmap))),
-    column = factor(column, levels = colnames(heatmap))
+    row = factor(row, levels = rev(rownames(heatmap_2_out))),
+    column = factor(column, levels = colnames(heatmap_2_out))
   ) |>
   ggplot(aes(column, row, fill = value)) +
   geom_tile() +
@@ -2610,22 +2701,26 @@ heatmap |>
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-```{r heatmap-2}
+```{r heatmap-3}
 # ── Heatmap ──
-heatmap_2 <- as.matrix(pivot_matrix_df)
-cols_ <- rev(names(sort(heatmap_2["LC4", ], decreasing = TRUE)))
-rows_ <- c(intersect(cols_, rownames(heatmap_2)), setdiff(rownames(heatmap_2), cols_))
-heatmap_2 <- heatmap_2[rows_, cols_, drop = FALSE]
-hi_ <- max(abs(heatmap_2), na.rm = TRUE)
+heatmap_3_out <- as.matrix(pivot_matrix_df)
+key_ <- which(rownames(heatmap_3_out) == "LC4")[1]
+cols_ <- rev(order(heatmap_3_out[key_, ], decreasing = TRUE, na.last = TRUE, method = "radix"))
+rows_ <- coda_follow_order(colnames(heatmap_3_out)[cols_], rownames(heatmap_3_out))
+heatmap_3_out <- heatmap_3_out[rows_, cols_, drop = FALSE]
+
+heatmap_3_rows <- coda_matrix_selection(rownames(heatmap_3_out), integer(0))
+heatmap_3_columns <- coda_matrix_selection(colnames(heatmap_3_out), integer(0))
+hi_ <- max(abs(heatmap_3_out), na.rm = TRUE)
 lo_ <- -hi_
 
-heatmap_2 |>
+heatmap_3_out |>
   as.data.frame() |>
   tibble::rownames_to_column("row") |>
   pivot_longer(-row, names_to = "column", values_to = "value") |>
   mutate(
-    row = factor(row, levels = rev(rownames(heatmap_2))),
-    column = factor(column, levels = colnames(heatmap_2)),
+    row = factor(row, levels = rev(rownames(heatmap_3_out))),
+    column = factor(column, levels = colnames(heatmap_3_out)),
     fill_ = pmin(pmax(value, lo_), hi_)
   ) |>
   ggplot(aes(column, row, fill = fill_)) +
@@ -2636,19 +2731,22 @@ heatmap_2 |>
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-```{r heatmap-3}
+```{r heatmap-4}
 # ── Heatmap ──
-heatmap_3 <- as.matrix(pivot_matrix_df)
-cols_ <- colnames(heatmap_3)[coda_natural_order(colnames(heatmap_3))]
-heatmap_3 <- heatmap_3[, cols_, drop = FALSE]
+heatmap_4_out <- as.matrix(pivot_matrix_df)
+cols_ <- coda_natural_order(colnames(heatmap_4_out))
+heatmap_4_out <- heatmap_4_out[, cols_, drop = FALSE]
 
-heatmap_3 |>
+heatmap_4_rows <- coda_matrix_selection(rownames(heatmap_4_out), integer(0))
+heatmap_4_columns <- coda_matrix_selection(colnames(heatmap_4_out), integer(0))
+
+heatmap_4_out |>
   as.data.frame() |>
   tibble::rownames_to_column("row") |>
   pivot_longer(-row, names_to = "column", values_to = "value") |>
   mutate(
-    row = factor(row, levels = rev(rownames(heatmap_3))),
-    column = factor(column, levels = colnames(heatmap_3))
+    row = factor(row, levels = rev(rownames(heatmap_4_out))),
+    column = factor(column, levels = colnames(heatmap_4_out))
   ) |>
   ggplot(aes(column, row, fill = value)) +
   geom_tile() +
@@ -2657,25 +2755,28 @@ heatmap_3 |>
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-```{r heatmap-4}
+```{r heatmap-5}
 # ── Heatmap ──
-heatmap_4 <- as.matrix(pivot_matrix_df)
-keepRows_ <- grepl("^LC[0-9]+$", rownames(heatmap_4), ignore.case = TRUE)
-keepCols_ <- !grepl("dn", tolower(colnames(heatmap_4)), fixed = TRUE)
-heatmap_4 <- heatmap_4[keepRows_, keepCols_, drop = FALSE]
-rows_ <- names(sort(rowSums(heatmap_4, na.rm = TRUE), decreasing = TRUE))
-cols_ <- c(intersect(rows_, colnames(heatmap_4)), setdiff(colnames(heatmap_4), rows_))
-heatmap_4 <- heatmap_4[rows_, cols_, drop = FALSE]
+heatmap_5_out <- as.matrix(pivot_matrix_df)
+keepRows_ <- grepl("^LC[0-9]+$", rownames(heatmap_5_out), ignore.case = TRUE)
+keepCols_ <- !grepl("dn", tolower(colnames(heatmap_5_out)), fixed = TRUE)
+heatmap_5_out <- heatmap_5_out[keepRows_, keepCols_, drop = FALSE]
+rows_ <- order(rowSums(heatmap_5_out, na.rm = TRUE), decreasing = TRUE, method = "radix")
+cols_ <- coda_follow_order(rownames(heatmap_5_out)[rows_], colnames(heatmap_5_out))
+heatmap_5_out <- heatmap_5_out[rows_, cols_, drop = FALSE]
+
+heatmap_5_rows <- coda_matrix_selection(rownames(heatmap_5_out), integer(0))
+heatmap_5_columns <- coda_matrix_selection(colnames(heatmap_5_out), integer(0))
 # NOTE: Coda draws this in its own blue ramp, which has no name here; Blues
 # is the nearest published one.
 
-heatmap_4 |>
+heatmap_5_out |>
   as.data.frame() |>
   tibble::rownames_to_column("row") |>
   pivot_longer(-row, names_to = "column", values_to = "value") |>
   mutate(
-    row = factor(row, levels = rev(rownames(heatmap_4))),
-    column = factor(column, levels = colnames(heatmap_4))
+    row = factor(row, levels = rev(rownames(heatmap_5_out))),
+    column = factor(column, levels = colnames(heatmap_5_out))
   ) |>
   ggplot(aes(column, row, fill = value)) +
   geom_tile() +
@@ -2684,9 +2785,12 @@ heatmap_4 |>
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-```{r heatmap-5}
+```{r heatmap-6}
 # ── Heatmap ──
-heatmap_5 <- as.matrix(pivot_matrix_df)
+heatmap_6_out <- as.matrix(pivot_matrix_df)
+
+heatmap_6_rows <- coda_matrix_selection(rownames(heatmap_6_out), integer(0))
+heatmap_6_columns <- coda_matrix_selection(colnames(heatmap_6_out), integer(0))
 # NOTE: Coda draws this in its own blue ramp, which has no name here; Blues
 # is the nearest published one.
 hi_ <- 50
@@ -2696,13 +2800,13 @@ lo_ <- 0
 # itself. A cell past either end is clipped to it, as on the card — note
 # that this leaves the legend labelled in the transformed units.
 
-heatmap_5 |>
+heatmap_6_out |>
   as.data.frame() |>
   tibble::rownames_to_column("row") |>
   pivot_longer(-row, names_to = "column", values_to = "value") |>
   mutate(
-    row = factor(row, levels = rev(rownames(heatmap_5))),
-    column = factor(column, levels = colnames(heatmap_5)),
+    row = factor(row, levels = rev(rownames(heatmap_6_out))),
+    column = factor(column, levels = colnames(heatmap_6_out)),
     fill_ = pmin(pmax(value, lo_), hi_),
     fill_ = log10(1 + fill_ - lo_)
   ) |>
@@ -2731,19 +2835,22 @@ unpivot_2 <- pivot_table_df |>
   )
 ```
 
-```{r heatmap-6}
+```{r heatmap-7}
 # ── Heatmap ──
-heatmap_6 <- as.matrix(normalize)
+heatmap_7_out <- as.matrix(normalize)
+
+heatmap_7_rows <- coda_matrix_selection(rownames(heatmap_7_out), integer(0))
+heatmap_7_columns <- coda_matrix_selection(colnames(heatmap_7_out), integer(0))
 # NOTE: Coda draws this in its own blue ramp, which has no name here; Blues
 # is the nearest published one.
 
-heatmap_6 |>
+heatmap_7_out |>
   as.data.frame() |>
   tibble::rownames_to_column("row") |>
   pivot_longer(-row, names_to = "column", values_to = "value") |>
   mutate(
-    row = factor(row, levels = rev(rownames(heatmap_6))),
-    column = factor(column, levels = colnames(heatmap_6))
+    row = factor(row, levels = rev(rownames(heatmap_7_out))),
+    column = factor(column, levels = colnames(heatmap_7_out))
   ) |>
   ggplot(aes(column, row, fill = value)) +
   geom_tile() +

@@ -1,6 +1,6 @@
 /**
- * Which of a matrix's rows and columns survive, and in what order — the Heatmap node's
- * `Filter` and `Order` tabs.
+ * What a matrix's rows and columns are called, which of them survive, and in what order — the
+ * Heatmap node's `Labels`, `Filter` and `Order` tabs.
  *
  * Headless, for `linkageOps.ts`'s reason: what is decidable without Python is decided here,
  * where a test can see it, and the one thing that is not — the clustering — arrives as an
@@ -21,6 +21,22 @@
  * order, and either may be absent. **The filter runs first**, and the sort is then computed
  * against the filtered matrix, because a row total taken over columns somebody has just
  * excluded is not the number they asked for.
+ *
+ * ## The relabel is not one of those two, and it runs before both
+ *
+ * `relabelMatrix` rewrites the names and touches no index list: every line stays, in its own
+ * order, called something else. It is **data here and a drawing on the dendrogram**, and the
+ * asymmetry is forced rather than stylistic — a leaf's name is read by nothing but the drawing,
+ * where a matrix axis label is read by the filter that matches it and the sort that orders by
+ * it. A presentational rename would put `LC4` on screen while a filter typed `LC4` matched
+ * nothing, which is the worse kind of wrong because the picture looks right. So it runs
+ * **first**, in `evaluate`, and the filter and the sort see the names a reader sees.
+ *
+ * The price of that is the price `core.relabel` names: the axis no longer carries the identity
+ * it arrived with, so a `Linkage` below a relabelled Heatmap clusters lines called `LC4`, and
+ * `Selected to Neurons` under it would match cell types against a neuron table. That is the
+ * user's decision to make, which is why it takes a wire and two pickers rather than happening
+ * on its own.
  *
  * ## Two axes, one order
  *
@@ -54,6 +70,163 @@ import type { ParamValues } from '../../core/node'
 import type { MatrixValue } from '../../core/values'
 import { makeMatrix } from '../../core/values'
 import { bareRegex, regexError } from './neuronSearch'
+
+// ---------------------------------------------------------------------------
+// Naming
+// ---------------------------------------------------------------------------
+
+/**
+ * Which axis a relabel names. The same three answers `sortAxis` gives, and the same type, so
+ * the two controls cannot come to disagree about what "both" means.
+ */
+export type MatrixSortAxis = 'rows' | 'columns' | 'both'
+
+/**
+ * Which axes a `rows | columns | both` choice covers.
+ *
+ * One expansion of `both`, because there are now three controls spelling it — the Labels tab's
+ * `Apply to`, the Order tab's, and `orderPlan` in its own vocabulary — and this module's header
+ * already claims the type is shared "so the two controls cannot come to disagree about what
+ * 'both' means". Written out per caller, that claim was about the type alone.
+ */
+export function axesOf(axis: MatrixSortAxis): MatrixAxis[] {
+  return axis === 'both' ? ['rows', 'columns'] : [axis]
+}
+
+export const LABEL_AXIS_OPTIONS: Array<{ value: MatrixSortAxis; label: string }> = [
+  { value: 'both', label: 'both axes' },
+  { value: 'rows', label: 'rows' },
+  { value: 'columns', label: 'columns' },
+]
+
+export interface MatrixLabelOptions {
+  axis: MatrixSortAxis
+  /**
+   * The annotation column matched against the axis label, as `ctx.column` answers it.
+   *
+   * `undefined` rather than `''` for an unset picker, because that is the answer the resolver
+   * gives and the answer `displayLabels` takes: a sentinel here would be normalised on the way
+   * in and undone again at the one place the value is consumed.
+   */
+  match?: string
+  /** The annotation column supplying the new name. */
+  label?: string
+}
+
+/**
+ * The three label params, read once — the node, both exporters and the tests.
+ *
+ * Takes a `column` resolver rather than reading `params.matchColumn`, which is invariant 5 and
+ * `relabel.ts`'s `specOf` arrangement: infer, validate, evaluate and the cache key all have to
+ * resolve a picker the same way, and a picker sitting on its own declared default resolves to a
+ * column nobody typed.
+ */
+export function readLabelOptions(ctx: {
+  params: ParamValues
+  column: (id: string) => string | undefined
+}): MatrixLabelOptions {
+  const axis = ctx.params.labelAxis
+  return {
+    axis: axis === 'rows' || axis === 'columns' ? axis : 'both',
+    ...(ctx.column('matchColumn') ? { match: ctx.column('matchColumn') } : {}),
+    ...(ctx.column('labelColumn') ? { label: ctx.column('labelColumn') } : {}),
+  }
+}
+
+/**
+ * Which axes the Labels tab actually names — the pickers and the wire, not just `Apply to`.
+ *
+ * `readLabelOptions`' rule one line up, and for the reason every reader in this file carries:
+ * the node, both exporters and the tests have to agree, and this decision had been spelled out
+ * twice in TypeScript inside the two emitters. An empty list means the tab does nothing.
+ *
+ * It takes *whether* a table arrived rather than the table, because the two callers know that
+ * differently: `evaluate` holds a value and an emitter holds a wire. What the node then does
+ * with a table whose columns are missing is `displayLabels`' four-ways-to-answer-nothing guard,
+ * which is a run-time question an emitter has no schema to ask.
+ */
+export function labelledAxes(options: MatrixLabelOptions, wired: boolean): MatrixAxis[] {
+  if (!wired || !options.match || !options.label) return []
+  return axesOf(options.axis)
+}
+
+/** How much of one axis a naming table covered. */
+export interface AxisNaming {
+  /** Lines the table had a name for. */
+  named: number
+  total: number
+}
+
+export interface RelabelledMatrix {
+  matrix: MatrixValue
+  /** One entry per axis the relabel was asked to name, for the caller to warn from. */
+  counts: Partial<Record<MatrixAxis, AxisNaming>>
+}
+
+/**
+ * The axis names rewritten through a lookup, every line kept in its own place.
+ *
+ * **An unnamed line keeps its own label**, which inverts `core.relabel`'s `Unmatched` default
+ * on purpose and for a sharper reason than the dendrogram's. There, a blank leaf is merely
+ * worse than the id it replaced; here it is worse than that — several blanks collide, the
+ * Filter box can no longer address those lines, and `Order by: one row or column` loses a key
+ * it could have named. So there is no `Unmatched` control at all, and the *count* is what the
+ * node says out loud instead: a half-joined axis looks like a broken join and usually is one.
+ *
+ * `counts` reports every axis that was asked, including one the table named in full, because
+ * the caller's two messages are "none of them" and "some of them" and it needs the totals to
+ * tell those apart.
+ *
+ * The values are handed to the new matrix **by reference**. Nothing here mutates a matrix's
+ * cells — `clusterAxis` copies before crossing the bridge precisely because the buffer belongs
+ * to the upstream node's cached result — and an axis rename that copied four million cells to
+ * change two strings would be a fold's worth of work for nothing.
+ */
+export function relabelMatrix(
+  matrix: MatrixValue,
+  names: Map<string, string>,
+  axis: MatrixSortAxis,
+): RelabelledMatrix {
+  const counts: Partial<Record<MatrixAxis, AxisNaming>> = {}
+  let rowLabels = matrix.rowLabels
+  let colLabels = matrix.colLabels
+
+  for (const which of axesOf(axis)) {
+    const labels = labelsOf(matrix, which)
+    let named = 0
+    // Built only once a name differs, and seeded with the prefix that did not — the unmatched
+    // axis is the *common* case (`both` against a matrix whose columns are regions), and a
+    // `map` there would allocate a full copy of the labels to throw away at the identity
+    // return below.
+    let next: string[] | undefined
+    for (let i = 0; i < labels.length; i++) {
+      const label = labels[i]!
+      const name = names.get(label)
+      // A table that names a line what it is already called has covered it, and has changed
+      // nothing — which is what keeps the identity return reachable.
+      if (name !== undefined) named++
+      const value = name ?? label
+      if (next) next.push(value)
+      // The first line that actually changes is where the copy starts, back-filled with the
+      // prefix that did not: the unmatched axis is the *common* case (`both` against a matrix
+      // whose columns are regions) and allocates nothing at all.
+      else if (value !== label) next = [...labels.slice(0, i), value]
+    }
+    counts[which] = { named, total: labels.length }
+    if (!next) continue
+    if (which === 'rows') rowLabels = next
+    else colLabels = next
+  }
+
+  // `takeMatrix`'s rule: a pass that changes nothing hands the value back untouched, so a
+  // wired-but-unmatched port costs one walk of the labels and no allocation at all.
+  if (rowLabels === matrix.rowLabels && colLabels === matrix.colLabels)
+    return { matrix, counts }
+  return {
+    matrix: makeMatrix(rowLabels, colLabels, matrix.values, matrix.valueLabel, matrix.measure),
+    counts,
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Filtering
@@ -179,7 +352,6 @@ export function readFilterOptions(params: ParamValues): MatrixFilterOptions {
 // ---------------------------------------------------------------------------
 
 export type MatrixSortBy = 'none' | 'total' | 'label' | 'value' | 'cluster'
-export type MatrixSortAxis = 'rows' | 'columns' | 'both'
 export type MatrixAxis = 'rows' | 'columns'
 export type ClusterMetric = 'euclidean' | 'correlation' | 'cosine'
 
@@ -381,7 +553,7 @@ function isIdentityOrder(order: Int32Array): boolean {
 
 /**
  * One axis's order under every criterion that needs no Python — `cluster` is the node's to
- * fetch and hand to `applyOrderPlan`. `undefined` means "leave it as it is", and comes with
+ * fetch and hand to `orderIndices`. `undefined` means "leave it as it is", and comes with
  * the reason, which the caller puts on the card.
  */
 export function orderAxis(
@@ -459,13 +631,17 @@ export function takeMatrix(
       values.set(matrix.values.subarray(from, from + cols), to)
     }
   }
-  const rowLabels = rowIndices
-    ? Array.from(rowIndices, (i) => matrix.rowLabels[i]!)
-    : matrix.rowLabels
-  const colLabels = colIndices
-    ? Array.from(colIndices, (i) => matrix.colLabels[i]!)
-    : matrix.colLabels
-  return makeMatrix(rowLabels, colLabels, values, matrix.valueLabel, matrix.measure)
+  // Through `takeAxisLabels`, which is this same pick generalised — the Heatmap puts a second
+  // set of labels through the identical lists, and two spellings of "gather by index" is how
+  // the pair comes to disagree about a `-1`.
+  const labels = takeAxisLabels(
+    { rows: matrix.rowLabels, columns: matrix.colLabels },
+    {
+      ...(rowIndices ? { rows: rowIndices } : {}),
+      ...(colIndices ? { columns: colIndices } : {}),
+    },
+  )
+  return makeMatrix(labels.rows, labels.columns, values, matrix.valueLabel, matrix.measure)
 }
 
 /**
@@ -489,15 +665,20 @@ function isWholeAxis(indices: Int32Array | undefined, length: number): boolean {
 }
 
 /**
- * The plan, carried out: the leading orders as given, the follower derived from the leader's
- * *new* labels. A leading axis with no order (a key that was not found) is left as it is, and
+ * The index list per axis: the leading orders as given, the follower derived from the leader's
+ * *new* labels.
+ *
+ * Lists rather than a reshaped matrix, because the Heatmap puts the *same* lists through a
+ * second set of labels (`takeAxisLabels`) to keep a line's arrival name beside its drawn one —
+ * and computing the follower twice is how the two would come to disagree. `takeMatrix` is the
+ * other half, one call away at the caller. A leading axis with no order (a key that was not found) is left as it is, and
  * so, then, is anything that was to follow it.
  */
-export function applyOrderPlan(
+export function orderIndices(
   matrix: MatrixValue,
   plan: OrderPlan,
   orders: Partial<Record<MatrixAxis, Int32Array>>,
-): MatrixValue {
+): Partial<Record<MatrixAxis, Int32Array>> {
   const rowOrder = orders.rows
   const colOrder = orders.columns
   const chosen: Partial<Record<MatrixAxis, Int32Array>> = {}
@@ -512,5 +693,25 @@ export function applyOrderPlan(
       chosen[plan.follower] = followOrder(leadLabels, labelsOf(matrix, plan.follower))
     }
   }
-  return takeMatrix(matrix, chosen.rows, chosen.columns)
+  return chosen
+}
+
+/**
+ * The same index lists applied to a pair of label arrays — the axes' *arrival* names, carried
+ * alongside the matrix so a line can still say what it was called before the Labels tab.
+ *
+ * Split out from `takeMatrix` rather than folded into it because a `MatrixValue` has one set of
+ * axis labels and this is a second one: the Heatmap needs both at the end (`Selected Rows`
+ * carries the id in `label` and the drawn name in `relabel`), and the only way to keep them
+ * aligned through a filter and a sort is to put the *same* lists through both.
+ */
+export function takeAxisLabels(
+  labels: Record<MatrixAxis, string[]>,
+  indices: Partial<Record<MatrixAxis, Int32Array>>,
+): Record<MatrixAxis, string[]> {
+  const pick = (axis: MatrixAxis): string[] => {
+    const list = indices[axis]
+    return list ? Array.from(list, (i) => labels[axis][i] ?? '') : labels[axis]
+  }
+  return { rows: pick('rows'), columns: pick('columns') }
 }

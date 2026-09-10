@@ -4896,6 +4896,19 @@ a.dropdown__item {
   outline: none;
 }
 /*
+ * A selected run of heatmap rows or columns.
+ *
+ * Outlined and never filled: colour *is* the data on this viewer, so a wash over the cells
+ * would change what every cell inside the selection appears to say. `--accent` is the same ink
+ * the marquee is drawn in, so the band reads as what the drag left behind.
+ */
+.heatmap-band rect {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+/*
  * The heatmap's labels, printed values and hover outline. `pointer-events: none` so the canvas
  * underneath keeps every hover — the overlay covers the whole plot, and a label intercepting
  * the pointer would put a dead strip across the row it names.
@@ -4905,14 +4918,20 @@ a.dropdown__item {
   inset: 0;
   pointer-events: none;
 }
-.scatter-gesture {
+.chart-gesture {
   position: absolute;
   inset: 0;
   pointer-events: none;
   z-index: 2;
 }
-.scatter-gesture rect,
-.scatter-gesture polygon {
+/*
+ * The in-flight marquee and the scatter's lasso trail — the same dashed outline, so one drag
+ * gesture looks the same wherever it is made. Named for the gesture rather than for the first
+ * viewer to want it: `.scatter-gesture` was the name while there was one caller, and a shared
+ * rule under one caller's name is how the second one comes to write its own.
+ */
+.chart-gesture rect,
+.chart-gesture polygon {
   fill: var(--accent-soft);
   stroke: var(--accent);
   stroke-width: 1;

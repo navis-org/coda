@@ -1118,6 +1118,29 @@ export function everythingGraph(): CodaGraph {
       // reach the goldens — and `showValues` with `log` is the case where they differ.
       params: { logColor: true, colorMin: '0', colorMax: '50', showValues: true },
     },
+    /*
+     * The Labels tab, on the one square matrix in this graph whose axes are root ids — which is
+     * the case the port exists for, and the case a `Pivot` of cell types cannot show. A filter
+     * beside it on purpose: the relabel runs first, so `/^LC` matches the names the annotation
+     * table just wrote, and the golden is where that ordering is read.
+     */
+    {
+      id: 'heatNamed',
+      type: 'out.heatmap',
+      col: 13,
+      row: 6,
+      /*
+       * A selection as well, and on this node rather than a seventh: the two Selected ports
+       * read the *arrival* labels, which only differ from the drawn ones where the Labels tab
+       * has run — so this is the one node in the graph where the tracking lines are emitted at
+       * all, and it carries a filter and a sort for them to survive.
+       */
+      params: {
+        rowFilter: '/^LC',
+        sortBy: 'label',
+        selection: ['r:0', 'r:1', 'r:3', 'c:0'],
+      },
+    },
     {
       id: 'heatByRow',
       type: 'out.heatmap',
@@ -1422,6 +1445,9 @@ export function everythingGraph(): CodaGraph {
     ['pivot', 'matrix', 'heatByLabel', 'in'],
     ['pivot', 'matrix', 'heatFiltered', 'in'],
     ['pivot', 'matrix', 'heatLog', 'in'],
+    ['simil', 'matrix', 'heatNamed', 'in'],
+    // The neuron table that named the observations, naming the axes — see `out.heatmap`.
+    ['find', 'neurons', 'heatNamed', 'annotations'],
     ['pivot', 'table', 'table', 'in'],
     ['find', 'neurons', 'unpivot', 'in'],
     ['pivot', 'table', 'unpivotWide', 'in'],

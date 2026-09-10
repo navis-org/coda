@@ -17,11 +17,15 @@ import {
 } from '../../../nodes/lib/heatmapParams'
 import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
 import {
+  axesOf,
+  labelledAxes,
   orderPlan,
   parseLabelFilter,
   readFilterOptions,
+  readLabelOptions,
   readOrderOptions,
 } from '../../../nodes/lib/matrixShape'
+import { decodeMatrixSelection, matrixSelectionOrder } from '../../../nodes/lib/chartSelection'
 import { rCol as col, rStr, rVector } from '../r'
 import { R_METHODS } from './analysis'
 import { registerEmitter } from '../registry'
@@ -140,8 +144,10 @@ registerEmitter('out.heatmap', (ctx) => {
 
   const lines = [
     `${out} <- as.matrix(${src})`,
+    ...heatmapLabelLines(ctx, out),
     ...heatmapFilterLines(ctx, out),
     ...heatmapOrderLines(ctx, out),
+    ...heatmapSelectionLines(ctx, out),
   ]
 
   /*
@@ -238,6 +244,56 @@ registerEmitter('out.heatmap', (ctx) => {
 })
 
 /**
+ * The Labels tab, as base R: `dimnames` rewritten through `coda_relabel`.
+ *
+ * **Assigned into `${out}` itself**, which is where this parts company with `out.dendrogram`'s
+ * emitter: there the renamed labels go onto a *copy* of the tree that only `plot()` sees,
+ * because the canvas names leaves presentationally. Here the canvas writes the names into the
+ * matrix and the Filter and Order tabs read them, so anything less would leave the two lines
+ * below matching labels the card no longer has.
+ *
+ * Emitted **before** the filter lines, the node's own order.
+ *
+ * `coda_relabel` rather than a bare `match()`: it carries first-of-a-repeated-key and
+ * `coda_match_keys`, which is what makes an 18-digit id compare as text rather than as a double
+ * that has already lost its last digits. Blanks are dropped first, the one rule the helper does
+ * not carry — `""` is not `NA`, and an untyped body would take a blank axis label.
+ */
+function heatmapLabelLines(ctx: Parameters<Emitter>[0], out: string): string[] {
+  const options = readLabelOptions(ctx)
+  const annotations = ctx.input('annotations')
+  if (!annotations || !options.match || !options.label) return []
+  const tracked = trackedAxes(ctx)
+  ctx.library('dplyr')
+  ctx.helper('coda_relabel')
+
+  const lines = [
+    `named_ <- ${annotations} |>`,
+    `  filter(!is.na(${col(options.label)}) & ${col(options.label)} != "")`,
+  ]
+  for (const axis of axesOf(options.axis)) {
+    const names = axis === 'rows' ? 'rownames' : 'colnames'
+    // The arrival names, captured before they are overwritten — `Selected Rows` carries them in
+    // `label`, and after the assignment there is nothing left to recover them from. Only where a
+    // selection actually reads them.
+    if (tracked.has(axis)) lines.push(`${sourceName(axis)} <- ${names}(${out})`)
+    // A one-column frame in and a column out: a matrix's dimnames are a character vector, not a
+    // column of the thing being rewritten — the shape `out.dendrogram` uses for its leaves.
+    lines.push(
+      `${names}(${out}) <- coda_relabel(`,
+      `  data.frame(label = ${names}(${out})),`,
+      `  "label",`,
+      `  named_,`,
+      `  ${rStr(options.match)},`,
+      `  ${rStr(options.label)},`,
+      `  unmatched = "keep"`,
+      `)$label`,
+    )
+  }
+  return lines
+}
+
+/**
  * The Filter tab, as base R: one logical vector per filtered axis, then one subscript.
  *
  * Emitted **before** the order lines, which is the node's own rule — an order is computed
@@ -245,6 +301,7 @@ registerEmitter('out.heatmap', (ctx) => {
  * `ignore.case`, because `grepl`'s `fixed = TRUE` ignores that argument.
  */
 function heatmapFilterLines(ctx: Parameters<Emitter>[0], out: string): string[] {
+  const tracked = trackedAxes(ctx)
   const filters = readFilterOptions(ctx.params)
   const lines: string[] = []
   const masks: Partial<Record<MatrixAxis, string>> = {}
@@ -269,6 +326,8 @@ function heatmapFilterLines(ctx: Parameters<Emitter>[0], out: string): string[] 
       ? `grepl(${rStr(filter.pattern)}, ${labels}, ignore.case = TRUE)`
       : `grepl(${rStr(filter.pattern.toLowerCase())}, tolower(${labels}), fixed = TRUE)`
     lines.push(`${name} <- ${filter.negate ? `!${test}` : test}`)
+    // The arrival names go through the *same* mask, which is the only way the two stay aligned.
+    if (tracked.has(axis)) lines.push(`${sourceName(axis)} <- ${sourceName(axis)}[${name}]`)
     masks[axis] = name
   }
 
@@ -279,11 +338,21 @@ function heatmapFilterLines(ctx: Parameters<Emitter>[0], out: string): string[] 
 }
 
 /**
- * The Order tab, as base R over the matrix: one label vector per sorted axis, the follower
- * derived from the leader, then one subscript. `hclust`'s `$order` is `leaves_list` — checked
- * for the Linkage node — and `R_METHODS` is the same spelling of the methods.
+ * The Order tab, as base R over the matrix: **positions** per sorted axis, the follower derived
+ * from the leader, then one subscript. `hclust`'s `$order` is `leaves_list` — checked for the
+ * Linkage node — and `R_METHODS` is the same spelling of the methods.
+ *
+ * **Positions, and that is a bug fix rather than a style.** This subscripted by *name*, which is
+ * correct only while axis labels are unique — and the Labels tab makes repeats routine, since
+ * naming rows by cell type is what it is for. Measured on a 3x3 with two rows called `LC4`:
+ * `m[c("DN", "LC4", "LC4"), ]` matches the first `LC4` twice and **silently drops the second
+ * row**, keeping the row count right so nothing looks wrong. pandas had the same bug and failed
+ * the other way, duplicating rows instead. Every arm here is positional now, which made three
+ * of them shorter — `order()` and `hclust()$order` were answering in positions already and were
+ * being converted to labels.
  */
 function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
+  const tracked = trackedAxes(ctx)
   const order = readOrderOptions(ctx.params)
   if (order.by === 'none') return []
   const plan = orderPlan(order)
@@ -296,13 +365,15 @@ function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
     let expr: string | undefined
     switch (order.by) {
       case 'total':
-        expr = `names(sort(${axis === 'rows' ? 'rowSums' : 'colSums'}(${out}, na.rm = TRUE), decreasing = TRUE))`
+        // `method = "radix"` for the tie rule: Coda's sort is stable, so equal totals keep
+        // their arrival order rather than whichever order a quicksort happens to leave.
+        expr = `order(${axis === 'rows' ? 'rowSums' : 'colSums'}(${out}, na.rm = TRUE), decreasing = TRUE, method = "radix")`
         break
       case 'label':
         ctx.helper('coda_natural_order')
-        expr = `${labels}[coda_natural_order(${labels})]`
+        expr = `coda_natural_order(${labels})`
         break
-      case 'value':
+      case 'value': {
         if (!order.key) {
           lines.push(
             ...ctx.note(
@@ -312,11 +383,14 @@ function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
           )
           break
         }
-        expr =
-          axis === 'rows'
-            ? `names(sort(${out}[, ${rStr(order.key)}], decreasing = TRUE))`
-            : `names(sort(${out}[${rStr(order.key)}, ], decreasing = TRUE))`
+        // The *first* line of that name, which is `axisVector`'s `indexOf`.
+        const other = axis === 'rows' ? `colnames(${out})` : `rownames(${out})`
+        lines.push(`key_ <- which(${other} == ${rStr(order.key)})[1]`)
+        expr = `order(${
+          axis === 'rows' ? `${out}[, key_]` : `${out}[key_, ]`
+        }, decreasing = TRUE, na.last = TRUE, method = "radix")`
         break
+      }
       case 'cluster': {
         if (lines.length === 0) {
           lines.push(
@@ -333,7 +407,7 @@ function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
         const vectors = axis === 'rows' ? 'x_' : 't(x_)'
         const method = R_METHODS[order.method] ?? 'average'
         if (order.metric === 'euclidean') {
-          expr = `${labels}[hclust(dist(${vectors}), method = ${rStr(method)})$order]`
+          expr = `hclust(dist(${vectors}), method = ${rStr(method)})$order`
           break
         }
         // A constant vector has no correlation and a zero vector no cosine: `cor` answers NA
@@ -348,7 +422,7 @@ function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
           `d_[!is.finite(d_)] <- 1`,
           `diag(d_) <- 0`,
         )
-        expr = `${labels}[hclust(as.dist(d_), method = ${rStr(method)})$order]`
+        expr = `hclust(as.dist(d_), method = ${rStr(method)})$order`
         break
       }
       default:
@@ -360,17 +434,77 @@ function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
   }
 
   if (plan.follower && plan.lead[0] && chosen[plan.lead[0]]) {
-    const lead = chosen[plan.lead[0]]!
+    const leader = plan.lead[0]!
+    const lead = chosen[leader]!
     const name = plan.follower === 'rows' ? 'rows_' : 'cols_'
     const labels = plan.follower === 'rows' ? `rownames(${out})` : `colnames(${out})`
-    // The leader's labels in the leader's order, where the follower has them, then the rest
-    // as they were — `followOrder` in `matrixShape.ts`.
-    lines.push(`${name} <- c(intersect(${lead}, ${labels}), setdiff(${labels}, ${lead}))`)
+    const leadLabels = leader === 'rows' ? `rownames(${out})` : `colnames(${out})`
+    // The leader's labels in the leader's *new* order, matched onto the follower — the first
+    // unclaimed line of a repeated name winning. `intersect`/`setdiff` cannot say that: both
+    // de-duplicate, so a follower with two lines of one name came back with one.
+    ctx.helper('coda_follow_order')
+    lines.push(`${name} <- coda_follow_order(${leadLabels}[${lead}], ${labels})`)
     chosen[plan.follower] = name
+  }
+
+  // The arrival names take the same positions, both axes, after the follower is derived.
+  for (const axis of ['rows', 'columns'] as const) {
+    const list = chosen[axis]
+    if (list && tracked.has(axis))
+      lines.push(`${sourceName(axis)} <- ${sourceName(axis)}[${list}]`)
   }
 
   if (chosen.rows || chosen.columns) {
     lines.push(`${out} <- ${out}[${chosen.rows ?? ''}, ${chosen.columns ?? ''}, drop = FALSE]`)
+  }
+  return lines
+}
+
+/**
+ * Which axes carry their arrival names through the reshaping.
+ *
+ * `labelledAxes` is the shared half — whether the Labels tab names an axis at all — and lives in
+ * `matrixShape.ts` beside the readers it composes, because it is a decision about params with no
+ * language in it and it had been spelled out in TypeScript inside *both* emitters. What is local
+ * is the `size > 0` gate: the canvas tracks unconditionally because an index list costs nothing,
+ * where here every tracked axis is two more lines in somebody's document.
+ */
+function trackedAxes(ctx: Parameters<Emitter>[0]): Set<MatrixAxis> {
+  const picked = decodeMatrixSelection(ctx.params.selection)
+  const named = labelledAxes(readLabelOptions(ctx), Boolean(ctx.input('annotations')))
+  return new Set(named.filter((axis) => picked[axis].size > 0))
+}
+
+/** Where an axis's arrival names live while the pipeline reshapes them. */
+function sourceName(axis: MatrixAxis): string {
+  return axis === 'rows' ? 'rowSrc_' : 'colSrc_'
+}
+
+/**
+ * `Selected Rows` and `Selected Columns`.
+ *
+ * **Both bound whatever the selection is**, the notebook emitter's rule and for its reason: an
+ * emitter cannot ask who is downstream, and a chunk further on naming an unbound variable is an
+ * error rather than an empty table.
+ */
+function heatmapSelectionLines(ctx: Parameters<Emitter>[0], out: string): string[] {
+  const picked = decodeMatrixSelection(ctx.params.selection)
+  const tracked = trackedAxes(ctx)
+  ctx.helper('coda_matrix_selection')
+  const lines: string[] = ['']
+  for (const axis of ['rows', 'columns'] as const) {
+    const names = axis === 'rows' ? 'rownames' : 'colnames'
+    const arrival = tracked.has(axis) ? `, ${sourceName(axis)}` : ''
+    // Ascending, for the notebook emitter's reason. **`integer(0)` and never `rVector`'s empty**,
+    // which is `character(0)`: these are positions, and the helper shifts them to R's 1-based
+    // subscripts and hands one back in `index` — a character vector there types that column as
+    // something other than an integer, which is a column a join downstream reads differently.
+    const positions = matrixSelectionOrder(picked[axis])
+    const vector = positions.length === 0 ? 'integer(0)' : rVector(positions)
+    lines.push(
+      `${ctx.output(axis)} <- coda_matrix_selection(` +
+        `${names}(${out}), ${vector}${arrival})`,
+    )
   }
   return lines
 }
