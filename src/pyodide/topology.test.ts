@@ -125,6 +125,21 @@ describe('the navis defaults topology.py pins', () => {
     expect(SOURCE).toContain('_connecting_nodes(parents, is_dend | (compartment == LINKER)')
   })
 
+  it('heals only when asked, and before the check that refuses a forest', () => {
+    /*
+     * The order is the feature. Healed after the root check, the flag does nothing — every
+     * fragmented neuron still comes back `multiple roots`, which is exactly the state the flag
+     * exists to get out of, and nothing throws.
+     */
+    expect(SOURCE).toContain('heal = bool(req.get("heal", False))')
+    const heal = SOURCE.indexOf('parents = _heal(parents, coords)')
+    const refuse = SOURCE.indexOf('return compartment, flow, MULTIPLE_ROOTS')
+    expect(heal).toBeGreaterThan(-1)
+    expect(heal).toBeLessThan(refuse)
+    // No distance cap: a cap leaves a forest, and a forest is still refused.
+    expect(SOURCE).toMatch(/method="ALL",\s*max_dist=None/)
+  })
+
   it("unpacks geodesic_nearest in fastcore's order, not navis's wrapper's", () => {
     // fastcore returns `(distances, nearest)`; navis's `graph._geodesic_nearest` returns them the
     // other way round. Backwards, this assigns compartments by indexing with a distance — it

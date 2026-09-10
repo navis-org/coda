@@ -70,6 +70,17 @@ export type SplitCompartmentsRequest = {
    * it is easy to miss that the knob exists. Above 1 biases towards dendrite, below towards axon.
    */
   splitVal: number
+  /**
+   * Join a skeleton that arrived in several pieces into one tree before splitting it — fastcore's
+   * `heal_skeleton`, no distance cap. Without it such a neuron comes back `multiple roots`. Off by
+   * default: a bridge is an edge nobody traced, and it carries synapse flow.
+   */
+  heal: boolean
+  /**
+   * xyz interleaved, one per node in the order of `parents`. Read only when `heal` is on — healing
+   * is the one step that needs to know where a node *is* — and sent empty otherwise.
+   */
+  points: Float32Array
 }
 
 export interface SplitCompartmentsResult {

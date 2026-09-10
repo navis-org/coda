@@ -48,7 +48,7 @@ import type {
   ThinMethod,
 } from '../../pyodide/skeletons'
 import { NM_PER_UM } from './nblastOps'
-import { packSkeletons } from './skeletonPacking'
+import { packPositions, packSkeletons } from './skeletonPacking'
 import { geometryPointCount } from './transformOps'
 
 /**
@@ -137,20 +137,15 @@ export function cleanRequestFrom(
   skeletons: SkeletonsValue,
   params: SkeletonCleanParams,
 ): CleanSkeletonsRequest {
-  // `parents` and `offsets` are `packSkeletons`' — that layout and both of its rules are shared
-  // with every other Pyodide skeleton call. What is local here is the two buffers this request
-  // adds on top of them.
+  // `parents`, `offsets` and `points` are `skeletonPacking.ts`' — that layout and both of its
+  // rules are shared with every other Pyodide skeleton call. What is local here is `radii`.
   const { parents, offsets, total } = packSkeletons(skeletons)
-
-  const points = new Float32Array(total * 3)
+  const points = packPositions(skeletons, offsets)
   const radii = new Float32Array(total)
 
   for (let n = 0; n < skeletons.items.length; n++) {
     const item = skeletons.items[n]!
-    const at = offsets[n]!
-    const count = item.parents.length
-    points.set(item.positions.subarray(0, count * 3), at * 3)
-    radii.set(item.radii.subarray(0, count), at)
+    radii.set(item.radii.subarray(0, item.parents.length), offsets[n]!)
   }
 
   return {

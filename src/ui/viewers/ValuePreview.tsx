@@ -512,6 +512,8 @@ function ValuePreviewInner({
         flowThresh={Number(node.params.flowThresh ?? 0.9)}
         splitVal={Number(node.params.splitVal ?? 1)}
         onSplitParam={(id, value) => onParamChange?.(id, value)}
+        heal={node.params.heal === true}
+        onHeal={(on) => onParamChange?.('heal', on)}
         pointSize={Number(node.params.pointSize ?? 6)}
         skeletonWidth={Number(node.params.skeletonWidth ?? 2)}
         skeletonOpacity={Number(node.params.skeletonOpacity ?? 1)}

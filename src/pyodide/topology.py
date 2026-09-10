@@ -26,9 +26,16 @@ here is the same function on the same wheel rather than a second implementation 
 
 **navis rejects a multi-rooted neuron outright**; this reports it. A fragmented reconstruction is
 common enough that failing the whole batch on one would make the node useless on exactly the
-datasets that need `Clean Skeletons` first — so `status` says which neurons could not be split and
-the card names them. Same call `cleanOps.ts` makes about an item that cannot be processed: it stays
+datasets whose skeletons arrive in pieces — so `status` says which neurons could not be split and
+the card names them, beside the `heal` flag below that fixes it. Same call `cleanOps.ts` makes about an item that cannot be processed: it stays
 in the collection, and the count is said out loud.
+
+**Healing is opt-in, and happens here rather than in `skeletons.py`.** A skeleton derived from a
+segmentation routinely arrives as a forest — every fish2 body sampled was 13 to 627 pieces — and
+navis's answer is to call `heal_skeleton` first. With `heal` on, `_split_one` does exactly that
+before asking whether it has one root. It is off by default because a bridge is an edge nobody
+traced and it carries synapse flow, so it can move the linker. The coordinates cross the bridge
+only when it is on; the split itself never reads them.
 
 **Synapses arrive already assigned to nodes.** navis reads a `node_id` off its connector table;
 Coda's synapses are loose coordinates, so `assignSynapses` in `nodes/lib/topologyOps.ts` does the
@@ -120,13 +127,35 @@ def _connecting_nodes(parents, allowed, seeds):
     return keep
 
 
-def _split_one(parents, presynapses, postsynapses, flow_thresh, split_val=SPLIT_VAL):
+def _heal(parents, coords):
+    """Every fragment joined into one tree, as `skeletons.py`'s heal does with no distance cap.
+
+    `heal_skeleton` returns parents in the numbering it was given, so the labels computed on the
+    healed tree land on the caller's own nodes — which is what lets the card colour the skeleton
+    it drew, bridges and all, without drawing the bridges.
+    """
+    ids = np.arange(len(parents), dtype=np.int64)
+    # float64 here, per neuron that heals, rather than for the whole batch up front: most
+    # neurons in a mixed set have one root and never read their coordinates at all.
+    healed = fc.heal_skeleton(
+        ids,
+        parents.astype(np.int64),
+        np.ascontiguousarray(coords, dtype=np.float64),
+        method="ALL",
+        max_dist=None,
+    )
+    return np.asarray(healed, dtype=np.int32)
+
+
+def _split_one(parents, presynapses, postsynapses, flow_thresh, split_val=SPLIT_VAL, coords=None):
     """One neuron. Returns `(compartment, flow, status)`.
 
     `flow_thresh` and `split_val` are navis's two tuning knobs, in navis's own units: the linker
     is `max(flow) * flow_thresh`, and a component is axon when its pre/post fraction ratio is at
     or above `split_val`. navis spells the second one inside the `split` argument
     (`split='prepost:0.5'`), which is why it is easy to miss that it exists at all.
+
+    `coords` is the opt-in heal: given, a fragmented neuron is joined into one tree first.
     """
     n = len(parents)
     compartment = np.full(n, UNASSIGNED, dtype=np.int32)
@@ -137,8 +166,14 @@ def _split_one(parents, presynapses, postsynapses, flow_thresh, split_val=SPLIT_
 
     node_ids = np.arange(n, dtype=np.int32)
 
+    # Healed before the root check, which is the whole point: that check is what refuses a forest.
+    roots = int((parents < 0).sum())
+    if coords is not None and roots > 1:
+        parents = _heal(parents, coords)
+        roots = int((parents < 0).sum())
+
     # navis raises here. We report instead - see the module docstring.
-    if int((parents < 0).sum()) != 1:
+    if roots != 1:
         return compartment, flow, MULTIPLE_ROOTS
 
     if int(presynapses.sum()) == 0 or int(postsynapses.sum()) == 0:
@@ -278,6 +313,12 @@ def coda_split_compartments(request, report=None):
     offsets = np.frombuffer(req["offsets"], dtype=np.int32)
     flow_thresh = float(req.get("flowThresh", 0.9))
     split_val = float(req.get("splitVal", SPLIT_VAL))
+    heal = bool(req.get("heal", False))
+    # Only healing needs to know where a node is, so the coordinates are sent only then — and kept
+    # a float32 view here; `_heal` widens the one neuron it is healing.
+    coords = np.frombuffer(req["points"], dtype=np.float32).reshape(-1, 3) if heal else None
+    if coords is not None and len(coords) != len(parents):
+        raise ValueError(f"heal needs one point per node: {len(coords)} for {len(parents)}")
     count = len(offsets) - 1
 
     compartment = np.full(len(parents), UNASSIGNED, dtype=np.int32)
@@ -288,7 +329,12 @@ def coda_split_compartments(request, report=None):
         if b <= a:
             continue
         comp_i, _flow_i, status_i = _split_one(
-            parents[a:b], presynapses[a:b], postsynapses[a:b], flow_thresh, split_val
+            parents[a:b],
+            presynapses[a:b],
+            postsynapses[a:b],
+            flow_thresh,
+            split_val,
+            coords=None if coords is None else coords[a:b],
         )
         compartment[a:b] = comp_i
         status[i] = status_i

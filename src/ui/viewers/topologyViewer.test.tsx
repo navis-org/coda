@@ -48,6 +48,18 @@ import { TopologyViewer } from './TopologyViewer'
  */
 import { clearTopologyCache } from './useNeuronTopology'
 import { clearSynapseLinksCache } from './useSynapseLinks'
+import type * as TopologyModule from '../../pyodide/topology'
+
+/*
+ * The split, behind a spy. It cannot run under jsdom — no Worker — so by default the spy rejects,
+ * which is the error state every earlier test in this file was written against. A test that needs
+ * an *answer* (a refused forest, a healed tree) gives it one.
+ */
+const split = vi.hoisted(() => ({ run: vi.fn() }))
+vi.mock('../../pyodide/topology', async (importOriginal) => ({
+  ...(await importOriginal<typeof TopologyModule>()),
+  runSplitCompartments: (...args: unknown[]) => split.run(...args),
+}))
 
 let sceneProps: Record<string, unknown> | undefined
 vi.mock('./LazyViewers', () => ({
@@ -210,6 +222,8 @@ const PROPS = {
   flowThresh: 0.9,
   splitVal: 1,
   onSplitParam: vi.fn(),
+  heal: false,
+  onHeal: vi.fn(),
   pointSize: 6,
   skeletonWidth: 2,
   skeletonOpacity: 1,
@@ -227,6 +241,7 @@ beforeEach(() => {
   installJsdomStubs()
   clearTopologyCache()
   install()
+  split.run.mockReset().mockRejectedValue(new Error('No Worker under jsdom'))
   vi.useFakeTimers({ shouldAdvanceTime: true })
 })
 
@@ -842,6 +857,75 @@ describe('tuning the split', () => {
     // whose author never touched it — which, with the split checkbox on, marks it stale.
     expect(onSplitParam).toHaveBeenCalledTimes(1)
     expect(onSplitParam).toHaveBeenCalledWith('flowThresh', 0.9)
+  })
+})
+
+/**
+ * A skeleton that arrived in pieces.
+ *
+ * Every fish2 body is one — 13 to 627 roots — and the split refuses a forest, so the card drew a
+ * single colour and said why only in a sentence pointing at a node that cannot sit in front of
+ * this card (it fetches its own skeleton). What is checkable is that the refusal is *said*, with
+ * the count, beside a control that fixes it; and that the control reaches the split.
+ */
+describe('a fragmented skeleton', () => {
+  /** The fixture's five nodes, cut after the second: two roots. */
+  function fragmented(): SkeletonsValue {
+    const value = skeleton()
+    const item = value.items[0]!
+    return { ...value, items: [{ ...item, parents: new Int32Array([-1, 0, 1, -1, 3]) }] }
+  }
+
+  function answer(status: number, compartment = new Int32Array(5)) {
+    return { compartment, status: new Int32Array([status]) }
+  }
+
+  let onHeal = vi.fn()
+  beforeEach(() => {
+    onHeal = vi.fn()
+    fetchSkeletons.mockReset().mockResolvedValue(fragmented())
+  })
+
+  it('says it is in pieces, and how many, rather than drawing one colour', async () => {
+    split.run.mockResolvedValue(answer(1))
+    render(<TopologyViewer {...PROPS} tab="compartments" onHeal={onHeal} />)
+    const warning = await screen.findByText(/in 2 pieces/, undefined, { timeout: 3000 })
+    expect(warning.closest('.topo__note--warn')).toBeTruthy()
+    expect(warning.textContent).toMatch(/Heal fragmented skeletons/)
+  })
+
+  it('offers the heal beside the refusal, and writes it back', async () => {
+    split.run.mockResolvedValue(answer(1))
+    render(<TopologyViewer {...PROPS} tab="compartments" onHeal={onHeal} />)
+    const box = await screen.findByLabelText(/Heal fragmented skeletons/, undefined, {
+      timeout: 3000,
+    })
+    fireEvent.click(box)
+    expect(onHeal).toHaveBeenCalledWith(true)
+  })
+
+  it('sends the coordinates only when healing, since nothing else reads them', async () => {
+    split.run.mockResolvedValue(answer(1))
+    render(<TopologyViewer {...PROPS} tab="compartments" />)
+    await waitFor(() => expect(split.run).toHaveBeenCalled(), { timeout: 3000 })
+    expect(split.run.mock.calls[0]![0]).toMatchObject({ heal: false })
+    expect(split.run.mock.calls[0]![0].points).toHaveLength(0)
+
+    cleanup()
+    split.run.mockClear()
+    render(<TopologyViewer {...PROPS} tab="compartments" heal />)
+    await waitFor(() => expect(split.run).toHaveBeenCalled(), { timeout: 3000 })
+    const request = split.run.mock.calls[0]![0]
+    expect(request.heal).toBe(true)
+    // One xyz per node, in the skeleton's own order — the labels come back onto these nodes.
+    expect(Array.from(request.points)).toEqual(Array.from(fragmented().items[0]!.positions))
+  })
+
+  it('says the pieces were joined once a healed split succeeds', async () => {
+    split.run.mockResolvedValue(answer(0, new Int32Array([1, 1, 3, 2, 2])))
+    render(<TopologyViewer {...PROPS} tab="compartments" heal />)
+    await screen.findByText(/2 pieces were joined/, undefined, { timeout: 3000 })
+    expect(screen.queryByText(/in 2 pieces, so it cannot be split/)).toBeNull()
   })
 })
 

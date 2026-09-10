@@ -11,3 +11,4 @@ coverage/
 !.env.example
 _TODOs.md
 compare-catalogue.log
+__pycache__/

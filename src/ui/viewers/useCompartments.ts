@@ -48,12 +48,13 @@ export type CompartmentState =
  * only knob. With a second one it would have served the answer for the previous axon threshold
  * whenever somebody moved it back and forth across a threshold they had already tried — a stale
  * split that looks exactly like a working one, since both are plausible splits of the same cell.
+ * `heal` is the third, and the same argument: a healed and an unhealed answer are both plausible.
  */
 const memory = new WeakMap<SkeletonGeometry, Map<string, Compartments>>()
 
 /** What one cached split is a fact about, beyond the skeleton the WeakMap is keyed on. */
-function settingsKey(flowThresh: number, splitVal: number): string {
-  return `${flowThresh}|${splitVal}`
+function settingsKey(flowThresh: number, splitVal: number, heal: boolean): string {
+  return `${flowThresh}|${splitVal}|${heal ? 'heal' : ''}`
 }
 
 export function useCompartments(
@@ -61,6 +62,7 @@ export function useCompartments(
   sites: readonly SynapseSite[] | undefined,
   flowThresh: number,
   splitVal: number,
+  heal: boolean,
   enabled: boolean,
 ): CompartmentState {
   const [state, setState] = useState<CompartmentState>({ status: 'idle' })
@@ -71,7 +73,7 @@ export function useCompartments(
       return
     }
 
-    const key = settingsKey(flowThresh, splitVal)
+    const key = settingsKey(flowThresh, splitVal, heal)
     const hit = memory.get(skeleton)?.get(key)
     if (hit) {
       setState({ status: 'ready', data: hit })
@@ -98,6 +100,9 @@ export function useCompartments(
           offsets: new Int32Array([0, nodeCount]),
           flowThresh,
           splitVal,
+          heal,
+          // A copy, like every buffer above: the call transfers, and this is the drawn geometry.
+          points: heal ? skeleton.positions.slice(0, nodeCount * 3) : new Float32Array(0),
         })
         const data: Compartments = {
           labels: result.compartment,
@@ -116,7 +121,7 @@ export function useCompartments(
     return () => {
       live = false
     }
-  }, [skeleton, sites, flowThresh, splitVal, enabled])
+  }, [skeleton, sites, flowThresh, splitVal, heal, enabled])
 
   return state
 }

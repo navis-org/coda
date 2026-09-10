@@ -197,6 +197,26 @@ export const topologyNode = registerNode({
       advanced: true,
       visibleIf: (params) => params['split'] === true,
     },
+    {
+      /*
+       * Opt-in, because a bridge is an edge nobody traced — and it carries synapse flow, so it can
+       * move the linker. A skeleton derived from a segmentation routinely arrives as a forest
+       * (every fish2 body sampled was 13 to 627 pieces), which the split refuses outright; this
+       * joins the pieces first with fastcore's `heal_skeleton`, no distance cap. The joins exist
+       * only inside the split: the skeleton drawn and measured, and the cable in every
+       * per-compartment column, are the traced edges alone.
+       *
+       * `visibleIf` the split for `flowThresh`'s reason — out of the provenance key until it
+       * decides what `Morphometrics` carries. Absent means off, which is what a stored graph did.
+       */
+      id: 'heal',
+      kind: 'boolean',
+      label: 'Heal fragmented skeletons',
+      help: 'Join a skeleton that arrived in several pieces into one tree before splitting it. Without this a fragmented neuron cannot be split. The joins are used by the split only — the skeleton drawn and measured is unchanged.',
+      default: false,
+      advanced: true,
+      visibleIf: (params) => params['split'] === true,
+    },
     /*
      * Both `advanced`, which is a departure from `neuron.skeletons` and `neuron.synapses` where
      * the same two helpers are the card's only real controls and belong on it. Here the card is a
@@ -710,22 +730,20 @@ export const topologyNode = registerNode({
       assignSynapses(item, byNeuron.get(item.id) ?? [], distances[i]),
     )
 
-    const { parents, offsets, presynapses, postsynapses } = flattenForSplit(
-      skeletons,
-      assignments,
-    )
-    // Read before the call: `transferable` detaches every buffer the moment it is posted.
+    const heal = ctx.params.heal === true
+    const packed = flattenForSplit(skeletons, assignments, heal)
+    // Read before the call: `transferable` detaches every buffer the moment it is posted —
+    // `offsets` included, which is why it is copied out for the scatter below.
     const neuronCount = skeletons.items.length
+    const offsets = packed.offsets.slice()
 
     ctx.progress(0.82, 'splitting')
     const split = await runSplitCompartments(
       {
-        parents,
-        presynapses,
-        postsynapses,
-        offsets,
+        ...packed,
         flowThresh: Number(ctx.params.flowThresh ?? 0.9),
         splitVal: Number(ctx.params.splitVal ?? 1),
+        heal,
       },
       {
         ...(ctx.signal ? { signal: ctx.signal } : {}),
@@ -734,9 +752,11 @@ export const topologyNode = registerNode({
     )
 
     let unsplit = 0
+    let fragmented = 0
     const withCompartments: TopologyRow[] = rows.map((row, i) => {
       const status = splitStatusOf(split.status[i])
       if (status !== 'ok') unsplit++
+      if (status === 'multiple roots') fragmented++
       const item = skeletons.items[i]!
       const from = offsets[i]!
       const to = offsets[i + 1]!
@@ -760,8 +780,11 @@ export const topologyNode = registerNode({
      */
     if (unsplit > 0 && neuronCount > 0) {
       ctx.warn(
-        `${unsplit} of ${neuronCount} neurons could not be split — see the splitStatus column. ` +
-          'A fragmented reconstruction has to be healed first (Clean Skeletons ▸ Heal).',
+        `${unsplit} of ${neuronCount} neurons could not be split — see the splitStatus column.` +
+          (fragmented > 0
+            ? ` ${fragmented} of them arrived in several pieces; tick Heal fragmented skeletons ` +
+              'on the Compartments tab to join them first.'
+            : ''),
       )
     }
 

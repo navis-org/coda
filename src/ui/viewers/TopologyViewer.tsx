@@ -99,6 +99,9 @@ export interface TopologyViewerProps {
   flowThresh: number
   splitVal: number
   onSplitParam: (id: SplitParam, value: number) => void
+  /** The node's `heal` param: join a fragmented skeleton before splitting it. */
+  heal: boolean
+  onHeal: (on: boolean) => void
   pointSize: number
   skeletonWidth: number
   skeletonOpacity: number
@@ -257,6 +260,8 @@ export function TopologyViewer(props: TopologyViewerProps) {
     flowThresh,
     splitVal,
     onSplitParam,
+    heal,
+    onHeal,
     pointSize,
     skeletonWidth,
     skeletonOpacity,
@@ -355,7 +360,20 @@ export function TopologyViewer(props: TopologyViewerProps) {
   // property lookup, and memoising it would freeze an answer a source can still learn.
   const meshAvailable = hasNeuronMeshes(sourceId, datasetId)
 
-  const compartments = useCompartments(skeleton, sites, flowThresh, splitVal, wantsSplit)
+  /*
+   * `morphometrics`' own count, the one the Morphology tab prints, so the two tabs cannot disagree.
+   * And heal only what has something to heal: a single-rooted tree splits identically either way,
+   * so ticking the box on one keeps the cached answer rather than re-splitting the whole arbour.
+   */
+  const fragments = metrics?.fragments ?? 0
+  const compartments = useCompartments(
+    skeleton,
+    sites,
+    flowThresh,
+    splitVal,
+    heal && fragments > 1,
+    wantsSplit,
+  )
   const labels = compartments.status === 'ready' ? compartments.data : undefined
 
   const mode = currentMode()
@@ -1061,6 +1079,9 @@ export function TopologyViewer(props: TopologyViewerProps) {
                   flowThresh={flowThresh}
                   splitVal={splitVal}
                   onSplitParam={onSplitParam}
+                  heal={heal}
+                  onHeal={onHeal}
+                  fragments={fragments}
                 />
               </div>
             )}
@@ -1347,6 +1368,9 @@ function CompartmentPanel({
   flowThresh,
   splitVal,
   onSplitParam,
+  heal,
+  onHeal,
+  fragments,
 }: {
   state: ReturnType<typeof useCompartments>
   palette: Record<number, string>
@@ -1355,6 +1379,10 @@ function CompartmentPanel({
   flowThresh: number
   splitVal: number
   onSplitParam: (id: SplitParam, value: number) => void
+  heal: boolean
+  onHeal: (on: boolean) => void
+  /** How many pieces the skeleton arrived in — its root count. */
+  fragments: number
 }) {
   const tuned = flowThresh !== SPLIT_DEFAULTS.flowThresh || splitVal !== SPLIT_DEFAULTS.splitVal
 
@@ -1374,7 +1402,22 @@ function CompartmentPanel({
    */
   return (
     <>
-      <CompartmentBody state={state} palette={palette} />
+      <CompartmentBody state={state} palette={palette} fragments={fragments} />
+      {/*
+       * Directly under the body, because the refusal above names it. Drawn whatever the split did
+       * — like the sliders, it is the control somebody reaches for when the split has failed.
+       */}
+      <div className="topo__panel-foot">
+        <label className="topo__check">
+          <input type="checkbox" checked={heal} onChange={(e) => onHeal(e.target.checked)} />
+          Heal fragmented skeletons
+        </label>
+        <p className="topo__note topo__note--block">
+          Joins a skeleton that arrived in several pieces into one tree, so it can be split. The
+          joins are straight bridges between the nearest pieces and carry synapse flow, so they
+          can move the linker; the skeleton drawn and measured is unchanged.
+        </p>
+      </div>
       <div className="topo__panel-foot">
         <Slider
           id="flowThresh"
@@ -1435,25 +1478,53 @@ function CompartmentPanel({
 function CompartmentBody({
   state,
   palette,
+  fragments,
 }: {
   state: ReturnType<typeof useCompartments>
   palette: Record<number, string>
+  fragments: number
 }) {
   if (state.status === 'loading') return <p className="topo__pending">Splitting…</p>
   if (state.status === 'error') return <p className="topo__pending">{state.message}</p>
   if (state.status === 'idle') return <p className="topo__pending">No skeleton to split.</p>
 
   const { data } = state
-  if (data.status !== 'ok') {
+  if (data.status === 'multiple roots') {
+    /*
+     * A warning rather than a pending line, and it names the checkbox beneath it. This used to
+     * send the reader to Clean Skeletons ▸ Heal — which cannot help here, since the card fetches
+     * its own skeleton by id and nothing wired upstream reaches it. The stage meanwhile draws one
+     * colour, so this sentence is the only place the refusal is visible at all.
+     */
     return (
-      <p className="topo__pending">
-        {data.status === 'multiple roots'
-          ? 'This reconstruction is in several pieces, so it cannot be split. Heal it first (Clean Skeletons ▸ Heal).'
-          : 'This neuron has synapses of only one polarity, so there is no flow to split on.'}
+      <p className="topo__note topo__note--block topo__note--warn">
+        This skeleton is in {formatNumber(fragments)} pieces, so it cannot be split into axon
+        and dendrite. Tick <b>Heal fragmented skeletons</b> below to join them into one tree
+        first.
       </p>
     )
   }
-  return <CompartmentTable data={data} palette={palette} />
+  if (data.status !== 'ok') {
+    return (
+      <p className="topo__pending">
+        This neuron has synapses of only one polarity, so there is no flow to split on.
+      </p>
+    )
+  }
+  return (
+    <>
+      <CompartmentTable data={data} palette={palette} />
+      {/*
+       * Said, because the split ran on edges nobody traced. No `heal` check needed: a forest
+       * never comes back `ok` unhealed, so this reads the answer on screen, not the checkbox.
+       */}
+      {fragments > 1 && (
+        <p className="topo__note topo__note--block">
+          {formatNumber(fragments)} pieces were joined into one tree before splitting.
+        </p>
+      )}
+    </>
+  )
 }
 
 function CompartmentTable({

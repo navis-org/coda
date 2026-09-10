@@ -48,7 +48,7 @@ import type {
 import type { SplitStatus } from '../../pyodide/topology'
 import { cableLength, getColumn, makeTable } from '../../core/values'
 import { NM_PER_UM } from './nblastOps'
-import { packSkeletons } from './skeletonPacking'
+import { packPositions, packSkeletons } from './skeletonPacking'
 
 /**
  * What a node is, in fastcore's own codes.
@@ -813,15 +813,19 @@ export function topologyTable(rows: readonly TopologyRow[], withSplit: boolean):
 export function flattenForSplit(
   skeletons: SkeletonsValue,
   assignments: readonly SynapseAssignment[],
+  /** Pack the coordinates too — only healing reads them, so they are empty otherwise. */
+  withPoints = false,
 ): {
   parents: Int32Array
   offsets: Int32Array
   presynapses: Uint32Array
   postsynapses: Uint32Array
+  points: Float32Array
 } {
   const { parents, offsets, total } = packSkeletons(skeletons)
   const presynapses = new Uint32Array(total)
   const postsynapses = new Uint32Array(total)
+  const points = withPoints ? packPositions(skeletons, offsets) : new Float32Array(0)
 
   for (let i = 0; i < skeletons.items.length; i++) {
     const assignment = assignments[i]
@@ -830,5 +834,5 @@ export function flattenForSplit(
     postsynapses.set(assignment.post, offsets[i]!)
   }
 
-  return { parents, offsets, presynapses, postsynapses }
+  return { parents, offsets, presynapses, postsynapses, points }
 }

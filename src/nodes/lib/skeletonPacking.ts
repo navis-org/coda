@@ -46,3 +46,16 @@ export function packSkeletons(skeletons: SkeletonsValue): PackedSkeletons {
   }
   return { parents, offsets, total }
 }
+
+/**
+ * Every node's xyz over `packSkeletons`' `offsets` — the per-call buffer both a clean and a
+ * healing split add, and built rather than borrowed for the transfer rule above.
+ */
+export function packPositions(skeletons: SkeletonsValue, offsets: Int32Array): Float32Array {
+  const points = new Float32Array(offsets[skeletons.items.length]! * 3)
+  for (let n = 0; n < skeletons.items.length; n++) {
+    const item = skeletons.items[n]!
+    points.set(item.positions.subarray(0, item.parents.length * 3), offsets[n]! * 3)
+  }
+  return points
+}
