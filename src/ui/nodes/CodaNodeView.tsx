@@ -140,21 +140,13 @@ function CodaNodeViewImpl({
   const expandedNodeId = useGraphStore((s) => s.expandedNodeId)
   const isPinned = useGraphStore((s) => s.pinnedNodeId === id)
   const openHelp = useGraphStore((s) => s.openHelp)
-  const needsRun = useGraphStore((s) => {
-    void s.runVersion
-    return s.needsRun(id)
-  })
+  const needsRun = useGraphStore((s) => s.needsRun(id))
   const busy = useGraphStore((s) => s.busy)
   const setNotice = useGraphStore((s) => s.setNotice)
   const graphName = useGraphStore((s) => s.graph.meta?.name)
 
-  // runVersion is what ties these reads to scheduler ticks.
-  const info = useGraphStore((s) => {
-    void s.runVersion
-    return s.nodeInfo(id)
-  })
+  const info = useGraphStore((s) => s.nodeInfo(id))
   const outputValue = useGraphStore((s) => {
-    void s.runVersion
     const def = getNodeDef(node.type)
     const port = def ? firstOutputPort(def, node.params) : undefined
     return port ? s.nodeOutput(id, port.id) : undefined
@@ -178,10 +170,7 @@ function CodaNodeViewImpl({
   const drawsPreviews = previewable !== undefined && isViewer(previewable)
   void useGraphStore((s) => (drawsPreviews ? s.previewVersion : 0))
   // A number or undefined, so the snapshot is a primitive — invariant 7.
-  const fetchedAt = useGraphStore((s) => {
-    void s.runVersion
-    return s.nodeFetchedAt(id)
-  })
+  const fetchedAt = useGraphStore((s) => s.nodeFetchedAt(id))
   /*
    * What the last run said it was doing anyway — a set past a guard rail, a draw that was
    * sampled. A string or undefined, so this is a primitive too.
@@ -189,13 +178,10 @@ function CodaNodeViewImpl({
    * It arrives *during* the run, which is the point: the warning names a wait before the wait,
    * with Cancel an inch away. See `EvalContext.warn`.
    */
-  const runWarning = useGraphStore((s) => {
-    void s.runVersion
-    return s.nodeWarning(id)
-  })
+  const runWarning = useGraphStore((s) => s.nodeWarning(id))
   const clearNodeCache = useGraphStore((s) => s.clearNodeCache)
   // Only the multi-input viewers need these, so they are resolved lazily per render rather
-  // than subscribed to; `runVersion` above already ties this component to scheduler ticks.
+  // than subscribed to — `previewVersion` above is what re-renders the card when they move.
   const nodeInputs = useGraphStore((s) => s.nodeInputs)
 
   // Which handle a connection drag started on — shared with the canvas, which colours the

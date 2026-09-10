@@ -12,9 +12,9 @@
  *
  * **The value is subscribed to, not handed in.** A hover outlives a run — a preview left open
  * while a scheduled pass replaces the cache would otherwise show what used to be on the wire,
- * which is the one thing a preview of a wire may not do. `runVersion` is what ties the read to
- * the scheduler, and `nodeOutput` returns the cached value by identity, so the selector
- * allocates nothing (invariant 7). Where the value has gone the panel renders nothing rather
+ * which is the one thing a preview of a wire may not do. The selector re-runs on every scheduler
+ * tick, and `nodeOutput` returns the cached value by identity, so it allocates nothing
+ * (invariant 7). Where the value has gone the panel renders nothing rather
  * than an empty box.
  */
 
@@ -43,10 +43,7 @@ export interface PortPreviewPanelProps {
 }
 
 export function PortPreviewPanel({ nodeId, portId, label, anchor }: PortPreviewPanelProps) {
-  const value = useGraphStore((s) => {
-    void s.runVersion
-    return s.nodeOutput(nodeId, portId)
-  })
+  const value = useGraphStore((s) => s.nodeOutput(nodeId, portId))
   const { ref, style } = usePlacedPanel(
     anchor,
     // Away from the card: an output socket sits on the card's right edge, so everything the

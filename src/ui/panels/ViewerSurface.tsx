@@ -151,10 +151,7 @@ export function ViewerSurface({
   const togglePanel = useGraphStore((s) => s.togglePanel)
   const openHelp = useGraphStore((s) => s.openHelp)
 
-  const info = useGraphStore((s) => {
-    void s.runVersion
-    return s.nodeInfo(nodeId)
-  })
+  const info = useGraphStore((s) => s.nodeInfo(nodeId))
   const [tabId, setTabId] = useState<string | undefined>(undefined)
   /*
    * The node's screen map, per surface rather than in the store: it is a child of this component,
@@ -169,7 +166,6 @@ export function ViewerSurface({
   const def = found?.def
   const graphName = useGraphStore((s) => s.graph.meta?.name)
   const value = useGraphStore((s) => {
-    void s.runVersion
     const port = def && node ? firstOutputPort(def, node.params) : undefined
     return port ? s.nodeOutput(nodeId, port.id) : undefined
   })

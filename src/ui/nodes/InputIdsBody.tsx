@@ -49,16 +49,8 @@ interface Summary {
 export function InputIdsBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   const def = getNodeDef(node.type)
 
-  const neurons = useGraphStore((s) => {
-    // `runVersion` ties this read to scheduler ticks; `nodeOutput` returns the cached value by
-    // reference, so the selector allocates nothing — invariant 7.
-    void s.runVersion
-    return s.nodeOutput(node.id, 'neurons')
-  })
-  const wired = useGraphStore((s) => {
-    void s.runVersion
-    return s.nodeInputs(node.id)['ids']
-  })
+  const neurons = useGraphStore((s) => s.nodeOutput(node.id, 'neurons'))
+  const wired = useGraphStore((s) => s.nodeInputs(node.id)['ids'])
 
   const column = ctx.column('column')
   // Whether a Dataset is *connected*, which is what decides whether "not found" means anything.

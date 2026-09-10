@@ -17,7 +17,7 @@ import { App } from '../../App'
 import { MockSource } from '../../data/mock/MockSource'
 import { getSource, registerSource } from '../../data/source'
 import '../../nodes'
-import { useGraphStore } from '../../store/graphStore'
+import { countInStates, STALE_STATES, useGraphStore } from '../../store/graphStore'
 import { demoWorkflow } from '../../wizard/build'
 import { loadAutoRun, saveAutoRun } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
@@ -42,14 +42,9 @@ afterEach(cleanup)
 
 const checkbox = () => screen.getByRole('checkbox', { name: /Auto-run/ }) as HTMLInputElement
 
-/** Stale-or-blocked node count, read outside React. `useStaleCount` is the hook equivalent. */
+/** `useStaleCount`, read outside React. */
 function staleCount(): number {
-  const store = useGraphStore.getState()
-  void store.runVersion
-  return store.graph.nodes.filter((n) => {
-    const state = store.nodeInfo(n.id).state
-    return state === 'stale' || state === 'blocked'
-  }).length
+  return countInStates(useGraphStore.getState(), 'all', STALE_STATES)
 }
 
 /** Row count of the terminal Table node — proof the expensive chain actually executed. */

@@ -4,8 +4,9 @@
  * Zustand holds the *document* (graph, selection, history). The Scheduler is a mutable
  * class kept outside the store — it owns caches of potentially large tables, and putting
  * those behind immutable state updates would mean copying references on every tick for
- * no benefit. The store instead bumps `runVersion` when scheduler state changes, and
- * components read node state through selectors that depend on it.
+ * no benefit. The store instead bumps `runVersion` when scheduler state changes. The bump is a
+ * `set`, and every `set` re-runs every selector, so a component reads node state by calling the
+ * scheduler-backed methods (`nodeInfo`, `nodeOutput`, …) in a selector and nothing more.
  *
  * Auto-evaluation is debounced: cheap nodes re-run ~180ms after you stop typing.
  * Expensive nodes are left stale by the auto pass and wait for Run.
@@ -273,17 +274,19 @@ export interface GraphState {
   graph: CodaGraph
   inference: InferenceResult
   selection: string[]
-  /** Bumped whenever scheduler node states change, to invalidate memoised selectors. */
+  /**
+   * Bumped whenever scheduler node states change. The bump is the `set` that re-runs every
+   * selector, so a selector calling `nodeInfo` and friends has no need to read it.
+   */
   runVersion: number
   /**
    * Bumped when a running node publishes or drops a partial result — see `Scheduler.onPreview`.
    *
    * Its own counter rather than a second use of `runVersion`, because of who has to subscribe.
-   * `runVersion` is read by selectors that already return something that moves with it (a node's
-   * own state, a stale count); a card drawing from its *inputs* has no such thing — the 3D
-   * viewer's own output and state are unchanged while its upstream fills in, so nothing it
-   * selects would differ and zustand would skip the render. `void s.runVersion` inside a selector
-   * subscribes to nothing on its own: the comparison is on what the selector *returns*.
+   * Every `set` re-runs every selector, but zustand re-renders only when what a selector
+   * *returns* changes — and a card drawing from its *inputs* returns nothing that moves while its
+   * upstream fills in: the 3D viewer's own output and state are unchanged. For the same reason
+   * `void s.runVersion` inside a selector subscribes to nothing.
    *
    * So this is selected directly, as the primitive invariant 7 requires. Every card re-renders
    * when it moves, which is why `PUBLISH_INTERVAL_MS` bounds how often that can be.
@@ -1036,32 +1039,36 @@ export interface GraphState {
   /**
    * How far the run in flight has got, or undefined when nothing is running.
    *
-   * Read through `runVersion` like `nodeInfo`, and a method rather than a snapshot field for the
-   * same reason: it belongs to the Scheduler's clock, not the graph's. The Scheduler hands back
+   * A method rather than a snapshot field, like `nodeInfo`, because it belongs to the
+   * Scheduler's clock, not the graph's. The Scheduler hands back
    * a reference it replaces only when the number moves, which is what lets a selector return it
    * whole without breaking invariant 7 — see `useRunProgress`.
    */
   runProgress(): RunProgress | undefined
+  /** A node's cached value on one port, by reference — so a selector may return it as is. */
   nodeOutput(nodeId: string, portId: string): Value | undefined
   /**
    * When the data behind a node's current result was read from a server, or undefined.
    *
-   * Read through `runVersion` like `nodeInfo`, since it changes with the scheduler's cache rather
-   * than with the graph.
+   * A method like `nodeInfo`, since it changes with the scheduler's cache rather than with the
+   * graph.
    */
   nodeFetchedAt(nodeId: string): number | undefined
   /**
    * What this node warned about the result it is holding, or undefined.
    *
-   * One string rather than a list, so the snapshot is a primitive (invariant 7). Read through
-   * `runVersion` like `nodeInfo`: a warning is raised while the node runs and then belongs to
-   * its cached result, so neither end of its life is a graph edit.
+   * One string rather than a list, so the snapshot is a primitive (invariant 7). A method like
+   * `nodeInfo`: a warning is raised while the node runs and then belongs to its cached result, so
+   * neither end of its life is a graph edit.
    */
   nodeWarning(nodeId: string): string | undefined
   /**
    * Realised values arriving at a node's input ports. Viewers with several inputs (the 3D
    * scene takes skeletons, meshes and points) need these, since a node's own output cache
    * only holds what it produced.
+   *
+   * The record is built per call, so a selector picks one port out of it rather than returning
+   * it; the values themselves are the cached ones, by reference (invariant 7).
    */
   nodeInputs(nodeId: string): Record<string, Value | undefined>
   setNotice(notice: string | undefined): void
@@ -2937,13 +2944,27 @@ export function useSelectedNode(): GraphNode | undefined {
  * said "not evaluated". See the boot derive in `createStore`.
  */
 export function useStaleCount(): number {
-  return useGraphStore((s) => {
-    void s.runVersion // subscribe to scheduler ticks
-    return s.graph.nodes.filter((n) => {
-      const state = s.nodeInfo(n.id).state
-      return state === 'stale' || state === 'blocked'
-    }).length
-  })
+  return useNodeStateCount('all', ...STALE_STATES)
+}
+
+export const STALE_STATES: readonly NodeRunState[] = ['stale', 'blocked']
+
+/**
+ * How many of `ids` — every node in the graph, for `'all'` — are in one of `states`. The body of
+ * `useNodeStateCount`, exported for a test that counts outside React.
+ */
+export function countInStates(
+  s: GraphState,
+  ids: readonly string[] | 'all',
+  states: readonly NodeRunState[],
+): number {
+  let count = 0
+  const tally = (id: string) => {
+    if (states.includes(s.nodeInfo(id).state)) count += 1
+  }
+  if (ids === 'all') for (const node of s.graph.nodes) tally(node.id)
+  else for (const id of ids) tally(id)
+  return count
 }
 
 /**
@@ -2956,48 +2977,34 @@ export function useStaleCount(): number {
  * anything at all.
  */
 export function useRunProgress(): RunProgress | undefined {
-  return useGraphStore((s) => {
-    void s.runVersion // subscribe to scheduler ticks
-    return s.runProgress()
-  })
+  return useGraphStore((s) => s.runProgress())
 }
 
 /**
- * What a set of nodes is doing, for a surface that draws them as one thing.
+ * How many nodes are in one of `states` — a set of them, or `'all'` for the whole graph.
  *
- * `useStaleCount`'s idiom scoped to a set. Both exist for the collapsed group box: a folded frame
- * draws no member cards, so the ring and the error badge those cards would have shown have
- * nowhere to appear — the box says it for them, or a graph running inside a fold looks idle and a
- * failure inside one is invisible until you unfold it.
+ * The set is for the collapsed group box: a folded frame draws no member cards, so the ring and
+ * the error badge those cards would have shown have nowhere to appear — the box says it for them,
+ * or a graph running inside a fold looks idle and a failure inside one is invisible until you
+ * unfold it. `'all'` is the toolbar's error badge.
  *
- * Both return a **primitive**, like their two neighbours and for invariant 7's reason: the store
- * is read through `useSyncExternalStore`, which compares snapshots by identity, so one selector
- * handing back a fresh `{running, failed}` would re-render on every tick of anything.
+ * Both this and `useAnyNodeState` return a **primitive**, like `useStaleCount` and for invariant
+ * 7's reason: the store is read through `useSyncExternalStore`, which compares snapshots by
+ * identity, so one selector handing back a fresh `{running, failed}` would re-render on every tick
+ * of anything.
  *
  * **A count where the number is shown, a boolean where it is not.** `useAnyNodeState` stops at
  * the first match and, more to the point, does not change as members hand the work along: a
  * running *count* makes every 1→2→1 among ten members a new snapshot and a full re-render of a
  * card whose markup never changed — and a For Each region can tick thousands of times.
  */
-export function useNodeStateCount(nodeIds: readonly string[], state: NodeRunState): number {
-  return useGraphStore((s) => {
-    void s.runVersion // subscribe to scheduler ticks
-    let count = 0
-    for (const id of nodeIds) if (s.nodeInfo(id).state === state) count += 1
-    return count
-  })
+export function useNodeStateCount(
+  nodeIds: readonly string[] | 'all',
+  ...states: NodeRunState[]
+): number {
+  return useGraphStore((s) => countInStates(s, nodeIds, states))
 }
 
 export function useAnyNodeState(nodeIds: readonly string[], state: NodeRunState): boolean {
-  return useGraphStore((s) => {
-    void s.runVersion
-    return nodeIds.some((id) => s.nodeInfo(id).state === state)
-  })
-}
-
-export function useErrorCount(): number {
-  return useGraphStore((s) => {
-    void s.runVersion
-    return s.graph.nodes.filter((n) => s.nodeInfo(n.id).state === 'error').length
-  })
+  return useGraphStore((s) => nodeIds.some((id) => s.nodeInfo(id).state === state))
 }

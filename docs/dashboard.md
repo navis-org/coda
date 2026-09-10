@@ -166,9 +166,9 @@ The dashboard is the surface that made a mount-time read visible, and the bug is
 because the mechanism is general and the symptom points nowhere near it.
 
 A viewer draws from one of two places. Most draw their **own output** — a Table, a Heatmap, a
-Network — which `ViewerSurface` selects through `runVersion` like every other scheduler-backed
-read. A handful draw from their **inputs** instead, because their own `out` port is a pass-through
-and keying the card on it would show the same table twice: Explore Dataset, Neuron Profile, Neuron
+Network — which `ViewerSurface` selects like every other scheduler-backed read, re-read on
+every `runVersion` bump. A handful draw from their **inputs** instead, because their own `out`
+port is a pass-through and keying the card on it would show the same table twice: Explore Dataset, Neuron Profile, Neuron
 Topology, the 3D scene, the Neuroglancer cell, Graph Metrics, the dendrogram's annotations port.
 Those read `nodeInputs(id)`.
 

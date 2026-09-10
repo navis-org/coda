@@ -52,12 +52,7 @@ interface Summary {
 
 export function PathsBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   const def = getNodeDef(node.type)
-  const paths = useGraphStore((s) => {
-    // runVersion is what ties this read to scheduler ticks; `nodeOutput` returns the cached
-    // value by reference, so this selector allocates nothing — invariant 7.
-    void s.runVersion
-    return s.nodeOutput(node.id, 'paths')
-  })
+  const paths = useGraphStore((s) => s.nodeOutput(node.id, 'paths'))
 
   const summary: Summary | undefined = useMemo(() => {
     if (!isTableValue(paths) || paths.length === 0) return undefined

@@ -30,16 +30,8 @@ const MAX_LISTED = 6
 export function IdsFromLabelBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   const def = getNodeDef(node.type)
 
-  const neurons = useGraphStore((s) => {
-    // `runVersion` is what ties this read to scheduler ticks; `nodeOutput` returns the cached
-    // value by reference, so the selector allocates nothing — invariant 7.
-    void s.runVersion
-    return s.nodeOutput(node.id, 'neurons')
-  })
-  const inputs = useGraphStore((s) => {
-    void s.runVersion
-    return s.nodeInputs(node.id)['labels']
-  })
+  const neurons = useGraphStore((s) => s.nodeOutput(node.id, 'neurons'))
+  const inputs = useGraphStore((s) => s.nodeInputs(node.id)['labels'])
 
   const field = ctx.column('field')
   const column = ctx.column('column')

@@ -46,10 +46,7 @@ export function CopyIdsBody({ node, ctx, setParam, onError }: NodeBodyProps) {
     return () => window.clearTimeout(timer)
   }, [presses])
 
-  const value = useGraphStore((s) => {
-    void s.runVersion
-    return s.nodeInputs(node.id)['neurons']
-  })
+  const value = useGraphStore((s) => s.nodeInputs(node.id)['neurons'])
 
   const { separator, dedupe, quoted } = copyIdsSettings(node.params)
 

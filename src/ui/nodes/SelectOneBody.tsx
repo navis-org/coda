@@ -35,12 +35,7 @@ import { cardParams } from '../params/paramGroups'
 export function SelectOneBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   const def = getNodeDef(node.type)
 
-  const input = useGraphStore((s) => {
-    // `runVersion` ties this read to scheduler ticks; `nodeInputs` hands back the cached value
-    // by reference, so the selector allocates nothing — invariant 7.
-    void s.runVersion
-    return s.nodeInputs(node.id)['in']
-  })
+  const input = useGraphStore((s) => s.nodeInputs(node.id)['in'])
 
   /*
    * Two different questions, answered from two different places, and conflating them printed

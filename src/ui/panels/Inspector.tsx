@@ -39,12 +39,8 @@ export function Inspector() {
   const setNotice = useGraphStore((s) => s.setNotice)
   const graphName = useGraphStore((s) => s.graph.meta?.name)
 
-  const info = useGraphStore((s) => {
-    void s.runVersion
-    return node ? s.nodeInfo(node.id) : undefined
-  })
+  const info = useGraphStore((s) => (node ? s.nodeInfo(node.id) : undefined))
   const outputValue = useGraphStore((s) => {
-    void s.runVersion
     if (!node) return undefined
     const def = getNodeDef(node.type)
     const port = def ? firstOutputPort(def, node.params) : undefined
@@ -52,10 +48,7 @@ export function Inspector() {
   })
   // What the run said about the result that is here — a guard rail passed, a draw sampled. A
   // string or undefined, so the snapshot stays a primitive (invariant 7). See `EvalContext.warn`.
-  const runWarning = useGraphStore((s) => {
-    void s.runVersion
-    return node ? s.nodeWarning(node.id) : undefined
-  })
+  const runWarning = useGraphStore((s) => (node ? s.nodeWarning(node.id) : undefined))
 
   const def = node ? getNodeDef(node.type) : undefined
   const types = node ? inference.nodes[node.id] : undefined

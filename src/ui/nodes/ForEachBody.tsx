@@ -52,16 +52,8 @@ export function ForEachBody({ node, ctx, setParam }: NodeBodyProps) {
   const def = getNodeDef(node.type)
   const [asking, setAsking] = useState(false)
 
-  const input = useGraphStore((s) => {
-    // `runVersion` ties this read to scheduler ticks; `nodeInputs` hands back the cached value
-    // by reference, so the selector allocates nothing — invariant 7.
-    void s.runVersion
-    return s.nodeInputs(node.id)['in']
-  })
-  const info = useGraphStore((s) => {
-    void s.runVersion
-    return s.nodeInfo(node.id)
-  })
+  const input = useGraphStore((s) => s.nodeInputs(node.id)['in'])
+  const info = useGraphStore((s) => s.nodeInfo(node.id))
   const busy = useGraphStore((s) => s.busy)
 
   /**

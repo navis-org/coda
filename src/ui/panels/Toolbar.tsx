@@ -17,7 +17,7 @@ import { WIZARD_BLURB, WIZARD_LABEL } from '../../wizard/options'
 import type { StarterSpec } from '../../examples/starters'
 import type { WorkflowSummary } from '../../store/library'
 import { findByName } from '../../store/library'
-import { useErrorCount, useGraphStore, useStaleCount } from '../../store/graphStore'
+import { useGraphStore, useNodeStateCount, useStaleCount } from '../../store/graphStore'
 import { pickGraphFile } from '../../store/persistence'
 import { graphName } from '../../core/graph'
 import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
@@ -95,7 +95,7 @@ export function Toolbar() {
   const fullscreen = useIsFullscreen(appElement())
 
   const staleCount = useStaleCount()
-  const errorCount = useErrorCount()
+  const errorCount = useNodeStateCount('all', 'error')
 
   /*
    * The narrow shell — see `smallScreen.ts` for the threshold and `App` for the attribute the

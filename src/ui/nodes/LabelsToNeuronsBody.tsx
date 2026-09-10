@@ -37,26 +37,15 @@ type Summary = Omit<LabelMatchResult, 'neurons'> & {
 export function LabelsToNeuronsBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   const def = getNodeDef(node.type)
 
-  const result = useGraphStore((s) => {
-    // `runVersion` ties this read to scheduler ticks; `nodeOutput` returns the cached value by
-    // reference, so the selector allocates nothing — invariant 7.
-    void s.runVersion
-    return s.nodeOutput(node.id, 'neurons')
-  })
+  const result = useGraphStore((s) => s.nodeOutput(node.id, 'neurons'))
   /*
    * Two selectors rather than one over `nodeInputs(node.id)`, which looks like the wasteful
    * shape and is the only correct one: that record is rebuilt per call, so a selector returning
    * it changes identity on every store tick and `useSyncExternalStore` loops. Invariant 7 —
    * select a value, never the container. Both siblings do the same.
    */
-  const labels = useGraphStore((s) => {
-    void s.runVersion
-    return s.nodeInputs(node.id)['labels']
-  })
-  const neurons = useGraphStore((s) => {
-    void s.runVersion
-    return s.nodeInputs(node.id)['neurons']
-  })
+  const labels = useGraphStore((s) => s.nodeInputs(node.id)['labels'])
+  const neurons = useGraphStore((s) => s.nodeInputs(node.id)['neurons'])
 
   const labelColumn = ctx.column('labelColumn')
   const matchColumn = ctx.column('matchColumn')

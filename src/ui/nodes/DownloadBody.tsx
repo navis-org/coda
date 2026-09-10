@@ -44,10 +44,7 @@ export function DownloadBody({ node, ctx, compact, setParam, onError }: NodeBody
   const def = getNodeDef(node.type)
   const [busy, setBusy] = useState(false)
 
-  const value = useGraphStore((s) => {
-    void s.runVersion
-    return s.nodeInputs(node.id)['in']
-  })
+  const value = useGraphStore((s) => s.nodeInputs(node.id)['in'])
   const autoRun = useGraphStore((s) => s.autoRun)
   const graphName = useGraphStore((s) => s.graph.meta?.name)
   const sourceId = useGraphStore((s) => upstreamNodeId(s.graph, node.id))

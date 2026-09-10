@@ -214,11 +214,11 @@ A checkbox beside Run. On (the default), every change re-runs the **whole** grap
 nodes included; off, the existing hybrid model applies. Persisted in `localStorage`
 (`coda.autorun.v1`), so an expensive workflow can be left on manual.
 
-**On is the default, and absence in storage is what carries it.** `loadAutoRun` tests for
-`!== 'false'` rather than the `=== 'true'` its neighbouring preferences use, because the key is
-only ever written by the checkbox: a profile that has never touched it has nothing stored, and
-that nothing has to read as on while a deliberate opt-out reads as off. The two are the same
-absent value under the `=== 'true'` spelling.
+**On is the default, and absence in storage is what carries it.** `loadAutoRun` reads the key
+through `readFlag` with absence meaning on, which tests for `!== 'false'` rather than the
+`=== 'true'` a default-off flag uses, because the key is only ever written by the checkbox: a profile that has
+never touched it has nothing stored, and that nothing has to read as on while a deliberate opt-out
+reads as off. The two are the same absent value under the `=== 'true'` spelling.
 
 **What that default costs is invariant 6's.** Expensive nodes hit a shared production Neo4j, and
 the hybrid evaluation model exists precisely so a reactive editor does not fire a query per

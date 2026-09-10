@@ -824,7 +824,6 @@ function EditorCanvas() {
   const paletteItems = useMemo<PaletteItem[]>(() => {
     // Read so the dependency is a real one: `buildCommandItems` calls `peekExportWarnings`,
     // which answers differently once a walk has landed and is invisible to the lint rule.
-    // `Inspector`'s `void s.runVersion` is the same idiom in a selector.
     void exportWarningsRevision
     if (!menu) return []
     if (menu.filter) return buildNodeItems(menu.filter, locked)

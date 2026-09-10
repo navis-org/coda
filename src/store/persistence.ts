@@ -129,12 +129,10 @@ const MAX_SLOTS = 6
 const MAX_SLOT_BYTES = 2_000_000
 
 /**
- * `localStorage`, with the failure reported rather than swallowed.
- *
- * Every other accessor in this file swallows, on the rule stated above: losing a *preference*
- * is survivable. The autosave path needs the answer — a slot whose write was refused must not
- * be left in the index claiming bytes that are not there, or the budget drifts until it starts
- * evicting live tabs.
+ * `localStorage`, with every failure swallowed on the rule stated above — losing a *preference* is
+ * survivable — except that `writeLocal` says whether the write landed. Only the autosave path
+ * reads that answer: a slot whose write was refused must not be left in the index claiming bytes
+ * that are not there, or the budget drifts until it starts evicting live tabs.
  */
 function readLocal(name: string): string | undefined {
   try {
@@ -164,15 +162,10 @@ function writeLocal(name: string, value: string): boolean {
  * entry in a hand-edited key does not lose the rest.
  */
 function readStringArray(name: string): string[] {
-  const raw = readLocal(name)
-  if (!raw) return []
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((value): value is string => typeof value === 'string')
-  } catch {
-    return []
-  }
+  const parsed = readJson(name)
+  return Array.isArray(parsed)
+    ? parsed.filter((value): value is string => typeof value === 'string')
+    : []
 }
 
 function writeStringArray(name: string, values: readonly string[]): void {
@@ -185,6 +178,36 @@ function removeLocal(name: string): void {
   } catch {
     /* ignore */
   }
+}
+
+/** A stored JSON value, or `undefined` for nothing stored, storage disabled, or unreadable text. */
+function readJson(name: string): unknown {
+  const raw = readLocal(name)
+  if (!raw) return undefined
+  try {
+    return JSON.parse(raw) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * A stored boolean, and `absent` is what nothing stored means.
+ *
+ * Every flag here is written only when its control is touched, so a fresh profile has nothing
+ * stored and that nothing has to read as the *default* rather than as a choice. Hence the two
+ * spellings: a default-on flag is `!== 'false'`, a default-off one `=== 'true'` — one test for
+ * both would make a fresh profile and a deliberate opt-out indistinguishable on one side or the
+ * other. Storage disabled reads as absent.
+ */
+function readFlag(name: string, absent: boolean): boolean {
+  const raw = readLocal(name)
+  return absent ? raw !== 'false' : raw === 'true'
+}
+
+/** The one writer `readFlag`'s two spellings depend on: exactly `'true'` or `'false'`. */
+function writeFlag(name: string, value: boolean): void {
+  writeLocal(name, String(value))
 }
 
 /**
@@ -320,22 +343,16 @@ interface SlotRecord {
 type SlotIndex = Record<string, SlotRecord>
 
 function readSlotIndex(): SlotIndex {
-  const raw = readLocal(SLOT_INDEX_KEY)
-  if (!raw) return {}
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return {}
-    const out: SlotIndex = {}
-    for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
-      const held = value as Partial<SlotRecord> | null
-      if (typeof held?.at === 'number' && typeof held.size === 'number') {
-        out[id] = { at: held.at, size: held.size }
-      }
+  const parsed = readJson(SLOT_INDEX_KEY)
+  if (!parsed || typeof parsed !== 'object') return {}
+  const out: SlotIndex = {}
+  for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+    const held = value as Partial<SlotRecord> | null
+    if (typeof held?.at === 'number' && typeof held.size === 'number') {
+      out[id] = { at: held.at, size: held.size }
     }
-    return out
-  } catch {
-    return {}
   }
+  return out
 }
 
 /** Every slot actually in storage, whatever the index believes about them. */
@@ -513,13 +530,8 @@ export async function pickGraphFile(): Promise<
 export type ThemePreference = 'system' | 'light' | 'dark'
 
 export function loadTheme(): ThemePreference {
-  try {
-    const raw = localStorage.getItem(THEME_KEY)
-    if (raw === 'light' || raw === 'dark' || raw === 'system') return raw
-  } catch {
-    /* ignore */
-  }
-  return 'dark'
+  const raw = readLocal(THEME_KEY)
+  return raw === 'light' || raw === 'dark' || raw === 'system' ? raw : 'dark'
 }
 
 // ---------------------------------------------------------------------------
@@ -577,33 +589,24 @@ export const DEFAULT_PANELS: PanelState = {
 }
 
 export function loadPanels(): PanelState {
-  try {
-    const raw = localStorage.getItem(PANELS_KEY)
-    if (!raw) return DEFAULT_PANELS
-    const parsed: unknown = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return DEFAULT_PANELS
-    const held = parsed as Partial<Record<keyof PanelState, unknown>>
-    return {
-      inspector: held.inspector === true,
-      minimap: held.minimap === true,
-      assistant: held.assistant === true,
-      // Note the inverted test: absent means open for these two, and a build written before
-      // the key existed must not read as "the user closed it".
-      style: held.style !== false,
-      workflows: held.workflows !== false,
-    }
-  } catch {
-    // Storage disabled, or a value written by an older build. Closed is the safe answer.
-    return DEFAULT_PANELS
+  const parsed = readJson(PANELS_KEY)
+  // Nothing stored, storage disabled, or a value written by an older build: closed is the safe
+  // answer.
+  if (!parsed || typeof parsed !== 'object') return DEFAULT_PANELS
+  const held = parsed as Partial<Record<keyof PanelState, unknown>>
+  return {
+    inspector: held.inspector === true,
+    minimap: held.minimap === true,
+    assistant: held.assistant === true,
+    // Note the inverted test: absent means open for these two, and a build written before
+    // the key existed must not read as "the user closed it".
+    style: held.style !== false,
+    workflows: held.workflows !== false,
   }
 }
 
 export function savePanels(panels: PanelState): void {
-  try {
-    localStorage.setItem(PANELS_KEY, JSON.stringify(panels))
-  } catch {
-    /* ignore */
-  }
+  writeLocal(PANELS_KEY, JSON.stringify(panels))
 }
 
 /*
@@ -682,28 +685,18 @@ export function saveDockFraction(fraction: number): void {
  *
  * **On by default, and absence is what carries that.** The key is only ever written by the
  * checkbox, so a profile that has never touched it has nothing stored — which is the new-profile
- * case and reads as on. Only an explicit `'false'` turns it off, which is why this cannot be the
- * `=== 'true'` test its neighbours use: that spelling would make a fresh profile and a deliberate
- * opt-out indistinguishable.
+ * case and reads as on. Only an explicit `'false'` turns it off — see `readFlag`.
  *
  * The cost is real and is invariant 6's: expensive nodes hit a shared production Neo4j, so on
  * means a query per edit (debounced to one per `AUTO_FULL_RUN_DELAY_MS`) rather than one per Run.
  * The checkbox beside Run is the opt-out, and it is remembered.
  */
 export function loadAutoRun(): boolean {
-  try {
-    return localStorage.getItem(AUTORUN_KEY) !== 'false'
-  } catch {
-    return true
-  }
+  return readFlag(AUTORUN_KEY, true)
 }
 
 export function saveAutoRun(enabled: boolean): void {
-  try {
-    localStorage.setItem(AUTORUN_KEY, String(enabled))
-  } catch {
-    /* ignore */
-  }
+  writeFlag(AUTORUN_KEY, enabled)
 }
 
 // ---------------------------------------------------------------------------
@@ -719,19 +712,11 @@ export function saveAutoRun(enabled: boolean): void {
  * gesture. Remembered so that somebody who turned it on is not asked again next session.
  */
 export function loadNotifyRuns(): boolean {
-  try {
-    return localStorage.getItem(NOTIFY_KEY) === 'true'
-  } catch {
-    return false
-  }
+  return readFlag(NOTIFY_KEY, false)
 }
 
 export function saveNotifyRuns(enabled: boolean): void {
-  try {
-    localStorage.setItem(NOTIFY_KEY, String(enabled))
-  } catch {
-    /* ignore */
-  }
+  writeFlag(NOTIFY_KEY, enabled)
 }
 
 // ---------------------------------------------------------------------------
@@ -782,29 +767,20 @@ export function loadLayoutPrefs(): LayoutPrefs {
     options: DEFAULT_LAYOUT_OPTIONS,
     edgeRouting: DEFAULT_EDGE_ROUTING,
   }
-  try {
-    const raw = localStorage.getItem(LAYOUT_KEY)
-    if (!raw) return fallback
-    const parsed: unknown = JSON.parse(raw)
-    const held = (parsed ?? {}) as Record<string, unknown>
-    return {
-      auto: held.auto === true,
-      options: coerceLayoutOptions(held.options),
-      edgeRouting: coerceEdgeRouting(held.edgeRouting),
-    }
-  } catch {
-    // Storage disabled, or a value from an older build. Off with stock options is the answer
-    // that cannot surprise anyone.
-    return fallback
+  const parsed = readJson(LAYOUT_KEY)
+  // Nothing stored, storage disabled, or a value from an older build. Off with stock options is
+  // the answer that cannot surprise anyone.
+  if (!parsed || typeof parsed !== 'object') return fallback
+  const held = parsed as Record<string, unknown>
+  return {
+    auto: held.auto === true,
+    options: coerceLayoutOptions(held.options),
+    edgeRouting: coerceEdgeRouting(held.edgeRouting),
   }
 }
 
 export function saveLayoutPrefs(prefs: LayoutPrefs): void {
-  try {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify(prefs))
-  } catch {
-    /* ignore */
-  }
+  writeLocal(LAYOUT_KEY, JSON.stringify(prefs))
 }
 
 // ---------------------------------------------------------------------------
@@ -819,22 +795,14 @@ export function saveLayoutPrefs(prefs: LayoutPrefs): void {
  * for itself in devtools.
  */
 export function loadStartPageDismissed(): boolean {
-  try {
-    return localStorage.getItem(START_PAGE_KEY) === 'dismissed'
-  } catch {
-    // Storage disabled. Showing the start page again is the harmless failure; suppressing it
-    // for someone who never asked is not.
-    return false
-  }
+  // Storage disabled reads as not dismissed. Showing the start page again is the harmless
+  // failure; suppressing it for someone who never asked is not.
+  return readLocal(START_PAGE_KEY) === 'dismissed'
 }
 
 export function saveStartPageDismissed(dismissed: boolean): void {
-  try {
-    if (dismissed) localStorage.setItem(START_PAGE_KEY, 'dismissed')
-    else localStorage.removeItem(START_PAGE_KEY)
-  } catch {
-    /* ignore */
-  }
+  if (dismissed) writeLocal(START_PAGE_KEY, 'dismissed')
+  else removeLocal(START_PAGE_KEY)
 }
 
 // ---------------------------------------------------------------------------
@@ -870,33 +838,31 @@ export function saveSmallScreenAck(): void {
 /**
  * Whether generated workflows arrive with their notes.
  *
- * `!== 'false'` rather than `=== 'true'`, the same spelling `loadAutoRun` uses and for the same
- * reason: nothing is stored until the checkbox is touched, so absence has to read as the default
- * rather than as a deliberate no.
+ * On by default, as `loadAutoRun` is; `readFlag` says why absence has to read that way.
  */
 export function loadWizardNotes(): boolean {
-  return readLocal(WIZARD_NOTES_KEY) !== 'false'
+  return readFlag(WIZARD_NOTES_KEY, true)
 }
 
 export function saveWizardNotes(enabled: boolean): void {
-  writeLocal(WIZARD_NOTES_KEY, String(enabled))
+  writeFlag(WIZARD_NOTES_KEY, enabled)
 }
 
 /**
  * Whether a generated workflow opens into the grid.
  *
- * `=== 'true'` — off until asked for, which is the opposite spelling to the notes above and the
- * opposite default for a reason. A note explains the graph somebody just generated and costs
- * nothing to ignore; the dashboard *replaces the view they are in*, and a first workflow that
+ * Off until asked for — the opposite default to the notes above, and for a reason. A note
+ * explains the graph somebody just generated and costs nothing to ignore; the dashboard *replaces
+ * the view they are in*, and a first workflow that
  * opened somewhere other than the canvas would be answering a question about the app before the
  * reader had one.
  */
 export function loadWizardDashboard(): boolean {
-  return readLocal(WIZARD_DASHBOARD_KEY) === 'true'
+  return readFlag(WIZARD_DASHBOARD_KEY, false)
 }
 
 export function saveWizardDashboard(enabled: boolean): void {
-  writeLocal(WIZARD_DASHBOARD_KEY, String(enabled))
+  writeFlag(WIZARD_DASHBOARD_KEY, enabled)
 }
 
 /**
@@ -918,15 +884,14 @@ export function saveWizardViewsOff(ids: readonly string[]): void {
 /**
  * Whether a generated workflow gets its one layout pass on arrival.
  *
- * `!== 'false'`, the notes spelling: nothing is stored until the box is touched, so absence has
- * to read as the default rather than as a deliberate no.
+ * On by default, as the notes are.
  */
 export function loadWizardArrange(): boolean {
-  return readLocal(WIZARD_ARRANGE_KEY) !== 'false'
+  return readFlag(WIZARD_ARRANGE_KEY, true)
 }
 
 export function saveWizardArrange(enabled: boolean): void {
-  writeLocal(WIZARD_ARRANGE_KEY, String(enabled))
+  writeFlag(WIZARD_ARRANGE_KEY, enabled)
 }
 
 // ---------------------------------------------------------------------------
@@ -1016,9 +981,5 @@ export function saveFeedbackNudgeAt(at: number): void {
 export function applyTheme(preference: ThemePreference): void {
   if (preference === 'system') delete document.documentElement.dataset.theme
   else document.documentElement.dataset.theme = preference
-  try {
-    localStorage.setItem(THEME_KEY, preference)
-  } catch {
-    /* ignore */
-  }
+  writeLocal(THEME_KEY, preference)
 }
