@@ -20,7 +20,7 @@ import { buildFeedbackDiagnostics, submitFeedback } from '../../data/feedback'
 import { useGraphStore } from '../../store/graphStore'
 import { formatNumber } from '../format'
 import { LONG_LINK_CHARS } from '../shareAdvisories'
-import { useDismissOnOutside } from '../useDismiss'
+import { Modal, ModalHeader } from '../Modal'
 
 interface CategoryCopy {
   label: string
@@ -92,8 +92,6 @@ function Dialog({
 }) {
   const graph = useGraphStore((s) => s.graph)
   const requestShare = useGraphStore((s) => s.requestShare)
-  const panelRef = useRef<HTMLDivElement>(null)
-  useDismissOnOutside(panelRef, onClose, { onEscape: true })
 
   const [category, setCategory] = useState<FeedbackCategory>(initialCategory)
   const [messages, setMessages] = useState<Record<FeedbackCategory, string>>({
@@ -168,182 +166,168 @@ function Dialog({
   }, [category, message, email, includeDiagnostics, diagnostics, includeLink, graphLink])
 
   return (
-    <div className="overlay" role="presentation">
-      <div
-        ref={panelRef}
-        className="overlay__panel feedback"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Send feedback"
-      >
-        <header className="sources__header">
-          <h2>Feedback</h2>
-          <button type="button" className="btn btn--ghost" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
-        </header>
+    <Modal className="overlay__panel feedback" label="Send feedback" onClose={onClose}>
+      <ModalHeader onClose={onClose}>Feedback</ModalHeader>
 
-        <div className="sources__tabs" role="tablist" aria-label="Kind of feedback">
-          {CATEGORY_ORDER.map((id) => (
+      <div className="sources__tabs" role="tablist" aria-label="Kind of feedback">
+        {CATEGORY_ORDER.map((id) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            className="sources__tab"
+            aria-selected={category === id}
+            onClick={() => {
+              setCategory(id)
+              setStatus({ state: 'idle' })
+            }}
+          >
+            {CATEGORIES[id].label}
+          </button>
+        ))}
+      </div>
+
+      <div className="sources__body feedback__body" role="tabpanel">
+        {status.state === 'done' ? (
+          <>
+            <p className="sources__result" data-tone="ok">
+              Thanks — your {copy.label.toLowerCase()} is on its way.
+            </p>
             <button
-              key={id}
               type="button"
-              role="tab"
-              className="sources__tab"
-              aria-selected={category === id}
+              className="btn"
               onClick={() => {
-                setCategory(id)
+                setMessages((m) => ({ ...m, [category]: '' }))
                 setStatus({ state: 'idle' })
               }}
             >
-              {CATEGORIES[id].label}
+              Send another
             </button>
-          ))}
-        </div>
+          </>
+        ) : (
+          <>
+            <p className="sources__note">{copy.blurb}</p>
 
-        <div className="sources__body feedback__body" role="tabpanel">
-          {status.state === 'done' ? (
-            <>
-              <p className="sources__result" data-tone="ok">
-                Thanks — your {copy.label.toLowerCase()} is on its way.
-              </p>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  setMessages((m) => ({ ...m, [category]: '' }))
-                  setStatus({ state: 'idle' })
-                }}
-              >
-                Send another
-              </button>
-            </>
-          ) : (
-            <>
-              <p className="sources__note">{copy.blurb}</p>
+            <label className="sources__field">
+              <span>Message</span>
+              <textarea
+                className="field feedback__message"
+                value={message}
+                placeholder={copy.placeholder}
+                onChange={(e) => setMessages((m) => ({ ...m, [category]: e.target.value }))}
+                rows={6}
+              />
+            </label>
 
-              <label className="sources__field">
-                <span>Message</span>
-                <textarea
-                  className="field feedback__message"
-                  value={message}
-                  placeholder={copy.placeholder}
-                  onChange={(e) => setMessages((m) => ({ ...m, [category]: e.target.value }))}
-                  rows={6}
-                />
-              </label>
+            <label className="sources__field">
+              <span>Your email (optional — only if you&rsquo;d like a reply)</span>
+              <input
+                className="field"
+                type="email"
+                value={email}
+                placeholder="you@example.com"
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </label>
 
-              <label className="sources__field">
-                <span>Your email (optional — only if you&rsquo;d like a reply)</span>
-                <input
-                  className="field"
-                  type="email"
-                  value={email}
-                  placeholder="you@example.com"
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </label>
+            {category === 'bug' && (
+              <>
+                <label className="share__check">
+                  <input
+                    type="checkbox"
+                    checked={includeDiagnostics}
+                    onChange={(e) => setIncludeDiagnostics(e.target.checked)}
+                  />
+                  <span>
+                    Include diagnostic details
+                    <em>Graph size, browser and app version — nothing from your data.</em>
+                  </span>
+                </label>
+                {includeDiagnostics && (
+                  <pre className="feedback__diagnostics">{diagnostics}</pre>
+                )}
 
-              {category === 'bug' && (
-                <>
-                  <label className="share__check">
-                    <input
-                      type="checkbox"
-                      checked={includeDiagnostics}
-                      onChange={(e) => setIncludeDiagnostics(e.target.checked)}
-                    />
-                    <span>
-                      Include diagnostic details
-                      <em>Graph size, browser and app version — nothing from your data.</em>
-                    </span>
-                  </label>
-                  {includeDiagnostics && (
-                    <pre className="feedback__diagnostics">{diagnostics}</pre>
-                  )}
+                <label className="share__check">
+                  <input
+                    type="checkbox"
+                    checked={includeLink}
+                    onChange={(e) => setIncludeLink(e.target.checked)}
+                  />
+                  <span>
+                    Include a link to this graph
+                    <em>
+                      Lets us open the exact graph you saw the bug in. Leave this off if it
+                      holds anything sensitive.
+                    </em>
+                  </span>
+                </label>
 
-                  <label className="share__check">
-                    <input
-                      type="checkbox"
-                      checked={includeLink}
-                      onChange={(e) => setIncludeLink(e.target.checked)}
-                    />
-                    <span>
-                      Include a link to this graph
-                      <em>
-                        Lets us open the exact graph you saw the bug in. Leave this off if it
-                        holds anything sensitive.
-                      </em>
-                    </span>
-                  </label>
+                {includeLink && linkState.state === 'building' && (
+                  <p className="sources__note sources__note--tight">Building the link…</p>
+                )}
 
-                  {includeLink && linkState.state === 'building' && (
-                    <p className="sources__note sources__note--tight">Building the link…</p>
-                  )}
+                {includeLink && linkState.state === 'ready' && (
+                  <input
+                    className="field feedback__link"
+                    readOnly
+                    value={linkState.url}
+                    aria-label="Graph link"
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                )}
 
-                  {includeLink && linkState.state === 'ready' && (
-                    <input
-                      className="field feedback__link"
-                      readOnly
-                      value={linkState.url}
-                      aria-label="Graph link"
-                      onFocus={(e) => e.currentTarget.select()}
-                    />
-                  )}
+                {includeLink && linkState.state === 'error' && (
+                  <p className="sources__result" data-tone="error">
+                    Could not build a link: {linkState.message}
+                  </p>
+                )}
 
-                  {includeLink && linkState.state === 'error' && (
-                    <p className="sources__result" data-tone="error">
-                      Could not build a link: {linkState.message}
+                {includeLink && linkState.state === 'too-long' && (
+                  <div className="feedback__link-toolong">
+                    <p className="sources__note sources__note--tight">
+                      This graph packs to {formatNumber(linkState.length)} characters — too long
+                      for a plain link. Close this and use <strong>Share ▸ GitHub Gist</strong>{' '}
+                      to shorten it, then paste the result below.
                     </p>
-                  )}
+                    <input
+                      className="field"
+                      value={manualLink}
+                      placeholder="Paste a gist link here"
+                      aria-label="Gist link"
+                      onChange={(e) => setManualLink(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => {
+                        onClose()
+                        requestShare()
+                      }}
+                    >
+                      Open the Share dialog
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
 
-                  {includeLink && linkState.state === 'too-long' && (
-                    <div className="feedback__link-toolong">
-                      <p className="sources__note sources__note--tight">
-                        This graph packs to {formatNumber(linkState.length)} characters — too
-                        long for a plain link. Close this and use{' '}
-                        <strong>Share ▸ GitHub Gist</strong> to shorten it, then paste the
-                        result below.
-                      </p>
-                      <input
-                        className="field"
-                        value={manualLink}
-                        placeholder="Paste a gist link here"
-                        aria-label="Gist link"
-                        onChange={(e) => setManualLink(e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={() => {
-                          onClose()
-                          requestShare()
-                        }}
-                      >
-                        Open the Share dialog
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
+            {status.state === 'error' && (
+              <p className="sources__result" data-tone="error">
+                {status.message}
+              </p>
+            )}
 
-              {status.state === 'error' && (
-                <p className="sources__result" data-tone="error">
-                  {status.message}
-                </p>
-              )}
-
-              <button
-                type="button"
-                className="btn btn--primary feedback__submit"
-                disabled={!message.trim() || status.state === 'sending'}
-                onClick={submit}
-              >
-                {status.state === 'sending' ? 'Sending…' : 'Send'}
-              </button>
-            </>
-          )}
-        </div>
+            <button
+              type="button"
+              className="btn btn--primary feedback__submit"
+              disabled={!message.trim() || status.state === 'sending'}
+              onClick={submit}
+            >
+              {status.state === 'sending' ? 'Sending…' : 'Send'}
+            </button>
+          </>
+        )}
       </div>
-    </div>
+    </Modal>
   )
 }

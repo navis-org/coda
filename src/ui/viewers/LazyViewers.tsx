@@ -10,6 +10,7 @@ import { Suspense, lazy } from 'react'
 
 import type { NetworkViewerProps } from './NetworkViewer'
 import type { Viewer3DProps } from './Viewer3D'
+import { ViewerEmpty } from './ViewerEmpty'
 
 const NetworkViewerImpl = lazy(async () => ({
   default: (await import('./NetworkViewer')).NetworkViewer,
@@ -20,11 +21,7 @@ const Viewer3DImpl = lazy(async () => ({
 }))
 
 function Loading({ what }: { what: string }) {
-  return (
-    <div className="viewer">
-      <div className="viewer__empty">loading {what}…</div>
-    </div>
-  )
+  return <ViewerEmpty>loading {what}…</ViewerEmpty>
 }
 
 export function LazyNetworkViewer(props: NetworkViewerProps) {

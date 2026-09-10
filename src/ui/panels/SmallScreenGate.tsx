@@ -28,6 +28,7 @@
 import { useEffect, useRef } from 'react'
 
 import { acknowledgeSmallScreen, useSmallScreenNotice } from '../smallScreen'
+import { Modal } from '../Modal'
 
 /*
  * The three pages that read on a phone. Through `BASE_URL` for `StartPage`'s reason: `base` is
@@ -52,51 +53,47 @@ function Notice() {
   }, [])
 
   /*
-   * No `useDismissOnOutside`. Every other dialog closes on Escape or a tap on the backdrop, and
+   * No `onClose` on its `Modal`. Every other dialog closes on Escape or a tap on the backdrop, and
    * both would be accidents here: there is no keyboard on the device this is written for, and a
    * tap outside a card is what a finger does on the way to a button. Dismissing has to be the
    * button, because dismissing is an answer that gets written down.
    */
   return (
-    <div className="overlay small-screen" role="presentation">
-      <div
-        className="overlay__panel small-screen__panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="small-screen-title"
-      >
-        <h2 id="small-screen-title">Coda wants a bigger screen</h2>
-        <p>
-          Coda is a node-graph editor built for a desktop or a tablet — a canvas you place cards
-          on, wire together and read charts from. On a phone the layout will not hold together.
-        </p>
-        <p className="small-screen__quiet">
-          These pages do read here, and are where the writing is:
-        </p>
-        <ul className="small-screen__links">
-          <li>
-            <a href={OVERVIEW_URL}>Overview</a> — what Coda is, in one scroll.
-          </li>
-          <li>
-            <a href={TUTORIAL_URL}>Field guide</a> — an introduction that builds a real
-            pipeline.
-          </li>
-          <li>
-            <a href={NODE_GUIDE_URL}>Node guide</a> — every node, what it takes and what it
-            hands on.
-          </li>
-        </ul>
-        <div className="small-screen__actions">
-          <button
-            ref={proceedRef}
-            type="button"
-            className="btn btn--primary"
-            onClick={acknowledgeSmallScreen}
-          >
-            Open it anyway
-          </button>
-        </div>
+    <Modal
+      rootClassName="overlay small-screen"
+      className="overlay__panel small-screen__panel"
+      labelledBy="small-screen-title"
+    >
+      <h2 id="small-screen-title">Coda wants a bigger screen</h2>
+      <p>
+        Coda is a node-graph editor built for a desktop or a tablet — a canvas you place cards
+        on, wire together and read charts from. On a phone the layout will not hold together.
+      </p>
+      <p className="small-screen__quiet">
+        These pages do read here, and are where the writing is:
+      </p>
+      <ul className="small-screen__links">
+        <li>
+          <a href={OVERVIEW_URL}>Overview</a> — what Coda is, in one scroll.
+        </li>
+        <li>
+          <a href={TUTORIAL_URL}>Field guide</a> — an introduction that builds a real pipeline.
+        </li>
+        <li>
+          <a href={NODE_GUIDE_URL}>Node guide</a> — every node, what it takes and what it hands
+          on.
+        </li>
+      </ul>
+      <div className="small-screen__actions">
+        <button
+          ref={proceedRef}
+          type="button"
+          className="btn btn--primary"
+          onClick={acknowledgeSmallScreen}
+        >
+          Open it anyway
+        </button>
       </div>
-    </div>
+    </Modal>
   )
 }

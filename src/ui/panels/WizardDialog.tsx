@@ -35,7 +35,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { useGraphStore } from '../../store/graphStore'
-import { useDismissOnOutside } from '../useDismiss'
 import { datasetGlyph } from '../nodes/DatasetPreview'
 import { BACKENDS } from '../../nodes/lib/datasetFamilies'
 import { GLYPH_STROKE_WIDTH, GLYPH_VIEWBOX, SPECIMEN_VIEWBOX } from '../glyphs'
@@ -59,6 +58,7 @@ import {
 import { getNodeDef, isAnnotation, requireNodeDef } from '../../core/registry'
 import { plural } from '../format'
 import type { CodaGraph } from '../../core/graph'
+import { Modal, ModalHeader } from '../Modal'
 
 export function WizardDialog() {
   const open = useGraphStore((s) => s.wizardOpen)
@@ -151,9 +151,6 @@ function Dialog() {
   const [chosenStart, setStart] = useState<StartId>('browse')
   const [chosenAnalysis, setAnalysis] = useState<AnalysisId>('partners')
   const [step, setStep] = useState(0)
-
-  const panelRef = useRef<HTMLDivElement>(null)
-  useDismissOnOutside(panelRef, close, { onEscape: true })
 
   const steps = stepsFor(multi)
   const questions = steps.length
@@ -329,198 +326,187 @@ function Dialog() {
   const blocked = blockedReason(at, ticked, analyses)
 
   return (
-    <div className="overlay" role="presentation">
-      <div
-        ref={panelRef}
-        className="overlay__panel wizard"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="wizard-title"
-      >
-        <header className="sources__header">
-          <h2 id="wizard-title">{WIZARD_LABEL}</h2>
-          <button type="button" className="btn btn--ghost" onClick={close} aria-label="Close">
-            ✕
-          </button>
-        </header>
+    <Modal className="overlay__panel wizard" labelledBy="wizard-title" onClose={close}>
+      <ModalHeader titleId="wizard-title" onClose={close}>
+        {WIZARD_LABEL}
+      </ModalHeader>
 
-        <div className="wizard__body">
-          {at === 'dataset' && (
-            <Question
-              title="Which dataset?"
-              hint="Pick the dataset you want to work with. You can change it on the canvas afterwards."
-            >
-              {families.map((family) => (
-                <Option
-                  key={family.key}
-                  selected={family.key === dataset}
-                  label={family.label}
-                  /*
-                   * Which backend serves it, beside the name — two datasets can look alike and
-                   * answer very differently, and the backend is what decides that. Read through
-                   * `BACKENDS` rather than the source id, so both CATMAID servers say CATMAID.
-                   * Blank for the synthetic family, whose label in that table is deliberately
-                   * empty: `Demo Data (Mock)` is the name a rule produces when nobody checked it
-                   * against the values.
-                   */
-                  where={BACKENDS[family.backend]?.label}
-                  blurb={family.description}
-                  onPick={() => pick.dataset(family.key)}
-                  glyph={
-                    <GlyphSvg className="wizard__glyph" viewBox={SPECIMEN_VIEWBOX}>
-                      {datasetGlyph(family.glyph)}
-                    </GlyphSvg>
-                  }
-                />
-              ))}
-              {/*
-               * Last, and it is the one row here that is not a dataset: it answers this question
-               * by replacing it with a different one. Its copy is `options.ts`' like every other
-               * answer's, and it wears a node's drawing like every other answer — the mapper,
-               * which is the card that could not exist in a single-dataset workflow at all.
-               */}
+      <div className="wizard__body">
+        {at === 'dataset' && (
+          <Question
+            title="Which dataset?"
+            hint="Pick the dataset you want to work with. You can change it on the canvas afterwards."
+          >
+            {families.map((family) => (
               <Option
-                key={MULTI_DATASET.id}
-                selected={multi}
-                label={MULTI_DATASET.label}
-                blurb={MULTI_DATASET.blurb}
-                glyph={<OptionGlyph option={MULTI_DATASET} />}
-                onPick={pick.multiple}
+                key={family.key}
+                selected={family.key === dataset}
+                label={family.label}
+                /*
+                 * Which backend serves it, beside the name — two datasets can look alike and
+                 * answer very differently, and the backend is what decides that. Read through
+                 * `BACKENDS` rather than the source id, so both CATMAID servers say CATMAID.
+                 * Blank for the synthetic family, whose label in that table is deliberately
+                 * empty: `Demo Data (Mock)` is the name a rule produces when nobody checked it
+                 * against the values.
+                 */
+                where={BACKENDS[family.backend]?.label}
+                blurb={family.description}
+                onPick={() => pick.dataset(family.key)}
+                glyph={
+                  <GlyphSvg className="wizard__glyph" viewBox={SPECIMEN_VIEWBOX}>
+                    {datasetGlyph(family.glyph)}
+                  </GlyphSvg>
+                }
               />
-            </Question>
-          )}
-
-          {at === 'datasets' && (
-            <Question
-              title="Which datasets?"
-              hint={`Tick two or more connectomes to compare — up to ${maxDatasets}. The order is the order they appear in the workflow.`}
-            >
-              {multiFamilies.map((family) => (
-                <Option
-                  key={family.key}
-                  selected={ticked.includes(family.key)}
-                  multiple
-                  label={family.label}
-                  where={BACKENDS[family.backend]?.label}
-                  blurb={family.description}
-                  onPick={() => pick.datasets(family.key)}
-                  glyph={
-                    <GlyphSvg className="wizard__glyph" viewBox={SPECIMEN_VIEWBOX}>
-                      {datasetGlyph(family.glyph)}
-                    </GlyphSvg>
-                  }
-                />
-              ))}
-            </Question>
-          )}
-
-          {at === 'start' && (
-            <Question
-              title="Which neurons?"
-              hint="How you want to define the set of neurons you want to work on."
-            >
-              {starts.map((option) => (
-                <Option
-                  key={option.id}
-                  selected={option.id === start}
-                  label={option.label}
-                  blurb={option.blurb}
-                  glyph={<OptionGlyph option={option} />}
-                  onPick={() => pick.start(option.id)}
-                />
-              ))}
-            </Question>
-          )}
-
-          {at === 'analysis' && (
-            <Question
-              title="What do you want to know or do?"
-              hint="The question the workflow is supposed to answer."
-            >
-              {analyses.map((option) => (
-                <Option
-                  key={option.id}
-                  selected={option.id === analysis}
-                  label={option.label}
-                  blurb={option.blurb}
-                  glyph={<OptionGlyph option={option} />}
-                  onPick={() => pick.analysis(option.id)}
-                />
-              ))}
-            </Question>
-          )}
-
-          {at === 'views' && (
-            <Question
-              title="How should it look?"
-              hint="What ends the chain — tick as many as you want. Viewers pass their input through, so you can add more after them."
-            >
-              {views.map((option) => (
-                <Option
-                  key={option.id}
-                  selected={visualisations.includes(option.id)}
-                  multiple
-                  label={option.label}
-                  blurb={option.blurb}
-                  glyph={<OptionGlyph option={option} />}
-                  onPick={() => pick.visualisation(option.id)}
-                />
-              ))}
-            </Question>
-          )}
-
-          {step === questions && (
-            <Summary
-              graph={graph}
-              notes={notes}
-              onNotes={setNotes}
-              dashboard={dashboard}
-              onDashboard={setDashboard}
-              arrange={arrange}
-              onArrange={setArrange}
+            ))}
+            {/*
+             * Last, and it is the one row here that is not a dataset: it answers this question
+             * by replacing it with a different one. Its copy is `options.ts`' like every other
+             * answer's, and it wears a node's drawing like every other answer — the mapper,
+             * which is the card that could not exist in a single-dataset workflow at all.
+             */}
+            <Option
+              key={MULTI_DATASET.id}
+              selected={multi}
+              label={MULTI_DATASET.label}
+              blurb={MULTI_DATASET.blurb}
+              glyph={<OptionGlyph option={MULTI_DATASET} />}
+              onPick={pick.multiple}
             />
-          )}
-        </div>
+          </Question>
+        )}
 
-        <div className="wizard__foot">
-          {/*
-           * The position, and — on the one question that can refuse to be left — why. Both,
-           * rather than the reason replacing the counter: a reader who cannot press Continue
-           * needs to know what is missing *and* still needs to know where they are, and a
-           * counter that disappears on one screen reads as a screen outside the sequence.
-           */}
-          <span className="wizard__progress">
-            {step < questions ? `Question ${step + 1} of ${questions}` : 'Ready to build'}
-            {blocked ? ` · ${blocked}` : ''}
-          </span>
-          <span className="toolbar__spacer" />
-          <button type="button" className="btn" onClick={back}>
-            {step === 0 ? 'Cancel' : 'Back'}
-          </button>
-          {/*
-           * The two multi-select questions are the ones that cannot advance on a click — see
-           * `pick`. The datasets question can also be *unanswerable*, which no other question
-           * can be: two connectomes that share no capability share no analysis, so Continue is
-           * refused and the footer says which rather than opening a question with nothing in it.
-           */}
-          {(at === 'datasets' || at === 'views') && (
-            <button
-              type="button"
-              className="btn btn--primary"
-              disabled={Boolean(blocked)}
-              onClick={() => setStep(step + 1)}
-            >
-              Continue
-            </button>
-          )}
-          {step === questions && (
-            <button type="button" className="btn btn--primary" onClick={create}>
-              Create workflow
-            </button>
-          )}
-        </div>
+        {at === 'datasets' && (
+          <Question
+            title="Which datasets?"
+            hint={`Tick two or more connectomes to compare — up to ${maxDatasets}. The order is the order they appear in the workflow.`}
+          >
+            {multiFamilies.map((family) => (
+              <Option
+                key={family.key}
+                selected={ticked.includes(family.key)}
+                multiple
+                label={family.label}
+                where={BACKENDS[family.backend]?.label}
+                blurb={family.description}
+                onPick={() => pick.datasets(family.key)}
+                glyph={
+                  <GlyphSvg className="wizard__glyph" viewBox={SPECIMEN_VIEWBOX}>
+                    {datasetGlyph(family.glyph)}
+                  </GlyphSvg>
+                }
+              />
+            ))}
+          </Question>
+        )}
+
+        {at === 'start' && (
+          <Question
+            title="Which neurons?"
+            hint="How you want to define the set of neurons you want to work on."
+          >
+            {starts.map((option) => (
+              <Option
+                key={option.id}
+                selected={option.id === start}
+                label={option.label}
+                blurb={option.blurb}
+                glyph={<OptionGlyph option={option} />}
+                onPick={() => pick.start(option.id)}
+              />
+            ))}
+          </Question>
+        )}
+
+        {at === 'analysis' && (
+          <Question
+            title="What do you want to know or do?"
+            hint="The question the workflow is supposed to answer."
+          >
+            {analyses.map((option) => (
+              <Option
+                key={option.id}
+                selected={option.id === analysis}
+                label={option.label}
+                blurb={option.blurb}
+                glyph={<OptionGlyph option={option} />}
+                onPick={() => pick.analysis(option.id)}
+              />
+            ))}
+          </Question>
+        )}
+
+        {at === 'views' && (
+          <Question
+            title="How should it look?"
+            hint="What ends the chain — tick as many as you want. Viewers pass their input through, so you can add more after them."
+          >
+            {views.map((option) => (
+              <Option
+                key={option.id}
+                selected={visualisations.includes(option.id)}
+                multiple
+                label={option.label}
+                blurb={option.blurb}
+                glyph={<OptionGlyph option={option} />}
+                onPick={() => pick.visualisation(option.id)}
+              />
+            ))}
+          </Question>
+        )}
+
+        {step === questions && (
+          <Summary
+            graph={graph}
+            notes={notes}
+            onNotes={setNotes}
+            dashboard={dashboard}
+            onDashboard={setDashboard}
+            arrange={arrange}
+            onArrange={setArrange}
+          />
+        )}
       </div>
-    </div>
+
+      <div className="wizard__foot">
+        {/*
+         * The position, and — on the one question that can refuse to be left — why. Both,
+         * rather than the reason replacing the counter: a reader who cannot press Continue
+         * needs to know what is missing *and* still needs to know where they are, and a
+         * counter that disappears on one screen reads as a screen outside the sequence.
+         */}
+        <span className="wizard__progress">
+          {step < questions ? `Question ${step + 1} of ${questions}` : 'Ready to build'}
+          {blocked ? ` · ${blocked}` : ''}
+        </span>
+        <span className="toolbar__spacer" />
+        <button type="button" className="btn" onClick={back}>
+          {step === 0 ? 'Cancel' : 'Back'}
+        </button>
+        {/*
+         * The two multi-select questions are the ones that cannot advance on a click — see
+         * `pick`. The datasets question can also be *unanswerable*, which no other question
+         * can be: two connectomes that share no capability share no analysis, so Continue is
+         * refused and the footer says which rather than opening a question with nothing in it.
+         */}
+        {(at === 'datasets' || at === 'views') && (
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={Boolean(blocked)}
+            onClick={() => setStep(step + 1)}
+          >
+            Continue
+          </button>
+        )}
+        {step === questions && (
+          <button type="button" className="btn btn--primary" onClick={create}>
+            Create workflow
+          </button>
+        )}
+      </div>
+    </Modal>
   )
 }
 

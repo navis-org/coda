@@ -28,7 +28,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { LONG_LINK_CHARS, shareAdvisories } from '../shareAdvisories'
 import { copyText, slugify } from '../export'
 import { formatNumber } from '../format'
-import { useDismissOnOutside } from '../useDismiss'
+import { Modal, ModalHeader } from '../Modal'
 
 type Mode = 'link' | 'gist'
 
@@ -74,11 +74,6 @@ function Dialog({ onClose }: { onClose: () => void }) {
   const [gist, setGist] = useState<GistState>({ state: 'idle' })
   const [copied, setCopied] = useState(false)
   const [login, setLogin] = useState<string | undefined>()
-  const panelRef = useRef<HTMLDivElement>(null)
-
-  // Escape and a click outside, through the hook every other popover here uses rather than a
-  // sixth hand-rolled `keydown` listener. Without it this dialog had no Escape at all.
-  useDismissOnOutside(panelRef, onClose, { onEscape: true })
 
   const name = graphName(graph)
   const stored = graph.meta?.gist
@@ -217,132 +212,119 @@ function Dialog({ onClose }: { onClose: () => void }) {
           : undefined
 
   return (
-    <div className="overlay" role="presentation">
-      <div
-        ref={panelRef}
-        className="overlay__panel share"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Share workflow"
-      >
-        <header className="sources__header">
-          <h2>Share “{name}”</h2>
-          <button type="button" className="btn btn--ghost" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
-        </header>
+    <Modal className="overlay__panel share" label="Share workflow" onClose={onClose}>
+      <ModalHeader onClose={onClose}>Share “{name}”</ModalHeader>
 
-        <div className="sources__sections" role="tablist" aria-label="Where the workflow goes">
-          <button
-            type="button"
-            role="tab"
-            className="sources__section"
-            aria-selected={mode === 'link'}
-            onClick={() => setMode('link')}
-          >
-            In the link
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className="sources__section"
-            aria-selected={mode === 'gist'}
-            onClick={() => setMode('gist')}
-          >
-            GitHub Gist
-          </button>
-        </div>
-
-        <div className="sources__body share__body" role="tabpanel">
-          {mode === 'link' ? (
-            <p className="sources__note">
-              The workflow travels inside the address — no account, no server, nothing to keep
-              alive. Anyone who opens it gets your graph exactly as it is on the canvas.
-            </p>
-          ) : (
-            <p className="sources__note">
-              The workflow is stored in a gist on your GitHub account and the link points at it.
-              Forty characters however large the graph, and you can update it later. Reading one
-              needs no token, so the link works for anybody.
-            </p>
-          )}
-
-          {mode === 'gist' && !hasToken ? (
-            <p className="share__blocked">
-              No GitHub token yet. Add one in <strong>Connections ▸ Sharing</strong> — the
-              branch icon in the toolbar. It needs the <code>gist</code> scope and nothing else.
-            </p>
-          ) : null}
-
-          {mode === 'gist' && hasToken ? (
-            <div className="share__controls">
-              <label className="share__check">
-                <input
-                  type="checkbox"
-                  checked={secret}
-                  disabled={Boolean(stored) && gist.state !== 'done'}
-                  onChange={(e) => setSecret(e.target.checked)}
-                />
-                <span>
-                  Secret gist
-                  <em>
-                    Unlisted, not private — anyone with the link can read it, and it will not
-                    appear on your profile or in search.
-                  </em>
-                </span>
-              </label>
-              <button
-                type="button"
-                className="btn btn--primary"
-                disabled={gist.state === 'working'}
-                onClick={share}
-              >
-                {gist.state === 'working'
-                  ? 'Uploading…'
-                  : mine
-                    ? 'Update the gist'
-                    : 'Create a gist'}
-              </button>
-            </div>
-          ) : null}
-
-          <LinkBox url={url} copied={copied} onCopy={copy} pending={pending} />
-
-          {mode === 'link' && linkUrl ? (
-            <p className="share__size">
-              {formatNumber(linkUrl.length)} characters
-              {linkUrl.length > LONG_LINK_CHARS ? ' — longer than most clients carry' : ''}
-            </p>
-          ) : null}
-
-          {gist.state === 'done' ? (
-            <p className="sources__result" data-tone="ok">
-              {gist.updated ? 'Gist updated.' : 'Gist created.'} Pressing Share again updates
-              this same gist, so the link you have already sent stays current.
-            </p>
-          ) : null}
-          {gist.state === 'error' ? (
-            <p className="sources__result" data-tone="error">
-              {gist.message}
-            </p>
-          ) : null}
-
-          {local ? (
-            <p className="share__advisory">
-              This link points at <code>{window.location.host || 'this machine'}</code>, so it
-              only opens where Coda is running now. Share from the deployed site to send it
-              anywhere else.
-            </p>
-          ) : null}
-
-          {advisories.map((advisory) => (
-            <p className="share__advisory" key={advisory.id}>
-              {advisory.text}
-            </p>
-          ))}
-        </div>
+      <div className="sources__sections" role="tablist" aria-label="Where the workflow goes">
+        <button
+          type="button"
+          role="tab"
+          className="sources__section"
+          aria-selected={mode === 'link'}
+          onClick={() => setMode('link')}
+        >
+          In the link
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className="sources__section"
+          aria-selected={mode === 'gist'}
+          onClick={() => setMode('gist')}
+        >
+          GitHub Gist
+        </button>
       </div>
-    </div>
+
+      <div className="sources__body share__body" role="tabpanel">
+        {mode === 'link' ? (
+          <p className="sources__note">
+            The workflow travels inside the address — no account, no server, nothing to keep
+            alive. Anyone who opens it gets your graph exactly as it is on the canvas.
+          </p>
+        ) : (
+          <p className="sources__note">
+            The workflow is stored in a gist on your GitHub account and the link points at it.
+            Forty characters however large the graph, and you can update it later. Reading one
+            needs no token, so the link works for anybody.
+          </p>
+        )}
+
+        {mode === 'gist' && !hasToken ? (
+          <p className="share__blocked">
+            No GitHub token yet. Add one in <strong>Connections ▸ Sharing</strong> — the branch
+            icon in the toolbar. It needs the <code>gist</code> scope and nothing else.
+          </p>
+        ) : null}
+
+        {mode === 'gist' && hasToken ? (
+          <div className="share__controls">
+            <label className="share__check">
+              <input
+                type="checkbox"
+                checked={secret}
+                disabled={Boolean(stored) && gist.state !== 'done'}
+                onChange={(e) => setSecret(e.target.checked)}
+              />
+              <span>
+                Secret gist
+                <em>
+                  Unlisted, not private — anyone with the link can read it, and it will not
+                  appear on your profile or in search.
+                </em>
+              </span>
+            </label>
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={gist.state === 'working'}
+              onClick={share}
+            >
+              {gist.state === 'working'
+                ? 'Uploading…'
+                : mine
+                  ? 'Update the gist'
+                  : 'Create a gist'}
+            </button>
+          </div>
+        ) : null}
+
+        <LinkBox url={url} copied={copied} onCopy={copy} pending={pending} />
+
+        {mode === 'link' && linkUrl ? (
+          <p className="share__size">
+            {formatNumber(linkUrl.length)} characters
+            {linkUrl.length > LONG_LINK_CHARS ? ' — longer than most clients carry' : ''}
+          </p>
+        ) : null}
+
+        {gist.state === 'done' ? (
+          <p className="sources__result" data-tone="ok">
+            {gist.updated ? 'Gist updated.' : 'Gist created.'} Pressing Share again updates this
+            same gist, so the link you have already sent stays current.
+          </p>
+        ) : null}
+        {gist.state === 'error' ? (
+          <p className="sources__result" data-tone="error">
+            {gist.message}
+          </p>
+        ) : null}
+
+        {local ? (
+          <p className="share__advisory">
+            This link points at <code>{window.location.host || 'this machine'}</code>, so it
+            only opens where Coda is running now. Share from the deployed site to send it
+            anywhere else.
+          </p>
+        ) : null}
+
+        {advisories.map((advisory) => (
+          <p className="share__advisory" key={advisory.id}>
+            {advisory.text}
+          </p>
+        ))}
+      </div>
+    </Modal>
   )
 }
 

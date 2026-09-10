@@ -7,7 +7,7 @@
  *
  * What is *in* the panel is `ViewerSurface`, shared with the pinned dock: the header, the
  * presentational rail or the tabbed styling sidebar, and the node's own body. This file is the
- * modal frame around it — the backdrop, Escape, the per-node width cap, fullscreen.
+ * modal frame around it — a `Modal`, the per-node width cap, fullscreen.
  *
  * The other surface answers a different moment. This one is for looking at a result; the dock
  * (`ViewerDock`) is for keeping one open while you work on the graph beside it. They are
@@ -15,12 +15,13 @@
  * memory-footprint decision rather than a tidiness one.
  */
 
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useRef } from 'react'
 
 import { useGraphStore } from '../../store/graphStore'
 import { exitFullscreen, toggleFullscreen, useIsFullscreen } from '../fullscreen'
 import { expandedWidth } from './expandedWidth'
 import { ViewerSurface, useViewerNode } from './ViewerSurface'
+import { Modal } from '../Modal'
 
 export function ViewerOverlay() {
   const nodeId = useGraphStore((s) => s.expandedNodeId)
@@ -40,37 +41,6 @@ export function ViewerOverlay() {
     if (document.fullscreenElement === panelRef.current) exitFullscreen()
     expandNode(undefined)
   }, [expandNode])
-
-  // Escape closes. The browser consumes Escape itself while the *panel* is fullscreen, which
-  // exits fullscreen first and leaves the overlay up — that's the behaviour people expect.
-  // A fullscreen *app* underneath is not that case: the overlay is an ordinary dialog on top
-  // of it, and Escape closes it like any other.
-  useEffect(() => {
-    if (!nodeId) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || document.fullscreenElement === panelRef.current) return
-      /*
-       * A popover on top of a dialog owns Escape first.
-       *
-       * This listener is on the *capture* phase, so it beats every popover's own dismissal —
-       * which meant pressing Escape to shut the network viewer's context menu closed the whole
-       * overlay from under it. Standing aside while one is open lets the key reach the menu's
-       * own handler on the way back up; the next press finds no menu and closes this.
-       *
-       * By class rather than by a registry, because `.context-menu` is what all four of them
-       * are, and a dialog knowing which popovers exist is the coupling being avoided.
-       *
-       * A node's screen map (`.smap`) is the same case one level up. It takes Escape on the
-       * capture phase too, but both listeners are on `window`, where `stopPropagation` does not
-       * stop a sibling — so without this one press shut the map *and* the viewer under it.
-       */
-      if (document.querySelector('.context-menu, .smap')) return
-      event.stopPropagation()
-      close()
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [nodeId, close])
 
   if (!nodeId || !found) return null
   const title = found.node.title ?? found.def.label
@@ -93,43 +63,42 @@ export function ViewerOverlay() {
   }
 
   return (
-    <div className="overlay" role="presentation" onPointerDown={close}>
-      <div
-        ref={panelRef}
-        className="overlay__panel viewer-panel viewer-surface"
-        style={width === 'full' || isFullscreen ? undefined : { maxWidth: width }}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${title} output`}
-        // Clicks inside must not reach the backdrop's close handler.
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        <ViewerSurface
-          nodeId={nodeId}
-          actions={
-            <>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={onToggleFullscreen}
-                title={isFullscreen ? 'Leave fullscreen' : 'Fullscreen'}
-                aria-label={isFullscreen ? 'Leave fullscreen' : 'Enter fullscreen'}
-              >
-                {isFullscreen ? '⛶ Exit' : '⛶ Fullscreen'}
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={close}
-                title="Close (Esc)"
-                aria-label="Close viewer"
-              >
-                ✕
-              </button>
-            </>
-          }
-        />
-      </div>
-    </div>
+    <Modal
+      className="overlay__panel viewer-panel viewer-surface"
+      label={`${title} output`}
+      onClose={close}
+      panelRef={panelRef}
+      style={width === 'full' || isFullscreen ? undefined : { maxWidth: width }}
+      /* The browser consumes Escape itself while the *panel* is fullscreen, leaving fullscreen
+         with the overlay still up — the behaviour people expect. A fullscreen *app* underneath
+         is not that case: the overlay is an ordinary dialog on top of it. */
+      ignoreEscape={() => document.fullscreenElement === panelRef.current}
+    >
+      <ViewerSurface
+        nodeId={nodeId}
+        actions={
+          <>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={onToggleFullscreen}
+              title={isFullscreen ? 'Leave fullscreen' : 'Fullscreen'}
+              aria-label={isFullscreen ? 'Leave fullscreen' : 'Enter fullscreen'}
+            >
+              {isFullscreen ? '⛶ Exit' : '⛶ Fullscreen'}
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={close}
+              title="Close (Esc)"
+              aria-label="Close viewer"
+            >
+              ✕
+            </button>
+          </>
+        }
+      />
+    </Modal>
   )
 }

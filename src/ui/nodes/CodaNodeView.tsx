@@ -37,7 +37,7 @@ import { IssueText } from '../IssueText'
 import { bucketParams } from '../params/paramGroups'
 import { socketStyle } from '../socketStyle'
 import { dragPortType, useDragOrigin } from '../dragOrigin'
-import { ValuePreview } from '../viewers/ValuePreview'
+import { drawsFromInputs, ValuePreview } from '../viewers/ValuePreview'
 import { CacheAge } from './CacheAge'
 import { DatasetCacheAge } from './DatasetCacheAge'
 import { nodeBody, nodeCardWidth } from './nodeBodies'
@@ -69,26 +69,6 @@ export interface CodaNodeData {
  */
 const MIN_NODE_WIDTH = 220
 const MIN_NODE_HEIGHT = 160
-
-/**
- * Viewers that draw from their *inputs* rather than their own output, so they have something
- * to show before — and without — a result of their own.
- *
- * Genuinely a list: nothing on the definition declares it, and it is not derivable from the
- * category the way `isViewer` is.
- */
-const SELF_DRAWING_NODE_TYPES = new Set([
-  'out.viewer3d',
-  'out.neuroglancer',
-  'out.profile',
-  // Draws its input's topology, so it has a card one scheduler step before its own value —
-  // and reading the input rather than the output is also what makes the card share the run's
-  // memoised metrics instead of computing a second set. See `ValuePreview`'s branch.
-  'net.metrics',
-  // The two with no outputs at all, so they could never draw from anything else.
-  'out.datasetSummary',
-  'out.rois',
-])
 
 /**
  * Output nodes render their result inline; everything else shows a one-line summary.
@@ -333,7 +313,10 @@ function CodaNodeViewImpl({
     !node.collapsed &&
     expandedNodeId !== id &&
     !isPinned &&
-    (outputValue !== undefined || SELF_DRAWING_NODE_TYPES.has(node.type))
+    // A viewer drawing from its inputs has something to show before — and without — a result of
+    // its own. `ValuePreview`'s table says which, beside the entry that draws them: a list kept
+    // here as well was one a new viewer could be missing from, and its card would never draw.
+    (outputValue !== undefined || drawsFromInputs(node.type))
 
   /*
    * Only viewers resize, and only while they are showing one. A transform node's height is
@@ -491,6 +474,7 @@ function CodaNodeViewImpl({
           </span>
           {renaming ? (
             <input
+              data-owns-escape
               className="coda-node__title-input nodrag"
               autoFocus
               defaultValue={node.title ?? def.label}

@@ -5465,7 +5465,7 @@ a.viewer-actions__btn {
   max-height: 660px;
 }
 
-.sources__header {
+.modal__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -5474,7 +5474,7 @@ a.viewer-actions__btn {
   border-bottom: 1px solid var(--border);
   flex: none;
 }
-.sources__header h2 {
+.modal__header h2 {
   margin: 0;
   font-size: 13px;
   font-weight: 600;

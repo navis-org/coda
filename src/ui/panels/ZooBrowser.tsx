@@ -42,6 +42,7 @@ import { useListNav } from '../useListNav'
 import { Highlight } from './Highlight'
 import { fuzzyRank } from './fuzzy'
 import { ZooThumbnail } from './ZooThumbnail'
+import { Modal } from '../Modal'
 
 export interface ZooBrowserProps {
   onClose: () => void
@@ -139,7 +140,7 @@ export function ZooBrowser({ onClose }: ZooBrowserProps) {
     return byslug
   }, [workflows])
 
-  const nav = useListNav(ranked.length, ranked, onClose)
+  const nav = useListNav(ranked.length, ranked)
   const selected: ZooEntry | undefined = ranked[nav.activeIndex]?.item
 
   /*
@@ -228,215 +229,207 @@ export function ZooBrowser({ onClose }: ZooBrowserProps) {
     )
 
   return (
-    <div className="overlay" role="presentation" onPointerDown={onClose}>
-      <div
-        className="overlay__panel zoo"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Browse community workflows"
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        <div className="zoo__search">
-          <input
-            className="node-browser__input"
-            autoFocus
-            placeholder="Search workflows…"
-            aria-label="Search workflows"
-            value={query}
-            spellCheck={false}
-            onChange={(e) => {
-              setQuery(e.target.value)
-              // Typing widens back to every tag, so a search can never come up empty because of
-              // a chip the reader forgot was on. Same rule as the node browser's categories.
-              if (e.target.value) setTag(undefined)
-            }}
-            onKeyDown={(e) => {
-              if (nav.onKeyDown(e)) return
-              if (e.key === 'Enter' && selected) {
-                e.preventDefault()
-                open(selected)
-              }
-            }}
-          />
+    <Modal className="overlay__panel zoo" label="Browse community workflows" onClose={onClose}>
+      <div className="zoo__search">
+        <input
+          className="node-browser__input"
+          autoFocus
+          placeholder="Search workflows…"
+          aria-label="Search workflows"
+          value={query}
+          spellCheck={false}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            // Typing widens back to every tag, so a search can never come up empty because of
+            // a chip the reader forgot was on. Same rule as the node browser's categories.
+            if (e.target.value) setTag(undefined)
+          }}
+          onKeyDown={(e) => {
+            if (nav.onKeyDown(e)) return
+            if (e.key === 'Enter' && selected) {
+              e.preventDefault()
+              open(selected)
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="chip-filter zoo__refresh"
+          onClick={() => fetchIndex(true)}
+          disabled={refreshing}
+          title="Fetch the list again"
+        >
+          {refreshing ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
+
+      {tags.length > 0 && (
+        <div className="zoo__tags" role="group" aria-label="Filter by tag">
           <button
             type="button"
-            className="chip-filter zoo__refresh"
-            onClick={() => fetchIndex(true)}
-            disabled={refreshing}
-            title="Fetch the list again"
+            className="chip-filter"
+            aria-selected={tag === undefined}
+            onClick={() => setTag(undefined)}
           >
-            {refreshing ? 'Refreshing…' : 'Refresh'}
+            All <span className="chip-filter__count">{workflows.length}</span>
           </button>
-        </div>
-
-        {tags.length > 0 && (
-          <div className="zoo__tags" role="group" aria-label="Filter by tag">
+          {tags.map(([name, count]) => (
             <button
+              key={name}
               type="button"
               className="chip-filter"
-              aria-selected={tag === undefined}
-              onClick={() => setTag(undefined)}
+              aria-selected={tag === name}
+              onClick={() => {
+                setTag(tag === name ? undefined : name)
+                setQuery('')
+              }}
             >
-              All <span className="chip-filter__count">{workflows.length}</span>
+              {name} <span className="chip-filter__count">{count}</span>
             </button>
-            {tags.map(([name, count]) => (
-              <button
-                key={name}
-                type="button"
-                className="chip-filter"
-                aria-selected={tag === name}
-                onClick={() => {
-                  setTag(tag === name ? undefined : name)
-                  setQuery('')
-                }}
+          ))}
+        </div>
+      )}
+
+      <div className="zoo__body">
+        <div className="zoo__list" ref={nav.listRef} role="listbox" aria-label="Workflows">
+          {emptyState && <div className="zoo__empty">{emptyState}</div>}
+
+          {ranked.map(({ item, matches }, index) => {
+            const requirement = requirements.get(item.slug)!
+            return (
+              <div
+                key={item.slug}
+                className="zoo-row"
+                role="option"
+                aria-selected={index === nav.activeIndex}
+                tabIndex={-1}
+                onClick={() => nav.setActiveIndex(index)}
+                onDoubleClick={() => open(item)}
               >
-                {name} <span className="chip-filter__count">{count}</span>
+                <ZooThumbnail layout={item.layout} width={128} height={72} />
+                <div className="zoo-row__text">
+                  <strong>
+                    <Highlight text={item.name} matches={matches} />
+                  </strong>
+                  <span className="zoo-row__summary">{item.summary}</span>
+                  <span className="zoo-row__meta">
+                    <span
+                      className="zoo-row__requires"
+                      data-free={requirement.free || undefined}
+                    >
+                      {requirement.text}
+                    </span>
+                    {' · '}
+                    {plural(item.nodeCount, 'node')}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {selected && (
+          <div className="zoo__detail">
+            <ZooThumbnail layout={selected.layout} width={300} height={168} />
+            <h2 className="zoo__title">{selected.name}</h2>
+            <p className="zoo__summary">{selected.summary}</p>
+
+            <dl className="zoo__facts">
+              <dt>Needs</dt>
+              <dd>{requirements.get(selected.slug)?.text}</dd>
+              {selected.authors.length > 0 && (
+                <>
+                  <dt>{selected.authors.length === 1 ? 'Author' : 'Authors'}</dt>
+                  <dd>
+                    {selected.authors.map((person, i) => (
+                      <span key={person.name}>
+                        {i > 0 && ', '}
+                        {person.github ? (
+                          <a
+                            href={`https://github.com/${person.github}`}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                          >
+                            {person.name}
+                          </a>
+                        ) : (
+                          person.name
+                        )}
+                      </span>
+                    ))}
+                  </dd>
+                </>
+              )}
+              {selected.updatedAt && (
+                <>
+                  <dt>Updated</dt>
+                  <dd>{formatAgo(Date.parse(selected.updatedAt))}</dd>
+                </>
+              )}
+              {selected.tags.length > 0 && (
+                <>
+                  <dt>Tags</dt>
+                  <dd>{selected.tags.join(', ')}</dd>
+                </>
+              )}
+            </dl>
+
+            {readme.slug === selected.slug && readme.text && (
+              /* Not `extended`: see the module note. A deposited README is third-party text. */
+              <MarkdownView source={readme.text} className="zoo__readme" />
+            )}
+
+            {openError && <p className="zoo__error">{openError}</p>}
+
+            <div className="zoo__actions">
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={opening === selected.slug}
+                onClick={() => open(selected)}
+              >
+                {opening === selected.slug ? 'Opening…' : 'Open on the canvas'}
               </button>
-            ))}
+              <a
+                className="zoo__source-link"
+                href={zooEntryUrl(selected)}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                View on GitHub
+              </a>
+            </div>
           </div>
         )}
-
-        <div className="zoo__body">
-          <div className="zoo__list" ref={nav.listRef} role="listbox" aria-label="Workflows">
-            {emptyState && <div className="zoo__empty">{emptyState}</div>}
-
-            {ranked.map(({ item, matches }, index) => {
-              const requirement = requirements.get(item.slug)!
-              return (
-                <div
-                  key={item.slug}
-                  className="zoo-row"
-                  role="option"
-                  aria-selected={index === nav.activeIndex}
-                  tabIndex={-1}
-                  onClick={() => nav.setActiveIndex(index)}
-                  onDoubleClick={() => open(item)}
-                >
-                  <ZooThumbnail layout={item.layout} width={128} height={72} />
-                  <div className="zoo-row__text">
-                    <strong>
-                      <Highlight text={item.name} matches={matches} />
-                    </strong>
-                    <span className="zoo-row__summary">{item.summary}</span>
-                    <span className="zoo-row__meta">
-                      <span
-                        className="zoo-row__requires"
-                        data-free={requirement.free || undefined}
-                      >
-                        {requirement.text}
-                      </span>
-                      {' · '}
-                      {plural(item.nodeCount, 'node')}
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          {selected && (
-            <div className="zoo__detail">
-              <ZooThumbnail layout={selected.layout} width={300} height={168} />
-              <h2 className="zoo__title">{selected.name}</h2>
-              <p className="zoo__summary">{selected.summary}</p>
-
-              <dl className="zoo__facts">
-                <dt>Needs</dt>
-                <dd>{requirements.get(selected.slug)?.text}</dd>
-                {selected.authors.length > 0 && (
-                  <>
-                    <dt>{selected.authors.length === 1 ? 'Author' : 'Authors'}</dt>
-                    <dd>
-                      {selected.authors.map((person, i) => (
-                        <span key={person.name}>
-                          {i > 0 && ', '}
-                          {person.github ? (
-                            <a
-                              href={`https://github.com/${person.github}`}
-                              target="_blank"
-                              rel="noreferrer noopener"
-                            >
-                              {person.name}
-                            </a>
-                          ) : (
-                            person.name
-                          )}
-                        </span>
-                      ))}
-                    </dd>
-                  </>
-                )}
-                {selected.updatedAt && (
-                  <>
-                    <dt>Updated</dt>
-                    <dd>{formatAgo(Date.parse(selected.updatedAt))}</dd>
-                  </>
-                )}
-                {selected.tags.length > 0 && (
-                  <>
-                    <dt>Tags</dt>
-                    <dd>{selected.tags.join(', ')}</dd>
-                  </>
-                )}
-              </dl>
-
-              {readme.slug === selected.slug && readme.text && (
-                /* Not `extended`: see the module note. A deposited README is third-party text. */
-                <MarkdownView source={readme.text} className="zoo__readme" />
-              )}
-
-              {openError && <p className="zoo__error">{openError}</p>}
-
-              <div className="zoo__actions">
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  disabled={opening === selected.slug}
-                  onClick={() => open(selected)}
-                >
-                  {opening === selected.slug ? 'Opening…' : 'Open on the canvas'}
-                </button>
-                <a
-                  className="zoo__source-link"
-                  href={zooEntryUrl(selected)}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                >
-                  View on GitHub
-                </a>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="zoo__foot">
-          <span>
-            {loaded?.stale
-              ? `Offline — showing a copy from ${formatAgo(loaded.savedAt)}, which may be missing newer workflows.`
-              : loadError && workflows.length > 0
-                ? `Could not refresh — showing the copy from ${formatAgo(loaded?.savedAt ?? Date.now())}.`
-                : loaded
-                  ? `${plural(workflows.length, 'workflow')} from ${zooRepoUrl().replace('https://github.com/', '')}`
-                  : ''}
-          </span>
-          {loaded && loaded.dropped.length > 0 && (
-            /* Named rather than swallowed: a dropped entry is a contributor's, and the only way
-               anybody finds out is if the browser says so. */
-            <span className="zoo__dropped" title={loaded.dropped.join('\n')}>
-              {loaded.dropped.length === 1
-                ? '1 entry could not be read'
-                : `${loaded.dropped.length} entries could not be read`}
-            </span>
-          )}
-          <a
-            href={`${zooRepoUrl()}/blob/main/CONTRIBUTING.md`}
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            Contribute a workflow
-          </a>
-        </div>
       </div>
-    </div>
+
+      <div className="zoo__foot">
+        <span>
+          {loaded?.stale
+            ? `Offline — showing a copy from ${formatAgo(loaded.savedAt)}, which may be missing newer workflows.`
+            : loadError && workflows.length > 0
+              ? `Could not refresh — showing the copy from ${formatAgo(loaded?.savedAt ?? Date.now())}.`
+              : loaded
+                ? `${plural(workflows.length, 'workflow')} from ${zooRepoUrl().replace('https://github.com/', '')}`
+                : ''}
+        </span>
+        {loaded && loaded.dropped.length > 0 && (
+          /* Named rather than swallowed: a dropped entry is a contributor's, and the only way
+               anybody finds out is if the browser says so. */
+          <span className="zoo__dropped" title={loaded.dropped.join('\n')}>
+            {loaded.dropped.length === 1
+              ? '1 entry could not be read'
+              : `${loaded.dropped.length} entries could not be read`}
+          </span>
+        )}
+        <a
+          href={`${zooRepoUrl()}/blob/main/CONTRIBUTING.md`}
+          target="_blank"
+          rel="noreferrer noopener"
+        >
+          Contribute a workflow
+        </a>
+      </div>
+    </Modal>
   )
 }

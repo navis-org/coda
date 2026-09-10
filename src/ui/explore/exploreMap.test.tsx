@@ -146,7 +146,8 @@ describe('Explore Dataset’s screen map', () => {
 
   /*
    * Both listeners take Escape on the capture phase at `window`, where `stopPropagation` does not
-   * stop a sibling — so the viewer has to stand aside while a map is up, or one press shuts both.
+   * stop a sibling — so only the top of `useOverlayEscape`'s stack may answer, or one press shuts
+   * both.
    */
   it('closes on Escape and leaves the viewer open', async () => {
     const { overlay } = await expanded()

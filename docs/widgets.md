@@ -461,9 +461,9 @@ four of the fields the feature exists for. One `ColumnEditor` serves a header ce
 "Combine…", since adding is editing a column that does not exist yet: a filterable field list, the renderers that can draw what is ticked,
 and the tick order kept and shown because it is the order the parts draw in. **A draft until
 Apply**, because every write is a param write and an undo step, and four ticks live would be three
-steps describing a column nobody wanted. It wears `.context-menu`, which buys `ViewerOverlay`'s
-Escape rule free, and stops every key but Escape: the canvas binds Space and Backspace, and Escape
-has to reach the window-level listener that dismisses it. **Only its field list may give up
+steps describing a column nobody wanted. It is a `ContextMenu`, so Escape closes it
+rather than the overlay (`useOverlayEscape`'s stack), and every key stops at it: the canvas binds
+Space and Backspace, which a field filter is somewhere people type. **Only its field list may give up
 height**: a flex column under a `max-height` lets every child shrink, and the caption's
 `overflow: hidden` makes its automatic minimum zero, so on fish2's thirty-five fields the filter box
 sat over the title. The mock's six fields fit and could not show it; capping the open editor at
@@ -570,7 +570,7 @@ Four decisions about the gesture. **`HOVER_DELAY_MS.dense`, the port preview's 2
 the thumbnail's `sparse` 130**, and for the port's reason: marks are a dense grid, several to a row,
 and a pointer on the way to one crosses others. The two delays are named once in `useHoverPanel.ts`
 with that reasoning, the panels' chrome is one `.hover-panel` class, and every panel is kept inside
-`layoutViewport()` — the thumbnail had been measuring `window.innerWidth`, which `menuPosition.ts`
+`layoutViewport()` — the thumbnail had been measuring `window.innerWidth`, which `menu/placement.ts`
 records as wrong. **The cell is the target, not the ink** — a ring is 22 pixels of a 54-pixel
 track and a bar 8 pixels tall, and a target that is only the ink is one a resting pointer slides
 off. **It opens right**, the thumbnail's rule turned round rather than broken: open into what the
@@ -582,11 +582,11 @@ port preview had written privately and now shares. Whether it lands whole, on to
 scale is `pnpm probe:explore-columns`.
 
 **Right-clicking a row opens a menu, and it wears `NodeContextMenu`'s clothes rather than its
-own.** `.context-menu` and its rows, `useDismissOnOutside` for the dismissal — a right-click should
+own.** `ContextMenu` and `.context-menu`'s rows — a right-click should
 not look like a different kind of thing depending on which surface it landed on, which is the rule
-`NetworkContextMenu` already follows. Two things come free from that: `ViewerOverlay`'s
-capture-phase Escape already stands aside for anything matching `.context-menu`, so Escape closes
-the menu rather than the whole overlay; and the menu is `position: fixed` in client coordinates,
+`NetworkContextMenu` already follows. Two things come free from that: the menu is on
+`useOverlayEscape`'s stack above the overlay, so Escape closes the menu rather than the whole
+overlay; and the menu is `position: fixed` in client coordinates,
 clamped, because it belongs to the pointer rather than to the list that would clip it.
 
 **Copy is two rows, which is where it departs from the network menu on purpose.** There, a
@@ -1722,7 +1722,7 @@ how much of it can I trust", which is otherwise two lookups and a mental model o
 **A Dataset Summary, not a 3D View.** The obvious sibling is `out.viewer3d`, since both draw
 meshes, and it is the wrong one: that node takes geometry *on a wire* and something upstream
 fetched it. This takes a Dataset and fetches for itself, which is `out.datasetSummary`'s
-arrangement exactly — no outputs at all, an entry in `SELF_DRAWING_NODE_TYPES`, and `cheap`
+arrangement exactly — no outputs at all, a `withoutValue` entry in `VIEWERS`, and `cheap`
 despite the widget downloading tens of megabytes, because `evaluate` confirms the input is a
 dataset and returns nothing. What a viewer fetches for itself is not what the scheduler has to
 reason about.

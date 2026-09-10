@@ -16,8 +16,8 @@ import { ANY_OPTION, datasetInfoFromType, schemasFromType } from '../lib/dataset
  *
  * Three shape decisions, each with a precedent in this codebase.
  *
- * **A self-drawing viewer with no outputs.** `category: 'visualisation'` plus an entry in
- * `SELF_DRAWING_NODE_TYPES` is what earns it resize handles, a `defaultSize` and the full-size
+ * **A self-drawing viewer with no outputs.** `category: 'visualisation'` plus a `withoutValue`
+ * entry in `ValuePreview`'s `VIEWERS` is what earns it resize handles, a `defaultSize` and the full-size
  * overlay while having no output value of its own — the same standing `out.neuroglancer` and
  * `out.profile` have, minus their ports. No outputs at all is `dataset.description`'s call and
  * for the same reason: this is an annotation hanging off a dataset node, and a socket would

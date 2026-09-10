@@ -89,6 +89,7 @@ import {
 } from './viewer3dScene'
 import { useStable } from './useStable'
 import { rememberCamera, recallCamera, forgetCamera } from './cameraMemo'
+import { ViewerEmpty } from './ViewerEmpty'
 
 export interface Viewer3DProps {
   skeletons?: SkeletonsValue | undefined
@@ -499,11 +500,7 @@ export function Viewer3D(props: Viewer3DProps) {
 
   if (!skeletons && !meshes && !points && !volumes) {
     return (
-      <div className="viewer">
-        <div className="viewer__empty">
-          Connect skeletons, meshes, points or volumes to see a scene.
-        </div>
-      </div>
+      <ViewerEmpty>Connect skeletons, meshes, points or volumes to see a scene.</ViewerEmpty>
     )
   }
 

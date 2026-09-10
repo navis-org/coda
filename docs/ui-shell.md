@@ -383,13 +383,37 @@ The overlay's `close` and its Escape handler were both widened for the same reas
 to ask "is anything fullscreen?", which was only ever equivalent because nothing else could be.
 Closing a viewer has no business dropping the whole window out of fullscreen.
 
-**And that Escape handler stands aside for an open popover.** It is bound on the *capture*
+**And that Escape handler lets an open popover answer first.** It is bound on the *capture*
 phase, which is what lets it beat the canvas's shortcuts — and which also meant it beat every
 popover's own dismissal: pressing Escape to shut the network viewer's context menu closed the
-whole overlay from under it. It now returns early while a `.context-menu` is in the document,
-so the key reaches that menu's own handler on the way back up and the *next* press closes the
-overlay. By class rather than by a registry, because `.context-menu` is what all four of them
-are, and a dialog knowing which popovers exist is the coupling being avoided.
+whole overlay from under it. The first fix was a class check, returning early while a
+`.context-menu` was in the document; what replaced it is the stack below, with the menus on it.
+
+**Every modal shares that handler now, and only the one on top answers it.** `useOverlayEscape` is
+the viewer's rule for all of them, reached through `<Modal>`: fifteen surfaces had built their own
+backdrop and Escape, five different ways, and the rule above had reached two of them. The copies
+failed where nobody looks — Help opened from a viewer, or the start page reopened over one, are
+capture listeners on `window` like the viewer's, where `stopPropagation` does not stop a sibling,
+so one Escape closed both. The hook keeps the open surfaces in the order they opened, and only
+the last answers. Everything else that closes on Escape is on the same stack — `ContextMenu`, the
+command palette, a node's screen map — so a menu opened inside a dialog is simply above it, which
+retired the class check and `useListNav`'s own capture-phase Escape, a sixth copy with neither
+rule. The order is *opened*, not mounted: React runs a child's effects before its parent's, so a
+surface mounted in the same commit as the dialog around it would register first — nothing here
+opens that way. A field that cancels its own edit on Escape — a rename, a note — says so with
+`data-owns-escape` and is asked first; taken by the surface instead, it unmounts and its blur
+commits the draft Escape was meant to discard. The two departures are props: no `onClose` (`SmallScreenGate`) and
+`backdrop={false}` (`SharedLinkGate`). The backdrop closes on its *own* pointer-down, never through a window
+listener testing containment: a portalled child such as a node's screen map is outside the
+panel's DOM and inside its React tree.
+
+**A context menu measures itself.** The seven that wear `.context-menu` each clamped against a
+size typed beside them — 190×230, 210×110, 220×210 plus 67 when a chip row appeared — and one
+taller than its guess ran off the bottom of the window. `ContextMenu` reads its own box in a
+`useLayoutEffect`, before paint, and again whenever it resizes (a `ResizeObserver`: a section
+toggled open inside a child component grows the menu without it rendering), and clamps with
+`menuPosition`. The menu code `Toolbar.tsx` carried lives beside it in
+`ui/menu/`.
 
 ### The manifest
 
@@ -876,9 +900,9 @@ That included the announcement sentence, which briefly existed three times in tw
 into the main chunk — verified against a real build, the Guided Tour's step bodies were in
 `main-*.js` while `build.ts`'s and `dashboard.ts`'s were not. Splitting the vocabulary out put
 them back and cost the entry chunk a string tuple and two lines. Dismissal is
-`useDismissOnOutside`'s, which gained an `escapeCapture` option: the canvas binds Escape too, and
-two bubble-phase listeners are resolved by mount order, which is not a thing a component should
-have to reason about.
+`useDismissOnOutside`'s for a press and `useOverlayEscape`'s for Escape: the canvas binds Escape
+too, and two bubble-phase listeners are resolved by mount order, which is not a thing a component
+should have to reason about.
 
 **The question it answers is not the question a tour answers.** A tour walks: each stop hides
 the rest of the app behind a scrim and says one thing, which is the right shape for teaching a
@@ -1036,9 +1060,9 @@ Four things differ from the shell's map, and each is silent when wrong:
   descendant, so a stage rendered in place would be offset by the overlay's origin while its rects
   were measured against the viewport.
 - **Escape is the map's first.** The viewer's listener and the map's are both capture-phase on
-  `window`, where `stopPropagation` does not stop a sibling, so one press shut both. The viewer
-  now stands aside while `.smap` is up, exactly as it does for `.context-menu`; the test was
-  checked by mutation.
+  `window`, where `stopPropagation` does not stop a sibling, so one press shut both. Both are on
+  `useOverlayEscape`'s stack now, where the map, opened last, answers alone; the test was written
+  against the first fix, a class check, and holds for this one.
 - **A repeated control is boxed on the first row only** — the checkbox, the tile, and the name for
   the right-click, since the menu names the neuron. Chips take the first row that has any, which
   on the synthetic dataset is none, so the probe expects seven boxes there. The name is boxed by

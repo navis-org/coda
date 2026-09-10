@@ -31,6 +31,7 @@ export function GroupTitleInput({ group }: { group: GraphGroup }) {
 
   return (
     <input
+      data-owns-escape
       className="group-frame__title-input nopan nodrag"
       value={text}
       autoFocus

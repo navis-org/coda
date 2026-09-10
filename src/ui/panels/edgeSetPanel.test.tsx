@@ -200,7 +200,7 @@ describe('the panel', () => {
     cleanup()
     withNode()
     render(<EdgeSetPanel />)
-    fireEvent.pointerDown(document.body)
+    fireEvent.pointerDown(document.querySelector('.overlay')!)
     expect(useGraphStore.getState().edgePanelNode).toBeUndefined()
   })
 

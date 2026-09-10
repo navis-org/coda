@@ -992,13 +992,8 @@ function EditorCanvas() {
       if (!mod && isTourActive() && TOUR_DECLINES.has(event.key.toLowerCase())) return
       const { selection: selected } = useGraphStore.getState()
 
-      if (event.key === 'Escape') {
-        setMenu(null)
-        setContextMenu(null)
-        setEdgeMenu(null)
-        setGroupMenu(null)
-        return
-      }
+      // No Escape here: every menu the canvas opens is on `useOverlayEscape`'s stack, and closes
+      // itself before this listener hears the key.
       // Space opens the full palette. React Flow's default binds it to pan-activation,
       // which is disabled below via panActivationKeyCode so this can own the key.
       if (event.key === ' ') {

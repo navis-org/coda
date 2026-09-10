@@ -16,15 +16,8 @@
  * pointer and would be clipped by that box on its way to being useful.
  */
 
-import { useRef } from 'react'
-
-import { useDismissOnOutside } from '../useDismiss'
 import type { SelectScope } from './networkSelect'
-import { menuPosition } from '../menuPosition'
-
-/** Rough menu box, for keeping it on screen. Mirrors `.context-menu`'s min-width. */
-const MENU_WIDTH = 190
-const MENU_HEIGHT = 250
+import { ContextMenu } from '../menu/ContextMenu'
 
 export interface NetworkContextMenuProps {
   /** Where the pointer was, in client coordinates. */
@@ -65,9 +58,6 @@ export function NetworkContextMenu({
   onFit,
   onClose,
 }: NetworkContextMenuProps) {
-  const ref = useRef<HTMLDivElement>(null)
-  useDismissOnOutside(ref, onClose, { onEscape: true })
-
   const act = (fn: () => void) => () => {
     fn()
     onClose()
@@ -75,12 +65,7 @@ export function NetworkContextMenu({
   const anchored = seeds.length > 0
 
   return (
-    <div
-      ref={ref}
-      className="context-menu"
-      style={menuPosition(at, { width: MENU_WIDTH, height: MENU_HEIGHT })}
-      role="menu"
-    >
+    <ContextMenu at={at} onClose={onClose}>
       <div className="context-menu__caption">{caption}</div>
       {anchored && (
         <>
@@ -156,6 +141,6 @@ export function NetworkContextMenu({
           Fit to view
         </button>
       )}
-    </div>
+    </ContextMenu>
   )
 }

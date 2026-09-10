@@ -580,8 +580,8 @@ Area-specific — the rule, then the doc that holds why:
   a header button wherever `?` is), on the same `MapStage`. Three traps are specific to it. Its
   finders are **scoped to the surface's body**, because the card on the canvas draws the same
   markup and a document-wide finder boxes both as one. It is **portalled**, because `.overlay`'s
-  `backdrop-filter` is the containing block for fixed children. And the viewer's capture-phase
-  Escape **stands aside while `.smap` is up**, since two capture listeners on `window` both fire.
+  `backdrop-filter` is the containing block for fixed children. And the map is on
+  `useOverlayEscape`'s stack **above the viewer**, since two capture listeners on `window` both fire.
   See [docs/ui-shell.md](docs/ui-shell.md).
 - **The launch sequence is one boolean and a stage, and the guides dialog is the first stop.**
   `startPageOpen` means the sequence is showing, `guidesOpen` that it is at its first stop, and
@@ -1448,7 +1448,7 @@ Area-specific — the rule, then the doc that holds why:
   arbitrary order. What is added is **node order** on the result, because it lands in an `ids` param
   that reaches a provenance key. Sigma routes a right-click to exactly one of node/edge/stage and the
   edge arm is gated on link count, so the browser's menu is cancelled on the *container*. And
-  `ViewerOverlay`'s capture-phase Escape had to stand aside for an open `.context-menu`, or the first
+  the menu is on `useOverlayEscape`'s stack above the overlay, or the first
   press closes the viewer from under the menu. See [docs/viewers.md](docs/viewers.md).
 - **Node dragging is five silent failures, not a mousemove handler.** Sigma ships none of it.
   `autoRescale` renormalises against the node extent on every refresh, so a drag must `setCustomBBox`

@@ -1,11 +1,14 @@
 /**
  * Keyboard navigation for a search-and-list modal.
  *
- * The four pieces — a capture-phase Escape, an active index that resets when the results change,
- * `scrollIntoView` on the active row, and a `step` that wraps — were written out in
+ * The three pieces — an active index that resets when the results change, `scrollIntoView` on
+ * the active row, and a `step` that wraps — were written out in
  * `NodeBrowser`, again in `CommandPalette`, and a third time in `ZooBrowser`. Same shape as
  * `useDismiss`, whose own docstring records that a popover behaviour written five times meant a
  * fix reached exactly one popover at a time.
+ *
+ * Escape is the modal's (`useOverlayEscape`), not the list's: a list that took the key itself
+ * was a surface off the stack, and closed the viewer under a browser opened over it.
  *
  * The `listRef` goes on the scrolling container: the hook finds the active row by
  * `[aria-selected="true"]` inside it, which is the attribute those lists already carry for
@@ -24,24 +27,11 @@ export interface ListNav {
   onKeyDown: (event: React.KeyboardEvent) => boolean
 }
 
-export function useListNav(count: number, resetKey: unknown, onEscape?: () => void): ListNav {
+export function useListNav(count: number, resetKey: unknown): ListNav {
   const [activeIndex, setActiveIndex] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => setActiveIndex(0), [resetKey])
-
-  useEffect(() => {
-    if (!onEscape) return
-    const handler = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      // Capture phase and `stopPropagation`: the modal is over a canvas that also answers
-      // Escape, and only the top thing should.
-      event.stopPropagation()
-      onEscape()
-    }
-    window.addEventListener('keydown', handler, true)
-    return () => window.removeEventListener('keydown', handler, true)
-  }, [onEscape])
 
   useEffect(() => {
     listRef.current

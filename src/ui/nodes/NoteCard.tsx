@@ -86,6 +86,7 @@ function NoteCardImpl({
       >
         {editing ? (
           <textarea
+            data-owns-escape
             className="coda-note__editor nodrag"
             aria-label="Note text"
             autoFocus

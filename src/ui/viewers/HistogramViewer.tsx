@@ -1,19 +1,20 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 
 import type { TableValue } from '../../core/values'
 import { encodeRange } from '../../nodes/lib/chartSelection'
-import { CHART_INK, SURFACE_GAP, chartSurface, currentMode, seriesColor } from '../colors'
-import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
+import { SURFACE_GAP, seriesColor } from '../colors'
+import { exportBaseName as makeBaseName } from '../export'
 import { formatCompact, formatNumber, labelStep, niceTicks, plural } from '../format'
 import { ClearSelection } from './LegendKeys'
 import type { HistogramBar, Normalize } from './histogramBins'
 import { binScan, normalizeLabel, scanValues } from './histogramBins'
 import { isAdditive, useMarkSelection } from './useMarkSelection'
-import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import { tooltipPoint } from './tooltipPoint'
-import { useElementSize } from './useElementSize'
+import { ChartTooltip, TooltipRow } from './ChartTooltip'
+import { ViewerEmpty } from './ViewerEmpty'
+import { useChart } from './useChart'
 
 export interface HistogramViewerProps {
   table: TableValue
@@ -68,17 +69,8 @@ export function HistogramViewer({
   onExpand,
   onError,
 }: HistogramViewerProps) {
-  const [ref, size] = useElementSize<HTMLDivElement>()
-  const [hover, setHover] = useState<Hover | null>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
-  const mode = currentMode()
-  const ink = CHART_INK[mode]
-  const surface = chartSurface(mode)
-
-  const exportSource: ExportSource = useMemo(
-    () => ({ csv: () => tableToCsvParts(table), svg: () => svgRef.current }),
-    [table],
-  )
+  const { ref, size, hover, setHover, svgRef, mode, ink, surface, exportSource } =
+    useChart<Hover>(table)
 
   // Two memos, not one: nothing about a bin count or a scaling changes which rows are
   // plottable, and `bins` is a scrub field that fires per pointer-move. See `scanValues`.
@@ -101,13 +93,11 @@ export function HistogramViewer({
 
   if (bars.length === 0) {
     return (
-      <div className="viewer">
-        <div className="viewer__empty">
-          {dropped > 0
-            ? `Nothing to plot — no usable ${log ? 'positive ' : ''}numbers in "${valueColumn}"`
-            : 'Nothing to plot — no rows'}
-        </div>
-      </div>
+      <ViewerEmpty>
+        {dropped > 0
+          ? `Nothing to plot — no usable ${log ? 'positive ' : ''}numbers in "${valueColumn}"`
+          : 'Nothing to plot — no rows'}
+      </ViewerEmpty>
     )
   }
 
@@ -297,28 +287,20 @@ export function HistogramViewer({
         )}
 
         {hovered && (
-          <div
-            className="chart-tooltip"
-            style={{ left: hover!.x + 12, top: hover!.y + 12 }}
-            role="status"
-          >
+          <ChartTooltip at={hover!}>
             <strong>
               {formatNumber(hovered.lo)} – {formatNumber(hovered.hi)}
             </strong>
             {hoveredSegment && seriesColumn && (
-              <div className="chart-tooltip__row">
-                <span
-                  className="chart-tooltip__swatch"
-                  style={{ background: seriesColor(hoveredSegment.colorIndex, mode) }}
-                />
+              <TooltipRow swatch={seriesColor(hoveredSegment.colorIndex, mode)}>
                 {hoveredSegment.series}: {plural(hoveredSegment.count, 'row')}
-              </div>
+              </TooltipRow>
             )}
-            <div className="chart-tooltip__row">
+            <TooltipRow>
               {plural(hovered.count, 'row')}
               {used > 0 ? ` · ${((hovered.count / used) * 100).toFixed(1)}%` : ''}
-            </div>
-          </div>
+            </TooltipRow>
+          </ChartTooltip>
         )}
       </div>
 

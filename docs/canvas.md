@@ -1065,7 +1065,7 @@ live cards has no business deciding on their behalf.
 
 The deeper version of that last fix is written down and **not taken**: the two canvas listeners
 could ask `isDialogOpen()` beside `isTourActive()`, which would close the same hole in the
-thirteen other `.overlay` surfaces — `ViewerOverlay` and `HelpOverlay` have it too. It is a change
+fourteen other `Modal`s — `ViewerOverlay` and `HelpOverlay` have it too. It is a change
 to what every dialog does with every shortcut, and eleven tests across five files currently assert
 that `i`, `Space`, `Tab` and `p` still fire with one up. That is a decision about the app rather
 than a cleanup.

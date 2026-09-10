@@ -26,7 +26,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent, RefObject } from
 
 import { hoverPlacement } from './hoverPlacement'
 import type { HoverPlacementRequest, Rect } from './hoverPlacement'
-import { layoutViewport } from './menuPosition'
+import { layoutViewport } from './menu/placement'
 
 /**
  * How long a pointer rests before a hover panel opens, by how dense the targets are.

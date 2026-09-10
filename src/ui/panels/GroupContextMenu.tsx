@@ -11,7 +11,7 @@
  * blue is in each mode. See `GROUP_COLORS` for why a document may not carry a CSS value.
  */
 
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import type { GraphGroup, GraphNode, GroupColor } from '../../core/graph'
 import { GROUP_COLORS, nodesById } from '../../core/graph'
@@ -22,9 +22,8 @@ import { getNodeDef } from '../../core/registry'
 import { useGraphStore } from '../../store/graphStore'
 import { LOCKED_HINT } from '../lockCopy'
 import { shortcutKeys } from '../shortcuts'
-import { useDismissOnOutside } from '../useDismiss'
 import { AlignTools } from './AlignTools'
-import { menuPosition } from '../menuPosition'
+import { ContextMenu } from '../menu/ContextMenu'
 
 /**
  * Which of the members' params the folded box carries.
@@ -127,7 +126,6 @@ export interface GroupContextMenuProps {
 }
 
 export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupContextMenuProps) {
-  const ref = useRef<HTMLDivElement>(null)
   /*
    * Field by field rather than `useGraphStore()` whole, which re-rendered this menu on every
    * change to the store while it was open. The actions are stable, so they are read once.
@@ -137,8 +135,6 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
   const actions = useGraphStore.getState()
   const group = graph.groups?.find((g) => g.id === groupId)
 
-  useDismissOnOutside(ref, onClose, { onEscape: true })
-
   if (!group) return null
 
   const act = (fn: () => void) => () => {
@@ -147,12 +143,7 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
   }
 
   return (
-    <div
-      ref={ref}
-      className="context-menu"
-      style={menuPosition(screenPosition, { width: 190, height: 240 })}
-      role="menu"
-    >
+    <ContextMenu at={screenPosition} onClose={onClose}>
       <div className="context-menu__caption">{group.title || 'Untitled group'}</div>
       {/* Which frame is being renamed is `editingGroupId`: this menu can reach neither the
           outline nor the folded box that draws the field. */}
@@ -274,6 +265,6 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
       >
         Ungroup <kbd>{shortcutKeys('ungroup')}</kbd>
       </button>
-    </div>
+    </ContextMenu>
   )
 }

@@ -64,8 +64,6 @@ export function DashboardView() {
   const [over, setOver] = useState<Over | undefined>(undefined)
   const [addOpen, setAddOpen] = useState(false)
   const addRef = useRef<HTMLDivElement>(null)
-  // Stable, because `useDismissOnOutside` has it in an effect dep list — a fresh arrow per render
-  // detaches and re-attaches two window listeners on every render while the menu is open.
   const closeAdd = useCallback(() => setAddOpen(false), [])
   useDismissOnOutside(addRef, closeAdd, { onEscape: true, enabled: addOpen })
 

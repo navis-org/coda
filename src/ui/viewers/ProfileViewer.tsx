@@ -64,6 +64,7 @@ import { Bars, Facts, Loadable, Tile } from './Tiles'
 import { useNeuronProfile } from './useNeuronProfile'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
+import { ViewerEmpty } from './ViewerEmpty'
 
 export interface ProfileViewerProps {
   /** The incoming neuron table. Paged through, one subject at a time. */
@@ -259,19 +260,11 @@ export function ProfileViewer({
   }
 
   if (!neurons) {
-    return (
-      <div className="viewer">
-        <div className="viewer__empty">Connect a table of neurons to profile them.</div>
-      </div>
-    )
+    return <ViewerEmpty>Connect a table of neurons to profile them.</ViewerEmpty>
   }
 
   if (total === 0) {
-    return (
-      <div className="viewer">
-        <div className="viewer__empty">No neurons in the incoming table.</div>
-      </div>
-    )
+    return <ViewerEmpty>No neurons in the incoming table.</ViewerEmpty>
   }
 
   const name = grouped ? (subject?.label ?? '—') : primaryName(factRow, fields.primary)

@@ -9,15 +9,12 @@
  * Deletion goes through `deleteEdges`, so it is one undo step like every other graph edit.
  */
 
-import { useRef } from 'react'
-
 import type { CodaGraph } from '../../core/graph'
 import { getNodeDef } from '../../core/registry'
 import { useGraphStore } from '../../store/graphStore'
 import { LOCKED_HINT } from '../lockCopy'
-import { useDismissOnOutside } from '../useDismiss'
 import { nodePorts } from '../../core/graph'
-import { menuPosition } from '../menuPosition'
+import { ContextMenu } from '../menu/ContextMenu'
 
 export interface EdgeContextMenuProps {
   screenPosition: { x: number; y: number }
@@ -42,7 +39,6 @@ function endpointLabel(
 }
 
 export function EdgeContextMenu({ screenPosition, edgeId, onClose }: EdgeContextMenuProps) {
-  const ref = useRef<HTMLDivElement>(null)
   /*
    * Field by field rather than `useGraphStore()` whole, which re-rendered this menu on every
    * change to the store while it was open. The actions are stable, so they are read once.
@@ -52,20 +48,13 @@ export function EdgeContextMenu({ screenPosition, edgeId, onClose }: EdgeContext
   const actions = useGraphStore.getState()
   const edge = graph.edges.find((e) => e.id === edgeId)
 
-  useDismissOnOutside(ref, onClose, { onEscape: true })
-
   if (!edge) return null
 
   const from = endpointLabel(graph, edge.source, edge.sourceHandle, 'output')
   const to = endpointLabel(graph, edge.target, edge.targetHandle, 'input')
 
   return (
-    <div
-      ref={ref}
-      className="context-menu"
-      style={menuPosition(screenPosition, { width: 210, height: 110 })}
-      role="menu"
-    >
+    <ContextMenu at={screenPosition} onClose={onClose}>
       <div className="context-menu__header">
         <div className="context-menu__endpoint">
           <span className="context-menu__endpoint-node">{from.node}</span>
@@ -94,6 +83,6 @@ export function EdgeContextMenu({ screenPosition, edgeId, onClose }: EdgeContext
       >
         Delete link <kbd>⌫</kbd>
       </button>
-    </div>
+    </ContextMenu>
   )
 }

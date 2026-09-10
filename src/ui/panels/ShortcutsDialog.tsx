@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { useGraphStore } from '../../store/graphStore'
 import { SHORTCUT_GROUPS, formatChord, isApplePlatform } from '../shortcuts'
-import { useDismissOnOutside } from '../useDismiss'
+import { Modal, ModalHeader } from '../Modal'
 
 /**
  * Mounted once, in `App`, and opened by a store request — the same idiom as `ShareDialog`, and
@@ -38,9 +38,6 @@ export function ShortcutsDialog() {
 }
 
 function Dialog({ onClose }: { onClose: () => void }) {
-  const panelRef = useRef<HTMLDivElement>(null)
-  useDismissOnOutside(panelRef, onClose, { onEscape: true })
-
   /*
    * Resolved once per open rather than per row, so every glyph in the dialog agrees even if
    * something re-renders mid-read, and so the platform sniff runs once.
@@ -48,62 +45,49 @@ function Dialog({ onClose }: { onClose: () => void }) {
   const apple = isApplePlatform()
 
   return (
-    <div className="overlay" role="presentation">
-      <div
-        ref={panelRef}
-        className="overlay__panel shortcuts"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Keyboard shortcuts"
-      >
-        <header className="sources__header">
-          <h2>Keyboard Shortcuts</h2>
-          <button type="button" className="btn btn--ghost" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
-        </header>
+    <Modal className="overlay__panel shortcuts" label="Keyboard shortcuts" onClose={onClose}>
+      <ModalHeader onClose={onClose}>Keyboard Shortcuts</ModalHeader>
 
-        {/*
-         * Two columns on a wide dialog, one on a narrow one, laid out with CSS `columns` so the
-         * groups flow rather than being split into two hand-balanced halves — a fixed split
-         * goes lopsided the moment a group gains a row.
-         */}
-        <div className="sources__body shortcuts__body">
-          {SHORTCUT_GROUPS.map((group) => (
-            <section key={group.title} className="shortcuts__group">
-              <h3>{group.title}</h3>
-              {group.note && <p className="sources__note sources__note--tight">{group.note}</p>}
-              <dl>
-                {group.items.map((item) => (
-                  <div key={item.id} className="shortcuts__row">
-                    <dt>
-                      {item.chords.map((chord, i) => (
-                        <kbd key={i}>{formatChord(chord, apple)}</kbd>
-                      ))}
-                    </dt>
-                    <dd>
-                      {item.label}
-                      {item.hint && <span>{item.hint}</span>}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
-          ))}
-        </div>
-
-        {/*
-         * The one thing the table cannot say row by row. Fields are excluded wholesale rather
-         * than per shortcut — `Editor.tsx` returns early for `INPUT`, `TEXTAREA`, `SELECT` and
-         * anything contenteditable — so it is a property of the whole list, and a reader who
-         * has just found a bare letter key is exactly the person about to wonder why it did
-         * nothing while the cursor was in a query box.
-         */}
-        <footer className="shortcuts__foot">
-          Bare letters are off while you are typing in a field, and while a guided tour is on
-          screen.
-        </footer>
+      {/*
+       * Two columns on a wide dialog, one on a narrow one, laid out with CSS `columns` so the
+       * groups flow rather than being split into two hand-balanced halves — a fixed split
+       * goes lopsided the moment a group gains a row.
+       */}
+      <div className="sources__body shortcuts__body">
+        {SHORTCUT_GROUPS.map((group) => (
+          <section key={group.title} className="shortcuts__group">
+            <h3>{group.title}</h3>
+            {group.note && <p className="sources__note sources__note--tight">{group.note}</p>}
+            <dl>
+              {group.items.map((item) => (
+                <div key={item.id} className="shortcuts__row">
+                  <dt>
+                    {item.chords.map((chord, i) => (
+                      <kbd key={i}>{formatChord(chord, apple)}</kbd>
+                    ))}
+                  </dt>
+                  <dd>
+                    {item.label}
+                    {item.hint && <span>{item.hint}</span>}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ))}
       </div>
-    </div>
+
+      {/*
+       * The one thing the table cannot say row by row. Fields are excluded wholesale rather
+       * than per shortcut — `Editor.tsx` returns early for `INPUT`, `TEXTAREA`, `SELECT` and
+       * anything contenteditable — so it is a property of the whole list, and a reader who
+       * has just found a bare letter key is exactly the person about to wonder why it did
+       * nothing while the cursor was in a query box.
+       */}
+      <footer className="shortcuts__foot">
+        Bare letters are off while you are typing in a field, and while a guided tour is on
+        screen.
+      </footer>
+    </Modal>
   )
 }

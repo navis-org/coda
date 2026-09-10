@@ -15,17 +15,9 @@
  * fields, drawn how — and keeps its own editor behind "Combine…".
  */
 
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 
-import { useDismissOnOutside } from '../useDismiss'
-import {
-  FilterInput,
-  KindBadge,
-  NoMatch,
-  matching,
-  popoverStyle,
-  stopCanvasKeys,
-} from './fieldPopover'
+import { FieldPopover, FilterInput, KindBadge, matching, NoMatch } from './fieldPopover'
 import type { Place } from './rowColumns'
 import { LAST_FIELD_HINT } from './rowColumns'
 
@@ -68,20 +60,16 @@ export function AddFieldMenu({
   onCombine,
   onClose,
 }: AddFieldMenuProps) {
-  const ref = useRef<HTMLDivElement>(null)
-  useDismissOnOutside(ref, onClose, { onEscape: true })
   const [filter, setFilter] = useState('')
   const shown = matching(fields, filter, (f) => f.name)
   const place = { column: onColumn, chip: onChip }
 
   return (
-    <div
-      ref={ref}
-      className="context-menu explore-colmenu explore-fieldmenu"
-      role="dialog"
-      aria-label="Add a field"
-      style={popoverStyle(anchor)}
-      onKeyDown={stopCanvasKeys}
+    <FieldPopover
+      anchor={anchor}
+      label="Add a field"
+      className="explore-colmenu explore-fieldmenu"
+      onClose={onClose}
     >
       <div className="context-menu__caption">Add a field</div>
       <FilterInput value={filter} onChange={setFilter} />
@@ -134,6 +122,6 @@ export function AddFieldMenu({
       >
         Combine several fields into one column…
       </button>
-    </div>
+    </FieldPopover>
   )
 }

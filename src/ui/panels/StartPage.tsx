@@ -37,6 +37,7 @@ import { GlyphSvg, doorGlyph } from './startGlyphs'
 import { useLaunchStage } from './launchStage'
 import { shortcutKeys } from '../shortcuts'
 import { startTour } from '../tour/tourState'
+import { Modal } from '../Modal'
 
 const REPO_URL = 'https://github.com/navis-org/coda'
 /** The group that develops Coda, named in the credits line. */
@@ -101,15 +102,7 @@ export function StartPage() {
     // Read the shelf when the page opens rather than at store load: someone who has never
     // saved anything should not pay an IndexedDB open for a rail they will never see.
     void refreshLibrary()
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation()
-        closeStartPage()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [open, closeStartPage, refreshLibrary])
+  }, [open, refreshLibrary])
 
   if (!open) return null
 
@@ -157,254 +150,251 @@ export function StartPage() {
   }
 
   return (
-    <div className="start" role="presentation" onPointerDown={closeStartPage}>
+    <Modal
+      rootClassName="start"
+      className="start__panel"
+      labelledBy="start-title"
+      onClose={closeStartPage}
+    >
+      {/*
+       * `BASE_URL` rather than a bare `/start/…`: `base` is './' so the build works from a
+       * subpath, where an absolute URL resolves to the domain root and 404s.
+       */}
       <div
-        className="start__panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="start-title"
-        onPointerDown={(e) => e.stopPropagation()}
+        className="start__image"
+        style={{ backgroundImage: `url(${import.meta.env.BASE_URL}start/backdrop.svg)` }}
+        aria-hidden="true"
+      />
+      <div className="start__scrim" aria-hidden="true" />
+
+      <button
+        type="button"
+        className="start__close"
+        onClick={closeStartPage}
+        title="Close (Esc)"
+        aria-label="Close start page"
       >
+        ✕
+      </button>
+
+      <div className="start__scroll">
+        <header className="start__head">
+          <div className="start__brand">
+            {/*
+             * The mark stands in for the letter o rather than sitting beside the name — the
+             * coda sign is a ring, so the substitution is the whole argument for it in one
+             * image. `aria-label` because the visible text is now "C" + a glyph + "da", and
+             * the dialog names itself from this heading.
+             */}
+            <h1 id="start-title" aria-label="Coda">
+              C<CodaMark size={38} className="start__o" />
+              da
+            </h1>
+            <span className="start__badge">Beta</span>
+            <span className="start__version">v{__APP_VERSION__}</span>
+          </div>
+          <p className="start__lede">
+            Next-Generation <strong style={{ color: '#ffffff' }}>Co</strong>nnectome{' '}
+            <strong style={{ color: '#ffffff' }}>D</strong>ata{' '}
+            <strong style={{ color: '#ffffff' }}>A</strong>nalysis. Build a workflow out of
+            nodes, wire them up, and inspect the results.
+          </p>
+          <p className="start__stage">
+            Coda is in beta. Expect the odd rough edge. Feedback & feature requests are very
+            welcome!
+          </p>
+        </header>
+
         {/*
-         * `BASE_URL` rather than a bare `/start/…`: `base` is './' so the build works from a
-         * subpath, where an absolute URL resolves to the domain root and 404s.
+         * First, and only when there is something on it. A returning user is here for their
+         * own work, so it goes above the two rails of things to start from — and an empty
+         * rail explaining that it is empty is noise on the visit where it matters most, the
+         * first one, when nobody has saved anything yet.
          */}
-        <div
-          className="start__image"
-          style={{ backgroundImage: `url(${import.meta.env.BASE_URL}start/backdrop.svg)` }}
-          aria-hidden="true"
+        {workflows.length > 0 && (
+          <Deck
+            label="Your workflows"
+            note="saved in this browser · not synced, and cleared with the site data"
+            cards={workflows}
+            onPick={pick}
+          />
+        )}
+
+        {/*
+         * The doors, above the dataset rail and below the reader's own work. Nothing here
+         * replaces the canvas on the click: the wizard and the Zoo each ask their own question
+         * where it can be answered, and a tour announces what it will do in its first step.
+         * See `DOOR_CARDS` for the order.
+         */}
+        <Deck
+          label="Start & learn"
+          note="the wizard builds a graph to your question · tours run in place · the Zoo fetches what others shared"
+          cards={DOOR_CARDS}
+          onPick={pick}
         />
-        <div className="start__scrim" aria-hidden="true" />
 
-        <button
-          type="button"
-          className="start__close"
-          onClick={closeStartPage}
-          title="Close (Esc)"
-          aria-label="Close start page"
-        >
-          ✕
-        </button>
+        <Deck
+          label="Preconfigured Datasets"
+          note="real data · add credentials under Connections, the branch icon in the toolbar"
+          cards={datasets}
+          onPick={pick}
+        />
+      </div>
 
-        <div className="start__scroll">
-          <header className="start__head">
-            <div className="start__brand">
-              {/*
-               * The mark stands in for the letter o rather than sitting beside the name — the
-               * coda sign is a ring, so the substitution is the whole argument for it in one
-               * image. `aria-label` because the visible text is now "C" + a glyph + "da", and
-               * the dialog names itself from this heading.
-               */}
-              <h1 id="start-title" aria-label="Coda">
-                C<CodaMark size={38} className="start__o" />
-                da
-              </h1>
-              <span className="start__badge">Beta</span>
-              <span className="start__version">v{__APP_VERSION__}</span>
-            </div>
-            <p className="start__lede">
-              Next-Generation <strong style={{ color: '#ffffff' }}>Co</strong>nnectome{' '}
-              <strong style={{ color: '#ffffff' }}>D</strong>ata{' '}
-              <strong style={{ color: '#ffffff' }}>A</strong>nalysis. Build a workflow out of
-              nodes, wire them up, and inspect the results.
-            </p>
-            <p className="start__stage">
-              Coda is in beta. Expect the odd rough edge. Feedback & feature requests are very
-              welcome!
-            </p>
-          </header>
-
-          {/*
-           * First, and only when there is something on it. A returning user is here for their
-           * own work, so it goes above the two rails of things to start from — and an empty
-           * rail explaining that it is empty is noise on the visit where it matters most, the
-           * first one, when nobody has saved anything yet.
-           */}
-          {workflows.length > 0 && (
-            <Deck
-              label="Your workflows"
-              note="saved in this browser · not synced, and cleared with the site data"
-              cards={workflows}
-              onPick={pick}
-            />
-          )}
-
-          {/*
-           * The doors, above the dataset rail and below the reader's own work. Nothing here
-           * replaces the canvas on the click: the wizard and the Zoo each ask their own question
-           * where it can be answered, and a tour announces what it will do in its first step.
-           * See `DOOR_CARDS` for the order.
-           */}
-          <Deck
-            label="Start & learn"
-            note="the wizard builds a graph to your question · tours run in place · the Zoo fetches what others shared"
-            cards={DOOR_CARDS}
-            onPick={pick}
-          />
-
-          <Deck
-            label="Preconfigured Datasets"
-            note="real data · add credentials under Connections, the branch icon in the toolbar"
-            cards={datasets}
-            onPick={pick}
-          />
-        </div>
-
-        {/*
-         * The shortcuts and the credits live in the bar, not at the end of the scroll. That is
-         * what makes them visible at all: the decks are the scrolling part, so a row below them
-         * is only reached by someone who scrolled past the thing they opened the page for.
-         *
-         * Two rows rather than three, and the split is measured rather than chosen. The keys box
-         * and the actions come to ~700px of the bar's 972, so they share a line; the credits run
-         * ~850px and cannot join them without wrapping. The credits go last, where a colophon
-         * goes, which also leaves the keys above them in the order they were already in.
-         *
-         * The funder logos share that last row rather than taking a third, and sit at its right
-         * end: they are what "Developed by ... (Cambridge, UK)" is attributing, so they belong beside
-         * that sentence and not under the whole bar. They cost the credits a line — ~850px of
-         * text plus ~285px of logo does not fit 972 — which is why the text is allowed to wrap
-         * to two and the logos are sized to stand about as tall as the two lines together.
-         */}
-        <div className="start__bar">
-          <div className="start__bar-row">
-            {/* Glyphs from `shortcuts.ts`, so the box says ⌘ or Ctrl to match the keyboard the
+      {/*
+       * The shortcuts and the credits live in the bar, not at the end of the scroll. That is
+       * what makes them visible at all: the decks are the scrolling part, so a row below them
+       * is only reached by someone who scrolled past the thing they opened the page for.
+       *
+       * Two rows rather than three, and the split is measured rather than chosen. The keys box
+       * and the actions come to ~700px of the bar's 972, so they share a line; the credits run
+       * ~850px and cannot join them without wrapping. The credits go last, where a colophon
+       * goes, which also leaves the keys above them in the order they were already in.
+       *
+       * The funder logos share that last row rather than taking a third, and sit at its right
+       * end: they are what "Developed by ... (Cambridge, UK)" is attributing, so they belong beside
+       * that sentence and not under the whole bar. They cost the credits a line — ~850px of
+       * text plus ~285px of logo does not fit 972 — which is why the text is allowed to wrap
+       * to two and the logos are sized to stand about as tall as the two lines together.
+       */}
+      <div className="start__bar">
+        <div className="start__bar-row">
+          {/* Glyphs from `shortcuts.ts`, so the box says ⌘ or Ctrl to match the keyboard the
                 reader actually has. The four are picked by hand rather than by a list constant
                 because the last cell pairs two of them — see the width note above. */}
-            <div className="start__keys">
-              <span>
-                <strong>{shortcutKeys('palette')}</strong> commands
-              </span>
-              <span>
-                <strong>{shortcutKeys('browse-nodes')}</strong> add a node
-              </span>
-              <span>
-                <strong>{shortcutKeys('run-all')}</strong> run
-              </span>
-              <span>
-                <strong>{shortcutKeys('pan')}</strong> pan ·{' '}
-                <strong>{shortcutKeys('box-select')}</strong> box-select
-              </span>
-            </div>
-            <span className="toolbar__spacer" />
-            <label className="start__dismiss">
-              <input
-                type="checkbox"
-                checked={dismissed}
-                onChange={(e) => setStartPageDismissed(e.target.checked)}
-              />
-              Don&rsquo;t show again
-            </label>
-            <button
-              type="button"
-              className="btn btn--primary"
-              ref={closeRef}
-              onClick={closeStartPage}
-            >
-              Close
-            </button>
+          <div className="start__keys">
+            <span>
+              <strong>{shortcutKeys('palette')}</strong> commands
+            </span>
+            <span>
+              <strong>{shortcutKeys('browse-nodes')}</strong> add a node
+            </span>
+            <span>
+              <strong>{shortcutKeys('run-all')}</strong> run
+            </span>
+            <span>
+              <strong>{shortcutKeys('pan')}</strong> pan ·{' '}
+              <strong>{shortcutKeys('box-select')}</strong> box-select
+            </span>
           </div>
-          <div className="start__credits">
-            <div className="start__links">
-              <span>
-                Developed by the{' '}
-                <a href={GROUP_URL} target="_blank" rel="noreferrer noopener">
-                  Fly Connectomics Group
-                </a>{' '}
-                (Cambridge, UK) · Source Code at{' '}
-                <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
-                  github.com/navis-org/coda
-                </a>
-                <br />
-                <button
-                  type="button"
-                  className="start__link-button"
-                  onClick={() => {
-                    closeStartPage()
-                    requestFeedback('general')
-                  }}
-                >
-                  Give feedback
-                </button>{' '}
-                ·{' '}
-                {/*
-                 * The tours used to be three buttons in this row and are now the first three
-                 * cards on the doors rail, which is a card each with the blurb `TOURS` already
-                 * carries — offering both would be the same three things twice in one dialog.
-                 * What is left here is what the rail cannot hold: a new tab each, and the
-                 * feedback dialog. The `?` menu still lists the tours for the visit somebody
-                 * ticked "Don't show again" on.
-                 */}
-                <a href={OVERVIEW_URL} target="_blank" rel="noreferrer noopener">
-                  Overview
-                </a>{' '}
-                ·{' '}
-                <a href={TUTORIAL_URL} target="_blank" rel="noreferrer noopener">
-                  Docs
-                </a>{' '}
-                ·{' '}
-                <a href={NODE_GUIDE_URL} target="_blank" rel="noreferrer noopener">
-                  Node guide
-                </a>{' '}
-                ·{' '}
-                <a href={ANALYTICS_URL} target="_blank" rel="noreferrer noopener">
-                  Visitor stats
-                </a>
-              </span>
-            </div>
-
-            {/*
-             * Both inks of each logo ship, and CSS hides the wrong one — see `.start__logo`
-             * in `editor.css`. Picking in JS would have to resolve `theme: 'system'` through
-             * `matchMedia` and listen for changes; this keeps the swap in the one place the
-             * rest of the theming already lives, and `display: none` also takes the hidden
-             * copy out of the accessibility tree, so each logo is announced exactly once.
-             */}
-            <div className="start__logos">
+          <span className="toolbar__spacer" />
+          <label className="start__dismiss">
+            <input
+              type="checkbox"
+              checked={dismissed}
+              onChange={(e) => setStartPageDismissed(e.target.checked)}
+            />
+            Don&rsquo;t show again
+          </label>
+          <button
+            type="button"
+            className="btn btn--primary"
+            ref={closeRef}
+            onClick={closeStartPage}
+          >
+            Close
+          </button>
+        </div>
+        <div className="start__credits">
+          <div className="start__links">
+            <span>
+              Developed by the{' '}
+              <a href={GROUP_URL} target="_blank" rel="noreferrer noopener">
+                Fly Connectomics Group
+              </a>{' '}
+              (Cambridge, UK) · Source Code at{' '}
+              <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
+                github.com/navis-org/coda
+              </a>
+              <br />
+              <button
+                type="button"
+                className="start__link-button"
+                onClick={() => {
+                  closeStartPage()
+                  requestFeedback('general')
+                }}
+              >
+                Give feedback
+              </button>{' '}
+              ·{' '}
               {/*
-               * One anchor per institution wrapping both inks, rather than a link per image:
-               * the hidden copy is `display: none` and so out of the accessibility tree, which
-               * leaves each link named once, by the `alt` of whichever ink is showing.
+               * The tours used to be three buttons in this row and are now the first three
+               * cards on the doors rail, which is a card each with the blurb `TOURS` already
+               * carries — offering both would be the same three things twice in one dialog.
+               * What is left here is what the rail cannot hold: a new tab each, and the
+               * feedback dialog. The `?` menu still lists the tours for the visit somebody
+               * ticked "Don't show again" on.
                */}
-              <a
-                className="start__logo-link"
-                href={LMB_URL}
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                <img
-                  className="start__logo start__logo--light"
-                  src={lmbLight}
-                  alt="MRC Laboratory of Molecular Biology"
-                />
-                <img
-                  className="start__logo start__logo--dark"
-                  src={lmbDark}
-                  alt="MRC Laboratory of Molecular Biology"
-                />
+              <a href={OVERVIEW_URL} target="_blank" rel="noreferrer noopener">
+                Overview
+              </a>{' '}
+              ·{' '}
+              <a href={TUTORIAL_URL} target="_blank" rel="noreferrer noopener">
+                Docs
+              </a>{' '}
+              ·{' '}
+              <a href={NODE_GUIDE_URL} target="_blank" rel="noreferrer noopener">
+                Node guide
+              </a>{' '}
+              ·{' '}
+              <a href={ANALYTICS_URL} target="_blank" rel="noreferrer noopener">
+                Visitor stats
               </a>
-              <a
-                className="start__logo-link"
-                href={CAMBRIDGE_URL}
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                <img
-                  className="start__logo start__logo--cam start__logo--light"
-                  src={cambridgeLight}
-                  alt="University of Cambridge"
-                />
-                <img
-                  className="start__logo start__logo--cam start__logo--dark"
-                  src={cambridgeDark}
-                  alt="University of Cambridge"
-                />
-              </a>
-            </div>
+            </span>
+          </div>
+
+          {/*
+           * Both inks of each logo ship, and CSS hides the wrong one — see `.start__logo`
+           * in `editor.css`. Picking in JS would have to resolve `theme: 'system'` through
+           * `matchMedia` and listen for changes; this keeps the swap in the one place the
+           * rest of the theming already lives, and `display: none` also takes the hidden
+           * copy out of the accessibility tree, so each logo is announced exactly once.
+           */}
+          <div className="start__logos">
+            {/*
+             * One anchor per institution wrapping both inks, rather than a link per image:
+             * the hidden copy is `display: none` and so out of the accessibility tree, which
+             * leaves each link named once, by the `alt` of whichever ink is showing.
+             */}
+            <a
+              className="start__logo-link"
+              href={LMB_URL}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              <img
+                className="start__logo start__logo--light"
+                src={lmbLight}
+                alt="MRC Laboratory of Molecular Biology"
+              />
+              <img
+                className="start__logo start__logo--dark"
+                src={lmbDark}
+                alt="MRC Laboratory of Molecular Biology"
+              />
+            </a>
+            <a
+              className="start__logo-link"
+              href={CAMBRIDGE_URL}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              <img
+                className="start__logo start__logo--cam start__logo--light"
+                src={cambridgeLight}
+                alt="University of Cambridge"
+              />
+              <img
+                className="start__logo start__logo--cam start__logo--dark"
+                src={cambridgeDark}
+                alt="University of Cambridge"
+              />
+            </a>
           </div>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 

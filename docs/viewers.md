@@ -4,7 +4,9 @@ Every viewer, its export path, and the styling panel they share.
 
 ## Output widgets
 
-`ValuePreview` picks a viewer by node type, then by value kind, and forwards a shared prop bundle
+`ValuePreview` picks a viewer by node type — `VIEWERS`, a table keyed like `NODE_BODIES`, whose
+`withoutValue` entries draw from their inputs before the "No result yet" guard — then by value
+kind, and forwards a shared prop bundle
 (`baseName`, `onExpand`, `onError`, `compact`) so a new viewer cannot ship without export or expand.
 
 - **Export** lives in `ui/export.ts`. CSV is chunked `Blob` parts rather than one string — a
@@ -23,14 +25,19 @@ Every viewer, its export path, and the styling panel they share.
   block, **and** divide by the zoom, a length inside a `scale(z)` pane being drawn `z` times as long.
   `offsetWidth` ignores transforms where `getBoundingClientRect()` has applied them, so their ratio
   *is* the zoom — the identity the auto-layout measurement leans on. `tooltipPoint()` is that,
-  shared by Heatmap, Bar Chart, Scatter and Dendrogram; `NetworkViewer` never had the bug, being
+  shared by all seven charts that draw a tooltip (the card itself is `ChartTooltip`); `NetworkViewer` never had the bug, being
   already `absolute` over sigma's container coordinates — what `.viewer`'s own
   `position: relative` comment describes. Verified in a browser: the gap tracks the
   camera at 4, 7 and 10 px for zoom 0.35, 0.60 and 0.86 — one constant 12 local px.
 
-  The container passed must be the tooltip's **containing block** — `.viewer__scroll` for three,
+  The container passed must be the tooltip's **containing block** — `.viewer__scroll` for most,
   `.viewer` for the scatter, whose tooltip is a sibling of its plot box. The wrong one is off by
   that element's own offset, which on a card looks like a styling choice rather than a bug.
+- **The scaffolding is shared, not copied.** `useChart` is what Bar, Histogram, Pie and
+  Distribution each opened with — the measured box, the hovered mark, the `<svg>` the exports clone,
+  the theme's ink and the CSV/SVG export source. `ChartTooltip` and `TooltipRow` are the hover card,
+  and `ViewerEmpty` is the empty state every viewer draws. What differs between the charts — the
+  plot's width and height, where a legend goes — stays in each.
 - **The panel's width is a property of the node it draws** (`expandedWidth()`); its height never is.
   It inherited `.overlay__panel`'s 1500px dialog cap, which on a 1440p display fills the height and
   stops a third of the way across — the height claims a full-size read and the width contradicts it.
@@ -971,10 +978,10 @@ it is one `contextmenu` listener on the container instead. The same routing is w
 a menu at all rather than falling through to the canvas: it anchors on **both its ends**, which
 is the reading that makes right-clicking a wire mean something.
 
-**Escape needed a concession from the overlay.** `ViewerOverlay`'s Escape handler is on the
+**Escape has to reach the menu before the overlay.** `ViewerOverlay`'s Escape handler is on the
 capture phase and beats every popover's own dismissal, so the first press closed the whole
-viewer from under the menu. It now stands aside while a `.context-menu` is open — see
-[docs/ui-shell.md](ui-shell.md).
+viewer from under the menu. Both are on `useOverlayEscape`'s stack now, where the menu, opened
+last, answers first — see [docs/ui-shell.md](ui-shell.md).
 
 **Opening the menu dismisses the tooltip**, which is otherwise summoned by the same pointer
 over the same mark and comes up underneath a menu already named after that node.
@@ -2290,7 +2297,7 @@ the input is a cache hit and reading the output is a second triangle count on ev
 also puts the branch **above** `ValuePreview`'s `!value` guard, which is the failure
 `out.datasetSummary` shipped once: below the guard it showed "No result yet" permanently, with a
 green suite, because every test rendered the viewer directly and so never reached the dispatcher.
-`net.metrics` is in `SELF_DRAWING_NODE_TYPES` for the same reason, and `networkMetrics.test.tsx`
+`net.metrics` is a `withoutValue` entry for the same reason, and `networkMetrics.test.tsx`
 renders through `ValuePreview` with no value at all.
 
 **One log switch, and it does two things, because on this data they are one thing.** A connectome's
@@ -2577,8 +2584,9 @@ delivery, and the `0.0015` sensitivity were all written out three times — and 
 already drifted, listing the window in its dependency array and so tearing the listener down and
 putting it back on every render, cancelling any queued gesture step with it. The hook reads its
 callback through a ref, which is what makes attaching once per element compatible with seeing
-this render's window. `ScatterViewer` keeps its own, which has no coalescing and three gesture
-kinds; it is the next caller, not a fourth copy to make.
+this render's window. `ScatterViewer` is its fourth caller. Its three drag gestures are still its
+own, and so are the heatmap's — both capture the pointer at the press, where `usePanGesture` waits
+for the slop, which is the change a shared drag gesture would make and one only a browser can check.
 
 **Three things exist only because this viewer's purpose is clicking branches**, which the heatmap
 has no equivalent of:

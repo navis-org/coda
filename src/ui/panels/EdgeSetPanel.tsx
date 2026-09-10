@@ -31,8 +31,8 @@ import type { EdgeSourcePreview } from '../../data/edges/importer'
 import { importEdges, previewEdgeSource } from '../../data/edges/importer'
 import type { EdgeColumnChoice } from '../../data/edges/read'
 import { useGraphStore } from '../../store/graphStore'
-import { useDismissOnOutside } from '../useDismiss'
 import { formatBytes, formatNumber } from '../format'
+import { Modal, ModalHeader } from '../Modal'
 
 /** What the panel is doing. Anything but `idle` owns the lower half of the dialog. */
 type Stage =
@@ -88,12 +88,10 @@ function Dialog({ nodeId }: { nodeId: string }) {
    * open, while Escape and Cancel stopped it. One handler is the fix rather than passing the
    * same callback to two places, because two places can drift apart again.
    */
-  const panel = useRef<HTMLDivElement>(null)
   const dismiss = useCallback(() => {
     abort.current?.abort()
     close()
   }, [close])
-  useDismissOnOutside(panel, dismiss, { onEscape: true })
 
   const preview = useCallback(async (source: Source) => {
     setError(undefined)
@@ -153,45 +151,32 @@ function Dialog({ nodeId }: { nodeId: string }) {
   )
 
   return (
-    <div className="overlay" role="presentation">
-      <div
-        ref={panel}
-        className="overlay__panel sources edges"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Edge data"
-      >
-        <header className="sources__header">
-          <h2>Edge data</h2>
-          <button type="button" className="btn btn--ghost" onClick={close} aria-label="Close">
-            ✕
-          </button>
-        </header>
+    <Modal className="overlay__panel sources edges" label="Edge data" onClose={dismiss}>
+      <ModalHeader onClose={dismiss}>Edge data</ModalHeader>
 
-        <p className="sources__privacy">
-          An edge set replaces every connectivity answer for {title} — Connectivity, Adjacency,
-          Paths and Neuron Profile all read it. It is kept in this browser and never travels in
-          a saved graph; what travels is its name and a content id, so the same file opened
-          elsewhere matches.
+      <p className="sources__privacy">
+        An edge set replaces every connectivity answer for {title} — Connectivity, Adjacency,
+        Paths and Neuron Profile all read it. It is kept in this browser and never travels in a
+        saved graph; what travels is its name and a content id, so the same file opened
+        elsewhere matches.
+      </p>
+
+      {error && (
+        <p className="sources__result" data-tone="error">
+          {error}
         </p>
+      )}
 
-        {error && (
-          <p className="sources__result" data-tone="error">
-            {error}
-          </p>
-        )}
+      <Shelf sets={sets} attachedId={attachedId} onAttach={(set) => attach(nodeId, set)} />
 
-        <Shelf sets={sets} attachedId={attachedId} onAttach={(set) => attach(nodeId, set)} />
-
-        <Importer
-          stage={stage}
-          onPreview={preview}
-          onImport={run}
-          onCancel={() => abort.current?.abort()}
-          onStage={setStage}
-        />
-      </div>
-    </div>
+      <Importer
+        stage={stage}
+        onPreview={preview}
+        onImport={run}
+        onCancel={() => abort.current?.abort()}
+        onStage={setStage}
+      />
+    </Modal>
   )
 }
 
@@ -252,6 +237,7 @@ function Shelf({
               />
               {renaming?.id === set.id ? (
                 <input
+                  data-owns-escape
                   className="edges__rename"
                   autoFocus
                   aria-label={`Name for ${set.name}`}

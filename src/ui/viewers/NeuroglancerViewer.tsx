@@ -82,6 +82,7 @@ import { copyText } from '../export'
 import { forgetScene, recallScene, rememberScene } from './sceneMemo'
 import { ViewerActions } from './ViewerActions'
 import { plural } from '../format'
+import { ViewerEmpty } from './ViewerEmpty'
 
 export interface NeuroglancerViewerProps {
   /** Built by the node; empty until it has run. */
@@ -445,11 +446,7 @@ export function NeuroglancerViewer({
   )
 
   if (!url) {
-    return (
-      <div className="viewer">
-        <div className="viewer__empty">Run the node to build a neuroglancer scene.</div>
-      </div>
-    )
+    return <ViewerEmpty>Run the node to build a neuroglancer scene.</ViewerEmpty>
   }
 
   const count = neurons?.length ?? 0

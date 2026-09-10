@@ -1,24 +1,22 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo } from 'react'
 
 import { markLabel } from '../../nodes/lib/chartSelection'
 import type { TableValue } from '../../core/values'
 import {
-  CHART_INK,
   MAX_BAR_THICKNESS,
   MAX_SERIES,
   OTHER_LABEL,
   SURFACE_GAP,
-  chartSurface,
-  currentMode,
   foldByRank,
   seriesColor,
 } from '../colors'
-import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
+import { exportBaseName as makeBaseName } from '../export'
 import { formatCompact, formatNumber, labelGutter, niceTicks, truncateLabel } from '../format'
-import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import { tooltipPoint } from './tooltipPoint'
-import { useElementSize } from './useElementSize'
+import { ChartTooltip, TooltipRow } from './ChartTooltip'
+import { ViewerEmpty } from './ViewerEmpty'
+import { useChart } from './useChart'
 
 export interface BarChartViewerProps {
   table: TableValue
@@ -73,17 +71,8 @@ export function BarChartViewer({
   onExpand,
   onError,
 }: BarChartViewerProps) {
-  const [ref, size] = useElementSize<HTMLDivElement>()
-  const [hover, setHover] = useState<Hover | null>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
-  const mode = currentMode()
-  const ink = CHART_INK[mode]
-  const surface = chartSurface(mode)
-
-  const exportSource: ExportSource = useMemo(
-    () => ({ csv: () => tableToCsvParts(table), svg: () => svgRef.current }),
-    [table],
-  )
+  const { ref, size, hover, setHover, svgRef, mode, ink, surface, exportSource } =
+    useChart<Hover>(table)
 
   const { bars, series, max } = useMemo(
     () => aggregate(table, categoryColumn, valueColumn, seriesColumn, sortBars),
@@ -91,11 +80,7 @@ export function BarChartViewer({
   )
 
   if (bars.length === 0) {
-    return (
-      <div className="viewer">
-        <div className="viewer__empty">Nothing to plot — no rows after aggregation</div>
-      </div>
-    )
+    return <ViewerEmpty>Nothing to plot — no rows after aggregation</ViewerEmpty>
   }
 
   const showLegend = series.length >= 2
@@ -237,24 +222,14 @@ export function BarChartViewer({
         )}
 
         {hovered?.segment && (
-          <div
-            className="chart-tooltip"
-            style={{ left: hover!.x + 12, top: hover!.y + 12 }}
-            role="status"
-          >
+          <ChartTooltip at={hover!}>
             <strong>{hovered.bar.category}</strong>
-            <div className="chart-tooltip__row">
-              <span
-                className="chart-tooltip__swatch"
-                style={{ background: seriesColor(hovered.segment.colorIndex, mode) }}
-              />
+            <TooltipRow swatch={seriesColor(hovered.segment.colorIndex, mode)}>
               {seriesColumn ? `${hovered.segment.series}: ` : ''}
               {formatNumber(hovered.segment.value)}
-            </div>
-            {seriesColumn && (
-              <div className="chart-tooltip__row">total {formatNumber(hovered.bar.total)}</div>
-            )}
-          </div>
+            </TooltipRow>
+            {seriesColumn && <TooltipRow>total {formatNumber(hovered.bar.total)}</TooltipRow>}
+          </ChartTooltip>
         )}
       </div>
 

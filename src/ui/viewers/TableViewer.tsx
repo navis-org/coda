@@ -16,6 +16,7 @@ import { formatCell } from '../format'
 import { FilterIcon } from '../Icons'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
+import { ViewerEmpty } from './ViewerEmpty'
 
 export interface TableViewerProps {
   table: TableValue
@@ -221,11 +222,7 @@ export function TableViewer({
   const filterRowOpen = filterable && (showFilters || draft.length > 0)
 
   if (table.schema.columns.length === 0) {
-    return (
-      <div className="viewer">
-        <div className="viewer__empty">Table has no columns</div>
-      </div>
-    )
+    return <ViewerEmpty>Table has no columns</ViewerEmpty>
   }
 
   const toggleSort = (columnName: string) => {

@@ -39,6 +39,8 @@ import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import { useElementSize } from './useElementSize'
 import { useStable } from './useStable'
+import { ChartTooltip, TooltipRow } from './ChartTooltip'
+import { ViewerEmpty } from './ViewerEmpty'
 
 export interface HeatmapViewerProps {
   matrix: MatrixValue
@@ -518,11 +520,7 @@ export function HeatmapViewer({
   )
 
   if (rows === 0 || cols === 0) {
-    return (
-      <div className="viewer">
-        <div className="viewer__empty">Matrix is empty</div>
-      </div>
-    )
+    return <ViewerEmpty>Matrix is empty</ViewerEmpty>
   }
   if (oversized) {
     /*
@@ -531,14 +529,12 @@ export function HeatmapViewer({
      * honest answer is a slower first layout and a caption; see `HEATMAP_CELLS_WARN`.
      */
     return (
-      <div className="viewer">
-        <div className="viewer__empty">
-          {rows.toLocaleString()} × {cols.toLocaleString()} is {cells.toLocaleString()} cells,
-          more than a browser can hold as one grid.
-          <br />
-          Aggregate upstream — e.g. group by type before pivoting.
-        </div>
-      </div>
+      <ViewerEmpty>
+        {rows.toLocaleString()} × {cols.toLocaleString()} is {cells.toLocaleString()} cells,
+        more than a browser can hold as one grid.
+        <br />
+        Aggregate upstream — e.g. group by type before pivoting.
+      </ViewerEmpty>
     )
   }
 
@@ -694,26 +690,20 @@ export function HeatmapViewer({
         )}
 
         {hovered && hover && (
-          <div
-            className="chart-tooltip"
-            style={{ left: hover.x + 12, top: hover.y + 12 }}
-            role="status"
-          >
+          <ChartTooltip at={hover}>
             <strong>
               {hovered.row} → {hovered.col}
             </strong>
-            <div className="chart-tooltip__row">
+            <TooltipRow>
               {formatNumber(hovered.value)}
               {matrix.valueLabel ? ` ${matrix.valueLabel}` : ''}
-            </div>
+            </TooltipRow>
             {spec?.folded && (
               // The block under the pointer stands for many cells and is drawn as the
               // strongest of them, so say which one is being named.
-              <div className="chart-tooltip__row">
-                strongest of ~{spec.foldFactor.toLocaleString()} cells
-              </div>
+              <TooltipRow>strongest of ~{spec.foldFactor.toLocaleString()} cells</TooltipRow>
             )}
-          </div>
+          </ChartTooltip>
         )}
       </div>
 

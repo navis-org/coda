@@ -49,6 +49,8 @@ import { prepareCanvas } from './canvas2d'
 import { useElementSize } from './useElementSize'
 import { useStable } from './useStable'
 import { useWheelZoom } from './useWheelZoom'
+import { ChartTooltip, TooltipRow } from './ChartTooltip'
+import { ViewerEmpty } from './ViewerEmpty'
 
 export interface ScatterViewerProps {
   table: TableValue
@@ -484,18 +486,10 @@ export function ScatterViewer({
 
   // --- empty states ------------------------------------------------------
   if (!xValues || !yValues) {
-    return (
-      <div className="viewer">
-        <div className="viewer__empty">Pick two numeric columns to plot.</div>
-      </div>
-    )
+    return <ViewerEmpty>Pick two numeric columns to plot.</ViewerEmpty>
   }
   if (table.length === 0) {
-    return (
-      <div className="viewer">
-        <div className="viewer__empty">Nothing to plot — the table is empty.</div>
-      </div>
-    )
+    return <ViewerEmpty>Nothing to plot — the table is empty.</ViewerEmpty>
   }
 
   const usable = spec?.usableRows.length ?? 0
@@ -571,45 +565,37 @@ export function ScatterViewer({
       </div>
 
       {hovered && hoveredRow !== undefined && (
-        <div
-          className="chart-tooltip"
-          style={{ left: hovered.x + 12, top: hovered.y + 12 }}
-          role="status"
-        >
+        <ChartTooltip at={hovered}>
           <strong>
             {labelColumn
               ? formatCell(table.data[labelColumn]?.[hoveredRow] ?? null, labelColumn)
               : keyAt(hoveredRow)}
           </strong>
-          <div className="chart-tooltip__row">
-            <span
-              className="chart-tooltip__swatch"
-              style={{ background: colors.at(hoveredRow) }}
-            />
+          <TooltipRow swatch={colors.at(hoveredRow)}>
             {xColumn}: {formatNumber(cellNumber(xValues[hoveredRow]))}
-          </div>
-          <div className="chart-tooltip__row">
+          </TooltipRow>
+          <TooltipRow>
             {yColumn}: {formatNumber(cellNumber(yValues[hoveredRow]))}
-          </div>
+          </TooltipRow>
           {stableColor.column && (
-            <div className="chart-tooltip__row">
+            <TooltipRow>
               {stableColor.column}:{' '}
               {formatCell(
                 table.data[stableColor.column]?.[hoveredRow] ?? null,
                 stableColor.column,
               )}
-            </div>
+            </TooltipRow>
           )}
           {shapes.legend && shapes.legend.column !== stableColor.column && (
-            <div className="chart-tooltip__row">
+            <TooltipRow>
               {shapes.legend.column}:{' '}
               {formatCell(
                 table.data[shapes.legend.column]?.[hoveredRow] ?? null,
                 shapes.legend.column,
               )}
-            </div>
+            </TooltipRow>
           )}
-        </div>
+        </ChartTooltip>
       )}
 
       {(colors.legend || shapes.legend || (!compact && sizes.domain)) && (

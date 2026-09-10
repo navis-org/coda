@@ -1,5 +1,3 @@
-import { useRef } from 'react'
-
 import { isOnDashboard, placeableIds } from '../../core/dashboard'
 import { groupsTouching } from '../../core/groups'
 import { getNodeDef, isAnnotation } from '../../core/registry'
@@ -9,9 +7,8 @@ import { copySelectionToSystem, cutSelectionToSystem, pasteFromClipboard } from 
 import { restoreHints, splitHints, useDismissedHints } from '../hints'
 import { LOCKED_HINT } from '../lockCopy'
 import { shortcutKeys } from '../shortcuts'
-import { useDismissOnOutside } from '../useDismiss'
 import { AlignTools } from './AlignTools'
-import { menuPosition } from '../menuPosition'
+import { ContextMenu } from '../menu/ContextMenu'
 
 export interface NodeContextMenuProps {
   screenPosition: { x: number; y: number }
@@ -34,7 +31,6 @@ export function NodeContextMenu({
   nodeId,
   onClose,
 }: NodeContextMenuProps) {
-  const ref = useRef<HTMLDivElement>(null)
   /*
    * Field by field rather than `useGraphStore()` whole, which re-rendered this menu on every
    * change to the store while it was open. The actions are stable, so they are read once.
@@ -45,7 +41,6 @@ export function NodeContextMenu({
   const actions = useGraphStore.getState()
   const node = graph.nodes.find((n) => n.id === nodeId)
 
-  useDismissOnOutside(ref, onClose, { onEscape: true })
   const seenHints = useDismissedHints()
 
   if (!node) return null
@@ -99,12 +94,7 @@ export function NodeContextMenu({
   }
 
   return (
-    <div
-      ref={ref}
-      className="context-menu"
-      style={menuPosition(screenPosition, { width: 190, height: 230 })}
-      role="menu"
-    >
+    <ContextMenu at={screenPosition} onClose={onClose}>
       {dataflow && (
         <>
           <button
@@ -324,6 +314,6 @@ export function NodeContextMenu({
       >
         Delete <kbd>⌫</kbd>
       </button>
-    </div>
+    </ContextMenu>
   )
 }

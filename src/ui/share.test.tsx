@@ -160,7 +160,7 @@ describe('dismissing', () => {
   it('closes on a click outside the panel', async () => {
     render(<App />)
     await openShare()
-    fireEvent.pointerDown(document.body)
+    fireEvent.pointerDown(document.querySelector('.overlay')!)
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Share workflow' })).toBeNull()
     })

@@ -19,7 +19,7 @@ import { sourceLabel, sourceSupports } from '../lib/datasetParam'
  * The obvious sibling is `out.viewer3d`, since both draw meshes, and it is the wrong one. That
  * node takes geometry *on a wire* and something upstream fetched it. This takes a Dataset and
  * fetches for itself — which is exactly `out.datasetSummary`'s arrangement, down to having no
- * outputs at all and needing an entry in `SELF_DRAWING_NODE_TYPES` to earn its resize handles
+ * outputs at all and needing a `withoutValue` entry in `ValuePreview`'s `VIEWERS` to earn its resize handles
  * and its overlay.
  *
  * **`cheap`, despite the widget downloading a great deal.** `evaluate` confirms the input is a

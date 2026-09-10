@@ -37,8 +37,8 @@
  *
  * The keyboard is the same shape of problem, and the fix here is deliberately *local*: bare keys
  * are stopped, modified ones are not. The deeper version — the two canvas listeners asking "is a
- * dialog open" beside `isTourActive()` — would close the same hole in the thirteen other
- * `.overlay` surfaces, and it is a change to what every one of them does with every shortcut:
+ * dialog open" beside `isTourActive()` — would close the same hole in the fourteen other
+ * `Modal`s, and it is a change to what every one of them does with every shortcut:
  * eleven tests across five files currently assert that `i`, `Space`, `Tab` and `p` still fire
  * with a dialog up. That is a decision about the app, not a cleanup, and it is written down here
  * rather than taken quietly.
@@ -59,6 +59,7 @@ import { CARD_POINTERS } from '../nodes/cardPointers'
 import { EDGE_TYPES } from '../CodaEdge'
 import { useGraphStore } from '../../store/graphStore'
 import { wireStyle } from '../socketStyle'
+import { Modal } from '../Modal'
 
 /**
  * The peeked card's data, cached per node as the canvas caches its own.
@@ -98,18 +99,12 @@ function PeekPanel({ groupId }: { groupId: string }) {
   const close = useCallback(() => peekGroup(undefined), [peekGroup])
   const group = groupById(graph, groupId)
 
-  // Escape closes, on the capture phase and standing aside for a popover — `ViewerOverlay`'s
-  // arrangement, and for the reason written there: a card's own menu owns the key first.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (document.querySelector('.context-menu')) return
-        event.stopPropagation()
-        close()
-        return
-      }
+      // Escape is the dialog's — `useOverlayEscape`, where a card's own menu sits above it.
+      if (event.key === 'Escape') return
       /*
-       * Unmodified keys stop here too, and only unmodified ones.
+       * Unmodified keys stop here, and only unmodified ones.
        *
        * The canvas's shortcuts are `window` listeners taking *bare* letters, and
        * `isTypingTarget` exempts fields rather than buttons — so a `d`, `m` or `h` pressed at
@@ -126,7 +121,7 @@ function PeekPanel({ groupId }: { groupId: string }) {
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [close])
+  }, [])
 
   const fragment = useMemo(
     () => (group ? subgraphOf(graph, group.nodeIds) : undefined),
@@ -181,55 +176,47 @@ function PeekPanel({ groupId }: { groupId: string }) {
   const title = group.title || 'Group'
 
   return (
-    <div className="overlay" role="presentation" onPointerDown={close}>
-      <div
-        className="overlay__panel group-peek"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Inside ${title}`}
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        {/* The dialog header every other panel wears — `.overlay__title` is already `flex: 1`,
+    <Modal className="overlay__panel group-peek" label={`Inside ${title}`} onClose={close}>
+      {/* The dialog header every other panel wears — `.overlay__title` is already `flex: 1`,
             which is what pushes the close button right without a spacer of our own. */}
-        <div className="overlay__header">
-          <div className="overlay__title">
-            <strong>{title}</strong>
-            <span>
-              {nodes.length} node{nodes.length === 1 ? '' : 's'}
-            </span>
-          </div>
-          <button type="button" className="btn btn--ghost" onClick={close} aria-label="Close">
-            ✕
-          </button>
+      <div className="overlay__header">
+        <div className="overlay__title">
+          <strong>{title}</strong>
+          <span>
+            {nodes.length} node{nodes.length === 1 ? '' : 's'}
+          </span>
         </div>
-        <div className="group-peek__flow">
-          {/*
-           * Its own provider, so this flow's store, viewport and measurements are its own and
-           * the canvas behind it is untouched. `key` on the group, so opening a second peek
-           * frames its own cards rather than inheriting the last one's camera.
-           */}
-          <ReactFlowProvider key={groupId}>
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={CARD_TYPES}
-              edgeTypes={EDGE_TYPES}
-              fitView
-              fitViewOptions={FIT_VIEW_OPTIONS}
-              nodesDraggable={false}
-              nodesConnectable={false}
-              nodesFocusable={false}
-              elementsSelectable={false}
-              edgesFocusable={false}
-              deleteKeyCode={null}
-              selectionKeyCode={null}
-              multiSelectionKeyCode={null}
-              zoomOnDoubleClick={false}
-              proOptions={{ hideAttribution: true }}
-            />
-          </ReactFlowProvider>
-        </div>
+        <button type="button" className="btn btn--ghost" onClick={close} aria-label="Close">
+          ✕
+        </button>
       </div>
-    </div>
+      <div className="group-peek__flow">
+        {/*
+         * Its own provider, so this flow's store, viewport and measurements are its own and
+         * the canvas behind it is untouched. `key` on the group, so opening a second peek
+         * frames its own cards rather than inheriting the last one's camera.
+         */}
+        <ReactFlowProvider key={groupId}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={CARD_TYPES}
+            edgeTypes={EDGE_TYPES}
+            fitView
+            fitViewOptions={FIT_VIEW_OPTIONS}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            nodesFocusable={false}
+            elementsSelectable={false}
+            edgesFocusable={false}
+            deleteKeyCode={null}
+            selectionKeyCode={null}
+            multiSelectionKeyCode={null}
+            zoomOnDoubleClick={false}
+            proOptions={{ hideAttribution: true }}
+          />
+        </ReactFlowProvider>
+      </div>
+    </Modal>
   )
 }

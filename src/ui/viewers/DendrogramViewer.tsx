@@ -34,6 +34,8 @@ import { useWheelZoom } from './useWheelZoom'
 import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import { useElementSize } from './useElementSize'
+import { ChartTooltip, TooltipRow } from './ChartTooltip'
+import { ViewerEmpty } from './ViewerEmpty'
 
 export interface DendrogramViewerProps {
   linkage: LinkageValue
@@ -390,22 +392,16 @@ export function DendrogramViewer({
   })
 
   if (leafCount === 0) {
-    return (
-      <div className="viewer">
-        <div className="viewer__empty">Tree is empty</div>
-      </div>
-    )
+    return <ViewerEmpty>Tree is empty</ViewerEmpty>
   }
   if (leafCount > MAX_LEAVES_DRAWN) {
     return (
-      <div className="viewer">
-        <div className="viewer__empty">
-          {leafCount.toLocaleString()} leaves is {(leafCount * 2).toLocaleString()} SVG paths,
-          more than one card can hold.
-          <br />
-          Group or filter upstream, or take the clustering as a table through Cut Tree.
-        </div>
-      </div>
+      <ViewerEmpty>
+        {leafCount.toLocaleString()} leaves is {(leafCount * 2).toLocaleString()} SVG paths,
+        more than one card can hold.
+        <br />
+        Group or filter upstream, or take the clustering as a table through Cut Tree.
+      </ViewerEmpty>
     )
   }
 
@@ -607,11 +603,7 @@ export function DendrogramViewer({
         )}
 
         {hover && !panning && (
-          <div
-            className="chart-tooltip"
-            style={{ left: hover.x + 12, top: hover.y + 12 }}
-            role="status"
-          >
+          <ChartTooltip at={hover}>
             <strong>{hover.link.last - hover.link.first + 1} leaves</strong>
             {/*
              * Two rows rather than one. The label is an *expression* — "1 − NBLAST score" —
@@ -619,13 +611,9 @@ export function DendrogramViewer({
              * {label}` shape reads as "0.239 1 − NBLAST score" and the two numbers run
              * together.
              */}
-            <div className="chart-tooltip__row">
-              joined at {formatNumber(hover.link.distance)}
-            </div>
-            {linkage.distanceLabel && (
-              <div className="chart-tooltip__row">{linkage.distanceLabel}</div>
-            )}
-          </div>
+            <TooltipRow>joined at {formatNumber(hover.link.distance)}</TooltipRow>
+            {linkage.distanceLabel && <TooltipRow>{linkage.distanceLabel}</TooltipRow>}
+          </ChartTooltip>
         )}
       </div>
       <div className="viewer__caption">

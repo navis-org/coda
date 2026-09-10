@@ -590,6 +590,8 @@ export function ExploreBody({
         <input
           ref={inputRef}
           className="explore__input"
+          // While the completions are open, Escape is theirs to close — not the viewer around them.
+          data-owns-escape={(completionOpen && completions.items.length > 0) || undefined}
           type="text"
           value={text}
           placeholder={compact ? 'Search neurons…' : `Search: ${SEARCH_PLACEHOLDER}`}

@@ -3,9 +3,8 @@
  *
  * Wears `NodeContextMenu`'s clothes — `.context-menu` and its rows — for the reason
  * `NetworkContextMenu` states: a right-click should not look like a different kind of thing
- * depending on which surface it landed on. `useDismissOnOutside` is the same dismissal, and
- * `ViewerOverlay`'s capture-phase Escape already stands aside for anything matching
- * `.context-menu`, so Escape closes the menu rather than the whole overlay with no work here.
+ * depending on which surface it landed on. `ContextMenu` is the same dismissal, and puts Escape
+ * on the stack above the overlay, so it closes the menu rather than the whole viewer.
  *
  * Deliberately dumb, like the network's: it is handed labels and counts and reports which row was
  * pressed. What each command *does* — which ids, which rows, what goes on the clipboard — is
@@ -19,17 +18,8 @@
  * something the reader cannot see. Both rows, always, and the count is in the label.
  */
 
-import { useRef } from 'react'
-
-import { useDismissOnOutside } from '../useDismiss'
 import { LAST_FIELD_HINT } from './rowColumns'
-import { menuPosition } from '../menuPosition'
-
-/** Rough menu box, for keeping it on screen. Mirrors `.context-menu`'s min-width. */
-const MENU_WIDTH = 220
-const MENU_HEIGHT = 210
-/** The chip's two rows and their separator, when there is one. */
-const CHIP_ROW_HEIGHT = 67
+import { ContextMenu } from '../menu/ContextMenu'
 
 export interface RowContextMenuProps {
   /** Where the pointer was, in client coordinates. */
@@ -77,24 +67,13 @@ export function RowContextMenu({
   onSearchType,
   onClose,
 }: RowContextMenuProps) {
-  const ref = useRef<HTMLDivElement>(null)
-  useDismissOnOutside(ref, onClose, { onEscape: true })
-
   const act = (fn: () => void) => () => {
     fn()
     onClose()
   }
 
   return (
-    <div
-      ref={ref}
-      className="context-menu"
-      style={menuPosition(at, {
-        width: MENU_WIDTH,
-        height: MENU_HEIGHT + (chip ? CHIP_ROW_HEIGHT : 0),
-      })}
-      role="menu"
-    >
+    <ContextMenu at={at} onClose={onClose}>
       <div className="context-menu__caption">{caption}</div>
 
       {chip !== undefined && (
@@ -188,6 +167,6 @@ export function RowContextMenu({
       >
         Search for this type
       </button>
-    </div>
+    </ContextMenu>
   )
 }

@@ -494,7 +494,7 @@ canvas the tour is pointing at.
 
 **Escape is deliberately not bound.** It belongs to whatever is on top — an expanded viewer, a help
 document, the add menu — and a mode that closed itself out from under one of those would be the
-same failure `ViewerOverlay`'s capture-phase listener had to stand aside for.
+same failure `useOverlayEscape`'s stack exists to prevent.
 
 ## What was measured
 

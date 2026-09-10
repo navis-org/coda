@@ -31,6 +31,7 @@ import { MarkdownBlocks, MarkdownInlines } from '../MarkdownView'
 import type { MarkdownRenderOptions } from '../MarkdownView'
 import { parseInline } from '../markdown'
 import { FigureView } from './FigureView'
+import { Modal } from '../Modal'
 
 const NODE_GUIDE_URL = `${import.meta.env.BASE_URL}nodes.html`
 
@@ -48,38 +49,21 @@ export function HelpOverlay() {
 
   const close = useCallback(() => openHelp(undefined), [openHelp])
 
-  // Capture-phase, and stopped, so the canvas underneath does not also act on the key — the
-  // same arrangement `ViewerOverlay` uses, and for the same reason.
-  useEffect(() => {
-    if (!helpType) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.stopPropagation()
-      close()
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [helpType, close])
-
   if (!helpType || !current) return null
   return (
-    <div className="overlay" role="presentation" onPointerDown={close}>
-      <div
-        className="overlay__panel help-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${getNodeDef(current)?.label ?? current} help`}
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        <HelpHeader
-          type={current}
-          canGoBack={trail.length > 1}
-          onBack={() => setTrail((t) => t.slice(0, -1))}
-          onClose={close}
-        />
-        <HelpBody type={current} onNavigate={(next) => setTrail((t) => [...t, next])} />
-      </div>
-    </div>
+    <Modal
+      className="overlay__panel help-panel"
+      label={`${getNodeDef(current)?.label ?? current} help`}
+      onClose={close}
+    >
+      <HelpHeader
+        type={current}
+        canGoBack={trail.length > 1}
+        onBack={() => setTrail((t) => t.slice(0, -1))}
+        onClose={close}
+      />
+      <HelpBody type={current} onNavigate={(next) => setTrail((t) => [...t, next])} />
+    </Modal>
   )
 }
 

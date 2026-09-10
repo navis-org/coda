@@ -10,24 +10,15 @@
 import { useEffect } from 'react'
 import type { RefObject } from 'react'
 
+import { useLatest } from './useLatest'
+import { useOverlayEscape } from './useOverlayEscape'
+
 export interface DismissOptions {
-  /** Also close on Escape. The context menus want it; the dropdowns leave it to their button. */
+  /**
+   * Also close on Escape — through `useOverlayEscape`, so the popover is on the one stack that
+   * decides which surface answers, and one opened inside a dialog closes before the dialog.
+   */
   onEscape?: boolean
-  /**
-   * Take Escape on the capture phase, for a surface that is on top of everything.
-   *
-   * The canvas binds Escape too (it clears the open menus), and two bubble-phase listeners are
-   * resolved by registration order — which is mount order, which is not a thing a component
-   * should have to reason about. A full-screen overlay is unambiguously the one that should
-   * answer, so it says so. Off by default: a popover inside the page has no such claim.
-   */
-  escapeCapture?: boolean
-  /**
-   * Close on a pointer-down outside the ref. On by default, and turned off by the one dialog
-   * where dismissing is destructive: the share gate asks whether to replace the canvas, and a
-   * stray click on the backdrop is not an answer to that.
-   */
-  outside?: boolean
   /** Skip binding entirely — for popovers that stay mounted while closed. */
   enabled?: boolean
 }
@@ -35,26 +26,17 @@ export interface DismissOptions {
 export function useDismissOnOutside(
   ref: RefObject<HTMLElement | null>,
   onClose: () => void,
-  {
-    onEscape = false,
-    escapeCapture = false,
-    outside = true,
-    enabled = true,
-  }: DismissOptions = {},
+  { onEscape = false, enabled = true }: DismissOptions = {},
 ): void {
+  const latest = useLatest(onClose)
+  useOverlayEscape(onEscape && enabled ? onClose : undefined)
+
   useEffect(() => {
     if (!enabled) return
     const onPointerDown = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node)) onClose()
+      if (!ref.current?.contains(event.target as Node)) latest.current()
     }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    if (outside) window.addEventListener('pointerdown', onPointerDown, true)
-    if (onEscape) window.addEventListener('keydown', onKey, escapeCapture)
-    return () => {
-      if (outside) window.removeEventListener('pointerdown', onPointerDown, true)
-      if (onEscape) window.removeEventListener('keydown', onKey, escapeCapture)
-    }
-  }, [ref, onClose, onEscape, escapeCapture, outside, enabled])
+    window.addEventListener('pointerdown', onPointerDown, true)
+    return () => window.removeEventListener('pointerdown', onPointerDown, true)
+  }, [ref, enabled, latest])
 }

@@ -40,7 +40,7 @@ import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/
 import type { Viewport } from '../../test/matchMedia'
 import { evaluateQuery, installMatchMedia, setViewport } from '../../test/matchMedia'
 import { NARROW_QUERY, resetSmallScreenForTest } from '../smallScreen'
-import { menuShift, submenuPlacement } from './Toolbar'
+import { menuShift, submenuPlacement } from '../menu/placement'
 
 const PHONE = { width: 412, height: 915 }
 const DESKTOP = { width: 1440, height: 900 }

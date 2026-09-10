@@ -8,8 +8,7 @@
  * by ticking four boxes. Drag-to-merge was the other shape on the table, and it cannot reach a
  * field the header does not already show — which on fish2 is all four of those.
  *
- * Wears `.context-menu`'s clothes, which buys the overlay's Escape rule for free: `ViewerOverlay`
- * stands aside for anything matching it, so Escape closes this rather than the whole overlay.
+ * A `ContextMenu` (through `FieldPopover`), so Escape closes this rather than the whole overlay.
  * Changes are held in a draft until **Apply**, because every write is a param write and an undo
  * step — ticking four boxes live would be four of them, three describing a column nobody wanted.
  *
@@ -17,18 +16,10 @@
  * empty field is visibly "automatic" rather than blank, and a name equal to that is not stored.
  */
 
-import { useId, useRef, useState } from 'react'
+import { useId, useState } from 'react'
 
 import type { TableSchema } from '../../core/types'
-import { useDismissOnOutside } from '../useDismiss'
-import {
-  FilterInput,
-  KindBadge,
-  NoMatch,
-  matching,
-  popoverStyle,
-  stopCanvasKeys,
-} from './fieldPopover'
+import { FieldPopover, FilterInput, KindBadge, matching, NoMatch } from './fieldPopover'
 import type { ColumnSpec, Renderer } from './rowColumns'
 import {
   LAST_FIELD_HINT,
@@ -84,8 +75,6 @@ export function ColumnEditor({
   onReset,
   onClose,
 }: ColumnEditorProps) {
-  const ref = useRef<HTMLDivElement>(null)
-  useDismissOnOutside(ref, onClose, { onEscape: true })
   const radioName = useId()
 
   // A built-in reads no field anybody could re-point, so it offers only a name, move and remove.
@@ -135,14 +124,7 @@ export function ColumnEditor({
   const title = column ? `Column · ${columnLabel(column)}` : 'Add a column'
 
   return (
-    <div
-      ref={ref}
-      className="context-menu explore-colmenu"
-      role="dialog"
-      aria-label={title}
-      style={popoverStyle(anchor)}
-      onKeyDown={stopCanvasKeys}
-    >
+    <FieldPopover anchor={anchor} label={title} className="explore-colmenu" onClose={onClose}>
       <div className="context-menu__caption">{title}</div>
 
       {!builtin && (
@@ -296,6 +278,6 @@ export function ColumnEditor({
           </button>
         </>
       )}
-    </div>
+    </FieldPopover>
   )
 }

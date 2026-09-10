@@ -1,9 +1,9 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 
 import type { TableValue } from '../../core/values'
-import { CHART_INK, MAX_BAR_THICKNESS, chartSurface, currentMode, seriesColor } from '../colors'
-import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
+import { MAX_BAR_THICKNESS, seriesColor } from '../colors'
+import { exportBaseName as makeBaseName } from '../export'
 import { formatCompact, formatNumber, labelGutter, plural, truncateLabel } from '../format'
 import { ClearSelection } from './LegendKeys'
 import type { GroupDistribution, WhiskerRule } from './boxStats'
@@ -11,10 +11,11 @@ import { MAX_GROUPS_DEFAULT, groupValues, summarise, swarmOffsets } from './boxS
 import { isAdditive, useMarkSelection } from './useMarkSelection'
 import type { ScaleKind } from './scatterPlot'
 import { axisTicks, forward, inverse } from './scatterPlot'
-import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import { tooltipPoint } from './tooltipPoint'
-import { useElementSize } from './useElementSize'
+import { ChartTooltip, TooltipRow } from './ChartTooltip'
+import { ViewerEmpty } from './ViewerEmpty'
+import { useChart } from './useChart'
 
 export type DistributionStyle = 'box' | 'violin' | 'both' | 'swarm' | 'swarmBox'
 export type DistributionOrientation = 'rows' | 'columns'
@@ -88,17 +89,8 @@ export function DistributionViewer({
   onExpand,
   onError,
 }: DistributionViewerProps) {
-  const [ref, size] = useElementSize<HTMLDivElement>()
-  const [hover, setHover] = useState<Hover | null>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
-  const mode = currentMode()
-  const ink = CHART_INK[mode]
-  const surface = chartSurface(mode)
-
-  const exportSource: ExportSource = useMemo(
-    () => ({ csv: () => tableToCsvParts(table), svg: () => svgRef.current }),
-    [table],
-  )
+  const { ref, size, hover, setHover, svgRef, mode, ink, surface, exportSource } =
+    useChart<Hover>(table)
 
   const showBox = style === 'box' || style === 'both' || style === 'swarmBox'
   const showViolin = style === 'violin' || style === 'both'
@@ -128,13 +120,11 @@ export function DistributionViewer({
 
   if (groups.length === 0) {
     return (
-      <div className="viewer">
-        <div className="viewer__empty">
-          {dropped > 0
-            ? `Nothing to plot — no usable ${log ? 'positive ' : ''}numbers in "${valueColumn}"`
-            : 'Nothing to plot — no rows'}
-        </div>
-      </div>
+      <ViewerEmpty>
+        {dropped > 0
+          ? `Nothing to plot — no usable ${log ? 'positive ' : ''}numbers in "${valueColumn}"`
+          : 'Nothing to plot — no rows'}
+      </ViewerEmpty>
     )
   }
 
@@ -408,26 +398,18 @@ export function DistributionViewer({
         )}
 
         {hovered && (
-          <div
-            className="chart-tooltip"
-            style={{ left: hover!.x + 12, top: hover!.y + 12 }}
-            role="status"
-          >
+          <ChartTooltip at={hover!}>
             <strong>{hovered.label}</strong>
-            <div className="chart-tooltip__row">
-              <span
-                className="chart-tooltip__swatch"
-                style={{ background: seriesColor(hovered.colorIndex, mode) }}
-              />
+            <TooltipRow swatch={seriesColor(hovered.colorIndex, mode)}>
               median {formatNumber(hovered.stats.median)}
-            </div>
-            <div className="chart-tooltip__row">
+            </TooltipRow>
+            <TooltipRow>
               IQR {formatNumber(hovered.stats.q1)} – {formatNumber(hovered.stats.q3)}
-            </div>
-            <div className="chart-tooltip__row">
+            </TooltipRow>
+            <TooltipRow>
               whiskers {formatNumber(hovered.stats.lower)} – {formatNumber(hovered.stats.upper)}
-            </div>
-            <div className="chart-tooltip__row">
+            </TooltipRow>
+            <TooltipRow>
               {plural(hovered.stats.n, 'row')}
               {showSwarm && hovered.swarm.length < hovered.stats.n
                 ? ` · ${formatNumber(hovered.swarm.length)} drawn`
@@ -435,8 +417,8 @@ export function DistributionViewer({
               {!showSwarm && hovered.stats.outlierCount > 0
                 ? ` · ${plural(hovered.stats.outlierCount, 'outlier')}`
                 : ''}
-            </div>
-          </div>
+            </TooltipRow>
+          </ChartTooltip>
         )}
       </div>
 

@@ -81,6 +81,7 @@ import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import { useStable } from './useStable'
 import { errorMessage } from '../../core/errors'
+import { ViewerEmpty } from './ViewerEmpty'
 
 export interface NetworkViewerProps {
   network: NetworkValue
@@ -1443,23 +1444,17 @@ export function NetworkViewer({
   }, [selectionSet])
 
   if (empty) {
-    return (
-      <div className="viewer">
-        <div className="viewer__empty">Network has no nodes</div>
-      </div>
-    )
+    return <ViewerEmpty>Network has no nodes</ViewerEmpty>
   }
 
   if (tooBig) {
     return (
-      <div className="viewer">
-        <div className="viewer__empty">
-          {network.nodes.length.toLocaleString()} nodes is more than this viewer can build a
-          graph for.
-          <br />
-          Aggregate upstream — group connectivity by type before building the network.
-        </div>
-      </div>
+      <ViewerEmpty>
+        {network.nodes.length.toLocaleString()} nodes is more than this viewer can build a graph
+        for.
+        <br />
+        Aggregate upstream — group connectivity by type before building the network.
+      </ViewerEmpty>
     )
   }
 

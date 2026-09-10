@@ -27,7 +27,7 @@ import type { PaletteAction, PaletteItem } from './paletteItems'
 import { PALETTE_ACTIONS, paletteSearchText } from './paletteItems'
 import { Highlight } from './Highlight'
 import { useDismissOnOutside } from '../useDismiss'
-import { menuPosition } from '../menuPosition'
+import { menuPosition } from '../menu/placement'
 
 export interface CommandPaletteProps {
   items: PaletteItem[]
@@ -90,7 +90,7 @@ export function CommandPalette({
     setActiveIndex(firstEnabled === -1 ? 0 : firstEnabled)
   }, [ranked])
 
-  useDismissOnOutside(containerRef, onClose)
+  useDismissOnOutside(containerRef, onClose, { onEscape: true })
 
   // Keep the highlighted row in view during keyboard navigation.
   useEffect(() => {
@@ -138,10 +138,7 @@ export function CommandPalette({
         spellCheck={false}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            e.preventDefault()
-            onClose()
-          } else if (e.key === 'ArrowDown') {
+          if (e.key === 'ArrowDown') {
             e.preventDefault()
             step(1)
           } else if (e.key === 'ArrowUp') {

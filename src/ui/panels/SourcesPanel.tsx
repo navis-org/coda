@@ -117,6 +117,7 @@ import { useGraphStore } from '../../store/graphStore'
  */
 import { isTourActive } from '../tour/tourState'
 import { errorMessage } from '../../core/errors'
+import { Modal, ModalHeader } from '../Modal'
 
 /**
  * A credential being checked. `Ok` is what a successful check found, which differs by what is
@@ -452,12 +453,7 @@ export function SourcesPanel() {
     if (!open) return
     setTokenField(getToken() ?? '')
     setServerField(getBaseUrlOverride() ?? '')
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closePanel()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, closePanel])
+  }, [open])
 
   const test = useCallback(async () => {
     setProbe({ state: 'testing' })
@@ -505,7 +501,7 @@ export function SourcesPanel() {
   return (
     <>
       {open && (
-        <Dialog
+        <ConnectionsDialog
           onClose={closePanel}
           reason={reason}
           token={token}
@@ -569,12 +565,12 @@ function TabBar({
   )
 }
 
-interface DialogProps extends SourceTabProps {
+interface ConnectionsDialogProps extends SourceTabProps {
   onClose: () => void
   reason: { section: SectionId; message: string; tab?: string } | undefined
 }
 
-function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
+function ConnectionsDialog({ onClose, reason, ...tabProps }: ConnectionsDialogProps) {
   // Tab state lives here rather than in `SourcesPanel` because the dialog is unmounted when
   // closed, so every opening starts on the connection you are most likely to have come for.
   const [sectionId, setSectionId] = useState<SectionId>(reason?.section ?? SECTIONS[0].id)
@@ -606,59 +602,50 @@ function Dialog({ onClose, reason, ...tabProps }: DialogProps) {
   }, [reason])
 
   return (
-    <div className="overlay" role="presentation" onPointerDown={onClose}>
-      <div
-        className="overlay__panel sources"
-        /* The tour's own name for the dialog, as `inspector-panel` is for the inspector: a step
-           that asks the reader to paste a token has to spotlight the form, not the button that
-           opens it. */
-        data-tour="connections-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Connections"
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        <header className="sources__header">
-          <h2>Connections</h2>
-          <button type="button" className="btn btn--ghost" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
-        </header>
+    <Modal
+      className="overlay__panel sources"
+      /* The tour's own name for the dialog, as `inspector-panel` is for the inspector: a step
+         that asks the reader to paste a token has to spotlight the form, not the button that
+         opens it. */
+      tour="connections-panel"
+      label="Connections"
+      onClose={onClose}
+    >
+      <ModalHeader onClose={onClose}>Connections</ModalHeader>
 
-        {/* The same treatment as a node's issue band, and for the same sentence: a CAVE refusal
+      {/* The same treatment as a node's issue band, and for the same sentence: a CAVE refusal
             that names the terms-of-service form which lifts it can land in either place. */}
-        {alert && (
-          <p className="sources__alert">
-            <IssueText message={alert.message} copyable />
-          </p>
-        )}
+      {alert && (
+        <p className="sources__alert">
+          <IssueText message={alert.message} copyable />
+        </p>
+      )}
 
-        <div className="sources__sections" role="tablist" aria-label="Connection kind">
-          {SECTIONS.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              role="tab"
-              className="sources__section"
-              aria-selected={entry.id === section.id}
-              onClick={() => setSectionId(entry.id)}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </div>
-
-        {/*
-         * Above the field that asks for the credential, and per section rather than once at
-         * the top: "where does this go?" has two different honest answers here, and the one
-         * about the proxy is not a hedge — a neuPrint request really is relayed by whatever
-         * serves this page, while an Anthropic one is not relayed at all.
-         */}
-        <p className="sources__privacy">{section.privacy}</p>
-
-        {renderSection(section, { ...tabProps, tabId, setTabId, onClose, onResolved })}
+      <div className="sources__sections" role="tablist" aria-label="Connection kind">
+        {SECTIONS.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            role="tab"
+            className="sources__section"
+            aria-selected={entry.id === section.id}
+            onClick={() => setSectionId(entry.id)}
+          >
+            {entry.label}
+          </button>
+        ))}
       </div>
-    </div>
+
+      {/*
+       * Above the field that asks for the credential, and per section rather than once at
+       * the top: "where does this go?" has two different honest answers here, and the one
+       * about the proxy is not a hedge — a neuPrint request really is relayed by whatever
+       * serves this page, while an Anthropic one is not relayed at all.
+       */}
+      <p className="sources__privacy">{section.privacy}</p>
+
+      {renderSection(section, { ...tabProps, tabId, setTabId, onClose, onResolved })}
+    </Modal>
   )
 }
 

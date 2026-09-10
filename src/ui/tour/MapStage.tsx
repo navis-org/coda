@@ -32,6 +32,8 @@ import type { RefObject } from 'react'
 
 import { union } from '../../layout/place'
 import { useDismissOnOutside } from '../useDismiss'
+import { layoutViewport } from '../menu/placement'
+import { ModalHeader } from '../Modal'
 import type { LabelBox, Placement, Rect } from './mapLayout'
 import { placeLabels } from './mapLayout'
 import type { MapSpot } from './mapSpots'
@@ -130,10 +132,10 @@ export function MapStage({ spots, scope, title, text, onClose }: MapStageProps) 
 
   /*
    * The panel is the only thing on this surface that takes a click, so it is the "inside" — a
-   * press anywhere else, on a label or on bare scrim, closes. Escape on the capture phase,
-   * because the canvas binds Escape too and this is on top of it.
+   * press anywhere else, on a label or on bare scrim, closes. Escape is on `useOverlayEscape`'s
+   * stack, which puts this above the viewer or the card it was opened from.
    */
-  useDismissOnOutside(panel, onClose, { onEscape: true, escapeCapture: true })
+  useDismissOnOutside(panel, onClose, { onEscape: true })
 
   /*
    * Pass one. In a layout effect rather than an effect: this runs in the commit that put the map
@@ -186,7 +188,7 @@ export function MapStage({ spots, scope, title, text, onClose }: MapStageProps) 
     const bar = panel.current?.getBoundingClientRect()
     const laid = placeLabels(
       items,
-      { width: window.innerWidth, height: window.innerHeight },
+      layoutViewport(),
       bar ? [{ x: bar.left, y: bar.top, width: bar.width, height: bar.height }] : [],
     )
     setPlaces(new Map(laid.map((place) => [place.id, place])))
@@ -302,17 +304,12 @@ export interface MapListProps {
  */
 export function MapList({ spots, title, lede, onClose }: MapListProps) {
   const sheet = useRef<HTMLDivElement>(null)
-  useDismissOnOutside(sheet, onClose, { onEscape: true, escapeCapture: true })
+  useDismissOnOutside(sheet, onClose, { onEscape: true })
   return (
     <div className="smap smap--list" role="dialog" aria-modal="true" aria-label={title}>
       <div className="smap__scrim" />
       <div className="smap__sheet" ref={sheet}>
-        <header className="sources__header">
-          <h2>{title}</h2>
-          <button type="button" className="btn btn--ghost" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
-        </header>
+        <ModalHeader onClose={onClose}>{title}</ModalHeader>
         <p className="smap__lede">{lede}</p>
         <ul className="smap__rows">
           {spots.map((spot) => (

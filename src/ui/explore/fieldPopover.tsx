@@ -6,34 +6,49 @@
  * past the bottom of the window. One position rule, one key rule, one filter.
  */
 
-import type React from 'react'
+import type { ReactNode } from 'react'
 
-/** Mirrors `.explore-colmenu`'s width and `max-height` — the box the position is clamped for. */
-const WIDTH = 264
-const MAX_HEIGHT = 520
+import { ContextMenu } from '../menu/ContextMenu'
+
+/** The gap below the anchor, and the margin kept from the window's edge. */
 const MARGIN = 4
 
 /**
- * Hung below its anchor's left edge and kept inside the window.
+ * A field popover: a `ContextMenu` hung under its anchor's left edge, holding fields rather than
+ * commands. `ContextMenu` keeps it inside the window by measuring its own box, where this used to
+ * clamp against a width and a `max-height` typed here to mirror the stylesheet — the copy of a
+ * size that had already drifted once.
  *
- * `documentElement.clientWidth`, never `window.innerWidth` — `RowContextMenu` records why.
+ * Every key stops at it, as the search box's do: the canvas binds Space and Backspace, and a field
+ * filter is somewhere people type both. Escape included — the popover's own Escape is
+ * `useOverlayEscape`'s, on the window's capture phase, which has run before this sees the key.
  */
-export function popoverStyle(anchor: { left: number; bottom: number }): React.CSSProperties {
-  const width = document.documentElement.clientWidth
-  const height = document.documentElement.clientHeight
-  return {
-    left: Math.max(MARGIN, Math.min(anchor.left, width - WIDTH - MARGIN)),
-    top: Math.max(MARGIN, Math.min(anchor.bottom + MARGIN, height - MAX_HEIGHT)),
-  }
-}
-
-/**
- * Every key but Escape stops at the popover, as the search box's do: the canvas binds Space and
- * Backspace, and a field filter is somewhere people type both. Escape is let through because it is
- * the dismissal's own key, heard at the window.
- */
-export function stopCanvasKeys(event: React.KeyboardEvent): void {
-  if (event.key !== 'Escape') event.stopPropagation()
+export function FieldPopover({
+  anchor,
+  label,
+  className,
+  onClose,
+  children,
+}: {
+  anchor: { left: number; bottom: number }
+  label: string
+  className: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  return (
+    <ContextMenu
+      at={{ x: anchor.left, y: anchor.bottom + MARGIN }}
+      onClose={onClose}
+      className={className}
+      role="dialog"
+      label={label}
+      margin={MARGIN}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      {children}
+    </ContextMenu>
+  )
 }
 
 /** The items whose name contains the filter, case-insensitively; all of them for an empty one. */

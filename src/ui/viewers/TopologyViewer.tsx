@@ -61,6 +61,7 @@ import {
   partnerLabelColumn,
 } from './synapseHighlight'
 import { hasSynapseLinks, useSynapseLinks } from './useSynapseLinks'
+import { ViewerEmpty } from './ViewerEmpty'
 
 export interface TopologyViewerProps {
   neurons: TableValue | undefined
@@ -651,18 +652,10 @@ export function TopologyViewer(props: TopologyViewerProps) {
   )
 
   if (!neurons) {
-    return (
-      <div className="viewer">
-        <div className="viewer__empty">Connect a table of neurons to measure them.</div>
-      </div>
-    )
+    return <ViewerEmpty>Connect a table of neurons to measure them.</ViewerEmpty>
   }
   if (total === 0) {
-    return (
-      <div className="viewer">
-        <div className="viewer__empty">No neurons in the incoming table.</div>
-      </div>
-    )
+    return <ViewerEmpty>No neurons in the incoming table.</ViewerEmpty>
   }
 
   const isPinned = neuronId !== null && pinned.includes(neuronId)

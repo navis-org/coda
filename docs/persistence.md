@@ -227,10 +227,11 @@ which is right when the recipient's window is a different size.
   goes to the notice channel — the share dialog was writing it into `GistState`, which rendered a
   clipboard error in the gist result slot in *link* mode and, worse, overwrote `state: 'done'`,
   taking the freshly created `gh://` link off the screen when a copy failed.
-- **`useDismissOnOutside` gained `outside`.** The share dialog had no Escape at all and the gate
-  hand-rolled a sixth private listener. The gate passes `outside: false`, which is the reason the
-  option exists: dismissing there discards a link somebody was sent, and on the replace prompt
-  the other answer discards the canvas — a stray backdrop click is not an answer to either.
+- **The gate's backdrop does not dismiss it** (`Modal`'s `backdrop={false}`). The share dialog had
+  no Escape at all and the gate hand-rolled a sixth private listener; both are `Modal`s now, and the
+  gate is the reason the option exists: dismissing there discards a link somebody was sent, and on
+  the replace prompt the other answer discards the canvas — a stray backdrop click is not an
+  answer to either.
 
 ### What it costs, and why it is not lazy
 
