@@ -15,25 +15,24 @@ import { memo } from 'react'
 
 import { idText } from '../../core/ids'
 import type { CellValue, TableValue } from '../../core/values'
-import { formatCell, formatExact, formatMeasure } from '../format'
+import { formatCell, formatExact, formatMeasure, formatNumber, formatShare } from '../format'
 import { NeuronThumbnail, TILE_COMPACT_PX, TILE_PX } from './NeuronThumbnail'
 import type { RowFields } from './rowFields'
 import { chipKey, chipSlots, splitTags, statUnit } from './rowFields'
 import type { Mode } from '../colors'
-import type { Distributions } from './rowPlots'
-import { barFraction, percentileOf, sharesOf } from './rowPlots'
+import type { Distributions, Spread, SpreadScale } from './rowPlots'
+import { barFraction, percentileOf, sharesOf, spreadFor } from './rowPlots'
+import { ConfidenceBar, PartsMark, PercentileTick, ShareRing, ValueBar } from './RowMarks'
 import {
-  ConfidenceBar,
-  PartsDonut,
-  PercentileTick,
-  ShareRing,
-  SideBars,
-  StackedBar,
-  ValueBar,
-} from './RowMarks'
+  ConfidencePreview,
+  HoverMark,
+  PartsPreview,
+  RegionsPreview,
+  SpreadPreview,
+} from './MarkPreview'
 import type { RegionShare } from './rowRois'
 import type { ColumnSpec } from './rowColumns'
-import { columnWidth } from './rowColumns'
+import { columnLabel, columnWidth } from './rowColumns'
 
 export interface NeuronRowProps {
   table: TableValue
@@ -158,6 +157,10 @@ function NeuronRowImpl({
   // cache key and the 3D fetch ever see it.
   const neuronIdText = idText(cellOf(table, 'neuronId', row)) ?? ''
   const primary = fields.primary ? cellOf(table, fields.primary, row) : null
+  // A neuron with no type is normal in an unfinished dataset, and saying so beats an empty row
+  // that looks like a rendering bug.
+  const name =
+    primary === null || primary === '' ? 'untyped' : formatCell(primary, fields.primary)
   /*
    * The card shows the same chips as the overlay, and `compact` reaches only the thumbnail.
    *
@@ -254,13 +257,7 @@ function NeuronRowImpl({
 
       <div className="explore-row__main">
         <div className="explore-row__name">
-          {/* A neuron with no type is normal in an unfinished dataset, and saying so beats an
-              empty row that looks like a rendering bug. */}
-          <strong>
-            {primary === null || primary === ''
-              ? 'untyped'
-              : formatCell(primary, fields.primary)}
-          </strong>
+          <strong>{name}</strong>
           <span className="explore-row__id">{neuronIdText}</span>
         </div>
         {secondary.length > 0 && (
@@ -318,6 +315,7 @@ function NeuronRowImpl({
             table={table}
             row={row}
             shares={shares}
+            subject={`${name} · ${neuronIdText}`}
             mode={mode}
           />
         ))
@@ -342,8 +340,16 @@ interface ColumnCellProps {
   table: TableValue
   row: number
   shares: RegionShare[] | undefined
+  /** The row's type and id, for the head of a mark's hover preview. */
+  subject: string
   /** Read once for the page and handed down — see `RowMarks`. */
   mode: Mode
+}
+
+/** A mark, and the preview a rest on it opens — built together so both read one computation. */
+interface Drawn {
+  mark: React.ReactElement
+  preview: () => React.ReactNode
 }
 
 /** One column's cell: text, a figure, or a mark — or an empty box of the mark's width. */
@@ -376,12 +382,23 @@ function ColumnCell(props: ColumnCellProps) {
   if (column.render === 'number') {
     return <Figure table={table} row={row} name={name} readable={column.readable === true} />
   }
-  return drawMark(props) ?? <span className="explore-mark--empty" aria-hidden="true" />
+  const drawn = drawMark(props)
+  if (!drawn) return <span className="explore-mark--empty" aria-hidden="true" />
+  return (
+    <HoverMark
+      title={columnLabel(props.column)}
+      subject={props.subject}
+      preview={drawn.preview}
+    >
+      {drawn.mark}
+    </HoverMark>
+  )
 }
 
 /**
- * The mark a column draws. An explicit return type and no `default`, so a renderer added to
- * `rowColumns.ts` without a case here is a compile error rather than an empty box on every row.
+ * The mark a column draws, and what it previews as. An explicit return type and no `default`, so
+ * a renderer added to `rowColumns.ts` without a case here is a compile error rather than an empty
+ * box on every row.
  */
 function drawMark({
   column,
@@ -390,35 +407,63 @@ function drawMark({
   row,
   shares,
   mode,
-}: ColumnCellProps): React.ReactElement | null {
+}: ColumnCellProps): Drawn | null {
   const [first = '', second = ''] = column.fields
   switch (column.render) {
     case 'bar':
     case 'logBar': {
-      const value = cellOf(table, first, row)
+      const cell = cellOf(table, first, row)
       const log = column.render === 'logBar'
-      const fraction = barFraction(distributions, first, value, log)
-      return fraction === null ? null : (
-        <ValueBar
-          fraction={fraction}
-          value={value as number}
-          name={first}
-          unit={statUnit(table.schema, first)}
-          log={log}
-          mode={mode}
-        />
-      )
+      const fraction = barFraction(distributions, first, cell, log)
+      if (fraction === null) return null
+      const value = cell as number
+      const unit = statUnit(table.schema, first)
+      return {
+        mark: (
+          <ValueBar
+            fraction={fraction}
+            value={value}
+            name={first}
+            unit={unit}
+            log={log}
+            mode={mode}
+          />
+        ),
+        preview: spreadPreview({
+          table,
+          name: first,
+          value,
+          unit,
+          mode,
+          // On the bar's own axis, from zero — see `spreadOf`.
+          scale: log ? 'log' : 'linear',
+          fromZero: true,
+          // A share of the largest whatever the drawing's scale: the log bar's *length* is not a
+          // fraction of anything, and a caption quoting it would say so wrongly.
+          caption: (spread) =>
+            `${formatShare(value / spread.hi)} of the largest in this dataset`,
+        }),
+      }
     }
     case 'rank': {
       const at = percentileOf(distributions, first, cellOf(table, first, row))
-      return at ? (
-        <PercentileTick
-          percentile={at}
-          unit={statUnit(table.schema, first)}
-          name={first}
-          mode={mode}
-        />
-      ) : null
+      if (!at) return null
+      const unit = statUnit(table.schema, first)
+      return {
+        mark: <PercentileTick percentile={at} unit={unit} name={first} mode={mode} />,
+        preview: spreadPreview({
+          table,
+          name: first,
+          value: at.value,
+          unit,
+          mode,
+          scale: 'auto',
+          fromZero: false,
+          caption: (spread) =>
+            `Larger than ${Math.round(at.at * 100)}% of the ` +
+            `${formatNumber(spread.total)} neurons with a value`,
+        }),
+      }
     }
     case 'stacked':
     case 'bars':
@@ -428,23 +473,63 @@ function drawMark({
         column.fields.map((name) => cellOf(table, name, row)),
       )
       if (!parts) return null
-      if (column.render === 'stacked') return <StackedBar parts={parts} mode={mode} />
-      if (column.render === 'bars') return <SideBars parts={parts} mode={mode} />
-      return <PartsDonut parts={parts} mode={mode} />
+      const shape = column.render
+      return {
+        mark: <PartsMark shape={shape} parts={parts} mode={mode} />,
+        preview: () => <PartsPreview parts={parts} shape={shape} mode={mode} />,
+      }
     }
     case 'regions':
-      return shares ? <ShareRing shares={shares} mode={mode} /> : null
+      return shares
+        ? {
+            mark: <ShareRing shares={shares} mode={mode} />,
+            preview: () => <RegionsPreview shares={shares} mode={mode} />,
+          }
+        : null
     case 'confidence': {
       const value = cellOf(table, second, row)
-      const label = cellOf(table, first, row)
-      return typeof value === 'number' ? (
-        <ConfidenceBar value={value} label={String(label ?? 'prediction')} mode={mode} />
-      ) : null
+      if (typeof value !== 'number') return null
+      const label = String(cellOf(table, first, row) ?? 'prediction')
+      return {
+        mark: <ConfidenceBar value={value} label={label} mode={mode} />,
+        preview: () => <ConfidencePreview value={value} label={label} mode={mode} />,
+      }
     }
     case 'text':
     case 'number':
       // Drawn as text and figures by `ColumnCell`, before it asks for a mark.
       return null
+  }
+}
+
+/**
+ * A bar's or a rank's preview: the neuron against its whole column. One builder for both, which
+ * differ only in the axis and in what the caption reads off the spread.
+ */
+function spreadPreview(options: {
+  table: TableValue
+  name: string
+  value: number
+  unit: string | undefined
+  scale: SpreadScale | 'auto'
+  fromZero: boolean
+  caption: (spread: Spread) => string
+  mode: Mode
+}): () => React.ReactNode {
+  const { table, name, value, unit, scale, fromZero, caption, mode } = options
+  return () => {
+    const spread = spreadFor(table, name, scale, fromZero)
+    return (
+      spread && (
+        <SpreadPreview
+          spread={spread}
+          value={value}
+          unit={unit}
+          caption={caption(spread)}
+          mode={mode}
+        />
+      )
+    )
   }
 }
 

@@ -36,6 +36,15 @@ export interface RegionShare {
   count: number
   /** Rank in the page's ordering — the palette index, so a region is one colour down the list. */
   rank: number
+  /**
+   * On the `Other` segment only: the regions it folded, this neuron's largest first.
+   *
+   * What the hover preview itemises. The ring folds and so does its legend — **fold where the mark
+   * folds** — but a list of names in grey is not a mark, and it is the one place the tail can be
+   * read without spending a colour on it. Ordered by this neuron rather than by the page, since
+   * nothing in it is coloured and so nothing has to agree down the column.
+   */
+  folded?: ReadonlyArray<{ roi: string; count: number }>
 }
 
 /**
@@ -111,10 +120,19 @@ export function regionShares(
       share: region.total / sum,
       rank: ranking.slotOf(region.roi),
     }))
-    const rest = ordered.slice(MAX_REGIONS).reduce((a, r) => a + r.total, 0)
+    const tail = ordered.slice(MAX_REGIONS).filter((region) => region.total > 0)
+    const rest = tail.reduce((a, r) => a + r.total, 0)
     if (rest > 0) {
       // One segment for the tail, at the palette's own fold position.
-      shares.push({ roi: OTHER_LABEL, count: rest, share: rest / sum, rank: MAX_REGIONS })
+      shares.push({
+        roi: OTHER_LABEL,
+        count: rest,
+        share: rest / sum,
+        rank: MAX_REGIONS,
+        folded: tail
+          .map((region) => ({ roi: region.roi, count: region.total }))
+          .sort((a, b) => b.count - a.count || a.roi.localeCompare(b.roi)),
+      })
     }
     byNeuron.set(id, shares)
   }

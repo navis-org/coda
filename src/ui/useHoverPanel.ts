@@ -21,10 +21,23 @@
  * surface under the pointer moves during the delay — a list scrolls, a canvas pans.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent, RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent, RefObject } from 'react'
 
-import type { Rect } from './hoverPlacement'
+import { hoverPlacement } from './hoverPlacement'
+import type { HoverPlacementRequest, Rect } from './hoverPlacement'
+import { layoutViewport } from './menuPosition'
+
+/**
+ * How long a pointer rests before a hover panel opens, by how dense the targets are.
+ *
+ * `sparse` is a target a pointer goes to on purpose — Explore's thumbnail, one per row at its left
+ * edge. `dense` is one a pointer crosses on its way to another — a card's sockets, up to eight
+ * down one side, and a row's marks, several abreast — where a panel per crossing would strobe.
+ * Long enough that crossing is free, short enough that resting is not a wait. Named here so the
+ * reasoning is written once and two surfaces of one kind cannot drift apart.
+ */
+export const HOVER_DELAY_MS = { sparse: 130, dense: 260 } as const
 
 export interface HoverPanelOptions {
   /** What the panel is anchored to, and whose movement dismisses it. */
@@ -171,4 +184,56 @@ export function useHoverPanel(options: HoverPanelOptions): HoverPanel {
   }, [anchorRef, open, hide])
 
   return { open, hide, handlers: { onPointerEnter, onPointerLeave, onPointerDown } }
+}
+
+/**
+ * Place a panel whose height is its content: mount hidden, measure, place, show.
+ *
+ * Two panels are sized by what they hold — a port's value and a mark's legend — so there is no
+ * size to hand `hoverPlacement` before the thing exists, and this is the second pass both need.
+ * Written into `PortPreviewPanel` first; the mark preview is what made it a function.
+ *
+ * Hidden rather than unmounted for the first frame, because the panel has to be in the document to
+ * be measured and one measured but not yet placed is at (0, 0). `content` is whatever the panel's
+ * size follows, so a change of it measures again; a measurement landing where the last one did
+ * keeps the state it had, so re-measuring costs a read and never a render. The viewport is
+ * `layoutViewport`'s.
+ *
+ * jsdom performs no layout, so this measures zero there and `hoverPlacement.test.ts` is where the
+ * geometry is held.
+ */
+export function usePlacedPanel(
+  anchor: Rect,
+  placement: Pick<HoverPlacementRequest, 'prefer' | 'gap' | 'margin'>,
+  content: unknown,
+): { ref: RefObject<HTMLDivElement | null>; style: CSSProperties } {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [box, setBox] = useState<{ left: number; top: number } | undefined>(undefined)
+  const { prefer, gap, margin } = placement
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const place = hoverPlacement({
+      anchor,
+      width: el.offsetWidth,
+      height: el.offsetHeight,
+      viewport: layoutViewport(),
+      prefer,
+      gap,
+      margin,
+    })
+    setBox((was) =>
+      was?.left === place.left && was.top === place.top
+        ? was
+        : { left: place.left, top: place.top },
+    )
+  }, [anchor, prefer, gap, margin, content])
+  return {
+    ref,
+    style: {
+      left: box?.left ?? 0,
+      top: box?.top ?? 0,
+      visibility: box ? undefined : 'hidden',
+    },
+  }
 }

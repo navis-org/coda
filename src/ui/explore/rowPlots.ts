@@ -17,6 +17,7 @@
  */
 
 import type { CellValue, TableValue } from '../../core/values'
+import { normalize } from '../viewers/heatmapPlot'
 
 /** Where a value sits in a column, 0 at the smallest and 1 at the largest. */
 export interface Percentile {
@@ -140,6 +141,159 @@ export function barFraction(
   const value = Math.max(cell, 0)
   const fraction = log ? Math.log1p(value) / Math.log1p(max) : value / max
   return Math.min(fraction, 1)
+}
+
+/** How a spread's axis is drawn. */
+export type SpreadScale = 'linear' | 'log'
+
+/**
+ * A column's whole distribution, binned — what a bar's or a rank's hover preview draws the neuron
+ * against.
+ *
+ * **Every row, not the sample.** `Distributions.sorted` is a strided sample because a rank is
+ * asked of it once per row per page; a spread is asked once per column and a hover, and a sample
+ * would draw the dataset's largest neuron — one row — as an empty bin thirty-nine times in forty,
+ * which is `Distributions.max`'s own reason.
+ *
+ * **Not `histogramBins.ts`' `Histogram`**, which bins a chart's own axis: its log is `log10` with
+ * every non-positive value dropped, and it has no notion of an axis that must start at zero. This
+ * is read against a *mark* — a bar's zero, a rank that must keep every neuron — so its log is
+ * `log1p` shifted by the minimum, which is total.
+ */
+export interface Spread {
+  /** Neurons per bin, left to right. */
+  counts: number[]
+  /** The axis ends, in the column's own unit. */
+  lo: number
+  hi: number
+  scale: SpreadScale
+  /** How many neurons were binned: every finite number in the column. */
+  total: number
+}
+
+/**
+ * Forty bins across a 240px drawing is six pixels each, which is one bin per pixel column a
+ * pointer can tell apart and wide enough to keep a one-pixel gap between neighbours.
+ */
+const SPREAD_BINS = 40
+
+/**
+ * Where a value sits along a spread's axis, 0 at `lo` and 1 at `hi`.
+ *
+ * The heatmap's ramp position, `log1p(v − lo) / log1p(hi − lo)` on a log axis, and called rather
+ * than restated since the two are meant to agree. A column of one value has no span and sits in the
+ * middle, where the ramp answers 0 — a colour for "nothing", which a lone value is not.
+ */
+export function axisAt(axis: Pick<Spread, 'lo' | 'hi' | 'scale'>, value: number): number {
+  if (!(axis.hi > axis.lo)) return 0.5
+  return normalize(value, {
+    lo: axis.lo,
+    hi: axis.hi,
+    neutral: axis.lo,
+    log: axis.scale === 'log',
+  })
+}
+
+/**
+ * The share of a linear axis, from its low end, that holding half the column makes a rank's axis
+ * log.
+ *
+ * A tenth, because at `SPREAD_BINS` that is half the dataset in the first four bins and the other
+ * half spread thinly over thirty-six — the picture of a synapse count or a cable length on a
+ * linear axis, and one in which the neuron being asked about is almost always in the spike.
+ */
+const SKEWED = 0.1
+
+function binned(
+  column: readonly CellValue[],
+  axis: Omit<Spread, 'counts' | 'total'>,
+  bins: number,
+) {
+  const counts = new Array<number>(bins).fill(0)
+  for (const cell of column) {
+    if (typeof cell !== 'number' || !Number.isFinite(cell)) continue
+    counts[Math.min(bins - 1, Math.floor(axisAt(axis, cell) * bins))]!++
+  }
+  return counts
+}
+
+/** Whether more than half the column is in the first `SKEWED` of the axis. */
+function skewed(counts: readonly number[], total: number): boolean {
+  const head = Math.max(1, Math.round(counts.length * SKEWED))
+  let held = 0
+  for (let i = 0; i < head; i++) held += counts[i]!
+  return held * 2 > total
+}
+
+/**
+ * Bin one column, or `null` where it holds no number.
+ *
+ * `fromZero` is a bar's axis: its length is read from zero, so the preview's axis starts there too
+ * — a spread starting at the column's minimum would put the bar's own zero somewhere off the left
+ * edge. A bar's scale is the bar's own, so a log bar's preview is a log spread.
+ *
+ * `auto` is a rank's, whose mark has no scale, being a position: log where a linear axis puts more
+ * than half the column in its first tenth — read off the linear binning itself, so from every row
+ * rather than the sample — and linear otherwise and wherever a value is negative, since a shifted
+ * log of a negative still orders correctly but a reader cannot then say what the axis means.
+ */
+export function spreadOf(
+  column: readonly CellValue[],
+  scale: SpreadScale | 'auto',
+  fromZero: boolean,
+  bins = SPREAD_BINS,
+): Spread | null {
+  let lo = Infinity
+  let hi = -Infinity
+  let total = 0
+  for (const cell of column) {
+    if (typeof cell !== 'number' || !Number.isFinite(cell)) continue
+    if (cell < lo) lo = cell
+    if (cell > hi) hi = cell
+    total++
+  }
+  if (total === 0) return null
+  if (fromZero) {
+    lo = 0
+    hi = Math.max(hi, 0)
+  }
+  const first: SpreadScale = scale === 'log' ? 'log' : 'linear'
+  const counts = binned(column, { lo, hi, scale: first }, bins)
+  if (scale === 'auto' && lo >= 0 && skewed(counts, total)) {
+    return {
+      counts: binned(column, { lo, hi, scale: 'log' }, bins),
+      lo,
+      hi,
+      scale: 'log',
+      total,
+    }
+  }
+  return { counts, lo, hi, scale: first, total }
+}
+
+/**
+ * Keyed on the column array itself, which a table holds by identity for its whole life — so a
+ * search, a page turn and a second hover all reuse one pass, and a new table simply misses.
+ */
+const SPREADS = new WeakMap<readonly CellValue[], Map<string, Spread | null>>()
+
+/** `spreadOf` for one of a table's columns, computed once per column and axis. */
+export function spreadFor(
+  table: TableValue,
+  name: string,
+  scale: SpreadScale | 'auto',
+  fromZero: boolean,
+): Spread | null {
+  const column = table.data[name]
+  if (!column) return null
+  let held = SPREADS.get(column)
+  if (!held) {
+    held = new Map()
+    SPREADS.set(column, held)
+  }
+  const key = `${scale}:${fromZero}`
+  if (!held.has(key)) held.set(key, spreadOf(column, scale, fromZero))
+  return held.get(key) ?? null
 }
 
 /** One field's part of a merged column. */

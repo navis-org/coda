@@ -103,6 +103,37 @@ describe('regionShares', () => {
     expect(shares.reduce((a, s) => a + s.share, 0)).toBeCloseTo(1)
   })
 
+  it('keeps what the tail folded, this neuron’s largest first, for the preview to name', () => {
+    /*
+     * Neuron 2's large R5 ranks R5 above R6 and R7 on the page, so neuron 1's tail arrives in page
+     * order R5, R7, R6 — and is named in its own order, R7, R6, R5. Nothing in the list is
+     * coloured, so nothing in it has to agree down the column.
+     */
+    const top = Array.from(
+      { length: MAX_REGIONS },
+      (_, i): [string, string, number, number] => ['1', `R${i}`, 100, 0],
+    )
+    const entries: Array<[string, string, number, number]> = [
+      ...top,
+      ['1', 'R5', 1, 0],
+      ['1', 'R6', 2, 0],
+      ['1', 'R7', 3, 0],
+      ['2', 'R5', 50, 0],
+    ]
+    const shares = regionShares(rows(entries), [...top.map((e) => e[1]), 'R5', 'R6', 'R7'])
+    const own = shares.get('1')!
+    const other = own.at(-1)!
+    expect(other.roi).toBe(OTHER_LABEL)
+    expect(other.folded).toEqual([
+      { roi: 'R7', count: 3 },
+      { roi: 'R6', count: 2 },
+      { roi: 'R5', count: 1 },
+    ])
+    expect(other.folded!.reduce((a, r) => a + r.count, 0)).toBe(other.count)
+    // Only the fold carries a list; a named region is its own entry.
+    expect(own.slice(0, -1).every((s) => s.folded === undefined)).toBe(true)
+  })
+
   it('skips a neuron with nothing in any primary region', () => {
     expect(regionShares(rows([['1', 'A', 0, 0]]), ['A']).size).toBe(0)
   })

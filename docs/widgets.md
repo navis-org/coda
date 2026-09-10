@@ -521,6 +521,66 @@ to them by position — three parallel enumerations agreeing by inspection. As t
 label is simply the cell above, and that machinery (`markSlots`, `--mark-gap`, `--mark-pad`) is
 gone.
 
+### A rest on a mark opens it larger, with its numbers
+
+A 54-pixel mark is a scanning aid, and the moment somebody stops on one they want what it cannot say
+at that size — which colour is which part, what the counts are, what "the dataset" a rank is read
+against looks like. So a rest on any mark opens `MarkPreview.tsx`'s panel beside it, and what it
+holds depends on what kind of mark it is:
+
+- **A split** — stacked, side by side, donut, regions — is **the same drawing, larger**, above a
+  legend of name, count and share with swatches in the row's colours. The same *components*, sized
+  by a prop, never a second rendering: a figure that explains a mark is a copy of the mark, and a
+  copy goes stale silently. The ring's stroke keeps its proportion to the diameter, so the preview
+  is the row's ring rather than a thinner one with a bigger hole. A merged column's foot reads
+  **"Sum of these"**, because the shares are of the parts' own sum (`sharesOf`) and on fish2 that
+  is not `pre` on 1278 of 2000 neurons.
+- **A bar or a rank** is the neuron against **the whole column**: a histogram of every row, this
+  neuron's value marked and every bin to its left filled, so the filled area is the fraction a rank
+  reports. It is the picture a rank *means*, and the one thing here no other surface can draw
+  without a query, Explore already holding the column. **Every row, not the strided sample** the
+  rank reads, for `Distributions.max`'s reason: a sample drops the dataset's largest neuron — one
+  row — thirty-nine times in forty. Binned once per column and axis, memoised on the column array's
+  identity, so a search or a page turn reuses it. A **bar's axis is the bar's own** — from zero,
+  linear or log as the bar is — or the bar's zero would sit off the histogram's left edge. A **rank
+  has no scale of its own**, so `spreadOf`'s `auto` axis reads the column: log where more than
+  half of it falls in the first tenth of a linear axis, which at forty bins is the first four — the
+  picture of a synapse count on a linear axis, with the neuron being asked about in the spike. It
+  is decided from the linear binning of every row, not from the rank's sample, so one picture has
+  one source. A column with a negative value stays linear. The log is the heatmap's own
+  `normalize`, `log1p(v − lo) / log1p(hi − lo)`, called rather than restated, and the axis says
+  "log scale" when it is one. The type is `Spread` and not `histogramBins.ts`' `Histogram`, whose
+  log is `log10` over positive values only — right for a chart's axis, wrong against a mark.
+- **A confidence** is its bar enlarged beside the prediction it qualifies, and a grey one says why
+  it is grey.
+
+**The regions ring itemises its `Other`.** The ring folds its tail and so does its legend — a sixth
+colour would have to mean one region on this row and another on the next — but grey names beneath
+the legend are not a mark, and the tail is exactly what somebody hovering a ring with a large grey
+slice wants. `regionShares` hands the fold's members over on the `Other` segment
+(`RegionShare.folded`), **ordered by this neuron** rather than by the page, since nothing in the
+list is coloured and so nothing has to agree down the column. Eight are named, the rest counted.
+
+**The marks lost their `<title>`**, which is the preview's doing: the browser shows one about a
+second after the pointer stops, so with a panel opening at a quarter of that the native tooltip
+arrived *on top* of it, saying less. The numbers are in the `aria-label`, and the panel is
+`aria-hidden` for the thumbnail preview's reason — only a mouse can open it.
+
+Four decisions about the gesture. **`HOVER_DELAY_MS.dense`, the port preview's 260ms rather than
+the thumbnail's `sparse` 130**, and for the port's reason: marks are a dense grid, several to a row,
+and a pointer on the way to one crosses others. The two delays are named once in `useHoverPanel.ts`
+with that reasoning, the panels' chrome is one `.hover-panel` class, and every panel is kept inside
+`layoutViewport()` — the thumbnail had been measuring `window.innerWidth`, which `menuPosition.ts`
+records as wrong. **The cell is the target, not the ink** — a ring is 22 pixels of a 54-pixel
+track and a bar 8 pixels tall, and a target that is only the ink is one a resting pointer slides
+off. **It opens right**, the thumbnail's rule turned round rather than broken: open into what the
+reader is not comparing against, which for a mark is the same column on the rows above and below
+and the row's own name to its left. Clamped at the window's edge, never flipped. And **the state is
+per cell**, since a hovered-cell id in the list would re-render a memoised page to change one row.
+The panel's height is its content, so it is measured and then placed — `usePlacedPanel`, which the
+port preview had written privately and now shares. Whether it lands whole, on top and at screen
+scale is `pnpm probe:explore-columns`.
+
 **Right-clicking a row opens a menu, and it wears `NodeContextMenu`'s clothes rather than its
 own.** `.context-menu` and its rows, `useDismissOnOutside` for the dismissal — a right-click should
 not look like a different kind of thing depending on which surface it landed on, which is the rule

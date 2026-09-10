@@ -11,9 +11,18 @@
  * during render does not.
  *
  * Every one of them is **labelled as well as drawn**. A bar in a list is a scanning aid, not the
- * value: the `title` carries the numbers, and the figure columns beside them carry the same facts
- * as text. That is the same doctrine as the socket colours and the chip slots — colour and shape
- * plus a readable label, never a mark alone.
+ * value: the hover preview (`MarkPreview.tsx`) carries the numbers and names each part, the
+ * `aria-label` says the same in words, and the figure columns beside them carry the same facts as
+ * text. That is the same doctrine as the socket colours and the chip slots — colour and shape plus
+ * a readable label, never a mark alone.
+ *
+ * **No `<title>`, and that is the preview's doing.** Each mark used to carry its numbers in one,
+ * which the browser shows about a second after the pointer stops — so with a preview opening at a
+ * quarter of that, the native tooltip arrived on top of the panel saying less than it.
+ *
+ * **The split marks and the ring are drawn at any size**, because the preview draws the very same
+ * picture larger: a second drawing of "the same" bar is a copy, and a copy goes stale silently.
+ * The row's size is the default everywhere, so only the preview names another.
  */
 
 import type React from 'react'
@@ -31,36 +40,40 @@ const W = MARK_W
 const H = 8
 
 /**
- * The frame every mark shares: size, role, label and title.
+ * The frame every mark shares: size, role and label.
  *
  * Four copies of an eight-line SVG shell is four places for the accessibility contract this
- * file's header rests on to drift — and the marks differ only in their height and their contents.
+ * file's header rests on to drift — and the marks differ only in their size and their contents.
  */
 function Mark({
-  title,
-  label = title,
+  label,
+  width = W,
   height = H,
   children,
 }: {
-  title: string
-  /** Defaults to the title — passed apart only where the two genuinely say different things. */
-  label?: string
+  label: string
+  width?: number
   height?: number
   children: React.ReactNode
 }) {
   return (
     <svg
       className="explore-plot"
-      width={W}
+      width={width}
       height={height}
-      viewBox={`0 0 ${W} ${height}`}
+      viewBox={`0 0 ${width} ${height}`}
       role="img"
       aria-label={label}
     >
-      <title>{title}</title>
       {children}
     </svg>
   )
+}
+
+/** A mark's box: the row's by default, the preview's where it asks. A ring's height is its diameter. */
+interface MarkSize {
+  width?: number
+  height?: number
 }
 
 /**
@@ -71,23 +84,28 @@ function Mark({
  * where a centred diverging mark would make the total vary instead — which the figures already
  * say. Parts are coloured by position, so part one is one colour on every row of the column.
  */
-export function StackedBar({ parts, mode }: { parts: readonly Part[]; mode: Mode }) {
+export function StackedBar({
+  parts,
+  mode,
+  width = W,
+  height = H,
+}: { parts: readonly Part[]; mode: Mode } & MarkSize) {
   let at = 0
   return (
-    <Mark label={partsLabel(parts)} title={partsTitle(parts)}>
+    <Mark label={partsLabel(parts)} width={width} height={height}>
       {parts.map((part, i) => {
         // Rounded at the running edge rather than per segment, so two parts meant to touch
         // cannot open a hairline between them — `donutArcs`' rule for the same reason.
-        const x = Math.round(at * W)
+        const x = Math.round(at * width)
         at += part.share
-        const width = Math.round(at * W) - x
+        const w = Math.round(at * width) - x
         return (
           <rect
             key={part.name}
             x={x}
             y={0}
-            width={width}
-            height={H}
+            width={w}
+            height={height}
             fill={seriesColor(i, mode)}
           />
         )
@@ -108,22 +126,27 @@ export function StackedBar({ parts, mode }: { parts: readonly Part[]; mode: Mode
 const BARS_H = 16
 const BAR_GAP = 2
 
-export function SideBars({ parts, mode }: { parts: readonly Part[]; mode: Mode }) {
-  const width = (W - BAR_GAP * (parts.length - 1)) / parts.length
-  const top = BARS_H - 1
+export function SideBars({
+  parts,
+  mode,
+  width = W,
+  height = BARS_H,
+}: { parts: readonly Part[]; mode: Mode } & MarkSize) {
+  const each = (width - BAR_GAP * (parts.length - 1)) / parts.length
+  const top = height - 1
   return (
-    <Mark height={BARS_H} label={partsLabel(parts)} title={partsTitle(parts)}>
-      <rect x={0} y={top} width={W} height={1} fill={CHART_INK[mode].muted} opacity={0.5} />
+    <Mark label={partsLabel(parts)} width={width} height={height}>
+      <rect x={0} y={top} width={width} height={1} fill={CHART_INK[mode].muted} opacity={0.5} />
       {parts.map((part, i) => {
         // A part that exists is never drawn as nothing — a pixel says "some", which zero does not.
-        const height = part.count > 0 ? Math.max(1, Math.round(part.share * top)) : 0
+        const h = part.count > 0 ? Math.max(1, Math.round(part.share * top)) : 0
         return (
           <rect
             key={part.name}
-            x={i * (width + BAR_GAP)}
-            y={top - height}
-            width={width}
-            height={height}
+            x={i * (each + BAR_GAP)}
+            y={top - h}
+            width={each}
+            height={h}
             fill={seriesColor(i, mode)}
           />
         )
@@ -133,7 +156,11 @@ export function SideBars({ parts, mode }: { parts: readonly Part[]; mode: Mode }
 }
 
 /** The same parts as a ring — `ShareRing`, with each part in the slot its position gives it. */
-export function PartsDonut({ parts, mode }: { parts: readonly Part[]; mode: Mode }) {
+export function PartsDonut({
+  parts,
+  mode,
+  ...size
+}: { parts: readonly Part[]; mode: Mode } & MarkSize) {
   return (
     <ShareRing
       shares={parts.map((part, i) => ({
@@ -143,25 +170,27 @@ export function PartsDonut({ parts, mode }: { parts: readonly Part[]; mode: Mode
         rank: i,
       }))}
       mode={mode}
+      {...size}
     />
   )
 }
 
+/** The renderers that draw a merged column's parts. */
+export type PartsShape = 'stacked' | 'bars' | 'donut'
+
+const PARTS_SHAPES = { stacked: StackedBar, bars: SideBars, donut: PartsDonut } as const
+
+/** A merged column's parts in the shape its renderer names — one choice, for the row and the preview. */
+export function PartsMark({
+  shape,
+  ...props
+}: { shape: PartsShape; parts: readonly Part[]; mode: Mode } & MarkSize) {
+  const Shape = PARTS_SHAPES[shape]
+  return <Shape {...props} />
+}
+
 function partsLabel(parts: readonly Part[]): string {
   return parts.map((p) => `${p.name} ${formatNumber(p.count)}`).join(', ')
-}
-
-function partsTitle(parts: readonly Part[]): string {
-  return parts.map((p) => shareLine(p.name, p.count, p.share)).join('\n')
-}
-
-/**
- * One part's line in a split mark's title, for the bars and the ring alike. `formatShare`, not a
- * rounded percent: a part under half a percent read "0%" beside a side-by-side bar that draws it
- * a pixel tall precisely so it does not read as none.
- */
-function shareLine(name: string, count: number, share: number): string {
-  return `${name} — ${formatNumber(count)} (${formatShare(share)})`
 }
 
 /**
@@ -169,7 +198,7 @@ function shareLine(name: string, count: number, share: number): string {
  *
  * A filled bar, because here the quantity *is* the point — where `PercentileTick` is a rank and
  * deliberately not filled. The track is the dataset's maximum, so a full bar means "the largest
- * neuron here", which the title says in words.
+ * neuron here", which the label says in words.
  */
 export function ValueBar({
   fraction,
@@ -189,7 +218,7 @@ export function ValueBar({
   const width = Math.max(fraction > 0 ? 1 : 0, Math.round(W * fraction))
   return (
     <Mark
-      title={
+      label={
         `${name} ${formatMeasure(value, unit)} — ` +
         (log
           ? 'on a log scale against the largest in this dataset'
@@ -214,7 +243,7 @@ export function ValueBar({
  * Where this neuron sits in the dataset's own spread.
  *
  * A track with a tick rather than a filled bar: a filled bar reads as a *quantity*, and this is a
- * rank. The track is the whole dataset, the tick is this one neuron, and the caption says the
+ * rank. The track is the whole dataset, the tick is this one neuron, and the label says the
  * value so the mark never has to carry it.
  */
 export function PercentileTick({
@@ -232,7 +261,7 @@ export function PercentileTick({
   const at = Math.round((W - 2) * percentile.at) + 1
   return (
     <Mark
-      title={
+      label={
         `${name} ${formatMeasure(percentile.value, unit)} — larger than ` +
         `${Math.round(percentile.at * 100)}% of neurons in this dataset`
       }
@@ -258,25 +287,32 @@ export function PercentileTick({
  * mark can never appear next to a value it does not describe. Below `LOW`, the bar takes the
  * achromatic ink rather than a hue: a weak prediction should not look like a category.
  */
-const LOW = 0.5
+export const LOW = 0.5
+
+/** A confidence in words, the mark's label and the preview's line alike. */
+export function confidenceText(label: string, value: number): string {
+  return `${label} — ${Math.round(value * 100)}% confidence`
+}
 
 export function ConfidenceBar({
   value,
   label,
   mode,
+  width = W,
+  height = H,
 }: {
   value: number
   label: string
   mode: Mode
-}) {
-  const width = Math.max(1, Math.round(W * Math.min(Math.max(value, 0), 1)))
+} & MarkSize) {
+  const filled = Math.max(1, Math.round(width * Math.min(Math.max(value, 0), 1)))
   return (
-    <Mark title={`${label} — ${Math.round(value * 100)}% confidence`}>
+    <Mark label={confidenceText(label, value)} width={width} height={height}>
       <rect
         x={0}
         y={0}
-        width={W}
-        height={H}
+        width={width}
+        height={height}
         rx={2}
         fill={CHART_INK[mode].muted}
         opacity={0.25}
@@ -284,8 +320,8 @@ export function ConfidenceBar({
       <rect
         x={0}
         y={0}
-        width={width}
-        height={H}
+        width={filled}
+        height={height}
         rx={2}
         fill={value < LOW ? CHART_INK[mode].muted : seriesColor(2, mode)}
       />
@@ -308,31 +344,38 @@ export function ConfidenceBar({
  *
  * Drawn in the same `MARK_W`-wide slot every other mark occupies, centred, so the header's labels
  * keep sitting over the marks they name and `rowTemplate`'s arithmetic does not learn about a
- * mark of its own shape.
+ * mark of its own shape. The stroke keeps its proportion to the diameter at any size, so the
+ * preview's ring is the row's, larger — not a thinner ring with a bigger hole.
  */
 const RING = 22
 const RING_STROKE = 6.5
-const RADIUS = (RING - RING_STROKE) / 2
-const CIRCUMFERENCE = 2 * Math.PI * RADIUS
 
-export function ShareRing({ shares, mode }: { shares: RegionShare[]; mode: Mode }) {
-  const arcs = donutArcs(shares, CIRCUMFERENCE)
+export function ShareRing({
+  shares,
+  mode,
+  height: size = RING,
+  width = W,
+}: { shares: readonly RegionShare[]; mode: Mode } & MarkSize) {
+  const stroke = (size * RING_STROKE) / RING
+  const radius = (size - stroke) / 2
+  const circumference = 2 * Math.PI * radius
+  const arcs = donutArcs(shares, circumference)
   return (
     <Mark
-      height={RING}
+      width={width}
+      height={size}
       label={shares.map((s) => `${s.roi} ${formatShare(s.share)}`).join(', ')}
-      title={shares.map((s) => shareLine(s.roi, s.count, s.share)).join('\n')}
     >
       {/* Centred in the slot, and started at twelve o'clock rather than three. */}
-      <g transform={`translate(${W / 2} ${RING / 2}) rotate(-90)`}>
+      <g transform={`translate(${width / 2} ${size / 2}) rotate(-90)`}>
         {arcs.map((arc) => (
           <circle
             key={arc.roi}
-            r={RADIUS}
+            r={radius}
             fill="none"
             stroke={seriesColor(arc.rank, mode)}
-            strokeWidth={RING_STROKE}
-            strokeDasharray={`${arc.length} ${CIRCUMFERENCE}`}
+            strokeWidth={stroke}
+            strokeDasharray={`${arc.length} ${circumference}`}
             strokeDashoffset={arc.offset}
           />
         ))}

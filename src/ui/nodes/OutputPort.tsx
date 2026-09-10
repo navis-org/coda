@@ -42,19 +42,9 @@ import type { PortDef } from '../../core/node'
 import type { CodaType } from '../../core/types'
 import { typeLabel } from '../../core/types'
 import { useGraphStore } from '../../store/graphStore'
-import { useHoverPanel } from '../useHoverPanel'
+import { HOVER_DELAY_MS, useHoverPanel } from '../useHoverPanel'
 import { PortPreviewPanel } from './PortPreviewPanel'
 import type { SocketStyle } from '../socketStyle'
-
-/**
- * How long the pointer rests before a panel opens.
- *
- * Longer than the thumbnail preview's 130ms, because the two gestures differ: a thumbnail is
- * hovered deliberately, where a pointer crosses several sockets on its way to the one it wants —
- * a card has up to eight — and a panel that opened on each would strobe down the side of the
- * card. Long enough that crossing is free, short enough that resting is not a wait.
- */
-const PREVIEW_DELAY_MS = 260
 
 export interface OutputPortProps {
   nodeId: string
@@ -85,7 +75,8 @@ export function OutputPort({
   const socketRef = useRef<HTMLDivElement | null>(null)
   const { open, handlers } = useHoverPanel({
     anchorRef: socketRef,
-    delayMs: PREVIEW_DELAY_MS,
+    // A card's sockets are dense targets, crossed on the way to the one wanted.
+    delayMs: HOVER_DELAY_MS.dense,
     // Asked here rather than subscribed to, and asked *now* rather than when the pointer
     // arrived: a run may have filled this port during the delay.
     canOpen: () => port !== undefined && !!useGraphStore.getState().nodeOutput(nodeId, port.id),

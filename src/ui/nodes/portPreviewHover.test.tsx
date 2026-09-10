@@ -20,7 +20,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import { useGraphStore } from '../../store/graphStore'
 import { searchFor } from '../../test/findNeurons'
-import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
+import { clearStorage, installJsdomStubs, pointerEvent } from '../../test/jsdomStubs'
 
 beforeAll(() => {
   installJsdomStubs({ width: 1200, height: 800 })
@@ -41,11 +41,9 @@ function panel() {
   return document.querySelector('.port-preview')
 }
 
-/** `pointerenter` is delegated off `pointerover` by React, which is what a real mouse sends. */
+/** A mouse's pointer event — see `pointerEvent` for why `fireEvent` cannot make one. */
 function pointer(target: Element, type: 'pointerover' | 'pointerout' | 'pointerdown') {
-  const event = new MouseEvent(type, { bubbles: true })
-  Object.defineProperty(event, 'pointerType', { value: 'mouse' })
-  fireEvent(target, event)
+  fireEvent(target, pointerEvent(type))
 }
 
 /** The side of a port row carrying one named socket. */

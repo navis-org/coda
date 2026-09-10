@@ -27,6 +27,10 @@
  *    `max-height`, and once its content outgrows that, every child is allowed to shrink — the
  *    caption (`overflow: hidden`, so its automatic minimum is zero) first, which put the filter
  *    box over the title on fish2's 35-field list. Only the field list may give up height.
+ * 6. **A mark's hover preview lands whole, on top and at screen scale**, for every mark on a row:
+ *    inside the window, hit-tested at its own centre (it is portalled out of the list's clip and
+ *    the panel's), its drawing `PREVIEW_W` wide, and to the right of its cell unless clamped
+ *    against the window's edge. And a scroll of the list under it dismisses it.
  *
  * On `mock.opticlobe` through `#!demo://neuron.explore`, like `probe-explore-preview.mjs`: no
  * credential, no server. The fields merged are the first two the editor marks as numbers.
@@ -40,7 +44,7 @@ const args = probeArgs()
 const url = args.value('--url') ?? 'http://localhost:5177/'
 const keep = args.keep
 
-const { send, evaluate, waitFor, screenshot, rect, click, close } = await launchChrome({
+const { send, evaluate, waitFor, screenshot, rect, click, mouseTo, close } = await launchChrome({
   port: 9424,
   profile: '/tmp/coda-probe-explore-columns',
   width: 1600,
@@ -201,8 +205,9 @@ const heads = await evaluate(`[...document.querySelectorAll('.overlay__panel .ex
 check(heads.at(-1) === label, `the merged column ${label} is the header's last`)
 const ring = await evaluate(`(() => {
   const row = document.querySelector('.overlay__panel .explore-row')
-  const cell = [...row.children].at(-1)
-  return cell?.tagName.toLowerCase() === 'svg' ? cell.querySelectorAll('circle').length : 0
+  // The mark sits in its hover cell, \`.explore-mark\`, which is the grid child.
+  const svg = [...row.children].at(-1)?.querySelector(':scope > svg')
+  return svg ? svg.querySelectorAll('circle').length : 0
 })()`)
 check(ring === 2, `and every row draws it as a ring of ${ring} segments`)
 
@@ -248,6 +253,90 @@ for (const type of ['keyDown', 'keyUp']) {
 await sleep(150)
 const state = await evaluate(`({ editor: !!document.querySelector('.explore-colmenu'), overlay: !!document.querySelector('.overlay__panel') })`)
 check(!state.editor && state.overlay, `Escape closes the editor (${state.editor ? 'still open' : 'closed'}) and leaves the overlay (${state.overlay ? 'open' : 'closed'})`)
+
+// ── 6. A mark's hover preview ────────────────────────────────────────────────────────────────
+/** What `MarkPreview` declares. A mismatch here is the finding, not a stale constant. */
+const PREVIEW_W = 240
+
+const FIRST_ROW_MARKS = `[...document.querySelectorAll('.overlay__panel .explore-row')[0].querySelectorAll(':scope > .explore-mark')].map((el) => {
+  const r = el.getBoundingClientRect()
+  return { left: r.left, top: r.top, right: r.right, width: r.width, height: r.height, label: el.querySelector('svg')?.getAttribute('aria-label') ?? '' }
+})`
+
+/**
+ * The open preview, plus what is hit-tested at its centre — with `pointer-events` lifted for the
+ * question, since the panel declares none and would otherwise answer with whatever is behind it.
+ */
+const READ_MARK_PREVIEW = `(() => {
+  const el = document.querySelector('.explore-mark-preview')
+  if (!el) return null
+  const r = el.getBoundingClientRect()
+  const was = el.style.pointerEvents
+  el.style.pointerEvents = 'auto'
+  const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+  el.style.pointerEvents = was
+  const figure = el.querySelector('.explore-mark-preview__figure svg')?.getBoundingClientRect()
+  return {
+    left: r.left, top: r.top, right: r.right, bottom: r.bottom,
+    width: document.documentElement.clientWidth, height: document.documentElement.clientHeight,
+    inside: !!at && el.contains(at),
+    figure: figure ? Math.round(figure.width) : null,
+    kind: el.querySelector('.explore-mark-preview__axis') ? 'spread' : el.querySelector('.explore-mark-preview__legend') ? 'legend' : 'bar',
+    host: el.parentElement === document.body ? 'body' : el.parentElement?.className ?? null,
+  }
+})()`
+
+const PREVIEW_OPEN = `!!document.querySelector('.explore-mark-preview')`
+
+/** Park the pointer off every mark, then rest on this one until its preview is placed. */
+async function restOn(mark, i) {
+  await mouseTo(4, 990)
+  await waitFor(`!${PREVIEW_OPEN}`, 'no preview while parked')
+  await mouseTo(mark.left + mark.width / 2, mark.top + mark.height / 2)
+  await waitFor(PREVIEW_OPEN, `mark ${i}'s preview to open`)
+  // Past the measure-then-place pass and the 90ms fade.
+  await sleep(150)
+  return evaluate(READ_MARK_PREVIEW)
+}
+
+const marks = await evaluate(FIRST_ROW_MARKS)
+console.log(`\n${marks.length} marks on the first row`)
+check(marks.length > 0, 'the first row draws at least one mark to hover')
+for (const [i, mark] of marks.entries()) {
+  const p = await restOn(mark, i)
+  const clamped = Math.abs(p.right - (p.width - 8)) <= 1
+  console.log(
+    `      mark ${i} (${mark.label.slice(0, 40)}…) cell ${Math.round(mark.left)}..${Math.round(mark.right)}: ` +
+      `${p.kind} ${Math.round(p.right - p.left)}×${Math.round(p.bottom - p.top)} at ${Math.round(p.left)},${Math.round(p.top)}` +
+      (clamped ? ' (clamped)' : ''),
+  )
+  check(
+    p.left >= 0 && p.top >= 0 && p.right <= p.width && p.bottom <= p.height,
+    `mark ${i}: the preview is wholly inside the window`,
+  )
+  check(p.inside && p.host === 'body', `mark ${i}: portalled to the ${p.host} and on top at its own centre`)
+  check(p.figure === PREVIEW_W, `mark ${i}: its drawing is ${p.figure}px wide — screen scale, the width the legend is`)
+  check(
+    p.left >= mark.right || clamped,
+    `mark ${i}: opens right of its cell (${Math.round(p.left - mark.right)}px clear), or clamped against the window's edge`,
+  )
+  if (keep) console.log(`      → ${await screenshot(`probe-explore-columns-mark-${i}`)}`)
+}
+
+// The list scrolling under an open preview dismisses it: the anchor moved, so the placement is stale.
+await restOn(marks[0], 0)
+const scrolled = await evaluate(`(() => {
+  const list = document.querySelector('.overlay__panel .explore__list')
+  const was = list.scrollTop
+  list.scrollTop = was + 80
+  return list.scrollTop !== was
+})()`)
+if (scrolled) {
+  await sleep(150)
+  check(!(await evaluate(PREVIEW_OPEN)), 'a scroll of the list under an open preview dismisses it')
+} else {
+  console.log('      (the list does not scroll at this window size — dismissal not exercised)')
+}
 
 close()
 finish('See the note at the top of this file.')

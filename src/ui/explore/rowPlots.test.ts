@@ -9,7 +9,16 @@ import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
 import { makeTable } from '../../core/values'
-import { barFraction, distributionsFor, percentileOf, plotSpec, sharesOf } from './rowPlots'
+import {
+  axisAt,
+  barFraction,
+  distributionsFor,
+  spreadFor,
+  spreadOf,
+  percentileOf,
+  plotSpec,
+  sharesOf,
+} from './rowPlots'
 import { splitByFill } from './rowFields'
 
 const numbers = (name: string, values: number[]) =>
@@ -122,6 +131,90 @@ describe('percentileOf', () => {
     )
     const spread = distributionsFor(ordered, ['size'])
     expect(percentileOf(spread, 'size', 19000)!.at).toBeGreaterThan(0.9)
+  })
+})
+
+/**
+ * The histogram a bar's or a rank's hover preview draws a neuron against.
+ *
+ * Headless for the reason the marks are: what the preview *means* — which bin a value lands in,
+ * where the axis starts — is invisible in an SVG jsdom cannot lay out.
+ */
+describe('spreadOf', () => {
+  it('bins every number in the column, and nothing else', () => {
+    const h = spreadOf([1, 2, 3, null, 'x', Number.NaN, 4], 'linear', false, 4)!
+    expect(h.total).toBe(4)
+    expect(h.counts.reduce((a, b) => a + b, 0)).toBe(4)
+    expect([h.lo, h.hi]).toEqual([1, 4])
+  })
+
+  it('puts the largest value in the last bin rather than one past it', () => {
+    expect(spreadOf([0, 5, 10], 'linear', false, 2)!.counts).toEqual([1, 2])
+  })
+
+  it('starts a bar’s axis at zero, which is where the bar is read from', () => {
+    const h = spreadOf([10, 20, 30], 'linear', true, 3)!
+    expect(h.lo).toBe(0)
+    // 10 is a third of the way along from zero, so the first bin is empty.
+    expect(h.counts).toEqual([0, 1, 2])
+  })
+
+  it('on a log axis, spreads a long tail a linear one crowds into its first bin', () => {
+    const skewed = [...Array.from({ length: 99 }, (_, i) => i + 1), 10_000]
+    const linear = spreadOf(skewed, 'linear', false, 10)!
+    const log = spreadOf(skewed, 'log', false, 10)!
+    expect(linear.counts[0]).toBe(99)
+    expect(Math.max(...log.counts)).toBeLessThan(99)
+    expect(log.counts.filter((n) => n > 0).length).toBeGreaterThan(3)
+  })
+
+  it('answers nothing for a column holding no number', () => {
+    expect(spreadOf([null, 'a'], 'linear', false)).toBeNull()
+  })
+})
+
+describe('axisAt', () => {
+  it('runs from 0 at one end to 1 at the other on either scale, clamped outside', () => {
+    for (const scale of ['linear', 'log'] as const) {
+      const axis = { lo: 10, hi: 1000, scale }
+      expect(axisAt(axis, 10)).toBe(0)
+      expect(axisAt(axis, 1000)).toBe(1)
+      expect(axisAt(axis, 5)).toBe(0)
+      expect(axisAt(axis, 5000)).toBe(1)
+      expect(axisAt(axis, 100)).toBeGreaterThan(0)
+      expect(axisAt(axis, 100)).toBeLessThan(axisAt(axis, 200))
+    }
+  })
+
+  it('puts a column of one value in the middle rather than dividing by nothing', () => {
+    expect(axisAt({ lo: 5, hi: 5, scale: 'log' }, 5)).toBe(0.5)
+  })
+})
+
+describe('spreadFor', () => {
+  it('bins a column once per axis, and again only for another', () => {
+    const table = numbers('size', [1, 2, 3])
+    const once = spreadFor(table, 'size', 'linear', false)
+    expect(spreadFor(table, 'size', 'linear', false)).toBe(once)
+    expect(spreadFor(table, 'size', 'log', false)).not.toBe(once)
+    expect(spreadFor(table, 'absent', 'linear', false)).toBeNull()
+  })
+})
+
+describe('a rank’s automatic axis', () => {
+  const axis = (values: number[]) => spreadOf(values, 'auto', false)!.scale
+
+  it('goes log where more than half the column sits in the first tenth of a linear one', () => {
+    expect(axis([...Array.from({ length: 99 }, (_, i) => i + 1), 10_000])).toBe('log')
+  })
+
+  it('keeps an even spread linear', () => {
+    expect(axis(Array.from({ length: 101 }, (_, i) => i))).toBe('linear')
+  })
+
+  it('keeps a column with a negative value linear, and one with no span', () => {
+    expect(axis([-5, 0, 1, 2, 1000])).toBe('linear')
+    expect(axis([3, 3, 3])).toBe('linear')
   })
 })
 

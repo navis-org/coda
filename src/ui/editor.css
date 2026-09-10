@@ -1277,9 +1277,7 @@
  * and where the next one is dropped; taking the pointer there would eat the drop.
  */
 .port-preview {
-  position: fixed;
   z-index: 55;
-  pointer-events: none;
   width: max-content;
   /* The panel is sized to its content; what bounds the content is `TABLE_BUDGET_PX` in
      `nodes/portPreview.ts`, which is what keeps the "+N more columns" count honest. This is the
@@ -1293,19 +1291,8 @@
   flex-direction: column;
   gap: 6px;
   padding: 8px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface-3);
-  box-shadow: var(--shadow-panel);
   font-size: 11px;
   color: var(--text-primary);
-  animation: hover-panel-appear 90ms ease-out;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .port-preview {
-    animation: none;
-  }
 }
 
 .port-preview__head {
@@ -2399,6 +2386,11 @@ select.field {
   display: block;
   overflow: visible;
 }
+/* A mark's grid cell and its hover target (`HoverMark`) — the whole track, not just the ink.
+   `line-height: 0` so the wrapper is exactly the mark's height, as the SVG alone was. */
+.explore-mark {
+  line-height: 0;
+}
 
 .explore-head__cell {
   /* A button, for its column's editor, dressed as the label it always was. */
@@ -2690,16 +2682,9 @@ select.field {
  * sat still.
  */
 .explore-thumb-preview {
-  position: fixed;
   z-index: 65;
-  pointer-events: none;
   padding: 6px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface-3);
-  box-shadow: var(--shadow-panel);
   line-height: 0;
-  animation: hover-panel-appear 90ms ease-out;
 }
 
 /*
@@ -2735,10 +2720,131 @@ select.field {
     opacity: 0;
   }
 }
+/*
+ * The chrome every hover panel shares — Explore's thumbnail and mark previews, and an output
+ * port's. Each surface's own class keeps what is its own: stacking, padding, size and type.
+ *
+ * `pointer-events: none` is load-bearing on all three: a panel opens beside its anchor and can
+ * land over it, and taking the pointer there would drop the `pointerleave` that closes it — or,
+ * beside a socket, eat the drop of the wire being dragged to it. `fixed`, because each is
+ * portalled to the body or the fullscreen root, where no ancestor is transformed.
+ */
+.hover-panel {
+  position: fixed;
+  pointer-events: none;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-panel);
+  animation: hover-panel-appear 90ms ease-out;
+}
 @media (prefers-reduced-motion: reduce) {
-  .explore-thumb-preview {
+  .hover-panel {
     animation: none;
   }
+}
+
+/*
+ * A mark's hover preview (`MarkPreview.tsx`): the row's drawing larger, and its numbers.
+ *
+ * The thumbnail preview's stacking and `pointer-events: none`, for its reasons — it can open over
+ * the row, and taking the pointer there would drop the `pointerleave` that closes it. Its content
+ * width is `PREVIEW_W`, written onto the element from TypeScript so the drawing and the legend
+ * under it cannot disagree; `content-box` so the padding is added to that rather than taken out.
+ */
+.explore-mark-preview {
+  z-index: 65;
+  box-sizing: content-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+.explore-mark-preview__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.explore-mark-preview__title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explore-mark-preview__subject {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.explore-mark-preview__figure {
+  display: flex;
+  justify-content: center;
+  line-height: 0;
+}
+.explore-mark-preview__value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.explore-mark-preview__legend {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.explore-mark-preview__legend td {
+  padding: 1px 0 1px 8px;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.explore-mark-preview__legend td:first-child {
+  padding-left: 0;
+}
+.explore-mark-preview__legend tfoot td {
+  padding-top: 3px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.explore-mark-preview__name {
+  width: 100%;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+.explore-mark-preview__num {
+  text-align: right;
+}
+/* `.legend__swatch`, the charts' own key, set inline in a table cell. */
+.explore-mark-preview__legend .legend__swatch {
+  display: inline-block;
+  vertical-align: -1px;
+}
+/* What `Other` folded: names, no colour — it is not a mark. */
+.explore-mark-preview__folded .explore-mark-preview__legend td,
+.explore-mark-preview__folded .explore-mark-preview__name {
+  color: var(--text-muted);
+}
+.explore-mark-preview__caption {
+  margin-bottom: 2px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 9px;
+}
+.explore-mark-preview__axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.explore-mark-preview__note {
+  color: var(--text-muted);
 }
 
 .explore-row__main {

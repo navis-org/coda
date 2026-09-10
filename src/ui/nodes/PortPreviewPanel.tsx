@@ -8,9 +8,7 @@
  *
  * **It measures itself and then places itself.** A port preview's height is its content — two
  * facts or two tables — so there is no size to hand `hoverPlacement` before the thing exists.
- * The layout effect is the whole of the second pass: mount hidden, measure, place, show. That is
- * also why the placement arithmetic is a pure function in a file of its own; jsdom performs no
- * layout, so this effect measures zero and only `hoverPlacement.test.ts` can hold the geometry.
+ * `usePlacedPanel` is that second pass, shared with Explore's mark preview.
  *
  * **The value is subscribed to, not handed in.** A hover outlives a run — a preview left open
  * while a scheduled pass replaces the cache would otherwise show what used to be on the wire,
@@ -20,12 +18,12 @@
  * than an empty box.
  */
 
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useMemo } from 'react'
 
 import { useGraphStore } from '../../store/graphStore'
 import { plural } from '../format'
-import { hoverPlacement } from '../hoverPlacement'
 import type { Rect } from '../hoverPlacement'
+import { usePlacedPanel } from '../useHoverPanel'
 import { portPreview } from './portPreview'
 import type { PreviewTable } from './portPreview'
 
@@ -49,26 +47,14 @@ export function PortPreviewPanel({ nodeId, portId, label, anchor }: PortPreviewP
     void s.runVersion
     return s.nodeOutput(nodeId, portId)
   })
-  const ref = useRef<HTMLDivElement | null>(null)
-  const [box, setBox] = useState<{ left: number; top: number } | undefined>(undefined)
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const place = hoverPlacement({
-      anchor,
-      width: el.offsetWidth,
-      height: el.offsetHeight,
-      viewport: { width: window.innerWidth, height: window.innerHeight },
-      // Away from the card: an output socket sits on the card's right edge, so everything the
-      // reader is comparing this against — the card's title, its params, its footer — is to the
-      // left. See `hoverPlacement`.
-      prefer: 'right',
-      gap: GAP,
-      margin: MARGIN,
-    })
-    setBox({ left: place.left, top: place.top })
-  }, [anchor, value])
+  const { ref, style } = usePlacedPanel(
+    anchor,
+    // Away from the card: an output socket sits on the card's right edge, so everything the
+    // reader is comparing this against — the card's title, its params, its footer — is to the
+    // left. See `hoverPlacement`.
+    { prefer: 'right', gap: GAP, margin: MARGIN },
+    value,
+  )
 
   /*
    * Memoised on the value's identity, which the scheduler cache gives for free.
@@ -84,18 +70,7 @@ export function PortPreviewPanel({ nodeId, portId, label, anchor }: PortPreviewP
   if (!preview) return null
 
   return (
-    <div
-      ref={ref}
-      className="port-preview"
-      // Hidden rather than unmounted for the first frame: the panel has to be in the document to
-      // be measured, and a panel that has been measured but not yet placed is at (0, 0).
-      style={{
-        left: box?.left ?? 0,
-        top: box?.top ?? 0,
-        visibility: box ? undefined : 'hidden',
-      }}
-      role="tooltip"
-    >
+    <div ref={ref} className="hover-panel port-preview" style={style} role="tooltip">
       <div className="port-preview__head">
         <span className="port-preview__port">{label}</span>
         <span className="port-preview__headline">{preview.headline}</span>

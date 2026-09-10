@@ -46,7 +46,8 @@ import { CHART_INK } from '../colors'
 import { cacheGet, cacheSet } from '../../data/cache'
 import { usePrefersReducedMotion, useThemeMode } from '../useThemeMode'
 import { previewPlacement } from './previewPlacement'
-import { useHoverPanel } from '../useHoverPanel'
+import { HOVER_DELAY_MS, useHoverPanel } from '../useHoverPanel'
+import { layoutViewport } from '../menuPosition'
 import { buildOrder, createRotation, decimateSkeleton, rockFrame } from './rotation'
 import { keyedCache } from '../viewers/keyedCache'
 import type { Silhouette } from './thumbnail'
@@ -524,7 +525,7 @@ const PREVIEW_RASTER = 640
  * *fine* fetch off a sweep — that request is started when the preview opens, not when the pointer
  * arrives, so a pass down the list costs nothing at the source.
  */
-const PREVIEW_DELAY_MS = 130
+const PREVIEW_DELAY_MS = HOVER_DELAY_MS.sparse
 
 interface PaintBuffer {
   rgba: Uint8ClampedArray
@@ -881,12 +882,7 @@ export function NeuronThumbnail({
    * is a pure function over rectangles, and the rect it is given is the one measured when the
    * panel opened — see `useHoverPanel`, which measures then and not on pointer arrival.
    */
-  const placement =
-    open &&
-    previewPlacement(open.anchor, PREVIEW_SIZE, {
-      width: window.innerWidth,
-      height: window.innerHeight,
-    })
+  const placement = open && previewPlacement(open.anchor, PREVIEW_SIZE, layoutViewport())
 
   /*
    * Gated on the preview being open, so nothing is rasterised for a row nobody rested on — and
@@ -985,7 +981,7 @@ export function NeuronThumbnail({
            * 1920 the preview sits outside the panel entirely, on the backdrop.
            */
           <div
-            className="explore-thumb-preview"
+            className="hover-panel explore-thumb-preview"
             style={{ left: placement.left, top: placement.top }}
             aria-hidden="true"
           >

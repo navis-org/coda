@@ -431,3 +431,24 @@ export function clipboardEvent(
   })
   return event as Event & { clipboardData: { getData(kind: string): string } }
 }
+
+/**
+ * A pointer event carrying a `pointerType`, which `fireEvent` cannot make.
+ *
+ * jsdom implements no `PointerEvent`, so testing-library falls back to a `MouseEvent` and every
+ * init key the fallback does not know — `pointerType` above all — is dropped silently. A hover
+ * test written the obvious way therefore exercises `useHoverPanel`'s *touch* branch while reading
+ * as the mouse one, and passes for the wrong reason in both directions. Here for `clipboardEvent`'s
+ * reason: two suites had each written it, one with that warning and one without.
+ *
+ * Dispatch `pointerover`/`pointerout` rather than `pointerenter`/`pointerleave`: React derives the
+ * enter/leave pair from the over/out pair at the root, so the non-bubbling ones never arrive.
+ */
+export function pointerEvent(
+  type: 'pointerover' | 'pointerout' | 'pointerdown',
+  pointerType = 'mouse',
+): MouseEvent {
+  const event = new MouseEvent(type, { bubbles: true })
+  Object.defineProperty(event, 'pointerType', { value: pointerType })
+  return event
+}

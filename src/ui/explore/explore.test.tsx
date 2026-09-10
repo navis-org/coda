@@ -44,7 +44,7 @@ import { resetIndexLoads } from '../../data/neuronIndex'
 import type { DataSource } from '../../data/source'
 import { registerSource } from '../../data/source'
 import '../../nodes'
-import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
+import { clearStorage, installJsdomStubs, pointerEvent } from '../../test/jsdomStubs'
 import { App } from '../../App'
 import { useGraphStore } from '../../store/graphStore'
 import { resetNeuronIndexState } from '../useNeuronIndex'
@@ -703,6 +703,31 @@ function richSource(id: string): DataSource {
  * pinning for that, since a version that ticked only the visible rows would look right on a
  * single-page dataset and be silently wrong on every real one.
  */
+/** A pointer event of a given `pointerType` — see `pointerEvent` for why `fireEvent` cannot. */
+function pointer(target: Element, type: 'pointerover' | 'pointerout', pointerType: string) {
+  fireEvent(target, pointerEvent(type, pointerType))
+}
+
+/**
+ * Rest on a mark until its preview opens, read the preview's legend row by row, and leave.
+ *
+ * Every row, the foot included, as its cells' text — so an assertion reads like the panel does.
+ */
+async function hoverMark(cell: Element): Promise<string[][]> {
+  pointer(cell, 'pointerover', 'mouse')
+  const panel = await waitFor(() => {
+    const found = document.querySelector('.explore-mark-preview')
+    if (!found) throw new Error('no mark preview yet')
+    return found
+  })
+  const rows = [...panel.querySelectorAll('.explore-mark-preview__legend tr')].map((tr) =>
+    [...tr.children].map((td) => td.textContent ?? ''),
+  )
+  pointer(cell, 'pointerout', 'mouse')
+  await waitFor(() => expect(document.querySelector('.explore-mark-preview')).toBeNull())
+  return rows
+}
+
 /**
  * The expanded view's aligned half.
  *
@@ -723,7 +748,7 @@ describe('aligned columns', () => {
   /** A row's column cells, in grid order: text, figures, marks and empty mark boxes alike. */
   const columnCells = (row: Element) =>
     row.querySelectorAll(
-      ':scope > .explore-cell, :scope > .explore-stat, :scope > .explore-plot, :scope > .explore-mark--empty',
+      ':scope > .explore-cell, :scope > .explore-stat, :scope > .explore-mark, :scope > .explore-mark--empty',
     )
 
   async function ready() {
@@ -773,7 +798,7 @@ describe('aligned columns', () => {
     setup({}, 'mock-rich-slots')
     await ready()
     const row = document.querySelectorAll('.explore-row')[0]!
-    const drawn = row.querySelectorAll(':scope > .explore-plot').length
+    const drawn = row.querySelectorAll(':scope > .explore-mark').length
     const empty = row.querySelectorAll(':scope > .explore-mark--empty').length
     // At least one mark has no value this early, which is the case worth having.
     expect(empty).toBeGreaterThan(0)
@@ -928,10 +953,10 @@ describe('the editable header', () => {
     expect(head()).toEqual([...before, 'axonIn/axonOut/dendriteIn/dendriteOut'])
     expect(screen.queryByRole('dialog')).toBeNull()
 
-    // And every row draws it: the ring's title names each part with its share.
+    // And every row draws it, and a rest on the ring names each part with its count and share.
     const row = document.querySelectorAll('.explore-row')[0]!
-    const titles = [...row.querySelectorAll('.explore-plot title')].map((t) => t.textContent)
-    expect(titles.some((t) => t?.includes('dendriteOut — 0 (0.0%)'))).toBe(true)
+    const legend = await hoverMark([...row.querySelectorAll(':scope > .explore-mark')].at(-1)!)
+    expect(legend).toContainEqual(['', 'dendriteOut', '0', '0.0%'])
   })
 
   it('changes how a column draws from its own header cell', async () => {
@@ -989,10 +1014,16 @@ describe('the editable header', () => {
     const text = row.querySelector('.explore-cell--values')!
     expect(text.textContent).toBe('100 / 50')
     expect(text.getAttribute('title')).toBe('pre: 100\npost: 50')
-    // Two bars on one baseline, each titled with its share of the pair.
+    // Two bars on one baseline, and a rest on them lists each with its share of the pair.
     const bars = row.querySelector('svg.explore-plot')!
     expect(bars.querySelectorAll('rect')).toHaveLength(3)
-    expect(bars.querySelector('title')?.textContent).toBe('pre — 100 (67%)\npost — 50 (33%)')
+    // The native tooltip is gone: it arrived a second after the preview, on top of it.
+    expect(bars.querySelector('title')).toBeNull()
+    expect(await hoverMark(bars.closest('.explore-mark')!)).toEqual([
+      ['', 'pre', '100', '67%'],
+      ['', 'post', '50', '33%'],
+      ['', 'Sum of these', '150', '100%'],
+    ])
   })
 
   it('places a field from the + as a column or a chip, shows where each is, and hides it', async () => {
@@ -1520,23 +1551,6 @@ describe('thumbnail hover preview', () => {
   const BODY = getConnectome(DATASET)!.neurons[0]!.neuronId
 
   const preview = () => document.querySelector('.explore-thumb-preview')
-
-  /**
-   * A pointer event carrying a `pointerType`, which `fireEvent` cannot make here.
-   *
-   * jsdom implements no `PointerEvent`, so testing-library falls back to a `MouseEvent` and
-   * every init key the fallback does not know — `pointerType` above all — is dropped silently.
-   * A test written the obvious way therefore exercises the *touch* branch while reading as the
-   * mouse one, and passes for the wrong reason in both directions.
-   *
-   * `pointerover`/`pointerout` rather than `pointerenter`/`pointerleave`: React derives the
-   * enter/leave pair from the over/out pair at the root, so the non-bubbling ones never arrive.
-   */
-  function pointer(target: Element, type: 'pointerover' | 'pointerout', pointerType: string) {
-    const event = new MouseEvent(type, { bubbles: true })
-    Object.defineProperty(event, 'pointerType', { value: pointerType })
-    fireEvent(target, event)
-  }
 
   async function drawTile(hoverPreview: boolean) {
     render(
