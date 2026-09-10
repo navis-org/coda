@@ -315,6 +315,22 @@ Area-specific — the rule, then the doc that holds why:
   node that only wants to be wider sets `NODE_BODIES[type].width`.
 - **Two wires between the same pair of nodes are not a cycle.** `topoSort` derives indegree
   from the same index that decrements it, so the two cannot disagree again.
+- **A `reference` port that resolved to nothing is refused by the scheduler, and the two states it
+  tells apart are invisible to the node.** `datasetIdentity` hands `evaluate` the same `undefined`
+  for "nothing wired" and "a wire whose dataset node cannot yet say which dataset it is", so both
+  CAVE readers on the FlyWire chain refused in the only words they have — `Wire a CAVE Dataset` on a
+  card with a Dataset wired to it. **The ordering references exist for is what made it
+  undiagnosable**: those nodes run *upstream* of the dataset node, so the run stopped there and the
+  dataset node's own accurate sentence (`whyDatasetMissing`: FlyWire's materialize service was
+  answering 503 for every datastack) was never reached, with everything below `blocked`. So
+  `gatherInputs` composes `GatheredInputs.refusal` from the **referenced node's** inference issues
+  (skipping `aboutColumns`), checked after `blocked`, **after the auto-pass deferral** (it replaces a
+  throw from `evaluate`, and both readers are `expensive` — ahead of it, a cold session reddens two
+  cards per keystroke) and before `evaluate`; no reason at all means a cold listing, which is not an
+  error, so that sentence says *Run again*. Downstream of it,
+  CAVE's `explain` reads an HTML body's `<title>` and nothing else — a 300-character slice of an
+  nginx page reads as Coda being broken, and a general tag stripper would draw a stylesheet.
+  See [docs/core.md](docs/core.md).
 - **Copy is bound to the clipboard *events*, and a paste that is not a graph must fall through.**
   ⌘C/⌘X/⌘V ride `copy`/`cut`/`paste`, not keydown, because `clipboardData` is readable inside the
   browser's own gesture where `navigator.clipboard.readText` is a prompt in Chrome and a refusal in

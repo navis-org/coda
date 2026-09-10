@@ -61,6 +61,42 @@ beforeAll(() => {
       }
     },
   })
+  /*
+   * The same stand-in with a reason of its own, for the case that matters most: a dataset node
+   * that *knows* why it cannot name a dataset. On CAVE that sentence is
+   * `DataSource.whyDatasetMissing`, and getting it onto the card that actually failed is the
+   * whole point of composing the refusal in the scheduler.
+   */
+  registerNode({
+    type: 'test.ref.dataset.refused',
+    label: 'dataset',
+    category: 'dataset',
+    cost: 'cheap',
+    inputs: [{ id: 'annotations', label: 'Annotations', type: T.table(), required: false }],
+    outputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
+    inferOutputs: () => ({ dataset: T.dataset('mock', '') }),
+    validate: () => ['stack:7 is not listed — the server said 503'],
+    evaluate: () => {
+      throw new Error('never runs in these tests')
+    },
+  })
+  // The same reader at the cost both CAVE readers actually declare, for the auto pass: a refusal
+  // that fired before the deferral would paint an error on every keystroke.
+  registerNode({
+    type: 'test.ref.reader.expensive',
+    label: 'reader',
+    category: 'utility',
+    cost: 'expensive',
+    inputs: [
+      { id: 'dataset', label: 'Dataset', type: T.dataset(), required: false, reference: true },
+    ],
+    outputs: [{ id: 'out', label: 'Out', type: T.table() }],
+    inferOutputs: () => ({ out: T.table() }),
+    evaluate: () => {
+      ran.push('expensive reader')
+      return { out: { kind: 'table', schema: { columns: [] }, data: {}, length: 0 } }
+    },
+  })
   registerNode({
     type: 'test.ref.reader',
     label: 'reader',
@@ -182,6 +218,116 @@ describe('what a reference changes', () => {
     ran = []
     await sched.run(moved, { mode: 'full' })
     expect(ran).toContain('reader')
+  })
+})
+
+/**
+ * A reference whose node cannot say which dataset it names.
+ *
+ * The FlyWire starter's annotation chain is what found this. `datasetIdentity` hands a reference
+ * reader `undefined` both when nothing is wired *and* when the wire's dataset node has resolved no
+ * id — so the reader refused in the only words it has, which are about the wiring:
+ * `Wire a CAVE Dataset, so the ids can be looked up somewhere` on a card with a Dataset wired to
+ * it, beside `Name a datastack and a table, or wire a Dataset` on the next one. Both nodes are
+ * *upstream* of the dataset node in a chain — that is the whole point of a reference — so the run
+ * stopped there and the dataset node's own diagnosis, which was accurate and named a materialize
+ * service answering 503, was never reached.
+ *
+ * The two states are only distinguishable in the scheduler, which can see both the wire and the
+ * unresolved type, so that is where the sentence is written and this is where it is pinned.
+ */
+describe('a reference that resolves to nothing', () => {
+  function unresolved(dsType = 'test.ref.dataset'): CodaGraph {
+    // No `id` param, so the type carries no `datasetId` and the identity does not resolve — which
+    // is what a CAVE dataset node looks like before its materialization listing has arrived.
+    let g = emptyGraph('unresolved')
+    g = addNode(g, node('ds', dsType, {}))
+    g = addNode(g, node('rd', 'test.ref.reader'))
+    return addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'rd',
+      targetHandle: 'dataset',
+    })
+  }
+
+  function scheduler(): Scheduler {
+    return new Scheduler({
+      resolveSource: () => {
+        throw new Error('no source')
+      },
+    })
+  }
+
+  it('refuses the reader by naming the node it references, never its own wiring', async () => {
+    ran = []
+    const sched = scheduler()
+    const summary = await sched.run(unresolved(), { mode: 'full' })
+
+    // `evaluate` is not reached, which is the half that matters: whatever the node says when its
+    // reference port is unwired would be a sentence about a wire that is right there.
+    expect(ran).not.toContain('reader')
+    expect(summary.failed).toContain('rd')
+    const info = sched.info('rd')
+    expect(info.state).toBe('error')
+    expect(info.error).toContain('Input "Dataset" is wired to dataset')
+    expect(info.error).toContain('has not resolved a dataset')
+  })
+
+  it('carries the referenced node’s own reason, which is the diagnosis nobody could reach', async () => {
+    const sched = scheduler()
+    await sched.run(unresolved('test.ref.dataset.refused'), { mode: 'full' })
+    // The sentence the dataset node's `validate` produced — on CAVE this is
+    // `DataSource.whyDatasetMissing`, i.e. the reason the listing dropped this datastack.
+    expect(sched.info('rd').error).toContain('the server said 503')
+  })
+
+  it('says what to do when there is no reason, because a cold listing is not an error', async () => {
+    const sched = scheduler()
+    await sched.run(unresolved(), { mode: 'full' })
+    expect(sched.info('rd').error).toContain('Run again')
+  })
+
+  it('still defers an expensive reader on an auto pass rather than reddening it', async () => {
+    /*
+     * This refusal replaces one the node used to throw from `evaluate`, and an auto pass never
+     * reached `evaluate` on an `expensive` node — both readers this exists for are expensive. So
+     * the check sits *after* the deferral: otherwise a cold listing paints two error cards on
+     * every keystroke, which is a report about the app rather than about the graph.
+     */
+    let g = emptyGraph('auto')
+    g = addNode(g, node('ds', 'test.ref.dataset', {}))
+    g = addNode(g, node('rd', 'test.ref.reader.expensive'))
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'rd',
+      targetHandle: 'dataset',
+    })
+    const sched = scheduler()
+    const summary = await sched.run(g, { mode: 'auto' })
+    expect(summary.failed).not.toContain('rd')
+    expect(summary.deferred).toContain('rd')
+    expect(sched.info('rd').state).toBe('stale')
+    // And a full run still says why.
+    await sched.run(g, { mode: 'full' })
+    expect(sched.info('rd').error).toContain('has not resolved a dataset')
+  })
+
+  it('leaves an unwired reference alone, which is an ordinary state', async () => {
+    /*
+     * The other side of the same line: with nothing on the port there is no wire to be wrong
+     * about, so the node runs and answers in its own words — `annotation.caveTable` reads its
+     * `datastack` field in exactly this case, and refusing here would break it.
+     */
+    ran = []
+    captured.length = 0
+    let g = emptyGraph('unwired')
+    g = addNode(g, node('rd', 'test.ref.reader'))
+    const summary = await scheduler().run(g, { mode: 'full' })
+    expect(summary.failed).toEqual([])
+    expect(ran).toEqual(['reader'])
+    expect(captured[0]).toBeUndefined()
   })
 })
 

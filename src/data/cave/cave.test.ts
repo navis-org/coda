@@ -1725,6 +1725,31 @@ describe('credentials', () => {
     expect(getSession()).toBeUndefined()
   })
 
+  /*
+   * The shape a card ends up drawing. A materialize service behind nginx answers 503 with a whole
+   * HTML document, and that body reached a node's error text verbatim — `CAVE returned 503:
+   * <html>` and four lines of markup, which reads as Coda being broken rather than as a service
+   * being down. It travels further than the dataset node now, too: a reference reader repeats it
+   * (`Scheduler.unresolvedReference`).
+   */
+  it('reads the title out of an HTML error page instead of drawing its markup', async () => {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve({
+        ok: false,
+        status: 503,
+        text: () =>
+          Promise.resolve(
+            '<html>\r\n<head><title>503 Service Temporarily Unavailable</title></head>\r\n' +
+              '<body>\r\n<center><h1>503 Service Temporarily Unavailable</h1></center>\r\n' +
+              '<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n',
+          ),
+      } as Response),
+    )
+    await expect(new CaveSource().listDatasets()).rejects.toThrow(
+      /CAVE returned 503: 503 Service Temporarily Unavailable$/,
+    )
+  })
+
   it('explains a validator refusal rather than printing its JSON at somebody', async () => {
     vi.stubGlobal('fetch', () =>
       Promise.resolve({

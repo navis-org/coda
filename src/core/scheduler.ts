@@ -28,7 +28,14 @@ import {
 import { hashValue } from './hash'
 import type { InferenceResult } from './inference'
 import { hasErrors, inferGraph } from './inference'
-import type { EvalContext, LoopIteration, LoopPlan, NodeDefinition, ParamValues } from './node'
+import type {
+  EvalContext,
+  LoopIteration,
+  LoopPlan,
+  NodeDefinition,
+  ParamValues,
+  PortDef,
+} from './node'
 import { findParam, resolveColumn, resolveColumns } from './node'
 import { getNodeDef } from './registry'
 import { inputPorts, outputPorts } from './ports'
@@ -145,6 +152,16 @@ interface GatheredInputs {
   inputs: Record<string, Value | undefined>
   inputKeys: Record<string, string>
   blocked: boolean
+  /**
+   * Why this node cannot run at all — a wired `reference` that resolved to nothing.
+   *
+   * Composed here rather than thrown by the node, because this is the one layer that can tell
+   * the two states apart: `datasetIdentity` collapses "no wire" and "a wire whose dataset has
+   * not resolved" into the same `undefined`, and every reference reader therefore refused with
+   * a sentence about the *wiring* — `Wire a CAVE Dataset` on a card with a Dataset wired to it.
+   * See `unresolvedReference`.
+   */
+  refusal?: string
 }
 
 /**
@@ -1123,6 +1140,7 @@ export class Scheduler {
     const inputs: Record<string, Value | undefined> = {}
     const inputKeys: Record<string, string> = {}
     let blocked = false
+    let refusal: string | undefined
     for (const port of inputPorts(def, this.nodeOf(pass, nodeId).params)) {
       const edge = pass.inbound.get(portKey(nodeId, port.id))
       if (!edge) {
@@ -1137,7 +1155,17 @@ export class Scheduler {
        */
       if (port.reference) {
         const type = pass.inference.nodes[nodeId]?.inputs[port.id]
-        inputs[port.id] = datasetIdentity(type)
+        const identity = datasetIdentity(type)
+        /*
+         * A wire that resolved to nothing. The node is refused *here*, with a sentence naming
+         * the node it references and that node's own reason, rather than left to refuse with
+         * whatever it says when the port is unwired — see `GatheredInputs.refusal`.
+         *
+         * First one wins, and nothing overwrites it: a node with two dead references has one
+         * story, and it is the first port's.
+         */
+        if (!identity) refusal ??= this.unresolvedReference(pass, port, edge)
+        inputs[port.id] = identity
         inputKeys[port.id] = referenceKey(type)
         continue
       }
@@ -1148,7 +1176,42 @@ export class Scheduler {
       inputs[port.id] = this.cache.get(edge.source)?.outputs[edge.sourceHandle]
       inputKeys[port.id] = upstreamKey(pass.keys, edge.source, edge.sourceHandle)
     }
-    return { inputs, inputKeys, blocked }
+    return { inputs, inputKeys, blocked, ...(refusal ? { refusal } : {}) }
+  }
+
+  /**
+   * "The Dataset wired here has not resolved which dataset it is" — the sentence, and why it is
+   * the scheduler's to write.
+   *
+   * A reference reader is handed `datasetIdentity(type)`, which is `undefined` both when nothing
+   * is wired and when the wire's node cannot yet say which dataset it names. The node sees one
+   * value for two states, so every one of them refused with a sentence about the wiring: a
+   * FlyWire chain whose datastack listing had not arrived — or whose materialization service was
+   * answering 503 — put `Wire a CAVE Dataset, so the ids can be looked up somewhere` on a card
+   * with a Dataset wired to it, and `Name a datastack and a table, or wire a Dataset` on the one
+   * beside it. Both nodes run *before* the dataset node in an annotation chain, so the dataset
+   * node's own diagnosis — which is accurate, and names the 503 — was never reached.
+   *
+   * So the reason is taken from the referenced node's inference issues, which is where that
+   * diagnosis already lives (`DataSource.whyDatasetMissing` reaches a dataset node's `validate`).
+   * `aboutColumns` issues are skipped: a column picker on the dataset node has nothing to do with
+   * whether it resolved an id, and `RULES` excuses them elsewhere for the same reason.
+   *
+   * With no reason at all the listing simply has not arrived, which is the ordinary state of a
+   * cold session and *not* an error the dataset node reports — so the sentence says what to do
+   * about it rather than implying something is broken.
+   */
+  private unresolvedReference(pass: RunPass, port: PortDef, edge: GraphEdge): string {
+    const source = pass.nodes.get(edge.source)
+    const label = (source && getNodeDef(source.type)?.label) ?? source?.type ?? edge.source
+    const why = pass.inference.nodes[edge.source]?.issues.find((i) => !i.aboutColumns)?.message
+    // `Input "…"` is `inferGraph`'s wording for the same thing, one state along: that one says a
+    // port is not connected, this one that what it is connected to cannot answer yet.
+    const name = `Input "${port.label ?? port.id}"`
+    return why
+      ? `${name} is wired to ${label}, which has not resolved a dataset: ${why}`
+      : `${name} is wired to ${label}, which has not resolved a dataset yet — its version list ` +
+          `has not arrived. Run again once it has.`
   }
 
   /**
@@ -1200,12 +1263,25 @@ export class Scheduler {
       this.setState(nodeId, { state: 'blocked' })
       return 'blocked'
     }
-
     // The hybrid rule: defer expensive work unless this is a full run.
     if (pass.mode === 'auto' && def.cost === 'expensive') {
       this.setState(nodeId, { state: 'stale' })
       pass.summary.deferred.push(nodeId)
       return 'skipped'
+    }
+    /*
+     * Both positions here are deliberate. **After `blocked`**, because a node still waiting on an
+     * ordinary input cannot run for a reason of its own and a second error on top of that is
+     * noise. **After the deferral**, because this refusal replaces one the node used to throw from
+     * `evaluate`, and a node that never reaches `evaluate` on an auto pass must not start reporting
+     * an error on every keystroke — both CAVE readers this exists for are `expensive`. And before
+     * `evaluate`, which is the point: the node must not refuse in its own words. See
+     * `GatheredInputs.refusal`.
+     */
+    if (gathered.refusal) {
+      this.setState(nodeId, { state: 'error', error: gathered.refusal })
+      if (!pass.summary.failed.includes(nodeId)) pass.summary.failed.push(nodeId)
+      return 'failed'
     }
 
     this.setState(nodeId, { state: 'running', progress: 0 })

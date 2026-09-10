@@ -398,6 +398,43 @@ Five places implement it, and each was mutation-checked because every failure he
   it was written out twice at first. `datasetIdentity` lives beside `DatasetValue` in `values.ts`
   rather than in the scheduler, because it is the type→value projection and it is **partial**: no
   annotations, and `label` is the dataset id rather than the human name an ordinary wire carries.
+- **A reference that resolves to nothing is refused by the scheduler, not by the node** — and the
+  reason is that `datasetIdentity` collapses two states into one `undefined`. Nothing wired, and a
+  wire whose dataset node cannot yet say *which* dataset it is, arrive at `evaluate` identically,
+  so every reference reader refused in the only words it has: `Wire a CAVE Dataset, so the ids can
+  be looked up somewhere` on a card with a Dataset wired to it, beside `Name a datastack and a
+  table, or wire a Dataset` on the next one. Reported against the FlyWire starter, twice, with the
+  wiring blamed both times.
+
+  **What made it undiagnosable is the ordering references exist for.** Both of those nodes are
+  *upstream* of the dataset node in an annotation chain, so the run stops at them and the dataset
+  node — which had the answer, and stated it: `flywire_fafb_public: CAVE returned 503`, from
+  `DataSource.whyDatasetMissing` through its own `validate` — never ran at all. Everything from the
+  `Join` down came out `blocked`. The cause was external and total: `prod.flywire-daf.com`'s
+  materialize service answered 503 for *every* datastack it serves, so no materialization listing
+  arrived, so `resolveDatasetId` had nothing to resolve and the dataset type carried no
+  `datasetId`. BANC's listing, on a different deployment, was fine throughout — which is why one
+  CAVE chain worked and the other did not.
+
+  So `gatherInputs` composes the refusal (`Scheduler.unresolvedReference`) and hands it back on
+  `GatheredInputs.refusal`. Four decisions in it. The **reason is the referenced node's inference
+  issues**, because that is where the diagnosis already lives — first issue that is not
+  `aboutColumns`, a column picker on the dataset node having nothing to do with whether it resolved
+  an id. **No reason means the listing has not arrived**, which is the ordinary state of a cold
+  session and something no dataset node reports (`validate`'s two-state rule), so that sentence
+  says *Run again once it has* rather than implying breakage. Its **position** in `executeNode` is
+  three decisions: after `blocked`, since a node still waiting on an ordinary input cannot run for a
+  reason of its own and a second error on top is noise; after the **auto-pass deferral**, since this
+  replaces a refusal the node threw from `evaluate` and both readers it exists for are `expensive` —
+  fired ahead of the deferral it reddens two cards on every keystroke of a cold session; and before
+  `evaluate`, which is the whole point. And it is the scheduler's to write because this is the only
+  layer that can see both halves: the edge, and the type that did not resolve.
+
+  One thing this made visible downstream: the sentence now travels onto two more cards, and CAVE's
+  `explain` was slicing 300 characters of an nginx error *document* into it — `CAVE returned 503:
+  <html>` and four lines of markup, which reads as Coda being broken rather than as a service being
+  down. An HTML body's readable part is its `<title>`, and only its title: a general tag stripper
+  turns a page carrying a stylesheet into a paragraph of CSS.
 
 **Deliberately narrow: a Dataset socket that takes the identity only, not a general information
 edge.** Synthesising a value from a type is defensible exactly because a dataset's identity *is*

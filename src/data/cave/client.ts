@@ -268,6 +268,12 @@ function parsedBody(body: string): Record<string, unknown> {
  * is the one anybody building a request will meet, and it names the offending field — and an
  * HTML page from whatever is in front. Digging the first two out beats printing 300 characters
  * of JSON at somebody, and falling back to a truncated body beats printing nothing.
+ *
+ * The third shape is worth one more line, because it is the one a card ends up drawing. A
+ * materialize service behind nginx answers a 503 as a whole HTML document, and its readable part
+ * is the `<title>`: sliced raw, the message on the node was `CAVE returned 503: <html>` followed
+ * by four lines of markup — which reads as Coda being broken rather than as a service being down,
+ * and is now the sentence a reference reader repeats (`Scheduler.unresolvedReference`).
  */
 function explain(body: string): string {
   const parsed = parsedBody(body)
@@ -275,7 +281,20 @@ function explain(body: string): string {
   if (parsed.schema_errors) return `invalid query — ${JSON.stringify(parsed.schema_errors)}`
   if (typeof parsed.error === 'string') return parsed.error
   // Not JSON: an HTML error page, or nothing at all.
-  return body.slice(0, 300) || '(empty response)'
+  return htmlTitle(body) ?? (body.slice(0, 300) || '(empty response)')
+}
+
+/**
+ * The `<title>` of an HTML error page, or `undefined` for anything that is not one.
+ *
+ * Deliberately only the title, and only when the body looks like a document: a general tag
+ * stripper turns a page with a stylesheet in it into a paragraph of CSS, which is worse than the
+ * markup it replaced.
+ */
+function htmlTitle(body: string): string | undefined {
+  if (!/^\s*<(?:!doctype|html|head)\b/i.test(body)) return undefined
+  const title = /<title[^>]*>([^<]*)<\/title>/i.exec(body)?.[1]?.trim()
+  return title || undefined
 }
 
 export function caveGet<T>(url: string, options: CaveRequestOptions = {}): Promise<T> {
