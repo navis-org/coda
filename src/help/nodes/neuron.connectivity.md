@@ -164,6 +164,28 @@ invents no `NotPrimary` bucket the way neuprint-python does.
 neuron.connectivity: splitByRoi, rois, primaryRoisOnly
 ```
 
+## Edge properties
+
+A neuPrint connection carries more than its synapse count. Most datasets publish `weightHP` and
+`weightHR` beside `weight`, and fish2 splits the count by the compartment at each end —
+`weightAxonDendrite`, `weightAxonAxon`, `weightDendriteAxon`, `weightDendriteDendrite`. Each one
+picked in `Edge properties` becomes a column after `weight`.
+
+The list is the dataset's own, so it differs between datasets and fills in a moment after the
+Dataset node resolves. CAVE and CATMAID connections carry only the count, and the list stays empty.
+
+With `Split by region` or `Regions` on, **each region's row carries that region's share**, and the
+shares add back up to the connection's own value. A property the dataset does not break down by
+region — `weightHP` is one, marked *not by region* in the list — comes back empty there rather than
+repeated on every row.
+
+`Min weight` still applies to `weight`. Adjacency's `Weight` and Neuron Profile's `Count by` offer
+the same list.
+
+```coda-params
+neuron.connectivity: edgeProperties
+```
+
 ### Example: Edges to Build Network to Network Viewer
 
 ```coda-graph

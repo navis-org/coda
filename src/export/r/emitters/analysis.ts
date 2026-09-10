@@ -24,7 +24,8 @@ import { decodeIndices } from '../../../nodes/lib/chartSelection'
 import { codaIds, neuronIds, selectionIds } from './common'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { populationCypher } from '../../../data/neuprint/cypher'
-import { schemasFromType } from '../../../nodes/lib/datasetParam'
+import { readWeightProperty, schemasFromType } from '../../../nodes/lib/datasetParam'
+import { CYPHER_PLACEHOLDERS, profilePropertyQueries } from '../../connectivityPlan'
 import { rFilterPredicate } from './table'
 import { findColumn, isNumericDType } from '../../../core/types'
 
@@ -513,6 +514,11 @@ registerEmitter('out.profile', (ctx) => {
   const selection = selectionIds(ctx)
   const minWeight = Math.max(1, Number(ctx.params.minWeight ?? 1))
   const topN = Number(ctx.params.topN ?? 10)
+  // The card's Count by; passed only when it is not the weight, so a profile that never chose
+  // one exports exactly the chunk it always did.
+  const property = readWeightProperty(ctx.params.countBy)
+  // The canvas's own two queries, which the helper fills and runs — not a second copy of them.
+  const queries = property ? profilePropertyQueries(property) : undefined
 
   const lines: string[] = [`${out} <- ${src}`]
   if (selection.length > 0) {
@@ -545,6 +551,12 @@ registerEmitter('out.profile', (ctx) => {
     `  ${ids},`,
     `  min_weight = ${minWeight},`,
     `  top_n = ${topN},`,
+    // Counted by an edge property on the card, so every partner frame below is too.
+    ...(queries
+      ? [
+          `  property_queries = list(PRE = ${rStr(queries.upstream)}, POST = ${rStr(queries.downstream)}),`,
+        ]
+      : []),
     ...(grouped
       ? [
           // Grouped on the canvas, so the partner frames below are means across each group's
@@ -586,7 +598,22 @@ registerHelper({
   name: 'coda_profile',
   requires: ['neuprintr', 'dplyr'],
   source: [
-    'coda_profile <- function(ids, min_weight = 1, top_n = 10, groups = NULL, conn) {',
+    'coda_partners_by <- function(ids, query, min_weight, conn) {',
+    '  # One direction of partners counted by an edge property rather than the weight --',
+    "  # the card's Count by. neuprint_connection_table returns the weight and nothing else",
+    '  # about a connection, so `query` is the one Coda sends, with the property after the',
+    `  # weight and ${CYPHER_PLACEHOLDERS.ids} where the ids go. The property becomes the weight here, and the`,
+    '  # threshold applies to it, since that is the count the card shows.',
+    `  q <- sub("${CYPHER_PLACEHOLDERS.ids}", paste0("[", paste(ids, collapse = ","), "]"), query, fixed = TRUE)`,
+    '  tbl <- neuprint_fetch_custom(q, conn = conn)',
+    '  if (is.null(tbl) || nrow(tbl) == 0) return(NULL)',
+    '  names(tbl) <- c("bodyid", "bodytype", "partner", "type", "synapses", "weight")',
+    '  tbl <- tbl[!is.na(tbl$weight) & tbl$weight >= min_weight, ]',
+    '  tbl[c("bodyid", "partner", "type", "weight")]',
+    '}',
+    '',
+    'coda_profile <- function(ids, min_weight = 1, top_n = 10, groups = NULL, conn,',
+    '                         property_queries = NULL) {',
     "  # Keys mirror the card's tiles: upstream_types, downstream_types, top_upstream,",
     '  # top_downstream, regions.',
     '  #',
@@ -597,7 +624,13 @@ registerHelper({
     '  #    neuron is not forty onto forty.',
     '  #  * roiInfo NESTS: a synapse in LO(R) is counted again in its parent OL(R), so the',
     '  #    regions are filtered to the primary set before summing or the totals double.',
+    '  #',
+    '  # property_queries counts every partner by an edge property instead of the weight --',
+    "  # the card's Count by: the two queries Coda sends, keyed PRE and POST like `side`.",
     '  partners <- function(side) {',
+    '    if (!is.null(property_queries)) {',
+    '      return(coda_partners_by(ids, property_queries[[side]], min_weight, conn))',
+    '    }',
     '    tbl <- neuprint_connection_table(',
     '      ids, prepost = side, threshold = min_weight, details = TRUE, conn = conn',
     '    )',

@@ -1638,6 +1638,9 @@ select.field {
   font-size: 11px;
   line-height: 1;
   padding: 1px 6px 2px;
+  /* A select is as wide as its longest option, which is the dataset's to decide — capped so a
+     long property or column name cannot push the control out of its box and off the card. */
+  max-width: 100%;
 }
 .columns-field__add:hover {
   color: var(--text-primary);

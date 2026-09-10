@@ -41,7 +41,13 @@ import { registerNode } from '../../core/registry'
 import type { TableSchema } from '../../core/types'
 import { T, columnNames, isTabular, schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
-import { schemasFromType } from '../lib/datasetParam'
+import { WEIGHT_PROPERTY } from '../../data/source'
+import {
+  edgePropertyIssues,
+  readWeightProperty,
+  schemasFromType,
+  weightPropertyOptions,
+} from '../lib/datasetParam'
 import { rowsWithIds } from '../lib/tableOps'
 
 /**
@@ -190,6 +196,26 @@ export const profileNode = registerNode({
       advanced: true,
     },
     {
+      /*
+       * What every number on the card is a count of: the connection's weight, or a property the
+       * dataset publishes on each connection — on fish2, `weightAxonDendrite` makes every
+       * partner list a list of axon→dendrite synapses.
+       *
+       * **Presentational, like `minWeight`**, and for the same reason: no port carries a count.
+       * The widget fetches the property for itself — a second request, cached separately, since
+       * the connection rows differ — and `Min synapses` then applies to the chosen count.
+       */
+      id: 'countBy',
+      kind: 'enum',
+      label: 'Count by',
+      help: 'What the partner lists count: every synapse, or a property the dataset publishes on each connection — on fish2, weightAxonDendrite counts only axon→dendrite synapses. Min synapses applies to the chosen count.',
+      default: WEIGHT_PROPERTY,
+      optionsWithoutPeek: true,
+      options: (ctx) => weightPropertyOptions(ctx.inputs.dataset),
+      presentational: true,
+      advanced: true,
+    },
+    {
       id: 'topN',
       kind: 'int',
       label: 'Rows per list',
@@ -215,13 +241,19 @@ export const profileNode = registerNode({
   },
 
   validate: (ctx) => {
+    // `Count by` first and unconditionally: it is about the dataset, not the table, and a card
+    // counting a property its dataset does not publish is wrong whatever the table holds.
+    const issues = edgePropertyIssues(ctx.inputs.dataset, [
+      readWeightProperty(ctx.params.countBy),
+    ])
     const input = ctx.inputs.neurons
     // Only complain when the schema is actually known — an unknown one (a raw Cypher result,
     // say) may well have a neuronId, and refusing it before anything has run would be a guess.
-    if (!isTabular(input) || !input.schema) return []
+    if (!isTabular(input) || !input.schema) return issues
     const names = columnNames(input.schema)
-    if (names.includes('neuronId')) return []
+    if (names.includes('neuronId')) return issues
     return [
+      ...issues,
       `Neuron Profile needs a "neuronId" column to identify a neuron. This table has: ${
         names.length ? names.join(', ') : '(no columns)'
       }`,

@@ -21,7 +21,7 @@
 import { ID_COLUMN_NAME } from '../../core/ids'
 import type { DType, TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
-import type { SourceSchemas } from '../source'
+import type { EdgeProperty, SourceSchemas } from '../source'
 import { CANONICAL_SCHEMAS } from '../source'
 
 /**
@@ -165,6 +165,41 @@ export function discoverNeuronSchema(input: DiscoveryInput): DiscoveredSchema {
   }
 
   return { neurons: tableSchema(...columns), extras, extrasTruncated: truncated }
+}
+
+/**
+ * Never offered as an edge property: `weight` is the connection itself and always returned,
+ * and `roiInfo` is the per-region blob the region options read — as a cell it is JSON.
+ */
+const EDGE_SUPPRESSED = new Set(['weight', 'roiInfo'])
+
+/** The name a region entry in `roiInfo` gives the connection's own weight. */
+const REGION_WEIGHT_KEY = 'post'
+
+/**
+ * What a dataset's connections carry beyond `weight`.
+ *
+ * `sampled` is `sampleEdgePropertiesCypher`'s rows as they arrive — `[name, one non-null value]`
+ * — and `regionKeys` every key seen inside a region entry of `roiInfo`.
+ *
+ * Alphabetical, for `discoverNeuronSchema`'s reason: the list is a picker, and a picker whose
+ * order follows whatever the server sampled first reshuffles between sessions. A value that is
+ * not a scalar is left out, as a neuron property would be.
+ */
+export function discoverEdgeProperties(
+  sampled: ReadonlyArray<readonly unknown[]>,
+  regionKeys: readonly unknown[],
+): EdgeProperty[] {
+  const regional = new Set(regionKeys.filter((k): k is string => typeof k === 'string'))
+  regional.delete(REGION_WEIGHT_KEY)
+  const found: EdgeProperty[] = []
+  for (const [name, value] of sampled) {
+    if (typeof name !== 'string' || EDGE_SUPPRESSED.has(name)) continue
+    const dtype = dtypeOf(undefined, value)
+    if (!dtype) continue
+    found.push({ name, dtype, perRegion: regional.has(name) })
+  }
+  return found.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 /**

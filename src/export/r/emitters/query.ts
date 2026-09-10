@@ -32,11 +32,12 @@ import type { DType } from '../../../core/types'
 import { isNumericDType } from '../../../core/types'
 import { asksNothing, noFiltersReason } from '../../../nodes/lib/findNeuronsRows'
 import { rowsFromParams } from '../../../nodes/lib/filterRowParams'
-import { schemasFromType } from '../../../nodes/lib/datasetParam'
+import { readWeightProperty, schemasFromType } from '../../../nodes/lib/datasetParam'
+import { CYPHER_PLACEHOLDERS, adjacencyExportQuery } from '../../connectivityPlan'
 import { filterPredicates } from './tableFilters'
 import type { EmitContext } from '../types'
 import { neuprintProperty } from '../../../data/neuprint/schema'
-import { neuronIds, rPopulationPredicate } from './common'
+import { cypherIdList, neuronIds, rPopulationPredicate } from './common'
 import { STATUS_COLUMN, withoutStatedStatus } from '../../../data/neuronFilter'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { SKELETON_SOURCE_PARAM } from '../../../nodes/lib/skeletonParams'
@@ -425,6 +426,38 @@ registerEmitter('neuron.idsFromLabel', (ctx) => {
 // Adjacency / ROI
 // ---------------------------------------------------------------------------
 
+/**
+ * The adjacency matrix through the canvas's own Cypher, for a matrix of an edge property.
+ *
+ * `neuprint_get_adjacency_matrix` counts synapses and takes no property, so a matrix of fish2's
+ * `weightAxonDendrite` has no library route. This runs `adjacencyCypher` — the canvas's query —
+ * with both id lists as placeholders, and folds the rows with `xtabs`. The axes are the ids
+ * *asked about*, each as a factor level whether or not it connects, which is the shape
+ * `neuprint_get_adjacency_matrix` returns and the canvas builds (`matrixFromEdges`' second rule:
+ * the caller has sized its picture around the list it sent).
+ */
+function cypherAdjacency(
+  out: string,
+  sources: string,
+  targets: string,
+  conn: string,
+  weight: string,
+): string[] {
+  const { sources: sourcesAt, targets: targetsAt } = CYPHER_PLACEHOLDERS
+  const query = adjacencyExportQuery(weight)
+  const filled = `sub(${rStr(sourcesAt)}, ${cypherIdList(sources)}, ${rStr(query)}, fixed = TRUE)`
+  return [
+    `.conn <- neuprint_fetch_custom(`,
+    `  sub(${rStr(targetsAt)}, ${cypherIdList(targets)}, ${filled}, fixed = TRUE),`,
+    `  conn = ${conn}`,
+    `)`,
+    `names(.conn) <- c("pre", "pre_type", "post", "post_type", "weight")`,
+    `.conn$pre <- factor(as.character(.conn$pre), levels = unique(as.character(${neuronIds(sources)})))`,
+    `.conn$post <- factor(as.character(.conn$post), levels = unique(as.character(${neuronIds(targets)})))`,
+    `${out} <- unclass(xtabs(weight ~ pre + post, data = .conn))`,
+  ]
+}
+
 registerEmitter('neuron.adjacency', (ctx) => {
   const conn = ctx.wired('dataset')
   const sources = ctx.wired('sources')
@@ -433,12 +466,17 @@ registerEmitter('neuron.adjacency', (ctx) => {
   const out = ctx.output('matrix')
   const links = ctx.output('links')
 
+  const weight = readWeightProperty(ctx.params.weight)
   const lines = [
-    `${out} <- neuprint_get_adjacency_matrix(`,
-    `  inputids = ${neuronIds(sources)},`,
-    `  outputids = ${neuronIds(targets)},`,
-    `  conn = ${conn}`,
-    `)`,
+    ...(weight === undefined
+      ? [
+          `${out} <- neuprint_get_adjacency_matrix(`,
+          `  inputids = ${neuronIds(sources)},`,
+          `  outputids = ${neuronIds(targets)},`,
+          `  conn = ${conn}`,
+          `)`,
+        ]
+      : cypherAdjacency(out, sources, targets, conn, weight)),
     ``,
     // The long half, melted off the matrix and stripped of its zeros — `matrixToLinks`' rule,
     // for its reason: a matrix cell is 0 where nothing was found, and keeping those would make

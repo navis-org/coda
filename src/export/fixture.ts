@@ -1743,3 +1743,40 @@ export function pathsGraph(params: ParamValues = {}): CodaGraph {
   for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
   return g
 }
+
+/**
+ * hemibrain → Find Neurons → one node under test, its named ports wired from those two.
+ *
+ * The edge-property suites' builder, here for `twoNodeGraph`'s reason: the notebook suite and the
+ * R suite each carried a character-identical copy, and two copies drift until the two suites
+ * check different graphs while both stay green. Over declared defaults, like the rest.
+ */
+export function findChainGraph(
+  type: string,
+  params: ParamValues,
+  ports: Record<string, 'dataset' | 'neurons'>,
+): CodaGraph {
+  let g = emptyGraph('find-chain')
+  const nodes: Array<[string, string, ParamValues]> = [
+    ['ds', 'dataset.hemibrain', { version: 'v1.2.1' }],
+    [
+      'find',
+      'neuron.findNeurons',
+      { filters: encodeRows([{ field: 'type', op: 'matches', values: ['LC4'] }]) },
+    ],
+    ['n', type, params],
+  ]
+  for (const [id, nodeType, nodeParams] of nodes) {
+    g = addNode(g, {
+      id,
+      type: nodeType,
+      position: { x: 0, y: 0 },
+      params: { ...defaultParams(requireNodeDef(nodeType)), ...nodeParams } as ParamValues,
+    })
+  }
+  g = wire(g, 'ds', 'dataset', 'find', 'dataset')
+  for (const [port, from] of Object.entries(ports)) {
+    g = wire(g, from === 'dataset' ? 'ds' : 'find', from, 'n', port)
+  }
+  return g
+}

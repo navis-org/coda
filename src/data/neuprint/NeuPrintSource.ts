@@ -64,6 +64,7 @@ import {
   CANONICAL_SCHEMAS,
   GROUP_TOTALS_SCHEMA,
   PATH_STEP_SCHEMA,
+  connectivitySchemaWithEdgeProperties,
   connectivitySchemaWithRoi,
   SYNAPSE_TOTALS_SCHEMA,
   ROI_CONNECTIVITY_SCHEMA,
@@ -107,6 +108,8 @@ import {
   pathStepCypher,
   metaCypher,
   roiCountsCypher,
+  sampleEdgePropertiesCypher,
+  sampleEdgeRegionKeysCypher,
   sampleNeuronsCypher,
   sampleStatusesCypher,
   synapseTotalsCypher,
@@ -131,7 +134,7 @@ import {
 import { probePrecomputed } from '../precomputed/probe'
 import { SKELETON_ROUTES, route } from '../skeletonRoutes'
 import type { DiscoveredSchema } from './schema'
-import { discoverNeuronSchema, schemasFor } from './schema'
+import { discoverEdgeProperties, discoverNeuronSchema, schemasFor } from './schema'
 import type { VoxelScale } from '../units'
 import {
   IDENTITY_SCALE,
@@ -261,6 +264,10 @@ interface DatasetState {
   sceneResolving?: Promise<NgScene | null>
   /** In flight, so two nodes inferring at once don't each trigger discovery. */
   discovering?: Promise<void>
+  /** The same for the edge-property sample, which nothing but a property-asking query waits on. */
+  discoveringEdges?: Promise<void>
+  /** When the edge sample last failed — see `EDGE_RETRY_MS`. */
+  edgesFailedAt?: number
 }
 
 export class NeuPrintSource implements DataSource {
@@ -305,6 +312,10 @@ export class NeuPrintSource implements DataSource {
     // failure. Totals come from `upstream`/`downstream` for the `all` basis and from one
     // aggregate over `ConnectsTo` for `connected`.
     connectivityRois: true,
+    // `ConnectsTo` carries more than `weight` on every dataset looked at — `weightHP` on
+    // hemibrain, `weightHR` beside it on the rest, and on fish2 four compartment splits
+    // (`weightAxonDendrite`, …). Which ones is per dataset, learned by `discover`.
+    edgeProperties: true,
     synapseTotals: true,
     roiMeshes: true,
   }
@@ -411,6 +422,11 @@ export class NeuPrintSource implements DataSource {
           // Same reason: `listDatasets` re-fetches on every call and the Sources panel does
           // exactly that, so a merge that dropped this would un-learn it after discovery.
           ...(existing.info.roiSuper ? { roiSuper: existing.info.roiSuper } : {}),
+          // And again: the listing does not carry these at all, so a merge that dropped them
+          // would empty every edge-property picker on the dataset until the next session.
+          ...(existing.info.edgeProperties
+            ? { edgeProperties: existing.info.edgeProperties }
+            : {}),
         }
       else this.states.set(info.id, { info })
     }
@@ -484,12 +500,82 @@ export class NeuPrintSource implements DataSource {
     return state.discovering
   }
 
+  /**
+   * Learn what a dataset's connections carry beyond `weight`. Idempotent and deduplicated.
+   *
+   * Apart from `discover` on purpose: no neuron query depends on it, so nothing waits on it but a
+   * Connectivity fetch that asked for a property (for the columns' dtypes), and the pickers, which
+   * `reportSourceLearned` re-infers when it lands. A failed sample leaves the list *unknown* rather
+   * than empty — a picker must not say a dataset has no edge properties because one request timed
+   * out — and the next ask tries again. The region keys failing on their own is milder: every
+   * property reads as not broken down by region, which the card notes and the query does not
+   * trust (see `roiConnectivityCypher`).
+   */
+  discoverEdges(datasetId: string): Promise<void> {
+    const state = this.states.get(datasetId) ?? { info: placeholderInfo(datasetId) }
+    this.states.set(datasetId, state)
+    if (state.info.edgeProperties) return Promise.resolve()
+    // A sample that just failed is not re-sent for a minute: a traversal asks once per hop per
+    // direction, and a server that timed out on the first would be asked again on every one.
+    const EDGE_RETRY_MS = 60_000
+    if (state.edgesFailedAt !== undefined && Date.now() - state.edgesFailedAt < EDGE_RETRY_MS) {
+      return Promise.resolve()
+    }
+    state.discoveringEdges ??= this.runEdgeDiscovery(state, datasetId).finally(() => {
+      state.discoveringEdges = undefined
+    })
+    return state.discoveringEdges
+  }
+
+  private async runEdgeDiscovery(state: DatasetState, datasetId: string): Promise<void> {
+    // No caller's signal: several nodes may be waiting on this one read, and one of them
+    // cancelling must not leave the rest with an unknown list.
+    const options = this.options()
+    const [sample, regions] = await Promise.all([
+      runCypher(sampleEdgePropertiesCypher(), datasetId, options).catch(() => undefined),
+      runCypher(sampleEdgeRegionKeysCypher(), datasetId, options).catch(() => undefined),
+    ])
+    if (!sample) {
+      // Remembered, so a run asking on every hop does not re-send a sample that just failed.
+      state.edgesFailedAt = Date.now()
+      return
+    }
+    state.info = {
+      ...state.info,
+      edgeProperties: discoverEdgeProperties(
+        sample.data ?? [],
+        (regions?.data ?? []).map((row) => row[0]),
+      ),
+    }
+    this.republish(datasetId, state)
+  }
+
+  /**
+   * Hand a freshened info out, which both discovery paths end on.
+   *
+   * The list `peekDatasets` handed out holds the object as it was before discovery, so the new
+   * one is swapped in — unconditionally, since it carries the primary ROI list, the statuses and
+   * the edge properties, and a dataset whose status sample came back empty would otherwise keep
+   * handing out an info with no primaryRois on it. Then `reportSourceLearned`, which is what
+   * causes the extra inference pass `schemasFor` promised: without it a column picker offers
+   * the canonical seven columns until something unrelated makes the graph change.
+   */
+  private republish(datasetId: string, state: DatasetState): void {
+    const index = this.ordered?.findIndex((d) => d.id === datasetId) ?? -1
+    if (this.ordered && index >= 0) this.ordered[index] = state.info
+    reportSourceLearned(this.id)
+  }
+
   private async runDiscovery(
     state: DatasetState,
     datasetId: string,
     signal?: AbortSignal,
   ): Promise<void> {
     const options = this.options(signal)
+    // Edge properties are learned beside this rather than inside it: no neuron query depends on
+    // them, and five queries gating the first Find Neurons of a session where three did would be
+    // a cost everyone pays for a picker few open. See `discoverEdges`.
+    void this.discoverEdges(datasetId)
     const [meta, sample, statuses] = await Promise.all([
       runCypher(metaCypher(), datasetId, options).catch(() => undefined),
       runCypher(sampleNeuronsCypher(), datasetId, options).catch(() => undefined),
@@ -544,17 +630,7 @@ export class NeuPrintSource implements DataSource {
       .filter((value): value is string => typeof value === 'string' && value.length > 0)
     if (seen.length) state.info = { ...state.info, statuses: [...new Set(seen)].sort() }
 
-    // The list handed out by peekDatasets holds the object as it was before discovery, so
-    // swap the freshened one in. Unconditional, and that matters: it carries the primary ROI
-    // list as well as the statuses now, and a dataset whose status sample came back empty
-    // would otherwise keep handing out an info with no primaryRois on it.
-    const index = this.ordered?.findIndex((d) => d.id === datasetId) ?? -1
-    if (this.ordered && index >= 0) this.ordered[index] = state.info
-
-    // `schemasFor` promised "one extra inference pass once the real schema lands" — this is
-    // what actually causes that pass. Without it a column picker offers the canonical seven
-    // columns until something unrelated makes the graph change.
-    reportSourceLearned(this.id)
+    this.republish(datasetId, state)
   }
 
   /** Voxels → nanometres for a dataset. Identity until discovery has run. */
@@ -702,19 +778,29 @@ export class NeuPrintSource implements DataSource {
   }
 
   async fetchConnectivity(req: ConnectivityRequest): Promise<TableValue> {
-    const base = schemasFor(emptyDiscovered()).connectivity
-    // The region column is part of the schema exactly when the query returns it, so the two
-    // halves of invariant 3 are decided by the same expression rather than by two readings of
-    // the same param. `tableFromCypher` maps columns positionally and throws on a count
-    // mismatch, which is what would catch the pair coming apart.
-    const schema = req.splitByRoi ? connectivitySchemaWithRoi(base) : base
-    if (req.neuronIds.length === 0) return emptyTable(schema)
-    const response = await runCypher(
-      connectivityCypher(req),
-      req.datasetId,
-      this.options(req.signal),
-    )
-    return tableFromCypher(response, schema)
+    const extras = req.edgeProperties ?? []
+    /*
+     * Built after the query rather than before it, because the extra columns' dtypes come from
+     * edge discovery — which runs beside the query, the query not depending on it, and only when
+     * a property is asked for. The properties sit after `weight` and the region last, exactly as
+     * in the RETURN, and the region column is part of the schema exactly when the query returns
+     * it — so the two halves of invariant 3 are decided by the same expression. `tableFromCypher`
+     * maps positionally and throws on a count mismatch, which is what catches the pair drifting.
+     */
+    const schema = () => {
+      const base = connectivitySchemaWithEdgeProperties(
+        schemasFor(emptyDiscovered()).connectivity,
+        this.states.get(req.datasetId)?.info.edgeProperties,
+        extras,
+      )
+      return req.splitByRoi ? connectivitySchemaWithRoi(base) : base
+    }
+    if (req.neuronIds.length === 0) return emptyTable(schema())
+    const [response] = await Promise.all([
+      runCypher(connectivityCypher(req), req.datasetId, this.options(req.signal)),
+      extras.length ? this.discoverEdges(req.datasetId) : undefined,
+    ])
+    return tableFromCypher(response, schema())
   }
 
   /**

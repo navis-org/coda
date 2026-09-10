@@ -30,6 +30,7 @@ import type {
   ConnectivityRequest,
   DataSource,
   DatasetInfo,
+  EdgeProperty,
   FindNeuronsRequest,
   GeometryRequest,
   GroupTotalsRequest,
@@ -51,8 +52,10 @@ import {
   ROI_COMPLETENESS_SCHEMA,
   ROI_MESH_SCHEMA,
   ROI_CONNECTIVITY_SCHEMA,
+  connectivitySchemaWithEdgeProperties,
   connectivitySchemaWithRoi,
   delay,
+  edgePropertyWeight,
   SYNAPSE_TOTALS_SCHEMA,
   requireSkeletonRoute,
   throwIfAborted,
@@ -132,6 +135,9 @@ export class MockSource implements DataSource {
     // are derivable from where its two ends overlap. Nothing is stored for it — see
     // `connectionRoiSplit` — so the connectome and every golden built from it are unchanged.
     connectivityRois: true,
+    // Two of fish2's shapes, derived from the weight rather than stored: one broken down by
+    // region and one that is not. See `MOCK_EDGE_TABLE`.
+    edgeProperties: true,
     synapseTotals: true,
     roiMeshes: true,
   }
@@ -164,6 +170,7 @@ export class MockSource implements DataSource {
         primaryRois: meta.rois,
         roiSuper: mockRoiSuper(meta.rois),
         statuses: ['Traced', 'Anchor', 'Assign'],
+        edgeProperties: MOCK_EDGE_PROPERTIES,
         ...(connectome ? { neuronCount: connectome.neurons.length } : {}),
       }
     })
@@ -309,11 +316,17 @@ export class MockSource implements DataSource {
 
     const restrictTo = req.rois?.length ? new Set(req.rois) : undefined
     const split = req.splitByRoi === true
-    const schema = split
-      ? connectivitySchemaWithRoi(this.schemas.connectivity)
-      : this.schemas.connectivity
+    const extras = req.edgeProperties ?? []
+    // The query's column order: properties after `weight`, `roi` last.
+    const withExtras = connectivitySchemaWithEdgeProperties(
+      this.schemas.connectivity,
+      MOCK_EDGE_PROPERTIES,
+      extras,
+    )
+    const schema = split ? connectivitySchemaWithRoi(withExtras) : withExtras
 
-    const rows: Array<Record<string, number | string>> = []
+    // Null is a real cell here: a property with no regional breakdown answers null per region.
+    const rows: Array<Record<string, number | string | null>> = []
     for (const neuronId of wanted) {
       throwIfAborted(req.signal)
       const self = connectome.byId.get(neuronId)
@@ -347,11 +360,24 @@ export class MockSource implements DataSource {
           partnerId: publishedId(partnerId),
           partnerType: connectome.byId.get(partnerId)?.type ?? 'unknown',
         }
+        // Per property, off the same parts the weight was: restricted, a property is re-totalled
+        // over the regions kept; split, each row carries its own region's value; neither, the
+        // connection's own. `mockEdgeValue` is where "no breakdown answers null" lives.
+        // Nothing at all when no property is asked for, the common case: an empty object spread
+        // into every row would be built per row for nothing.
+        const valuesOver = (over: ReadonlyArray<{ weight: number }> | undefined) =>
+          extras.length === 0
+            ? undefined
+            : Object.fromEntries(
+                extras.map((name) => [name, mockEdgeValue(connectome, edge, name, over)]),
+              )
         if (!split) {
-          rows.push({ ...common, weight })
+          rows.push({ ...common, weight, ...valuesOver(restrictTo ? parts : undefined) })
           continue
         }
-        for (const part of parts) rows.push({ ...common, weight: part.weight, roi: part.roi })
+        for (const part of parts) {
+          rows.push({ ...common, weight: part.weight, ...valuesOver([part]), roi: part.roi })
+        }
       }
     }
 
@@ -511,6 +537,11 @@ export class MockSource implements DataSource {
     await delay(this.latencyMs, req.signal)
     const connectome = this.require(req.datasetId)
     const groupByType = req.groupByType ?? true
+    // What fills a cell: the weight, or the property asked for — summed the same way. A property
+    // this dataset does not publish is null on a server, and null is 0 in a matrix cell.
+    const property = edgePropertyWeight(req.weight)
+    const valueOf = (edge: MockConnection): number =>
+      property ? (mockEdgeValue(connectome, edge, property) ?? 0) : edge.weight
 
     const sourceIds = numericIds(req.sourceIds)
     const targetIds = numericIds(req.targetIds)
@@ -535,7 +566,7 @@ export class MockSource implements DataSource {
         const c = colIndex.get(colKey)
         if (c === undefined) continue
         const at = r * colKeys.labels.length + c
-        values[at] = (values[at] ?? 0) + edge.weight
+        values[at] = (values[at] ?? 0) + valueOf(edge)
       }
     }
 
@@ -969,6 +1000,62 @@ function mockRoiSuper(rois: readonly string[]): Record<string, string> {
     if (group) groups[roi] = group
   }
   return groups
+}
+
+/**
+ * The two edge properties a mock dataset publishes, one of each shape fish2 has.
+ *
+ * `weightAxonDendrite` is broken down by region, like fish2's compartment weights, and
+ * `weightHP` is not, like `weightHP` everywhere. Derived from the weight rather than stored, so
+ * the connectome and every golden built from it are unchanged — `connectionRoiSplit`'s rule.
+ *
+ * One table for both halves: `of` is a count's share of the property, and `perRegion` is both
+ * what the dataset advertises and what `mockEdgeValue` obeys, so the two cannot disagree.
+ */
+const MOCK_EDGE_TABLE: ReadonlyArray<EdgeProperty & { of: (weight: number) => number }> = [
+  // Three synapses in four, rounded down.
+  {
+    name: 'weightAxonDendrite',
+    dtype: 'i64',
+    perRegion: true,
+    of: (weight) => Math.floor((weight * 3) / 4),
+  },
+  {
+    name: 'weightHP',
+    dtype: 'i64',
+    perRegion: false,
+    of: (weight) => Math.round(weight * 0.9),
+  },
+]
+
+/** What a mock dataset advertises: the table without its value rules. */
+const MOCK_EDGE_PROPERTIES: readonly EdgeProperty[] = MOCK_EDGE_TABLE.map(
+  ({ name, dtype, perRegion }) => ({ name, dtype, perRegion }),
+)
+
+/**
+ * One connection's value of an edge property, for the whole connection or for some of its
+ * region parts.
+ *
+ * `parts` undefined asks about the whole connection. The whole regional value is the **sum over
+ * the connection's own full split** rather than a function of its weight, which is what fish2
+ * measures and what makes a split a decomposition: the parts add back up to the whole exactly,
+ * where three quarters of each part rounded down would not add up to three quarters of the sum.
+ * A property with no breakdown answers null for any parts at all, as neuPrint's query does, and
+ * a name this dataset does not publish answers null everywhere — `w['nope']` on a server.
+ */
+function mockEdgeValue(
+  connectome: MockConnectome,
+  edge: MockConnection,
+  name: string,
+  parts?: ReadonlyArray<{ weight: number }>,
+): number | null {
+  const property = MOCK_EDGE_TABLE.find((p) => p.name === name)
+  if (!property) return null
+  if (!property.perRegion) return parts ? null : property.of(edge.weight)
+  const over = parts ?? connectionRoiSplit(connectome, edge, undefined)
+  if (over.length === 0) return parts ? 0 : property.of(edge.weight)
+  return over.reduce((sum, part) => sum + property.of(part.weight), 0)
 }
 
 /**

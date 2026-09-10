@@ -5,8 +5,12 @@ import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { idColumn } from '../lib/tableOps'
 import { unmatchedIds } from '../lib/idList'
+import { edgePropertyColumns } from '../../data/source'
 import {
   datasetRequest,
+  edgePropertiesFromType,
+  edgePropertyIssues,
+  edgePropertyOptions,
   publishedNeurons,
   requireDataset,
   schemasForDataset,
@@ -15,8 +19,9 @@ import {
   sourceLabel,
   sourceSupports,
 } from '../lib/datasetParam'
-import type { TraversalDirection } from '../lib/connectivityOps'
 import {
+  RESERVED_EDGE_COLUMNS,
+  readTraversalDirection,
   connectivityOutputSchema,
   endpointNeurons,
   endpointSchema,
@@ -25,6 +30,7 @@ import {
   normalizeSide,
   normalizeTargets,
   readBasis,
+  readEdgeProperties,
   readNormalizeBy,
   regionOptions,
   totalsLookup,
@@ -34,10 +40,6 @@ import {
 
 /** Above this the fan-out is worth saying out loud. A warning, never a refusal. */
 const NOISY_HOPS = 3
-
-function readDirection(raw: unknown): TraversalDirection {
-  return raw === 'inputs' || raw === 'both' ? raw : 'outputs'
-}
 
 /**
  * Synaptic partners of a set of neurons, one or more hops out.
@@ -123,6 +125,36 @@ export const connectivityNode = registerNode({
       default: 1,
       min: 1,
       step: 1,
+    },
+    /*
+     * What a connection carries beside its weight, as extra columns.
+     *
+     * **A picker of what discovery found, not a checkbox for "everything".** The first idea was
+     * the checkbox, because it was not clear a dataset's edge properties could be listed at all;
+     * they can, from a 0.4 s sample (`sampleEdgePropertiesCypher`). A picker puts the chosen
+     * *names* in the provenance key and in the schema, so a dataset that grows a property later
+     * does not change what an existing node returns, and a column picker downstream is configured
+     * against columns that are promised rather than whatever turned up.
+     *
+     * No `absentMeans`: a stored node without the key returned the weight alone, which is what
+     * the empty default says. Not `presentational`: it changes what `evaluate` returns.
+     *
+     * `optionsWithoutPeek` holds: `edgePropertyOptions` reads `peekDataset`, a map lookup.
+     */
+    {
+      id: 'edgeProperties',
+      kind: 'multiEnum',
+      label: 'Edge properties',
+      noun: 'property',
+      emptyLabel: 'weight only',
+      help: 'Properties of each connection to add as columns beside weight, from what the dataset publishes — on fish2, the synapse count split by compartment (weightAxonDendrite, …). With the region options on, each region’s row carries that region’s share; a property marked “not by region” is empty there.',
+      default: [],
+      optionsWithoutPeek: true,
+      options: (ctx) =>
+        edgePropertyOptions(ctx.inputs.dataset, {
+          exclude: RESERVED_EDGE_COLUMNS,
+          noteRegions: true,
+        }),
     },
     /*
      * The four region and normalisation controls.
@@ -292,6 +324,14 @@ export const connectivityNode = registerNode({
         connectivityOutputSchema(schemas.connectivity, {
           splitByRoi: ctx.params.splitByRoi === true,
           normalize: ctx.params.normalize === true,
+          // Typed off the same discovered list `evaluate` and the source type them by, so the
+          // advertised dtype is the built one (invariant 3). Advertised whether or not the
+          // dataset turns out to publish the name — `validate` says when it does not, and a
+          // column that came and went with discovery would clear the pickers pointing at it.
+          edgeProperties: edgePropertyColumns(
+            edgePropertiesFromType(ctx.inputs.dataset),
+            readEdgeProperties(ctx.params.edgeProperties),
+          ),
         }),
       ),
       /*
@@ -356,6 +396,26 @@ export const connectivityNode = registerNode({
         'Regions nest, so a split over the whole published list counts a synapse once per region containing it — the rows will sum to more than the connection weight.',
       )
     }
+    /*
+     * Edge properties: the refusals every "which property" control shares, then one of this
+     * node's own — a property the dataset does not break down by region, asked for with the
+     * region options on. That one is a note rather than a refusal because the query does not
+     * trust the sample either: such a column comes back empty, never as the whole connection's
+     * value repeated on every region's row.
+     */
+    const properties = readEdgeProperties(ctx.params.edgeProperties)
+    issues.push(...edgePropertyIssues(ctx.inputs.dataset, properties))
+    if (properties.length && usesRegions(ctx.params)) {
+      const known = edgePropertiesFromType(ctx.inputs.dataset)
+      const whole = properties.filter(
+        (name) => known?.find((p) => p.name === name)?.perRegion === false,
+      )
+      if (whole.length) {
+        issues.push(
+          `${whole.join(', ')} ${whole.length === 1 ? 'is' : 'are'} not broken down by region in this dataset, so with the region options on ${whole.length === 1 ? 'its column is' : 'their columns are'} empty.`,
+        )
+      }
+    }
     return issues
   },
 
@@ -368,7 +428,7 @@ export const connectivityNode = registerNode({
     const neuronIds = idColumn(neurons, 'neuronId')
     if (neuronIds.length === 0) throw new Error('No neuronIds in the incoming neuron table')
 
-    const direction = readDirection(ctx.params.direction)
+    const direction = readTraversalDirection(ctx.params.direction)
     const hops = Math.max(1, Math.floor(Number(ctx.params.hops ?? 1)))
     const minWeight = Number(ctx.params.minWeight ?? 1)
     const normalize = ctx.params.normalize === true
@@ -413,12 +473,25 @@ export const connectivityNode = registerNode({
     // on — the wider one the fractions are appended to.
     const sourceSchema = schemasForDataset(source, dataset).connectivity
 
+    /*
+     * The edge properties, typed off the list `inferOutputs` read — `peekDataset` is where
+     * `edgePropertiesFromType` reads it too — so the advertised dtype is the built one.
+     */
+    const properties = readEdgeProperties(ctx.params.edgeProperties)
+    const propertyColumns = edgePropertyColumns(
+      source.peekDataset(dataset.datasetId)?.edgeProperties,
+      properties,
+    )
+
     ctx.progress(0.15, `${neuronIds.length} neurons`)
     const traversed = await traverseConnectivity({
       seeds: neuronIds,
       direction,
       hops,
-      schema: connectivityOutputSchema(sourceSchema, { splitByRoi }),
+      schema: connectivityOutputSchema(sourceSchema, {
+        splitByRoi,
+        edgeProperties: propertyColumns,
+      }),
       signal: ctx.signal,
       /*
        * The `Include fragments` filter, asked of the source rather than compiled into the
@@ -450,6 +523,9 @@ export const connectivityNode = registerNode({
           minWeight,
           ...(rois ? { rois } : {}),
           ...(splitByRoi ? { splitByRoi } : {}),
+          // Every hop, so a property rides on every edge the traversal keeps; the dedupe in
+          // `collect` copies it with the rest of the row.
+          ...(properties.length ? { edgeProperties: properties } : {}),
           signal: ctx.signal,
         }),
     })
@@ -483,7 +559,11 @@ export const connectivityNode = registerNode({
         traversed,
         by,
         totalsLookup(totals),
-        connectivityOutputSchema(sourceSchema, { splitByRoi, normalize: true }),
+        connectivityOutputSchema(sourceSchema, {
+          splitByRoi,
+          normalize: true,
+          edgeProperties: propertyColumns,
+        }),
       )
 
       /*

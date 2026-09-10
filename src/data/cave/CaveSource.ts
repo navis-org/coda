@@ -172,6 +172,8 @@ const CAVE_CAPABILITIES: SourceCapabilities = {
   // reading every synapse of every queried neuron — which is the work the connection roll-up
   // exists to avoid. The same reason `roiCounts` is false here.
   connectivityRois: false,
+  // A connection here is a count of synapse rows, so there is nothing on it but the count.
+  edgeProperties: false,
   synapseTotals: false,
   roiMeshes: false,
 }

@@ -124,7 +124,7 @@ export function cardWidth(type: string): number {
   const def = getNodeDef(type)
   return Math.max(
     def?.defaultSize?.width ?? 0,
-    NODE_BODIES[type]?.width ?? 0,
+    nodeCardWidth(type) ?? 0,
     def?.category === 'visualisation' ? WIDE_CARD_WIDTH : 0,
     FALLBACK_NODE_SIZE.width,
   )
@@ -262,4 +262,23 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
 
 export function nodeBody(type: string): NodeBodyEntry | undefined {
   return NODE_BODIES[type]
+}
+
+/**
+ * A card width for a node that draws the ordinary param rows and has no body of its own.
+ *
+ * A second table rather than a `NODE_BODIES` entry, because an entry there *replaces* the param
+ * band with its component — a width is all these nodes want.
+ */
+const NODE_WIDTHS: Record<string, number> = {
+  /*
+   * Wider than the default so the title reads in full beside five header buttons, and so the
+   * `Edge properties` picker has room for a chip and its add control on one line.
+   */
+  'neuron.connectivity': 280,
+}
+
+/** The width a card of this type declares, from a body or from `NODE_WIDTHS`, if either does. */
+export function nodeCardWidth(type: string): number | undefined {
+  return NODE_BODIES[type]?.width ?? NODE_WIDTHS[type]
 }

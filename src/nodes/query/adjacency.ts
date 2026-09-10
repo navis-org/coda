@@ -1,9 +1,15 @@
 import { registerNode } from '../../core/registry'
 import { connectivityRequest } from '../lib/datasetParam'
 import { adjacencyFor } from '../../data/queries'
+import { WEIGHT_PROPERTY } from '../../data/source'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
-import { requireDataset } from '../lib/datasetParam'
+import {
+  edgePropertyIssues,
+  readWeightProperty,
+  requireDataset,
+  weightPropertyOptions,
+} from '../lib/datasetParam'
 import { idColumn, matrixLinksSchema, matrixToLinks } from '../lib/tableOps'
 
 /**
@@ -53,12 +59,34 @@ export const adjacencyNode = registerNode({
       help: 'On: one row/column per neuron type, weights summed. Off: one per neuron id.',
       default: true,
     },
+    /*
+     * What fills a cell. One property rather than several, because a matrix holds one number per
+     * cell — Connectivity is where several ride together, as columns.
+     *
+     * The `Links` column stays `weight` whichever is chosen: it is what `net.build` reads, and a
+     * name that followed the choice would unset that picker every time this one moved. The card
+     * and the matrix both say what the number is.
+     *
+     * No `absentMeans`: a stored node without the key summed the weight, which is the default.
+     */
+    {
+      id: 'weight',
+      kind: 'enum',
+      label: 'Weight',
+      help: 'What fills a cell: the connection’s synapse count, or a property the dataset publishes on each connection — on fish2, weightAxonDendrite gives an axon→dendrite matrix.',
+      default: WEIGHT_PROPERTY,
+      optionsWithoutPeek: true,
+      options: (ctx) => weightPropertyOptions(ctx.inputs.dataset),
+    },
   ],
 
   // Both exact before anything runs: a matrix carries no schema, and the link table's shape is
   // decided by "a matrix has two axes and a value" rather than by the data — so a picker
   // downstream of `Links` fills the moment the wire is drawn.
   inferOutputs: () => ({ matrix: T.matrix(), links: T.table(matrixLinksSchema()) }),
+
+  validate: (ctx) =>
+    edgePropertyIssues(ctx.inputs.dataset, [readWeightProperty(ctx.params.weight)]),
 
   evaluate: async (ctx) => {
     const dataset = requireDataset(ctx.input('dataset'))
@@ -73,12 +101,16 @@ export const adjacencyNode = registerNode({
     if (sourceIds.length === 0) throw new Error('Sources table has no neuronIds')
     if (targetIds.length === 0) throw new Error('Targets table has no neuronIds')
 
+    const weight = readWeightProperty(ctx.params.weight)
     ctx.progress(0.2, `${sourceIds.length} × ${targetIds.length}`)
     const matrix = await adjacencyFor(source, {
       ...connectivityRequest(dataset),
       sourceIds,
       targetIds,
       groupByType: ctx.params.groupByType !== false,
+      // Only when it is not the default, so the request every graph before this control made is
+      // the request it still makes.
+      ...(weight ? { weight } : {}),
       signal: ctx.signal,
     })
 

@@ -17,6 +17,7 @@ import type {
   DatasetInfo,
   DatasetRequest,
   EdgeAnswerableRequest,
+  EdgeProperty,
   SourceCapabilities,
   SourceSchemas,
 } from '../../data/source'
@@ -26,8 +27,13 @@ import { backendName } from './datasetFamilies'
 import { idColumn } from './tableOps'
 import {
   CANONICAL_SCHEMAS,
+  WEIGHT_PROPERTY,
   allSources,
   backendOf,
+  canFetchEdgeProperties,
+  edgePropertiesRefusal,
+  edgePropertyWeight,
+  edgeSetPropertiesRefusal,
   canSplitConnectivityByRoi,
   canTotalGroups,
   canTotalSynapses,
@@ -89,6 +95,8 @@ export function sourceSupports(
   if (capability === 'connectivityRois')
     return canSplitConnectivityByRoi(source, datasetId, edges)
   if (capability === 'synapseTotals') return canTotalSynapses(source, datasetId, edges)
+  // Removed by an edge set for the same reason: a file of `pre, post, weight` has nothing else.
+  if (capability === 'edgeProperties') return canFetchEdgeProperties(source, datasetId, edges)
   // The one question that is not a flag at all: what decides it is whether the source implements
   // `fetchGroupTotals`, and there is nothing per-dataset to publish. It is answered here rather
   // than by a helper beside this one so that every node keeps asking edit-time capability
@@ -214,6 +222,107 @@ export function roiOptions(
   return [...names]
     .sort((a, b) => a.localeCompare(b))
     .map((roi) => ({ value: roi, label: roi }))
+}
+
+/**
+ * What a Dataset socket's connections carry beyond `weight`, or undefined where nobody knows.
+ *
+ * Undefined is two cases — a source that publishes none, and one still finding out — and every
+ * reader has to treat it as "cannot say", never as "none". Asked through `sourceSupports` first
+ * wherever the difference between those two matters to a message.
+ */
+export function edgePropertiesFromType(
+  type: CodaType | undefined,
+): readonly EdgeProperty[] | undefined {
+  return datasetInfoFromType(type)?.edgeProperties
+}
+
+/**
+ * The edge properties a Dataset socket offers a picker, in discovery's (alphabetical) order.
+ *
+ * One function for the three nodes that ask, so a property is offered — and labelled — the same
+ * way on each. The label says when a property has no regional breakdown, because that is the one
+ * fact about it that changes what a node can do with it, and the picker is where somebody decides.
+ * `exclude` is for names the asking node already uses for something else.
+ *
+ * A peek-free read — `sourceSupports` and `peekDataset` are both lookups — which is what lets
+ * the params carry `optionsWithoutPeek`.
+ */
+export function edgePropertyOptions(
+  type: CodaType | undefined,
+  options: { exclude?: ReadonlySet<string>; noteRegions?: boolean } = {},
+): EnumOption[] {
+  if (!sourceSupports(type, 'edgeProperties')) return []
+  return (edgePropertiesFromType(type) ?? [])
+    .filter((p) => !options.exclude?.has(p.name))
+    .map((p) => ({
+      value: p.name,
+      label: options.noteRegions && !p.perRegion ? `${p.name} (not by region)` : p.name,
+    }))
+}
+
+/**
+ * The options of a "which weight" param: the connection's own weight, then every edge property.
+ *
+ * Shared by Adjacency's `Weight` and Profile's `Count by`, which `readWeightProperty` decodes.
+ * Discovery never lists `weight` itself, so nothing needs excluding to keep it from appearing
+ * twice.
+ */
+export function weightPropertyOptions(type: CodaType | undefined): EnumOption[] {
+  return [
+    { value: WEIGHT_PROPERTY, label: 'weight (all synapses)' },
+    ...edgePropertyOptions(type),
+  ]
+}
+
+/**
+ * A "which weight" param, decoded to what a request carries: the edge property it names, or
+ * undefined for the connection's own weight — a blank, `weight` itself, or anything unreadable.
+ *
+ * Shared by Adjacency, Neuron Profile and both exporters, so a stored value means the same thing
+ * on every reader; `edgePropertyWeight` is the rule.
+ */
+export function readWeightProperty(raw: unknown): string | undefined {
+  return typeof raw === 'string' ? edgePropertyWeight(raw) : undefined
+}
+
+/**
+ * What a card says about edge properties it has been asked for, where anything is wrong.
+ *
+ * One function for the three nodes, because the three things that can be wrong are the same on
+ * each and a sentence written per node is how one of them comes to name a control that is not
+ * there. In order: an attached edge set (which removes the capability, and says which control
+ * does), a source that has no edge properties at all, and a name this dataset does not publish.
+ * The last is asked only once discovery has answered — undefined is "not known yet", and a card
+ * that flagged every stored name during the first second of a session would be wrong every time.
+ */
+export function edgePropertyIssues(
+  type: CodaType | undefined,
+  names: readonly (string | undefined)[],
+): string[] {
+  // `undefined` is a "which weight" param on the connection's own weight: nothing to check.
+  const asked = names.filter((n): n is string => n !== undefined)
+  if (asked.length === 0) return []
+  if (!sourceSupports(type, 'edgeProperties')) {
+    return [
+      type?.kind === 'dataset' && type.edges === true
+        ? edgeSetPropertiesRefusal()
+        : `${edgePropertiesRefusal(sourceLabel(type) ?? 'This source')}.`,
+    ]
+  }
+  const known = edgePropertiesFromType(type)
+  if (!known) return []
+  const published = new Set(known.map((p) => p.name))
+  const missing = asked.filter((n) => !published.has(n))
+  if (missing.length === 0) return []
+  const offered = known.map((p) => p.name).join(', ')
+  return [
+    `This dataset publishes no edge propert${missing.length === 1 ? 'y' : 'ies'} ${missing
+      .map((n) => `"${n}"`)
+      .join(
+        ', ',
+      )}. ${offered ? `It publishes: ${offered}.` : 'Its connections carry only a weight.'}`,
+  ]
 }
 
 /** Resolve the `source` param, falling back to the first registered source. */

@@ -17,7 +17,7 @@
  *    Honest about the fact that the answer may not have arrived yet.
  */
 
-import type { PopulationFilter, TableSchema } from '../core/types'
+import type { ColumnSchema, DType, PopulationFilter, TableSchema } from '../core/types'
 import { column, tableSchema } from '../core/types'
 import type {
   DatasetAnnotations,
@@ -40,6 +40,21 @@ export type { NeuronIndexRequest } from './neuronIndex'
 
 import type { NeuronId } from '../core/ids'
 import { ID_COLUMN_NAME } from '../core/ids'
+
+/**
+ * One property a dataset's connections carry beside their `weight`.
+ *
+ * `perRegion` says whether the per-region breakdown (`roiInfo` on neuPrint) carries it too, which
+ * is what decides whether it can be split and restricted by region the way the weight can. It is
+ * learned from a sample, so `false` means *not seen* rather than *proved absent* — and the query
+ * is written so that a property with no breakdown comes back empty, never as the whole
+ * connection's value repeated on every region's row.
+ */
+export interface EdgeProperty {
+  name: string
+  dtype: DType
+  perRegion: boolean
+}
 
 export interface DatasetInfo {
   id: string
@@ -83,6 +98,15 @@ export interface DatasetInfo {
   roiSuper?: Record<string, string>
   /** Neuron statuses present in this dataset, for status filters. */
   statuses: string[]
+  /**
+   * What a connection carries beyond `weight`, where the source has looked.
+   *
+   * Undefined means *not known* — a source with no such thing, or one that has not finished
+   * finding out — which is a different answer from an empty list, and a picker offering nothing
+   * for the first must not tell anybody the dataset has none. Gated by
+   * `capabilities.edgeProperties`; neuPrint learns it in discovery.
+   */
+  edgeProperties?: readonly EdgeProperty[]
   neuronCount?: number
   /** e.g. "v1.2.1" — surfaced so results are attributable to a dataset version. */
   version?: string
@@ -272,6 +296,17 @@ export interface ConnectivityRequest extends EdgeAnswerableRequest {
    * non-overlapping set is for.
    */
   splitByRoi?: boolean
+  /**
+   * Properties of the connection to return beside `weight`, by name — one column each, after
+   * `weight` and before `roi`, named as the dataset names them.
+   *
+   * Gated by `capabilities.edgeProperties`, for `rois`' reason: a source without them would
+   * ignore the field and hand back a table missing columns the node had advertised. Under the
+   * region options a property is read out of each region's own breakdown, never repeated from
+   * the connection — see `EdgeProperty.perRegion` — and a connection with no breakdown of it
+   * answers null.
+   */
+  edgeProperties?: readonly string[]
   signal?: AbortSignal
 }
 
@@ -379,6 +414,12 @@ export interface AdjacencyRequest extends EdgeAnswerableRequest {
   targetIds: NeuronId[]
   /** Aggregate per-neuron weights up to type level before building the matrix. */
   groupByType?: boolean
+  /**
+   * The edge property that fills a cell, summed like the weight — `weightAxonDendrite` for an
+   * axon→dendrite matrix. Absent or `weight` is the connection's own weight. Gated by
+   * `capabilities.edgeProperties`; see `ConnectivityRequest.edgeProperties`.
+   */
+  weight?: string
   signal?: AbortSignal
 }
 
@@ -715,6 +756,16 @@ export interface SourceCapabilities {
    * weights under a `roi` column is a wrong number with the right name on it.
    */
   connectivityRois: boolean
+  /**
+   * Whether a connection carries properties beyond its `weight` that a query can return.
+   *
+   * neuPrint's `ConnectsTo` does — `weightHP` and `weightHR` on most datasets, and on fish2 the
+   * synapse count broken down by the compartment at each end (`weightAxonDendrite`, …). Which
+   * ones is per dataset and is `DatasetInfo.edgeProperties`; this says only whether asking can
+   * work at all. CAVE and CATMAID count synapse rows into a connection, so there is nothing on
+   * one but the count, and they decline.
+   */
+  edgeProperties: boolean
   /**
    * Whether the source can report a neuron's total synapse count, for normalising weights.
    *
@@ -1056,6 +1107,101 @@ export const CONNECTIVITY_ROI_COLUMN = 'roi'
 export function connectivitySchemaWithRoi(schema: TableSchema): TableSchema {
   if (schema.columns.some((c) => c.name === CONNECTIVITY_ROI_COLUMN)) return schema
   return tableSchema(...schema.columns, column(CONNECTIVITY_ROI_COLUMN, 'str'))
+}
+
+/** The property every connection has, and what every "which weight" control defaults to. */
+export const WEIGHT_PROPERTY = 'weight'
+
+/**
+ * The edge property a "which weight" request names, or undefined for the connection's own.
+ *
+ * One spelling of "is this the default", which the funnel, the builder, the mock, the Adjacency
+ * node and the Profile card all ask — an absent or blank weight and `weight` itself are the same.
+ */
+export function edgePropertyWeight(weight: string | undefined): string | undefined {
+  return weight && weight !== WEIGHT_PROPERTY ? weight : undefined
+}
+
+/**
+ * Columns for edge properties chosen by name, typed from what discovery learned.
+ *
+ * A name discovery has not seen — not yet, or not on this dataset — is typed `i64`, which is what
+ * every edge property on every neuPrint dataset measured is. Shared by the sources that build the
+ * table and the node that advertises it, so the two halves of invariant 3 take a dtype from one
+ * place rather than each guessing.
+ */
+export function edgePropertyColumns(
+  known: readonly EdgeProperty[] | undefined,
+  names: readonly string[],
+): ColumnSchema[] {
+  return names.map((name) => column(name, known?.find((p) => p.name === name)?.dtype ?? 'i64'))
+}
+
+/**
+ * A connectivity schema with the chosen edge properties appended, typed from what discovery
+ * learned (`edgePropertyColumns`).
+ *
+ * Call it before `connectivitySchemaWithRoi`: that is the query's own order — properties after the
+ * weight, the region last — and `tableFromCypher` maps by position. Hands the schema back by
+ * identity when nothing was chosen, so the plain query's schema is untouched.
+ */
+export function connectivitySchemaWithEdgeProperties(
+  schema: TableSchema,
+  known: readonly EdgeProperty[] | undefined,
+  names: readonly string[],
+): TableSchema {
+  const columns = edgePropertyColumns(known, names)
+  return columns.length ? tableSchema(...schema.columns, ...columns) : schema
+}
+
+/**
+ * Whether this dataset's connections can be asked for properties beyond their weight.
+ *
+ * `canSplitConnectivityByRoi`'s rule, and for its reason: an attached set *replaces* the query,
+ * and a file of `pre, post, weight` carries nothing else — so the set removes the capability,
+ * whatever the backend behind it publishes.
+ */
+export function canFetchEdgeProperties(
+  source: DataSource | undefined,
+  datasetId: string | undefined,
+  hasEdgeSet: boolean,
+): boolean {
+  return edgeSetRemoves(source, datasetId, hasEdgeSet, 'edgeProperties')
+}
+
+/**
+ * The rule behind both capabilities an attached edge set removes — `canTotal`'s arrangement for
+ * the two totals predicates: two exported names, one sentence. An edge set refuses; an unresolved
+ * source refuses nothing (`capabilityOf`'s rule, applied before the flag for `canTracePaths`'
+ * reason: a cold Dataset socket is invariant 2's ordinary state, not a no); then the flag.
+ */
+function edgeSetRemoves(
+  source: DataSource | undefined,
+  datasetId: string | undefined,
+  hasEdgeSet: boolean,
+  capability: 'connectivityRois' | 'edgeProperties',
+): boolean {
+  if (hasEdgeSet) return false
+  if (!source) return true
+  return capabilityOf(source, datasetId, capability)
+}
+
+/** The refusal, one sentence for the card and the run. */
+export function edgePropertiesRefusal(label: string): string {
+  return `${label} publishes nothing on a connection beyond its weight`
+}
+
+/**
+ * Why an attached edge set has no edge properties — one sentence for the card and both funnels,
+ * `groupTotalsRefusal`'s arrangement. The card knows only that a set is attached; a funnel has
+ * its name.
+ */
+export function edgeSetPropertiesRefusal(name?: string): string {
+  return (
+    `This dataset's connectivity comes from ${name ? `the edge set "${name}"` : 'an attached edge set'}, ` +
+    `which records pre, post and weight and nothing else about a connection. Go back to the ` +
+    `plain weight on this node, or detach the edge set under Edge data on the dataset card.`
+  )
 }
 
 /**
@@ -1477,11 +1623,7 @@ export function canSplitConnectivityByRoi(
   datasetId: string | undefined,
   hasEdgeSet: boolean,
 ): boolean {
-  if (hasEdgeSet) return false
-  // An unresolved source refuses nothing — `capabilityOf`'s rule, applied before the flag for
-  // `canTracePaths`'s reason: a cold Dataset socket is invariant 2's ordinary state, not a no.
-  if (!source) return true
-  return capabilityOf(source, datasetId, 'connectivityRois')
+  return edgeSetRemoves(source, datasetId, hasEdgeSet, 'connectivityRois')
 }
 
 /**

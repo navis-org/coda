@@ -55,6 +55,14 @@ export function neuronIdInts(frame: string, limit = 0): string {
 }
 
 /**
+ * The same ids as a Cypher list literal, for a query whose id placeholder the cell fills when it
+ * runs (`CYPHER_PLACEHOLDERS`). `str` of a list of ints is exactly one: `[1, 2]`.
+ */
+export function cypherIdList(frame: string): string {
+  return `str(${neuronIdInts(frame)})`
+}
+
+/**
  * The same ids as an index-shaped Series, for a `set_index` or a `reindex`.
  *
  * Split out when `Carry fields` needed the cast without the `.tolist()` and wrote it by hand two

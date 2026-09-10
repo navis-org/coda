@@ -12,9 +12,14 @@
  */
 
 import { pyList, pyStr } from '../py'
-import { regionOptions } from '../../../nodes/lib/connectivityOps'
+import {
+  readEdgeProperties,
+  readTraversalDirection,
+  regionOptions,
+} from '../../../nodes/lib/connectivityOps'
+import { CYPHER_PLACEHOLDERS, connectivityExportPlan } from '../../connectivityPlan'
 import { registerEmitter, registerHelper } from '../registry'
-import { codaIds, codaNeurons, neuronIdInts, neuronIds } from './common'
+import { codaIds, codaNeurons, cypherIdList, neuronIdInts, neuronIds } from './common'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import type { EmitContext } from '../types'
 
@@ -121,13 +126,72 @@ function renameLines(indent: string): string[] {
   ]
 }
 
+/**
+ * One hop through the canvas's own Cypher, for a node asking for edge properties.
+ *
+ * `fetch_adjacencies` returns `weight` and a per-ROI breakdown and nothing else about a
+ * connection — its RETURN is fixed — so a property like fish2's `weightAxonDendrite` has no
+ * library route at all. `connectivityExportPlan` decides the legs, their query text and the
+ * columns, shared with the R emitter; this only spells them in Python.
+ *
+ * A raw string, because `escapeString` writes `\'` into a region name like `a'L(R)` and a plain
+ * triple-quoted string would eat the backslash.
+ */
+function cypherConnectivity(
+  ctx: EmitContext,
+  out: string,
+  neurons: string,
+  client: string,
+  properties: readonly string[],
+): string[] {
+  ctx.require('pandas')
+  ctx.require('neuprint', 'fetch_custom')
+  const plan = connectivityExportPlan(ctx.params, properties)
+
+  const lines = [...populationNote(ctx), `_ids = ${cypherIdList(neurons)}`]
+  let fill = `.replace(${pyStr(CYPHER_PLACEHOLDERS.ids)}, _ids)`
+  if (plan.primaryRois) {
+    ctx.require('neuprint', 'fetch_primary_rois')
+    // `str` of a list of names is a Cypher list literal: a name holding `'` comes out quoted `"`.
+    lines.push(`_rois = str(list(fetch_primary_rois(client=${client})))`)
+    fill += `.replace(${pyStr(CYPHER_PLACEHOLDERS.rois)}, _rois)`
+  }
+  const frames = plan.legs.map((leg) => (leg.label === 'downstream' ? '_down' : '_up'))
+  plan.legs.forEach((leg, i) => {
+    const frame = frames[i]!
+    lines.push(
+      `${frame} = fetch_custom(`,
+      `    r"""`,
+      ...leg.query.split('\n').map((l) => `    ${l}`),
+      `    """${fill},`,
+      `    client=${client},`,
+      `)`,
+      `${frame}.columns = ${pyList(plan.fetched)}`,
+      `${frame} = ${frame}.rename(columns={${Object.entries(leg.renames)
+        .map(([from, to]) => `${pyStr(from)}: ${pyStr(to)}`)
+        .join(', ')}})`,
+      `${frame} = ${frame}[${pyList(plan.ordered)}].assign(hop=1, direction=${pyStr(leg.label)})`,
+    )
+  })
+
+  lines.push(
+    '',
+    frames.length > 1
+      ? `${out} = pd.concat([${frames.join(', ')}], ignore_index=True).drop_duplicates(subset=${pyList(plan.dedupe)})`
+      : `${out} = ${frames[0]}`,
+    codaIds(ctx, out, 'preId', 'postId'),
+    ...endpointLines(ctx, out, neuronIds(neurons), client),
+  )
+  return lines
+}
+
 registerEmitter('neuron.connectivity', (ctx) => {
   const c = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
   if (!neurons) return ctx.todo('No Neurons are wired to this Connectivity node.')
 
   const out = ctx.output('connections')
-  const direction = String(ctx.params.direction ?? 'outputs')
+  const direction = readTraversalDirection(ctx.params.direction)
   const hops = Math.max(1, Number(ctx.params.hops ?? 1))
   const minWeight = Math.max(1, Number(ctx.params.minWeight ?? 1))
   const ids = neuronIds(neurons)
@@ -159,6 +223,21 @@ registerEmitter('neuron.connectivity', (ctx) => {
     return ctx.todo(
       'The region options are written against the one-hop fetch_adjacencies call; the multi-hop traversal helper works one row per pair. Set Hops to 1, or drop the region options.',
     )
+  }
+
+  /*
+   * Edge properties go through the canvas's own query — see `cypherConnectivity`. One hop only:
+   * the multi-hop helper walks through `fetch_adjacencies`, which returns weight and nothing
+   * else, and the region options are refused past one hop above for the same reason.
+   */
+  const properties = readEdgeProperties(ctx.params.edgeProperties)
+  if (properties.length > 0) {
+    if (hops > 1) {
+      return ctx.todo(
+        `Edge properties (${properties.join(', ')}) are exported for one hop. The multi-hop traversal helper fetches through fetch_adjacencies, which returns weight and nothing else about a connection. Set Hops to 1, or clear Edge properties.`,
+      )
+    }
+    return cypherConnectivity(ctx, out, neurons, c, properties)
   }
 
   ctx.require('neuprint', 'NeuronCriteria', 'fetch_adjacencies', 'merge_neuron_properties')

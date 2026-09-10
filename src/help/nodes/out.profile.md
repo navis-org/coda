@@ -14,6 +14,16 @@ caption: Threshold controls — instant filtering.
 out.profile: minWeight, topN
 ```
 
+## Counting by an edge property
+
+`Count by` makes every partner list count a property of the connection rather than its synapses —
+on fish2, `weightAxonDendrite` ranks partners by the synapses that land axon→dendrite. The options
+are what the dataset publishes on a connection, and `Min synapses` applies to the chosen count.
+
+```coda-params
+out.profile: countBy
+```
+
 ## One cell, or one cell type
 
 Leave **Group by** empty and the pager walks neurons, one row at a time. Point it at a column — `type`, `hemilineage`, `class`, a cluster id from Cut Tree, a shared label from Match Cell Types — and it walks *groups* instead: every tile then shows a mean across the members with a sample standard deviation beside it.

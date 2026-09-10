@@ -43,6 +43,7 @@ import { DatasetSummaryViewer } from './DatasetSummaryViewer'
 import { NetworkMetricsViewer } from './NetworkMetricsViewer'
 import { DEFAULT_HISTOGRAM_CHOICE } from '../../nodes/lib/networkMetrics'
 import { roisPrimaryOnly } from '../../nodes/lib/roiViewParams'
+import { readWeightProperty } from '../../nodes/lib/datasetParam'
 import { RoisViewer } from './RoisViewer'
 import type { RoiColorMode, RoiLabelMode } from './RoisViewer'
 import type { RoiView } from './roiProjection'
@@ -464,6 +465,7 @@ function ValuePreviewInner({
         pinned={selection}
         onPin={(ids) => onParamChange?.('selection', ids)}
         minWeight={Number(node.params.minWeight ?? 1)}
+        countBy={readWeightProperty(node.params.countBy)}
         topN={Number(node.params.topN ?? 10)}
         chips={ctx.columns('chips')}
         {...shared}

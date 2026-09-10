@@ -8,12 +8,17 @@
  * either way, because everything downstream addresses them by name.
  */
 
-import { rStr } from '../r'
+import { rStr, rVector } from '../r'
 import { registerEmitter, registerHelper } from '../registry'
-import { neuronIds } from './common'
+import { codaIds, cypherIdList, neuronIds } from './common'
 import type { EmitContext } from '../types'
 import { populationFromType } from '../../../nodes/lib/populationParams'
-import { regionOptions } from '../../../nodes/lib/connectivityOps'
+import {
+  readEdgeProperties,
+  readTraversalDirection,
+  regionOptions,
+} from '../../../nodes/lib/connectivityOps'
+import { CYPHER_PLACEHOLDERS, connectivityExportPlan } from '../../connectivityPlan'
 
 /**
  * neuprintr's own name for the `Include fragments` control.
@@ -74,6 +79,70 @@ function endpointLines(ctx: EmitContext, edges: string, seeds: string, conn: str
   ]
 }
 
+/**
+ * One hop through the canvas's own Cypher, for a node asking for edge properties.
+ *
+ * The notebook emitter's twin: `neuprint_connection_table` returns the weight and nothing else
+ * about a connection, so a property has no library route. `connectivityExportPlan` decides the
+ * legs, their query text and the columns; this only spells them in R. Unlike the library call,
+ * the query text states its region options, so they are exported here where that route refuses
+ * them. `neuprint_fetch_custom` names columns after the RETURN expressions (see Explore's chunk),
+ * so they are set by position.
+ */
+function cypherConnectivity(
+  ctx: EmitContext,
+  out: string,
+  neurons: string,
+  conn: string,
+  properties: readonly string[],
+): string[] {
+  const plan = connectivityExportPlan(ctx.params, properties)
+  const lines = [
+    ...populationNote(ctx),
+    `.ids <- ${cypherIdList(neurons)}`,
+    // `neuprint_ROIs(superLevel = FALSE)` is how this exporter spells the set that tiles the
+    // volume everywhere else (`coda_profile`, ROI Meshes), so it is spelled that way here too.
+    ...(plan.primaryRois
+      ? [
+          `.rois <- paste0("[", paste0('"', neuprint_ROIs(superLevel = FALSE, conn = ${conn}), '"', collapse = ","), "]")`,
+        ]
+      : []),
+  ]
+  const fill = (query: string) => {
+    const ids = `sub(${rStr(CYPHER_PLACEHOLDERS.ids)}, .ids, ${rStr(query)}, fixed = TRUE)`
+    return plan.primaryRois
+      ? `sub(${rStr(CYPHER_PLACEHOLDERS.rois)}, .rois, ${ids}, fixed = TRUE)`
+      : ids
+  }
+  const frames = plan.legs.map((leg) => (leg.label === 'downstream' ? '.down' : '.up'))
+  plan.legs.forEach((leg, i) => {
+    const frame = frames[i]!
+    lines.push(
+      `${frame} <- neuprint_fetch_custom(`,
+      `  ${fill(leg.query)},`,
+      `  conn = ${conn}`,
+      `)`,
+      `names(${frame}) <- ${rVector(plan.fetched)}`,
+      `${frame} <- ${frame} |>`,
+      `  rename(${Object.entries(leg.renames)
+        .map(([from, to]) => `${to} = ${from}`)
+        .join(', ')}) |>`,
+      `  select(all_of(${rVector(plan.ordered)})) |>`,
+      `  mutate(hop = 1L, direction = ${rStr(leg.label)})`,
+    )
+  })
+
+  lines.push(
+    '',
+    frames.length > 1
+      ? `${out} <- bind_rows(${frames.join(', ')}) |> distinct(${plan.dedupe.join(', ')}, .keep_all = TRUE)`
+      : `${out} <- ${frames[0]}`,
+    codaIds(ctx, out, 'preId', 'postId'),
+    ...endpointLines(ctx, out, neuronIds(neurons), conn),
+  )
+  return lines
+}
+
 registerEmitter('neuron.connectivity', (ctx) => {
   const conn = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
@@ -82,9 +151,29 @@ registerEmitter('neuron.connectivity', (ctx) => {
 
   const out = ctx.output('connections')
   const ids = neuronIds(neurons)
-  const direction = String(ctx.params.direction ?? 'outputs')
+  const direction = readTraversalDirection(ctx.params.direction)
   const hops = Math.max(1, Number(ctx.params.hops ?? 1))
   const minWeight = Math.max(1, Number(ctx.params.minWeight ?? 1))
+  // One sentence for both routes, which refuse Normalize for the same reason.
+  const normalizeTodo =
+    'Normalize is not translated. The all-synapses denominators are the upstream/downstream columns of neuprint_get_meta(); the reconstructed-partners-only denominator needs its own aggregate query, and the two differ by a factor of two and a half on male-CNS.'
+
+  /*
+   * Edge properties go through the canvas's own query (`cypherConnectivity`), which states the
+   * region options in its own text — so they are exported on this route where the library route
+   * below refuses them. Normalize and multiple hops are still refused: neither has a translation
+   * that was checked.
+   */
+  const properties = readEdgeProperties(ctx.params.edgeProperties)
+  if (properties.length > 0) {
+    if (ctx.params.normalize === true) return ctx.todo(normalizeTodo)
+    if (hops > 1) {
+      return ctx.todo(
+        `Edge properties (${properties.join(', ')}) are exported for one hop. The multi-hop traversal helper fetches through neuprint_connection_table, which returns weight and nothing else about a connection. Set Hops to 1, or clear Edge properties.`,
+      )
+    }
+    return cypherConnectivity(ctx, out, neurons, conn, properties)
+  }
 
   /*
    * The region and normalisation options are refused here where the Python emitter translates
@@ -104,11 +193,7 @@ registerEmitter('neuron.connectivity', (ctx) => {
       'The region options are not translated. neuprint_connection_table() can break a connection down by region; the argument names were not verified against an installed neuprintr, and guessing them produces a cell that fails at your console.',
     )
   }
-  if (ctx.params.normalize === true) {
-    return ctx.todo(
-      'Normalize is not translated. The all-synapses denominators are the upstream/downstream columns of neuprint_get_meta(); the reconstructed-partners-only denominator needs its own aggregate query, and the two differ by a factor of two and a half on male-CNS.',
-    )
-  }
+  if (ctx.params.normalize === true) return ctx.todo(normalizeTodo)
 
   if (hops > 1) {
     ctx.helper('coda_traverse_connectivity')

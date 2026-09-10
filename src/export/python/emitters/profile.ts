@@ -16,6 +16,8 @@ import { pyStr } from '../py'
 import { registerEmitter, registerHelper } from '../registry'
 import { profileExportPin } from '../../profileSubject'
 import { neuronIds, pySelection, selectionIds } from './common'
+import { readWeightProperty } from '../../../nodes/lib/datasetParam'
+import { CYPHER_PLACEHOLDERS, profilePropertyQueries } from '../../connectivityPlan'
 
 registerEmitter('out.profile', (ctx) => {
   const src = ctx.wired('neurons')
@@ -26,6 +28,10 @@ registerEmitter('out.profile', (ctx) => {
   const selection = selectionIds(ctx)
   const minWeight = Math.max(1, Number(ctx.params.minWeight ?? 1))
   const topN = Number(ctx.params.topN ?? 10)
+  // The card's Count by, as the canvas's own two queries; passed only when it is not the weight,
+  // so a profile that never chose one exports exactly the cell it always did.
+  const property = readWeightProperty(ctx.params.countBy)
+  const queries = property ? profilePropertyQueries(property) : undefined
 
   ctx.require('pandas')
   const lines: string[] = [`${out} = ${src}`]
@@ -64,6 +70,18 @@ registerEmitter('out.profile', (ctx) => {
     `    client=${c},`,
     `    min_weight=${minWeight},`,
     `    top_n=${topN},`,
+    // Counted by an edge property on the card, so every partner frame below is too.
+    ...(queries
+      ? [
+          `    property_queries={`,
+          ...(['upstream', 'downstream'] as const).flatMap((way) => [
+            `        ${pyStr(way)}: r"""`,
+            ...queries[way].split('\n').map((l) => `        ${l}`),
+            `        """,`,
+          ]),
+          `    },`,
+        ]
+      : []),
     ...(grouped
       ? [
           // The card is grouped, so the frames below are means across each group's members
@@ -109,6 +127,8 @@ registerHelper({
       'fetch_neurons',
       'fetch_primary_rois',
       'merge_neuron_properties',
+      // Only called for Count by, but a helper's imports are its whole body's.
+      'fetch_custom',
     ],
   ],
   source: [
@@ -184,7 +204,23 @@ registerHelper({
     '    return pd.concat(out, ignore_index=True)[cols]',
     '',
     '',
-    'def _coda_connectivity(neuron_ids, direction, min_weight, client):',
+    'def _coda_connectivity_by(neuron_ids, query, min_weight, client):',
+    '    """One direction of partners counted by an edge property instead of the weight.',
+    '',
+    "    The card's Count by -- weightAxonDendrite on fish2, say. fetch_adjacencies returns the",
+    '    weight and nothing else about a connection, so `query` is the one Coda sends, with the',
+    `    property after the weight and ${CYPHER_PLACEHOLDERS.ids} where the ids go. The property becomes the`,
+    '    weight here and the threshold applies to it, since that is the count the card shows.',
+    '    Same columns as _coda_connectivity.',
+    '    """',
+    '    ids = "[" + ", ".join(str(int(i)) for i in neuron_ids) + "]"',
+    `    conn = fetch_custom(query.replace("${CYPHER_PLACEHOLDERS.ids}", ids), client=client)`,
+    '    conn.columns = ["neuronId", "neuronType", "partnerId", "partnerType", "synapses", "weight"]',
+    '    conn = conn[conn["weight"].fillna(0) >= min_weight]',
+    '    return conn[["neuronId", "partnerId", "partnerType", "weight"]]',
+    '',
+    '',
+    'def _coda_connectivity(neuron_ids, direction, min_weight, client, weight_query=None):',
     '    """One direction of partners, in the query-relative shape the roll-ups expect.',
     '',
     '    neuronId is always the neuron being profiled and partnerId is whatever it is wired to,',
@@ -192,6 +228,8 @@ registerHelper({
     '    Connectivity node, and the right one here: "these are my upstream partners" is the',
     '    question a profile asks.',
     '    """',
+    '    if weight_query is not None:',
+    '        return _coda_connectivity_by(neuron_ids, weight_query, min_weight, client)',
     '    criteria = NeuronCriteria(bodyId=list(neuron_ids), client=client)',
     '    if direction == "downstream":',
     '        neurons, conn = fetch_adjacencies(',
@@ -286,7 +324,8 @@ registerHelper({
     '    return df.groupby(by, sort=False).head(top_n) if top_n else df',
     '',
     '',
-    'def coda_profile(neuron_ids, client, min_weight=1, top_n=10, groups=None):',
+    'def coda_profile(neuron_ids, client, min_weight=1, top_n=10, groups=None,',
+    '                 property_queries=None):',
     '    """Everything Coda\'s Neuron Profile card shows, as a dict of DataFrames.',
     '',
     '    Keys mirror the tiles: summary, upstream_types, downstream_types, top_upstream,',
@@ -297,6 +336,9 @@ registerHelper({
     '    entire table, which is the one thing the Neuron Profile widget cannot do.',
     '',
     '    min_weight drops connections below a threshold; top_n caps each list (0 keeps all).',
+    '',
+    "    property_queries counts every partner by an edge property instead -- the card's Count",
+    '    by: the two queries Coda sends, keyed "upstream" and "downstream".',
     '',
     '    Pass `groups` -- a Series indexed by neuronId -- to profile CELL TYPES rather than cells,',
     '    which is what the card does with its Group by picker set. Every frame then carries one',
@@ -315,8 +357,11 @@ registerHelper({
     '        NeuronCriteria(bodyId=neuron_ids, client=client), client=client,',
     '    )',
     '    neurons, roi_counts = coda_neurons(neurons), coda_neurons(roi_counts)',
-    '    up = _coda_connectivity(neuron_ids, "upstream", min_weight, client)',
-    '    down = _coda_connectivity(neuron_ids, "downstream", min_weight, client)',
+    '    queries = property_queries or {}',
+    '    up = _coda_connectivity(neuron_ids, "upstream", min_weight, client, queries.get("upstream"))',
+    '    down = _coda_connectivity(',
+    '        neuron_ids, "downstream", min_weight, client, queries.get("downstream"),',
+    '    )',
     '',
     '    # roiInfo NESTS: a synapse in LO(R) is counted again in its parent OL(R), so summing',
     "    # the raw breakdown reports roughly twice the neuron's synapses. Only the primary ROIs",

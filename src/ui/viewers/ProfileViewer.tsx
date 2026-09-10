@@ -88,6 +88,11 @@ export interface ProfileViewerProps {
   pinned: readonly string[]
   onPin: (ids: string[]) => void
   minWeight: number
+  /**
+   * The edge property every count on the card is a count of; blank means the weight. The hook
+   * fetches it and swaps it into `weight`, so nothing below this prop knows there is a choice.
+   */
+  countBy?: string | undefined
   topN: number
   /** Fields to show as chips. Empty means "decide for me", as in Explore. */
   chips?: readonly string[]
@@ -121,6 +126,7 @@ export function ProfileViewer({
   pinned,
   onPin,
   minWeight,
+  countBy,
   topN,
   chips = [],
   compact = false,
@@ -151,7 +157,7 @@ export function ProfileViewer({
 
   const members: readonly NeuronId[] = subject?.members ?? EMPTY_MEMBERS
 
-  const profile = useNeuronProfile(sourceId, datasetId, members, annotations, edges)
+  const profile = useNeuronProfile(sourceId, datasetId, members, annotations, edges, countBy)
   const data = profile.status === 'ready' ? profile.data : undefined
   const deferred = profile.status === 'deferred'
 

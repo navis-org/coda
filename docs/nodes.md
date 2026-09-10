@@ -2949,6 +2949,70 @@ put a different number in the notebook from the one on the canvas. R Markdown re
 neuprintr was not installed to check its argument names against, and this codebase has been bitten
 by recalling that API before (`Client.fetch_roi_hierarchy` does not exist — see `roiHierarchy.ts`).
 
+### Edge properties: what a connection carries beside its weight
+
+`Edge properties` adds one column per property a connection carries beyond `weight`, named as the
+dataset names it, after `weight` and before `roi`. The same list feeds Adjacency's `Weight` (which
+property fills a cell) and Neuron Profile's `Count by` (what every partner list counts). Probed on
+neuPrint rather than assumed:
+
+| dataset | on `ConnectsTo` besides `weight` and `roiInfo` |
+| --- | --- |
+| fish2 | `weightHP`, `weightHR`, `weightAxonAxon`, `weightAxonDendrite`, `weightDendriteAxon`, `weightDendriteDendrite` |
+| male-cns:v1.0, manc:v1.2.1, optic-lobe:v1.1 | `weightHP`, `weightHR` |
+| hemibrain:v1.2.1 | `weightHP` |
+
+**A picker of what discovery found, not an "everything" checkbox.** The checkbox was the first
+idea, because it was not clear a dataset's edge properties could be listed at all. They can — see
+[backends.md](backends.md#what-else-a-connection-carries-and-how-to-find-out) for the sample and why
+it is not the exact schema call. A picker puts the chosen *names* in the provenance key and in the
+schema, so a dataset that grows a property does not change what an existing node returns, and a
+picker downstream is configured against columns that are promised rather than whatever turned up.
+The names are advertised even when the dataset turns out not to publish one — `validate` says so,
+and a column that came and went with discovery would clear the pickers pointing at it.
+
+**Under the region options a property is read out of each region's breakdown, never off the
+connection.** fish2's `roiInfo` carries the compartment weights region by region, and summed over
+the primary set they reproduce the connection's own value — 200 of 200 sampled edges, and 422 of
+422 connections of three strong seeds through the node's own query. `weightHP` and `weightHR` are
+never in it. A whole-connection value repeated on every region's row is counted again by anything
+that sums the parts, so `roiConnectivityCypher` does three things:
+
+- a region entry **omits a zero**, so an absent key reads as 0 — but only on a connection whose
+  breakdown names the property somewhere (`has[i]`, asked once per connection);
+- a connection whose breakdown never names it answers **null**;
+- a connection whose own value is 0 is 0 in every region.
+
+Discovery records which properties it saw in a breakdown (`EdgeProperty.perRegion`), which labels
+the picker and puts a note on the card, **and the query does not trust it.** `weightDendriteDendrite`
+is never non-zero on fish2, so no sample can show it in a breakdown, and any rule refusing a property
+the sample did not see would refuse it wrongly. Restricted but not split, each property is re-totalled
+over the kept regions the way the weight is, and a null term makes the total null.
+
+**Gated like the region options.** `capabilities.edgeProperties` is true on neuPrint and false on
+CAVE and CATMAID, whose connection is a count of synapse rows with nothing else on it; an attached
+edge set **removes** it, a file of `pre, post, weight` carrying nothing else. `connectivityFor` and
+`adjacencyFor` refuse again at run time, for the graph repointed after it was set up. The three
+cards share one message function, `edgePropertyIssues`, and one options function,
+`edgePropertyOptions`.
+
+**Profile swaps the property into `weight`** rather than threading a count-by argument through
+`profileStats`: every roll-up there reads `weight`, and a dozen signatures that must agree is how
+two tiles come to count different things. So `Min synapses` applies to the chosen count, and the
+param stays presentational — no port carries a count.
+
+**Exported through the canvas's own query.** `fetch_adjacencies` and neuprintr's connection table
+return the weight and nothing else about a connection, so a property has no library route. Both
+exporters run `connectivityCypher`/`adjacencyCypher` through `fetch_custom`/`neuprint_fetch_custom`,
+with `CypherRendering` changing only what an exporter must: the id list becomes a placeholder
+filled when the cell runs; so does the region list when a split covers the primary set (the canvas
+resolves that list off the listing before it queries — omitting it split over every nested region,
+which the first draft did); and the far end is labelled `:Neuron` unless fragments are included, the
+libraries' own restriction. On this route R exports the region options its library route refuses,
+the query text stating them itself. One hop only — the multi-hop helpers walk through the library
+calls. The notebook cells were run against fish2; the R chunks were parsed and run with the fetch
+stubbed, neuprintr not being installed.
+
 ## Paths: how does this reach that?
 
 `neuron.paths`, added from `Add ▸ Query ▸ Paths`. `Connectivity` answers "what is wired to

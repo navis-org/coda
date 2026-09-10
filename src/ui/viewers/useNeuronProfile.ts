@@ -26,9 +26,11 @@ import { useCallback, useMemo, useState } from 'react'
 
 import type { NeuronId } from '../../core/ids'
 import { compareIds } from '../../core/ids'
+import { columnNames, findColumn } from '../../core/types'
 import type { DatasetAnnotations, DatasetEdges, TableValue } from '../../core/values'
 import { connectivityFor } from '../../data/queries'
-import { getSource } from '../../data/source'
+import { WEIGHT_PROPERTY, getSource } from '../../data/source'
+import { renameTable, selectTable } from '../../nodes/lib/tableOps'
 import { keyedCache } from './keyedCache'
 import { useSettledFetch } from './useSettledFetch'
 
@@ -127,12 +129,33 @@ export function clearProfileCache(): void {
   cache.clear()
 }
 
+/**
+ * A connectivity table whose `weight` is an edge property's count instead.
+ *
+ * **Swapped in rather than threaded through**, and the reason is the size of what it would
+ * otherwise touch: every roll-up in `profileStats` — partner types, top partners, the summary,
+ * each of their subject folds, the `Min synapses` threshold — reads `weight`, and a count-by
+ * argument on each of them is a dozen signatures that must all agree. Here it is one column, and
+ * every number on the card is a count of the chosen property by construction. The property's own
+ * column takes `weight`'s name — and keeps its own dtype — so nothing downstream can read the
+ * two as different things.
+ *
+ * A connection with no value for the property keeps a null, which every roll-up already reads
+ * as nothing rather than as a count.
+ */
+function weighedBy(table: TableValue, property: string): TableValue {
+  if (!findColumn(table.schema, property)) return table
+  const kept = columnNames(table.schema).filter((name) => name !== WEIGHT_PROPERTY)
+  return renameTable(selectTable(table, kept), [{ from: property, to: WEIGHT_PROPERTY }])
+}
+
 async function load(
   sourceId: string,
   datasetId: string,
   members: readonly NeuronId[],
   annotations: DatasetAnnotations | undefined,
   edges: DatasetEdges | undefined,
+  property: string | undefined,
 ): Promise<NeuronProfileData> {
   const source = getSource(sourceId)
   if (!source) throw new Error(`Data source "${sourceId}" is not registered`)
@@ -148,6 +171,10 @@ async function load(
    * The annotation chain rides along, or the card would name a partner's type out of the
    * datastack's own labels while the ports an inch away carry the chain's — the disagreement
    * phase 4 exists to avoid, on the one surface that shows a type in words.
+   *
+   * A count-by property is asked for on both connectivity legs and swapped into `weight` once
+   * it lands — see `weighedBy`. `connectivityFor` refuses it on a source or an edge set that has
+   * none, so a card repointed at CAVE says so rather than silently counting synapses.
    */
   const dataset = {
     datasetId,
@@ -155,15 +182,21 @@ async function load(
     ...(edges ? { edges } : {}),
   }
   const neuronIds = [...members]
+  const extra = property ? { edgeProperties: [property] } : {}
   const [inputs, outputs, regions] = await Promise.all([
-    connectivityFor(source, { ...dataset, neuronIds, direction: 'inputs' }),
-    connectivityFor(source, { ...dataset, neuronIds, direction: 'outputs' }),
+    connectivityFor(source, { ...dataset, ...extra, neuronIds, direction: 'inputs' }),
+    connectivityFor(source, { ...dataset, ...extra, neuronIds, direction: 'outputs' }),
     source.fetchRoiCounts?.({ ...dataset, neuronIds }),
   ])
 
   // Read after the await: discovery may well have landed while these were in flight, and the
   // primary list is what makes the region totals sound.
-  return { inputs, outputs, regions, primaryRois: source.peekDataset(datasetId)?.primaryRois }
+  return {
+    inputs: property ? weighedBy(inputs, property) : inputs,
+    outputs: property ? weighedBy(outputs, property) : outputs,
+    regions,
+    primaryRois: source.peekDataset(datasetId)?.primaryRois,
+  }
 }
 
 /**
@@ -172,7 +205,8 @@ async function load(
  * The chain is in it for `neuronIndexKey`'s reason: two graphs on one datastack with different
  * annotations hold genuinely different answers, and without it the first one looked at would be
  * served to the other for the rest of the session. The edge set is in it for the same reason —
- * one dataset with a file behind its connectivity and one without hold different answers.
+ * one dataset with a file behind its connectivity and one without hold different answers — and
+ * so is the count-by property, whose rows carry a different number in `weight`.
  *
  * The members are **sorted** into it, so a set is one cache entry however the table happened to
  * order it. Two paths reach the same subject in different orders routinely: a group takes the
@@ -184,10 +218,11 @@ function profileKey(
   members: readonly NeuronId[],
   annotations: DatasetAnnotations | undefined,
   edges: DatasetEdges | undefined,
+  countBy: string | undefined,
 ): string | undefined {
   if (!sourceId || !datasetId || members.length === 0) return undefined
   const ids = [...members].sort(compareIds).join(',')
-  return `${sourceId}|${datasetId}|${annotations?.key ?? ''}|${edges?.id ?? ''}|${ids}`
+  return `${sourceId}|${datasetId}|${annotations?.key ?? ''}|${edges?.id ?? ''}|${countBy ?? ''}|${ids}`
 }
 
 export function useNeuronProfile(
@@ -196,6 +231,8 @@ export function useNeuronProfile(
   members: readonly NeuronId[],
   annotations?: DatasetAnnotations,
   edges?: DatasetEdges,
+  /** The edge property every count is of, or undefined for the weight — `readWeightProperty`. */
+  countBy?: string,
 ): NeuronProfileState {
   /*
    * Memoised, because building it sorts and joins the whole member list. That is nothing for one
@@ -205,12 +242,12 @@ export function useNeuronProfile(
    * viewer's `subjects` memo talking, so its identity is already stable.
    */
   const key = useMemo(
-    () => profileKey(sourceId, datasetId, members, annotations, edges),
+    () => profileKey(sourceId, datasetId, members, annotations, edges, countBy),
     // The chain's *key* and the edge set's *id*, not the objects: those are what `profileKey`
     // reads, and the hook this replaced kept both behind refs precisely because a fresh
     // `DatasetValue` can churn their identity on an unrelated store tick. Depending on the
     // objects would put the sort-and-join back on every render of the pager.
-    [sourceId, datasetId, members, annotations?.key, edges?.id],
+    [sourceId, datasetId, members, annotations?.key, edges?.id, countBy],
   )
 
   /*
@@ -247,7 +284,7 @@ export function useNeuronProfile(
     deferred ? undefined : key,
     () =>
       sourceId && datasetId
-        ? load(sourceId, datasetId, members, annotations, edges)
+        ? load(sourceId, datasetId, members, annotations, edges, countBy)
         : Promise.reject(new Error('No dataset')),
     { settleMs: SETTLE_MS, cache },
   )

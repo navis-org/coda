@@ -25,6 +25,7 @@ import type {
   SynapseRequest,
   SynapseTotalsRequest,
 } from '../source'
+import { edgePropertyWeight } from '../source'
 import { isNeuronId } from '../../core/ids'
 import { SYNAPSE_UNITS } from '../synapseUnits'
 import type { PopulationFilter, TableSchema } from '../../core/types'
@@ -391,22 +392,72 @@ export function findNeuronsCypher(
  * Uses apoc, which every neuPrint deployment checked has installed — its own cached
  * `/api/cached/roiconnectivity` endpoint is built on `apoc.convert.fromJsonMap`.
  */
-export function connectivityCypher(req: ConnectivityRequest): string {
-  const ids = idList(req.neuronIds)
+export function connectivityCypher(
+  req: ConnectivityRequest,
+  render: CypherRendering = {},
+): string {
+  const ids = render.ids ?? idList(req.neuronIds)
+  const far = render.partnerLabel ? `(p:${render.partnerLabel})` : '(p)'
   const pattern =
     req.direction === 'outputs'
-      ? `MATCH (n:Neuron)-[w:ConnectsTo]->(p)\nWHERE n.bodyId IN ${ids}`
-      : `MATCH (p)-[w:ConnectsTo]->(n:Neuron)\nWHERE n.bodyId IN ${ids}`
+      ? `MATCH (n:Neuron)-[w:ConnectsTo]->${far}\nWHERE n.bodyId IN ${ids}`
+      : `MATCH ${far}-[w:ConnectsTo]->(n:Neuron)\nWHERE n.bodyId IN ${ids}`
 
   const min = req.minWeight && req.minWeight > 0 ? Math.floor(req.minWeight) : 0
-  if (req.rois?.length || req.splitByRoi) return roiConnectivityCypher(req, pattern, min)
+  const extras = req.edgeProperties ?? []
+  if (req.rois?.length || req.splitByRoi) {
+    // `keys(ri)` where no region list was given, so an unrestricted split still sees everything
+    // the connection mentions rather than silently answering for nothing. An exporter's
+    // placeholder wins over both, being the list the canvas would have resolved.
+    const wanted = render.rois ?? (req.rois?.length ? stringList(req.rois) : 'keys(ri)')
+    return roiConnectivityCypher(req, pattern, min, wanted)
+  }
 
   const where = min > 0 ? `\nAND w.weight >= ${min}` : ''
   return [
     pattern + where,
-    'RETURN n.bodyId, n.type, p.bodyId, p.type, w.weight',
+    ['RETURN n.bodyId, n.type, p.bodyId, p.type, w.weight', ...extras.map(edgeValue)].join(
+      ', ',
+    ),
     'ORDER BY w.weight DESC',
   ].join('\n')
+}
+
+/**
+ * How an exporter wants a query written, where that differs from what the canvas sends.
+ *
+ * The notebook and the R document run the canvas's own query text when a node asks for
+ * something no library call can express — an edge property is the case — and this is the whole
+ * of what they need changed: the id lists arrive from variables at run time rather than as
+ * literals, and the far end is labelled where the canvas filters it by lookup instead. The
+ * canvas never passes it, so the query it sends is exactly the one its tests pin.
+ */
+export interface CypherRendering {
+  /** Written in place of the id list — a placeholder the exported code fills from a variable. */
+  ids?: string
+  /**
+   * Written in place of the region list. The canvas resolves "no regions chosen, primary only"
+   * to the dataset's primary set before it queries (`evaluate` reads it off the listing), so an
+   * exported query has to be handed the same list when it runs — or its split covers every
+   * region a connection mentions, and regions nest.
+   */
+  rois?: string
+  /** A label on the partner end: the libraries' restriction, which the exporters follow. */
+  partnerLabel?: 'Neuron'
+  /** Adjacency's two id lists: `ids`' placeholder, once per end. */
+  sourceIds?: string
+  targetIds?: string
+}
+
+/**
+ * One property of the connection, by name.
+ *
+ * Dynamic access with a string key rather than `w.name` with a back-quoted identifier, so a name
+ * goes through `escapeString` — the one sanctioned way a value reaches a query — and the same
+ * spelling serves `ri[r][…]` on a map below.
+ */
+function edgeValue(name: string): string {
+  return `w[${escapeString(name)}]`
 }
 
 /**
@@ -415,24 +466,69 @@ export function connectivityCypher(req: ConnectivityRequest): string {
  * An empty `rois` with `splitByRoi` set is a caller that wants every region the connection
  * mentions, which is the one shape here that can double count — the node is what decides
  * whether that set tiles, and it warns with a measured ratio when it does not.
+ *
+ * **An edge property is read out of the region entry, never off the connection**, which is the
+ * whole difficulty. Repeating `weightHP` on every region's row would double count wherever a
+ * downstream node sums the parts, so each part carries its own region's value — and a region
+ * entry *omits* a key whose count is zero. So an absent key reads as 0, but only on a connection
+ * whose breakdown mentions that property somewhere (`has`): one whose `roiInfo` never names it
+ * has no breakdown of it at all, and answers null rather than a column of zeroes. A connection
+ * whose own value is 0 is 0 in every region, whatever the breakdown says.
  */
-function roiConnectivityCypher(req: ConnectivityRequest, pattern: string, min: number): string {
-  // `keys(ri)` where no region list was given, so an unrestricted split still sees everything
-  // the connection mentions rather than silently answering for nothing.
-  const wanted = req.rois?.length ? stringList(req.rois) : 'keys(ri)'
+function roiConnectivityCypher(
+  req: ConnectivityRequest,
+  pattern: string,
+  min: number,
+  wanted: string,
+): string {
+  const extras = req.edgeProperties ?? []
+  // Positional aliases (`e0`, `e1`, …) inside the query, because a property name is text from a
+  // server and has no business being a map key or an identifier here.
+  const key = (i: number) => `e${i}`
+  const inRegion = (name: string, i: number) => {
+    const whole = edgeValue(name)
+    return (
+      `CASE WHEN ${whole} IS NULL THEN null WHEN ${whole} = 0 THEN 0 ` +
+      `WHEN has[${i}] THEN coalesce(ri[r][${escapeString(name)}], 0) ELSE null END`
+    )
+  }
+  const partExtras = extras.map((name, i) => `, ${key(i)}: ${inRegion(name, i)}`).join('')
   return [
     pattern,
     'WITH n, p, w, apoc.convert.fromJsonMap(w.roiInfo) AS ri',
+    ...(extras.length
+      ? [
+          `WITH n, p, w, ri, [${extras
+            .map((name) => `any(q IN keys(ri) WHERE ri[q][${escapeString(name)}] IS NOT NULL)`)
+            .join(', ')}] AS has`,
+        ]
+      : []),
     // `coalesce(…, 0)`: a region entry may carry only `pre`, and `null > 0` is null, not false.
-    `WITH n, p, [r IN ${wanted} WHERE coalesce(ri[r].post, 0) > 0 | {roi: r, weight: ri[r].post}] AS parts`,
-    'WITH n, p, parts, reduce(total = 0, x IN parts | total + x.weight) AS weight',
+    `WITH n, p, [r IN ${wanted} WHERE coalesce(ri[r].post, 0) > 0 | {roi: r, weight: ri[r].post${partExtras}}] AS parts`,
+    [
+      'WITH n, p, parts, reduce(total = 0, x IN parts | total + x.weight) AS weight',
+      // Re-totalled like the weight when the parts are folded back into one row. A null part
+      // makes the sum null, which is right: a total with an unknown term is not known.
+      ...(req.splitByRoi
+        ? []
+        : extras.map((_, i) => `reduce(t = 0, x IN parts | t + x.${key(i)}) AS ${key(i)}`)),
+    ].join(', '),
     `WHERE weight >= ${Math.max(1, min)}`,
     ...(req.splitByRoi
       ? [
           'UNWIND parts AS part',
-          'RETURN n.bodyId, n.type, p.bodyId, p.type, part.weight AS weight, part.roi AS roi',
+          [
+            'RETURN n.bodyId, n.type, p.bodyId, p.type, part.weight AS weight',
+            ...extras.map((_, i) => `part.${key(i)} AS ${key(i)}`),
+            'part.roi AS roi',
+          ].join(', '),
         ]
-      : ['RETURN n.bodyId, n.type, p.bodyId, p.type, weight']),
+      : [
+          [
+            'RETURN n.bodyId, n.type, p.bodyId, p.type, weight',
+            ...extras.map((_, i) => key(i)),
+          ].join(', '),
+        ]),
   ].join('\n')
 }
 
@@ -592,11 +688,21 @@ export function pathStepCypher(req: PathStepRequest): string {
   ].join('\n')
 }
 
-export function adjacencyCypher(req: AdjacencyRequest): string {
+/**
+ * Every connection from one set onto another.
+ *
+ * `weight` names the property that fills the matrix — `weightAxonDendrite` on fish2, say — and
+ * absent means the connection's own weight. It stays the fifth column either way, so the decoder
+ * reading it positionally does not learn that there is a choice.
+ */
+export function adjacencyCypher(req: AdjacencyRequest, render: CypherRendering = {}): string {
+  const sources = render.sourceIds ?? idList(req.sourceIds)
+  const targets = render.targetIds ?? idList(req.targetIds)
+  const property = edgePropertyWeight(req.weight)
   return [
     'MATCH (a:Neuron)-[w:ConnectsTo]->(b:Neuron)',
-    `WHERE a.bodyId IN ${idList(req.sourceIds)} AND b.bodyId IN ${idList(req.targetIds)}`,
-    'RETURN a.bodyId, a.type, b.bodyId, b.type, w.weight',
+    `WHERE a.bodyId IN ${sources} AND b.bodyId IN ${targets}`,
+    `RETURN a.bodyId, a.type, b.bodyId, b.type, ${property ? edgeValue(property) : 'w.weight'}`,
   ].join('\n')
 }
 
@@ -742,4 +848,44 @@ export function sampleNeuronsCypher(sample = 25): string {
 /** Statuses present, sampled for the same reason — a full DISTINCT is a table scan. */
 export function sampleStatusesCypher(sample = 20_000): string {
   return `MATCH (n:Neuron) WITH n LIMIT ${Math.floor(sample)}\nRETURN DISTINCT n.status`
+}
+
+/**
+ * The properties a sample of connections carries, each with one non-null value.
+ *
+ * **Sampled, because the exact answer is a scan.** Neo4j's own
+ * `db.schema.relTypeProperties()` works through neuPrint's custom endpoint and names every
+ * property with its type — and it walks every relationship to do it: 52 s on fish2, 115 s on
+ * hemibrain, past 180 s on male-cns. This answers in about 0.4 s on either end of that range. The
+ * cost is `sampleNeuronsCypher`'s: a property only a handful of connections carry can be missed,
+ * which on every dataset measured it is not — each one carried its properties on every edge.
+ *
+ * The value rides along so a dtype can be read off it, which is why this is not `keys(w)` alone.
+ */
+export function sampleEdgePropertiesCypher(sample = 500): string {
+  return [
+    `MATCH (:Neuron)-[w:ConnectsTo]->() WITH w LIMIT ${Math.floor(sample)}`,
+    'UNWIND keys(w) AS k',
+    'WITH k, collect(w[k])[0] AS v',
+    'RETURN k, v',
+  ].join('\n')
+}
+
+/**
+ * Which properties a connection's `roiInfo` breaks down by region, from a sample.
+ *
+ * On fish2 the compartment weights are in there region by region, and summed over the primary
+ * set they equal the connection's own value on 200 of 200 edges measured; `weightHP` and
+ * `weightHR` never are. A region entry omits a key whose count is zero, so this is sampled from
+ * connections of some size, where a rarely non-zero property has a chance to show.
+ */
+export function sampleEdgeRegionKeysCypher(sample = 500, minWeight = 10): string {
+  return [
+    `MATCH (:Neuron)-[w:ConnectsTo]->() WHERE w.weight >= ${Math.floor(minWeight)} AND w.roiInfo IS NOT NULL`,
+    `WITH w LIMIT ${Math.floor(sample)}`,
+    'WITH apoc.convert.fromJsonMap(w.roiInfo) AS ri',
+    'UNWIND keys(ri) AS r',
+    'UNWIND keys(ri[r]) AS k',
+    'RETURN DISTINCT k',
+  ].join('\n')
 }

@@ -972,6 +972,19 @@ Area-specific — the rule, then the doc that holds why:
   found. An attached edge set **removes** both capabilities where it *adds* `paths`: a file of
   `pre, post, weight` has no regions, and its weights are not the population the backend's totals
   count. See [docs/nodes.md](docs/nodes.md) and [docs/backends.md](docs/backends.md).
+- **A connection carries more than its weight, and a split has to read each region's own share.**
+  neuPrint's `ConnectsTo` has `weightHP`/`weightHR` nearly everywhere and, on fish2, the count split
+  by compartment (`weightAxonDendrite`, …). `Edge properties` (Connectivity), `Weight` (Adjacency)
+  and `Count by` (Profile) read one list, `DatasetInfo.edgeProperties`, **sampled** because the exact
+  `db.schema.relTypeProperties()` walks every relationship (52 s on fish2, past 180 s on male-CNS).
+  Under the region options a property comes out of `roiInfo` region by region — an absent key is 0
+  only where that connection's breakdown names the property somewhere, and null where it never does
+  — because a whole-connection value repeated per region is summed again downstream. `perRegion` is a
+  sample: it labels the picker and the query does not trust it. Gated by `capabilities.edgeProperties`
+  and removed by an edge set. Exported through the canvas's own Cypher (`CypherRendering`), no library
+  call returning a property — and a split over the primary set has to hand that list over, or the
+  export splits over nested regions. See [docs/nodes.md](docs/nodes.md) and
+  [docs/backends.md](docs/backends.md).
 - **A path's denominator belongs to a population, and the floor that uses it has to prune while the
   search is still running.** `Paths` normalises with `Connectivity`'s vocabulary exactly, but a
   type-collapsed edge's weight is every LC4→PLP1 synapse summed, so its denominator is everything

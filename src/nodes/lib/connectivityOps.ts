@@ -20,7 +20,7 @@
  * per-hop fetch as a callback, which is what makes the BFS testable without a network.
  */
 
-import type { TableSchema } from '../../core/types'
+import type { ColumnSchema, TableSchema } from '../../core/types'
 import type { ParamValues } from '../../core/node'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
@@ -80,8 +80,44 @@ const UPSTREAM_NAMES: Record<string, string> = {
   partnerType: PRE_TYPE,
 }
 
-function renamesFor(direction: ConnectionDirection): Record<string, string> {
+/** Source column → output column for a row fetched this way — also what the exporters rename by. */
+export function renamesFor(direction: ConnectionDirection): Record<string, string> {
   return direction === 'outputs' ? DOWNSTREAM_NAMES : UPSTREAM_NAMES
+}
+
+/** How a row fetched this way was found, for the `direction` column; `both` is decided later. */
+export function foundAs(direction: ConnectionDirection): EdgeDirection {
+  return direction === 'outputs' ? 'downstream' : 'upstream'
+}
+
+/**
+ * Names an edge property cannot take, because the edge list already uses them.
+ *
+ * Both sides of the reorientation are here — the source's query-relative names and the node's
+ * pre/post ones — since a property column travels through both tables. A dataset publishing
+ * `hop` on its connections would otherwise overwrite the traversal's own column in silence.
+ */
+export const RESERVED_EDGE_COLUMNS: ReadonlySet<string> = new Set([
+  ...Object.entries(DOWNSTREAM_NAMES).flat(),
+  'weight',
+  CONNECTIVITY_ROI_COLUMN,
+  HOP_COLUMN,
+  DIRECTION_COLUMN,
+  NORM_COLUMN,
+  NORM_TOTAL_COLUMN,
+])
+
+/** The node's `direction` param, decoded: anything unrecognised is `outputs`, the default. */
+export function readTraversalDirection(raw: unknown): TraversalDirection {
+  return raw === 'inputs' || raw === 'both' ? raw : 'outputs'
+}
+
+/**
+ * What one hop asks the source, per direction — both of them for `both`. Read by the traversal
+ * and by both exporters, which run the same legs through their own query calls.
+ */
+export function hopDirections(direction: TraversalDirection): ConnectionDirection[] {
+  return direction === 'both' ? ['outputs', 'inputs'] : [direction]
 }
 
 /** What the optional columns depend on. Read identically by `inferOutputs` and `evaluate`. */
@@ -90,6 +126,11 @@ export interface OutputShape {
   splitByRoi?: boolean
   /** Append `weightNorm` and the denominator it was computed against. */
   normalize?: boolean
+  /**
+   * Edge properties chosen, as columns after the source's own — `edgePropertyColumns`' output,
+   * which is also what the source typed them by, so the dtype cannot differ between the halves.
+   */
+  edgeProperties?: readonly ColumnSchema[]
 }
 
 /**
@@ -121,6 +162,9 @@ export function connectivityOutputSchema(
   })
   return tableSchema(
     ...columns,
+    // After the source's own columns and before `roi`, which is the order the source's table
+    // carries them in — so an edge list reads weight, then what the weight is made of.
+    ...(shape.edgeProperties ?? []),
     ...(shape.splitByRoi ? [column(CONNECTIVITY_ROI_COLUMN, 'str')] : []),
     column(HOP_COLUMN, 'i64'),
     column(DIRECTION_COLUMN, 'str'),
@@ -374,8 +418,7 @@ interface EdgeRow {
  */
 export async function traverseConnectivity(opts: TraverseOptions): Promise<TableValue> {
   const hops = Math.max(1, Math.floor(opts.hops))
-  const directions: ConnectionDirection[] =
-    opts.direction === 'both' ? ['outputs', 'inputs'] : [opts.direction]
+  const directions = hopDirections(opts.direction)
 
   const edges = new Map<string, EdgeRow>()
   const expanded = new Set<string>(opts.seeds)
@@ -477,7 +520,7 @@ function collect(
   next: Set<string>,
 ): void {
   const names = renamesFor(direction)
-  const found: EdgeDirection = direction === 'outputs' ? 'downstream' : 'upstream'
+  const found = foundAs(direction)
   const columns = table.schema.columns.map((col) => ({
     from: col.name,
     to: names[col.name] ?? col.name,
@@ -740,4 +783,21 @@ export function regionOptions(params: ParamValues): RegionOptions {
 /** `MultiEnumParam.visibleIf` and `BooleanParam.visibleIf` both want exactly this. */
 export function usesRegions(params: ParamValues): boolean {
   return regionOptions(params).used
+}
+
+/**
+ * The `Edge properties` param, decoded once — `regionOptions`' arrangement and for its reason:
+ * the node, its `validate` and both exporters read it, and the R emitter's region test is the
+ * recorded case of four readers of one param disagreeing about an empty string.
+ *
+ * Non-strings, blanks and repeats are dropped, and so is a reserved name — one the edge list
+ * already spends on something else. The node's `validate` is what says a stored name has gone;
+ * this only makes sure no reader sends one that could not be a column.
+ */
+export function readEdgeProperties(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const names = raw.filter(
+    (v): v is string => typeof v === 'string' && v !== '' && !RESERVED_EDGE_COLUMNS.has(v),
+  )
+  return [...new Set(names)]
 }

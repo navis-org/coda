@@ -346,3 +346,72 @@ describe('an id of any width, against any dataset', () => {
     expect(findColumn(table.schema, 'neuronId')?.dtype).toBe('str')
   })
 })
+
+/**
+ * Edge properties, gated for the region options' reason: a source without them would ignore the
+ * field and hand back a table missing the columns the node advertised — and a file of `pre, post,
+ * weight` has none, whatever the backend behind the dataset publishes.
+ */
+describe('edge properties against a source or an edge set that has none', () => {
+  const withEdgeProperties = (edgeProperties: boolean) =>
+    stubSource({
+      capabilities: { neuronIndex: true, edgeProperties } as DataSource['capabilities'],
+    })
+
+  it('refuses a property a source cannot return, rather than a table missing its column', async () => {
+    const source = withEdgeProperties(false)
+    await expect(
+      connectivityFor(source, {
+        datasetId: 'd',
+        neuronIds: ['1'],
+        direction: 'outputs',
+        edgeProperties: ['weightHP'],
+      }),
+    ).rejects.toThrow(/nothing on a connection beyond its weight/)
+    expect(source.fetchConnectivity).not.toHaveBeenCalled()
+  })
+
+  it('refuses one on an edge set, whatever the backend behind it publishes', async () => {
+    const source = withEdgeProperties(true)
+    await expect(
+      connectivityFor(source, {
+        datasetId: 'd',
+        neuronIds: ['1'],
+        direction: 'outputs',
+        edgeProperties: ['weightHP'],
+        edges: await attach(),
+      }),
+    ).rejects.toThrow(/edge set "my edges"/)
+    expect(source.fetchConnectivity).not.toHaveBeenCalled()
+  })
+
+  it('passes a property through to a source that has them', async () => {
+    const source = withEdgeProperties(true)
+    await connectivityFor(source, {
+      datasetId: 'd',
+      neuronIds: ['1'],
+      direction: 'outputs',
+      edgeProperties: ['weightHP'],
+    })
+    expect(source.fetchConnectivity).toHaveBeenCalledOnce()
+  })
+
+  it("gates Adjacency's weight the same way, and leaves the default alone", async () => {
+    const cannot = withEdgeProperties(false)
+    await expect(
+      adjacencyFor(cannot, {
+        datasetId: 'd',
+        sourceIds: ['1'],
+        targetIds: ['2'],
+        weight: 'weightHP',
+      }),
+    ).rejects.toThrow(/beyond its weight/)
+    await adjacencyFor(cannot, {
+      datasetId: 'd',
+      sourceIds: ['1'],
+      targetIds: ['2'],
+      weight: 'weight',
+    })
+    expect(cannot.fetchAdjacency).toHaveBeenCalledOnce()
+  })
+})

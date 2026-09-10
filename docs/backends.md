@@ -251,6 +251,33 @@ times smaller. `synapseTotalsCypher` therefore falls back `coalesce(n.upstream, 
 incoming side, where the two are measured equal, and has deliberately **no** fallback on the
 outgoing one.
 
+### What else a connection carries, and how to find out
+
+`ConnectsTo` carries more than `weight` and `roiInfo` on every dataset looked at — `weightHP`
+everywhere, `weightHR` on most, and on fish2 the count split by the compartment at each end; the
+table is in [nodes.md](nodes.md#edge-properties-what-a-connection-carries-beside-its-weight).
+`Meta` declares none of it — it has `neuronProperties` and no relationship equivalent — so
+`discoverEdges` samples it, on a promise of its own: `discover` starts it and does not wait, so
+no neuron query is held behind it, and only a query that asked for a property does.
+
+- `sampleEdgePropertiesCypher` reads one non-null value per key off 500 connections, which is
+  enough for a dtype. Every dataset measured carried its properties on every edge.
+- `sampleEdgeRegionKeysCypher` reads the keys inside `roiInfo`'s region entries off 500 connections
+  of weight ≥ 10. A region entry **omits a zero**, so on the weight-1 edges an unfiltered sample
+  lands on, a rarely non-zero key does not appear.
+
+Both answered in about 0.4 s on male-CNS and on fish2, and both fail soft: no sample leaves the list
+*unknown*, never empty. The listing merge carries the list across a re-list, as it does statuses and
+the primary set.
+
+**The exact answer exists and is too slow to use.** `CALL db.schema.relTypeProperties()` is allowed
+through the custom endpoint and names every property with its Neo4j type — and walks every
+relationship to do it: 52 s on fish2, 115 s on hemibrain, still running at 180 s on male-CNS.
+
+A property is read with a string key, `w['weightAxonDendrite']`, rather than a back-quoted
+identifier, so a name from the server goes through `escapeString` like every other value, and the
+same spelling reads a region entry (`ri[r]['weightAxonDendrite']`).
+
 ### The same totals per group, for a type-collapsed traversal
 
 `groupTotalsCypher` is that query summed over a population, and it exists because the Paths node

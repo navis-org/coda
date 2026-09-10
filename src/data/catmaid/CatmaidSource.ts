@@ -146,6 +146,7 @@ const CATMAID_CAPABILITIES: SourceCapabilities = {
   // all, and a capability that could only honour half of `SynapseTotalsBasis` is the control
   // meaning two things per dataset that `synapseTotals` documents.
   connectivityRois: false,
+  edgeProperties: false,
   synapseTotals: false,
   roiMeshes: true,
 }

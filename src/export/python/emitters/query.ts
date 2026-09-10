@@ -25,7 +25,8 @@ import type { FieldTerm } from '../../../data/terms'
 import { resolveRows } from '../../../data/filterRows'
 import { asksNothing, noFiltersReason } from '../../../nodes/lib/findNeuronsRows'
 import { rowsFromParams } from '../../../nodes/lib/filterRowParams'
-import { schemasFromType } from '../../../nodes/lib/datasetParam'
+import { readWeightProperty, schemasFromType } from '../../../nodes/lib/datasetParam'
+import { CYPHER_PLACEHOLDERS, adjacencyExportQuery } from '../../connectivityPlan'
 import { CARRY_PARAM_ID } from '../../../nodes/lib/carryParams'
 import { filterMasks } from './tableFilters'
 import type { EmitContext } from '../types'
@@ -38,6 +39,7 @@ import {
   caveLabels,
   codaIds,
   codaNeurons,
+  cypherIdList,
   codaSynapses,
   isCaveDataset,
   neuronIdInts,
@@ -538,6 +540,39 @@ registerEmitter('neuron.idsFromLabel', (ctx) => {
 // Adjacency
 // ---------------------------------------------------------------------------
 
+/**
+ * The adjacency fetch through the canvas's own Cypher, for a matrix of an edge property.
+ *
+ * `fetch_adjacencies` returns the weight and nothing else about a connection, so a matrix of
+ * fish2's `weightAxonDendrite` has no library route. This runs `adjacencyCypher` — the query the
+ * canvas sends — with both id lists left as placeholders, and names the columns the way
+ * `fetch_adjacencies` plus `merge_neuron_properties` would have, the chosen property under
+ * `weight`. So `connection_table_to_matrix` and the long half below read it with no idea there was
+ * a choice, which is the canvas's arrangement too: `matrixFromConnections` reads the fifth column
+ * whatever it is. A raw string, for the `\'` `escapeString` can write into a property name.
+ */
+function cypherAdjacency(
+  ctx: EmitContext,
+  sources: string,
+  targets: string,
+  client: string,
+  weight: string,
+): string[] {
+  ctx.require('neuprint', 'fetch_custom')
+  const { sources: sourcesAt, targets: targetsAt } = CYPHER_PLACEHOLDERS
+  const query = adjacencyExportQuery(weight)
+  return [
+    `_conn = fetch_custom(`,
+    `    r"""`,
+    ...query.split('\n').map((l) => `    ${l}`),
+    `    """.replace(${pyStr(sourcesAt)}, ${cypherIdList(sources)})`,
+    `    .replace(${pyStr(targetsAt)}, ${cypherIdList(targets)}),`,
+    `    client=${client},`,
+    `)`,
+    `_conn.columns = ['bodyId_pre', 'type_pre', 'bodyId_post', 'type_post', 'weight']`,
+  ]
+}
+
 registerEmitter('neuron.adjacency', (ctx) => {
   const c = ctx.wired('dataset')
   const sources = ctx.wired('sources')
@@ -558,14 +593,19 @@ registerEmitter('neuron.adjacency', (ctx) => {
   // `_pre`/`_post` to this itself, and the columns it is indexing are `fetch_adjacencies`'
   // output — which `merge_neuron_properties` has just written `bodyId_pre`/`bodyId_post` into.
   const group = byType ? 'type' : 'bodyId'
+  const weight = readWeightProperty(ctx.params.weight)
 
   return [
-    `_neurons, _conn = fetch_adjacencies(`,
-    `    NeuronCriteria(bodyId=${neuronIdInts(sources)}, client=${c}),`,
-    `    NeuronCriteria(bodyId=${neuronIdInts(targets)}, client=${c}),`,
-    `    client=${c},`,
-    `)`,
-    `_conn = merge_neuron_properties(_neurons, _conn, ['type'])`,
+    ...(weight === undefined
+      ? [
+          `_neurons, _conn = fetch_adjacencies(`,
+          `    NeuronCriteria(bodyId=${neuronIdInts(sources)}, client=${c}),`,
+          `    NeuronCriteria(bodyId=${neuronIdInts(targets)}, client=${c}),`,
+          `    client=${c},`,
+          `)`,
+          `_conn = merge_neuron_properties(_neurons, _conn, ['type'])`,
+        ]
+      : cypherAdjacency(ctx, sources, targets, c, weight)),
     `${out} = connection_table_to_matrix(_conn, ${pyStr(group)}, sort_by=${pyStr(group)})`,
     ``,
     /*

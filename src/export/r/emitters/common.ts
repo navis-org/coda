@@ -19,6 +19,14 @@ export function neuronIds(frame: string): string {
 }
 
 /**
+ * The same ids as a Cypher list literal, for a query whose id placeholder the chunk fills when it
+ * runs (`CYPHER_PLACEHOLDERS`). Pasted as they are: a Coda id is the digits already.
+ */
+export function cypherIdList(frame: string): string {
+  return `paste0("[", paste(${neuronIds(frame)}, collapse = ","), "]")`
+}
+
+/**
  * Declare `coda_ids` and emit the call, wherever an emitter *mints* a Coda id column.
  *
  * The twin of the Python exporter's `codaIds`, and it exists for that one's reason: the frames

@@ -46,8 +46,12 @@ import type {
   SynapseTotalsRequest,
 } from './source'
 import {
+  canFetchEdgeProperties,
   canSplitConnectivityByRoi,
   canTotalGroups,
+  edgePropertiesRefusal,
+  edgePropertyWeight,
+  edgeSetPropertiesRefusal,
   canTotalSynapses,
   canTracePaths,
   capabilityOf,
@@ -141,6 +145,12 @@ export async function connectivityFor(
       throw new Error(`${source.label} cannot break a connection down by region`)
     }
   }
+  /*
+   * Edge properties, gated for the region options' reason: a source that has none ignores the
+   * field, and the node would advertise `weightAxonDendrite` over a table that does not carry it.
+   * A file of `pre, post, weight` has none either, whatever the backend behind it publishes.
+   */
+  if (req.edgeProperties?.length) requireEdgeProperties(source, req)
   if (!req.edges) return source.fetchConnectivity(req)
   /*
    * Together, because they are independent and both are slow on a first run: the set is up to a
@@ -234,10 +244,28 @@ function edgeSetDenominator(name: string): Error {
   )
 }
 
+/**
+ * The edge-property gate both funnels share: a file of `pre, post, weight` has none, and neither
+ * has a source without the capability. Said in the sentences the cards use, so the card and the
+ * run cannot disagree.
+ */
+function requireEdgeProperties(
+  source: DataSource,
+  req: { datasetId: string; edges?: DatasetEdges },
+): void {
+  if (req.edges) throw new Error(edgeSetPropertiesRefusal(req.edges.name))
+  if (!canFetchEdgeProperties(source, req.datasetId, false)) {
+    throw new Error(edgePropertiesRefusal(source.label))
+  }
+}
+
 export async function adjacencyFor(
   source: DataSource,
   req: AdjacencyRequest,
 ): Promise<MatrixValue> {
+  // `connectivityFor`'s gate, for its reason: a source that cannot answer ignores the field, and
+  // would fill a matrix labelled `weightAxonDendrite` with whole-connection weights.
+  if (edgePropertyWeight(req.weight)) requireEdgeProperties(source, req)
   if (!req.edges) return source.fetchAdjacency(req)
   const [set, types] = await Promise.all([
     attached(req.edges),
