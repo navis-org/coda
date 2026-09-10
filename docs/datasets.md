@@ -793,7 +793,9 @@ other half of the pairing is `JOIN_SEPARATOR`: the aggregation joins with it and
 splits on it.
 
 **Every starter now answers the same question, off the schema rather than off the backend.**
-`tagColumnFor` in `starters.ts` points `Additional tags` at a column literally named
+`exploreTagColumn` in `nodes/lib/annotationChain.ts` — asked by the starters and the wizard
+alike, which used to answer it two ways, so `New ▸ CATMAID` opened with a tag row and the wizard's
+Interactive Search on the same dataset without one — points `Additional tags` at a column literally named
 `annotations` where the source publishes one, which is CATMAID and nothing else: a neuron there
 has exactly one name and any number of annotations, and the annotations are where the lineages,
 the hemisphere, the clusterings and the papers are. Both CATMAID datasets would otherwise open

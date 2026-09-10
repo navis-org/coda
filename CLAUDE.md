@@ -34,9 +34,10 @@ full. **Read it before deciding a rule does not apply to your case.**
    Because it reads whatever is cached, something has to say when a degraded answer is
    worth redoing: fire `reportSourceLearned` for anything inference reads synchronously.
 
-3. **Schema half and value half must agree.** Every op in `src/nodes/lib/tableOps.ts`
-   has a `*Schema` and a `*Table` function side by side. If they disagree, downstream
-   column pickers break only after a run.
+3. **Schema half and value half must agree.** Every op in `src/nodes/lib/tableOps.ts` that
+   shapes its output has a `*Schema` and a `*Table` function side by side (a row-only op —
+   filter, dedupe, sort, sample — passes the schema through and has none). If they disagree,
+   downstream column pickers break only after a run.
 
 4. **Cache keys are provenance, not content** — `hash(type, params, upstream keys)`. So
    `evaluate` must be deterministic; hidden mutable state needs an explicit nonce param.

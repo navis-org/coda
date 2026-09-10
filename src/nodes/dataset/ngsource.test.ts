@@ -24,6 +24,7 @@ import { resetTransport } from '../../data/precomputed/transport'
 import type { RestoreFetch } from '../../test/precomputedStubs'
 import { DRACO_INFO, serveJson, volumeInfo } from '../../test/precomputedStubs'
 import '../index'
+import { node } from '../../test/graph'
 
 const TYPE = 'dataset.ngsource'
 const SPEC = 'precomputed://gs://flyem-male-cns/v1.0/segmentation/'
@@ -47,15 +48,6 @@ function ctxFor(params: ParamValues) {
 
 function issues(params: ParamValues): string[] {
   return requireNodeDef(TYPE).validate?.(ctxFor(params)) ?? []
-}
-
-function node(id: string, type: string, params: ParamValues = {}) {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params },
-  }
 }
 
 beforeEach(() => {

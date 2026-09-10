@@ -10,11 +10,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
-import { Scheduler } from '../../core/scheduler'
+import type { Scheduler } from '../../core/scheduler'
 import { columnNames, schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
@@ -23,17 +22,10 @@ import { describeSchema } from '../lib/describeOps'
 import '../index'
 import { defaultOutputPorts } from '../../core/ports'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
+import { mockScheduler } from '../../test/scheduler'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
 
 /** dataset → find(LC.*) → describe */
 function pipeline(): CodaGraph {
@@ -93,12 +85,7 @@ describe('out.describe — evaluate', () => {
   let scheduler: Scheduler
 
   beforeEach(() => {
-    scheduler = new Scheduler({
-      resolveSource: (id) => {
-        if (id !== 'mock') throw new Error(`unexpected source ${id}`)
-        return source
-      },
-    })
+    scheduler = mockScheduler(source)
   })
 
   it('passes the input through untouched, by identity', async () => {

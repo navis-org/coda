@@ -31,7 +31,6 @@ import '../nodes'
 import {
   deleteWorkflow,
   findByName,
-  libraryAvailable,
   listWorkflows,
   loadWorkflow,
   normalizeName,
@@ -166,10 +165,6 @@ describe('workflow library', () => {
       // @ts-expect-error deliberately removing the platform API
       delete globalThis.indexedDB
       resetLibrary()
-    })
-
-    it('says so', async () => {
-      expect(await libraryAvailable()).toBe(false)
     })
 
     it('reads as an empty shelf', async () => {

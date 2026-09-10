@@ -20,6 +20,7 @@ import { useRef } from 'react'
 
 import { useDismissOnOutside } from '../useDismiss'
 import type { SelectScope } from './networkSelect'
+import { menuPosition } from '../menuPosition'
 
 /** Rough menu box, for keeping it on screen. Mirrors `.context-menu`'s min-width. */
 const MENU_WIDTH = 190
@@ -77,10 +78,7 @@ export function NetworkContextMenu({
     <div
       ref={ref}
       className="context-menu"
-      style={{
-        left: Math.min(at.x, window.innerWidth - MENU_WIDTH),
-        top: Math.min(at.y, window.innerHeight - MENU_HEIGHT),
-      }}
+      style={menuPosition(at, { width: MENU_WIDTH, height: MENU_HEIGHT })}
       role="menu"
     >
       <div className="context-menu__caption">{caption}</div>

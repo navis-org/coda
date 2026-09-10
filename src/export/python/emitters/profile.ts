@@ -15,9 +15,10 @@
 import { pyStr } from '../py'
 import { registerEmitter, registerHelper } from '../registry'
 import { profileExportPin } from '../../profileSubject'
-import { neuronIds, pySelection, selectionIds } from './common'
+import { neuronIds, pySelection } from './common'
 import { readWeightProperty } from '../../../nodes/lib/datasetParam'
 import { CYPHER_PLACEHOLDERS, profilePropertyQueries } from '../../connectivityPlan'
+import { selectionIds } from '../../selection'
 
 registerEmitter('out.profile', (ctx) => {
   const src = ctx.wired('neurons')

@@ -12,9 +12,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import type { TableValue } from '../../core/values'
@@ -24,6 +23,7 @@ import { registerSource, requireSource } from '../../data/source'
 import { readEdgeProperties } from '../lib/connectivityOps'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
 
 beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
@@ -32,15 +32,6 @@ beforeAll(() => {
 const BOTH = ['weightAxonDendrite', 'weightHP']
 /** A seed type whose every connection has a regional breakdown — `connectivity.test.ts`' pick. */
 const SPLITTING_TYPE = 'Dm8'
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
 
 function wire(g: CodaGraph, source: string, handle: string, target: string, into: string) {
   return addEdge(g, { source, sourceHandle: handle, target, targetHandle: into })

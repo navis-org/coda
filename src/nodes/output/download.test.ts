@@ -17,9 +17,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { columnNames, schemaOf } from '../../core/types'
@@ -30,6 +29,7 @@ import { registerSource, requireSource } from '../../data/source'
 import '../index'
 import { defaultInputPorts } from '../../core/ports'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
 
 const DATASET = mockDatasetIds()[0]!
 
@@ -39,15 +39,6 @@ beforeAll(() => {
 
 function makeScheduler(): Scheduler {
   return new Scheduler({ resolveSource: (id) => requireSource(id) })
-}
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
 }
 
 /** dataset → find → download → sort, so the pass-through has something after it. */

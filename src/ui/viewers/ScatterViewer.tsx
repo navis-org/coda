@@ -48,6 +48,7 @@ import { CLICK_SLOP, tooltipPoint } from './tooltipPoint'
 import { prepareCanvas } from './canvas2d'
 import { useElementSize } from './useElementSize'
 import { useStable } from './useStable'
+import { useWheelZoom } from './useWheelZoom'
 
 export interface ScatterViewerProps {
   table: TableValue
@@ -281,43 +282,32 @@ export function ScatterViewer({
   }, [spec, ink, surface, opacity, xColumn, yColumn, selectedIndices, hovered, compact, box])
 
   // --- zoom --------------------------------------------------------------
-  /*
-   * A native, non-passive listener: React routes `onWheel` through a passive root listener,
-   * so `preventDefault` there is ignored and the page scrolls behind the chart. `nowheel` on
-   * the wrapper is the other half — it stops React Flow zooming the canvas underneath.
-   */
-  useEffect(() => {
-    const element = wrapRef.current
-    if (!element || !spec) return
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault()
-      const rect = element.getBoundingClientRect()
-      const px = event.clientX - rect.left
-      const py = event.clientY - rect.top
-      // Zoom about the pointer: the value under it is the one that must not move.
-      const anchorX = unprojectX(px, spec.view, spec.plot)
-      const anchorY = unprojectY(py, spec.view, spec.plot)
-      const factor = Math.exp(event.deltaY * 0.0015)
-      setView({
-        x: {
-          min: anchorX + (spec.view.x.min - anchorX) * factor,
-          max: anchorX + (spec.view.x.max - anchorX) * factor,
-        },
-        y: {
-          min: anchorY + (spec.view.y.min - anchorY) * factor,
-          max: anchorY + (spec.view.y.max - anchorY) * factor,
-        },
-      })
-    }
-    element.addEventListener('wheel', onWheel, { passive: false })
-    return () => element.removeEventListener('wheel', onWheel)
-  }, [wrapRef, spec])
+  // The shared hook: a native non-passive listener, and one update per animation frame.
+  useWheelZoom(wrapRef, spec !== undefined, (factor, px, py) => {
+    if (!spec) return
+    // Zoom about the pointer: the value under it is the one that must not move.
+    const anchorX = unprojectX(px, spec.view, spec.plot)
+    const anchorY = unprojectY(py, spec.view, spec.plot)
+    setView({
+      x: {
+        min: anchorX + (spec.view.x.min - anchorX) * factor,
+        max: anchorX + (spec.view.x.max - anchorX) * factor,
+      },
+      y: {
+        min: anchorY + (spec.view.y.min - anchorY) * factor,
+        max: anchorY + (spec.view.y.max - anchorY) * factor,
+      },
+    })
+  })
 
   // --- pointer -----------------------------------------------------------
-  const localPoint = (event: React.PointerEvent): { x: number; y: number } => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top }
-  }
+  /*
+   * In the element's own pixels, which is what the plot is laid out in. Through `tooltipPoint`,
+   * which divides out React Flow's zoom: the gestures are live on the card too, at whatever scale
+   * the canvas is at, and a raw client offset put the hover and the lasso that factor away.
+   */
+  const localPoint = (event: React.PointerEvent<HTMLDivElement>): { x: number; y: number } =>
+    tooltipPoint(event, event.currentTarget)
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!spec || event.button !== 0) return

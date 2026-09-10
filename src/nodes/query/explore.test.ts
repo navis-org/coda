@@ -11,9 +11,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, deserializeGraph, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { excludedFromSearch } from './explore'
 import { Scheduler } from '../../core/scheduler'
@@ -23,21 +22,13 @@ import { MockSource } from '../../data/mock/MockSource'
 import { mockDatasetIds } from '../../data/mock/generate'
 import { registerSource, requireSource } from '../../data/source'
 import '../index'
+import { node } from '../../test/graph'
 
 const DATASET = mockDatasetIds()[0]!
 
 beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
 })
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
 
 /** dataset → explore */
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {

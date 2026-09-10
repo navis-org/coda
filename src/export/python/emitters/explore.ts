@@ -10,16 +10,10 @@
 
 import { pyStr } from '../py'
 import { registerEmitter, registerHelper } from '../registry'
-import {
-  caveLabels,
-  codaNeurons,
-  isCaveDataset,
-  pyPopulationMask,
-  pySelection,
-  selectionIds,
-} from './common'
+import { caveLabels, codaNeurons, isCaveDataset, pyPopulationMask, pySelection } from './common'
 import { schemasFromType } from '../../../nodes/lib/datasetParam'
 import { populationFromType } from '../../../nodes/lib/populationParams'
+import { selectionIds } from '../../selection'
 
 /**
  * Explore, on either backend.

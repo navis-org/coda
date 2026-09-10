@@ -49,8 +49,8 @@ export function readUnpivotSpec(ctx: {
     // columns actually read agree about which names resolved.
     columns: ctx.columns('columns'),
     keep: ctx.columns('keep'),
-    nameInto: String(ctx.params.nameInto ?? ''),
-    valueInto: String(ctx.params.valueInto ?? ''),
+    nameInto: String(ctx.params.nameInto ?? 'name'),
+    valueInto: String(ctx.params.valueInto ?? 'value'),
     dropEmpty: ctx.params.dropEmpty === true,
   }
 }

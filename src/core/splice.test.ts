@@ -14,14 +14,14 @@
 import { describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from './graph'
-import type { CodaGraph, GraphNode } from './graph'
+import type { CodaGraph } from './graph'
 import { inferGraph } from './inference'
 import { T } from './types'
-import { defaultParams } from './node'
-import { registerNode, requireNodeDef } from './registry'
+import { registerNode } from './registry'
 import { spliceCandidate, spliceGraph } from './splice'
 import '../nodes'
 import { searchFor } from '../test/findNeurons'
+import { node } from '../test/graph'
 
 /*
  * A dataset in, a dataset out — what a "pin the materialization" node would be. Nothing in the
@@ -39,15 +39,6 @@ registerNode({
   inferOutputs: (ctx) => ({ out: ctx.inputs.in ?? T.dataset() }),
   evaluate: (ctx) => ({ out: ctx.input('in')! }),
 })
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
 
 /** `Find Neurons → Skeletons`, plus whatever loose node the test is dropping on it. */
 function chain(loose: string): { graph: CodaGraph; edgeId: string } {

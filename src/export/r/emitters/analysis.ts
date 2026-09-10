@@ -21,13 +21,14 @@ import { centralityOptions } from '../../../nodes/analysis/networkCentrality'
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
 import { decodeIndices } from '../../../nodes/lib/chartSelection'
-import { codaIds, neuronIds, selectionIds } from './common'
+import { codaIds, neuronIds } from './common'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { populationCypher } from '../../../data/neuprint/cypher'
 import { readWeightProperty, schemasFromType } from '../../../nodes/lib/datasetParam'
 import { CYPHER_PLACEHOLDERS, profilePropertyQueries } from '../../connectivityPlan'
 import { rFilterPredicate } from './table'
 import { findColumn, isNumericDType } from '../../../core/types'
+import { selectionIds } from '../../selection'
 
 // ---------------------------------------------------------------------------
 // Build Network

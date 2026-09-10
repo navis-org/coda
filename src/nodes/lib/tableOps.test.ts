@@ -35,7 +35,6 @@ import {
   renameTable,
   resolveFilterOp,
   sampleRowIndices,
-  sampleSchema,
   sampleTable,
   selectSchema,
   selectTable,
@@ -195,7 +194,7 @@ describe('sample', () => {
 
   it('preserves the schema, and neurons-ness with it', () => {
     const out = sampleTable(conn(), spec({ mode: 'stride', step: 2 }))
-    expectSchemaAgreement(sampleSchema(CONNECTIVITY), out)
+    expectSchemaAgreement(CONNECTIVITY, out)
     expect(out.data.neuronId).toEqual([1, 1, 2])
   })
 })

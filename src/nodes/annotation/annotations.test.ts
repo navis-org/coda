@@ -22,7 +22,6 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { addEdge, addNode, emptyGraph, topoSort } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { checkConnection, inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { column, columnNames, tableSchema } from '../../core/types'
@@ -37,6 +36,7 @@ import { SEATABLE_PROVIDER } from '../../data/annotations/seaTable'
 // outside this directory consumes — a registration seam is for a test and for `index.ts` itself.
 import { registerAnnotationProvider } from '../../data/annotations/registry'
 import '../index'
+import { node } from '../../test/graph'
 
 // ---------------------------------------------------------------------------
 // A provider standing in for both real ones
@@ -101,15 +101,6 @@ beforeEach(() => {
 })
 
 // ---------------------------------------------------------------------------
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
 
 /**
  * `Custom CAVE`, the dataset node that answers from its own params.

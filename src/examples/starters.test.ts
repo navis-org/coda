@@ -26,7 +26,7 @@ beforeAll(() => {
   /*
    * The whole builtin set rather than a hand-listed subset, which is what this was until a
    * starter began reading things off sources other than the mock — a capability for the
-   * Neuroglancer node, and now a neuron schema for `tagColumnFor`. Most of them are registered
+   * Neuroglancer node, and now a neuron schema for `exploreTagColumn`. Most of them are registered
    * and never called; what matters is that the list cannot fall behind `builtins.ts`, which is
    * the drift that file's own header exists to prevent.
    */

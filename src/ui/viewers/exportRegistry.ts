@@ -53,8 +53,3 @@ export function registerExportSource(nodeId: string, source: ExportSource): () =
 export function exportSourceFor(nodeId: string | undefined): ExportSource | undefined {
   return nodeId ? sources.get(nodeId) : undefined
 }
-
-/** Test seam. */
-export function resetExportSources(): void {
-  sources.clear()
-}

@@ -78,23 +78,6 @@ export function superRoisFrom(
   return groups
 }
 
-/**
- * The groups themselves, in the order the hierarchy lists them.
- *
- * Tree order rather than alphabetical, because the hierarchy is somebody's ordering of anatomy
- * and re-sorting it discards that for nothing — the same call `DatasetInfo.rois` makes.
- */
-export function superRoiNames(groups: Record<string, string>): string[] {
-  const seen = new Set<string>()
-  const names: string[] = []
-  for (const group of Object.values(groups)) {
-    if (seen.has(group)) continue
-    seen.add(group)
-    names.push(group)
-  }
-  return names
-}
-
 /** Accepts the parsed object or the JSON string Neo4j stores it as. */
 function parse(raw: unknown): HierarchyNode | undefined {
   if (typeof raw === 'string') {

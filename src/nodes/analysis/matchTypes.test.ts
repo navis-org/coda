@@ -45,6 +45,7 @@ import { mockDatasetIds } from '../../data/mock/generate'
 import { resetCache } from '../../data/cache'
 import { everyNeuron } from '../../test/findNeurons'
 import '../index'
+import { node } from '../../test/graph'
 
 const def = requireNodeDef('compare.matchTypes')
 const DATASET = mockDatasetIds()[0]!
@@ -73,15 +74,6 @@ beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
   registerSource(NO_INDEX)
 })
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
 
 /**
  * One mock dataset into both sockets, which is the whole graph this node needs.

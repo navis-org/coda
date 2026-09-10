@@ -18,7 +18,6 @@
 import { describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { GraphNode } from '../../core/graph'
 import { checkConnection, inferGraph } from '../../core/inference'
 import { defaultParams, makeInferContext } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
@@ -26,6 +25,7 @@ import { T, column, columnNames, schemaOf, tableSchema } from '../../core/types'
 import '../index'
 import type { TableValue } from '../../core/values'
 import { tableFromRows } from '../../core/values'
+import { node } from '../../test/graph'
 
 const ANN = tableSchema(
   column('neuronId', 'str'),
@@ -141,12 +141,3 @@ describe('the node', () => {
     }
   })
 })
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}

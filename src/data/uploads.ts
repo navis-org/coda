@@ -359,16 +359,6 @@ function uploadId(table: TableValue): string {
   return `u_${hashString(parts.join(SEP))}`
 }
 
-/** Whether an upload could survive a reload here. Drives what the node offers. */
-export async function uploadsAvailable(): Promise<boolean> {
-  try {
-    await db()
-    return true
-  } catch {
-    return false
-  }
-}
-
 /** Test seam: forget the session's mirror and the memoised connection. */
 export function resetUploads(): void {
   metaMirror.clear()

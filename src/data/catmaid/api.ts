@@ -209,21 +209,6 @@ export function compactSkeleton(
   )
 }
 
-/** Cable length in nanometres, per skeleton. GET, anonymous, and cheap. */
-export function cableLengths(
-  server: string,
-  projectId: number,
-  skeletonIds: readonly number[],
-  options?: CatmaidRequestOptions,
-): Promise<Record<string, number>> {
-  return catmaidGet<Record<string, number>>(
-    server,
-    `/${projectId}/skeletons/cable-length`,
-    { skeleton_ids: skeletonIds },
-    options,
-  )
-}
-
 export interface SkeletonSummary {
   skeleton_id: number
   num_nodes: number

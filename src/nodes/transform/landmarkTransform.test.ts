@@ -10,16 +10,15 @@
 import { describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
-import { requireNodeDef } from '../../core/registry'
 import { column, tableSchema } from '../../core/types'
 import { MIN_LANDMARKS, checkLandmarkCount, landmarkTriple } from '../lib/transformOps'
 import { scaleFor } from '../../data/transforms/landmarks'
 import { makeTable } from '../../core/values'
 import type { TableValue } from '../../core/values'
 import '../index'
+import { node } from '../../test/graph'
 
 const COLUMNS = ['x', 'y', 'z', 'x2', 'y2', 'z2'] as const
 const PICKED = {
@@ -44,15 +43,6 @@ function landmarks(rows = 4, offset = 10): TableValue {
     data.z2!.push(i * 3 + offset)
   }
   return makeTable(tableSchema(...COLUMNS.map((name) => column(name, 'f64'))), data)
-}
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
 }
 
 /** Just enough graph for the type-level questions: the value half is tested through the ops. */

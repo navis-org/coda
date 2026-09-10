@@ -75,7 +75,7 @@ export const sampleNode = registerNode({
   // only thing worth reporting is the state where the node is silently doing nothing at all.
   validate: (ctx) => {
     const mode = String(ctx.params.mode ?? 'head') as SampleMode
-    if (mode === 'stride' && Number(ctx.params.step ?? 1) <= 1) {
+    if (mode === 'stride' && Number(ctx.params.step ?? 10) <= 1) {
       return ['Every 1 keeps every row — raise it, or the node is a pass-through']
     }
     return []
@@ -87,9 +87,10 @@ export const sampleNode = registerNode({
     return {
       out: sampleTable(table, {
         mode: String(ctx.params.mode ?? 'head') as SampleMode,
-        count: Number(ctx.params.count ?? 0),
-        step: Number(ctx.params.step ?? 1),
-        seed: Number(ctx.params.seed ?? 0),
+        // The declared defaults, which is what the provenance key hashes for an absent key.
+        count: Number(ctx.params.count ?? 100),
+        step: Number(ctx.params.step ?? 10),
+        seed: Number(ctx.params.seed ?? 1),
       }),
     }
   },

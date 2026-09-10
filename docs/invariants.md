@@ -30,9 +30,12 @@ verbatim. Read the entry before arguing with the rule.
    succeeded. It recovered on any edit at all, because `afterGraphChange` re-infers; that
    "everything fixes it" quality is the signature to recognise.
 
-3. **Schema half and value half must agree.** Every op in `src/nodes/lib/tableOps.ts` has a
-   `*Schema` and a `*Table` function side by side. If they disagree, downstream column
-   pickers break only after a run. `tableOps.test.ts` asserts the pairing.
+3. **Schema half and value half must agree.** Every op in `src/nodes/lib/tableOps.ts` that
+   shapes its output has a `*Schema` and a `*Table` function side by side. If they disagree,
+   downstream column pickers break only after a run. `tableOps.test.ts` asserts the pairing.
+   An op that only drops or reorders rows (filter, dedupe, sort, sample) passes its input's
+   schema through and has no schema half: the identity functions that used to stand in for
+   one had no caller, so they checked nothing.
 
 4. **Cache keys are provenance, not content** — `hash(type, params, upstream keys)`. So
    `evaluate` must be deterministic. Nodes depending on hidden mutable state need an

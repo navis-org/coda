@@ -16,7 +16,7 @@ import {
   serializeGraph,
   setNodeParam,
 } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import type { EvalContext, NodeDefinition, ParamValues } from '../../core/node'
 import {
@@ -38,19 +38,11 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource, requireSource } from '../../data/source'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
 
 beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
 })
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
 
 /** dataset → find → connectivity → build network → network view */
 function pipeline(overrides: Record<string, unknown> = {}): CodaGraph {

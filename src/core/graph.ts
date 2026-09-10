@@ -260,15 +260,6 @@ export function emptyGraph(name = 'Untitled'): CodaGraph {
   return { version: GRAPH_FORMAT_VERSION, nodes: [], edges: [], meta: { name } }
 }
 
-/** Edges arriving at a node. */
-export function incomingEdges(graph: CodaGraph, nodeId: string): GraphEdge[] {
-  return graph.edges.filter((e) => e.target === nodeId)
-}
-
-export function outgoingEdges(graph: CodaGraph, nodeId: string): GraphEdge[] {
-  return graph.edges.filter((e) => e.source === nodeId)
-}
-
 /** The single edge feeding an input port, if any. Input ports are single-connection. */
 export function edgeInto(
   graph: CodaGraph,
@@ -310,15 +301,6 @@ export function inboundIndex(graph: CodaGraph): Map<string, GraphEdge> {
     if (!index.has(key)) index.set(key, edge)
   }
   return index
-}
-
-/** Direct upstream node ids, deduplicated. */
-export function dependencies(graph: CodaGraph, nodeId: string): string[] {
-  return [...new Set(incomingEdges(graph, nodeId).map((e) => e.source))]
-}
-
-export function dependents(graph: CodaGraph, nodeId: string): string[] {
-  return [...new Set(outgoingEdges(graph, nodeId).map((e) => e.target))]
 }
 
 /**

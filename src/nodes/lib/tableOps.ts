@@ -214,11 +214,6 @@ export function opNeedsValue(op: FilterOp): boolean {
   return !['isEmpty', 'notEmpty', 'isTrue', 'isFalse'].includes(op)
 }
 
-/** Filtering never changes the schema. */
-export function filterSchema(schema: TableSchema | undefined): TableSchema | undefined {
-  return schema
-}
-
 /**
  * Keep the rows matching one condition.
  *
@@ -349,11 +344,6 @@ export const KEEP_OPTIONS: Array<{ value: KeepMode; label: string }> = [
   { value: 'none', label: 'none (drop them all)' },
 ]
 
-/** Deduplicating never changes the schema. */
-export function dedupeSchema(schema: TableSchema | undefined): TableSchema | undefined {
-  return schema
-}
-
 /**
  * Drop rows that repeat, comparing on the named columns.
  *
@@ -421,10 +411,6 @@ export function dedupeTable(
 // Sort / limit
 // ---------------------------------------------------------------------------
 
-export function sortSchema(schema: TableSchema | undefined): TableSchema | undefined {
-  return schema
-}
-
 /**
  * Row order after sorting, without materialising a new table.
  *
@@ -491,11 +477,6 @@ export interface SampleSpec {
   step: number
   /** Seeds the draw. `random` only. */
   seed: number
-}
-
-/** Sampling takes rows away and never touches the columns. */
-export function sampleSchema(schema: TableSchema | undefined): TableSchema | undefined {
-  return schema
 }
 
 /**

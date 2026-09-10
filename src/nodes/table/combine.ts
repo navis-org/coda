@@ -43,7 +43,7 @@ function readSpec(ctx: {
     // Through `ctx.columns`, never `ctx.params` — invariant 5, so the provenance key and the
     // columns actually read agree about which names resolved.
     columns: ctx.columns('columns'),
-    into: String(ctx.params.into ?? '').trim(),
+    into: String(ctx.params.into ?? TYPE_COLUMN_NAME).trim(),
     sourceColumn: String(ctx.params.sourceColumn ?? '').trim(),
   }
 }

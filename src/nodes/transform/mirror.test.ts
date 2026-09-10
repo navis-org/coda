@@ -23,11 +23,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
-import { requireNodeDef } from '../../core/registry'
-import { Scheduler } from '../../core/scheduler'
+import type { Scheduler } from '../../core/scheduler'
 import { schemaOf } from '../../core/types'
 import { isSkeletonsValue } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
@@ -36,6 +34,8 @@ import { MIRRORED_COLUMN, checkWarpSize } from '../lib/transformOps'
 import { resetLandmarks } from '../../data/transforms/landmarks'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
+import { mockScheduler } from '../../test/scheduler'
 
 vi.mock('../../pyodide/warp', () => ({ warpPoints: vi.fn() }))
 const { warpPoints } = await import('../../pyodide/warp')
@@ -77,21 +77,7 @@ afterEach(() => {
 })
 
 function makeScheduler(): Scheduler {
-  return new Scheduler({
-    resolveSource: (id) => {
-      if (id !== 'mock') throw new Error(`unexpected source ${id}`)
-      return source
-    },
-  })
-}
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
+  return mockScheduler(source)
 }
 
 /** dataset → find(LC4) → skeletons → mirror, or → mirror straight off the table. */

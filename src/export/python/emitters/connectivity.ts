@@ -188,7 +188,6 @@ function cypherConnectivity(
 registerEmitter('neuron.connectivity', (ctx) => {
   const c = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
-  if (!neurons) return ctx.todo('No Neurons are wired to this Connectivity node.')
 
   const out = ctx.output('connections')
   const direction = readTraversalDirection(ctx.params.direction)

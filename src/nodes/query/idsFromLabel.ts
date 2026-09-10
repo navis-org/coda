@@ -195,7 +195,7 @@ export const idsFromLabelNode = registerNode({
      * live on CAVE. `schemasForDataset` is the dataset's own neuron schema, so this asks the only
      * question that settles it — does this dataset have such a field?
      */
-    const status = String(ctx.params.status ?? '')
+    const status = String(ctx.params.status ?? 'Traced')
     const rows =
       status && findColumn(schema, 'status')
         ? [{ field: 'status', op: 'is' as const, values: [status] }]

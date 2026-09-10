@@ -20,13 +20,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import { defaultParams } from '../../core/node'
 import type { EvalContext, ParamValues } from '../../core/node'
 import { inputPorts, outputPorts } from '../../core/ports'
 import { requireNodeDef } from '../../core/registry'
-import { Scheduler } from '../../core/scheduler'
+import type { Scheduler } from '../../core/scheduler'
 import { columnNames, schemaOf, column, tableSchema } from '../../core/types'
 import type { TableValue, Value } from '../../core/values'
 import { isTableValue, tableFromRows } from '../../core/values'
@@ -35,6 +35,8 @@ import type { DataSource, FindNeuronsRequest } from '../../data/source'
 
 import '../index'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
+import { mockScheduler } from '../../test/scheduler'
 
 const DATASET = 'optic-lobe-mini'
 
@@ -54,21 +56,7 @@ beforeEach(() => {
 })
 
 function makeScheduler(): Scheduler {
-  return new Scheduler({
-    resolveSource: (id) => {
-      if (id !== 'mock') throw new Error(`unexpected source ${id}`)
-      return source
-    },
-  })
-}
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
+  return mockScheduler(source)
 }
 
 /** ids → sort, with a Dataset wired only when asked for. */

@@ -377,8 +377,3 @@ function label(cell: CellValue | undefined): string {
   if (cell === null || cell === undefined || cell === '') return '—'
   return String(cell)
 }
-
-/** Exposed for tests: does this table have what BuildNetwork needs? */
-export function canBuildNetwork(schema: TableSchema | undefined): boolean {
-  return !!schema && schema.columns.length >= 2 && !!findColumn(schema, schema.columns[0]!.name)
-}

@@ -60,6 +60,7 @@ import {
   chainGrid,
   chainLinks,
   chainWidth,
+  exploreTagColumn,
   foldChain,
   prefixChain,
 } from '../nodes/lib/annotationChain'
@@ -506,13 +507,14 @@ function headOf(
      * chain's second arm doing nothing visible, which is the failure `AnnotationChain.tagColumn`
      * exists to stop and which the starter had always avoided by setting this by hand.
      */
+    const tagColumn = exploreTagColumn(family?.sourceId, chain)
     return {
       node: {
         id: id('explore'),
         type: 'neuron.explore',
         col: 1,
         row,
-        ...(chain?.tagColumn ? { params: { tagColumn: chain.tagColumn } } : {}),
+        ...(tagColumn ? { params: { tagColumn } } : {}),
       },
       // `selected`, not `hits`: an empty search is the whole dataset, and a workflow whose first
       // Run pushes 165,000 rows into a viewer teaches the wrong thing about what to wire.

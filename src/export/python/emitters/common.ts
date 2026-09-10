@@ -104,26 +104,6 @@ export const NAVIS_RESERVED: ReadonlySet<string> = new Set([
 ])
 
 /**
- * A viewer's `ids` selection param, as **exact decimal text**.
- *
- * `kind: 'ids'` params are written by widgets and live in the saved file, so the value is
- * whatever was last stored — an array normally, and absent on a graph saved before the param
- * existed.
- *
- * It used to answer `number[]`, which is invariant 8 at a seam nobody had looked at: a stored id
- * is a string of digits, and `Number('720575940628857210')` is `720575940628857216` — a
- * different neuron, written into a notebook with nothing to say so. Harmless while every
- * exportable dataset was neuPrint, whose nine-to-eleven-digit ids are exact as doubles, and live
- * the moment a CAVE selection can be exported at all. Emit with `pySelection`, which quotes the
- * digits to match the `str` id column every source publishes — and with `decodeIndices`
- * (`nodes/lib/chartSelection.ts`) instead where the param holds leaf positions rather than ids.
- */
-export function selectionIds(ctx: EmitContext): string[] {
-  const raw = ctx.params.selection
-  return Array.isArray(raw) ? raw.map((id) => String(id).trim()).filter(Boolean) : []
-}
-
-/**
  * A selection as a Python list literal, wrapped if long.
  *
  * Paired with `selectionIds` deliberately, the way `codaNeurons` pairs a declaration with its

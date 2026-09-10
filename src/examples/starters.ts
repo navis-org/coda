@@ -43,9 +43,13 @@ import { addNodeWithCompanion } from '../core/companion'
 import { addEdge } from '../core/graph'
 import type { Link } from './assemble'
 import { assembleGraph as assemble, graphNode as node } from './assemble'
-import { findColumn } from '../core/types'
 import { datasetFamily } from '../nodes/lib/datasetFamilies'
-import { chainGrid, chainLinks, foldChain } from '../nodes/lib/annotationChain'
+import {
+  chainGrid,
+  chainLinks,
+  exploreTagColumn,
+  foldChain,
+} from '../nodes/lib/annotationChain'
 import { capabilityAnywhere, getSource } from '../data/source'
 import { COLLAPSED_SIZE } from '../layout/collapse'
 import { GROUP_PADDING } from '../layout/groupBounds'
@@ -76,30 +80,6 @@ function place(
   return node(id, type, { x: COLUMNS[column] ?? 60, y }, params)
 }
 
-/**
- * The column Explore's `Additional tags` opens on, or none.
- *
- * A source that publishes a column *named* `annotations` is publishing the thing that control
- * exists for: several free-form labels per neuron in one cell, joined with `JOIN_SEPARATOR`.
- * CATMAID is the only one that does — a neuron there has exactly one name and any number of
- * annotations, and the annotations are where the lineages, the hemisphere, the clusterings and
- * the papers live — so both its datasets would otherwise open with that whole bag drawn nowhere,
- * because `tagColumn` is `optional` and an optional picker never takes its declared default
- * (`resolveColumn`: on an optional picker empty is a *choice*). Setting it there instead of
- * changing the default is what keeps that rule intact.
- *
- * Read off the schema rather than keyed on the backend, which is the same shape `withScene` uses
- * above and for the same reason: it is a fact about what the source publishes, and a backend
- * that starts publishing one gets this without an edit here. It is a *column name* doing that
- * work rather than anything declared, which is the honest weakness of it — `ColumnSchema` is
- * `{name, dtype, unit}` and a "these are joined tags" flag would have exactly one declarer. The picker is still filtered
- * against the live schema downstream, so naming it costs nothing where the column is absent.
- */
-function tagColumnFor(sourceId: string | undefined): string | undefined {
-  const neurons = sourceId ? getSource(sourceId)?.schemas.neurons : undefined
-  return findColumn(neurons, 'annotations') ? 'annotations' : undefined
-}
-
 function genericStarter(spec: StarterSpec): CodaGraph {
   /*
    * No dataset id: a starter is a node type and some params, and which dataset that resolves to
@@ -116,7 +96,7 @@ function genericStarter(spec: StarterSpec): CodaGraph {
   const withScene = spec.sourceId
     ? capabilityAnywhere(getSource(spec.sourceId), 'viewerScene')
     : false
-  const tagColumn = tagColumnFor(spec.sourceId)
+  const tagColumn = exploreTagColumn(spec.sourceId)
 
   return assemble(
     spec.label,

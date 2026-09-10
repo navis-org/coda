@@ -35,9 +35,10 @@ import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
 import { decodeRanges } from '../../../nodes/lib/chartSelection'
-import { codaNeurons, neuronIds, pySelection, selectionIds } from './common'
+import { codaNeurons, neuronIds, pySelection } from './common'
 import { filterMasks } from './tableFilters'
 import { roisPrimaryOnly } from '../../../nodes/lib/roiViewParams'
+import { selectionIds } from '../../selection'
 
 // ---------------------------------------------------------------------------
 // Table — the one viewer with nothing to draw

@@ -15,15 +15,16 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, deserializeGraph, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
-import { Scheduler } from '../../core/scheduler'
+import type { Scheduler } from '../../core/scheduler'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 
 import '../index'
+import { node } from '../../test/graph'
+import { mockScheduler } from '../../test/scheduler'
 
 const DATASET = 'optic-lobe-mini'
 
@@ -34,21 +35,7 @@ beforeEach(() => {
 })
 
 function makeScheduler(): Scheduler {
-  return new Scheduler({
-    resolveSource: (id) => {
-      if (id !== 'mock') throw new Error(`unexpected source ${id}`)
-      return source
-    },
-  })
-}
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
+  return mockScheduler(source)
 }
 
 function graph(params: Record<string, unknown> = {}): CodaGraph {

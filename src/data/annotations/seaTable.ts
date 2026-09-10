@@ -40,6 +40,7 @@ import { ID_COLUMN_NAME } from '../../core/ids'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { makeTable } from '../../core/values'
 import { errorMessage } from '../../core/errors'
+import { bodyExcerpt } from '../errorBody'
 import type { RouteKind } from '../routeMemory'
 import { makeRouteMemory } from '../routeMemory'
 import { getToken, normaliseHost, reportAuthFailure } from './credentials'
@@ -184,7 +185,7 @@ function explain(body: string): string {
     const parsed = JSON.parse(body) as { error_msg?: string; error_message?: string }
     return parsed.error_msg ?? parsed.error_message ?? body.slice(0, 300)
   } catch {
-    return body.slice(0, 300) || '(empty response)'
+    return bodyExcerpt(body)
   }
 }
 

@@ -25,11 +25,12 @@
 import type { PopulationFilter, TableSchema } from '../core/types'
 import { columnNames, findColumn } from '../core/types'
 import type { ColumnData, TableValue } from '../core/values'
-import { selectRows } from '../core/values'
+import { getRow, selectRows } from '../core/values'
 import type { FindNeuronsRequest, LabelMatch } from './source'
 import { resolveRows } from './filterRows'
 import type { PreparedFieldTerm } from './terms'
-import { anchoredPattern, prepareFieldTerms } from './terms'
+import { anchoredPattern, fieldTermsMatch, prepareFieldTerms } from './terms'
+import { ID_COLUMN_NAME, idText } from '../core/ids'
 
 /**
  * Compile one anchored pattern, or say which field it came from.
@@ -366,4 +367,34 @@ export function narrowPopulation(
     byPopulation.set(key, result)
   }
   return result
+}
+
+/**
+ * The index rows a local `findNeurons` keeps, in index order and capped at `req.limit`.
+ *
+ * One loop for every source that answers from a neuron index, because three copies were how an
+ * id rule reached one of them: CATMAID compared through `idText` while CAVE and Precomputed were
+ * still spelling a cell with `String`. Present-and-empty `neuronIds` means no neurons, never "no
+ * filter" — the seam's documented rule, and the one an unconfigured node depends on. Columns are
+ * hoisted by `prepareFieldTerms` and a whole row is built only for `labels`, the one filter that
+ * needs one: materialising every row first cost CAVE 139,255 objects per query, discarded
+ * overwhelmingly by the very next line.
+ */
+export function matchIndexRows(
+  index: TableValue,
+  req: Pick<FindNeuronsRequest, 'neuronIds' | 'limit'>,
+  prepared: readonly PreparedFieldTerm[],
+  labelTest: ((row: Record<string, unknown>) => boolean) | undefined,
+): number[] {
+  const wanted = req.neuronIds ? new Set<string>(req.neuronIds) : undefined
+  const ids = index.data[ID_COLUMN_NAME] ?? []
+  const limit = req.limit && req.limit > 0 ? req.limit : Infinity
+  const matched: number[] = []
+  for (let i = 0; i < index.length && matched.length < limit; i++) {
+    if (wanted && !wanted.has(idText(ids[i]) ?? '')) continue
+    if (!fieldTermsMatch(prepared, i)) continue
+    if (labelTest && !labelTest(getRow(index, i))) continue
+    matched.push(i)
+  }
+  return matched
 }

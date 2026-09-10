@@ -29,6 +29,8 @@
 import type { CodaGraph } from '../../core/graph'
 import { createGroup } from '../../core/groups'
 import type { ParamValues } from '../../core/node'
+import { findColumn } from '../../core/types'
+import { getSource } from '../../data/source'
 
 /** One card in a chain: an id local to the chain, a node type, and its overrides. */
 export interface ChainNode {
@@ -227,4 +229,35 @@ export function datasetChainNote(chain: AnnotationChain | undefined): string | u
     'Do this on any workflow that reads neuron names from this dataset; a bare dataset node here',
     'gives a table of root ids with no cell types on it.',
   ].join(' ')
+}
+
+/**
+ * The column Explore's `Additional tags` opens on, or none — asked by the wizard and the starters
+ * alike, which is the point: they answered it two ways, so `New ▸ CATMAID` opened with a tag row
+ * and the wizard's Interactive Search on the same dataset without one.
+ *
+ * The chain's column first, where a chain folds community text into a column of its own. Then a
+ * source that publishes a column *named* `annotations`, which is publishing the thing that control
+ * exists for: several free-form labels per neuron in one cell, joined with `JOIN_SEPARATOR`.
+ * CATMAID is the only one that does — a neuron there has exactly one name and any number of
+ * annotations, and the annotations are where the lineages, the hemisphere, the clusterings and
+ * the papers live — so both its datasets would otherwise open with that whole bag drawn nowhere,
+ * because `tagColumn` is `optional` and an optional picker never takes its declared default
+ * (`resolveColumn`: on an optional picker empty is a *choice*). Setting it here instead of
+ * changing the default is what keeps that rule intact.
+ *
+ * Read off the schema rather than keyed on the backend: it is a fact about what the source
+ * publishes, and a backend that starts publishing one gets this without an edit here. It is a
+ * *column name* doing that work rather than anything declared, which is the honest weakness of
+ * it — `ColumnSchema` is `{name, dtype, unit}` and a "these are joined tags" flag would have
+ * exactly one declarer. The picker is still filtered against the live schema downstream, so
+ * naming it costs nothing where the column is absent.
+ */
+export function exploreTagColumn(
+  sourceId: string | undefined,
+  chain?: AnnotationChain,
+): string | undefined {
+  if (chain?.tagColumn) return chain.tagColumn
+  const neurons = sourceId ? getSource(sourceId)?.schemas.neurons : undefined
+  return findColumn(neurons, 'annotations') ? 'annotations' : undefined
 }

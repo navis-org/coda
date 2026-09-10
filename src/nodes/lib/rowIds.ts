@@ -15,7 +15,7 @@
  */
 
 import type { TableValue } from '../../core/values'
-import { makeTable, selectRows } from '../../core/values'
+import { selectRows } from '../../core/values'
 
 /**
  * Name each row, given the chosen id column — `undefined` meaning "no usable id column",
@@ -75,13 +75,4 @@ export function rowsMatching(
     }
   }
   return selectRows(table, rows)
-}
-
-/** An empty result of the same schema and kind — what an unrun or empty selection yields. */
-export function emptyLike(table: TableValue): TableValue {
-  return makeTable(
-    table.schema,
-    Object.fromEntries(table.schema.columns.map((c) => [c.name, []])),
-    table.kind,
-  )
 }

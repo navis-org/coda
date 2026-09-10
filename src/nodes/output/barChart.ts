@@ -1,5 +1,6 @@
 import { registerNode } from '../../core/registry'
-import { NUMERIC_DTYPES, T, isTabular, schemaOf } from '../../core/types'
+import { NUMERIC_DTYPES, T } from '../../core/types'
+import { tapPorts } from '../lib/tapPorts'
 import { isTableValue } from '../../core/values'
 
 export const barChartNode = registerNode({
@@ -55,11 +56,7 @@ export const barChartNode = registerNode({
     },
   ],
 
-  inferOutputs: (ctx) => {
-    const input = ctx.inputs.in
-    if (!isTabular(input)) return { out: T.table() }
-    return { out: T.table(schemaOf(input)) }
-  },
+  inferOutputs: (ctx) => tapPorts(ctx.inputs.in, ['out']),
 
   /**
    * Only what `validateColumnParams` cannot already say.

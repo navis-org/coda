@@ -16,9 +16,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import type { DType } from '../../core/types'
@@ -31,6 +30,7 @@ import type { NblastKnnRequest } from '../../pyodide/nblast'
 import { knnTable } from '../lib/nblastOps'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
 
 vi.mock('../../pyodide/nblast', () => ({
   runNblast: vi.fn(),
@@ -40,15 +40,6 @@ const { runNblastKnn } = await import('../../pyodide/nblast')
 const mockedKnn = vi.mocked(runNblastKnn)
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
 
 /** dataset → find(LC4) → skeletons → k-NN */
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {

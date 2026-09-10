@@ -1584,16 +1584,16 @@ roi_counts <- neuprint_get_roiInfo(find_neurons$neuronId, conn = hemibrain_neupr
 
 ```{r influence}
 # ── Influence ──
-# TODO: "Influence" has no notebook equivalent yet, so this step is missing
-# from the translation. Everything downstream of it refers to variables that
-# were never bound.
+# TODO: "Influence" has no R Markdown equivalent yet, so this step is
+# missing from the translation. Everything downstream of it refers to
+# variables that were never bound.
 ```
 
 ```{r influence-2}
 # ── Influence ──
-# TODO: "Influence" has no notebook equivalent yet, so this step is missing
-# from the translation. Everything downstream of it refers to variables that
-# were never bound.
+# TODO: "Influence" has no R Markdown equivalent yet, so this step is
+# missing from the translation. Everything downstream of it refers to
+# variables that were never bound.
 ```
 
 ```{r skeletons}
@@ -1629,7 +1629,7 @@ synapses <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn =
 # neuronId and polarity ("pre"/"post"). Any cell below that names a synapse
 # column will need one or the other spelling — the notebook export
 # normalises these, this one does not yet.
-# TODO: neuprintr has no confidence argument — filter this frame yourself,
+# NOTE: neuprintr has no confidence argument — filter this frame yourself,
 # e.g. subset(<points>, confidence >= 0.8).
 synapses_2 <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn = hemibrain_neuprint)
 ```
@@ -1846,9 +1846,9 @@ adjacency_links <- adjacency_links[adjacency_links$weight != 0, ]
 
 ```{r influence-3}
 # ── Influence ──
-# TODO: "Influence" has no notebook equivalent yet, so this step is missing
-# from the translation. Everything downstream of it refers to variables that
-# were never bound.
+# TODO: "Influence" has no R Markdown equivalent yet, so this step is
+# missing from the translation. Everything downstream of it refers to
+# variables that were never bound.
 ```
 
 ```{r paths}
@@ -1926,7 +1926,7 @@ select_one <- skeletons |> slice(1)
 
 ```{r mirror-neurons}
 # ── Mirror Neurons ──
-# TODO: "Mirror Neurons" has no notebook equivalent yet, so this step is
+# TODO: "Mirror Neurons" has no R Markdown equivalent yet, so this step is
 # missing from the translation. Everything downstream of it refers to
 # variables that were never bound.
 ```

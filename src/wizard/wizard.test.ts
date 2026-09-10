@@ -981,6 +981,10 @@ describe('a dataset that needs an annotation chain', () => {
     expect(explore(build('flywire'))?.params.tagColumn).toBe(chain.tagColumn)
     expect(explore(build('flywire', { annotationChain: false }))?.params.tagColumn).toBe('')
     expect(explore(build('banc'))?.params.tagColumn).toBe('')
+    // No chain, but a source publishing its tags as a column of their own: the starter's answer,
+    // which `New ▸ CATMAID` gave and the wizard did not.
+    expect(explore(build('catmaid.fafb'))?.params.tagColumn).toBe('annotations')
+    expect(explore(build('catmaid.l1'))?.params.tagColumn).toBe('annotations')
   })
 
   it('leaves every family without one exactly as it was', () => {

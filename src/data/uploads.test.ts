@@ -37,7 +37,6 @@ import {
   resetUploads,
   subscribeUploadLearned,
   uploadPeekSettled,
-  uploadsAvailable,
 } from './uploads'
 
 const SCHEMA = tableSchema(column('neuronId', 'i64'), column('cellType', 'str'))
@@ -194,11 +193,10 @@ describe('without storage', () => {
     await expect(putUpload('annotations.csv', SAMPLE(), 42)).rejects.toThrow(/no storage/i)
   })
 
-  it('resolves a read to nothing, and says it is unavailable', async () => {
+  it('resolves a read to nothing', async () => {
     // @ts-expect-error — see above.
     delete globalThis.indexedDB
     resetUploads()
-    expect(await uploadsAvailable()).toBe(false)
     expect(await getUpload('u_anything')).toBeUndefined()
   })
 })

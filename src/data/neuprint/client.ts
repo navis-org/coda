@@ -22,6 +22,7 @@ import type { Route, RouteKind } from './servers'
 import { normaliseServer, routesForServer } from './servers'
 import { errorMessage } from '../../core/errors'
 import { makeRouteMemory } from '../routeMemory'
+import { bodyExcerpt, looksLikeHtml } from '../errorBody'
 
 export class NeuPrintError extends Error {
   readonly status: number
@@ -176,7 +177,7 @@ async function readResponse<T>(response: Response, route: Route, mode: BodyMode)
     throw new NeuPrintError(message, response.status)
   }
   if (!response.ok) {
-    const body = (await response.text()).slice(0, 300)
+    const body = await response.text()
     /*
      * A 404 on a *same-origin* base means the request never left the machine serving this page:
      * nothing is proxying that path to neuPrint. Two tells, because the two hosts that produce
@@ -199,14 +200,12 @@ async function readResponse<T>(response: Response, route: Route, mode: BodyMode)
         404,
       )
     }
-    throw new NeuPrintError(`neuPrint returned ${response.status}: ${body}`, response.status)
+    throw new NeuPrintError(
+      `neuPrint returned ${response.status}: ${bodyExcerpt(body)}`,
+      response.status,
+    )
   }
   return (mode === 'text' ? await response.text() : await response.json()) as T
-}
-
-/** A served error page rather than anything neuPrint would send: its own errors are JSON. */
-function looksLikeHtml(body: string): boolean {
-  return /^\s*<(!doctype|html)/i.test(body)
 }
 
 export function get<T>(path: string, options?: RequestOptions): Promise<T> {

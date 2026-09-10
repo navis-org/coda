@@ -23,6 +23,7 @@
  */
 
 import { errorMessage } from '../../core/errors'
+import { bodyExcerpt } from '../errorBody'
 import type { RouteKind } from '../routeMemory'
 import { makeRouteMemory } from '../routeMemory'
 import type { CatmaidInstance } from './credentials'
@@ -365,5 +366,5 @@ function explain(body: string): string {
   } catch {
     // Not JSON: a served HTML page, or nothing at all.
   }
-  return body.slice(0, 300) || '(empty response)'
+  return bodyExcerpt(body)
 }

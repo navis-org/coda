@@ -205,8 +205,10 @@ export interface WorkflowTab {
  * says what it is for a document nobody has touched, and `activate` spreads one or the other back
  * — so adding a per-document field is a type error in `DocStash` and one edit in each of the two,
  * rather than a field that silently leaks across a switch because one of six object literals
- * forgot it. `loadGraph` and `newGraph` are deliberately *not* in that set: they reset the live
- * store rather than build a stash, and `inference` is `afterGraphChange`'s there.
+ * forgot it. `loadGraph` and `newGraph` reset the live store through `blankDoc` too (`freshDoc`),
+ * less the two fields that are not theirs: `inference` is `afterGraphChange`'s there, and
+ * `autoLayout` a preference each handles its own way. They used to type the list out again, and
+ * both copies had drifted — a group peek survived a switch, and the Edge data panel a load.
  *
  * Note what is **not** here: `locked` is a canvas mode rather than a fact about a document, and
  * follows the reader between them on purpose — every reload starts unlocked.
@@ -229,6 +231,9 @@ interface DocStash {
   pinnedNodeId: string | undefined
   dashboardOpen: boolean
   edgePanelNode: string | undefined
+  /** Both name a group by id, and two documents opened from one file share their ids. */
+  peekGroupId: string | undefined
+  editingGroupId: string | undefined
   autoLayout: boolean
 }
 
@@ -1684,6 +1689,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
       pinnedNodeId: s.pinnedNodeId,
       dashboardOpen: s.dashboardOpen,
       edgePanelNode: s.edgePanelNode,
+      peekGroupId: s.peekGroupId,
+      editingGroupId: s.editingGroupId,
       autoLayout: s.autoLayout,
     }
   }
@@ -1695,9 +1702,17 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * `loadGraph`'s rule — a workflow saved from the grid opens into the grid.
    */
   function blankDoc(graph: CodaGraph): DocStash {
+    return { ...freshDoc(graph), inference: undefined, autoLayout: false }
+  }
+
+  /**
+   * What `loadGraph` and `newGraph` reset the live store to: `blankDoc` less the two fields that
+   * are not theirs — `inference`, which `afterGraphChange` computes, and `autoLayout`, which each
+   * of them handles its own way.
+   */
+  function freshDoc(graph: CodaGraph): Omit<DocStash, 'inference' | 'autoLayout'> {
     return {
       graph,
-      inference: undefined,
       past: [],
       future: [],
       selection: [],
@@ -1705,9 +1720,19 @@ export const useGraphStore = create<GraphState>((set, get) => {
       lastRun: undefined,
       expandedNodeId: undefined,
       pinnedNodeId: undefined,
+      /*
+       * The view the file was saved from — the one field *read* from the document rather than
+       * reset by it. A graph carrying no dashboard, or one saved from the canvas, opens on the
+       * canvas, so nothing that predates this feature changes. A graph whose author saved it
+       * while looking at the grid opens into the grid, which is the whole point of a dashboard
+       * being shareable: the link is the wall of results, not a canvas the recipient has to be
+       * told to press `D` on. See `DashboardLayout.open` for why this is a different promise
+       * from the lock's, which deliberately does not travel.
+       */
       dashboardOpen: graph.dashboard?.open === true,
       edgePanelNode: undefined,
-      autoLayout: false,
+      peekGroupId: undefined,
+      editingGroupId: undefined,
     }
   }
 
@@ -2298,20 +2323,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     newGraph: () => {
       const graph = emptyGraph('Untitled')
-      set({
-        graph,
-        past: [],
-        future: [],
-        selection: [],
-        notice: undefined,
-        lastRun: undefined,
-        expandedNodeId: undefined,
-        peekGroupId: undefined,
-        editingGroupId: undefined,
-        pinnedNodeId: undefined,
-        // Nothing to show in a grid, so the canvas whatever the last graph was seen through.
-        dashboardOpen: false,
-      })
+      // A new graph has no dashboard, so this opens on the canvas whatever the last graph was
+      // seen through.
+      set(freshDoc(graph))
       sched().invalidateAll()
       afterGraphChange(graph, { autoRun: false })
     },
@@ -2324,28 +2338,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
        */
       if (get().autoLayout) get().setAutoLayout(false)
       set({
-        graph,
-        past: [],
-        future: [],
-        selection: [],
+        ...freshDoc(graph),
         notice: warnings.length ? warnings.join(' · ') : undefined,
-        lastRun: undefined,
-        expandedNodeId: undefined,
-        peekGroupId: undefined,
-        editingGroupId: undefined,
-        pinnedNodeId: undefined,
-        /*
-         * The view the file was saved from — the one thing on this list that is *read* from the
-         * document rather than reset by it.
-         *
-         * A graph carrying no dashboard, or one saved from the canvas, opens on the canvas, so
-         * nothing that predates this feature changes. A graph whose author saved it while looking
-         * at the grid opens into the grid, which is the whole point of a dashboard being
-         * shareable: the link is the wall of results, not a canvas the recipient has to be told
-         * to press `D` on. See `DashboardLayout.open` for why this is a different promise from
-         * the lock's, which deliberately does not travel.
-         */
-        dashboardOpen: graph.dashboard?.open === true,
       })
       sched().invalidateAll()
       afterGraphChange(graph)

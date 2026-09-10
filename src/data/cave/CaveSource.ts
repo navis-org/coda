@@ -41,7 +41,7 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import { boundsOf, getRow, makeTable, selectRows, tableFromRows } from '../../core/values'
+import { boundsOf, makeTable, selectRows, tableFromRows } from '../../core/values'
 import { geometryFrame } from '../transforms/spaces'
 import type {
   AdjacencyRequest,
@@ -65,8 +65,12 @@ import type { NeuronIndexRequest } from '../neuronIndex'
 import type { Edge } from '../connectivity'
 import { matrixFromEdges, typesOf } from '../connectivity'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
-import { compileLabelMatch, preparedRows, refuseUnfilterableRoi } from '../neuronFilter'
-import { fieldTermsMatch } from '../terms'
+import {
+  compileLabelMatch,
+  matchIndexRows,
+  preparedRows,
+  refuseUnfilterableRoi,
+} from '../neuronFilter'
 import { mapWithConcurrency } from '../concurrency'
 import type { GrapheneMeshSource } from './meshes'
 import {
@@ -854,9 +858,6 @@ export class CaveSource implements DataSource {
 
     const prepared = preparedRows(index, req, 'This CAVE datastack')
     const labelTest = compileLabelMatch(req.labels)
-    // Present-and-empty means no neurons, never "no filter" — the seam's documented rule, and
-    // the one an unconfigured node depends on.
-    const wantedIds = req.neuronIds ? new Set<string>(req.neuronIds) : undefined
 
     /*
      * The one filter a CAVE datastack has nothing to answer with, refused before a row is read.
@@ -870,23 +871,7 @@ export class CaveSource implements DataSource {
      */
     refuseUnfilterableRoi(req, 'This CAVE datastack')
 
-    /*
-     * Columns are hoisted by `prepareFieldTerms`, and a row record is built only for `labels` —
-     * the one filter that genuinely needs a whole row. Materialising every row first cost 139,255
-     * objects per query, discarded overwhelmingly by the very next line.
-     */
-    const ids = index.data[ID_COLUMN_NAME] ?? []
-
-    const matched: number[] = []
-    for (let i = 0; i < index.length; i++) {
-      if (wantedIds && !wantedIds.has(String(ids[i]))) continue
-      if (!fieldTermsMatch(prepared, i)) continue
-      if (labelTest && !labelTest(getRow(index, i))) continue
-      matched.push(i)
-    }
-
-    const limited = req.limit && req.limit > 0 ? matched.slice(0, req.limit) : matched
-    return selectRows(index, limited)
+    return selectRows(index, matchIndexRows(index, req, prepared, labelTest))
   }
 
   // -------------------------------------------------------------------------

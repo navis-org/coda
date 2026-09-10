@@ -20,9 +20,8 @@ import { IDBFactory } from 'fake-indexeddb'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { addEdge, addNode, emptyGraph, setNodeParam } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { column, columnNames, schemaOf, tableSchema } from '../../core/types'
@@ -30,6 +29,7 @@ import type { TableValue } from '../../core/values'
 import { isTableValue, tableFromRows } from '../../core/values'
 import { putUpload, resetUploads, uploadPeekSettled } from '../../data/uploads'
 import '../index'
+import { node } from '../../test/graph'
 
 const ANNOTATIONS = tableSchema(
   column('root_id', 'i64'),
@@ -51,15 +51,6 @@ function makeScheduler(): Scheduler {
       throw new Error(`the upload node must not reach a source (asked for ${id})`)
     },
   })
-}
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
 }
 
 /** upload → sort, so there is something downstream to observe being invalidated. */

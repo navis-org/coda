@@ -30,6 +30,7 @@
 
 import { useEffect, useRef } from 'react'
 import type { RefObject } from 'react'
+import { tooltipPoint } from './tooltipPoint'
 
 /** How fast a wheel zooms. One constant, because two charts must not differ. */
 const WHEEL_SENSITIVITY = 0.0015
@@ -49,10 +50,10 @@ export function useWheelZoom(
     let pending: { factor: number; x: number; y: number; frame: number } | undefined
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
-      const rect = element.getBoundingClientRect()
       const factor = Math.exp(event.deltaY * WHEEL_SENSITIVITY)
-      const x = event.clientX - rect.left
-      const y = event.clientY - rect.top
+      // In the element's own pixels: `tooltipPoint` divides out React Flow's zoom, which a card
+      // on the canvas is drawn at and a raw client offset would carry into the anchor.
+      const { x, y } = tooltipPoint(event, element)
       if (pending) {
         pending.factor *= factor
         pending.x = x

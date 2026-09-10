@@ -17,7 +17,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import { availableColumns, defaultParams, makeInferContext } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
@@ -28,21 +28,13 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource, requireSource } from '../../data/source'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
 
 const DATASET = 'optic-lobe-mini'
 
 beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
 })
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
 
 /** dataset → (find sources, find targets) → paths */
 function pipeline(params: Record<string, unknown> = {}, from = 'L1', to = 'DNp02'): CodaGraph {

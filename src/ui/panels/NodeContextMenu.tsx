@@ -11,6 +11,7 @@ import { LOCKED_HINT } from '../lockCopy'
 import { shortcutKeys } from '../shortcuts'
 import { useDismissOnOutside } from '../useDismiss'
 import { AlignTools } from './AlignTools'
+import { menuPosition } from '../menuPosition'
 
 export interface NodeContextMenuProps {
   screenPosition: { x: number; y: number }
@@ -34,8 +35,15 @@ export function NodeContextMenu({
   onClose,
 }: NodeContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
-  const store = useGraphStore()
-  const node = store.graph.nodes.find((n) => n.id === nodeId)
+  /*
+   * Field by field rather than `useGraphStore()` whole, which re-rendered this menu on every
+   * change to the store while it was open. The actions are stable, so they are read once.
+   */
+  const graph = useGraphStore((s) => s.graph)
+  const selection = useGraphStore((s) => s.selection)
+  const locked = useGraphStore((s) => s.locked)
+  const actions = useGraphStore.getState()
+  const node = graph.nodes.find((n) => n.id === nodeId)
 
   useDismissOnOutside(ref, onClose, { onEscape: true })
   const seenHints = useDismissedHints()
@@ -58,9 +66,9 @@ export function NodeContextMenu({
 
   // The selection is what bulk actions apply to; a right-click on an unselected node
   // acts on that node alone.
-  const targets = store.selection.includes(nodeId) ? store.selection : [nodeId]
+  const targets = selection.includes(nodeId) ? selection : [nodeId]
   /** The frames this menu's cards sit in — what Ungroup would take apart. */
-  const touched = groupsTouching(store.graph, targets)
+  const touched = groupsTouching(graph, targets)
 
   /*
    * Half this menu is about evaluation — run it, drop its cache, mute it, collapse it — and none
@@ -82,9 +90,8 @@ export function NodeContextMenu({
    * reach `addToDashboard` and get a cell with nothing in it. `addCells` refuses it now either
    * way — this is what stops the row counting it and promising otherwise.
    */
-  const placeable = placeableIds(store.graph, targets)
-  const onDashboard =
-    placeable.length > 0 && placeable.every((id) => isOnDashboard(store.graph, id))
+  const placeable = placeableIds(graph, targets)
+  const onDashboard = placeable.length > 0 && placeable.every((id) => isOnDashboard(graph, id))
 
   const act = (fn: () => void) => () => {
     fn()
@@ -95,10 +102,7 @@ export function NodeContextMenu({
     <div
       ref={ref}
       className="context-menu"
-      style={{
-        left: Math.min(screenPosition.x, window.innerWidth - 190),
-        top: Math.min(screenPosition.y, window.innerHeight - 230),
-      }}
+      style={menuPosition(screenPosition, { width: 190, height: 230 })}
       role="menu"
     >
       {dataflow && (
@@ -106,7 +110,7 @@ export function NodeContextMenu({
           <button
             type="button"
             className="context-menu__item"
-            onClick={act(() => void store.runNode(nodeId))}
+            onClick={act(() => void actions.runNode(nodeId))}
           >
             Run this node <kbd>⏎</kbd>
           </button>
@@ -114,7 +118,7 @@ export function NodeContextMenu({
             type="button"
             className="context-menu__item"
             title="Drop the results here and downstream, so they are computed again"
-            onClick={act(() => store.invalidateNode(nodeId))}
+            onClick={act(() => actions.invalidateNode(nodeId))}
           >
             Invalidate Results
           </button>
@@ -128,7 +132,7 @@ export function NodeContextMenu({
               type="button"
               className="context-menu__item"
               title="Forget the data this node downloaded, so the next run fetches it again"
-              onClick={act(() => store.clearNodeCache(nodeId))}
+              onClick={act(() => actions.clearNodeCache(nodeId))}
             >
               Clear Cache
             </button>
@@ -137,14 +141,14 @@ export function NodeContextMenu({
           <button
             type="button"
             className="context-menu__item"
-            onClick={act(() => store.toggleDisabled(targets))}
+            onClick={act(() => actions.toggleDisabled(targets))}
           >
             {node.disabled ? 'Unmute' : 'Mute'} <kbd>M</kbd>
           </button>
           <button
             type="button"
             className="context-menu__item"
-            onClick={act(() => store.toggleCollapsed(targets))}
+            onClick={act(() => actions.toggleCollapsed(targets))}
           >
             {node.collapsed ? 'Expand' : 'Collapse'} <kbd>H</kbd>
           </button>
@@ -152,7 +156,7 @@ export function NodeContextMenu({
             type="button"
             className="context-menu__item"
             title="Fold the parameter and port rows away, leaving the header, the body and the result"
-            onClick={act(() => store.toggleParamRows(targets))}
+            onClick={act(() => actions.toggleParamRows(targets))}
           >
             {node.paramsCollapsed ? 'Show parameters & ports' : 'Hide parameters & ports'}
           </button>
@@ -188,8 +192,8 @@ export function NodeContextMenu({
             disabled={placeable.length === 0}
             onClick={act(() =>
               onDashboard
-                ? store.removeFromDashboard(placeable)
-                : store.addToDashboard(placeable),
+                ? actions.removeFromDashboard(placeable)
+                : actions.addToDashboard(placeable),
             )}
           >
             {onDashboard ? 'Remove from Dashboard' : 'Add to Dashboard'}
@@ -199,9 +203,9 @@ export function NodeContextMenu({
       <button
         type="button"
         className="context-menu__item"
-        onClick={act(() => store.duplicateSelection())}
-        disabled={store.locked || store.selection.length === 0}
-        title={store.locked ? LOCKED_HINT : undefined}
+        onClick={act(() => actions.duplicateSelection())}
+        disabled={locked || selection.length === 0}
+        title={locked ? LOCKED_HINT : undefined}
       >
         Duplicate <kbd>{shortcutKeys('duplicate')}</kbd>
       </button>
@@ -216,7 +220,7 @@ export function NodeContextMenu({
         className="context-menu__item"
         title="Onto the system clipboard, so it pastes into another tab too"
         onClick={act(() => {
-          store.setSelection(targets)
+          actions.setSelection(targets)
           copySelectionToSystem()
         })}
       >
@@ -226,11 +230,11 @@ export function NodeContextMenu({
         type="button"
         className="context-menu__item"
         onClick={act(() => {
-          store.setSelection(targets)
+          actions.setSelection(targets)
           cutSelectionToSystem()
         })}
-        disabled={store.locked}
-        title={store.locked ? LOCKED_HINT : undefined}
+        disabled={locked}
+        title={locked ? LOCKED_HINT : undefined}
       >
         Cut <kbd>{shortcutKeys('cut')}</kbd>
       </button>
@@ -248,8 +252,8 @@ export function NodeContextMenu({
         type="button"
         className="context-menu__item"
         onClick={act(() => void pasteFromClipboard(flowPosition))}
-        disabled={store.locked}
-        title={store.locked ? LOCKED_HINT : 'Put the copied cards down here'}
+        disabled={locked}
+        title={locked ? LOCKED_HINT : 'Put the copied cards down here'}
       >
         Paste <kbd>{shortcutKeys('paste')}</kbd>
       </button>
@@ -263,12 +267,12 @@ export function NodeContextMenu({
         type="button"
         className="context-menu__item"
         onClick={act(() => {
-          store.setSelection(targets)
-          store.groupSelection()
+          actions.setSelection(targets)
+          actions.groupSelection()
         })}
-        disabled={store.locked}
+        disabled={locked}
         title={
-          store.locked
+          locked
             ? LOCKED_HINT
             : 'Draw one frame around these cards; dragging it moves all of them'
         }
@@ -279,9 +283,9 @@ export function NodeContextMenu({
         <button
           type="button"
           className="context-menu__item"
-          onClick={act(() => store.ungroup(touched.map((g) => g.id)))}
-          disabled={store.locked}
-          title={store.locked ? LOCKED_HINT : 'The frame goes; the cards stay where they are'}
+          onClick={act(() => actions.ungroup(touched.map((g) => g.id)))}
+          disabled={locked}
+          title={locked ? LOCKED_HINT : 'The frame goes; the cards stay where they are'}
         >
           {touched.length > 1 ? `Ungroup ${touched.length} groups` : 'Ungroup'}{' '}
           <kbd>{shortcutKeys('ungroup')}</kbd>
@@ -304,7 +308,7 @@ export function NodeContextMenu({
           <button
             type="button"
             className="context-menu__item"
-            onClick={act(() => store.openHelp(def.type))}
+            onClick={act(() => actions.openHelp(def.type))}
           >
             What this node does
           </button>
@@ -314,9 +318,9 @@ export function NodeContextMenu({
       <button
         type="button"
         className="context-menu__item context-menu__item--danger"
-        onClick={act(() => store.deleteNodes(targets))}
-        disabled={store.locked}
-        title={store.locked ? LOCKED_HINT : undefined}
+        onClick={act(() => actions.deleteNodes(targets))}
+        disabled={locked}
+        title={locked ? LOCKED_HINT : undefined}
       >
         Delete <kbd>⌫</kbd>
       </button>

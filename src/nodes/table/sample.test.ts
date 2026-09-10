@@ -13,36 +13,22 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph, setNodeParam } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
-import { requireNodeDef } from '../../core/registry'
-import { Scheduler } from '../../core/scheduler'
+import type { Scheduler } from '../../core/scheduler'
 import { schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
+import { mockScheduler } from '../../test/scheduler'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
 function makeScheduler(): Scheduler {
-  return new Scheduler({
-    resolveSource: (id) => {
-      if (id !== 'mock') throw new Error(`unexpected source ${id}`)
-      return source
-    },
-  })
-}
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
+  return mockScheduler(source)
 }
 
 /** dataset → find(LC.*) → sample */
@@ -118,6 +104,26 @@ describe('core.sample — modes', () => {
     expect(
       inferGraph(pipeline({ mode: 'stride', step: 2 })).nodes['smp']?.issues ?? [],
     ).toEqual([])
+  })
+
+  /*
+   * A node stored without a key — an older file, a hand edit, an assistant plan — is keyed on the
+   * declared default (`normalizeParams`), so that is what it has to compute. It used to read
+   * `count ?? 0` and answer an empty table under a key that said a hundred rows.
+   */
+  it('reads an absent count, step or seed as its declared default', async () => {
+    const all = await rows(pipeline({ mode: 'head', count: 1_000_000 }))
+    const absent = (params: Record<string, unknown>): CodaGraph => {
+      const graph = pipeline(params)
+      const stored = graph.nodes.find((n) => n.id === 'smp')!.params as Record<string, unknown>
+      for (const key of ['count', 'step', 'seed']) delete stored[key]
+      return graph
+    }
+    expect(await rows(absent({ mode: 'head' }))).toEqual(all.slice(0, 100))
+    expect(await rows(absent({ mode: 'stride' }))).toEqual(all.filter((_, i) => i % 10 === 0))
+    expect(await rows(absent({ mode: 'random' }))).toEqual(
+      await rows(pipeline({ mode: 'random', count: 100, seed: 1 })),
+    )
   })
 })
 

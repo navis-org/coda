@@ -242,7 +242,6 @@ registerEmitter(
   'neuron.findNeurons',
   (ctx) => {
     const c = ctx.wired('dataset')
-    if (!c) return ctx.todo('No Dataset is wired to this Find Neurons.')
 
     // One resolution of the dataset's neuron schema, threaded to whichever branch runs — it was
     // being recomputed three times per node, once in a helper that then discarded it.
@@ -464,7 +463,6 @@ registerEmitter('neuron.inputIds', (ctx) => {
 
 registerEmitter('neuron.idsFromLabel', (ctx) => {
   const c = ctx.wired('dataset')
-  if (!c) return ctx.todo('No Dataset is wired to this IDs from Label.')
 
   const field = ctx.column('field') || 'type'
   const typed = parseTypedLabels(ctx.params.labels)
@@ -633,7 +631,6 @@ registerEmitter('neuron.adjacency', (ctx) => {
 registerEmitter('neuron.roiCounts', (ctx) => {
   const c = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
-  if (!neurons) return ctx.todo('No Neurons are wired to this ROI Counts.')
 
   ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
   const out = ctx.output('counts')
@@ -659,7 +656,6 @@ registerEmitter('neuron.roiCounts', (ctx) => {
 
 registerEmitter('neuron.rawCypher', (ctx) => {
   const c = ctx.wired('dataset')
-  if (!c) return ctx.todo('No Dataset is wired to this Raw Cypher.')
 
   ctx.require('neuprint', 'fetch_custom')
   const out = ctx.output('result')
@@ -745,7 +741,6 @@ function carryLines(ctx: EmitContext, list: string, frame: string): string[] {
 registerEmitter('neuron.skeletons', (ctx) => {
   const c = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
-  if (!neurons) return ctx.todo('No Neurons are wired to this Skeletons node.')
 
   // navis rather than neuprint's own `fetch_skeleton`: this returns a NeuronList of healed
   // TreeNeurons, which is the object every downstream navis call actually wants.
@@ -788,7 +783,6 @@ registerEmitter('neuron.skeletons', (ctx) => {
 registerEmitter('neuron.meshes', (ctx) => {
   const c = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
-  if (!neurons) return ctx.todo('No Neurons are wired to this Meshes node.')
 
   ctx.require('navisNeuprint')
   const out = ctx.output('meshes')
@@ -867,7 +861,6 @@ registerEmitter('neuron.roiMeshes', (ctx) => {
 registerEmitter('neuron.synapses', (ctx) => {
   const c = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
-  if (!neurons) return ctx.todo('No Neurons are wired to this Synapses node.')
 
   ctx.require('neuprint', 'NeuronCriteria', 'SynapseCriteria', 'fetch_synapses')
   const out = ctx.output('points')

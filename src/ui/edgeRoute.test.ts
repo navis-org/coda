@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { XY } from '../layout/place'
-import { CORNER_RADIUS, roundedPath, routeMidpoint, routeWaypoints } from './edgeRoute'
+import { CORNER_RADIUS, roundedPath, routeWaypoints } from './edgeRoute'
 
 /** Every coordinate pair in a path, in order — enough to check where a path has been. */
 function points(d: string): XY[] {
@@ -128,28 +128,5 @@ describe('routeWaypoints', () => {
       { x: 0, y: 0 },
       { x: 50, y: 50 },
     ])
-  })
-})
-
-describe('routeMidpoint', () => {
-  it('measures by length, not by waypoint index', () => {
-    /*
-     * The waypoints are not evenly spaced — ELK's step out of a port is 10 units and the run
-     * across the graph is several hundred — so the middle *entry* of the list is usually still
-     * sitting on the source card.
-     */
-    const middle = routeMidpoint([
-      { x: 0, y: 0 },
-      { x: 10, y: 0 },
-      { x: 10, y: 200 },
-      { x: 20, y: 200 },
-    ])
-    expect(middle.x).toBeCloseTo(10)
-    expect(middle.y).toBeCloseTo(100)
-  })
-
-  it('answers for the degenerate cases rather than throwing', () => {
-    expect(routeMidpoint([])).toEqual({ x: 0, y: 0 })
-    expect(routeMidpoint([{ x: 3, y: 4 }])).toEqual({ x: 3, y: 4 })
   })
 })

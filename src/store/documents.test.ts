@@ -153,6 +153,35 @@ describe('switching', () => {
   })
 
   /*
+   * Both name a group by id, and two documents opened from one file share their ids — so a peek
+   * carried across a switch opens on the *other* document's group of the same id.
+   */
+  it('keeps a group peek and a title edit with the document they were opened in', () => {
+    const { first, second } = twoDocuments()
+    store().peekGroup('g1')
+    store().editGroupTitle('g1')
+
+    store().switchDocument(first)
+    expect(store().peekGroupId).toBeUndefined()
+    expect(store().editingGroupId).toBeUndefined()
+
+    store().switchDocument(second)
+    expect(store().peekGroupId).toBe('g1')
+    expect(store().editingGroupId).toBe('g1')
+  })
+
+  it('closes the Edge data panel when a graph is loaded or started over', () => {
+    twoDocuments()
+    store().openEdgePanel(store().graph.nodes[0]!.id)
+    store().loadGraph(named('Loaded'))
+    expect(store().edgePanelNode).toBeUndefined()
+
+    store().openEdgePanel(store().graph.nodes[0]!.id)
+    store().newGraph()
+    expect(store().edgePanelNode).toBeUndefined()
+  })
+
+  /*
    * The reason there is a Scheduler per document rather than one shared. A cache keyed by node
    * id would be right if node ids were unique, and they are not: `deserializeGraph` does not
    * remap them, so two documents opened from one file carry the same ones.

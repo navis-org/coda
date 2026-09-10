@@ -279,9 +279,9 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
           `${blockedBy.length === 1 ? 'was' : 'were'} not translated.`,
       )
     } else if (!emitter) {
-      warnings.push(`${def.label} has no Python equivalent yet.`)
+      warnings.push(`${def.label} has no R equivalent yet.`)
       body = ctx.todo(
-        `"${def.label}" has no notebook equivalent yet, so this step is missing from ` +
+        `"${def.label}" has no R Markdown equivalent yet, so this step is missing from ` +
           'the translation. Everything downstream of it refers to variables that were ' +
           'never bound.',
       )

@@ -16,7 +16,6 @@
 import { describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { GraphNode } from '../../core/graph'
 import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { inferGraph } from '../../core/inference'
@@ -25,17 +24,9 @@ import type { MatrixValue, TableValue, Value } from '../../core/values'
 import { getColumn, isTableValue, makeMatrix, tableFromRows } from '../../core/values'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
 
 const def = requireNodeDef('core.embed')
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
 
 /** Eight observations in two obvious groups of four, as similarities. */
 function scoreMatrix(): MatrixValue {

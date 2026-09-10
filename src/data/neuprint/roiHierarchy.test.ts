@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { superRoiNames, superRoisFrom } from './roiHierarchy'
+import { superRoisFrom } from './roiHierarchy'
 
 /** hemibrain's, as `fetch_roi_hierarchy` prints it. Asterisks there mark the primary set. */
 const HEMIBRAIN = {
@@ -115,18 +115,5 @@ describe('superRoisFrom', () => {
 
   it('answers nothing when no region is primary', () => {
     expect(superRoisFrom(HEMIBRAIN, [])).toEqual({})
-  })
-})
-
-describe('superRoiNames', () => {
-  it('lists the groups once each, in the order the hierarchy gives them', () => {
-    // Tree order rather than alphabetical: the hierarchy is somebody's ordering of anatomy and
-    // re-sorting discards it for nothing.
-    expect(superRoiNames(superRoisFrom(HEMIBRAIN, PRIMARY))).toEqual(['CX', 'INP'])
-  })
-
-  it('is empty for a dataset whose primary regions are all top level', () => {
-    const flat = { name: 'ds', children: [{ name: 'A' }, { name: 'B' }] }
-    expect(superRoiNames(superRoisFrom(flat, ['A', 'B']))).toEqual([])
   })
 })

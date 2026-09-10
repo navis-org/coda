@@ -23,6 +23,7 @@ import { useRef } from 'react'
 
 import { useDismissOnOutside } from '../useDismiss'
 import { LAST_FIELD_HINT } from './rowColumns'
+import { menuPosition } from '../menuPosition'
 
 /** Rough menu box, for keeping it on screen. Mirrors `.context-menu`'s min-width. */
 const MENU_WIDTH = 220
@@ -88,21 +89,10 @@ export function RowContextMenu({
     <div
       ref={ref}
       className="context-menu"
-      style={{
-        /*
-         * `documentElement.clientWidth`, never `window.innerWidth`. On a phone `innerWidth` is
-         * the visual viewport at minimum scale, so a panel hanging off the right widens the
-         * document, the browser zooms out, and the number grows to include the overflow being
-         * measured — `ui-shell.md` records that costing a menu 8px of correction instead of 60.
-         * The four older context menus still clamp the other way; this is not the diff to fix
-         * them in.
-         */
-        left: Math.min(at.x, document.documentElement.clientWidth - MENU_WIDTH),
-        top: Math.min(
-          at.y,
-          document.documentElement.clientHeight - MENU_HEIGHT - (chip ? CHIP_ROW_HEIGHT : 0),
-        ),
-      }}
+      style={menuPosition(at, {
+        width: MENU_WIDTH,
+        height: MENU_HEIGHT + (chip ? CHIP_ROW_HEIGHT : 0),
+      })}
       role="menu"
     >
       <div className="context-menu__caption">{caption}</div>

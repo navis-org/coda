@@ -183,16 +183,6 @@ async function read<T>(
   }
 }
 
-/** Whether anything saved here would survive a reload. Drives what the UI offers. */
-export async function libraryAvailable(): Promise<boolean> {
-  try {
-    await db()
-    return true
-  } catch {
-    return false
-  }
-}
-
 /**
  * Everything on the shelf, newest first.
  *

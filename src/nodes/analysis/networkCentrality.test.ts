@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
@@ -25,17 +25,9 @@ import { centralitySummarySchema } from '../lib/networkCentrality'
 import { centralityOptions } from './networkCentrality'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
 
 /** dataset → find(LC.*) → connectivity → net.build → net.centrality */
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {

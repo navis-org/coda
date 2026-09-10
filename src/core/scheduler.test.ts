@@ -3,27 +3,23 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { MockSource } from '../data/mock/MockSource'
 import type { DataSource } from '../data/source'
 import '../nodes'
-import type { CodaGraph, GraphNode } from './graph'
+import type { CodaGraph } from './graph'
 import { addEdge, addNode, emptyGraph, setNodeParam } from './graph'
 import { inferGraph } from './inference'
 import { T, column, tableSchema } from './types'
-import { defaultParams } from './node'
-import { registerNode, requireNodeDef } from './registry'
+import { registerNode } from './registry'
 import { Scheduler } from './scheduler'
 import type { Value } from './values'
 import { isTableValue, tableFromRows } from './values'
 import { searchFor } from '../test/findNeurons'
+import { mockScheduler } from '../test/scheduler'
+import { node } from '../test/graph'
 
 /** Zero-latency source so tests don't wait on the simulated round trip. */
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
 function makeScheduler(): Scheduler {
-  return new Scheduler({
-    resolveSource: (id) => {
-      if (id !== 'mock') throw new Error(`unexpected source ${id}`)
-      return source
-    },
-  })
+  return mockScheduler(source)
 }
 
 /**
@@ -57,16 +53,6 @@ function sampling(): { scheduler: Scheduler; seen: { done: number; total: number
 function expectNeverBackwards(seen: readonly { done: number }[]): void {
   for (const [i, p] of seen.entries()) {
     expect(p.done).toBeGreaterThanOrEqual(seen[i - 1]?.done ?? 0)
-  }
-}
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  const def = requireNodeDef(type)
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(def), ...params } as GraphNode['params'],
   }
 }
 

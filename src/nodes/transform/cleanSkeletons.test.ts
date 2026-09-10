@@ -15,12 +15,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import { defaultParams, makeInferContext } from '../../core/node'
 import type { ParamValues } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
-import { Scheduler } from '../../core/scheduler'
+import type { Scheduler } from '../../core/scheduler'
 import { column, tableSchema } from '../../core/types'
 import type { SkeletonsValue } from '../../core/values'
 import { isSkeletonsValue, makeTable } from '../../core/values'
@@ -40,6 +40,8 @@ import {
 import { NM_PER_UM } from '../lib/nblastOps'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
+import { mockScheduler } from '../../test/scheduler'
 
 vi.mock('../../pyodide/skeletons', () => ({ runCleanSkeletons: vi.fn() }))
 const { runCleanSkeletons } = await import('../../pyodide/skeletons')
@@ -284,15 +286,6 @@ describe('cleanOps — the resample ceiling', () => {
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
 
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
-
 /** dataset → find(LC4) → skeletons → clean */
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {
   let g = emptyGraph('clean-test')
@@ -315,12 +308,7 @@ function pipeline(params: Record<string, unknown> = {}): CodaGraph {
 }
 
 function scheduler(): Scheduler {
-  return new Scheduler({
-    resolveSource: (id) => {
-      if (id !== 'mock') throw new Error(`unexpected source ${id}`)
-      return source
-    },
-  })
+  return mockScheduler(source)
 }
 
 beforeEach(() => {

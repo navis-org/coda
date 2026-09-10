@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import { defaultParams, makeInferContext } from '../../core/node'
 import { defaultOutputPorts } from '../../core/ports'
@@ -25,17 +25,9 @@ import type { DataSource } from '../../data/source'
 import { matrixLinksSchema } from '../lib/tableOps'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
 
 const source: DataSource = new MockSource({ latencyMs: 0 })
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
 
 /**
  * dataset → find(LC.\*) onto find(everything) → adjacency → net.build

@@ -97,37 +97,3 @@ export function routeWaypoints(source: XY, bends: readonly XY[], target: XY): XY
   if (!last || !same(target, last)) points.push(target)
   return points
 }
-
-/**
- * The midpoint of a route, by arc length — where a label or a badge would go.
- *
- * By length rather than by waypoint index, because the waypoints are not evenly spaced: ELK's
- * step out of a port is 10 units and the run across the graph is several hundred, so the middle
- * *point* of the list is usually still sitting on the source card.
- */
-export function routeMidpoint(points: readonly XY[]): XY {
-  const first = points[0]
-  const end = points[points.length - 1]
-  if (!first || !end) return { x: 0, y: 0 }
-  if (points.length === 1) return { ...first }
-
-  const segments: Array<{ from: XY; to: XY; length: number }> = []
-  let total = 0
-  for (let i = 1; i < points.length; i++) {
-    const from = points[i - 1]
-    const to = points[i]
-    if (!from || !to) continue
-    const length = distance(from, to)
-    segments.push({ from, to, length })
-    total += length
-  }
-
-  let walked = 0
-  for (const segment of segments) {
-    if (walked + segment.length >= total / 2) {
-      return towards(segment.from, segment.to, total / 2 - walked)
-    }
-    walked += segment.length
-  }
-  return { ...end }
-}

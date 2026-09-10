@@ -34,7 +34,6 @@ let token: string | undefined
 let login: string | undefined
 let loaded = false
 
-const changed = channel()
 const authFailure = channel<string>()
 
 function load(): void {
@@ -63,7 +62,6 @@ export function setGithubToken(raw: string | undefined): void {
   if (next !== token) setGithubLogin(undefined)
   token = next
   writeStorage(TOKEN_KEY, token)
-  changed.notify()
 }
 
 export function forgetGithubToken(): void {
@@ -81,8 +79,6 @@ export function setGithubLogin(raw: string | undefined): void {
   login = raw?.trim() || undefined
   writeStorage(LOGIN_KEY, login)
 }
-
-export const subscribeGithubChanged = changed.subscribe
 
 /** Raised on a 401 so the panel can open on the field that needs attention. */
 export const reportGithubAuthFailure = authFailure.notify

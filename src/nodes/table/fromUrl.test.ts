@@ -16,9 +16,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { addEdge, addNode, emptyGraph, setNodeParam } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { availableColumns, defaultParams } from '../../core/node'
+import { availableColumns } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { columnNames, schemaOf } from '../../core/types'
@@ -26,6 +26,7 @@ import { isTableValue } from '../../core/values'
 import { MAX_UPLOAD_BYTES } from '../../data/uploads'
 import '../index'
 import { resetFetchedSchemas } from './fromUrl'
+import { node } from '../../test/graph'
 
 const URL_ = 'https://example.org/annotations.csv'
 const CSV = 'root_id,cellType,cluster\n101,LC4,3\n102,LC6,1\n'
@@ -57,15 +58,6 @@ function makeScheduler(): Scheduler {
       throw new Error(`this node must not reach a source (asked for ${id})`)
     },
   })
-}
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
 }
 
 /** url → sort, so there is something downstream to observe. */

@@ -17,6 +17,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { LOCKED_HINT } from '../lockCopy'
 import { useDismissOnOutside } from '../useDismiss'
 import { nodePorts } from '../../core/graph'
+import { menuPosition } from '../menuPosition'
 
 export interface EdgeContextMenuProps {
   screenPosition: { x: number; y: number }
@@ -42,24 +43,27 @@ function endpointLabel(
 
 export function EdgeContextMenu({ screenPosition, edgeId, onClose }: EdgeContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
-  const store = useGraphStore()
-  const edge = store.graph.edges.find((e) => e.id === edgeId)
+  /*
+   * Field by field rather than `useGraphStore()` whole, which re-rendered this menu on every
+   * change to the store while it was open. The actions are stable, so they are read once.
+   */
+  const graph = useGraphStore((s) => s.graph)
+  const locked = useGraphStore((s) => s.locked)
+  const actions = useGraphStore.getState()
+  const edge = graph.edges.find((e) => e.id === edgeId)
 
   useDismissOnOutside(ref, onClose, { onEscape: true })
 
   if (!edge) return null
 
-  const from = endpointLabel(store.graph, edge.source, edge.sourceHandle, 'output')
-  const to = endpointLabel(store.graph, edge.target, edge.targetHandle, 'input')
+  const from = endpointLabel(graph, edge.source, edge.sourceHandle, 'output')
+  const to = endpointLabel(graph, edge.target, edge.targetHandle, 'input')
 
   return (
     <div
       ref={ref}
       className="context-menu"
-      style={{
-        left: Math.min(screenPosition.x, window.innerWidth - 210),
-        top: Math.min(screenPosition.y, window.innerHeight - 110),
-      }}
+      style={menuPosition(screenPosition, { width: 210, height: 110 })}
       role="menu"
     >
       <div className="context-menu__header">
@@ -80,13 +84,13 @@ export function EdgeContextMenu({ screenPosition, edgeId, onClose }: EdgeContext
         type="button"
         className="context-menu__item context-menu__item--danger"
         onClick={() => {
-          store.deleteEdges([edgeId])
+          actions.deleteEdges([edgeId])
           onClose()
         }}
         // The one item this menu has, so a locked canvas leaves a menu that only names the wire.
         // That is the point: naming which wire is under the pointer is worth something on its own.
-        disabled={store.locked}
-        title={store.locked ? LOCKED_HINT : undefined}
+        disabled={locked}
+        title={locked ? LOCKED_HINT : undefined}
       >
         Delete link <kbd>⌫</kbd>
       </button>

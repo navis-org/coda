@@ -24,6 +24,7 @@ import { LOCKED_HINT } from '../lockCopy'
 import { shortcutKeys } from '../shortcuts'
 import { useDismissOnOutside } from '../useDismiss'
 import { AlignTools } from './AlignTools'
+import { menuPosition } from '../menuPosition'
 
 /**
  * Which of the members' params the folded box carries.
@@ -127,8 +128,14 @@ export interface GroupContextMenuProps {
 
 export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
-  const store = useGraphStore()
-  const group = store.graph.groups?.find((g) => g.id === groupId)
+  /*
+   * Field by field rather than `useGraphStore()` whole, which re-rendered this menu on every
+   * change to the store while it was open. The actions are stable, so they are read once.
+   */
+  const graph = useGraphStore((s) => s.graph)
+  const locked = useGraphStore((s) => s.locked)
+  const actions = useGraphStore.getState()
+  const group = graph.groups?.find((g) => g.id === groupId)
 
   useDismissOnOutside(ref, onClose, { onEscape: true })
 
@@ -143,10 +150,7 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
     <div
       ref={ref}
       className="context-menu"
-      style={{
-        left: Math.min(screenPosition.x, window.innerWidth - 190),
-        top: Math.min(screenPosition.y, window.innerHeight - 240),
-      }}
+      style={menuPosition(screenPosition, { width: 190, height: 240 })}
       role="menu"
     >
       <div className="context-menu__caption">{group.title || 'Untitled group'}</div>
@@ -155,7 +159,7 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
       <button
         type="button"
         className="context-menu__item"
-        onClick={act(() => store.editGroupTitle(groupId))}
+        onClick={act(() => actions.editGroupTitle(groupId))}
       >
         {group.title ? 'Rename' : 'Name this group'}
       </button>
@@ -163,7 +167,7 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
         type="button"
         className="context-menu__item"
         title="Select every card inside the frame"
-        onClick={act(() => store.setSelection(group.nodeIds))}
+        onClick={act(() => actions.setSelection(group.nodeIds))}
       >
         Select {group.nodeIds.length} nodes
       </button>
@@ -180,7 +184,7 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
             ? 'Draw the cards inside this frame again'
             : 'Fold this frame into one box, with its wires joined at its edges'
         }
-        onClick={act(() => store.toggleGroupCollapsed(groupId))}
+        onClick={act(() => actions.toggleGroupCollapsed(groupId))}
       >
         {group.collapsed ? 'Expand' : 'Collapse'}
       </button>
@@ -194,7 +198,7 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
           type="button"
           className="context-menu__item"
           title="Show the cards inside this frame in a panel, without unfolding it"
-          onClick={act(() => store.peekGroup(groupId))}
+          onClick={act(() => actions.peekGroup(groupId))}
         >
           Look inside
         </button>
@@ -234,7 +238,7 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
             aria-label={COLOR_LABELS[color]}
             aria-pressed={(group.color ?? 'grey') === color}
             title={COLOR_LABELS[color]}
-            onClick={() => store.styleGroup(groupId, { color })}
+            onClick={() => actions.styleGroup(groupId, { color })}
           />
         ))}
       </div>
@@ -243,7 +247,7 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
         className="context-menu__item"
         aria-pressed={group.filled === true}
         title="Tint the inside of the frame instead of drawing an outline only"
-        onClick={() => store.styleGroup(groupId, { filled: !group.filled })}
+        onClick={() => actions.styleGroup(groupId, { filled: !group.filled })}
       >
         {group.filled ? '✓ ' : ''}Filled
       </button>
@@ -251,7 +255,7 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
         type="button"
         className="context-menu__item"
         aria-pressed={group.dashed === true}
-        onClick={() => store.styleGroup(groupId, { dashed: !group.dashed })}
+        onClick={() => actions.styleGroup(groupId, { dashed: !group.dashed })}
       >
         {group.dashed ? '✓ ' : ''}Dashed
       </button>
@@ -264,9 +268,9 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
       <button
         type="button"
         className="context-menu__item"
-        onClick={act(() => store.ungroup([groupId]))}
-        disabled={store.locked}
-        title={store.locked ? LOCKED_HINT : 'Remove the frame; the cards stay where they are'}
+        onClick={act(() => actions.ungroup([groupId]))}
+        disabled={locked}
+        title={locked ? LOCKED_HINT : 'Remove the frame; the cards stay where they are'}
       >
         Ungroup <kbd>{shortcutKeys('ungroup')}</kbd>
       </button>

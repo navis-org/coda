@@ -17,7 +17,6 @@
 import { describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { GraphNode } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import { defaultParams, makeInferContext, resolveColumn } from '../../core/node'
 import type { ColumnParam, ParamValues } from '../../core/node'
@@ -28,6 +27,7 @@ import type { CodaType } from '../../core/types'
 import { tableFromRows } from '../../core/values'
 import type { TableValue } from '../../core/values'
 import '../index'
+import { node } from '../../test/graph'
 
 const EDGES = tableSchema(
   column('preId', 'str'),
@@ -313,13 +313,4 @@ function pipeline() {
     g = addEdge(g, { source: 'match', sourceHandle: out, target: 'cmp', targetHandle: into })
   }
   return g
-}
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
 }

@@ -10,10 +10,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
-import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { isTableValue } from '../../core/values'
 import type { TableValue } from '../../core/values'
@@ -22,21 +20,13 @@ import { mockDatasetIds } from '../../data/mock/generate'
 import { registerSource, requireSource } from '../../data/source'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
+import { node } from '../../test/graph'
 
 const DATASET = mockDatasetIds()[0]!
 
 beforeAll(() => {
   registerSource(new MockSource({ latencyMs: 0 }))
 })
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
-}
 
 /** dataset → idsFromLabel, plus an optional find → labels wire. */
 function pipeline(

@@ -31,9 +31,10 @@ import { R_METHODS } from './analysis'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
 import { decodeRanges } from '../../../nodes/lib/chartSelection'
-import { neuronIds, selectionIds, selectionLabels } from './common'
+import { neuronIds, selectionLabels } from './common'
 import { REGEX_FLAVOUR_NOTE, filterPredicates } from './tableFilters'
 import { roisPrimaryOnly } from '../../../nodes/lib/roiViewParams'
+import { selectionIds } from '../../selection'
 
 registerEmitter('out.table', (ctx) => {
   const src = ctx.wired('in')

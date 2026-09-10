@@ -24,6 +24,7 @@
  */
 
 import { errorMessage } from '../../core/errors'
+import { bodyExcerpt } from '../errorBody'
 import { parseCaveJson } from './json'
 import { getToken, reportAuthFailure } from './credentials'
 
@@ -281,20 +282,7 @@ function explain(body: string): string {
   if (parsed.schema_errors) return `invalid query — ${JSON.stringify(parsed.schema_errors)}`
   if (typeof parsed.error === 'string') return parsed.error
   // Not JSON: an HTML error page, or nothing at all.
-  return htmlTitle(body) ?? (body.slice(0, 300) || '(empty response)')
-}
-
-/**
- * The `<title>` of an HTML error page, or `undefined` for anything that is not one.
- *
- * Deliberately only the title, and only when the body looks like a document: a general tag
- * stripper turns a page with a stylesheet in it into a paragraph of CSS, which is worse than the
- * markup it replaced.
- */
-function htmlTitle(body: string): string | undefined {
-  if (!/^\s*<(?:!doctype|html|head)\b/i.test(body)) return undefined
-  const title = /<title[^>]*>([^<]*)<\/title>/i.exec(body)?.[1]?.trim()
-  return title || undefined
+  return bodyExcerpt(body)
 }
 
 export function caveGet<T>(url: string, options: CaveRequestOptions = {}): Promise<T> {

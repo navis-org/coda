@@ -51,14 +51,7 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import {
-  boundsOf,
-  cableLength,
-  emptyTable,
-  getRow,
-  makeTable,
-  selectRows,
-} from '../../core/values'
+import { boundsOf, cableLength, emptyTable, makeTable, selectRows } from '../../core/values'
 import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type {
@@ -74,9 +67,12 @@ import type {
   SourceSchemas,
 } from '../source'
 import { ROI_MESH_SCHEMA, requireSkeletonRoute } from '../source'
-import { compileLabelMatch, preparedRows, refuseUnfilterableRoi } from '../neuronFilter'
-import { fieldTermsMatch } from '../terms'
-import { ID_COLUMN_NAME } from '../../core/ids'
+import {
+  compileLabelMatch,
+  matchIndexRows,
+  preparedRows,
+  refuseUnfilterableRoi,
+} from '../neuronFilter'
 import { geometryFrame } from '../transforms/spaces'
 import type { NgSourceRef } from '../neuroglancer/sourceUrl'
 import type { MeshResult, MeshSource } from './index'
@@ -482,23 +478,11 @@ export class PrecomputedSource implements DataSource {
 
     const prepared = preparedRows(index, req, 'This neuroglancer datasource')
     const labelTest = compileLabelMatch(req.labels)
-    // Present-and-empty means no neurons, never "no filter" — the seam's documented rule, and the
-    // one an unconfigured node depends on.
-    const wantedIds = req.neuronIds ? new Set<string>(req.neuronIds) : undefined
     // A precomputed source has no regions to narrow by, and `DatasetInfo.rois` being full of its
     // *labels* is exactly the trap this refusal was written for on CATMAID.
     refuseUnfilterableRoi(req, 'This neuroglancer datasource')
 
-    const ids = index.data[ID_COLUMN_NAME] ?? []
-    const matched: number[] = []
-    for (let i = 0; i < index.length; i++) {
-      if (wantedIds && !wantedIds.has(String(ids[i]))) continue
-      if (!fieldTermsMatch(prepared, i)) continue
-      if (labelTest && !labelTest(getRow(index, i))) continue
-      matched.push(i)
-    }
-    const limited = req.limit && req.limit > 0 ? matched.slice(0, req.limit) : matched
-    return selectRows(index, limited)
+    return selectRows(index, matchIndexRows(index, req, prepared, labelTest))
   }
 
   /**

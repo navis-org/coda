@@ -27,6 +27,7 @@ import type { PaletteAction, PaletteItem } from './paletteItems'
 import { PALETTE_ACTIONS, paletteSearchText } from './paletteItems'
 import { Highlight } from './Highlight'
 import { useDismissOnOutside } from '../useDismiss'
+import { menuPosition } from '../menuPosition'
 
 export interface CommandPaletteProps {
   items: PaletteItem[]
@@ -117,8 +118,7 @@ export function CommandPalette({
 
   const width = 460
   const maxHeight = 440
-  const left = Math.max(8, Math.min(screenPosition.x, window.innerWidth - width - 8))
-  const top = Math.max(8, Math.min(screenPosition.y, window.innerHeight - maxHeight - 8))
+  const { left, top } = menuPosition(screenPosition, { width, height: maxHeight }, 8)
 
   return (
     <div

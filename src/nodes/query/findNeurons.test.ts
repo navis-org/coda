@@ -26,9 +26,8 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import type { CodaGraph, GraphNode } from '../../core/graph'
+import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { isTableValue, tableFromRows } from '../../core/values'
@@ -41,6 +40,7 @@ import type { DataSource } from '../../data/source'
 import { CANONICAL_SCHEMAS, registerSource, requireSource } from '../../data/source'
 import { rowsFromParams } from '../lib/filterRowParams'
 import '../index'
+import { node } from '../../test/graph'
 
 const DATASET = mockDatasetIds()[0]!
 
@@ -80,15 +80,6 @@ function mockRoi(): string {
   const roi = requireSource('mock').peekDataset(DATASET)?.rois?.[0]
   if (!roi) throw new Error('the mock dataset publishes no regions')
   return roi
-}
-
-function node(id: string, type: string, params: Record<string, unknown> = {}): GraphNode {
-  return {
-    id,
-    type,
-    position: { x: 0, y: 0 },
-    params: { ...defaultParams(requireNodeDef(type)), ...params } as GraphNode['params'],
-  }
 }
 
 function pipeline(params: Record<string, unknown> = {}): CodaGraph {

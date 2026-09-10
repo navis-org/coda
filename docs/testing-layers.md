@@ -2,6 +2,12 @@
 
 Which test file covers what — the index to consult before writing a new test.
 
+Shared helpers live in `src/test/`, and are the thing to reach for before writing a local copy:
+`graph.ts` (`node` — a node carrying its definition's default params, once written out byte for
+byte in forty-five files), `scheduler.ts` (`mockScheduler` — a Scheduler refusing every source but
+the one it is given, once in nineteen), `findNeurons.ts` (`searchFor`), `jsdomStubs.ts`,
+`storeReset.ts` and `caveStubs.ts`.
+
 ## Testing layers
 
 | File                                     | Covers                                                                                                                           |

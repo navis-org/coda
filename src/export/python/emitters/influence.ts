@@ -47,7 +47,6 @@ function populationNote(ctx: EmitContext, includeFragments: boolean): string[] {
 registerEmitter('neuron.influence', (ctx) => {
   const client = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
-  if (!neurons) return ctx.todo('No Neurons are wired to this Influence node.')
 
   const out = ctx.output('influence')
   /*

@@ -33,18 +33,15 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import {
-  boundsOf,
-  cableLength,
-  getRow,
-  makeMatrix,
-  selectRows,
-  tableFromRows,
-} from '../../core/values'
+import { boundsOf, cableLength, makeMatrix, selectRows, tableFromRows } from '../../core/values'
 import { geometryFrame } from '../transforms/spaces'
 import { mapWithConcurrency } from '../concurrency'
-import { compileLabelMatch, preparedRows, refuseUnfilterableRoi } from '../neuronFilter'
-import { fieldTermsMatch } from '../terms'
+import {
+  compileLabelMatch,
+  matchIndexRows,
+  preparedRows,
+  refuseUnfilterableRoi,
+} from '../neuronFilter'
 import { schemaFingerprint } from '../cache'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
@@ -569,32 +566,12 @@ export class CatmaidSource implements DataSource {
 
     const prepared = preparedRows(index, req, 'CATMAID')
     const labelMatch = compileLabelMatch(req.labels)
-    // Text against text. It was `numericIds` against `Number(ids[i])`, which was right while the
-    // column was `i64` and is now two conversions bracketing a comparison that needs none.
-    const wanted = req.neuronIds ? new Set(req.neuronIds) : undefined
-
     /*
-     * Columns are hoisted by `prepareFieldTerms` and the row built **only** for `labelMatch`,
-     * which is the one filter that needs a whole row. `CaveSource` documents the same fix:
-     * materialising every row first cost it 139,255 objects per query, "discarded,
-     * overwhelmingly, by the very next line".
-     *
-     * And the result is `selectRows` rather than a rebuilt table, which matters beyond the
+     * The result is `selectRows` rather than a rebuilt table, which matters beyond the
      * allocation: `tableFromRows` mints a fresh `TableValue`, throwing away the object identity
      * that `searchIndexFor` and `statsFor` key their `WeakMap`s on.
      */
-    const ids = index.data[ID_COLUMN_NAME] ?? []
-
-    const matched: number[] = []
-    for (let i = 0; i < index.length; i += 1) {
-      if (wanted && !wanted.has(idText(ids[i]) ?? '')) continue
-      if (!fieldTermsMatch(prepared, i)) continue
-      if (labelMatch && !labelMatch(getRow(index, i))) continue
-      matched.push(i)
-      if (req.limit && matched.length >= req.limit) break
-    }
-
-    return selectRows(index, matched)
+    return selectRows(index, matchIndexRows(index, req, prepared, labelMatch))
   }
 
   /**

@@ -688,7 +688,7 @@ registerEmitter('neuron.synapses', (ctx) => {
      * here, in the opposite direction from the notebook export.
      */
     ...(minConfidence > 0
-      ? ctx.todo(
+      ? ctx.note(
           `neuprintr has no confidence argument — filter this frame yourself, e.g. ` +
             `subset(<points>, confidence >= ${minConfidence}).`,
         )
