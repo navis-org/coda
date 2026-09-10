@@ -51,8 +51,8 @@ export function centralityOptions(params: ParamValues): CentralityOptions {
     eigenvector: params['eigenvector'] === true,
     communities: params['communities'] !== false,
     weighted: params['weighted'] === true,
-    samples: Math.max(0, Number(params['samples'] ?? 0)),
-    seed: Number(params['seed'] ?? 1),
+    samples: Math.max(0, Number(params['samples'])),
+    seed: Number(params['seed']),
     resolution: Number(params['resolution'] ?? 1),
     damping: Number(params['damping'] ?? 0.85),
   }
@@ -146,8 +146,7 @@ export const networkCentralityNode = registerNode({
       default: 1,
       min: 0,
       advanced: true,
-      visibleIf: (params) =>
-        Number(params['samples'] ?? 0) > 0 || params['communities'] !== false,
+      visibleIf: (params) => Number(params['samples']) > 0 || params['communities'] !== false,
       help: 'Pins the pivot draw and Louvain’s walk, so a re-run gives the same answer.',
     },
     {

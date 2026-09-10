@@ -26,6 +26,7 @@ import { formatNumber } from '../format'
 import { ParamField } from '../params/ParamField'
 import type { LabelMatchResult } from '../../nodes/lib/labelsToNeurons'
 import type { NodeBodyProps } from './nodeBodies'
+import { cardParams } from '../params/paramGroups'
 
 /** The op's own counts, plus the one fact only the run can supply. */
 type Summary = Omit<LabelMatchResult, 'neurons'> & {
@@ -86,9 +87,7 @@ export function LabelsToNeuronsBody({ node, ctx, compact, setParam }: NodeBodyPr
   // The generic card renders every non-advanced param; a body replaces that area outright, so
   // it renders the same set rather than a chosen few — a control a body forgets is reachable
   // only from the inspector, which on screen is indistinguishable from one never added.
-  const fields = (def?.params ?? []).filter(
-    (p) => !p.advanced && (!p.visibleIf || p.visibleIf(node.params)),
-  )
+  const fields = cardParams(def, node.params)
 
   const missed = summary ? summary.asked - summary.matched : 0
 

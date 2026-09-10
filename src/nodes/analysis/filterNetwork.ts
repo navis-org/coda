@@ -101,8 +101,7 @@ export const filterNetworkNode = registerNode({
       kind: 'string',
       label: 'Value',
       default: '',
-      visibleIf: (params) =>
-        opNeedsValue(String(params.op ?? FILTER_NETWORK_DEFAULT_OP) as FilterOp),
+      visibleIf: (params) => opNeedsValue(String(params.op) as FilterOp),
     },
     {
       id: 'seedColumn',
@@ -175,7 +174,7 @@ export const filterNetworkNode = registerNode({
 
     // `Filter Table`'s three checks, now literally the same function rather than a copy that had
     // already drifted on one message. See `filterConditionIssues`.
-    if (column) issues.push(...filterConditionIssues(dtype, op, String(ctx.params.value ?? '')))
+    if (column) issues.push(...filterConditionIssues(dtype, op, String(ctx.params.value)))
     /*
      * A wired seed table with no column chosen is the one reading of "empty" nobody intends —
      * `Match Cell Types`' Pass Through port, same shape and same message.
@@ -212,7 +211,7 @@ export const filterNetworkNode = registerNode({
         network.nodes,
         column,
         resolveFilterOp(ctx.params.op, seedCol.dtype, FILTER_NETWORK_DEFAULT_OP),
-        String(ctx.params.value ?? ''),
+        String(ctx.params.value),
       )
       for (const cell of getColumn(kept, 'id')) seeds.add(String(cell ?? ''))
     }
@@ -235,9 +234,9 @@ export const filterNetworkNode = registerNode({
 
     const kept = expandSelection(network, {
       seeds,
-      expand: String(ctx.params.expand ?? 'component') as NetworkExpansion,
-      hops: Number(ctx.params.hops ?? 1),
-      direction: String(ctx.params.direction ?? 'any') as WalkDirection,
+      expand: String(ctx.params.expand) as NetworkExpansion,
+      hops: Number(ctx.params.hops),
+      direction: String(ctx.params.direction) as WalkDirection,
     })
 
     if (seeds.size > 0 && kept.size === 0) {

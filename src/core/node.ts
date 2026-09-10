@@ -300,9 +300,9 @@ interface ParamBase {
    * and never runs over `deserializeGraph`, so a document without the key was written by a build
    * where the control did not exist — and it meant whatever the node did before it was added.
    *
-   * Left unset, absent is read as the default, which is right for the ordinary case: the reader
-   * spells it `params.normalize !== false` and `ParamField` falls back the same way, so the card
-   * and `evaluate` agree. Set, `deserializeGraph` writes this value in as the document is read,
+   * Left unset, absent is read as the default, which is right for the ordinary case: every context
+   * is built through `withDefaults`, which fills it, and `ParamField` falls back the same way, so
+   * the card and `evaluate` agree. Set, `deserializeGraph` writes this value in as the document is read,
    * which is what keeps them agreeing when the two answers differ. Without it the widget shows
    * the default while a reader spelling absence as off returns something else — a checkbox that
    * lies about the query under it, on somebody else's saved graph.
@@ -1062,6 +1062,85 @@ export function defaultParams(def: NodeDefinition): ParamValues {
   return params
 }
 
+/**
+ * What a column picker reads as when it is unset: its default if it is required, empty if it is
+ * optional — where empty is a *choice*. The one statement of it, for `resolveColumn`, which also
+ * counts a stored `''` on a required picker as unset, and for `withDefaults`, which fills a
+ * missing key.
+ */
+function columnAbsence(p: ColumnParam): string {
+  return p.optional ? '' : (p.default ?? '')
+}
+
+/**
+ * What a declared param reads as when nothing is stored, or `undefined` for nothing to give.
+ *
+ * A column picker reads as `columnAbsence` and a multi-picker as `[]` — what `resolveColumn` and
+ * `resolveColumns` already make of a missing key — so filling them changes no resolution and no
+ * key, and an emitter reading the param directly gets the canvas's answer.
+ */
+function absentValue(p: ParamDef): ParamValue | undefined {
+  if (p.kind === 'column') return columnAbsence(p)
+  if (p.kind === 'columns') return []
+  return p.default
+}
+
+const FILLED = new WeakMap<ParamValues, ParamValues>()
+
+/**
+ * A node's params as its code reads them: a declared param with no stored value reads as its
+ * declared default.
+ *
+ * The provenance key has always read absence that way (`normalizeParams`), and so has the widget
+ * (`ParamField` falls back to `param.default`), but `validate`, `inferOutputs` and `evaluate`
+ * were handed the stored object as it was — so every read spelled the default a second time,
+ * and the copies drifted: `ctx.params.count ?? 0` beside a declared `100` answered an empty table
+ * under a key that said a hundred rows. Applied where the contexts are built — `makeInferContext`,
+ * the scheduler's eval context, `normalizeParams`, both exporters' walks through the first — and
+ * wherever `visibleIf` is asked (`visibleParams`), so a node reads `ctx.params.x` and there is no
+ * second copy to drift.
+ *
+ * At read time, not at load. A load-time backfill is what `storedParams` refuses, because it
+ * reaches saved files and misses every fixture and hand-built node; this reaches all of them
+ * alike. `absentMeans` is untouched by it and deliberately not consulted: it describes a *stored*
+ * document, and the loader has written it in before anything reads — a node built in code is not
+ * a document from an older build, and reads the default like one made by `addNode`. `null`
+ * counts as absent, as the `??` it replaced did.
+ *
+ * Returns `params` itself when nothing is missing — the ordinary case, since `addNode` writes
+ * every key — and one memoised copy per params object otherwise, so the many surfaces asking
+ * about one keyless node share a single filled view.
+ */
+export function withDefaults<P extends ParamValues>(def: NodeDefinition, params: P): P {
+  const memo = FILLED.get(params)
+  if (memo) return memo as P
+  let filled: ParamValues | undefined
+  for (const p of def.params ?? []) {
+    if (params[p.id] != null) continue
+    const value = absentValue(p)
+    if (value === undefined) continue
+    filled ??= { ...params }
+    filled[p.id] = Array.isArray(value) ? [...value] : value
+  }
+  if (!filled) return params
+  FILLED.set(params, filled)
+  return filled as P
+}
+
+/**
+ * The params switched on for these values: each `visibleIf` asked of what the node reads.
+ *
+ * Through `withDefaults`, filled once, so the inspector, a card and the cache key agree about a
+ * node stored without the controlling key — asked of raw params, a param that counts towards the
+ * key could vanish from the inspector on an older graph, or the reverse. The one door `visibleIf`
+ * is asked through: `configurableParams`, `normalizeParams`, `validateColumnParams` and every
+ * surface that lists params build on it.
+ */
+export function visibleParams(def: NodeDefinition, params: ParamValues): ParamDef[] {
+  const filled = withDefaults(def, params)
+  return (def.params ?? []).filter((p) => !p.visibleIf || p.visibleIf(filled))
+}
+
 export function findParam(def: NodeDefinition, paramId: string): ParamDef | undefined {
   return (def.params ?? []).find((p) => p.id === paramId)
 }
@@ -1165,9 +1244,7 @@ export function validateParamValue(param: ParamDef, value: ParamValue): string |
  * The denominator for "are the hidden ones all there is", and the set `hiddenParams` filters.
  */
 export function configurableParams(def: NodeDefinition, values: ParamValues): ParamDef[] {
-  return (def.params ?? []).filter(
-    (p) => p.internal !== true && (!p.visibleIf || p.visibleIf(values)),
-  )
+  return visibleParams(def, values).filter((p) => p.internal !== true)
 }
 
 /**
@@ -1280,7 +1357,7 @@ export function resolveColumn(
    * `idColumn: ''` is exactly that: "identify points by row index, not by neuron id". Reading
    * it as unset would hand back `neuronId` and quietly undo it.
    */
-  const chosen = saved || (param.optional ? '' : (param.default ?? ''))
+  const chosen = saved || columnAbsence(param)
   if (chosen && available.includes(chosen)) return chosen
   if (param.optional) return undefined
   if (chosen && chosen !== param.default) return chosen
@@ -1392,9 +1469,8 @@ export function availableColumns(
  */
 export function validateColumnParams(def: NodeDefinition, ctx: InferContext): string[] {
   const issues: string[] = []
-  for (const p of def.params ?? []) {
+  for (const p of visibleParams(def, ctx.params)) {
     if (p.kind !== 'column' && p.kind !== 'columns') continue
-    if (p.visibleIf && !p.visibleIf(ctx.params)) continue
     const upstream = ctx.inputs[p.from]
     // Unconnected input is reported by the port itself; don't double up.
     if (!upstream) continue
@@ -1461,10 +1537,11 @@ export function validateColumnParams(def: NodeDefinition, ctx: InferContext): st
 /** Build an InferContext. Shared by the inference pass and the UI's widget layer. */
 export function makeInferContext<P extends ParamValues = ParamValues>(
   def: NodeDefinition,
-  params: P,
+  stored: P,
   inputs: Readonly<Record<string, CodaType | undefined>>,
   observed?: TableSchema | undefined,
 ): InferContext<P> {
+  const params = withDefaults(def, stored)
   return {
     params,
     inputs,

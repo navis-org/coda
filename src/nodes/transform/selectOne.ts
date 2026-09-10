@@ -135,7 +135,7 @@ export const selectOneNode = registerNode({
       )
     }
 
-    const index = Math.floor(Number(ctx.params.selected ?? 0))
+    const index = Math.floor(Number(ctx.params.selected))
     const count = elementCount(value)
     /*
      * Out of range emits nothing rather than the nearest element. An upstream filter that

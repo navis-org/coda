@@ -99,8 +99,8 @@ export const linkageNode = registerNode({
     if (!isMatrixValue(matrix)) throw new Error('Input is not a matrix')
     checkLinkageInput(ctx, matrix)
 
-    const method = String(ctx.params.method ?? 'ward')
-    const transform = transformFor(matrix.measure, String(ctx.params.distance ?? 'auto'))
+    const method = String(ctx.params.method)
+    const transform = transformFor(matrix.measure, String(ctx.params.distance))
     // Before anything is marshalled: a matrix of counts turned into negative distances
     // clusters perfectly happily and draws nowhere. See `checkLinkageDistances`.
     checkLinkageDistances(matrix, transform)
@@ -114,7 +114,7 @@ export const linkageNode = registerNode({
     const result = await runLinkage(
       linkageRequestFrom(matrix, {
         method,
-        symmetry: String(ctx.params.symmetry ?? 'mean') as LinkageSymmetry,
+        symmetry: String(ctx.params.symmetry) as LinkageSymmetry,
         transform,
       }),
       { onProgress: ctx.progress, signal: ctx.signal },

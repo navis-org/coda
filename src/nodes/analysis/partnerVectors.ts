@@ -128,7 +128,7 @@ export const partnerVectorsNode = registerNode({
   inferOutputs: (ctx) => ({
     out: T.table(
       partnerVectorSchema(ctx.schema('in'), {
-        weighting: String(ctx.params.weighting ?? 'raw') as VectorWeighting,
+        weighting: String(ctx.params.weighting) as VectorWeighting,
         weightColumn: ctx.column('weight'),
       }),
     ),
@@ -137,7 +137,7 @@ export const partnerVectorsNode = registerNode({
   validate: (ctx) => {
     const issues = partnerVectorIssues(
       ctx.schema('in'),
-      String(ctx.params.partnerBy ?? 'type') as PartnerBy,
+      String(ctx.params.partnerBy) as PartnerBy,
       Boolean(ctx.inputs.neurons),
     )
     /*
@@ -181,10 +181,10 @@ export const partnerVectorsNode = registerNode({
       out: partnerVectorTable(
         table,
         {
-          partnerBy: String(ctx.params.partnerBy ?? 'type') as PartnerBy,
-          untyped: String(ctx.params.untyped ?? 'id') as UntypedPolicy,
+          partnerBy: String(ctx.params.partnerBy) as PartnerBy,
+          untyped: String(ctx.params.untyped) as UntypedPolicy,
           weightColumn: weight,
-          weighting: String(ctx.params.weighting ?? 'raw') as VectorWeighting,
+          weighting: String(ctx.params.weighting) as VectorWeighting,
           ...(queries ? { queries } : {}),
           ...(labels ? { labels } : {}),
         },

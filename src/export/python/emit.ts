@@ -11,7 +11,7 @@ import { inboundIndex, nodesById, portKey } from '../../core/graph'
 import { exportOrder } from '../order'
 import { inferGraph } from '../../core/inference'
 import type { NodeDefinition, ParamValues } from '../../core/node'
-import { defaultParams, makeInferContext } from '../../core/node'
+import { makeInferContext } from '../../core/node'
 import { getNodeDef, isAnnotation } from '../../core/registry'
 import { inputPorts, outputPorts } from '../../core/ports'
 import { backendName } from '../../nodes/lib/datasetFamilies'
@@ -199,9 +199,10 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
     }
 
     const emitter = getEmitter(node.type)
-    const params: ParamValues = { ...defaultParams(def), ...node.params }
     const inputTypes = inference.nodes[nodeId]?.inputs ?? {}
-    const inferCtx = makeInferContext(def, params, inputTypes)
+    // What every emitter reads: the node's params filled with its declared defaults.
+    const inferCtx = makeInferContext(def, node.params, inputTypes)
+    const params = inferCtx.params
     const varName = names.get(nodeId) ?? 'step'
 
     const inputVar = (portId: string): string | undefined => {

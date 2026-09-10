@@ -157,7 +157,7 @@ export const caveTableNode = registerNode({
       help: 'With Pivot on, the column holding the annotation itself.',
       default: '',
       advanced: true,
-      visibleIf: (params) => Boolean(String(params.pivotOn ?? '')),
+      visibleIf: (params) => Boolean(String(params.pivotOn)),
     },
   ],
 
@@ -179,8 +179,8 @@ export const caveTableNode = registerNode({
      */
     const datastack = caveDatastackIssues(ctx.inputs.dataset, ctx.params)
     if (datastack.length > 0) return datastack
-    if (!String(ctx.params.table ?? '').trim()) return ['Name an annotation table']
-    if (String(ctx.params.pivotOn ?? '') && !String(ctx.params.valueColumn ?? '')) {
+    if (!String(ctx.params.table).trim()) return ['Name an annotation table']
+    if (String(ctx.params.pivotOn) && !String(ctx.params.valueColumn)) {
       return ['With Pivot on set, name the column holding the value']
     }
     return []
@@ -209,20 +209,20 @@ function caveRef(
   datasetId: string | undefined,
   params: Record<string, unknown>,
 ): AnnotationRef | undefined {
-  const table = String(params.table ?? '').trim()
+  const table = String(params.table).trim()
   // The same wire-beats-field rule the card and `validate` apply, from the one place that states
   // it. Note this keeps the *unsplit* id, which is what `AnnotationRef.dataset` carries.
-  const dataset = datasetId ?? String(params.datastack ?? '').trim()
+  const dataset = datasetId ?? String(params.datastack).trim()
   if (!dataset || !table) return undefined
   return {
     provider: CAVE_TABLE_PROVIDER,
     config: {
       dataset,
       table,
-      idColumn: String(params.idColumn ?? 'pt_root_id').trim() || 'pt_root_id',
-      pivotOn: String(params.pivotOn ?? '').trim(),
-      valueColumn: String(params.valueColumn ?? '').trim(),
-      columns: String(params.columns ?? '').trim(),
+      idColumn: String(params.idColumn).trim() || 'pt_root_id',
+      pivotOn: String(params.pivotOn).trim(),
+      valueColumn: String(params.valueColumn).trim(),
+      columns: String(params.columns).trim(),
     },
   }
 }
@@ -300,9 +300,9 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
     }),
 
     validate: (ctx) => {
-      const base = String(ctx.params.base ?? '').trim()
+      const base = String(ctx.params.base).trim()
       if (!base) return ['Name a base']
-      if (!String(ctx.params.table ?? '').trim()) return ['Name a table inside the base']
+      if (!String(ctx.params.table).trim()) return ['Name a table inside the base']
       /*
        * The workspace is **not** required. It used to be, which was wrong twice over: a base name
        * is very nearly always unique across an account, and the field is `advanced`, so the card
@@ -313,7 +313,7 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
        * listing, and an auth-failure popup, for a node somebody is still typing into. In practice
        * it is loaded by the time this matters, since `peekColumns` resolves the same base.
        */
-      if (!String(ctx.params.workspace ?? '').trim()) {
+      if (!String(ctx.params.workspace).trim()) {
         // Through the ref, so `validate` and `evaluate` cannot disagree about which deployment
         // this node points at — these were two spellings and one was missing the other's trim,
         // so a whitespace-only host sent them to different hosts.
@@ -340,8 +340,8 @@ function seaRef(
   params: Record<string, unknown>,
   fallbackHost: string,
 ): AnnotationRef | undefined {
-  const base = String(params.base ?? '').trim()
-  const table = String(params.table ?? '').trim()
+  const base = String(params.base).trim()
+  const table = String(params.table).trim()
   // No workspace needed to name a ref: it is resolved from the base when it is empty, and a ref
   // that could not be built until somebody supplied one would leave the column picker empty on
   // exactly the configuration that is now the ordinary one.
@@ -349,12 +349,12 @@ function seaRef(
   return {
     provider: SEATABLE_PROVIDER,
     config: {
-      host: String(params.host ?? '').trim() || fallbackHost,
-      workspace: String(params.workspace ?? '').trim(),
+      host: String(params.host).trim() || fallbackHost,
+      workspace: String(params.workspace).trim(),
       base,
       table,
-      idColumn: String(params.idColumn ?? 'root_id').trim() || 'root_id',
-      columns: String(params.columns ?? '').trim(),
+      idColumn: String(params.idColumn).trim() || 'root_id',
+      columns: String(params.columns).trim(),
     },
   }
 }
@@ -458,11 +458,11 @@ export const googleSheetNode = registerNode({
    * wrong. Same rule `columnSchemaFor` states and `importShapeIssues` follows one node over.
    */
   validate: (ctx) => {
-    if (!String(ctx.params.sheet ?? '').trim()) return ['No sheet yet — paste its link']
+    if (!String(ctx.params.sheet).trim()) return ['No sheet yet — paste its link']
     const { config, error } = sheetConfigFrom(ctx.params)
     if (error) return [error]
     if (!config) return []
-    const gid = String(ctx.params.gid ?? '').trim()
+    const gid = String(ctx.params.gid).trim()
     if (gid && !/^\d+$/.test(gid)) {
       return [`Tab "${gid}" is not a gid — it is the number after “#gid=” in the sheet’s URL`]
     }

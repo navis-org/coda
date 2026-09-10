@@ -83,7 +83,7 @@ export const groupByNode = registerNode({
   ],
 
   inferOutputs: (ctx) => {
-    const agg = String(ctx.params.agg ?? 'sum') as AggFn
+    const agg = String(ctx.params.agg) as AggFn
     const by = ctx.columns('by')
     const schema = groupBySchema(ctx.schema('in'), by, ctx.columns('value'), agg)
     return { out: schema ? T.table(schema) : T.table() }
@@ -93,7 +93,7 @@ export const groupByNode = registerNode({
     if (ctx.columns('by').length === 0 && ctx.inputs.in) {
       return ['Pick at least one column to group by']
     }
-    const agg = String(ctx.params.agg ?? 'sum') as AggFn
+    const agg = String(ctx.params.agg) as AggFn
     if (agg !== 'count' && ctx.columns('value').length === 0) {
       return [`"${agg}" needs at least one value column`]
     }
@@ -103,7 +103,7 @@ export const groupByNode = registerNode({
   evaluate: (ctx) => {
     const table = ctx.input('in')
     if (!isTableValue(table)) throw new Error('Input is not a table')
-    const agg = String(ctx.params.agg ?? 'sum') as AggFn
+    const agg = String(ctx.params.agg) as AggFn
     const by = ctx.columns('by')
     if (by.length === 0) throw new Error('No group-by columns selected')
     return { out: groupByTable(table, by, ctx.columns('value'), agg) }

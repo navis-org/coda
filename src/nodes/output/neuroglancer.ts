@@ -268,7 +268,7 @@ export const neuroglancerNode = registerNode({
       throw new Error('Neurons input is not a table')
     }
 
-    const limit = Number(ctx.params.limit ?? SEGMENTS_WARN) || SEGMENTS_WARN
+    const limit = Number(ctx.params.limit) || SEGMENTS_WARN
     const spec = readColorSpec('segment', ctx.params, ctx.column)
     const { segments, colors } = segmentColors(neurons, spec, limit, ctx)
 
@@ -291,14 +291,14 @@ export const neuroglancerNode = registerNode({
       datasetId: dataset.datasetId,
       segments,
       ...colorFields(spec.mode, segments, colors),
-      layout: String(ctx.params.layout ?? '3d') as NgLayout,
-      layers: String(ctx.params.layers ?? 'all') as NgLayerSet,
+      layout: String(ctx.params.layout) as NgLayout,
+      layers: String(ctx.params.layers) as NgLayerSet,
       showSlices: ctx.params.showSlices === true,
       ...(extra ? { extraLayers: extra.items } : {}),
     })
 
     const viewer = viewerBaseFor(
-      String(ctx.params.viewer ?? ''),
+      String(ctx.params.viewer),
       source.peekDataset(dataset.datasetId)?.viewerSite,
     )
     return { url: str(sceneUrl(viewer, scene, chosenViewerKind(ctx.params))) }

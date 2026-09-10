@@ -172,7 +172,7 @@ export const caveTableInfoNode = registerNode({
   validate: (ctx) => {
     const issues = caveDatastackIssues(ctx.inputs.dataset, ctx.params)
     if (issues.length > 0) return issues
-    const name = String(ctx.params.table ?? '').trim()
+    const name = String(ctx.params.table).trim()
     if (!name) return ['Name a table or a view']
     /*
      * Checked against the listing only once it has landed. `peekTableList` answers `undefined`
@@ -194,7 +194,7 @@ export const caveTableInfoNode = registerNode({
   evaluate: async (ctx) => {
     const where = caveTargetOfValue(ctx.input('dataset'), ctx.params)
     if (!where) throw new Error('Name a datastack as `name:number`, or wire a CAVE Dataset')
-    const name = String(ctx.params.table ?? '').trim()
+    const name = String(ctx.params.table).trim()
     if (!name) throw new Error('Name a table or a view')
     const options = { signal: ctx.signal }
 

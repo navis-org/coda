@@ -161,14 +161,14 @@ export const nblastKnnNode = registerNode({
     ),
   }),
 
-  validate: (ctx) => nblastIssues(Number(ctx.params.resample ?? 1)),
+  validate: (ctx) => nblastIssues(Number(ctx.params.resample)),
 
   evaluate: async (ctx) => {
     const { query, target: targetValue } = nblastSidesFrom(
       ctx,
       ctx.input('query'),
       ctx.input('target'),
-      Number(ctx.params.limit ?? MAX_NEURONS),
+      Number(ctx.params.limit),
     )
 
     ctx.progress(0.01, `${query.items.length} neurons`)
@@ -176,12 +176,12 @@ export const nblastKnnNode = registerNode({
       {
         query: dotpropSetFrom(query),
         ...(targetValue ? { target: dotpropSetFrom(targetValue) } : {}),
-        k: Number(ctx.params.k ?? 5),
-        nCandidates: Number(ctx.params.nCandidates ?? 200),
-        tangentK: Number(ctx.params.tangentK ?? 5),
-        resample: Number(ctx.params.resample ?? 1),
+        k: Number(ctx.params.k),
+        nCandidates: Number(ctx.params.nCandidates),
+        tangentK: Number(ctx.params.tangentK),
+        resample: Number(ctx.params.resample),
         normalize: ctx.params.normalize !== false,
-        symmetry: String(ctx.params.symmetry ?? 'mean') as NblastSymmetry,
+        symmetry: String(ctx.params.symmetry) as NblastSymmetry,
         useAlpha: ctx.params.useAlpha === true,
       },
       { onProgress: ctx.progress, signal: ctx.signal },

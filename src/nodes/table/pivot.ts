@@ -71,7 +71,7 @@ export const pivotNode = registerNode({
     if (rows && cols && rows === cols) {
       issues.push('Rows and Columns point at the same column')
     }
-    const agg = String(ctx.params.agg ?? 'sum') as AggFn
+    const agg = String(ctx.params.agg) as AggFn
     if (agg !== 'count' && !ctx.column('value'))
       issues.push(`"${agg}" needs a numeric value column`)
     return issues
@@ -99,7 +99,7 @@ export const pivotNode = registerNode({
           'missing, the node says so above.',
       )
     }
-    const agg = String(ctx.params.agg ?? 'sum') as AggFn
+    const agg = String(ctx.params.agg) as AggFn
     const matrix = pivotTable(
       table,
       rows,

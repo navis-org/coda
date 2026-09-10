@@ -214,13 +214,13 @@ registerEmitter('out.histogram', (ctx) => {
     return [...lines, ...ctx.note('No value column is picked, so nothing is drawn.')]
   }
 
-  const binMode = String(ctx.params.binMode ?? 'auto')
-  const normalize = String(ctx.params.normalize ?? 'count')
+  const binMode = String(ctx.params.binMode)
+  const normalize = String(ctx.params.normalize)
   const args = [
     `data=${out}`,
     `x=${pyStr(value)}`,
     ...(series && series !== value ? [`hue=${pyStr(series)}`, `multiple='stack'`] : []),
-    binMode === 'fixed' ? `bins=${Math.round(Number(ctx.params.bins ?? 30))}` : `bins='auto'`,
+    binMode === 'fixed' ? `bins=${Math.round(Number(ctx.params.bins))}` : `bins='auto'`,
     ...(normalize === 'count' ? [] : [`stat=${pyStr(normalize)}`]),
     ...(ctx.params.cumulative === true && normalize !== 'density' ? ['cumulative=True'] : []),
     ...(ctx.params.logX === true ? ['log_scale=True'] : []),
@@ -266,9 +266,9 @@ registerEmitter('out.pie', (ctx) => {
     return [...lines, ...ctx.note('No category column is picked, so nothing is drawn.')]
   }
 
-  const maxSlices = Math.max(2, Math.round(Number(ctx.params.maxSlices ?? 8)))
+  const maxSlices = Math.max(2, Math.round(Number(ctx.params.maxSlices)))
   const sortBySize = ctx.params.sortSlices !== false
-  const labelMode = String(ctx.params.sliceLabels ?? 'percent')
+  const labelMode = String(ctx.params.sliceLabels)
 
   lines.push(
     ``,
@@ -329,9 +329,9 @@ registerEmitter('out.distribution', (ctx) => {
     return [...lines, ...ctx.note('No value column is picked, so nothing is drawn.')]
   }
 
-  const style = String(ctx.params.style ?? 'box')
-  const whiskers = String(ctx.params.whiskers ?? 'tukey')
-  const maxGroups = Math.max(1, Math.round(Number(ctx.params.maxGroups ?? 24)))
+  const style = String(ctx.params.style)
+  const whiskers = String(ctx.params.whiskers)
+  const maxGroups = Math.max(1, Math.round(Number(ctx.params.maxGroups)))
   // Hoisted, as the R emitter beside it does: read twice, the two could drift into emitting
   // `order=_order` without the line that binds it.
   const grouped = !!group && group !== value
@@ -844,14 +844,14 @@ registerEmitter('out.scatter', (ctx) => {
     ...(size ? [`size=${pyStr(size)}`] : []),
     ...(shape ? [`style=${pyStr(shape)}`] : []),
   ]
-  const opacity = Number(ctx.params.opacity ?? 1)
+  const opacity = Number(ctx.params.opacity)
   if (Number.isFinite(opacity) && opacity < 1) args.push(`alpha=${opacity}`)
 
   lines.push(``, `plt.figure(figsize=(8, 6))`, `sns.scatterplot(${args.join(', ')})`)
   if (ctx.params.xLog === true) lines.push(`plt.xscale('log')`)
   if (ctx.params.yLog === true) lines.push(`plt.yscale('log')`)
-  if (String(ctx.params.aspect ?? '') === 'equal') lines.push(`plt.gca().set_aspect('equal')`)
-  if (String(ctx.params.trend ?? 'none') !== 'none') {
+  if (String(ctx.params.aspect) === 'equal') lines.push(`plt.gca().set_aspect('equal')`)
+  if (String(ctx.params.trend) !== 'none') {
     // seaborn's regplot fits in the space it is drawn in, which is the same reading Coda's
     // trend gives: straight on screen, so a log-log fit is a power law.
     lines.push(`sns.regplot(data=${out}, x=${pyStr(x)}, y=${pyStr(y)}, scatter=False, ci=None)`)
@@ -873,7 +873,7 @@ registerEmitter('out.network', (ctx) => {
 
   // The three filters are not presentational on this node: they change what it *returns*, so
   // they have to be applied to the value and not merely to the drawing.
-  const minLinkWeight = Number(ctx.params.minLinkWeight ?? 0)
+  const minLinkWeight = Number(ctx.params.minLinkWeight)
   const hideIsolated = ctx.params.hideIsolated === true
 
   lines.push(`${out} = ${src}.copy()`)
@@ -965,8 +965,8 @@ registerEmitter('out.download', (ctx) => {
   const src = ctx.wired('in')
 
   const out = ctx.output('out')
-  const filename = String(ctx.params.filename ?? '') || 'export'
-  const format = String(ctx.params.format ?? 'csv')
+  const filename = String(ctx.params.filename) || 'export'
+  const format = String(ctx.params.format)
 
   const lines = [`${out} = ${src}`]
   switch (format) {
@@ -1110,8 +1110,8 @@ registerEmitter(
 registerEmitter('out.datasetSummary', (ctx) => {
   const c = ctx.wired('dataset')
   const neurons = `${ctx.name}_neurons`
-  const status = String(ctx.params.status ?? '')
-  const topTypes = Number(ctx.params.topTypes ?? 20)
+  const status = String(ctx.params.status)
+  const topTypes = Number(ctx.params.topTypes)
   const chosen = (ctx.params.attributes as string[] | undefined) ?? []
 
   ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')

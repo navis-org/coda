@@ -26,6 +26,7 @@ import type { ParamValues } from '../core/node'
 import { defaultParams } from '../core/node'
 import { requireNodeDef } from '../core/registry'
 import { encodeRows } from '../data/filterRows'
+import { populationParams } from '../nodes/lib/populationParams'
 
 interface Spec {
   id: string
@@ -36,12 +37,36 @@ interface Spec {
   row?: number
 }
 
+/**
+ * A node's params: its declared defaults, as `addNode` writes them — except the population
+ * checkboxes (`populationParams`), which carry what a graph saved before they existed carries:
+ * their `absentMeans`, off, as the loader writes it in for such a file.
+ *
+ * That exception is the one respect in which this graph is a saved document, and the unchanged
+ * goldens are the proof it was built for: such a graph still exports exactly as it did. It used
+ * to be made by writing every node's params verbatim, which worked only while contexts were
+ * handed raw params — every other missing key was then filled by the exporters' own spread over
+ * `defaultParams`. Contexts read declared defaults now (`withDefaults`), so the exception is
+ * stated, and by name: every *other* `absentMeans` on these types would claim "saved before that
+ * control too", which this graph never did.
+ */
+function paramsFor(spec: Spec): ParamValues {
+  const def = requireNodeDef(spec.type)
+  const declared = new Set((def.params ?? []).map((p) => p.id))
+  const savedBefore = Object.fromEntries(
+    populationParams()
+      .filter((p) => declared.has(p.id))
+      .map((p) => [p.id, p.absentMeans]),
+  )
+  return { ...defaultParams(def), ...savedBefore, ...spec.params }
+}
+
 function place(graph: CodaGraph, spec: Spec): CodaGraph {
   const node: GraphNode = {
     id: spec.id,
     type: spec.type,
     position: { x: spec.col * 260, y: (spec.row ?? 0) * 180 },
-    params: spec.params ?? {},
+    params: paramsFor(spec),
   }
   return addNode(graph, node)
 }
@@ -1671,10 +1696,9 @@ export function caveGraph(): CodaGraph {
  * A dataset node wired to one query node, both built over their declared defaults.
  *
  * The counterpart of `everythingGraph` for a setting that lives on the **dataset** and shows up
- * in every query cell below it. The everything graph cannot test one: `spec.params` above writes
- * params verbatim rather than over `defaultParams`, so its dataset nodes carry the population
- * checkboxes absent — which is off, and is what makes the unchanged goldens a proof that a graph
- * saved before those params existed still exports exactly as it did.
+ * in every query cell below it. The everything graph cannot test one: `paramsFor` above gives its
+ * dataset nodes the population checkboxes a graph saved before they existed carries — off — which
+ * is what makes the unchanged goldens a proof that such a graph still exports exactly as it did.
  *
  * Here rather than copied into both `export.test.ts` files, which is where it started: the two
  * were character-identical, and a graph builder that drifts between the languages is how their

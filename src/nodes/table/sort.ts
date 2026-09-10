@@ -45,7 +45,7 @@ export const sortNode = registerNode({
         table,
         columnName,
         ctx.params.descending !== false,
-        Math.max(0, Number(ctx.params.limit ?? 0)),
+        Math.max(0, Number(ctx.params.limit)),
       ),
     }
   },

@@ -17,7 +17,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { defaultParams, makeInferContext } from '../../core/node'
+import { defaultParams, makeInferContext, visibleParams } from '../../core/node'
 import type { ParamValue } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { T, column, tableSchema } from '../../core/types'
@@ -82,8 +82,8 @@ const labels = () => [...document.querySelectorAll('.param__label')].map((el) =>
 describe('the Paths card', () => {
   /** What the definition says belongs on the card, given these values. `visibleIf` included. */
   const declared = (params: Record<string, ParamValue> = {}) =>
-    (requireNodeDef(TYPE).params ?? [])
-      .filter((p) => !p.advanced && (!p.visibleIf || p.visibleIf({ ...defaults(), ...params })))
+    visibleParams(requireNodeDef(TYPE), { ...defaults(), ...params })
+      .filter((p) => !p.advanced)
       .map((p) => p.label)
 
   it('draws every non-advanced param exactly once, in declaration order', () => {

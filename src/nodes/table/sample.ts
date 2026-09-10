@@ -74,8 +74,8 @@ export const sampleNode = registerNode({
   // Zero rows is a legitimate thing to ask for and the empty table says so plainly, so the
   // only thing worth reporting is the state where the node is silently doing nothing at all.
   validate: (ctx) => {
-    const mode = String(ctx.params.mode ?? 'head') as SampleMode
-    if (mode === 'stride' && Number(ctx.params.step ?? 10) <= 1) {
+    const mode = String(ctx.params.mode) as SampleMode
+    if (mode === 'stride' && Number(ctx.params.step) <= 1) {
       return ['Every 1 keeps every row — raise it, or the node is a pass-through']
     }
     return []
@@ -86,11 +86,10 @@ export const sampleNode = registerNode({
     if (!isTableValue(table)) throw new Error('Input is not a table')
     return {
       out: sampleTable(table, {
-        mode: String(ctx.params.mode ?? 'head') as SampleMode,
-        // The declared defaults, which is what the provenance key hashes for an absent key.
-        count: Number(ctx.params.count ?? 100),
-        step: Number(ctx.params.step ?? 10),
-        seed: Number(ctx.params.seed ?? 1),
+        mode: String(ctx.params.mode) as SampleMode,
+        count: Number(ctx.params.count),
+        step: Number(ctx.params.step),
+        seed: Number(ctx.params.seed),
       }),
     }
   },

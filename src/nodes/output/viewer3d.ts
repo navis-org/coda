@@ -64,13 +64,12 @@ type WidthMode = 'uniform' | 'radius' | 'world'
  * it was written out four times. It also removes a small divergence: written inline, a
  * nonsense stored value showed *no* width control at all while the viewer drew it as uniform.
  *
- * The `'uniform'` in it is `skeletonWidthMode`'s **`absentMeans`**, not its `default`, and the
- * two deliberately differ: a new card opens `by radius`, where a document with no key for the
- * mode was written by a build that drew every neurite the same. `deserializeGraph` writes that
- * in, so this is the belt to that document's braces.
+ * An unreadable value draws as uniform. An *absent* one never arrives: `visibleParams` fills the
+ * declared `by radius`, and a document saved before the mode existed carries its `absentMeans`,
+ * `uniform`, which `deserializeGraph` writes in.
  */
 function widthModeOf(params: ParamValues): WidthMode {
-  const mode = String(params.skeletonWidthMode ?? 'uniform')
+  const mode = String(params.skeletonWidthMode)
   return mode === 'radius' || mode === 'world' ? mode : 'uniform'
 }
 

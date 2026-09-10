@@ -98,7 +98,7 @@ function define(flavour: Flavour): NodeDefinition {
         labels,
         ctx.column('labelColumn'),
         neurons,
-        String(ctx.params.suffix ?? DEFAULT_LABEL_SUFFIX),
+        String(ctx.params.suffix),
       )
       return { neurons: schema ? T.neurons(schema) : T.neurons() }
     },
@@ -146,7 +146,7 @@ function define(flavour: Flavour): NodeDefinition {
         labelColumn: ctx.column('labelColumn') ?? 'label',
         neurons,
         matchColumn: ctx.column('matchColumn'),
-        suffix: String(ctx.params.suffix ?? DEFAULT_LABEL_SUFFIX),
+        suffix: String(ctx.params.suffix),
       })
       return { neurons: result.neurons }
     },

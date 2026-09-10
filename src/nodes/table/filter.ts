@@ -56,8 +56,7 @@ export const filterNode = registerNode({
       kind: 'string',
       label: 'Value',
       default: '',
-      visibleIf: (params) =>
-        opNeedsValue(String(params.op ?? FILTER_TABLE_DEFAULT_OP) as FilterOp),
+      visibleIf: (params) => opNeedsValue(String(params.op) as FilterOp),
     },
   ],
 
@@ -76,7 +75,7 @@ export const filterNode = registerNode({
     // Resolved first, so a complaint is about a condition somebody *chose*. A fresh node pointed
     // at a text column used to earn one before anything had been done to it.
     const op = resolveFilterOp(ctx.params.op, col?.dtype, FILTER_TABLE_DEFAULT_OP)
-    return filterConditionIssues(col?.dtype, op, String(ctx.params.value ?? ''))
+    return filterConditionIssues(col?.dtype, op, String(ctx.params.value))
   },
 
   evaluate: (ctx) => {
@@ -92,7 +91,7 @@ export const filterNode = registerNode({
         findColumn(schemaOf(table), columnName)?.dtype,
         FILTER_TABLE_DEFAULT_OP,
       ),
-      String(ctx.params.value ?? ''),
+      String(ctx.params.value),
     )
     return { out }
   },

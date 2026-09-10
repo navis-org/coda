@@ -351,8 +351,8 @@ export const connectivityNode = registerNode({
 
   validate: (ctx) => {
     const issues: string[] = []
-    const hops = Number(ctx.params.hops ?? 1)
-    const minWeight = Number(ctx.params.minWeight ?? 1)
+    const hops = Number(ctx.params.hops)
+    const minWeight = Number(ctx.params.minWeight)
     /*
      * A warning rather than a cap, deliberately — the same call Find Neurons makes about
      * `limit: 0`. What is worth saying is that the two params multiply: the frontier grows by
@@ -429,8 +429,8 @@ export const connectivityNode = registerNode({
     if (neuronIds.length === 0) throw new Error('No neuronIds in the incoming neuron table')
 
     const direction = readTraversalDirection(ctx.params.direction)
-    const hops = Math.max(1, Math.floor(Number(ctx.params.hops ?? 1)))
-    const minWeight = Number(ctx.params.minWeight ?? 1)
+    const hops = Math.max(1, Math.floor(Number(ctx.params.hops)))
+    const minWeight = Number(ctx.params.minWeight)
     const normalize = ctx.params.normalize === true
     const includeFragments = ctx.params.includeFragments === true
     const { rois: chosen, splitByRoi, primaryOnly } = regionOptions(ctx.params)

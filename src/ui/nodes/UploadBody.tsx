@@ -39,6 +39,7 @@ import {
 import { formatBytes, formatNumber } from '../format'
 import { ParamField } from '../params/ParamField'
 import type { NodeBodyProps } from './nodeBodies'
+import { cardParams } from '../params/paramGroups'
 
 /** Big enough that a header and a few rows are legible; small enough not to own the card. */
 const PASTE_ROWS = 4
@@ -155,13 +156,7 @@ export function UploadBody({ node, ctx, compact, setParam, onError }: NodeBodyPr
   // The generic card renders every non-advanced param; a body replaces that area outright, so
   // it renders the same set rather than a chosen few — a control a body forgot is reachable
   // only from the inspector, which on screen is indistinguishable from one never added.
-  const fields = useMemo(
-    () =>
-      (def?.params ?? []).filter(
-        (p) => !p.advanced && (!p.visibleIf || p.visibleIf(node.params)),
-      ),
-    [def, node.params],
-  )
+  const fields = useMemo(() => cardParams(def, node.params), [def, node.params])
 
   return (
     <div className="upload-body nodrag">

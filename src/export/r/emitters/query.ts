@@ -127,14 +127,14 @@ for (const family of DATASET_FAMILIES) {
 }
 
 registerEmitter('dataset.neuprint', (ctx) => {
-  const datasetId = String(ctx.params.dataset ?? '')
+  const datasetId = String(ctx.params.dataset)
   if (!datasetId) return ctx.todo('This neuPrint node names no dataset.')
-  const server = String(ctx.params.server ?? DEFAULT_DEPLOYMENT)
+  const server = String(ctx.params.server)
   return connectionLines(ctx, ctx.output('dataset'), server, datasetId)
 })
 
 registerEmitter('neuron.dataset', (ctx) => {
-  const datasetId = String(ctx.params.dataset ?? '')
+  const datasetId = String(ctx.params.dataset)
   if (!datasetId) return ctx.todo('This Dataset node names no dataset.')
   return connectionLines(ctx, ctx.output('dataset'), DEFAULT_DEPLOYMENT, datasetId)
 })
@@ -173,8 +173,8 @@ registerEmitter('neuron.findNeurons', (ctx) => {
   // both emitters rather than each carrying its own unknown-is-not-missing branch.
   const rows = rowsFromParams(ctx.params)
   const resolved = resolveRows(schema, rows)
-  const roi = String(ctx.params.roi ?? '')
-  const limit = Number(ctx.params.limit ?? 0)
+  const roi = String(ctx.params.roi)
+  const limit = Number(ctx.params.limit)
 
   const lines: string[] = resolved.problems.flatMap((p) => ctx.note(p.message))
 
@@ -317,7 +317,7 @@ registerEmitter('neuron.findNeurons', (ctx) => {
  */
 registerEmitter('neuron.inputIds', (ctx) => {
   const out = ctx.output('neurons')
-  const parsed = parseIdList(String(ctx.params.ids ?? ''))
+  const parsed = parseIdList(String(ctx.params.ids))
   const wired = ctx.input('ids')
   if (parsed.error && !wired)
     return ctx.todo(`The pasted id list is not valid: ${parsed.error}`)
@@ -365,7 +365,7 @@ registerEmitter('neuron.idsFromLabel', (ctx) => {
   const typed = parseTypedLabels(ctx.params.labels)
   const wired = ctx.input('labels')
   const wiredColumn = ctx.column('column')
-  const regex = String(ctx.params.match ?? 'exact') === 'regex'
+  const regex = String(ctx.params.match) === 'regex'
 
   const lines: string[] = []
   if (wired && wiredColumn) {
@@ -398,7 +398,7 @@ registerEmitter('neuron.idsFromLabel', (ctx) => {
 
   // This node's own `Status` first, then the dataset's population — the same precedence as Find
   // Neurons above, and it removes only the `traced` disjunct rather than the whole group.
-  const status = String(ctx.params.status ?? '')
+  const status = String(ctx.params.status)
   if (status) {
     ctx.library('dplyr')
     lines.push(`${out} <- ${out} |> filter(status == ${rStr(status)})`)
@@ -575,7 +575,7 @@ registerEmitter('neuron.roiMeshes', (ctx) => {
 registerEmitter('neuron.rawCypher', (ctx) => {
   const conn = ctx.wired('dataset')
   ctx.library('neuprintr')
-  const query = String(ctx.params.query ?? '').trim()
+  const query = String(ctx.params.query).trim()
   if (!query) return ctx.todo('This Raw Cypher node has no query.')
   return [
     `${ctx.output('result')} <- neuprint_fetch_custom(`,
@@ -619,7 +619,7 @@ registerEmitter('neuron.skeletons', (ctx) => {
   const neurons = ctx.wired('neurons')
   ctx.library('neuprintr')
   ctx.library('nat')
-  const limit = Number(ctx.params.limit ?? 0)
+  const limit = Number(ctx.params.limit)
   const ids = limit > 0 ? `head(${neuronIds(neurons)}, ${limit})` : neuronIds(neurons)
   const out = ctx.output('skeletons')
   // Returns a nat neuronlist, which is what every downstream nat call wants — the same
@@ -654,7 +654,7 @@ registerEmitter('neuron.synapses', (ctx) => {
   const conn = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
   ctx.library('neuprintr')
-  const polarity = String(ctx.params.polarity ?? '')
+  const polarity = String(ctx.params.polarity)
   const minConfidence = minSynapseConfidence(ctx.params)
   const unit = synapseUnitFor(ctx.inputType('dataset'), ctx.params)
   const args = [

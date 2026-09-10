@@ -151,7 +151,7 @@ export const cleanMeshesNode = registerNode({
         { value: 'humphrey', label: 'Humphrey (HC) — gentle on detail' },
       ],
       advanced: true,
-      visibleIf: (params) => Number(params.smooth ?? 0) > 0,
+      visibleIf: (params) => Number(params.smooth) > 0,
       help: 'Taubin alternates a shrink and an inflate pass tuned to cancel, which is why it is the default. Plain Laplacian loses most of a neuron’s enclosed volume at five passes.',
     },
     {
@@ -160,7 +160,7 @@ export const cleanMeshesNode = registerNode({
       label: 'Correct volume',
       default: false,
       advanced: true,
-      visibleIf: (params) => Number(params.smooth ?? 0) > 0,
+      visibleIf: (params) => Number(params.smooth) > 0,
       help: 'Rescale the smoothed mesh about its own centroid so the enclosed volume matches what went in. Worth turning on with Laplacian, rarely needed with Taubin. A mesh with no usable volume comes back unscaled.',
     },
   ],

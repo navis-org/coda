@@ -161,7 +161,7 @@ export const skeletonsNode = registerNode({
     const neuronIds = neuronIdsFrom(
       ctx,
       ctx.input('neurons'),
-      Number(ctx.params.limit ?? MAX_NEURONS),
+      Number(ctx.params.limit),
       'Each skeleton is a separate request, and a few thousand of them is minutes rather than seconds.',
     )
     ctx.progress(0.02, `${neuronIds.length} neurons`)
@@ -260,7 +260,7 @@ export const meshesNode = registerNode({
     const neuronIds = neuronIdsFrom(
       ctx,
       ctx.input('neurons'),
-      Number(ctx.params.limit ?? MAX_NEURONS),
+      Number(ctx.params.limit),
       'Each mesh is a separate fetch, and a source without levels of detail sends full resolution.',
     )
     ctx.progress(0.02, `${neuronIds.length} neurons`)
@@ -268,7 +268,7 @@ export const meshesNode = registerNode({
     const meshes = await source.fetchMeshes({
       ...datasetRequest(dataset),
       neuronIds,
-      triangleBudget: Number(ctx.params.detail ?? 1_500_000) || 1_500_000,
+      triangleBudget: Number(ctx.params.detail) || 1_500_000,
       onProgress: ctx.progress,
       // A cost only the backend knows: see `GeometryRequest.onWarn`.
       onWarn: ctx.warn,
@@ -370,10 +370,10 @@ export const synapsesNode = registerNode({
     const neuronIds = neuronIdsFrom(
       ctx,
       ctx.input('neurons'),
-      Number(ctx.params.limit ?? MAX_NEURONS),
+      Number(ctx.params.limit),
       'These arrive in one query, but it returns a row per synapse — thousands per neuron.',
     )
-    const polarity = String(ctx.params.polarity ?? '')
+    const polarity = String(ctx.params.polarity)
     /*
      * **Resolved here, at the one door.** `fetchSynapses` has exactly this caller, and a unit
      * varies with nothing — so a copy of this inside each backend was three re-derivations of a

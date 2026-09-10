@@ -578,8 +578,8 @@ export const networkViewNode = registerNode({
     // Filtering happens here rather than in the viewer, so the picture and the `out` port
     // can never disagree — see `networkOps.ts`.
     const { network } = filterNetwork(input, {
-      minWeight: Number(ctx.params.minLinkWeight ?? 0),
-      topNodes: Number(ctx.params.topNodes ?? 0),
+      minWeight: Number(ctx.params.minLinkWeight),
+      topNodes: Number(ctx.params.topNodes),
       hideIsolated: ctx.params.hideIsolated === true,
     })
 

@@ -147,7 +147,7 @@ export const ngSourceNode = registerNode({
    * network-free, which is `neuPrintSourceFor`'s rule for the same call.
    */
   inferOutputs: (ctx) => {
-    const source = precomputedSourceFor(String(ctx.params.url ?? ''))
+    const source = precomputedSourceFor(String(ctx.params.url))
     return {
       dataset: source ? T.dataset(source.id, source.datasetId) : T.dataset(),
       layers: T.layers(),
@@ -155,7 +155,7 @@ export const ngSourceNode = registerNode({
   },
 
   validate: (ctx) => {
-    const text = String(ctx.params.url ?? '').trim()
+    const text = String(ctx.params.url).trim()
     if (!text) return [`Paste a neuroglancer source URL, e.g. ${EXAMPLE}`]
 
     /*
@@ -223,7 +223,7 @@ export const ngSourceNode = registerNode({
   },
 
   evaluate: async (ctx) => {
-    const text = String(ctx.params.url ?? '').trim()
+    const text = String(ctx.params.url).trim()
     if (!text) throw new Error(`Paste a neuroglancer source URL, e.g. ${EXAMPLE}`)
     const source = precomputedSourceFor(text)
     if (!source) throw new Error(`"${text}" is not a source URL`)
@@ -263,13 +263,8 @@ export const ngSourceNode = registerNode({
     const segments = parsed.ids
 
     const layer = {
-      type: layerTypeFor(
-        String(ctx.params.layerType ?? 'auto'),
-        described.kind,
-        described.volumeType,
-      ),
-      name:
-        String(ctx.params.layerName ?? '').trim() || source.label.split('/').pop() || 'layer',
+      type: layerTypeFor(String(ctx.params.layerType), described.kind, described.volumeType),
+      name: String(ctx.params.layerName).trim() || source.label.split('/').pop() || 'layer',
       // The canonical spelling, which is why `parseNgSource` keeps the location in its own
       // scheme: neuroglancer wants `precomputed://gs://…` back, not the storage.googleapis.com
       // URL Coda fetches through.

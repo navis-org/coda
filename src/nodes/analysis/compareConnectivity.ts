@@ -148,7 +148,7 @@ const perDatasetParams = repeatParams({
 export function resolveDatasetNames(ctx: {
   params: Readonly<Record<string, unknown>>
 }): string[] {
-  const count = Math.max(2, Math.min(MAX_DATASETS, Number(ctx.params.datasetCount ?? 2)))
+  const count = Math.max(2, Math.min(MAX_DATASETS, Number(ctx.params.datasetCount)))
   const taken = new Set<string>()
   return Array.from({ length: count }, (_, i) => {
     const index = i + 1

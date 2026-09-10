@@ -128,14 +128,14 @@ export const nblastNode = registerNode({
    */
   inferOutputs: () => ({ scores: T.matrix() }),
 
-  validate: (ctx) => nblastIssues(Number(ctx.params.resample ?? 1)),
+  validate: (ctx) => nblastIssues(Number(ctx.params.resample)),
 
   evaluate: async (ctx) => {
     const { query, target: targetValue } = nblastSidesFrom(
       ctx,
       ctx.input('query'),
       ctx.input('target'),
-      Number(ctx.params.limit ?? MAX_NEURONS),
+      Number(ctx.params.limit),
     )
 
     const rows = query.items.length
@@ -147,10 +147,10 @@ export const nblastNode = registerNode({
       {
         query: dotpropSetFrom(query),
         ...(targetValue ? { target: dotpropSetFrom(targetValue) } : {}),
-        k: Number(ctx.params.k ?? 5),
-        resample: Number(ctx.params.resample ?? 1),
+        k: Number(ctx.params.k),
+        resample: Number(ctx.params.resample),
         normalize: ctx.params.normalize !== false,
-        symmetry: String(ctx.params.symmetry ?? 'mean') as NblastSymmetry,
+        symmetry: String(ctx.params.symmetry) as NblastSymmetry,
         useAlpha: ctx.params.useAlpha === true,
       },
       { onProgress: ctx.progress, signal: ctx.signal },

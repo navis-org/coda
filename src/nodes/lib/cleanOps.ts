@@ -86,7 +86,8 @@ export interface SkeletonCleanParams {
 }
 
 /**
- * Raw params in, `SkeletonCleanParams` out — the one place that says what the card means.
+ * A context's params in (every default filled by `withDefaults`), `SkeletonCleanParams` out —
+ * the one place that says what the card means.
  *
  * **The Python emitter calls this too**, `matchParamsFrom`'s reason: an emitter that
  * transcribed these defaults would be a notebook that could come to disagree with the canvas
@@ -97,11 +98,11 @@ export interface SkeletonCleanParams {
 export function skeletonCleanParamsFrom(params: ParamValues): SkeletonCleanParams {
   return {
     heal: params.heal === true,
-    healMaxDist: Number(params.healMaxDist ?? 0),
-    smooth: Number(params.smooth ?? 0),
-    method: String(params.method ?? 'none') as ThinMethod,
-    spacing: Number(params.spacing ?? 1),
-    factor: Number(params.factor ?? 2),
+    healMaxDist: Number(params.healMaxDist),
+    smooth: Number(params.smooth),
+    method: String(params.method) as ThinMethod,
+    spacing: Number(params.spacing),
+    factor: Number(params.factor),
   }
 }
 
@@ -282,17 +283,17 @@ export interface MeshCleanParams {
   volumeCorrection: boolean
 }
 
-/** Raw params in, `MeshCleanParams` out. See `skeletonCleanParamsFrom`. */
+/** A context's params in, `MeshCleanParams` out. See `skeletonCleanParamsFrom`. */
 export function meshCleanParamsFrom(params: ParamValues): MeshCleanParams {
   return {
     dropInternals: params.dropInternals === true,
-    openness: Number(params.openness ?? 0.05),
-    rays: Number(params.rays ?? 16),
-    passes: Number(params.passes ?? 3),
+    openness: Number(params.openness),
+    rays: Number(params.rays),
+    passes: Number(params.passes),
     fillHoles: params.fillHoles === true,
-    ratio: Number(params.ratio ?? 1),
-    smooth: Number(params.smooth ?? 0),
-    method: String(params.method ?? 'taubin') as SmoothMethod,
+    ratio: Number(params.ratio),
+    smooth: Number(params.smooth),
+    method: String(params.method) as SmoothMethod,
     volumeCorrection: params.volumeCorrection === true,
   }
 }

@@ -124,7 +124,7 @@ export const tableFromUrlNode = registerNode({
    * load of every graph that uses this node. `evaluate` says it instead, table in hand.
    */
   validate: (ctx) => {
-    const url = String(ctx.params.url ?? '').trim()
+    const url = String(ctx.params.url).trim()
     if (!url) return ['No URL yet — paste one in']
     let parsed: URL
     try {
@@ -192,7 +192,7 @@ export const tableFromUrlNode = registerNode({
       ctx,
     )
 
-    const idColumn = String(ctx.params.idColumn ?? '')
+    const idColumn = String(ctx.params.idColumn)
     if (idColumn && !findColumn(parsed.table.schema, idColumn)) {
       throw new Error(
         `ID column "${idColumn}" is not in ${url}. Available: ${columnNames(parsed.table.schema).join(', ')}`,

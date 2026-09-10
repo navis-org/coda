@@ -124,12 +124,12 @@ export const cutTreeNode = registerNode({
     const tree = ctx.input('in')
     if (!isLinkageValue(tree)) throw new Error('Input is not a tree — wire a Linkage node in')
 
-    const mode = String(ctx.params.mode ?? 'count')
+    const mode = String(ctx.params.mode)
     const byHeight = mode === 'height'
-    const height = Number(ctx.params.height ?? 0.5)
+    const height = Number(ctx.params.height)
 
     if (mode === 'mixed') {
-      const share = Number(ctx.params.maxShare ?? 0.8)
+      const share = Number(ctx.params.maxShare)
       const { clusters, datasets, singletons } = cutHomogeneous(tree, qualifiedDataset, share)
       /*
        * One dataset means nothing was qualified, and the criterion then rejects every group —
@@ -154,7 +154,7 @@ export const cutTreeNode = registerNode({
 
     const clusters = byHeight
       ? cutByHeight(tree, height)
-      : cutByCount(tree, Number(ctx.params.count ?? 4))
+      : cutByCount(tree, Number(ctx.params.count))
 
     if (byHeight && height > linkageMaxHeight(tree)) {
       // Not an error: one cluster is the true answer to "what groups at this distance" when

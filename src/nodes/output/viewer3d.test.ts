@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { defaultParams } from '../../core/node'
+import { defaultParams, visibleParams } from '../../core/node'
 import type { ParamDef } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { CONSTANT_COLOR_OPTIONS } from '../lib/encodingParams'
@@ -41,7 +41,7 @@ describe('the card stays a picture', () => {
      * with nothing *on* it, not a node with nothing to set.
      */
     const params = defaultParams(def())
-    const inPanel = (def().params ?? []).filter((p) => !p.visibleIf || p.visibleIf(params))
+    const inPanel = visibleParams(def(), params)
     expect(inPanel.length).toBeGreaterThan(10)
     // `skeletonRadiusWidth` rather than `skeletonWidth`: the mode defaults to `by radius`.
     for (const id of [

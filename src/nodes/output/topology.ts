@@ -643,7 +643,7 @@ export const topologyNode = registerNode({
     const neuronIds = neuronIdsFrom(
       ctx,
       table,
-      Number(ctx.params.limit ?? MAX_NEURONS),
+      Number(ctx.params.limit),
       'Each skeleton is a separate request, and a few thousand of them is minutes rather than seconds.',
     )
 
@@ -741,8 +741,8 @@ export const topologyNode = registerNode({
     const split = await runSplitCompartments(
       {
         ...packed,
-        flowThresh: Number(ctx.params.flowThresh ?? 0.9),
-        splitVal: Number(ctx.params.splitVal ?? 1),
+        flowThresh: Number(ctx.params.flowThresh),
+        splitVal: Number(ctx.params.splitVal),
         heal,
       },
       {

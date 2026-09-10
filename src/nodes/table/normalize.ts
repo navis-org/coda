@@ -26,7 +26,7 @@ export const normalizeNode = registerNode({
     const matrix = ctx.input('in')
     if (!isMatrixValue(matrix)) throw new Error('Input is not a matrix')
     return {
-      out: normalizeMatrix(matrix, String(ctx.params.mode ?? 'row') as NormalizeMode, ctx),
+      out: normalizeMatrix(matrix, String(ctx.params.mode) as NormalizeMode, ctx),
     }
   },
 })

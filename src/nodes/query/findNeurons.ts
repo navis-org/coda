@@ -230,8 +230,8 @@ export const findNeuronsNode = registerNode({
       // is where that precedence is decided rather than here.
       ...neuronSetRequest(dataset),
       rows,
-      roi: String(ctx.params.roi ?? '') || undefined,
-      limit: Number(ctx.params.limit ?? 0) || undefined,
+      roi: String(ctx.params.roi) || undefined,
+      limit: Number(ctx.params.limit) || undefined,
       signal: ctx.signal,
     })
 

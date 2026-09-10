@@ -43,7 +43,10 @@ full. **Read it before deciding a rule does not apply to your case.**
    `evaluate` must be deterministic; hidden mutable state needs an explicit nonce param.
    `normalizeParams` excludes hidden (`visibleIf` false) and `presentational: true`
    params. Mark a param presentational **only** if it cannot change what `evaluate`
-   returns — getting it wrong means a stale result silently survives an edit.
+   returns — getting it wrong means a stale result silently survives an edit. A declared
+   param nothing stored reads as its declared default in every context (`withDefaults`), so
+   read `ctx.params.x` plainly — a `?? literal` beside it is a second copy that drifts — and ask
+   `visibleIf` through `visibleParams`, or the inspector and the key disagree on an old graph.
 
 5. **Resolve column params via `ctx.column()` / `ctx.columns()`,** never
    `ctx.params.someColumn`. Infer, validate, evaluate and the cache key all rely on the

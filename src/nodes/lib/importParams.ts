@@ -66,7 +66,7 @@ export function importShapeParams({ read, textAdvanced }: ImportShapeOptions): P
        */
       optionsWithoutPeek: true,
       options: (ctx) => {
-        const id = String(ctx.params.idColumn ?? '')
+        const id = String(ctx.params.idColumn)
         return [
           { value: '', label: 'none' },
           ...(read(ctx.params)?.columns ?? [])
@@ -102,8 +102,8 @@ export function readImportShape(ctx: {
   columns: (id: string) => string[]
 }): UploadShape {
   return {
-    idColumn: String(ctx.params.idColumn ?? ''),
-    typeColumn: String(ctx.params.typeColumn ?? ''),
+    idColumn: String(ctx.params.idColumn),
+    typeColumn: String(ctx.params.typeColumn),
     textColumns: ctx.columns('textColumns'),
   }
 }
@@ -121,11 +121,11 @@ export function importShapeIssues(
   subject: string,
 ): string[] {
   if (!schema) return []
-  const idColumn = String(ctx.params.idColumn ?? '')
+  const idColumn = String(ctx.params.idColumn)
   if (idColumn && !findColumn(schema, idColumn)) {
     return [`ID column "${idColumn}" is not in ${subject}`]
   }
-  const typeColumn = String(ctx.params.typeColumn ?? '')
+  const typeColumn = String(ctx.params.typeColumn)
   if (typeColumn && !findColumn(schema, typeColumn)) {
     return [`Type column "${typeColumn}" is not in ${subject}`]
   }

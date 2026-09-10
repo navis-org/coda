@@ -237,10 +237,10 @@ function specOf(ctx: {
 }): QualifySpec {
   return {
     column: ctx.column('column') ?? '',
-    direction: String(ctx.params.direction ?? 'add') as Direction,
-    prefix: String(ctx.params.prefix ?? '').trim(),
+    direction: String(ctx.params.direction) as Direction,
+    prefix: String(ctx.params.prefix).trim(),
     // Trimmed here rather than at each reader — it was trimmed again in the layout and once
     // more in each emitter, which is three chances to disagree about whether " " names a column.
-    into: String(ctx.params.into ?? '').trim(),
+    into: String(ctx.params.into).trim(),
   }
 }

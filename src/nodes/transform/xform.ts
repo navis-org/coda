@@ -194,9 +194,9 @@ export const xformNode = registerNode({
      * was one, and it was wrong: it said a second hop costs accuracy, where the measurement
      * says two hops cost about what the two one-hops cost added, sometimes less. See the header.
      */
-    const target = String(ctx.params.target ?? COMMON_SPACE.id)
+    const target = String(ctx.params.target)
 
-    const override = String(ctx.params.space ?? '')
+    const override = String(ctx.params.space)
     if (!override) return []
     if (!toCommonFor(override)) {
       return [`Coda ships no route from “${override}” into ${COMMON_SPACE.id}.`]
@@ -278,10 +278,7 @@ export const xformNode = registerNode({
       }
     }
 
-    const { space: spaceId, conflict } = resolveSpace(
-      String(ctx.params.space ?? ''),
-      value.space,
-    )
+    const { space: spaceId, conflict } = resolveSpace(String(ctx.params.space), value.space)
     if (conflict) {
       const [carried, override] = conflict
       throw new Error(
@@ -299,7 +296,7 @@ export const xformNode = registerNode({
       )
     }
 
-    const target = String(ctx.params.target ?? COMMON_SPACE.id)
+    const target = String(ctx.params.target)
 
     if (spaceId === target) {
       /*

@@ -133,8 +133,7 @@ export const similarityNode = registerNode({
       label: 'Cells are',
       default: 'similarity',
       options: SIMILARITY_OUTPUT_OPTIONS,
-      visibleIf: (params) =>
-        hasSimilarityForm(String(params.metric ?? 'cosine') as SimilarityMetric),
+      visibleIf: (params) => hasSimilarityForm(String(params.metric) as SimilarityMetric),
       help: 'Distance is 1 − the similarity. Either works into Linkage; a Heatmap is usually easier to read as similarities.',
     },
   ],
@@ -161,10 +160,10 @@ export const similarityNode = registerNode({
   evaluate: (ctx) => {
     const table = ctx.input('in')
     if (!isTableValue(table)) throw new Error('Input is not a table')
-    const metric = String(ctx.params.metric ?? 'cosine') as SimilarityMetric
+    const metric = String(ctx.params.metric) as SimilarityMetric
     // Handed over as stored: `similarityMatrix` resolves it through `effectiveOutput` itself,
     // and resolving it twice is two call sites that have to stay in step for no gain.
-    const output = String(ctx.params.output ?? 'similarity') as SimilarityOutput
+    const output = String(ctx.params.output) as SimilarityOutput
 
     let features
     if (isLongLayout(ctx.params)) {

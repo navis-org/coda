@@ -20,6 +20,7 @@
  */
 
 import type { NodeDefinition, ParamDef, ParamValues } from '../../core/node'
+import { visibleParams } from '../../core/node'
 
 export interface SingleRow {
   kind: 'single'
@@ -75,9 +76,7 @@ export function bucketParams(
   filter: (param: ParamDef) => boolean = () => true,
 ): ParamBucket[] {
   const declared = def.paramGroups ?? []
-  const visible = (def.params ?? []).filter(
-    (param) => filter(param) && (!param.visibleIf || param.visibleIf(params)),
-  )
+  const visible = visibleParams(def, params).filter(filter)
 
   const known = new Set(declared.map((group) => group.id))
   const buckets = new Map<string, ParamBucket>()
@@ -205,9 +204,7 @@ export function paramsForPanel(def: NodeDefinition): (param: ParamDef) => boolea
  */
 export function railParams(def: NodeDefinition, params: ParamValues): ParamDef[] {
   if (def.ownControls) return []
-  return (def.params ?? []).filter(
-    (param) => param.presentational === true && (!param.visibleIf || param.visibleIf(params)),
-  )
+  return visibleParams(def, params).filter((param) => param.presentational === true)
 }
 
 /**
@@ -230,4 +227,16 @@ export function panelTabs(
 ): ReturnType<typeof groupParams> {
   if (controls !== 'auto' || def.ownControls || !def.paramGroups?.length) return []
   return groupParams(def, params, paramsForPanel(def))
+}
+
+/**
+ * The params a card draws in its band: switched on, and not `advanced`.
+ *
+ * Also the set a node with a body of its own draws, which is the point of naming it: nine bodies
+ * each spelled this filter and each said, in a comment, that it matched the generic band — a
+ * control one of them forgets is reachable only from the inspector, which on screen looks like
+ * one that was never added.
+ */
+export function cardParams(def: NodeDefinition | undefined, params: ParamValues): ParamDef[] {
+  return def ? visibleParams(def, params).filter((p) => !p.advanced) : []
 }

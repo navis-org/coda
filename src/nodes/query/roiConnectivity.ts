@@ -39,9 +39,8 @@ const MEASURES = [
 ] as const
 
 /**
- * Named once, so the declared default and the fallback `evaluate` reaches for when a graph
- * carries no `measure` at all cannot drift apart — they did, and a test that ran the node on
- * its own default was reading the other column.
+ * Typed against `MEASURES`, so the declared default cannot name a measure the enum does not
+ * offer.
  */
 const DEFAULT_MEASURE: (typeof MEASURES)[number]['value'] = 'weight'
 
@@ -96,7 +95,7 @@ export const roiConnectivityNode = registerNode({
 
     ctx.progress(0.2, 'regions')
     const links = await fetch({ datasetId: dataset.datasetId, signal: ctx.signal })
-    const measure = String(ctx.params.measure ?? DEFAULT_MEASURE)
+    const measure = String(ctx.params.measure)
     const label = MEASURES.find((m) => m.value === measure)?.label ?? measure
 
     return { matrix: linksToMatrix(links, measure, label), links }

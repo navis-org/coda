@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { NodeDefinition, ParamDef, ParamValues } from '../../core/node'
-import { defaultParams } from '../../core/node'
+import { defaultParams, visibleParams } from '../../core/node'
 import { listableNodeDefs, requireNodeDef } from '../../core/registry'
 import '../../nodes'
 import type { CompositeRow, ParamRow } from './paramGroups'
@@ -424,8 +424,8 @@ describe('bucketParams over compare.connectivity, the card filter', () => {
     // Nothing is stranded: every visible card param is in exactly one tab.
     const shown = at(2).flatMap((b) => b.params.map((p) => p.id))
     const params = { ...defaultParams(compare), datasetCount: 2 }
-    const flat = (compare.params ?? [])
-      .filter((p) => card(p) && (!p.visibleIf || p.visibleIf(params)))
+    const flat = visibleParams(compare, params)
+      .filter(card)
       .map((p) => p.id)
     expect([...shown].sort()).toEqual([...flat].sort())
     expect(new Set(shown).size).toBe(shown.length)

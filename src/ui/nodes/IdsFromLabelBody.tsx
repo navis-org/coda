@@ -22,6 +22,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { formatNumber } from '../format'
 import { ParamField } from '../params/ParamField'
 import type { NodeBodyProps } from './nodeBodies'
+import { cardParams } from '../params/paramGroups'
 
 /** Past this many, the missing labels are summarised rather than listed. */
 const MAX_LISTED = 6
@@ -68,9 +69,7 @@ export function IdsFromLabelBody({ node, ctx, compact, setParam }: NodeBodyProps
   // The generic card renders every non-advanced param; a body replaces that whole area, so it
   // renders the same set rather than a chosen one — a control that exists only in the inspector
   // because a body forgot it is indistinguishable from one that was never added.
-  const fields = (def?.params ?? []).filter(
-    (p) => !p.advanced && (!p.visibleIf || p.visibleIf(node.params)),
-  )
+  const fields = cardParams(def, node.params)
 
   return (
     <div className="list-body nodrag">

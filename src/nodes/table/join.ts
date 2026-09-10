@@ -19,8 +19,8 @@ function specOf(ctx: {
   return {
     leftKey: ctx.column('leftKey') ?? '',
     rightKey: ctx.column('rightKey') ?? '',
-    how: String(ctx.params.how ?? 'left') as JoinHow,
-    suffix: String(ctx.params.suffix ?? '_r'),
+    how: String(ctx.params.how) as JoinHow,
+    suffix: String(ctx.params.suffix),
   }
 }
 

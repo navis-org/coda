@@ -549,7 +549,7 @@ registerEmitter('out.scatter', (ctx) => {
     ...(size ? [`size = ${col(size)}`] : []),
     ...(shape ? [`shape = ${col(shape)}`] : []),
   ]
-  const opacity = Number(ctx.params.opacity ?? 1)
+  const opacity = Number(ctx.params.opacity)
 
   lines.push(``, `ggplot(${out}, aes(${aes.join(', ')})) +`)
   lines.push(
@@ -557,11 +557,11 @@ registerEmitter('out.scatter', (ctx) => {
   )
   if (ctx.params.xLog === true) lines.push(`  scale_x_log10() +`)
   if (ctx.params.yLog === true) lines.push(`  scale_y_log10() +`)
-  if (String(ctx.params.trend ?? 'none') !== 'none') {
+  if (String(ctx.params.trend) !== 'none') {
     // `lm` in the transformed space, which is the reading a log axis is put on to get.
     lines.push(`  geom_smooth(method = "lm", se = FALSE) +`)
   }
-  if (String(ctx.params.aspect ?? '') === 'equal') lines.push(`  coord_equal() +`)
+  if (String(ctx.params.aspect) === 'equal') lines.push(`  coord_equal() +`)
   lines.push(`  theme_minimal()`)
   return lines
 })
@@ -609,10 +609,10 @@ registerEmitter('out.histogram', (ctx) => {
     return [...lines, ...ctx.note('No value column is picked, so nothing is drawn.')]
   }
 
-  const normalize = String(ctx.params.normalize ?? 'count')
+  const normalize = String(ctx.params.normalize)
   const cumulative = ctx.params.cumulative === true && normalize !== 'density'
-  const fixed = String(ctx.params.binMode ?? 'auto') === 'fixed'
-  const bins = Math.max(2, Math.round(Number(ctx.params.bins ?? 30)))
+  const fixed = String(ctx.params.binMode) === 'fixed'
+  const bins = Math.max(2, Math.round(Number(ctx.params.bins)))
 
   /*
    * ggplot's y is a mapping rather than a `stat=` argument, so every scaling here goes in the
@@ -680,7 +680,7 @@ registerEmitter('out.pie', (ctx) => {
     return [...lines, ...ctx.note('No category column is picked, so nothing is drawn.')]
   }
 
-  const maxSlices = Math.max(2, Math.round(Number(ctx.params.maxSlices ?? 8)))
+  const maxSlices = Math.max(2, Math.round(Number(ctx.params.maxSlices)))
   const donut = ctx.params.shape !== 'pie'
   /*
    * Prefixed with the node's own name, and not with an underscore.
@@ -747,9 +747,9 @@ registerEmitter('out.distribution', (ctx) => {
   }
 
   const grouped = !!group && group !== value
-  const style = String(ctx.params.style ?? 'box')
-  const whiskers = String(ctx.params.whiskers ?? 'tukey')
-  const maxGroups = Math.max(1, Math.round(Number(ctx.params.maxGroups ?? 24)))
+  const style = String(ctx.params.style)
+  const whiskers = String(ctx.params.whiskers)
+  const maxGroups = Math.max(1, Math.round(Number(ctx.params.maxGroups)))
   // Not `_keep`/`_plot`: a leading underscore is a syntax error in R. See the pie emitter.
   const keep = `${ctx.name}_keep`
   const plot = `${ctx.name}_data`
@@ -836,7 +836,7 @@ registerEmitter('out.network', (ctx) => {
   const src = ctx.wired('in')
   ctx.library('igraph')
   const out = ctx.output('out')
-  const minLinkWeight = Number(ctx.params.minLinkWeight ?? 0)
+  const minLinkWeight = Number(ctx.params.minLinkWeight)
   const hideIsolated = ctx.params.hideIsolated === true
 
   const lines = [`${out} <- ${src}`]
@@ -931,8 +931,8 @@ registerEmitter('out.copyIds', (ctx) => {
 registerEmitter('out.download', (ctx) => {
   const src = ctx.wired('in')
   const out = ctx.output('out')
-  const filename = String(ctx.params.filename ?? '') || 'export'
-  const format = String(ctx.params.format ?? 'csv')
+  const filename = String(ctx.params.filename) || 'export'
+  const format = String(ctx.params.format)
 
   const lines = [`${out} <- ${src}`]
   switch (format) {
@@ -985,8 +985,8 @@ registerEmitter('out.datasetSummary', (ctx) => {
   ctx.library('neuprintr')
   ctx.library('dplyr')
   const neurons = `${ctx.name}_neurons`
-  const status = String(ctx.params.status ?? '')
-  const topTypes = Number(ctx.params.topTypes ?? 20)
+  const status = String(ctx.params.status)
+  const topTypes = Number(ctx.params.topTypes)
 
   return [
     ...ctx.note(

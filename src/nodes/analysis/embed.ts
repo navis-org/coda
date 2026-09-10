@@ -365,7 +365,7 @@ export const embedNode = registerNode({
      * outright; umap-js does not, so an unfittable pair there comes back as an arrangement
      * that merely looks wrong. Said at edit time, where the number is still on screen.
      */
-    if (Number(ctx.params.minDist ?? 0.1) > Number(ctx.params.spread ?? 1)) {
+    if (Number(ctx.params.minDist) > Number(ctx.params.spread)) {
       return [
         'Min distance cannot exceed Spread — the first is how tightly points may pack within the second',
       ]
@@ -380,7 +380,7 @@ export const embedNode = registerNode({
     if (!selected.ok) throw new Error(selected.refusal)
     const route = selected.route
 
-    const requested = Number(ctx.params.neighbors ?? 15)
+    const requested = Number(ctx.params.neighbors)
     let graph
     if (route === 'neighbours') {
       const table = ctx.input('neighbours')
@@ -388,8 +388,7 @@ export const embedNode = registerNode({
       const query = ctx.column('queryColumn')
       const target = ctx.column('targetColumn')
       if (!query || !target) throw new Error(EMBED_ISSUES.neighbourColumns)
-      const scoreIs =
-        String(ctx.params.scoreIs ?? 'similarity') === 'distance' ? 'distance' : 'similarity'
+      const scoreIs = String(ctx.params.scoreIs) === 'distance' ? 'distance' : 'similarity'
       ctx.progress(0.02, `${table.length.toLocaleString()} neighbour rows`)
       const built = knnFromNeighbours(
         table,
@@ -417,7 +416,7 @@ export const embedNode = registerNode({
     } else {
       const matrix = matrixFor(ctx, route)
       checkEmbedMatrix(ctx, matrix)
-      const transform = transformFor(matrix.measure, String(ctx.params.distance ?? 'auto'))
+      const transform = transformFor(matrix.measure, String(ctx.params.distance))
       /*
        * Before anything is laid out: a matrix of counts read as similarities gives negative
        * distances, which UMAP embeds without complaint. `linkageOps`' guards, verbatim, because
@@ -436,10 +435,10 @@ export const embedNode = registerNode({
       graph,
       {
         nNeighbors: graph.indices[0]?.length ?? requested,
-        minDist: Number(ctx.params.minDist ?? 0.1),
-        spread: Number(ctx.params.spread ?? 1),
-        seed: Number(ctx.params.seed ?? 42),
-        epochs: Number(ctx.params.epochs ?? 0),
+        minDist: Number(ctx.params.minDist),
+        spread: Number(ctx.params.spread),
+        seed: Number(ctx.params.seed),
+        epochs: Number(ctx.params.epochs),
       },
       { onProgress: ctx.progress, signal: ctx.signal },
     )
@@ -502,7 +501,7 @@ function matrixFor(ctx: EvalContext, route: string): MatrixValue {
   // `transformFor` the wired-matrix route uses rather than through a branch here.
   return similarityMatrix(
     features,
-    String(ctx.params.metric ?? 'cosine') as SimilarityMetric,
+    String(ctx.params.metric) as SimilarityMetric,
     'distance',
     ctx,
   )

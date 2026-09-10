@@ -178,9 +178,9 @@ for (const family of DATASET_FAMILIES) {
 registerEmitter(
   'dataset.cave',
   (ctx) => {
-    const datastack = String(ctx.params.datastack ?? '').trim()
+    const datastack = String(ctx.params.datastack).trim()
     if (!datastack) return ctx.todo('This CAVE node names no datastack.')
-    const version = String(ctx.params.version ?? '').trim()
+    const version = String(ctx.params.version).trim()
     if (!version) {
       /*
        * "Latest" is resolved by a network call the exporter has not made — the same gap the
@@ -216,7 +216,7 @@ registerEmitter(
 registerEmitter(
   'annotation.caveTable',
   (ctx) => {
-    const table = String(ctx.params.table ?? '').trim()
+    const table = String(ctx.params.table).trim()
     if (!table) return ctx.todo('This CAVE table node names no table.')
 
     /*
@@ -237,7 +237,7 @@ registerEmitter(
       client = resolved.expr
       lines.push(...resolved.setup)
     } else {
-      const datastackParam = String(ctx.params.datastack ?? '').trim()
+      const datastackParam = String(ctx.params.datastack).trim()
       const parsed = splitDatasetId(datastackParam)
       if (!parsed) {
         return ctx.todo(
@@ -251,10 +251,10 @@ registerEmitter(
     }
 
     ctx.helper('coda_cave_table')
-    const idColumn = String(ctx.params.idColumn ?? 'pt_root_id').trim() || 'pt_root_id'
-    const pivotOn = String(ctx.params.pivotOn ?? '').trim()
-    const valueColumn = String(ctx.params.valueColumn ?? '').trim()
-    const columns = namedColumns(String(ctx.params.columns ?? ''), idColumn)
+    const idColumn = String(ctx.params.idColumn).trim() || 'pt_root_id'
+    const pivotOn = String(ctx.params.pivotOn).trim()
+    const valueColumn = String(ctx.params.valueColumn).trim()
+    const columns = namedColumns(String(ctx.params.columns), idColumn)
 
     const args = [`    ${client},`, `    ${pyStr(table)},`, `    id_column=${pyStr(idColumn)},`]
     if (columns.length > 0) args.push(`    columns=${pyList(columns)},`)
@@ -304,7 +304,7 @@ registerEmitter(
     }
     ctx.helper('coda_update_root_ids')
     const idColumn = ctx.column('idColumn') ?? 'neuronId'
-    const version = String(ctx.params.version ?? '').trim()
+    const version = String(ctx.params.version).trim()
 
     const lines: string[] = []
     let client: string
@@ -373,21 +373,21 @@ registerEmitter(
  *   serve them — the note says which server each cell is pointed at.
  */
 function seaTableCell(ctx: EmitContext, defaultHost: string): string[] {
-  const base = String(ctx.params.base ?? '').trim()
-  const table = String(ctx.params.table ?? '').trim()
+  const base = String(ctx.params.base).trim()
+  const table = String(ctx.params.table).trim()
   if (!base || !table) return ctx.todo('This node names no base and table.')
 
   ctx.require('os')
   ctx.require('seaserpent')
   ctx.helper('coda_seatable')
 
-  const host = String(ctx.params.host ?? '').trim() || defaultHost
-  const idColumn = String(ctx.params.idColumn ?? 'root_id').trim() || 'root_id'
-  const columns = namedColumns(String(ctx.params.columns ?? ''), idColumn)
+  const host = String(ctx.params.host).trim() || defaultHost
+  const idColumn = String(ctx.params.idColumn).trim() || 'root_id'
+  const columns = namedColumns(String(ctx.params.columns), idColumn)
   const out = ctx.output('annotations')
   const lines: string[] = []
 
-  const workspace = String(ctx.params.workspace ?? '').trim()
+  const workspace = String(ctx.params.workspace).trim()
   if (workspace) {
     lines.push(
       ...ctx.note(
@@ -508,7 +508,7 @@ registerEmitter(
 registerEmitter(
   'cave.tableInfo',
   (ctx) => {
-    const table = String(ctx.params.table ?? '').trim()
+    const table = String(ctx.params.table).trim()
     if (!table) return ctx.todo('This CAVE table info node names no table or view.')
     const resolved = discoveryClient(ctx)
     if (!resolved) return ctx.todo(NO_DATASTACK)

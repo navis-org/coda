@@ -254,8 +254,8 @@ export const pathsNode = registerNode({
     if (ctx.inputs.dataset && !sourceSupports(ctx.inputs.dataset, 'paths')) {
       return [`${sourceLabel(ctx.inputs.dataset) ?? 'This data source'} cannot trace paths`]
     }
-    const hops = Number(ctx.params.maxHops ?? 3)
-    const minWeight = Number(ctx.params.minWeight ?? 10)
+    const hops = Number(ctx.params.maxHops)
+    const minWeight = Number(ctx.params.minWeight)
     /*
      * A warning rather than a cap — the same call `Find Neurons` makes about `limit: 0` and
      * `Connectivity` about deep traversals. What is worth saying is that the two multiply.
@@ -301,9 +301,9 @@ export const pathsNode = registerNode({
     if (!isTableValue(targetTable)) throw new Error('Targets input is not a table')
 
     const collapseTypes = ctx.params.collapseTypes !== false
-    const maxHops = Math.max(1, Math.floor(Number(ctx.params.maxHops ?? 3)))
-    const minWeight = Math.max(1, Math.floor(Number(ctx.params.minWeight ?? 10)))
-    const topN = Math.max(0, Math.floor(Number(ctx.params.topN ?? 25)))
+    const maxHops = Math.max(1, Math.floor(Number(ctx.params.maxHops)))
+    const minWeight = Math.max(1, Math.floor(Number(ctx.params.minWeight)))
+    const topN = Math.max(0, Math.floor(Number(ctx.params.topN)))
 
     const normalize = ctx.params.normalize === true
     const by = readNormalizeBy(ctx.params.normalizeBy)
@@ -311,7 +311,7 @@ export const pathsNode = registerNode({
     // Only meaningful while normalising, and only then read: `Rank by` is `visibleIf`-hidden
     // with `Normalize` off, so it is out of the provenance key there as well.
     const rankBy = normalize && ctx.params.rankBy === 'fraction' ? 'norm' : 'weight'
-    const minFraction = normalize ? Math.max(0, Number(ctx.params.minFraction ?? 0)) : 0
+    const minFraction = normalize ? Math.max(0, Number(ctx.params.minFraction)) : 0
     /*
      * The same predicate `validate` asks and the funnel asks again, said here so the message
      * names this node's own switch. `groupTotalsFor` would refuse anyway, one hop in — after a

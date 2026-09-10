@@ -173,7 +173,7 @@ export const mirrorNode = registerNode({
      * it has never heard of. The two used to be the same question because every space had
      * both halves; `evaluate` has always refused on this lookup, and now the card agrees.
      */
-    const override = String(ctx.params.space ?? '')
+    const override = String(ctx.params.space)
     if (override && !mirrorFor(override)) {
       return [`Coda ships no mirror for “${override}”.`]
     }
@@ -186,10 +186,7 @@ export const mirrorNode = registerNode({
       throw new Error('Mirror takes skeletons, meshes or points.')
     }
 
-    const { space: spaceId, conflict } = resolveSpace(
-      String(ctx.params.space ?? ''),
-      value.space,
-    )
+    const { space: spaceId, conflict } = resolveSpace(String(ctx.params.space), value.space)
     if (conflict) {
       const [carried, override] = conflict
       throw new Error(

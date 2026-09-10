@@ -27,8 +27,8 @@ registerEmitter('out.profile', (ctx) => {
   const out = ctx.output('out')
   const current = ctx.output('current')
   const selection = selectionIds(ctx)
-  const minWeight = Math.max(1, Number(ctx.params.minWeight ?? 1))
-  const topN = Number(ctx.params.topN ?? 10)
+  const minWeight = Math.max(1, Number(ctx.params.minWeight))
+  const topN = Number(ctx.params.topN)
   // The card's Count by, as the canvas's own two queries; passed only when it is not the weight,
   // so a profile that never chose one exports exactly the cell it always did.
   const property = readWeightProperty(ctx.params.countBy)

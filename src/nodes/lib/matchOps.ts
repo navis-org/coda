@@ -101,7 +101,8 @@ export interface MatchParams {
 }
 
 /**
- * Raw params in, `MatchParams` out — the one place that says what a card's values *mean*.
+ * A context's params in (every default filled by `withDefaults`), `MatchParams` out — the one
+ * place that says what a card's values *mean*.
  *
  * **Both exporters call this too**, which is the whole reason it is here rather than a helper
  * in the node file. `decodeRenames` and `resolveFilters` set the precedent: a param's
@@ -112,15 +113,15 @@ export interface MatchParams {
  */
 export function matchParamsFrom(params: ParamValues): MatchParams {
   return {
-    mode: String(params.mode ?? 'top') as MatchMode,
+    mode: String(params.mode) as MatchMode,
     // The card stores an enum, which is text; fastcore's argument is an axis number.
-    axis: String(params.axis ?? '0') === '1' ? 1 : 0,
-    direction: String(params.direction ?? 'auto') as MatchDirection,
+    axis: String(params.axis) === '1' ? 1 : 0,
+    direction: String(params.direction) as MatchDirection,
     skipSelf: params.skipSelf !== false,
-    n: Number(params.n ?? 5),
-    cutoff: String(params.cutoff ?? 'threshold') as MatchCutoff,
-    threshold: Number(params.threshold ?? 0.5),
-    percentage: Number(params.percentage ?? 0.05),
+    n: Number(params.n),
+    cutoff: String(params.cutoff) as MatchCutoff,
+    threshold: Number(params.threshold),
+    percentage: Number(params.percentage),
   }
 }
 

@@ -152,15 +152,15 @@ for (const family of DATASET_FAMILIES) {
 
 registerEmitter('dataset.neuprint', (ctx) => {
   // The custom node names its own deployment and dataset, so there is no family to consult.
-  const datasetId = String(ctx.params.dataset ?? '')
+  const datasetId = String(ctx.params.dataset)
   if (!datasetId) return ctx.todo('This neuPrint node names no dataset.')
-  const server = String(ctx.params.server ?? DEFAULT_DEPLOYMENT)
+  const server = String(ctx.params.server)
   return clientLines(ctx, ctx.output('dataset'), server, datasetId)
 })
 
 // The superseded generic picker. Registered because a saved graph may still hold one.
 registerEmitter('neuron.dataset', (ctx) => {
-  const datasetId = String(ctx.params.dataset ?? '')
+  const datasetId = String(ctx.params.dataset)
   if (!datasetId) return ctx.todo('This Dataset node names no dataset.')
   return clientLines(ctx, ctx.output('dataset'), DEFAULT_DEPLOYMENT, datasetId)
 })
@@ -277,8 +277,8 @@ registerEmitter(
 
     ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
     const out = ctx.output('neurons')
-    const roi = String(ctx.params.roi ?? '')
-    const limit = Number(ctx.params.limit ?? 0)
+    const roi = String(ctx.params.roi)
+    const limit = Number(ctx.params.limit)
 
     const { criteria: pushed, statuses, rest } = partitionForCriteria(terms)
 
@@ -374,8 +374,8 @@ function caveFindNeurons(
   schema: TableSchema | undefined,
 ): string[] {
   const out = ctx.output('neurons')
-  const roi = String(ctx.params.roi ?? '')
-  const limit = Number(ctx.params.limit ?? 0)
+  const roi = String(ctx.params.roi)
+  const limit = Number(ctx.params.limit)
 
   const lines: string[] = [
     ...ctx.note(
@@ -407,7 +407,7 @@ function caveFindNeurons(
 
 registerEmitter('neuron.inputIds', (ctx) => {
   const out = ctx.output('neurons')
-  const parsed = parseIdList(String(ctx.params.ids ?? ''))
+  const parsed = parseIdList(String(ctx.params.ids))
   const wired = ctx.input('ids')
 
   if (parsed.error && !wired)
@@ -468,8 +468,8 @@ registerEmitter('neuron.idsFromLabel', (ctx) => {
   const typed = parseTypedLabels(ctx.params.labels)
   const wired = ctx.input('labels')
   const wiredColumn = ctx.column('column')
-  const regex = String(ctx.params.match ?? 'exact') === 'regex'
-  const status = String(ctx.params.status ?? '')
+  const regex = String(ctx.params.match) === 'regex'
+  const status = String(ctx.params.status)
 
   ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
   const out = ctx.output('neurons')
@@ -659,7 +659,7 @@ registerEmitter('neuron.rawCypher', (ctx) => {
 
   ctx.require('neuprint', 'fetch_custom')
   const out = ctx.output('result')
-  const query = String(ctx.params.query ?? '').trim()
+  const query = String(ctx.params.query).trim()
   if (!query) return ctx.todo('This Raw Cypher node has no query.')
 
   // Triple-quoted so the query keeps the shape it was written in on the canvas; a Cypher
@@ -746,7 +746,7 @@ registerEmitter('neuron.skeletons', (ctx) => {
   // TreeNeurons, which is the object every downstream navis call actually wants.
   ctx.require('navisNeuprint')
   const out = ctx.output('skeletons')
-  const limit = Number(ctx.params.limit ?? 0)
+  const limit = Number(ctx.params.limit)
   const ids = neuronIdInts(neurons, limit)
 
   return [
@@ -786,7 +786,7 @@ registerEmitter('neuron.meshes', (ctx) => {
 
   ctx.require('navisNeuprint')
   const out = ctx.output('meshes')
-  const limit = Number(ctx.params.limit ?? 0)
+  const limit = Number(ctx.params.limit)
   const ids = neuronIdInts(neurons, limit)
 
   return [
@@ -864,7 +864,7 @@ registerEmitter('neuron.synapses', (ctx) => {
 
   ctx.require('neuprint', 'NeuronCriteria', 'SynapseCriteria', 'fetch_synapses')
   const out = ctx.output('points')
-  const polarity = String(ctx.params.polarity ?? '')
+  const polarity = String(ctx.params.polarity)
   const minConfidence = minSynapseConfidence(ctx.params)
   const unit = synapseUnitFor(ctx.inputType('dataset'), ctx.params)
 
@@ -969,7 +969,7 @@ registerEmitter('neuron.roiConnectivity', (ctx) => {
   const c = ctx.wired('dataset')
   const links = ctx.output('links')
   const matrix = ctx.output('matrix')
-  const measure = String(ctx.params.measure ?? 'count') === 'weight' ? 'weight' : 'count'
+  const measure = String(ctx.params.measure) === 'weight' ? 'weight' : 'count'
   const rois = `_${matrix}_rois`
 
   return [

@@ -253,7 +253,7 @@ export const exploreNode = registerNode({
   validate: (ctx) => {
     const issues = validateSearch(
       schemasFromType(ctx.inputs.dataset).neurons,
-      parseSearch(String(ctx.params.query ?? '')),
+      parseSearch(String(ctx.params.query)),
     )
     if (!sourceSupports(ctx.inputs.dataset, 'neuronIndex')) {
       const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
@@ -272,7 +272,7 @@ export const exploreNode = registerNode({
     }
 
     const datasetKey = `${dataset.sourceId}:${dataset.datasetId}`
-    const nonce = Number(ctx.params.refresh ?? 0)
+    const nonce = Number(ctx.params.refresh)
     const seen = lastRefresh.get(datasetKey)
     const refresh = seen !== undefined && seen !== nonce
     lastRefresh.set(datasetKey, nonce)
@@ -298,7 +298,7 @@ export const exploreNode = registerNode({
     const population = narrowPopulation(index, dataset.population)
 
     ctx.progress(0.8, 'searching')
-    const parsed = parseSearch(String(ctx.params.query ?? ''))
+    const parsed = parseSearch(String(ctx.params.query))
     // Through `ctx.column`, never `ctx.params` — invariant 5, and it is what keeps the column
     // excluded here the same one the provenance key was taken over.
     const excluded = excludedFromSearch(ctx.params, ctx.column('tagColumn'))
@@ -307,7 +307,7 @@ export const exploreNode = registerNode({
       searchIndexFor(population, excluded ? [excluded] : []),
       parsed,
     )
-    const limit = Number(ctx.params.limit ?? 0)
+    const limit = Number(ctx.params.limit)
     const capped = limit > 0 ? rows.slice(0, limit) : rows
 
     return {

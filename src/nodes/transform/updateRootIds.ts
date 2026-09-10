@@ -124,7 +124,7 @@ export const updateRootIdsNode = registerNode({
         'Pick the column holding each row’s supervoxel id — the ids cannot be updated without it',
       ]
     }
-    const version = String(ctx.params.version ?? '').trim()
+    const version = String(ctx.params.version).trim()
     if (version && !Number.isInteger(Number(version))) {
       return [`"${version}" is not a materialization number — CAVE numbers them, e.g. 783`]
     }
@@ -142,7 +142,7 @@ export const updateRootIdsNode = registerNode({
       throw new Error('Wire a CAVE Dataset, so the ids can be looked up somewhere')
     }
     const [datastack, pinned] = dataset.datasetId.split(':')
-    const chosen = String(ctx.params.version ?? '').trim() || pinned
+    const chosen = String(ctx.params.version).trim() || pinned
     const version = Number(chosen)
     if (!datastack || !Number.isInteger(version)) {
       throw new Error(`Cannot read a materialization out of "${dataset.datasetId}"`)

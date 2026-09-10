@@ -17,6 +17,7 @@ import { downloadBaseName, runDownload, upstreamNodeId } from '../useDownloads'
 import { exportSourceFor } from '../viewers/exportRegistry'
 import { ParamField } from '../params/ParamField'
 import type { NodeBodyProps } from './nodeBodies'
+import { cardParams } from '../params/paramGroups'
 
 /** Past this many, the file list is counted rather than named. */
 const MAX_LISTED = 3
@@ -85,9 +86,7 @@ export function DownloadBody({ node, ctx, compact, setParam, onError }: NodeBody
   // A body replaces the generic rows outright, so it renders the same set in declaration order
   // — a control a body forgets is reachable only from the inspector, which on screen is
   // indistinguishable from one that was never added.
-  const fields = (def?.params ?? []).filter(
-    (p) => !p.advanced && (!p.visibleIf || p.visibleIf(node.params)),
-  )
+  const fields = cardParams(def, node.params)
 
   const download = async () => {
     setBusy(true)

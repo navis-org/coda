@@ -48,8 +48,8 @@ registerEmitter(
     // No `cave` branch: only neuPrint dataset nodes declare the params, so a CAVE dataset type
     // carries no population and this resolves to nothing — see `DatasetBackend.population`.
     const population = populationFromType(ctx.inputType('dataset'))
-    const query = String(ctx.params.query ?? '').trim()
-    const limit = Number(ctx.params.limit ?? 0)
+    const query = String(ctx.params.query).trim()
+    const limit = Number(ctx.params.limit)
     const selection = selectionIds(ctx)
 
     // `All` is the index handed on unchanged, and it is the download every other port is sliced

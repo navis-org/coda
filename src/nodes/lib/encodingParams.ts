@@ -321,7 +321,7 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
       from,
       ...(part ? { part } : {}),
       default: options.defaultColumn ?? '',
-      visibleIf: (params) => !DATALESS_MODES.has(String(params[modeId] ?? defaultMode)),
+      visibleIf: (params) => !DATALESS_MODES.has(String(params[modeId])),
     },
     {
       ...base,
@@ -331,7 +331,7 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
       label: `${label} value`,
       default: defaultColor,
       options: CONSTANT_COLOR_OPTIONS,
-      visibleIf: (params) => (params[modeId] ?? defaultMode) === 'constant',
+      visibleIf: (params) => params[modeId] === 'constant',
     },
     ...(options.palettes
       ? ([
@@ -359,7 +359,7 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
              * the *node* channel's palette rather than one of its own.
              */
             visibleIf: (params) => {
-              const current = String(params[modeId] ?? defaultMode)
+              const current = String(params[modeId])
               return current === 'categorical' || current === 'component'
             },
           },
@@ -427,7 +427,7 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
             label: `${label} — overrides`,
             default: '',
             help: 'Per-key colours chosen from the legend swatches, as JSON. Empty means the palette decides.',
-            visibleIf: (params) => String(params[`${prefix}ColorOverrides`] ?? '') !== '',
+            visibleIf: (params) => String(params[`${prefix}ColorOverrides`]) !== '',
           },
         ] satisfies ParamDef[])
       : []),
@@ -600,7 +600,7 @@ export function shapeParams(options: ShapeParamOptions): ParamDef[] {
       from,
       ...(part ? { part } : {}),
       default: options.defaultColumn ?? '',
-      visibleIf: (params) => String(params[modeId] ?? defaultMode) === 'categorical',
+      visibleIf: (params) => String(params[modeId]) === 'categorical',
     },
     {
       ...base,
@@ -610,7 +610,7 @@ export function shapeParams(options: ShapeParamOptions): ParamDef[] {
       label: `${label} mark`,
       default: defaultShape,
       options: [...SHAPE_OPTIONS],
-      visibleIf: (params) => String(params[modeId] ?? defaultMode) !== 'categorical',
+      visibleIf: (params) => String(params[modeId]) !== 'categorical',
     },
     ...(options.legend
       ? ([
@@ -623,7 +623,7 @@ export function shapeParams(options: ShapeParamOptions): ParamDef[] {
             label: `${label} — overrides`,
             default: '',
             help: 'Per-key shapes chosen from the legend marks, as JSON. Empty means the ranking decides.',
-            visibleIf: (params) => String(params[`${prefix}ShapeOverrides`] ?? '') !== '',
+            visibleIf: (params) => String(params[`${prefix}ShapeOverrides`]) !== '',
           },
         ] satisfies ParamDef[])
       : []),

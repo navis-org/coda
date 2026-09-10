@@ -424,7 +424,7 @@ export function compareParamsFrom(
     }),
     idColumn: ctx.column('idColumn') ?? ID_COLUMN_NAME,
     labelColumn: ctx.column('labelColumn') ?? 'label',
-    minWeight: Math.max(0, Number(ctx.params.minWeight ?? 0)),
+    minWeight: Math.max(0, Number(ctx.params.minWeight)),
   }
 }
 

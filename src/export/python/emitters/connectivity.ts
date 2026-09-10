@@ -191,8 +191,8 @@ registerEmitter('neuron.connectivity', (ctx) => {
 
   const out = ctx.output('connections')
   const direction = readTraversalDirection(ctx.params.direction)
-  const hops = Math.max(1, Number(ctx.params.hops ?? 1))
-  const minWeight = Math.max(1, Number(ctx.params.minWeight ?? 1))
+  const hops = Math.max(1, Number(ctx.params.hops))
+  const minWeight = Math.max(1, Number(ctx.params.minWeight))
   const ids = neuronIds(neurons)
 
   // The node's own decoder rather than a second reading of the same params — the route

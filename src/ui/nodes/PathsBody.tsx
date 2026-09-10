@@ -32,6 +32,7 @@ import { readNormalizeBy } from '../../nodes/lib/connectivityOps'
 import { formatNumber, formatShare, plural } from '../format'
 import { ParamField } from '../params/ParamField'
 import type { NodeBodyProps } from './nodeBodies'
+import { cardParams } from '../params/paramGroups'
 
 interface Summary {
   count: number
@@ -94,9 +95,7 @@ export function PathsBody({ node, ctx, compact, setParam }: NodeBodyProps) {
 
   // The same set the generic band draws, and in the same order — a control a body forgets is
   // reachable only from the inspector, which on screen looks like one that was never added.
-  const fields = (def?.params ?? []).filter(
-    (p) => !p.advanced && (!p.visibleIf || p.visibleIf(node.params)),
-  )
+  const fields = cardParams(def, node.params)
 
   return (
     <div className="list-body paths-body nodrag">

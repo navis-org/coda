@@ -9,7 +9,7 @@
 import { useMemo } from 'react'
 import { IssueText } from '../IssueText'
 
-import { makeInferContext } from '../../core/node'
+import { makeInferContext, visibleParams } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
 import { typeLabel } from '../../core/types'
 import { describeValue } from '../../core/values'
@@ -99,7 +99,7 @@ export function Inspector() {
     )
   }
 
-  const params = (def.params ?? []).filter((p) => !p.visibleIf || p.visibleIf(node.params))
+  const params = visibleParams(def, node.params)
   /*
    * Run state and edit-time issues in one list, ranked by `nodeIssues` — the same ranking the
    * card takes its single line from, so the top of this list and the card's line are always the

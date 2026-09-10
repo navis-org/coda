@@ -52,7 +52,7 @@ export const rawCypherNode = registerNode({
   inferOutputs: (ctx) => ({ result: T.table(ctx.observed) }),
 
   validate: (ctx) => {
-    const query = String(ctx.params.query ?? '').trim()
+    const query = String(ctx.params.query).trim()
     if (!query) return ['Query is empty']
     if (!sourceSupports(ctx.inputs.dataset, 'rawQuery')) {
       const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
@@ -67,7 +67,7 @@ export const rawCypherNode = registerNode({
     if (!source.rawQuery) {
       throw new Error(`${source.label} does not support raw queries`)
     }
-    const query = String(ctx.params.query ?? '').trim()
+    const query = String(ctx.params.query).trim()
     if (!query) throw new Error('Query is empty')
 
     ctx.progress(0.1, 'querying')

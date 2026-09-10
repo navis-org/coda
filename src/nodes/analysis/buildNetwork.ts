@@ -202,7 +202,7 @@ export const buildNetworkNode = registerNode({
     const weightColumn = ctx.column('weight')
     const directed = ctx.params.directed !== false
     const aggregate = ctx.params.aggregate !== false
-    const minWeight = Number(ctx.params.minWeight ?? 0)
+    const minWeight = Number(ctx.params.minWeight)
 
     const sourceData = getColumn(edges, sourceColumn)
     const targetData = getColumn(edges, targetColumn)

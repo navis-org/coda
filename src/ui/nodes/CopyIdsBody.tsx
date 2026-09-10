@@ -23,6 +23,7 @@ import { copyText } from '../export'
 import { plural } from '../format'
 import { ParamField } from '../params/ParamField'
 import type { NodeBodyProps } from './nodeBodies'
+import { cardParams } from '../params/paramGroups'
 
 /** How long "Copied" stays up. ShareDialog's number, because it is the same gesture. */
 const COPIED_MS = 1600
@@ -70,9 +71,7 @@ export function CopyIdsBody({ node, ctx, setParam, onError }: NodeBodyProps) {
   // A body replaces the generic rows outright, so it renders the same set in declaration order
   // — a control a body forgets is reachable only from the inspector, which on screen is
   // indistinguishable from one that was never added.
-  const fields = (def?.params ?? []).filter(
-    (p) => !p.advanced && (!p.visibleIf || p.visibleIf(node.params)),
-  )
+  const fields = cardParams(def, node.params)
 
   const copy = () => {
     void copyText(joinIds(ids, { separator, quoted })).then(

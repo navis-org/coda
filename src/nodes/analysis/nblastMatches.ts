@@ -87,7 +87,7 @@ export const nblastMatchesNode = registerNode({
       default: 5,
       min: 1,
       max: 1000,
-      visibleIf: (params) => String(params.mode ?? 'top') === 'top',
+      visibleIf: (params) => String(params.mode) === 'top',
       help: 'How many to keep, best first. Cut down to what the matrix can offer if it is narrower, with a warning rather than an error.',
     },
     {
@@ -96,7 +96,7 @@ export const nblastMatchesNode = registerNode({
       label: 'Cutoff',
       default: 'threshold',
       options: MATCH_CUTOFFS,
-      visibleIf: (params) => String(params.mode ?? 'top') !== 'top',
+      visibleIf: (params) => String(params.mode) !== 'top',
       help: 'An absolute score applies one number to every neuron. A percentage band applies to each neuron’s own best match, for when some have a near-perfect match and others nothing above 0.3.',
     },
     {
@@ -106,8 +106,7 @@ export const nblastMatchesNode = registerNode({
       default: 0.5,
       step: 0.05,
       visibleIf: (params) =>
-        String(params.mode ?? 'top') !== 'top' &&
-        String(params.cutoff ?? 'threshold') === 'threshold',
+        String(params.mode) !== 'top' && String(params.cutoff) === 'threshold',
       help: 'Keep every cell at or above this — at or below, on a distance matrix. A normalised NBLAST score runs to 1, and around 0.5 is the usual place to start.',
     },
     {
@@ -119,8 +118,7 @@ export const nblastMatchesNode = registerNode({
       max: 1,
       step: 0.01,
       visibleIf: (params) =>
-        String(params.mode ?? 'top') !== 'top' &&
-        String(params.cutoff ?? 'threshold') === 'percentage',
+        String(params.mode) !== 'top' && String(params.cutoff) === 'percentage',
       help:
         'A fraction, not a percent: 0.05 keeps everything within 5% of that neuron’s best ' +
         'match. Its own best, not the matrix’s.',
@@ -159,7 +157,7 @@ export const nblastMatchesNode = registerNode({
    * taking the matrix's own `valueLabel`; see the note beside `matchSchema`.
    */
   inferOutputs: (ctx) => ({
-    matches: T.table(matchSchema(String(ctx.params.mode ?? 'top') as MatchMode)),
+    matches: T.table(matchSchema(String(ctx.params.mode) as MatchMode)),
   }),
 
   validate: (ctx) => matchIssues(matchParamsFrom(ctx.params)),

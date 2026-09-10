@@ -152,8 +152,8 @@ registerEmitter('neuron.connectivity', (ctx) => {
   const out = ctx.output('connections')
   const ids = neuronIds(neurons)
   const direction = readTraversalDirection(ctx.params.direction)
-  const hops = Math.max(1, Number(ctx.params.hops ?? 1))
-  const minWeight = Math.max(1, Number(ctx.params.minWeight ?? 1))
+  const hops = Math.max(1, Number(ctx.params.hops))
+  const minWeight = Math.max(1, Number(ctx.params.minWeight))
   // One sentence for both routes, which refuse Normalize for the same reason.
   const normalizeTodo =
     'Normalize is not translated. The all-synapses denominators are the upstream/downstream columns of neuprint_get_meta(); the reconstructed-partners-only denominator needs its own aggregate query, and the two differ by a factor of two and a half on male-CNS.'

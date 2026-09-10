@@ -59,7 +59,7 @@ registerEmitter('net.build', (ctx) => {
     `)`,
   ]
 
-  const minWeight = Number(ctx.params.minWeight ?? 0)
+  const minWeight = Number(ctx.params.minWeight)
   if (minWeight > 0) lines.push(`_links = _links[_links['weight'] >= ${minWeight}]`)
 
   lines.push(
@@ -231,7 +231,7 @@ registerEmitter('net.filter', (ctx) => {
   const seeds: string[] = []
 
   if (name) {
-    const raw = String(ctx.params.value ?? '')
+    const raw = String(ctx.params.value)
     // `ctx.attributes`, not `ctx.schema`: `schemaOf` has no branch for a network, and this is
     // the accessor `InferContext` carries for exactly that — forwarded onto `EmitContext` rather
     // than reached around, or every network emitter after this writes it again.
@@ -259,7 +259,7 @@ registerEmitter('net.filter', (ctx) => {
   // Unioned, never one overriding the other — both are things somebody asked for.
   lines.push(`_keep = ${seeds.join(' | ')}`)
 
-  const expand = String(ctx.params.expand ?? 'component')
+  const expand = String(ctx.params.expand)
   if (expand === 'component') {
     lines.push(
       // Undirected on purpose: a connected component that respected arrows would be a
@@ -269,8 +269,8 @@ registerEmitter('net.filter', (ctx) => {
       `    _keep |= nx.node_connected_component(_undirected, _n)`,
     )
   } else if (expand === 'hops') {
-    const hops = Math.max(1, Math.floor(Number(ctx.params.hops ?? 1)))
-    const direction = String(ctx.params.direction ?? 'any')
+    const hops = Math.max(1, Math.floor(Number(ctx.params.hops)))
+    const direction = String(ctx.params.direction)
     if (direction === 'upstream') {
       lines.push(`_walk = ${src}.reverse(copy=False) if ${src}.is_directed() else ${src}`)
     } else {
@@ -299,7 +299,7 @@ registerEmitter('net.filter', (ctx) => {
 registerEmitter('core.uploadTable', (ctx) => {
   ctx.require('pandas')
   const out = ctx.output('out')
-  const fileName = String(ctx.params.fileName ?? '')
+  const fileName = String(ctx.params.fileName)
 
   const lines: string[] = [
     /*
@@ -327,7 +327,7 @@ registerEmitter('core.uploadTable', (ctx) => {
 registerEmitter('core.tableFromUrl', (ctx) => {
   ctx.require('pandas')
   const out = ctx.output('out')
-  const typed = String(ctx.params.url ?? '').trim()
+  const typed = String(ctx.params.url).trim()
   if (!typed) return ctx.todo('This Table from URL node has no URL.')
 
   // The counterpart of the upload node, and the one property that separates them: a URL is
@@ -356,7 +356,7 @@ registerEmitter('core.tableFromUrl', (ctx) => {
  */
 function shapingLines(ctx: EmitContext, out: string): string[] {
   const lines: string[] = []
-  const idColumn = String(ctx.params.idColumn ?? '')
+  const idColumn = String(ctx.params.idColumn)
   const textColumns = ctx.columns('textColumns')
 
   if (idColumn) {
@@ -389,8 +389,8 @@ registerEmitter('neuron.paths', (ctx) => {
   if (!sources || !targets) return ctx.todo('Paths needs both Sources and Targets wired.')
 
   const collapse = ctx.params.collapseTypes !== false
-  const maxHops = Number(ctx.params.maxHops ?? 3)
-  const minWeight = Number(ctx.params.minWeight ?? 1)
+  const maxHops = Number(ctx.params.maxHops)
+  const minWeight = Number(ctx.params.minWeight)
 
   if (collapse) {
     /*
@@ -486,9 +486,9 @@ registerEmitter('neuron.nblast', (ctx) => {
 
   const out = ctx.output('scores')
   const dots = `${ctx.name}_dp`
-  const k = Number(ctx.params.k ?? 5)
-  const resample = Number(ctx.params.resample ?? 1)
-  const symmetry = String(ctx.params.symmetry ?? 'mean')
+  const k = Number(ctx.params.k)
+  const resample = Number(ctx.params.resample)
+  const symmetry = String(ctx.params.symmetry)
   const normalized = ctx.params.normalize !== false
   const useAlpha = ctx.params.useAlpha === true
 
@@ -562,9 +562,9 @@ registerEmitter('neuron.nblastKnn', (ctx) => {
 
   const out = ctx.output('matches')
   const dots = `${ctx.name}_dp`
-  const tangentK = Number(ctx.params.tangentK ?? 5)
-  const resample = Number(ctx.params.resample ?? 1)
-  const symmetry = String(ctx.params.symmetry ?? 'mean')
+  const tangentK = Number(ctx.params.tangentK)
+  const resample = Number(ctx.params.resample)
+  const symmetry = String(ctx.params.symmetry)
 
   const lines: string[] = [
     ...ctx.note(MICRON_NOTE),
@@ -578,9 +578,9 @@ registerEmitter('neuron.nblastKnn', (ctx) => {
     `${out} = navis.nblast_knn(`,
     `    ${dots},`,
     ...(targetDots ? [`    target=${targetDots},`] : []),
-    `    k=${Number(ctx.params.k ?? 5)},`,
+    `    k=${Number(ctx.params.k)},`,
     `    scores=${pyStr(symmetry === 'none' ? 'forward' : symmetry)},`,
-    `    n_candidates=${Number(ctx.params.nCandidates ?? 200)},`,
+    `    n_candidates=${Number(ctx.params.nCandidates)},`,
     `    format='long',`,
     `    normalized=${ctx.params.normalize !== false ? 'True' : 'False'},`,
     ...(ctx.params.useAlpha === true ? [`    use_alpha=True,`] : []),
@@ -637,9 +637,9 @@ registerEmitter('cluster.linkage', (ctx) => {
   const tree = ctx.output('tree')
   const ordered = ctx.output('ordered')
   const { labels, order, clusters } = companions(tree)
-  const method = String(ctx.params.method ?? 'ward')
-  const symmetry = String(ctx.params.symmetry ?? 'mean')
-  const distance = String(ctx.params.distance ?? 'auto')
+  const method = String(ctx.params.method)
+  const symmetry = String(ctx.params.symmetry)
+  const distance = String(ctx.params.distance)
 
   const combined =
     symmetry === 'mean'
@@ -713,7 +713,7 @@ registerEmitter('cluster.cut', (ctx) => {
   const clustersOut = ctx.output('clusters')
   const tree = ctx.output('tree')
   const out = companions(tree)
-  const mode = String(ctx.params.mode ?? 'count')
+  const mode = String(ctx.params.mode)
   /*
    * The mixed-dataset mode has no counterpart here. `cut_tree`/`cutree` both cut across the
    * tree at one level; this mode descends to the deepest clusters drawing from every dataset,
@@ -734,8 +734,8 @@ registerEmitter('cluster.cut', (ctx) => {
   const byHeight = mode === 'height'
   ctx.require('scipyCluster', byHeight ? 'fcluster' : 'cut_tree')
   const cut = byHeight
-    ? `fcluster(${src}, t=${Number(ctx.params.height ?? 0.5)}, criterion='distance')`
-    : `cut_tree(${src}, n_clusters=${Number(ctx.params.count ?? 4)}).ravel()`
+    ? `fcluster(${src}, t=${Number(ctx.params.height)}, criterion='distance')`
+    : `cut_tree(${src}, n_clusters=${Number(ctx.params.count)}).ravel()`
 
   return [
     `_raw = np.asarray(${cut})`,
@@ -778,7 +778,7 @@ registerEmitter('out.dendrogram', (ctx) => {
   const out = ctx.output('out')
   const selected = ctx.output('selected')
   const outNames = companions(out)
-  const down = String(ctx.params.orientation ?? 'right') === 'down'
+  const down = String(ctx.params.orientation) === 'down'
   // Leaf *positions*, not names: a label column can call two leaves the same thing, so the
   // canvas holds the observation index. `decodeIndices` is the node's own reader, shared so
   // the canvas and both documents cannot disagree about what this param holds.
@@ -920,7 +920,7 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
 
   const out = ctx.output('neurons')
   const labelColumn = ctx.column('labelColumn') ?? 'label'
-  const suffix = String(ctx.params.suffix ?? '_c')
+  const suffix = String(ctx.params.suffix)
 
   if (!neurons) {
     ctx.require('numpy')
@@ -999,7 +999,7 @@ registerEmitter('cluster.clustersToNeurons', labelsToNeuronsEmitter)
 registerEmitter('neuron.mirror', (ctx) => {
   const src = ctx.wired('in')
   const out = ctx.output('out')
-  const space = String(ctx.params.space ?? '')
+  const space = String(ctx.params.space)
 
   /*
    * A space this cell cannot name. The canvas reads it off the geometry at run time, which is a
@@ -1073,7 +1073,7 @@ registerEmitter('neuron.xform', (ctx) => {
     return [`${out} = navis.xform(${src}, transform=${supplied})`]
   }
 
-  const space = String(ctx.params.space ?? '')
+  const space = String(ctx.params.space)
 
   /*
    * The same gap `neuron.mirror` has, and for the same reason: the canvas reads the source space
@@ -1088,7 +1088,7 @@ registerEmitter('neuron.xform', (ctx) => {
     )
   }
 
-  const target = String(ctx.params.target ?? COMMON_SPACE.id)
+  const target = String(ctx.params.target)
 
   if (target === COMMON_SPACE.id && nerveCordIn(space).any) {
     return ctx.todo(
@@ -1186,7 +1186,7 @@ registerEmitter('neuron.synblast', (ctx) => {
   const out = ctx.output('scores')
   const polarity = ctx.column('polarityColumn')
   const label = ctx.column('labelColumn')
-  const symmetry = String(ctx.params.symmetry ?? 'mean')
+  const symmetry = String(ctx.params.symmetry)
   const groups = `${ctx.name}_groups`
   const build = `${ctx.name}_connectors`
   // Namespaced like every other name this file binds. Unprefixed, two syNBLAST nodes in one
@@ -1610,7 +1610,7 @@ registerEmitter('neuron.partnerVectors', (ctx) => {
   ctx.helper('coda_partner_vectors')
   const neurons = ctx.input('neurons')
   const labels = ctx.input('labels')
-  const partnerBy = String(ctx.params.partnerBy ?? 'type')
+  const partnerBy = String(ctx.params.partnerBy)
 
   /*
    * A wired mapping supersedes both grouping params, so they are left out of the call rather
@@ -1625,9 +1625,7 @@ registerEmitter('neuron.partnerVectors', (ctx) => {
       ]
     : [
         `    partner_by=${pyStr(partnerBy)},`,
-        ...(partnerBy === 'type'
-          ? [`    untyped=${pyStr(String(ctx.params.untyped ?? 'id'))},`]
-          : []),
+        ...(partnerBy === 'type' ? [`    untyped=${pyStr(String(ctx.params.untyped))},`] : []),
       ]
 
   return [
@@ -1636,7 +1634,7 @@ registerEmitter('neuron.partnerVectors', (ctx) => {
     ...(neurons ? [`    neurons=${neurons},`] : []),
     ...grouping,
     `    weight=${pyStr(weight)},`,
-    `    weighting=${pyStr(String(ctx.params.weighting ?? 'raw'))},`,
+    `    weighting=${pyStr(String(ctx.params.weighting))},`,
     `)`,
   ]
 })
@@ -1683,7 +1681,7 @@ function similarityCall(
 ): string[] {
   ctx.helper('coda_similarity')
   const tail = [
-    `    metric=${pyStr(String(ctx.params.metric ?? 'cosine'))},`,
+    `    metric=${pyStr(String(ctx.params.metric))},`,
     `    output=${pyStr(options.output)},`,
     `)`,
   ]
@@ -1720,8 +1718,8 @@ registerEmitter('core.similarity', (ctx) => {
     // that param, so reading it raw would emit `output='similarity'` for a node whose run could
     // only produce distances.
     output: effectiveOutput(
-      String(ctx.params.metric ?? 'cosine') as SimilarityMetric,
-      String(ctx.params.output ?? 'similarity') as SimilarityOutput,
+      String(ctx.params.metric) as SimilarityMetric,
+      String(ctx.params.output) as SimilarityOutput,
     ),
   })
 })
@@ -1817,16 +1815,16 @@ registerEmitter('core.embed', (ctx) => {
   ctx.require('umap')
 
   const out = ctx.output('out')
-  const neighbours = Number(ctx.params.neighbors ?? 15)
-  const epochs = Number(ctx.params.epochs ?? 0)
+  const neighbours = Number(ctx.params.neighbors)
+  const epochs = Number(ctx.params.epochs)
   const settings = [
     `    n_components=2,`,
-    `    min_dist=${pyValue(Number(ctx.params.minDist ?? 0.1))},`,
-    `    spread=${pyValue(Number(ctx.params.spread ?? 1))},`,
+    `    min_dist=${pyValue(Number(ctx.params.minDist))},`,
+    `    spread=${pyValue(Number(ctx.params.spread))},`,
     ...(epochs > 0 ? [`    n_epochs=${epochs},`] : []),
     // The seed is the node's, so the notebook is at least reproducible *with itself* — which is
     // the property the card offers and the one a reader is most likely to want back.
-    `    random_state=${Number(ctx.params.seed ?? 42)},`,
+    `    random_state=${Number(ctx.params.seed)},`,
   ]
 
   const lines: string[] = ctx.note(
@@ -1851,7 +1849,7 @@ registerEmitter('core.embed', (ctx) => {
       `    query=${pyStr(query)},`,
       `    target=${pyStr(target)},`,
       ...(score ? [`    score=${pyStr(score)},`] : []),
-      `    scores_are=${pyStr(String(ctx.params.scoreIs ?? 'similarity'))},`,
+      `    scores_are=${pyStr(String(ctx.params.scoreIs))},`,
       `    k=${neighbours},`,
       `)`,
       // `X` is read only for its length once the neighbours are precomputed, which is the whole
@@ -1890,7 +1888,7 @@ registerEmitter('core.embed', (ctx) => {
     // `auto` on a wired matrix means "read `measure` off it", which a DataFrame does not carry —
     // so the emitter resolves it the way the node's own `transformFor` does, against the
     // measure the *inferred* input had, and falls to the same similarity default.
-    const distance = String(ctx.params.distance ?? 'auto')
+    const distance = String(ctx.params.distance)
     const invert = route === 'features' ? false : distance !== 'none'
     lines.push(
       `_m = np.asarray(${source}, dtype=float)`,

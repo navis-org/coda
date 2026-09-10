@@ -349,7 +349,7 @@ export const matchTypesNode = registerNode({
     ctx.progress(0.9, 'matching')
     const mapping = matchCellTypes(datasets, {
       badLabels: parseTypedLabels(ctx.params.badLabels),
-      compoundSeparator: String(ctx.params.compoundSeparator ?? ','),
+      compoundSeparator: String(ctx.params.compoundSeparator),
       noSplitPrefixes: parseTypedLabels(ctx.params.noSplitPrefixes),
       labelMode: ctx.params.labelMode as LabelMode,
       allowIndirect: ctx.params.allowIndirect === true,

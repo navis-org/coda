@@ -44,7 +44,7 @@ registerEmitter('net.build', (ctx) => {
   const weight = ctx.column('weight') ?? 'weight'
   const directed = ctx.params.directed !== false
   const nodes = ctx.input('nodes')
-  const minWeight = Number(ctx.params.minWeight ?? 0)
+  const minWeight = Number(ctx.params.minWeight)
 
   const lines = [
     // Parallel links merge and only `weight` is summed: a number in a connectivity table is as
@@ -201,7 +201,7 @@ registerEmitter('net.filter', (ctx) => {
   const seeds: string[] = []
 
   if (name) {
-    const raw = String(ctx.params.value ?? '')
+    const raw = String(ctx.params.value)
     // `ctx.attributes`, not `ctx.schema`: `schemaOf` has no branch for a network, and this is
     // the accessor `InferContext` carries for exactly that.
     const dtype = findColumn(ctx.attributes('in', 'nodes'), name)?.dtype
@@ -230,7 +230,7 @@ registerEmitter('net.filter', (ctx) => {
   lines.push(`keep <- unique(c(${seeds.join(', ')}))`)
   lines.push(`keep <- keep[keep %in% V(${src})$name]`)
 
-  const expand = String(ctx.params.expand ?? 'component')
+  const expand = String(ctx.params.expand)
   if (expand === 'component') {
     lines.push(
       // Undirected on purpose: a component that respected arrows would be a *reachable set*,
@@ -240,8 +240,8 @@ registerEmitter('net.filter', (ctx) => {
       `keep <- names(parts)[parts %in% parts[keep]]`,
     )
   } else if (expand === 'hops') {
-    const hops = Math.max(1, Math.floor(Number(ctx.params.hops ?? 1)))
-    const direction = String(ctx.params.direction ?? 'any')
+    const hops = Math.max(1, Math.floor(Number(ctx.params.hops)))
+    const direction = String(ctx.params.direction)
     const mode = direction === 'downstream' ? 'out' : direction === 'upstream' ? 'in' : 'all'
     lines.push(
       `near <- ego(${src}, order = ${hops}, nodes = keep, mode = "${mode}")`,
@@ -262,8 +262,8 @@ registerEmitter('neuron.paths', (ctx) => {
   const sources = ctx.wired('sources')
   const targets = ctx.wired('targets')
   const collapse = ctx.params.collapseTypes !== false
-  const maxHops = Number(ctx.params.maxHops ?? 3)
-  const minWeight = Number(ctx.params.minWeight ?? 1)
+  const maxHops = Number(ctx.params.maxHops)
+  const minWeight = Number(ctx.params.minWeight)
 
   if (collapse) {
     /*
@@ -320,8 +320,8 @@ registerEmitter('neuron.explore', (ctx) => {
   const all = ctx.output('all')
   const hits = ctx.output('hits')
   const selected = ctx.output('selected')
-  const query = String(ctx.params.query ?? '').trim()
-  const limit = Number(ctx.params.limit ?? 0)
+  const query = String(ctx.params.query).trim()
+  const limit = Number(ctx.params.limit)
   const selection = selectionIds(ctx)
   /*
    * The dataset's population, in the `WHERE` of the Cypher this chunk writes by hand.
@@ -513,8 +513,8 @@ registerEmitter('out.profile', (ctx) => {
   const out = ctx.output('out')
   const current = ctx.output('current')
   const selection = selectionIds(ctx)
-  const minWeight = Math.max(1, Number(ctx.params.minWeight ?? 1))
-  const topN = Number(ctx.params.topN ?? 10)
+  const minWeight = Math.max(1, Number(ctx.params.minWeight))
+  const topN = Number(ctx.params.topN)
   // The card's Count by; passed only when it is not the weight, so a profile that never chose
   // one exports exactly the chunk it always did.
   const property = readWeightProperty(ctx.params.countBy)
@@ -796,9 +796,9 @@ registerEmitter('neuron.nblast', (ctx) => {
 
   const out = ctx.output('scores')
   const dots = `${ctx.name}_dps`
-  const k = Number(ctx.params.k ?? 5)
-  const resample = Number(ctx.params.resample ?? 1)
-  const symmetry = String(ctx.params.symmetry ?? 'mean')
+  const k = Number(ctx.params.k)
+  const resample = Number(ctx.params.resample)
+  const symmetry = String(ctx.params.symmetry)
   const normalized = ctx.params.normalize !== false
   const useAlpha = ctx.params.useAlpha === true
 
@@ -914,9 +914,9 @@ registerEmitter('cluster.linkage', (ctx) => {
   const src = ctx.wired('in')
   const tree = ctx.output('tree')
   const ordered = ctx.output('ordered')
-  const method = R_METHODS[String(ctx.params.method ?? 'ward')] ?? 'ward.D2'
-  const symmetry = String(ctx.params.symmetry ?? 'mean')
-  const distance = String(ctx.params.distance ?? 'auto')
+  const method = R_METHODS[String(ctx.params.method)] ?? 'ward.D2'
+  const symmetry = String(ctx.params.symmetry)
+  const distance = String(ctx.params.distance)
 
   const combined =
     symmetry === 'mean'
@@ -929,7 +929,7 @@ registerEmitter('cluster.linkage', (ctx) => {
 
   const lines: string[] = [
     ...ctx.note(
-      `Coda runs navis-fastcore, whose linkage is SciPy's, and "${String(ctx.params.method ?? 'ward')}" ` +
+      `Coda runs navis-fastcore, whose linkage is SciPy's, and "${String(ctx.params.method)}" ` +
         `is hclust's "${method}". Checked through both on one matrix: same merge heights, same ` +
         `leaf order. Note that "ward.D" is a different criterion and would not agree.`,
     ),
@@ -965,7 +965,7 @@ registerEmitter('cluster.cut', (ctx) => {
   ctx.library('dplyr')
   const clusters = ctx.output('clusters')
   const tree = ctx.output('tree')
-  const mode = String(ctx.params.mode ?? 'count')
+  const mode = String(ctx.params.mode)
   /*
    * The mixed-dataset mode has no counterpart here. `cut_tree`/`cutree` both cut across the
    * tree at one level; this mode descends to the deepest clusters drawing from every dataset,
@@ -985,8 +985,8 @@ registerEmitter('cluster.cut', (ctx) => {
   }
   const byHeight = mode === 'height'
   const cut = byHeight
-    ? `cutree(${src}, h = ${Number(ctx.params.height ?? 0.5)})`
-    : `cutree(${src}, k = ${Number(ctx.params.count ?? 4)})`
+    ? `cutree(${src}, h = ${Number(ctx.params.height)})`
+    : `cutree(${src}, k = ${Number(ctx.params.count)})`
 
   return [
     ...(byHeight
@@ -1030,7 +1030,7 @@ registerEmitter('out.dendrogram', (ctx) => {
   ctx.library('dplyr')
   const out = ctx.output('out')
   const selected = ctx.output('selected')
-  const down = String(ctx.params.orientation ?? 'right') === 'down'
+  const down = String(ctx.params.orientation) === 'down'
   // Leaf positions, not names — see the notebook emitter and `out.dendrogram`. A different
   // reader from `selectionIds`, and the type is the point: see `decodeIndices`.
   const selection = decodeIndices(ctx.params.selection)
@@ -1143,7 +1143,7 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
 
   const out = ctx.output('neurons')
   const labelColumn = ctx.column('labelColumn') ?? 'label'
-  const suffix = String(ctx.params.suffix ?? '_c')
+  const suffix = String(ctx.params.suffix)
 
   if (!neurons) {
     return [
@@ -1479,7 +1479,7 @@ registerEmitter('neuron.partnerVectors', (ctx) => {
   ctx.helper('coda_partner_vectors')
   const neurons = ctx.input('neurons')
   const labels = ctx.input('labels')
-  const partnerBy = String(ctx.params.partnerBy ?? 'type')
+  const partnerBy = String(ctx.params.partnerBy)
 
   /*
    * A wired mapping supersedes both grouping params, so they are left out of the call rather
@@ -1495,9 +1495,7 @@ registerEmitter('neuron.partnerVectors', (ctx) => {
       ]
     : [
         `  partner_by = ${rStr(partnerBy)},`,
-        ...(partnerBy === 'type'
-          ? [`  untyped = ${rStr(String(ctx.params.untyped ?? 'id'))},`]
-          : []),
+        ...(partnerBy === 'type' ? [`  untyped = ${rStr(String(ctx.params.untyped))},`] : []),
       ]
 
   return [
@@ -1506,7 +1504,7 @@ registerEmitter('neuron.partnerVectors', (ctx) => {
     ...(neurons ? [`  neurons = ${neurons},`] : []),
     ...grouping,
     `  weight = ${rStr(weight)},`,
-    `  weighting = ${rStr(String(ctx.params.weighting ?? 'raw'))}`,
+    `  weighting = ${rStr(String(ctx.params.weighting))}`,
     `)`,
   ]
 })
@@ -1550,7 +1548,7 @@ function similarityCall(
 ): string[] {
   ctx.helper('coda_similarity')
   const tail = [
-    `  metric = ${rStr(String(ctx.params.metric ?? 'cosine'))},`,
+    `  metric = ${rStr(String(ctx.params.metric))},`,
     `  output = ${rStr(options.output)}`,
     `)`,
   ]
@@ -1584,8 +1582,8 @@ registerEmitter('core.similarity', (ctx) => {
     // Through `effectiveOutput`: Euclidean hides the Output param, so reading it raw would put
     // an argument in the document that the run it mirrors never used.
     output: effectiveOutput(
-      String(ctx.params.metric ?? 'cosine') as SimilarityMetric,
-      String(ctx.params.output ?? 'similarity') as SimilarityOutput,
+      String(ctx.params.metric) as SimilarityMetric,
+      String(ctx.params.output) as SimilarityOutput,
     ),
   })
 })
@@ -1669,12 +1667,12 @@ registerEmitter('core.embed', (ctx) => {
   const route = selected.route
 
   const out = ctx.output('out')
-  const neighbours = Number(ctx.params.neighbors ?? 15)
-  const epochs = Number(ctx.params.epochs ?? 0)
+  const neighbours = Number(ctx.params.neighbors)
+  const epochs = Number(ctx.params.epochs)
   const settings = [
     `  n_components = 2,`,
-    `  min_dist = ${rValue(Number(ctx.params.minDist ?? 0.1))},`,
-    `  spread = ${rValue(Number(ctx.params.spread ?? 1))},`,
+    `  min_dist = ${rValue(Number(ctx.params.minDist))},`,
+    `  spread = ${rValue(Number(ctx.params.spread))},`,
     ...(epochs > 0 ? [`  n_epochs = ${epochs},`] : []),
   ]
 
@@ -1700,7 +1698,7 @@ registerEmitter('core.embed', (ctx) => {
       `  query = ${rStr(query)},`,
       `  target = ${rStr(target)},`,
       ...(score ? [`  score = ${rStr(score)},`] : []),
-      `  scores_are = ${rStr(String(ctx.params.scoreIs ?? 'similarity'))},`,
+      `  scores_are = ${rStr(String(ctx.params.scoreIs))},`,
       `  k = ${neighbours}`,
       `)`,
       `.labels <- .knn$labels`,
@@ -1733,7 +1731,7 @@ registerEmitter('core.embed', (ctx) => {
       source = '.features'
     }
 
-    const distance = String(ctx.params.distance ?? 'auto')
+    const distance = String(ctx.params.distance)
     const invert = route === 'features' ? false : distance !== 'none'
     ctx.library('uwot')
     lines.push(

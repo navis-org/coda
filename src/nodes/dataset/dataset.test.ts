@@ -9,7 +9,13 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { inferGraph } from '../../core/inference'
-import { addEdge, addNode, emptyGraph } from '../../core/graph'
+import {
+  GRAPH_FORMAT_VERSION,
+  addEdge,
+  addNode,
+  deserializeGraph,
+  emptyGraph,
+} from '../../core/graph'
 import type { EnumOption, ParamValues } from '../../core/node'
 import { defaultParams, makeInferContext } from '../../core/node'
 import { getNodeDef, requireNodeDef } from '../../core/registry'
@@ -765,7 +771,22 @@ describe('the population checkboxes', () => {
    */
   it('read an absent param as off, so a saved graph keeps its neuron set', () => {
     const def = requireNodeDef('dataset.hemibrain')
-    const saved = makeInferContext(def, { version: '' }, {})
+    /*
+     * Through the loader, because that is where a saved graph's absence is turned into a value
+     * (`absentMeans`). Handed straight to a context, a missing key now reads as the declared
+     * default (`withDefaults`), exactly as a node built by `addNode` does — which is the point:
+     * absent means off only for a document written before these controls existed.
+     */
+    const { graph } = deserializeGraph(
+      JSON.stringify({
+        version: GRAPH_FORMAT_VERSION,
+        nodes: [
+          { id: 'ds', type: def.type, position: { x: 0, y: 0 }, params: { version: '' } },
+        ],
+        edges: [],
+      }),
+    )
+    const saved = makeInferContext(def, graph.nodes[0]!.params, {})
     expect(datasetRef(def.inferOutputs!(saved)['dataset'])?.population).toBeUndefined()
     // While a node created today arrives with this family's judgement on.
     expect(defaultParams(def).typedOnly).toBe(true)

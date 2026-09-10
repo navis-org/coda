@@ -46,6 +46,18 @@ verbatim. Read the entry before arguing with the rule.
    cannot change what `evaluate` returns — every `out.*` viewer knob qualifies. Getting it
    wrong means a stale result silently survives an edit.
 
+   **A declared param with no stored value reads as its declared default, everywhere.**
+   `withDefaults` (`core/node.ts`) is applied where every context is built — `makeInferContext`,
+   the scheduler's eval context, `normalizeParams` and both exporters' walks — so read
+   `ctx.params.x` plainly. A `?? literal` beside it is a second copy of the default, and that is
+   the bug this closed: the key hashed a declared `100` while `evaluate` read
+   `ctx.params.count ?? 0`, and a Sample node stored without the key answered an empty table under
+   a key that said a hundred rows. 433 such copies were deleted; thirty of them had already
+   disagreed with the declaration. `visibleIf` is asked through `visibleParams`, so the inspector,
+   the cards and the key agree about a node stored without the controlling key. A column picker
+   is filled with what `resolveColumn` reads its absence as, so resolution is unchanged
+   (invariant 5); `absentMeans` is the loader's, not this.
+
 5. **Resolve column params via `ctx.column()` / `ctx.columns()`,** never
    `ctx.params.someColumn`. Infer, validate, evaluate and the cache key all rely on the
    same resolution; bypassing it desynchronises them.

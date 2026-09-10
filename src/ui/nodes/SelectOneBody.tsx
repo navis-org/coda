@@ -30,6 +30,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { formatNumber } from '../format'
 import { ParamField } from '../params/ParamField'
 import type { NodeBodyProps } from './nodeBodies'
+import { cardParams } from '../params/paramGroups'
 
 export function SelectOneBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   const def = getNodeDef(node.type)
@@ -91,9 +92,7 @@ export function SelectOneBody({ node, ctx, compact, setParam }: NodeBodyProps) {
   // The generic card renders every non-advanced param; a body replaces that area outright, so it
   // renders the same set rather than a chosen few — a control a body forgets is reachable only
   // from the inspector, which on screen is indistinguishable from one that was never added.
-  const fields = (def?.params ?? []).filter(
-    (p) => !p.advanced && (!p.visibleIf || p.visibleIf(node.params)),
-  )
+  const fields = cardParams(def, node.params)
 
   return (
     <div className="list-body nodrag">

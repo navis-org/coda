@@ -1012,6 +1012,9 @@ function droppedHandle(
  * through here, so it would reach saved files and miss every starter graph, fixture and test that
  * builds a node by hand, leaving two populations that behave differently.
  *
+ * Reading an absent param as its default needs no pass at all: `withDefaults` does it where every
+ * context is built, which reaches saved files and hand-built nodes alike.
+ *
  * What it is for is the narrow case where absent and the default are *different answers*. Then
  * absence is not a value waiting to be filled in, it is a fact about when the document was
  * written, and something has to record it before the graph reaches a card — because `ParamField`

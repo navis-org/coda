@@ -120,7 +120,7 @@ export const synblastNode = registerNode({
       ctx,
       ctx.input('query'),
       ctx.input('target'),
-      Number(ctx.params.limit ?? MAX_NEURONS),
+      Number(ctx.params.limit),
     )
 
     const polarity = ctx.column('polarityColumn')
@@ -138,7 +138,7 @@ export const synblastNode = registerNode({
           : {}),
         byType,
         normalize: ctx.params.normalize !== false,
-        symmetry: String(ctx.params.symmetry ?? 'mean') as NblastSymmetry,
+        symmetry: String(ctx.params.symmetry) as NblastSymmetry,
       },
       { onProgress: ctx.progress, signal: ctx.signal },
     )

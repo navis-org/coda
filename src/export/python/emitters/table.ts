@@ -150,7 +150,7 @@ registerEmitter('core.filterTable', (ctx) => {
   // from the card it was exported from. See `resolveFilterOp`.
   const dtype = dtypeOf(ctx, 'in', name)
   const op = resolveFilterOp(ctx.params.op, dtype, FILTER_TABLE_DEFAULT_OP)
-  const raw = String(ctx.params.value ?? '')
+  const raw = String(ctx.params.value)
   const numeric = isNumericDType(dtype ?? 'str')
 
   const built = pyFilterMask(src, name, op, raw, numeric)
@@ -228,7 +228,7 @@ registerEmitter('core.sort', (ctx) => {
   ctx.require('pandas')
   const out = ctx.output('out')
   const descending = ctx.params.descending === true
-  const limit = Number(ctx.params.limit ?? 0)
+  const limit = Number(ctx.params.limit)
   const numeric = isNumericDType(dtypeOf(ctx, 'in', name) ?? 'str')
 
   const lines: string[] = []
@@ -288,7 +288,7 @@ registerEmitter('core.dedupe', (ctx) => {
 
   const out = ctx.output('out')
   const names = ctx.columns('columns')
-  const keep = KEEP_ARG[String(ctx.params.keep ?? 'first')] ?? "'first'"
+  const keep = KEEP_ARG[String(ctx.params.keep)] ?? "'first'"
   // Omitted rather than passed as an empty list: `subset=[]` compares on *no* columns, which
   // makes every row a duplicate of the first. Absent is pandas' own "compare whole rows", which
   // is what an empty picker means here.
@@ -304,8 +304,8 @@ registerEmitter('core.combineColumns', (ctx) => {
   const src = ctx.wired('in')
   const out = ctx.output('out')
   const columns = ctx.columns('columns')
-  const into = String(ctx.params.into ?? '').trim()
-  const sourceColumn = String(ctx.params.sourceColumn ?? '').trim()
+  const into = String(ctx.params.into).trim()
+  const sourceColumn = String(ctx.params.sourceColumn).trim()
   if (!into || columns.length === 0) {
     // Not configured, and the node passes its input through in exactly that case.
     return [`${out} = ${src}`]
@@ -372,8 +372,8 @@ registerEmitter('core.relabel', (ctx) => {
   ctx.require('pandas')
   ctx.helper('coda_relabel')
   const out = ctx.output('out')
-  const unmatched = String(ctx.params.unmatched ?? 'null')
-  const target = relabelTarget(ctx.schema('in'), column, String(ctx.params.into ?? ''))
+  const unmatched = String(ctx.params.unmatched)
+  const target = relabelTarget(ctx.schema('in'), column, String(ctx.params.into))
   return [
     `${out} = coda_relabel(${src}, ${pyStr(column)}, ${map}, ${pyStr(keyColumn)}, ` +
       `${pyStr(valueColumn)}, into=${pyStr(target)}, unmatched=${pyStr(unmatched)})`,
@@ -401,7 +401,7 @@ registerEmitter('core.groupBy', (ctx) => {
 
   ctx.require('pandas')
   const out = ctx.output('out')
-  const agg = String(ctx.params.agg ?? 'sum') as AggFn
+  const agg = String(ctx.params.agg) as AggFn
   const values = agg === 'count' ? [] : ctx.columns('value')
   if (agg !== 'count' && values.length === 0) {
     return ctx.todo(`"${agg}" needs at least one value column.`)
@@ -497,8 +497,8 @@ registerEmitter('core.join', (ctx) => {
 
   ctx.require('pandas')
   const out = ctx.output('out')
-  const how = String(ctx.params.how ?? 'left') as JoinHow
-  const suffix = String(ctx.params.suffix ?? '_r')
+  const how = String(ctx.params.how) as JoinHow
+  const suffix = String(ctx.params.suffix)
   // The op's own predicate, not a second copy of it — see `keepsUnmatchedRight`.
   const fillsKey = keepsUnmatchedRight(how)
 
@@ -622,10 +622,10 @@ registerEmitter('core.sample', (ctx) => {
 
   ctx.require('pandas')
   const out = ctx.output('out')
-  const mode = String(ctx.params.mode ?? 'head')
-  const count = Number(ctx.params.count ?? 0)
-  const step = Math.max(1, Number(ctx.params.step ?? 1))
-  const seed = Number(ctx.params.seed ?? 0)
+  const mode = String(ctx.params.mode)
+  const count = Number(ctx.params.count)
+  const step = Math.max(1, Number(ctx.params.step))
+  const seed = Number(ctx.params.seed)
 
   switch (mode) {
     case 'head':
@@ -656,7 +656,7 @@ registerEmitter('core.pivot', (ctx) => {
   if (!rows || !cols) return ctx.todo('This Pivot needs both a Rows and a Columns field.')
 
   ctx.require('pandas')
-  const agg = String(ctx.params.agg ?? 'sum') as AggFn
+  const agg = String(ctx.params.agg) as AggFn
   const value = ctx.column('value')
   const matrix = ctx.output('matrix')
   const table = ctx.output('table')
@@ -757,7 +757,7 @@ registerEmitter('core.normalize', (ctx) => {
 
   ctx.require('pandas')
   const out = ctx.output('out')
-  const mode = String(ctx.params.mode ?? 'none')
+  const mode = String(ctx.params.mode)
 
   /*
    * The totals are masked rather than filled, and an empty line is put back afterwards.
@@ -819,7 +819,7 @@ registerEmitter('core.selectOne', (ctx) => {
    * emits an empty collection of the same kind, and emits a collection either way. `[i:i+1]`
    * is the one spelling that reproduces both, in pandas and in navis alike.
    */
-  const index = Math.floor(Number(ctx.params.selected ?? 0))
+  const index = Math.floor(Number(ctx.params.selected))
   const from = Number.isFinite(index) && index > 0 ? index : 0
   // A negative index would slice from the end in Python and emit nothing in Coda. Only
   // reachable by hand-editing the file, and an empty slice is what the canvas would show.
@@ -896,15 +896,15 @@ registerEmitter('core.qualifyIds', (ctx) => {
 
   ctx.require('pandas')
   ctx.helper('coda_qualify_ids')
-  const direction = String(ctx.params.direction ?? 'add')
+  const direction = String(ctx.params.direction)
   // Through the node's own rule, not the typed name: it suffixes a name the table already
   // has where both languages would overwrite. `relabelTarget`'s reason, one node over.
-  const into = qualifyTarget(ctx.schema('in'), String(ctx.params.into ?? ''))
+  const into = qualifyTarget(ctx.schema('in'), String(ctx.params.into))
   const args = [
     src,
     pyStr(name),
     `direction=${pyStr(direction)}`,
-    ...(direction === 'add' ? [`prefix=${pyStr(String(ctx.params.prefix ?? '').trim())}`] : []),
+    ...(direction === 'add' ? [`prefix=${pyStr(String(ctx.params.prefix).trim())}`] : []),
     ...(direction === 'remove' && into ? [`into=${pyStr(into)}`] : []),
   ]
   return [`${ctx.output('out')} = coda_qualify_ids(${args.join(', ')})`]

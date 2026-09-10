@@ -42,6 +42,11 @@ export const myNode = registerNode({
 })
 ```
 
+Read a param as `ctx.params.factor`, with no `?? 1` beside it: every context is built through
+`withDefaults`, so a param nothing stored already reads as its declared default, and a fallback
+is a second copy of that default which drifts (invariant 4). Column params are the exception,
+and go through `ctx.column()` — see below.
+
 Then export it from [`src/nodes/index.ts`](../src/nodes/index.ts). That file is the node
 pack; importing it registers everything.
 

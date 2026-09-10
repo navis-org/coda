@@ -76,7 +76,7 @@ export const uploadTableNode = registerNode({
    * types and the wire still connects; the columns fill in when the peek lands.
    */
   inferOutputs: (ctx) => {
-    const stored = peekUploadSchema(String(ctx.params.dataId ?? ''))
+    const stored = peekUploadSchema(String(ctx.params.dataId))
     const shape = readImportShape(ctx)
     const shaped = uploadShapeSchema(stored, shape)
     return {
@@ -92,20 +92,20 @@ export const uploadTableNode = registerNode({
    * fire on every single graph load.
    */
   validate: (ctx) => {
-    const dataId = String(ctx.params.dataId ?? '')
+    const dataId = String(ctx.params.dataId)
     if (!dataId) return ['No file chosen — use the button on the node']
     if (!uploadPeekSettled(dataId)) return []
     const schema = peekUploadSchema(dataId)
     if (!schema) {
-      const name = String(ctx.params.fileName ?? '') || 'this file'
+      const name = String(ctx.params.fileName) || 'this file'
       return [`${name} is not stored in this browser — pick the file again`]
     }
-    return importShapeIssues(ctx, schema, String(ctx.params.fileName ?? '') || 'the file')
+    return importShapeIssues(ctx, schema, String(ctx.params.fileName) || 'the file')
   },
 
   evaluate: async (ctx) => {
-    const dataId = String(ctx.params.dataId ?? '')
-    const name = String(ctx.params.fileName ?? '') || 'the uploaded file'
+    const dataId = String(ctx.params.dataId)
+    const name = String(ctx.params.fileName) || 'the uploaded file'
     if (!dataId) throw new Error('No file chosen. Use the button on the node to pick a CSV.')
 
     const table = await getUpload(dataId)
@@ -121,7 +121,7 @@ export const uploadTableNode = registerNode({
       )
     }
 
-    const idColumn = String(ctx.params.idColumn ?? '')
+    const idColumn = String(ctx.params.idColumn)
     if (idColumn && !findColumn(table.schema, idColumn)) {
       throw new Error(
         `ID column "${idColumn}" is not in "${name}". Available: ${columnNames(table.schema).join(', ')}`,

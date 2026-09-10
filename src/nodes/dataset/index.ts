@@ -164,7 +164,7 @@ function buildDatasetNode(family: DatasetFamily) {
         const why = source.whyDatasetMissing?.(family.family)
         return why ? [why] : []
       }
-      const chosen = String(ctx.params.version ?? '')
+      const chosen = String(ctx.params.version)
       if (chosen && !versions.some((v) => v.version === chosen)) {
         return [
           `${familyLabel(family)} ${chosen} is not on this server — it offers ${versions.map((v) => v.version).join(', ')}`,
@@ -291,8 +291,8 @@ export const customCaveNode = registerNode({
        * control, where "name a datastack first" reads as an instruction.
        */
       options: (ctx) => {
-        const datastack = String(ctx.params.datastack ?? '').trim()
-        const chosen = String(ctx.params.version ?? '').trim()
+        const datastack = String(ctx.params.datastack).trim()
+        const chosen = String(ctx.params.version).trim()
         if (!datastack) return [{ value: '', label: 'Name a datastack first' }]
         const known = peekMaterializations(datastack)
         if (!known) {
@@ -364,7 +364,7 @@ export const customCaveNode = registerNode({
   },
 
   validate: (ctx) => {
-    const datastack = String(ctx.params.datastack ?? '').trim()
+    const datastack = String(ctx.params.datastack).trim()
     if (!datastack) return ['Name a datastack, e.g. flywire_fafb_public']
     /*
      * Checked before anything else on the card, because it makes everything else on the card
@@ -379,7 +379,7 @@ export const customCaveNode = registerNode({
           `settings are ignored for a datastack that already has a spec.`,
       ]
     }
-    const version = String(ctx.params.version ?? '').trim()
+    const version = String(ctx.params.version).trim()
     if (version && !Number.isInteger(Number(version))) {
       return [`"${version}" is not a materialization number — CAVE numbers them, e.g. 783`]
     }
@@ -389,7 +389,7 @@ export const customCaveNode = registerNode({
      * demand for the table — several datastacks publish no equivalent, and for those the chain
      * is the answer rather than a workaround.
      */
-    if (!String(ctx.params.neuronTable ?? '').trim() && !ctx.inputs.annotations) {
+    if (!String(ctx.params.neuronTable).trim() && !ctx.inputs.annotations) {
       return [
         'Name a table listing this datastack\u2019s neurons (e.g. proofread_neurons), or wire ' +
           'an Annotations source to supply the neuron list',
@@ -418,9 +418,9 @@ export const customCaveNode = registerNode({
   },
 
   evaluate: async (ctx) => {
-    const datastack = String(ctx.params.datastack ?? '').trim()
+    const datastack = String(ctx.params.datastack).trim()
     if (!datastack) throw new Error('Name a datastack, e.g. flywire_fafb_public')
-    const pinned = String(ctx.params.version ?? '').trim()
+    const pinned = String(ctx.params.version).trim()
     /*
      * Resolved by *fetching* rather than by peeking. `evaluate` may await where inference may
      * not, so an unpinned node runs on the first press rather than failing because the metadata
@@ -526,9 +526,9 @@ function rootDriftIssues(datasetId: string | undefined): string[] {
  * node publishes a Dataset type with no id for a moment and `reportSourceLearned` re-infers.
  */
 function customCaveDatasetId(params: Record<string, unknown>): string | undefined {
-  const datastack = String(params.datastack ?? '').trim()
+  const datastack = String(params.datastack).trim()
   if (!datastack) return undefined
-  const pinned = String(params.version ?? '').trim()
+  const pinned = String(params.version).trim()
   const version = pinned ? Number(pinned) : peekMaterializations(datastack)?.[0]
   // Through `datasetIdFor`, which `splitDatasetId` is the reader for — a third spelling of the
   // `datastack:materialization` grammar is a third place it can drift.
@@ -538,10 +538,10 @@ function customCaveDatasetId(params: Record<string, unknown>): string | undefine
 }
 
 function registerCustomCaveSpec(params: Record<string, unknown>): void {
-  const datastack = String(params.datastack ?? '').trim()
+  const datastack = String(params.datastack).trim()
   if (!datastack) return
-  const table = String(params.neuronTable ?? '').trim()
-  const view = String(params.connectionView ?? '').trim()
+  const table = String(params.neuronTable).trim()
+  const view = String(params.connectionView).trim()
   registerDatastackSpec({
     datastack,
     label: datastack,
@@ -553,7 +553,7 @@ function registerCustomCaveSpec(params: Record<string, unknown>): void {
       ? {
           neurons: {
             table,
-            idColumn: String(params.idColumn ?? 'pt_root_id').trim() || 'pt_root_id',
+            idColumn: String(params.idColumn).trim() || 'pt_root_id',
           },
         }
       : {}),
@@ -619,11 +619,11 @@ export const customNeuPrintNode = registerNode({
   ],
 
   inferOutputs: (ctx) => {
-    const server = normaliseServer(String(ctx.params.server ?? ''))
+    const server = normaliseServer(String(ctx.params.server))
     // Registers the source if this is the first sight of the deployment. Synchronous and
     // network-free, which is what makes it safe to call from inference.
     neuPrintSourceFor(server)
-    const datasetId = String(ctx.params.dataset ?? '').trim()
+    const datasetId = String(ctx.params.dataset).trim()
     return {
       dataset: T.dataset(
         sourceIdForServer(server),
@@ -636,9 +636,9 @@ export const customNeuPrintNode = registerNode({
   },
 
   validate: (ctx) => {
-    const datasetId = String(ctx.params.dataset ?? '').trim()
+    const datasetId = String(ctx.params.dataset).trim()
     if (!datasetId) return ['Name a dataset, e.g. hemibrain:v1.2.1']
-    const source = neuPrintSourceFor(normaliseServer(String(ctx.params.server ?? '')))
+    const source = neuPrintSourceFor(normaliseServer(String(ctx.params.server)))
     const available = source.peekDatasets()
     // Undefined means the listing has not arrived; only complain once it has.
     if (available && !available.some((d) => d.id === datasetId)) {
@@ -651,10 +651,10 @@ export const customNeuPrintNode = registerNode({
   },
 
   evaluate: async (ctx) => {
-    const server = normaliseServer(String(ctx.params.server ?? ''))
+    const server = normaliseServer(String(ctx.params.server))
     const registered = neuPrintSourceFor(server)
     const source = ctx.resolveSource(registered.id)
-    const datasetId = String(ctx.params.dataset ?? '').trim()
+    const datasetId = String(ctx.params.dataset).trim()
     if (!datasetId) throw new Error('No dataset named')
 
     const datasets = await source.listDatasets(ctx.signal)
@@ -754,13 +754,13 @@ export const customCatmaidNode = registerNode({
        * empty value means *unchosen* rather than *newest*, and `validate` says so.
        */
       options: (ctx) => {
-        const chosen = String(ctx.params.project ?? '').trim()
+        const chosen = String(ctx.params.project).trim()
         // Two labels for one kept value, and the difference is the whole of the rule above:
         // while the list is unknown the id is offered *plainly*, because "not listed" is a claim
         // nobody is in a position to make yet.
         const waiting = chosen ? [{ value: chosen, label: chosen }] : []
         const unlisted = chosen ? [{ value: chosen, label: `${chosen} (not listed)` }] : []
-        const projects = catmaidSourceFor(String(ctx.params.server ?? '')).peekDatasets()
+        const projects = catmaidSourceFor(String(ctx.params.server)).peekDatasets()
         if (!projects) {
           return [{ value: '', label: 'Projects not listed yet' }, ...waiting]
         }
@@ -787,14 +787,14 @@ export const customCatmaidNode = registerNode({
   inferOutputs: (ctx) => {
     // Registers the source for this instance if this is the first sight of it. Synchronous and
     // network-free, which is what makes it safe from inference — `neuPrintSourceFor`'s rule.
-    const source = catmaidSourceFor(String(ctx.params.server ?? ''))
-    const project = String(ctx.params.project ?? '').trim()
+    const source = catmaidSourceFor(String(ctx.params.server))
+    const project = String(ctx.params.project).trim()
     return { dataset: T.dataset(source.id, project || undefined) }
   },
 
   validate: (ctx) => {
-    const source = catmaidSourceFor(String(ctx.params.server ?? ''))
-    const project = String(ctx.params.project ?? '').trim()
+    const source = catmaidSourceFor(String(ctx.params.server))
+    const project = String(ctx.params.project).trim()
     if (!project) return ['Pick a project — the list fills in once the server answers']
     const projects = source.peekDatasets()
     // Undefined means the listing has not arrived, which is not a problem to report: the same
@@ -812,9 +812,9 @@ export const customCatmaidNode = registerNode({
   },
 
   evaluate: async (ctx) => {
-    const registered = catmaidSourceFor(String(ctx.params.server ?? ''))
+    const registered = catmaidSourceFor(String(ctx.params.server))
     const source = ctx.resolveSource(registered.id)
-    const project = String(ctx.params.project ?? '').trim()
+    const project = String(ctx.params.project).trim()
     if (!project) throw new Error('No project chosen')
 
     const projects = await source.listDatasets(ctx.signal)

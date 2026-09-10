@@ -36,7 +36,7 @@ import type {
   ParamValues,
   PortDef,
 } from './node'
-import { findParam, resolveColumn, resolveColumns } from './node'
+import { findParam, resolveColumn, resolveColumns, visibleParams, withDefaults } from './node'
 import { getNodeDef } from './registry'
 import { inputPorts, outputPorts } from './ports'
 import type { CodaType } from './types'
@@ -1513,7 +1513,7 @@ export class Scheduler {
     onFetched?: (at: number) => void
   }): EvalContext {
     const { pass, nodeId, def, gathered, refresh } = opts
-    const params = this.nodeOf(pass, nodeId).params
+    const params = withDefaults(def, this.nodeOf(pass, nodeId).params)
     const types = (pass.inference.nodes[nodeId]?.inputs ?? {}) as Record<string, never>
     return {
       params,
@@ -1632,17 +1632,18 @@ function referenceKey(type: CodaType | undefined): string {
  */
 function normalizeParams(
   def: NodeDefinition,
-  params: ParamValues,
+  stored: ParamValues,
   inputTypes: Readonly<Record<string, unknown>>,
 ): ParamValues {
+  // The view `evaluate` reads, so `visibleIf` decides over the same values the node will see.
+  const params = withDefaults(def, stored)
   const types = inputTypes as Record<string, never>
   const out: ParamValues = {}
-  for (const p of def.params ?? []) {
+  for (const p of visibleParams(def, params)) {
     if (p.presentational) continue
-    if (p.visibleIf && !p.visibleIf(params)) continue
     if (p.kind === 'column') out[p.id] = resolveColumn(p, params, types) ?? ''
     else if (p.kind === 'columns') out[p.id] = resolveColumns(p, params, types)
-    else out[p.id] = params[p.id] ?? p.default
+    else out[p.id] = params[p.id]!
   }
   return out
 }

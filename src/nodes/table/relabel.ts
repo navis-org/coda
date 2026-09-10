@@ -33,8 +33,8 @@ function specOf(ctx: {
     column: ctx.column('column') ?? '',
     keyColumn: ctx.column('keyColumn') ?? '',
     valueColumn: ctx.column('valueColumn') ?? '',
-    into: String(ctx.params.into ?? '').trim(),
-    unmatched: String(ctx.params.unmatched ?? 'null') as UnmatchedMode,
+    into: String(ctx.params.into).trim(),
+    unmatched: String(ctx.params.unmatched) as UnmatchedMode,
   }
 }
 

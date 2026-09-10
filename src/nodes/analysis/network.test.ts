@@ -27,6 +27,7 @@ import {
   makeInferContext,
   resolveColumn,
   resolveColumns,
+  visibleParams,
 } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
@@ -338,9 +339,7 @@ describe('what the unexpanded card draws', () => {
    */
   const def = requireNodeDef('out.network')
   const values = defaultParams(def)
-  const onCard = (def.params ?? []).filter(
-    (p) => !p.advanced && (!p.visibleIf || p.visibleIf(values)),
-  )
+  const onCard = visibleParams(def, values).filter((p) => !p.advanced)
 
   it('shows the one control that decides what the picture is, and nothing else', () => {
     expect(onCard.map((p) => p.id)).toEqual(['layout'])

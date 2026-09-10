@@ -143,7 +143,7 @@ registerEmitter('core.filterTable', (ctx) => {
   // the card it came from. See `resolveFilterOp`.
   const dtype = dtypeOf(ctx, 'in', name)
   const op = resolveFilterOp(ctx.params.op, dtype, FILTER_TABLE_DEFAULT_OP)
-  const raw = String(ctx.params.value ?? '')
+  const raw = String(ctx.params.value)
   const numeric = isNumericDType(dtype ?? 'str')
 
   const built = rFilterPredicate(name, op, raw, numeric)
@@ -235,7 +235,7 @@ registerEmitter('core.sort', (ctx) => {
   ctx.library('dplyr')
   const out = ctx.output('out')
   const descending = ctx.params.descending === true
-  const limit = Number(ctx.params.limit ?? 0)
+  const limit = Number(ctx.params.limit)
   const lines: string[] = []
 
   if (!isNumericDType(dtypeOf(ctx, 'in', name) ?? 'str')) {
@@ -276,7 +276,7 @@ registerEmitter('core.select', (ctx) => {
 registerEmitter('core.selectOne', (ctx) => {
   const src = ctx.wired('in')
   ctx.library('dplyr')
-  const index = Number(ctx.params.selected ?? ctx.params.index ?? 0)
+  const index = Number(ctx.params.selected)
   // R is 1-based, and this is exactly the sort of off-by-one that produces a valid answer
   // about the wrong row.
   return [`${ctx.output('item')} <- ${src} |> slice(${index + 1})`]
@@ -290,7 +290,7 @@ registerEmitter('core.dedupe', (ctx) => {
   const src = ctx.wired('in')
   const out = ctx.output('out')
   const names = ctx.columns('columns')
-  const keep = String(ctx.params.keep ?? 'first')
+  const keep = String(ctx.params.keep)
 
   /*
    * Base R's `duplicated()` rather than `dplyr::distinct()`, which is the house verb everywhere
@@ -325,8 +325,8 @@ registerEmitter('core.combineColumns', (ctx) => {
   const src = ctx.wired('in')
   const out = ctx.output('out')
   const columns = ctx.columns('columns')
-  const into = String(ctx.params.into ?? '').trim()
-  const sourceColumn = String(ctx.params.sourceColumn ?? '').trim()
+  const into = String(ctx.params.into).trim()
+  const sourceColumn = String(ctx.params.sourceColumn).trim()
   if (!into || columns.length === 0) {
     // Not configured, and the node passes its input through in exactly that case.
     return [`${out} <- ${src}`]
@@ -385,8 +385,8 @@ registerEmitter('core.relabel', (ctx) => {
 
   ctx.helper('coda_relabel')
   const out = ctx.output('out')
-  const unmatched = String(ctx.params.unmatched ?? 'null')
-  const target = relabelTarget(ctx.schema('in'), column, String(ctx.params.into ?? ''))
+  const unmatched = String(ctx.params.unmatched)
+  const target = relabelTarget(ctx.schema('in'), column, String(ctx.params.into))
   return [
     `${out} <- coda_relabel(${src}, ${rStr(column)}, ${map}, ${rStr(keyColumn)}, ` +
       `${rStr(valueColumn)}, into = ${rStr(target)}, unmatched = ${rStr(unmatched)})`,
@@ -453,7 +453,7 @@ registerEmitter('core.groupBy', (ctx) => {
 
   ctx.library('dplyr')
   const out = ctx.output('out')
-  const agg = String(ctx.params.agg ?? 'sum') as AggFn
+  const agg = String(ctx.params.agg) as AggFn
   const values = agg === 'count' ? [] : ctx.columns('value')
   if (agg !== 'count' && values.length === 0) {
     return ctx.todo(`"${agg}" needs at least one value column.`)
@@ -528,8 +528,8 @@ registerEmitter('core.join', (ctx) => {
 
   ctx.library('dplyr')
   const out = ctx.output('out')
-  const how = String(ctx.params.how ?? 'left')
-  const suffix = String(ctx.params.suffix ?? '_r')
+  const how = String(ctx.params.how)
+  const suffix = String(ctx.params.suffix)
   const verb =
     { left: 'left_join', inner: 'inner_join', outer: 'full_join', right: 'right_join' }[how] ??
     'left_join'
@@ -630,10 +630,10 @@ registerEmitter('core.sample', (ctx) => {
   const src = ctx.wired('in')
   ctx.library('dplyr')
   const out = ctx.output('out')
-  const mode = String(ctx.params.mode ?? 'head')
-  const count = Number(ctx.params.count ?? 0)
-  const step = Math.max(1, Number(ctx.params.step ?? 1))
-  const seed = Number(ctx.params.seed ?? 0)
+  const mode = String(ctx.params.mode)
+  const count = Number(ctx.params.count)
+  const step = Math.max(1, Number(ctx.params.step))
+  const seed = Number(ctx.params.seed)
 
   switch (mode) {
     case 'head':
@@ -665,7 +665,7 @@ registerEmitter('core.pivot', (ctx) => {
 
   ctx.library('dplyr')
   ctx.library('tidyr')
-  const agg = String(ctx.params.agg ?? 'sum') as AggFn
+  const agg = String(ctx.params.agg) as AggFn
   const value = ctx.column('value')
   const matrix = ctx.output('matrix')
   const table = ctx.output('table')
@@ -749,7 +749,7 @@ registerEmitter('core.unpivot', (ctx) => {
 registerEmitter('core.normalize', (ctx) => {
   const src = ctx.wired('in')
   const out = ctx.output('out')
-  const mode = String(ctx.params.mode ?? 'none')
+  const mode = String(ctx.params.mode)
 
   /*
    * `[!is.finite()] <- 0` was the old ending and it reproduced Coda's old bug: a line that holds
@@ -810,7 +810,7 @@ registerEmitter('core.normalize', (ctx) => {
  */
 function shapingLines(ctx: EmitContext, out: string): string[] {
   const lines: string[] = []
-  const idColumn = String(ctx.params.idColumn ?? '')
+  const idColumn = String(ctx.params.idColumn)
   const textColumns = ctx.columns('textColumns')
 
   if (idColumn) {
@@ -832,7 +832,7 @@ function shapingLines(ctx: EmitContext, out: string): string[] {
 registerEmitter('core.uploadTable', (ctx) => {
   ctx.library('readr')
   const out = ctx.output('out')
-  const fileName = String(ctx.params.fileName ?? '')
+  const fileName = String(ctx.params.fileName)
   return [
     ...ctx.note(
       fileName
@@ -848,7 +848,7 @@ registerEmitter('core.uploadTable', (ctx) => {
 registerEmitter('core.tableFromUrl', (ctx) => {
   ctx.library('readr')
   const out = ctx.output('out')
-  const typed = String(ctx.params.url ?? '').trim()
+  const typed = String(ctx.params.url).trim()
   if (!typed) return ctx.todo('This Table from URL node has no URL.')
   // `rawFileUrl` and its note, as the notebook does: `read_csv` on a github.com file page reads
   // the page's HTML rather than failing.
@@ -912,17 +912,15 @@ registerEmitter('core.qualifyIds', (ctx) => {
   if (!name) return ctx.todo('This Qualify Ids has no id column chosen.')
 
   ctx.helper('coda_qualify_ids')
-  const direction = String(ctx.params.direction ?? 'add')
+  const direction = String(ctx.params.direction)
   // Through the node's own rule, not the typed name: it suffixes a name the table already
   // has where both languages would overwrite. `relabelTarget`'s reason, one node over.
-  const into = qualifyTarget(ctx.schema('in'), String(ctx.params.into ?? ''))
+  const into = qualifyTarget(ctx.schema('in'), String(ctx.params.into))
   const args = [
     src,
     rStr(name),
     `direction = ${rStr(direction)}`,
-    ...(direction === 'add'
-      ? [`prefix = ${rStr(String(ctx.params.prefix ?? '').trim())}`]
-      : []),
+    ...(direction === 'add' ? [`prefix = ${rStr(String(ctx.params.prefix).trim())}`] : []),
     ...(direction === 'remove' && into ? [`into = ${rStr(into)}`] : []),
   ]
   return [`${ctx.output('out')} <- coda_qualify_ids(${args.join(', ')})`]
