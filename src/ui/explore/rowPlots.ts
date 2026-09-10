@@ -37,13 +37,24 @@ export interface Percentile {
 export interface Distributions {
   /** Column name to its sorted sample, ascending. */
   sorted: Map<string, Float64Array>
+  /**
+   * Column name to its largest value, over **every** row rather than the sample.
+   *
+   * What a bar's length is read against. The strided sample is fine for a rank, where one neuron
+   * more or less moves nothing, and wrong for a maximum: the largest neuron in a dataset is one
+   * row, which a stride of forty skips thirty-nine times in forty, and then every neuron larger
+   * than the sample's top draws as a full bar. One pass over a column is a millisecond.
+   */
+  max: Map<string, number>
 }
 
 /** How many points a distribution is estimated from. */
 const SAMPLE = 4000
 
 /**
- * Sort a sample of each numeric column, once.
+ * Each measured column's spread, once: a sorted sample for a rank, the whole column's maximum for a
+ * bar — and only what each mark reads, since both are passes over every row of a table that runs to
+ * 165,122 on male-CNS.
  *
  * Keyed on the table so a search does not recompute it: the distribution is a property of the
  * *dataset*, and re-deriving it per query would also make a neuron's percentile move as somebody
@@ -51,12 +62,14 @@ const SAMPLE = 4000
  */
 export function distributionsFor(
   table: TableValue | undefined,
-  columns: readonly string[],
+  ranked: readonly string[],
+  barred: readonly string[] = [],
 ): Distributions {
   const sorted = new Map<string, Float64Array>()
-  if (!table) return { sorted }
+  const max = new Map<string, number>()
+  if (!table) return { sorted, max }
   const stride = Math.max(1, Math.floor(table.length / SAMPLE))
-  for (const name of columns) {
+  for (const name of ranked) {
     const column = table.data[name]
     if (!column) continue
     const values: number[] = []
@@ -68,7 +81,17 @@ export function distributionsFor(
     values.sort((a, b) => a - b)
     sorted.set(name, Float64Array.from(values))
   }
-  return { sorted }
+  for (const name of barred) {
+    const column = table.data[name]
+    if (!column) continue
+    let largest = -Infinity
+    for (let row = 0; row < table.length; row++) {
+      const value = column[row]
+      if (typeof value === 'number' && value > largest) largest = value
+    }
+    if (Number.isFinite(largest)) max.set(name, largest)
+  }
+  return { sorted, max }
 }
 
 /**
@@ -96,27 +119,61 @@ export function percentileOf(
   return { at: sample.length === 1 ? 0.5 : low / (sample.length - 1), value: cell }
 }
 
-/** A neuron's split between output and input sites. */
-export interface Balance {
-  /** Presynaptic share of the two, 0 to 1. */
-  pre: number
-  preCount: number
-  postCount: number
+/**
+ * How long a bar is, 0 to 1, against the largest value in the dataset.
+ *
+ * `log` is `log1p(v) / log1p(max)` — the heatmap's own log, and for the same reason: a synapse
+ * count spans four orders of magnitude, so on a linear bar all but the few largest neurons are a
+ * pixel. A rank answers "where does it sit" without either problem; a bar is for when the
+ * *quantity* is the point. Negative values draw as empty rather than backwards — nothing a neuron
+ * table publishes is negative, and a bar pointing left would be a mark nobody could read in a list.
+ */
+export function barFraction(
+  distributions: Distributions,
+  name: string,
+  cell: CellValue,
+  log: boolean,
+): number | null {
+  if (typeof cell !== 'number' || !Number.isFinite(cell)) return null
+  const max = distributions.max.get(name)
+  if (max === undefined || max <= 0) return null
+  const value = Math.max(cell, 0)
+  const fraction = log ? Math.log1p(value) / Math.log1p(max) : value / max
+  return Math.min(fraction, 1)
+}
+
+/** One field's part of a merged column. */
+export interface Part {
+  name: string
+  count: number
+  /** Share of the parts' own sum, 0 to 1. */
+  share: number
 }
 
 /**
- * The pre/post split, or `null` where either half is missing.
+ * A neuron's split across several counts, as shares of **their own sum**.
  *
- * **Both or neither**, because a bar drawn from one is not a balance — a neuron with `pre` and no
- * `post` would draw as fully presynaptic, which is a claim the data did not make. A total of zero
- * is `null` for the same reason: an untraced neuron is not a 50/50 one.
+ * All or nothing, which is the pre/post rule generalised: a bar drawn from the parts that happen
+ * to be present is not a split — a neuron with `pre` and no `post` would draw as entirely
+ * presynaptic, a claim the data did not make. A total of zero is `null` for the same reason (an
+ * untraced neuron is not an even one), and so is a negative part, which has no share.
+ *
+ * The denominator is the sum and never a column the parts are *supposed* to sum to. On
+ * `neuprint-fish2` `axonIn + dendriteIn` equals `post` on every neuron sampled, but
+ * `axonOut + dendriteOut` equals `pre` on only 722 of 2,000 — 100006807 has `pre` 86 and
+ * `axonOut` 94 — so a share of `pre` would draw past the end of its own bar.
  */
-export function balanceOf(pre: CellValue, post: CellValue): Balance | null {
-  if (typeof pre !== 'number' || typeof post !== 'number') return null
-  if (!Number.isFinite(pre) || !Number.isFinite(post)) return null
-  const total = pre + post
+export function sharesOf(names: readonly string[], cells: readonly CellValue[]): Part[] | null {
+  let total = 0
+  for (const cell of cells) {
+    if (typeof cell !== 'number' || !Number.isFinite(cell) || cell < 0) return null
+    total += cell
+  }
   if (total <= 0) return null
-  return { pre: pre / total, preCount: pre, postCount: post }
+  return names.map((name, i) => {
+    const count = cells[i] as number
+    return { name, count, share: count / total }
+  })
 }
 
 /** Column pairs that make a balance, best first. Same "address by name" contract as `rowFields`. */
@@ -141,7 +198,7 @@ const CONFIDENCE_PAIRS: Array<[string, string]> = [
   ['top_nt', 'top_nt_conf'],
 ]
 
-/** What an expanded row can draw, decided once from the schema. */
+/** What an expanded row draws by default, decided once from the schema. */
 export interface PlotSpec {
   balance?: { pre: string; post: string }
   percentile?: string
@@ -158,57 +215,20 @@ export interface PlotSpec {
 }
 
 /**
- * The marks' own geometry, in one place because three files have to agree on it.
+ * The marks' width, in one place because three files have to agree on it.
  *
- * The SVGs are drawn at `MARK_W`, the grid track is sized from it, and the header's labels are
- * laid out on the same pitch — `rowTemplate` hands the last two to CSS as custom properties, so a
- * stylesheet that cannot import a constant still reads the one that exists. Written out three
- * times it was convention held together by three comments saying so, and every way of getting it
- * wrong is browser-only: jsdom reports no layout, and the suite counts labels rather than
- * measuring them.
+ * The SVGs are drawn at `MARK_W` and `rowTemplate` sizes a mark's grid track from it. Every mark
+ * is its own track now, so the header's label for one is simply the cell above it — there is no
+ * longer a pitch for a label row to match.
  */
 export const MARK_W = 54
-export const MARK_GAP = 6
-export const MARK_PAD = 10
-
-/** Which mark, so a row can draw the right one in the right slot. */
-export type MarkKind = 'balance' | 'percentile' | 'regions' | 'confidence'
-
-export interface MarkSlot {
-  kind: MarkKind
-  label: string
-}
 
 /**
- * The marks this dataset draws, in order, each with the name the header gives it.
- *
- * **One list, and that is the whole point.** The header lays its labels out on a fixed pitch and
- * the row lays its marks out on the same one, so label *i* names mark *i* by position — there is
- * nothing else tying them together. This was three parallel enumerations: a label list, a count
- * the grid track was sized from, and the order the row happened to render in. They agreed by
- * inspection.
- *
- * A row that has no *value* for a supported mark still occupies its slot — see `NeuronRow`. That
- * is not tidiness either: `regions` is absent for the first settle of every page and for good on
- * any neuron the query returned no rows for, so a row that simply dropped the child packed the
- * confidence bar left under the `regions` label on ordinary pages.
- */
-export function markSlots(spec: PlotSpec): MarkSlot[] {
-  const out: MarkSlot[] = []
-  if (spec.balance) out.push({ kind: 'balance', label: 'pre/post' })
-  // "rank", not the column's own name: the figure columns already carry `size`, and one word
-  // labelling two different things a few tracks apart is worse than no label.
-  if (spec.percentile) out.push({ kind: 'percentile', label: `${spec.percentile} rank` })
-  if (spec.regions) out.push({ kind: 'regions', label: 'regions' })
-  if (spec.confidence) out.push({ kind: 'confidence', label: 'nt conf.' })
-  return out
-}
-
-/**
- * Which plots this dataset supports.
+ * Which marks this dataset draws by default.
  *
  * Schema-driven exactly as `rowFields` is, so a dataset lacking the columns draws fewer marks
  * rather than empty frames — and so nothing here ever names a column that a backend must have.
+ * What each becomes as a column is `automaticColumns`'.
  */
 export function plotSpec(has: (name: string) => boolean, regions = false): PlotSpec {
   const spec: PlotSpec = {}

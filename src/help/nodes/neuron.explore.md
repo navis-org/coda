@@ -40,6 +40,22 @@ The same grammar is used by the [Table](#out.table) viewer's header filters and 
 > [!NOTE] `Search tags` controls whether the box matches the `Additional tags` column
 > With it off you can still target that column explicitly by name — `tags==foo`.
 
+### Columns
+
+In the expanded view every column header is a button. Click one to change how that column draws — a number can be a figure, a bar against the largest in the dataset (linear or log scale), or its rank in the dataset — or to move it, remove it, or show it as a chip instead. A column you add shows each number as stored (`15417`), in the dataset's own unit; tick **Human-readable formatting** in its menu for `15.4K` instead. The figures the list picks by itself start human-readable.
+
+The **+** at the end of the header lists every field with a **column | chip** choice, the highlighted half being where that field is now. A column lines a field up down the list; a chip appears on a row only where that neuron has a value. Click the highlighted half again to hide that field. To turn a chip into a column, or hide it, right-click it on any row. Once you have made one of these choices, the list stops deciding for you: a field is shown only if you have placed it, as a column or as a chip.
+
+**Combine several fields into one column…**, at the foot of the same menu, merges numbers into one column, drawn as a stacked bar, as bars side by side, as a donut, or as text (`100 / 50`). Ticking `axonIn`, `axonOut`, `dendriteIn` and `dendriteOut` shows, on every row, how that neuron's synapses split across its compartments.
+
+Any column can be renamed in the same menu. Leave the name empty to keep the automatic one; hovering a renamed header still shows which fields it reads.
+
+> [!NOTE] A merged column is a share of the fields you ticked, not of `pre` or `post`
+> A dataset's parts do not always add up to its published total — on fish2, `axonOut +
+> dendriteOut` differs from `pre` on most neurons — so the bar only ever divides by what you chose.
+
+The node card shows the same fields, as chips. Your choices are saved with the workflow; **Reset to automatic fields** in any header's menu, or clearing **Fields** in the inspector, hands the choice back.
+
 ```coda-params
-neuron.explore: pageSize, limit
+neuron.explore: pageSize, limit, layout
 ```

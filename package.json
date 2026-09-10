@@ -28,6 +28,7 @@
     "probe:node-anatomy": "node scripts/probe-node-anatomy.mjs",
     "probe:screen-map": "node scripts/probe-screen-map.mjs",
     "probe:explore-preview": "node scripts/probe-explore-preview.mjs",
+    "probe:explore-columns": "node scripts/probe-explore-columns.mjs",
     "probe:port-preview": "node scripts/probe-port-preview.mjs",
     "probe:matches": "node scripts/probe-matches.mjs",
     "probe:heatmap-select": "node scripts/probe-heatmap-select.mjs",

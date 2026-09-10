@@ -194,8 +194,8 @@ const MAX_COLUMNS = 5
  * the end however sparse or interesting they were.
  *
  * The card keeps `MAX_CHIPS`, and that is not an oversight: it is the narrow surface, every one of
- * its annotations *is* a coloured chip, and thirteen of them is not a row anybody can read. Either
- * way the `chips` param overrides the lot.
+ * its annotations *is* a coloured chip, and thirteen of them is not a row anybody can read. A
+ * chosen list (Neuron Profile's `Fields`) overrides the lot; Explore's own is `rowColumns.ts`'.
  */
 const MAX_AUTO_COLUMNS_AND_CHIPS = MAX_COLUMNS + MAX_CHIPS
 
@@ -228,9 +228,6 @@ const FILL_MIN = 0.5
  * inside the margin that matters, against 165,122 cells per candidate for the exact answer.
  */
 const FILL_SAMPLE = 2000
-
-/** Whether a hand-picked field list stands in for the automatic one or is added to it. */
-export type FieldsMode = 'add' | 'replace'
 
 export interface RowFields {
   /** Headline label — the neuron's name. Undefined for a table with no string columns. */
@@ -274,12 +271,9 @@ export function splitTags(cell: CellValue): string[] {
 }
 
 /**
- * @param chosen Fields the user picked in the inspector. Empty means "decide for me", which is
- * what every dataset starts as and what the priority list above is for.
- * @param mode Whether `chosen` stands in for the automatic list or is added to it. `'replace'` is
- * the default here rather than the node's, and deliberately: it is what the control meant before
- * the mode existed, so every caller holding only a schema — and every stored graph, through
- * `absentMeans` — keeps the behaviour it had.
+ * @param chosen Fields somebody picked — Neuron Profile's `Fields` — which stand in for the automatic
+ * list. Empty means "decide for me", which is what the priority list above is for. Explore passes
+ * none: its list, columns and chips alike, is `rowColumns.ts`' and starts from this automatic one.
  */
 export function rowFields(
   schema: TableSchema | undefined,
@@ -293,7 +287,6 @@ export function rowFields(
    * the only thing that says whether aligning it pays. See `FILL_MIN`.
    */
   aligned?: { data: Record<string, readonly CellValue[] | undefined>; length: number },
-  mode: FieldsMode = 'replace',
 ): RowFields {
   const byName = new Map((schema?.columns ?? []).map((c) => [c.name, c]))
   const has = (name: string) => byName.has(name)
@@ -302,27 +295,14 @@ export function rowFields(
   const tags = tagColumn && has(tagColumn) ? tagColumn : undefined
 
   const primary = PRIMARY.find(has) ?? firstString(schema)
-  // A chosen field is still filtered against the schema: the param outlives the dataset it was
-  // set on, and a graph repointed at hemibrain should lose `superclass` rather than show a
-  // column of blanks. Uncapped, unlike the automatic list — see `MAX_CHIPS`.
   const cap = aligned ? MAX_AUTO_COLUMNS_AND_CHIPS : MAX_CHIPS
-  const picked = chosen.filter(has)
   /*
-   * A chosen field comes **first**, and is never trimmed.
-   *
-   * First because an explicit choice outranks a default: it is what guarantees the field is
-   * visible at all rather than sitting past the cap, and what gives it a shot at a column instead
-   * of the chip tail. Never trimmed because that is already this control's rule — trimming what
-   * was asked for is how a control stops being believed. `splitByFill` still decides its *shape*,
-   * so asking for a field nine neurons in ten lack still gets a chip rather than a column of
-   * blanks; position buys prominence, not an exemption from the fill rule.
+   * A chosen list — Neuron Profile's `Fields` — is filtered against the schema, the param
+   * outliving the dataset it was set on, and otherwise taken whole: trimming what was asked for is
+   * how a control stops being believed.
    */
-  const annotations =
-    picked.length === 0
-      ? automaticChips(has, primary, cap)
-      : mode === 'replace'
-        ? picked
-        : [...picked, ...automaticChips(has, primary, cap, picked)]
+  const picked = chosen.filter(has)
+  const annotations = picked.length === 0 ? automaticChips(has, primary, cap) : picked
   const withoutTags = annotations.filter((name) => name !== tags)
   const split = aligned
     ? splitByFill(withoutTags, aligned)
@@ -406,26 +386,12 @@ function automaticChips(
   has: (name: string) => boolean,
   primary: string | undefined,
   limit: number,
-  /**
-   * Fields already chosen by hand, which this list must not duplicate — nor answer twice.
-   *
-   * Their *families* are claimed as well as their names, so somebody who asked for `predictedNt`
-   * does not also get `consensusNt` appended: two chips saying one thing is exactly what the
-   * family rule exists to prevent, and it would be odd for choosing a field to be the thing that
-   * reintroduces it.
-   */
-  alreadyPicked: readonly string[] = [],
 ): string[] {
   const families = new Set<string>()
-  for (const name of alreadyPicked) {
-    const family = CHIP_BY_NAME.get(name)?.family
-    if (family) families.add(family)
-  }
   const out: string[] = []
   for (const chip of CHIPS) {
     if (out.length >= limit) break
     if (!has(chip.name) || chip.name === primary) continue
-    if (alreadyPicked.includes(chip.name)) continue
     if (chip.family) {
       if (families.has(chip.family)) continue
       families.add(chip.family)

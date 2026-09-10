@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { idText } from '../../core/ids'
-import { datasetRef } from '../../core/types'
+import { datasetRef, isNumericDType } from '../../core/types'
 import { isDatasetValue } from '../../core/values'
 import { narrowPopulation } from '../../data/neuronFilter'
 import { SELECT_ALL_WARN, excludedFromSearch } from '../../nodes/query/explore'
@@ -36,14 +36,36 @@ import { copyText } from '../export'
 import { errorMessage } from '../../core/errors'
 import { joinIds } from '../../nodes/lib/copyIds'
 import { NeuronRow, rowTemplate } from './NeuronRow'
-import type { FieldsMode } from './rowFields'
-import { distributionsFor, markSlots, plotSpec } from './rowPlots'
+import { distributionsFor, plotSpec } from './rowPlots'
+import type { Layout } from './rowColumns'
+import {
+  automaticLayout,
+  columnLabel,
+  columnTitle,
+  encodeLayout,
+  hideField,
+  isEmptyLayout,
+  isMark,
+  moveColumn,
+  offerableFields,
+  placeAsChip,
+  placeAsColumn,
+  placeOf,
+  removeColumn,
+  resolveLayout,
+  rowSpecFor,
+  setColumn,
+  soleFieldOf,
+  spreadsRead,
+} from './rowColumns'
+import { ColumnEditor } from './ColumnEditor'
+import { AddFieldMenu } from './AddFieldMenu'
 import { capabilityOf, getSource } from '../../data/source'
 import { regionShares } from './rowRois'
 import { clearRowRoiCache, useRowRois } from './useRowRois'
 import { useThemeMode } from '../useThemeMode'
 import { RowContextMenu } from './RowContextMenu'
-import { rowFields, statUnit } from './rowFields'
+import { rowFields } from './rowFields'
 import { useNeuronIndex } from '../useNeuronIndex'
 
 /**
@@ -51,6 +73,18 @@ import { useNeuronIndex } from '../useNeuronIndex'
  * itself is ~6–45 ms, so this is about not thrashing React and the store, not about the scan.
  */
 const DEBOUNCE_MS = 140
+
+/** One identity for "nothing stored", so the layout memo is not rebuilt by a fresh `[]`. */
+const NO_ENTRIES: readonly string[] = []
+
+/** Where a popover hangs: the left and bottom edges of the control that opened it. */
+const anchorOf = (event: React.MouseEvent<HTMLElement>) => {
+  const rect = event.currentTarget.getBoundingClientRect()
+  return { left: rect.left, bottom: rect.bottom }
+}
+
+/** A memo key of joined names, back into the names. */
+const keyList = (key: string) => (key ? key.split('\u0000') : [])
 
 export function ExploreBody({
   node,
@@ -169,40 +203,21 @@ export function ExploreBody({
   // here could not do anyway, since inference rebuilds the type and with it the filter array.
   const table = loaded ? narrowPopulation(loaded, datasetRef(type)?.population) : undefined
 
-  // Through `ctx.columns`, never `ctx.params.chips`: that is what filters the stored list
-  // against the schema actually arriving, so a graph repointed at another dataset drops the
-  // fields it no longer has instead of showing a column of blanks.
-  // Joined into a key rather than kept as an array: `ctx.columns` mints a fresh one on every
-  // render, so an identity-keyed memo would rebuild the row spec on every keystroke.
-  const chosenKey = ctx.columns('chips').join('\u0000')
-  // Resolved the same way, and for the same reason: a tag column the current dataset does not
-  // have must drop out rather than draw an empty row.
+  // Through `ctx.column`, like every picker: a tag column the current dataset does not have must
+  // drop out rather than draw an empty row.
   const tagColumn = ctx.column('tagColumn') ?? ''
   /** Once for the page, not once per mark per row — see `RowMarks`. */
   const mode = useThemeMode()
 
   /*
-   * Absence is read as `replace` here as well as in `deserializeGraph`, so a graph loaded by a
-   * build that predates the control behaves the same whichever path it arrived by — a node put on
-   * the canvas today carries `add` from `defaultParams`.
-   */
-  const fieldsMode: FieldsMode = node.params.fieldsMode === 'add' ? 'add' : 'replace'
-
-  /*
-   * The table is handed over only in the expanded view, which is what splits the annotations into
-   * aligned columns and a chip tail — a card has no width to align in. Memoised on the table
-   * identity, so the fill-rate pass runs once per dataset rather than per keystroke.
+   * The automatic row spec: what the list shows while nobody has edited it, and what the first edit
+   * starts from. The table is handed over only in the expanded view, which is what splits the
+   * annotations into aligned columns and a chip tail — a card has no width to align in. Memoised on
+   * the table identity, so the fill-rate pass runs once per dataset rather than per keystroke.
    */
   const fields = useMemo(
-    () =>
-      rowFields(
-        table?.schema,
-        chosenKey ? chosenKey.split('\u0000') : [],
-        tagColumn,
-        compact ? undefined : table,
-        fieldsMode,
-      ),
-    [table, chosenKey, tagColumn, compact, fieldsMode],
+    () => rowFields(table?.schema, [], tagColumn, compact ? undefined : table),
+    [table, tagColumn, compact],
   )
 
   /*
@@ -259,28 +274,116 @@ export function ExploreBody({
     capabilityOf(getSource(ref.sourceId), ref.datasetId, 'roiCounts')
 
   /**
-   * The inline marks this dataset supports, and the spread they read against.
+   * The marks this dataset draws by default.
    *
-   * Both derived from the whole table and memoised on it, never on the hits: a percentile is a
-   * neuron's place in its *dataset*, so recomputing it per search would make the same neuron move
-   * as somebody types. Expanded only, like the columns — a card has no room for a mark.
+   * Derived from the whole table and memoised on it, never on the hits — like the columns.
+   * Expanded only: a card has no room for a mark.
    */
-  const plots = useMemo(() => {
+  const spec = useMemo(() => {
     if (compact || !table) return undefined
     const names = new Set(table.schema.columns.map((c) => c.name))
     // The region slot is reserved on the *capability*, so the track is the right width before the
-    // query answers — passed in rather than written over the result, so the spec is built once.
-    const spec = plotSpec((name) => names.has(name), roiSupported)
-    // The slot list is built once and carried, not derived at each of the three sites that want
-    // it — the header, the grid template and every row all read the same array.
-    const slots = markSlots(spec)
-    if (slots.length === 0) return undefined
-    return {
-      spec,
-      slots,
-      distributions: distributionsFor(table, spec.percentile ? [spec.percentile] : []),
-    }
+    // query answers.
+    return plotSpec((name) => names.has(name), roiSupported)
   }, [table, compact, roiSupported])
+
+  const stored = Array.isArray(node.params.layout) ? node.params.layout : NO_ENTRIES
+
+  /*
+   * The list against this dataset: what it can draw (`layout`, undefined for the automatic list) and
+   * what it cannot (`unseen`, which every edit writes back verbatim) — see `resolveLayout`.
+   */
+  const resolved = useMemo(
+    () => resolveLayout(stored, table?.schema, spec, tagColumn),
+    [stored, table, spec, tagColumn],
+  )
+  const listed = resolved.layout
+  const explicit = listed !== undefined
+
+  /*
+   * The list as it stands — the stored one, or the automatic one it is about to become. What every
+   * edit starts from, and through `automaticLayout` exactly what was drawn, so the first edit moves
+   * nothing on screen.
+   */
+  const current = useMemo(() => listed ?? automaticLayout(fields, spec), [listed, fields, spec])
+  /** The expanded view's columns; a card has none. */
+  const columns = compact || !table ? undefined : current.columns
+
+  /*
+   * The spread the ranks and bars are read against — of the *whole table*, never the hits, for the
+   * reason a percentile needs: a neuron's place is in its dataset, and recomputing it per search
+   * would move it as somebody types. Keyed on *which* fields are measured rather than on the
+   * columns, because each is a pass over every row: a rename, a move or a new chip measures nothing
+   * again, and a rank pays only for its sample, a bar only for its maximum.
+   */
+  const spreads = columns ? spreadsRead(columns) : undefined
+  const rankedKey = spreads?.ranked.join('\u0000')
+  const barredKey = spreads?.barred.join('\u0000')
+  const distributions = useMemo(
+    () =>
+      table && rankedKey !== undefined && barredKey !== undefined
+        ? distributionsFor(table, keyList(rankedKey), keyList(barredKey))
+        : undefined,
+    [table, rankedKey, barredKey],
+  )
+
+  /*
+   * What every row of the page draws in its columns: one object, so `NeuronRow`'s memo holds, and
+   * one grid template, built once for the page and its header rather than once per row.
+   */
+  const rowLayout = useMemo(
+    () =>
+      columns && distributions
+        ? { columns, distributions, style: rowTemplate(columns) }
+        : undefined,
+    [columns, distributions],
+  )
+
+  /** The row spec as drawn — the list's rule, and the card's half of it, are `rowSpecFor`'s. */
+  const rowSpec = useMemo(() => rowSpecFor(fields, listed, compact), [fields, listed, compact])
+
+  /*
+   * The open column editor: which column (`null` to add one) and where its header cell sat when
+   * it was clicked — read then, since the editor belongs to the cell it was opened from.
+   */
+  const [editing, setEditing] = useState<{
+    index: number | null
+    anchor: { left: number; bottom: number }
+  } | null>(null)
+  const openEditor = (index: number | null, event: React.MouseEvent<HTMLElement>) =>
+    setEditing({ index, anchor: anchorOf(event) })
+
+  /*
+   * Every edit writes the *whole* list — columns, chips, and the entries this dataset cannot draw —
+   * so the first one turns the automatic list into a stored one exactly as it was drawn, and an edit
+   * made while pointed at hemibrain keeps a fish2 column. One param, so one write and one undo step.
+   * `encodeLayout` refuses an empty list, which would read back as "automatic".
+   */
+  const commit = (next: Layout) => {
+    const encoded = encodeLayout(next, resolved.unseen)
+    if (encoded) setParam('layout', encoded)
+  }
+  /**
+   * Whether an edit may be written — everything but one leaving the list empty. Asked of the
+   * result, by every control that could produce it, so a click `commit` would refuse is a
+   * disabled control rather than a silent one.
+   */
+  const allowed = (next: Layout) => !isEmptyLayout(next)
+
+  const numericFields = useMemo(
+    () =>
+      new Set(table?.schema.columns.filter((c) => isNumericDType(c.dtype)).map((c) => c.name)),
+    [table],
+  )
+  /** The fields both popovers offer, so they cannot offer two different lists. */
+  const offered = useMemo(() => offerableFields(table?.schema, tagColumn), [table, tagColumn])
+
+  /** The `+` menu, and the header cell it hangs from. */
+  const [adding, setAdding] = useState<{ left: number; bottom: number } | null>(null)
+
+  /** The one field a column being edited shows, where it shows exactly one. */
+  const editedColumn = editing && editing.index !== null ? columns?.[editing.index] : undefined
+  const editedField = editedColumn && soleFieldOf(editedColumn)
 
   const setPage = useCallback(
     (next: number) => setParam('page', Math.min(Math.max(0, next), pageCount - 1)),
@@ -332,7 +435,12 @@ export function ExploreBody({
     () => visible.map((row) => neuronIdAt(row)).filter((id): id is string => !!id),
     [visible, neuronIdAt],
   )
-  const roiData = useRowRois(ref?.sourceId, ref?.datasetId, pageIds, roiSupported)
+  /*
+   * Asked only while a column draws it: a header somebody took the region donut out of has no
+   * reader for the one query on this surface that reaches a server.
+   */
+  const wantsRegions = columns?.some((c) => c.render === 'regions') ?? false
+  const roiData = useRowRois(ref?.sourceId, ref?.datasetId, pageIds, wantsRegions)
   const regions = useMemo(() => regionShares(roiData?.rows, roiData?.primaryRois), [roiData])
 
   const selectRowsInto = useCallback(
@@ -389,10 +497,16 @@ export function ExploreBody({
    * column, and resolving at open time would mean the menu kept showing a label from before the
    * search that has since moved under it.
    */
-  const [menu, setMenu] = useState<{ at: { x: number; y: number }; row: number } | null>(null)
+  const [menu, setMenu] = useState<{
+    at: { x: number; y: number }
+    row: number
+    /** The chip the right-click landed on, if any — see `RowContextMenu.chip`. */
+    chip: string | undefined
+  } | null>(null)
 
   const openMenu = useCallback(
-    (row: number, at: { x: number; y: number }) => setMenu({ at, row }),
+    (row: number, at: { x: number; y: number }, chip: string | undefined) =>
+      setMenu({ at, row, chip }),
     [],
   )
 
@@ -583,56 +697,96 @@ export function ExploreBody({
       {table && (
         <>
           {/*
-            The header, drawn only where there are columns to name. It shares `rowTemplate` with
-            every row below it, or it sits half a column off the values it labels.
+            The header, which shares `rowTemplate` with every row below it or it sits half a column
+            off the values it labels. Every cell is a button opening that column's editor, and the
+            `+` in the last track opens the field menu — drawn even over no columns at all, since it is
+            then the only way to get one.
           */}
-          {fields.columns.length > 0 && (
-            <div
-              className="explore-head"
-              style={rowTemplate(
-                fields.columns.length,
-                fields.stats.length,
-                plots?.slots.length ?? 0,
-              )}
-            >
+          {rowLayout && (
+            <div className="explore-head" style={rowLayout.style}>
               {/* The checkbox, tile and name-block tracks, named by nothing. */}
               <span />
               <span />
               <span />
-              {fields.columns.map((name) => (
-                <span key={name} className="explore-head__cell" title={name}>
-                  {name}
-                </span>
-              ))}
-              {/*
-                The marks' track, labelled in the same geometry the marks are drawn in — four
-                small bars are unreadable without it, and a `title` per mark only helps somebody
-                who already suspects there is something to hover.
-              */}
-              {plots && (
-                <span className="explore-head__marks">
-                  {plots.slots.map((slot) => (
-                    <span key={slot.kind} className="explore-head__cell" title={slot.label}>
-                      {slot.label}
-                    </span>
-                  ))}
-                </span>
-              )}
-              {/* The figures' labels live here rather than under every value. */}
-              {fields.stats.map((name) => (
-                <span
-                  key={name}
-                  className="explore-head__cell explore-head__cell--stat"
-                  title={
-                    statUnit(table?.schema, name)
-                      ? `${name} (${statUnit(table?.schema, name)})`
-                      : name
+              {rowLayout.columns.map((column, at) => (
+                <button
+                  type="button"
+                  // Position is the key: a header cell holds no state of its own.
+                  key={at}
+                  className={
+                    'explore-head__cell' +
+                    (column.render === 'number' ? ' explore-head__cell--stat' : '') +
+                    (isMark(column) ? ' explore-head__cell--mark' : '')
                   }
+                  title={columnTitle(column, table.schema)}
+                  aria-haspopup="dialog"
+                  onClick={(event) => openEditor(at, event)}
                 >
-                  {name}
-                </span>
+                  {columnLabel(column)}
+                </button>
               ))}
+              <button
+                type="button"
+                className="explore-head__add"
+                title="Add a field, as a column or a chip — or combine several into one column"
+                aria-label="Add a field"
+                aria-haspopup="dialog"
+                onClick={(event) => setAdding(anchorOf(event))}
+              >
+                +
+              </button>
             </div>
+          )}
+          {columns && editing && (
+            <ColumnEditor
+              // Keyed on the column, so opening a second one starts from that column's own state.
+              key={editing.index ?? 'add'}
+              anchor={editing.anchor}
+              column={editing.index === null ? undefined : columns[editing.index]}
+              schema={table.schema}
+              offered={offered}
+              numeric={numericFields}
+              canMoveLeft={editing.index !== null && editing.index > 0}
+              canMoveRight={editing.index !== null && editing.index < columns.length - 1}
+              canRemove={
+                editing.index !== null && allowed(removeColumn(current, editing.index))
+              }
+              explicit={explicit}
+              onApply={(column) => commit(setColumn(current, editing.index, column))}
+              onMove={(delta) =>
+                editing.index !== null && commit(moveColumn(current, editing.index, delta))
+              }
+              {...(editedField
+                ? {
+                    onShowAsChip: () => commit(placeAsChip(current, editedField)),
+                  }
+                : {})}
+              onRemove={() =>
+                editing.index !== null && commit(removeColumn(current, editing.index))
+              }
+              onReset={() => setParam('layout', [])}
+              onClose={() => setEditing(null)}
+            />
+          )}
+
+          {columns && adding && (
+            <AddFieldMenu
+              anchor={adding}
+              fields={offered.map((name) => ({
+                name,
+                numeric: numericFields.has(name),
+                place: placeOf(current, name),
+              }))}
+              canHide={(name) => allowed(hideField(current, name))}
+              onColumn={(name) => commit(placeAsColumn(current, name, numericFields.has(name)))}
+              onChip={(name) => commit(placeAsChip(current, name))}
+              onHide={(name) => commit(hideField(current, name))}
+              onCombine={() => {
+                setAdding(null)
+                setEditing({ index: null, anchor: adding })
+              }}
+              onClose={() => setAdding(null)}
+            />
           )}
 
           {/* `nowheel` lets the list scroll instead of zooming the canvas under it. */}
@@ -649,7 +803,7 @@ export function ExploreBody({
                     key={neuronId || row}
                     table={table}
                     row={row}
-                    fields={fields}
+                    fields={rowSpec}
                     sourceId={ref?.sourceId}
                     datasetId={ref?.datasetId}
                     selected={selection.has(neuronId)}
@@ -661,7 +815,7 @@ export function ExploreBody({
                     // for panning and selection, where a preview only wants somewhere to draw.
                     onContextMenu={compact ? undefined : openMenu}
                     mode={mode}
-                    {...(plots ? { plots } : {})}
+                    {...(rowLayout ? { layout: rowLayout } : {})}
                     {...(regions.size ? { regions } : {})}
                   />
                 )
@@ -683,6 +837,13 @@ export function ExploreBody({
               onCopyType={() => menuRow.type && copyOrReport(menuRow.type)}
               onSelectSharing={() => selectMatching(menuRow.sharing)}
               onSearchType={() => menuRow.type && setText(menuRow.type)}
+              chip={menu.chip}
+              onChipToColumn={() =>
+                menu.chip &&
+                commit(placeAsColumn(current, menu.chip, numericFields.has(menu.chip)))
+              }
+              onChipHide={() => menu.chip && commit(hideField(current, menu.chip))}
+              canHideChip={menu.chip !== undefined && allowed(hideField(current, menu.chip))}
               onClose={() => setMenu(null)}
             />
           )}

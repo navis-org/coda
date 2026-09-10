@@ -22,10 +22,13 @@
 import { useRef } from 'react'
 
 import { useDismissOnOutside } from '../useDismiss'
+import { LAST_FIELD_HINT } from './rowColumns'
 
 /** Rough menu box, for keeping it on screen. Mirrors `.context-menu`'s min-width. */
 const MENU_WIDTH = 220
 const MENU_HEIGHT = 210
+/** The chip's two rows and their separator, when there is one. */
+const CHIP_ROW_HEIGHT = 67
 
 export interface RowContextMenuProps {
   /** Where the pointer was, in client coordinates. */
@@ -38,6 +41,16 @@ export interface RowContextMenuProps {
   selected: number
   /** How many hits share this row's type — the count `Select all` would add. */
   sharing: number
+  /**
+   * The field of the chip the right-click landed on, if it landed on one. Its row is the
+   * promotion: a chip is where a field somebody wants aligned is visible, so it is where the
+   * gesture that aligns it belongs.
+   */
+  chip: string | undefined
+  onChipToColumn: () => void
+  onChipHide: () => void
+  /** False when the chip is the list's only field — see `encodeLayout`. */
+  canHideChip: boolean
   onCopyId: () => void
   onCopySelected: () => void
   onCopyType: () => void
@@ -52,6 +65,10 @@ export function RowContextMenu({
   type,
   selected,
   sharing,
+  chip,
+  onChipToColumn,
+  onChipHide,
+  canHideChip,
   onCopyId,
   onCopySelected,
   onCopyType,
@@ -81,11 +98,37 @@ export function RowContextMenu({
          * them in.
          */
         left: Math.min(at.x, document.documentElement.clientWidth - MENU_WIDTH),
-        top: Math.min(at.y, document.documentElement.clientHeight - MENU_HEIGHT),
+        top: Math.min(
+          at.y,
+          document.documentElement.clientHeight - MENU_HEIGHT - (chip ? CHIP_ROW_HEIGHT : 0),
+        ),
       }}
       role="menu"
     >
       <div className="context-menu__caption">{caption}</div>
+
+      {chip !== undefined && (
+        <>
+          <button
+            type="button"
+            className="context-menu__item"
+            title={`Give ${chip} a column of its own in the header, instead of a chip on each row`}
+            onClick={act(onChipToColumn)}
+          >
+            Show “{chip}” as a column
+          </button>
+          <button
+            type="button"
+            className="context-menu__item"
+            disabled={!canHideChip}
+            title={canHideChip ? `Stop showing ${chip} on the rows` : LAST_FIELD_HINT}
+            onClick={act(onChipHide)}
+          >
+            Hide “{chip}”
+          </button>
+          <div className="context-menu__sep" />
+        </>
+      )}
 
       <button
         type="button"

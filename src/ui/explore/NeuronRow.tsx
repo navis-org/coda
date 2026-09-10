@@ -20,10 +20,20 @@ import { NeuronThumbnail, TILE_COMPACT_PX, TILE_PX } from './NeuronThumbnail'
 import type { RowFields } from './rowFields'
 import { chipKey, chipSlots, splitTags, statUnit } from './rowFields'
 import type { Mode } from '../colors'
-import type { Distributions, MarkSlot, PlotSpec } from './rowPlots'
-import { MARK_GAP, MARK_PAD, MARK_W, balanceOf, percentileOf } from './rowPlots'
-import { BalanceBar, ConfidenceBar, PercentileTick, RegionBar } from './RowMarks'
+import type { Distributions } from './rowPlots'
+import { barFraction, percentileOf, sharesOf } from './rowPlots'
+import {
+  ConfidenceBar,
+  PartsDonut,
+  PercentileTick,
+  ShareRing,
+  SideBars,
+  StackedBar,
+  ValueBar,
+} from './RowMarks'
 import type { RegionShare } from './rowRois'
+import type { ColumnSpec } from './rowColumns'
+import { columnWidth } from './rowColumns'
 
 export interface NeuronRowProps {
   table: TableValue
@@ -49,21 +59,34 @@ export interface NeuronRowProps {
    * type as well, and the index is what reaches every column. Stable for the whole page for the
    * same reason `onToggle` is — a fresh arrow per row defeats `memo` outright.
    */
-  onContextMenu?: (row: number, at: { x: number; y: number }) => void
+  onContextMenu?: (row: number, at: { x: number; y: number }, chip: string | undefined) => void
   /**
    * The theme, read once for the whole page rather than per mark — see `RowMarks`. Also what makes
    * the marks repaint on a flip, which reading during render does not.
    */
   mode: Mode
-  /** Which inline marks this dataset supports, and the spread they are read against. */
-  plots?: { spec: PlotSpec; slots: readonly MarkSlot[]; distributions: Distributions }
+  /**
+   * The expanded view's columns, and the spread its ranks and bars are read against.
+   *
+   * Present means aligned: the row is a grid and a header names its tracks. Absent is a card,
+   * which has no width to align in and keeps its flex row of figures with their labels.
+   */
+  layout?: RowLayout
   /**
    * This page's region bars, keyed by neuron id.
    *
-   * Separate from `plots` because it arrives *later* — everything else on a row is already in the
+   * Separate from `layout` because it arrives *later* — everything else on a row is already in the
    * index, and this is one query per page. A row simply draws no bar until it lands.
    */
   regions?: Map<string, RegionShare[]>
+}
+
+/** What an aligned row draws, shared by every row of a page — see `NeuronRowProps.layout`. */
+export interface RowLayout {
+  columns: readonly ColumnSpec[]
+  distributions: Distributions
+  /** `rowTemplate(columns)`, built once for the page and its header rather than once per row. */
+  style: React.CSSProperties
 }
 
 /**
@@ -83,12 +106,7 @@ const MAX_ROW_TAGS = 4
  * flexible track: it takes what the fixed ones leave, so a narrow window squeezes the name rather
  * than crushing every column equally.
  */
-export function rowTemplate(
-  columns: number,
-  stats: number,
-  /** How many marks the *dataset* draws — not how many this row happens to have. */
-  marks = 0,
-): React.CSSProperties {
+export function rowTemplate(columns: readonly ColumnSpec[]): React.CSSProperties {
   /*
    * **Every track is a fixed size except the name block, and that is the whole of what makes the
    * columns line up.** The first version wrote `auto auto minmax(0, 1fr) repeat(n, minmax(0,
@@ -101,34 +119,20 @@ export function rowTemplate(
    *    `1,496` — so the row's own columns drifted a few pixels against each other.
    *
    * `minmax(0, 8rem)` was the third mistake: a column that may shrink to nothing shrinks by a
-   * different amount per row. Fixed, so it cannot.
+   * different amount per row. Fixed, so it cannot — and a mark's track is fixed from what the
+   * *column* draws rather than from what this row has a value for, so a neuron missing `pre` keeps
+   * its figures under their labels. The last track is the header's `+`, empty on every row.
    */
   return {
     gridTemplateColumns:
-      `1.25rem ${TILE_PX}px minmax(0, 1fr) repeat(${columns}, 8rem)` +
-      `${marks ? ` ${marksWidth(marks)}px` : ''} repeat(${stats}, 4.5rem)`,
-    // Handed to CSS rather than repeated in it — see `MARK_W`.
-    '--mark-w': `${MARK_W}px`,
-    '--mark-gap': `${MARK_GAP}px`,
-    '--mark-pad': `${MARK_PAD}px`,
-  } as React.CSSProperties
+      `1.25rem ${TILE_PX}px minmax(0, 1fr)` +
+      columns.map((column) => ` ${columnWidth(column)}`).join('') +
+      ` ${ADD_TRACK}`,
+  }
 }
 
-/**
- * The marks' track, sized from how many the *dataset* draws.
- *
- * Fixed and not `auto`, which is the third time that distinction has bitten in this template: an
- * `auto` track sizes to its own row's content, so the header's empty span measured 28px against a
- * row's 124px and every column after it sat 96px out. It also has to be the dataset's mark count
- * rather than the row's — a neuron missing `pre` draws no balance bar, and a track that shrank
- * for it would pull that one row's figures left of everybody else's.
- *
- * The numbers are `rowPlots`', which is also where the marks themselves read them and where the
- * custom properties below take them from: one home, three readers.
- */
-function marksWidth(marks: number): number {
-  return marks * MARK_W + (marks - 1) * MARK_GAP + MARK_PAD
-}
+/** The header's trailing `+`, a track of its own so adding a column never shifts the others. */
+const ADD_TRACK = '1.25rem'
 
 function cellOf(table: TableValue, name: string, row: number): CellValue {
   const column = table.data[name]
@@ -146,7 +150,7 @@ function NeuronRowImpl({
   onToggle,
   compact,
   onContextMenu,
-  plots,
+  layout,
   regions,
   mode,
 }: NeuronRowProps) {
@@ -167,7 +171,7 @@ function NeuronRowImpl({
   // happens to have filled in, so a colour does not shift between two rows of the same list
   // because one of them is missing a value.
   /** Aligned mode: the row is a grid and a header names its columns. */
-  const aligned = fields.columns.length > 0
+  const aligned = layout !== undefined
   /** This row's region segments, if the page's query has answered for it. */
   const shares = regions?.get(neuronIdText)
   const slots = chipSlots(fields.chips)
@@ -203,18 +207,20 @@ function NeuronRowImpl({
       data-aligned={aligned || undefined}
       // One template per row, from the same list the header uses — which is what makes the
       // columns line up at all. A card has no columns and falls back to the flex layout.
-      style={
-        aligned
-          ? rowTemplate(fields.columns.length, fields.stats.length, plots?.slots.length ?? 0)
-          : undefined
-      }
+      style={layout?.style}
       onContextMenu={
         onContextMenu &&
         ((event) => {
           // The browser's own menu offers nothing about a neuron, and leaving it is how a
           // right-click ends up meaning two different things on one surface.
           event.preventDefault()
-          onContextMenu(row, { x: event.clientX, y: event.clientY })
+          // Which chip, if the press landed on one — the menu then offers to make it a column.
+          const chip = (event.target as Element).closest?.('[data-field]')
+          onContextMenu(
+            row,
+            { x: event.clientX, y: event.clientY },
+            chip?.getAttribute('data-field') ?? undefined,
+          )
         })
       }
     >
@@ -266,6 +272,7 @@ function NeuronRowImpl({
               <span
                 key={chip.name}
                 className="explore-chip"
+                data-field={chip.name}
                 // The hue is resolved in CSS rather than computed here, so a theme switch
                 // recolours every chip without re-rendering a memoised row.
                 data-slot={chip.slot}
@@ -296,100 +303,41 @@ function NeuronRowImpl({
       </div>
 
       {/*
-        The aligned half. One cell per column on *every* row, blank included — a missing value
-        here says "not annotated", which is the whole reason a column beats a chip for a field
-        most neurons carry. `fields.columns` is empty on a card, so this renders nothing there.
+        The aligned half: one grid child per column on *every* row, blank included — a missing
+        value says "not annotated", which is the whole reason a column beats a chip for a field
+        most neurons carry, and a mark with nothing to draw keeps its track empty rather than
+        letting the next column slide under the wrong label.
       */}
-      {fields.columns.map((name) => {
-        const value = cellOf(table, name, row)
-        const empty = value === null || value === ''
-        return (
-          <div
-            key={name}
-            className="explore-cell"
-            data-empty={empty || undefined}
-            title={empty ? `${name}: not annotated` : `${name}: ${formatCell(value, name)}`}
-          >
-            {empty ? '—' : formatCell(value, name)}
-          </div>
-        )
-      })}
-
-      {/*
-        One slot per mark the *dataset* draws, in `markSlots`' order — the header lays its labels
-        out on the same pitch, so slot `i` is named by label `i` and nothing else ties them
-        together. A row with no value for a mark keeps its slot empty rather than dropping the
-        child: `regions` is absent for the first settle of every page, and a row that packed left
-        put the confidence bar under the `regions` label on ordinary pages.
-      */}
-      {plots && (
-        <div className="explore-marks">
-          {plots.slots.map((slot) => (
-            <MarkSlotView
-              key={slot.kind}
-              slot={slot}
-              spec={plots.spec}
-              distributions={plots.distributions}
-              table={table}
-              row={row}
-              shares={shares}
-              mode={mode}
-            />
+      {layout ? (
+        layout.columns.map((column, at) => (
+          <ColumnCell
+            // Position is the key: a cell holds no state, and one list may hold a column twice.
+            key={at}
+            column={column}
+            distributions={layout.distributions}
+            table={table}
+            row={row}
+            shares={shares}
+            mode={mode}
+          />
+        ))
+      ) : (
+        /*
+         * A card: no header, so each figure carries its own label beneath it — which on an aligned
+         * row would be the same word twenty-five times down a column that already says it once.
+         */
+        <div className="explore-row__stats">
+          {fields.stats.map((name) => (
+            <Figure key={name} table={table} row={row} name={name} labelled />
           ))}
         </div>
       )}
-
-      {/*
-        Each figure is its own grid track when the row is aligned, so it sits under its header —
-        wrapped in one box, they would share a single track and drift with the digits.
-      */}
-      <StatsWrap aligned={aligned}>
-        {fields.stats.map((name) => {
-          const value = cellOf(table, name, row)
-          const unit = statUnit(table.schema, name)
-          /*
-           * Glanceable on screen, exact on hover. The figure is scaled into the unit a reader
-           * thinks in — a cable length is millimetres of arbor, not three million nanometres —
-           * and the title carries the stored number **verbatim**, which is the one to copy into
-           * anything else: `formatNumber` would group and round it, so the hover would answer
-           * the one question it exists for with a different number.
-           *
-           * The unit stays on the label rather than after the value, so it survives an absent
-           * one. What a column is *in* is the one thing an empty cell can still say, and it is
-           * what the title said before any of this.
-           */
-          const label = unit ? `${name} (${unit})` : name
-          const title = typeof value === 'number' ? `${label}: ${formatExact(value)}` : label
-          return (
-            <span key={name} className="explore-stat" title={title}>
-              <span className="explore-stat__value">
-                {typeof value === 'number' ? formatMeasure(value, unit) : '—'}
-              </span>
-              {/*
-                The label is the header's job wherever there is one — repeating it under every
-                figure is the same word twenty-five times down a column that already says it.
-                Without columns (a card) there is no header, so it stays.
-              */}
-              {!aligned && <span className="explore-stat__label">{name}</span>}
-            </span>
-          )
-        })}
-      </StatsWrap>
     </div>
   )
 }
 
-/**
- * One mark's slot: the mark where this row has the values for it, an empty box of the same width
- * where it does not. Never nothing — see the call site.
- */
-function MarkSlotView(props: MarkSlotProps) {
-  return drawMark(props) ?? <span className="explore-mark--empty" aria-hidden="true" />
-}
-
-interface MarkSlotProps {
-  slot: MarkSlot
-  spec: PlotSpec
+interface ColumnCellProps {
+  column: ColumnSpec
   distributions: Distributions
   table: TableValue
   row: number
@@ -398,40 +346,197 @@ interface MarkSlotProps {
   mode: Mode
 }
 
-function drawMark({ slot, spec, distributions, table, row, shares, mode }: MarkSlotProps) {
-  if (slot.kind === 'balance' && spec.balance) {
-    const balance = balanceOf(
-      cellOf(table, spec.balance.pre, row),
-      cellOf(table, spec.balance.post, row),
-    )
-    return balance ? <BalanceBar balance={balance} mode={mode} /> : null
-  }
-  if (slot.kind === 'percentile' && spec.percentile) {
-    const at = percentileOf(distributions, spec.percentile, cellOf(table, spec.percentile, row))
-    return at ? (
-      <PercentileTick
-        percentile={at}
-        unit={statUnit(table.schema, spec.percentile)}
-        name={spec.percentile}
-        mode={mode}
+/** One column's cell: text, a figure, or a mark — or an empty box of the mark's width. */
+function ColumnCell(props: ColumnCellProps) {
+  const { column, table, row } = props
+  const name = column.fields[0] ?? ''
+  if (column.render === 'text' && column.fields.length > 1) {
+    return (
+      <Values
+        table={table}
+        row={row}
+        fields={column.fields}
+        readable={column.readable === true}
       />
-    ) : null
+    )
   }
-  if (slot.kind === 'regions') return shares ? <RegionBar shares={shares} mode={mode} /> : null
-  if (slot.kind === 'confidence' && spec.confidence) {
-    const value = cellOf(table, spec.confidence.value, row)
-    const label = cellOf(table, spec.confidence.label, row)
-    return typeof value === 'number' ? (
-      <ConfidenceBar value={value} label={String(label ?? 'prediction')} mode={mode} />
-    ) : null
+  if (column.render === 'text') {
+    const value = cellOf(table, name, row)
+    const empty = value === null || value === ''
+    return (
+      <div
+        className="explore-cell"
+        data-empty={empty || undefined}
+        title={empty ? `${name}: not annotated` : `${name}: ${formatCell(value, name)}`}
+      >
+        {empty ? '—' : formatCell(value, name)}
+      </div>
+    )
   }
-  return null
+  if (column.render === 'number') {
+    return <Figure table={table} row={row} name={name} readable={column.readable === true} />
+  }
+  return drawMark(props) ?? <span className="explore-mark--empty" aria-hidden="true" />
 }
 
-/** A flex box on a card, nothing at all on an aligned row — see the call site. */
-function StatsWrap({ aligned, children }: { aligned: boolean; children: React.ReactNode }) {
-  if (aligned) return <>{children}</>
-  return <div className="explore-row__stats">{children}</div>
+/**
+ * The mark a column draws. An explicit return type and no `default`, so a renderer added to
+ * `rowColumns.ts` without a case here is a compile error rather than an empty box on every row.
+ */
+function drawMark({
+  column,
+  distributions,
+  table,
+  row,
+  shares,
+  mode,
+}: ColumnCellProps): React.ReactElement | null {
+  const [first = '', second = ''] = column.fields
+  switch (column.render) {
+    case 'bar':
+    case 'logBar': {
+      const value = cellOf(table, first, row)
+      const log = column.render === 'logBar'
+      const fraction = barFraction(distributions, first, value, log)
+      return fraction === null ? null : (
+        <ValueBar
+          fraction={fraction}
+          value={value as number}
+          name={first}
+          unit={statUnit(table.schema, first)}
+          log={log}
+          mode={mode}
+        />
+      )
+    }
+    case 'rank': {
+      const at = percentileOf(distributions, first, cellOf(table, first, row))
+      return at ? (
+        <PercentileTick
+          percentile={at}
+          unit={statUnit(table.schema, first)}
+          name={first}
+          mode={mode}
+        />
+      ) : null
+    }
+    case 'stacked':
+    case 'bars':
+    case 'donut': {
+      const parts = sharesOf(
+        column.fields,
+        column.fields.map((name) => cellOf(table, name, row)),
+      )
+      if (!parts) return null
+      if (column.render === 'stacked') return <StackedBar parts={parts} mode={mode} />
+      if (column.render === 'bars') return <SideBars parts={parts} mode={mode} />
+      return <PartsDonut parts={parts} mode={mode} />
+    }
+    case 'regions':
+      return shares ? <ShareRing shares={shares} mode={mode} /> : null
+    case 'confidence': {
+      const value = cellOf(table, second, row)
+      const label = cellOf(table, first, row)
+      return typeof value === 'number' ? (
+        <ConfidenceBar value={value} label={String(label ?? 'prediction')} mode={mode} />
+      ) : null
+    }
+    case 'text':
+    case 'number':
+      // Drawn as text and figures by `ColumnCell`, before it asks for a mark.
+      return null
+  }
+}
+
+/**
+ * Several numbers as one line of text, `12 / 340`, each scaled into its own unit.
+ *
+ * A missing value is a dash *in its own position* rather than dropped: `12 / 340` with the first
+ * absent would otherwise read `340`, which is the same two fields saying something else. The title
+ * carries every value verbatim, one per line, for `Figure`'s reason.
+ */
+function Values({
+  table,
+  row,
+  fields,
+  readable,
+}: {
+  table: TableValue
+  row: number
+  fields: readonly string[]
+  /** Scaled and grouped, or each value verbatim — see `ColumnSpec.readable`. */
+  readable: boolean
+}) {
+  const cells = fields.map((name) => cellOf(table, name, row))
+  const empty = cells.every((value) => typeof value !== 'number')
+  const text = cells
+    .map((value, i) => formatFigure(value, statUnit(table.schema, fields[i]!), readable))
+    .join(' / ')
+  const title = fields
+    .map((name, i) => {
+      const value = cells[i]
+      return `${name}: ${typeof value === 'number' ? formatExact(value) : 'no value'}`
+    })
+    .join('\n')
+  return (
+    <div
+      className="explore-cell explore-cell--values"
+      data-empty={empty || undefined}
+      title={title}
+    >
+      {text}
+    </div>
+  )
+}
+
+/**
+ * One figure: glanceable on screen, exact on hover.
+ *
+ * The figure is scaled into the unit a reader thinks in — a cable length is millimetres of arbor,
+ * not three million nanometres — and the title carries the stored number **verbatim**, which is
+ * the one to copy into anything else: `formatNumber` would group and round it, so the hover would
+ * answer the one question it exists for with a different number.
+ *
+ * The unit stays on the label rather than after the value, so it survives an absent one. What a
+ * column is *in* is the one thing an empty cell can still say.
+ */
+function Figure({
+  table,
+  row,
+  name,
+  labelled = false,
+  readable = true,
+}: {
+  table: TableValue
+  row: number
+  name: string
+  /** A card's figure names itself; an aligned one leaves that to the header. */
+  labelled?: boolean
+  /**
+   * Scaled and grouped, or the stored number verbatim — see `ColumnSpec.readable`. On by default,
+   * which is the card: its figures are not columns anybody configured.
+   */
+  readable?: boolean
+}) {
+  const value = cellOf(table, name, row)
+  const unit = statUnit(table.schema, name)
+  const label = unit ? `${name} (${unit})` : name
+  const title = typeof value === 'number' ? `${label}: ${formatExact(value)}` : label
+  return (
+    <span className="explore-stat" data-exact={!readable || undefined} title={title}>
+      <span className="explore-stat__value">{formatFigure(value, unit, readable)}</span>
+      {labelled && <span className="explore-stat__label">{name}</span>}
+    </span>
+  )
+}
+
+/**
+ * A number as a cell prints it — verbatim, or scaled into its unit (`ColumnSpec.readable`) — and a
+ * dash where there is none. One spelling for a figure and for merged numbers as text.
+ */
+function formatFigure(value: CellValue, unit: string | undefined, readable: boolean): string {
+  if (typeof value !== 'number') return '—'
+  return readable ? formatMeasure(value, unit) : formatExact(value)
 }
 
 export const NeuronRow = memo(NeuronRowImpl)

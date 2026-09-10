@@ -26,7 +26,7 @@ import {
 } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { availableColumns, makeInferContext } from '../../core/node'
+import { makeInferContext } from '../../core/node'
 import type { ParamValue, ParamValues } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import type { TableSchema } from '../../core/types'
@@ -53,6 +53,7 @@ import { NeuronThumbnail } from './NeuronThumbnail'
 import * as rotationModule from './rotation'
 import { NeuronRow } from './NeuronRow'
 import { rowFields } from './rowFields'
+import { encodeChip, encodeColumn } from './rowColumns'
 import { resetThumbnailCache } from './NeuronThumbnail'
 
 const DATASET = 'optic-lobe-mini'
@@ -663,6 +664,39 @@ function recordPaints(): { frames: ImageData[]; restore: () => void } {
 }
 
 /**
+ * A source whose neuron table carries annotations, which the plain mock deliberately does not.
+ *
+ * `class` on every neuron and `dimorphism` on one in five, which is the split the layout is
+ * about: the first earns a column, the second is chip material. Ten rows, so the fill rates are
+ * exactly 1.0 and 0.2 against `FILL_MIN`.
+ */
+const ANNOTATED = makeTable(
+  tableSchema(
+    column('neuronId', 'i64'),
+    column('type', 'str'),
+    column('class', 'str'),
+    column('dimorphism', 'str'),
+  ),
+  {
+    neuronId: Array.from({ length: 10 }, (_, i) => 1000 + i),
+    type: Array.from({ length: 10 }, (_, i) => (i === 3 ? '' : `T${i}`)),
+    class: Array.from({ length: 10 }, () => 'descending'),
+    dimorphism: Array.from({ length: 10 }, (_, i) => (i < 2 ? 'male-specific' : '')),
+  },
+  'neurons',
+)
+
+function richSource(id: string): DataSource {
+  const base: DataSource = new MockSource({ latencyMs: 0 })
+  const source = Object.assign(Object.create(base) as DataSource, {
+    id,
+    neuronIndex: async () => ANNOTATED,
+  })
+  registerSource(source)
+  return source
+}
+
+/**
  * The row menu in the expanded view.
  *
  * Its commands act on the *index*, not on the page — `Select all of this type` is the one worth
@@ -677,47 +711,19 @@ function recordPaints(): { frames: ImageData[]; restore: () => void } {
  * the same fields the rows draw, and that a card gets neither.
  */
 describe('aligned columns', () => {
-  /**
-   * A source whose neuron table carries annotations, which the plain mock deliberately does not.
-   *
-   * `class` on every neuron and `dimorphism` on one in five, which is the split the layout is
-   * about: the first earns a column, the second is chip material. Ten rows, so the fill rates are
-   * exactly 1.0 and 0.2 against `FILL_MIN`.
-   */
-  const ANNOTATED = makeTable(
-    tableSchema(
-      column('neuronId', 'i64'),
-      column('type', 'str'),
-      column('class', 'str'),
-      column('dimorphism', 'str'),
-    ),
-    {
-      neuronId: Array.from({ length: 10 }, (_, i) => 1000 + i),
-      type: Array.from({ length: 10 }, (_, i) => (i === 3 ? '' : `T${i}`)),
-      class: Array.from({ length: 10 }, () => 'descending'),
-      dimorphism: Array.from({ length: 10 }, (_, i) => (i < 2 ? 'male-specific' : '')),
-    },
-    'neurons',
-  )
-
-  function richSource(id: string): DataSource {
-    const base: DataSource = new MockSource({ latencyMs: 0 })
-    const source = Object.assign(Object.create(base) as DataSource, {
-      id,
-      neuronIndex: async () => ANNOTATED,
-    })
-    registerSource(source)
-    return source
-  }
-
-  /** Column and figure labels — the marks' own labels live nested and are counted apart. */
+  /** Every column's label, marks included — each mark is a track of its own now. */
   const head = () =>
     [...document.querySelectorAll('.explore-head > .explore-head__cell')].map(
       (e) => e.textContent,
     )
   const markHead = () =>
-    [...document.querySelectorAll('.explore-head__marks .explore-head__cell')].map(
+    [...document.querySelectorAll('.explore-head > .explore-head__cell--mark')].map(
       (e) => e.textContent,
+    )
+  /** A row's column cells, in grid order: text, figures, marks and empty mark boxes alike. */
+  const columnCells = (row: Element) =>
+    row.querySelectorAll(
+      ':scope > .explore-cell, :scope > .explore-stat, :scope > .explore-plot, :scope > .explore-mark--empty',
     )
 
   async function ready() {
@@ -742,25 +748,18 @@ describe('aligned columns', () => {
     setup({}, 'mock-rich2')
     await ready()
     const row = document.querySelectorAll('.explore-row')[0]!
-    // The header and the rows are one grid; a count that disagreed would put every label a
-    // track off the values it names. Where they land is the browser probe's business.
-    expect(head()).toHaveLength(
-      row.querySelectorAll('.explore-cell').length +
-        row.querySelectorAll('.explore-stat').length,
-    )
     /*
-     * The marks' labels are their own track and must not be counted among the column labels.
+     * The header and the rows are one grid; a count that disagreed would put every label a track
+     * off the values it names. Where they land is the browser probe's business.
      *
-     * **One slot per label, always** — this used to assert `drawn <= labels`, which passes
-     * precisely when the bug is present. Both rows are fixed-pitch flex boxes matched by
-     * position, so a row that skipped a mark it had no value for slid every later mark under the
-     * wrong label; `regions` is absent for the whole settle of every page, so that was the
-     * ordinary case rather than an edge one. The slot is reserved from what the *dataset* can
-     * answer and filled when it does.
+     * **One cell per label, always** — this used to assert `drawn <= labels` for the marks, which
+     * passes precisely when the bug is present: the grid places children in order, so a row that
+     * skipped a mark it had no value for would slide every later column under the wrong label, and
+     * `regions` is absent for the whole settle of every page. The track is reserved from what the
+     * *dataset* can answer and filled when it does.
      */
     expect(markHead()).toContain('regions')
-    const slots = row.querySelectorAll('.explore-marks > *')
-    expect(slots).toHaveLength(markHead().length)
+    expect(columnCells(row)).toHaveLength(head().length)
   })
 
   it('keeps a slot for a mark it has no value for yet, so labels stay over their marks', async () => {
@@ -774,8 +773,8 @@ describe('aligned columns', () => {
     setup({}, 'mock-rich-slots')
     await ready()
     const row = document.querySelectorAll('.explore-row')[0]!
-    const drawn = row.querySelectorAll('.explore-marks .explore-plot').length
-    const empty = row.querySelectorAll('.explore-marks .explore-mark--empty').length
+    const drawn = row.querySelectorAll(':scope > .explore-plot').length
+    const empty = row.querySelectorAll(':scope > .explore-mark--empty').length
     // At least one mark has no value this early, which is the case worth having.
     expect(empty).toBeGreaterThan(0)
     expect(drawn + empty).toBe(markHead().length)
@@ -822,6 +821,417 @@ describe('aligned columns', () => {
     expect(document.querySelector('.explore-cell')).toBeNull()
     // The annotations are still there, as chips — which is the card's whole shape.
     expect(document.querySelectorAll('.explore-chip').length).toBeGreaterThan(0)
+  })
+})
+
+/**
+ * The header is editable: a column is fields plus a renderer, and the header is where both change.
+ *
+ * What is pinned is the param each gesture writes, since that is what survives a save — and that
+ * the first edit writes the **whole** list, which is what turns the automatic columns into stored
+ * ones rather than leaving one hand-made column appended to a list that still moves by itself.
+ */
+describe('the editable header', () => {
+  /** fish2's shape: four compartment counts that only a merged column can say anything with. */
+  const COMPARTMENTS = makeTable(
+    tableSchema(
+      column('neuronId', 'i64'),
+      column('type', 'str'),
+      column('pre', 'i64'),
+      column('post', 'i64'),
+      column('axonIn', 'i64'),
+      column('axonOut', 'i64'),
+      column('dendriteIn', 'i64'),
+      column('dendriteOut', 'i64'),
+    ),
+    {
+      neuronId: Array.from({ length: 10 }, (_, i) => 2000 + i),
+      type: Array.from({ length: 10 }, (_, i) => `T${i}`),
+      pre: Array.from({ length: 10 }, (_, i) => 100 + i),
+      post: Array.from({ length: 10 }, (_, i) => 50 + i),
+      axonIn: Array.from({ length: 10 }, (_, i) => 5 + i),
+      axonOut: Array.from({ length: 10 }, (_, i) => 90 + i),
+      dendriteIn: Array.from({ length: 10 }, () => 45),
+      dendriteOut: Array.from({ length: 10 }, (_, i) => i),
+    },
+    'neurons',
+  )
+
+  /*
+   * The schema is declared as well as the table, because the node infers its outputs and resolves
+   * its pickers against what the dataset *says* it publishes (`schemasFor`), and the mock's own
+   * schema has no `axonIn` — a fixture whose declared and loaded schemas disagree about the very
+   * fields under test.
+   */
+  function compartmentSource(id: string) {
+    const base: DataSource = new MockSource({ latencyMs: 0 })
+    const schemas = { ...base.schemas, neurons: COMPARTMENTS.schema }
+    registerSource(
+      Object.assign(Object.create(base) as DataSource, {
+        id,
+        neuronIndex: async () => COMPARTMENTS,
+        schemas,
+        schemasFor: () => schemas,
+      }),
+    )
+  }
+
+  const head = () =>
+    [...document.querySelectorAll('.explore-head > .explore-head__cell')].map(
+      (e) => e.textContent,
+    )
+
+  async function ready() {
+    await waitFor(() => expect(document.querySelector('.explore-head')).not.toBeNull())
+    await waitFor(() => expect(document.querySelectorAll('.explore-row').length).toBe(10))
+  }
+
+  /** Tick a field in the editor — the checkbox inside the row naming it. */
+  function tick(dialog: HTMLElement, name: string) {
+    const label = within(dialog).getByText(name).closest('label')!
+    fireEvent.click(label.querySelector('input')!)
+  }
+
+  const lastParam = (writes: Array<[string, ParamValue]>, param: string) =>
+    writes.filter(([id]) => id === param).at(-1)?.[1]
+  const lastLayout = (writes: Array<[string, ParamValue]>) => lastParam(writes, 'layout')
+  const chipsOf = (field: string) =>
+    document.querySelectorAll(`.explore-chip[data-field="${field}"]`).length
+
+  it('adds a merged column from the +, and writes the whole list', async () => {
+    compartmentSource('mock-fish-add')
+    const { writes } = setup({}, 'mock-fish-add')
+    await ready()
+    const before = head()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add a field' }))
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'Add a field' })).getByRole('button', {
+        name: 'Combine several fields into one column…',
+      }),
+    )
+    const dialog = screen.getByRole('dialog', { name: 'Add a column' })
+    for (const name of ['axonIn', 'axonOut', 'dendriteIn', 'dendriteOut']) tick(dialog, name)
+    // A merge says what it is a share of before it is committed to.
+    expect(within(dialog).getByText(/share of their sum/)).toBeTruthy()
+    fireEvent.click(within(dialog).getByLabelText('Donut'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add column' }))
+
+    const stored = lastLayout(writes) as string[]
+    expect(stored).toHaveLength(before.length + 1)
+    expect(stored.at(-1)).toBe(
+      encodeColumn({
+        render: 'donut',
+        fields: ['axonIn', 'axonOut', 'dendriteIn', 'dendriteOut'],
+      }),
+    )
+    expect(head()).toEqual([...before, 'axonIn/axonOut/dendriteIn/dendriteOut'])
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    // And every row draws it: the ring's title names each part with its share.
+    const row = document.querySelectorAll('.explore-row')[0]!
+    const titles = [...row.querySelectorAll('.explore-plot title')].map((t) => t.textContent)
+    expect(titles.some((t) => t?.includes('dendriteOut — 0 (0.0%)'))).toBe(true)
+  })
+
+  it('changes how a column draws from its own header cell', async () => {
+    compartmentSource('mock-fish-edit')
+    const { writes } = setup({}, 'mock-fish-edit')
+    await ready()
+    expect(head()).toContain('pre')
+
+    fireEvent.click(screen.getByRole('button', { name: 'pre' }))
+    const dialog = screen.getByRole('dialog', { name: 'Column · pre' })
+    fireEvent.click(within(dialog).getByLabelText('Rank in dataset'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Apply' }))
+
+    expect(head()).toContain('pre rank')
+    expect(head()).not.toContain('pre')
+    expect(lastLayout(writes)).toContain(encodeColumn({ render: 'rank', fields: ['pre'] }))
+  })
+
+  it('renames a column, and the header still says what it reads', async () => {
+    compartmentSource('mock-fish-name')
+    const { writes } = setup({}, 'mock-fish-name')
+    await ready()
+
+    fireEvent.click(screen.getByRole('button', { name: 'pre' }))
+    const dialog = screen.getByRole('dialog', { name: 'Column · pre' })
+    // The placeholder is the name it would get anyway, so an empty field reads as automatic.
+    const field = within(dialog).getByLabelText('Column name') as HTMLInputElement
+    expect(field.placeholder).toBe('pre')
+    fireEvent.change(field, { target: { value: '  outputs ' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Apply' }))
+
+    const renamed = screen.getByRole('button', { name: 'outputs' })
+    expect(renamed.getAttribute('title')).toBe('outputs: pre')
+    expect(lastLayout(writes)).toContain(
+      encodeColumn({ render: 'number', fields: ['pre'], label: 'outputs', readable: true }),
+    )
+  })
+
+  it('draws merged numbers as a line of text, or as bars side by side', async () => {
+    compartmentSource('mock-fish-shapes')
+    setup(
+      {
+        layout: [
+          encodeColumn({ render: 'text', fields: ['pre', 'post'] }),
+          encodeColumn({ render: 'bars', fields: ['pre', 'post'] }),
+        ],
+      },
+      'mock-fish-shapes',
+    )
+    await ready()
+    const row = [...document.querySelectorAll('.explore-row')].find((r) =>
+      r.textContent?.includes('2000'),
+    )!
+    // Neuron 2000: pre 100, post 50.
+    const text = row.querySelector('.explore-cell--values')!
+    expect(text.textContent).toBe('100 / 50')
+    expect(text.getAttribute('title')).toBe('pre: 100\npost: 50')
+    // Two bars on one baseline, each titled with its share of the pair.
+    const bars = row.querySelector('svg.explore-plot')!
+    expect(bars.querySelectorAll('rect')).toHaveLength(3)
+    expect(bars.querySelector('title')?.textContent).toBe('pre — 100 (67%)\npost — 50 (33%)')
+  })
+
+  it('places a field from the + as a column or a chip, shows where each is, and hides it', async () => {
+    compartmentSource('mock-fish-place')
+    const { writes } = setup({}, 'mock-fish-place')
+    await ready()
+    const before = head()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add a field' }))
+    const menu = () => screen.getByRole('dialog', { name: 'Add a field' })
+    const choice = (name: string) => within(menu()).getByRole('button', { name })
+    // `pre` is a figure already, so its pressed half is "column" — and its own column wins over
+    // the merged `pre/post` bar it is also in, or its pair would be locked.
+    expect(choice('Show pre as a column').getAttribute('aria-pressed')).toBe('true')
+    expect((choice('Show pre as a chip') as HTMLButtonElement).disabled).toBe(false)
+
+    fireEvent.click(choice('Show axonIn as a chip'))
+    /*
+     * One list, written whole: the automatic columns as they were drawn, then the chip. That is what
+     * makes it explicit — under the automatic list the fill rule would class a field on every
+     * neuron straight back to a column, the opposite of what was just asked.
+     */
+    const stored = lastLayout(writes) as string[]
+    expect(stored).toHaveLength(before.length + 1)
+    expect(stored.at(-1)).toBe(encodeChip('axonIn'))
+    expect(chipsOf('axonIn')).toBe(10)
+    expect(head()).toEqual(before)
+
+    fireEvent.click(choice('Show axonOut as a column'))
+    expect(head()).toEqual([...before, 'axonOut'])
+    // The menu stays open for the next field, and now says where both went.
+    expect(choice('Show axonIn as a chip').getAttribute('aria-pressed')).toBe('true')
+    expect(choice('Show axonOut as a column').getAttribute('aria-pressed')).toBe('true')
+
+    // The highlighted half again hides the field — from either place.
+    fireEvent.click(choice('Show axonOut as a column'))
+    fireEvent.click(choice('Show axonIn as a chip'))
+    expect(head()).toEqual(before)
+    expect(chipsOf('axonIn')).toBe(0)
+    expect(choice('Show axonIn as a chip').getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('promotes a chip to a column from the row it is on, or hides it', async () => {
+    compartmentSource('mock-fish-promote')
+    setup(
+      {
+        layout: [
+          encodeColumn({ render: 'number', fields: ['pre'] }),
+          encodeChip('axonIn'),
+          encodeChip('axonOut'),
+        ],
+      },
+      'mock-fish-promote',
+    )
+    await ready()
+    expect(chipsOf('axonIn')).toBe(10)
+
+    fireEvent.contextMenu(document.querySelector('.explore-chip[data-field="axonIn"]')!)
+    fireEvent.click(screen.getByRole('button', { name: 'Show “axonIn” as a column' }))
+    expect(head()).toEqual(['pre', 'axonIn'])
+    expect(chipsOf('axonIn')).toBe(0)
+
+    fireEvent.contextMenu(document.querySelector('.explore-chip[data-field="axonOut"]')!)
+    fireEvent.click(screen.getByRole('button', { name: 'Hide “axonOut”' }))
+    expect(chipsOf('axonOut')).toBe(0)
+    expect(head()).toEqual(['pre', 'axonIn'])
+  })
+
+  it('offers no chip row on a right-click that missed the chips', async () => {
+    compartmentSource('mock-fish-nochip')
+    setup({}, 'mock-fish-nochip')
+    await ready()
+    fireEvent.contextMenu(document.querySelectorAll('.explore-row')[0]!)
+    expect(screen.queryByRole('button', { name: /as a column/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy ID' })).toBeTruthy()
+  })
+
+  it('shows a column as a chip instead, from its own menu', async () => {
+    compartmentSource('mock-fish-demote')
+    const { writes } = setup(
+      {
+        layout: [
+          encodeColumn({ render: 'number', fields: ['pre'] }),
+          encodeColumn({ render: 'number', fields: ['post'] }),
+        ],
+      },
+      'mock-fish-demote',
+    )
+    await ready()
+
+    fireEvent.click(screen.getByRole('button', { name: 'post' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Show as chip instead' }))
+    expect(head()).toEqual(['pre'])
+    expect(lastLayout(writes)).toEqual([
+      encodeColumn({ render: 'number', fields: ['pre'] }),
+      encodeChip('post'),
+    ])
+    expect(chipsOf('post')).toBe(10)
+  })
+
+  it('removes any column outright, and only the last field shown stays', async () => {
+    richSource('mock-rich-remove')
+    setup(
+      {
+        layout: [
+          encodeColumn({ render: 'text', fields: ['class'] }),
+          encodeColumn({ render: 'text', fields: ['dimorphism'] }),
+        ],
+      },
+      'mock-rich-remove',
+    )
+    await waitFor(() => expect(document.querySelectorAll('.explore-row').length).toBe(10))
+    fireEvent.click(screen.getByRole('button', { name: 'class' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove column' }))
+    // Gone, not moved: `class` is a default field, and under an edited list a field is shown only
+    // if the list holds it.
+    expect(head()).toEqual(['dimorphism'])
+    expect(chipsOf('class')).toBe(0)
+
+    // An empty list is the automatic one, so the last field cannot go.
+    fireEvent.click(screen.getByRole('button', { name: 'dimorphism' }))
+    expect(
+      (screen.getByRole('button', { name: 'Remove column' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+  })
+
+  it('draws the list on a card too: its text columns as chips, then its chips', async () => {
+    richSource('mock-rich-card')
+    const def = requireNodeDef('neuron.explore')
+    const params: ParamValues = {
+      ...defaults(def.params),
+      layout: [encodeColumn({ render: 'text', fields: ['dimorphism'] }), encodeChip('class')],
+    }
+    function Card() {
+      const ctx = makeInferContext(def, params, {
+        dataset: T.dataset('mock-rich-card', DATASET, undefined, false),
+      })
+      return (
+        <ExploreBody
+          node={{ id: 'n1', type: 'neuron.explore', position: { x: 0, y: 0 }, params }}
+          ctx={ctx}
+          compact
+          setParam={() => {}}
+          onError={() => {}}
+        />
+      )
+    }
+    render(<Card />)
+    await waitFor(() =>
+      expect(document.querySelectorAll('.explore-row').length).toBeGreaterThan(2),
+    )
+    expect(document.querySelector('.explore-head')).toBeNull()
+    // Neuron 1000 carries both; the card has no header to align `dimorphism` under.
+    const row = [...document.querySelectorAll('.explore-row')].find((r) =>
+      r.textContent?.includes('1000'),
+    )!
+    expect(
+      [...row.querySelectorAll('.explore-chip')].map((c) => c.getAttribute('data-field')),
+    ).toEqual(['dimorphism', 'class'])
+  })
+
+  it('adds a figure exact, and keeps an automatic one human-readable until told', async () => {
+    compartmentSource('mock-fish-readable')
+    const { writes } = setup({}, 'mock-fish-readable')
+    await ready()
+
+    // A field added now prints its digits: the new column carries no readable flag.
+    fireEvent.click(screen.getByRole('button', { name: 'Add a field' }))
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'Add a field' })).getByRole('button', {
+        name: 'Show axonOut as a column',
+      }),
+    )
+    const stored = lastLayout(writes) as string[]
+    expect(stored.at(-1)).toBe(encodeColumn({ render: 'number', fields: ['axonOut'] }))
+    // The automatic figures were written as they were drawn, so the first edit changed no digits.
+    expect(stored).toContain(
+      encodeColumn({ render: 'number', fields: ['pre'], readable: true }),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'pre' }))
+    const dialog = screen.getByRole('dialog', { name: 'Column · pre' })
+    const box = () =>
+      within(dialog).queryByLabelText(/Human-readable formatting/) as HTMLInputElement
+    expect(box().checked).toBe(true)
+    // A rank has no digits to format, so the box leaves with the figure.
+    fireEvent.click(within(dialog).getByLabelText('Rank in dataset'))
+    expect(box()).toBeNull()
+    fireEvent.click(within(dialog).getByLabelText('Number'))
+    fireEvent.click(box())
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Apply' }))
+    expect(lastLayout(writes)).toContain(encodeColumn({ render: 'number', fields: ['pre'] }))
+  })
+
+  it('moves and removes a column, and a reset hands the list back', async () => {
+    compartmentSource('mock-fish-move')
+    const { writes } = setup(
+      {
+        layout: [
+          encodeColumn({ render: 'number', fields: ['pre'] }),
+          encodeColumn({ render: 'number', fields: ['post'] }),
+        ],
+      },
+      'mock-fish-move',
+    )
+    await ready()
+    expect(head()).toEqual(['pre', 'post'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'post' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Move left' }))
+    expect(head()).toEqual(['post', 'pre'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'post' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove column' }))
+    expect(head()).toEqual(['pre'])
+
+    // The last column cannot go — an empty list is the automatic one, which is Reset's job.
+    fireEvent.click(screen.getByRole('button', { name: 'pre' }))
+    expect(
+      (screen.getByRole('button', { name: 'Remove column' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to automatic fields' }))
+    expect(lastLayout(writes)).toEqual([])
+    expect(head()).toContain('pre/post')
+  })
+
+  it('keeps a text field it placed in a column out of the chip tail', async () => {
+    richSource('mock-rich-placed')
+    setup(
+      { layout: [encodeColumn({ render: 'text', fields: ['dimorphism'] })] },
+      'mock-rich-placed',
+    )
+    await waitFor(() => expect(document.querySelector('.explore-head')).not.toBeNull())
+    await waitFor(() => expect(document.querySelectorAll('.explore-row').length).toBe(10))
+    expect(head()).toEqual(['dimorphism'])
+    const chips = [...document.querySelectorAll('.explore-chip')].map((c) =>
+      c.getAttribute('title'),
+    )
+    expect(chips).not.toContain('dimorphism')
   })
 })
 
@@ -1838,7 +2248,7 @@ describe('annotation chips', () => {
  * the automatic list looks for, which makes it the ideal witness — any chip in these rows got
  * there by being asked for.
  */
-describe('the Tags param', () => {
+describe('the Fields list', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
   })
@@ -1864,43 +2274,34 @@ describe('the Tags param', () => {
     )
   }
 
-  it('shows a field chosen in the inspector, even one the automatic list would never pick', async () => {
-    setup({ chips: ['status'] })
+  it('shows a field placed as a chip, even one the automatic list would never pick', async () => {
+    setup({ layout: [encodeChip('status')] })
     await ready()
-    /*
-     * In whichever shape the layout gives it. In the expanded view a well-filled field is
-     * aligned into a column rather than drawn as a chip — the chosen list decides *which* fields,
-     * `splitByFill` decides which of them are worth a column, and this test is about the first.
-     */
     expect(annotations()).toEqual(['status'])
   })
 
-  it('ignores a chosen field this dataset does not have', async () => {
-    // Through `ctx.columns`, which filters against the live schema — the param outlives the
-    // dataset it was set on, and a stale name must not become an empty tag.
-    setup({ chips: ['superclass', 'status'] })
+  it('ignores a placed field this dataset does not have', async () => {
+    // The list outlives the dataset it was built on, and a stale name must not become an empty tag.
+    setup({
+      layout: [encodeChip('superclass'), encodeChip('status')],
+    })
     await ready()
     expect(annotations()).toEqual(['status'])
   })
 
   it('lives in the inspector and not on the card, and stales nothing', () => {
-    // `advanced` keeps it off the node body — a multi-select above a list of neurons would
-    // spend the widget's width on its own configuration. `presentational` keeps it out of the
-    // provenance key, because it cannot change what either port carries.
-    const param = requireNodeDef('neuron.explore').params?.find((p) => p.id === 'chips')
+    // `advanced` keeps it off the node body; `presentational` keeps it out of the provenance key,
+    // because it cannot change what either port carries.
+    const param = requireNodeDef('neuron.explore').params?.find((p) => p.id === 'layout')
     expect(param?.advanced).toBe(true)
     expect(param?.presentational).toBe(true)
   })
 
-  it('offers the dataset’s own columns as options, not a fixed list', async () => {
-    // A Dataset socket carries a source id rather than a schema, so without the node's own
-    // lookup the picker would come up empty and the control would look broken.
-    const def = requireNodeDef('neuron.explore')
-    const param = def.params?.find((p) => p.id === 'chips')
-    expect(param?.kind).toBe('columns')
-    expect(
-      availableColumns(param as never, { dataset: T.dataset('mock', DATASET) }, {}),
-    ).toContain('status')
+  it('replaced the Fields picker and its mode, rather than sitting beside them', () => {
+    // Two controls over one row is how the chips and the header came to disagree.
+    const ids = requireNodeDef('neuron.explore').params?.map((p) => p.id)
+    expect(ids).not.toContain('chips')
+    expect(ids).not.toContain('fieldsMode')
   })
 })
 
@@ -2020,7 +2421,7 @@ describe('the population checkboxes', () => {
   })
 
   it('shows only proofread rows under Traced only', async () => {
-    setup({ chips: ['status'] }, 'mock', undefined, undefined, ['traced'])
+    setup({ layout: [encodeChip('status')] }, 'mock', undefined, undefined, ['traced'])
     await ready()
     expect(rows().length).toBeGreaterThan(0)
     for (const row of rows()) expect(row.textContent).not.toMatch(/Anchor|Assign/)

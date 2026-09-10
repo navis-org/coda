@@ -23,6 +23,7 @@ import { installJsdomStubs } from '../../test/jsdomStubs'
 import { NeuronRow } from './NeuronRow'
 import type { RowFields } from './rowFields'
 import { rowFields } from './rowFields'
+import { distributionsFor } from './rowPlots'
 
 beforeAll(() => installJsdomStubs({ width: 800, height: 500 }))
 afterEach(cleanup)
@@ -157,6 +158,48 @@ describe('a stat that carries a unit', () => {
     const stat = container.querySelector('.explore-stat')
     expect(stat?.querySelector('.explore-stat__value')?.textContent).toBe('16.8K')
     expect(stat?.querySelector('.explore-stat__label')?.textContent).toBe('nodes')
+  })
+
+  it('prints the stored number itself unless the column asks for human-readable formatting', () => {
+    const table = tableFromRows(
+      tableSchema(
+        column('neuronId', 'i64'),
+        column('nodes', 'i64'),
+        column('cableLength', 'f64', 'nm'),
+      ),
+      [{ neuronId: 16, nodes: 15_417, cableLength: 2_980_158.182 }],
+      'neurons',
+    )
+    const { container } = render(
+      <NeuronRow
+        table={table}
+        row={0}
+        fields={rowFields(table.schema)}
+        sourceId={undefined}
+        datasetId={undefined}
+        selected={false}
+        onToggle={() => undefined}
+        compact={false}
+        mode="dark"
+        layout={{
+          columns: [
+            { render: 'number', fields: ['nodes'] },
+            { render: 'number', fields: ['cableLength'], readable: true },
+            { render: 'text', fields: ['nodes', 'cableLength'] },
+          ],
+          distributions: distributionsFor(table, []),
+          style: {},
+        }}
+      />,
+    )
+    // Exact beside readable: no grouping, no rounding, no unit scaling — and each column's flag
+    // reaches only that column.
+    expect(
+      [...container.querySelectorAll('.explore-stat__value')].map((el) => el.textContent),
+    ).toEqual(['15417', '2.98 mm'])
+    expect(container.querySelector('.explore-cell--values')?.textContent).toBe(
+      '15417 / 2980158.182',
+    )
   })
 
   // `nodes` is CATMAID's `size`: without it a CATMAID row had exactly one stat, because it

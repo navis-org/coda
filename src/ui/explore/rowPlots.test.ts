@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
 import { makeTable } from '../../core/values'
-import { balanceOf, distributionsFor, percentileOf, plotSpec } from './rowPlots'
+import { barFraction, distributionsFor, percentileOf, plotSpec, sharesOf } from './rowPlots'
 import { splitByFill } from './rowFields'
 
 const numbers = (name: string, values: number[]) =>
@@ -18,23 +18,70 @@ const numbers = (name: string, values: number[]) =>
     [name]: values,
   })
 
-describe('balanceOf', () => {
-  it('splits the two counts', () => {
-    expect(balanceOf(30, 70)).toEqual({ pre: 0.3, preCount: 30, postCount: 70 })
+describe('sharesOf', () => {
+  it('splits the counts into shares of their own sum', () => {
+    expect(sharesOf(['pre', 'post'], [30, 70])).toEqual([
+      { name: 'pre', count: 30, share: 0.3 },
+      { name: 'post', count: 70, share: 0.7 },
+    ])
+  })
+
+  it('reads any number of parts, and they sum to the whole', () => {
+    // fish2's 100010701: axonIn, axonOut, dendriteIn, dendriteOut.
+    const parts = sharesOf(['aIn', 'aOut', 'dIn', 'dOut'], [36, 3029, 342, 8])!
+    expect(parts.map((p) => p.name)).toEqual(['aIn', 'aOut', 'dIn', 'dOut'])
+    expect(parts.reduce((sum, p) => sum + p.share, 0)).toBeCloseTo(1, 12)
   })
 
   /*
-   * Both or neither. A bar drawn from one half is not a balance — it would read as "entirely
-   * presynaptic", which is a claim the data did not make.
+   * All or nothing. A bar drawn from the parts that happen to be present is not a split — a
+   * neuron with `pre` and no `post` would read as "entirely presynaptic", which is a claim the
+   * data did not make.
    */
   it('refuses a half-measured neuron rather than drawing it lopsided', () => {
-    expect(balanceOf(30, null)).toBeNull()
-    expect(balanceOf(null, 70)).toBeNull()
-    expect(balanceOf(30, 'many')).toBeNull()
+    expect(sharesOf(['pre', 'post'], [30, null])).toBeNull()
+    expect(sharesOf(['pre', 'post'], [null, 70])).toBeNull()
+    expect(sharesOf(['pre', 'post'], [30, 'many'])).toBeNull()
   })
 
-  it('refuses a neuron with no synapses at all, which is not a 50/50 one', () => {
-    expect(balanceOf(0, 0)).toBeNull()
+  it('refuses a neuron with no synapses at all, which is not an even one', () => {
+    expect(sharesOf(['pre', 'post'], [0, 0])).toBeNull()
+  })
+
+  it('refuses a negative part, which has no share', () => {
+    expect(sharesOf(['a', 'b'], [-5, 10])).toBeNull()
+  })
+})
+
+describe('barFraction', () => {
+  it('reads a value against the largest in the whole column, not the sample', () => {
+    // The largest value is one row among 20,000, which the 4,000-point stride skips — the bar
+    // must still be read against it, or everything above the sample's top is a full bar.
+    const values = Array.from({ length: 20_000 }, (_, i) =>
+      i === 12_345 ? 1_000_000 : i % 100,
+    )
+    const dist = distributionsFor(numbers('size', values), [], ['size'])
+    expect(dist.max.get('size')).toBe(1_000_000)
+    // And a bar pays for no sorted sample it would never read.
+    expect(dist.sorted.size).toBe(0)
+    expect(barFraction(dist, 'size', 500_000, false)).toBeCloseTo(0.5, 6)
+    expect(barFraction(dist, 'size', 1_000_000, false)).toBe(1)
+  })
+
+  it('on a log scale, gives a small value a visible length', () => {
+    const dist = distributionsFor(numbers('size', [0, 10, 10_000]), [], ['size'])
+    const linear = barFraction(dist, 'size', 10, false)!
+    const log = barFraction(dist, 'size', 10, true)!
+    expect(linear).toBeLessThan(0.01)
+    expect(log).toBeGreaterThan(0.2)
+    expect(barFraction(dist, 'size', 10_000, true)).toBeCloseTo(1, 12)
+  })
+
+  it('answers nothing where there is nothing to read against', () => {
+    const dist = distributionsFor(numbers('size', [0, 0]), [], ['size'])
+    expect(barFraction(dist, 'size', 0, false)).toBeNull()
+    expect(barFraction(dist, 'other', 5, false)).toBeNull()
+    expect(barFraction(dist, 'size', null, false)).toBeNull()
   })
 })
 

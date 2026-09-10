@@ -139,63 +139,28 @@ export const exploreNode = registerNode({
     },
     {
       /*
-       * Which fields the list shows as tags.
+       * Which fields each row shows, and how: the expanded list's columns and the fields shown as
+       * chips, one JSON entry each — `{"render":"stacked","fields":["axonIn","dendriteIn"]}` or
+       * `{"chip":"dimorphism"}`. See `ui/explore/rowColumns.ts`.
        *
-       * In the inspector and not on the card: it is a control you reach for once per dataset,
-       * and a multi-select above a list of neurons would spend the widget's width on its own
-       * configuration. `presentational`, because it decides what the *widget draws* and cannot
-       * change a byte of what either port carries — marking it otherwise would make restyling
-       * a row invalidate every downstream result.
+       * **It replaced two params**, `chips` (labelled Fields) and `fieldsMode`, which chose the
+       * chips from the inspector while the header chose the columns — so neither could show the
+       * whole row, and hiding a default field was only possible from the inspector. Their stored
+       * values are now undeclared: `normalizeParams` ignores them, and a saved workflow's
+       * hand-picked chips revert to the automatic ones. Cosmetic, both being presentational, and
+       * accepted in beta; `docs/widgets.md` records it.
        *
-       * Empty means "decide for me", which is what `rowFields` does from a priority list. A
-       * default that is a real list rather than a blank would have to be written before anyone
-       * knows which dataset this node points at.
+       * **Empty means automatic**, which is also what absence means, so it needs no `absentMeans`.
+       * Presentational because only the drawing reads it — `evaluate` never sees a field, so no
+       * downstream result can go stale behind a restyled row. An `ids` param because nothing
+       * generic could edit it; the inspector's read-and-clear field is the reset.
        */
-      id: 'chips',
-      kind: 'columns',
-      // "Fields", not "Tags": the value is a list of *columns*, and the widget now also has an
-      // `Additional tags` control naming a column whose *values* are tags. Two controls called
-      // Tags meaning opposite halves of one row is the confusion this avoids. The id stays
-      // `chips` — that is what a saved graph carries.
+      id: 'layout',
+      kind: 'ids',
       label: 'Fields',
-      from: 'dataset',
-      // A Dataset socket carries a source id, not a schema, so the picker is handed the
-      // lookup: same neuron schema the outputs are inferred from, so the options are exactly
-      // the columns the rows will have.
-      schemaFrom: (inputs) => schemasFromType(inputs.dataset).neurons,
-      help: 'Which columns are shown as chips on each neuron. Leave empty to choose automatically.',
+      noun: 'fields',
+      help: 'Which fields each row shows, as columns or chips — edited from the expanded list’s header. Clear to go back to the automatic fields.',
       default: [],
-      presentational: true,
-      advanced: true,
-    },
-    {
-      /*
-       * Whether `Fields` adds to the automatic list or stands in for it.
-       *
-       * **`absentMeans` is the whole reason this is safe to add.** The chosen list *replaced* the
-       * automatic one for as long as the control has existed, so a saved graph naming `status`
-       * shows exactly `status` — and shipping a new default of `add` without saying so would
-       * quietly redraw somebody else's stored workflow with eight more fields on every row.
-       * `defaultParams` writes the default at *creation* and never runs over `deserializeGraph`,
-       * so absence here is a third state and it means the old behaviour. A node made today gets
-       * `add`, which is the better default for the question people actually ask — "also show me
-       * this" far more often than "show me only this".
-       *
-       * Presentational for the same reason `chips` is, and hidden while `Fields` is empty: a mode
-       * governing an empty list has nothing to govern, and a control that does nothing is a
-       * control somebody has to work out is doing nothing.
-       */
-      id: 'fieldsMode',
-      kind: 'enum',
-      label: 'Fields mode',
-      help: 'Whether the fields above are added to the automatic ones or shown instead of them.',
-      options: [
-        { value: 'add', label: 'Add to the automatic fields' },
-        { value: 'replace', label: 'Replace the automatic fields' },
-      ],
-      default: 'add',
-      absentMeans: 'replace',
-      visibleIf: (params) => Array.isArray(params.chips) && params.chips.length > 0,
       presentational: true,
       advanced: true,
     },

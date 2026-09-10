@@ -215,6 +215,24 @@ export async function launchChrome({ port, profile, width = 1600, height = 1000,
     mouseTo(x, y) {
       return send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0 })
     },
+    /**
+     * Press and release at a point: a real click, which a capture-phase `pointerdown` listener
+     * hears — a dismiss-on-outside, say — where `element.click()` from `evaluate` fires none.
+     * `modifiers` is `dragHold`'s bitmask, on both events for the same reason.
+     */
+    async click(x, y, modifiers = 0) {
+      for (const type of ['mousePressed', 'mouseReleased']) {
+        await send('Input.dispatchMouseEvent', {
+          type,
+          x,
+          y,
+          button: 'left',
+          buttons: type === 'mousePressed' ? 1 : 0,
+          clickCount: 1,
+          modifiers,
+        })
+      }
+    },
     /** Press, move in six steps a frame apart, release. See `dragHold` for the modifier rule. */
     async drag(from, to, modifiers = 0) {
       // Not `this.dragHold`: every probe destructures this object, so `this` is undefined by

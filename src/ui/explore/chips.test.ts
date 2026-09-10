@@ -303,45 +303,9 @@ describe('the automatic chip list', () => {
     expect(chips).toEqual(['class', 'somaSide'])
   })
 
-  it('adds a chosen field to the automatic ones, in front of them', () => {
-    /*
-     * First because an explicit choice outranks a default — it is what puts the field in view at
-     * all rather than past the cap, and what gives it a shot at a column rather than the tail.
-     */
+  it('lets a chosen list stand in for the automatic one', () => {
+    // Neuron Profile's `Fields`: what somebody picked is the whole list, and never trimmed.
     const names = ['neuronId', 'type', 'class', 'subclass', 'status']
-    const { chips } = rowFields(schema(...names), ['status'], '', undefined, 'add')
-    expect(chips[0]).toBe('status')
-    expect(chips).toContain('class')
-    expect(chips).toContain('subclass')
-  })
-
-  it('does not answer one fact twice when a chosen field claims a family', () => {
-    // Choosing `predictedNt` must not append `consensusNt` beside it: two chips saying one thing
-    // is what the families exist to prevent, and it would be odd for choosing to reintroduce it.
-    const names = ['neuronId', 'type', 'consensusNt', 'predictedNt', 'class']
-    const { chips } = rowFields(schema(...names), ['predictedNt'], '', undefined, 'add')
-    expect(chips).toContain('predictedNt')
-    expect(chips).not.toContain('consensusNt')
-  })
-
-  it('never lists a chosen field twice when the automatic list wanted it too', () => {
-    const names = ['neuronId', 'type', 'class', 'subclass']
-    const { chips } = rowFields(schema(...names), ['class'], '', undefined, 'add')
-    expect(chips.filter((c) => c === 'class')).toHaveLength(1)
-  })
-
-  it('replaces when asked to, which is what every stored graph means', () => {
-    /*
-     * The compatibility half, and the reason `absentMeans` is on the param. The chosen list stood
-     * in for the automatic one for as long as the control has existed, so a graph naming `status`
-     * shows exactly `status` — a new default of `add` shipped without that would silently redraw
-     * somebody else's saved workflow with eight more fields on every row.
-     */
-    const names = ['neuronId', 'type', 'class', 'subclass', 'status']
-    expect(rowFields(schema(...names), ['status'], '', undefined, 'replace').chips).toEqual([
-      'status',
-    ])
-    // And the default, for every caller holding only a schema.
     expect(rowFields(schema(...names), ['status']).chips).toEqual(['status'])
   })
 

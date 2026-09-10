@@ -23,8 +23,8 @@ import { CHART_INK, seriesColor } from '../colors'
 import { MARK_W } from './rowPlots'
 import type { RegionShare } from './rowRois'
 import { donutArcs } from './rowRois'
-import { formatMeasure, formatNumber } from '../format'
-import type { Balance, Percentile } from './rowPlots'
+import { formatMeasure, formatNumber, formatShare } from '../format'
+import type { Part, Percentile } from './rowPlots'
 
 /** Bar geometry. `MARK_W` is `rowPlots`', which is also what sizes the grid track and the labels. */
 const W = MARK_W
@@ -64,25 +64,148 @@ function Mark({
 }
 
 /**
- * Presynaptic against postsynaptic, as one split bar.
+ * Several counts as one split bar, each drawn as its share of their sum.
  *
- * Two segments and not a centred diverging mark: what a reader wants from a list is "which way
- * does this one lean", and a shared baseline at the left makes the *proportion* the thing that
- * varies down the column. A diverging bar makes the total the thing that varies instead, which
- * the figures already say.
+ * The pre/post balance bar was the first of these and is now simply the automatic two-part one.
+ * A shared baseline at the left makes the *proportion* the thing that varies down the column,
+ * where a centred diverging mark would make the total vary instead — which the figures already
+ * say. Parts are coloured by position, so part one is one colour on every row of the column.
  */
-export function BalanceBar({ balance, mode }: { balance: Balance; mode: Mode }) {
-  const pre = Math.round(W * balance.pre)
+export function StackedBar({ parts, mode }: { parts: readonly Part[]; mode: Mode }) {
+  let at = 0
+  return (
+    <Mark label={partsLabel(parts)} title={partsTitle(parts)}>
+      {parts.map((part, i) => {
+        // Rounded at the running edge rather than per segment, so two parts meant to touch
+        // cannot open a hairline between them — `donutArcs`' rule for the same reason.
+        const x = Math.round(at * W)
+        at += part.share
+        const width = Math.round(at * W) - x
+        return (
+          <rect
+            key={part.name}
+            x={x}
+            y={0}
+            width={width}
+            height={H}
+            fill={seriesColor(i, mode)}
+          />
+        )
+      })}
+    </Mark>
+  )
+}
+
+/**
+ * The same parts as bars side by side on one baseline, each as tall as its share of their sum.
+ *
+ * Where the stacked bar answers "which way does it lean", this answers "how do the parts compare":
+ * four stacked segments are four lengths with four different starting points, which the eye
+ * compares badly, and four bars on one baseline it compares well. Heights are shares rather than
+ * the largest part scaled to full, so one height means one fraction on every row of the column —
+ * the property the stacked bar's shared left edge buys, kept.
+ */
+const BARS_H = 16
+const BAR_GAP = 2
+
+export function SideBars({ parts, mode }: { parts: readonly Part[]; mode: Mode }) {
+  const width = (W - BAR_GAP * (parts.length - 1)) / parts.length
+  const top = BARS_H - 1
+  return (
+    <Mark height={BARS_H} label={partsLabel(parts)} title={partsTitle(parts)}>
+      <rect x={0} y={top} width={W} height={1} fill={CHART_INK[mode].muted} opacity={0.5} />
+      {parts.map((part, i) => {
+        // A part that exists is never drawn as nothing — a pixel says "some", which zero does not.
+        const height = part.count > 0 ? Math.max(1, Math.round(part.share * top)) : 0
+        return (
+          <rect
+            key={part.name}
+            x={i * (width + BAR_GAP)}
+            y={top - height}
+            width={width}
+            height={height}
+            fill={seriesColor(i, mode)}
+          />
+        )
+      })}
+    </Mark>
+  )
+}
+
+/** The same parts as a ring — `ShareRing`, with each part in the slot its position gives it. */
+export function PartsDonut({ parts, mode }: { parts: readonly Part[]; mode: Mode }) {
+  return (
+    <ShareRing
+      shares={parts.map((part, i) => ({
+        roi: part.name,
+        share: part.share,
+        count: part.count,
+        rank: i,
+      }))}
+      mode={mode}
+    />
+  )
+}
+
+function partsLabel(parts: readonly Part[]): string {
+  return parts.map((p) => `${p.name} ${formatNumber(p.count)}`).join(', ')
+}
+
+function partsTitle(parts: readonly Part[]): string {
+  return parts.map((p) => shareLine(p.name, p.count, p.share)).join('\n')
+}
+
+/**
+ * One part's line in a split mark's title, for the bars and the ring alike. `formatShare`, not a
+ * rounded percent: a part under half a percent read "0%" beside a side-by-side bar that draws it
+ * a pixel tall precisely so it does not read as none.
+ */
+function shareLine(name: string, count: number, share: number): string {
+  return `${name} — ${formatNumber(count)} (${formatShare(share)})`
+}
+
+/**
+ * One quantity against the largest of its kind in the dataset.
+ *
+ * A filled bar, because here the quantity *is* the point — where `PercentileTick` is a rank and
+ * deliberately not filled. The track is the dataset's maximum, so a full bar means "the largest
+ * neuron here", which the title says in words.
+ */
+export function ValueBar({
+  fraction,
+  value,
+  name,
+  unit,
+  log,
+  mode,
+}: {
+  fraction: number
+  value: number
+  name: string
+  unit: string | undefined
+  log: boolean
+  mode: Mode
+}) {
+  const width = Math.max(fraction > 0 ? 1 : 0, Math.round(W * fraction))
   return (
     <Mark
-      label={`${formatNumber(balance.preCount)} presynaptic, ${formatNumber(balance.postCount)} postsynaptic`}
       title={
-        `${formatNumber(balance.preCount)} pre · ${formatNumber(balance.postCount)} post — ` +
-        `${Math.round(balance.pre * 100)}% outgoing`
+        `${name} ${formatMeasure(value, unit)} — ` +
+        (log
+          ? 'on a log scale against the largest in this dataset'
+          : `${formatShare(fraction)} of the largest in this dataset`)
       }
     >
-      <rect x={0} y={0} width={W} height={H} rx={2} fill={seriesColor(1, mode)} opacity={0.5} />
-      <rect x={0} y={0} width={pre} height={H} rx={2} fill={seriesColor(0, mode)} />
+      <rect
+        x={0}
+        y={0}
+        width={W}
+        height={H}
+        rx={2}
+        fill={CHART_INK[mode].muted}
+        opacity={0.25}
+      />
+      <rect x={0} y={0} width={width} height={H} rx={2} fill={seriesColor(0, mode)} />
     </Mark>
   )
 }
@@ -171,7 +294,7 @@ export function ConfidenceBar({
 }
 
 /**
- * Where this neuron's synapses are, as a donut.
+ * Shares as a donut: where this neuron's synapses are, or the parts of a merged column.
  *
  * A ring rather than a pie because the slices are small: a pie's segments all meet at the centre,
  * where the three narrowest are a few pixels of shared point and unreadable, while a ring gives
@@ -192,15 +315,13 @@ const RING_STROKE = 6.5
 const RADIUS = (RING - RING_STROKE) / 2
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS
 
-export function RegionBar({ shares, mode }: { shares: RegionShare[]; mode: Mode }) {
+export function ShareRing({ shares, mode }: { shares: RegionShare[]; mode: Mode }) {
   const arcs = donutArcs(shares, CIRCUMFERENCE)
   return (
     <Mark
       height={RING}
-      label={shares.map((s) => `${s.roi} ${Math.round(s.share * 100)}%`).join(', ')}
-      title={shares
-        .map((s) => `${s.roi} — ${formatNumber(s.count)} (${Math.round(s.share * 100)}%)`)
-        .join('\n')}
+      label={shares.map((s) => `${s.roi} ${formatShare(s.share)}`).join(', ')}
+      title={shares.map((s) => shareLine(s.roi, s.count, s.share)).join('\n')}
     >
       {/* Centred in the slot, and started at twelve o'clock rather than three. */}
       <g transform={`translate(${W / 2} ${RING / 2}) rotate(-90)`}>

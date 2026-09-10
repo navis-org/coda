@@ -2364,6 +2364,10 @@ select.field {
   text-overflow: ellipsis;
   padding-right: 8px;
 }
+/* Merged numbers as text: figures, so in the figures' face. */
+.explore-cell--values {
+  font-family: var(--font-mono);
+}
 /*
  * A blank is drawn, not skipped — an em dash at the same position as every other value in the
  * column. That is the difference this layout is for: a chip that is absent says nothing, where a
@@ -2388,50 +2392,23 @@ select.field {
   border-bottom: 1px solid var(--border);
   margin-bottom: 2px;
 }
-/*
- * The marks' labels, on the marks' own pitch, so each label sits over the bar it names.
- *
- * `--mark-w`, `--mark-gap` and `--mark-pad` are painted onto the row and the header by
- * `rowTemplate`, out of the single declaration in `rowPlots.ts` — a stylesheet cannot import a
- * constant, and this is the repo's own answer to that (`--dash-row`, `data-narrow`). Written out
- * here as literals they were a third home for a number three files have to agree on, and every
- * way of disagreeing is browser-only.
- */
-.explore-marks,
-.explore-head__marks {
-  display: flex;
-  gap: var(--mark-gap);
-  padding-right: var(--mark-pad);
-}
-.explore-head__marks .explore-head__cell {
-  width: var(--mark-w);
-  flex: 0 0 auto;
-  padding-right: 0;
-  font-size: 9px;
-}
-
-/* The marks' track: one row of small bars, vertically centred against the text beside them. */
-/* The row's marks are centred against the text beside them; the header's labels sit on the line. */
-.explore-marks {
-  align-items: center;
-}
-/*
- * A supported mark this row has no value for. Drawn as an empty box of the mark's own width
- * rather than skipped: both this row and the header's labels are fixed-pitch flex rows matched by
- * *position*, so a dropped child slides everything after it under the wrong label — which
- * `regions` does on every page for as long as its query is settling.
- */
-.explore-mark--empty {
-  flex: 0 0 auto;
-  width: var(--mark-w);
-}
 .explore-plot {
   display: block;
-  flex: 0 0 auto;
   overflow: visible;
 }
 
 .explore-head__cell {
+  /* A button, for its column's editor, dressed as the label it always was. */
+  appearance: none;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  margin: 0;
+  padding: 1px 8px 1px 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -2439,7 +2416,16 @@ select.field {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-right: 8px;
+}
+.explore-head__cell:hover,
+.explore-head__cell:focus-visible {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+/* A mark's label is as wide as the 54px mark under it, so it takes the smaller size. */
+.explore-head__cell--mark {
+  font-size: 9px;
+  padding-right: 0;
 }
 /*
  * After the base rule, not before it. Equal specificity, so source order is what decides — and
@@ -2449,6 +2435,194 @@ select.field {
 .explore-head__cell--stat {
   text-align: right;
   padding-right: 0;
+}
+.explore-head__add {
+  appearance: none;
+  border: 1px dashed var(--border-strong);
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  width: 100%;
+  padding: 1px 0 2px;
+  cursor: pointer;
+}
+.explore-head__add:hover,
+.explore-head__add:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/*
+ * The column editor. `.context-menu` gives it the frame, the rows and the overlay's Escape rule;
+ * what is added is a filterable field list that scrolls on its own, so a dataset publishing two
+ * hundred properties cannot push the renderers and Apply off the bottom of the screen.
+ */
+.explore-colmenu {
+  width: 264px;
+  max-height: 520px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+}
+/*
+ * Only the field list gives up height. Every child of a flex column may shrink by default, and the
+ * caption's `overflow: hidden` makes its automatic minimum zero — so once a long field list pushed
+ * the content past `max-height`, the caption went first and the filter box sat over the title
+ * (measured with the editor capped at 300px: 8px of its 24). The list scrolls instead.
+ */
+.explore-colmenu > * {
+  flex-shrink: 0;
+}
+.explore-colmenu__filter {
+  margin: 0 3px;
+  padding: 4px 6px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.explore-colmenu__fields {
+  flex: 1 1 auto;
+  min-height: 60px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0 3px;
+}
+.explore-colmenu__field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+}
+.explore-colmenu__field:hover {
+  background: var(--accent-soft);
+}
+.explore-colmenu__field[data-picked] {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.explore-colmenu__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explore-colmenu__kind {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.explore-colmenu__none,
+.explore-colmenu__hint {
+  margin: 0;
+  padding: 2px 7px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.explore-colmenu__renders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  padding: 4px 7px 0;
+  border-top: 1px solid var(--border);
+}
+.explore-colmenu__render {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.explore-colmenu__readable {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.explore-colmenu__rename {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 0 7px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.explore-colmenu__rename .explore-colmenu__filter {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* The `+` menu: one row per field, and a two-button choice of where it goes. */
+.explore-place {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.explore-place:hover {
+  background: var(--surface-2);
+}
+.explore-place__choice {
+  flex: 0 0 auto;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.explore-place__choice button {
+  appearance: none;
+  border: none;
+  background: none;
+  margin: 0;
+  padding: 1px 7px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.explore-place__choice button + button {
+  border-left: 1px solid var(--border);
+}
+.explore-place__choice button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+/* The pressed half is where the field is now; clicking it again hides the field. */
+.explore-place__choice button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.explore-place__choice button:disabled:not([aria-pressed='true']) {
+  opacity: 0.4;
+  cursor: default;
+}
+.explore-colmenu__apply {
+  margin: 2px 3px 0;
+  padding: 5px 7px;
+  font-size: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.explore-colmenu__apply:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .explore-row__pick {
@@ -2722,6 +2896,20 @@ select.field {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-primary);
+}
+/*
+ * An exact figure is as long as its digits, so its track is wider — and past that, clipped with an
+ * ellipsis rather than spilling into the next column. The title holds the whole number either way.
+ */
+.explore-stat[data-exact] {
+  min-width: 0;
+  max-width: 100%;
+}
+.explore-stat[data-exact] .explore-stat__value {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .explore-stat__label {
   font-size: 9px;

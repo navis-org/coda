@@ -143,31 +143,30 @@ describe('the tag search opt-out', () => {
       expect(param, id).toBeDefined()
       expect(param?.presentational, id).toBeFalsy()
     }
-    // And `chips` still is presentational: it only decides what is drawn.
-    expect(def.params?.find((p) => p.id === 'chips')?.presentational).toBe(true)
+    // And the Fields list is presentational: it only decides what is drawn.
+    expect(def.params?.find((p) => p.id === 'layout')?.presentational).toBe(true)
   })
 
   it('calls the field list "Fields", not "Tags"', () => {
-    // Two controls called Tags, meaning opposite halves of one row — a list of columns against a
-    // column of values — is the confusion this rename avoids. The id stays `chips`, which is
-    // what a saved graph carries.
+    // Two controls called Tags, meaning opposite halves of one row — a list of fields against a
+    // column of values — is the confusion the name avoids. The list is `layout` now; the old
+    // `chips` picker that first carried the name is gone (see below).
     const def = requireNodeDef('neuron.explore')
-    expect(def.params?.find((p) => p.id === 'chips')?.label).toBe('Fields')
+    expect(def.params?.find((p) => p.id === 'layout')?.label).toBe('Fields')
     expect(def.params?.find((p) => p.id === 'tagColumn')?.label).toBe('Additional tags')
   })
 
-  it('reads a stored graph as the whole list, whatever new nodes default to', () => {
+  it('loads a graph saved with the old Fields picker, and reads none of it', () => {
     /*
-     * The three states of a param added to a node that already shipped, and `chartsMode` on
-     * `out.datasetSummary` is the same call made for the same reason. A document written before
-     * `fieldsMode` existed held a `Fields` list that *was* the whole list, so absent and default
-     * are different answers — and `deserializeGraph` is what writes the absent one in. Without
-     * it, opening somebody's saved workflow would silently draw eight more fields on every row
-     * than it did when they saved it.
+     * `chips` and `fieldsMode` were replaced by the one `layout` list, dropped outright in beta. A
+     * stored value is an undeclared param now: the graph must still load, and nothing may carry
+     * it into the list — a half-honoured pick beside the list is the disagreement it replaced.
+     * The cost, recorded in `docs/widgets.md`, is that the picks revert to the automatic fields.
      */
-    const mode = requireNodeDef('neuron.explore').params?.find((p) => p.id === 'fieldsMode')
-    expect(mode?.default).toBe('add')
-    expect(mode?.absentMeans).toBe('replace')
+    const def = requireNodeDef('neuron.explore')
+    const ids = def.params?.map((p) => p.id)
+    expect(ids).not.toContain('chips')
+    expect(ids).not.toContain('fieldsMode')
 
     const loaded = deserializeGraph(
       JSON.stringify({
@@ -177,22 +176,12 @@ describe('the tag search opt-out', () => {
             id: 'ex',
             type: 'neuron.explore',
             position: { x: 0, y: 0 },
-            params: { chips: ['status'] },
+            params: { chips: ['status'], fieldsMode: 'replace' },
           },
         ],
         edges: [],
       }),
     ).graph.nodes[0]!.params
-    expect(loaded.fieldsMode).toBe('replace')
-  })
-
-  it('hides the mode while there is no chosen list for it to govern', () => {
-    // A control that does nothing is a control somebody has to work out is doing nothing.
-    const mode = requireNodeDef('neuron.explore').params?.find((p) => p.id === 'fieldsMode')
-    expect(mode?.visibleIf?.({ chips: [] })).toBe(false)
-    expect(mode?.visibleIf?.({ chips: ['status'] })).toBe(true)
-    // Inspector-only and presentational: it changes a drawing, never a port.
-    expect(mode?.advanced).toBe(true)
-    expect(mode?.presentational).toBe(true)
+    expect(loaded.layout ?? []).toEqual([])
   })
 })

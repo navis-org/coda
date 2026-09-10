@@ -295,26 +295,21 @@ would reshuffle as somebody types; and the fill rate is a *filter* on the priori
 than a re-ranking, since `type` before `class` before `superclass` is a hierarchy and sorting it by
 completeness scrambles it.
 
-**`Fields` adds to the automatic list rather than replacing it — and `absentMeans` is what makes
-that safe to ship.** The chosen list *stood in for* the automatic one for as long as the control
-has existed, so a saved graph naming `status` shows exactly `status`; a new default of `add`
-without saying so would quietly redraw somebody else's stored workflow with eight more fields on
-every row. `defaultParams` writes the default at *creation* and never runs over
-`deserializeGraph`, so absence here is a third state and it means the old behaviour —
-`out.datasetSummary`'s `chartsMode` is the identical call for the identical reason. A node made
-today gets `add`, which answers the question people actually ask: "also show me this" far more
-often than "show me only this".
-
-**A chosen field comes first and is never trimmed.** First because an explicit choice outranks a
-default: it is what puts the field in view rather than past the cap, and what gives it a shot at a
-column instead of the chip tail. Never trimmed because that is already this control's rule —
-trimming what was asked for is how a control stops being believed. `splitByFill` still decides its
-*shape*, so asking for a field nine neurons in ten lack still gets a chip rather than a column of
-blanks: position buys prominence, not an exemption from the fill rule. Choosing a field also claims
-its **family**, so asking for `predictedNt` does not append `consensusNt` beside it — two chips
-saying one thing is what the families exist to prevent, and it would be odd for choosing a field to
-be the thing that reintroduces it. Inspector-only and hidden while `Fields` is empty: a mode
-governing an empty list is a control somebody has to work out is doing nothing.
+**There was a `Fields` param, and the list the header edits replaced it.** It was the inspector's
+pick of annotations, with a mode saying whether the pick was added to the automatic list or stood in
+for it, and it survives in the history of this file for one lesson: once the header could place
+fields, `Fields` had become three things at once and a complete account of none. It stored the
+header's *chip* choices, which is why it looked out of sync with the row — it never listed a column
+or an automatically chosen chip, only chips somebody had picked by hand; it was the **only** way to
+configure a node card, which has no header; and it was the only way to *hide* a default field,
+which is why "Remove column" had to be disabled for `class` with a title pointing at the inspector.
+All three moved into the one list (`layout`: columns and `chip` entries), so the row, the header,
+the `+` menu and the card read one thing and nothing can disagree. **Dropped outright, in beta**:
+a stored `chips` or `fieldsMode` is now an undeclared param, which `normalizeParams` ignores, so a
+saved workflow's hand-picked chips revert to the automatic ones with nothing said. Cosmetic rather
+than a data loss — both were presentational, so no result moves and nothing re-runs — and none of
+the repo's own workflows (the wizard, the demos, the Zoo) set either. Neuron Profile keeps its own
+`Fields`: a different widget, untouched.
 
 **The automatic list is capped by *colour*, so the expanded view can afford a longer one.**
 `MAX_CHIPS` is eight because that is the palette, and an aligned column is plain text with no slot
@@ -341,15 +336,147 @@ an `auto` track sizes to its own row's content, so the header — which has no c
 collapsed its first two tracks and sat its labels 110px right of the values they named; the
 trailing `auto` held the figures, whose width follows the digits (`400` against `1,496`), so a
 row's own columns drifted against each other; and `minmax(0, 8rem)` let a column shrink by a
-different amount per row. The marks track is fixed for a fourth reason of its own: it is sized from
-how many marks the **dataset** draws, not the row, because a neuron missing `pre` draws no balance
-bar and a track that shrank for it would pull that row's figures left of everybody else's — and
-because the region bar arrives a query *after* the row, so a track that grew when it landed would
-shift the page sideways as the fetch returned. Measured in a browser: header and values at
-identical x on every track.
+different amount per row. A mark's track is fixed for a fourth reason of its own: it is sized from
+what the **column** draws, not from what the row has a value for, because a neuron missing `pre`
+draws no balance bar and a track that shrank for it would pull that row's figures left of everybody
+else's — and because the region bar arrives a query *after* the row, so a track that grew when it
+landed would shift the page sideways as the fetch returned. Measured in a browser: header and values
+at identical x on every track, before and after a column is added (`pnpm probe:explore-columns`).
 
 **The header also lifted the figure labels out of the rows.** `pre` under twenty-five figures is
 the same word twenty-five times down a column that already says it once.
+
+### The header is editable: a column is fields plus a renderer
+
+**The header was three mechanisms, and none of them could be edited where it was drawn.** Aligned
+annotations came from `splitByFill`, the marks from `plotSpec`'s hard-coded pairs, the figures from
+a fixed list capped at three. On `neuprint-fish2` that left four properties on every neuron —
+`axonIn`, `axonOut`, `dendriteIn`, `dendriteOut`, present on 2,000 of 2,000 sampled — with no way
+onto the row except as left-aligned text through the old `Fields` picker, since fish2 spends its three figures on
+`pre`, `post` and `synweight`. So a column is now `ColumnSpec` — **one or more fields plus a
+renderer** (`rowColumns.ts`) — and the three mechanisms survive as `automaticColumns`, in the order
+the row always drew them. Nothing about the old marks was special: the pre/post balance bar was a
+two-part stacked bar all along, and the size tick a one-field rank. One text field is text; one
+number is a figure, a bar, a log bar or a rank; two to eight numbers are a stacked bar, bars side by
+side, a donut, or a line of text.
+
+**A merged column is a share of its parts' own sum, never of a column they are supposed to sum
+to**, and that was measured rather than assumed. On fish2 `axonIn + dendriteIn` equals `post` on
+2,000 of 2,000 neurons sampled, but `axonOut + dendriteOut` equals `pre` on only **722** —
+100006807 has `pre` 86 and `axonOut` 94 — so a share of `pre` draws past the end of its own bar.
+`sharesOf` is the pre/post rule generalised: all or nothing (a bar drawn from the parts that happen
+to be present is not a split), `null` on a zero total and on a negative part. Parts are coloured by
+position, so part one is one hue down the whole column, and capped at `MAX_PARTS` = the palette:
+both marks *fold* past the eighth slot onto `Other`, which is right for a region's tail and wrong
+where every part was chosen by name. A text field cannot be merged — ticking one swaps the
+selection rather than refusing, since a share needs every part to be a count.
+
+**Side-by-side bars are shares too, not the largest part scaled to full.** They exist for a
+different question than the stacked bar — "how do the parts compare" rather than "which way does it
+lean", since four stacked segments are four lengths from four starting points and four bars on one
+baseline are not — but one height has to mean one fraction on every row, which is the property the
+stacked bar's shared left edge buys. A part that exists is never zero pixels tall. **Merged text**
+is `100 / 50`, each value in its own unit, and a missing value is a dash *in its own position*:
+dropped, `— / 50` would read `50`, which is the same two fields saying something else.
+
+**A column can be named**, and the name is the only thing about it that is not derived. The field's
+placeholder is the automatic name, so empty reads as "automatic" rather than blank, and a name equal
+to the automatic one is not stored — or the column stays pinned to a label that only happened to
+match. A renamed header's `title` still names the fields, since the name no longer does. That
+optional field is why an entry is a JSON **object** rather than the `[render, ...fields]` array it
+started as: an array has no slot for an optional value that could not be mistaken for one more field.
+
+**A figure prints its stored number unless it is asked for human-readable formatting** — `15417`
+by default, `15.4K` with the box ticked. It was built the other way round first, readable by
+default with an "Exact values" opt-out, and turned around on the argument that a field somebody
+adds by hand is usually added to be read or copied as a value. So `readable` is the flag, off is its
+absence, and the three ways a column appears decide it: **added** (`+`, a promoted chip, Combine)
+is exact; the **automatic** figures carry `readable: true`, which is how they always drew and what
+the first edit to a header writes for them, so editing one column changes no other column's digits;
+and a node **card**'s figures stay readable, not being columns anybody configured. Exact is
+`formatExact`, the rule the hover already used, in the column's **stored** unit — scaling a cable
+length into millimetres is the half of the readable form that rounds. It applies only where a column
+prints digits (one number, or merged numbers as text); a bar or a rank has none. An exact figure's
+track is 6.5rem rather than 4.5rem — `2980158.182` in 11px mono is about 73px — and anything longer
+is clipped with an ellipsis rather than spilling into the next column, the whole number staying in
+the title.
+
+**A bar reads against the whole column's maximum, not the sample's.** `distributionsFor` samples by
+stride for the rank, where one neuron more or less moves nothing; the largest neuron in a dataset is
+one row, which a stride of forty skips thirty-nine times in forty, and every neuron above the
+sample's top would then draw full. One pass over a column per dataset is a millisecond. The log bar
+is `log1p(v) / log1p(max)`, the heatmap's log.
+
+**The first edit writes the whole list.** Automatic until touched, then stored — a list half
+automatic and half hand-built would move by itself under the columns somebody placed. It is
+`layout`, an `ids` param of JSON entries (`{"render":"stacked","fields":["axonIn","dendriteIn"]}`, JSON for
+`paramPairs.ts`' reason: fish2 publishes `AF10_Tectum(L)`), **presentational** because only the
+drawing reads it, and needing no `absentMeans` because empty, absent and the old behaviour are the
+same answer. The inspector's read-and-clear field (labelled **Fields**) is the reset, and so is the editor's
+`Reset to automatic fields`. Removing the last column is disabled rather than allowed, since writing an empty
+list would read as asking for the automatic one back.
+
+**The list outlives the dataset it was built on**, so `resolveLayout` asks each stored entry
+whether it can be drawn here: a missing field, or a renderer that no longer fits its field's type,
+keeps the column off the row — a merged one **whole**, since the parts that remain are a split of
+something else under the same header. **Off the row, not out of the list**: what this dataset cannot
+draw comes back as `unseen` and every edit writes it back verbatim, because `fits` deciding what is
+kept as well as what is drawn meant a rename made while a graph pointed at hemibrain erased the
+fish2 columns it was built with — the multi-column picker's "keep an unseen list untouched", arrived
+at a second time. A list naming nothing this dataset has falls back to the automatic one rather than
+drawing an empty header, and `explicit` says which answered. The tag column is excluded in the same
+place, `fits` and `offerableFields`, since it draws as its own row. And the region query is
+asked **only while a column draws it**: a header with the donut removed has no reader for the one
+request on this surface that reaches a server.
+
+**Once the list has been edited, a field is shown if and only if the list holds it — as a column or
+as a chip.** The fill rule decides only until somebody has decided instead, and the first edit
+writes the automatic columns *and* the automatic chips exactly as they were drawn, so nothing on
+screen moves. It took three shapes. First the header held columns and `Fields` chose chips, so a
+well-filled field added through `Fields` after the header was edited was classed a column by the
+fill rule, was not in the stored list, and drew in **neither** place. Then "a column iff the header
+holds it, every other shown field a chip", which fixed that and left `Fields` holding half the row.
+Then one list. A confidence bar's label is not one of the fields it places, since the prediction is
+a chip beside the bar that says how far to trust it. What the one list buys most visibly is
+**hiding**: Remove column removes, clicking the highlighted half of a field's pair in the `+` menu
+hides it, and so does "Hide" on a chip's right-click. The one refusal is an edit that would **empty** the list, since an empty list is the automatic
+one and would bring every default back — asked of the edit's *result* (`isEmptyLayout`) by every
+control that could produce it, so a refused click is a disabled control and never a silent one. A card draws the
+list's text columns as chips ahead of its own chips, having no header to align them under; its
+figures stay the automatic ones, a card being a summary rather than the table.
+
+**The choice is made where a field is added.** The fill rule's weak point was sparse fields: they
+became chips, and somebody who wanted one aligned had to find it on a row before they could promote
+it. So the header's `+` lists **every** field with a `column | chip` pair (`AddFieldMenu`), the
+pressed half being where it is now — which makes the menu a map of the whole row as well as the way
+onto it, and is what stops one field being placed twice. It stays open, so four fields are four
+clicks. Merging several into one column is a different question (which fields, drawn how) and keeps
+its own editor behind "Combine several fields…". The other two gestures are the reverse directions:
+**right-click a chip** on a row for "Show … as a column" (the chip is where a field somebody wants
+aligned is visible), and **"Show as chip instead"** in a one-field column's menu.
+
+**Editing is a header cell and a `+`, not dragging one header onto another.** Drag-to-merge was the
+other shape, and it cannot reach a field the header does not already show — which on fish2 is all
+four of the fields the feature exists for. One `ColumnEditor` serves a header cell and the `+` menu's
+"Combine…", since adding is editing a column that does not exist yet: a filterable field list, the renderers that can draw what is ticked,
+and the tick order kept and shown because it is the order the parts draw in. **A draft until
+Apply**, because every write is a param write and an undo step, and four ticks live would be three
+steps describing a column nobody wanted. It wears `.context-menu`, which buys `ViewerOverlay`'s
+Escape rule free, and stops every key but Escape: the canvas binds Space and Backspace, and Escape
+has to reach the window-level listener that dismisses it. **Only its field list may give up
+height**: a flex column under a `max-height` lets every child shrink, and the caption's
+`overflow: hidden` makes its automatic minimum zero, so on fish2's thirty-five fields the filter box
+sat over the title. The mock's six fields fit and could not show it; capping the open editor at
+300px does, and measured the caption at 8px of its 24 before `flex-shrink: 0` on the rest.
+
+Measured in a browser on the demo workflow at 1600 × 1000 (`pnpm probe:explore-columns`), before the
+`+` became a field menu, then re-run after: six
+automatic labels at identical x and width to both the first and last row's cells, seven after a
+merged donut is added; the add editor 264 × 266, wholly inside the window and hit-tested at its own
+centre through `.overlay__panel`'s `overflow: hidden`; a column's editor 4px below the cell that
+opened it, at its left edge; Escape closing the editor and leaving the overlay. **Not measured on
+fish2 itself**, which needs a token in the browser — the four columns are the component tests'
+fixture shape instead.
 
 ### The inline marks
 
@@ -371,9 +498,9 @@ however thin its arc. Drawn as **dash offsets on one circle, not `A` path arcs**
 style choice — a segment covering the whole ring is a 360° arc whose start and end coincide, which
 SVG draws as *nothing*, and a neuron wholly within one region is the ordinary case for a fragment
 rather than an edge case. Offsets accumulate rather than being computed per segment, so rounding
-cannot open a hairline gap between two arcs meant to touch. It occupies the same `MARK_W` slot as
-every other mark, centred, so the header's labels keep sitting over what they name and
-`rowTemplate` never learns about a mark of its own shape.
+cannot open a hairline gap between two arcs meant to touch. It occupies a `MARK_W` track like every
+other mark, centred, so `rowTemplate` never learns about a mark of its own shape — and it is the
+same ring a merged column draws as a donut (`ShareRing`), coloured by part rather than by region.
 
 Two rules decide whether it means anything. `roiInfo` nests — a synapse in `LO(R)` is counted again in `OL(R)` — so only the primary
 set may be summed, and an *absent* primary list is not an empty one: it means discovery has not
@@ -387,9 +514,12 @@ shape — and a ring folds. `useRowRois` fetches a page at a time in one round t
 own ids, and a missing `capabilities.roiCounts` is a missing mark rather than a broken list — every
 other field on the row came out of the index and is perfectly good.
 
-**Each mark is labelled in the header, in the marks' own geometry.** Four small bars are
-unreadable otherwise, and a `title` per mark only helps somebody who already suspects there is
-something to hover.
+**Each mark is labelled in the header, as a column of its own.** Four small bars are unreadable
+otherwise, and a `title` per mark only helps somebody who already suspects there is something to
+hover. The marks used to share one track, with a row of labels laid out on their pitch and matched
+to them by position — three parallel enumerations agreeing by inspection. As tracks of their own the
+label is simply the cell above, and that machinery (`markSlots`, `--mark-gap`, `--mark-pad`) is
+gone.
 
 **Right-clicking a row opens a menu, and it wears `NodeContextMenu`'s clothes rather than its
 own.** `.context-menu` and its rows, `useDismissOnOutside` for the dismissal — a right-click should
@@ -960,7 +1090,7 @@ upload node reported a `Type column` naming a column its file does not carry, an
 with the same three params written out a second time, did not. The one real difference is where
 the schema is found, so that is the argument.
 
-**`chips` is labelled `Fields` now, on Explore Dataset and on Neuron Profile.** The value is a list of *columns*
+**`chips` is labelled `Fields` on Neuron Profile, and was on Explore Dataset until the header's list replaced it (see above).** The value is a list of *columns*
 where `Additional tags` names a column of *values*; two controls called Tags meaning opposite
 halves of one row is the confusion the rename avoids. The **id stays `chips`** — that is what a
 saved graph carries. Neuron Profile was renamed too though only Explore Dataset was reported: leaving one of the
