@@ -61,7 +61,7 @@ mock implements; nothing above `src/data` knows Cypher exists.
 neuPrint used to send _no_ `Access-Control-*` headers on any response, with its `OPTIONS`
 preflight returning 401 before CORS middleware would run — so a request carrying an
 `Authorization` header was blocked by the browser before it was sent, and every call had to go
-through a same-origin proxy. Janelia has since fixed that on `neuprint-test.janelia.org`, and
+through a same-origin proxy. Janelia fixed that on `neuprint-test.janelia.org` first, and
 the fix was checked end to end rather than taken on trust: 204 on the preflight,
 `Allow-Headers: Authorization, Content-Type` (exactly what this app sends — `Accept` is
 safelisted and needs no mention), no `Allow-Credentials`, and `Access-Control-Allow-Origin` on
@@ -69,11 +69,18 @@ safelisted and needs no mention), no `Allow-Credentials`, and `Access-Control-Al
 `reportAuthFailure` channel works by reading a 401's status, which a browser only surfaces if
 the response itself carries ACAO. All seven endpoints this app calls were verified, each path
 prefix preflighted separately (nginx CORS config is per-location), and a 4 MB Explore-Dataset-shaped
-index came back gzipped to 957 kB in 1.4 s. `neuprint.janelia.org` does **not** have it yet.
+index came back gzipped to 957 kB in 1.4 s.
 
-So `routesForServer` offers two routes — the deployment itself, then the proxy path — and
-`client.ts` _tries_ them, because a browser reports a CORS refusal as an opaque `TypeError`
-indistinguishable from a dead host. The answer is remembered per deployment in `localStorage`,
+**Every Janelia deployment has it now.** Re-probed 2026-09-10 against all five hosts the code
+names — `neuprint`, `neuprint-test`, `neuprint-cns`, `neuprint-pre`, `neuprint-fish2` — from
+`Origin: https://coda.science`: preflight 204 with the same allow-list and a one-hour max-age,
+and ACAO `*` on a 401 (a tokenless `POST /api/custom/custom`) and on a 404 alike. So a static
+deploy reaches every public neuPrint direct, with no proxy anywhere on the path.
+
+`routesForServer` still offers two routes — the deployment itself, then the proxy path — and
+`client.ts` still _tries_ them, because a neuPrint is software rather than a service: a lab's own
+deployment may send no CORS headers at all, and a browser reports a CORS refusal as an opaque
+`TypeError` indistinguishable from a dead host. The answer is remembered per deployment in `localStorage`,
 since without that every request in a proxy-only session pays a failed preflight first. Three
 rules make that safe, and each is pinned by a mutation-checked test:
 
@@ -86,7 +93,8 @@ rules make that safe, and each is pinned by a mutation-checked test:
 - **An `AbortError` is never answered by trying elsewhere** — that would issue the request the
   cancellation was meant to stop.
 
-The proxy still matters and is registered under **both `server.proxy` and `preview.proxy`** —
+The proxy is now for a deployment with no CORS headers, not for any Janelia host. It is
+registered under **both `server.proxy` and `preview.proxy`** —
 those are separate config keys, and a preview server without it 404s every request with an
 empty body.
 
@@ -106,9 +114,10 @@ header name in the Fetch spec, so it is silently ignored and Coda sends the brow
 header is the obvious substitute and is currently **worse than nothing** — it is not
 CORS-safelisted, so it must appear in `Access-Control-Allow-Headers`, and neuPrint answers a
 preflight with a **fixed** `Authorization, Content-Type` whatever is requested (checked with
-three different `Access-Control-Request-Headers`). Adding one today would fail every
-cross-origin request outright rather than merely going unnoticed. It is a line of nginx config
-on Janelia's side; ask for it alongside the production CORS rollout, since it is the same file.
+three different `Access-Control-Request-Headers`; still fixed on every deployment after the
+CORS rollout, re-checked 2026-09-10). Adding one today would fail every cross-origin request
+outright rather than merely going unnoticed. It is a line of nginx config on Janelia's side, in
+the same file as the CORS headers they have already added.
 
 So `tagQuery` prefixes `// coda/<version>`, which reaches the query log and changes nothing that
 executes. Three things about it:
