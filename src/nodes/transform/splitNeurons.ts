@@ -78,6 +78,9 @@ registerNode({
   type: 'neuron.splitNeurons',
   label: 'Split Neurons',
   category: 'transform',
+  // Find Neurons' width, because it is the same editor — `FilterRowsEditor` draws both cards, so
+  // a width that fits three controls on one card fits them on the other.
+  cardWidth: 360,
   description:
     'Split skeletons or meshes in two by their attributes: the matches, and the rest.',
   guide:

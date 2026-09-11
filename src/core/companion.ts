@@ -17,13 +17,14 @@
  *    Ctrl-Z after adding a dataset removes both — an add that takes two undos reads as a bug.
  *
  * Declared on the `NodeDefinition` rather than looked up in the UI, because "this node comes with
- * that one" is a fact about the node pack and not about React: the starter graphs in
- * `examples/starters.ts` are headless and go through the same function.
+ * that one" is a fact about the node pack and not about React: the graphs the Workflow Wizard
+ * builds — the starters among them, `wizard/starters.ts` — are headless and go through the same
+ * function.
  */
 
 import type { CodaGraph, GraphNode } from './graph'
 import { addEdge, addNode, newId } from './graph'
-import { defaultParams } from './node'
+import { declaredHeight, defaultParams } from './node'
 import { getNodeDef } from './registry'
 
 /** How a node asks for a companion. See the module note. */
@@ -35,20 +36,26 @@ export interface CompanionSpec {
   /** Input port of the companion the host feeds. */
   to: string
   /**
-   * Placement relative to the host's own position, in canvas units.
+   * Where the companion goes: `x` from the host's left edge, and `gap` between the host's
+   * **bottom** edge and the companion's top, in canvas units.
    *
    * Below rather than beside, because a graph flows left to right: a companion off to the right
    * sits where the *next* step in the pipeline goes, and reads as part of the chain.
    *
-   * **Both coordinates must be non-negative, and that is a constraint rather than the taste
-   * above.** `layout/companions.ts` withholds a companion from the layout and grows its host's box
-   * to reserve the space, anchoring that box at the host card's own top-left — which is what keeps
+   * **A gap below the host's height, not an offset from its top**, because a dataset card's
+   * height varies by backend and a fixed depth overlapped the tallest (`docs/canvas.md`). The
+   * height comes from the canvas's measurement where there is one (`layout/companions.ts`, at an
+   * arrange) and from the host's declared height where there is not (here, on add).
+   *
+   * **Both must be non-negative, and that is a constraint rather than the taste above.**
+   * `layout/companions.ts` withholds a companion from the layout and grows its host's box to
+   * reserve the space, anchoring that box at the host card's own top-left — which is what keeps
    * the measured socket offsets ELK is handed (`FIXED_POS` takes them literally) describing the
-   * host. A negative offset would put the companion outside the reserved box, so the layout
-   * declines to pin it at all: the card lands here on add and then wanders on the next arrange,
-   * with nothing on screen to say why. Stated here because this is where a node pack writes one.
+   * host. A negative one would put the companion outside the reserved box, so the layout declines
+   * to pin it at all: the card lands here on add and then wanders on the next arrange, with
+   * nothing on screen to say why. Stated here because this is where a node pack writes one.
    */
-  offset: { x: number; y: number }
+  offset: { x: number; gap: number }
 }
 
 /**
@@ -60,18 +67,25 @@ export interface CompanionSpec {
 export function addNodeWithCompanion(graph: CodaGraph, node: GraphNode): CodaGraph {
   const withHost = addNode(graph, node)
 
-  const spec = getNodeDef(node.type)?.companion
+  const hostDef = getNodeDef(node.type)
+  const spec = hostDef?.companion
   const companionDef = spec ? getNodeDef(spec.type) : undefined
   // An unregistered companion type is a wiring mistake in the node pack, not the user's
   // problem: the node they actually asked for still has to arrive.
   if (!spec || !companionDef) return withHost
 
+  /*
+   * The host has not been drawn yet, so its height is what it declares: a size somebody gave it,
+   * else the definition's. `registerNode` refuses a companion host declaring neither, so the `0`
+   * is unreachable rather than a guess.
+   */
+  const hostHeight = node.size?.height ?? declaredHeight(hostDef) ?? 0
   const companion: GraphNode = {
     id: newId('n'),
     type: spec.type,
     position: {
       x: node.position.x + spec.offset.x,
-      y: node.position.y + spec.offset.y,
+      y: node.position.y + hostHeight + spec.offset.gap,
     },
     params: defaultParams(companionDef),
   }

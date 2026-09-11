@@ -21,7 +21,7 @@
  */
 
 import type { CodaGraph, GraphGroup, GraphNode } from './graph'
-import { newId, withMembers } from './graph'
+import { newId, withMembers, withoutCaption } from './graph'
 import type { NodeDefinition, ParamDef } from './node'
 import { configurableParams, findParam } from './node'
 import { getNodeDef } from './registry'
@@ -211,6 +211,24 @@ export function exposedControls(
 /** Whether this frame already promotes that param. */
 export function isExposed(group: GraphGroup, nodeId: string, paramId: string): boolean {
   return (group.exposed ?? []).some((e) => e.node === nodeId && e.param === paramId)
+}
+
+/**
+ * Point each copied caption at its card's copy, or drop the relation where the card was not copied.
+ *
+ * Takes the whole map because a card may come after its note in document order. A caption copied
+ * without its card is a note about nothing on this canvas, and pointing it at the original would
+ * move it under a card the paste did not copy.
+ */
+export function cloneCaptions(
+  nodes: readonly GraphNode[],
+  idMap: ReadonlyMap<string, string>,
+): GraphNode[] {
+  return nodes.map((node) => {
+    if (!node.captionOf) return node
+    const host = idMap.get(node.captionOf)
+    return host ? { ...node, captionOf: host } : withoutCaption(node)
+  })
 }
 
 /**

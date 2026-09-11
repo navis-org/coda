@@ -35,6 +35,10 @@ registerNode({
   type: 'out.copyIds',
   label: 'Copy IDs',
   category: 'utility',
+  // Narrower than Download's card: three settings, a button and a count, with no sentence on it —
+  // the auto-run warning that sets Download's width has no counterpart, since nothing about this
+  // node fires on a run.
+  cardWidth: 260,
   description: 'Copy the incoming neuron ids to the clipboard, ready to paste elsewhere.',
   guide:
     'Puts the ids of whatever neurons are wired to it on the clipboard, in the shape the thing you are pasting into wants — one per line for a list, comma-separated and quoted for a Python or R literal. It is a tap, so it passes the neurons on unchanged and can sit mid-chain; the button is the only trigger, because a browser refuses a clipboard write that no one clicked for.',

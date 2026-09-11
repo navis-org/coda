@@ -146,7 +146,10 @@ touches React.
 
 **Only the canvas knows how big a card is.** A node's height comes from its param rows, its port
 count, its body widget and whether it is collapsed — none of which the document records. So
-`resolveSize` prefers the canvas's measurement and falls back `node.size → defaultSize → 232×120`.
+`resolveSize` prefers the canvas's measurement and falls back to `node.size`, then to `cardWidth`
+(the widest the type can draw: `defaultSize`, `NodeDefinition.cardWidth`, a viewer's 360) by the
+declared height (`declaredHeight`: `defaultSize`'s, else `cardHeight`) or 120. The width is the
+widest rather than the unrun one because every headless reader of it is *placing* something.
 A zero measurement counts as no measurement: a card mounted but not yet laid out reports 0×0, and
 taking that literally arranges a tidy grid of points.
 
@@ -286,9 +289,9 @@ that come closest are both wrong: a partition puts the pair in one *layer* and s
 which is above, and a post-pass that moves the card afterwards lands it on whatever ELK put there.
 So the pair goes through `collapse.ts`' shape one level down — the companion leaves the layout
 graph, **the host's box grows to cover where it will sit**, and it is put back at the declared
-offset once positions are known. ELK reserves the space, so nothing can be placed in it, and the
-rule holds exactly rather than on average. The host keeps its id, ports and edges; only its size
-changes, which is why `toElkGraph` and `place.ts` learn nothing about this.
+gap under the host once positions are known. ELK reserves the space, so nothing can be placed in it,
+and the rule holds exactly rather than on average. The host keeps its id, ports and edges; only its
+size changes, which is why `toElkGraph` and `place.ts` learn nothing about this.
 
 The growth is the half that fails silently: withholding a node and putting it back produces a
 perfectly plausible arrangement whether or not the box grew, and the only symptom is a card drawn
@@ -314,6 +317,50 @@ Expansion inverts `expandPositions`' rule on purpose. A folded group's members k
 arrangement their author left, because folding is a way of telling the layout to leave that part
 alone; a companion has no such arrangement to keep — it is placed by its host's *definition*, so
 an arrange snaps it back there.
+
+**Under the host's height, never at a fixed depth.** `CompanionSpec.offset` is `{ x, gap }`: the
+companion's top goes `gap` below the host's **bottom** edge. It was `{ x: 0, y: 300 }` from the
+host's top, and measured in a browser on a cold session a dataset card is 306–327 tall on neuPrint,
+282 on CAVE, 249 on CATMAID and 161 as a Custom CATMAID card — so one depth overlapped every
+neuPrint card by up to 27 units and left 139 of empty canvas under the last, on starters and on
+hand-added cards alike. The height comes from two places, because there are two moments: **on add** (`addNodeWithCompanion`) nothing has drawn the
+host, so it is the definition's declared `cardHeight` — the tallest the card was measured at, per
+backend, which `registerNode` requires of every companion host — and **at an arrange** it is the
+canvas's measurement, **floored by the declaration**. The floor is the part a browser found: a
+starter's arrival arrange measured a neuPrint card at 291 and it settled at 326 once its listing
+failed a moment later, so a snap to the measurement alone landed the Description 11 units inside it;
+BANC's CAVE table card read about 219 and settled at 265, and its caption landed 46 inside. The
+floor is `cardHeight` alone, not `defaultSize`: a resizable card resized shorter is drawn shorter.
+Measured on every dataset type added by hand, the Description clears its card by 24 units, 44
+under the four neuPrint cards that draw 20 short of the declared 326.
+
+### A chain caption is carried the same way, and it is the one note that moves
+
+`AnnotationChain.caption` arrives as a Text note under the chain it describes, and notes are not in
+the layout: `dodge` keeps the arranged block off them and never moves one, because a note is
+somebody's sentence about a place on the canvas. A caption's place is a *card*, so that rule left it
+behind — after a starter's arrival arrange, FlyWire's caption sat 399px (on screen) above the box it
+captions and BANC's 476px above its card. So a caption goes through the companion's shape exactly:
+it leaves the pass, its host's box grows to cover it (the same overlay), it is taken off `dodge`'s
+obstacle list, and it is snapped `CAPTION_GAP` under the host afterwards.
+
+**Declared, never inferred.** A caption is a note carrying `GraphNode.captionOf`, the id of the
+card it is about, written by the builder that placed it (`wizard/build.ts`). Every other note keeps
+`dodge`'s rule however near a card it sits; inferring "the card this note is under" would move
+notes somebody placed deliberately. Being an id reference, it has the same three places to stop
+naming something as a group's membership: dropped on load when the card is not in the file,
+remapped by paste and duplicate (`insertFragment`, which needs the whole id map because a card can
+come after its note), and dropped — the note kept — when the card is deleted.
+
+**The host is the card named, or the box standing in for it.** The builder names the chain's output
+card (`join` on FlyWire, the lone CAVE table on BANC). While that card is inside a **folded** group
+the host is the group's box, which is what is drawn and where the caption was placed to begin with.
+**Expanded**, the frame is not a layout item — only its members are — so the caption goes under the
+card it names: the one thing in that state ELK can reserve room under, where a post-pass under the
+members' union would land on whatever ELK put there. A host already carrying a pinned companion
+refuses the caption, for the "second companion on one host" reason. Auto-layout, the Arrange button
+and the arrival arrange all run `condenseForArrange` / `expandArranged`, the same pair the tests run
+against ELK (`src/test/arrange.ts`).
 
 ### A reference edge is not a layering constraint
 

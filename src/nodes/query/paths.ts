@@ -89,6 +89,9 @@ registerNode({
   type: 'neuron.paths',
   label: 'Paths',
   category: 'query',
+  // Wide enough for the `Collapse types` label and a number field to share a line — see
+  // `.paths-body` in the stylesheet, which widens the shared label column for it.
+  cardWidth: 260,
   description: 'Find the strongest routes from one set of neurons to another.',
   guide:
     'Not “what is wired to this?” but “how does this reach that?” — the strongest feed-forward ' +

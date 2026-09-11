@@ -7,11 +7,9 @@
  * measured and rejected: 75 kB of base64 in a page whose static appendix is the half a crawler
  * and a language model actually read.
  *
- * It lives beside the wizard rather than in `src/examples` because that is what it is made of:
- * `plansFor` is a projection of `everyCombination`, `demoStart` is `resolveOption`, and the
- * whole search is over the wizard's own answer space. The neighbours in `examples/` are
- * hand-authored documents and the primitives for them — and `wizard/build.ts` imports two of
- * those, so a demo builder filed there would have pointed the dependency both ways.
+ * It lives beside the wizard because that is what it is made of: `plansFor` is a projection of
+ * `everyCombination`, `demoStart` is `resolveOption`, and the whole search is over the wizard's
+ * own answer space.
  *
  * ## One rule, and the wizard does most of the work
  *
@@ -82,8 +80,9 @@ import type { DemoPlanRef } from '../data/share/fragment'
 import { DEMO_DATASET, buildWorkflow } from './build'
 import type { AnalysisId, StartId, VisualisationId } from './options'
 import { datasetOptions, everyCombination, resolveOption, startOptions } from './options'
-import { cardWidth } from '../ui/nodes/nodeBodies'
-import { graphNode } from '../examples/assemble'
+import { CARD_GAP } from '../layout/columns'
+import { boundsOf } from '../layout/place'
+import { graphNode } from './assemble'
 
 /** A place a wire can come from: a node already in the graph, and one of its output ports. */
 interface Source {
@@ -564,7 +563,7 @@ function append(
  * they paired ports with sources by index.
  *
  * `addNodeWithCompanion` rather than `addNode`, so a dataset node arrives with the Description
- * card its publisher asks to be cited by — the rule `examples/assemble.ts` states for graphs
+ * card its publisher asks to be cited by — the rule `wizard/assemble.ts` states for graphs
  * built from scratch, which a graph built by appending has no less reason to keep.
  */
 function attach(
@@ -777,39 +776,19 @@ function freshId(graph: CodaGraph, type: string): string {
 /**
  * One column to the right of everything, on the row of the card that feeds it.
  *
- * **`cardWidth`, not `boundsOf`.** Both answer "where does the canvas end", and only one of them
- * is right here: `boundsOf` goes through `layout/elkGraph`'s `resolveSize`, which reads
- * `defaultSize` and a measured size — and cannot read `NODE_BODIES`, because `src/layout` may not
- * import `src/ui`. So an Explore card (520 through `NODE_BODIES`, nothing declared) measures 232
- * there, and the appended card landed on top of it: 53 overlapping pairs across the 102 demos,
- * against zero in the wizard's own graphs. `cardWidth` is the reader that takes the max of all
- * four sources and says in its own header that it exists for exactly this; this is its fourth
- * caller, beside the wizard, the tour builder and `placeGuards.test.ts`.
- *
- * The row is `near` rather than the topmost card, because the topmost in every one of these
- * graphs is the overview note above the chain.
+ * Clear of `boundsOf` by `CARD_GAP`: `boundsOf` reads each card's declared width through
+ * `resolveSize`, so an appended card lands clear of a wide Explore card rather than on it. The row
+ * is `near` rather than the topmost card, because the topmost in every one of these graphs is the
+ * overview note above the chain.
  */
 function place(graph: CodaGraph, id: string, type: string, near?: string): GraphNode {
-  const right = graph.nodes.reduce(
-    (edge, node) => Math.max(edge, node.position.x + cardWidth(node.type)),
-    -Infinity,
-  )
+  const bounds = boundsOf(graph.nodes)
   const row = graph.nodes.find((node) => node.id === near)
   return graphNode(id, type, {
-    x: Number.isFinite(right) ? right + APPEND_GAP : 0,
+    x: bounds ? bounds.x + bounds.width + CARD_GAP : 0,
     y: row?.position.y ?? 0,
   })
 }
-
-/**
- * Clear space between the rightmost card and the one appended after it.
- *
- * The same 90 `wizard/build.ts` and `ui/tour/builder.ts` both use, and named for the gap rather
- * than for a card: `COL_WIDTH` is a column *stride* — a card plus the space after it — so adding
- * it to a right *edge* would double the gap, and subtracting a nominal card width to correct for
- * that was a fourth number meaning the same thing under a name `build.ts` had already taken.
- */
-const APPEND_GAP = 90
 
 /**
  * The plan for every listable type, asked once.

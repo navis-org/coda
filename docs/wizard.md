@@ -283,7 +283,7 @@ twice already.
 two nodes called `join`, and `assembleGraph` keys nodes by id — the second replaces the first and
 both sets of wires end up on whichever survived, giving a graph that looks smaller than it should
 and is wired wrong. `prefixChain` returns a whole chain with its ids rewritten rather than
-threading a prefix through `chainGrid`, `chainLinks` and `foldChain`, which would be three places
+threading a prefix through `chainLinks`, `foldChain` and the caption, which would be three places
 that must agree how a prefix is spelled. The **first** dataset keeps the bare ids, so a
 single-dataset graph is byte-identical to what it always was. FlyWire and BANC are the case that
 proves it: both declare a node called `annotations`, of two different types, so the test asserts
@@ -350,10 +350,20 @@ FlyWire or BANC used to open on a list of eighteen-digit root ids while `New ▸
 *same declarations*, opened them fully typed. FlyWire's six cards arrive folded into one frame;
 BANC's single card does not, which is `foldChain`'s rule rather than this file's.
 
-Its rows come from `ChainNode.row` and its columns from `chainGrid`, so the two arms cannot end up
-transposed here relative to the starter — which is what happened when this file derived a row from
-the list index. The negative columns are only a starting arrangement: a generated workflow asks the
-canvas for one ELK pass on arrival, and that is what decides where any of it sits.
+Its rows come from `ChainNode.row` — so the two arms cannot end up transposed, which is what
+happened when this file derived a row from the list index — and its columns from its own wires,
+like every card's (`layout/columns.ts`). The members keep those columns under the fold, so the
+box sits a few columns before the dataset rather than beside it: placed as one box-wide card
+instead, the hidden members landed across the dataset, its Description card and the head, and
+opening the frame would have dropped six cards on them (`placeGuards.test.ts` found it on every
+FlyWire graph). It is only a starting arrangement: a generated workflow asks the canvas for one ELK
+pass on arrival, which lays the box out as one card, and that decides where any of it sits.
+
+A chain that declares a **caption** (`AnnotationChain.caption`) arrives with it as a note, under
+the folded box at the box's width or under the lone card of an unfolded one, whenever notes are on.
+It was the FlyWire and BANC starters' until the starters became this builder's output
+(`starters.ts`), which is why a FlyWire workflow from the wizard used to carry no word about where
+its labels came from.
 
 The Browse head is pointed at `chain.tagColumn`, or the wizard builds the fold and the Join and
 then draws no tag row — half the chain's second arm doing nothing visible. It follows the chain
@@ -366,8 +376,10 @@ dataset node demoing on itself) wants the opposite.
 
 ## The arrange is a request, not a layout
 
-`buildWorkflow` places its cards as a row of columns — column index times `COL_WIDTH`, plus the
-viewers stepped by `cardWidth`. That is legible at four cards and a long thin strip at nine, and a
+`buildWorkflow` places its cards as a row of columns — `layout/columns.ts`, a card's column being
+its depth in the dataflow and each column as wide as its widest card; it was a column index times a
+constant `COL_WIDTH` until the widths moved onto the node definition. That is legible at four cards
+and a long thin strip at nine, and a
 strip is what the fit `loadGraph` fires zooms out to frame. Measured across the nine analyses with
 every viewer ticked, on a 1400 x 820 canvas: the row frames at **40–70%** and one ELK pass over the
 same nodes frames at **52–92%**, because the viewers stack into a layer instead of extending the

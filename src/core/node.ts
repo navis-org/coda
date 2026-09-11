@@ -976,6 +976,38 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    */
   defaultSize?: { width: number; height: number }
   /**
+   * How wide this card draws, in px, where that is wider than the 232 every card is by default.
+   *
+   * **Not `defaultSize`, and the difference is the whole reason this exists.** That one sizes
+   * React Flow's *wrapper*, and only a viewer's card fills its wrapper — declared on any other
+   * node it leaves the state bar hanging below the card (`nodeResize.test.tsx`). A body that
+   * holds a list of neurons, a row of three filter controls or a paste target only wants to be
+   * wider, which `CodaNodeView` does through `--node-width` from this field.
+   *
+   * On the definition rather than beside the body component in `ui/nodes/nodeBodies.ts`, because
+   * the layers that *place* cards are headless and may not import `src/ui`. See `cardWidth` in
+   * `layout/elkGraph.ts` for the widest a card of a type can draw, which is what placement asks.
+   */
+  cardWidth?: number
+  /**
+   * How tall this card draws before the canvas has measured it — a placeholder, in px, for
+   * whoever has to put something *under* it without a measurement to hand.
+   *
+   * A card's height is its content, which is why no other node declares one and why every placer
+   * with a canvas reads the measurement instead. What forces a declaration is the companion:
+   * `addNodeWithCompanion` places the Description card below its dataset at the moment the
+   * dataset is added, when nothing has drawn it yet. So a node declaring a `companion` must
+   * declare this (or a `defaultSize`) — `registerNode` refuses one without — and `resolveSize`
+   * reads it as the headless height too (`declaredHeight`), so the layout and the insertion agree.
+   *
+   * It is also a **floor** under the measurement wherever something is snapped beneath the card
+   * (`layout/companions.ts`), because a measurement taken at the moment an arrange runs can belong
+   * to a card that is still growing (`docs/canvas.md` has the numbers). So declare the tallest the
+   * card was measured at. A chain caption's host may declare one for the same reason
+   * (`annotation.caveTable` does).
+   */
+  cardHeight?: number
+  /**
    * A second node created alongside this one, already wired to it.
    *
    * For a node that is incomplete on its own in a way a user cannot be expected to know about:
@@ -1060,6 +1092,15 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
   /** Edit-time problems shown on the node (missing column, incompatible dtype, ...). */
   validate?(ctx: InferContext<P>): string[]
   evaluate(ctx: EvalContext<P>): Promise<Record<string, Value>> | Record<string, Value>
+}
+
+/**
+ * How tall a card of this type draws before the canvas has measured it, where the definition
+ * says: a resizable viewer's `defaultSize`, else `cardHeight`. Undefined where it says nothing, so
+ * each caller keeps its own fallback.
+ */
+export function declaredHeight(def: NodeDefinition | undefined): number | undefined {
+  return def?.defaultSize?.height ?? def?.cardHeight
 }
 
 // ---------------------------------------------------------------------------

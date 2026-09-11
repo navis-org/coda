@@ -42,6 +42,9 @@ registerNode({
   type: 'out.download',
   label: 'Download',
   category: 'utility',
+  // Wide enough for a filename field and for the auto-run warning to read as a sentence — that
+  // line is the whole reason somebody does not end up with four hundred files.
+  cardWidth: 300,
   description: 'Write the incoming value to a file, on every run or on demand.',
   guide:
     'Save whatever is connected to a file — CSV for tables, SWC for skeletons, OBJ for meshes, SVG or PNG for an upstream chart.',

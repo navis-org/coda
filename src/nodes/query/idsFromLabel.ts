@@ -47,6 +47,9 @@ registerNode({
   type: 'neuron.idsFromLabel',
   label: 'IDs from Label',
   category: 'query',
+  // The Labels field is a paste target — a list of cell types wrapped into a 232px box is
+  // unreadable — and the unmatched line names labels rather than counting them.
+  cardWidth: 300,
   description: 'Resolve cell type or other labels back to the neurons carrying them.',
   guide:
     'Resolve labels to neurons carrying them — the inverse of Find Neurons. Default to exact match because labels usually come from text people copied (a type column, a groupBy roll-up, a paper), and turning SMP001(a) into a regex would lose the literal parentheses.',

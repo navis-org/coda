@@ -416,7 +416,7 @@ const NEUPRINT_FAMILIES: DatasetFamily[] = [
   },
 ]
 
-/** The synthetic connectome, which needs no token and is what the examples run on. */
+/** The synthetic connectome, which needs no token and is what the demos and the tours run on. */
 const MOCK_FAMILIES: DatasetFamily[] = [
   {
     key: 'mock.opticlobe',
@@ -430,7 +430,7 @@ const MOCK_FAMILIES: DatasetFamily[] = [
     description:
       'Synthetic optic-lobe-like connectome generated in the browser. No token needed.',
     guide:
-      'A synthetic optic lobe, generated in the browser with the columnar repetition a real one has. Nothing is fetched and no token is needed — it is deterministic from a seed, so a graph built on it gives the same answer on any machine. This is the dataset the bundled examples run on and the right place to try a pipeline before pointing it at a real volume.',
+      'A synthetic optic lobe, generated in the browser with the columnar repetition a real one has. Nothing is fetched and no token is needed — it is deterministic from a seed, so a graph built on it gives the same answer on any machine. It is what the Workflow Wizard’s demo workflows and the guided tours run on, and the right place to try a pipeline before pointing it at a real volume.',
     glyph: 'fly_optic',
     synthetic: true,
   },
@@ -544,6 +544,19 @@ const FLYWIRE_CHAIN: AnnotationChain = {
   output: { id: 'join', port: 'out' },
   tagColumn: aggColumnName(TAG_AGG, TAG_SOURCE_COLUMN),
   title: 'FlyWire annotations',
+  caption: {
+    text: `
+      Hierarchical annotations loaded from [github.com/flyconnectome/flywire_annotations](https://github.com/flyconnectome/flywire_annotations).
+
+      Initial set of annotations reported in [Schlegel _et al._, Nature (2024)](https://doi.org/10.1038/s41586-024-07686-5). Now incorporates optic lobe annotations from [Matsliah _et al._, Nature (2024)](https://www.nature.com/articles/s41586-024-07981-1), and general updates from [Berg _et al._, Cell (2026)](https://www.biorxiv.org/content/10.1101/2025.10.09.680999v1).
+
+      Community annotations are added as separate "tags" (as opposed to the more structured "fields").
+
+      Open the group for details.`,
+    // 300 in the starter it came from, which clipped its last line by 4px once the Berg et al.
+    // sentence was added — measured in a browser at the box's 232px width.
+    height: 320,
+  },
   why:
     'This datastack publishes its own cell typing, and it is an outdated cut: the current ' +
     'hierarchical annotations are a file in the flywire_annotations repository, and the ' +
@@ -582,6 +595,14 @@ const BANC_CHAIN: AnnotationChain = {
   datasetRefs: ['annotations'],
   output: { id: 'annotations', port: 'annotations' },
   title: 'BANC annotations',
+  caption: {
+    text: `
+      The BANC's [Codex](https://banc.community) annotations live in a CAVE table rather than in the connectome, so they are wired in by hand.
+
+      \`codex_annotations\` is long-format — one row per (neuron, kind, value) — which **Pivot on** folds into a column per kind.`,
+    // 150 at the 260px it had in the starter; the card it hangs under is 232, so more lines.
+    height: 180,
+  },
   why:
     'This datastack keeps its cell typing in a CAVE table rather than on the neuron, so on its ' +
     'own it answers with root ids and no names. The table is long-format — one row per (neuron, ' +

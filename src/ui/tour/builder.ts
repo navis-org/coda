@@ -17,12 +17,13 @@
  * `ranClean`. They are questions about the store, and both tours ask them identically.
  */
 
+import { CARD_GAP } from '../../layout/columns'
+import { cardWidth } from '../../layout/elkGraph'
 import { useGraphStore } from '../../store/graphStore'
-import { cardWidth } from '../nodes/nodeBodies'
 import { cardOf, clearSpan, frameNodes, spanCards } from './steps'
 
-/** Clear space between one card's right edge and the next card's left. */
-const GAP = 90
+// Not `placeInColumns`: a tour's chain is node *types* in reading order, with no wires to take a
+// depth from until the reader has made them.
 
 export interface BuilderOptions {
   /**
@@ -47,7 +48,7 @@ export function row(chain: readonly string[]): ReadonlyMap<string, { x: number; 
   let x = 60
   for (const type of chain) {
     slots.set(type, { x, y: 0 })
-    x += cardWidth(type) + GAP
+    x += cardWidth(type) + CARD_GAP
   }
   return slots
 }
@@ -66,7 +67,7 @@ export function fan(rowHeight: number) {
     chain.forEach((type, i) => {
       if (i < 2) {
         slots.set(type, { x, y: 0 })
-        x += cardWidth(type) + GAP
+        x += cardWidth(type) + CARD_GAP
       } else {
         // Everything past the second shares one column and stacks.
         slots.set(type, { x, y: (i - 2) * rowHeight })

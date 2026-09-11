@@ -559,11 +559,12 @@ A neuPrint dataset carries its cell typing as properties on the neuron, so `Data
 a browser you can read. A CAVE datastack does not: the labels live in a table, and browsing
 FlyWire without an annotation chain is browsing a list of eighteen-digit root ids.
 
-That chain — six cards, two rows meeting at a Join — was written once, as `examples/starters.ts`'
-bespoke FlyWire starter, **and stayed there**. So the same dataset answered the same question two
-ways depending on which menu you came through: `New ▸ FlyWire FAFB` opened it fully typed, the
-Workflow Wizard opened it on root ids, and the assistant — whose catalogue is generated from the
-registry — could not know the chain existed at all and emitted a lone dataset node every time.
+That chain — six cards, two rows meeting at a Join — was written once, as the bespoke FlyWire
+starter graph (then `examples/starters.ts`), **and stayed there**. So the same dataset answered the
+same question two ways depending on which menu you came through: `New ▸ FlyWire FAFB` opened it
+fully typed, the Workflow Wizard opened it on root ids, and the assistant — whose catalogue is
+generated from the registry — could not know the chain existed at all and emitted a lone dataset
+node every time.
 
 It is now `DatasetFamily.annotationChain` (`nodes/lib/annotationChain.ts`): which nodes, which
 params, which wires, which port takes the dataset as a reference, and which column the fold
@@ -577,9 +578,10 @@ fallback that stacked an unmatched card on top of another, and the wizard derive
 list index, which fills column-major and *interleaves the two arms*, the transpose of what its own
 comment claimed. A row is a fact about the chain (a structured source down the top, a free-form one
 along the bottom, meeting at a join); an origin and a step are facts about a canvas. So `ChainNode`
-carries `row`, `chainGrid` derives the column, and each builder supplies two numbers. `chainLinks`
-and `foldChain` went the same way, for the same reason: how a chain *attaches* — the two reference
-edges, the output wire — and that it folds are not placement either, and were written out twice.
+carries `row`, and a card's column is its dataflow depth, read off the chain's own `links` by the
+placement every builder goes through (`layout/columns.ts`) — `join` is third on its row and fourth
+in the dataflow. `chainLinks` and `foldChain` went the declaration's way for the same reason: how a chain *attaches* — the two reference edges, the output wire — and that it folds are
+not placement either, and were written out twice. So did its caption, `AnnotationChain.caption`.
 
 Four things worth keeping.
 
@@ -626,7 +628,7 @@ declaration exists to stop.
 cross-dataset path builds one per dataset, and `annotations`, `combine` and `join` are ids two
 declarations can both use — FlyWire and BANC both call their first card `annotations`, of two
 different node types. `prefixChain` rewrites a whole chain rather than threading a prefix through
-`chainGrid`, `chainLinks` and `foldChain`, which would be three places that must agree how a prefix
+`chainLinks`, `foldChain` and the caption, which would be three places that must agree how a prefix
 is spelled; the first dataset keeps the bare ids, so a single-dataset graph is unchanged. The
 failure it prevents is silent: `assembleGraph` keys nodes by id, so the second `join` replaces the
 first and both sets of wires land on whichever survived.
@@ -667,78 +669,60 @@ the core set are *discovered*, so a freshly-built mapper warns `Missing column(s
 flywireType, mancType` until the schema lands. That is the multi-column picker keeping a chosen
 column rather than substituting, and it clears on the first peek.
 
-## Starter graphs, and the one that is not the generic shape
+## Starter graphs are the wizard's output
 
-`examples/starters.ts` — what `New ▸ <dataset>` and the start page's dataset rail both build,
-through one `buildStarter(spec)`. The generic shape is four nodes: a Dataset, an Explore Dataset, and a
-Table and a Neuroglancer view off `Selected`, plus the Description companion. Built from each
-node's own defaults, exactly like the examples, so a starter cannot drift out of sync with a
-node's param set.
-
-**FlyWire FAFB opts out, and the reason is the backend rather than taste.** A neuPrint dataset
-carries its cell typing as properties on the neuron, so "a Dataset and a browser" is a complete
-first screen. A CAVE datastack does not — the labels live in a table — so the same four nodes
-open on a list of eighteen-digit root ids and nothing else. No arrangement of the generic shape
-fixes that, because what is missing is a *chain in front of the dataset*:
+`wizard/starters.ts` — what `New ▸ <dataset>` and the start page's dataset rail both build,
+through one `buildStarter(spec)`. **A starter is a Workflow Wizard answer**: the dataset,
+*Interactive Search*, *Neuron table only*, and a Table — plus Neuroglancer where the source
+publishes a scene, asked through `sourceCan`, the same ceiling `familyCan` reads — and with it the
+Description companion and, for FlyWire and BANC, the dataset's annotation chain:
 
 ```text
-Table from URL ▸ Combine Columns ▸ Update root IDs ──────────┐
-                                                              ├─▸ Join ─▸ Dataset
-CAVE table (neuron_information_v2) ▸ Group By (join text) ───┘        ▸ Annotations
+Dataset ─┬─▸ Explore ──(Selected)─┬─▸ Table
+         └────────────────────────┴─▸ Neuroglancer
 ```
 
-Two sources answering two different questions about one neuron: structured fields along the top,
-free-form community text along the bottom.
+Three things are said differently from the wizard's own answer, and each is a `BuildOptions` field
+rather than a branch in the starter: **`dataset`**, the spec's own node type and params — a pinned
+version, a custom server, or a custom dataset node (`dataset.neuprint`, `dataset.cave`,
+`dataset.catmaid`) that is no family at all, which is also where its source comes from for
+`exploreTagColumn`; **`overview: false`**, so the hints stay, docked to the two cards somebody has
+to act on, while the paragraph saying the wizard built this from four answers goes, since nobody
+opening `New ▸ hemibrain` was asked any; and **its name and description**, which the starter sets
+on the graph it gets back ("Browsing hemibrain…"). And it arrives with the wizard's one layout
+pass: `loadStarter` raises `arrangeRequest` after the open, under the wizard's own remembered
+preference (`wizardArrange`), because its positions are arithmetic nobody chose.
 
-**All six ship folded into one frame**, which is the one decision here that is about the first
-screen rather than about the data. Six cards in two rows are the biggest thing on the canvas and
-none of them is what a newcomer came to do — they are plumbing that has to be right and never has
-to be touched — so folded, the starter reads as the four nodes every other one has (labels,
-dataset, browser, views) with the chain as a single box anybody can open. `GraphGroup.collapsed`
-lives in the document precisely so a graph can *arrive* this way, and the frame is built through
-`createGroup`, the same call ⌘G makes, so a starter is not the one surface assembling a group by
-hand. Nothing is `exposed` onto the box: a promoted control is one worth driving *without*
-unfolding, and every param down this chain is a wiring decision made once.
+One builder, so a starter cannot answer a question the wizard also asks differently — which is how
+`New ▸ FlyWire` once opened typed while the wizard opened the same dataset on root ids (see the
+chain section above). So FlyWire's Table reads **`Selected`**, like every starter's: an empty
+search is the whole dataset, 165,122 rows on male-CNS, and a first Run pushing that into a table
+teaches the wrong thing about what to wire. And `selection` and `page` arrive **empty**: the
+Explore *widget* writes both, so a starter carrying either would ship whoever built it's browsing
+position, and `defaultParams` supplies both.
 
-The two notes that used to caption the two rows are one note now, directly under the folded box
-and the same width as it — two captions pointing at a thing that is no longer two things would be
-describing a canvas nobody sees. Its placement is derived from `GROUP_PADDING` and
-`COLLAPSED_SIZE` rather than written down, because `collapsedView` puts the box at the frame's own
-corner and stores nothing: a hard-coded corner drifts the day either constant moves, and it drifts
-into a note overlapping the box it annotates.
+**The chain captions are on the chain** (`AnnotationChain.caption`), and the wizard places them for
+any chain that declares one, under the same switch as the hints. **Directly under the folded box,
+the same width as it**, read off `collapsedView` — which stores nothing, so a hard-coded corner
+would drift the day `GROUP_PADDING` or `COLLAPSED_SIZE` moved, silently, into a note overlapping the
+box it annotates. A one-card chain is not folded (BANC's), so its caption goes under the card, at
+the card's width. Both heights were measured: FlyWire's note clipped its last line by 4px at 300
+once the Berg _et al._ sentence was added, so it is 320; BANC's CAVE table card draws 265 tall on a
+cold session, so a fixed 220 drop put the note 45 units inside it, and the card declares that
+height (`cardHeight`) and the caption goes `CAPTION_GAP` under it. The note names its card
+(`GraphNode.captionOf`), so an arrange carries it with the chain — see
+[canvas.md](canvas.md#a-chain-caption-is-carried-the-same-way-and-it-is-the-one-note-that-moves).
 
-`BESPOKE` in that file is the dispatch — keyed by node type, since that is what a `StarterSpec`
-carries, and a table rather than an `if` so the second could not become one. There are two.
-
-**BANC is the second, and it opts out differently: `genericStarter` plus one node.** Same problem —
-a CAVE datastack keeps its cell typing in a table, so the generic four open on root ids — and a
-much smaller answer, because BANC's labels are already *in* the datastack where FlyWire's are a
-published file that has to be fetched, coalesced and root-id-repaired first. So the whole chain is
-one CAVE table node reading `codex_annotations`, wired to the dataset's `Annotations` socket and
-back as a reference:
-
-```text
-CAVE table (codex_annotations) ─▸ Dataset ▸ Annotations
-```
-
-It is **composed** rather than written out — `bancStarter` calls `genericStarter` and adds to what
-it returns — because everything downstream of the dataset genuinely is the generic shape, and a
-copy of it would only ever *happen* to still agree. `starters.test.ts` compares the two edge sets
-to keep that true.
-
-**`Pivot on` is the whole configuration.** `codex_annotations` is long-format — one row per
-(neuron, `classification_system`, `cell_type`) — so the distinct values of the kind column become
-the columns: 1,994,371 rows across 32 kinds folding to 158,250 neurons. `cell_type` arrives
-renamed to `type`, which is the name addressed by literal downstream.
-
-**Why a starter and not a `DatastackSpec.annotations` entry.** That spec joins through the
-datastack's own `neurons.table`, and `codex_annotations` is a reference table into
-`cell_representative_point` — not BANC's `backbone_proofread`. It cannot be expressed there, which
-is also why the Description card on a plain BANC dataset says "Annotations — none configured". The
-starter is where the wiring lives, and the canvas is where it is visible.
+**BANC's labels need no `DatastackSpec.annotations` entry, and cannot have one.** That spec joins
+through the datastack's own `neurons.table`, and `codex_annotations` is a reference table into
+`cell_representative_point` — not BANC's `backbone_proofread`. The chain is where the wiring lives,
+which is also why the Description card on a plain BANC dataset says "Annotations — none
+configured". `Pivot on` is its whole configuration: `codex_annotations` is long-format — one row
+per (neuron, `classification_system`, `cell_type`) — so the kinds become the columns, 1,994,371
+rows across 32 kinds folding to 158,250 neurons, and `cell_type` arrives renamed to `type`.
 
 Each step answers a question somebody would otherwise have to discover, and every one is pinned
-by `starters.test.ts`:
+by `wizard/starters.test.ts`:
 
 - **`raw.githubusercontent.com`, not the `github.com/…/raw/…` address the repository's own UI
   hands you.** That one answers `302` with `access-control-allow-origin:` **present and empty**,
@@ -777,14 +761,6 @@ by `starters.test.ts`:
   port for, and the test asserts `cyclic` is empty so a regression there shows up as a starter
   rather than as a unit test nobody connected.
 
-Two deliberate departures from the generic shape, both visible on the canvas. The **Table hangs
-off `All` rather than `Selected`** — every other starter avoids that, because `Hits`/`All` with
-an empty search is the whole dataset and teaches the wrong lesson about what to connect; here the
-annotated neuron table *is* the thing worth looking at, and a Table showing nothing until a row
-is ticked would hide it. Everything else **opens empty**: `selection` and `page` are both written
-by the Explore Dataset *widget*, so a starter carrying either would ship whoever exported the graph's
-browsing position, and the Neuroglancer panel would open on a neuron nobody chose.
-
 **`Additional tags` is pointed at `join_tag`, and the name is derived rather than typed.**
 `groupByTable` names an aggregate `<agg>_<column>`, so the starter reads it back through
 `aggColumnName` — a literal would be that rule stated in a second place, and getting it wrong is
@@ -819,16 +795,19 @@ column picker on a CAVE dataset until the first Run, where today they offer the 
 columns — which on this graph largely **are** the right names, since the published TSV and the
 datastack agree on `cell_class`, `super_class` and the rest. Telling the two states apart needs
 the dataset type to say "a chain is wired" separately from carrying its schema, which is a change
-to a seam every CAVE graph reads. `starters.test.ts` pins the warning *exactly*, so a second
+to a seam every CAVE graph reads. `wizard/starters.test.ts` pins the warning *exactly*, so a second
 issue fails the test rather than hiding behind this one.
 
-`examples/notes.ts` holds `dedent` and `noteNode`, shared with the bundled examples rather than
-copied — both write notes as indented template literals in TypeScript source, and two copies of
-`dedent` is two answers to what counts as a heading.
+**Checked in a real browser**, over CDP against `pnpm dev`, on six starters (the synthetic optic
+lobe, neuPrint's Optic Lobe and hemibrain, FlyWire, BANC and CATMAID FAFB), each as placed and again
+after the arrange pass it now requests. No card overlaps another in any of the twelve, and after
+the arrange both captions sit directly under their hosts — FlyWire's under the folded box at the
+box's width, BANC's under its CAVE table card, 16 units below each. Two findings got it there:
 
-**Checked in a real browser** over CDP against `pnpm dev`, which is the only thing that could:
-thirteen cards and thirteen wires in both themes, no overlaps at their measured sizes, the two
-notes right-aligned against the pipeline's left edge, no console errors, no sideways body scroll, every one of the note's four links resolving (the DOI to
-`doi.org` rather than to a university proxy), and neither note clipping its own text —
-`scrollHeight` equal to `clientHeight` on both, light and dark. What is *not* checked anywhere is
-a Run, which needs a CAVE token.
+- **A caption did not follow its chain through the arrange**, since notes never move. Fixed by
+  carrying it
+  ([canvas.md](canvas.md#a-chain-caption-is-carried-the-same-way-and-it-is-the-one-note-that-moves)).
+- **A dataset card's Description overlapped it on neuPrint**, as placed and after the arrange —
+  and on a dataset node added by hand, so it was never a starter's doing. It is placed a gap under
+  the card's height now, floored by the declared one
+  ([canvas.md](canvas.md#a-companion-is-placed-with-its-host-not-after-it)).

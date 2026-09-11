@@ -17,6 +17,7 @@
 
 import type { CompanionSpec } from '../../core/companion'
 import { registerNode } from '../../core/registry'
+import { DATASET_CARD_WIDTH } from './description'
 import { T } from '../../core/types'
 import type { DatasetValue } from '../../core/values'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
@@ -71,8 +72,9 @@ const REFRESH_PARAM = refreshParam(
  * The Description card every published dataset arrives with.
  *
  * Below the node rather than beside it: a graph flows left to right, so a card to the right sits
- * where the next step of the pipeline goes and would read as part of the chain. 300px clears a
- * dataset card's own height — preview, fields and footer — with a visible gap.
+ * where the next step of the pipeline goes and would read as part of the chain. A gap under the
+ * dataset card's own height, measured where the canvas has it and declared (`cardHeight`, below)
+ * where it does not.
  *
  * Not attached to the synthetic families: the card carries the credit and citation its publisher
  * asks for, and there is nobody to cite for a connectome generated in the browser on load.
@@ -81,8 +83,19 @@ const DESCRIPTION_COMPANION: CompanionSpec = {
   type: 'dataset.description',
   from: 'dataset',
   to: 'dataset',
-  offset: { x: 0, y: 300 },
+  offset: { x: 0, gap: 24 },
 }
+
+/**
+ * How tall a dataset card draws before it has been measured, per backend — the height its
+ * Description is placed under when the node is added. See `NodeDefinition.cardHeight`.
+ *
+ * Measured in a browser on a cold session with no credentials, which is the state a card arrives
+ * in (`docs/canvas.md` has the numbers). The tallest of each backend, since a card placed under a
+ * shorter guess is drawn over. A card that later grows — a token arriving, a listing landing — is
+ * caught by the next arrange, which reads the measurement instead.
+ */
+const DATASET_CARD_HEIGHTS: Record<string, number> = { neuprint: 326, cave: 282, catmaid: 249 }
 
 function buildDatasetNode(family: DatasetFamily) {
   return registerNode({
@@ -92,10 +105,15 @@ function buildDatasetNode(family: DatasetFamily) {
     // saved graph carries, and renaming one would drop the node from every file that has it.
     label: familyLabel(family),
     category: 'dataset',
+    // Every family draws the same body, so every family is one width — the Description card's,
+    // which hangs directly under it.
+    cardWidth: DATASET_CARD_WIDTH,
     description: family.description,
     catalogueNote: datasetChainNote(family.annotationChain),
     guide: family.guide,
-    ...(family.synthetic ? {} : { companion: DESCRIPTION_COMPANION }),
+    ...(family.synthetic
+      ? {}
+      : { companion: DESCRIPTION_COMPANION, cardHeight: DATASET_CARD_HEIGHTS[family.backend] }),
     // Cheap: it only resolves metadata, so switching version updates every downstream column
     // picker instantly while the actual queries stay stale until Run.
     cost: 'cheap',
@@ -244,6 +262,8 @@ registerNode({
   type: 'dataset.cave',
   label: 'Custom CAVE',
   category: 'dataset',
+  // Measured in a browser on a cold session, as `DATASET_CARD_HEIGHTS` is for the families.
+  cardHeight: 231,
   description: 'Any CAVE datastack configured by hand.',
   guide:
     'This node allows working with arbitrary CAVE datastacks that Coda ships no preconfigured ' +
@@ -584,6 +604,10 @@ registerNode({
   type: 'dataset.neuprint',
   label: 'Custom neuPrint',
   category: 'dataset',
+  // Measured in a browser on a cold session, as `DATASET_CARD_HEIGHTS` is for the families.
+  cardHeight: 327,
+  // 20px wider than `DATASET_CARD_WIDTH`, for no recorded reason.
+  cardWidth: 268,
   description: 'Configure a neuPrint dataset by hand.',
   guide:
     'The escape hatch for a dataset Coda ships no preset for: a release newer than this build, a ' +
@@ -708,6 +732,8 @@ registerNode({
   type: 'dataset.catmaid',
   label: 'Custom CATMAID',
   category: 'dataset',
+  // Measured in a browser on a cold session, as `DATASET_CARD_HEIGHTS` is for the families.
+  cardHeight: 161,
   description: 'Any CATMAID project, configured by hand.',
   guide:
     'The escape hatch for a CATMAID server Coda ships no node for — a lab instance, or a second ' +

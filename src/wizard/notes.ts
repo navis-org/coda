@@ -1,15 +1,10 @@
 /**
- * Text notes placed around a hand-built graph.
+ * Text notes placed around a built graph: the wizard's overview, and a chain's caption.
  *
- * Shared by the bundled examples and by the starter graphs, which is the whole reason it is its
- * own module: both write notes as indented template literals in TypeScript source, and both have
- * to strip that indentation the same way. Two copies of `dedent` is two answers to what counts
- * as a heading.
- *
- * Positioned absolutely rather than on the node grid: a pipeline node occupies one column, while
- * a note spans several of them and belongs above or below the whole row. Sizes are explicit
- * because the text is known at the call site — a note left at the definition's default clips its
- * own last line.
+ * Positioned absolutely rather than through `layout/columns.ts`: a pipeline node occupies one
+ * column, while a note spans several of them or hangs under one card. Sizes are explicit because
+ * the text is known where it is written — a note left at the definition's default clips its own
+ * last line.
  */
 
 import type { GraphNode } from '../core/graph'
@@ -27,7 +22,7 @@ const NOTE_TYPE = 'note.text'
  * with three hashes. The common indent is measured and removed rather than every leading space,
  * so a nested list in a future note still nests.
  */
-export function dedent(text: string): string {
+function dedent(text: string): string {
   const lines = text.replace(/\r\n?/g, '\n').split('\n')
   const indents = lines.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length)
   const common = indents.length ? Math.min(...indents) : 0

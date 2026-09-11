@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 
+import type { CodaGraph } from '../core/graph'
 import { deserializeGraph, serializeGraph, topoSort } from '../core/graph'
 import { inferGraph } from '../core/inference'
 import { ID_COLUMN_NAME } from '../core/ids'
@@ -10,6 +11,9 @@ import { isTableValue } from '../core/values'
 import { registerBuiltinSources } from '../data/builtins'
 import { requireSource } from '../data/source'
 import { L1_CATMAID_SOURCE_ID } from '../data/catmaid/registry'
+import { COLLAPSED_SIZE, collapsedView } from '../layout/collapse'
+import { CAPTION_GAP } from '../layout/companions'
+import { cardWidth } from '../layout/elkGraph'
 import '../nodes'
 import type { StarterSpec } from './starters'
 import { buildStarter } from './starters'
@@ -17,18 +21,20 @@ import { buildStarter } from './starters'
 /**
  * Starter graphs — what the New menu and the start page's dataset rail build.
  *
- * The examples this file used to cover are gone: the Workflow Wizard replaced them, and their
- * fixture standing went with them to `wizard/wizard.test.ts`. What is left here is the other
- * hand-built graph in the app, held to the same bar for the same reason — a starter is the first
- * thing a new user sees, and one that reports a type error on open is worse than an empty canvas.
+ * A starter is the Workflow Wizard's output now (`starters.ts`), so the fixture standing every
+ * wizard graph has is `wizard.test.ts`'s. What is here is what a starter adds to it: the
+ * dataset node it was asked for, the viewers its source can draw, and the two CAVE datasets that
+ * used to be bespoke graphs and are now the same answer with a chain in front — held to what
+ * those graphs were held to, because a starter is the first thing a new user sees and one that
+ * reports a type error on open is worse than an empty canvas.
+ *
+ * Node ids are the wizard's: `ds`, `explore`, `view` (the Table), `view2` (Neuroglancer).
  */
 beforeAll(() => {
   /*
-   * The whole builtin set rather than a hand-listed subset, which is what this was until a
-   * starter began reading things off sources other than the mock — a capability for the
-   * Neuroglancer node, and now a neuron schema for `exploreTagColumn`. Most of them are registered
-   * and never called; what matters is that the list cannot fall behind `builtins.ts`, which is
-   * the drift that file's own header exists to prevent.
+   * The whole builtin set rather than a hand-listed subset: a starter reads things off sources
+   * other than the mock — a capability for the Neuroglancer node, a neuron schema for
+   * `exploreTagColumn` — and the list must not fall behind `builtins.ts`.
    */
   registerBuiltinSources({ mockLatencyMs: 0 })
 })
@@ -37,16 +43,21 @@ function scheduler(): Scheduler {
   return new Scheduler({ resolveSource: (id) => requireSource(id) })
 }
 
+function issuesIn(graph: CodaGraph): string[] {
+  return Object.entries(inferGraph(graph).nodes).flatMap(([nodeId, node]) =>
+    node.issues.map((i) => `${nodeId}: ${i.severity}: ${i.message}`),
+  )
+}
+
+const byId = (graph: CodaGraph, id: string) => graph.nodes.find((n) => n.id === id)
+
 describe('starters', () => {
   const spec = { nodeType: 'dataset.mock.opticlobe', label: 'Demo Data' }
 
   it('builds with no type errors or warnings', () => {
-    const inference = inferGraph(buildStarter(spec))
-    const issues = Object.entries(inference.nodes).flatMap(([nodeId, node]) =>
-      node.issues.map((i) => `${nodeId}: ${i.severity}: ${i.message}`),
-    )
-    expect(issues).toEqual([])
-    expect(inference.ok).toBe(true)
+    const graph = buildStarter(spec)
+    expect(issuesIn(graph)).toEqual([])
+    expect(inferGraph(graph).ok).toBe(true)
   })
 
   it('wires Explore between the dataset and a viewer', () => {
@@ -61,16 +72,29 @@ describe('starters', () => {
     expect(graph.edges.map((e) => e.sourceHandle)).toEqual(['dataset', 'selected'])
   })
 
+  it('is named for what it is for, and carries no overview note', () => {
+    // The wizard's overview describes four answers nobody opening `New ▸ …` was asked. Its hints
+    // stay, because they are about the two cards somebody has to act on.
+    const graph = buildStarter(spec)
+    expect(graph.meta?.name).toBe('Demo Data')
+    expect(graph.meta?.description).toBe(
+      'Browsing Demo Data. Search in the Explore Dataset node, tick neurons, then Run.',
+    )
+    expect(graph.nodes.some((n) => n.type === 'note.text')).toBe(false)
+    expect(byId(graph, 'explore')?.hints?.length).toBe(1)
+    expect(byId(graph, 'view')?.hints?.length).toBe(1)
+  })
+
   it('adds a Neuroglancer view where the source publishes a scene', () => {
     const graph = buildStarter({
       nodeType: 'dataset.hemibrain',
       label: 'Hemibrain',
       sourceId: 'neuprint',
     })
-    expect(graph.nodes.map((n) => n.type)).toContain('out.neuroglancer')
+    const ngl = graph.nodes.find((n) => n.type === 'out.neuroglancer')!
+    expect(ngl).toBeDefined()
 
     // Both of its inputs are wired, or it opens as a node that can only complain.
-    const ngl = graph.nodes.find((n) => n.type === 'out.neuroglancer')!
     const into = graph.edges.filter((e) => e.target === ngl.id)
     expect(into.map((e) => e.targetHandle).sort()).toEqual(['dataset', 'neurons'])
     // Same selection the table shows, so the two viewers always agree about what is picked.
@@ -87,14 +111,32 @@ describe('starters', () => {
   it('opens on the newest version without pinning one', () => {
     // An empty `version` tracks the latest the server reports; the starter only pins when the
     // caller asked for a specific one.
-    const graph = buildStarter(spec)
-    const dataset = graph.nodes.find((n) => n.type === 'dataset.mock.opticlobe')
-    expect(dataset?.params.version).toBe('')
+    expect(byId(buildStarter(spec), 'ds')?.params.version).toBe('')
   })
 
   it('pins a version when one is given', () => {
     const graph = buildStarter({ ...spec, params: { version: 'mock-1.0' } })
-    expect(graph.nodes[0]?.params.version).toBe('mock-1.0')
+    expect(byId(graph, 'ds')?.params.version).toBe('mock-1.0')
+  })
+
+  it('opens a custom dataset node as itself, with the params it was given', () => {
+    /*
+     * The New menu's escape hatches are node types that are no family, and the wizard's first
+     * question only ever names a family — so this is what `BuildOptions.dataset` is for. The node
+     * has to arrive as the type asked for, holding the server, or the starter silently opened
+     * somebody's custom neuPrint as a default one.
+     */
+    const graph = buildStarter({
+      nodeType: 'dataset.neuprint',
+      label: 'Custom neuPrint',
+      sourceId: 'neuprint',
+      params: { server: 'neuprint.example.org', dataset: 'mine:v1' },
+    })
+    const ds = byId(graph, 'ds')!
+    expect(ds.type).toBe('dataset.neuprint')
+    expect(ds.params.server).toBe('neuprint.example.org')
+    expect(ds.params.dataset).toBe('mine:v1')
+    expect(graph.edges.some((e) => e.source === 'ds' && e.target === 'explore')).toBe(true)
   })
 
   it('runs end to end, with an empty selection rather than a failure', async () => {
@@ -103,9 +145,8 @@ describe('starters', () => {
     const summary = await sched.run(graph, { mode: 'full' })
 
     expect(summary.failed).toEqual([])
-    const explore = graph.nodes.find((n) => n.type === 'neuron.explore')!
-    const hits = sched.output(explore.id, 'hits')
-    const selected = sched.output(explore.id, 'selected')
+    const hits = sched.output('explore', 'hits')
+    const selected = sched.output('explore', 'selected')
     // Nothing ticked yet, but the whole dataset matches an empty query.
     expect(isTableValue(hits) && hits.length).toBeGreaterThan(0)
     expect(isTableValue(selected) && selected.length).toBe(0)
@@ -128,9 +169,9 @@ describe('starters', () => {
    * graph runs fine, and the tags are simply absent.
    */
   const tagColumnOf = (starter: StarterSpec) =>
-    buildStarter(starter).nodes.find((n) => n.id === 'explore')?.params.tagColumn
+    byId(buildStarter(starter), 'explore')?.params.tagColumn
 
-  it('opens CATMAID’s annotations as Additional tags, on both instances', () => {
+  it('opens CATMAID’s annotations as Additional tags, on both instances and the custom node', () => {
     expect(
       tagColumnOf({ nodeType: 'dataset.catmaid.fafb', label: 'FAFB', sourceId: 'catmaid' }),
     ).toBe('annotations')
@@ -139,6 +180,14 @@ describe('starters', () => {
         nodeType: 'dataset.catmaid.l1',
         label: 'L1',
         sourceId: L1_CATMAID_SOURCE_ID,
+      }),
+    ).toBe('annotations')
+    // No family, so the source is the spec's own — which is why `BuildOptions.dataset` carries it.
+    expect(
+      tagColumnOf({
+        nodeType: 'dataset.catmaid',
+        label: 'Custom CATMAID',
+        sourceId: 'catmaid',
       }),
     ).toBe('annotations')
   })
@@ -154,25 +203,20 @@ describe('starters', () => {
 })
 
 /**
- * BANC opts out too, and differently — see `bancStarter` in `starters.ts`.
+ * BANC: the generic starter with its one-card chain in front.
  *
- * Same problem as FlyWire's, much smaller answer: a CAVE datastack keeps its cell typing in a
- * table, so the generic four nodes open on a list of root ids. BANC's labels are already *in* the
- * datastack, so one CAVE table node is the whole chain — which is why this starter is composed
- * from `genericStarter` rather than written out. These tests are what says the composition still
- * produces the generic half.
+ * A CAVE datastack keeps its cell typing in a table, so without the chain the starter opens on
+ * a list of root ids. BANC's labels are already *in* the datastack, so one CAVE table node is
+ * the whole chain, and `foldChain` leaves a single card unfolded.
  */
 describe('the BANC starter', () => {
   const spec = { nodeType: 'dataset.banc', label: 'BANC public', sourceId: 'cave' }
 
   it('builds clean, and the reference edge is not a cycle', () => {
     const graph = buildStarter(spec)
-    const issues = Object.entries(inferGraph(graph).nodes).flatMap(([nodeId, node]) =>
-      node.issues.map((i) => `${nodeId}: ${i.severity}: ${i.message}`),
-    )
     // Pinned empty, unlike FlyWire's: nothing here waits on a fetch to know its columns, because
     // the CAVE table's kinds come from `unique_string_values` rather than from a run.
-    expect(issues).toEqual([])
+    expect(issuesIn(graph)).toEqual([])
     expect(inferGraph(graph).ok).toBe(true)
 
     /*
@@ -188,8 +232,8 @@ describe('the BANC starter', () => {
     const into = (target: string, handle: string) =>
       graph.edges.find((e) => e.target === target && e.targetHandle === handle)
 
-    expect(into('dataset', 'annotations')?.source).toBe('annotations')
-    expect(into('annotations', 'dataset')?.source).toBe('dataset')
+    expect(into('ds', 'annotations')?.source).toBe('annotations')
+    expect(into('annotations', 'dataset')?.source).toBe('ds')
 
     /*
      * `codex_annotations` is long-format — one row per (neuron, kind, value) — so `pivotOn` is
@@ -197,7 +241,7 @@ describe('the BANC starter', () => {
      * and `cell_type` arrives renamed to `type`, which is the name Explore's chips, the
      * connectivity tables and Profile's roll-ups all address by literal.
      */
-    const table = graph.nodes.find((n) => n.id === 'annotations')!
+    const table = byId(graph, 'annotations')!
     expect(table.params.table).toBe('codex_annotations')
     expect(table.params.pivotOn).toBe('classification_system')
     expect(table.params.valueColumn).toBe('cell_type')
@@ -206,18 +250,13 @@ describe('the BANC starter', () => {
     expect(table.params.idColumn).toBe('pt_root_id')
   })
 
-  it('keeps the generic half it composes from', () => {
-    // The point of composing rather than copying. Everything downstream of the dataset is the
-    // generic starter's, and a copy would only ever *happen* to still agree with it.
+  it('is the generic starter plus its chain, below the dataset node', () => {
+    // What composing used to buy by hand, now by construction: everything downstream of the
+    // dataset is the same wizard answer, compared on the cards the generic shape names.
     const banc = buildStarter(spec)
     const generic = buildStarter({ ...spec, nodeType: 'dataset.malecns', sourceId: 'neuprint' })
-    /*
-     * Between the four nodes the generic shape names, and only those. The Description companion
-     * is excluded because `addNodeWithCompanion` mints its id, so two builds of one starter do
-     * not agree on it — which is a fact about companions rather than about this comparison.
-     */
-    const GENERIC = new Set(['dataset', 'explore', 'picked', 'ngl'])
-    const shape = (graph: ReturnType<typeof buildStarter>) =>
+    const GENERIC = new Set(['ds', 'explore', 'view', 'view2'])
+    const shape = (graph: CodaGraph) =>
       graph.edges
         .filter((e) => GENERIC.has(e.source) && GENERIC.has(e.target))
         .map((e) => `${e.source}.${e.sourceHandle}→${e.target}.${e.targetHandle}`)
@@ -225,48 +264,49 @@ describe('the BANC starter', () => {
     expect(shape(banc)).toEqual(shape(generic))
   })
 
+  it('hangs its caption under the lone card, at the card’s width', () => {
+    // `AnnotationChain.caption`, placed by the same rule any builder folding a chain follows;
+    // a one-card chain is not folded, so the caption goes under the card itself.
+    const graph = buildStarter(spec)
+    const card = byId(graph, 'annotations')!
+    const note = byId(graph, 'note-annotations')!
+    expect(note.type).toBe('note.text')
+    expect(note.position.x).toBe(card.position.x)
+    expect(note.position.y).toBeGreaterThan(card.position.y)
+    expect(note.size?.width).toBe(cardWidth(card.type))
+  })
+
   it('opens with nothing browsed to and nothing ticked', () => {
     // `page` and `selection` are written by the Explore *widget*, so a starter carrying either
-    // ships whoever exported the graph's browsing position. The attached graph this was built
-    // from carried `page: 15`.
-    const explore = buildStarter(spec).nodes.find((n) => n.id === 'explore')!
+    // ships whoever exported the graph's browsing position.
+    const explore = byId(buildStarter(spec), 'explore')!
     expect(explore.params.page).toBe(0)
     expect(explore.params.selection).toEqual([])
   })
 })
 
 /**
- * FlyWire FAFB opts out of the generic shape — see `BESPOKE` in `starters.ts`.
+ * FlyWire FAFB: the generic starter with its six-card chain in front, folded into one frame.
  *
- * Held to the same bar as the rest, and to one more: a CAVE datastack takes its cell typing from
- * a table rather than from properties on the neuron, so the point of this starter is the chain
- * that fetches it. A wire missing there is a starter that opens on a list of root ids.
+ * Held to the same bar as the rest, and to one more: the point of this starter is the chain that
+ * fetches the typing. A wire missing there is a starter that opens on a list of root ids.
  */
 describe('the FlyWire starter', () => {
   const spec = { nodeType: 'dataset.flywire', label: 'FlyWire FAFB', sourceId: 'cave' }
 
-  const issuesIn = (graph: ReturnType<typeof buildStarter>) => {
-    const inference = inferGraph(graph)
-    return Object.entries(inference.nodes).flatMap(([nodeId, node]) =>
-      node.issues.map((i) => `${nodeId}: ${i.severity}: ${i.message}`),
-    )
-  }
-
   it('builds with no type errors, and one known warning', () => {
     /*
-     * `Column "tag" is gone` is the cold-start state rather than a mistake in the graph, and it
-     * is here as a tripwire rather than as an endorsement. `annotationSchemaFrom` deliberately
-     * answers the same `undefined` for an unwired socket and for a chain whose columns are not
-     * known yet, so `withAnnotations` falls back to the datastack's *own* labels — a schema that
-     * is known and, since a chain replaces those labels, known to be wrong. The chain's schema
-     * only lands once `Table from URL` has run, so the badge clears on the first Run.
+     * `Column "join_tag" is gone` is the cold-start state rather than a mistake in the graph, and
+     * it is here as a tripwire rather than as an endorsement. `annotationSchemaFrom` answers the
+     * same `undefined` for an unwired socket and for a chain whose columns are not known yet, so
+     * `withAnnotations` falls back to the datastack's *own* labels — known, and known to be wrong.
+     * The chain's schema lands once `Table from URL` has run, so the badge clears on the first Run.
      *
      * Pinned exactly, so a second issue fails this rather than hiding behind the first.
      */
-    expect(issuesIn(buildStarter(spec))).toEqual([
-      'explore: warning: Column "join_tag" is gone',
-    ])
-    expect(inferGraph(buildStarter(spec)).ok).toBe(true)
+    const graph = buildStarter(spec)
+    expect(issuesIn(graph)).toEqual(['explore: warning: Column "join_tag" is gone'])
+    expect(inferGraph(graph).ok).toBe(true)
   })
 
   it('feeds the dataset both label sources, joined', () => {
@@ -276,7 +316,7 @@ describe('the FlyWire starter', () => {
 
     // Structured fields along the top, community tags along the bottom, joined rather than
     // chained — a chain would let the later source *win* a collision rather than sit beside it.
-    expect(into('dataset', 'annotations')?.source).toBe('join')
+    expect(into('ds', 'annotations')?.source).toBe('join')
     expect(into('join', 'left')?.source).toBe('repair')
     expect(into('join', 'right')?.source).toBe('foldTags')
     expect(into('foldTags', 'in')?.source).toBe('tags')
@@ -284,23 +324,19 @@ describe('the FlyWire starter', () => {
     expect(into('combine', 'in')?.source).toBe('annotations')
 
     // `left`, so a neuron nobody has tagged still comes through.
-    expect(graph.nodes.find((n) => n.id === 'join')!.params.how).toBe('left')
+    expect(byId(graph, 'join')!.params.how).toBe('left')
 
     // The published file spreads a neuron's type over two columns; coalescing them into `type`
     // is what makes the connectivity tables and Explore's chips read in words.
-    const combine = graph.nodes.find((n) => n.id === 'combine')!
+    const combine = byId(graph, 'combine')!
     expect(combine.params.columns).toEqual(['cell_type', 'hemibrain_type'])
     expect(combine.params.into).toBe('type')
   })
 
   it('folds the tags to one row per neuron before the Join sees them', () => {
-    /*
-     * Not a tidy-up. `neuron_information_v2` is one row per (neuron, tag) and `joinTables` takes
-     * the *first* matching row for a repeated key — deliberately, so a many-to-many join cannot
-     * multiply the table being annotated. Without this fold a neuron carrying eight community
-     * tags shows exactly one of them, with nothing anywhere saying so.
-     */
-    const fold = buildStarter(spec).nodes.find((n) => n.id === 'foldTags')!
+    // `joinTables` takes the *first* matching row for a repeated key, so without this fold a
+    // neuron carrying eight community tags shows exactly one of them, with nothing saying so.
+    const fold = byId(buildStarter(spec), 'foldTags')!
     expect(fold.params.by).toEqual([ID_COLUMN_NAME])
     expect(fold.params.agg).toBe('join')
     expect(fold.params.value).toEqual(['tag'])
@@ -308,24 +344,19 @@ describe('the FlyWire starter', () => {
 
   it('narrows the tag table, and points Explore at the column the fold produces', () => {
     const graph = buildStarter(spec)
-    // Everything else in `neuron_information_v2` is bookkeeping that would land in every neuron
-    // table downstream — and naming the columns is also what lets `peekColumns` answer for a wide
-    // table with no fetch at all.
-    expect(graph.nodes.find((n) => n.id === 'tags')!.params.columns).toBe('pt_root_id, tag')
-
+    expect(byId(graph, 'tags')!.params.columns).toBe('pt_root_id, tag')
     // Through `aggColumnName`, because a literal here is the naming rule stated in a second
     // place — and a wrong `Additional tags` does not fail, it just draws no tag row.
-    const fold = graph.nodes.find((n) => n.id === 'foldTags')!
-    expect(graph.nodes.find((n) => n.id === 'explore')!.params.tagColumn).toBe(
+    const fold = byId(graph, 'foldTags')!
+    expect(byId(graph, 'explore')!.params.tagColumn).toBe(
       aggColumnName(fold.params.agg as AggFn, String(fold.params.value)),
     )
   })
 
   it('opens with nothing browsed to and nothing ticked', () => {
-    // `page` and `selection` are both written by the Explore *widget*, so a starter carrying
-    // either is shipping whoever exported the graph's browsing position — and a Neuroglancer
-    // panel opening on a neuron nobody chose reads as the app having decided something.
-    const explore = buildStarter(spec).nodes.find((n) => n.id === 'explore')!
+    // A Neuroglancer panel opening on a neuron nobody chose reads as the app having decided
+    // something.
+    const explore = byId(buildStarter(spec), 'explore')!
     expect(explore.params.page).toBe(0)
     expect(explore.params.selection).toEqual([])
   })
@@ -334,7 +365,7 @@ describe('the FlyWire starter', () => {
     // `github.com/.../raw/...` answers 302 with an empty `access-control-allow-origin`, and a
     // browser CORS-checks every hop — so the address the repository's own UI hands you is the
     // one address this cannot use.
-    const url = String(buildStarter(spec).nodes.find((n) => n.id === 'annotations')!.params.url)
+    const url = String(byId(buildStarter(spec), 'annotations')!.params.url)
     expect(url.startsWith('https://raw.githubusercontent.com/')).toBe(true)
   })
 
@@ -343,22 +374,14 @@ describe('the FlyWire starter', () => {
     for (const target of ['repair', 'tags']) {
       expect(
         graph.edges.find((e) => e.target === target && e.targetHandle === 'dataset')?.source,
-      ).toBe('dataset')
+      ).toBe('ds')
     }
-    // Both directions between two pairs. `topoSort` only sees the dataflow half of each.
     expect(topoSort(graph).cyclic).toEqual([])
   })
 
   it('ships the whole chain folded into one frame', () => {
-    /*
-     * The six cards are plumbing that has to be right and never has to be touched, and they are
-     * the biggest thing on the canvas. Folded, the first screen is the four nodes every other
-     * starter has. `collapsed` lives in the document exactly so a graph can *arrive* this way.
-     *
-     * Membership is pinned as a set rather than a count: a card that fell out of the frame is
-     * still six-minus-one plus whatever came in, and it would draw beside the box rather than
-     * inside it with nothing saying so.
-     */
+    // Membership pinned as a set: a card that fell out of the frame would draw beside the box
+    // rather than inside it, with nothing saying so.
     const graph = buildStarter(spec)
     expect(graph.groups).toHaveLength(1)
     const frame = graph.groups![0]!
@@ -367,15 +390,24 @@ describe('the FlyWire starter', () => {
     expect([...frame.nodeIds].sort()).toEqual(
       ['annotations', 'combine', 'foldTags', 'join', 'repair', 'tags'].sort(),
     )
-
-    // Nothing promoted: an exposed param is a control worth driving without unfolding, and every
-    // param down this chain is a wiring decision made once.
+    // Nothing promoted: every param down this chain is a wiring decision made once.
     expect(frame.exposed ?? []).toEqual([])
+    for (const id of ['ds', 'explore', 'view', 'view2']) expect(frame.nodeIds).not.toContain(id)
+  })
 
-    // The visible four, so the fold cannot quietly take one of them with it.
-    for (const id of ['dataset', 'explore', 'ngl', 'picked']) {
-      expect(frame.nodeIds).not.toContain(id)
-    }
+  it('puts its caption directly under the folded box, the same width as it', () => {
+    /*
+     * The rule the bespoke starter placed by hand, now `AnnotationChain.caption` placed by the
+     * wizard. Checked against `collapsedView` — what the canvas actually draws — rather than
+     * against the placement's arithmetic, so the two cannot agree with each other and both be
+     * wrong: the box is derived from the members, and the caption from the box.
+     */
+    const graph = buildStarter(spec)
+    const box = collapsedView(graph).boxes[0]!
+    const note = byId(graph, 'note-join')!
+    expect(note.position.x).toBe(box.position.x)
+    expect(note.position.y).toBe(box.position.y + COLLAPSED_SIZE.height + CAPTION_GAP)
+    expect(note.size?.width).toBe(COLLAPSED_SIZE.width)
   })
 
   it('survives a save and reload', () => {

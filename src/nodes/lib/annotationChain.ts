@@ -4,8 +4,8 @@
  * **Why this is data rather than a graph.** A neuPrint dataset carries its cell typing as
  * properties on the neuron, so `Dataset ▸ Explore` is a browser you can read. A CAVE datastack
  * does not: the labels live in a table, and browsing FlyWire without an annotation chain is
- * browsing a list of eighteen-digit root ids. That chain was written once, as
- * `examples/starters.ts`' bespoke FlyWire starter, and stayed there — so the Workflow Wizard
+ * browsing a list of eighteen-digit root ids. That chain was written once, as the bespoke FlyWire
+ * starter graph (then `examples/starters.ts`), and stayed there — so the Workflow Wizard
  * opened every FlyWire workflow on those root ids, and the assistant, whose catalogue is
  * generated from the registry, could not know the chain existed at all.
  *
@@ -27,6 +27,7 @@
  */
 
 import type { CodaGraph } from '../../core/graph'
+import type { Wire } from '../../core/graph'
 import { createGroup } from '../../core/groups'
 import type { ParamValues } from '../../core/node'
 import { findColumn } from '../../core/types'
@@ -51,14 +52,11 @@ export interface ChainNode {
   row?: number
 }
 
-/** `[from, fromPort, to, toPort]`, matching `examples/assemble.ts`' `Link`. */
-export type ChainLink = [string, string, string, string]
-
 export interface AnnotationChain {
   /** The cards, in the order they run. */
   nodes: readonly ChainNode[]
   /** Wires between chain members. Wires to the dataset are the three fields below. */
-  links: readonly ChainLink[]
+  links: readonly Wire[]
   /**
    * Chain ids taking the dataset's identity on a `dataset` port.
    *
@@ -77,6 +75,17 @@ export interface AnnotationChain {
   tagColumn?: string
   /** What the folded frame is called, where a builder folds it. */
   title: string
+  /**
+   * A note the chain arrives with, directly under it: under the folded box where `foldChain`
+   * folds it, under the lone card where it does not.
+   *
+   * On the chain rather than in whichever builder wrote it first, which is the rule this module
+   * exists for: the captions were the starter graph's, so a FlyWire workflow from the wizard — the
+   * same six cards, folded the same way — arrived with no word on where its labels came from. The
+   * width is not declared, because it is the box's or the card's and a builder derives it; the
+   * height is, because the text is known here and a note left too short clips its own last line.
+   */
+  caption?: { text: string; height: number }
   /**
    * Why this dataset needs one, in a sentence, for the assistant catalogue.
    *
@@ -114,7 +123,7 @@ export function prefixChain(chain: AnnotationChain, prefix: string): AnnotationC
   return {
     ...chain,
     nodes: chain.nodes.map((node) => ({ ...node, id: id(node.id) })),
-    links: chain.links.map(([from, fromPort, to, toPort]): ChainLink => [
+    links: chain.links.map(([from, fromPort, to, toPort]): Wire => [
       id(from),
       fromPort,
       id(to),
@@ -123,30 +132,6 @@ export function prefixChain(chain: AnnotationChain, prefix: string): AnnotationC
     datasetRefs: chain.datasetRefs.map(id),
     output: { ...chain.output, id: id(chain.output.id) },
   }
-}
-
-/**
- * The chain's cards with their grid position worked out: a row from the declaration, a column
- * from how many cards precede it on that row.
- *
- * One derivation because two builders were making it separately and getting different answers.
- * Only the origin and the step stay with the builder.
- */
-export function chainGrid(
-  chain: AnnotationChain,
-): { node: ChainNode; row: number; col: number }[] {
-  const filled = new Map<number, number>()
-  return chain.nodes.map((node) => {
-    const row = node.row ?? 0
-    const col = filled.get(row) ?? 0
-    filled.set(row, col + 1)
-    return { node, row, col }
-  })
-}
-
-/** How many columns the widest row needs, for a builder placing the chain right-to-left. */
-export function chainWidth(chain: AnnotationChain): number {
-  return Math.max(...chainGrid(chain).map((cell) => cell.col + 1))
 }
 
 /**
@@ -162,10 +147,10 @@ export function chainWidth(chain: AnnotationChain): number {
  * The two `dataset` edges are **references**, so neither pair is a cycle: both read the
  * datastack's identity out of the dataset they are about to feed. See `PortDef.reference`.
  */
-export function chainLinks(chain: AnnotationChain, datasetId: string): ChainLink[] {
+export function chainLinks(chain: AnnotationChain, datasetId: string): Wire[] {
   return [
     ...chain.links,
-    ...chain.datasetRefs.map((id): ChainLink => [datasetId, 'dataset', id, 'dataset']),
+    ...chain.datasetRefs.map((id): Wire => [datasetId, 'dataset', id, 'dataset']),
     [chain.output.id, chain.output.port, datasetId, 'annotations'],
   ]
 }

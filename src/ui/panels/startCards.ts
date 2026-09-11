@@ -20,7 +20,8 @@
 
 import type { NodeCategory } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
-import type { StarterSpec } from '../../examples/starters'
+import type { StarterSpec } from '../../wizard/starters'
+import { starterFor } from '../../wizard/starters'
 import type { DatasetGlyph } from '../../nodes/lib/datasetFamilies'
 import { starterFamilies } from '../../nodes/lib/datasetFamilies'
 import type { WorkflowSummary } from '../../store/library'
@@ -135,11 +136,7 @@ export function datasetCards(): DatasetCard[] {
       title: family.label,
       blurb: family.description,
       glyph: family.glyph,
-      starter: {
-        nodeType: `dataset.${family.key}`,
-        label: family.label,
-        sourceId: family.sourceId,
-      },
+      starter: starterFor(family),
     }))
 }
 

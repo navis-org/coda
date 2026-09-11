@@ -39,10 +39,24 @@
  * arithmetic for a case no definition asks for, a negative offset simply declines the pin and the
  * companion is laid out as the ordinary node it was — visible in `companions.test.ts` rather than
  * assumed.
+ *
+ * ## Under the host's height, not at a fixed depth
+ *
+ * A companion goes `CompanionSpec.offset.gap` below the host's **measured** bottom edge, floored
+ * by its declared `cardHeight` (see `under`).
+ *
+ * ## A chain's caption is the same move, and the one exception to "notes never move"
+ *
+ * A note that **declares** its host (`GraphNode.captionOf` — never inferred from what a note
+ * happens to be near) is condensed exactly like a companion: its host's box grows to cover it, it
+ * is not an obstacle to `dodge`, and it is snapped back `CAPTION_GAP` under the host. The host is
+ * the card it names, or the folded box standing in for it. `docs/canvas.md` has why.
  */
 
-import type { GraphEdge } from '../core/graph'
-import { getNodeDef } from '../core/registry'
+import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
+import { getNodeDef, isAnnotation } from '../core/registry'
+import type { CollapsedView } from './collapse'
+import { collapsedView, condense, expandPositions } from './collapse'
 import type { LayoutNode, MeasuredSizes, NodeSize } from './elkGraph'
 import { resolveSize } from './elkGraph'
 import type { XY } from './place'
@@ -53,7 +67,10 @@ export interface CompanionPair {
   host: string
   /** The node withheld from it. */
   companion: string
-  /** Where the companion goes, relative to the host's top-left. `CompanionSpec.offset`. */
+  /**
+   * Where the companion goes, relative to the host's top-left — resolved, so `y` is the host's
+   * height plus the declared gap rather than `CompanionSpec.offset` itself.
+   */
   offset: XY
   /** The box the pair occupies, anchored at the host's top-left. */
   box: NodeSize
@@ -117,24 +134,133 @@ export function companionView(
     if (!spec) continue
     if (spec.type !== companion.type) continue
     if (edge.sourceHandle !== spec.from || edge.targetHandle !== spec.to) continue
-    if (spec.offset.x < 0 || spec.offset.y < 0) continue
+    if (spec.offset.x < 0 || spec.offset.gap < 0) continue
     // Its one wire is this one. See the note above.
     if ((degree.get(companion.id) ?? 0) !== 1) continue
 
-    const hostSize = resolveSize(host, measured)
-    const size = resolveSize(companion, measured)
-    pairs.push({
-      host: host.id,
-      companion: companion.id,
-      offset: { ...spec.offset },
-      box: {
-        width: Math.max(hostSize.width, spec.offset.x + size.width),
-        height: Math.max(hostSize.height, spec.offset.y + size.height),
-      },
-    })
+    pairs.push(under(host, companion, spec.offset, measured))
   }
 
   return pairs
+}
+
+/**
+ * One pin: `card` below `host`, `gap` under the host's height, and the box covering both.
+ *
+ * One function for the companion and the caption, since the arithmetic is the whole of what they
+ * share and a second copy is how one of them comes to grow the box and the other not.
+ */
+function under(
+  host: LayoutNode,
+  card: GraphNode,
+  at: { x: number; gap: number },
+  measured?: MeasuredSizes,
+): CompanionPair {
+  const hostSize = resolveSize(host, measured)
+  const size = resolveSize(card, measured)
+  /*
+   * The declared `cardHeight` is a floor under the measurement, because a card measured at the
+   * moment an arrange runs can still be growing (`docs/canvas.md` has the measurements). Only
+   * `cardHeight`, not `declaredHeight`: a `defaultSize` is a resizable card's starting size, and a
+   * card resized shorter is drawn shorter.
+   */
+  const hostHeight = Math.max(hostSize.height, getNodeDef(host.type)?.cardHeight ?? 0)
+  const y = hostHeight + at.gap
+  return {
+    host: host.id,
+    companion: card.id,
+    offset: { x: at.x, y },
+    box: { width: Math.max(hostSize.width, at.x + size.width), height: y + size.height },
+  }
+}
+
+/**
+ * Space between a host's bottom edge and a caption hung under it — what the wizard places a
+ * caption at (`wizard/build.ts`), so an arrange puts it back where it arrived.
+ */
+export const CAPTION_GAP = 16
+
+/**
+ * Which notes are captions of which layout items. See the module note for why a caption moves.
+ *
+ * **Declared, never inferred**: only a note carrying `captionOf` is one, so a note somebody wrote
+ * beside a card keeps `dodge`'s rule and stays put. Its host is the card it names — or, when that
+ * card is inside a folded group, the group's box, since the box is what is drawn and what the
+ * caption was placed under. Expanded, the frame is not a layout item (only its members are), so
+ * the caption goes under the card it names — the chain's output card, the one that feeds the
+ * dataset — which is the only thing in that state ELK can reserve room under; a post-pass placing
+ * it under the members' union would land it on whatever ELK put there.
+ *
+ * Refused where the host already carries a pinned companion, for `companionView`'s "second
+ * companion on one host" reason; the caption then stays an ordinary note and is dodged.
+ */
+export function captionView(
+  graph: CodaGraph,
+  items: readonly LayoutNode[],
+  view: CollapsedView,
+  measured: MeasuredSizes | undefined,
+  taken: ReadonlySet<string>,
+): CompanionPair[] {
+  const byId = new Map(items.map((node) => [node.id, node]))
+  const boxOf = new Map<string, string>()
+  for (const box of view.boxes) for (const member of box.members) boxOf.set(member.id, box.id)
+
+  const pairs: CompanionPair[] = []
+  for (const note of graph.nodes) {
+    const about = note.captionOf
+    if (!about || !isAnnotation(note.type)) continue
+    const host = byId.get(boxOf.get(about) ?? about)
+    if (!host || taken.has(host.id) || pairs.some((pair) => pair.host === host.id)) continue
+    pairs.push(under(host, note, { x: 0, gap: CAPTION_GAP }, measured))
+  }
+  return pairs
+}
+
+/**
+ * What an arrange hands ELK: folded groups as one box each, companions and captions withheld and
+ * their hosts grown — and the note ids `dodge` must no longer treat as obstacles.
+ *
+ * The sequence the arrange runs, as one function so the canvas and the tests run the same one:
+ * folded first (a card inside a folded group has no place of its own to be put back into), then
+ * pinned. `hidden` is the fold's hidden set plus every pinned caption — a caption the block dodged
+ * would be pushed away from the very host it is about to be snapped under.
+ */
+export function condenseForArrange(
+  graph: CodaGraph,
+  scope: {
+    nodes: readonly GraphNode[]
+    edges: readonly GraphEdge[]
+    omit: Parameters<typeof condense>[3]
+  },
+  measured?: MeasuredSizes,
+): {
+  view: CollapsedView
+  pins: CompanionPair[]
+  nodes: LayoutNode[]
+  edges: GraphEdge[]
+  sizes: MeasuredSizes
+  hidden: ReadonlySet<string>
+} {
+  const view = collapsedView(graph, measured)
+  const folded = condense(scope.nodes, scope.edges, view, scope.omit)
+  const companions = companionView(folded.nodes, folded.edges, measured)
+  const taken = new Set(companions.map((pair) => pair.host))
+  const captions = captionView(graph, folded.nodes, view, measured, taken)
+  const pins = [...companions, ...captions]
+  const { nodes, edges, sizes } = pinCompanions(folded.nodes, folded.edges, pins, measured)
+  const hidden = new Set([...view.hidden, ...captions.map((pair) => pair.companion)])
+  return { view, pins, nodes, edges, sizes, hidden }
+}
+
+/**
+ * Positions for the real cards: companions and captions snapped back, then folded members moved
+ * with their boxes — each undoing one of `condenseForArrange`'s two condensations, in reverse.
+ */
+export function expandArranged(
+  placed: ReadonlyMap<string, XY>,
+  arranged: { pins: readonly CompanionPair[]; view: CollapsedView },
+): Map<string, XY> {
+  return expandPositions(expandCompanions(placed, arranged.pins), arranged.view)
 }
 
 /**

@@ -29,6 +29,18 @@ export function registerNode<P extends ParamValues>(def: NodeDefinition<P>): Nod
         'A loop needs both: the flag is what derives its region, the plan is what says how many passes to make.',
     )
   }
+  /*
+   * A companion is placed under its host's *height* on add, before anything has measured the
+   * host — so the host has to say how tall it expects to be. Without this it would silently fall
+   * back to a guess, and the failure is the one that forced the field: a credit card drawn over
+   * the card it credits. See `NodeDefinition.cardHeight`.
+   */
+  if (def.companion && def.cardHeight === undefined && !def.defaultSize) {
+    throw new Error(
+      `"${def.type}" declares a companion but no \`cardHeight\` or \`defaultSize\`: its companion ` +
+        'is placed under the host before the host is drawn, so the host must say how tall it is.',
+    )
+  }
   checkPortGroups(def as unknown as NodeDefinition)
   checkFormerParamIds(def as unknown as NodeDefinition)
   definitions.set(def.type, def as unknown as NodeDefinition)

@@ -40,7 +40,7 @@ import { dragPortType, useDragOrigin } from '../dragOrigin'
 import { drawsFromInputs, ValuePreview } from '../viewers/ValuePreview'
 import { CacheAge } from './CacheAge'
 import { DatasetCacheAge } from './DatasetCacheAge'
-import { nodeBody, nodeCardWidth } from './nodeBodies'
+import { nodeBody } from './nodeBodies'
 import { nodeIssues } from './nodeIssues'
 import { NodeHints } from './NodeHints'
 import { OutputPort } from './OutputPort'
@@ -276,8 +276,6 @@ function CodaNodeViewImpl({
    * as fields *as well* would put a raw "Search" text box under the search bar that writes it.
    */
   const body = nodeBody(node.type)
-  // A body's width, or a plain card's from `NODE_WIDTHS` — Connectivity draws param rows only.
-  const cardWidthPx = nodeCardWidth(node.type)
   /*
    * Flattened out of the buckets rather than filtered a second time. `bucketParams` invents
    * nothing and drops nothing — a param the definition did not place lands in a trailing "Other"
@@ -453,8 +451,8 @@ function CodaNodeViewImpl({
          * percentage-sized against React Flow's wrapper, so it follows without being told.
          */
         style={
-          cardWidthPx
-            ? ({ '--node-width': `${cardWidthPx}px` } as React.CSSProperties)
+          def?.cardWidth
+            ? ({ '--node-width': `${def.cardWidth}px` } as React.CSSProperties)
             : undefined
         }
       >

@@ -14,7 +14,8 @@ import {
 } from '../../nodes/lib/datasetFamilies'
 import { getNodeDef } from '../../core/registry'
 import { WIZARD_BLURB, WIZARD_LABEL } from '../../wizard/options'
-import type { StarterSpec } from '../../examples/starters'
+import type { StarterSpec } from '../../wizard/starters'
+import { starterFor } from '../../wizard/starters'
 import type { WorkflowSummary } from '../../store/library'
 import { findByName } from '../../store/library'
 import { useGraphStore, useNodeStateCount, useStaleCount } from '../../store/graphStore'
@@ -1034,13 +1035,7 @@ function NewMenu({
                 type="button"
                 className="dropdown__item"
                 title={family.description}
-                onClick={() =>
-                  onDataset({
-                    nodeType: `dataset.${family.key}`,
-                    label: family.label,
-                    sourceId: family.sourceId,
-                  })
-                }
+                onClick={() => onDataset(starterFor(family))}
               >
                 <strong>{family.label}</strong>
                 <span>{family.description}</span>

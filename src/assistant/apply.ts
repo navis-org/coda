@@ -22,7 +22,7 @@
  */
 
 import { addNodeWithCompanion } from '../core/companion'
-import type { CodaGraph, GraphNode } from '../core/graph'
+import type { CodaGraph, GraphNode, Wire } from '../core/graph'
 import {
   addEdge,
   edgeInto,
@@ -37,12 +37,10 @@ import { checkConnection, inferGraph, nodeTypes } from '../core/inference'
 import type { NodeDefinition, ParamDef, ParamValue, ParamValues } from '../core/node'
 import { configurableParams, defaultParams, findParam, validateParamValue } from '../core/node'
 import { getNodeDef } from '../core/registry'
-import { COL_WIDTH, GRID_ORIGIN, ROW_HEIGHT, boundsOf } from '../layout/place'
+import { CARD_GAP, GRID_ORIGIN, placeInColumns } from '../layout/columns'
+import { boundsOf } from '../layout/place'
 import type { AssistantPlan, PortRef } from './planShape'
 import { isEmptyPlan, plannableParams } from './planShape'
-
-/** Clearance between what was already on the canvas and the block a plan adds. */
-const BLOCK_GAP = 96
 
 /**
  * Something the edit left for the user.
@@ -597,6 +595,10 @@ function describePort(
  * Existing nodes never move, on the rule `dodge` already states: a position somebody chose
  * outranks one that was computed. So the block goes clear to the right, which is also where a
  * plan's nodes usually belong, since the thing they extend is normally the rightmost.
+ *
+ * The columns are `layout/columns.ts`', the placement every graph builder goes through, and
+ * `bounds` is `boundsOf`, which reads the same declared widths, so "clear to the right" is clear
+ * of the cards as drawn.
  */
 function positionsFor(
   pending: ReadonlyArray<{ ref: string; node: GraphNode }>,
@@ -604,55 +606,29 @@ function positionsFor(
   created: Readonly<Record<string, string>>,
   bounds: { x: number; y: number; width: number; height: number } | undefined,
 ): Map<string, { x: number; y: number }> {
-  const positions = new Map<string, { x: number; y: number }>()
-  if (pending.length === 0) return positions
-
-  const origin = bounds
-    ? { x: bounds.x + bounds.width + BLOCK_GAP, y: bounds.y }
-    : { ...GRID_ORIGIN }
+  if (pending.length === 0) return new Map()
+  const origin = bounds ? { x: bounds.x + bounds.width + CARD_GAP, y: bounds.y } : GRID_ORIGIN
 
   /*
-   * Depth *within the plan's own nodes*, not within the whole graph. Measuring against the
-   * whole graph would push a node appended to a five-deep chain out to a sixth column, so a
-   * one-node plan would land a screen away from the node it was wired to.
+   * Depth *within the plan's own nodes*, not within the whole graph: only wires between two
+   * created nodes are handed over. Measuring against the whole graph would push a node appended
+   * to a five-deep chain out to a sixth column, so a one-node plan would land a screen away from
+   * the node it was wired to.
    *
    * Read off the plan rather than the graph's edges, because this runs before the wires are
-   * made — which is also why the cycle guard below is load-bearing rather than defensive: the
-   * plan has not been checked for cycles yet, and a cyclic one must be refused, not hang.
+   * made — which is also why `placeInColumns` tolerates a cycle rather than trusting there is
+   * none: the plan has not been checked for cycles yet, and a cyclic one must be refused, not hang.
    */
-  const feeders = new Map<string, string[]>()
-  for (const wire of plan.connect) {
-    if (!(wire.from.node in created) || !(wire.to.node in created)) continue
-    const list = feeders.get(wire.to.node)
-    if (list) list.push(wire.from.node)
-    else feeders.set(wire.to.node, [wire.from.node])
-  }
-
-  const depth = new Map<string, number>()
-  const visiting = new Set<string>()
-  const depthOf = (ref: string): number => {
-    const known = depth.get(ref)
-    if (known !== undefined) return known
-    if (visiting.has(ref)) return 0
-    visiting.add(ref)
-    let best = 0
-    for (const feeder of feeders.get(ref) ?? []) best = Math.max(best, depthOf(feeder) + 1)
-    visiting.delete(ref)
-    depth.set(ref, best)
-    return best
-  }
-
-  const rows = new Map<number, number>()
-  for (const { ref, node } of pending) {
-    const column = depthOf(ref)
-    const row = rows.get(column) ?? 0
-    rows.set(column, row + 1)
-    positions.set(node.id, {
-      x: origin.x + column * COL_WIDTH,
-      y: origin.y + row * ROW_HEIGHT,
-    })
-  }
-  return positions
+  const wires = plan.connect.flatMap((wire): Wire[] => {
+    const from = created[wire.from.node]
+    const to = created[wire.to.node]
+    return from && to ? [[from, wire.from.port, to, wire.to.port]] : []
+  })
+  return placeInColumns(
+    pending.map(({ node }) => ({ id: node.id, type: node.type })),
+    wires,
+    origin,
+  )
 }
 
 // ---------------------------------------------------------------------------

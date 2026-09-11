@@ -64,6 +64,10 @@ registerNode({
    */
   label: 'Connectivity',
   category: 'query',
+  // Wider than the default so the title reads in full beside five header buttons, and so the
+  // `Edge properties` picker has room for a chip and its add control on one line. The one entry
+  // here that draws ordinary param rows rather than a body of its own.
+  cardWidth: 280,
   description: 'Fetch synaptic partners for the incoming neurons, one or more hops out.',
   guide:
     'Synaptic partners, one or more hops out. Connections is an edge list: every row is preId → postId oriented the way the synapse points, so Build Network works with nothing to think about. Neuron Set is the same result as neurons — seeds plus every partner reached — which is what Adjacency takes. Partners decides whether a fragment counts as one.',

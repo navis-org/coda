@@ -78,6 +78,15 @@ registerNode({
   type: 'core.editTable',
   label: 'Edit Table',
   category: 'transform',
+  /*
+   * The widest of the list cards, because a rule is three fields on a line: a filter, a column
+   * and a value. Measured in a browser rather than guessed, since a six-track grid is exactly
+   * what jsdom cannot see — at 400px the filter field is 134px and `type==LC4 status==Traced`
+   * cuts to `type==LC4 status==Tra`, so the card is 440 and all three fields carry their value in
+   * a `title`. Truncation is not avoidable at any width a canvas can hold, which is why the
+   * tooltip is the fix and the extra 40px only makes the common case fit.
+   */
+  cardWidth: 440,
   description: 'Overwrite values in the rows a rule matches.',
   /*
    * Short, because this node has a document: the overlay prints the guide above it under a

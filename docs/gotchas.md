@@ -12,7 +12,7 @@ verbatim.
   `.coda-node::before` is inset against the _wrapper_, because `.coda-node` is deliberately
   unpositioned so the handles and the run ring can escape its `overflow: hidden`. So the bar
   takes the wrapper's height and hangs below the card as a coloured line with nothing beside
-  it. A node that only wants to be wider sets `NODE_BODIES[type].width`, which goes through
+  it. A node that only wants to be wider sets `NodeDefinition.cardWidth`, which goes through
   `--node-width`. `nodeResize.test.tsx` asserts it across the whole registry, since nothing
   else catches it.
 

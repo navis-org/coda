@@ -58,6 +58,9 @@ registerNode({
   type: 'core.selectOne',
   label: 'Select One',
   category: 'transform',
+  // Wide enough for the pager and the commit button to share one line — `‹ › 5 / 271  DNp01
+  // [Use this]` wrapped onto two lines reads as two controls rather than one.
+  cardWidth: 300,
   description: 'Step through a table, skeletons or meshes and emit one element at a time.',
   guide:
     'Step through a collection one element at a time — the manual For each. Explore Dataset → Select One → Skeletons → 3D View. Stepping is free (arrows move the card), Use this commits (re-runs downstream). Live mode couples browsing and committing.',

@@ -54,6 +54,21 @@ export interface GraphNode {
    * unless somebody put it there.
    */
   hints?: NodeHint[]
+  /**
+   * The card this note is a caption of — an annotation's field, naming a node id.
+   *
+   * **Declared rather than inferred**, which is the whole point: an arrange never moves a note,
+   * because a note is somebody's sentence about a *place*, but a caption's place is a card, and
+   * left behind it ended up hundreds of units from what it describes. So the builder that places
+   * a caption (`AnnotationChain.caption`, in `wizard/build.ts`) writes this, and the layout moves
+   * exactly the notes that carry it (`layout/companions.ts`' `captionView`) — never a note that
+   * merely happens to sit near a card.
+   *
+   * An id reference like a group's membership, so it has the same three places to stop naming
+   * something: dropped on load and on delete when the card is not there (`pruneCaptions`), and
+   * remapped by a paste or duplicate (`cloneCaptions`).
+   */
+  captionOf?: string
 }
 
 /**
@@ -121,6 +136,9 @@ export interface GraphEdge {
   target: string
   targetHandle: string
 }
+
+/** A wire before it is an edge, as the graph builders write one down. */
+export type Wire = readonly [from: string, fromPort: string, to: string, toPort: string]
 
 /**
  * The colours a group frame may be drawn in, by name.
@@ -437,8 +455,12 @@ function mayHaveReferences(nodes: readonly GraphNode[]): boolean {
  * A question about a **port**, which is what the flag is on. It was phrased about an edge, which
  * meant `wouldCreateCycle` had to fabricate one with three placeholder fields to ask about a wire
  * that did not exist yet.
+ *
+ * Exported for the one caller that has wires and no graph: `layout/columns.ts` places a graph
+ * *before* it is assembled, so a companion can be put beside a host that is already where it
+ * belongs, and it has to leave a reference out of a card's depth for `dataflowEdges`' reason.
  */
-function isReferencePort(nodeType: string | undefined, portId: string): boolean {
+export function isReferencePort(nodeType: string | undefined, portId: string): boolean {
   if (!nodeType) return false
   const def = getNodeDef(nodeType)
   /*
@@ -740,11 +762,13 @@ export function removeNodes(graph: CodaGraph, ids: readonly string[]): CodaGraph
   // no longer there, and it is worse: the cell is a mount site, so it would draw a header for
   // a node that cannot be found.
   return pruneDashboard(
-    pruneGroups({
-      ...graph,
-      nodes: graph.nodes.filter((n) => !dead.has(n.id)),
-      edges: graph.edges.filter((e) => !dead.has(e.source) && !dead.has(e.target)),
-    }),
+    pruneGroups(
+      pruneCaptions({
+        ...graph,
+        nodes: graph.nodes.filter((n) => !dead.has(n.id)),
+        edges: graph.edges.filter((e) => !dead.has(e.source) && !dead.has(e.target)),
+      }),
+    ),
   )
 }
 
@@ -768,6 +792,31 @@ export function withMembers(group: GraphGroup, nodeIds: string[]): GraphGroup {
   if (exposed?.length) next.exposed = exposed
   else delete next.exposed
   return next
+}
+
+/**
+ * Drop every `captionOf` naming a card that is not in the graph (or the note itself). The note
+ * keeps its text: the sentence is the author's, and it is an ordinary note from then on.
+ *
+ * `alive` is for a caller that already holds the node ids (`deserializeGraph`). Returns the graph
+ * unchanged by identity when no caption needed dropping, as `pruneGroups` does.
+ */
+export function pruneCaptions(
+  graph: CodaGraph,
+  alive: { has(id: string): boolean } = new Set(graph.nodes.map((n) => n.id)),
+): CodaGraph {
+  let changed = false
+  const nodes = graph.nodes.map((n) => {
+    if (!n.captionOf || (n.captionOf !== n.id && alive.has(n.captionOf))) return n
+    changed = true
+    return withoutCaption(n)
+  })
+  return changed ? { ...graph, nodes } : graph
+}
+
+/** The node minus its `captionOf`, deleted rather than left `undefined` in a saved file. */
+export function withoutCaption({ captionOf: _gone, ...rest }: GraphNode): GraphNode {
+  return rest
 }
 
 /**
@@ -1093,6 +1142,11 @@ export function deserializeGraph(json: string): LoadResult {
       ...(n.disabled ? { disabled: true } : {}),
       ...(size ? { size } : {}),
       ...(hints.length ? { hints } : {}),
+      // Only on a note, and only a string; whether the card it names is here is asked by
+      // `pruneCaptions` below, once every node is known.
+      ...(typeof n.captionOf === 'string' && getNodeDef(n.type)?.annotation
+        ? { captionOf: n.captionOf }
+        : {}),
     })
   }
 
@@ -1147,15 +1201,20 @@ export function deserializeGraph(json: string): LoadResult {
   const dashboard = validDashboard(obj.dashboard, alive)
 
   return {
-    graph: {
-      version: GRAPH_FORMAT_VERSION,
-      nodes,
-      edges,
-      ...(groups.length ? { groups } : {}),
-      ...(dashboard ? { dashboard } : {}),
-      ...(obj.viewport ? { viewport: obj.viewport } : {}),
-      ...(validMeta(obj.meta) ? { meta: validMeta(obj.meta) } : {}),
-    },
+    // A caption naming a card this file does not hold is an ordinary note — silently, like a
+    // group member that is not there: nothing is lost but a relation to something already gone.
+    graph: pruneCaptions(
+      {
+        version: GRAPH_FORMAT_VERSION,
+        nodes,
+        edges,
+        ...(groups.length ? { groups } : {}),
+        ...(dashboard ? { dashboard } : {}),
+        ...(obj.viewport ? { viewport: obj.viewport } : {}),
+        ...(validMeta(obj.meta) ? { meta: validMeta(obj.meta) } : {}),
+      },
+      alive,
+    ),
     warnings,
   }
 }

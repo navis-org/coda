@@ -11,6 +11,8 @@ import type { ElkNode } from 'elkjs/lib/elk-api'
 
 import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
 import { referenceEdgeIds } from '../core/graph'
+import type { NodeDefinition } from '../core/node'
+import { declaredHeight } from '../core/node'
 import { getNodeDef, isAnnotation } from '../core/registry'
 import { inputPorts, outputPorts } from '../core/ports'
 import type { LayoutOptions } from './options'
@@ -57,10 +59,55 @@ export type MeasuredPorts = ReadonlyMap<string, ReadonlyMap<string, XY>>
 /** `--node-width` in `theme.css`, and a height that fits a header and two port rows. */
 export const FALLBACK_NODE_SIZE: NodeSize = { width: 232, height: 120 }
 
+/**
+ * What a viewer's card grows to once it has something to draw.
+ *
+ * The number itself is `.coda-node--wide` in `editor.css`, which is where it is applied — this is
+ * the declaration for anything that has to *reason* about how wide a card ends up. A viewer
+ * declares no `cardWidth` and, unless it is resizable, no `defaultSize` either, yet still draws
+ * at this width the moment `showPreview` puts the class on it. Missing it is what had a Table
+ * card, which declares nothing and renders at 360, sitting 38px inside the Group By beside it.
+ * Measured in a browser.
+ */
+const WIDE_CARD_WIDTH = 360
+
+/**
+ * The widest a card of this type can draw, from every source that can decide it.
+ *
+ * Three: the definition's `defaultSize` (a resizable viewer's wrapper), its `cardWidth` (a body
+ * or a param band that wants room), and a viewer's growth to `WIDE_CARD_WIDTH` once it has a
+ * value — `category === 'visualisation'` spelled out rather than imported, so this module keeps
+ * its one-way dependency on the registry. The widest rather than the current, because what asks
+ * is *placement*: a card placed for its unrun width overlaps its neighbour the moment it runs,
+ * which is the one moment somebody is looking at it.
+ */
+export function cardWidth(type: string): number {
+  return widestOf(getNodeDef(type))
+}
+
+function widestOf(def: NodeDefinition | undefined): number {
+  return Math.max(
+    def?.defaultSize?.width ?? 0,
+    def?.cardWidth ?? 0,
+    def?.category === 'visualisation' ? WIDE_CARD_WIDTH : 0,
+    FALLBACK_NODE_SIZE.width,
+  )
+}
+
+/**
+ * A card's box as far as the layout knows it: measured if the canvas has it, else declared.
+ *
+ * **A card somebody resized is taken at its word** (`node.size`), because that is what draws.
+ * Otherwise the width is `cardWidth` — the widest the type can draw, since every headless reader
+ * of this (`boundsOf`, `rectsOf`, the assistant's "clear of what is there") is placing something
+ * beside the card — and the height is the declared one (`declaredHeight`).
+ */
 export function resolveSize(node: GraphNode, measured?: MeasuredSizes): NodeSize {
   const seen = measured?.get(node.id)
   if (seen && seen.width > 0 && seen.height > 0) return seen
-  return node.size ?? getNodeDef(node.type)?.defaultSize ?? FALLBACK_NODE_SIZE
+  if (node.size) return node.size
+  const def = getNodeDef(node.type)
+  return { width: widestOf(def), height: declaredHeight(def) ?? FALLBACK_NODE_SIZE.height }
 }
 
 /**

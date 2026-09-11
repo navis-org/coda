@@ -42,6 +42,9 @@ registerNode({
   type: 'neuron.inputIds',
   label: 'Input IDs',
   category: 'query',
+  // IDs from Label's width, for its reason: the IDs field is a paste target, and a list of
+  // neuron ids wrapped into a 232px box is unreadable.
+  cardWidth: 300,
   description: 'A list of neuron IDs, typed or pasted, as a table.',
   guide:
     'A list of neuron IDs you already have — from a paper, a spreadsheet, a colleague. Paste them in any form; brackets and newlines are separators. Wire a Dataset to get full rows and a count of IDs it never heard of; unwired it just emits the IDs as a one-column table.',

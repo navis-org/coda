@@ -377,7 +377,24 @@ export function familyCan(key: string, capability: keyof SourceCapabilities): bo
    * what the Skeletons node's own `validate` reads, which is why a dataset that really has none
    * says so on the card rather than being silently un-offered two screens earlier.
    */
-  return capabilityAnywhere(getSource(family.sourceId), capability)
+  return sourceCan(family.sourceId, capability)
+}
+
+/**
+ * `familyCan`'s ceiling asked of a source rather than a family.
+ *
+ * The starters' reader (`starters.ts`): a starter names a node type and a source, and a custom
+ * dataset node — `dataset.neuprint`, `dataset.cave`, `dataset.catmaid` — is no family but still
+ * has a source whose ceiling decides whether a Neuroglancer cell is worth putting in the graph.
+ * One spelling of the reading, so the menu and the wizard cannot come to ask it two ways again.
+ * `false` with no source at all, where `familyCan` says `true` for a key it does not know: that
+ * one gates *offers*, and a starter with nothing to ask should not gain a viewer that can only warn.
+ */
+export function sourceCan(
+  sourceId: string | undefined,
+  capability: keyof SourceCapabilities,
+): boolean {
+  return sourceId ? capabilityAnywhere(getSource(sourceId), capability) : false
 }
 
 // ---------------------------------------------------------------------------

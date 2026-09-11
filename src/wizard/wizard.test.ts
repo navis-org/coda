@@ -865,7 +865,8 @@ describe('a dataset that needs an annotation chain', () => {
    * `DatasetFamily.annotationChain`. A CAVE datastack keeps its cell typing in a table rather
    * than on the neuron, so a wizard workflow that opened on the bare dataset node opened on a
    * list of eighteen-digit root ids — while `New ▸ FlyWire FAFB` and `New ▸ BANC public`, both
-   * building the *same* declarations through `examples/starters.ts`, opened them typed. One graph
+   * building the *same* declarations through the bespoke starters then in `src/examples`, opened
+   * them typed. The starters are this builder's output now (`starters.ts`). One graph
    * answering one question two ways depending on which menu you came through.
    *
    * **Asked of every family that declares one**, rather than of FlyWire: the two differ in size

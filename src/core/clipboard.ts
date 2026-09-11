@@ -21,7 +21,7 @@
 
 import type { CodaGraph } from './graph'
 import { GRAPH_FORMAT_VERSION, deserializeGraph, newId } from './graph'
-import { cloneGroups } from './groups'
+import { cloneCaptions, cloneGroups } from './groups'
 
 /**
  * What a copied fragment says it is.
@@ -155,7 +155,7 @@ export function insertFragment(graph: CodaGraph, incoming: CodaGraph, at?: Point
   const dy = at ? at.y - minY : PASTE_OFFSET
 
   const idMap = new Map<string, string>()
-  const nodes = incoming.nodes.map((node) => {
+  const minted = incoming.nodes.map((node) => {
     const id = newId('n')
     idMap.set(node.id, id)
     return {
@@ -165,6 +165,7 @@ export function insertFragment(graph: CodaGraph, incoming: CodaGraph, at?: Point
       params: { ...node.params },
     }
   })
+  const nodes = cloneCaptions(minted, idMap)
   const edges = incoming.edges
     .filter((e) => idMap.has(e.source) && idMap.has(e.target))
     .map((e) => ({

@@ -13,24 +13,41 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 
+import { insertFragment, subgraphOf } from '../core/clipboard'
+import { addNodeWithCompanion } from '../core/companion'
 import type { CodaGraph, GraphEdge, GraphNode } from '../core/graph'
-import { addEdge, addNode, emptyGraph } from '../core/graph'
+import {
+  addEdge,
+  addNode,
+  deserializeGraph,
+  emptyGraph,
+  removeNodes,
+  serializeGraph,
+} from '../core/graph'
 import { defaultParams } from '../core/node'
-import { getNodeDef, requireNodeDef } from '../core/registry'
-import { MockSource } from '../data/mock/MockSource'
-import { registerSource } from '../data/source'
+import { getNodeDef, registerNode, requireNodeDef } from '../core/registry'
+import { registerBuiltinSources } from '../data/builtins'
 import '../nodes'
+import { arrangeHeadless, overlappingPairs } from '../test/arrange'
+import { buildStarter } from '../wizard/starters'
 
 import type { LayoutNode, MeasuredSizes, NodeSize } from './elkGraph'
 import { arrangeScope, resolveSize } from './elkGraph'
-import { companionView, expandCompanions, pinCompanions } from './companions'
+import { COLLAPSED_SIZE, collapsedView } from './collapse'
+import type { CompanionPair } from './companions'
+import {
+  CAPTION_GAP,
+  companionView,
+  condenseForArrange,
+  expandCompanions,
+  pinCompanions,
+} from './companions'
 import { runLayout } from './engine'
 import { DEFAULT_LAYOUT_OPTIONS } from './options'
 import type { XY } from './place'
-import { overlaps } from './place'
 
 beforeAll(() => {
-  registerSource(new MockSource({ latencyMs: 0 }))
+  registerBuiltinSources({ mockLatencyMs: 0 })
 })
 
 const HOST = 'dataset.hemibrain'
@@ -64,6 +81,15 @@ function sized(entries: Record<string, NodeSize>): MeasuredSizes {
   return new Map(Object.entries(entries))
 }
 
+/** How tall the host is before anything has measured it: what it declares. */
+const declaredHeight = () => resolveSize(node('ds', HOST)).height
+
+/** That the companion's top is at least the gap below a host this tall, at the declared `x`. */
+function expectClears(pair: CompanionPair | undefined, hostHeight: number): void {
+  expect(pair!.offset.x).toBe(SPEC!.offset.x)
+  expect(pair!.offset.y).toBeGreaterThanOrEqual(hostHeight + SPEC!.offset.gap)
+}
+
 describe('the companion spec this is all about', () => {
   it('is declared on the dataset node, below it, at a non-negative offset', () => {
     /*
@@ -77,16 +103,41 @@ describe('the companion spec this is all about', () => {
     expect(SPEC?.from).toBe('dataset')
     expect(SPEC?.to).toBe('dataset')
     expect(SPEC!.offset.x).toBeGreaterThanOrEqual(0)
-    expect(SPEC!.offset.y).toBeGreaterThan(0)
+    expect(SPEC!.offset.gap).toBeGreaterThan(0)
+  })
+
+  it('is placed under the host’s declared height on add, not at a fixed depth', () => {
+    /*
+     * The insertion half of the overlap (`docs/canvas.md` has the measurements). The card has not
+     * been drawn when it is added, so the declared height is the only one there is.
+     */
+    const graph = addNodeWithCompanion(emptyGraph(), node('ds', HOST, 100, 100))
+    const desc = graph.nodes.find((n) => n.type === COMPANION)!
+    expect(desc.position.x).toBe(100 + SPEC!.offset.x)
+    expect(desc.position.y).toBeGreaterThanOrEqual(100 + declaredHeight() + SPEC!.offset.gap)
+  })
+
+  it('refuses a companion host that declares no height to clear', () => {
+    expect(() =>
+      registerNode({
+        type: 'test.companionWithoutHeight',
+        label: 'x',
+        category: 'dataset',
+        description: 'x',
+        cost: 'cheap',
+        companion: { ...SPEC!, offset: { x: 0, gap: 24 } },
+        evaluate: () => ({}),
+      }),
+    ).toThrow(/cardHeight/)
   })
 })
 
 describe('companionView', () => {
   it('pairs a card wired the way its host’s definition declares', () => {
     const { nodes, edges } = pair()
-    expect(companionView(nodes, edges)).toEqual([
-      { host: 'ds', companion: 'desc', offset: { ...SPEC!.offset }, box: expect.anything() },
-    ])
+    const pairs = companionView(nodes, edges)
+    expect(pairs.map((p) => [p.host, p.companion])).toEqual([['ds', 'desc']])
+    expectClears(pairs[0], declaredHeight())
   })
 
   it('reserves a box covering both cards, anchored at the host’s corner', () => {
@@ -95,23 +146,38 @@ describe('companionView', () => {
       ds: { width: 248, height: 247 },
       desc: { width: 248, height: 125 },
     })
-    expect(companionView(nodes, edges, measured)[0]!.box).toEqual({
+    const [pinned] = companionView(nodes, edges, measured)
+    expectClears(pinned, 247)
+    expect(pinned!.box).toEqual({
       width: Math.max(248, SPEC!.offset.x + 248),
-      height: SPEC!.offset.y + 125,
+      height: pinned!.offset.y + 125,
     })
   })
 
-  it('keeps the host’s own size where the companion fits inside it', () => {
+  it('floors a short measurement by the declared height, since the card may still be growing', () => {
+    /*
+     * Found in a browser: a card measured at an arrange can still be growing (`docs/canvas.md`).
+     * A measurement shorter than the declaration must not pull the companion up into the card.
+     */
     const { nodes, edges } = pair()
-    // A host taller than the offset plus the companion — the box must not shrink to the pair.
+    const short = declaredHeight() - 35
     const measured = sized({
-      ds: { width: 900, height: SPEC!.offset.y + 400 },
+      ds: { width: 248, height: short },
       desc: { width: 248, height: 125 },
     })
-    expect(companionView(nodes, edges, measured)[0]!.box).toEqual({
-      width: 900,
-      height: SPEC!.offset.y + 400,
+    expectClears(companionView(nodes, edges, measured)[0], declaredHeight())
+  })
+
+  it('clears a host however tall it measures', () => {
+    // The snap half of the overlap: a tall host pushes the companion down with it.
+    const { nodes, edges } = pair()
+    const measured = sized({
+      ds: { width: 900, height: 700 },
+      desc: { width: 248, height: 125 },
     })
+    const [pinned] = companionView(nodes, edges, measured)
+    expectClears(pinned, 700)
+    expect(pinned!.box).toEqual({ width: 900, height: pinned!.offset.y + 125 })
   })
 
   it('ignores a card of the right type on the wrong port', () => {
@@ -168,12 +234,14 @@ describe('pinCompanions', () => {
       ds: { width: 248, height: 247 },
       desc: { width: 248, height: 125 },
     })
-    const out = pinCompanions(nodes, edges, companionView(nodes, edges, measured), measured)
+    const pairs = companionView(nodes, edges, measured)
+    const out = pinCompanions(nodes, edges, pairs, measured)
     expect(out.nodes.map((n) => n.id)).toEqual(['ds'])
     expect(out.edges).toEqual([])
-    // Asserted on `sizes` rather than on the pair it came from, because `sizes` is what reaches
-    // ELK — the box is an intermediate and could stop being read without this noticing.
-    expect(out.sizes.get('ds')).toEqual({ width: 248, height: SPEC!.offset.y + 125 })
+    // Asserted on `sizes`, because `sizes` is what reaches ELK — the box is an intermediate and
+    // could stop being read without this noticing. It holds the host, the gap and the companion.
+    expect(out.sizes.get('ds')).toEqual(pairs[0]!.box)
+    expect(out.sizes.get('ds')!.height).toBeGreaterThanOrEqual(247 + SPEC!.offset.gap + 125)
     expect(out.sizes.has('desc')).toBe(false)
   })
 
@@ -206,11 +274,10 @@ describe('pinCompanions', () => {
 describe('expandCompanions', () => {
   it('puts the companion at its host’s position plus the declared offset', () => {
     const { nodes, edges } = pair()
-    const placed = expandCompanions(
-      new Map([['ds', { x: 500, y: 200 }]]),
-      companionView(nodes, edges),
-    )
-    expect(placed.get('desc')).toEqual({ x: 500 + SPEC!.offset.x, y: 200 + SPEC!.offset.y })
+    const pairs = companionView(nodes, edges)
+    const placed = expandCompanions(new Map([['ds', { x: 500, y: 200 }]]), pairs)
+    const { offset } = pairs[0]!
+    expect(placed.get('desc')).toEqual({ x: 500 + offset.x, y: 200 + offset.y })
   })
 
   it('snaps rather than preserving where the card was', () => {
@@ -222,11 +289,9 @@ describe('expandCompanions', () => {
      */
     const nodes = [node('ds', HOST), node('desc', COMPANION, 9999, -4000)]
     const edges = [link('ds', 'dataset', 'desc', 'dataset')]
-    const placed = expandCompanions(
-      new Map([['ds', { x: 0, y: 0 }]]),
-      companionView(nodes, edges),
-    )
-    expect(placed.get('desc')).toEqual({ ...SPEC!.offset })
+    const pairs = companionView(nodes, edges)
+    const placed = expandCompanions(new Map([['ds', { x: 0, y: 0 }]]), pairs)
+    expect(placed.get('desc')).toEqual(pairs[0]!.offset)
   })
 
   it('leaves a companion alone when its host was not placed', () => {
@@ -288,11 +353,12 @@ const REAL_SIZES: MeasuredSizes = new Map([
 describe('a real arrange', () => {
   const graph = comparison()
   let placed: ReadonlyMap<string, XY>
+  let pairs: CompanionPair[]
 
   // One ELK run behind the three assertions: same fixture, same options, same answer.
   beforeAll(async () => {
     const scope = arrangeScope(graph, [])
-    const pairs = companionView(scope.nodes, scope.edges, REAL_SIZES)
+    pairs = companionView(scope.nodes, scope.edges, REAL_SIZES)
     const { nodes, edges, sizes } = pinCompanions(scope.nodes, scope.edges, pairs, REAL_SIZES)
     const { positions } = await runLayout(nodes, edges, DEFAULT_LAYOUT_OPTIONS, sizes)
     placed = expandCompanions(positions, pairs)
@@ -304,10 +370,9 @@ describe('a real arrange', () => {
       ['ds2', 'desc2'],
     ]) {
       const host = placed.get(ds!)!
-      expect(placed.get(desc!)).toEqual({
-        x: host.x + SPEC!.offset.x,
-        y: host.y + SPEC!.offset.y,
-      })
+      const { offset } = pairs.find((p) => p.host === ds)!
+      expect(placed.get(desc!)).toEqual({ x: host.x + offset.x, y: host.y + offset.y })
+      expect(offset.y).toBeGreaterThanOrEqual(REAL_SIZES.get(ds!)!.height + SPEC!.offset.gap)
     }
   })
 
@@ -317,13 +382,7 @@ describe('a real arrange', () => {
       ...placed.get(n.id)!,
       ...resolveSize(n, REAL_SIZES),
     }))
-    const clashes: string[] = []
-    for (let i = 0; i < rects.length; i++) {
-      for (let j = i + 1; j < rects.length; j++) {
-        if (overlaps(rects[i]!, rects[j]!)) clashes.push(`${rects[i]!.id} × ${rects[j]!.id}`)
-      }
-    }
-    expect(clashes).toEqual([])
+    expect(overlappingPairs(rects)).toEqual([])
   })
 
   it('does not spend a layer on the Description', () => {
@@ -336,5 +395,103 @@ describe('a real arrange', () => {
     // Dataset, Find Neurons, Table. A Description in the flow makes it four.
     expect(columns.size).toBe(3)
     expect(Math.round(placed.get('desc')!.x)).toBe(Math.round(placed.get('ds')!.x))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Captions
+// ---------------------------------------------------------------------------
+
+/** Every note far from where the arranged block will be, so a test can see it come back. */
+function scattered(graph: CodaGraph): CodaGraph {
+  return {
+    ...graph,
+    nodes: graph.nodes.map((n) =>
+      n.type === 'note.text' ? { ...n, position: { x: -5000, y: -5000 } } : n,
+    ),
+  }
+}
+
+describe('a chain caption through an arrange', () => {
+  /*
+   * A caption is the one note an arrange moves, because its place is a card rather than a spot.
+   * The notes are thrown far away first, so a caption that merely stayed put cannot pass. That
+   * nothing is drawn over either caption is `placeGuards.test.ts`' arranged-starter check.
+   */
+  it('lands directly under the folded FlyWire box, the same width as it', async () => {
+    const { graph } = await arrangeHeadless(
+      scattered(
+        buildStarter({ nodeType: 'dataset.flywire', label: 'FlyWire', sourceId: 'cave' }),
+      ),
+    )
+    const box = collapsedView(graph).boxes[0]!
+    const note = graph.nodes.find((n) => n.id === 'note-join')!
+    expect(note.captionOf).toBe('join')
+    expect(note.position).toEqual({
+      x: box.position.x,
+      y: box.position.y + COLLAPSED_SIZE.height + CAPTION_GAP,
+    })
+    expect(note.size?.width).toBe(COLLAPSED_SIZE.width)
+  })
+
+  it('lands directly under BANC’s single card, clear of its height', async () => {
+    const { graph } = await arrangeHeadless(
+      scattered(buildStarter({ nodeType: 'dataset.banc', label: 'BANC', sourceId: 'cave' })),
+    )
+    const card = graph.nodes.find((n) => n.id === 'annotations')!
+    const note = graph.nodes.find((n) => n.id === 'note-annotations')!
+    expect(note.position).toEqual({
+      x: card.position.x,
+      y: card.position.y + resolveSize(card).height + CAPTION_GAP,
+    })
+  })
+
+  it('leaves a note that declares no host where it was, and in the way', () => {
+    // Declared, never inferred: an ordinary note keeps `dodge`'s rule however near a card it is.
+    let graph = addNode(emptyGraph(), node('find', 'neuron.findNeurons'))
+    graph = addNode(graph, node('table', 'out.table', 400, 0))
+    graph = addNode(graph, { ...node('loose', 'note.text', 0, 200) })
+    graph = addEdge(graph, {
+      source: 'find',
+      sourceHandle: 'neurons',
+      target: 'table',
+      targetHandle: 'in',
+    })
+    const input = condenseForArrange(graph, arrangeScope(graph, []))
+    expect(input.pins).toEqual([])
+    expect(input.hidden.has('loose')).toBe(false)
+  })
+})
+
+describe('a caption’s host reference', () => {
+  const graph = () => {
+    let g = addNode(emptyGraph(), node('card', 'neuron.findNeurons'))
+    g = addNode(g, { ...node('cap', 'note.text', 0, 300), captionOf: 'card' })
+    return g
+  }
+
+  it('survives a save and load, and is dropped when the card is not in the file', () => {
+    const round = deserializeGraph(serializeGraph(graph())).graph
+    expect(round.nodes.find((n) => n.id === 'cap')?.captionOf).toBe('card')
+
+    const orphan = JSON.parse(serializeGraph(graph()))
+    orphan.nodes = orphan.nodes.filter((n: GraphNode) => n.id !== 'card')
+    expect(deserializeGraph(JSON.stringify(orphan)).graph.nodes[0]?.captionOf).toBeUndefined()
+  })
+
+  it('is dropped, and the note kept, when the card is deleted', () => {
+    const left = removeNodes(graph(), ['card'])
+    expect(left.nodes.map((n) => n.id)).toEqual(['cap'])
+    expect(left.nodes[0]?.captionOf).toBeUndefined()
+  })
+
+  it('follows the card to its new id on paste, and is dropped when the card was not copied', () => {
+    const both = insertFragment(graph(), subgraphOf(graph(), ['card', 'cap'])!)
+    const [card, cap] = both.nodeIds.map((id) => both.graph.nodes.find((n) => n.id === id)!)
+    expect(cap!.captionOf).toBe(card!.id)
+
+    const alone = insertFragment(graph(), subgraphOf(graph(), ['cap'])!)
+    const pasted = alone.graph.nodes.find((n) => n.id === alone.nodeIds[0])!
+    expect(pasted.captionOf).toBeUndefined()
   })
 })

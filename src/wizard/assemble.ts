@@ -1,26 +1,16 @@
 /**
- * Turning a list of nodes and wires into a graph — the part every hand-built graph does the same
- * way.
+ * Turning a list of nodes and wires into a graph — the part every built graph does the same way.
  *
- * Two builders exist: `starters.ts`, which opens a dataset for browsing, and `wizard/build.ts`,
- * which assembles a pipeline from four answers. Each had written these five statements itself —
- * `emptyGraph`, the `meta` spread, an `addNodeWithCompanion` loop, an `addEdge` loop — plus its
- * own `Link` tuple and its own "a node is `defaultParams` plus overrides" helper. Same reason
- * `notes.ts` exists next door: two graph builders, one way of doing the thing.
- *
- * What each keeps is its own *layout*, which is where they genuinely differ — a starter places
- * three fixed columns for a 520px Explore card, the wizard walks a grid and stacks notes.
+ * Its own module because `build.ts` and the node guide's demo builder (`demo.ts`) both read
+ * `graphNode`. Placement is `layout/columns.ts`'.
  */
 
-import type { CodaGraph, GraphNode } from '../core/graph'
+import type { CodaGraph, GraphNode, Wire } from '../core/graph'
 import { addEdge, emptyGraph } from '../core/graph'
 import { addNodeWithCompanion } from '../core/companion'
 import type { ParamValues } from '../core/node'
 import { defaultParams } from '../core/node'
 import { requireNodeDef } from '../core/registry'
-
-/** One wire: source node, its port, target node, its port. */
-export type Link = [from: string, fromPort: string, to: string, toPort: string]
 
 /** A node at an absolute position, its params being the definition's own plus any overrides. */
 export function graphNode(
@@ -28,16 +18,9 @@ export function graphNode(
   type: string,
   position: { x: number; y: number },
   params?: Record<string, unknown>,
-  size?: { width: number; height: number },
 ): GraphNode {
   const def = requireNodeDef(type)
-  return {
-    id,
-    type,
-    position,
-    params: { ...defaultParams(def), ...params } as ParamValues,
-    ...(size ? { size } : {}),
-  }
+  return { id, type, position, params: { ...defaultParams(def), ...params } as ParamValues }
 }
 
 /**
@@ -52,7 +35,7 @@ export function assembleGraph(
   name: string,
   description: string,
   nodes: readonly GraphNode[],
-  links: readonly Link[],
+  links: readonly Wire[],
 ): CodaGraph {
   let graph = emptyGraph(name)
   graph = { ...graph, meta: { ...graph.meta, name, description } }

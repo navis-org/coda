@@ -39,6 +39,9 @@ registerNode({
   type: 'core.rename',
   label: 'Rename Columns',
   category: 'transform',
+  // Wide enough for a column picker, an arrow and a name field to share one line — stacked, a
+  // rename stops reading as one act.
+  cardWidth: 320,
   description: 'Give one or more columns a different name.',
   guide:
     'Give one or more columns a different name, leaving their values, dtypes and units alone. Mostly for making somebody else’s table speak Coda’s vocabulary: the id column has to be called neuronId before a table can meet a Neurons socket, and the cell typing has to be called type before connectivity rows, Explore Dataset chips and Neuron Profile roll-ups can read it — which is why renaming a column onto neuronId promotes the table to Neurons, and renaming neuronId away demotes it. Nothing here refuses: a row naming a column the table does not have renames nothing and says so, and two rows aiming at one name suffix the second rather than dropping a column.',

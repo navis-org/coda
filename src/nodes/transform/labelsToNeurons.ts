@@ -46,6 +46,8 @@ function define(flavour: Flavour): NodeDefinition {
     type: flavour.type,
     label: flavour.label,
     category: 'transform',
+    // Wide enough for two column pickers and for "N matched nothing" to sit beside the counts.
+    cardWidth: 300,
     description: flavour.description,
     guide: flavour.guide,
     // No network, no Python: one pass over the neuron table and a map lookup per row.

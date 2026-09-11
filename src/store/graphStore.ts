@@ -82,8 +82,8 @@ import { subscribeUploadLearned } from '../data/uploads'
 import { subscribeEdgeSetsLearned } from '../data/edges/store'
 import { subscribeAnnotationsLearned } from '../data/annotations'
 import { subscribeRootCheck } from '../data/cave/rootIds'
-import type { StarterSpec } from '../examples/starters'
-import { buildStarter } from '../examples/starters'
+import type { StarterSpec } from '../wizard/starters'
+import { buildStarter } from '../wizard/starters'
 import type { WorkflowSummary } from './library'
 import { deleteSessionDoc, loadSession, saveSessionDoc, saveSessionMeta } from './session'
 import {
@@ -2360,6 +2360,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     loadStarter: (spec) => {
       get().openDocument(buildStarter(spec))
+      /*
+       * The wizard's one layout pass, asked exactly as `WizardDialog` asks it — after the open,
+       * and under the same remembered preference, since a starter *is* a wizard workflow now
+       * (`wizard/starters.ts`) and its positions are arithmetic nobody chose. The dialog's other
+       * condition, not opening onto the dashboard, holds here by construction: a starter carries
+       * no `DashboardLayout`, so `loadGraph` opens it on the canvas. See `arrangeRequest`.
+       */
+      if (get().wizardArrange) get().requestArrange()
     },
 
     // --- library -----------------------------------------------------------

@@ -243,8 +243,9 @@ Area-specific — the rule, then the doc that holds why:
   competing with the real next step: measured in a browser at x = −540 beside `find` while its
   dataset sat at −884, and once as the topmost card on a canvas whose dataset was a column back.
   `layout/companions.ts` gives it `collapse.ts`' treatment one level down — the companion leaves the
-  graph, **the host's box grows to cover where it will sit**, and it is snapped back to
-  `CompanionSpec.offset` afterwards; the growth is the silent half, since withholding and replacing
+  graph, **the host's box grows to cover where it will sit**, and it is snapped back
+  `CompanionSpec.offset.gap` under the host's measured height, floored by its declared
+  `cardHeight`; the growth is the silent half, since withholding and replacing
   looks plausible either way and the only symptom is a card over whatever filled the gap (1 collision
   with it removed). Grown as an **overlay** on the measurement map, never a `size` on the node
   (`resolveSize` reads `measured` first) and never in place (that map is `structureKey`'s). Three
@@ -253,7 +254,8 @@ Area-specific — the rule, then the doc that holds why:
   ordinary node; and a **negative offset declines**, the box's top-left being the host's, which is
   what keeps a `FIXED_POS` socket offset describing the host. Expansion **snaps**, inverting
   `expandPositions` on purpose: a folded group keeps its author's arrangement, a companion is placed
-  by its definition. Separately, **`arrangeScope` withholds every reference edge**
+  by its definition. A **chain caption** (`GraphNode.captionOf`) is condensed the same way, the one
+  note an arrange moves. Separately, **`arrangeScope` withholds every reference edge**
   (`referenceEdgeIds`) — a reference names a node rather than consuming it, which is why `topoSort`
   already excludes it, and an annotation chain reading its datastack out of the dataset it feeds is
   a two-edge loop ELK must break at one end or the other. It picked the annotations edge, drawing the
@@ -317,7 +319,7 @@ Area-specific — the rule, then the doc that holds why:
   See [docs/canvas.md](docs/canvas.md).
 - **`defaultSize` sizes React Flow's _wrapper_, and only a viewer's card fills one**
   (`category: 'visualisation'`). Elsewhere it leaves the state bar hanging below the card. A
-  node that only wants to be wider sets `NODE_BODIES[type].width`.
+  node that only wants to be wider sets `NodeDefinition.cardWidth`.
 - **Two wires between the same pair of nodes are not a cycle.** `topoSort` derives indegree
   from the same index that decrements it, so the two cannot disagree again.
 - **A `reference` port that resolved to nothing is refused by the scheduler, and the two states it
@@ -1301,7 +1303,7 @@ Area-specific — the rule, then the doc that holds why:
   families need one and they differ by a factor of six** — BANC's Codex annotations are already in
   the datastack, so one pivoted CAVE table does it; FlyWire's current annotations are a file
   published elsewhere and its community tags a second table, so six cards in two arms meet at a
-  Join. Both were written once as `examples/starters.ts`' bespoke starters and **stayed there**, so
+  Join. Both were written once as bespoke starters in `src/examples` and **stayed there**, so
   one dataset answered one question two ways depending on the menu you came through: `New ▸ FlyWire`
   opened it typed, the Workflow Wizard opened it on root ids, and the assistant — catalogue
   generated from the registry — could not know the chain existed and emitted a lone dataset node
@@ -1309,8 +1311,9 @@ Area-specific — the rule, then the doc that holds why:
   the step belong to the builder** — that line was first drawn at "placement", and both builders
   promptly invented structure the declaration knew and did not state, the wizard's version filling
   column-major and *interleaving the two arms*. A row is a fact about the chain, a step is a fact
-  about a canvas; `chainGrid`, `chainLinks` and `foldChain` are where the rest lives, since how a
-  chain attaches and that it folds are not placement either. Four rules. The catalogue note is **generated** from it
+  about a canvas; `chainLinks` and `foldChain` are where the rest lives, since how a chain
+  attaches and that it folds are not placement either, and a card's column is its dataflow depth
+  (`layout/columns.ts`). Four rules. The catalogue note is **generated** from it
   (`datasetChainNote` into `NodeDefinition.catalogueNote`, the sibling `ParamBase.catalogueNote`
   had been missing): **0/5 → 5/5** on `gemma4:31b-cloud`, on *both* families — a one-card chain is
   not the easy case it looks, since without the note the model never reaches for the table at all, and a prose draft saying *"wired in that

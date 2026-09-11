@@ -260,9 +260,13 @@ the Description card — can draw its own body instead of a list of param fields
 
 ```ts
 export const NODE_BODIES: Record<string, NodeBodyEntry> = {
-  'neuron.explore': { Component: ExploreBody, width: 520 },
+  'neuron.explore': { Component: ExploreBody, expandable: true },
 }
 ```
+
+A body that wants a wider card declares it on the definition, as `cardWidth: 520`, not here:
+every graph builder places cards by that width, and the ones that do it headless may not import
+`src/ui`. Not `defaultSize` either, which sizes the wrapper and only a viewer's card fills.
 
 A body that renders text a *source* supplied — the Description card is the one so far — must go
 through [`MarkdownView`](../src/ui/MarkdownView.tsx) rather than building HTML. It parses to an

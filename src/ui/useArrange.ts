@@ -16,9 +16,9 @@ import { useReactFlow } from '@xyflow/react'
 import type { MeasuredPorts, MeasuredSizes, NodeSize } from '../layout/elkGraph'
 import { measureCardSizes } from './cardSizes'
 import { nodesById } from '../core/graph'
-import { collapsedView, condense, expandPositions, foldedNodeCount } from '../layout/collapse'
+import { foldedNodeCount } from '../layout/collapse'
 import { arrangeScope } from '../layout/elkGraph'
-import { companionView, expandCompanions, pinCompanions } from '../layout/companions'
+import { condenseForArrange, expandArranged } from '../layout/companions'
 import { packColumns } from '../layout/pack'
 import { packSupported, targetAspect } from '../layout/options'
 import { runLayout } from '../layout/engine'
@@ -373,31 +373,23 @@ export function useArrange(): ArrangeHandle {
        * Condensed *after* scoping, so a selection decides which cards take part and the folding
        * decides how they are counted. See `layout/collapse.ts`.
        */
-      const view = collapsedView(current, measured)
-      // `scope.omit` rather than a second `referenceEdgeIds` call: the fold re-derives its
-      // stand-ins from the whole graph, so a rule the scope applied has to be handed on or it is
-      // undone for exactly the folded annotation chains it was written for. See `condense`.
-      const folded = condense(scope.nodes, scope.edges, view, scope.omit)
       /*
-       * Then the companion cards, which is the same move one level down: a Description is not a
-       * step in the pipeline, so it leaves the layout and its dataset's box grows to hold the
-       * place it will be put back in. *After* the fold, because a card inside a folded group is
-       * not on the canvas and has no place of its own to be put back into — `condense` has
-       * already replaced it with a box by the time this asks. See `layout/companions.ts`.
-       */
-      const pins = companionView(folded.nodes, folded.edges, measured)
-      /*
+       * Then the companion cards and the chain captions, which are the same move one level down:
+       * a Description is not a step in the pipeline and a caption's place is its chain, so each
+       * leaves the layout and its host's box grows to hold the place it will be put back in.
+       * *After* the fold, because a card inside a folded group has no place of its own — `condense`
+       * has already replaced it with a box. `scope.omit` is handed on because the fold re-derives
+       * its stand-ins from the whole graph, and a rule the scope applied would otherwise be undone
+       * for exactly the folded annotation chains it was written for. See `layout/companions.ts`.
+       *
        * Nodes, edges and sizes together, because they have to agree: `sizes` is keyed by layout
-       * item — boxes in, pinned companions out, hosts grown to hold the card that is coming back
-       * — and everything after this reads *it* rather than `measured`. What ELK is told, what
-       * `boundsOf` anchors against and what `dodge` keeps off the notes are then one answer, or
-       * the space reserved for a companion is reserved in the layout and nowhere else.
+       * item — boxes in, pinned cards out, hosts grown — and everything after this reads *it*
+       * rather than `measured`. What ELK is told, what `boundsOf` anchors against and what `dodge`
+       * keeps off the notes are then one answer, or the space reserved for a companion is reserved
+       * in the layout and nowhere else.
        */
-      const {
-        nodes: items,
-        edges: links,
-        sizes,
-      } = pinCompanions(folded.nodes, folded.edges, pins, measured)
+      const arranged = condenseForArrange(current, scope, measured)
+      const { nodes: items, edges: links, sizes } = arranged
       if (items.length < 2) return
       const before = boundsOf(items, sizes)
       if (!before) return
@@ -429,13 +421,13 @@ export function useArrange(): ArrangeHandle {
           const anchored = anchorTo(raw, sizes, anchor)
           // Notes are dodged even when only a selection is being arranged: a subgraph landing on
           // a note is the same collision, and the selection is not what decides that.
-          const obstacles = noteRects(current, measured, view.hidden)
+          // A pinned caption is not one: it is about to be snapped under its host, and dodging it
+          // would push the block away from the very card it captions.
+          const obstacles = noteRects(current, measured, arranged.hidden)
           // Still keyed by box wherever a group is folded: `dodge` and the routes below both work
           // in the arranged vocabulary, and only the positions handed to the store are expanded.
           const placed = dodge(anchored, sizes, obstacles)
-          // Companions first, then folded members: each undoes one of the two condensations, in
-          // the reverse of the order they were applied.
-          const final = expandPositions(expandCompanions(placed, pins), view)
+          const final = expandArranged(placed, arranged)
 
           /*
            * The routes take the *same* two shifts the positions did, read back off `place.ts`

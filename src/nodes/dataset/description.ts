@@ -23,10 +23,26 @@ import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isDatasetValue } from '../../core/values'
 
+/**
+ * The dataset card's width, shared with the Description card that hangs under it.
+ *
+ * One constant rather than two equal numbers: the two stack vertically, and a card an inch wider
+ * than the one above it reads as a mistake long before anyone measures it. Here rather than beside
+ * the dataset nodes because this module is the one they both can import without a cycle.
+ */
+export const DATASET_CARD_WIDTH = 248
+
 registerNode({
   type: 'dataset.description',
   label: 'Description',
   category: 'dataset',
+  /*
+   * The dataset card's width exactly, because it sits directly underneath one and the pair reads
+   * as a column. That is narrow for prose, which is what the expand button is for: the datasets
+   * publishing two paragraphs and a nested list of citations do not fit any card worth putting on
+   * a canvas, and the overlay is where they are actually read.
+   */
+  cardWidth: DATASET_CARD_WIDTH,
   description:
     'What a dataset covers, who made it and how to cite it, as its publisher states it.',
   guide:

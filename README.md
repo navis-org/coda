@@ -76,7 +76,7 @@ src/
 ├─ store/         zustand document state, undo, persistence
 ├─ ui/            React Flow editor, param widgets, viewers
 │  └─ panels/     command palette (+ fuzzy matcher), inspector, toolbar
-└─ examples/      example graphs, built programmatically
+└─ wizard/        the Workflow Wizard: graphs built from four answers, the starters, the demos
 ```
 
 `src/core` and `src/data` must stay headless — a lint rule blocks imports of React,

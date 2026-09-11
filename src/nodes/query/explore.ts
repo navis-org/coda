@@ -107,6 +107,9 @@ registerNode({
   type: 'neuron.explore',
   label: 'Explore Dataset',
   category: 'query',
+  // A body that holds a list of neurons with thumbnails, a search bar and a pager, and gets the
+  // room for them on the canvas rather than only once somebody opens it full size.
+  cardWidth: 520,
   description:
     'Browse every neuron in a dataset. Fuzzy search across all fields, per-field filters, and a picker.',
   guide:

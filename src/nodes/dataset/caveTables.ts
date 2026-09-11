@@ -139,6 +139,9 @@ registerNode({
   type: 'cave.tableInfo',
   label: 'CAVE table info',
   category: 'dataset',
+  // Wide enough for the two counts and their labels to share one line, since the whole point of
+  // showing both is that they can be compared at a glance.
+  cardWidth: 300,
   description: 'What one CAVE table is: its description, its row counts and its columns.',
   guide:
     'Four reads about one table of a CAVE datastack, gathered onto one card: its registered ' +

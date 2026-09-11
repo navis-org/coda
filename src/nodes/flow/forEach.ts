@@ -64,6 +64,9 @@ registerNode({
   type: 'flow.forEach',
   label: 'For Each',
   category: 'utility',
+  // Wider than Select One's: this card carries a progress bar with an element's name in it, and
+  // a neuron name wrapping mid-loop is a card that changes height on every pass.
+  cardWidth: 320,
   description: 'Run everything downstream once per element, or once per group.',
   guide:
     'Runs everything wired after it once per element — a row, a skeleton, a mesh, or every ' +

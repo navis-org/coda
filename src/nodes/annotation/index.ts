@@ -88,6 +88,12 @@ registerNode({
   type: 'annotation.caveTable',
   label: 'CAVE table',
   category: 'dataset',
+  /*
+   * The height a chain caption hangs under (BANC's is this card), measured in a browser on a cold
+   * session and a floor under an early measurement (`docs/canvas.md`). See
+   * `NodeDefinition.cardHeight`.
+   */
+  cardHeight: 265,
   description: 'Neuron labels from an annotation table inside a CAVE datastack.',
   guide:
     'Reads a CAVE annotation table and hands it to a Dataset as its labels. Name the datastack; ' +

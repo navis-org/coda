@@ -115,6 +115,9 @@ registerNode({
   type: 'neuron.findNeurons',
   label: 'Find Neurons',
   category: 'query',
+  // Wider than Rename's, because a filter is three controls on a line rather than two: a field,
+  // an operator and a value.
+  cardWidth: 360,
   description: 'Search a dataset for neurons, by any field the dataset publishes.',
   guide:
     'The workhorse query: narrow to the neurons you mean, one filter row at a time. The field list is the dataset\u2019s own \u2014 a neuPrint dataset offers status and size, a FlyWire datastack offers super_class. Rows combine with AND, and \u201cis one of\u201d takes several values, which is how you say OR. With no filters it returns no neurons: these run against a live server.',

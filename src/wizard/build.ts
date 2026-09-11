@@ -32,7 +32,7 @@
  * the failure this project keeps recording.
  */
 
-import type { CodaGraph, GraphNode, NodeHint } from '../core/graph'
+import type { CodaGraph, GraphNode, NodeHint, Wire } from '../core/graph'
 import {
   DEFAULT_COLUMNS,
   MIN_COLUMNS,
@@ -42,11 +42,12 @@ import {
   setSpan,
   setViewOpen,
 } from '../core/dashboard'
-import type { Link } from '../examples/assemble'
-import { assembleGraph, graphNode } from '../examples/assemble'
-import { COL_WIDTH, GRID_ORIGIN, ROW_HEIGHT } from '../layout/place'
-import { NODE_BODIES, cardWidth } from '../ui/nodes/nodeBodies'
-import { noteNode } from '../examples/notes'
+import { assembleGraph, graphNode } from './assemble'
+import { collapsedView } from '../layout/collapse'
+import { CAPTION_GAP } from '../layout/companions'
+import { GRID_ORIGIN, placeInColumns } from '../layout/columns'
+import { resolveSize } from '../layout/elkGraph'
+import { noteNode } from './notes'
 import type { DatasetFamily } from '../nodes/lib/datasetFamilies'
 import { datasetFamily } from '../nodes/lib/datasetFamilies'
 import { ID_COLUMN_NAME } from '../core/ids'
@@ -57,9 +58,7 @@ import { stackLabelParamId } from '../nodes/lib/stackParams'
 import { getNodeDef } from '../core/registry'
 import type { AnnotationChain } from '../nodes/lib/annotationChain'
 import {
-  chainGrid,
   chainLinks,
-  chainWidth,
   exploreTagColumn,
   foldChain,
   prefixChain,
@@ -127,48 +126,20 @@ function selfFetching(visualisation: VisualisationId): boolean {
   return def ? inputPorts(def, {}).some((port) => port.id === 'dataset') : false
 }
 
+/**
+ * One card, before it has a position: what it is and which row it sits on.
+ *
+ * **No column**: that is the card's dataflow depth, read off the wires by `layout/columns.ts`.
+ * What stays is the row, which the wires cannot say: which dataset's band an arm is on, and which
+ * arm of an annotation chain.
+ */
 interface Placement {
   id: string
   type: string
-  /** Column index; converted to an x offset. */
-  col: number
-  /** Row offset within the column, in node heights. */
+  /** Row, in `ROW_HEIGHT`s. Absent is 0. Cards on one row of one column sit side by side. */
   row?: number
-  /**
-   * Extra pixels to the right of that column, for the several viewers that share one. A column
-   * index cannot express it: they are stepped by each card's own width, not by the grid.
-   */
-  dx?: number
   params?: Record<string, unknown>
 }
-
-/**
- * Where a column starts.
- *
- * The Explore card is wider than a grid column, so a workflow that browses would have its second
- * node sitting inside the first. Everything downstream of the head shifts right by the overrun
- * rather than the grid changing: a note lining up with column 2 has to move with it.
- */
-function xOf(col: number, shift: number): number {
-  return GRID_ORIGIN.x + col * COL_WIDTH + (col >= 2 ? shift : 0)
-}
-
-/**
- * How far the tail moves when the head is the Explore card.
- *
- * **Measured off the card's own declared width**, not a constant of ours. `place.ts` says at
- * length that `COL_WIDTH` cannot be right for every graph and that the real fix is to advance
- * each column by the widest node in it; until that exists, a wizard reading `NODE_BODIES` gets
- * the same answer that file would, and a card that changes width takes its clearance with it.
- * A hand-tuned 160 would not.
- */
-/** Clear space between the widened card and the next column. `builder.ts` uses the same 90. */
-const CARD_GAP = 90
-
-const EXPLORE_SHIFT = Math.max(
-  0,
-  (NODE_BODIES['neuron.explore']?.width ?? 0) + CARD_GAP - COL_WIDTH,
-)
 
 // ---------------------------------------------------------------------------
 
@@ -199,16 +170,29 @@ const EXPLORE_SHIFT = Math.max(
 export interface BuildOptions {
   /** `false` to leave off `DatasetFamily.annotationChain`. Absent means build it. */
   annotationChain?: boolean
+  /**
+   * The first dataset's node, where it is not `dataset.<key>` at its defaults.
+   *
+   * What a starter carries (`starters.ts`): a pinned version, a custom server, or a custom
+   * dataset node — `dataset.neuprint`, `dataset.cave`, `dataset.catmaid` — that is no family at
+   * all. A key the family table does not know already builds sanely here (no chain, no synthetic
+   * seeding, every capability offered), so the one thing the key cannot supply is the node, and
+   * the source its `Additional tags` default is read from.
+   */
+  dataset?: { type: string; params?: Record<string, unknown>; sourceId?: string }
+  /** `false` to leave off the overview note alone; absent, `answers.notes` decides all notes. */
+  overview?: boolean
 }
 
 export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}): CodaGraph {
   const keys = answers.datasets
-  const shift = answers.start === 'browse' ? EXPLORE_SHIFT : 0
 
   const nodes: Placement[] = []
-  const links: Link[] = []
+  const links: Wire[] = []
   const chains: AnnotationChain[] = []
   const heads: Head[] = []
+  /** The first dataset's source: a starter's own where it has one, else the family's. */
+  const firstSource = options.dataset?.sourceId ?? datasetFamily(keys[0] ?? '')?.sourceId
 
   /*
    * One band per dataset: its node, whatever it needs in front of it, and the card the neurons
@@ -221,21 +205,23 @@ export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}
     const family = datasetFamily(key)
     const dsId = suffixed('ds', which)
     const row = index * DATASET_ROW
-    nodes.push({ id: dsId, type: `dataset.${key}`, col: 0, row })
+    const own = index === 0 ? options.dataset : undefined
+    const sourceId = index === 0 ? firstSource : family?.sourceId
+    nodes.push({
+      id: dsId,
+      type: own?.type ?? `dataset.${key}`,
+      row,
+      ...(own?.params ? { params: own.params } : {}),
+    })
 
     /*
      * What this dataset needs in front of it before its neurons have names.
      *
-     * `DatasetFamily.annotationChain`, which the starter graph also builds — one declaration, two
-     * builders, because the wizard opened every FlyWire workflow on a list of eighteen-digit root
-     * ids while `New ▸ FlyWire FAFB` opened the same dataset fully typed. That is the same graph
-     * answering the same question two ways depending on which menu you came through.
-     *
-     * Placed in the columns *before* the dataset, and folded, for the reason the starter folds it:
-     * six cards of plumbing that has to be right and never has to be touched are the biggest thing
-     * on the canvas and none of them is what the reader asked the wizard for. The negative columns
-     * are only a starting arrangement — a generated workflow asks the canvas for one ELK pass on
-     * arrival, and that is what decides where any of this actually sits.
+     * `DatasetFamily.annotationChain`, one declaration, so a CAVE dataset opens typed rather than
+     * on eighteen-digit root ids whichever menu it came through. Ahead of the dataset — its
+     * columns are its own dataflow, like every card's here — and folded below: six cards of
+     * plumbing that has to be right and never has to be touched are the biggest thing on the
+     * canvas and none of them is what the reader asked the wizard for.
      *
      * **Prefixed past the first**, because a chain's ids are local to the chain: two datasets
      * each carrying one would mint two nodes called `join` in one graph, which `assembleGraph`
@@ -250,16 +236,13 @@ export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}
     const declared = options.annotationChain === false ? undefined : family?.annotationChain
     const chain = declared ? prefixChain(declared, which === 1 ? '' : `${dsId}-`) : undefined
     if (chain) {
-      const width = chainWidth(chain)
-      for (const cell of chainGrid(chain)) {
+      for (const card of chain.nodes) {
         nodes.push({
-          id: cell.node.id,
-          type: cell.node.type,
-          // Right-to-left from the dataset at column 0, so the last card of the widest row is the
-          // one beside it. The row is the chain's own (`ChainNode.row`), not this file's guess.
-          col: cell.col - width,
-          row: row + cell.row,
-          ...(cell.node.params ? { params: cell.node.params } : {}),
+          id: card.id,
+          type: card.type,
+          // The row is the chain's own (`ChainNode.row`), not this file's guess.
+          row: row + (card.row ?? 0),
+          ...(card.params ? { params: card.params } : {}),
         })
       }
       links.push(...chainLinks(chain, dsId))
@@ -267,7 +250,7 @@ export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}
     }
 
     // --- the head: whichever way the neurons are chosen ---------------------
-    const head = headOf(answers, family, which, dsId, row, chain)
+    const head = headOf(answers, family, sourceId, which, dsId, row, chain)
     nodes.push(head.node)
     links.push(...head.links)
     heads.push(head)
@@ -281,7 +264,7 @@ export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}
    */
   const target =
     answers.analysis === 'paths'
-      ? headOf(answers, datasetFamily(keys[0] ?? ''), 2, 'ds', ARM_ROW, chains[0])
+      ? headOf(answers, datasetFamily(keys[0] ?? ''), firstSource, 2, 'ds', ARM_ROW, chains[0])
       : undefined
   if (target) {
     nodes.push(target.node)
@@ -302,9 +285,10 @@ export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}
    * been wrong once — the y was a constant chosen when every chain was a single row, and a paths
    * query's second head landed on top of it.
    *
-   * `nodes[0]` is the analysis head at column 2 in every arm that has one. Two arms make that
-   * read oddly and both are right: `neurons` has no analysis and is skipped, and morphology with
-   * only a Neuroglancer cell ticked has the *viewer* as its column-2 node — so the analysis hint
+   * `nodes[0]` is the analysis head — the first card after the neuron picker — in every arm that
+   * has one. Two arms make that read oddly and both are right: `neurons` has no analysis and is
+   * skipped, and morphology with only a Neuroglancer cell ticked has the *viewer* as its first
+   * card — so the analysis hint
    * and the view hint land on the same card and stack, which is what the two notes did when they
    * shared a column, minus the stacking arithmetic.
    *
@@ -314,7 +298,7 @@ export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}
   const hints = new Map<string, NodeHint[]>()
   let overview: GraphNode | undefined
   if (answers.notes) {
-    overview = overviewNote(answers)
+    overview = options.overview === false ? undefined : overviewNote(answers)
     const dock = (nodeId: string | undefined, hint: WizardHint | undefined) => {
       if (!nodeId || !hint?.text.trim()) return
       // Spread, not rebuilt field by field: `WizardHint` is `NodeHint` minus `side`, so a field
@@ -334,13 +318,23 @@ export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}
     dock(body.viewId, visualisationOption(answers.visualisations[0] ?? 'table')?.hint)
   }
 
-  const graph = assemble(answers, nodes, overview, links, shift, hints)
-  // One frame per chain, folded in the order the datasets were chosen. `foldChain` leaves a
-  // single-card chain alone, which is BANC's — so a FlyWire/BANC comparison gets one frame and
-  // one bare card rather than a box around nothing.
+  const graph = assemble(answers, nodes, links, overview, hints)
+  /*
+   * One frame per chain, folded in the order the datasets were chosen. `foldChain` leaves a
+   * single-card chain alone, which is BANC's — so a FlyWire/BANC comparison gets one frame and
+   * one bare card rather than a box around nothing.
+   *
+   * **The members were placed as ordinary cards**, each in its own column, so the box sits at the
+   * first of them, a few columns before the dataset. Placed as one card of the box's width, the
+   * box sat snug against the dataset and its hidden members straight across that dataset, its
+   * Description card and the head, since unfolding moves nothing else (`expandPositions`) —
+   * `placeGuards.test.ts` found it on every FlyWire graph. A generated workflow asks the canvas for
+   * one ELK pass on arrival, which lays the box out as one card and closes the gap.
+   */
   const folded = chains.reduce((graph, chain) => foldChain(graph, chain), graph)
+  // Commentary like the hints, so under the same switch — `answers.notes`, not the overview's.
   return dashboardFor(
-    folded,
+    answers.notes ? withChainCaptions(folded, chains) : folded,
     answers,
     heads.map((head) => head.node.id),
   )
@@ -434,8 +428,8 @@ const ARM_ROW = 2
  * is a card neither builder places.
  *
  * A published dataset node arrives with its Description companion, which `addNodeWithCompanion`
- * puts 300px below it (`NodeDefinition.companion.offset`) — so a band that only cleared the head
- * cards put the first dataset's credit card on top of the second dataset's node, at the same x
+ * puts under it (the host's declared `cardHeight` plus `CompanionSpec.offset.gap`) — so a band
+ * that only cleared the head cards put the first dataset's credit card on top of the second dataset's node, at the same x
  * and 80px apart. Found by `placeGuards.test.ts` at four datasets and invisible at two, because
  * two bands is one gap and the clash needs a *following* dataset to land in.
  *
@@ -462,7 +456,7 @@ function suffixed(base: string, which: number): string {
 interface Head {
   node: Placement
   port: [string, string]
-  links: Link[]
+  links: Wire[]
   /**
    * The dataset node this head reads from.
    *
@@ -490,6 +484,11 @@ function headOf(
   answers: WizardAnswers,
   /** This head's family, already resolved. `undefined` for a key the table does not know. */
   family: DatasetFamily | undefined,
+  /**
+   * This dataset's source: the family's, or a starter's own for a custom dataset node that is no
+   * family — which is how `New ▸ CATMAID ▸ Custom CATMAID` still opens with a tag row.
+   */
+  sourceId: string | undefined,
   which: number,
   /** The dataset node this head reads from. */
   datasetId: string,
@@ -507,12 +506,11 @@ function headOf(
      * chain's second arm doing nothing visible, which is the failure `AnnotationChain.tagColumn`
      * exists to stop and which the starter had always avoided by setting this by hand.
      */
-    const tagColumn = exploreTagColumn(family?.sourceId, chain)
+    const tagColumn = exploreTagColumn(sourceId, chain)
     return {
       node: {
         id: id('explore'),
         type: 'neuron.explore',
-        col: 1,
         row,
         ...(tagColumn ? { params: { tagColumn } } : {}),
       },
@@ -525,7 +523,7 @@ function headOf(
   }
   if (answers.start === 'ids') {
     return {
-      node: { id: id('ids'), type: 'neuron.inputIds', col: 1, row },
+      node: { id: id('ids'), type: 'neuron.inputIds', row },
       port: [id('ids'), 'neurons'],
       links: [[datasetId, 'dataset', id('ids'), 'dataset']],
       datasetId,
@@ -536,7 +534,7 @@ function headOf(
   // `defaultParams`, so `{}` and absent are the same arrival.
   const params = { ...(limit ? { limit } : {}), ...seedFilters(synthetic) }
   return {
-    node: { id: id('find'), type: 'neuron.findNeurons', col: 1, row, params },
+    node: { id: id('find'), type: 'neuron.findNeurons', row, params },
     port: [id('find'), 'neurons'],
     links: [[datasetId, 'dataset', id('find'), 'dataset']],
     datasetId,
@@ -582,17 +580,13 @@ function viewNode(
   answers: WizardAnswers,
   visualisation: VisualisationId,
   index: number,
-  col: number,
   row: number,
-  dx: number,
 ): Placement {
   const spec = VIEWS[answers.analysis][visualisation]
   return {
     id: index === 0 ? 'view' : `view${index + 1}`,
     type: spec?.type ?? 'out.table',
-    col,
     row,
-    dx,
     ...(spec?.params ? { params: spec.params } : {}),
   }
 }
@@ -618,19 +612,15 @@ function viewNode(
  * honest answer where nobody has made that judgement, and better than a guessed column that is
  * silently dropped for not existing.
  */
-function mapperNode(
-  bands: readonly Band[],
-  col: number,
-  row: number,
-): { node: Placement; links: Link[] } {
+function mapperNode(bands: readonly Band[], row: number): { node: Placement; links: Wire[] } {
   const params: Record<string, unknown> = { datasetCount: bands.length }
   bands.forEach((band, index) => {
     const columns = datasetFamily(band.key)?.typeColumns
     if (columns?.length) params[repeatParamId('types', index + 1)] = [...columns]
   })
   return {
-    node: { id: 'match', type: 'compare.matchTypes', col, row, params },
-    links: bands.map((band, index): Link => [
+    node: { id: 'match', type: 'compare.matchTypes', row, params },
+    links: bands.map((band, index): Wire => [
       band.id,
       'dataset',
       'match',
@@ -668,11 +658,9 @@ interface Band {
  */
 interface StackedInputs {
   nodes: Placement[]
-  links: Link[]
+  links: Wire[]
   /** What the fold produced: the stack's output, or the lone input where there was one. */
   out: [string, string]
-  /** The columns it consumed — 1, or 0 where one input needed no card. */
-  cols: 0 | 1
   /** The column that partitions the whole result, or undefined where none was added. */
   sourceColumn?: string
 }
@@ -710,14 +698,13 @@ function oneStack(spec: {
   inputs: readonly [string, string][]
   /** What each dataset is called in the source column. Ignored where none is added. */
   labels: readonly string[]
-  col: number
   row: number
   sourceColumn?: string
 }): StackedInputs {
   // One input is not a stack. The caller's chain still has to end somewhere, so that input's own
   // socket is the answer — which is what the fold used to return before it ran.
   if (spec.inputs.length < 2) {
-    return { nodes: [], links: [], out: spec.inputs[0] ?? ['ds', 'dataset'], cols: 0 }
+    return { nodes: [], links: [], out: spec.inputs[0] ?? ['ds', 'dataset'] }
   }
 
   const column = spec.sourceColumn
@@ -726,7 +713,6 @@ function oneStack(spec: {
       {
         id: 'stack',
         type: spec.type,
-        col: spec.col,
         row: spec.row,
         params: {
           inputCount: spec.inputs.length,
@@ -745,14 +731,13 @@ function oneStack(spec: {
     ],
     // `portIdAt`, as every other variadic link in this file does — the suffix rule has one
     // statement and a second one here would address sockets that do not exist.
-    links: spec.inputs.map((input, i): Link => [
+    links: spec.inputs.map((input, i): Wire => [
       input[0],
       input[1],
       'stack',
       portIdAt('in', i + 1),
     ]),
     out: ['stack', 'out'],
-    cols: 1,
     ...(column ? { sourceColumn: column } : {}),
   }
 }
@@ -773,16 +758,16 @@ function bodyOf(
   /** One head per dataset, in the order they were chosen. */
   heads: readonly Head[],
   targets?: [string, string],
-): { nodes: Placement[]; links: Link[]; viewId: string | undefined } {
+): { nodes: Placement[]; links: Wire[]; viewId: string | undefined } {
   /**
    * The nth dataset's neurons. The fallback is reachable: the dialog previews a graph while the
    * datasets question is still open, which is `datasets: []` and so no heads at all.
    */
-  const neuronsAt = (index: number, to: string, toPort: string): Link => {
+  const neuronsAt = (index: number, to: string, toPort: string): Wire => {
     const [from, port] = heads[index]?.port ?? ['ds', 'dataset']
     return [from, port, to, toPort]
   }
-  const neurons = (to: string, toPort: string): Link => neuronsAt(0, to, toPort)
+  const neurons = (to: string, toPort: string): Wire => neuronsAt(0, to, toPort)
   /** The nth dataset node — read off the head rather than re-minted. See `Head.datasetId`. */
   const datasetAt = (index: number) => heads[index]?.datasetId ?? 'ds'
   /**
@@ -790,7 +775,7 @@ function bodyOf(
    * belongs to, and that dataset's own neurons. Written out three times before this, once per
    * arm, each spelling the index twice.
    */
-  const opensOn = (index: number, to: string, toPort = 'neurons'): Link[] => [
+  const opensOn = (index: number, to: string, toPort = 'neurons'): Wire[] => [
     [datasetAt(index), 'dataset', to, 'dataset'],
     neuronsAt(index, to, toPort),
   ]
@@ -807,7 +792,7 @@ function bodyOf(
    */
   const mid = ((keys.length - 1) * DATASET_ROW) / 2
   /** The far end of a paths query, which is the only analysis that has one. */
-  const targetNeurons = (to: string, toPort: string): Link =>
+  const targetNeurons = (to: string, toPort: string): Wire =>
     targets ? [targets[0], targets[1], to, toPort] : neurons(to, toPort)
   const chosen = answers.visualisations
 
@@ -819,10 +804,9 @@ function bodyOf(
    * whole reason this takes a function rather than a port.
    */
   const views = (
-    col: number,
     baseRow: number,
-    wire: (visualisation: VisualisationId, id: string) => Link[],
-  ): { nodes: Placement[]; links: Link[]; viewId: string | undefined } => {
+    wire: (visualisation: VisualisationId, id: string) => Wire[],
+  ): { nodes: Placement[]; links: Wire[]; viewId: string | undefined } => {
     /*
      * **Side by side, and stepped by each card's real width** rather than stacked.
      *
@@ -830,15 +814,13 @@ function bodyOf(
      * its *content*, so an unrun Table card is short and a run one is 387px (a Bar Chart, 428) —
      * measured in a browser, against a pitch chosen for an ordinary node. The two cards overlapped
      * as soon as the reader pressed Run, which is the one moment they are looking at them.
-     * A width is declared and does not move: `cardWidth` reads the three places it can be said,
-     * and stepping by it is what `placeGuards.test.ts` already checks the whole graph for.
+     * A width is declared and does not move, so what is stepped by is the width: every viewer
+     * is an end of the chain, so `layout/columns.ts` puts them all in the last column, and cards
+     * given one row of one column are set side by side, each by its own `cardWidth`.
      */
-    let dx = 0
-    const nodes = chosen.map((visualisation, index) => {
-      const node = viewNode(answers, visualisation, index, col, baseRow, dx)
-      dx += Math.max(COL_WIDTH, cardWidth(node.type) + CARD_GAP)
-      return node
-    })
+    const nodes = chosen.map((visualisation, index) =>
+      viewNode(answers, visualisation, index, baseRow),
+    )
     return {
       nodes,
       links: nodes.flatMap((node, index) => wire(chosen[index]!, node.id)),
@@ -859,7 +841,7 @@ function bodyOf(
    *
    * `VIEWS` is what stops either being reachable from an analysis that does not offer it.
    */
-  const scene = (id: string): Link[] => [
+  const scene = (id: string): Wire[] => [
     ['ds', 'dataset', id, 'dataset'],
     neurons(id, 'neurons'),
   ]
@@ -872,32 +854,29 @@ function bodyOf(
    * Three arms end this way (`cluster`/`nblast`, `coclust`, `xnblast`) and each had written it
    * out, one of them without the sentence above. One rule, one spelling.
    */
-  const fromLinkage = (visualisation: VisualisationId, id: string): Link[] =>
+  const fromLinkage = (visualisation: VisualisationId, id: string): Wire[] =>
     visualisation === 'dendrogram'
       ? [['linkage', 'tree', id, 'in']]
       : [['linkage', 'ordered', id, 'in']]
 
   switch (answers.analysis) {
     case 'partners': {
-      const tail = views(5, 0, (_visualisation, id) => [['sort', 'out', id, 'in']])
+      const tail = views(0, (_visualisation, id) => [['sort', 'out', id, 'in']])
       return {
         nodes: [
           {
             id: 'conn',
             type: 'neuron.connectivity',
-            col: 2,
             params: { direction: 'outputs', minWeight: 3 },
           },
           {
             id: 'group',
             type: 'core.groupBy',
-            col: 3,
             params: { by: ['postType'], agg: 'sum', value: ['weight'] },
           },
           {
             id: 'sort',
             type: 'core.sort',
-            col: 4,
             params: { column: 'sum_weight', descending: true, limit: 0 },
           },
           ...tail.nodes,
@@ -921,16 +900,16 @@ function bodyOf(
        * The row-normalise is the heatmap's own, so it is built only when a heatmap was ticked.
        */
       const normalised = chosen.includes('heatmap')
-      const tail = views(normalised ? 4 : 3, 0, (visualisation, id) =>
+      const tail = views(0, (visualisation, id) =>
         visualisation === 'heatmap'
           ? [['norm', 'out', id, 'in']]
           : [['adj', 'links', id, 'in']],
       )
       return {
         nodes: [
-          { id: 'adj', type: 'neuron.adjacency', col: 2, params: { groupByType: true } },
+          { id: 'adj', type: 'neuron.adjacency', params: { groupByType: true } },
           ...(normalised
-            ? [{ id: 'norm', type: 'core.normalize', col: 3, params: { mode: 'row' } }]
+            ? [{ id: 'norm', type: 'core.normalize', params: { mode: 'row' } }]
             : []),
           ...tail.nodes,
         ],
@@ -938,7 +917,7 @@ function bodyOf(
           ['ds', 'dataset', 'adj', 'dataset'],
           neurons('adj', 'sources'),
           neurons('adj', 'targets'),
-          ...(normalised ? ([['adj', 'matrix', 'norm', 'in']] as Link[]) : []),
+          ...(normalised ? ([['adj', 'matrix', 'norm', 'in']] as Wire[]) : []),
           ...tail.links,
         ],
         viewId: tail.viewId,
@@ -960,8 +939,7 @@ function bodyOf(
        */
       const perQuery = chosen.includes('heatmap')
       const regroup = perQuery && chosen.includes('table')
-      const viewCol = 3 + (perQuery ? 1 : 0) + (regroup ? 2 : 0)
-      const tail = views(viewCol, 0, (visualisation, id) =>
+      const tail = views(0, (visualisation, id) =>
         visualisation === 'heatmap'
           ? [['piv', 'matrix', id, 'in']]
           : [regroup ? ['sort', 'out', id, 'in'] : ['inf', 'influence', id, 'in']],
@@ -971,7 +949,6 @@ function bodyOf(
           {
             id: 'inf',
             type: 'neuron.influence',
-            col: 2,
             params: { perQuery },
           },
           ...(perQuery
@@ -979,7 +956,6 @@ function bodyOf(
                 {
                   id: 'piv',
                   type: 'core.pivot',
-                  col: 3,
                   // Type against type: a search over a whole dataset returns a mix, so this is
                   // the picture somebody can read. `queryId` on the columns keeps every query
                   // neuron as its own column, which is one edit away on the card.
@@ -997,14 +973,12 @@ function bodyOf(
                 {
                   id: 'group',
                   type: 'core.groupBy',
-                  col: 3,
                   row: 1,
                   params: { by: ['neuronId', 'type'], agg: 'sum', value: ['influence'] },
                 },
                 {
                   id: 'sort',
                   type: 'core.sort',
-                  col: 4,
                   row: 1,
                   params: { column: 'sum_influence', descending: true, limit: 0 },
                 },
@@ -1015,12 +989,12 @@ function bodyOf(
         links: [
           ['ds', 'dataset', 'inf', 'dataset'],
           neurons('inf', 'neurons'),
-          ...(perQuery ? ([['inf', 'influence', 'piv', 'in']] as Link[]) : []),
+          ...(perQuery ? ([['inf', 'influence', 'piv', 'in']] as Wire[]) : []),
           ...(regroup
             ? ([
                 ['inf', 'influence', 'group', 'in'],
                 ['group', 'out', 'sort', 'in'],
-              ] as Link[])
+              ] as Wire[])
             : []),
           ...tail.links,
         ],
@@ -1035,7 +1009,7 @@ function bodyOf(
        * count is the whole point, so the geometry the query already knows is handed over rather
        * than recomputed. The table viewer takes the `paths` port, which is one row per path.
        */
-      const tail = views(3, 0, (visualisation, id) =>
+      const tail = views(0, (visualisation, id) =>
         visualisation === 'network'
           ? [
               ['paths', 'network', id, 'in'],
@@ -1044,7 +1018,7 @@ function bodyOf(
           : [['paths', 'paths', id, 'in']],
       )
       return {
-        nodes: [{ id: 'paths', type: 'neuron.paths', col: 2, row: 1 }, ...tail.nodes],
+        nodes: [{ id: 'paths', type: 'neuron.paths', row: 1 }, ...tail.nodes],
         links: [
           ['ds', 'dataset', 'paths', 'dataset'],
           neurons('paths', 'sources'),
@@ -1067,16 +1041,16 @@ function bodyOf(
        * and Linkage inverts a similarity and leaves a distance alone by reading exactly that.
        */
       const shape = answers.analysis === 'nblast'
-      const tail = views(shape ? 5 : 6, 0, fromLinkage)
+      const tail = views(0, fromLinkage)
       const upstream: Placement[] = shape
         ? [
-            { id: 'skel', type: 'neuron.skeletons', col: 2 },
-            { id: 'nblast', type: 'neuron.nblast', col: 3 },
+            { id: 'skel', type: 'neuron.skeletons' },
+            { id: 'nblast', type: 'neuron.nblast' },
           ]
         : [
-            { id: 'conn', type: 'neuron.connectivity', col: 2, params: VECTOR_CONNECTIVITY },
-            { id: 'vectors', type: 'neuron.partnerVectors', col: 3 },
-            { id: 'sim', type: 'core.similarity', col: 4, params: VECTOR_SIMILARITY },
+            { id: 'conn', type: 'neuron.connectivity', params: VECTOR_CONNECTIVITY },
+            { id: 'vectors', type: 'neuron.partnerVectors' },
+            { id: 'sim', type: 'core.similarity', params: VECTOR_SIMILARITY },
           ]
       return {
         nodes: [
@@ -1087,7 +1061,7 @@ function bodyOf(
            * carrying its result is taller than a row — which is the same lesson the viewers
            * taught: heights are content and only widths are declared.
            */
-          { id: 'linkage', type: 'cluster.linkage', col: shape ? 4 : 5 },
+          { id: 'linkage', type: 'cluster.linkage' },
           ...tail.nodes,
         ],
         links: shape
@@ -1114,19 +1088,17 @@ function bodyOf(
     }
 
     case 'network': {
-      const tail = views(5, 0, (_visualisation, id) => [['net', 'network', id, 'in']])
+      const tail = views(0, (_visualisation, id) => [['net', 'network', id, 'in']])
       return {
         nodes: [
           {
             id: 'conn',
             type: 'neuron.connectivity',
-            col: 2,
             params: { direction: 'outputs', minWeight: 5 },
           },
           {
             id: 'group',
             type: 'core.groupBy',
-            col: 3,
             // Both ends, because a network's edges are (source, target) pairs — grouping by the
             // partner alone would collapse every query neuron into one node.
             params: { by: ['preType', 'postType'], agg: 'sum', value: ['weight'] },
@@ -1134,7 +1106,6 @@ function bodyOf(
           {
             id: 'net',
             type: 'net.build',
-            col: 4,
             params: {
               source: 'preType',
               target: 'postType',
@@ -1167,11 +1138,11 @@ function bodyOf(
       // half of one decision, and a builder asking a different question from the dialog that
       // offered it is how a workflow comes to be built without a node it was shown with.
       const withSynapses = drawn && keys.every((key) => familyCan(key, 'synapses'))
-      const tail = views(drawn ? 3 : 2, drawn ? 0.5 : 0, (visualisation, id) =>
+      const tail = views(drawn ? 0.5 : 0, (visualisation, id) =>
         visualisation === 'viewer3d'
           ? [
               ['skel', 'skeletons', id, 'skeletons'],
-              ...(withSynapses ? ([['syn', 'points', id, 'points']] as Link[]) : []),
+              ...(withSynapses ? ([['syn', 'points', id, 'points']] as Wire[]) : []),
             ]
           : scene(id),
       )
@@ -1182,7 +1153,6 @@ function bodyOf(
                 {
                   id: 'skel',
                   type: 'neuron.skeletons',
-                  col: 2,
                   row: withSynapses ? 0 : 0.5,
                 },
               ]
@@ -1192,7 +1162,6 @@ function bodyOf(
                 {
                   id: 'syn',
                   type: 'neuron.synapses',
-                  col: 2,
                   row: 1.1,
                   params: { polarity: '', minWeight: 10 },
                 },
@@ -1223,10 +1192,10 @@ function bodyOf(
         ],
         links: [
           ...(drawn
-            ? ([['ds', 'dataset', 'skel', 'dataset'], neurons('skel', 'neurons')] as Link[])
+            ? ([['ds', 'dataset', 'skel', 'dataset'], neurons('skel', 'neurons')] as Wire[])
             : []),
           ...(withSynapses
-            ? ([['ds', 'dataset', 'syn', 'dataset'], neurons('syn', 'neurons')] as Link[])
+            ? ([['ds', 'dataset', 'syn', 'dataset'], neurons('syn', 'neurons')] as Wire[])
             : []),
           ...tail.links,
         ],
@@ -1246,14 +1215,13 @@ function bodyOf(
        * it is `expensive` and reads every dataset's whole annotation table, which is why nothing
        * here re-fetches when that threshold moves.
        */
-      const mapper = mapperNode(bands, 3, mid)
-      const tail = views(5, mid, (_visualisation, id) => [['cmp', 'comparison', id, 'in']])
+      const mapper = mapperNode(bands, mid)
+      const tail = views(mid, (_visualisation, id) => [['cmp', 'comparison', id, 'in']])
       return {
         nodes: [
           ...keys.map((_key, index): Placement => ({
             id: suffixed('conn', index + 1),
             type: 'neuron.connectivity',
-            col: 2,
             row: index * DATASET_ROW,
             // Outputs, so every row is presynaptic → postsynaptic and the two ends the
             // comparison reads are `preId`/`postId` — which are `Compare Connectivity`'s own
@@ -1264,14 +1232,13 @@ function bodyOf(
           {
             id: 'cmp',
             type: 'compare.connectivity',
-            col: 4,
             row: mid,
             params: { datasetCount: keys.length },
           },
           ...tail.nodes,
         ],
         links: [
-          ...keys.flatMap((_key, index): Link[] => {
+          ...keys.flatMap((_key, index): Wire[] => {
             const conn = suffixed('conn', index + 1)
             const slot = index + 1
             return [
@@ -1304,7 +1271,7 @@ function bodyOf(
        *
        * Which is also why the Stack Tables below adds no source column: the dataset is in the id.
        */
-      const mapper = mapperNode(bands, 3, mid)
+      const mapper = mapperNode(bands, mid)
       const stacks = oneStack({
         type: 'core.stack',
         inputs: keys.map((_key, index): [string, string] => [
@@ -1312,11 +1279,9 @@ function bodyOf(
           'out',
         ]),
         labels: keys,
-        col: 6,
         row: mid,
       })
-      const simCol = 6 + stacks.cols
-      const tail = views(simCol + 2, mid, fromLinkage)
+      const tail = views(mid, fromLinkage)
       return {
         nodes: [
           ...keys.flatMap((key, index): Placement[] => {
@@ -1326,15 +1291,13 @@ function bodyOf(
               {
                 id: suffixed('conn', which),
                 type: 'neuron.connectivity',
-                col: 2,
                 row,
                 params: VECTOR_CONNECTIVITY,
               },
-              { id: suffixed('vectors', which), type: 'neuron.partnerVectors', col: 4, row },
+              { id: suffixed('vectors', which), type: 'neuron.partnerVectors', row },
               {
                 id: suffixed('qual', which),
                 type: 'core.qualifyIds',
-                col: 5,
                 row,
                 // The family key, which is already the short name this param asks for — and the
                 // one string that identifies the dataset everywhere else in the app.
@@ -1347,15 +1310,14 @@ function bodyOf(
           {
             id: 'sim',
             type: 'core.similarity',
-            col: simCol,
             row: mid,
             params: VECTOR_SIMILARITY,
           },
-          { id: 'linkage', type: 'cluster.linkage', col: simCol + 1, row: mid },
+          { id: 'linkage', type: 'cluster.linkage', row: mid },
           ...tail.nodes,
         ],
         links: [
-          ...keys.flatMap((_key, index): Link[] => {
+          ...keys.flatMap((_key, index): Wire[] => {
             const which = index + 1
             const conn = suffixed('conn', which)
             const vectors = suffixed('vectors', which)
@@ -1396,12 +1358,10 @@ function bodyOf(
         type: 'neuron.stack',
         inputs: keys.map((_key, index): [string, string] => [suffixed('xf', index + 1), 'out']),
         labels: keys.map((key) => datasetFamily(key)?.label ?? key),
-        col: 4,
         row: mid,
         sourceColumn: STACK_SOURCE_COLUMN,
       })
-      const after = 4 + stacks.cols
-      const tail = views(shape ? after + 2 : after, mid, (visualisation, id) =>
+      const tail = views(mid, (visualisation, id) =>
         shape
           ? fromLinkage(visualisation, id)
           : [[stacks.out[0], stacks.out[1], id, 'skeletons']],
@@ -1412,17 +1372,17 @@ function bodyOf(
             const which = index + 1
             const row = index * DATASET_ROW
             return [
-              { id: suffixed('skel', which), type: 'neuron.skeletons', col: 2, row },
+              { id: suffixed('skel', which), type: 'neuron.skeletons', row },
               // No params: `Target` already defaults to the shared template and `Space` to
               // whatever the geometry arrived carrying, which is the pair the dataset stamped.
-              { id: suffixed('xf', which), type: 'neuron.xform', col: 3, row },
+              { id: suffixed('xf', which), type: 'neuron.xform', row },
             ]
           }),
           ...stacks.nodes,
           ...(shape
             ? [
-                { id: 'nblast', type: 'neuron.nblast', col: after, row: mid },
-                { id: 'linkage', type: 'cluster.linkage', col: after + 1, row: mid },
+                { id: 'nblast', type: 'neuron.nblast', row: mid },
+                { id: 'linkage', type: 'cluster.linkage', row: mid },
               ]
             : []),
           ...tail.nodes.map((node) =>
@@ -1441,7 +1401,7 @@ function bodyOf(
           ),
         ],
         links: [
-          ...keys.flatMap((_key, index): Link[] => {
+          ...keys.flatMap((_key, index): Wire[] => {
             const which = index + 1
             const skel = suffixed('skel', which)
             return [...opensOn(index, skel), [skel, 'skeletons', suffixed('xf', which), 'in']]
@@ -1451,7 +1411,7 @@ function bodyOf(
             ? ([
                 [stacks.out[0], stacks.out[1], 'nblast', 'query'],
                 ['nblast', 'scores', 'linkage', 'in'],
-              ] as Link[])
+              ] as Wire[])
             : []),
           ...tail.links,
         ],
@@ -1464,7 +1424,7 @@ function bodyOf(
       // No analysis: the neuron table straight into whatever was ticked, except the viewers that
       // fetch for themselves — those take the dataset too. Asked of the node rather than listed
       // by id; see `selfFetching`.
-      const tail = views(2, 0, (visualisation, id) =>
+      const tail = views(0, (visualisation, id) =>
         selfFetching(visualisation) ? scene(id) : [neurons(id, 'in')],
       )
       return tail
@@ -1545,7 +1505,7 @@ function overviewNote(answers: WizardAnswers): GraphNode {
     : ''
   return noteNode({
     id: 'note-overview',
-    x: xOf(0, 0),
+    x: GRID_ORIGIN.x,
     y: GRID_ORIGIN.y - 230,
     width: 720,
     height: 200,
@@ -1559,42 +1519,72 @@ function overviewNote(answers: WizardAnswers): GraphNode {
 
 // ---------------------------------------------------------------------------
 
-function place(
-  { id, type, col, row = 0, dx = 0, params }: Placement,
-  shift: number,
-): GraphNode {
-  return graphNode(
-    id,
-    type,
-    { x: xOf(col, shift) + dx, y: GRID_ORIGIN.y + row * ROW_HEIGHT },
-    params,
-  )
+/**
+ * Each chain's caption, directly under whatever the chain draws as. See `AnnotationChain.caption`.
+ *
+ * **Under the folded box, the same width as it**: one note under one box reads as that box's
+ * caption rather than as loose text on the canvas. Read off `collapsedView`, which is what the
+ * canvas draws, since nothing stores the box. A chain `foldChain` left unfolded is one card, and
+ * the caption goes under that card at its width, by the height it declares — the canvas has
+ * measured nothing yet. `CAPTION_GAP` either way, which is where an arrange snaps it back to.
+ *
+ * The note names the chain's output card (`GraphNode.captionOf`) — the one card a folded chain's
+ * box stands in for — which is what lets an arrange carry the caption with its chain rather than
+ * leave it behind; see `layout/companions.ts`' `captionView`.
+ */
+function withChainCaptions(graph: CodaGraph, chains: readonly AnnotationChain[]): CodaGraph {
+  const { boxes } = collapsedView(graph)
+  const notes = chains.flatMap((chain): GraphNode[] => {
+    const about = chain.output.id
+    const host =
+      boxes.find((box) => box.members.some((member) => member.id === about)) ??
+      graph.nodes.find((node) => node.id === about)
+    if (!chain.caption || !host) return []
+    const { width, height } = resolveSize(host)
+    const note = noteNode({
+      id: `note-${about}`,
+      x: host.position.x,
+      y: host.position.y + height + CAPTION_GAP,
+      width,
+      height: chain.caption.height,
+      text: chain.caption.text,
+    })
+    return [{ ...note, captionOf: about }]
+  })
+  return notes.length ? { ...graph, nodes: [...graph.nodes, ...notes] } : graph
 }
 
 /**
- * Nodes, the overview note and wires into a graph.
+ * Nodes, the notes and wires into a graph.
  *
- * The graph itself is `assembleGraph`, shared with the starters — see `assemble.ts`. What is here
- * is the wizard's own layout: placing a `Placement` on the grid, and docking each card's hints.
+ * The graph itself is `assembleGraph` — see `assemble.ts`. What is here is the wizard's own share
+ * of the layout: handing the cards to `layout/columns.ts` and docking each card's hints. A chain
+ * is folded, and captioned, afterwards by `buildWorkflow`.
  *
- * **The hints are applied here rather than inside `place`**, which stays a pure Placement → grid
- * coordinates function. Two concerns threaded through one helper is how the second one comes to
- * be passed down two levels to be used once.
+ * **Placed before they are added**, for the reason the assistant's applier gives: a dataset's
+ * Description companion goes in at `host.position + offset`, so a host moved after the add would
+ * leave its credit card behind.
  */
 function assemble(
   answers: WizardAnswers,
   nodes: Placement[],
+  links: Wire[],
   overview: GraphNode | undefined,
-  links: Link[],
-  shift: number,
   hints: ReadonlyMap<string, NodeHint[]>,
 ): CodaGraph {
   const { dataset, start, analysis, view } = answered(answers)
   const name = `${dataset} · ${analysis}`
   const description = `Built by the Workflow Wizard: ${dataset}, neurons chosen by ${start}, showing ${analysis} as ${view}.`
 
+  // `row ?? 0` rather than absent: every card here names its band, and an absent row would ask
+  // the placement to stack it under its column instead.
+  const at = placeInColumns(
+    nodes.map((spec) => ({ id: spec.id, type: spec.type, row: spec.row ?? 0 })),
+    links,
+  )
+
   const placed: GraphNode[] = nodes.map((spec) => {
-    const node = place(spec, shift)
+    const node = graphNode(spec.id, spec.type, at.get(spec.id) ?? GRID_ORIGIN, spec.params)
     const docked = hints.get(node.id)
     // Absent rather than empty, like every other optional field on a node: a `hints: []` in a
     // saved file is a key that says nothing, and a share link pays for it in the fragment.

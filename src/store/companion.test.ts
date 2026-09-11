@@ -18,7 +18,7 @@ import { requireNodeDef } from '../core/registry'
 import { MockSource } from '../data/mock/MockSource'
 import type { DataSource, DatasetInfo } from '../data/source'
 import { registerSource } from '../data/source'
-import { buildStarter } from '../examples/starters'
+import { buildStarter } from '../wizard/starters'
 import '../nodes'
 import { clearStorage } from '../test/jsdomStubs'
 import { useGraphStore } from './graphStore'
@@ -144,6 +144,24 @@ describe('starter graphs', () => {
     expect(built.edges.some((e) => e.target === card.id && e.targetHandle === 'dataset')).toBe(
       true,
     )
+  })
+
+  /*
+   * `loadStarter` asks for the wizard's one layout pass, under the wizard's own remembered
+   * preference — a starter is a wizard workflow, and its positions are arithmetic nobody chose.
+   * The request, not the pass: only the canvas answers it, and `layoutControls.test.tsx` covers
+   * what answering does.
+   */
+  it('asks the canvas for one arrange on arrival, unless the wizard’s box is unticked', () => {
+    const spec = { nodeType: 'dataset.hemibrain', label: 'Hemibrain', sourceId: 'neuprint' }
+    useGraphStore.getState().setWizardArrange(true)
+    const before = useGraphStore.getState().arrangeRequest
+    useGraphStore.getState().loadStarter(spec)
+    expect(useGraphStore.getState().arrangeRequest).toBe(before + 1)
+
+    useGraphStore.getState().setWizardArrange(false)
+    useGraphStore.getState().loadStarter(spec)
+    expect(useGraphStore.getState().arrangeRequest).toBe(before + 1)
   })
 
   it('opens a mock starter without one', () => {
