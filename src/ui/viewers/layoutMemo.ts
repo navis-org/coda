@@ -23,6 +23,7 @@
 import type { CameraState } from 'sigma/types'
 
 import type { Positioned } from './networkLayout'
+import { LruMap } from '../../core/lruMap'
 
 export interface LayoutMemo {
   /** Insertion order of the node ids the positions belong to. */
@@ -49,7 +50,7 @@ export interface LayoutMemo {
  */
 const MAX_MEMOS = 8
 
-const memos = new Map<string, LayoutMemo>()
+const memos = new LruMap<string, LayoutMemo>(MAX_MEMOS)
 
 function sameIds(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false
@@ -58,15 +59,7 @@ function sameIds(a: string[], b: string[]): boolean {
 }
 
 export function rememberLayout(key: string, memo: LayoutMemo): void {
-  // Re-inserting moves the entry to the end, so eviction tracks last *use* rather than
-  // first creation and the layout you keep returning to is the one that survives.
-  memos.delete(key)
   memos.set(key, memo)
-  while (memos.size > MAX_MEMOS) {
-    const oldest = memos.keys().next()
-    if (oldest.done) break
-    memos.delete(oldest.value)
-  }
 }
 
 /** The stored layout, when it still describes this graph laid out this way. */
@@ -78,7 +71,8 @@ export function recallLayout(
   const memo = memos.get(key)
   if (!memo) return undefined
   if (memo.signature !== signature || !sameIds(memo.nodeIds, nodeIds)) return undefined
-  memos.delete(key)
+  // A hit that still fits counts as a use, so the layout you keep returning to is the one that
+  // survives — `LruMap` leaves reads alone, so it is said here.
   memos.set(key, memo)
   return memo
 }

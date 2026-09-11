@@ -1,34 +1,38 @@
 /** Build Network, Paths, Explore, Profile, the clustering trio, and the similarity pair. */
 
 // An emitter may reach `src/ui` — see the notebook emitter for why the palette lives there.
-import { profileExportPin } from '../../profileSubject'
-import { FILTER_NETWORK_DEFAULT_OP, resolveFilterOp } from '../../../nodes/lib/tableOps'
+import { profileExportPin } from '../../plans/profile'
 import { MAX_SERIES } from '../../../ui/colors'
 import { clusterColor } from '../../../ui/encoding'
 import { rCol as col, rStr, rValue, rVector } from '../r'
-import type { LANDMARK_SIDES } from '../../../nodes/transform/landmarkTransform'
-import { LANDMARK_AXES, landmarkParamId } from '../../../nodes/transform/landmarkTransform'
-import { matchParamsFrom } from '../../../nodes/lib/matchOps'
-import { embedRoute } from '../../../nodes/lib/embedOps'
-import { effectiveOutput, isLongLayout } from '../../../nodes/lib/similarityOps'
-import type { SimilarityMetric, SimilarityOutput } from '../../../nodes/lib/similarityOps'
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import { portIdAt } from '../../../core/ports'
-import { compareParamsFrom } from '../../../nodes/lib/edgeComparison'
-import { repeatParamId } from '../../../nodes/lib/repeatParams'
-import { resolveDatasetNames } from '../../../nodes/analysis/compareConnectivity'
 import { centralityOptions } from '../../../nodes/analysis/networkCentrality'
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
-import { decodeIndices } from '../../../nodes/lib/chartSelection'
 import { codaIds, neuronIds } from './common'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { populationCypher } from '../../../data/neuprint/cypher'
 import { readWeightProperty, schemasFromType } from '../../../nodes/lib/datasetParam'
-import { CYPHER_PLACEHOLDERS, profilePropertyQueries } from '../../connectivityPlan'
+import { CYPHER_PLACEHOLDERS, profilePropertyQueries } from '../../plans/connectivity'
 import { rFilterPredicate } from './table'
-import { findColumn, isNumericDType } from '../../../core/types'
-import { selectionIds } from '../../selection'
+import type { EmbedNote, LinkageNote, SimilarityCall } from '../../plans/analysis'
+import type { MatchesNote } from '../../plans/analysis'
+import type { Refusable } from '../../neutral'
+import {
+  compareConnectivityPlan,
+  cutPlan,
+  embedPlan,
+  filterNetworkPlan,
+  landmarkPlan,
+  linkagePlan,
+  matchesPlan,
+  partnerVectorsPlan,
+  similarityPlan,
+} from '../../plans/analysis'
+import { dendrogramSelection } from '../../plans/viewers'
+import { explorePlan } from '../../plans/explore'
+import { pickedIds } from '../../plans/viewers'
 
 // ---------------------------------------------------------------------------
 // Build Network
@@ -187,12 +191,9 @@ registerEmitter('net.centrality', (ctx) => {
 registerEmitter('net.filter', (ctx) => {
   const src = ctx.wired('in')
   const out = ctx.output('out')
-  const name = ctx.column('column')
-  const seedFrame = ctx.input('seed')
-  const seedColumn = ctx.column('seedColumn')
-  const hasSeedTable = !!seedFrame && !!seedColumn
-  if (!name && !hasSeedTable)
-    return ctx.todo('Nothing selects any nodes on this Filter Network.')
+  const plan = filterNetworkPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const { condition, seed } = plan
 
   ctx.library('igraph')
   ctx.library('dplyr')
@@ -200,15 +201,8 @@ registerEmitter('net.filter', (ctx) => {
   const lines: string[] = []
   const seeds: string[] = []
 
-  if (name) {
-    const raw = String(ctx.params.value)
-    // `ctx.attributes`, not `ctx.schema`: `schemaOf` has no branch for a network, and this is
-    // the accessor `InferContext` carries for exactly that.
-    const dtype = findColumn(ctx.attributes('in', 'nodes'), name)?.dtype
-    // The same resolution `evaluate` makes, or the export filters on a different
-    // condition from the card it came from. See `resolveFilterOp`.
-    const op = resolveFilterOp(ctx.params.op, dtype, FILTER_NETWORK_DEFAULT_OP)
-    const built = rFilterPredicate(name, op, raw, isNumericDType(dtype ?? 'str'))
+  if (condition) {
+    const built = rFilterPredicate(condition)
     if (built.predicate === undefined) return ctx.todo(built.reason)
     lines.push(
       // The notes travel in the value, so the caveat this used to drop is now dropped only by
@@ -221,8 +215,8 @@ registerEmitter('net.filter', (ctx) => {
     seeds.push('seed')
   }
 
-  if (hasSeedTable) {
-    lines.push(`wired <- as.character(na.omit(${seedFrame}[["${seedColumn}"]]))`)
+  if (seed) {
+    lines.push(`wired <- as.character(na.omit(${seed.table}[["${seed.column}"]]))`)
     seeds.push('wired')
   }
 
@@ -320,9 +314,7 @@ registerEmitter('neuron.explore', (ctx) => {
   const all = ctx.output('all')
   const hits = ctx.output('hits')
   const selected = ctx.output('selected')
-  const query = String(ctx.params.query).trim()
-  const limit = Number(ctx.params.limit)
-  const selection = selectionIds(ctx)
+  const plan = explorePlan(ctx)
   /*
    * The dataset's population, in the `WHERE` of the Cypher this chunk writes by hand.
    *
@@ -355,10 +347,11 @@ registerEmitter('neuron.explore', (ctx) => {
     `)`,
   ]
 
-  if (query) {
+  if (plan.hits.note === undefined) {
+    const { query, cap: limit } = plan.hits
     ctx.helper('coda_search')
     lines.push(``, `${hits} <- coda_search(${all}, ${rStr(query)})`)
-    if (limit > 0) {
+    if (limit !== undefined) {
       lines.push(
         ...ctx.note(
           `Coda caps this at ${limit} hits and keeps the ${limit} most *relevant*; the ` +
@@ -368,23 +361,16 @@ registerEmitter('neuron.explore', (ctx) => {
       )
     }
   } else {
-    lines.push(
-      ``,
-      ...ctx.note('The search box is empty, so Hits is the whole table.'),
-      `${hits} <- ${all}`,
-    )
+    lines.push(``, ...ctx.note(plan.hits.note), `${hits} <- ${all}`)
   }
 
   lines.push(``)
-  if (selection.length === 0) {
-    lines.push(
-      ...ctx.note('Nothing is ticked on the canvas, so Selected is empty.'),
-      `${selected} <- ${all} |> slice(0)`,
-    )
+  if (plan.selected.note !== undefined) {
+    lines.push(...ctx.note(plan.selected.note), `${selected} <- ${all} |> slice(0)`)
   } else {
     // Resolved against the whole table rather than against hits, exactly as the node does:
     // refining a search must not drop a neuron somebody already chose.
-    lines.push(`${selected} <- ${all} |> filter(neuronId %in% ${rVector(selection)})`)
+    lines.push(`${selected} <- ${all} |> filter(neuronId %in% ${rVector(plan.selected.ids)})`)
   }
   return lines
 })
@@ -508,11 +494,10 @@ registerHelper({
 
 registerEmitter('out.profile', (ctx) => {
   const src = ctx.wired('neurons')
-  const conn = ctx.input('dataset')
+  const conn = ctx.wired('dataset')
   ctx.library('dplyr')
   const out = ctx.output('out')
   const current = ctx.output('current')
-  const selection = selectionIds(ctx)
   const minWeight = Math.max(1, Number(ctx.params.minWeight))
   const topN = Number(ctx.params.topN)
   // The card's Count by; passed only when it is not the weight, so a profile that never chose
@@ -522,29 +507,17 @@ registerEmitter('out.profile', (ctx) => {
   const queries = property ? profilePropertyQueries(property) : undefined
 
   const lines: string[] = [`${out} <- ${src}`]
-  if (selection.length > 0) {
-    lines.push(`${current} <- ${out} |> filter(neuronId %in% ${rVector(selection)})`)
+  const pinned = pickedIds(ctx, 'out.profile')
+  if (pinned.note === undefined) {
+    lines.push(`${current} <- ${out} |> filter(neuronId %in% ${rVector(pinned.ids)})`)
   } else {
-    lines.push(
-      ...ctx.note('No neuron is pinned on the canvas, so Current is empty.'),
-      `${current} <- ${out} |> slice(0)`,
-    )
-  }
-
-  if (!conn) {
-    return [
-      ...lines,
-      ...ctx.note(
-        'No Dataset is wired, so the metrics cannot be fetched — this is the pass-through ' +
-          'and the pinned row only.',
-      ),
-    ]
+    lines.push(...ctx.note(pinned.note), `${current} <- ${out} |> slice(0)`)
   }
 
   ctx.helper('coda_profile')
   const grouped = ctx.column('groupBy')
   // `profileExportPin` owns the rule; this owns only how a vector of ids is spelled in R.
-  const pin = profileExportPin(selection, grouped)
+  const pin = profileExportPin(pinned.note === undefined ? pinned.ids : [], grouped)
   const ids = pin ? rVector(pin) : neuronIds(out)
   lines.push(
     ``,
@@ -902,7 +875,7 @@ registerEmitter('neuron.nblastKnn', (ctx) =>
  * agree exactly. `ward.D` is the older variant of Ward's criterion and is **not** the match —
  * the two differ on the same data and neither errors.
  */
-export const R_METHODS: Record<string, string> = {
+const R_METHODS: Record<string, string> = {
   ward: 'ward.D2',
   average: 'average',
   complete: 'complete',
@@ -910,44 +883,62 @@ export const R_METHODS: Record<string, string> = {
   weighted: 'mcquitty',
 }
 
+/**
+ * Why a method fastcore accepts is still not written here, for the two `R_METHODS` cannot map —
+ * Linkage's and the Heatmap's cluster order both ask. `hclust` has a `centroid` and a `median`,
+ * but they are meant for squared Euclidean distances, where fastcore's take the distances
+ * themselves.
+ */
+function hclustRefusal(method: string): string {
+  return (
+    `hclust’s "${method}" method expects squared Euclidean distances, which is not what ` +
+    `fastcore clustered on the canvas, so "${method}" is not translated here.`
+  )
+}
+
+/** `hclust`'s name for a fastcore method, or `hclustRefusal` for the two it has none for. */
+export function hclustMethod(method: string): Refusable<{ method: string }> {
+  const name = R_METHODS[method]
+  return name ? { method: name } : { refusal: hclustRefusal(method) }
+}
+
+/** The notes a Linkage chunk can carry, keyed as `linkagePlan` decides them. */
+const LINKAGE_NOTES: Record<LinkageNote, string> = {
+  symmetryOff:
+    'Symmetry is off, and `as.dist` reads the **lower** triangle where Coda and the ' +
+    'notebook export read the upper. On a matrix that is already symmetric that is the ' +
+    'same answer; on one that is not, this is the transpose of what the canvas shows.',
+}
+
+/** Each of `linkagePlan`'s ways of making the matrix symmetric, in base R. */
+const SYMMETRISE = {
+  mean: '(m_ + t(m_)) / 2',
+  min: 'pmin(m_, t(m_))',
+  max: 'pmax(m_, t(m_))',
+} as const
+
 registerEmitter('cluster.linkage', (ctx) => {
   const src = ctx.wired('in')
   const tree = ctx.output('tree')
   const ordered = ctx.output('ordered')
-  const method = R_METHODS[String(ctx.params.method)] ?? 'ward.D2'
-  const symmetry = String(ctx.params.symmetry)
-  const distance = String(ctx.params.distance)
+  const plan = linkagePlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const hclust = hclustMethod(plan.method)
+  if (hclust.refusal !== undefined) return ctx.todo(hclust.refusal)
+  const { method } = hclust
+  const note = (key: LinkageNote) =>
+    plan.notes.includes(key) ? ctx.note(LINKAGE_NOTES[key]) : []
+  const combined = plan.combine ? SYMMETRISE[plan.combine] : 'm_'
 
-  const combined =
-    symmetry === 'mean'
-      ? '(m_ + t(m_)) / 2'
-      : symmetry === 'min'
-        ? 'pmin(m_, t(m_))'
-        : symmetry === 'max'
-          ? 'pmax(m_, t(m_))'
-          : 'm_'
-
-  const lines: string[] = [
+  return [
     ...ctx.note(
-      `Coda runs navis-fastcore, whose linkage is SciPy's, and "${String(ctx.params.method)}" ` +
+      `Coda runs navis-fastcore, whose linkage is SciPy's, and "${plan.method}" ` +
         `is hclust's "${method}". Checked through both on one matrix: same merge heights, same ` +
         `leaf order. Note that "ward.D" is a different criterion and would not agree.`,
     ),
     `m_ <- as.matrix(${src})`,
-    `d_ <- as.dist(${distance === 'none' ? combined : `1 - (${combined})`})`,
-  ]
-
-  if (symmetry === 'none') {
-    lines.push(
-      ...ctx.note(
-        'Symmetry is off, and `as.dist` reads the **lower** triangle where Coda and the ' +
-          'notebook export read the upper. On a matrix that is already symmetric that is the ' +
-          'same answer; on one that is not, this is the transpose of what the canvas shows.',
-      ),
-    )
-  }
-
-  lines.push(
+    `d_ <- as.dist(${plan.invert ? `1 - (${combined})` : combined})`,
+    ...note('symmetryOff'),
     ``,
     `${tree} <- hclust(d_, method = ${rStr(method)})`,
     // The block-diagonal picture, which is what the second port is for.
@@ -956,8 +947,8 @@ registerEmitter('cluster.linkage', (ctx) => {
     // vector rides beside it. NULL rather than an empty vector: nothing has cut this yet, which
     // is not the same as cutting it into nothing.
     `${tree}_clusters <- NULL`,
-  )
-  return lines
+    ...ctx.note(plan.autoNote),
+  ]
 })
 
 registerEmitter('cluster.cut', (ctx) => {
@@ -965,36 +956,14 @@ registerEmitter('cluster.cut', (ctx) => {
   ctx.library('dplyr')
   const clusters = ctx.output('clusters')
   const tree = ctx.output('tree')
-  const mode = String(ctx.params.mode)
-  /*
-   * The mixed-dataset mode has no counterpart here. `cut_tree`/`cutree` both cut across the
-   * tree at one level; this mode descends to the deepest clusters drawing from every dataset,
-   * which is a walk over the merge matrix rather than a cut. Emitting a count cut instead —
-   * which is what falling through to the branch below did — produces a notebook that *runs*,
-   * returns four clusters, and is a different analysis from the canvas, with `4` being a
-   * default the user never saw because the control is hidden in this mode.
-   *
-   * `docs/export.md`'s policy: two things are refused, every other gap emits a TODO. Writing
-   * the walk in both languages is the fix if somebody wants it; a silent wrong answer is not.
-   */
-  if (mode === 'mixed') {
-    return ctx.todo(
-      'This Cut Tree groups by which datasets each cluster draws from, which has no ' +
-        'single-call equivalent here.',
-    )
-  }
-  const byHeight = mode === 'height'
-  const cut = byHeight
-    ? `cutree(${src}, h = ${Number(ctx.params.height)})`
-    : `cutree(${src}, k = ${Number(ctx.params.count)})`
+  // The mixed-dataset mode is refused in both languages; `cutPlan` records why.
+  const plan = cutPlan(ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const byHeight = plan.by === 'height'
+  const cut = byHeight ? `cutree(${src}, h = ${plan.at})` : `cutree(${src}, k = ${plan.at})`
 
   return [
-    ...(byHeight
-      ? ctx.note(
-          'Cutting at a height gives however many groups fall out below it, which may be one ' +
-            'if the height is above the top of the tree.',
-        )
-      : []),
+    ...ctx.note(plan.note),
     `cl_ <- ${cut}`,
     ...ctx.note(
       'Coda numbers clusters left to right as the dendrogram draws them, so the column reads ' +
@@ -1031,9 +1000,8 @@ registerEmitter('out.dendrogram', (ctx) => {
   const out = ctx.output('out')
   const selected = ctx.output('selected')
   const down = String(ctx.params.orientation) === 'down'
-  // Leaf positions, not names — see the notebook emitter and `out.dendrogram`. A different
-  // reader from `selectionIds`, and the type is the point: see `decodeIndices`.
-  const selection = decodeIndices(ctx.params.selection)
+  // Leaf positions, not names — `dendrogramSelection` says why.
+  const selection = dendrogramSelection(ctx.params)
 
   /*
    * The Annotations port. It reaches the *plot* and nothing else — see the notebook emitter for
@@ -1098,12 +1066,12 @@ registerEmitter('out.dendrogram', (ctx) => {
   const palette = Array.from({ length: MAX_SERIES }, (_, i) => clusterColor(i + 1, 'dark'))
   const uncut = clusterColor(0, 'dark')
 
-  if (selection.length > 0) {
+  if (selection.note === undefined) {
     lines.push(
       // Coda counts observations from 0 and R indexes from 1, so the shift is explicit rather
       // than left to whoever reads this next. `decodeIndices`' `number[]` is what makes
       // `i + 1` arithmetic rather than string concatenation — see there.
-      `picked_ <- c(${selection.map((i) => i + 1).join(', ')})`,
+      `picked_ <- c(${selection.positions.map((i) => i + 1).join(', ')})`,
       `palette_ <- ${rVector(palette)}`,
       `cl_ <- if (is.null(${out}_clusters)) rep(0L, length(${out}$labels)) else ${out}_clusters`,
       `${selected} <- tibble(`,
@@ -1117,7 +1085,7 @@ registerEmitter('out.dendrogram', (ctx) => {
     )
   } else {
     lines.push(
-      ...ctx.note('No branch is selected on the canvas, so Selected is empty.'),
+      ...ctx.note(selection.note),
       `${selected} <- tibble(`,
       `  label = character(), order = integer(), cluster = integer(), color = character(),`,
       `)`,
@@ -1223,16 +1191,9 @@ registerEmitter('core.landmarkTransform', (ctx) => {
   const table = ctx.wired('in')
   const out = ctx.output('transform')
 
-  // Through the node's own id builder, so a renamed param breaks the build rather than
-  // quietly emitting the "unset columns" TODO.
-  const columns = (side: (typeof LANDMARK_SIDES)[number]) =>
-    LANDMARK_AXES.map((axis) => ctx.column(landmarkParamId(side, axis)) ?? '')
-
-  const from = columns('source')
-  const to = columns('target')
-  if ([...from, ...to].some((name) => !name)) {
-    return ctx.todo('Landmark Transform has unset coordinate columns — pick all six.')
-  }
+  const plan = landmarkPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const { from, to } = plan
 
   ctx.library('nat')
   const matrix = (names: string[], units: unknown) => {
@@ -1336,6 +1297,13 @@ registerEmitter('neuron.cleanMeshes', (ctx) =>
 // NBLAST Matches
 // ---------------------------------------------------------------------------
 
+const MATCHES_NOTES: Record<MatchesNote, string> = {
+  autoDirection:
+    'Best means is on "from the matrix", which Coda answers by reading what the matrix ' +
+    'says its cells are. A plain matrix has nowhere to carry that, so this assumes ' +
+    'higher is better.',
+}
+
 /**
  * The one of the four that translates cleanly, because it is arithmetic on a matrix rather
  * than a call into somebody's neuron library.
@@ -1351,7 +1319,8 @@ registerEmitter('neuron.nblastMatches', (ctx) => {
   // The node's own decoder, for the reason the Python emitter uses it: three transcriptions of
   // "the card stores `axis` as text and means an axis number" is three places to get it wrong,
   // and only one of them has a test.
-  const p = matchParamsFrom(ctx.params)
+  const plan = matchesPlan(ctx.params)
+  const p = plan.match
   const { mode, axis, direction, skipSelf, cutoff } = p
   const lower = direction === 'lower'
 
@@ -1377,15 +1346,7 @@ registerEmitter('neuron.nblastMatches', (ctx) => {
     )
   }
 
-  if (direction === 'auto') {
-    lines.push(
-      ...ctx.note(
-        'Best means is on "from the matrix", which Coda answers by reading what the matrix ' +
-          'says its cells are. A plain matrix has nowhere to carry that, so this assumes ' +
-          'higher is better.',
-      ),
-    )
-  }
+  lines.push(...plan.notes.flatMap((note) => ctx.note(MATCHES_NOTES[note])))
 
   const scoreBack = lower ? '-' : ''
 
@@ -1473,8 +1434,9 @@ registerEmitter('neuron.nblastMatches', (ctx) => {
  */
 registerEmitter('neuron.partnerVectors', (ctx) => {
   const src = ctx.wired('in')
-  const weight = ctx.column('weight')
-  if (!weight) return ctx.todo('This Partner Vectors node has no weight column picked.')
+  const plan = partnerVectorsPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const { weight } = plan
 
   ctx.helper('coda_partner_vectors')
   const neurons = ctx.input('neurons')
@@ -1510,82 +1472,44 @@ registerEmitter('neuron.partnerVectors', (ctx) => {
 })
 
 /**
- * The refusal, if this node cannot be translated. Kept apart from the call below so the guard
- * runs *before* `ctx.helper` — a misconfigured node that emits a TODO should not still pull two
- * hundred lines of helper, and an `install.packages` line for Matrix, into the document.
- */
-function similarityIssue(
-  ctx: EmitContext,
-  label: string,
-  featureParam: string,
-): string[] | undefined {
-  // Through the same predicate the nodes' `visibleIf` uses, rather than this emitter's own
-  // literal — the pair were testing `layout === 'wide'` in three places with three spellings.
-  if (!isLongLayout(ctx.params)) {
-    return ctx.column('idColumn') && ctx.columns('wideFeatures').length > 0
-      ? undefined
-      : ctx.todo(`This ${label} needs an Id column and at least one feature column.`)
-  }
-  return ctx.column('observations') && ctx.column(featureParam)
-    ? undefined
-    : ctx.todo(`This ${label} needs an Observations and a Features column.`)
-}
-
-/**
- * `coda_similarity_long|wide(...)`, for the two nodes that reach it.
- *
- * `core.similarity` is one; `core.embed`'s Features port is the other, and it had this block
- * copied — differing only in which param holds the long feature picker and in pinning
- * `output = "distance"`. Two spellings of one call is how a fix reaches one document and not
- * the other.
+ * `coda_similarity_long|wide(...)`, for the two nodes that reach it — `core.similarity`, and
+ * `core.embed`'s Features port. Which call, with which columns, is `plans/analysis.ts`'s; this only
+ * writes it, and asks for the helper once there is a call to write.
  *
  * No `ctx.library('Matrix')`: the helper declares its own package through `requires`, which is
  * what makes it impossible to pull the helper in without it.
  */
-function similarityCall(
+function similarityLines(
   ctx: EmitContext,
-  options: { out: string; src: string; featureParam: string; output: SimilarityOutput },
+  out: string,
+  src: string,
+  call: SimilarityCall,
 ): string[] {
   ctx.helper('coda_similarity')
-  const tail = [
-    `  metric = ${rStr(String(ctx.params.metric))},`,
-    `  output = ${rStr(options.output)}`,
-    `)`,
-  ]
-  if (!isLongLayout(ctx.params)) {
+  const tail = [`  metric = ${rStr(call.metric)},`, `  output = ${rStr(call.output)}`, `)`]
+  if (call.layout === 'wide') {
     return [
-      `${options.out} <- coda_similarity_wide(`,
-      `  ${options.src},`,
-      `  id_column = ${rStr(ctx.column('idColumn')!)},`,
-      `  columns = ${rVector(ctx.columns('wideFeatures'))},`,
+      `${out} <- coda_similarity_wide(`,
+      `  ${src},`,
+      `  id_column = ${rStr(call.idColumn)},`,
+      `  columns = ${rVector(call.columns)},`,
       ...tail,
     ]
   }
-  const value = ctx.column('value')
   return [
-    `${options.out} <- coda_similarity_long(`,
-    `  ${options.src},`,
-    `  observations = ${rStr(ctx.column('observations')!)},`,
-    `  features = ${rStr(ctx.column(options.featureParam)!)},`,
-    ...(value ? [`  value = ${rStr(value)},`] : []),
+    `${out} <- coda_similarity_long(`,
+    `  ${src},`,
+    `  observations = ${rStr(call.observations)},`,
+    `  features = ${rStr(call.features)},`,
+    ...(call.value ? [`  value = ${rStr(call.value)},`] : []),
     ...tail,
   ]
 }
 
 registerEmitter('core.similarity', (ctx) => {
-  const issue = similarityIssue(ctx, 'Similarity Matrix', 'features')
-  if (issue) return issue
-  return similarityCall(ctx, {
-    out: ctx.output('matrix'),
-    src: ctx.wired('in'),
-    featureParam: 'features',
-    // Through `effectiveOutput`: Euclidean hides the Output param, so reading it raw would put
-    // an argument in the document that the run it mirrors never used.
-    output: effectiveOutput(
-      String(ctx.params.metric) as SimilarityMetric,
-      String(ctx.params.output) as SimilarityOutput,
-    ),
-  })
+  const plan = similarityPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  return similarityLines(ctx, ctx.output('matrix'), ctx.wired('in'), plan.call)
 })
 
 // ---------------------------------------------------------------------------
@@ -1604,15 +1528,11 @@ registerEmitter('core.similarity', (ctx) => {
  * read as the node's two ports.
  */
 registerEmitter('compare.connectivity', (ctx) => {
-  const spec = compareParamsFrom(ctx, resolveDatasetNames(ctx), repeatParamId)
+  const spec = compareConnectivityPlan(ctx)
+  if (spec.refusal !== undefined) return ctx.todo(spec.refusal)
   const specs: string[] = []
   for (const [i, columns] of spec.columns.entries()) {
     const index = i + 1
-    if (!columns.pre || !columns.post) {
-      return ctx.todo(
-        `Dataset ${index} of this Compare Connectivity has no pre or post column.`,
-      )
-    }
     const entry = [
       `name = ${rStr(spec.names[i]!)}`,
       `edges = ${ctx.wired(portIdAt('edges', index))}`,
@@ -1644,6 +1564,13 @@ registerEmitter('compare.connectivity', (ctx) => {
 // Embedding
 // ---------------------------------------------------------------------------
 
+/** The notes an Embedding chunk can carry after its UMAP call, keyed as `embedPlan` decides them. */
+const EMBED_NOTES: Record<EmbedNote, string> = {
+  autoDistance:
+    'Scores are similarities, so the distance is 1 − score — the same reading the ' +
+    'Linkage chunk makes.',
+}
+
 /**
  * UMAP through `uwot`, which is **a third implementation rather than a translation of the
  * second**.
@@ -1660,46 +1587,42 @@ registerEmitter('compare.connectivity', (ctx) => {
  * one place its convention differs from Python's.
  */
 registerEmitter('core.embed', (ctx) => {
-  // The node's own decision rather than a fourth copy of the port list — see the notebook
-  // emitter for why, and `embedRoute` for the one statement of it.
-  const selected = embedRoute((port) => ctx.input(port) !== undefined)
-  if (!selected.ok) return ctx.todo(`This Embedding cannot be translated: ${selected.refusal}`)
-  const route = selected.route
+  const plan = embedPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const { settings, input } = plan
+  // Before `library(uwot)`, as in the notebook: a refused chunk attaches nothing.
+  if (input.refusal !== undefined) return ctx.todo(input.refusal)
+  ctx.library('uwot')
 
   const out = ctx.output('out')
-  const neighbours = Number(ctx.params.neighbors)
-  const epochs = Number(ctx.params.epochs)
-  const settings = [
+  const umapSettings = [
     `  n_components = 2,`,
-    `  min_dist = ${rValue(Number(ctx.params.minDist))},`,
-    `  spread = ${rValue(Number(ctx.params.spread))},`,
-    ...(epochs > 0 ? [`  n_epochs = ${epochs},`] : []),
+    `  min_dist = ${rValue(settings.minDist)},`,
+    `  spread = ${rValue(settings.spread)},`,
+    ...(settings.epochs !== undefined ? [`  n_epochs = ${settings.epochs},`] : []),
+    // The node's seed, so the document is at least reproducible *with itself* — the notebook's
+    // `random_state`.
+    `  seed = ${settings.seed},`,
   ]
 
-  const lines: string[] = ctx.note(
-    'Coda runs umap-js and the notebook exporter runs umap-learn; this is uwot. All three are ' +
-      'the same algorithm with the same settings, and all three draw different arrangements of ' +
-      'the same neighbourhoods — as two seeds of any one of them do.',
-  )
+  const lines: string[] = [
+    ...ctx.note(
+      'Coda runs umap-js and the notebook exporter runs umap-learn; this is uwot. All three are ' +
+        'the same algorithm with the same settings, and all three draw different arrangements ' +
+        'of the same neighbourhoods — as two seeds of any one of them do.',
+    ),
+  ]
 
-  if (route === 'neighbours') {
-    const src = ctx.input('neighbours')!
-    const query = ctx.column('queryColumn')
-    const target = ctx.column('targetColumn')
-    if (!query || !target) {
-      return ctx.todo('This Embedding needs the two columns naming each neighbour pair.')
-    }
-    const score = ctx.column('scoreColumn')
-    ctx.library('uwot')
+  if (input.route === 'neighbours') {
     ctx.helper('coda_umap_knn')
     lines.push(
       `.knn <- coda_umap_knn(`,
-      `  ${src},`,
-      `  query = ${rStr(query)},`,
-      `  target = ${rStr(target)},`,
-      ...(score ? [`  score = ${rStr(score)},`] : []),
-      `  scores_are = ${rStr(String(ctx.params.scoreIs))},`,
-      `  k = ${neighbours}`,
+      `  ${input.src},`,
+      `  query = ${rStr(input.query)},`,
+      `  target = ${rStr(input.target)},`,
+      ...(input.score ? [`  score = ${rStr(input.score)},`] : []),
+      `  scores_are = ${rStr(input.scoreIs)},`,
+      `  k = ${settings.neighbours}`,
       `)`,
       `.labels <- .knn$labels`,
       // `X = NULL` with a supplied graph, which is uwot's own spelling for "the neighbours are
@@ -1707,54 +1630,33 @@ registerEmitter('core.embed', (ctx) => {
       `.xy <- umap(`,
       `  X = NULL,`,
       `  nn_method = list(idx = .knn$idx, dist = .knn$dist),`,
-      ...settings,
+      ...umapSettings,
       `  verbose = FALSE`,
       `)`,
     )
   } else {
-    let source: string
-    if (route === 'matrix') {
-      source = ctx.input('matrix')!
-    } else {
-      // The same call the Similarity Matrix chunk emits, through the same function — so a graph
-      // that does this in two cards and one that does it in one produce the same matrix.
-      const issue = similarityIssue(ctx, 'Embedding', 'featureColumn')
-      if (issue) return issue
-      lines.push(
-        ...similarityCall(ctx, {
-          out: '.features',
-          src: ctx.input('features')!,
-          featureParam: 'featureColumn',
-          output: 'distance',
-        }),
-      )
+    // The Features route writes the Similarity Matrix chunk's own call first, asking it for
+    // distances — so a graph that does this in two cards and one that does it in one produce the
+    // same matrix.
+    let source = input.src
+    if (input.route === 'features') {
       source = '.features'
+      lines.push(...similarityLines(ctx, source, input.src, input.call))
     }
-
-    const distance = String(ctx.params.distance)
-    const invert = route === 'features' ? false : distance !== 'none'
-    ctx.library('uwot')
     lines.push(
       `.m <- as.matrix(${source})`,
       `.labels <- rownames(.m)`,
-      `.d <- ${invert ? '1 - .m' : '.m'}`,
+      `.d <- ${input.invert ? '1 - .m' : '.m'}`,
       // `as.dist` reads the lower triangle, which is uwot's precomputed route. It is the same
       // half `squareform` reads for the Linkage export — on a symmetric matrix, all of it.
       `.xy <- umap(`,
       `  X = as.dist(.d),`,
-      `  n_neighbors = min(${neighbours}, length(.labels) - 1),`,
-      ...settings,
+      `  n_neighbors = min(${settings.neighbours}, length(.labels) - 1),`,
+      ...umapSettings,
       `  verbose = FALSE`,
       `)`,
     )
-    if (invert && distance === 'auto') {
-      lines.push(
-        ...ctx.note(
-          'Scores are similarities, so the distance is 1 − score — the same reading the ' +
-            'Linkage chunk makes.',
-        ),
-      )
-    }
+    for (const key of input.notes) lines.push(...ctx.note(EMBED_NOTES[key]))
   }
 
   lines.push(
@@ -1766,17 +1668,16 @@ registerEmitter('core.embed', (ctx) => {
     `)`,
   )
 
-  const annotations = ctx.input('annotations')
-  const labelBy = ctx.column('labelBy')
-  if (annotations && labelBy) {
+  if (plan.annotations) {
+    const { table, key, value } = plan.annotations
     ctx.helper('coda_relabel')
     lines.push(
       `${out} <- coda_relabel(`,
       `  ${out},`,
       `  "label",`,
-      `  ${annotations},`,
-      `  key = ${rStr(ctx.column('matchOn') ?? ID_COLUMN_NAME)},`,
-      `  value = ${rStr(labelBy)},`,
+      `  ${table},`,
+      `  key = ${rStr(key)},`,
+      `  value = ${rStr(value)},`,
       `  into = "annotation",`,
       `  unmatched = "null"`,
       `)`,

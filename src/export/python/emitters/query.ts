@@ -8,12 +8,7 @@
  * level-of-detail argument Coda's `Detail` param maps onto lives.
  */
 
-import {
-  DATASET_FAMILIES,
-  datasetFamily,
-  resolveDatasetId,
-} from '../../../nodes/lib/datasetFamilies'
-import { parseIdList } from '../../../nodes/lib/idList'
+import { DATASET_FAMILIES } from '../../../nodes/lib/datasetFamilies'
 import { SYNAPSE_UNITS } from '../../../data/synapseUnits'
 import { minSynapseConfidence, synapseUnitFor } from '../../../nodes/lib/synapseParams'
 import { parseTypedLabels } from '../../../nodes/lib/labelLookup'
@@ -26,13 +21,20 @@ import { resolveRows } from '../../../data/filterRows'
 import { asksNothing, noFiltersReason } from '../../../nodes/lib/findNeuronsRows'
 import { rowsFromParams } from '../../../nodes/lib/filterRowParams'
 import { readWeightProperty, schemasFromType } from '../../../nodes/lib/datasetParam'
-import { CYPHER_PLACEHOLDERS, adjacencyExportQuery } from '../../connectivityPlan'
+import { CYPHER_PLACEHOLDERS, adjacencyExportQuery } from '../../plans/connectivity'
 import { CARRY_PARAM_ID } from '../../../nodes/lib/carryParams'
 import { filterMasks } from './tableFilters'
 import type { EmitContext } from '../types'
 
-/** What "neuPrint" means unless a node says otherwise. */
-const DEFAULT_DEPLOYMENT = 'https://neuprint.janelia.org'
+import type { DatasetNote, SkeletonsNote } from '../../plans/query'
+import {
+  datasetFamilyPlan,
+  datasetNodePlan,
+  inputIdsPlan,
+  neuprintNodePlan,
+  rawCypherPlan,
+  skeletonsPlan,
+} from '../../plans/query'
 import { neuprintProperty } from '../../../data/neuprint/schema'
 import {
   NAVIS_RESERVED,
@@ -49,8 +51,6 @@ import {
 } from './common'
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import { populationFromType } from '../../../nodes/lib/populationParams'
-import { SKELETON_SOURCE_PARAM } from '../../../nodes/lib/skeletonParams'
-import { SKELETON_ROUTES } from '../../../data/skeletonRoutes'
 import { withoutStatedStatus } from '../../../data/neuronFilter'
 import { TRACED_STATUS } from '../../../data/neuronFilter'
 
@@ -84,54 +84,28 @@ function clientLines(
   ]
 }
 
-/**
- * One `Client` per dataset node, and every fetch names it.
- *
- * neuprint-python has a global default client and every call would find it, which is tidier
- * to read and wrong the moment a graph carries two datasets — a second `Client(...)` silently
- * becomes the default and every earlier query starts answering from the other connectome.
- * Passing `client=` costs one kwarg and cannot do that.
- */
+const DATASET_NOTES: Record<DatasetNote, string> = {
+  // Deliberately no example version. An earlier draft suggested `<family>:v1.2.3` for every
+  // family, which is a version number nobody published and is simply wrong for Mushroom Body,
+  // whose dataset id carries no version at all — a made-up specific is worse guidance than none.
+  unresolvedLatest:
+    `This node tracks the latest release and the exporter could not resolve which that ` +
+    `is, so only the family is named. Set \`dataset\` to the exact release you mean ` +
+    `before sharing the notebook.`,
+  pinnedLatest:
+    `The node is set to "Latest"; this pins the version it resolved to at export, so ` +
+    `the notebook keeps answering the same question after the next release.`,
+}
+
 function emitDataset(ctx: EmitContext, familyKey: string): string[] {
-  const family = datasetFamily(familyKey)
-  if (!family) return ctx.todo(`Unknown dataset family "${familyKey}".`)
+  const plan = datasetFamilyPlan(familyKey, ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   const out = ctx.output('dataset')
-
-  const version = ctx.params.version
-  const resolved = resolveDatasetId(family, version)
-  const lines: string[] = []
-
-  let datasetId = resolved
-  if (!datasetId) {
-    // The listing is what turns "Latest" into a version, and it is a network call the
-    // exporter has not made. Naming the family alone still connects; leaving it silent would
-    // put an unpinned dataset into a file somebody shares, which is the provenance question
-    // mark the version dropdown exists to close.
-    datasetId = family.family
-    lines.push(
-      ...ctx.note(
-        // Deliberately no example version. An earlier draft suggested `<family>:v1.2.3` for
-        // every family, which is a version number nobody published and is simply wrong for
-        // Mushroom Body, whose dataset id carries no version at all — a made-up specific is
-        // worse guidance than none.
-        `This node tracks the latest release and the exporter could not resolve which that ` +
-          `is, so only the family is named. Set \`dataset\` to the exact release you mean ` +
-          `before sharing the notebook.`,
-      ),
-    )
-  } else if (!version) {
-    lines.push(
-      ...ctx.note(
-        `The node is set to "Latest"; this pins the version it resolved to at export, so ` +
-          `the notebook keeps answering the same question after the next release.`,
-      ),
-    )
-  }
-
-  const server = String(ctx.params.server ?? '') || DEFAULT_DEPLOYMENT
-  lines.push(...clientLines(ctx, out, server, datasetId))
-  return lines
+  return [
+    ...plan.notes.flatMap((note) => ctx.note(DATASET_NOTES[note])),
+    ...clientLines(ctx, out, plan.server, plan.datasetId),
+  ]
 }
 
 for (const family of DATASET_FAMILIES) {
@@ -151,18 +125,16 @@ for (const family of DATASET_FAMILIES) {
 }
 
 registerEmitter('dataset.neuprint', (ctx) => {
-  // The custom node names its own deployment and dataset, so there is no family to consult.
-  const datasetId = String(ctx.params.dataset)
-  if (!datasetId) return ctx.todo('This neuPrint node names no dataset.')
-  const server = String(ctx.params.server)
-  return clientLines(ctx, ctx.output('dataset'), server, datasetId)
+  const plan = neuprintNodePlan(ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  return clientLines(ctx, ctx.output('dataset'), plan.server, plan.datasetId)
 })
 
 // The superseded generic picker. Registered because a saved graph may still hold one.
 registerEmitter('neuron.dataset', (ctx) => {
-  const datasetId = String(ctx.params.dataset)
-  if (!datasetId) return ctx.todo('This Dataset node names no dataset.')
-  return clientLines(ctx, ctx.output('dataset'), DEFAULT_DEPLOYMENT, datasetId)
+  const plan = datasetNodePlan(ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  return clientLines(ctx, ctx.output('dataset'), plan.server, plan.datasetId)
 })
 
 // ---------------------------------------------------------------------------
@@ -407,40 +379,33 @@ function caveFindNeurons(
 
 registerEmitter('neuron.inputIds', (ctx) => {
   const out = ctx.output('neurons')
-  const parsed = parseIdList(String(ctx.params.ids))
-  const wired = ctx.input('ids')
+  const plan = inputIdsPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const { ids, from: wired, column, dataset } = plan
 
-  if (parsed.error && !wired)
-    return ctx.todo(`The pasted id list is not valid: ${parsed.error}`)
-
-  const c = ctx.wired('dataset')
   const lines: string[] = []
-  const literal = parsed.ids.length > 0
+  const literal = ids.length > 0
 
   if (literal && wired) {
     ctx.require('pandas')
-    const column = ctx.column('column') ?? 'neuronId'
     lines.push(
       `_ids = sorted(set(`,
-      ...pyLongIntList(parsed.ids).map((l) => `    ${l}`),
+      ...pyLongIntList(ids).map((l) => `    ${l}`),
       `) | set(${wired}[${pyStr(column)}].dropna().astype(int)))`,
     )
   } else if (wired) {
-    const column = ctx.column('column') ?? 'neuronId'
     lines.push(`_ids = ${wired}[${pyStr(column)}].dropna().astype(int).tolist()`)
   } else {
-    lines.push(`_ids = `.concat(pyLongIntList(parsed.ids).join('\n')))
+    lines.push(`_ids = `.concat(pyLongIntList(ids).join('\n')))
   }
 
-  if (!c) {
+  if (dataset.note !== undefined) {
     // Unwired, the node is a one-column table of the ids themselves — which is enough for
     // everything downstream that reaches its ids through `neuronId` and reads nothing else.
     ctx.require('pandas')
     return [
       ...lines,
-      ...ctx.note(
-        'No Dataset is wired, so this is the ids alone — exactly what the node emits.',
-      ),
+      ...ctx.note(dataset.note),
       // `_ids` is an integer list, because that is what `NeuronCriteria` takes on the wired
       // branch above and what the wired-column arm casts to. This frame is not a library
       // argument, though — it is the node's own `ID_ONLY_SCHEMA` output, which is `str`.
@@ -449,6 +414,7 @@ registerEmitter('neuron.inputIds', (ctx) => {
     ]
   }
 
+  const c = dataset.connection
   ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
   return [
     ...lines,
@@ -659,8 +625,9 @@ registerEmitter('neuron.rawCypher', (ctx) => {
 
   ctx.require('neuprint', 'fetch_custom')
   const out = ctx.output('result')
-  const query = String(ctx.params.query).trim()
-  if (!query) return ctx.todo('This Raw Cypher node has no query.')
+  const plan = rawCypherPlan(ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const { query } = plan
 
   // Triple-quoted so the query keeps the shape it was written in on the canvas; a Cypher
   // query folded onto one line is unreadable and unmaintainable in the notebook.
@@ -738,6 +705,16 @@ function carryLines(ctx: EmitContext, list: string, frame: string): string[] {
   return lines
 }
 
+/** `neu.fetch_skeletons` reads neuPrint's own SWC, which is what the node does on Automatic. */
+const SKELETON_NOTES: Record<SkeletonsNote, string> = {
+  publishedLayer:
+    'The Skeletons node is set to the published precomputed layer rather than neuPrint’s ' +
+    'own SWC. This cell fetches the SWC: the published copy is a bucket whose URL comes ' +
+    'from the dataset’s neuroglancer state, and navis reads it with ' +
+    '`navis.read_precomputed`. It carries no radii, and it covers only the bodies that ' +
+    'were exported into it.',
+}
+
 registerEmitter('neuron.skeletons', (ctx) => {
   const c = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
@@ -746,31 +723,11 @@ registerEmitter('neuron.skeletons', (ctx) => {
   // TreeNeurons, which is the object every downstream navis call actually wants.
   ctx.require('navisNeuprint')
   const out = ctx.output('skeletons')
-  const limit = Number(ctx.params.limit)
-  const ids = neuronIdInts(neurons, limit)
+  const plan = skeletonsPlan(ctx.params)
+  const ids = neuronIdInts(neurons, plan.limit)
 
   return [
-    /*
-     * A note rather than a refusal, and the line is where `Detail` on the Meshes node draws it:
-     * the cell below fetches real skeletons for the right neurons, and what differs is *which
-     * copy*. `neu.fetch_skeletons` reads neuPrint's own SWC, which is what the node does with
-     * Source on Automatic; the published layer is a precomputed directory whose URL is resolved
-     * from the dataset's neuroglancer state at run time, and this exporter has no network.
-     *
-     * Two things genuinely differ, so both are said: the published copy carries no radii
-     * (male-CNS declares no vertex attributes at all), and its coverage is whatever was exported
-     * into it — `optic-lobe:v1.0.1` answered 5 of 20 sampled bodies. A notebook silently a few
-     * neurons short is the failure this exporter minds most.
-     */
-    ...(ctx.params[SKELETON_SOURCE_PARAM] === SKELETON_ROUTES.published
-      ? ctx.note(
-          'The Skeletons node is set to the published precomputed layer rather than neuPrint’s ' +
-            'own SWC. This cell fetches the SWC: the published copy is a bucket whose URL comes ' +
-            'from the dataset’s neuroglancer state, and navis reads it with ' +
-            '`navis.read_precomputed`. It carries no radii, and it covers only the bodies that ' +
-            'were exported into it.',
-        )
-      : []),
+    ...plan.notes.flatMap((note) => ctx.note(SKELETON_NOTES[note])),
     `${out} = neu.fetch_skeletons(`,
     `    ${ids},`,
     `    heal=True,`,

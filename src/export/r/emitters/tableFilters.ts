@@ -22,7 +22,7 @@ import type { TableSchema } from '../../../core/types'
 import { findColumn, isNumericDType } from '../../../core/types'
 import type { FieldTerm } from '../../../data/terms'
 import { rNum, rStr } from '../r'
-import { R_COMPARISON } from './table'
+import { COMPARISON } from '../../neutral'
 
 /**
  * What to say when a chunk compiles one of Coda's regexes, said once.
@@ -64,7 +64,7 @@ function predicateFor(term: FieldTerm, schema: TableSchema | undefined): string 
     predicate =
       term.op === 'ne'
         ? `(is.na(${c}) | ${c} != ${literal})`
-        : `(!is.na(${c}) & ${c} ${R_COMPARISON[term.op]} ${literal})`
+        : `(!is.na(${c}) & ${c} ${COMPARISON[term.op]} ${literal})`
   } else {
     // `tolower` on both sides only where the term asks for it; a case-sensitive term compares
     // the characters as they are, which is what Neo4j's `=` does on the same clause.
@@ -73,7 +73,7 @@ function predicateFor(term: FieldTerm, schema: TableSchema | undefined): string 
     predicate =
       term.op === 'ne'
         ? `(is.na(${c}) | ${compared} != ${value})`
-        : `(!is.na(${c}) & ${compared} ${R_COMPARISON[term.op]} ${value})`
+        : `(!is.na(${c}) & ${compared} ${COMPARISON[term.op]} ${value})`
   }
 
   // Negation applies after the null rule, exactly as `fieldTermsMatch` applies it.

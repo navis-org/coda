@@ -17,10 +17,13 @@ import {
   readTraversalDirection,
   regionOptions,
 } from '../../../nodes/lib/connectivityOps'
-import { CYPHER_PLACEHOLDERS, connectivityExportPlan } from '../../connectivityPlan'
+import {
+  CYPHER_PLACEHOLDERS,
+  connectivityExportPlan,
+  unexpressedPopulation,
+} from '../../plans/connectivity'
 import { registerEmitter, registerHelper } from '../registry'
 import { codaIds, codaNeurons, cypherIdList, neuronIdInts, neuronIds } from './common'
-import { populationFromType } from '../../../nodes/lib/populationParams'
 import type { EmitContext } from '../types'
 
 /**
@@ -48,13 +51,11 @@ function farEnd(ctx: EmitContext, client: string): string {
  * `NeuronCriteria` takes values, so `traced` is expressible as `status='Traced'` and the other two
  * — a type column that is set, a superclass that is set — are not; the find emitters meet the same
  * wall and answer it with a mask on the result, which is not available here because
- * `fetch_adjacencies` returns `type` and `instance` for the partner and nothing else. Small and
- * said rather than large and silent: on male-CNS the label alone keeps 496 partners and the
- * label plus superclass keeps 492.
+ * `fetch_adjacencies` returns `type` and `instance` for the partner and nothing else. Which
+ * population that leaves out is `unexpressedPopulation`'s.
  */
 function populationNote(ctx: EmitContext): string[] {
-  if (ctx.params.includeFragments === true) return []
-  const population = populationFromType(ctx.inputType('dataset'))
+  const population = unexpressedPopulation(ctx)
   if (population.length === 0) return []
   return ctx.note(
     'Partners here are restricted to bodies neuPrint labels :Neuron, which is what ' +

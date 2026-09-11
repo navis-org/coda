@@ -47,10 +47,10 @@ export function rowKeys(
  */
 export function rowsWithKeys(
   table: TableValue,
-  selection: unknown,
+  keys: readonly string[],
   idColumn: string | undefined,
 ): TableValue {
-  return rowsMatching(table, rowKeys(table, idColumn), selection)
+  return rowsMatching(table, rowKeys(table, idColumn), keys)
 }
 
 /**
@@ -65,9 +65,9 @@ export function rowsWithKeys(
 export function rowsMatching(
   table: TableValue,
   nameAt: (row: number) => string,
-  selection: unknown,
+  names: readonly string[],
 ): TableValue {
-  const wanted = new Set((Array.isArray(selection) ? selection : []).map(String))
+  const wanted = new Set(names)
   const rows: number[] = []
   if (wanted.size > 0) {
     for (let row = 0; row < table.length; row++) {

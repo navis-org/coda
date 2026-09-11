@@ -25,6 +25,7 @@ import { registerNode } from '../../core/registry'
 import { NUMERIC_DTYPES, T, columnsOfType, schemaOf } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { colorParams, shapeParams, sizeParams } from '../lib/encodingParams'
+import { decodeLabels } from '../lib/chartSelection'
 import { rowsWithKeys } from '../lib/rowIds'
 import { tapPorts } from '../lib/tapPorts'
 
@@ -308,7 +309,7 @@ registerNode({
       out: table,
       // Independent of the axes: a selection is resolved by id, so it neither needs nor is
       // affected by whether there is anything to plot.
-      selected: rowsWithKeys(table, ctx.params.selection, ctx.column('idColumn')),
+      selected: rowsWithKeys(table, decodeLabels(ctx.params.selection), ctx.column('idColumn')),
     }
   },
 })

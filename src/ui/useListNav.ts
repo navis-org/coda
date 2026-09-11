@@ -7,6 +7,9 @@
  * `useDismiss`, whose own docstring records that a popover behaviour written five times meant a
  * fix reached exactly one popover at a time.
  *
+ * The palette's rows can be disabled, which is `skip`: the active row lands on the first usable one
+ * and the arrows step over the rest — the one difference that had kept it on its own copy.
+ *
  * Escape is the modal's (`useOverlayEscape`), not the list's: a list that took the key itself
  * was a surface off the stack, and closed the viewer under a browser opened over it.
  *
@@ -17,21 +20,35 @@
 
 import { useEffect, useRef, useState } from 'react'
 
+import { useLatest } from './useLatest'
+
 export interface ListNav {
   activeIndex: number
   setActiveIndex: (index: number) => void
-  /** Move by one, wrapping. A no-op on an empty list rather than an index of -1. */
+  /** Move by one, wrapping, over any row `skip` refuses. A no-op on an empty list. */
   step: (direction: 1 | -1) => void
   listRef: React.RefObject<HTMLDivElement | null>
   /** ArrowUp/ArrowDown wired to `step`; returns true when the key was handled. */
   onKeyDown: (event: React.KeyboardEvent) => boolean
 }
 
-export function useListNav(count: number, resetKey: unknown): ListNav {
+export function useListNav(
+  count: number,
+  resetKey: unknown,
+  skip?: (index: number) => boolean,
+): ListNav {
   const [activeIndex, setActiveIndex] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
+  // Read at the reset rather than listed: a caller's `skip` is an inline arrow over this render's
+  // rows, and the reset belongs to `resetKey` alone.
+  const latest = useLatest({ count, skip })
 
-  useEffect(() => setActiveIndex(0), [resetKey])
+  useEffect(() => {
+    const { count, skip } = latest.current
+    let first = 0
+    while (skip && first < count && skip(first)) first += 1
+    setActiveIndex(first < count ? first : 0)
+  }, [resetKey, latest])
 
   useEffect(() => {
     listRef.current
@@ -40,7 +57,13 @@ export function useListNav(count: number, resetKey: unknown): ListNav {
   }, [activeIndex])
 
   const step = (direction: 1 | -1) => {
-    setActiveIndex((current) => (count === 0 ? 0 : (current + direction + count) % count))
+    setActiveIndex((current) => {
+      for (let offset = 1; offset <= count; offset++) {
+        const next = (((current + direction * offset) % count) + count) % count
+        if (!skip?.(next)) return next
+      }
+      return current
+    })
   }
 
   return {

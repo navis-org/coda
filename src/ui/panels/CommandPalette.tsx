@@ -18,7 +18,7 @@
  * back out, which keeps the two entry points from feeling like separate modes.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 
 import { typeLabel } from '../../core/types'
 import type { CodaType } from '../../core/types'
@@ -28,6 +28,7 @@ import { PALETTE_ACTIONS, paletteSearchText } from './paletteItems'
 import { Highlight } from './Highlight'
 import { useDismissOnOutside } from '../useDismiss'
 import { menuPosition } from '../menu/placement'
+import { useListNav } from '../useListNav'
 
 export interface CommandPaletteProps {
   items: PaletteItem[]
@@ -68,9 +69,7 @@ export function CommandPalette({
   onClose,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState(initialQuery)
-  const [activeIndex, setActiveIndex] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
-  const listRef = useRef<HTMLDivElement>(null)
 
   const parsed = useMemo(() => parsePaletteQuery(query), [query])
 
@@ -84,31 +83,15 @@ export function CommandPalette({
     ]).slice(0, MAX_RESULTS)
   }, [parsed, items])
 
-  // Land on the first item that can actually be invoked.
-  useEffect(() => {
-    const firstEnabled = ranked.findIndex((r) => !r.item.disabled)
-    setActiveIndex(firstEnabled === -1 ? 0 : firstEnabled)
-  }, [ranked])
+  // Lands on the first item that can actually be invoked, and the arrows step over the rest.
+  const {
+    activeIndex,
+    setActiveIndex,
+    listRef,
+    onKeyDown: navigate,
+  } = useListNav(ranked.length, ranked, (index) => Boolean(ranked[index]?.item.disabled))
 
   useDismissOnOutside(containerRef, onClose, { onEscape: true })
-
-  // Keep the highlighted row in view during keyboard navigation.
-  useEffect(() => {
-    listRef.current
-      ?.querySelector('[aria-selected="true"]')
-      ?.scrollIntoView({ block: 'nearest' })
-  }, [activeIndex])
-
-  /** Step over disabled rows so arrow keys never park on something inert. */
-  const step = (direction: 1 | -1) => {
-    setActiveIndex((current) => {
-      for (let offset = 1; offset <= ranked.length; offset++) {
-        const next = (current + direction * offset + ranked.length * offset) % ranked.length
-        if (ranked[next] && !ranked[next]!.item.disabled) return next
-      }
-      return current
-    })
-  }
 
   const commit = (index: number) => {
     const entry = ranked[index]
@@ -138,13 +121,8 @@ export function CommandPalette({
         spellCheck={false}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'ArrowDown') {
-            e.preventDefault()
-            step(1)
-          } else if (e.key === 'ArrowUp') {
-            e.preventDefault()
-            step(-1)
-          } else if (e.key === 'Enter') {
+          if (navigate(e)) return
+          if (e.key === 'Enter') {
             e.preventDefault()
             commit(activeIndex)
           } else if (

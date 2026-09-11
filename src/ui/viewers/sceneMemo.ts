@@ -33,6 +33,7 @@
  */
 
 import type { NgScene } from '../../data/neuroglancer/scene'
+import { LruMap } from '../../core/lruMap'
 
 export interface SceneMemo {
   /** Viewer instance the state was read out of. A state is meaningless against another one. */
@@ -53,16 +54,10 @@ export interface SceneMemo {
  */
 const MAX_MEMOS = 4
 
-const memos = new Map<string, SceneMemo>()
+const memos = new LruMap<string, SceneMemo>(MAX_MEMOS)
 
 export function rememberScene(key: string, memo: SceneMemo): void {
-  memos.delete(key)
   memos.set(key, memo)
-  while (memos.size > MAX_MEMOS) {
-    const oldest = memos.keys().next()
-    if (oldest.done) break
-    memos.delete(oldest.value)
-  }
 }
 
 /** The stored state for this viewer, if one was read before its frame went away. */

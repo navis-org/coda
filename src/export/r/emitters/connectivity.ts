@@ -12,13 +12,16 @@ import { rStr, rVector } from '../r'
 import { registerEmitter, registerHelper } from '../registry'
 import { codaIds, cypherIdList, neuronIds } from './common'
 import type { EmitContext } from '../types'
-import { populationFromType } from '../../../nodes/lib/populationParams'
 import {
   readEdgeProperties,
   readTraversalDirection,
   regionOptions,
 } from '../../../nodes/lib/connectivityOps'
-import { CYPHER_PLACEHOLDERS, connectivityExportPlan } from '../../connectivityPlan'
+import {
+  CYPHER_PLACEHOLDERS,
+  connectivityExportPlan,
+  unexpressedPopulation,
+} from '../../plans/connectivity'
 
 /**
  * neuprintr's own name for the `Include fragments` control.
@@ -36,8 +39,7 @@ function allSegments(ctx: EmitContext): string {
 
 /** What the label restriction does not carry. See the notebook emitter's twin. */
 function populationNote(ctx: EmitContext): string[] {
-  if (ctx.params.includeFragments === true) return []
-  const population = populationFromType(ctx.inputType('dataset'))
+  const population = unexpressedPopulation(ctx)
   if (population.length === 0) return []
   return ctx.note(
     'Partners here are restricted to bodies neuPrint labels :Neuron, which is what ' +

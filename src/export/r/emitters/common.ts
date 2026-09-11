@@ -46,19 +46,6 @@ export function codaIds(ctx: EmitContext, frame: string, ...columns: string[]): 
 }
 
 /**
- * A viewer's `ids` selection param, as **text**.
- *
- * The counterpart to `selectionIds` for the charts whose selection is a set of *labels* rather
- * than of neuron ids — a pie slice, a box. `Number` would turn `"KCg-m"` into `NaN`, and would
- * turn a category that happens to look numeric into a value that no longer matches the string
- * the canvas compared against (see `nodes/lib/chartSelection.ts`).
- */
-export function selectionLabels(ctx: EmitContext): string[] {
-  const raw = ctx.params.selection
-  return Array.isArray(raw) ? raw.map((label) => String(label)) : []
-}
-
-/**
  * The population as one dplyr predicate, or empty.
  *
  * `|` between the disjuncts, and each parenthesised in full — R's `&` binds tighter than `|`, so

@@ -21,6 +21,8 @@
  * origin still is. Only the clip planes follow the new extent.
  */
 
+import { LruMap } from '../../core/lruMap'
+
 export interface CameraMemo {
   position: [number, number, number]
   up: [number, number, number]
@@ -37,16 +39,10 @@ export interface CameraMemo {
  */
 const MAX_MEMOS = 8
 
-const memos = new Map<string, CameraMemo>()
+const memos = new LruMap<string, CameraMemo>(MAX_MEMOS)
 
 export function rememberCamera(key: string, memo: CameraMemo): void {
-  memos.delete(key)
   memos.set(key, memo)
-  while (memos.size > MAX_MEMOS) {
-    const oldest = memos.keys().next()
-    if (oldest.done) break
-    memos.delete(oldest.value)
-  }
 }
 
 /**

@@ -14,6 +14,7 @@ Every node type that emits, wired up once.
 ```{r setup}
 # install.packages(c("nat", "nat.nblast", "dplyr", "tidyr", "readr", "ggplot2", "igraph", "Matrix", "uwot"))
 # remotes::install_github("natverse/neuprintr")  # not on CRAN
+# uwot >= 0.1.15, for `umap()`’s `seed` argument.
 
 library(neuprintr)
 library(nat)
@@ -1529,6 +1530,7 @@ google_sheet <- coda_join_annotations(upload_table, google_sheet)
   n_components = 2,
   min_dist = 0.1,
   spread = 1,
+  seed = 42,
   verbose = FALSE
 )
 embedding <- data.frame(
@@ -2126,6 +2128,7 @@ similarity_matrix_2 <- coda_similarity_long(
   n_components = 2,
   min_dist = 0.1,
   spread = 1,
+  seed = 42,
   verbose = FALSE
 )
 embedding_2 <- data.frame(
@@ -2214,6 +2217,11 @@ d_ <- as.dist(1 - ((m_ + t(m_)) / 2))
 linkage_tree <- hclust(d_, method = "average")
 linkage_ordered <- nblast_df[linkage_tree$order, linkage_tree$order]
 linkage_tree_clusters <- NULL
+# NOTE: Distance is on Auto, which the canvas decides from the matrix’s own
+# measure: a similarity is turned into 1 − score, a distance is used as it
+# stands. This document cannot see the measure, so it assumes similarities
+# and uses 1 − score. If the matrix holds distances, set Distance to "the
+# values are already distances" on the card and export again.
 ```
 
 ```{r embedding-3}
@@ -2231,6 +2239,7 @@ linkage_tree_clusters <- NULL
   n_components = 2,
   min_dist = 0.15,
   spread = 1,
+  seed = 7,
   verbose = FALSE
 )
 # NOTE: Scores are similarities, so the distance is 1 − score — the same
@@ -2594,11 +2603,11 @@ filter_network <- induced_subgraph(build_network, keep)
 
 ```{r filter-network-2}
 # ── Filter Network ──
-# NOTE: Coda matches this regex with JavaScript semantics; R uses POSIX ERE
-# by default. They agree on ordinary patterns — add perl = TRUE for
-# lookaround.
+# NOTE: Coda matches these regexes with JavaScript semantics. `perl = TRUE`
+# is the closest of R’s engines; the two differ on lookbehind and named
+# groups.
 attrs <- as_data_frame(build_network, what = "vertices")
-seed <- attrs |> filter(grepl("^LC[0-9]+$", `id`)) |> pull(name)
+seed <- attrs |> filter(grepl("^LC[0-9]+$", coalesce(as.character(`id`), ""), perl = TRUE)) |> pull(name)
 keep <- unique(c(seed))
 keep <- keep[keep %in% V(build_network)$name]
 parts <- components(build_network)$membership
@@ -2725,14 +2734,21 @@ heatmap_2_out |>
 ```{r heatmap-3}
 # ── Heatmap ──
 heatmap_3_out <- as.matrix(pivot_matrix_df)
-key_ <- which(rownames(heatmap_3_out) == "LC4")[1]
-cols_ <- rev(order(heatmap_3_out[key_, ], decreasing = TRUE, na.last = TRUE, method = "radix"))
-rows_ <- coda_follow_order(colnames(heatmap_3_out)[cols_], rownames(heatmap_3_out))
+if ("LC4" %in% rownames(heatmap_3_out)) {
+  key_ <- which(rownames(heatmap_3_out) == "LC4")[1]
+  cols_ <- rev(order(heatmap_3_out[key_, ], decreasing = TRUE, na.last = TRUE, method = "radix"))
+  rows_ <- coda_follow_order(colnames(heatmap_3_out)[cols_], rownames(heatmap_3_out))
+} else {
+  message("No row is called \"LC4\", so the columns are left as they arrived.")
+  cols_ <- seq_len(ncol(heatmap_3_out))
+  rows_ <- seq_len(nrow(heatmap_3_out))
+}
 heatmap_3_out <- heatmap_3_out[rows_, cols_, drop = FALSE]
 
 heatmap_3_rows <- coda_matrix_selection(rownames(heatmap_3_out), integer(0))
 heatmap_3_columns <- coda_matrix_selection(colnames(heatmap_3_out), integer(0))
 hi_ <- max(abs(heatmap_3_out), na.rm = TRUE)
+if (!is.finite(hi_) || hi_ == 0) hi_ <- 1
 lo_ <- -hi_
 
 heatmap_3_out |>

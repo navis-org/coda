@@ -11,10 +11,13 @@
  * Widening is safe to prefer because it costs nothing: all three fetches behind `coda_profile`
  * take the id list whole, so a hundred neurons is the same three requests as one.
  *
- * Here rather than in `src/nodes/output/profile.ts` because it is export-only policy, and the
- * neighbours (`canExport.ts`, `order.ts`) are the other language-neutral export rules. If a
- * second per-node export rule ever lands beside it, move them both to their nodes instead —
- * two is where this directory starts being a grab bag.
+ * **Plans live in `src/export/plans/`, one file per group of nodes** — this one, `connectivity.ts`,
+ * `heatmap.ts`, `analysis.ts`, `stack.ts`, `table.ts`, `query.ts`, `viewers.ts`, `explore.ts` — and
+ * never beside the nodes they describe. They are
+ * export policy rather than node behaviour, and the exporters are a lazily loaded chunk: a plan
+ * in `src/nodes` would be reachable from the main bundle, and one import from a node file would
+ * pull the policy in with it. What more than one plan needs (`NeutralContext`, `Refusable`) is
+ * `../neutral.ts`; a rule with no node at all (`canExport.ts`, `order.ts`) stays one level up.
  *
  * The caller formats — `pySelection` or `rVector` — because that is the only part that differs
  * between the two languages. It *was* generic in the id type, because the two `selectionIds`

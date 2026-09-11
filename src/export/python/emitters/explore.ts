@@ -13,7 +13,7 @@ import { registerEmitter, registerHelper } from '../registry'
 import { caveLabels, codaNeurons, isCaveDataset, pyPopulationMask, pySelection } from './common'
 import { schemasFromType } from '../../../nodes/lib/datasetParam'
 import { populationFromType } from '../../../nodes/lib/populationParams'
-import { selectionIds } from '../../selection'
+import { explorePlan } from '../../plans/explore'
 
 /**
  * Explore, on either backend.
@@ -48,9 +48,7 @@ registerEmitter(
     // No `cave` branch: only neuPrint dataset nodes declare the params, so a CAVE dataset type
     // carries no population and this resolves to nothing — see `DatasetBackend.population`.
     const population = populationFromType(ctx.inputType('dataset'))
-    const query = String(ctx.params.query).trim()
-    const limit = Number(ctx.params.limit)
-    const selection = selectionIds(ctx)
+    const plan = explorePlan(ctx)
 
     // `All` is the index handed on unchanged, and it is the download every other port is sliced
     // out of — one read rather than one per port.
@@ -84,10 +82,11 @@ registerEmitter(
       ...pyPopulationMask(all, population, schemasFromType(ctx.inputType('dataset')).neurons),
     )
 
-    if (query) {
+    if (plan.hits.note === undefined) {
+      const { query, cap: limit } = plan.hits
       ctx.helper('coda_search')
       lines.push('', `${hits} = coda_search(${all}, ${pyStr(query)})`)
-      if (limit > 0) {
+      if (limit !== undefined) {
         lines.push(
           ...ctx.note(
             `Coda caps this at ${limit} hits and keeps the ${limit} most *relevant*; the ` +
@@ -100,25 +99,17 @@ registerEmitter(
         )
       }
     } else {
-      // An empty search is every neuron, which is what the node's own `Hits` port answers.
-      lines.push(
-        '',
-        ...ctx.note('The search box is empty, so Hits is the whole table.'),
-        `${hits} = ${all}`,
-      )
+      lines.push('', ...ctx.note(plan.hits.note), `${hits} = ${all}`)
     }
 
     lines.push('')
-    if (selection.length === 0) {
-      lines.push(
-        ...ctx.note('Nothing is ticked on the canvas, so Selected is empty.'),
-        `${selected} = ${all}.iloc[0:0]`,
-      )
+    if (plan.selected.note !== undefined) {
+      lines.push(...ctx.note(plan.selected.note), `${selected} = ${all}.iloc[0:0]`)
     } else {
       // Resolved against the whole table rather than against `hits`, exactly as the node does:
       // refining a search must not drop a neuron somebody already chose.
       lines.push(
-        `_selected_ids = ${pySelection(selection)}`,
+        `_selected_ids = ${pySelection(plan.selected.ids)}`,
         /*
          * Compared as **text**, on every backend. This was a `cave ?` branch — a datastack
          * published `neuronId` as `str` because an eighteen-digit root id is not exact as a

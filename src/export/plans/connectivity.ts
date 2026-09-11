@@ -10,21 +10,24 @@
  * was the same forty lines twice, which is how the R emitter's region test once came apart from
  * the notebook's.
  *
- * `profileSubject.ts` is the precedent: shared export logic that belongs to neither language.
+ * `profile.ts` is the precedent: shared export logic that belongs to neither language.
  */
 
-import type { ParamValues } from '../core/node'
-import { columnNames } from '../core/types'
-import { adjacencyCypher, connectivityCypher } from '../data/neuprint/cypher'
-import type { ConnectionDirection } from '../data/source'
+import type { ParamValues } from '../../core/node'
+import type { PopulationFilter } from '../../core/types'
+import { columnNames } from '../../core/types'
+import { populationFromType } from '../../nodes/lib/populationParams'
+import type { NeutralContext } from '../neutral'
+import { adjacencyCypher, connectivityCypher } from '../../data/neuprint/cypher'
+import type { ConnectionDirection } from '../../data/source'
 import {
   CANONICAL_SCHEMAS,
   CONNECTIVITY_ROI_COLUMN,
   connectivitySchemaWithEdgeProperties,
   connectivitySchemaWithRoi,
   edgePropertyColumns,
-} from '../data/source'
-import type { EdgeDirection } from '../nodes/lib/connectivityOps'
+} from '../../data/source'
+import type { EdgeDirection } from '../../nodes/lib/connectivityOps'
 import {
   DIRECTION_COLUMN,
   HOP_COLUMN,
@@ -36,7 +39,7 @@ import {
   readTraversalDirection,
   regionOptions,
   renamesFor,
-} from '../nodes/lib/connectivityOps'
+} from '../../nodes/lib/connectivityOps'
 
 /**
  * What an exported query carries where the canvas's carries values, filled when the code runs.
@@ -164,4 +167,22 @@ export function profilePropertyQueries(
       { ids: CYPHER_PLACEHOLDERS.ids, partnerLabel: 'Neuron' },
     )
   return { upstream: query('inputs'), downstream: query('outputs') }
+}
+
+/**
+ * What a Connectivity export's partner restriction cannot carry: the population the Dataset node
+ * narrows to, or nothing when there is nothing to say.
+ *
+ * Both libraries restrict the far end by label alone — `:Neuron` unless `Include fragments` is
+ * ticked, and ticked there is no restriction to fall short of — so a Dataset node's population
+ * checkboxes reach the seeds on the canvas and no partner in either document. Small and said
+ * rather than large and silent: on male-CNS the label alone keeps 496 partners and the label plus
+ * superclass keeps 492. The list rides as data because each language names it inside its own
+ * sentence.
+ */
+export function unexpressedPopulation(
+  ctx: Pick<NeutralContext, 'params' | 'inputType'>,
+): PopulationFilter[] {
+  if (ctx.params.includeFragments === true) return []
+  return populationFromType(ctx.inputType('dataset'))
 }

@@ -490,9 +490,11 @@ actually land rather than a number anybody picked.
 **name** the palette somebody picked, which is why the list in `heatmapParams.ts` was chosen to
 be spelled the same way in matplotlib, seaborn, viridisLite and ColorBrewer. Coda's own two ramps
 have no name anywhere else, so `Blues` and `RdBu_r` (R: `scale_fill_distiller` with
-`direction = -1`) stand in, under a note. A diverging scale is centred: seaborn's `center=0`
-makes the range symmetric on its own; ggplot's does not, so the R side computes `lim_` and
-passes `limits = c(-lim_, lim_)`.
+`direction = -1`) stand in, under a note. A diverging scale is centred, and both documents state
+its ends as `colorDomain` has them — the magnitude of both arms, or 1 where that is zero or
+nothing is finite — as `vmin`/`vmax` beside seaborn's `center=0`, and as `limits` on ggplot's
+scale, which has no centre of its own. seaborn's `center` alone holds the arms equal but has no
+such fallback, which is why the notebook no longer leans on it.
 
 **The Order tab exports as an order on the frame the node outputs**, which is the node's own
 rule — one index per sorted axis, the follower derived from the leader by label, one `.loc` (R:
@@ -500,7 +502,8 @@ one subscript on the matrix). Two helpers carry Coda's natural label order (`cod
 `coda_natural_order`), and the R one zero-pads digit runs rather than casting because an
 18-digit neuron id does not survive a double. The clustering is `pdist` + `linkage` +
 `leaves_list` in Python and `hclust(...)$order` in R with `R_METHODS` spelling the method; both
-write a `NaN` distance as 1 before clustering, because a constant vector has no correlation and
+read every non-finite *cell* as 0 first, as `coda_cluster_order` does (the notebook's `fillna`
+left an infinity for `pdist`), and both write a `NaN` distance as 1 before clustering, because a constant vector has no correlation and
 scipy's `linkage` refuses the whole matrix over it where Coda puts that vector at the end of the
 tree. Both emitted chunks were **executed** on a toy matrix carrying a NaN cell, a constant row
 and a label starting with digits — which is how the `cor` refusal was found, and how a trailing
@@ -761,9 +764,42 @@ half *has* been run live, as above.
 ggplot2 and igraph**. `src/export/r/`, lazily loaded exactly like the notebook exporter, and it
 gets its own chunk (`exporter-*.js` × 2 — verify both stay out of `main` with `pnpm build`).
 
-**The two exporters share the fixture graph and the refusal policy, and nothing else.** The walk
-is a **copy**, taken deliberately: a change to how R chunks are assembled cannot reach the
-notebook. The cost is real and is the thing to watch — topological order, variable naming,
+**The two exporters share the fixture graph, the refusal policy and the decisions with no language
+in them, and nothing else.** Those decisions are **plans**, in `src/export/plans/`, one file per
+group of nodes: `connectivity.ts` (what a connection query is about, and what a partner
+restriction cannot carry), `profile.ts` (what a profile export is about), `stack.ts` (what a stack
+reads and which branch it takes), `heatmap.ts` (every Heatmap section — labels, filter, order,
+selection, colour), `analysis.ts` (when a Similarity Matrix refuses, which Embedding route is
+live, how a Linkage symmetrises and inverts, how a Cut Tree cuts, and the smaller analysis nodes'
+refusals), `table.ts` (every table transform's refusals and resolved columns), `query.ts` (the
+dataset nodes, Input IDs, Raw Cypher, Skeletons, Google Sheet), `viewers.ts` (whether a chart
+draws and whether a Selected port holds anything — one sentence each, with each node's gesture in
+one table) and `explore.ts` (Explore's Hits and Selected). Written once, spelled twice, because
+every one of them had been two copies and some
+had come apart; each emitter keeps only its syntax, helpers and its own wording. Plans are not
+beside their nodes because they are export policy and the exporters are a lazily loaded chunk.
+`neutral.ts` holds only what several share — the `NeutralContext` a plan reads (each plan takes a
+`Pick` of it naming what it reads), `Refusable`, `Noted`, the comparison table and `dtypeOf`.
+
+How a plan carries a note is one rule, so a renderer never decides *whether* a note applies:
+
+- **Text both documents share rides as text** on the step it stands beside — the Heatmap's
+  invalid-pattern, missing-key and ignored-limits notes and the sentence its run-time key check
+  prints, Linkage's `auto` note, Cut Tree's height note, Input IDs' ids-alone note. A refusal is
+  the same: `Refusable`'s `refusal` is the TODO both write.
+- **Text that differs per language rides as a key** (`LinkageNote`, `SortNote`, `DatasetNote`, …),
+  and each renderer holds a **complete** `Record` from key to its text. Complete, not `Partial`:
+  a new key then fails to compile until both languages have decided.
+- **A flag is fine where it is also data** — the Heatmap's `substitute`, which both renderers
+  need anyway to pick a ramp, gates each one's own palette note.
+
+Where the two documents differ in *substance* the plan records the fact and each renderer keeps its
+answer — and the list is down to what a library forces. R refuses the `centroid` and `median`
+linkage methods, which fastcore runs and `hclust` means for squared Euclidean distances, for
+Linkage and for the Heatmap's cluster order alike (`hclustRefusal`).
+
+The walk is a **copy**, taken deliberately: a change to how R chunks are assembled cannot reach
+the notebook. The cost is real and is the thing to watch — topological order, variable naming,
 unwired-versus-blocked and where the notes land now exist twice, so **if you fix one, look at the
 other**. What stops them drifting on *coverage* is `src/export/fixture.ts`: `everythingGraph`,
 two golden files, and a node that emits Python but nothing in R shows up as a TODO rather than as

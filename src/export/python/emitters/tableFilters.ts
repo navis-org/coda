@@ -18,7 +18,8 @@ import type { TableSchema } from '../../../core/types'
 import { findColumn, isNumericDType } from '../../../core/types'
 import type { FieldTerm } from '../../../data/terms'
 import { pyStr } from '../py'
-import { PY_COMPARISON, col } from './table'
+import { col } from './table'
+import { COMPARISON } from '../../neutral'
 
 /**
  * One resolved field term as a pandas expression over `frame`.
@@ -35,9 +36,10 @@ function maskFor(frame: string, term: FieldTerm, schema: TableSchema | undefined
   let mask: string
   if (term.op === 'match') {
     // `case` follows the term's own flag — insensitive for a search box, sensitive for a Find
-    // Neurons row whose twin is compiled to Neo4j's `=~`. `na=False` keeps a missing value out,
-    // which is the null rule rather than a convenience.
-    mask = `${c}.astype(str).str.contains(${pyStr(term.value)}, regex=True, case=${term.ignoreCase ? 'False' : 'True'}, na=False)`
+    // Neurons row whose twin is compiled to Neo4j's `=~`. `notna()` keeps a missing value out,
+    // which is the null rule: `astype(str)` has already made it `'nan'` or `'None'`, which a
+    // pattern can match, so `na=False` would come too late to say anything.
+    mask = `(${c}.notna() & ${c}.astype(str).str.contains(${pyStr(term.value)}, regex=True, case=${term.ignoreCase ? 'False' : 'True'}))`
   } else if (numeric) {
     const number = Number(term.value)
     const literal = Number.isFinite(number) ? String(number) : pyStr(term.value)
@@ -47,7 +49,7 @@ function maskFor(frame: string, term: FieldTerm, schema: TableSchema | undefined
     mask =
       term.op === 'ne'
         ? `(${c}.isna() | (${c} != ${literal}))`
-        : `(${c}.notna() & (${c} ${PY_COMPARISON[term.op]} ${literal}))`
+        : `(${c}.notna() & (${c} ${COMPARISON[term.op]} ${literal}))`
   } else {
     // Lowered on both sides only where the term asks for it; a case-sensitive term compares the
     // characters as they are, which is what Neo4j's `=` does on the same clause.
@@ -56,7 +58,7 @@ function maskFor(frame: string, term: FieldTerm, schema: TableSchema | undefined
     mask =
       term.op === 'ne'
         ? `(${c}.isna() | (${compared} != ${value}))`
-        : `(${c}.notna() & (${compared} ${PY_COMPARISON[term.op]} ${value}))`
+        : `(${c}.notna() & (${compared} ${COMPARISON[term.op]} ${value}))`
   }
 
   // Negation is applied *after* the null rule, exactly as `fieldTermsMatch` applies it — so

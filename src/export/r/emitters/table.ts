@@ -9,8 +9,8 @@
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import type { CellValue } from '../../../core/values'
 import type { DType } from '../../../core/types'
-import { columnNames, isNumericDType } from '../../../core/types'
-import { rawFileNote, rawFileUrl } from '../../../data/rawFileUrl'
+import { columnNames } from '../../../core/types'
+import { rawFileNote } from '../../../data/rawFileUrl'
 import { decodeSetters, disabledEditNote, editPlan } from '../../../nodes/lib/tableEdits'
 import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { resolveRows } from '../../../data/filterRows'
@@ -23,49 +23,33 @@ import {
 import { codaIds } from './common'
 import { REGEX_FLAVOUR_NOTE, filterPredicates } from './tableFilters'
 import type { AggFn } from '../../../nodes/lib/tableOps'
-import {
-  FILTER_TABLE_DEFAULT_OP,
-  aggColumnName,
-  combineLayout,
-  relabelTarget,
-  renameMapping,
-  resolveFilterOp,
-} from '../../../nodes/lib/tableOps'
+import { aggColumnName, combineLayout, renameMapping } from '../../../nodes/lib/tableOps'
 import { unpivotPlan } from '../../../nodes/lib/tableOps'
-import type { StackOptions } from '../../../nodes/lib/tableOps'
-import { stackLabelAt } from '../../../nodes/lib/tableOps'
-import { readStackOptions } from '../../../nodes/lib/stackParams'
-import type { ResolvedPort } from '../../../core/node'
-import { inputPorts } from '../../../core/ports'
 import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
 import { rCol, rStr, rValue, rVector } from '../r'
-import { qualifyTarget } from '../../../nodes/table/qualifyIds'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
+import { COMPARISON } from '../../neutral'
+import type { StackPlan } from '../../plans/stack'
+import { stackPlan } from '../../plans/stack'
+import type { FilterComparison, SortNote } from '../../plans/table'
+import {
+  filterTablePlan,
+  groupByPlan,
+  joinPlan,
+  normalizePlan,
+  pivotPlan,
+  qualifyIdsPlan,
+  relabelPlan,
+  samplePlan,
+  selectPlan,
+  sortPlan,
+  tableFromUrlPlan,
+} from '../../plans/table'
 
 /** The short local name this file uses forty times over. The rule itself is `rCol`. */
 const col = rCol
-
-/**
- * Coda's comparison operators as R's.
- *
- * Shared with `tableFilters.ts`, whose `FieldTerm['op']` overlaps `FilterOp` on exactly these
- * six names — two copies is how the Filter node and the Table's header cells come to render
- * the same comparison differently in one document.
- */
-export const R_COMPARISON: Record<string, string> = {
-  eq: '==',
-  ne: '!=',
-  gt: '>',
-  ge: '>=',
-  lt: '<',
-  le: '<=',
-}
-
-function dtypeOf(ctx: EmitContext, portId: string, name: string | undefined) {
-  return name ? ctx.schema(portId)?.columns.find((c) => c.name === name)?.dtype : undefined
-}
 
 // ---------------------------------------------------------------------------
 // Filter
@@ -83,12 +67,8 @@ function dtypeOf(ctx: EmitContext, portId: string, name: string | undefined) {
 export type FilterPredicate =
   { predicate: string; notes: readonly string[] } | { predicate?: undefined; reason: string }
 
-export function rFilterPredicate(
-  name: string,
-  op: string,
-  raw: string,
-  numeric: boolean,
-): FilterPredicate {
+export function rFilterPredicate(comparison: FilterComparison): FilterPredicate {
+  const { column: name, op, value: raw, numeric, keepsNull } = comparison
   const c = col(name)
   const ok = (predicate: string, notes: readonly string[] = []): FilterPredicate => ({
     predicate,
@@ -112,17 +92,22 @@ export function rFilterPredicate(
     case 'endsWith':
       return ok(`endsWith(as.character(${c}), ${rStr(raw)})`)
     case 'matches':
-      return ok(`grepl(${rStr(raw)}, ${c})`, [
-        'Coda matches this regex with JavaScript semantics; R uses POSIX ERE by default. ' +
-          'They agree on ordinary patterns — add perl = TRUE for lookaround.',
+      // A missing cell is tested as the empty string, which is `makePredicate`'s reading — so a
+      // pattern that matches "" keeps it, as on the card, where a bare `grepl` answers FALSE.
+      return ok(`grepl(${rStr(raw)}, coalesce(as.character(${c}), ""), perl = TRUE)`, [
+        REGEX_FLAVOUR_NOTE,
       ])
     default: {
-      const operator = R_COMPARISON[op]
+      const operator = COMPARISON[op]
       if (!operator) return { reason: `Unknown filter operator "${op}".` }
       if (numeric) {
         const target = Number(raw)
         if (!Number.isFinite(target)) return { reason: `"${raw}" is not a number.` }
-        return ok(`${c} ${operator} ${rValue(target)}`)
+        const compared = `${c} ${operator} ${rValue(target)}`
+        // `filter` drops every NA, so only a comparison the canvas keeps a null under needs
+        // saying — `keepsNull`, which is `== 0` and `!= t` for any other t: the canvas reads a
+        // null as 0.
+        return ok(keepsNull ? `is.na(${c}) | ${compared}` : compared)
       }
       // Coda reads a null cell as the empty string, so `!= x` keeps the unlabelled rows. R's NA
       // propagates through the comparison and `filter` drops it, which silently shrinks the
@@ -134,19 +119,12 @@ export function rFilterPredicate(
 
 registerEmitter('core.filterTable', (ctx) => {
   const src = ctx.wired('in')
-  const name = ctx.column('column')
-  if (!name) return ctx.todo('No column is chosen on this Filter Table.')
+  const plan = filterTablePlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.library('dplyr')
   const out = ctx.output('out')
-  // The same resolution `evaluate` makes, or the export filters on a different condition from
-  // the card it came from. See `resolveFilterOp`.
-  const dtype = dtypeOf(ctx, 'in', name)
-  const op = resolveFilterOp(ctx.params.op, dtype, FILTER_TABLE_DEFAULT_OP)
-  const raw = String(ctx.params.value)
-  const numeric = isNumericDType(dtype ?? 'str')
-
-  const built = rFilterPredicate(name, op, raw, numeric)
+  const built = rFilterPredicate(plan)
   if (built.predicate === undefined) return ctx.todo(built.reason)
 
   const lines = built.notes.flatMap((note) => ctx.note(note))
@@ -227,25 +205,21 @@ registerEmitter('neuron.splitNeurons', (ctx) => {
 // Sort
 // ---------------------------------------------------------------------------
 
+const SORT_NOTES: Record<SortNote, string> = {
+  textCollation:
+    'Coda sorts text with numeric-aware collation, so "item2" comes before "item10". ' +
+    "R uses the session's locale collation, which orders that pair the other way.",
+}
+
 registerEmitter('core.sort', (ctx) => {
   const src = ctx.wired('in')
-  const name = ctx.column('column')
-  if (!name) return ctx.todo('No column is chosen on this Sort.')
+  const plan = sortPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.library('dplyr')
   const out = ctx.output('out')
-  const descending = ctx.params.descending === true
-  const limit = Number(ctx.params.limit)
-  const lines: string[] = []
-
-  if (!isNumericDType(dtypeOf(ctx, 'in', name) ?? 'str')) {
-    lines.push(
-      ...ctx.note(
-        'Coda sorts text with numeric-aware collation, so "item2" comes before "item10". ' +
-          "R uses the session's locale collation, which orders that pair the other way.",
-      ),
-    )
-  }
+  const { column: name, descending, limit } = plan
+  const lines = plan.notes.flatMap((note) => ctx.note(SORT_NOTES[note]))
 
   // `arrange` already puts NA last in both directions, which is Coda's rule: a null is
   // absence, not an extreme, so it does not migrate to the top when the sort is reversed.
@@ -261,16 +235,11 @@ registerEmitter('core.sort', (ctx) => {
 registerEmitter('core.select', (ctx) => {
   const src = ctx.wired('in')
   ctx.library('dplyr')
-  const names = ctx.columns('columns')
+  const plan = selectPlan(ctx)
   const out = ctx.output('out')
-  if (names.length === 0) {
-    return [
-      ...ctx.note('No columns picked, which Coda reads as "keep them all".'),
-      `${out} <- ${src}`,
-    ]
-  }
+  if (plan.note !== undefined) return [...ctx.note(plan.note), `${out} <- ${src}`]
   // `all_of` so a missing column is an error rather than a silently narrower table.
-  return [`${out} <- ${src} |> select(all_of(${rVector(names)}))`]
+  return [`${out} <- ${src} |> select(all_of(${rVector(plan.columns)}))`]
 })
 
 registerEmitter('core.selectOne', (ctx) => {
@@ -376,17 +345,12 @@ registerEmitter('core.combineColumns', (ctx) => {
 registerEmitter('core.relabel', (ctx) => {
   const src = ctx.wired('in')
   const map = ctx.wired('map')
-  const column = ctx.column('column')
-  const keyColumn = ctx.column('keyColumn')
-  const valueColumn = ctx.column('valueColumn')
-  if (!column || !keyColumn || !valueColumn) {
-    return ctx.todo('This Relabel has no column chosen on one side.')
-  }
+  const plan = relabelPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.helper('coda_relabel')
   const out = ctx.output('out')
-  const unmatched = String(ctx.params.unmatched)
-  const target = relabelTarget(ctx.schema('in'), column, String(ctx.params.into))
+  const { column, keyColumn, valueColumn, unmatched, target } = plan
   return [
     `${out} <- coda_relabel(${src}, ${rStr(column)}, ${map}, ${rStr(keyColumn)}, ` +
       `${rStr(valueColumn)}, into = ${rStr(target)}, unmatched = ${rStr(unmatched)})`,
@@ -448,16 +412,14 @@ const PIVOT_AGG_FUNCS: Record<AggFn, string> = {
 
 registerEmitter('core.groupBy', (ctx) => {
   const src = ctx.wired('in')
-  const by = ctx.columns('by')
-  if (by.length === 0) return ctx.todo('No group-by columns are chosen.')
+  const plan = groupByPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.library('dplyr')
   const out = ctx.output('out')
-  const agg = String(ctx.params.agg) as AggFn
-  const values = agg === 'count' ? [] : ctx.columns('value')
-  if (agg !== 'count' && values.length === 0) {
-    return ctx.todo(`"${agg}" needs at least one value column.`)
-  }
+  if (plan.aggregate.refusal !== undefined) return ctx.todo(plan.aggregate.refusal)
+  const { by } = plan
+  const { agg, values } = plan.aggregate
   for (const helper of AGG_HELPERS[agg] ?? []) ctx.helper(helper)
 
   // `n` rides along with every aggregation, exactly as the node emits it, and one summary per
@@ -522,14 +484,12 @@ registerEmitter('core.rename', (ctx) => {
 registerEmitter('core.join', (ctx) => {
   const left = ctx.wired('left')
   const right = ctx.wired('right')
-  const leftKey = ctx.column('leftKey')
-  const rightKey = ctx.column('rightKey')
-  if (!leftKey || !rightKey) return ctx.todo('This Join has no key column on one side.')
+  const plan = joinPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.library('dplyr')
   const out = ctx.output('out')
-  const how = String(ctx.params.how)
-  const suffix = String(ctx.params.suffix)
+  const { leftKey, rightKey, how, suffix } = plan
   const verb =
     { left: 'left_join', inner: 'inner_join', outer: 'full_join', right: 'right_join' }[how] ??
     'left_join'
@@ -582,45 +542,26 @@ registerEmitter('core.join', (ctx) => {
  * a bare column name where `col()` quotes one that needs it; and no `ctx.library('dplyr')` at
  * all. Each of the three is invisible until somebody runs the document.
  */
-function stackFrames(ctx: EmitContext, frames: string[], options: StackOptions): string[] {
+function stackFrames(ctx: EmitContext, plan: StackPlan): string[] {
   ctx.library('dplyr')
   const out = ctx.output('out')
-  const source = options.sourceColumn
+  const frames = plan.inputs
   // `bind_rows` unions the columns and fills the gaps with NA, which is what the node does —
   // a column only some inputs carry is not recorded for the others' rows.
-  if (!source) return [`${out} <- bind_rows(${frames.join(', ')})`]
+  if (!plan.source) return [`${out} <- bind_rows(${frames.join(', ')})`]
+  const { column, labels } = plan.source
   return [
     `${out} <- bind_rows(`,
     ...frames.map(
       (frame, i) =>
-        `  ${frame} |> mutate(${col(source)} = ${rStr(stackLabelAt(options.labels, i + 1))})` +
+        `  ${frame} |> mutate(${col(column)} = ${rStr(labels[i]!)})` +
         (i === frames.length - 1 ? '' : ','),
     ),
     `)`,
   ]
 }
 
-/**
- * A Stack node's sockets and the variable on each, in order.
- *
- * Through `inputPorts` rather than a hand-built `in1 … inN`, so the exporter and the canvas read
- * one statement of both the id rule and the clamp on a stored arity — `portIdAt`'s reason, and
- * the one that bites here is a `.coda.json` written by a build whose max was higher.
- *
- * Returns the ports as well as the variables because `neuron.stack` needs the first port's *type*
- * to pick its branch, and returning only the variables is what had it re-spell this body verbatim
- * 250 lines down — a helper whose one documented job is stating a rule once, bypassed by the
- * second of its two callers.
- */
-function stackInputs(ctx: EmitContext): { ports: readonly ResolvedPort[]; vars: string[] } {
-  const ports = inputPorts(ctx.def, ctx.node.params)
-  return { ports, vars: ports.map((port) => ctx.wired(port.id)) }
-}
-
-registerEmitter('core.stack', (ctx) => {
-  const { vars } = stackInputs(ctx)
-  return stackFrames(ctx, vars, readStackOptions(ctx.params, vars.length))
-})
+registerEmitter('core.stack', (ctx) => stackFrames(ctx, stackPlan(ctx, false)))
 
 // ---------------------------------------------------------------------------
 // Sample
@@ -630,12 +571,11 @@ registerEmitter('core.sample', (ctx) => {
   const src = ctx.wired('in')
   ctx.library('dplyr')
   const out = ctx.output('out')
-  const mode = String(ctx.params.mode)
-  const count = Number(ctx.params.count)
-  const step = Math.max(1, Number(ctx.params.step))
-  const seed = Number(ctx.params.seed)
+  const plan = samplePlan(ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const { count, step, seed } = plan
 
-  switch (mode) {
+  switch (plan.mode) {
     case 'head':
       return [`${out} <- ${src} |> head(${count})`]
     case 'tail':
@@ -648,8 +588,6 @@ registerEmitter('core.sample', (ctx) => {
       // canvas. The helper is Coda's own generator.
       ctx.helper('coda_sample_rows')
       return [`${out} <- ${src} |> slice(coda_sample_rows(nrow(${src}), ${count}, ${seed}))`]
-    default:
-      return ctx.todo(`Unknown sample mode "${mode}".`)
   }
 })
 
@@ -659,14 +597,12 @@ registerEmitter('core.sample', (ctx) => {
 
 registerEmitter('core.pivot', (ctx) => {
   const src = ctx.wired('in')
-  const rows = ctx.column('rows')
-  const cols = ctx.column('columns')
-  if (!rows || !cols) return ctx.todo('This Pivot needs both a Rows and a Columns field.')
+  const plan = pivotPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.library('dplyr')
   ctx.library('tidyr')
-  const agg = String(ctx.params.agg) as AggFn
-  const value = ctx.column('value')
+  const { rows, columns: cols, agg, value } = plan
   const matrix = ctx.output('matrix')
   const table = ctx.output('table')
 
@@ -749,7 +685,8 @@ registerEmitter('core.unpivot', (ctx) => {
 registerEmitter('core.normalize', (ctx) => {
   const src = ctx.wired('in')
   const out = ctx.output('out')
-  const mode = String(ctx.params.mode)
+  const plan = normalizePlan(ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   /*
    * `[!is.finite()] <- 0` was the old ending and it reproduced Coda's old bug: a line that holds
@@ -763,7 +700,7 @@ registerEmitter('core.normalize', (ctx) => {
    * `m / v` recycles `v` down each column, so a row-total vector applies per row; the column arm
    * transposes for the same reason it always did.
    */
-  switch (mode) {
+  switch (plan.mode) {
     case 'none':
       return [`${out} <- ${src}`]
     case 'row':
@@ -791,8 +728,6 @@ registerEmitter('core.normalize', (ctx) => {
       // `log10` of a non-positive argument is NaN with a warning, which is the same answer Coda
       // gives for a cell at or below -1.
       return [`${out} <- log10(1 + ${src})`]
-    default:
-      return ctx.todo(`Unknown normalize mode "${mode}".`)
   }
 })
 
@@ -848,11 +783,9 @@ registerEmitter('core.uploadTable', (ctx) => {
 registerEmitter('core.tableFromUrl', (ctx) => {
   ctx.library('readr')
   const out = ctx.output('out')
-  const typed = String(ctx.params.url).trim()
-  if (!typed) return ctx.todo('This Table from URL node has no URL.')
-  // `rawFileUrl` and its note, as the notebook does: `read_csv` on a github.com file page reads
-  // the page's HTML rather than failing.
-  const url = rawFileUrl(typed)
+  const plan = tableFromUrlPlan(ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const { typed, url } = plan
   return [
     ...(url === typed ? [] : ctx.note(rawFileNote(typed, 'readr'))),
     `${out} <- read_csv(${rStr(url)}, show_col_types = FALSE)`,
@@ -871,32 +804,26 @@ registerEmitter('core.tableFromUrl', (ctx) => {
  * to that attached frame. That is what `plot3d(..., soma = )` and the nat colour helpers read,
  * so the co-visualisation gesture survives here as it does in Python.
  *
- * **Points take the `rbind` branch**, being a data frame on this side rather than a neuron
- * object — read off `inputType` rather than guessed, since the two emit unrelated cells.
+ * **Points take the `bind_rows` branch** — `core.stack`'s code — being a data frame on this side
+ * rather than a neuron object. Which branch, the inputs and their labels are `stackPlan`'s, read
+ * off the first input's type rather than guessed, since the two emit unrelated cells.
  */
 registerEmitter('neuron.stack', (ctx) => {
-  const { ports, vars } = stackInputs(ctx)
+  const plan = stackPlan(ctx, true)
+  if (plan.as === 'frames') return stackFrames(ctx, plan)
+
   const out = ctx.output('out')
-  const options = readStackOptions(ctx.params, vars.length)
-  const source = options.sourceColumn
-
-  // Read off the *first* input, which is the one `checkStackable` measures the rest against.
-  if (ctx.inputType(ports[0]?.id ?? '')?.kind === 'points') {
-    return stackFrames(ctx, vars, options)
-  }
-
   ctx.library('nat')
-  const joined = `c(${vars.join(', ')})`
-  if (!source) return [`${out} <- ${joined}`]
+  const joined = `c(${plan.inputs.join(', ')})`
+  if (!plan.source) return [`${out} <- ${joined}`]
 
+  const { column, labels } = plan.source
   return [
     ...ctx.note(
       'c() merges the neuronlists and their attached data frames together, which is the ' +
         'pairing Coda keeps between the geometry and its attribute table.',
     ),
-    ...vars.map(
-      (v, i) => `${v}[, ${rStr(source)}] <- ${rStr(stackLabelAt(options.labels, i + 1))}`,
-    ),
+    ...plan.inputs.map((v, i) => `${v}[, ${rStr(column)}] <- ${rStr(labels[i]!)}`),
     `${out} <- ${joined}`,
   ]
 })
@@ -908,20 +835,16 @@ registerEmitter('neuron.stack', (ctx) => {
 /** Tag an id column with its dataset, or strip it. Every rule is in `coda_qualify_ids`. */
 registerEmitter('core.qualifyIds', (ctx) => {
   const src = ctx.wired('in')
-  const name = ctx.column('column')
-  if (!name) return ctx.todo('This Qualify Ids has no id column chosen.')
+  const plan = qualifyIdsPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.helper('coda_qualify_ids')
-  const direction = String(ctx.params.direction)
-  // Through the node's own rule, not the typed name: it suffixes a name the table already
-  // has where both languages would overwrite. `relabelTarget`'s reason, one node over.
-  const into = qualifyTarget(ctx.schema('in'), String(ctx.params.into))
   const args = [
     src,
-    rStr(name),
-    `direction = ${rStr(direction)}`,
-    ...(direction === 'add' ? [`prefix = ${rStr(String(ctx.params.prefix).trim())}`] : []),
-    ...(direction === 'remove' && into ? [`into = ${rStr(into)}`] : []),
+    rStr(plan.column),
+    `direction = ${rStr(plan.direction)}`,
+    ...(plan.prefix !== undefined ? [`prefix = ${rStr(plan.prefix)}`] : []),
+    ...(plan.into ? [`into = ${rStr(plan.into)}`] : []),
   ]
   return [`${ctx.output('out')} <- coda_qualify_ids(${args.join(', ')})`]
 })

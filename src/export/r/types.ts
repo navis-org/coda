@@ -48,6 +48,11 @@ export type RPackage =
 export interface PackageSpec {
   /** Where it comes from, for the install comment. CRAN unless stated. */
   github?: string
+  /**
+   * The oldest version every emitted call runs on, and what needs it — said once in the setup
+   * chunk, where the install line is, rather than in every chunk that calls it.
+   */
+  minimum?: { version: string; for: string }
 }
 
 /** Declaration order is the order the setup chunk attaches them in. */
@@ -78,7 +83,7 @@ export const PACKAGES: Record<RPackage, PackageSpec> = {
    * in detail, which is what two seeds of one implementation already do. The emitted cell says
    * so rather than leaving a reader comparing two plots to conclude one is broken.
    */
-  uwot: {},
+  uwot: { minimum: { version: '0.1.15', for: '`umap()`’s `seed` argument' } },
 }
 
 export interface EmitContext<P extends ParamValues = ParamValues> {
@@ -117,7 +122,8 @@ export interface EmitContext<P extends ParamValues = ParamValues> {
   helper(name: string): void
 
   todo(message: string): string[]
-  note(message: string): string[]
+  /** A note beside working code. Nothing for `undefined`, so an optional note needs no guard. */
+  note(message: string | undefined): string[]
 }
 
 export type Emitter<P extends ParamValues = ParamValues> = (ctx: EmitContext<P>) => string[]

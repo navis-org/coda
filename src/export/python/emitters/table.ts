@@ -16,58 +16,44 @@
  *  - `Sort` puts nulls last in **both** directions, where `sort_values` follows the direction.
  */
 
-import type { JoinHow } from '../../../nodes/lib/tableOps'
 import {
-  FILTER_TABLE_DEFAULT_OP,
   aggColumnName,
   combineLayout,
   keepsUnmatchedRight,
-  relabelTarget,
   renameMapping,
-  resolveFilterOp,
 } from '../../../nodes/lib/tableOps'
 import { unpivotPlan } from '../../../nodes/lib/tableOps'
 import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
-import type { AggFn, StackOptions } from '../../../nodes/lib/tableOps'
-import { stackLabelAt } from '../../../nodes/lib/tableOps'
-import { readStackOptions } from '../../../nodes/lib/stackParams'
-import type { ResolvedPort } from '../../../core/node'
-import { inputPorts } from '../../../core/ports'
+import type { AggFn } from '../../../nodes/lib/tableOps'
 import type { CellValue } from '../../../core/values'
 import type { DType } from '../../../core/types'
-import { findColumn, isNumericDType } from '../../../core/types'
 import { decodeSetters, disabledEditNote, editPlan } from '../../../nodes/lib/tableEdits'
 import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { filterMasks } from './tableFilters'
 import { pyList, pyStr, pyValue } from '../py'
-import { qualifyTarget } from '../../../nodes/table/qualifyIds'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
+import { COMPARISON, dtypeOf } from '../../neutral'
+import type { StackPlan } from '../../plans/stack'
+import { stackPlan } from '../../plans/stack'
+import type { FilterComparison, SortNote } from '../../plans/table'
+import {
+  filterTablePlan,
+  groupByPlan,
+  joinPlan,
+  normalizePlan,
+  pivotPlan,
+  qualifyIdsPlan,
+  relabelPlan,
+  samplePlan,
+  selectPlan,
+  sortPlan,
+} from '../../plans/table'
 
 /** `df['col']` where the name is safe, `df[...]` otherwise — both are one idiom in pandas. */
 export function col(frame: string, name: string): string {
   return `${frame}[${pyStr(name)}]`
-}
-
-/**
- * Coda's comparison operators as Python's.
- *
- * Shared with `tableFilters.ts`, whose `FieldTerm['op']` overlaps `FilterOp` on exactly these
- * six names — two copies is how the Filter node and the Table's header cells come to render
- * the same comparison differently in one notebook.
- */
-export const PY_COMPARISON: Record<string, string> = {
-  eq: '==',
-  ne: '!=',
-  gt: '>',
-  ge: '>=',
-  lt: '<',
-  le: '<=',
-}
-
-function dtypeOf(ctx: EmitContext, portId: string, name: string | undefined) {
-  return name ? findColumn(ctx.schema(portId), name)?.dtype : undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -93,13 +79,8 @@ function dtypeOf(ctx: EmitContext, portId: string, name: string | undefined) {
 export type FilterMask =
   { mask: string; notes: readonly string[] } | { mask?: undefined; reason: string }
 
-export function pyFilterMask(
-  frame: string,
-  name: string,
-  op: string,
-  raw: string,
-  numeric: boolean,
-): FilterMask {
+export function pyFilterMask(frame: string, comparison: FilterComparison): FilterMask {
+  const { column: name, op, value: raw, numeric, keepsNull } = comparison
   const c = col(frame, name)
   const ok = (mask: string, notes: readonly string[] = []): FilterMask => ({ mask, notes })
   switch (op) {
@@ -125,12 +106,17 @@ export function pyFilterMask(
           'The two agree on ordinary patterns and differ on lookbehind and named groups.',
       ])
     default: {
-      const operator = PY_COMPARISON[op]
+      const operator = COMPARISON[op]
       if (!operator) return { reason: `Unknown filter operator "${op}".` }
       if (numeric) {
         const target = Number(raw)
         if (!Number.isFinite(target)) return { reason: `"${raw}" is not a number.` }
-        return ok(`${c} ${operator} ${pyValue(target)}`)
+        const compared = `${c} ${operator} ${pyValue(target)}`
+        // The plan says whether the canvas keeps a missing cell (`keepsNull`); pandas keeps one
+        // under `!=` and drops it under everything else, so the mask is guarded only where the
+        // two disagree — `== 0` and `!= 0`, since the canvas reads a null as 0.
+        if (keepsNull === (op === 'ne')) return ok(compared)
+        return ok(keepsNull ? `${c}.isna() | (${compared})` : `${c}.notna() & (${compared})`)
       }
       // A text comparison in Coda reads a null cell as the empty string, so `!= x` keeps the
       // unlabelled rows. pandas would drop them, which silently shrinks the result.
@@ -141,19 +127,12 @@ export function pyFilterMask(
 
 registerEmitter('core.filterTable', (ctx) => {
   const src = ctx.wired('in')
-  const name = ctx.column('column')
-  if (!name) return ctx.todo('No column is chosen on this Filter Table.')
+  const plan = filterTablePlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.require('pandas')
   const out = ctx.output('out')
-  // The same resolution `evaluate` makes, or the notebook filters on a different condition
-  // from the card it was exported from. See `resolveFilterOp`.
-  const dtype = dtypeOf(ctx, 'in', name)
-  const op = resolveFilterOp(ctx.params.op, dtype, FILTER_TABLE_DEFAULT_OP)
-  const raw = String(ctx.params.value)
-  const numeric = isNumericDType(dtype ?? 'str')
-
-  const built = pyFilterMask(src, name, op, raw, numeric)
+  const built = pyFilterMask(src, plan)
   if (built.mask === undefined) return ctx.todo(built.reason)
 
   const lines = built.notes.flatMap((note) => ctx.note(note))
@@ -220,26 +199,22 @@ registerEmitter('neuron.splitNeurons', (ctx) => {
 // Sort
 // ---------------------------------------------------------------------------
 
+const SORT_NOTES: Record<SortNote, string> = {
+  textCollation:
+    'Coda sorts text with numeric-aware collation, so "item2" comes before "item10". ' +
+    'pandas compares strings codepoint by codepoint, which reverses that pair.',
+}
+
 registerEmitter('core.sort', (ctx) => {
   const src = ctx.wired('in')
-  const name = ctx.column('column')
-  if (!name) return ctx.todo('No column is chosen on this Sort.')
+  const plan = sortPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.require('pandas')
   const out = ctx.output('out')
-  const descending = ctx.params.descending === true
-  const limit = Number(ctx.params.limit)
-  const numeric = isNumericDType(dtypeOf(ctx, 'in', name) ?? 'str')
+  const { column: name, descending, limit } = plan
 
-  const lines: string[] = []
-  if (!numeric) {
-    lines.push(
-      ...ctx.note(
-        'Coda sorts text with numeric-aware collation, so "item2" comes before "item10". ' +
-          'pandas compares strings codepoint by codepoint, which reverses that pair.',
-      ),
-    )
-  }
+  const lines = plan.notes.flatMap((note) => ctx.note(SORT_NOTES[note]))
 
   // `na_position='last'` in both directions is Coda's rule: a null is absence, not an
   // extreme, so it does not migrate to the top when the sort is reversed.
@@ -262,17 +237,10 @@ registerEmitter('core.select', (ctx) => {
   const src = ctx.wired('in')
   ctx.require('pandas')
 
-  const names = ctx.columns('columns')
+  const plan = selectPlan(ctx)
   const out = ctx.output('out')
-  // Empty means every column, which is what the node's own `selectTable` does — so the
-  // honest translation is a copy rather than an empty frame.
-  if (names.length === 0) {
-    return [
-      ...ctx.note('No columns picked, which Coda reads as "keep them all".'),
-      `${out} = ${src}`,
-    ]
-  }
-  return [`${out} = ${src}[${pyList(names)}]`]
+  if (plan.note !== undefined) return [...ctx.note(plan.note), `${out} = ${src}`]
+  return [`${out} = ${src}[${pyList(plan.columns)}]`]
 })
 
 // ---------------------------------------------------------------------------
@@ -362,18 +330,13 @@ registerEmitter('core.combineColumns', (ctx) => {
 registerEmitter('core.relabel', (ctx) => {
   const src = ctx.wired('in')
   const map = ctx.wired('map')
-  const column = ctx.column('column')
-  const keyColumn = ctx.column('keyColumn')
-  const valueColumn = ctx.column('valueColumn')
-  if (!column || !keyColumn || !valueColumn) {
-    return ctx.todo('This Relabel has no column chosen on one side.')
-  }
+  const plan = relabelPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.require('pandas')
   ctx.helper('coda_relabel')
   const out = ctx.output('out')
-  const unmatched = String(ctx.params.unmatched)
-  const target = relabelTarget(ctx.schema('in'), column, String(ctx.params.into))
+  const { column, keyColumn, valueColumn, unmatched, target } = plan
   return [
     `${out} = coda_relabel(${src}, ${pyStr(column)}, ${map}, ${pyStr(keyColumn)}, ` +
       `${pyStr(valueColumn)}, into=${pyStr(target)}, unmatched=${pyStr(unmatched)})`,
@@ -396,16 +359,14 @@ const AGG_FUNCS: Record<Exclude<AggFn, 'join'>, string> = {
 
 registerEmitter('core.groupBy', (ctx) => {
   const src = ctx.wired('in')
-  const by = ctx.columns('by')
-  if (by.length === 0) return ctx.todo('No group-by columns are chosen.')
+  const plan = groupByPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.require('pandas')
   const out = ctx.output('out')
-  const agg = String(ctx.params.agg) as AggFn
-  const values = agg === 'count' ? [] : ctx.columns('value')
-  if (agg !== 'count' && values.length === 0) {
-    return ctx.todo(`"${agg}" needs at least one value column.`)
-  }
+  if (plan.aggregate.refusal !== undefined) return ctx.todo(plan.aggregate.refusal)
+  const { by } = plan
+  const { agg, values } = plan.aggregate
 
   /*
    * `n` rides along with every aggregation, exactly as the node emits it — you almost always
@@ -484,9 +445,9 @@ registerEmitter('core.join', (ctx) => {
   const left = ctx.wired('left')
   const right = ctx.wired('right')
 
-  const leftKey = ctx.column('leftKey')
-  const rightKey = ctx.column('rightKey')
-  if (!leftKey || !rightKey) return ctx.todo('This Join has no key column on one side.')
+  const plan = joinPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const { leftKey, rightKey, suffix } = plan
   /*
    * Verified against pandas 2.3 rather than assumed, because it decides whether the two lines
    * below are needed at all: with `left_on` and `right_on` naming the *same* column, `merge`
@@ -497,8 +458,7 @@ registerEmitter('core.join', (ctx) => {
 
   ctx.require('pandas')
   const out = ctx.output('out')
-  const how = String(ctx.params.how) as JoinHow
-  const suffix = String(ctx.params.suffix)
+  const how = plan.how
   // The op's own predicate, not a second copy of it — see `keepsUnmatchedRight`.
   const fillsKey = keepsUnmatchedRight(how)
 
@@ -569,21 +529,20 @@ registerEmitter('core.join', (ctx) => {
  * emitted a pandas call into a notebook that never imported pandas. One `require` at the top,
  * ahead of every return, is what makes that unrepresentable.
  */
-function stackFrames(ctx: EmitContext, frames: string[], options: StackOptions): string[] {
+function stackFrames(ctx: EmitContext, plan: StackPlan): string[] {
   ctx.require('pandas')
   const out = ctx.output('out')
-  const source = options.sourceColumn
-  if (!source) {
+  if (!plan.source) {
     // `concat` unions the columns and fills the gaps with NaN, which is exactly what the
     // node does — a column only some inputs carry is not recorded for the others' rows.
-    return [`${out} = pd.concat([${frames.join(', ')}], ignore_index=True)`]
+    return [`${out} = pd.concat([${plan.inputs.join(', ')}], ignore_index=True)`]
   }
+  const { column, labels } = plan.source
   return [
     `${out} = pd.concat(`,
     `    [`,
-    ...frames.map(
-      (frame, i) =>
-        `        ${frame}.assign(**{${pyStr(source)}: ${pyStr(stackLabelAt(options.labels, i + 1))}}),`,
+    ...plan.inputs.map(
+      (frame, i) => `        ${frame}.assign(**{${pyStr(column)}: ${pyStr(labels[i]!)}}),`,
     ),
     `    ],`,
     `    ignore_index=True,`,
@@ -591,27 +550,7 @@ function stackFrames(ctx: EmitContext, frames: string[], options: StackOptions):
   ]
 }
 
-/**
- * A Stack node's sockets and the variable on each, in order.
- *
- * Through `inputPorts` rather than a hand-built `in1 … inN`, so the exporter and the canvas read
- * one statement of both the id rule and the clamp on a stored arity — `portIdAt`'s reason, and
- * the one that bites here is a `.coda.json` written by a build whose max was higher.
- *
- * Returns the ports as well as the variables because `neuron.stack` needs the first port's *type*
- * to pick its branch, and returning only the variables is what had it re-spell this body verbatim
- * 250 lines down — a helper whose one documented job is stating a rule once, bypassed by the
- * second of its two callers.
- */
-function stackInputs(ctx: EmitContext): { ports: readonly ResolvedPort[]; vars: string[] } {
-  const ports = inputPorts(ctx.def, ctx.node.params)
-  return { ports, vars: ports.map((port) => ctx.wired(port.id)) }
-}
-
-registerEmitter('core.stack', (ctx) => {
-  const { vars } = stackInputs(ctx)
-  return stackFrames(ctx, vars, readStackOptions(ctx.params, vars.length))
-})
+registerEmitter('core.stack', (ctx) => stackFrames(ctx, stackPlan(ctx, false)))
 
 // ---------------------------------------------------------------------------
 // Sample
@@ -622,12 +561,11 @@ registerEmitter('core.sample', (ctx) => {
 
   ctx.require('pandas')
   const out = ctx.output('out')
-  const mode = String(ctx.params.mode)
-  const count = Number(ctx.params.count)
-  const step = Math.max(1, Number(ctx.params.step))
-  const seed = Number(ctx.params.seed)
+  const plan = samplePlan(ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const { count, step, seed } = plan
 
-  switch (mode) {
+  switch (plan.mode) {
     case 'head':
       return [`${out} = ${src}.head(${count})`]
     case 'tail':
@@ -640,8 +578,6 @@ registerEmitter('core.sample', (ctx) => {
       // Coda's own generator, which is what makes the seed mean the same thing in both.
       ctx.helper('coda_sample_rows')
       return [`${out} = ${src}.iloc[coda_sample_rows(len(${src}), ${count}, ${seed})]`]
-    default:
-      return ctx.todo(`Unknown sample mode "${mode}".`)
   }
 })
 
@@ -651,13 +587,11 @@ registerEmitter('core.sample', (ctx) => {
 
 registerEmitter('core.pivot', (ctx) => {
   const src = ctx.wired('in')
-  const rows = ctx.column('rows')
-  const cols = ctx.column('columns')
-  if (!rows || !cols) return ctx.todo('This Pivot needs both a Rows and a Columns field.')
+  const plan = pivotPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.require('pandas')
-  const agg = String(ctx.params.agg) as AggFn
-  const value = ctx.column('value')
+  const { rows, columns: cols, agg, value } = plan
   const matrix = ctx.output('matrix')
   const table = ctx.output('table')
 
@@ -730,7 +664,7 @@ registerEmitter('core.unpivot', (ctx) => {
    * it: melting a count together with a label leaves an object column holding both, where Coda
    * has already decided the honest common type is text.
    */
-  const folded = melted.map((n) => findColumn(ctx.schema('in'), n)?.dtype)
+  const folded = melted.map((n) => dtypeOf(ctx, 'in', n))
   if (plan?.dtype === 'str' && folded.some((d) => d && d !== 'str')) {
     lines.push(
       `# The folded columns do not share a type, so the value column is text — Coda's rule.`,
@@ -757,7 +691,8 @@ registerEmitter('core.normalize', (ctx) => {
 
   ctx.require('pandas')
   const out = ctx.output('out')
-  const mode = String(ctx.params.mode)
+  const plan = normalizePlan(ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   /*
    * The totals are masked rather than filled, and an empty line is put back afterwards.
@@ -773,7 +708,7 @@ registerEmitter('core.normalize', (ctx) => {
    * hole in the picture. `0 / 0` is `NaN` in pandas, so it has to be put back explicitly.
    */
   const emptyLines = (axis: 0 | 1): string => `(${src} == 0).all(axis=${axis})`
-  switch (mode) {
+  switch (plan.mode) {
     case 'none':
       return [`${out} = ${src}`]
     case 'row':
@@ -800,8 +735,6 @@ registerEmitter('core.normalize', (ctx) => {
       // answer Coda gives for a cell at or below -1.
       ctx.require('numpy')
       return [`${out} = np.log10(1 + ${src})`]
-    default:
-      return ctx.todo(`Unknown normalize mode "${mode}".`)
   }
 })
 
@@ -851,34 +784,27 @@ registerEmitter('core.selectOne', (ctx) => {
  *
  * **A point cloud takes the other branch entirely.** `neuron.synapses` is a DataFrame in this
  * translation rather than a neuron object, so stacking it is `pd.concat` — the same code
- * `core.stack` emits. Read off `inputType` rather than guessed, since the two produce
- * completely different cells.
+ * `core.stack` emits. Which branch, the inputs and their labels are `stackPlan`'s, read off the
+ * first input's type rather than guessed, since the two produce completely different cells.
  */
 registerEmitter('neuron.stack', (ctx) => {
-  const { ports, vars } = stackInputs(ctx)
+  const plan = stackPlan(ctx, true)
+  if (plan.as === 'frames') return stackFrames(ctx, plan)
+
   const out = ctx.output('out')
-  const options = readStackOptions(ctx.params, vars.length)
-  const source = options.sourceColumn
-
-  // Points are a frame on this side; skeletons and meshes are neuron objects. Unknown takes
-  // the neuron branch, which is what this node is overwhelmingly used for. Read off the *first*
-  // input, which is the one `checkStackable` measures the rest against.
-  if (ctx.inputType(ports[0]?.id ?? '')?.kind === 'points') {
-    return stackFrames(ctx, vars, options)
-  }
-
   ctx.require('navis')
-  const joined = `navis.NeuronList([${vars.map((v) => `*${v}`).join(', ')}])`
-  if (!source) return [`${out} = ${joined}`]
+  const joined = `navis.NeuronList([${plan.inputs.map((v) => `*${v}`).join(', ')}])`
+  if (!plan.source) return [`${out} = ${joined}`]
 
+  const { column, labels } = plan.source
   return [
     ...ctx.note(
       'Coda adds the source as a column on the attribute table; navis carries it as an ' +
         'attribute on each neuron, which is what plot3d(color_by=) and NeuronList.summary() read.',
     ),
-    ...vars.flatMap((v, i) => [
+    ...plan.inputs.flatMap((v, i) => [
       `for _n in ${v}:`,
-      `    _n.${source} = ${pyStr(stackLabelAt(options.labels, i + 1))}`,
+      `    _n.${column} = ${pyStr(labels[i]!)}`,
     ]),
     `${out} = ${joined}`,
   ]
@@ -891,21 +817,17 @@ registerEmitter('neuron.stack', (ctx) => {
 /** Tag an id column with its dataset, or strip it. Every rule is in `coda_qualify_ids`. */
 registerEmitter('core.qualifyIds', (ctx) => {
   const src = ctx.wired('in')
-  const name = ctx.column('column')
-  if (!name) return ctx.todo('This Qualify Ids has no id column chosen.')
+  const plan = qualifyIdsPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.require('pandas')
   ctx.helper('coda_qualify_ids')
-  const direction = String(ctx.params.direction)
-  // Through the node's own rule, not the typed name: it suffixes a name the table already
-  // has where both languages would overwrite. `relabelTarget`'s reason, one node over.
-  const into = qualifyTarget(ctx.schema('in'), String(ctx.params.into))
   const args = [
     src,
-    pyStr(name),
-    `direction=${pyStr(direction)}`,
-    ...(direction === 'add' ? [`prefix=${pyStr(String(ctx.params.prefix).trim())}`] : []),
-    ...(direction === 'remove' && into ? [`into=${pyStr(into)}`] : []),
+    pyStr(plan.column),
+    `direction=${pyStr(plan.direction)}`,
+    ...(plan.prefix !== undefined ? [`prefix=${pyStr(plan.prefix)}`] : []),
+    ...(plan.into ? [`into=${pyStr(plan.into)}`] : []),
   ]
   return [`${ctx.output('out')} = coda_qualify_ids(${args.join(', ')})`]
 })

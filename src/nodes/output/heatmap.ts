@@ -61,6 +61,7 @@ import {
   takeAxisLabels,
   takeMatrix,
 } from '../lib/matrixShape'
+import { LruMap } from '../../core/lruMap'
 
 /** Whether an order has been chosen at all — the four Order controls hang off this. */
 const ordering = (p: ParamValues): boolean => p.sortBy !== 'none'
@@ -427,7 +428,10 @@ interface Shaped {
  * zoom window on `matrix`, so a fresh object per drag would rescan and re-fold four million
  * cells to draw the picture already on screen.
  */
-const SHAPED = new WeakMap<MatrixValue, Map<string, { shaped: Shaped; warnings: string[] }>>()
+const SHAPED = new WeakMap<
+  MatrixValue,
+  LruMap<string, { shaped: Shaped; warnings: string[] }>
+>()
 
 /** How many reshapings of one input matrix are worth holding. */
 const SHAPED_KEPT = 4
@@ -458,18 +462,6 @@ async function reshape(ctx: EvalContext, input: MatrixValue): Promise<Shaped> {
   const key = reshapingKey(ctx)
   let held = SHAPED.get(input)
   if (!held) {
-    held = new Map()
-    SHAPED.set(input, held)
-  }
-
-  let entry = held.get(key)
-  if (!entry) {
-    // The pipeline warns into the entry rather than at the card, so a hit can replay them: a
-    // card that dropped its "12 of 40 rows are not named" line the moment somebody selected
-    // something would be the cache showing through.
-    const warnings: string[] = []
-    const shaped = await shapeOnce({ ...ctx, warn: (m) => warnings.push(m) }, input)
-    entry = { shaped, warnings }
     /*
      * A few per input rather than one. Keyed on the input alone, two Heatmaps reading one
      * upstream matrix with different tabs evicted each other on every gesture — and a miss under
@@ -481,7 +473,18 @@ async function reshape(ctx: EvalContext, input: MatrixValue): Promise<Shaped> {
      * past this node being deleted. The bound is `SHAPED_KEPT` copies of something the scheduler
      * is already holding one of, and the input dying takes them with it.
      */
-    if (held.size >= SHAPED_KEPT) held.delete(held.keys().next().value!)
+    held = new LruMap(SHAPED_KEPT)
+    SHAPED.set(input, held)
+  }
+
+  let entry = held.get(key)
+  if (!entry) {
+    // The pipeline warns into the entry rather than at the card, so a hit can replay them: a
+    // card that dropped its "12 of 40 rows are not named" line the moment somebody selected
+    // something would be the cache showing through.
+    const warnings: string[] = []
+    const shaped = await shapeOnce({ ...ctx, warn: (m) => warnings.push(m) }, input)
+    entry = { shaped, warnings }
     held.set(key, entry)
   }
 

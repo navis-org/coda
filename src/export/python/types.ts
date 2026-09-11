@@ -262,8 +262,11 @@ export interface EmitContext<P extends ParamValues = ParamValues> {
    * being left out, so a notebook is never quietly shorter than the graph it came from.
    */
   todo(message: string): string[]
-  /** A note the cell carries alongside working code — an approximation, a caveat. */
-  note(message: string): string[]
+  /**
+   * A note the cell carries alongside working code — an approximation, a caveat. Nothing for
+   * `undefined`, so a plan's optional note needs no guard.
+   */
+  note(message: string | undefined): string[]
 }
 
 /** Lines of Python. One node, one cell. */

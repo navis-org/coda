@@ -13,32 +13,33 @@
 
 import { datasetRef } from '../../../core/types'
 import { readColorSpec, readShapeSpec, readSizeSpec } from '../../../nodes/lib/encodingParams'
-import { decodeClauses, resolveFilters, usesRegex } from '../../../nodes/lib/tableFilter'
+import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { copyIdsSettings } from '../../../nodes/lib/copyIds'
-import {
-  heatmapLogColor,
-  heatmapPaletteOf,
-  readColorLimits,
-} from '../../../nodes/lib/heatmapParams'
 import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
-import {
-  axesOf,
-  labelledAxes,
-  orderPlan,
-  parseLabelFilter,
-  readFilterOptions,
-  readLabelOptions,
-  readOrderOptions,
-} from '../../../nodes/lib/matrixShape'
-import { decodeMatrixSelection, matrixSelectionOrder } from '../../../nodes/lib/chartSelection'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
-import { decodeRanges } from '../../../nodes/lib/chartSelection'
 import { codaNeurons, neuronIds, pySelection } from './common'
 import { filterMasks } from './tableFilters'
 import { roisPrimaryOnly } from '../../../nodes/lib/roiViewParams'
-import { selectionIds } from '../../selection'
+import type {
+  HeatmapFilterStep,
+  HeatmapLabelPlan,
+  HeatmapOrderPlan,
+  HeatmapSelectionStep,
+} from '../../plans/heatmap'
+import { heatmapExportPlan } from '../../plans/heatmap'
+import type { PickedLabels } from '../../plans/viewers'
+import {
+  NEUROGLANCER_REFUSAL,
+  barChartPlan,
+  distributionPlan,
+  histogramPlan,
+  piePlan,
+  scatterPlan,
+  tableViewerPlan,
+  viewer3dPlan,
+} from '../../plans/viewers'
 
 // ---------------------------------------------------------------------------
 // Table — the one viewer with nothing to draw
@@ -48,10 +49,7 @@ registerEmitter('out.table', (ctx) => {
   const src = ctx.wired('in')
   const out = ctx.output('out')
   const filtered = ctx.output('filtered')
-  const { terms, problems } = resolveFilters(
-    ctx.schema('in'),
-    decodeClauses(ctx.params.filters),
-  )
+  const { terms, ignored } = tableViewerPlan(ctx)
   const masks = filterMasks(out, terms, ctx.schema('in'))
 
   const lines = [`${out} = ${src}`]
@@ -89,7 +87,7 @@ registerEmitter('out.table', (ctx) => {
 
   // A clause the canvas was ignoring is a clause the notebook must ignore too — and say so,
   // or the two quietly report different row counts for the same graph.
-  for (const problem of problems) lines.push(...ctx.note(`${problem} — not applied.`))
+  for (const note of ignored) lines.push(...ctx.note(note))
 
   // A bare name on the last line is how a notebook displays a frame, which is exactly what
   // this node is for.
@@ -131,19 +129,13 @@ registerEmitter('out.barChart', (ctx) => {
 
   ctx.require('matplotlib')
   const out = ctx.output('out')
-  const category = ctx.column('category')
-  const value = ctx.column('value')
-  const series = ctx.params.useSeries === true ? ctx.column('series') : undefined
+  const plan = barChartPlan(ctx)
 
   const lines = [`${out} = ${src}`]
-  if (!category || !value) {
-    // The node itself does not refuse over an unpicked column — it is a tap, and blocking
-    // everything downstream because a drawing cannot be configured helps nobody.
-    return [
-      ...lines,
-      ...ctx.note('No category or value column is picked, so nothing is drawn.'),
-    ]
-  }
+  // The node itself does not refuse over an unpicked column — it is a tap, and blocking
+  // everything downstream because a drawing cannot be configured helps nobody.
+  if (plan.note !== undefined) return [...lines, ...ctx.note(plan.note)]
+  const { category, value, series } = plan
 
   if (series) {
     lines.push(
@@ -173,9 +165,14 @@ registerEmitter('out.barChart', (ctx) => {
  * Coda's `markLabel` stringifies the cell before comparing, so a selection made on a numeric
  * category column holds `'5'` and not `5`. Without the cast the notebook would silently select
  * nothing on exactly the graphs where the canvas selects something.
+ *
+ * `missing` adds the null arm: `markLabel` names a null `'—'`, so a selection holding that
+ * picks the rows with no value, which `astype(str)` turns into `'nan'` and `'None'` instead.
  */
-function labelMask(frame: string, column: string, labels: readonly string[]): string {
-  return `${frame}[${frame}[${pyStr(column)}].astype(str).isin(${pyList(labels)})]`
+function labelMask(frame: string, selected: PickedLabels): string {
+  const c = `${frame}[${pyStr(selected.column)}]`
+  const isin = `${c}.astype(str).isin(${pyList(selected.labels)})`
+  return `${frame}[${selected.missing ? `${isin} | ${c}.isna()` : isin}]`
 }
 
 registerEmitter('out.histogram', (ctx) => {
@@ -184,18 +181,15 @@ registerEmitter('out.histogram', (ctx) => {
   ctx.require('matplotlib')
   const out = ctx.output('out')
   const selected = ctx.output('selected')
-  const value = ctx.column('value')
-  const series = ctx.column('series')
+  const plan = histogramPlan(ctx)
 
   const lines = [`${out} = ${src}`]
 
-  // The ranges, straight out of the stored selection — the same decode the node runs, so the
-  // notebook and the canvas cut the table at the same numbers.
-  const ranges = decodeRanges(ctx.params.selection)
-  if (ranges.length > 0 && value) {
+  if (plan.selected.note === undefined) {
+    const { column, ranges } = plan.selected
     const clauses = ranges.map(
       (range) =>
-        `((${out}[${pyStr(value)}] >= ${range.lo}) & (${out}[${pyStr(value)}] ` +
+        `((${out}[${pyStr(column)}] >= ${range.lo}) & (${out}[${pyStr(column)}] ` +
         `${range.closed ? '<=' : '<'} ${range.hi}))`,
     )
     lines.push(
@@ -204,15 +198,11 @@ registerEmitter('out.histogram', (ctx) => {
       `]`,
     )
   } else {
-    lines.push(
-      ...ctx.note('No bars are selected on the canvas, so Selected is empty.'),
-      `${selected} = ${out}.iloc[0:0]`,
-    )
+    lines.push(...ctx.note(plan.selected.note), `${selected} = ${out}.iloc[0:0]`)
   }
 
-  if (!value) {
-    return [...lines, ...ctx.note('No value column is picked, so nothing is drawn.')]
-  }
+  if (plan.drawn.note !== undefined) return [...lines, ...ctx.note(plan.drawn.note)]
+  const { value, series } = plan.drawn
 
   const binMode = String(ctx.params.binMode)
   const normalize = String(ctx.params.normalize)
@@ -247,24 +237,19 @@ registerEmitter('out.pie', (ctx) => {
   ctx.require('matplotlib')
   const out = ctx.output('out')
   const selected = ctx.output('selected')
-  const category = ctx.column('category')
-  const value = ctx.column('value')
+  const plan = piePlan(ctx)
 
   const lines = [`${out} = ${src}`]
 
-  const labels = selectionIds(ctx)
-  if (labels.length > 0 && category) {
-    lines.push(`${selected} = ${labelMask(out, category, labels)}`)
+  if (plan.selected.note === undefined) {
+    lines.push(`${selected} = ${labelMask(out, plan.selected)}`)
   } else {
-    lines.push(
-      ...ctx.note('No slices are selected on the canvas, so Selected is empty.'),
-      `${selected} = ${out}.iloc[0:0]`,
-    )
+    lines.push(...ctx.note(plan.selected.note), `${selected} = ${out}.iloc[0:0]`)
   }
 
-  if (!category) {
-    return [...lines, ...ctx.note('No category column is picked, so nothing is drawn.')]
-  }
+  if (plan.drawn.note !== undefined) return [...lines, ...ctx.note(plan.drawn.note)]
+  const { value } = plan.drawn
+  const category = plan.category!
 
   const maxSlices = Math.max(2, Math.round(Number(ctx.params.maxSlices)))
   const sortBySize = ctx.params.sortSlices !== false
@@ -310,24 +295,19 @@ registerEmitter('out.distribution', (ctx) => {
   ctx.require('matplotlib')
   const out = ctx.output('out')
   const selected = ctx.output('selected')
-  const value = ctx.column('value')
-  const group = ctx.column('group')
+  const plan = distributionPlan(ctx)
 
   const lines = [`${out} = ${src}`]
 
-  const labels = selectionIds(ctx)
-  if (labels.length > 0 && group) {
-    lines.push(`${selected} = ${labelMask(out, group, labels)}`)
+  if (plan.selected.note === undefined) {
+    lines.push(`${selected} = ${labelMask(out, plan.selected)}`)
   } else {
-    lines.push(
-      ...ctx.note('No boxes are selected on the canvas, so Selected is empty.'),
-      `${selected} = ${out}.iloc[0:0]`,
-    )
+    lines.push(...ctx.note(plan.selected.note), `${selected} = ${out}.iloc[0:0]`)
   }
 
-  if (!value) {
-    return [...lines, ...ctx.note('No value column is picked, so nothing is drawn.')]
-  }
+  if (plan.drawn.note !== undefined) return [...lines, ...ctx.note(plan.drawn.note)]
+  const { value } = plan.drawn
+  const { group } = plan
 
   const style = String(ctx.params.style)
   const whiskers = String(ctx.params.whiskers)
@@ -403,20 +383,21 @@ function whisArg(rule: string): string {
 
 registerEmitter('out.heatmap', (ctx) => {
   const src = ctx.wired('in')
+  // Every decision below is `heatmapExportPlan`'s; this emitter spells it in pandas and seaborn.
+  const plan = heatmapExportPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.require('seaborn')
   ctx.require('matplotlib')
   const out = ctx.output('out')
-  const showValues = ctx.params.showValues === true
-  const diverging = ctx.params.scale === 'diverging'
-  const palette = heatmapPaletteOf(ctx.params)
+  const { palette, diverging, substitute, limits, manual, log, showValues } = plan.colour
 
   const lines = [
     `${out} = ${src}`,
-    ...heatmapLabelLines(ctx, out),
-    ...heatmapFilterLines(ctx, out),
-    ...heatmapOrderLines(ctx, out),
-    ...heatmapSelectionLines(ctx, out),
+    ...heatmapLabelLines(ctx, out, plan.labels, plan.tracked),
+    ...heatmapFilterLines(ctx, out, plan.filter, plan.tracked),
+    ...heatmapOrderLines(ctx, out, plan.order, plan.tracked),
+    ...heatmapSelectionLines(ctx, out, plan.selection, plan.tracked),
   ]
 
   /*
@@ -425,8 +406,8 @@ registerEmitter('out.heatmap', (ctx) => {
    * palette itself — that is what the list was chosen for — and the ColorBrewer sets run as
    * published in both places, red at the negative end of `RdBu`.
    */
-  const cmap = palette === 'coda' ? (diverging ? 'RdBu_r' : 'Blues') : palette
-  if (palette === 'coda') {
+  const cmap = substitute ? (diverging ? 'RdBu_r' : 'Blues') : palette
+  if (substitute) {
     lines.push(
       ...ctx.note(
         `Coda draws this in its own ${diverging ? 'blue–red' : 'blue'} ramp, which has no ` +
@@ -434,33 +415,24 @@ registerEmitter('out.heatmap', (ctx) => {
       ),
     )
   }
-  /*
-   * The colour ends and the log mapping, which is where the frame being drawn stops being the
-   * frame the node output. `_lo`/`_hi` are computed rather than inlined even when the limits
-   * are manual, so the log arm below has one expression to read them from.
-   */
-  const limits = readColorLimits(ctx.params)
-  const log = heatmapLogColor(ctx.params)
-  const manual = limits.min !== undefined || limits.max !== undefined
-  if (limits.problem) {
-    lines.push(
-      ...ctx.note(
-        `Coda is ignoring the colour limits because ${limits.problem}, so neither this nor the ` +
-          `card is using them.`,
-      ),
-    )
-  }
+  lines.push(...ctx.note(plan.colour.limitsNote))
 
+  // The ends wherever they are not the data's — `colorDomain`'s on a diverging scale — as in R.
   let drawn = out
-  if (manual || log) {
+  if (diverging) {
     ctx.require('numpy')
     lines.push(
-      diverging
-        ? `_hi = ${limits.max ?? `float(np.nanmax(np.abs(${out}.values)))`}`
-        : `_hi = ${limits.max ?? `float(np.nanmax(${out}.values))`}`,
-      diverging
-        ? `_lo = -_hi`
-        : `_lo = ${limits.min ?? `min(0.0, float(np.nanmin(${out}.values)))`}`,
+      `_hi = ${limits.max ?? `float(np.nanmax(np.abs(${out}.values)))`}`,
+      ...(limits.max === undefined
+        ? [`if not np.isfinite(_hi) or _hi == 0:`, `    _hi = 1.0`]
+        : []),
+      `_lo = -_hi`,
+    )
+  } else if (manual || log) {
+    ctx.require('numpy')
+    lines.push(
+      `_hi = ${limits.max ?? `float(np.nanmax(${out}.values))`}`,
+      `_lo = ${limits.min ?? `min(0.0, float(np.nanmin(${out}.values)))`}`,
     )
   }
   if (log) {
@@ -482,7 +454,7 @@ registerEmitter('out.heatmap', (ctx) => {
     ...(diverging && !log ? ['center=0'] : []),
     ...(log
       ? ['vmin=0', `vmax=float(np.log10(1 + _hi - _lo))`]
-      : manual
+      : manual || diverging
         ? ['vmin=_lo', 'vmax=_hi']
         : []),
     // `annot` takes a frame of its own, which is what keeps the printed numbers the values
@@ -516,27 +488,30 @@ registerEmitter('out.heatmap', (ctx) => {
  * dropped here, the one rule the helper does not carry — `dropna` keeps the empty string, and
  * an untyped body would otherwise take a blank axis label where the canvas kept its id.
  */
-function heatmapLabelLines(ctx: Parameters<Emitter>[0], out: string): string[] {
-  const options = readLabelOptions(ctx)
-  const annotations = ctx.input('annotations')
-  if (!annotations || !options.match || !options.label) return []
-  const tracked = trackedAxes(ctx)
+function heatmapLabelLines(
+  ctx: Parameters<Emitter>[0],
+  out: string,
+  labels: HeatmapLabelPlan | undefined,
+  tracked: ReadonlySet<MatrixAxis>,
+): string[] {
+  if (!labels) return []
+  const { annotations, match, label } = labels
   // `pd.DataFrame` below, which the heatmap emitter itself has no other reason to ask for.
   ctx.require('pandas')
   ctx.helper('coda_relabel')
 
   const lines = [
     `${ctx.name}_named = ${annotations}.loc[`,
-    `    ${annotations}[${pyStr(options.label)}].notna()`,
-    `    & (${annotations}[${pyStr(options.label)}].astype(str) != '')`,
+    `    ${annotations}[${pyStr(label)}].notna()`,
+    `    & (${annotations}[${pyStr(label)}].astype(str) != '')`,
     `]`,
   ]
-  for (const axis of axesOf(options.axis)) {
+  for (const axis of labels.axes) {
     const attribute = axis === 'rows' ? 'index' : 'columns'
     // The arrival names, captured before they are overwritten — `Selected Rows` carries them in
     // `label`, and after `set_axis` there is nothing left to recover them from. Only where a
-    // selection actually reads them, since this is the one thing here that costs a line for
-    // nothing when nobody has dragged a rectangle.
+    // selection actually reads them (`tracked`), since this is the one thing here that costs a
+    // line for nothing when nobody has dragged a rectangle.
     if (tracked.has(axis)) {
       lines.push(`${sourceName(axis)} = list(${out}.${attribute}.astype(str))`)
     }
@@ -559,8 +534,8 @@ function heatmapLabelLines(ctx: Parameters<Emitter>[0], out: string): string[] {
       `        pd.DataFrame({'label': ${out}.${attribute}.astype(str)}),`,
       `        'label',`,
       `        ${ctx.name}_named,`,
-      `        ${pyStr(options.match)},`,
-      `        ${pyStr(options.label)},`,
+      `        ${pyStr(match)},`,
+      `        ${pyStr(label)},`,
       `        unmatched='keep',`,
       `    )['label'].tolist(),`,
       `    axis=${pyStr(attribute)},`,
@@ -568,21 +543,6 @@ function heatmapLabelLines(ctx: Parameters<Emitter>[0], out: string): string[] {
     )
   }
   return lines
-}
-
-/**
- * Which axes carry their arrival names through the reshaping.
- *
- * `labelledAxes` is the shared half — whether the Labels tab names an axis at all — and lives in
- * `matrixShape.ts` beside the readers it composes, because it is a decision about params with no
- * language in it and it had been spelled out in TypeScript inside *both* emitters. What is local
- * is the `size > 0` gate: the canvas tracks unconditionally because an index list costs nothing,
- * where here every tracked axis is two more lines in somebody's document.
- */
-function trackedAxes(ctx: Parameters<Emitter>[0]): Set<MatrixAxis> {
-  const picked = decodeMatrixSelection(ctx.params.selection)
-  const named = labelledAxes(readLabelOptions(ctx), Boolean(ctx.input('annotations')))
-  return new Set(named.filter((axis) => picked[axis].size > 0))
 }
 
 /** Where an axis's arrival names live while the pipeline reshapes them. */
@@ -595,24 +555,24 @@ function sourceName(axis: MatrixAxis): string {
  *
  * **Both bound whatever the selection is**, including empty, because an emitter cannot ask who
  * is downstream and a cell further on naming an unbound variable is a `NameError` rather than
- * an empty table. `coda_matrix_selection` is the whole of the logic; what is decided here is
- * only whether it is handed the tracked arrival names or reads the axis itself.
+ * an empty table. `coda_matrix_selection` is the whole of the logic; whether it is handed the
+ * tracked arrival names or reads the axis itself is the plan's `tracked`, and the positions come
+ * ascending from the plan, so the cell reads in the card's own order.
  */
-function heatmapSelectionLines(ctx: Parameters<Emitter>[0], out: string): string[] {
-  const picked = decodeMatrixSelection(ctx.params.selection)
-  const tracked = trackedAxes(ctx)
+function heatmapSelectionLines(
+  ctx: Parameters<Emitter>[0],
+  out: string,
+  selection: HeatmapSelectionStep[],
+  tracked: ReadonlySet<MatrixAxis>,
+): string[] {
   ctx.require('pandas')
   ctx.helper('coda_matrix_selection')
   const lines: string[] = ['']
-  for (const axis of ['rows', 'columns'] as const) {
+  for (const { axis, positions } of selection) {
     const attribute = axis === 'rows' ? 'index' : 'columns'
-    const arrival = tracked.has(axis) ? `, ${sourceName(axis)}` : ''
-    // Ascending, so the cell reads in the card's own order and two gestures selecting the same
-    // lines emit the same text — `chartSelection.ts` owns that rule for the param as well.
-    const positions = matrixSelectionOrder(picked[axis])
     lines.push(
       `${ctx.output(axis)} = coda_matrix_selection(` +
-        `${out}.${attribute}, ${pyList(positions)}${arrival})`,
+        `${out}.${attribute}, ${pyList(positions)}${tracked.has(axis) ? `, ${sourceName(axis)}` : ''})`,
     )
   }
   return lines
@@ -625,32 +585,28 @@ function heatmapSelectionLines(ctx: Parameters<Emitter>[0], out: string): string
  * against what the filter left. `.astype(str)` because a pivot's index may be numeric where
  * Coda's labels are always text, and `.str.contains` on an Int64Index raises.
  */
-function heatmapFilterLines(ctx: Parameters<Emitter>[0], out: string): string[] {
-  const tracked = trackedAxes(ctx)
-  const filters = readFilterOptions(ctx.params)
+function heatmapFilterLines(
+  ctx: Parameters<Emitter>[0],
+  out: string,
+  steps: HeatmapFilterStep[],
+  tracked: ReadonlySet<MatrixAxis>,
+): string[] {
   const lines: string[] = []
   const masks: Partial<Record<MatrixAxis, string>> = {}
 
-  for (const axis of ['rows', 'columns'] as const) {
-    const query = axis === 'rows' ? filters.rows : filters.columns
-    const { filter, error } = parseLabelFilter(query)
-    if (error) {
-      lines.push(
-        ...ctx.note(
-          `The ${axis} filter "${query}" is not a valid regular expression, so Coda kept every ` +
-            `${axis === 'rows' ? 'row' : 'column'} and so does this.`,
-        ),
-      )
+  for (const step of steps) {
+    // A pattern the canvas could not compile: the axis stays whole, and the note says so here.
+    if (step.note !== undefined) {
+      lines.push(...ctx.note(step.note))
       continue
     }
-    if (!filter) continue
-
+    const { axis } = step
     const name = axis === 'rows' ? '_keep_rows' : '_keep_cols'
     const labels = `${out}.${axis === 'rows' ? 'index' : 'columns'}.astype(str)`
-    const test = `${labels}.str.contains(${pyStr(filter.pattern)}, case=False, regex=${
-      filter.regex ? 'True' : 'False'
+    const test = `${labels}.str.contains(${pyStr(step.pattern)}, case=False, regex=${
+      step.regex ? 'True' : 'False'
     })`
-    lines.push(`${name} = ${filter.negate ? `~${test}` : test}`)
+    lines.push(`${name} = ${step.negate ? `~${test}` : test}`)
     // The arrival names go through the *same* mask, which is the only way the two stay aligned
     // — the node tracks them through the identical index lists for the identical reason.
     if (tracked.has(axis)) {
@@ -678,19 +634,25 @@ function heatmapFilterLines(ctx: Parameters<Emitter>[0], out: string): string[] 
  * duplicated label returns every match for each occurrence. The R emitter had the same bug and
  * failed the other way, silently dropping a row; neither looks wrong in the output.
  */
-function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
-  const tracked = trackedAxes(ctx)
-  const order = readOrderOptions(ctx.params)
-  if (order.by === 'none') return []
-  const plan = orderPlan(order)
+function heatmapOrderLines(
+  ctx: Parameters<Emitter>[0],
+  out: string,
+  order: HeatmapOrderPlan | undefined,
+  tracked: ReadonlySet<MatrixAxis>,
+): string[] {
+  if (!order) return []
   const lines: string[] = []
-  const chosen: Partial<Record<MatrixAxis, string>> = {}
 
-  for (const axis of plan.lead) {
-    const name = axis === 'rows' ? '_rows' : '_cols'
+  for (const [i, step] of order.steps.entries()) {
+    // A `value` sort with no key: the note stands where the sort would have been.
+    if (step.note !== undefined) {
+      lines.push(...ctx.note(step.note))
+      continue
+    }
+    const { axis } = step
     const labels = axis === 'rows' ? `${out}.index` : `${out}.columns`
-    let expr: string | undefined
-    switch (order.by) {
+    let expr: string
+    switch (step.by) {
       case 'total':
         ctx.require('numpy')
         // Negated and stable, which is Coda's `orderByScores`: descending, ties in arrival
@@ -702,88 +664,112 @@ function heatmapOrderLines(ctx: Parameters<Emitter>[0], out: string): string[] {
         expr = `sorted(range(len(${labels})), key=lambda i: coda_natural_key(${labels}[i]))`
         break
       case 'value': {
-        if (!order.key) {
-          lines.push(
-            ...ctx.note(
-              `The ${axis} are to be ordered by one ${axis === 'rows' ? 'column' : 'row'} but ` +
-                `none is named, so they are left as they arrived.`,
-            ),
-          )
-          break
-        }
         ctx.require('numpy')
         // The *first* line of that name, which is `axisVector`'s `indexOf` — a repeated key is
         // not an error and picking the last of them would be a different question.
         const other = axis === 'rows' ? `${out}.columns` : `${out}.index`
-        lines.push(`_key = list(${other}).index(${pyStr(order.key)})`)
-        expr = `list(np.argsort(-${out}.${axis === 'rows' ? 'iloc[:, _key]' : 'iloc[_key, :]'}.values, kind='stable'))`
-        break
+        const found = [
+          `_key = list(${other}).index(${pyStr(order.key)})`,
+          `${orderName(axis)} = list(np.argsort(-${out}.${axis === 'rows' ? 'iloc[:, _key]' : 'iloc[_key, :]'}.values, kind='stable'))${order.reverse ? '[::-1]' : ''}`,
+        ]
+        // Whether a line carries the key is a fact about the data, so it is asked at run time:
+        // the card warns and leaves this axis — and the one following it — as they arrived.
+        const follower = order.follower?.leader === axis ? order.follower.axis : undefined
+        if (follower) found.push(followerLine(ctx, out, follower, axis))
+        lines.push(
+          `if ${pyStr(order.key)} in list(${other}):`,
+          ...found.map((line) => `    ${line}`),
+          `else:`,
+          `    print(${pyStr(step.keyMissing)})`,
+          `    ${orderName(axis)} = list(range(len(${labels})))`,
+          ...(follower
+            ? [`    ${orderName(follower)} = list(range(len(${axisLabels(out, follower)})))`]
+            : []),
+        )
+        continue
       }
       case 'cluster': {
+        ctx.require('numpy')
         ctx.require('scipyCluster', 'leaves_list', 'linkage')
         ctx.require('scipyDistance', 'pdist')
-        if (lines.length === 0) {
+        // Once, before the first axis: a later one always has lines above it in the section.
+        if (i === 0) {
           lines.push(
             ...ctx.note(
               'The clustering is seaborn’s clustermap: each row a vector across the columns, ' +
-                'clustered by the distance between vectors. Coda reads an empty cell as 0 for ' +
-                'this, hence the fillna, and puts a constant vector — no correlation, no cosine ' +
-                '— at distance 1 from everything rather than letting pdist’s NaN stop linkage.',
+                'clustered by the distance between vectors. Coda reads an empty or infinite ' +
+                'cell as 0 for this, hence the nan_to_num, and puts a constant vector — no ' +
+                'correlation, no cosine — at distance 1 from everything rather than letting ' +
+                'pdist’s NaN stop linkage.',
             ),
+            // Every non-finite cell to 0, which is `coda_cluster_order`'s `nan_to_num` — `fillna`
+            // alone would hand `pdist` an infinity and every distance from that vector with it.
+            // One copy for both axes, R's `x_`: nothing between them touches the frame.
+            `_x = np.nan_to_num(${out}.to_numpy(dtype=float, copy=True), nan=0.0, posinf=0.0, neginf=0.0, copy=False)`,
           )
         }
-        const vectors = `${out}.fillna(0).values${axis === 'rows' ? '' : '.T'}`
+        const vectors = axis === 'rows' ? '_x' : '_x.T'
         let distances = `pdist(${vectors}, metric=${pyStr(order.metric)})`
         if (order.metric !== 'euclidean') {
           // A constant vector has no correlation and a zero vector no cosine: `pdist` answers
           // NaN and `linkage` refuses the lot. Coda puts such a vector at distance 1 from
           // everything — unlike everything, at the end of the tree — so the NaN is too.
-          ctx.require('numpy')
           distances = `np.nan_to_num(${distances}, nan=1.0)`
         }
         // `leaves_list` already answers in positions, so this arm got *simpler* for the fix.
         expr = `list(leaves_list(linkage(${distances}, method=${pyStr(order.method)})))`
         break
       }
-      default:
-        break
     }
-    if (!expr) continue
-    lines.push(`${name} = ${expr}${order.reverse ? '[::-1]' : ''}`)
-    chosen[axis] = name
+    lines.push(`${orderName(axis)} = ${expr}${order.reverse ? '[::-1]' : ''}`)
   }
 
-  if (plan.follower && plan.lead[0] && chosen[plan.lead[0]]) {
-    const leader = plan.lead[0]!
-    const lead = chosen[leader]!
-    const name = plan.follower === 'rows' ? '_rows' : '_cols'
-    const labels = plan.follower === 'rows' ? `${out}.index` : `${out}.columns`
-    const leadLabels = leader === 'rows' ? `${out}.index` : `${out}.columns`
-    // The leader's labels in the leader's *new* order, matched onto the follower — the first
-    // unclaimed line of a repeated name winning, which is `followOrder` and is the rule a list
-    // comprehension cannot state. See `coda_follow_order`.
-    ctx.helper('coda_follow_order')
-    lines.push(
-      `${name} = coda_follow_order([${leadLabels}[i] for i in ${lead}], list(${labels}))`,
-    )
-    chosen[plan.follower] = name
+  // A `value` sort's follower was written inside its run-time check, above.
+  if (order.follower && order.by !== 'value') {
+    lines.push(followerLine(ctx, out, order.follower.axis, order.follower.leader))
   }
 
   // The arrival names take the same positions, both axes, after the follower is derived.
-  for (const axis of ['rows', 'columns'] as const) {
-    const list = chosen[axis]
-    if (list && tracked.has(axis)) {
-      lines.push(`${sourceName(axis)} = [${sourceName(axis)}[i] for i in ${list}]`)
-    }
+  for (const axis of order.ordered.filter((a) => tracked.has(a))) {
+    lines.push(`${sourceName(axis)} = [${sourceName(axis)}[i] for i in ${orderName(axis)}]`)
   }
 
   // `.iloc`, never `.loc` — see the header. Two lists select the cross product, which is what
   // a reordered matrix is.
-  if (chosen.rows && chosen.columns)
-    lines.push(`${out} = ${out}.iloc[${chosen.rows}, ${chosen.columns}]`)
-  else if (chosen.rows) lines.push(`${out} = ${out}.iloc[${chosen.rows}]`)
-  else if (chosen.columns) lines.push(`${out} = ${out}.iloc[:, ${chosen.columns}]`)
+  const rows = order.ordered.includes('rows') ? orderName('rows') : undefined
+  const columns = order.ordered.includes('columns') ? orderName('columns') : undefined
+  if (rows && columns) lines.push(`${out} = ${out}.iloc[${rows}, ${columns}]`)
+  else if (rows) lines.push(`${out} = ${out}.iloc[${rows}]`)
+  else if (columns) lines.push(`${out} = ${out}.iloc[:, ${columns}]`)
   return lines
+}
+
+/** The variable holding an axis's permutation. */
+function orderName(axis: MatrixAxis): string {
+  return axis === 'rows' ? '_rows' : '_cols'
+}
+
+/** An axis's labels on the frame. */
+function axisLabels(out: string, axis: MatrixAxis): string {
+  return axis === 'rows' ? `${out}.index` : `${out}.columns`
+}
+
+/**
+ * The follower's permutation: the leader's labels in the leader's *new* order, matched onto the
+ * follower — the first unclaimed line of a repeated name winning, which is `followOrder` and is
+ * the rule a list comprehension cannot state. See `coda_follow_order`.
+ */
+function followerLine(
+  ctx: Parameters<Emitter>[0],
+  out: string,
+  axis: MatrixAxis,
+  leader: MatrixAxis,
+): string {
+  ctx.helper('coda_follow_order')
+  return (
+    `${orderName(axis)} = coda_follow_order(` +
+    `[${axisLabels(out, leader)}[i] for i in ${orderName(leader)}], list(${axisLabels(out, axis)}))`
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -797,27 +783,19 @@ registerEmitter('out.scatter', (ctx) => {
   ctx.require('matplotlib')
   const out = ctx.output('out')
   const selected = ctx.output('selected')
-  const x = ctx.column('x')
-  const y = ctx.column('y')
+  const plan = scatterPlan(ctx)
 
   const lines = [`${out} = ${src}`]
 
-  const selection = selectionIds(ctx)
-  const idColumn = ctx.column('idColumn')
-  if (selection.length > 0 && idColumn) {
-    lines.push(
-      `${selected} = ${out}[${out}[${pyStr(idColumn)}].isin(${pySelection(selection)})]`,
-    )
+  if (plan.selected.note === undefined) {
+    const { column, ids } = plan.selected
+    lines.push(`${selected} = ${out}[${out}[${pyStr(column)}].isin(${pySelection(ids)})]`)
   } else {
-    lines.push(
-      ...ctx.note('Nothing is lassoed on the canvas, so Selected is empty.'),
-      `${selected} = ${out}.iloc[0:0]`,
-    )
+    lines.push(...ctx.note(plan.selected.note), `${selected} = ${out}.iloc[0:0]`)
   }
 
-  if (!x || !y) {
-    return [...lines, ...ctx.note('No x or y column is picked, so nothing is drawn.')]
-  }
+  if (plan.drawn.note !== undefined) return [...lines, ...ctx.note(plan.drawn.note)]
+  const { x, y } = plan.drawn
 
   /*
    * Read through the spec readers rather than by naming param ids here.
@@ -921,33 +899,28 @@ registerEmitter('out.network', (ctx) => {
 // ---------------------------------------------------------------------------
 
 registerEmitter('out.viewer3d', (ctx) => {
-  // Four optional geometry sockets rather than one input, and the node is *not* a tap: its
-  // only output is the neurons picked in the viewer. Assuming the pass-through shape every
-  // other viewer has is what made this emit "nothing is wired" for a node plainly wired up.
-  const wired = ['skeletons', 'meshes', 'points']
-    .map((port) => ctx.input(port))
-    .filter((v): v is string => !!v)
+  const plan = viewer3dPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const { geometry: wired, selected: selection } = plan
   /*
    * Volumes are spread rather than passed, because what arrives on that socket is a *list* of
    * shells where the other three are one object each. `[skeletons, volumes]` would hand
    * `plot3d` a nested list; `[skeletons, *volumes]` is flat either way, and still correct if
    * somebody wires an ordinary Meshes node there — a NeuronList unpacks too.
    */
-  const volumes = ctx.input('volumes')
-  if (wired.length === 0 && !volumes) return ctx.todo('No geometry is wired to this 3D Viewer.')
+  const volumes = plan.volumes
 
   ctx.require('navis')
   const selected = ctx.output('selected')
-  const selection = selectionIds(ctx)
 
   ctx.require('pandas')
   const args = [...wired, ...(volumes ? [`*${volumes}`] : [])].join(', ')
   const lines = [`navis.plot3d([${args}])`, '']
-  if (selection.length > 0) {
-    lines.push(`${selected} = pd.DataFrame({'neuronId': ${pySelection(selection)}})`)
+  if (selection.note === undefined) {
+    lines.push(`${selected} = pd.DataFrame({'neuronId': ${pySelection(selection.ids)}})`)
   } else {
     lines.push(
-      ...ctx.note('Nothing is picked in the viewer, so Selected is empty.'),
+      ...ctx.note(selection.note),
       // Typed at the literal rather than cast after it: an empty `[]` is `float64`, where the
       // node's own fallback schema says `str`. Nothing to convert, so `coda_ids` would be a
       // line of ceremony over a frame with no rows.
@@ -1042,16 +1015,8 @@ registerEmitter('out.copyIds', (ctx) => {
 // Neuroglancer  (Profile lives in its own file — it compiles real metrics)
 // ---------------------------------------------------------------------------
 
-registerEmitter('out.neuroglancer', (ctx) => {
-  // The output is a **URL**, not a table, so there is nothing to pass through: binding the
-  // incoming neurons to it would hand a DataFrame to anything reading a link. Building the
-  // URL needs the scene JSON the dataset publishes, which is a fetch this translation does
-  // not make — so it emits nothing and says so, and downstream reports being blocked.
-  return ctx.todo(
-    'This node builds a neuroglancer URL by editing the scene its dataset publishes. That ' +
-      'scene is a fetch this translation does not make, so no link is built here.',
-  )
-})
+// Refused whatever it is set to — `NEUROGLANCER_REFUSAL` says why.
+registerEmitter('out.neuroglancer', (ctx) => ctx.todo(NEUROGLANCER_REFUSAL))
 
 // ---------------------------------------------------------------------------
 // Dataset description

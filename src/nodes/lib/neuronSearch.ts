@@ -81,6 +81,7 @@ import type { CellValue, ColumnData, TableValue } from '../../core/values'
  */
 import type { CompareOp, FieldTerm } from '../../data/terms'
 import { fieldTermsMatch, prepareFieldTerms, resolveColumn } from '../../data/terms'
+import { LruMap } from '../../core/lruMap'
 
 export interface TextTerm {
   kind: 'text'
@@ -387,7 +388,7 @@ export function buildSearchIndex(
   }
 }
 
-const indexCache = new WeakMap<TableValue, Map<string, SearchIndex>>()
+const indexCache = new WeakMap<TableValue, LruMap<string, SearchIndex>>()
 
 /** Memoised `buildSearchIndex`. Keyed by table identity, which is how values flow anyway. */
 export function searchIndexFor(
@@ -401,28 +402,26 @@ export function searchIndexFor(
   const key = [...exclude].sort().join('\u0001')
   let byExclusion = indexCache.get(table)
   if (!byExclusion) {
-    byExclusion = new Map<string, SearchIndex>()
+    byExclusion = new LruMap<string, SearchIndex>(MAX_CACHED_INDEXES)
     indexCache.set(table, byExclusion)
   }
   let index = byExclusion.get(key)
   if (!index) {
-    /*
-     * Bounded, because the `WeakMap` protects nothing here: `cacheGet` promotes a hit into
-     * `cache.ts`'s module map, so the neuron index is held for the life of the tab and every
-     * distinct exclusion would accumulate a haystack that is never collected — 24 MB apiece at
-     * 165k neurons. Two is what the honest case needs (two Explore nodes on one dataset,
-     * configured differently); a single slot would thrash between them at 55 ms a swap.
-     */
-    if (byExclusion.size >= MAX_CACHED_INDEXES) {
-      byExclusion.delete(byExclusion.keys().next().value!)
-    }
+    // Room first, so the haystack being replaced is gone before the next one is built.
+    byExclusion.makeRoom()
     index = buildSearchIndex(table, exclude)
     byExclusion.set(key, index)
   }
   return index
 }
 
-/** Haystacks kept per table. See the note in `searchIndexFor`. */
+/**
+ * Haystacks kept per table. Bounded, because the `WeakMap` protects nothing here: `cacheGet`
+ * promotes a hit into `cache.ts`'s module map, so the neuron index is held for the life of the tab
+ * and every distinct exclusion would accumulate a haystack that is never collected — 24 MB apiece
+ * at 165k neurons. Two is what the honest case needs (two Explore nodes on one dataset, configured
+ * differently); a single slot would thrash between them at 55 ms a swap.
+ */
 const MAX_CACHED_INDEXES = 3
 
 // ---------------------------------------------------------------------------

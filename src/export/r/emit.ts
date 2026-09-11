@@ -20,7 +20,7 @@ import { inferGraph } from '../../core/inference'
 import type { NodeDefinition, ParamValues } from '../../core/node'
 import { makeInferContext } from '../../core/node'
 import { getNodeDef, isAnnotation } from '../../core/registry'
-import { inputPorts, outputPorts } from '../../core/ports'
+import { findInputPort, inputPorts, outputPorts } from '../../core/ports'
 import type { CodaType } from '../../core/types'
 import type { ExportRefusal, TodoStep } from '../canExport'
 import { canExportNotebook, nodeLabel } from '../canExport'
@@ -201,6 +201,12 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
       name: varName,
       input: inputVar,
       wired: (portId) => {
+        if (findInputPort(def, node.params, portId)?.required === false) {
+          throw new Error(
+            `emitter asked wired() for optional input "${portId}" of ${def.type}; ` +
+              `use input() for an optional port`,
+          )
+        }
         const variable = inputVar(portId)
         if (variable === undefined) {
           throw new Error(
@@ -225,7 +231,7 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
         emittedTodo = true
         return rComment(`TODO: ${message}`)
       },
-      note: (message) => rComment(`NOTE: ${message}`),
+      note: (message) => (message === undefined ? [] : rComment(`NOTE: ${message}`)),
     }
 
     /*
@@ -377,6 +383,10 @@ function setupChunk(packages: Set<RPackage>): Cell {
   }
   for (const pkg of github) {
     lines.push(`# remotes::install_github("${PACKAGES[pkg].github}")  # not on CRAN`)
+  }
+  for (const pkg of declared) {
+    const minimum = PACKAGES[pkg].minimum
+    if (minimum) lines.push(`# ${pkg} >= ${minimum.version}, for ${minimum.for}.`)
   }
   lines.push('')
   for (const pkg of declared) lines.push(`library(${pkg})`)

@@ -13,7 +13,7 @@ import { inferGraph } from '../../core/inference'
 import type { NodeDefinition, ParamValues } from '../../core/node'
 import { makeInferContext } from '../../core/node'
 import { getNodeDef, isAnnotation } from '../../core/registry'
-import { inputPorts, outputPorts } from '../../core/ports'
+import { findInputPort, inputPorts, outputPorts } from '../../core/ports'
 import { backendName } from '../../nodes/lib/datasetFamilies'
 import { backendOf } from '../../data/source'
 import type { CodaType } from '../../core/types'
@@ -222,6 +222,12 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
       name: varName,
       input: inputVar,
       wired: (portId) => {
+        if (findInputPort(def, node.params, portId)?.required === false) {
+          throw new Error(
+            `emitter asked wired() for optional input "${portId}" of ${def.type}; ` +
+              `use input() for an optional port`,
+          )
+        }
         const variable = inputVar(portId)
         if (variable === undefined) {
           throw new Error(
@@ -246,7 +252,7 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
         emittedTodo = true
         return pyComment(`TODO: ${message}`)
       },
-      note: (message) => pyComment(`NOTE: ${message}`),
+      note: (message) => (message === undefined ? [] : pyComment(`NOTE: ${message}`)),
     }
 
     /*

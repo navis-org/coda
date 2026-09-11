@@ -14,29 +14,24 @@
  * is half of it: the Tab field overrides the pasted link.
  */
 
-import { sheetConfigFrom, sheetExportUrl } from '../../../data/annotations'
-import { namedColumns } from '../../../data/annotations/types'
+import { googleSheetPlan } from '../../plans/query'
 import { rStr, rVector } from '../r'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 
 registerEmitter('annotation.googleSheet', (ctx: EmitContext) => {
-  const { config, error } = sheetConfigFrom(ctx.params)
-  // The sentence `validate` puts on the card and `evaluate` throws, rather than a fourth
-  // wording of one refusal.
-  if (error) return ctx.todo(error)
-  if (!config) return ctx.todo('This node names no sheet.')
+  const plan = googleSheetPlan(ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   ctx.library('readr')
   ctx.helper('coda_google_sheet')
 
-  const { idColumn } = config
-  const columns = namedColumns(config.columns, idColumn)
+  const { idColumn, columns } = plan
   const out = ctx.output('annotations')
 
   const lines: string[] = [
     `${out} <- coda_google_sheet(`,
-    `  ${rStr(sheetExportUrl(config.documentId, config.gid))},`,
+    `  ${rStr(plan.url)},`,
     `  id_column = ${rStr(idColumn)}${columns.length > 0 ? ',' : ''}`,
     ...(columns.length > 0 ? [`  columns = ${rVector(columns)}`] : []),
     `)`,

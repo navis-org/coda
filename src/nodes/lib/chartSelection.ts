@@ -61,7 +61,22 @@ export function rowsWithLabels(
 ): TableValue {
   const data = column ? table.data[column] : undefined
   // An unresolved column names nothing, which `rowsMatching` reads as an empty selection.
-  return rowsMatching(table, (row) => markLabel(data?.[row]), data ? selection : [])
+  return rowsMatching(
+    table,
+    (row) => markLabel(data?.[row]),
+    data ? decodeLabels(selection) : [],
+  )
+}
+
+/**
+ * A stored selection read as the **names** it holds — a mark's label, or a row's key — verbatim.
+ *
+ * Stringified and nothing more, for the canvas and both exporters alike: trimming one or dropping
+ * a blank would select rows the canvas does not, and `Number` would turn `"KCg-m"` into `NaN` and
+ * a category that looks numeric into a value that no longer matches the string compared.
+ */
+export function decodeLabels(selection: unknown): string[] {
+  return Array.isArray(selection) ? selection.map(String) : []
 }
 
 // ---------------------------------------------------------------------------

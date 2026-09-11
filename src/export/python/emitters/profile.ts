@@ -14,11 +14,11 @@
 
 import { pyStr } from '../py'
 import { registerEmitter, registerHelper } from '../registry'
-import { profileExportPin } from '../../profileSubject'
+import { profileExportPin } from '../../plans/profile'
 import { neuronIds, pySelection } from './common'
 import { readWeightProperty } from '../../../nodes/lib/datasetParam'
-import { CYPHER_PLACEHOLDERS, profilePropertyQueries } from '../../connectivityPlan'
-import { selectionIds } from '../../selection'
+import { CYPHER_PLACEHOLDERS, profilePropertyQueries } from '../../plans/connectivity'
+import { pickedIds } from '../../plans/viewers'
 
 registerEmitter('out.profile', (ctx) => {
   const src = ctx.wired('neurons')
@@ -26,7 +26,6 @@ registerEmitter('out.profile', (ctx) => {
   const c = ctx.wired('dataset')
   const out = ctx.output('out')
   const current = ctx.output('current')
-  const selection = selectionIds(ctx)
   const minWeight = Math.max(1, Number(ctx.params.minWeight))
   const topN = Number(ctx.params.topN)
   // The card's Count by, as the canvas's own two queries; passed only when it is not the weight,
@@ -37,30 +36,18 @@ registerEmitter('out.profile', (ctx) => {
   ctx.require('pandas')
   const lines: string[] = [`${out} = ${src}`]
 
-  // The pinned row, which is the node's `Current` output whether or not the metrics run.
-  if (selection.length > 0) {
-    lines.push(`${current} = ${out}[${out}['neuronId'].isin(${pySelection(selection)})]`)
+  // The pinned row, which is the node's `Current` output.
+  const pinned = pickedIds(ctx, 'out.profile')
+  if (pinned.note === undefined) {
+    lines.push(`${current} = ${out}[${out}['neuronId'].isin(${pySelection(pinned.ids)})]`)
   } else {
-    lines.push(
-      ...ctx.note('No neuron is pinned on the canvas, so Current is empty.'),
-      `${current} = ${out}.iloc[0:0]`,
-    )
-  }
-
-  if (!c) {
-    return [
-      ...lines,
-      ...ctx.note(
-        'No Dataset is wired, so the metrics cannot be fetched — this is the pass-through ' +
-          'and the pinned row only.',
-      ),
-    ]
+    lines.push(...ctx.note(pinned.note), `${current} = ${out}.iloc[0:0]`)
   }
 
   ctx.helper('coda_profile')
   const grouped = ctx.column('groupBy')
   // `profileExportPin` owns the rule; this owns only how a list of ids is spelled in Python.
-  const pin = profileExportPin(selection, grouped)
+  const pin = profileExportPin(pinned.note === undefined ? pinned.ids : [], grouped)
   const ids = pin ? pySelection(pin) : neuronIds(out)
 
   lines.push(

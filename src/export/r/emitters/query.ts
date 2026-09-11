@@ -12,12 +12,7 @@
  *  - **There is no neuron-mesh fetch at all.** `neuprint_ROI_mesh()` is ROI shells.
  */
 
-import {
-  DATASET_FAMILIES,
-  datasetFamily,
-  resolveDatasetId,
-} from '../../../nodes/lib/datasetFamilies'
-import { parseIdList } from '../../../nodes/lib/idList'
+import { DATASET_FAMILIES } from '../../../nodes/lib/datasetFamilies'
 import { SYNAPSE_UNITS } from '../../../data/synapseUnits'
 import { minSynapseConfidence, synapseUnitFor } from '../../../nodes/lib/synapseParams'
 import { parseTypedLabels } from '../../../nodes/lib/labelLookup'
@@ -33,18 +28,23 @@ import { isNumericDType } from '../../../core/types'
 import { asksNothing, noFiltersReason } from '../../../nodes/lib/findNeuronsRows'
 import { rowsFromParams } from '../../../nodes/lib/filterRowParams'
 import { readWeightProperty, schemasFromType } from '../../../nodes/lib/datasetParam'
-import { CYPHER_PLACEHOLDERS, adjacencyExportQuery } from '../../connectivityPlan'
+import { CYPHER_PLACEHOLDERS, adjacencyExportQuery } from '../../plans/connectivity'
 import { filterPredicates } from './tableFilters'
 import type { EmitContext } from '../types'
 import { neuprintProperty } from '../../../data/neuprint/schema'
 import { cypherIdList, neuronIds, rPopulationPredicate } from './common'
 import { STATUS_COLUMN, withoutStatedStatus } from '../../../data/neuronFilter'
 import { populationFromType } from '../../../nodes/lib/populationParams'
-import { SKELETON_SOURCE_PARAM } from '../../../nodes/lib/skeletonParams'
-import { SKELETON_ROUTES } from '../../../data/skeletonRoutes'
 
-/** What "neuPrint" means unless a node says otherwise. */
-const DEFAULT_DEPLOYMENT = 'https://neuprint.janelia.org'
+import type { DatasetNote, SkeletonsNote } from '../../plans/query'
+import {
+  datasetFamilyPlan,
+  datasetNodePlan,
+  inputIdsPlan,
+  neuprintNodePlan,
+  rawCypherPlan,
+  skeletonsPlan,
+} from '../../plans/query'
 
 // ---------------------------------------------------------------------------
 // Dataset
@@ -77,37 +77,25 @@ function connectionLines(
   ]
 }
 
+const DATASET_NOTES: Record<DatasetNote, string> = {
+  unresolvedLatest:
+    'This node tracks the latest release and the exporter could not resolve which that ' +
+    'is, so only the family is named. Set `dataset` to the exact release you mean ' +
+    'before sharing the document.',
+  pinnedLatest:
+    'The node is set to "Latest"; this pins the version it resolved to at export, so the ' +
+    'document keeps answering the same question after the next release.',
+}
+
 function emitDataset(ctx: EmitContext, familyKey: string): string[] {
-  const family = datasetFamily(familyKey)
-  if (!family) return ctx.todo(`Unknown dataset family "${familyKey}".`)
+  const plan = datasetFamilyPlan(familyKey, ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
 
   const out = ctx.output('dataset')
-  const version = ctx.params.version
-  const resolved = resolveDatasetId(family, version)
-  const lines: string[] = []
-
-  let datasetId = resolved
-  if (!datasetId) {
-    datasetId = family.family
-    lines.push(
-      ...ctx.note(
-        'This node tracks the latest release and the exporter could not resolve which that ' +
-          'is, so only the family is named. Set `dataset` to the exact release you mean ' +
-          'before sharing the document.',
-      ),
-    )
-  } else if (!version) {
-    lines.push(
-      ...ctx.note(
-        'The node is set to "Latest"; this pins the version it resolved to at export, so the ' +
-          'document keeps answering the same question after the next release.',
-      ),
-    )
-  }
-
-  const server = String(ctx.params.server ?? '') || DEFAULT_DEPLOYMENT
-  lines.push(...connectionLines(ctx, out, server, datasetId))
-  return lines
+  return [
+    ...plan.notes.flatMap((note) => ctx.note(DATASET_NOTES[note])),
+    ...connectionLines(ctx, out, plan.server, plan.datasetId),
+  ]
 }
 
 for (const family of DATASET_FAMILIES) {
@@ -127,16 +115,15 @@ for (const family of DATASET_FAMILIES) {
 }
 
 registerEmitter('dataset.neuprint', (ctx) => {
-  const datasetId = String(ctx.params.dataset)
-  if (!datasetId) return ctx.todo('This neuPrint node names no dataset.')
-  const server = String(ctx.params.server)
-  return connectionLines(ctx, ctx.output('dataset'), server, datasetId)
+  const plan = neuprintNodePlan(ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  return connectionLines(ctx, ctx.output('dataset'), plan.server, plan.datasetId)
 })
 
 registerEmitter('neuron.dataset', (ctx) => {
-  const datasetId = String(ctx.params.dataset)
-  if (!datasetId) return ctx.todo('This Dataset node names no dataset.')
-  return connectionLines(ctx, ctx.output('dataset'), DEFAULT_DEPLOYMENT, datasetId)
+  const plan = datasetNodePlan(ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  return connectionLines(ctx, ctx.output('dataset'), plan.server, plan.datasetId)
 })
 
 // ---------------------------------------------------------------------------
@@ -317,16 +304,13 @@ registerEmitter('neuron.findNeurons', (ctx) => {
  */
 registerEmitter('neuron.inputIds', (ctx) => {
   const out = ctx.output('neurons')
-  const parsed = parseIdList(String(ctx.params.ids))
-  const wired = ctx.input('ids')
-  if (parsed.error && !wired)
-    return ctx.todo(`The pasted id list is not valid: ${parsed.error}`)
-
-  const column = ctx.column('column') ?? 'neuronId'
+  const plan = inputIdsPlan(ctx)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const { ids, from: wired, column, dataset } = plan
   const lines: string[] = []
 
-  if (parsed.ids.length > 0 && wired) {
-    const [first, ...rest] = rLongVector(parsed.ids)
+  if (ids.length > 0 && wired) {
+    const [first, ...rest] = rLongVector(ids)
     lines.push(
       `ids <- unique(c(`,
       `  ${first}`,
@@ -336,24 +320,20 @@ registerEmitter('neuron.inputIds', (ctx) => {
   } else if (wired) {
     lines.push(`ids <- unique(${wired}$${column})`)
   } else {
-    const [first, ...rest] = rLongVector(parsed.ids)
+    const [first, ...rest] = rLongVector(ids)
     lines.push(`ids <- ${first}`, ...rest)
   }
 
-  const conn = ctx.input('dataset')
-  if (!conn) {
+  if (dataset.note !== undefined) {
     ctx.library('dplyr')
-    return [
-      ...lines,
-      ...ctx.note(
-        'No Dataset is wired, so this is the ids alone — exactly what the node emits.',
-      ),
-      `${out} <- tibble(neuronId = ids)`,
-    ]
+    return [...lines, ...ctx.note(dataset.note), `${out} <- tibble(neuronId = ids)`]
   }
   ctx.library('neuprintr')
   ctx.helper('coda_neurons')
-  return [...lines, `${out} <- neuprint_get_meta(ids, conn = ${conn}) |> coda_neurons()`]
+  return [
+    ...lines,
+    `${out} <- neuprint_get_meta(ids, conn = ${dataset.connection}) |> coda_neurons()`,
+  ]
 })
 
 registerEmitter('neuron.idsFromLabel', (ctx) => {
@@ -575,8 +555,9 @@ registerEmitter('neuron.roiMeshes', (ctx) => {
 registerEmitter('neuron.rawCypher', (ctx) => {
   const conn = ctx.wired('dataset')
   ctx.library('neuprintr')
-  const query = String(ctx.params.query).trim()
-  if (!query) return ctx.todo('This Raw Cypher node has no query.')
+  const plan = rawCypherPlan(ctx.params)
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  const { query } = plan
   return [
     `${ctx.output('result')} <- neuprint_fetch_custom(`,
     `  "${query.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\n  ')}",`,
@@ -614,28 +595,27 @@ function carryLines(ctx: EmitContext, list: string, frame: string): string[] {
   )
 }
 
+/** `neuprint_read_neurons` reads neuPrint's own SWC. */
+const SKELETON_NOTES: Record<SkeletonsNote, string> = {
+  publishedLayer:
+    'The Skeletons node is set to the published precomputed layer rather than neuPrint’s ' +
+    'own SWC. This cell reads the SWC: the published copy is a bucket named by the ' +
+    'dataset’s neuroglancer state, it carries no radii, and it covers only the bodies ' +
+    'that were exported into it.',
+}
+
 registerEmitter('neuron.skeletons', (ctx) => {
   const conn = ctx.wired('dataset')
   const neurons = ctx.wired('neurons')
   ctx.library('neuprintr')
   ctx.library('nat')
-  const limit = Number(ctx.params.limit)
+  const { limit, notes } = skeletonsPlan(ctx.params)
   const ids = limit > 0 ? `head(${neuronIds(neurons)}, ${limit})` : neuronIds(neurons)
   const out = ctx.output('skeletons')
   // Returns a nat neuronlist, which is what every downstream nat call wants — the same
   // relationship navis has to the Python side, since navis is nat's port.
   return [
-    // The same caveat the Python cell carries, and for the same reason: `neuprint_read_neurons`
-    // reads neuPrint's own SWC, where the node may be set to the precomputed layer published
-    // beside the segmentation — a different copy, with no radii and its own coverage.
-    ...(ctx.params[SKELETON_SOURCE_PARAM] === SKELETON_ROUTES.published
-      ? ctx.note(
-          'The Skeletons node is set to the published precomputed layer rather than neuPrint’s ' +
-            'own SWC. This cell reads the SWC: the published copy is a bucket named by the ' +
-            'dataset’s neuroglancer state, it carries no radii, and it covers only the bodies ' +
-            'that were exported into it.',
-        )
-      : []),
+    ...notes.flatMap((note) => ctx.note(SKELETON_NOTES[note])),
     `${out} <- neuprint_read_neurons(${ids}, conn = ${conn})`,
     ...carryLines(ctx, out, neurons),
   ]

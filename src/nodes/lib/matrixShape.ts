@@ -552,6 +552,14 @@ function isIdentityOrder(order: Int32Array): boolean {
 }
 
 /**
+ * The card's sentence for a `value` sort whose key no line of the other axis carries. Exported
+ * because the exporters print it at run time, where only the data can say the key is missing.
+ */
+export function missingKeyProblem(axis: MatrixAxis, key: string): string {
+  return `No ${axis === 'rows' ? 'column' : 'row'} is called "${key}", so the ${axis} are left as they arrived.`
+}
+
+/**
  * One axis's order under every criterion that needs no Python — `cluster` is the node's to
  * fetch and hand to `orderIndices`. `undefined` means "leave it as it is", and comes with
  * the reason, which the caller puts on the card.
@@ -578,12 +586,7 @@ export function orderAxis(
         }
       }
       const vector = axisVector(matrix, axis, options.key)
-      if (!vector) {
-        return {
-          order: undefined,
-          problem: `No ${axis === 'rows' ? 'column' : 'row'} is called "${options.key}", so the ${axis} are left as they arrived.`,
-        }
-      }
+      if (!vector) return { order: undefined, problem: missingKeyProblem(axis, options.key) }
       order = orderByScores(vector)
       break
     }
