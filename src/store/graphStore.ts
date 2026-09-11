@@ -165,6 +165,21 @@ const AUTOSAVE_DELAY_MS = 800
 const HISTORY_COALESCE_MS = 700
 const HISTORY_LIMIT = 100
 
+/**
+ * `Name (copy)`, then `Name (copy 2)` and on, against the names already open. A copy of a copy
+ * counts on from the base rather than stacking into `(copy) (copy)`.
+ *
+ * Not `core/types.ts`' `uniqueName`, whose `name_2` is the rule for *columns*; a workflow's name is
+ * read by a person, and strips a suffix of its own before probing.
+ */
+function copyName(name: string, taken: (candidate: string) => boolean): string {
+  const base = name.replace(/ \(copy(?: \d+)?\)$/, '')
+  for (let n = 1; ; n += 1) {
+    const next = n === 1 ? `${base} (copy)` : `${base} (copy ${n})`
+    if (!taken(next)) return next
+  }
+}
+
 interface HistoryEntry {
   graph: CodaGraph
   /** Identifies coalescable edits: `param:<nodeId>:<paramId>`. */
@@ -814,6 +829,26 @@ export interface GraphState {
    */
   openDocument(graph: CodaGraph, warnings?: string[]): void
   /**
+   * Open a copy of an open workflow, beside it in the list, and switch to it.
+   *
+   * The copy starts with the original's **results** — it keeps the same node ids, so its
+   * provenance keys match and the cached answers are exactly right — and with nothing else: no
+   * undo history, no selection, a fresh fit rather than the original's viewport. It is named
+   * `… (copy)`, because the browser shelf finds a saved workflow by name and a copy under the
+   * original's name would offer to overwrite it; and it drops `meta.gist`, or pressing Share on
+   * the copy would update the original's link.
+   *
+   * Like a switch, it cancels a run in flight on the document on screen.
+   */
+  duplicateDocument(id: string): void
+  /**
+   * Rename any open workflow, on screen or not. The active one goes through `setGraphName`; a
+   * background one is renamed in its stash with an undo step of its own, so the two behave alike.
+   */
+  renameDocument(id: string, name: string): void
+  /** The graph behind an open workflow, on screen or not. A read, for the switcher's Download. */
+  documentGraph(id: string): CodaGraph | undefined
+  /**
    * Remember where the canvas was left, so a switch back puts it there.
    *
    * Deliberately writes no store state: nothing renders from it, it fires at the end of every
@@ -1392,8 +1427,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
     }
   }
 
-  function pushHistory(graph: CodaGraph, tag?: string): HistoryEntry[] {
-    const { past } = get()
+  /** `past` defaults to the document on screen; `renameDocument` hands a background one's. */
+  function pushHistory(
+    graph: CodaGraph,
+    tag?: string,
+    past: HistoryEntry[] = get().past,
+  ): HistoryEntry[] {
     const last = past.at(-1)
     const now = Date.now()
     // Collapse rapid edits to the same param into one undo step, so typing "12345" in a
@@ -1520,12 +1559,15 @@ export const useGraphStore = create<GraphState>((set, get) => {
    * `tabs` is an ordinary snapshot field, everything else selecting it — for an edit no row
    * displays.
    */
+  /** A document's graph. The active record has no stash: its graph is the one live in the store. */
+  function graphOf(rec: DocRecord): CodaGraph {
+    return rec.stash?.graph ?? get().graph
+  }
+
   function syncTabs(): void {
-    const live = get().graph
     const next = [...docs.values()].map((rec) => ({
       id: rec.id,
-      // The active record has no stash: its graph is the one live in the store.
-      name: graphName(rec.stash?.graph ?? live),
+      name: graphName(graphOf(rec)),
     }))
     const now = get().tabs
     const same =
@@ -1674,12 +1716,21 @@ export const useGraphStore = create<GraphState>((set, get) => {
      * reload. Rebuilt in place, since `docs` is what every other function here closes over.
      */
     const rank = new Map(stored.map((entry, i) => [entry.docId, i]))
-    const ranked = [...docs.values()].sort(
-      (a, b) => (rank.get(a.id) ?? rank.size) - (rank.get(b.id) ?? rank.size),
+    reorderDocs(
+      [...docs.values()].sort(
+        (a, b) => (rank.get(a.id) ?? rank.size) - (rank.get(b.id) ?? rank.size),
+      ),
     )
-    docs.clear()
-    for (const rec of ranked) docs.set(rec.id, rec)
     syncTabs()
+  }
+
+  /**
+   * Put the open documents in `order`. `docs`' insertion order is what the switcher draws, and it
+   * is rebuilt in place because every function here closes over that one `Map`.
+   */
+  function reorderDocs(order: DocRecord[]): void {
+    docs.clear()
+    for (const rec of order) docs.set(rec.id, rec)
   }
 
   /** The per-document slice as it stands on screen. One of the two definitions — see `DocStash`. */
@@ -2300,6 +2351,71 @@ export const useGraphStore = create<GraphState>((set, get) => {
       // Through `loadGraph`, so the history reset, the load warnings, the auto-layout stand-down
       // and the fit-on-load request are the ones every other open has always got.
       get().loadGraph(graph, warnings)
+    },
+
+    duplicateDocument: (id) => {
+      const source = docs.get(id)
+      if (!source) return
+      // Stashed first, so the source is read one way whether or not it was the one on screen.
+      stashActive()
+      cancelActiveWork()
+      const from = source.stash!
+      const meta = {
+        ...from.graph.meta,
+        // Against the shelf as well as the open names: the shelf's lookup is what a copy's name
+        // exists to stay out of.
+        name: copyName(graphName(from.graph), (candidate) => {
+          const { tabs, library } = get()
+          return tabs.some((t) => t.name === candidate) || !!findByName(library, candidate)
+        }),
+        createdAt: new Date().toISOString(),
+      }
+      delete meta.gist
+      const copy: CodaGraph = { ...from.graph, meta }
+
+      const rec = createDoc(newId('doc'))
+      rec.scheduler.adoptResults(source.scheduler)
+      rec.lastObserved = source.lastObserved
+      // The original's inference answers for the copy too: a name is not something it reads.
+      rec.stash = { ...blankDoc(copy), inference: from.inference }
+
+      /*
+       * Beside the original rather than at the end, where a copy of the first of six workflows
+       * would land out of sight of the row it was made from. `docs`' order is the list's order.
+       */
+      const order = [...docs.values()].filter((r) => r !== rec)
+      order.splice(order.indexOf(source) + 1, 0, rec)
+      reorderDocs(order)
+
+      activate(rec)
+      // A document seen for the first time is framed — `activate` restores only a known viewport.
+      if (copy.nodes.length > 0) get().requestFitView()
+    },
+
+    renameDocument: (id, name) => {
+      const rec = docs.get(id)
+      // One no-op rule for both paths: `setGraphName` would mint an empty undo step on its own.
+      if (!rec || (graphOf(rec).meta?.name ?? '') === name) return
+      if (id === get().activeTabId) {
+        get().setGraphName(name)
+        return
+      }
+      const stash = rec.stash!
+      rec.stash = {
+        ...stash,
+        graph: { ...stash.graph, meta: { ...stash.graph.meta, name } },
+        past: pushHistory(stash.graph, 'meta:name', stash.past),
+        future: [],
+      }
+      syncTabs()
+      // Written now, for `persistShape`'s reason: a background document gets no autosave of its own.
+      const tab = tabId()
+      if (tab) writeDoc(tab, rec)
+    },
+
+    documentGraph: (id) => {
+      const rec = docs.get(id)
+      return rec && graphOf(rec)
     },
 
     // --- document ----------------------------------------------------------

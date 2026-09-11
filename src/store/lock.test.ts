@@ -403,6 +403,11 @@ describe('every store action is on one side of the lock', () => {
     // `newGraph` is the in-place reset and is already above; this is the one that mints a
     // document, and it is `openDocument` with a blank graph.
     'newWorkflow',
+    // A copy opened beside the original is `openDocument`'s kind of act, and naming one is
+    // `setGraphName`'s — which is what it calls for the document on screen.
+    'duplicateDocument',
+    'renameDocument',
+    'documentGraph',
     // Where the canvas was left. Not an edit to anything: it writes no store state and nothing in
     // the document moves — see `recordViewport`.
     'recordViewport',

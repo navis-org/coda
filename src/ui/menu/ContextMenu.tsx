@@ -16,6 +16,7 @@
 
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 import { useDismissOnOutside } from '../useDismiss'
 import { menuPosition } from './placement'
@@ -32,6 +33,11 @@ export interface ContextMenuProps {
   /** The margin kept from the window's edge. */
   margin?: number
   onKeyDown?: (event: KeyboardEvent) => void
+  /**
+   * Render into the document rather than in place — for a menu opened from inside a stacking
+   * context (a React Flow `<Panel>`) that would cap its `z-index`. The host is `Modal`'s.
+   */
+  portal?: boolean
   children: ReactNode
 }
 
@@ -43,6 +49,7 @@ export function ContextMenu({
   label,
   margin = 0,
   onKeyDown,
+  portal = false,
   children,
 }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
@@ -65,7 +72,7 @@ export function ContextMenu({
     return () => observer.disconnect()
   }, [x, y, margin])
 
-  return (
+  const menu = (
     <div
       ref={ref}
       className={className ? `context-menu ${className}` : 'context-menu'}
@@ -77,4 +84,5 @@ export function ContextMenu({
       {children}
     </div>
   )
+  return portal ? createPortal(menu, document.fullscreenElement ?? document.body) : menu
 }

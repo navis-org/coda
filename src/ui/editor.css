@@ -11279,6 +11279,20 @@ details[open] > summary.tile__label {
   color: var(--text-primary);
 }
 
+/* Takes the name button's slot and metrics, so the row does not jump when the field opens. */
+.wf-tabs__rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 1px 4px 1px 3px;
+  padding: 2px 4px;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--surface-0, var(--surface-1));
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
 /*
  * Always occupying its slot rather than appearing on hover: a row that grows a button under the
  * cursor moves the name out from under the click that was already on its way.

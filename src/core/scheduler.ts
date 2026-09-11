@@ -599,6 +599,26 @@ export class Scheduler {
     this.host.onStateChange?.()
   }
 
+  /**
+   * Start from another Scheduler's results — what a duplicated workflow is handed.
+   *
+   * Sound only because a copy keeps its original's node ids: a cache entry is keyed by node id and
+   * holds the provenance key it answered, so the copy's `refreshStates` finds every entry fresh
+   * for exactly the nodes whose key still matches, and a later edit in either document moves only
+   * that document's keys. The loop state rides along because it takes part in the key.
+   *
+   * New maps over the same values, so the copy costs no memory for the tables themselves while one
+   * document's run still cannot evict the other's result. Previews and `forceRefresh` are left
+   * behind — a half-finished value and a request made against the original are both facts about
+   * the other document.
+   */
+  adoptResults(from: Scheduler): void {
+    this.cache = new Map(from.cache)
+    this.states = new Map(from.states)
+    this.loopIndex = new Map(from.loopIndex)
+    this.loopDone = new Set(from.loopDone)
+  }
+
   invalidateNode(graph: CodaGraph, nodeId: string): void {
     this.cache.delete(nodeId)
     for (const id of descendantsOf(graph, nodeId)) this.cache.delete(id)

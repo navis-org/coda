@@ -25,16 +25,17 @@ import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { CodaGraph } from '../core/graph'
 import { emptyGraph, serializeGraph } from '../core/graph'
 import { MockSource } from '../data/mock/MockSource'
 import { registerSource } from '../data/source'
 import '../nodes'
+import { namedGraph } from '../test/graph'
 import { clearStorage, installStorageStub } from '../test/jsdomStubs'
 import { resetDocuments } from '../test/storeReset'
 import { demoWorkflow } from '../wizard/build'
 import type * as GraphStoreModule from './graphStore'
 import { useGraphStore } from './graphStore'
+import type { WorkflowSummary } from './library'
 import { saveAutosave } from './persistence'
 import { loadSession, resetSessionStore, saveSessionDoc, saveSessionMeta } from './session'
 
@@ -43,13 +44,6 @@ beforeAll(() => {
   // Node 26 shadows jsdom's, and the reload block below is entirely about what survives in them.
   installStorageStub()
 })
-
-/** A graph with a name and one real node, so it is not the blank `beginDocument` reuses. */
-function named(name: string): CodaGraph {
-  const graph = emptyGraph(name)
-  graph.nodes.push({ id: `n_${name}`, type: 'out.table', position: { x: 0, y: 0 }, params: {} })
-  return graph
-}
 
 beforeEach(() => {
   clearStorage()
@@ -173,7 +167,7 @@ describe('switching', () => {
   it('closes the Edge data panel when a graph is loaded or started over', () => {
     twoDocuments()
     store().openEdgePanel(store().graph.nodes[0]!.id)
-    store().loadGraph(named('Loaded'))
+    store().loadGraph(namedGraph('Loaded'))
     expect(store().edgePanelNode).toBeUndefined()
 
     store().openEdgePanel(store().graph.nodes[0]!.id)
@@ -268,6 +262,100 @@ describe('closing', () => {
   })
 })
 
+/** See `GraphState.duplicateDocument` for what a copy carries and why. */
+describe('duplicating', () => {
+  it('opens a copy beside the original, already run, with no history of its own', async () => {
+    store().openDocument(demoWorkflow('partners'))
+    const original = store().activeTabId
+    const name = store().tabs[0]!.name
+    await store().runAll()
+    const ran = store().graph.nodes.filter((n) => store().nodeInfo(n.id).state === 'ok')
+    expect(ran.length).toBeGreaterThan(0)
+    store().openDocument(namedGraph('Other'))
+    store().switchDocument(original)
+    store().setSelection([ran[0]!.id])
+
+    store().duplicateDocument(original)
+
+    expect(names()).toEqual([name, `${name} (copy)`, 'Other'])
+    expect(store().activeTabId).not.toBe(original)
+    for (const node of ran) expect(store().nodeInfo(node.id).state).toBe('ok')
+    expect(store().past).toHaveLength(0)
+    expect(store().selection).toEqual([])
+  })
+
+  it('keeps its results apart from the original’s once made', async () => {
+    store().openDocument(demoWorkflow('partners'))
+    const original = store().activeTabId
+    await store().runAll()
+    const ran = store().graph.nodes.filter((n) => store().nodeInfo(n.id).state === 'ok')
+
+    store().duplicateDocument(original)
+    store().clearResults()
+    expect(store().nodeInfo(ran[0]!.id).state).not.toBe('ok')
+
+    store().switchDocument(original)
+    for (const node of ran) expect(store().nodeInfo(node.id).state).toBe('ok')
+  })
+
+  it('drops the gist and counts on from the base name', () => {
+    store().openDocument(namedGraph('Atlas'))
+    store().setGraphGist({ id: 'g123', owner: 'me' })
+    const original = store().activeTabId
+
+    store().duplicateDocument(original)
+    expect(store().graph.meta?.gist).toBeUndefined()
+    store().duplicateDocument(store().activeTabId)
+    expect(names()).toEqual(['Atlas', 'Atlas (copy)', 'Atlas (copy 2)'])
+
+    store().switchDocument(original)
+    expect(store().graph.meta?.gist).toEqual({ id: 'g123', owner: 'me' })
+  })
+
+  // Not only against the open names: a copy named after a shelved workflow would save over it.
+  it('steps past a name already on the browser shelf', () => {
+    useGraphStore.setState({ library: [{ id: 'w1', name: 'Atlas (copy)' } as WorkflowSummary] })
+    store().openDocument(namedGraph('Atlas'))
+    store().duplicateDocument(store().activeTabId)
+    expect(names()).toEqual(['Atlas', 'Atlas (copy 2)'])
+  })
+
+  it('copies a workflow that is not the one on screen', () => {
+    store().openDocument(namedGraph('Background'))
+    const background = store().activeTabId
+    store().openDocument(namedGraph('Foreground'))
+
+    store().duplicateDocument(background)
+    expect(names()).toEqual(['Background', 'Background (copy)', 'Foreground'])
+    expect(store().graph.nodes.map((n) => n.id)).toEqual(['n_Background'])
+  })
+})
+
+describe('renaming', () => {
+  it('renames a workflow in the background, with an undo step it keeps', () => {
+    store().openDocument(namedGraph('First'))
+    const first = store().activeTabId
+    store().openDocument(namedGraph('Second'))
+
+    store().renameDocument(first, 'Renamed')
+    expect(names()).toEqual(['Renamed', 'Second'])
+    expect(store().graph.meta?.name).toBe('Second')
+
+    store().switchDocument(first)
+    expect(store().graph.meta?.name).toBe('Renamed')
+    store().undo()
+    expect(store().graph.meta?.name).toBe('First')
+  })
+
+  it('renames the one on screen through its own history', () => {
+    store().openDocument(namedGraph('First'))
+    store().renameDocument(store().activeTabId, 'Renamed')
+    expect(names()).toEqual(['Renamed'])
+    store().undo()
+    expect(names()).toEqual(['First'])
+  })
+})
+
 /**
  * Surviving a reload.
  *
@@ -339,10 +427,10 @@ describe('across a reload', () => {
   it('comes back with every open workflow, in the order they were in', async () => {
     becomeTab(TAB, 'doc-b')
     // What the last life left: the active document in the slot, all three in the session store.
-    saveAutosave(named('Beta'))
-    await saveSessionDoc(TAB, 'doc-a', serializeGraph(named('Alpha'), { compact: true }))
-    await saveSessionDoc(TAB, 'doc-b', serializeGraph(named('Beta'), { compact: true }))
-    await saveSessionDoc(TAB, 'doc-c', serializeGraph(named('Gamma'), { compact: true }))
+    saveAutosave(namedGraph('Beta'))
+    await saveSessionDoc(TAB, 'doc-a', serializeGraph(namedGraph('Alpha'), { compact: true }))
+    await saveSessionDoc(TAB, 'doc-b', serializeGraph(namedGraph('Beta'), { compact: true }))
+    await saveSessionDoc(TAB, 'doc-c', serializeGraph(namedGraph('Gamma'), { compact: true }))
     await saveSessionMeta(TAB, ['doc-a', 'doc-b', 'doc-c'])
 
     const { useGraphStore } = await reload(3)
@@ -368,9 +456,9 @@ describe('across a reload', () => {
    */
   it('does not build a second record over the active document', async () => {
     becomeTab(TAB, 'doc-a')
-    saveAutosave(named('Alpha'))
-    await saveSessionDoc(TAB, 'doc-a', serializeGraph(named('Alpha'), { compact: true }))
-    await saveSessionDoc(TAB, 'doc-b', serializeGraph(named('Beta'), { compact: true }))
+    saveAutosave(namedGraph('Alpha'))
+    await saveSessionDoc(TAB, 'doc-a', serializeGraph(namedGraph('Alpha'), { compact: true }))
+    await saveSessionDoc(TAB, 'doc-b', serializeGraph(namedGraph('Beta'), { compact: true }))
     await saveSessionMeta(TAB, ['doc-a', 'doc-b'])
 
     const { useGraphStore } = await reload(2)
@@ -395,10 +483,14 @@ describe('across a reload', () => {
     // No slot for this tab — only the shared key, holding another tab's work.
     localStorage.setItem(
       'coda.autosave.v1',
-      serializeGraph(named('Somebody else’s'), { compact: true }),
+      serializeGraph(namedGraph('Somebody else’s'), { compact: true }),
     )
-    await saveSessionDoc(TAB, 'doc-a', serializeGraph(named('Mine'), { compact: true }))
-    await saveSessionDoc(TAB, 'doc-b', serializeGraph(named('Mine too'), { compact: true }))
+    await saveSessionDoc(TAB, 'doc-a', serializeGraph(namedGraph('Mine'), { compact: true }))
+    await saveSessionDoc(
+      TAB,
+      'doc-b',
+      serializeGraph(namedGraph('Mine too'), { compact: true }),
+    )
     await saveSessionMeta(TAB, ['doc-a', 'doc-b'])
 
     const { useGraphStore } = await reload(2)
@@ -415,9 +507,9 @@ describe('across a reload', () => {
    */
   it('keeps the slot’s copy when the slot is this tab’s own', async () => {
     becomeTab(TAB, 'doc-a')
-    saveAutosave(named('Newer'))
-    await saveSessionDoc(TAB, 'doc-a', serializeGraph(named('Older'), { compact: true }))
-    await saveSessionDoc(TAB, 'doc-b', serializeGraph(named('Other'), { compact: true }))
+    saveAutosave(namedGraph('Newer'))
+    await saveSessionDoc(TAB, 'doc-a', serializeGraph(namedGraph('Older'), { compact: true }))
+    await saveSessionDoc(TAB, 'doc-b', serializeGraph(namedGraph('Other'), { compact: true }))
     await saveSessionMeta(TAB, ['doc-a', 'doc-b'])
 
     const { useGraphStore } = await reload(2)
@@ -426,7 +518,7 @@ describe('across a reload', () => {
 
   it('starts on one document when the tab has no session, exactly as it always did', async () => {
     becomeTab('a-tab-with-no-session')
-    saveAutosave(named('Only one'))
+    saveAutosave(namedGraph('Only one'))
 
     const { useGraphStore } = await reload()
     const s = useGraphStore.getState()
@@ -451,9 +543,9 @@ describe('across a reload', () => {
     becomeTab(TAB)
     const { useGraphStore } = await reload()
     const s = () => useGraphStore.getState()
-    s().openDocument(named('Alpha'))
+    s().openDocument(namedGraph('Alpha'))
     const alpha = s().activeTabId
-    s().openDocument(named('Beta'))
+    s().openDocument(namedGraph('Beta'))
 
     await stored((ids) => ids.includes(alpha))
   })
@@ -462,9 +554,9 @@ describe('across a reload', () => {
     becomeTab(TAB)
     const { useGraphStore } = await reload()
     const s = () => useGraphStore.getState()
-    s().openDocument(named('Alpha'))
+    s().openDocument(namedGraph('Alpha'))
     const alpha = s().activeTabId
-    s().openDocument(named('Beta'))
+    s().openDocument(namedGraph('Beta'))
     await stored((ids) => ids.includes(alpha))
 
     s().closeDocument(alpha)

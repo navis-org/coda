@@ -254,6 +254,33 @@ was on screen**, not to the first in the list, because `loadActiveDocId` is read
 as the graph. And the restore is **additive and never activates**, so a share link followed before
 it lands is safe — the recovered workflows slot in around it.
 
+### The right-click menu: Rename, Duplicate, Download
+
+A right-click on a row opens a menu about *that* workflow; on the header, about the one on screen.
+Rename and Download are here because the toolbar's name field and `Save ▸ Download` can only reach
+the document on screen — a background rename goes into its stash with an undo step of its own
+(`renameDocument`), so undoing it after switching there behaves as it would have in place.
+
+**Duplicate carries the results and nothing else.** A copy keeps its original's node ids, so its
+provenance keys match and `Scheduler.adoptResults` can hand it the original's cache — new maps over
+the same values, so the tables cost no memory twice and a run in one document still cannot evict
+the other's result. This is the reverse of the two-copies-of-one-file case above and does not
+contradict it: there, two Schedulers *must not* share one cache; here, one is started from a
+snapshot of the other's and they diverge from the first edit. Undo history, selection and viewport
+are deliberately **not** carried — the copy is framed fresh.
+
+Two things the copy must *not* keep, both silent if it did. **`meta.gist`**: Share on the copy
+would update the original's link. And **the name**: the browser shelf finds a saved workflow by
+name (`findByName`), so a copy under the original's name would offer to overwrite it. Hence
+`… (copy)`, counting on (`(copy 2)`) against the names open **and the names on the shelf**, and a
+copy of a copy counts on from the base rather than stacking. It lands directly after its original
+in the list, and — like a switch — cancels a run in flight on the document on screen.
+
+The menu is `ContextMenu`'s `portal`: a React Flow `<Panel>` carries a `z-index`, which is a
+stacking context that would cap the menu's own. The canvas's other menus never needed it because
+`Editor` renders them outside `<ReactFlow>`. The rename field is `RenameInput`, shared with a group
+frame's title.
+
 ### What is deliberately not built
 
 - **Closing asks nothing**, and an unsaved document really is lost. Now that the open set is
