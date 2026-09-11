@@ -224,6 +224,18 @@ export interface ResolvedPort extends PortDef {
 export interface EnumOption {
   value: string
   label: string
+  /**
+   * A qualifier drawn after the label, in brackets — "not by region" on an edge property. Kept
+   * apart from the label so a chip can cut the *label* to fit its card and keep this whole: it is
+   * the part that changes what the choice means, and an ellipsis over it hides exactly that. A
+   * dropdown row and a tooltip show both, through `optionText`.
+   */
+  note?: string
+}
+
+/** An option as one line of text — the label, then its note in brackets. */
+export function optionText(option: EnumOption): string {
+  return option.note ? `${option.label} (${option.note})` : option.label
 }
 
 interface ParamBase {

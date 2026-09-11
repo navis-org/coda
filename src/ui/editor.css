@@ -1482,9 +1482,15 @@
   color: inherit;
 }
 
+/*
+ * `minmax(0, 1fr)`, never a bare `1fr`: a bare one is `minmax(auto, 1fr)`, whose floor is the
+ * field's own min-content width — so a chip whose text will not wrap widened the whole field past
+ * the card, and `.chip`'s `max-width: 100%` then capped the chip against a field that was already
+ * too wide. With the floor at 0 the track is the card's, and the chip's cap is what cuts the text.
+ */
 .param {
   display: grid;
-  grid-template-columns: 62px 1fr;
+  grid-template-columns: 62px minmax(0, 1fr);
   align-items: center;
   gap: 6px;
   min-height: 22px;
@@ -1497,7 +1503,7 @@
   text-overflow: ellipsis;
 }
 .param--wide {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 .param--wide .param__label {
   display: none;
@@ -1589,6 +1595,10 @@ select.field {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  /* Never wider than the field it sits in: a chip's label is whatever a dataset calls a column or
+     a property, and a long one otherwise pushes the whole field off the card. */
+  max-width: 100%;
+  min-width: 0;
   font-size: 10px;
   padding: 1px 3px 1px 5px;
   background: var(--accent-soft);
@@ -1596,6 +1606,20 @@ select.field {
   border-radius: 9px;
   color: var(--text-primary);
   white-space: nowrap;
+}
+/* The label is what gives way, with an ellipsis; the note and the remove button keep their size —
+   the note is what says what the choice means, and the button is how to undo it. */
+.chip__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip__note,
+.chip button {
+  flex-shrink: 0;
+}
+.chip__note {
+  color: var(--text-secondary);
 }
 .chip button {
   border: none;
@@ -3414,7 +3438,8 @@ select.field {
   line-height: 1.6;
 }
 .inspector .param {
-  grid-template-columns: 88px 1fr;
+  /* `minmax(0, 1fr)` for `.param`'s reason: the field must not outgrow the panel. */
+  grid-template-columns: 88px minmax(0, 1fr);
   min-height: 24px;
 }
 .inspector .param__label {

@@ -9,8 +9,8 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 
-import type { InferContext, ParamDef, ParamValue } from '../../core/node'
-import { availableColumns, columnsKnown } from '../../core/node'
+import type { EnumOption, InferContext, ParamDef, ParamValue } from '../../core/node'
+import { availableColumns, columnsKnown, optionText } from '../../core/node'
 
 /**
  * What a column picker says when the port carries no schema at all.
@@ -558,7 +558,7 @@ export function SelectField({
       {!options.some((o) => o.value === value) && <option value={value}>{value || '—'}</option>}
       {options.map((option) => (
         <option key={option.value} value={option.value}>
-          {option.label}
+          {optionText(option)}
         </option>
       ))}
     </select>
@@ -630,7 +630,7 @@ function IdsField({ label, noun, ids, onChange }: IdsFieldProps) {
 
 interface ChipsFieldProps {
   label: string
-  available: Array<{ value: string; label: string }>
+  available: EnumOption[]
   /** Whether the source of the options is complete yet. Unknown is not empty — `UNKNOWN_COLUMNS`. */
   known: boolean
   selected: string[]
@@ -664,26 +664,38 @@ function ChipsField({
 }: ChipsFieldProps) {
   const values = available.map((option) => option.value)
   const remaining = available.filter((option) => !selected.includes(option.value))
-  const labelOf = (value: string) =>
-    available.find((option) => option.value === value)?.label ?? value
+  /*
+   * What a chip draws: the option's label and note, or the stored name noted as missing where a
+   * known list has lost it. Two spans, because the label is what gets cut to fit the card — see
+   * `.chip__text` — and a note is the half that says what the choice means.
+   */
+  const chipOf = (value: string): EnumOption =>
+    known && !values.includes(value)
+      ? { value, label: value, note: 'missing' }
+      : (available.find((option) => option.value === value) ?? { value, label: value })
 
   return (
     <div className="columns-field nodrag">
       {selected.length === 0 && remaining.length > 0 && (
         <span className="chip chip--empty">{emptyChip ?? 'none'}</span>
       )}
-      {selected.map((name) => (
-        <span key={name} className="chip" title={known ? undefined : UNKNOWN_HINT}>
-          {known && !values.includes(name) ? `${name} (missing)` : labelOf(name)}
-          <button
-            type="button"
-            title={`Remove ${name}`}
-            onClick={() => onChange(selected.filter((c) => c !== name))}
-          >
-            ×
-          </button>
-        </span>
-      ))}
+      {selected.map((name) => {
+        const chip = chipOf(name)
+        return (
+          // The whole text on hover, which is where a label cut to fit is read in full.
+          <span key={name} className="chip" title={known ? optionText(chip) : UNKNOWN_HINT}>
+            <span className="chip__text">{chip.label}</span>
+            {chip.note && <span className="chip__note">{` (${chip.note})`}</span>}
+            <button
+              type="button"
+              title={`Remove ${name}`}
+              onClick={() => onChange(selected.filter((c) => c !== name))}
+            >
+              ×
+            </button>
+          </span>
+        )
+      })}
       {remaining.length > 0 && (
         <select
           className="columns-field__add"
@@ -698,7 +710,7 @@ function ChipsField({
           <option value="">+</option>
           {remaining.map((option) => (
             <option key={option.value} value={option.value}>
-              {option.label}
+              {optionText(option)}
             </option>
           ))}
         </select>

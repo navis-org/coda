@@ -16,7 +16,7 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { ColumnParam, ColumnsParam, NodeDefinition } from '../../core/node'
+import type { ColumnParam, ColumnsParam, MultiEnumParam, NodeDefinition } from '../../core/node'
 import { defaultParams, makeInferContext } from '../../core/node'
 import type { CodaType } from '../../core/types'
 import { T, column, tableSchema } from '../../core/types'
@@ -41,7 +41,7 @@ const MANY: ColumnsParam = {
   default: [],
 }
 
-function def(param: ColumnParam | ColumnsParam): NodeDefinition {
+function def(param: ColumnParam | ColumnsParam | MultiEnumParam): NodeDefinition {
   return {
     type: 'test.picker',
     label: 'Test',
@@ -56,7 +56,7 @@ function def(param: ColumnParam | ColumnsParam): NodeDefinition {
 }
 
 function draw(
-  param: ColumnParam | ColumnsParam,
+  param: ColumnParam | ColumnsParam | MultiEnumParam,
   input: CodaType | undefined,
   params: Record<string, unknown> = {},
 ) {
@@ -145,5 +145,51 @@ describe('a multi-column picker with no schema upstream', () => {
   it('still marks a name a known schema has lost', () => {
     const { container } = draw(MANY, T.table(SCHEMA), { columns: ['gone'] })
     expect(container.textContent).toContain('gone (missing)')
+  })
+})
+
+/**
+ * A chip is cut to fit its card, and what gets cut is the label: a property named
+ * `weightDendriteDendrite` beside "(not by region)" is wider than a Connectivity card, and cutting
+ * the end would take the half that says what the choice means. jsdom lays nothing out, so what is
+ * pinned is the structure the stylesheet truncates — the width itself is a browser's to show.
+ */
+describe('a chip whose option carries a note', () => {
+  const PROPS: MultiEnumParam = {
+    id: 'props',
+    kind: 'multiEnum',
+    label: 'Edge properties',
+    noun: 'property',
+    default: [],
+    options: [
+      {
+        value: 'weightDendriteDendrite',
+        label: 'weightDendriteDendrite',
+        note: 'not by region',
+      },
+      { value: 'weightHP', label: 'weightHP' },
+    ],
+  }
+
+  it('draws the label and the note apart, so the stylesheet can cut one and keep the other', () => {
+    const { container } = draw(PROPS, undefined, { props: ['weightDendriteDendrite'] })
+    const chip = container.querySelector('.chip:not(.chip--empty)')!
+    expect(chip.querySelector('.chip__text')?.textContent).toBe('weightDendriteDendrite')
+    expect(chip.querySelector('.chip__note')?.textContent).toBe(' (not by region)')
+    // …and says all of it on hover, which is where a cut label is read in full.
+    expect(chip.getAttribute('title')).toBe('weightDendriteDendrite (not by region)')
+  })
+
+  it('offers the whole text in the dropdown, which is never cut', () => {
+    draw(PROPS, undefined, { props: [] })
+    const add = screen.getByLabelText('Add a property to Edge properties')
+    const rows = [...add.querySelectorAll('option')].map((o) => o.textContent)
+    expect(rows).toContain('weightDendriteDendrite (not by region)')
+    expect(rows).toContain('weightHP')
+  })
+
+  it('notes a value the list has lost, so "missing" survives the cut too', () => {
+    const { container } = draw(PROPS, undefined, { props: ['gone'] })
+    expect(container.querySelector('.chip__note')?.textContent).toBe(' (missing)')
   })
 })

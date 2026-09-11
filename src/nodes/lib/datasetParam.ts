@@ -241,7 +241,7 @@ export function edgePropertiesFromType(
  * The edge properties a Dataset socket offers a picker, in discovery's (alphabetical) order.
  *
  * One function for the three nodes that ask, so a property is offered — and labelled — the same
- * way on each. The label says when a property has no regional breakdown, because that is the one
+ * way on each. Its note says when a property has no regional breakdown, because that is the one
  * fact about it that changes what a node can do with it, and the picker is where somebody decides.
  * `exclude` is for names the asking node already uses for something else.
  *
@@ -257,7 +257,9 @@ export function edgePropertyOptions(
     .filter((p) => !options.exclude?.has(p.name))
     .map((p) => ({
       value: p.name,
-      label: options.noteRegions && !p.perRegion ? `${p.name} (not by region)` : p.name,
+      label: p.name,
+      // A note rather than part of the label, so a chip cut to fit its card keeps it.
+      ...(options.noteRegions && !p.perRegion ? { note: 'not by region' } : {}),
     }))
 }
 
