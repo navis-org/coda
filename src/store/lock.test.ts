@@ -272,6 +272,7 @@ describe('every store action is on one side of the lock', () => {
     'requestShare',
     'requestShortcuts',
     'requestPrivacy',
+    'requestMemory',
     'requestFeedback',
     'requestFitView',
     'setAutoRun',
@@ -389,6 +390,8 @@ describe('every store action is on one side of the lock', () => {
     'nodeOutput',
     'nodeFetchedAt',
     'nodeWarning',
+    // What each workflow's results hold, for the memory readout. A read.
+    'workflowMemory',
     'setNotice',
     'copySelection',
     /*

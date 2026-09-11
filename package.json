@@ -25,6 +25,7 @@
     "probe:split": "python3 scripts/probe-split.py",
     "probe:meshes": "node scripts/probe-meshes.mjs",
     "probe:mobile": "node scripts/probe-mobile.mjs",
+    "probe:memory": "node scripts/probe-memory.mjs",
     "probe:node-anatomy": "node scripts/probe-node-anatomy.mjs",
     "probe:screen-map": "node scripts/probe-screen-map.mjs",
     "probe:explore-preview": "node scripts/probe-explore-preview.mjs",

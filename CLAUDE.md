@@ -643,6 +643,15 @@ Area-specific — the rule, then the doc that holds why:
   column beside 92px of canvas — off `--inspector-width` and off **stamped attributes, never
   `:has()`**, so "both open, the inspector wins" is a selector rather than a fact about source
   order. What none of this touches is **touch**. See [docs/ui-shell.md](docs/ui-shell.md).
+- **The memory readout's limit is half of a ceiling, and Chrome's is the only measured number.**
+  `performance.memory` is live on a served page and **frozen on `about:blank`**, where a probe
+  concludes it reports nothing. Typed arrays count towards `usedJSHeapSize` but **not** against
+  `jsHeapSizeLimit` (6 GiB at 147%, no error), while ordinary objects ended the tab at **79%** — so
+  the meter is `(used − typed arrays held) / limit`, red from 75%. Everything else is
+  `core/valueBytes.ts`' estimate, and `ByteLedger` charges each array and buffer **once**: a
+  duplicate workflow adopts its original's cache and the geometry cache holds a scene's own buffers,
+  so a per-holder sum double-counts in exactly the case somebody is deciding what to close.
+  `pnpm probe:memory` is the measurement. See [docs/ui-shell.md](docs/ui-shell.md).
 - **A run notification is opt-in, but the tab title is not, and the fallback is the feature.**
   `Notification.requestPermission()` is refused outside a user gesture, so the bell's *click* is the
   prompt. **`denied` is terminal** — a page can never ask twice and hears nothing when the user

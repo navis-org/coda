@@ -11,6 +11,7 @@ import { FeedbackDialog } from './ui/panels/FeedbackDialog'
 import { FeedbackNudge } from './ui/panels/FeedbackNudge'
 import { Inspector } from './ui/panels/Inspector'
 import { ShareDialog } from './ui/panels/ShareDialog'
+import { MemoryDialog } from './ui/panels/MemoryDialog'
 import { PrivacyDialog } from './ui/panels/PrivacyDialog'
 import { ShortcutsDialog } from './ui/panels/ShortcutsDialog'
 import { SharedLinkGate } from './ui/panels/SharedLinkGate'
@@ -117,6 +118,8 @@ export function App() {
        */}
       <ShortcutsDialog />
       <PrivacyDialog />
+      {/* Opened from the status bar's memory readout and the palette. */}
+      <MemoryDialog />
       {/* Same idiom, opened from the `?` menu, the palette, the start page and the nudge below. */}
       <FeedbackDialog />
       {/* Last, and on top: it can be reopened over an expanded viewer. */}

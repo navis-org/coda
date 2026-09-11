@@ -36,11 +36,18 @@ interface Pending {
 
 let worker: Worker | undefined
 const pending = new Map<number, Pending>()
+/**
+ * The memory readout's questions, apart from `pending` so that asking one never makes the runtime
+ * look busy — `pythonBusy` is what decides whether it may be stopped.
+ */
+const probes = new Map<number, (bytes: number | undefined) => void>()
 let nextId = 1
 
 function fail(reason: string): void {
   for (const entry of pending.values()) entry.reject(new Error(reason))
   pending.clear()
+  for (const answer of probes.values()) answer(undefined)
+  probes.clear()
 }
 
 /** Drop the runtime. The next request boots a new one; the download is cached by then. */
@@ -66,6 +73,11 @@ function ensureWorker(): Worker {
   const created = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
   created.addEventListener('message', (event: MessageEvent<WorkerReply>) => {
     const reply = event.data
+    if (reply.kind === 'memory') {
+      probes.get(reply.id)?.(reply.bytes)
+      probes.delete(reply.id)
+      return
+    }
     const entry = pending.get(reply.id)
     if (!entry) return
     if (reply.kind === 'progress') {
@@ -131,6 +143,38 @@ export async function callPython(call: PyCall, options: CallOptions = {}): Promi
     const message: WorkerRequest = { id, call }
     instance.postMessage(message, transferable(call.args))
   })
+}
+
+/** Whether a call is in flight — a runtime that is may not be stopped from the readout. */
+export function pythonBusy(): boolean {
+  return pending.size > 0
+}
+
+/**
+ * How far the runtime's wasm heap has grown, or undefined when there is no runtime to ask.
+ *
+ * Never boots one: with no worker this answers at once, and a worker still booting answers once
+ * the boot settles.
+ */
+export function pythonHeapBytes(): Promise<number | undefined> {
+  if (!worker) return Promise.resolve(undefined)
+  const instance = worker
+  const id = nextId++
+  return new Promise((resolve) => {
+    probes.set(id, resolve)
+    const message: WorkerRequest = { id, memory: true }
+    instance.postMessage(message)
+  })
+}
+
+/**
+ * Stop an idle runtime and give its heap back — the readout's one way to do that, since a wasm
+ * memory never shrinks. The next Python step boots a new one, which is cancel's cost exactly.
+ * Does nothing while a call is in flight, or when there is nothing to stop.
+ */
+export function stopPython(): void {
+  if (!worker || pending.size > 0) return
+  teardown('Stopped')
 }
 
 /** Every buffer in a call's arguments, however deeply nested. */

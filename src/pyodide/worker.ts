@@ -8,7 +8,7 @@
  */
 
 import { errorMessage } from '../core/errors'
-import { callPython } from './runtime'
+import { callPython, heapBytes } from './runtime'
 import type { WorkerReply, WorkerRequest } from './types'
 
 /*
@@ -42,7 +42,14 @@ function transferable(result: Record<string, unknown>): Transferable[] {
 }
 
 scope.addEventListener('message', (event) => {
-  const { id, call } = event.data
+  const request = event.data
+  if ('memory' in request) {
+    void heapBytes().then((bytes) => {
+      scope.postMessage({ id: request.id, kind: 'memory', bytes })
+    })
+    return
+  }
+  const { id, call } = request
   void (async () => {
     try {
       const result = await callPython(call.module, call.fn, call.args, (fraction, note) => {

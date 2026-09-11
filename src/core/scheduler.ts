@@ -289,8 +289,38 @@ export interface SchedulerHost {
   onIteration?(info: IterationInfo): Promise<void> | void
 }
 
+/**
+ * How many times any Scheduler's held results have changed — for the memory readout, which walks
+ * every held value only when this has moved rather than on every tick of its clock.
+ *
+ * One counter across every document rather than one each: the readout's question is only "has
+ * anything changed", and a background document's Scheduler is reachable only through the store.
+ */
+let heldChanges = 0
+
+export function heldResultsVersion(): number {
+  return heldChanges
+}
+
+/** A map that counts its writes into `heldChanges`, so no call site has to remember to. */
+class HeldMap<V> extends Map<string, V> {
+  override set(key: string, value: V): this {
+    heldChanges += 1
+    return super.set(key, value)
+  }
+  override delete(key: string): boolean {
+    const had = super.delete(key)
+    if (had) heldChanges += 1
+    return had
+  }
+  override clear(): void {
+    if (this.size > 0) heldChanges += 1
+    super.clear()
+  }
+}
+
 export class Scheduler {
-  private cache = new Map<string, CacheEntry>()
+  private cache = new HeldMap<CacheEntry>()
   private states = new Map<string, NodeRunInfo>()
   /**
    * Nodes asked to ignore their persistent data cache on the next run they actually execute.
@@ -312,7 +342,7 @@ export class Scheduler {
    * is the newer truth and whatever the cache holds belongs to a key that has already moved.
    * Dropped when the node settles, which is what makes that precedence safe to state so simply.
    */
-  private previews = new Map<string, Record<string, Value>>()
+  private previews = new HeldMap<Record<string, Value>>()
   /**
    * Warnings raised by the node currently executing, before there is a cache entry to hold them.
    *
@@ -503,6 +533,19 @@ export class Scheduler {
     return this.previews.get(nodeId) ?? this.cache.get(nodeId)?.outputs
   }
 
+  /**
+   * Every set of outputs this Scheduler is keeping alive, by node — for the memory readout.
+   *
+   * Both halves, where `outputs` answers with one: while a node runs, its preview *and* the result
+   * it is about to replace are held, and a readout asked what is in memory has to see both.
+   */
+  heldOutputs(): Array<[nodeId: string, outputs: Record<string, Value>]> {
+    const held: Array<[string, Record<string, Value>]> = []
+    for (const [nodeId, outputs] of this.previews) held.push([nodeId, outputs])
+    for (const [nodeId, entry] of this.cache) held.push([nodeId, entry.outputs])
+    return held
+  }
+
   /** One statement of the preview-before-cache rule, so the two cannot come to disagree. */
   output(nodeId: string, portId: string): Value | undefined {
     return this.outputs(nodeId)?.[portId]
@@ -613,7 +656,7 @@ export class Scheduler {
    * the other document.
    */
   adoptResults(from: Scheduler): void {
-    this.cache = new Map(from.cache)
+    this.cache = new HeldMap(from.cache)
     this.states = new Map(from.states)
     this.loopIndex = new Map(from.loopIndex)
     this.loopDone = new Set(from.loopDone)

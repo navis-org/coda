@@ -76,6 +76,8 @@ import { Scheduler } from '../core/scheduler'
 import type { TableSchema } from '../core/types'
 import type { Value } from '../core/values'
 import { isTableValue } from '../core/values'
+import type { ByteLedger, MemoryCategory } from '../core/valueBytes'
+import { MEMORY_CATEGORIES, valueCategory } from '../core/valueBytes'
 import { registerBuiltinSources } from '../data/builtins'
 import { requireSource, subscribeSourceLearned } from '../data/source'
 import { subscribeUploadLearned } from '../data/uploads'
@@ -209,6 +211,21 @@ export interface WorkflowTab {
   id: string
   /** Already defaulted — `'Untitled'` for a graph nobody has named. */
   name: string
+}
+
+/**
+ * One open workflow's results, as the memory readout reports them — see `workflowMemory`.
+ *
+ * Bytes are what the ledger had not already counted, so a result shared with a workflow earlier in
+ * the list (a duplicate adopts its original's cache whole) reads as nothing here.
+ */
+export interface WorkflowMemory {
+  id: string
+  name: string
+  bytes: number
+  byCategory: Record<MemoryCategory, number>
+  /** How many nodes are holding a result. */
+  results: number
 }
 
 /**
@@ -352,6 +369,12 @@ export interface GraphState {
    */
   privacyRequest: number
   requestPrivacy(): void
+  /**
+   * Asks for the Memory dialog. Same idiom: the status bar's readout and the command palette both
+   * open it, and neither has anywhere to hold a dialog.
+   */
+  memoryRequest: number
+  requestMemory(): void
   /**
    * Asks for the Feedback dialog, on whichever tab the caller means.
    *
@@ -820,6 +843,14 @@ export interface GraphState {
    */
   closeDocument(id: string): void
   /**
+   * What every open workflow's results hold, in the switcher's order, charged to `ledger`.
+   *
+   * The ledger is the caller's so a total can carry on past the workflows — the geometry cache
+   * holds the same buffers a scene does, and only one ledger across both counts them once. An
+   * action rather than a selector: it walks every held value, and the readout asks it on a clock.
+   */
+  workflowMemory(ledger: ByteLedger): WorkflowMemory[]
+  /**
    * Open a graph in a document of its own — what every route that used to replace the canvas
    * now calls. See `loadGraph` for the in-place version, which is still what a tour restores
    * through.
@@ -1067,7 +1098,12 @@ export interface GraphState {
    */
   clearNodeCache(nodeId: string): void
   /** Drop every cached result, so the next Run re-fetches from scratch. */
-  clearResults(): void
+  /**
+   * Drop a workflow's results — the one on screen by default, any open one by id (the Memory
+   * dialog). A no-op on the one on screen while it runs: dropping results out from under a run
+   * races its own `finally`, and waiting a moment costs nothing.
+   */
+  clearResults(workflowId?: string): void
   /** True when running this node would actually do work. */
   needsRun(nodeId: string): boolean
   nodeInfo(nodeId: string): NodeRunInfo
@@ -2026,6 +2062,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
     requestShortcuts: () => set((s) => ({ shortcutsRequest: s.shortcutsRequest + 1 })),
     privacyRequest: 0,
     requestPrivacy: () => set((s) => ({ privacyRequest: s.privacyRequest + 1 })),
+    memoryRequest: 0,
+    requestMemory: () => set((s) => ({ memoryRequest: s.memoryRequest + 1 })),
     feedbackRequest: { seq: 0, category: 'general' },
     requestFeedback: (category = 'general') =>
       set((s) => ({ feedbackRequest: { seq: s.feedbackRequest.seq + 1, category } })),
@@ -2340,6 +2378,32 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const nextId = remaining[Math.min(at, remaining.length - 1)]
       // Never zero documents: a canvas with nothing behind it is a state nothing else can draw.
       activate(nextId ? docs.get(nextId)! : createDoc(newId('doc')))
+    },
+
+    workflowMemory: (ledger) => {
+      const names = new Map(get().tabs.map((tab) => [tab.id, tab.name]))
+      return [...docs.values()].map((rec) => {
+        const byCategory = Object.fromEntries(
+          MEMORY_CATEGORIES.map((c) => [c.id, 0]),
+        ) as Record<MemoryCategory, number>
+        const holders = new Set<string>()
+        let bytes = 0
+        for (const [nodeId, outputs] of rec.scheduler.heldOutputs()) {
+          holders.add(nodeId)
+          for (const value of Object.values(outputs)) {
+            const charged = ledger.add(value)
+            byCategory[valueCategory(value)] += charged
+            bytes += charged
+          }
+        }
+        return {
+          id: rec.id,
+          name: names.get(rec.id) ?? 'Untitled',
+          bytes,
+          byCategory,
+          results: holders.size,
+        }
+      })
     },
 
     newWorkflow: () => {
@@ -3002,7 +3066,18 @@ export const useGraphStore = create<GraphState>((set, get) => {
       sched().clearNodeCache(get().graph, nodeId)
     },
 
-    clearResults: () => {
+    clearResults: (workflowId) => {
+      const id = workflowId ?? get().activeTabId
+      if (id !== get().activeTabId) {
+        const rec = docs.get(id)
+        if (!rec) return
+        // Its host callbacks are gated on being active, so this reaches nothing on screen, and
+        // `activate` derives its badges afresh on the way back in.
+        rec.scheduler.invalidateAll()
+        if (rec.stash) rec.stash = { ...rec.stash, lastRun: undefined }
+        return
+      }
+      if (get().busy) return
       sched().invalidateAll()
       afterGraphChange(get().graph, { autoRun: false })
       set({ lastRun: undefined })

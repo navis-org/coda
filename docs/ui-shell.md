@@ -817,6 +817,91 @@ purpose. Those are read by somebody already in Connections configuring a token; 
 somebody who has never opened it. A reader who must find the other surface to learn whether their
 token is safe has already been failed.
 
+## The memory readout
+
+The status bar's left cluster carries `Memory 1.2 GB` with a small meter, and a click on it opens
+the Memory dialog (so does the palette's *Memory Usage*). It is for somebody pushing a browser as
+far as it goes, and their question has two halves: how close is the tab to its ceiling, and which
+of the things it is holding can be let go of. Everything below was measured with
+`pnpm probe:memory`, which drives Chrome over CDP against a served page.
+
+### Two sources, and the one that measures
+
+**Chrome's `performance.memory` is the only measured number, and it is live.** On a served page it
+moves by exactly 400 MB when a 400 MB `Float32Array` is allocated, and `--enable-precise-memory-info`
+changes nothing. **On `about:blank` it does not move at all** — the first probe was run there and
+concluded the API reports nothing, which is the finding worth keeping. Its standard successor,
+`measureUserAgentSpecificMemory`, needs cross-origin isolation, which GitHub Pages cannot grant —
+the same wall `pyodide/engine.ts` records for interrupting Python.
+
+**Everything else is Coda's own estimate** (`core/valueBytes.ts`): per workflow and per kind of
+result, which no browser can say, and the only figure Firefox and Safari get. There it is marked
+`≈` and drawn with **no meter**, since a meter needs a limit and there is no honest one to draw, and
+the dialog says in words that the browser does not report — a zero, or a bar near empty, would read
+as "plenty of room".
+
+### The limit binds half of the number
+
+`jsHeapSizeLimit` looks like the ceiling and is only half of one. **Typed arrays count towards
+`usedJSHeapSize` but not against the limit**: 6 GiB of them allocated at 147% of a 4 GiB "limit"
+with no error. What the limit binds is ordinary objects — table columns, strings, records — and
+those **ended the tab at 79%** of it, added 256 MB at a time, because the next allocation needed
+room past what was already used. Two consequences. The meter is `(used − typed arrays the ledger
+holds) / limit`, with geometry and matrix buffers reported separately as bounded by the device; a
+typed array held by something that is not a result (a WebGL staging copy) stays on the objects side,
+which overstates — the safe direction. And the colours are amber from **60%** and red from **75%**
+(`HIGH_SHARE`, `CRITICAL_SHARE`), because a red that started at 85% would start after the crash.
+They are a colour and nothing else — see [limits.md](limits.md).
+
+### The estimate
+
+Per table cell, as a heap delta over a million cells arriving through `JSON.parse` (how every
+backend's rows arrive): 4 B for an integer below 2^30, 8 B for a double, 13 B for doubles with one
+null in four, 36 B for an 18-digit id held as text. **A repeated string costs a slot**: `JSON.parse`
+hands back one string for every repeat, so a `type` column is 4 B a row plus its distinct names
+once, and the model charges distinct values — exactly up to 65,536 string cells and from a sample
+above, memoised on the column's identity so a million-row table is walked once per result rather
+than once per tick.
+
+**`ByteLedger` charges each column array and each `ArrayBuffer` once**, and that is the part that
+fails as a plausible number. Results share far more than they copy: a passthrough hands its input on
+by identity, a duplicated workflow adopts its original's cache whole (`adoptResults`), and the
+geometry cache holds the very buffers a scene is drawing. A per-holder sum counts all of those twice,
+in exactly the situation somebody is deciding what to close. So a duplicate reads as nothing while
+its original holds the results, and as everything once the original lets go — which is also the true
+answer to what dropping the original frees. The geometry cache hands over its **items**
+(`forEachHeldGeometry`), not a total, because a total cannot be de-duplicated.
+
+The reading is retaken every 2 s while anything is subscribed and the tab is visible, in a
+module-level store rather than zustand's — a clock in the graph store would re-run every selector in
+the app every two seconds. **An idle tick walks no values**: every Scheduler's cache and preview
+maps count their writes into one `heldResultsVersion`, the geometry cache has
+`geometryCacheVersion`, and the tab list is compared by identity, so the estimate is rebuilt only
+when one of them moved — and with Chrome's figure unchanged, React is handed the same snapshot and
+nothing re-renders. Python's heap is asked only while the dialog is open, since the chip never shows
+it.
+
+### What the dialog can free
+
+- **Drop results**, per open workflow — `clearResults(id)`, which takes any open document and
+  refuses the one on screen while it runs.
+- **Downloaded geometry** — `resetGeometryCache`: what the session cache keeps beyond what results
+  already hold.
+- **Python runtime** — a wasm heap grows and never shrinks, so the figure is the high-water mark
+  since boot and terminating the worker is the only way to give it back. **Stop** does that when the
+  runtime is idle. The size is asked by a `memory` message of its own, never a call, so reading it
+  never boots Python, and it is kept out of `pending` so asking does not make the runtime look busy.
+
+Not counted, and the dialog says so in a footnote for the two a reader would expect to be: **GPU
+memory**, which no web API reports in any browser (three.js counts geometries and textures, not
+bytes, and the GPU copy is a second one beside the arrays already counted — on unified-memory
+machines it is system RAM that never reaches `usedJSHeapSize`); and **an embedded Neuroglancer**,
+which in production loads from its own origin, so site isolation puts it in another process whose
+heap, chunk cache and GPU buffers this page cannot read. Under `pnpm dev` `sameOriginViewer`
+proxies it onto this origin, so a development reading may include some of it and a deployed one
+none — a development figure is not the one to calibrate against. Also uncounted: the fetching
+widgets' `keyedCache`s, and IndexedDB, which is disk.
+
 ## Keyboard shortcuts
 
 `src/ui/shortcuts.ts` is the one table of every key and canvas gesture, and

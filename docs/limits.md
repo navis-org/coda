@@ -237,6 +237,11 @@ Left alone deliberately, so a sweep like this one does not come back for them:
   and work a browsing gesture would incur: fifty is where a page turn stops being a page turn.
   Nothing else on this page defers, and nothing else should unless the same two things are true —
   the cost is incidental to browsing, and one click makes it deliberate.
+- **The memory readout's colours** (`HIGH_SHARE` 0.6, `CRITICAL_SHARE` 0.75, in
+  `ui/memoryReadout.ts`) — a colour on the status bar and nothing else: nothing warns, refuses or
+  waits on them. Placed well short of 1 because the tab does not wait for 1: measured, ordinary
+  arrays added 256 MB at a time ended it at 79% of `jsHeapSizeLimit`. See
+  [ui-shell.md](ui-shell.md).
 - **Correctness refusals.** Not limits at all, and they must never become warnings: mismatched
   NBLAST units (`checkNblastUnits`), a distance control applied to voxel coordinates
   (`cleanOps.checkCleanUnits` — and note it refuses *only* where a distance is actually in play,

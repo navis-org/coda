@@ -142,6 +142,11 @@ interface PyodideApi {
   ): Promise<unknown>
   runPython(code: string): unknown
   globals: { get(name: string): PyProxy | undefined }
+  /**
+   * Emscripten's module, not Pyodide's public surface — read for the heap's size and nothing
+   * else, as `scripts/lib/pyodideProbe.mjs` already does. Optional because it is not a promise.
+   */
+  _module?: { HEAP8?: { length: number } }
 }
 
 interface PyodideModule {
@@ -172,6 +177,22 @@ async function boot(report: Report): Promise<PyodideApi> {
     })
   }
   return bootPromise
+}
+
+/**
+ * How far the wasm heap has grown, or undefined before Python has booted — for the memory readout.
+ *
+ * A wasm memory grows and never shrinks, so this is the high-water mark of every call since boot
+ * rather than what the last one is using. Terminating the worker is the only way to hand it back,
+ * which is why the readout offers exactly that.
+ */
+export async function heapBytes(): Promise<number | undefined> {
+  if (!bootPromise) return undefined
+  try {
+    return (await bootPromise)._module?.HEAP8?.length
+  } catch {
+    return undefined
+  }
 }
 
 /** Where the boot ends and the called function's own progress begins. */

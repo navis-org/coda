@@ -260,6 +260,13 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       disabled: store.busy,
       perform: () => store.clearResults(),
     },
+    {
+      id: 'cmd:memory',
+      label: 'Memory Usage',
+      action: 'View',
+      hint: 'How much memory this tab uses, and which workflows and caches hold it',
+      perform: () => store.requestMemory(),
+    },
 
     {
       id: 'cmd:undo',

@@ -93,6 +93,8 @@ interface Entry {
  */
 const entries = new Map<string, Entry>()
 let held = 0
+/** Bumped whenever what is held changes — see `geometryCacheVersion`. */
+let changes = 0
 
 function evict(): void {
   for (const [key, entry] of entries) {
@@ -112,6 +114,8 @@ function read(key: string): Entry | undefined {
 }
 
 function write(key: string, value: unknown, bytes: number, fetchedAt: number): void {
+  // Once here covers `evict` too, which only ever runs from here.
+  changes += 1
   const existing = entries.get(key)
   if (existing) held -= existing.bytes
   entries.delete(key)
@@ -233,6 +237,7 @@ export async function cachedGeometry<T>(
       if (!entry) continue
       entries.delete(key(id))
       held -= entry.bytes
+      changes += 1
     }
   }
 
@@ -318,8 +323,26 @@ export function geometryCacheStats(): { entries: number; bytes: number } {
   return { entries: entries.size, bytes: held }
 }
 
+/**
+ * Every item held, with what it was charged — for the memory readout.
+ *
+ * The items rather than a total, because a total cannot be de-duplicated: while a scene is on
+ * screen these are the same buffers the scheduler's result holds (the header's argument for why
+ * holding them is cheap), and a readout adding `geometryCacheStats().bytes` to the results would
+ * count every drawn neuron twice.
+ */
+export function forEachHeldGeometry(visit: (item: unknown, bytes: number) => void): void {
+  for (const entry of entries.values()) visit(entry.value, entry.bytes)
+}
+
+/** Moves whenever what is held changes, so the memory readout re-walks only when it must. */
+export function geometryCacheVersion(): number {
+  return changes
+}
+
 /** Test seam, and the reset a `Clear Cache` over everything would use. */
 export function resetGeometryCache(): void {
   entries.clear()
   held = 0
+  changes += 1
 }

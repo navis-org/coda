@@ -57,17 +57,21 @@ export interface PyCall {
   args: PyArg[]
 }
 
-/** Main thread to worker. */
-export interface WorkerRequest {
-  id: number
-  call: PyCall
-}
+/**
+ * Main thread to worker: a call, or a question about the runtime itself.
+ *
+ * `memory` is the one message that is not a call, and deliberately so: the memory readout asks it
+ * on a clock, and routing it through `callPython` would load a module to answer it — or, worse,
+ * boot Python for somebody who has only opened a dialog.
+ */
+export type WorkerRequest = { id: number; call: PyCall } | { id: number; memory: true }
 
 /** Worker to main thread. */
 export type WorkerReply =
   | { id: number; kind: 'progress'; fraction: number; note?: string }
   | { id: number; kind: 'done'; result: PyResult }
   | { id: number; kind: 'error'; message: string }
+  | { id: number; kind: 'memory'; bytes: number | undefined }
 
 /** Read a number a Python function promised, failing by name rather than as a `NaN`. */
 export function numberFrom(result: PyResult, key: string): number {
