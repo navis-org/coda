@@ -206,26 +206,31 @@ So if you are running Coda locally — `pnpm dev` on `http://localhost:5173`, or
 
 ### For the hosted app
 
-[navis-org.github.io/coda](https://navis-org.github.io/coda/) is a different origin, and it has to be named exactly — scheme and host, no path:
+[coda.science](https://coda.science) is a different origin, and it has to be named exactly — scheme and host, no path, **no trailing slash**:
 
 ```
-https://navis-org.github.io
+https://coda.science
 ```
+
+Two near misses are refused outright, and both look like a dead server from inside Coda:
+
+- **`https://coda.science/`** — an origin never ends in a slash, and Ollama compares the string exactly. Checked: with the slash the preflight answers `403 Forbidden`, without it `204` and the header Coda needs.
+- **`https://navis-org.github.io`** — where Coda used to be served. That address now redirects to coda.science, so the page you are actually on sends `Origin: https://coda.science` and the old name matches nothing.
 
 #### macOS
 
 If Ollama runs as the app (the usual case), the variable has to be set where a GUI application will see it:
 
 ```shell
-launchctl setenv OLLAMA_ORIGINS "https://navis-org.github.io"
+launchctl setenv OLLAMA_ORIGINS "https://coda.science"
 ```
 
-Then **quit Ollama from the menu bar and start it again** — it reads the environment once, at launch.
+Then **quit Ollama from the menu bar and start it again** — it reads the environment once, at launch. Setting the variable in a terminal does nothing for the app.
 
-`launchctl setenv` lasts until you log out or reboot. To make it permanent, either add a LaunchAgent, or stop using the app's server and run your own:
+`launchctl setenv` lasts until you log out or reboot. To make it permanent, either add a LaunchAgent, or stop using the app's server and run your own — quit the app first, or this one fails with `address already in use`:
 
 ```shell
-OLLAMA_ORIGINS="https://navis-org.github.io" ollama serve
+OLLAMA_ORIGINS="https://coda.science" ollama serve
 ```
 
 #### Linux
@@ -240,7 +245,7 @@ Add, under `[Service]`:
 
 ```ini
 [Service]
-Environment="OLLAMA_ORIGINS=https://navis-org.github.io"
+Environment="OLLAMA_ORIGINS=https://coda.science"
 ```
 
 Save, then:
@@ -250,7 +255,7 @@ sudo systemctl daemon-reload
 sudo systemctl restart ollama
 ```
 
-Running it in the foreground instead? `OLLAMA_ORIGINS="https://navis-org.github.io" ollama serve`.
+Running it in the foreground instead? `OLLAMA_ORIGINS="https://coda.science" ollama serve`.
 
 #### Windows
 
@@ -260,7 +265,7 @@ Ollama inherits your user environment variables.
 2. Open **Settings** (Windows 11) or **Control Panel** (Windows 10) and search for
    *environment variables*.
 3. Click **Edit environment variables for your account**.
-4. Add a new user variable `OLLAMA_ORIGINS` with the value `https://navis-org.github.io`.
+4. Add a new user variable `OLLAMA_ORIGINS` with the value `https://coda.science`.
 5. OK / Apply, then start Ollama again from the Start menu.
 
 ### Verify it before opening Coda
@@ -269,7 +274,7 @@ This asks Ollama the same question the browser will:
 
 ```shell
 curl -i -X OPTIONS http://localhost:11434/api/chat \
-  -H "Origin: https://navis-org.github.io" \
+  -H "Origin: https://coda.science" \
   -H "Access-Control-Request-Method: POST" \
   -H "Access-Control-Request-Headers: content-type"
 ```
@@ -277,12 +282,16 @@ curl -i -X OPTIONS http://localhost:11434/api/chat \
 The response must carry:
 
 ```
-Access-Control-Allow-Origin: https://navis-org.github.io
+Access-Control-Allow-Origin: https://coda.science
 ```
 
-No such header means the variable did not reach the running server — nearly always because it was set in a shell rather than for the service, or because Ollama was not restarted.
+A `403 Forbidden` with no such header means the running server does not allow that origin. Either the value is wrong (a trailing slash, or the old github.io address), or the variable never reached the server — set in a shell rather than for the app or service, or Ollama was not restarted. To see what a terminal-started server actually got, on macOS or Linux:
 
-Several origins are comma-separated: `OLLAMA_ORIGINS="https://navis-org.github.io,https://example.org"`.
+```shell
+ps eww -p "$(pgrep -f 'ollama serve')" | tr ' ' '\n' | grep OLLAMA_
+```
+
+Several origins are comma-separated, with no spaces: `OLLAMA_ORIGINS="https://coda.science,https://example.org"`.
 
 ---
 
@@ -431,7 +440,7 @@ Coda's messages are specific on purpose; each one below names its own fix.
 
 | What Coda says | What it means |
 | --- | --- |
-| `Could not reach http://localhost:11434. Is the server running, and is it set to accept requests from this page?` | One of three: Ollama is not running (`curl http://localhost:11434`), the origin is not allowed ([step 3](#3-let-the-browser-in)), or the browser blocked it before it was sent (Safari, or a denied Chrome prompt). A browser reports all three identically, which is why the message lists them |
+| `Could not reach http://localhost:11434. Is the server running, and is it set to accept requests from this page?` | One of three: Ollama is not running (`curl http://localhost:11434`), the origin is not allowed ([step 3](#3-let-the-browser-in) — check for a trailing slash or the old `navis-org.github.io` origin, and run the `curl` check there), or the browser blocked it before it was sent (Safari, or a denied Chrome prompt). A browser reports all three identically, which is why the message lists them |
 | `<model> is not pulled on this machine. Run ollama pull <model>, or choose one you have: …` | Coda asked `/api/tags` and the name in the dropdown is not among the answers. The models it lists after the colon are really there |
 | `Nothing pulled yet — run ollama pull … , then refresh` | The server answered and has no models. Pull one, then press **↻** |
 | `The prompt did not fit <model>'s context window. Ollama truncated it from the front until the question itself was gone…` | The model clamped `num_ctx` to its own trained window and Coda's prompt did not fit. `ollama show <model>` prints that window; pull one with at least 32k. **This is the one that looks like a hang** — the prompt is evaluated before the refusal, so on a 27B model the error lands three to five minutes after you asked. If it started after you ticked **Full node help**, that is why: it roughly doubles the prompt |
