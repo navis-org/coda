@@ -30,6 +30,19 @@ import { readStorage, writeStorage } from '../localStore'
 const TOKEN_KEY = 'coda.github.token'
 const LOGIN_KEY = 'coda.github.login'
 
+/**
+ * Where `writeScratchGist` keeps its gist's id, per GitHub account — declared here so this file
+ * still names everything the app stores under `coda.github.*`.
+ *
+ * Not a credential: a gist id is public by construction, and forgetting the token leaves it, so a
+ * token put back for the same account finds its gist again. Per login because a token can change
+ * hands: one account's id is a 404 for the next, which the writer survives by creating a gist —
+ * and would then hand the first account's gist back the moment the old token returned.
+ */
+export function githubScratchKey(login: string | undefined): string {
+  return `coda.github.scratch${login ? `.${login}` : ''}`
+}
+
 let token: string | undefined
 let login: string | undefined
 let loaded = false

@@ -28,6 +28,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { LONG_LINK_CHARS, shareAdvisories } from '../shareAdvisories'
 import { copyText, slugify } from '../export'
 import { formatNumber } from '../format'
+import { UNLISTED_GIST, WhereTheTokenGoes } from '../githubGistNotes'
 import { Modal, ModalHeader } from '../Modal'
 
 type Mode = 'link' | 'gist'
@@ -252,8 +253,7 @@ function Dialog({ onClose }: { onClose: () => void }) {
 
         {mode === 'gist' && !hasToken ? (
           <p className="share__blocked">
-            No GitHub token yet. Add one in <strong>Connections ▸ Sharing</strong> — the branch
-            icon in the toolbar. It needs the <code>gist</code> scope and nothing else.
+            No GitHub token yet. <WhereTheTokenGoes />
           </p>
         ) : null}
 
@@ -268,10 +268,7 @@ function Dialog({ onClose }: { onClose: () => void }) {
               />
               <span>
                 Secret gist
-                <em>
-                  Unlisted, not private — anyone with the link can read it, and it will not
-                  appear on your profile or in search.
-                </em>
+                <em>{UNLISTED_GIST}</em>
               </span>
             </label>
             <button

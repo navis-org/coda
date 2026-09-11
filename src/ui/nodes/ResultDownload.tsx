@@ -22,16 +22,10 @@ import type { Value } from '../../core/values'
 import { DownloadButton } from '../DownloadButton'
 import { downloadFiles } from '../export'
 import type { ExportFormat } from '../exportValue'
-import { formatsFor, planExport } from '../exportValue'
+import { EXPORT_LABEL, formatsFor, planExport } from '../exportValue'
 
 /** Menu row text. `auto`, `svg` and `png` never reach here — `formatsFor` returns none of them. */
-const LABEL: Partial<Record<ExportFormat, string>> = {
-  csv: 'CSV data',
-  graphml: 'GraphML graph',
-  json: 'JSON data',
-  swc: 'SWC skeletons',
-  obj: 'OBJ meshes',
-}
+const LABEL: Partial<Record<ExportFormat, string>> = EXPORT_LABEL
 
 export interface ResultDownloadProps {
   value: Value | undefined

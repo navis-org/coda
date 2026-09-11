@@ -93,6 +93,7 @@ registerNode({
         { value: 'auto', label: 'auto (by type)' },
         { value: 'csv', label: 'CSV' },
         { value: 'graphml', label: 'GraphML (networks)' },
+        { value: 'cx2', label: 'CX2 (networks, Cytoscape Web)' },
         { value: 'json', label: 'JSON' },
         { value: 'swc', label: 'SWC (skeletons)' },
         { value: 'obj', label: 'OBJ (meshes)' },

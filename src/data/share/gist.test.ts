@@ -17,7 +17,7 @@ import {
   setGithubToken,
   subscribeGithubAuthFailure,
 } from './credentials'
-import { createGist, githubLogin, readGist, updateGist } from './gist'
+import { createGist, githubLogin, readGist, updateGist, writeScratchGist } from './gist'
 
 interface Call {
   url: string
@@ -106,6 +106,109 @@ describe('creating', () => {
     stubFetch(() => reply(201, { id: 'abc123' }))
     await createGist(OPTIONS)
     expect((calls[0]?.body as { public: boolean }).public).toBe(true)
+  })
+})
+
+describe('the scratch gist', () => {
+  const FILE = {
+    filename: 'coda-network.cx2',
+    content: '[{"CXVersion":"2.0"}]',
+    description: 'LC4 — opened in Cytoscape Web',
+  }
+  const raw = (id: string, revision: string) =>
+    `https://gist.githubusercontent.com/schlegelp/${id}/raw/${revision}/coda-network.cx2`
+
+  /**
+   * A GitHub that remembers: POST mints the next id, PATCH answers for the ids it has minted and
+   * 404s for any other, each write a new revision — and `/user` answers with `login`.
+   */
+  function github(login = 'schlegelp') {
+    const live = new Set<string>()
+    let minted = 0
+    let revision = 0
+    stubFetch((call) => {
+      if (call.url.endsWith('/user')) return reply(200, { login })
+      const answer = (id: string, status: number) =>
+        reply(status, {
+          id,
+          owner: { login },
+          files: { 'coda-network.cx2': { raw_url: raw(id, `r${++revision}`) } },
+        })
+      if (call.method === 'POST') {
+        const id = `g${++minted}`
+        live.add(id)
+        return answer(id, 201)
+      }
+      const id = call.url.split('/').pop()!
+      return live.has(id) ? answer(id, 200) : reply(404, { message: 'Not Found' })
+    })
+    return live
+  }
+
+  const writes = (method: string) => calls.filter((c) => c.method === method)
+
+  it('refuses without a token, before asking GitHub anything', async () => {
+    github()
+    await expect(writeScratchGist(FILE)).rejects.toThrow(/Connections ▸ Sharing/)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('creates one secret gist, and hands back the address of this revision of the file', async () => {
+    setGithubToken('ghp_test')
+    github()
+    expect(await writeScratchGist(FILE)).toBe(raw('g1', 'r1'))
+    expect(writes('POST')[0]?.body).toEqual({
+      description: FILE.description,
+      public: false,
+      files: { 'coda-network.cx2': { content: FILE.content } },
+    })
+  })
+
+  it('rewrites that same gist next time rather than making another', async () => {
+    // One gist per press would fill an account with them, and the earlier link does not need
+    // its gist left alone: `raw_url` names a revision, so it still serves the file it was for.
+    setGithubToken('ghp_test')
+    github()
+    const first = await writeScratchGist(FILE)
+    const second = await writeScratchGist({ ...FILE, content: '[]' })
+    expect(writes('POST')).toHaveLength(1)
+    expect(writes('PATCH')[0]?.url).toBe('https://api.github.com/gists/g1')
+    expect(writes('PATCH')[0]?.body).not.toHaveProperty('public')
+    expect(second).not.toBe(first)
+  })
+
+  it('makes a new one when the stored gist has been deleted, and uses that from then on', async () => {
+    setGithubToken('ghp_test')
+    const live = github()
+    await writeScratchGist(FILE)
+    live.delete('g1')
+    expect(await writeScratchGist(FILE)).toBe(raw('g2', 'r2'))
+    await writeScratchGist(FILE)
+    expect(writes('PATCH').map((c) => c.url.split('/').pop())).toEqual(['g1', 'g2'])
+  })
+
+  it('keeps one per account, so a different token never writes into the last one’s gist', async () => {
+    setGithubToken('ghp_first')
+    github('schlegelp')
+    await writeScratchGist(FILE)
+    setGithubToken('ghp_second')
+    github('someone-else')
+    await writeScratchGist(FILE)
+    expect(writes('POST')).toHaveLength(2)
+    expect(writes('PATCH')).toHaveLength(0)
+  })
+
+  it('reports a refusal other than a missing gist, rather than making a second one', async () => {
+    setGithubToken('ghp_test')
+    github()
+    await writeScratchGist(FILE)
+    stubFetch((call) =>
+      call.url.endsWith('/user')
+        ? reply(200, { login: 'schlegelp' })
+        : reply(401, { message: 'Bad credentials' }),
+    )
+    await expect(writeScratchGist(FILE)).rejects.toThrow(/rejected the token/)
+    expect(writes('POST')).toHaveLength(1)
   })
 })
 

@@ -33,6 +33,7 @@ import {
   formatsFor,
   linkageToNewick,
   meshToObj,
+  networkToCx2,
   networkToGraphml,
   planExport,
   skeletonToSwc,
@@ -330,7 +331,7 @@ describe('GraphML', () => {
   })
 
   it('is offered for a network and for nothing else', () => {
-    expect(formatsFor(graph())).toEqual(['csv', 'graphml', 'json'])
+    expect(formatsFor(graph())).toEqual(['csv', 'graphml', 'cx2', 'json'])
     // CSV stays the `auto` answer: GraphML is the better file for Cytoscape, and a spreadsheet
     // cannot open it at all.
     expect(defaultFormat(graph())).toBe('csv')
@@ -348,6 +349,196 @@ describe('GraphML', () => {
     // An explicit format the value cannot be written as plans nothing and is reported; a
     // silent fallback would hide that the choice did not apply.
     expect(planExport(table(), 'graphml', 'out').files).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// CX2
+// ---------------------------------------------------------------------------
+
+type Cx2Element = { id: number; v?: Record<string, unknown>; x?: number; y?: number }
+type Cx2Edge = { id: number; s: number; t: number; v: Record<string, unknown> }
+
+/** A link table carrying only the two structural columns. */
+const links = (rows: Parameters<typeof tableFromRows>[1] = []) =>
+  tableFromRows(tableSchema(column('source', 'str'), column('target', 'str')), rows)
+
+/**
+ * The writer's output as parsed JSON, the aspects keyed by name.
+ *
+ * Parsed for the reason the GraphML block parses: the parts are concatenated by a Blob on the far
+ * side, and a separator dropped at a chunk boundary is a file that looks right in a snapshot and
+ * is refused by Cytoscape Web.
+ */
+function parseCx2(network: NetworkValue, positions?: Map<string, { x: number; y: number }>) {
+  const aspects = JSON.parse(
+    networkToCx2(network, { name: 'net', positions }).join(''),
+  ) as Array<Record<string, unknown>>
+  const byName = new Map(aspects.slice(1).map((a) => [Object.keys(a)[0]!, Object.values(a)[0]]))
+  return {
+    aspects,
+    names: aspects.slice(1).map((a) => Object.keys(a)[0]),
+    nodes: byName.get('nodes') as Cx2Element[],
+    edges: byName.get('edges') as Cx2Edge[],
+    declared: (
+      byName.get('attributeDeclarations') as Array<Record<string, unknown>>
+    )[0] as Record<string, Record<string, { d: string }>>,
+    meta: byName.get('metaData') as Array<{ name: string; elementCount: number }>,
+  }
+}
+
+describe('CX2', () => {
+  it('has the preamble and the two aspects Cytoscape Web refuses a file without', () => {
+    const cx = parseCx2(graph())
+    expect(cx.aspects[0]).toEqual({ CXVersion: '2.0', hasFragments: false })
+    expect(cx.names).toEqual([
+      'metaData',
+      'attributeDeclarations',
+      'networkAttributes',
+      'nodes',
+      'edges',
+      'status',
+    ])
+    expect(cx.meta).toContainEqual({ name: 'nodes', elementCount: 2 })
+    expect(cx.meta).toContainEqual({ name: 'edges', elementCount: 1 })
+  })
+
+  it('writes integer ids and carries the Coda id as a string `name`', () => {
+    // `name` is what Cytoscape labels by; an id under any other key opens as unlabelled dots.
+    const cx = parseCx2(graph())
+    expect(cx.nodes.map((n) => [n.id, n.v?.['name']])).toEqual([
+      [0, 'LC4'],
+      [1, "a'L(R) & <x>"],
+    ])
+    expect(cx.declared['nodes']?.['name']).toEqual({ d: 'string' })
+    expect(cx.edges[0]).toMatchObject({ id: 0, s: 0, t: 1 })
+  })
+
+  it('keeps an 18-digit id as text, whatever the column dtype', () => {
+    const wide = '720575940621234567'
+    const cx = parseCx2({
+      kind: 'network',
+      directed: true,
+      nodes: tableFromRows(tableSchema(column('id', 'str')), [{ id: wide }]),
+      edges: links(),
+    })
+    expect(cx.nodes[0]!.v?.['name']).toBe(wide)
+  })
+
+  it('declares a type per column and never repeats id, source or target', () => {
+    const cx = parseCx2(graph())
+    expect(cx.declared['nodes']).toEqual({
+      name: { d: 'string' },
+      type: { d: 'string' },
+      degreeOut: { d: 'long' },
+      weightOut: { d: 'double' },
+      cropped: { d: 'boolean' },
+    })
+    expect(cx.declared['edges']).toEqual({ weight: { d: 'double' }, roi: { d: 'string' } })
+  })
+
+  it('omits a null and keeps a real zero and a real false', () => {
+    const cx = parseCx2(graph())
+    expect(cx.nodes[1]!.v).toEqual({
+      name: "a'L(R) & <x>",
+      degreeOut: 0,
+      weightOut: 0,
+      cropped: true,
+    })
+    expect(cx.nodes[0]!.v?.['cropped']).toBe(false)
+    expect(cx.edges[0]!.v).toEqual({ weight: 40 })
+  })
+
+  it('keeps a `name` column of its own, and moves the id to `id`', () => {
+    const cx = parseCx2({
+      ...graph(),
+      nodes: tableFromRows(tableSchema(column('id', 'str'), column('name', 'str')), [
+        { id: '101', name: 'LC4 left' },
+      ]),
+      edges: links(),
+    })
+    expect(cx.nodes[0]!.v).toEqual({ id: '101', name: 'LC4 left' })
+    expect(cx.declared['nodes']).toEqual({ id: { d: 'string' }, name: { d: 'string' } })
+  })
+
+  it('declares a node for an endpoint the node table lacks, or the file is refused', () => {
+    const cx = parseCx2({
+      ...graph(),
+      edges: links([
+        { source: 'LC4', target: 'elsewhere' },
+        { source: 'elsewhere', target: 'LC4' },
+      ]),
+    })
+    expect(cx.nodes).toHaveLength(3)
+    expect(cx.nodes[2]).toEqual({ id: 2, v: { name: 'elsewhere' } })
+    expect(cx.edges.map((e) => [e.s, e.t])).toEqual([
+      [0, 2],
+      [2, 0],
+    ])
+    expect(cx.meta).toContainEqual({ name: 'nodes', elementCount: 3 })
+  })
+
+  it('writes no positions unless handed some', () => {
+    for (const node of parseCx2(graph()).nodes) {
+      expect(node).not.toHaveProperty('x')
+      expect(node).not.toHaveProperty('y')
+    }
+  })
+
+  it('rescales a layout keeping its proportions, and flips y into Cytoscape’s y-down', () => {
+    // A 2:1 layout far from the origin, the second node right of and *above* the first in Coda's
+    // y-up. Two nodes → longer side 100·√2. Unflipped, a hierarchy opens upside down, which reads
+    // as a different arrangement rather than a mirrored one.
+    const positions = new Map([
+      ['LC4', { x: 1000, y: 500 }],
+      ["a'L(R) & <x>", { x: 1002, y: 501 }],
+    ])
+    const [a, b] = parseCx2(graph(), positions).nodes
+    const side = 100 * Math.SQRT2
+    expect(b!.x! - a!.x!).toBeCloseTo(side, 1)
+    expect(a!.y! - b!.y!).toBeCloseTo(side / 2, 1)
+  })
+
+  it('puts the layout’s top-left corner by the origin, where Cytoscape Web’s view opens', () => {
+    // Cytoscape Web opened a layout centred on the origin three quarters off screen, the origin
+    // pinned to the canvas's corner. The margin keeps the corner node's box and label on screen.
+    const positions = new Map([
+      ['LC4', { x: -3, y: 7 }],
+      ["a'L(R) & <x>", { x: 4, y: -2 }],
+    ])
+    const { nodes } = parseCx2(graph(), positions)
+    expect(Math.min(...nodes.map((n) => n.x!))).toBe(50)
+    expect(Math.min(...nodes.map((n) => n.y!))).toBe(50)
+  })
+
+  it('leaves a node without a position unplaced', () => {
+    const cx = parseCx2(graph(), new Map([['LC4', { x: 5, y: 5 }]]))
+    expect(cx.nodes[0]).toMatchObject({ x: 50, y: 50 })
+    expect(cx.nodes[1]).not.toHaveProperty('x')
+  })
+
+  it('still parses when the node and edge lists span several chunks', () => {
+    const count = 4100
+    const rows = Array.from({ length: count }, (_, i) => ({ id: `n${i}` }))
+    const chain = rows.slice(1).map((r, i) => ({ source: `n${i}`, target: r.id }))
+    const big: NetworkValue = {
+      kind: 'network',
+      directed: true,
+      nodes: tableFromRows(tableSchema(column('id', 'str')), rows),
+      edges: links(chain),
+    }
+    expect(networkToCx2(big, { name: 'big' }).length).toBeGreaterThan(3)
+    const cx = parseCx2(big)
+    expect(cx.nodes).toHaveLength(count)
+    expect(cx.edges).toHaveLength(count - 1)
+  })
+
+  it('is one .cx2 file, offered for a network and refused for anything else', () => {
+    const plan = planExport(graph(), 'cx2', 'out')
+    expect(plan.files.map((f) => f.name)).toEqual(['out.cx2'])
+    expect(plan.files[0]!.mime).toBe('application/json')
+    expect(formatsFor(table())).not.toContain('cx2')
+    expect(planExport(table(), 'cx2', 'out').files).toEqual([])
   })
 })
 

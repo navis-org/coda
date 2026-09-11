@@ -19,9 +19,17 @@
  *
  * Escape is `useOverlayEscape`, which is also what makes stacking work: only the surface opened
  * last answers it.
+ *
+ * **`portal`** is for a modal opened from inside a node card, which clips, and whose React Flow
+ * transform would otherwise be the fixed-position containing block. It renders into the document
+ * — the fullscreen element when there is one, as the hover panels do, or it opens invisibly under
+ * a fullscreen viewer — and stops React events at its root: they still bubble through a portal to
+ * the card, whose double-click expands it. Escape is left alone; `useOverlayEscape` takes it on the
+ * window, in the capture phase.
  */
 
-import type { CSSProperties, ReactNode, Ref } from 'react'
+import type { CSSProperties, ReactNode, Ref, SyntheticEvent } from 'react'
+import { createPortal } from 'react-dom'
 
 import { useOverlayEscape } from './useOverlayEscape'
 
@@ -41,7 +49,14 @@ export interface ModalProps {
   style?: CSSProperties
   /** `data-tour` name, for a dialog the Guided Tour spotlights. */
   tour?: string
+  /** Opened from inside a node card — see the note above. */
+  portal?: boolean
   children: ReactNode
+}
+
+function stopHere(event: SyntheticEvent) {
+  if ('key' in event && event.key === 'Escape') return
+  event.stopPropagation()
 }
 
 export function Modal({
@@ -55,14 +70,22 @@ export function Modal({
   panelRef,
   style,
   tour,
+  portal = false,
   children,
 }: ModalProps) {
   useOverlayEscape(onClose, { ignore: ignoreEscape })
-  return (
+  const close = backdrop && onClose ? onClose : undefined
+  const modal = (
     <div
       className={rootClassName}
       role="presentation"
-      onPointerDown={backdrop && onClose ? () => onClose() : undefined}
+      onPointerDown={(event) => {
+        if (portal) event.stopPropagation()
+        close?.()
+      }}
+      onClick={portal ? stopHere : undefined}
+      onDoubleClick={portal ? stopHere : undefined}
+      onKeyDown={portal ? stopHere : undefined}
     >
       <div
         ref={panelRef}
@@ -79,6 +102,7 @@ export function Modal({
       </div>
     </div>
   )
+  return portal ? createPortal(modal, document.fullscreenElement ?? document.body) : modal
 }
 
 /** The header most dialogs wear: a title and a ✕. */

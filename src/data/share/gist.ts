@@ -22,9 +22,11 @@
  * anything, which is the entire point of sharing one.
  */
 
+import { readStorage, writeStorage } from '../localStore'
 import { memoPromise } from '../memoPromise'
 import {
   getGithubToken,
+  githubScratchKey,
   reportGithubAuthFailure,
   setGithubLogin,
   getGithubLogin,
@@ -52,6 +54,27 @@ function headers(token: string | undefined): HeadersInit {
     'x-github-api-version': API_VERSION,
     ...(token ? { authorization: `Bearer ${token}` } : {}),
   }
+}
+
+/** The stored token, or the sentence saying where one goes — every write starts here. */
+function requireToken(): string {
+  const token = getGithubToken()
+  if (!token) throw new Error('No GitHub token — add one in Connections ▸ Sharing.')
+  return token
+}
+
+/**
+ * One write: a POST making a gist when `id` is absent, a PATCH of that gist when it is present.
+ *
+ * The response is handed back unread, because what a failure *means* is the caller's: a lost
+ * workflow gist is an error to report, a lost scratch gist is a reason to make another.
+ */
+function sendGist(token: string, id: string | undefined, body: string): Promise<Response> {
+  return fetch(id ? `${API}/gists/${encodeURIComponent(id)}` : `${API}/gists`, {
+    method: id ? 'PATCH' : 'POST',
+    headers: { ...headers(token), 'content-type': 'application/json' },
+    body,
+  })
 }
 
 /**
@@ -164,15 +187,13 @@ function body({ json, name, filename, appVersion }: WriteGistOptions, extra?: ob
 }
 
 export async function createGist(options: WriteGistOptions): Promise<GistRef> {
-  const token = getGithubToken()
-  if (!token) throw new Error('No GitHub token — add one in Connections ▸ Sharing.')
-  const response = await fetch(`${API}/gists`, {
-    method: 'POST',
-    headers: { ...headers(token), 'content-type': 'application/json' },
-    body: body(options, { public: !options.secret }),
-  })
+  const response = await sendGist(
+    requireToken(),
+    undefined,
+    body(options, { public: !options.secret }),
+  )
   if (!response.ok) return refuse(response, 'The gist')
-  const created = (await response.json()) as { id?: string; owner?: { login?: string } }
+  const created = (await response.json()) as GistResponse
   if (!created.id) throw new Error('GitHub accepted the gist but named no id.')
   return { id: created.id, owner: created.owner?.login }
 }
@@ -186,15 +207,9 @@ export async function createGist(options: WriteGistOptions): Promise<GistRef> {
  * goes.
  */
 export async function updateGist(id: string, options: WriteGistOptions): Promise<GistRef> {
-  const token = getGithubToken()
-  if (!token) throw new Error('No GitHub token — add one in Connections ▸ Sharing.')
-  const response = await fetch(`${API}/gists/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    headers: { ...headers(token), 'content-type': 'application/json' },
-    body: body(options),
-  })
+  const response = await sendGist(requireToken(), id, body(options))
   if (!response.ok) return refuse(response, 'That gist')
-  const updated = (await response.json()) as { id?: string; owner?: { login?: string } }
+  const updated = (await response.json()) as GistResponse
   return { id: updated.id ?? id, owner: updated.owner?.login }
 }
 
@@ -203,6 +218,13 @@ interface GistFile {
   content?: string
   truncated?: boolean
   raw_url?: string
+}
+
+/** The parts of GitHub's gist object this file reads, from any of its three answers. */
+interface GistResponse {
+  id?: string
+  owner?: { login?: string }
+  files?: Record<string, GistFile | null>
 }
 
 /**
@@ -230,7 +252,7 @@ export async function readGist(id: string, revision?: string): Promise<string> {
   const response = await fetch(path, { headers: headers(token) })
   if (!response.ok) return refuse(response, 'That gist')
 
-  const gist = (await response.json()) as { files?: Record<string, GistFile | null> }
+  const gist = (await response.json()) as GistResponse
   const files = Object.values(gist.files ?? {}).filter((file): file is GistFile =>
     Boolean(file),
   )
@@ -258,4 +280,60 @@ export async function readGist(id: string, revision?: string): Promise<string> {
     throw new Error('That gist file is empty.')
   }
   return file.content
+}
+
+export interface ScratchFile {
+  /** Fixed per use, so each write replaces the file rather than adding one beside it. */
+  filename: string
+  content: string
+  description: string
+}
+
+/** The address serving exactly the revision of `filename` this answer describes. */
+function rawUrl(gist: GistResponse, filename: string): string {
+  const url = gist.files?.[filename]?.raw_url
+  if (!gist.id || !url) throw new Error('GitHub accepted the file but named no address for it.')
+  return url
+}
+
+/**
+ * Put a file somewhere another web app can fetch it, and return that address: one **secret** gist
+ * per GitHub account (`githubScratchKey`), rewritten on every call, rather than one per call.
+ *
+ * For handing a file to a page that reads by URL — Cytoscape Web's `?import=` — where the file
+ * only has to exist long enough to be fetched, and a gist per press would leave an account full of
+ * them. Updating in place costs nothing earlier callers relied on: **`raw_url` names a
+ * revision**, so a link written before this call still serves the file it was written with.
+ *
+ * Secret, which is **unlisted, not private** — `UNLISTED_GIST` is the wording every surface
+ * writing one shows. A stored id whose gist has been deleted is a 404 on the PATCH, and the
+ * answer to that is a new gist, not an error: deleting it is a perfectly reasonable thing for
+ * somebody tidying their account to have done.
+ */
+export async function writeScratchGist(file: ScratchFile): Promise<string> {
+  const token = requireToken()
+  const slot = githubScratchKey(await githubLogin())
+  const payload = {
+    description: file.description,
+    files: { [file.filename]: { content: file.content } },
+  }
+
+  const stored = readStorage(slot)
+  if (stored) {
+    const response = await sendGist(token, stored, JSON.stringify(payload))
+    if (response.ok) return rawUrl((await response.json()) as GistResponse, file.filename)
+    if (response.status !== 404) return refuse(response, 'The scratch gist')
+  }
+
+  // Visibility on the POST alone: a PATCH carrying `public` is a 422 (see `body`).
+  const response = await sendGist(
+    token,
+    undefined,
+    JSON.stringify({ ...payload, public: false }),
+  )
+  if (!response.ok) return refuse(response, 'The scratch gist')
+  const created = (await response.json()) as GistResponse
+  const url = rawUrl(created, file.filename)
+  writeStorage(slot, created.id)
+  return url
 }

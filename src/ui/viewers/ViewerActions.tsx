@@ -2,15 +2,23 @@
  * The download / expand controls that sit in every viewer's caption bar.
  *
  * Formats are declared by the viewer, not assumed here: a table offers CSV, a chart offers
- * CSV plus SVG and PNG, and the network adds GraphML. When only one format is available the
+ * CSV plus SVG and PNG, and the network adds GraphML and CX2. When only one format is available the
  * button downloads directly instead of opening a one-item menu.
  */
 
 import { useContext, useEffect, useRef } from 'react'
 
 import { DownloadButton } from '../DownloadButton'
-import { downloadCsv, downloadDataUrl, downloadPng, downloadSvg, downloadText } from '../export'
-import { GRAPHML_MIME } from '../exportValue'
+import {
+  downloadCsv,
+  downloadDataUrl,
+  downloadFiles,
+  downloadPng,
+  downloadSvg,
+  downloadText,
+} from '../export'
+import type { ExportFile } from '../exportValue'
+import { EXPORT_LABEL, GRAPHML_MIME } from '../exportValue'
 import { ExportNodeContext, registerExportSource } from './exportRegistry'
 
 export interface ExportSource {
@@ -24,6 +32,16 @@ export interface ExportSource {
    * lazily for the same reason as the CSV.
    */
   graphml?: () => string[]
+  /**
+   * The graph as a CX2 file for Cytoscape Web, `name` being both its stem and its name there.
+   *
+   * Unlike `graphml` this carries the **layout on screen**: Cytoscape Web opens a file with
+   * positions as it is and lays out one without, and the arrangement somebody was looking at is
+   * the thing worth taking across. Which is why it is the viewer's accessor at all — the Download
+   * node writes the same file from a wire, where there is no layout, and so writes none. Files
+   * rather than parts, from `cx2Files`, so the name and type are the ones `planExport` writes.
+   */
+  cx2?: (name: string) => ExportFile[]
   /**
    * The current view as a standalone `<svg>`, for vector and raster export.
    *
@@ -58,11 +76,12 @@ export interface ViewerActionsProps {
   onError?: (message: string) => void
 }
 
-type Format = 'csv' | 'graphml' | 'svg' | 'png' | 'pngAlpha'
+type Format = 'csv' | 'graphml' | 'cx2' | 'svg' | 'png' | 'pngAlpha'
 
 const FORMAT_LABEL: Record<Format, string> = {
-  csv: 'CSV data',
-  graphml: 'GraphML graph',
+  csv: EXPORT_LABEL.csv,
+  graphml: EXPORT_LABEL.graphml,
+  cx2: EXPORT_LABEL.cx2,
   svg: 'SVG vector',
   png: 'PNG image',
   pngAlpha: 'PNG, no background',
@@ -72,6 +91,7 @@ const FORMAT_LABEL: Record<Format, string> = {
 const FORMAT_SHORT: Record<Format, string> = {
   csv: 'CSV',
   graphml: 'GraphML',
+  cx2: 'CX2',
   svg: 'SVG',
   png: 'PNG',
   pngAlpha: 'PNG',
@@ -115,6 +135,7 @@ export function ViewerActions({
   const formats: Format[] = []
   if (source.csv) formats.push('csv')
   if (source.graphml) formats.push('graphml')
+  if (source.cx2) formats.push('cx2')
   if (source.svg) formats.push('svg', 'png')
   /*
    * The cut-out is offered only by the read-back path, and that is not an omission. A viewer
@@ -138,6 +159,12 @@ export function ViewerActions({
       const parts = source.graphml?.()
       if (!parts) throw new Error('Nothing to export')
       downloadText(parts, `${baseName}.graphml`, GRAPHML_MIME)
+      return
+    }
+    if (format === 'cx2') {
+      const files = source.cx2?.(baseName)
+      if (!files) throw new Error('Nothing to export')
+      downloadFiles(files)
       return
     }
     // A viewer with no vector form takes its own read-back path; one with both never reaches

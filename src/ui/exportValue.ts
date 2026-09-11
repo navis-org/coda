@@ -37,7 +37,7 @@ export interface ExportFile {
 }
 
 export type ExportFormat =
-  'auto' | 'csv' | 'graphml' | 'json' | 'svg' | 'png' | 'swc' | 'obj' | 'newick'
+  'auto' | 'csv' | 'graphml' | 'cx2' | 'json' | 'svg' | 'png' | 'swc' | 'obj' | 'newick'
 
 const TEXT = 'text/plain;charset=utf-8'
 const CSV = 'text/csv;charset=utf-8'
@@ -267,8 +267,12 @@ function pointsToCsv(points: PointsValue): string[] {
  * element.
  */
 
-/** Coda's dtypes as GraphML's. The reason this format was picked over GML. */
-const GRAPHML_TYPE: Record<DType, string> = {
+/**
+ * Coda's dtypes as the attribute types both network formats declare — GraphML's `attr.type` and
+ * CX2's `d` spell them the same. Declared types are the reason GraphML was picked over GML; `long`
+ * rather than `integer`, which is 32-bit in Cytoscape.
+ */
+const NETWORK_TYPE: Record<DType, string> = {
   i64: 'long',
   f64: 'double',
   str: 'string',
@@ -282,11 +286,65 @@ const GRAPHML_TYPE: Record<DType, string> = {
  * weight columns onto a link under their original names: an id written twice is not extra
  * information, and on import it becomes a redundant column beside the one the reader keyed on.
  */
-const GRAPHML_NODE_OWNED = new Set(['id'])
-const GRAPHML_EDGE_OWNED = new Set(['source', 'target'])
+const NETWORK_NODE_OWNED: ReadonlySet<string> = new Set(['id'])
+const NETWORK_EDGE_OWNED: ReadonlySet<string> = new Set(['source', 'target'])
+
+/** The columns a network writer carries as attributes: everything its structure does not. */
+function attributeColumns(schema: TableSchema, owned: ReadonlySet<string>): ColumnSchema[] {
+  return schema.columns.filter((c) => !owned.has(c.name))
+}
 
 /** Rows per string part, matching `tableToCsvParts` — a whole document is one huge string. */
-const GRAPHML_CHUNK_ROWS = 2000
+const CHUNK_ROWS = 2000
+
+/** Gathers rows into `parts`, one string per `CHUNK_ROWS` of them, for both network writers. */
+function chunker(parts: string[]): { push: (row: string) => void; flush: () => void } {
+  let chunk: string[] = []
+  const flush = () => {
+    if (chunk.length === 0) return
+    parts.push(chunk.join(''))
+    chunk = []
+  }
+  const push = (row: string) => {
+    chunk.push(row)
+    if (chunk.length >= CHUNK_ROWS) flush()
+  }
+  return { push, flush }
+}
+
+/**
+ * One cell as the value a network writer puts in its file, or `undefined` for "write nothing".
+ *
+ * Absence is the case that matters. A missing value has no lexical form in a `double`, and
+ * writing `0` would make it a reading — the trap `numeric()` in `encoding.ts` exists for, one
+ * step further downstream. Omitting it leaves the attribute simply absent from that node, which is
+ * what every reader of both formats treats as "not recorded".
+ *
+ * A non-finite number goes the same way. XML Schema does spell `NaN` and `INF` (JSON spells
+ * neither), but the readers disagree about them and a number nobody can compare is not worth a
+ * parse error.
+ *
+ * An **empty string is kept**, unlike a null, because this is a serializer rather than an
+ * analysis: `<data key="nd0"></data>` reads back as `''`, where omitting it reads back as a
+ * missing key and turns a blank cell into a `KeyError` in somebody's script.
+ */
+function exportCell(
+  value: CellValue | undefined,
+  dtype: DType,
+): string | number | boolean | undefined {
+  if (value === null || value === undefined) return undefined
+  if (dtype === 'i64' || dtype === 'f64') {
+    const number = Number(value)
+    return Number.isFinite(number) ? number : undefined
+  }
+  if (dtype === 'bool') {
+    // A `bool` column holds booleans; the string forms are what a foreign table can arrive
+    // with, and `Boolean('false')` is `true`.
+    if (value === 'true' || value === 'false') return value === 'true'
+    return Boolean(value)
+  }
+  return String(value)
+}
 
 interface GraphmlKey {
   /** Generated, never the column name: a `<key>` id is an XML ID and a column name is text. */
@@ -294,10 +352,12 @@ interface GraphmlKey {
   column: ColumnSchema
 }
 
-function graphmlKeys(schema: TableSchema, owned: Set<string>, prefix: string): GraphmlKey[] {
-  return schema.columns
-    .filter((c) => !owned.has(c.name))
-    .map((column, i) => ({ id: `${prefix}${i}`, column }))
+function graphmlKeys(
+  schema: TableSchema,
+  owned: ReadonlySet<string>,
+  prefix: string,
+): GraphmlKey[] {
+  return attributeColumns(schema, owned).map((column, i) => ({ id: `${prefix}${i}`, column }))
 }
 
 /**
@@ -332,34 +392,11 @@ export function xmlText(value: string): string {
     .replaceAll('"', '&quot;')
 }
 
-/**
- * One cell as GraphML text, or `undefined` for "write no element at all".
- *
- * Absence is the case that matters. A missing value has no lexical form in a `double`, and
- * writing `0` would make it a reading — the trap `numeric()` in `encoding.ts` exists for, one
- * step further downstream. Omitting the element leaves the attribute simply absent from that
- * node, which is what every reader here treats as "not recorded".
- *
- * A non-finite number goes the same way. XML Schema does spell `NaN` and `INF`, but the readers
- * disagree about them and a number nobody can compare is not worth a parse error.
- *
- * An **empty string is kept**, unlike a null, because this is a serializer rather than an
- * analysis: `<data key="nd0"></data>` reads back as `''`, where omitting it reads back as a
- * missing key and turns a blank cell into a `KeyError` in somebody's script.
- */
+/** One cell as GraphML text, or `undefined` for "write no element at all" — `exportCell`'s rules. */
 function graphmlCell(value: CellValue | undefined, dtype: DType): string | undefined {
-  if (value === null || value === undefined) return undefined
-  if (dtype === 'i64' || dtype === 'f64') {
-    const number = Number(value)
-    return Number.isFinite(number) ? String(number) : undefined
-  }
-  if (dtype === 'bool') {
-    // A `bool` column holds booleans; the string forms are what a foreign table can arrive
-    // with, and `Boolean('false')` is `true`.
-    if (value === 'true' || value === 'false') return value
-    return value ? 'true' : 'false'
-  }
-  return xmlText(String(value))
+  const cell = exportCell(value, dtype)
+  if (cell === undefined) return undefined
+  return typeof cell === 'string' ? xmlText(cell) : String(cell)
 }
 
 /** The `<data>` children of one node or edge, indented to sit inside it. */
@@ -377,13 +414,13 @@ function graphmlKeyElement(key: GraphmlKey, scope: 'node' | 'edge'): string {
   const { name, dtype } = key.column
   return (
     `  <key id="${key.id}" for="${scope}" attr.name="${xmlText(name)}"` +
-    ` attr.type="${GRAPHML_TYPE[dtype]}"/>\n`
+    ` attr.type="${NETWORK_TYPE[dtype]}"/>\n`
   )
 }
 
 export function networkToGraphml(network: NetworkValue): string[] {
-  const nodeKeys = graphmlKeys(network.nodes.schema, GRAPHML_NODE_OWNED, 'nd')
-  const edgeKeys = graphmlKeys(network.edges.schema, GRAPHML_EDGE_OWNED, 'ed')
+  const nodeKeys = graphmlKeys(network.nodes.schema, NETWORK_NODE_OWNED, 'nd')
+  const edgeKeys = graphmlKeys(network.edges.schema, NETWORK_EDGE_OWNED, 'ed')
 
   const head = [
     `<?xml version="1.0" encoding="UTF-8"?>\n`,
@@ -397,21 +434,13 @@ export function networkToGraphml(network: NetworkValue): string[] {
   ]
 
   const parts: string[] = [head.join('')]
-  let chunk: string[] = []
-  const flush = () => {
-    if (chunk.length === 0) return
-    parts.push(chunk.join(''))
-    chunk = []
-  }
+  const { push, flush } = chunker(parts)
 
   const ids = getColumn(network.nodes, 'id')
   for (let row = 0; row < network.nodes.length; row++) {
     const id = xmlText(String(ids[row] ?? ''))
     const data = graphmlData(network.nodes, nodeKeys, row)
-    chunk.push(
-      data ? `    <node id="${id}">\n${data}    </node>\n` : `    <node id="${id}"/>\n`,
-    )
-    if (chunk.length >= GRAPHML_CHUNK_ROWS) flush()
+    push(data ? `    <node id="${id}">\n${data}    </node>\n` : `    <node id="${id}"/>\n`)
   }
   flush()
 
@@ -422,12 +451,249 @@ export function networkToGraphml(network: NetworkValue): string[] {
     const to = xmlText(String(targets[row] ?? ''))
     const open = `<edge source="${from}" target="${to}"`
     const data = graphmlData(network.edges, edgeKeys, row)
-    chunk.push(data ? `    ${open}>\n${data}    </edge>\n` : `    ${open}/>\n`)
-    if (chunk.length >= GRAPHML_CHUNK_ROWS) flush()
+    push(data ? `    ${open}>\n${data}    </edge>\n` : `    ${open}/>\n`)
   }
   flush()
 
   parts.push('  </graph>\n</graphml>\n')
+  return parts
+}
+
+// ---------------------------------------------------------------------------
+// CX2
+// ---------------------------------------------------------------------------
+
+/**
+ * A network as CX2, the JSON format Cytoscape Web and NDEx read natively.
+ *
+ * GraphML already reaches desktop Cytoscape; this exists for **Cytoscape Web**, which opens CX2
+ * and nothing else from a URL (`?import=`). The file is an array of *aspects*, each a one-key
+ * object, and three things about the shape are refusals rather than preferences — Cytoscape Web's
+ * validator rejects the file outright without them:
+ *
+ *  - **a `metaData` and a `status` aspect**, even though neither says anything about the network;
+ *  - **integer node ids**, so a node is its row number and Coda's id travels as an attribute;
+ *  - **every edge endpoint declared as a node.** A Coda link table can name an endpoint the node
+ *    table lacks, which GraphML readers shrug at; here it is an error. Such an endpoint is written
+ *    as a node carrying its id and nothing else, which is also what a GraphML reader would have
+ *    made of it.
+ *
+ * **Coda's id is written as `name`**, because that is the attribute Cytoscape keys on and labels
+ * by — a node written with its id under any other name opens as a graph of unlabelled dots. A node
+ * table that already has a `name` column keeps it (it is somebody's label, and the better one) and
+ * the id goes under `id` instead. Either way the id is declared a `string`: it is an identity, and
+ * an 18-digit root id written as a JSON number is a different neuron (invariant 8).
+ *
+ * **Positions are optional, and that is the one departure from GraphML's attributes-only rule.**
+ * The Network viewer hands over the layout on screen, so Cytoscape Web opens the arrangement that
+ * was being looked at rather than laying the graph out again; the Download node has no layout to
+ * give and writes none. They are flipped and rescaled here (`cx2Placement`): a Coda layout's y
+ * runs up where Cytoscape's runs down, and it is normalised into a box of a fixed size whatever
+ * the node count where Cytoscape draws a node about 40 px wide.
+ *
+ * Nulls and non-finite numbers are omitted, an empty string kept — GraphML's rules, for GraphML's
+ * reasons. No `visualProperties`: Cytoscape Web applies its default style to a file without one.
+ */
+
+export interface Cx2Options {
+  /** The network's name in Cytoscape Web's workspace list. */
+  name: string
+  /**
+   * Node positions keyed by node id, in any unit and with **y running up** — every Coda layout's
+   * convention, being sigma's graph space. Cytoscape's y runs down, so the flip is made here with
+   * the rescale (`cx2Placement`) rather than by each caller. A node without one gets no `x`/`y`.
+   */
+  positions?: ReadonlyMap<string, Point> | undefined
+}
+
+interface Point {
+  x: number
+  y: number
+}
+
+/**
+ * Pixels per √node along the longer side of the exported layout.
+ *
+ * A Coda layout spans the same box at ten nodes and at ten thousand, which in a viewer that
+ * scales its marks to the frame is right and in Cytoscape — whose nodes are a fixed ~40 px — is a
+ * pile. Growing the side with √n keeps the *area per node* constant instead: about 100 × 100 px,
+ * room for a node and its label.
+ */
+const CX2_SPACING = 100
+
+/** A column ready to write: its key already JSON-quoted, its data looked up once. */
+interface Cx2Field {
+  key: string
+  data: TableValue['data'][string] | undefined
+  dtype: DType
+}
+
+function cx2Fields(table: TableValue, columns: readonly ColumnSchema[]): Cx2Field[] {
+  return columns.map((column) => ({
+    key: `${JSON.stringify(column.name)}:`,
+    data: table.data[column.name],
+    dtype: column.dtype,
+  }))
+}
+
+/**
+ * One row's attributes as JSON object members, each *preceded* by a comma, so the caller opens the
+ * object with a member of its own or drops the first comma.
+ *
+ * Text rather than an object handed to `JSON.stringify`, which is what `networkToGraphml` does
+ * too: the object route costs two or three throwaway objects per row and re-escapes the same key
+ * names on every one of a few hundred thousand links.
+ */
+function cx2Members(fields: readonly Cx2Field[], row: number): string {
+  let out = ''
+  for (const { key, data, dtype } of fields) {
+    const cell = exportCell(data?.[row] ?? null, dtype)
+    if (cell === undefined) continue
+    out += `,${key}${typeof cell === 'string' ? JSON.stringify(cell) : String(cell)}`
+  }
+  return out
+}
+
+function cx2Declarations(columns: readonly ColumnSchema[]): Record<string, { d: string }> {
+  const out: Record<string, { d: string }> = {}
+  for (const column of columns) out[column.name] = { d: NETWORK_TYPE[column.dtype] }
+  return out
+}
+
+function placeable(at: Point | undefined): at is Point {
+  return at !== undefined && Number.isFinite(at.x) && Number.isFinite(at.y)
+}
+
+/**
+ * The `,"x":…,"y":…` members for a position, or `undefined` when there is nothing to place.
+ *
+ * Scaled to `CX2_SPACING`·√n along the longer side, **flipped into Cytoscape's y-down**, rounded to
+ * a hundredth of a pixel (the digits past that are a third of the file on a large graph), and
+ * **moved so the layout's top-left corner sits half a spacing from the origin** — not centred on
+ * it. Cytoscape Web opened a layout centred on the origin with the origin pinned to the canvas's
+ * top-left corner and three quarters of the graph off screen; the same layout anchored at the
+ * corner opens whole. Measured in a browser, which is the only place it shows: the file is valid
+ * either way.
+ *
+ * Proportions are kept: scaling the two axes separately would stretch a layout somebody arranged.
+ * A single placed node, or several on one spot, has no extent to scale and is only moved.
+ */
+function cx2Placement(
+  ids: Iterable<string>,
+  positions: ReadonlyMap<string, Point> | undefined,
+): ((at: Point) => string) | undefined {
+  if (!positions) return undefined
+  let count = 0
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
+  for (const id of ids) {
+    const at = positions.get(id)
+    if (!placeable(at)) continue
+    count++
+    minX = Math.min(minX, at.x)
+    maxX = Math.max(maxX, at.x)
+    minY = Math.min(minY, at.y)
+    maxY = Math.max(maxY, at.y)
+  }
+  if (count === 0) return undefined
+  const side = Math.max(maxX - minX, maxY - minY)
+  const scale = side > 0 ? (CX2_SPACING * Math.sqrt(count)) / side : 1
+  const margin = CX2_SPACING / 2
+  const round = (v: number) => Math.round(v * 100) / 100
+  // `maxY - y` is the flip: the layout's top edge lands on the margin.
+  return (at) =>
+    `,"x":${round((at.x - minX) * scale + margin)},"y":${round((maxY - at.y) * scale + margin)}`
+}
+
+export function networkToCx2(network: NetworkValue, options: Cx2Options): string[] {
+  const nodeColumns = attributeColumns(network.nodes.schema, NETWORK_NODE_OWNED)
+  const edgeColumns = attributeColumns(network.edges.schema, NETWORK_EDGE_OWNED)
+  const idKey = nodeColumns.some((c) => c.name === 'name') ? 'id' : 'name'
+
+  // Integer id per Coda id, first row winning a repeat — which is also the node an edge joins.
+  const ids = getColumn(network.nodes, 'id')
+  const rows = network.nodes.length
+  const index = new Map<string, number>()
+  for (let row = 0; row < rows; row++) {
+    const id = String(ids[row] ?? '')
+    if (!index.has(id)) index.set(id, row)
+  }
+
+  // Endpoints the node table lacks, found before anything is written: the node aspect precedes
+  // the edge aspect, and `metaData` has to count both.
+  const minted: string[] = []
+  const endpoint = (value: CellValue | undefined): number => {
+    const id = String(value ?? '')
+    let at = index.get(id)
+    if (at === undefined) {
+      at = rows + minted.length
+      minted.push(id)
+      index.set(id, at)
+    }
+    return at
+  }
+  const sources = getColumn(network.edges, 'source')
+  const targets = getColumn(network.edges, 'target')
+  const ends = new Int32Array(network.edges.length * 2)
+  for (let row = 0; row < network.edges.length; row++) {
+    ends[row * 2] = endpoint(sources[row])
+    ends[row * 2 + 1] = endpoint(targets[row])
+  }
+  const nodeCount = rows + minted.length
+  const place = cx2Placement(index.keys(), options.positions)
+
+  const head = [
+    { CXVersion: '2.0', hasFragments: false },
+    {
+      metaData: [
+        { name: 'attributeDeclarations', elementCount: 1 },
+        { name: 'networkAttributes', elementCount: 1 },
+        { name: 'nodes', elementCount: nodeCount },
+        { name: 'edges', elementCount: network.edges.length },
+      ],
+    },
+    {
+      attributeDeclarations: [
+        {
+          networkAttributes: { name: { d: 'string' } },
+          nodes: { [idKey]: { d: 'string' }, ...cx2Declarations(nodeColumns) },
+          edges: cx2Declarations(edgeColumns),
+        },
+      ],
+    },
+    { networkAttributes: [{ name: options.name }] },
+  ]
+
+  const parts = [`[${head.map((aspect) => JSON.stringify(aspect)).join(',\n')},\n{"nodes":[\n`]
+  const { push, flush } = chunker(parts)
+  const nodeFields = cx2Fields(network.nodes, nodeColumns)
+  const edgeFields = cx2Fields(network.edges, edgeColumns)
+  const idMember = `${JSON.stringify(idKey)}:`
+
+  // A separator *before* every element but the first, so the chunk boundaries need no fix-up.
+  for (let i = 0; i < nodeCount; i++) {
+    // Rows past the table's end are the endpoints minted above: an id and nothing else.
+    const id = i < rows ? String(ids[i] ?? '') : minted[i - rows]!
+    const members = i < rows ? cx2Members(nodeFields, i) : ''
+    const at = index.get(id) === i ? options.positions?.get(id) : undefined
+    const xy = place && placeable(at) ? place(at) : ''
+    push(
+      `${i === 0 ? '' : ',\n'}{"id":${i},"v":{${idMember}${JSON.stringify(id)}${members}}${xy}}`,
+    )
+  }
+  flush()
+  parts.push('\n]},\n{"edges":[\n')
+  for (let row = 0; row < network.edges.length; row++) {
+    const v = cx2Members(edgeFields, row).slice(1)
+    push(
+      `${row === 0 ? '' : ',\n'}{"id":${row},"s":${ends[row * 2]},"t":${ends[row * 2 + 1]},"v":{${v}}}`,
+    )
+  }
+  flush()
+
+  parts.push('\n]},\n{"status":[{"error":"","success":true}]}]\n')
   return parts
 }
 
@@ -455,6 +721,19 @@ export function defaultFormat(value: Value | undefined): ExportFormat {
   }
 }
 
+/**
+ * Menu row text per format, for both menus offering these — a viewer's caption bar and a card's
+ * foot — so one file cannot be offered under two names.
+ */
+export const EXPORT_LABEL = {
+  csv: 'CSV data',
+  graphml: 'GraphML graph',
+  cx2: 'CX2 for Cytoscape Web',
+  json: 'JSON data',
+  swc: 'SWC skeletons',
+  obj: 'OBJ meshes',
+} as const satisfies Partial<Record<ExportFormat, string>>
+
 /** Formats a value can actually be written as, in menu order. `svg`/`png` are the viewer's. */
 export function formatsFor(value: Value | undefined): ExportFormat[] {
   if (!value) return []
@@ -463,7 +742,7 @@ export function formatsFor(value: Value | undefined): ExportFormat[] {
   if (csv) out.push('csv')
   // After CSV rather than instead of it, and CSV stays the `auto` answer: GraphML is the
   // better file for Cytoscape and NetworkX, and a spreadsheet cannot open it at all.
-  if (value.kind === 'network') out.push('graphml')
+  if (value.kind === 'network') out.push('graphml', 'cx2')
   if (value.kind === 'skeletons') out.push('swc')
   if (value.kind === 'meshes') out.push('obj')
   if (value.kind === 'linkage') {
@@ -500,6 +779,20 @@ function networkFiles(network: NetworkValue, base: string): ExportFile[] {
 /** The same network as one file, with both halves and their types intact. */
 function graphmlFiles(network: NetworkValue, base: string): ExportFile[] {
   return [{ name: `${base}.graphml`, parts: networkToGraphml(network), mime: GRAPHML_MIME }]
+}
+
+/**
+ * The same network as CX2, for Cytoscape Web — JSON, which is the type NDEx serves it as, there
+ * being none registered for CX2. `positions` is the Network viewer's layout; a value on a wire has
+ * none, so `planExport` passes none and Cytoscape Web lays the graph out itself.
+ */
+export function cx2Files(
+  network: NetworkValue,
+  base: string,
+  positions?: Cx2Options['positions'],
+): ExportFile[] {
+  const parts = networkToCx2(network, { name: base, positions })
+  return [{ name: `${base}.cx2`, parts, mime: JSON_MIME }]
 }
 
 /**
@@ -576,6 +869,7 @@ export function planExport(
     case 'network':
       if (resolved === 'csv') return { files: networkFiles(value, base) }
       if (resolved === 'graphml') return { files: graphmlFiles(value, base) }
+      if (resolved === 'cx2') return { files: cx2Files(value, base) }
       break
     case 'points':
       // Positions and attributes in one table, because they are one row each and splitting

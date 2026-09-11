@@ -11,12 +11,12 @@
  */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
 import type { NetworkValue } from '../../core/values'
 import { tableFromRows } from '../../core/values'
-import { installJsdomStubs } from '../../test/jsdomStubs'
+import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import type { NetworkViewerProps } from './NetworkViewer'
 import { NetworkViewer } from './NetworkViewer'
 
@@ -69,6 +69,62 @@ function draw(network: NetworkValue, extra: Partial<NetworkViewerProps> = {}) {
     />,
   )
 }
+
+describe('Open in Cytoscape Web', () => {
+  beforeEach(() => {
+    installStorageStub()
+    clearStorage()
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  const openDialog = () =>
+    fireEvent.click(screen.getByRole('button', { name: 'Open in Cytoscape Web' }))
+
+  it('offers the three toggles, the layout off where nothing is drawn', () => {
+    // jsdom has no WebGL, so this viewer never draws — which is the case the Layout toggle
+    // has to admit to rather than offer positions it does not have.
+    draw(ring(3))
+    openDialog()
+    expect(screen.getByRole('checkbox', { name: /Node attributes/ })).toHaveProperty(
+      'checked',
+      true,
+    )
+    expect(screen.getByRole('checkbox', { name: /Edge attributes/ })).toHaveProperty(
+      'checked',
+      true,
+    )
+    const layout = screen.getByRole('checkbox', { name: /Layout/ })
+    expect(layout).toHaveProperty('disabled', true)
+    expect(layout).toHaveProperty('checked', false)
+  })
+
+  it('opens a small graph straight from a link, uploading nothing', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    draw(ring(3))
+    openDialog()
+    expect(screen.getByText(/fits in the link/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Open ↗' }))
+    expect(open).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^https:\/\/web\.cytoscape\.org\/\?import=data:application\/json;base64,/,
+      ),
+      '_blank',
+      'noopener,noreferrer',
+    )
+    expect(screen.queryByRole('button', { name: 'Open ↗' })).toBeNull()
+  })
+
+  it('says where the token goes when a graph is too large for a link and there is none', () => {
+    draw(build(300, 2))
+    openDialog()
+    expect(screen.getByText(/too large for a link/)).toBeTruthy()
+    expect(screen.getByText(/Connections ▸ Sharing/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Upload and open ↗' })).toHaveProperty(
+      'disabled',
+      true,
+    )
+  })
+})
 
 describe('NetworkViewer caption', () => {
   it('reports the size of what it is drawing', () => {

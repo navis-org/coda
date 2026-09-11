@@ -166,6 +166,16 @@ It is committed with `autoRun: false` — bookkeeping about a link is not an edi
 going stale because somebody copied its address would read as a scheduler bug. Same standing a
 resize has.
 
+**A second, scratch use of the same token: handing a file to Cytoscape Web.** `writeScratchGist`
+keeps **one secret gist per GitHub login** (`coda.github.scratch.<login>` in `localStorage`) and
+rewrites its one file on every hand-off, rather than minting a gist per press. That costs an earlier
+link nothing, because **`raw_url` names a revision** — the address handed to Cytoscape Web is pinned
+to the file as it was written. A stored id whose gist is gone is a 404 on the PATCH, and the answer is
+a new gist, not an error: deleting it is what somebody tidying their account would do. Per login,
+because a token can change hands and the old account's id is a 404 for the new one — surviving that
+by creating a gist would then hand the first account's gist back when its token returned. It never
+touches `meta.gist`, which names the *workflow's* gist. See [viewers.md](viewers.md).
+
 ### The advisories, and why this is a dialog
 
 A menu item that copied a link would be smaller and would be wrong: what a shared workflow does

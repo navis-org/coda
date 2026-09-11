@@ -104,6 +104,65 @@ with an unescaped `&` in a region name produces.
 **CSV stays what `auto` picks**: GraphML is the better file for Cytoscape and NetworkX, a spreadsheet
 cannot open it at all, and `auto` is what somebody gets without choosing.
 
+**A network also exports as CX2**, for **Cytoscape Web**, which reads CX2 and nothing else from a URL
+(`https://web.cytoscape.org/?import=<url>` — a `data:` URL works, up to the ~8 kB request line its
+Apache accepts). `networkToCx2` beside the GraphML writer, offered by all three surfaces. Three shape
+rules are **refusals** in Cytoscape Web's validator rather than preferences: a `metaData` and a
+`status` aspect must be present; node ids are integers, so a node is its row number and Coda's id
+travels as the **`name`** attribute (what Cytoscape labels by — anything else opens as unlabelled
+dots; a table with its own `name` column keeps it and the id moves to `id`), always declared
+`string` per invariant 8; and **every edge endpoint must be a node**, so an endpoint the node table
+lacks is written as a node carrying only its id. Nulls and non-finite numbers are omitted, as in
+GraphML.
+
+**CX2 is the one export that carries positions, and only from the viewer.** It inverts the GraphML
+rule on purpose: Cytoscape Web opens a file with positions as it is, and the arrangement somebody was
+looking at is what they want to take across. So `ExportSource.cx2` hands `cx2Files` sigma's graph
+coordinates (not the camera's, so zoom does not leak in) through the same `graphPositions` the layout
+memo reads, and **the writer flips y** — every Coda layout is in sigma's y-up space, Cytoscape's runs
+down, and an unflipped hierarchy reads as a different arrangement. The Download node and the card foot
+write the same file from a wire, where there is no layout, so theirs has none and Cytoscape Web lays
+it out. The writer **rescales** to `CX2_SPACING`·√n px on the longer side: a Coda layout spans the
+same box at ten nodes and at ten thousand, and Cytoscape's nodes are a fixed ~40 px. And it puts the
+layout's **top-left corner by the origin**, never its centre: Cytoscape Web opened a centred layout
+with the origin pinned to the canvas's top-left corner and three quarters of the graph off screen,
+where the same file anchored at the corner opens whole — valid either way, found only by loading it
+in a browser. No
+`visualProperties` yet — the file opens in Cytoscape Web's default style, so colours and direction
+arrows do not cross.
+
+**Open in Cytoscape Web** is the Network viewer's `↗ Cytoscape Web` caption button: a dialog with
+three toggles (node attributes, edge attributes, layout), a size readout, and one Open. Cytoscape
+Web's only interface is `?import=<url>`, so the file has to be somewhere it can fetch cross-origin,
+and there are two places (`ui/cytoscapeWeb.ts`):
+
+- **In the link**, as a base64 `data:` URL, under `MAX_LINK_CHARS` (8,000). Measured: the server
+  refuses a request line past ~8,190 bytes; a 45-node graph with types, weights and a layout is an
+  8,047-character link that opens, one node more is 8,223 and a 414. That is **30–50 nodes**
+  depending on density and columns. base64 beat percent-encoded JSON by 25–30% (every `"` is three
+  characters escaped, `%`/`#` twice over), and its one trap is `+`, which the query decodes as a
+  space — `cytoscapeWeb.test.ts` reads each link back through `URLSearchParams` for that reason. No
+  fragment (the app reads only the query) and no compression (it reads the body with `.text()`).
+- **In a gist**, past that: `writeScratchGist`'s one secret gist per account, rewritten each time
+  and addressed by its revision-pinned `raw_url` (see [persistence.md](persistence.md)). It needs
+  the GitHub token from Connections ▸ Sharing; without one the dialog says where it goes and that
+  leaving attributes out is the other way under the limit.
+
+Three toggles rather than a column checklist, by choice. They strip columns off the *network*
+(`selectTable`) rather than asking the writer to skip them, so `networkToCx2` stays one path. The
+gist route **opens its tab on the click and points it after the upload** — a tab opened after an
+`await` is outside the gesture and blocked, `caveSignIn.ts`'s trap — severing `opener` before
+navigating, and closing the tab if the upload fails. The dialog is `Modal`'s **`portal`** case: rendered
+into the document — the fullscreen element when there is one, or it opens invisibly under a ⛶
+viewer — because a card clips and React Flow's transform would be the fixed-position containing
+block, with React events stopped at its root, since they still bubble through a portal to the card
+whose double-click expands it. The layout is read **once, as the dialog opens**, so a force layout
+settling behind it does not rebuild the file every tick. And **nothing is written for a graph no
+toggle could fit** (`mayFitInLink`, a lower bound held by a test to never turn away a graph a link
+would carry): at tens of thousands of nodes the file is megabytes and blocks the main thread per
+toggle, for a size readout about a file that is going to a gist regardless — so it is built on
+Upload, and the readout counts nodes and links instead.
+
 ### The ⤓ in a card's foot
 
 `ResultDownload`, in `.coda-node__footer` for any card whose result `planExport` can write.

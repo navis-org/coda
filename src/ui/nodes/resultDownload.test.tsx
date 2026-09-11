@@ -107,7 +107,12 @@ describe('the card foot download', () => {
     const rows = [...card.querySelectorAll('.viewer-actions__item')].map((r) =>
       r.textContent?.trim(),
     )
-    expect(rows).toEqual(['CSV data.csv', 'GraphML graph.graphml', 'JSON data.json'])
+    expect(rows).toEqual([
+      'CSV data.csv',
+      'GraphML graph.graphml',
+      'CX2 for Cytoscape Web.cx2',
+      'JSON data.json',
+    ])
   })
 
   it('writes GraphML that names the node and parses', async () => {

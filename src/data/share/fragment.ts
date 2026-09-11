@@ -34,6 +34,7 @@
 
 import type { CodaGraph } from '../../core/graph'
 import { serializeGraph } from '../../core/graph'
+import { toBase64 } from '../base64'
 
 /** The prefix marking a Coda share link, matching neuroglancer's. */
 export const SHARE_PREFIX = '#!'
@@ -322,20 +323,9 @@ async function through(data: Uint8Array, stream: TransformStream): Promise<Uint8
   return new Uint8Array(await new Response(stream.readable).arrayBuffer())
 }
 
-/**
- * base64url, in chunks.
- *
- * `String.fromCharCode(...bytes)` is the one-liner and it blows the call stack: an Explore
- * select-all packs to roughly 42,000 bytes, which is already past what some engines will spread
- * into arguments, and nothing about the failure names the array that did it.
- */
+/** base64url: `toBase64` with the two characters a URL would escape swapped, and no padding. */
 function toBase64Url(bytes: Uint8Array): string {
-  let binary = ''
-  const CHUNK = 0x8000
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
-  }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return toBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 /**

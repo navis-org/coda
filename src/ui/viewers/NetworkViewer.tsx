@@ -37,7 +37,8 @@ import {
   resolveNetworkNodeColor,
 } from './networkColor'
 import { copyText, exportBaseName as makeBaseName, tableToCsvParts } from '../export'
-import { networkToGraphml } from '../exportValue'
+import { cx2Files, networkToGraphml } from '../exportValue'
+import { CytoscapeDialog } from './CytoscapeDialog'
 import { formatCell } from '../format'
 import { NetworkLegend } from './NetworkLegend'
 import type { SvgEdge, SvgNode } from './networkDraw'
@@ -478,6 +479,7 @@ export function NetworkViewer({
 }: NetworkViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const renderedRef = useRef<Rendered | null>(null)
+  const [cytoscapeOpen, setCytoscapeOpen] = useState(false)
   /*
    * Cache key. Falls back to a per-mount id so a viewer with no identity behaves as it always
    * did — positions surviving a rebuild, but not an unmount.
@@ -695,6 +697,9 @@ export function NetworkViewer({
       // the same one Build Network writes for the same network, and the layout on screen is
       // not smuggled into a document that says nothing about how it was made.
       graphml: () => networkToGraphml(network),
+      // The one that *does* carry positions, because it is for opening this graph in Cytoscape
+      // Web, where the arrangement on screen is the thing worth taking across.
+      cx2: (name) => cx2Files(network, name, renderedPositions(renderedRef.current)),
       svg: () => buildSvg(renderedRef.current, styleRef.current, network),
     }),
     [network],
@@ -702,6 +707,8 @@ export function NetworkViewer({
 
   const tooBig = network.nodes.length > MAX_NODES
   const empty = network.nodes.length === 0
+  // One name for the ⤓ files and for the network in Cytoscape Web.
+  const exportName = baseName ?? makeBaseName(undefined, 'network')
 
   // What the node's filters removed. Silence here would leave a graph that is simply smaller
   // than the data with nothing on screen to say why — the same failure `labels thinned` was
@@ -1295,16 +1302,12 @@ export function NetworkViewer({
       if (settleTimer) clearTimeout(settleTimer)
       const current = renderedRef.current
       if (current) {
-        // Read positions off the graph rather than off whatever was computed: the supervisor
-        // has been moving them ever since, and where it stopped is what is worth keeping.
-        const positions = new Map<string, Positioned>()
-        current.graph.forEachNode((id, attrs) => {
-          positions.set(id, { x: Number(attrs.x), y: Number(attrs.y) })
-        })
+        // Off the graph, where the supervisor has been moving them ever since: where it stopped
+        // is what is worth keeping.
         rememberLayout(memoKey, {
           nodeIds: current.nodeIds,
           signature,
-          positions,
+          positions: graphPositions(current.graph),
           camera: current.sigma.getCamera().getState(),
           // So the caption can still say so after a rebuild restores this.
           moved: handMoved,
@@ -1673,8 +1676,26 @@ export function NetworkViewer({
             layout from input
           </span>
         )}
+        <button
+          type="button"
+          className="viewer-actions__btn nodrag"
+          title="Open in Cytoscape Web"
+          aria-label="Open in Cytoscape Web"
+          disabled={empty}
+          onClick={() => setCytoscapeOpen(true)}
+        >
+          ↗{!compact && <span>Cytoscape Web</span>}
+        </button>
+        {cytoscapeOpen ? (
+          <CytoscapeDialog
+            network={network}
+            name={exportName}
+            readPositions={() => renderedPositions(renderedRef.current)}
+            onClose={() => setCytoscapeOpen(false)}
+          />
+        ) : null}
         <ViewerActions
-          baseName={baseName ?? makeBaseName(undefined, 'network')}
+          baseName={exportName}
           source={exportSource}
           compact={compact}
           onExpand={onExpand}
@@ -1683,6 +1704,27 @@ export function NetworkViewer({
       </div>
     </div>
   )
+}
+
+/** The positions on screen, or `undefined` while nothing is drawn — what both CX2 routes take. */
+function renderedPositions(rendered: Rendered | null): Map<string, Positioned> | undefined {
+  return rendered ? graphPositions(rendered.graph) : undefined
+}
+
+/**
+ * Every node's position as the graph holds it — graph coordinates, sigma's y-up.
+ *
+ * Read off the graph rather than off whatever was computed: the supervisor and a drag both keep
+ * writing here, and where the nodes are now is what the layout memo keeps and what the CX2 export
+ * takes to Cytoscape Web — in graph units, not `buildSvg`'s viewport ones, so how far somebody had
+ * zoomed does not leak into the file.
+ */
+function graphPositions(graph: Graph): Map<string, Positioned> {
+  const positions = new Map<string, Positioned>()
+  graph.forEachNode((id, attrs) => {
+    positions.set(id, { x: Number(attrs.x), y: Number(attrs.y) })
+  })
+  return positions
 }
 
 /**

@@ -5313,6 +5313,14 @@ a.viewer-actions__btn {
   text-decoration: none;
 }
 
+/* The Cytoscape Web dialog's three toggles, stacked. */
+.cytoscape-dialog__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+
 /*
  * In-canvas action strip: fit, re-layout, freeze, find.
  *
