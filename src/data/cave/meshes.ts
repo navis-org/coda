@@ -179,7 +179,7 @@ interface SegmentationInfo {
  */
 export async function openGrapheneMeshes(
   segmentationSource: string,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<GrapheneMeshSource | undefined> {
   const parsed = parseGrapheneSource(segmentationSource)
   if (!parsed) return undefined
@@ -231,7 +231,7 @@ export async function readGrapheneMesh(
   neuronId: string,
   grid: number,
   fragmentLimit: number,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<DecodedMesh | undefined> {
   /*
    * A manifest failure is *not* swallowed, which is the opposite of `readLegacyMesh`'s call and

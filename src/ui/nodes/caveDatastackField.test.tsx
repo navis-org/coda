@@ -28,6 +28,7 @@ import { resetCaveState } from '../../data/cave/tables'
 import { useGraphStore } from '../../store/graphStore'
 import { installCaveFetch } from '../../test/caveStubs'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
+import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 
 beforeAll(() => {
   installJsdomStubs({ width: 900, height: 600 })
@@ -94,13 +95,15 @@ describe('the Custom CAVE card', () => {
      * The card's own `validate` says "name a table listing this datastack's neurons" — so with
      * that field in the inspector, which is closed by default, the card was asking for something
      * it did not show. The connection view is deliberately still inspector-only: not naming one
-     * is an ordinary configuration, and its whole consequence is that Connectivity declines.
+     * is an ordinary configuration, and its whole consequence is that Connectivity declines. So
+     * is the global server: nearly every datastack is on the default deployment, so on the card it
+     * would be a row that almost never changes.
      */
     expect(rows(card)).toEqual(['Datastack', 'Materialization', 'Neuron table', 'ID column'])
   })
 
   it('completes the datastack name once a token can list them', async () => {
-    setToken('test-token')
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
     installCaveFetch()
     render(<App />)
     const card = await customCaveCard()
@@ -114,7 +117,7 @@ describe('the Custom CAVE card', () => {
   })
 
   it('stays a text field, so a datastack no listing mentions can still be named', async () => {
-    setToken('test-token')
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
     installCaveFetch()
     render(<App />)
     const card = await customCaveCard()

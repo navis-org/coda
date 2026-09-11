@@ -3,8 +3,7 @@
  *
  * A peek starts one fetch; further peeks start none, even after a failure (inference runs on every
  * graph mutation, so a peek that retried would be a request per keystroke); an awaited caller does
- * retry a failure. Plus the two that were quietly different per source: what a success is kept for,
- * and that a request started before a `reset` cannot land afterwards.
+ * retry a failure. Plus the one that was quietly different per source: what a success is kept for.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -76,24 +75,6 @@ describe('DatasetListing', () => {
     })
     await listing.get()
     expect(seen).toEqual([info('a')])
-  })
-
-  it('a listing started before a reset does not land after it', async () => {
-    let finish!: (list: DatasetInfo[]) => void
-    const load = vi
-      .fn<() => Promise<DatasetInfo[]>>()
-      .mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)))
-      .mockResolvedValue([info('new')])
-    const listing = new DatasetListing('src', load, { keep: 'inflight' })
-    const stale = listing.get()
-    listing.reset()
-    const fresh = listing.get()
-    expect(fresh).not.toBe(stale)
-    finish([info('old')])
-    await stale
-    expect(await fresh).toEqual([info('new')])
-    expect(listing.find('old')).toBeUndefined()
-    expect(listing.find('new')).toEqual(info('new'))
   })
 
   it('revise swaps one entry as a new list, and only for a listed dataset', async () => {

@@ -478,6 +478,37 @@ describe('a node that asks nothing', () => {
   })
 })
 
+/*
+ * caveclient's default global server is the default deployment's, so a FlyWire notebook names
+ * none — and one on any other deployment has to, or `CAVEclient('h01_c3_flat')` asks
+ * `global.daf-apis.com` about a datastack it has never heard of.
+ */
+describe('the CAVE deployment', () => {
+  it('passes server_address for a datastack on another deployment, and only then', () => {
+    const h01 = exportFixture(
+      twoNodeGraph(
+        'dataset.cave',
+        {
+          server: 'https://global.brain-wire-test.org',
+          datastack: 'h01_c3_flat',
+          version: '1229',
+          neuronTable: 'nucleus',
+        },
+        'neuron.explore',
+      ),
+    )
+    expect(h01).toContain(
+      "CAVEclient('h01_c3_flat', server_address='https://global.brain-wire-test.org', version=1229)",
+    )
+
+    const flywire = exportFixture(
+      twoNodeGraph('dataset.flywire', { version: '783' }, 'neuron.explore'),
+    )
+    expect(flywire).toContain('CAVEclient(')
+    expect(flywire).not.toContain('server_address')
+  })
+})
+
 describe('the population filters', () => {
   const graphWith = (params: ParamValues, query: string, queryParams: ParamValues = {}) =>
     twoNodeGraph('dataset.hemibrain', params, query, queryParams)

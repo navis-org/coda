@@ -278,6 +278,16 @@ spec simply winning over the settings on it, and `validate` says exactly that in
 dropping those names would leave the field disagreeing with the count the Connections panel prints
 from the very same request.
 
+**`Custom CAVE`'s first field is its Global server**, because every field below it is answered by
+that deployment: the completions, the materialization list and the token that asks for both. It is
+**inspector-only**, where `Custom neuPrint`'s and `Custom CATMAID`'s Server are on the card: nearly
+every datastack anybody reaches for is on the default deployment, so on the card it would be a row
+that almost never changes above the three that always do. Its default is the URL
+rather than empty, so a graph saved before the field existed reads as the default deployment —
+which is where every such graph was. The card publishes `publishedCaveSourceId(server)` as its source, so a
+node wired below it learns the deployment from the wire; see
+[backends.md](backends.md#a-deployment-is-a-global-server-and-each-has-its-own-token).
+
 The mechanism is `StringParam.suggestions`, which is a general control rather than this node's:
 `EnumParam.options`' contract exactly — synchronous, network-free, asked on every render — drawn
 by `SuggestField`, which pairs a `TextField` with a `datalist` of its own. `TextField.list` stays

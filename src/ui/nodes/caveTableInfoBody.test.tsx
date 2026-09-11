@@ -27,6 +27,7 @@ import { installCaveFetch } from '../../test/caveStubs'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { CaveTableInfoBody } from './CaveTableInfoBody'
 import { nodeBody } from './nodeBodies'
+import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 
 function draw(
   params: Record<string, unknown>,
@@ -62,7 +63,7 @@ beforeEach(() => {
   installJsdomStubs({ width: 1000, height: 700 })
   resetCaveState()
   resetCredentials()
-  setToken('token')
+  setToken(DEFAULT_CAVE_SERVER, 'token')
 })
 
 afterEach(() => {
@@ -81,7 +82,9 @@ describe('the CAVE table info card', () => {
 
   it('draws the name, the schema type, both counts and the publisher’s description', async () => {
     installCaveFetch({ counts: [143140, 140000] })
-    await tableFactsFor('flywire_fafb_public', 783, 'nuclei_v1')
+    await tableFactsFor('flywire_fafb_public', 783, 'nuclei_v1', {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
     draw({ datastack: 'flywire_fafb_public:783', table: 'nuclei_v1' })
 
     expect(screen.getByText('nuclei_v1')).toBeTruthy()
@@ -102,7 +105,9 @@ describe('the CAVE table info card', () => {
 
   it('takes the datastack from a wired Dataset over the field', async () => {
     installCaveFetch({ counts: [143140, 140000] })
-    await tableFactsFor('flywire_fafb_public', 783, 'nuclei_v1')
+    await tableFactsFor('flywire_fafb_public', 783, 'nuclei_v1', {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
     draw(
       { datastack: 'nonsense:1', table: 'nuclei_v1' },
       { dataset: T.dataset('cave', 'flywire_fafb_public:783') },
@@ -117,7 +122,9 @@ describe('the CAVE table info card', () => {
    */
   it('draws a view from the listing, with no row counts at all', async () => {
     installCaveFetch({ counts: [143140, 140000] })
-    await tableFactsFor('flywire_fafb_public', 783, 'valid_connection_v2')
+    await tableFactsFor('flywire_fafb_public', 783, 'valid_connection_v2', {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
     draw({ datastack: 'flywire_fafb_public:783', table: 'valid_connection_v2' })
     expect(screen.getByText('view')).toBeTruthy()
     expect(document.body.textContent).toContain('This is a summary table')
@@ -127,7 +134,9 @@ describe('the CAVE table info card', () => {
 
   it('holds the permissions back on the card and shows them in the overlay', async () => {
     installCaveFetch({ counts: [143140, 140000] })
-    await tableFactsFor('flywire_fafb_public', 783, 'nuclei_v1')
+    await tableFactsFor('flywire_fafb_public', 783, 'nuclei_v1', {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
     draw({ datastack: 'flywire_fafb_public:783', table: 'nuclei_v1' }, { compact: true })
     expect(screen.queryByText(/read PUBLIC/)).toBeNull()
     cleanup()
@@ -155,7 +164,7 @@ describe('the CAVE table info card', () => {
     expect(document.body.textContent).toContain('has not listed its tables yet')
     cleanup()
 
-    await tableListFor('flywire_fafb_public', 783)
+    await tableListFor('flywire_fafb_public', 783, { deployment: DEFAULT_CAVE_SERVER })
 
     // It has now, and this name is not in it.
     draw({ datastack: 'flywire_fafb_public:783', table: 'nuclei_v2' })

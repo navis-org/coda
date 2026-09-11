@@ -22,6 +22,8 @@
  * entry below plus, usually, nothing else.
  */
 
+import { deploymentKey, normaliseCaveServer } from './deployments'
+
 /** Where a datastack's neuron identities come from. */
 export interface NeuronTableSpec {
   table: string
@@ -113,6 +115,16 @@ export interface SynapseTableSpec {
 
 export interface DatastackSpec {
   datastack: string
+  /**
+   * The global server that lists this datastack. Absent means `DEFAULT_CAVE_SERVER`, which is
+   * where every entry below lives today.
+   *
+   * On the spec because it is a fact about the datastack rather than a setting: `h01_c3_flat` is
+   * listed by `global.brain-wire-test.org` and nowhere else, and asking `global.daf-apis.com`
+   * about it is a 404. Read through `specDeployment`, which normalises it, and it decides which
+   * `CaveSource` offers the datastack and which token its requests carry.
+   */
+  server?: string
   label: string
   description: string
   /**
@@ -282,16 +294,62 @@ export const DATASTACK_SPECS: readonly DatastackSpec[] = [
  * Separate from the static table rather than merged into it, because the two have different
  * lifetimes: this one is rebuilt from a node's params on every graph load and must not
  * accumulate, while the table above is what the Add menu is built from.
+ *
+ * Keyed by deployment as well as by name, because two info services may each list a datastack
+ * of the same name and two Custom CAVE cards pointed at them describe two different tables.
  */
 const runtimeSpecs = new Map<string, DatastackSpec>()
 
+/** The deployment a spec belongs to, normalised — the default where it names none. */
+export function specDeployment(spec: DatastackSpec): string {
+  return normaliseCaveServer(spec.server)
+}
+
+/**
+ * Every deployment the static table names, in table order.
+ *
+ * What `registerBuiltinSources` registers a `CaveSource` for, so a family whose datastack lives
+ * on a second deployment has a source to resolve before any node has asked for one.
+ */
+export function specDeployments(): string[] {
+  return [...new Set(DATASTACK_SPECS.map(specDeployment))]
+}
+
 export function registerDatastackSpec(spec: DatastackSpec): DatastackSpec {
-  runtimeSpecs.set(spec.datastack, spec)
+  runtimeSpecs.set(deploymentKey(spec.server, spec.datastack), spec)
   return spec
 }
 
-export function specFor(datastack: string): DatastackSpec | undefined {
-  return DATASTACK_SPECS.find((s) => s.datastack === datastack) ?? runtimeSpecs.get(datastack)
+/**
+ * The spec for a datastack on a deployment — the static table first, then a hand-registered one.
+ *
+ * The static table wins because a shipped spec is checked and a typed one is not; `Custom CAVE`'s
+ * `validate` says so in words when somebody points one at a shipped datastack.
+ */
+export function specFor(deployment: string, datastack: string): DatastackSpec | undefined {
+  return (
+    shippedSpecFor(deployment, datastack) ??
+    runtimeSpecs.get(deploymentKey(deployment, datastack))
+  )
+}
+
+/**
+ * The static table's spec for a datastack on a deployment, ignoring hand-registered ones — which
+ * is what `Custom CAVE` asks, since the spec it registers itself would otherwise answer. A `find`
+ * with the cheap name test first, since `specFor` sits on inference's hot path.
+ */
+export function shippedSpecFor(
+  deployment: string | undefined,
+  datastack: string,
+): DatastackSpec | undefined {
+  const on = normaliseCaveServer(deployment)
+  return DATASTACK_SPECS.find((s) => s.datastack === datastack && specDeployment(s) === on)
+}
+
+/** The shipped specs on one deployment — what its `CaveSource` offers, and what it is for. */
+export function specsOn(deployment: string | undefined): DatastackSpec[] {
+  const on = normaliseCaveServer(deployment)
+  return DATASTACK_SPECS.filter((s) => specDeployment(s) === on)
 }
 
 /** Test seam: drop hand-named datastacks between suites. */

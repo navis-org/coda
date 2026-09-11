@@ -11,7 +11,6 @@
  * worse than a knob visibly not translated.
  */
 
-import { datasetRef } from '../../../core/types'
 import { readColorSpec, readShapeSpec, readSizeSpec } from '../../../nodes/lib/encodingParams'
 import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { copyIdsSettings } from '../../../nodes/lib/copyIds'
@@ -19,7 +18,7 @@ import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
 import { pyList, pyStr } from '../py'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
-import { codaNeurons, neuronIds, pySelection } from './common'
+import { codaNeurons, isCaveDataset, neuronIds, pySelection } from './common'
 import { filterMasks } from './tableFilters'
 import { roisPrimaryOnly } from '../../../nodes/lib/roiViewParams'
 import type {
@@ -1037,7 +1036,7 @@ registerEmitter('out.neuroglancer', (ctx) => ctx.todo(NEUROGLANCER_REFUSAL))
 registerEmitter(
   'dataset.description',
   (ctx) => {
-    const cave = datasetRef(ctx.inputType('dataset'))?.sourceId === 'cave'
+    const cave = isCaveDataset(ctx)
     return ctx.note(
       "This card shows the dataset's published description and citation, which is prose " +
         'rather than a step. Read it with ' +

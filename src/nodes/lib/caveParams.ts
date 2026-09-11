@@ -24,6 +24,12 @@ import type { CodaType } from '../../core/types'
 import { T, datasetRef } from '../../core/types'
 import type { Value } from '../../core/values'
 import { splitDatasetId } from '../../data/cave/spec'
+import {
+  DEFAULT_CAVE_SERVER,
+  caveServerLabel,
+  caveServerOfSource,
+  normaliseCaveServer,
+} from '../../data/cave/deployments'
 import { foreignBackend } from './datasetParam'
 
 /** The reference Dataset port. See the header on why `reference` is not optional here. */
@@ -46,37 +52,72 @@ export function caveDatastackParam(help: string): ParamDef {
     kind: 'string',
     label: 'Datastack',
     placeholder: 'flywire_fafb_public:783',
-    help,
+    // Said once here rather than per node: the typed field has no deployment of its own, so it is
+    // the default one's — and a datastack on another deployment is reached by wiring its Dataset.
+    help:
+      `${help} A typed name is looked up on ${caveServerLabel(DEFAULT_CAVE_SERVER)}; wire a ` +
+      `Dataset to read a datastack from another CAVE deployment.`,
     default: '',
   }
 }
 
 /**
+ * The deployment a `Custom CAVE` card names — normalised, so a pasted address bar and a bare host
+ * resolve to the one source, the one token and the one set of memo keys. Here rather than on the
+ * node so its exporter reads the same answer.
+ */
+export function customCaveServer(params: Record<string, unknown>): string {
+  return normaliseCaveServer(String(params.server))
+}
+
+/** Which datastack, on which deployment, at which materialization. */
+export interface CaveTarget {
+  /** The global server — the wired Dataset's, or the default for a typed name. */
+  deployment: string
+  datastack: string
+  version: number
+}
+
+/**
+ * The two fields of a Dataset — wired or referenced — that say which datastack it is. Optional,
+ * because that is what `datasetRef` answers for a wire whose type has not resolved.
+ */
+export interface DatasetIdentity {
+  sourceId?: string | undefined
+  datasetId?: string | undefined
+}
+
+/**
  * Which datastack and materialization, from a wire or from a field.
  *
- * Takes a `datasetId` rather than a context, because the callers hold different things: inference
+ * Takes an identity rather than a context, because the callers hold different things: inference
  * has a `CodaType`, `evaluate` has a `DatasetValue`, and the card has neither. A shape covering
- * all three would be a union nobody can read; the one thing each can supply is the id.
+ * all three would be a union nobody can read; the two things each can supply are the ids.
  *
- * Through `splitDatasetId` either way, so there is one reader of the
- * `datastack:materialization` grammar rather than a spelling of it per caller.
+ * **The deployment rides on the wire and nowhere else.** A Dataset's `sourceId` says which global
+ * server it came from (`caveServerOfSource`), where the typed `datastack:materialization` field
+ * has no room for one — so a typed name means the default deployment, and the field's help says
+ * so. Through `splitDatasetId` either way, so there is one reader of the grammar.
  */
 export function caveTarget(
-  datasetId: string | undefined,
+  dataset: DatasetIdentity | undefined,
   params: Record<string, unknown>,
-): { datastack: string; version: number } | undefined {
-  const id = datasetId ?? String(params.datastack ?? '').trim()
-  return id ? splitDatasetId(id) : undefined
+): CaveTarget | undefined {
+  const wired = dataset?.datasetId ? dataset : undefined
+  const id = wired?.datasetId ?? String(params.datastack ?? '').trim()
+  const parsed = id ? splitDatasetId(id) : undefined
+  if (!parsed) return undefined
+  return { deployment: caveServerOfSource(wired?.sourceId) ?? DEFAULT_CAVE_SERVER, ...parsed }
 }
 
 /** `caveTarget` from an edit-time context's port type. */
 export function caveTargetOfType(type: CodaType | undefined, params: Record<string, unknown>) {
-  return caveTarget(datasetRef(type)?.datasetId, params)
+  return caveTarget(datasetRef(type), params)
 }
 
 /** `caveTarget` from a run-time port value. */
 export function caveTargetOfValue(value: Value | undefined, params: Record<string, unknown>) {
-  return caveTarget(value?.kind === 'dataset' ? value.datasetId : undefined, params)
+  return caveTarget(value?.kind === 'dataset' ? value : undefined, params)
 }
 
 /**

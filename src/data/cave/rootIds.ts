@@ -21,6 +21,7 @@ import { cacheGet, cacheSet } from '../cache'
 import type { CaveRequestOptions } from './client'
 import { cavePostBinary, cavePostRaw } from './client'
 import { datastackRecord, materializationsFor, versionFrozenAt } from './datastack'
+import { deploymentKey } from './deployments'
 import type { GrapheneSource } from './graphene'
 import { parseGrapheneSource } from './graphene'
 import { channel } from '../channel'
@@ -67,8 +68,9 @@ const STORE_FORMAT = 1
  * The `key` is the whole reason this is an entry rather than a bare result. A check is about a
  * *particular* set of ids, and those ids change the moment somebody drops an `Update root IDs`
  * between the base and the dataset — which is exactly the moment the answer matters most. Keyed
- * on the dataset id, because that is all `validate` can see; carrying the chain's provenance key,
- * so a changed chain replaces the answer instead of being served the previous one.
+ * on the deployment and the dataset id, because that is all `validate` can see; carrying the
+ * chain's provenance key, so a changed chain replaces the answer instead of being served the
+ * previous one.
  */
 interface Entry {
   /** `ctx.inputKey('annotations')`, or `''` where nothing is wired. */
@@ -88,8 +90,8 @@ const learned = channel()
 export const subscribeRootCheck = learned.subscribe
 
 /** What a finished check found for a dataset, or undefined while nothing is known. */
-export function peekRootCheck(datasetId: string): RootCheck | undefined {
-  return entries.get(datasetId)?.check
+export function peekRootCheck(deployment: string, datasetId: string): RootCheck | undefined {
+  return entries.get(deploymentKey(deployment, datasetId))?.check
 }
 
 /** Test seam, and what a Clear Cache on the dataset would reach. */
@@ -113,18 +115,19 @@ export function startRootCheck(
   datasetId: string,
   chainKey: string | undefined,
   ids: readonly string[],
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): void {
   const key = chainKey ?? ''
-  if (entries.get(datasetId)?.key === key) return
+  const at = deploymentKey(options.deployment, datasetId)
+  if (entries.get(at)?.key === key) return
 
   /*
    * The previous answer goes *now*, before the new one is known. It was about a chain that is no
    * longer there, and leaving it up until the replacement lands is the bug this fixed: a warning
    * that survived the repair it asked for reads as the repair not having worked.
    */
-  const had = entries.get(datasetId)?.check !== undefined
-  entries.set(datasetId, { key })
+  const had = entries.get(at)?.check !== undefined
+  entries.set(at, { key })
   // Deferred, because `notify` re-runs inference and the caller is inside a node's `evaluate`.
   if (had) queueMicrotask(() => learned.notify())
   if (ids.length === 0) return
@@ -135,8 +138,8 @@ export function startRootCheck(
       // entry stays claimed and nothing asks again.
       if (!result) return
       // A newer chain may have arrived while this was in flight; it owns the entry now.
-      if (entries.get(datasetId)?.key !== key) return
-      entries.set(datasetId, { key, check: result })
+      if (entries.get(at)?.key !== key) return
+      entries.set(at, { key, check: result })
       learned.notify()
     })
     .catch(() => {
@@ -146,7 +149,7 @@ export function startRootCheck(
        * dropped connection is not an answer, so the next run asks again rather than the session
        * going quiet about a base that may well be drifting.
        */
-      if (entries.get(datasetId)?.key === key) entries.delete(datasetId)
+      if (entries.get(at)?.key === key) entries.delete(at)
     })
 }
 
@@ -200,7 +203,7 @@ async function frozenAt(
   options: CaveRequestOptions,
 ): Promise<number | undefined> {
   await materializationsFor(datastack, options)
-  return versionFrozenAt(datastack, version)
+  return versionFrozenAt(options.deployment, datastack, version)
 }
 
 /**
@@ -253,7 +256,7 @@ export async function staleRoots(
   datastack: string,
   version: number,
   ids: readonly string[],
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<Set<string>> {
   const graphene = await grapheneFor(datastack, options)
   const at = await frozenAt(datastack, version, options)
@@ -281,7 +284,7 @@ export async function rootsForSupervoxels(
   datastack: string,
   version: number,
   supervoxels: readonly string[],
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>()
   const graphene = await grapheneFor(datastack, options)

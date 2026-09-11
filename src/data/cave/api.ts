@@ -108,20 +108,17 @@ export interface VersionInfo {
 
 const enc = encodeURIComponent
 
-export function listDatastacks(
-  globalServer: string,
-  options?: CaveRequestOptions,
-): Promise<string[]> {
-  return caveGet<string[]>(`${globalServer}/info/api/v2/datastacks`, options)
+/** The global info service is the deployment itself, so it is read off the options — once. */
+export function listDatastacks(options: CaveRequestOptions): Promise<string[]> {
+  return caveGet<string[]>(`${options.deployment}/info/api/v2/datastacks`, options)
 }
 
 export function datastackInfo(
-  globalServer: string,
   datastack: string,
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<DatastackInfo> {
   return caveGet<DatastackInfo>(
-    `${globalServer}/info/api/v2/datastack/full/${enc(datastack)}`,
+    `${options.deployment}/info/api/v2/datastack/full/${enc(datastack)}`,
     options,
   )
 }
@@ -138,7 +135,7 @@ export function datastackInfo(
 export function versionsMetadata(
   server: string,
   datastack: string,
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<VersionInfo[]> {
   return caveGet<VersionInfo[]>(
     `${server}/materialize/api/v3/datastack/${enc(datastack)}/metadata`,
@@ -158,7 +155,7 @@ export function uniqueStringValues(
   server: string,
   datastack: string,
   table: string,
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<Record<string, string[]>> {
   return caveGet<Record<string, string[]>>(
     `${server}/materialize/api/v3/datastack/${enc(datastack)}/table/${enc(table)}/unique_string_values`,
@@ -339,7 +336,7 @@ function runQuery(
   segment: 'table' | 'views',
   name: string,
   query: CaveQuery & { reference?: CaveReference },
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<CaveRow[]> {
   const shared = {
     ...filterBody(name, query.filters),
@@ -382,7 +379,7 @@ export function queryTable(
   datastack: string,
   version: number,
   query: CaveTableQuery,
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<CaveRow[]> {
   return runQuery(server, datastack, version, 'table', query.table, query, options)
 }
@@ -430,7 +427,7 @@ export async function countTable(
   datastack: string,
   version: number,
   query: CaveTableQuery,
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<number> {
   const rows = await cavePost<CaveRow[]>(
     // The base table, even for a reference query: the join endpoint answers rows to `count=true`
@@ -492,7 +489,7 @@ export async function queryTableChecked(
   query: Omit<CaveTableQuery, 'limit'>,
   /** What a truncated read would cost, and what to call the thing that was read. */
   refusal: { of?: string; consequence: string },
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<CaveRow[]> {
   const [rows, total] = await Promise.all([
     queryTable(server, datastack, version, query, options),
@@ -507,7 +504,7 @@ export function queryView(
   datastack: string,
   version: number,
   query: CaveQuery & { view: string },
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<CaveRow[]> {
   return runQuery(server, datastack, version, 'views', query.view, query, options)
 }
@@ -531,7 +528,7 @@ export function listTables(
   server: string,
   datastack: string,
   version: number,
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<string[]> {
   return caveGet<string[]>(
     `${server}/materialize/api/v2/datastack/${enc(datastack)}/version/${version}/tables`,
@@ -560,7 +557,7 @@ export function listViews(
   server: string,
   datastack: string,
   version: number,
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<Record<string, ViewInfo>> {
   return caveGet<Record<string, ViewInfo>>(
     `${server}/materialize/api/v3/datastack/${enc(datastack)}/version/${version}/views`,
@@ -602,7 +599,7 @@ export function tableMetadata(
   datastack: string,
   version: number,
   table: string,
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<TableMetadata> {
   return caveGet<TableMetadata>(
     `${server}/materialize/api/v3/datastack/${enc(datastack)}/version/${version}/table/${enc(table)}/metadata`,
@@ -637,7 +634,7 @@ export function materializedCount(
   datastack: string,
   version: number,
   table: string,
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<number> {
   return caveGet<number>(
     `${server}/materialize/api/v3/datastack/${enc(datastack)}/version/${version}/table/${enc(table)}/count`,
@@ -661,7 +658,7 @@ export function annotationCount(
   server: string,
   alignedVolume: string,
   table: string,
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<number> {
   return caveGet<number>(
     `${server}/annotation/api/v2/aligned_volume/${enc(alignedVolume)}/table/${enc(table)}/count`,

@@ -28,6 +28,7 @@ import { idText } from '../../core/ids'
 import type { CellValue, ColumnData } from '../../core/values'
 import { isTableValue, makeTable } from '../../core/values'
 import { rootsForSupervoxels, staleRoots } from '../../data/cave/rootIds'
+import { caveTargetOfValue } from '../lib/caveParams'
 import { foreignBackend } from '../lib/datasetParam'
 
 registerNode({
@@ -141,12 +142,15 @@ registerNode({
     if (dataset?.kind !== 'dataset') {
       throw new Error('Wire a CAVE Dataset, so the ids can be looked up somewhere')
     }
-    const [datastack, pinned] = dataset.datasetId.split(':')
-    const chosen = String(ctx.params.version).trim() || pinned
-    const version = Number(chosen)
-    if (!datastack || !Number.isInteger(version)) {
+    // Which datastack, and which deployment's chunkedgraph answers it — whose token asks — is the
+    // Dataset's, through the one reader of that rule. A version on this node overrides its own.
+    const target = caveTargetOfValue(dataset, {})
+    const chosen = String(ctx.params.version).trim()
+    const version = chosen ? Number(chosen) : target?.version
+    if (!target || version === undefined || !Number.isInteger(version)) {
       throw new Error(`Cannot read a materialization out of "${dataset.datasetId}"`)
     }
+    const { deployment, datastack } = target
 
     const idColumn = ctx.column('idColumn')
     const svColumn = ctx.column('supervoxelColumn')
@@ -156,7 +160,7 @@ registerNode({
     if (!ids || !svs) throw new Error(`"${idColumn}" or "${svColumn}" is not in this table`)
 
     ctx.progress(0.1, 'checking which ids moved')
-    const options = ctx.signal ? { signal: ctx.signal } : {}
+    const options = { deployment, signal: ctx.signal }
     /*
      * Only the rows that actually moved are looked up. On an unedited base this is one
      * `is_latest_roots` pass and no `get_roots` at all — and both answers are cached forever,

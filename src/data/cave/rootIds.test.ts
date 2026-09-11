@@ -15,6 +15,7 @@ import { resetCache } from '../cache'
 import { resetCredentials, setToken } from './credentials'
 import { parseCaveTimestamp, resetDatastackRecords } from './datastack'
 import { peekRootCheck, resetRootChecks, startRootCheck, subscribeRootCheck } from './rootIds'
+import { DEFAULT_CAVE_SERVER } from './deployments'
 
 const DATASTACK = 'flywire_fafb_public'
 const DATASET = `${DATASTACK}:783`
@@ -94,7 +95,7 @@ beforeEach(() => {
   resetRootChecks()
   resetDatastackRecords()
   resetCredentials()
-  setToken('token')
+  setToken(DEFAULT_CAVE_SERVER, 'token')
 })
 
 afterEach(() => {
@@ -106,14 +107,15 @@ describe('what it finds', () => {
   it('names the ids that were not current, and counts them', async () => {
     installFetch(['720575940628857211'])
     const wait = landed()
-    startRootCheck(DATASET, 'chain', [
-      '720575940628857210',
-      '720575940628857211',
-      '720575940628857212',
-    ])
+    startRootCheck(
+      DATASET,
+      'chain',
+      ['720575940628857210', '720575940628857211', '720575940628857212'],
+      { deployment: DEFAULT_CAVE_SERVER },
+    )
     await wait
 
-    const check = peekRootCheck(DATASET)
+    const check = peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)
     expect(check?.checked).toBe(3)
     expect(check?.stale).toBe(1)
     expect(check?.examples).toEqual(['720575940628857211'])
@@ -128,7 +130,9 @@ describe('what it finds', () => {
      */
     const calls = installFetch()
     const wait = landed()
-    startRootCheck(DATASET, 'chain', ['720575940628857210'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210'], {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
     await wait
 
     const post = calls.find((c) => c.url.includes('is_latest_roots'))!
@@ -189,34 +193,34 @@ describe('which chain it is about', () => {
 
   it('drops the warning when a repair changes the ids', async () => {
     installFetch([STALE])
-    startRootCheck(DATASET, 'raw', [STALE])
-    await until(() => peekRootCheck(DATASET)?.stale === 1)
+    startRootCheck(DATASET, 'raw', [STALE], { deployment: DEFAULT_CAVE_SERVER })
+    await until(() => peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)?.stale === 1)
 
     // `Update root IDs` between the base and the dataset: one dataset, a different chain.
-    startRootCheck(DATASET, 'repaired', [REPAIRED])
-    await until(() => peekRootCheck(DATASET)?.checked === 1)
-    expect(peekRootCheck(DATASET)?.stale).toBe(0)
+    startRootCheck(DATASET, 'repaired', [REPAIRED], { deployment: DEFAULT_CAVE_SERVER })
+    await until(() => peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)?.checked === 1)
+    expect(peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)?.stale).toBe(0)
   })
 
   it('raises it when the repair is taken back out', async () => {
     installFetch([STALE])
-    startRootCheck(DATASET, 'repaired', [REPAIRED])
-    await until(() => peekRootCheck(DATASET)?.checked === 1)
-    expect(peekRootCheck(DATASET)?.stale).toBe(0)
+    startRootCheck(DATASET, 'repaired', [REPAIRED], { deployment: DEFAULT_CAVE_SERVER })
+    await until(() => peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)?.checked === 1)
+    expect(peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)?.stale).toBe(0)
 
-    startRootCheck(DATASET, 'raw', [STALE])
-    await until(() => peekRootCheck(DATASET)?.stale === 1)
+    startRootCheck(DATASET, 'raw', [STALE], { deployment: DEFAULT_CAVE_SERVER })
+    await until(() => peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)?.stale === 1)
   })
 
   it('forgets it when the annotations are unplugged', async () => {
     // Nothing wired is a real answer, not a reason to keep the last one: the warning would
     // otherwise name ids the graph no longer holds.
     installFetch([STALE])
-    startRootCheck(DATASET, 'raw', [STALE])
-    await until(() => peekRootCheck(DATASET)?.stale === 1)
+    startRootCheck(DATASET, 'raw', [STALE], { deployment: DEFAULT_CAVE_SERVER })
+    await until(() => peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)?.stale === 1)
 
-    startRootCheck(DATASET, undefined, [])
-    expect(peekRootCheck(DATASET)).toBeUndefined()
+    startRootCheck(DATASET, undefined, [], { deployment: DEFAULT_CAVE_SERVER })
+    expect(peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)).toBeUndefined()
   })
 
   it('asks again after a failure, rather than going quiet for the session', async () => {
@@ -237,13 +241,13 @@ describe('which chain it is about', () => {
       return inner(url as never, init)
     })
 
-    startRootCheck(DATASET, 'raw', [STALE])
+    startRootCheck(DATASET, 'raw', [STALE], { deployment: DEFAULT_CAVE_SERVER })
     await until(() => firstAsk === false)
     await new Promise((r) => setTimeout(r, 20))
-    expect(peekRootCheck(DATASET)).toBeUndefined()
+    expect(peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)).toBeUndefined()
 
-    startRootCheck(DATASET, 'raw', [STALE])
-    await until(() => peekRootCheck(DATASET)?.stale === 1)
+    startRootCheck(DATASET, 'raw', [STALE], { deployment: DEFAULT_CAVE_SERVER })
+    await until(() => peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)?.stale === 1)
   })
 
   it('lets the newest chain own the answer, whichever lands first', async () => {
@@ -261,19 +265,19 @@ describe('which chain it is about', () => {
       return new Promise((resolve) => held.push(() => resolve(answer)))
     })
 
-    startRootCheck(DATASET, 'raw', [STALE])
+    startRootCheck(DATASET, 'raw', [STALE], { deployment: DEFAULT_CAVE_SERVER })
     await until(() => held.length === 1)
-    startRootCheck(DATASET, 'repaired', [REPAIRED])
+    startRootCheck(DATASET, 'repaired', [REPAIRED], { deployment: DEFAULT_CAVE_SERVER })
     await until(() => held.length === 2)
 
     held[1]!()
-    await until(() => peekRootCheck(DATASET)?.checked === 1)
-    expect(peekRootCheck(DATASET)?.stale).toBe(0)
+    await until(() => peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)?.checked === 1)
+    expect(peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)?.stale).toBe(0)
 
     // The chain nobody is on any more, arriving late.
     held[0]!()
     await new Promise((r) => setTimeout(r, 20))
-    expect(peekRootCheck(DATASET)?.stale).toBe(0)
+    expect(peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)?.stale).toBe(0)
     expect(calls.filter((c) => c.url.includes('is_latest_roots'))).toHaveLength(2)
   })
 
@@ -281,11 +285,11 @@ describe('which chain it is about', () => {
     // A run does not re-infer, so a warning nobody announces the removal of stays on the card
     // until the next unrelated edit — which is what made this look like it had not worked.
     installFetch([STALE])
-    startRootCheck(DATASET, 'raw', [STALE])
-    await until(() => peekRootCheck(DATASET)?.stale === 1)
+    startRootCheck(DATASET, 'raw', [STALE], { deployment: DEFAULT_CAVE_SERVER })
+    await until(() => peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)?.stale === 1)
 
     const wait = landed()
-    startRootCheck(DATASET, undefined, [])
+    startRootCheck(DATASET, undefined, [], { deployment: DEFAULT_CAVE_SERVER })
     await wait
   })
 })
@@ -294,10 +298,16 @@ describe('what keeps it cheap', () => {
   it('asks once per chain, however many times a run reports the same ids', async () => {
     const calls = installFetch()
     const wait = landed()
-    startRootCheck(DATASET, 'chain', ['720575940628857210'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210'], {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
     await wait
-    startRootCheck(DATASET, 'chain', ['720575940628857210'])
-    startRootCheck(DATASET, 'chain', ['720575940628857210'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210'], {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
+    startRootCheck(DATASET, 'chain', ['720575940628857210'], {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
 
     // The ids arrive on every run of a graph; re-asking on each is the hammering this avoids.
     expect(calls.filter((c) => c.url.includes('is_latest_roots'))).toHaveLength(1)
@@ -312,34 +322,38 @@ describe('what keeps it cheap', () => {
      */
     const calls = installFetch()
     let wait = landed()
-    startRootCheck(DATASET, 'chain', ['720575940628857210', '720575940628857211'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210', '720575940628857211'], {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
     await wait
 
     resetRootChecks()
     wait = landed()
-    startRootCheck(DATASET, 'chain', [
-      '720575940628857210',
-      '720575940628857211',
-      '720575940628857299',
-    ])
+    startRootCheck(
+      DATASET,
+      'chain',
+      ['720575940628857210', '720575940628857211', '720575940628857299'],
+      { deployment: DEFAULT_CAVE_SERVER },
+    )
     await wait
 
     const posts = calls.filter((c) => c.url.includes('is_latest_roots'))
     expect(posts).toHaveLength(2)
     // Only the newcomer in the second call.
     expect(posts[1]!.body).toBe('{"node_ids":[720575940628857299]}')
-    expect(peekRootCheck(DATASET)?.checked).toBe(3)
+    expect(peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)?.checked).toBe(3)
   })
 
   it('deduplicates, because an annotation base repeats a root id', async () => {
     // Measured at 1,089 neurons on FlyTable's `main.info`, one of them 104 times over.
     const calls = installFetch()
     const wait = landed()
-    startRootCheck(DATASET, 'chain', [
-      '720575940628857210',
-      '720575940628857210',
-      '720575940628857210',
-    ])
+    startRootCheck(
+      DATASET,
+      'chain',
+      ['720575940628857210', '720575940628857210', '720575940628857210'],
+      { deployment: DEFAULT_CAVE_SERVER },
+    )
     await wait
     expect(calls.find((c) => c.url.includes('is_latest_roots'))!.body).toBe(
       '{"node_ids":[720575940628857210]}',
@@ -354,9 +368,11 @@ describe('what keeps it cheap', () => {
         segmentation_source: 'precomputed://gs://somewhere/seg',
       },
     })
-    startRootCheck(DATASET, 'chain', ['720575940628857210'])
+    startRootCheck(DATASET, 'chain', ['720575940628857210'], {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
     await new Promise((r) => setTimeout(r, 50))
     expect(calls.filter((c) => c.url.includes('is_latest_roots'))).toHaveLength(0)
-    expect(peekRootCheck(DATASET)).toBeUndefined()
+    expect(peekRootCheck(DEFAULT_CAVE_SERVER, DATASET)).toBeUndefined()
   })
 })

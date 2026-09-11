@@ -109,7 +109,13 @@ import type { CaveRequestOptions, CaveRow } from './client'
 import type { DatastackInfo } from './api'
 import { CaveError } from './client'
 import { queryTableChecked, queryView, uniqueStringValues, versionsMetadata } from './api'
-import { getServer, reportAuthFailure } from './credentials'
+import { reportAuthFailure } from './credentials'
+import {
+  DEFAULT_CAVE_SERVER,
+  caveServerLabel,
+  caveSourceId,
+  normaliseCaveServer,
+} from './deployments'
 import {
   caveServerFor,
   datastackRecord,
@@ -126,11 +132,11 @@ import { caveScene } from './scene'
 import type { NgScene } from '../neuroglancer/scene'
 import type { DatastackSpec, NeuronTableSpec, SynapseTableSpec } from './spec'
 import {
-  DATASTACK_SPECS,
   STANDARD_SYNAPSE_COLUMNS,
   datasetIdFor,
   specFor,
   splitDatasetId,
+  specsOn,
 } from './spec'
 
 /**
@@ -336,11 +342,24 @@ function noRoute(
   )
 }
 
+/**
+ * One per **deployment** — `registry.ts`' `caveSourceFor`, CATMAID's arrangement and for a
+ * sharper version of its reason.
+ *
+ * A deployment is a global server, and everything a source knows hangs off one: which datastacks
+ * exist, where each is served from, and which login service's token signs a request. It used to
+ * be one source reading a single user setting, so `global.daf-apis.com` and
+ * `global.brain-wire-test.org` were alternatives — switching reset the listing and every datastack
+ * of the other deployment vanished from the session — where a graph comparing FlyWire and H01
+ * needs them at once. So the deployment is fixed at construction and every request is signed with
+ * it (`options`), and the default keeps the bare `cave` id every saved graph and cache key holds.
+ */
 export class CaveSource implements DataSource {
-  readonly id = 'cave'
-  readonly label = 'CAVE'
-  readonly description =
-    'FlyWire and other CAVE-hosted connectomes. Needs a CAVE token; every dataset is pinned to a materialization.'
+  /** The global server this source lists datastacks from and signs every request for. */
+  readonly deployment: string
+  readonly id: string
+  readonly label: string
+  readonly description: string
   /**
    * Links only, and the absence of `sites` is a fact about the data rather than a gap.
    *
@@ -361,63 +380,52 @@ export class CaveSource implements DataSource {
    * The listing — `DatasetListing`, re-fetched on every awaited call. Unlike the neuron index it
    * is not persisted: it is small, and it is the one thing that would tell us a materialization
    * has expired.
+   *
+   * Built in the constructor rather than as a field initialiser, because it is keyed by `id` and
+   * initialisers run before the constructor body that sets it.
    */
-  private readonly listing = new DatasetListing(this.id, (signal) => this.runListing(signal), {
-    keep: 'inflight',
-  })
+  private readonly listing: DatasetListing
   /** Why each specced datastack is absent from the last listing. */
   private failures = new Map<string, string>()
-  /** Which global server produced the listing. A changed setting invalidates everything. */
-  private listedFrom: string | undefined
   private readonly states = new Map<string, DatastackState>()
+
+  constructor(deployment?: string) {
+    this.deployment = normaliseCaveServer(deployment)
+    this.id = caveSourceId(this.deployment)
+    const isDefault = this.deployment === DEFAULT_CAVE_SERVER
+    // The default keeps the label every error and menu heading has always carried; another
+    // deployment is named by its host, which is what a reader needs when a message says which
+    // one declined.
+    this.label = isDefault ? 'CAVE' : `CAVE (${caveServerLabel(this.deployment)})`
+    this.description = isDefault
+      ? 'FlyWire and other CAVE-hosted connectomes. Needs a CAVE token; every dataset is pinned to a materialization.'
+      : `CAVE datastacks listed by ${caveServerLabel(this.deployment)}. Needs a token from that ` +
+        `deployment; every dataset is pinned to a materialization.`
+    this.listing = new DatasetListing(this.id, (signal) => this.runListing(signal), {
+      keep: 'inflight',
+    })
+  }
+
+  /** Every request this source makes, signed for its own deployment. */
+  private options(signal?: AbortSignal): CaveRequestOptions {
+    return { deployment: this.deployment, signal }
+  }
 
   // -------------------------------------------------------------------------
   // Datasets
   // -------------------------------------------------------------------------
 
   async listDatasets(signal?: AbortSignal): Promise<DatasetInfo[]> {
-    this.followServer()
     return this.listing.get(signal)
   }
 
-  /**
-   * `DatasetListing.peek`: starts the listing once per instance, and answers what has landed.
-   *
-   * The server is checked here as well as in `listDatasets`. The peek used to reach the check only
-   * through `listDatasets`, and only when it had nothing to answer with — so after a change of
-   * server, a listing already in hand kept handing out the previous deployment's datastacks.
-   */
+  /** `DatasetListing.peek`: starts the listing once per instance, and answers what has landed. */
   peekDatasets(): DatasetInfo[] | undefined {
-    this.followServer()
     return this.listing.peek()
   }
 
   peekDataset(datasetId: string): DatasetInfo | undefined {
     return this.listing.find(datasetId)
-  }
-
-  /** Forget everything if the global server is no longer the one the listing came from. */
-  private followServer(): void {
-    const server = getServer()
-    if (this.listedFrom !== server) this.reset(server)
-  }
-
-  /**
-   * Forget everything learned from one global server.
-   *
-   * `listing` is cleared with the rest, which is the part that matters: without it a listing for
-   * the old server stays in flight, `listDatasets` hands that promise to a caller asking about
-   * the new one, and the dataset picker quietly shows the previous deployment's datastacks.
-   * `listedFrom` has exactly one writer for the same reason — it used to be re-pinned at the end
-   * of `runListing`, which on that path put it back to the server being replaced.
-   */
-  private reset(server: string): void {
-    this.listedFrom = server
-    // With the rest: an explanation of why a datastack was missing from the *previous* server's
-    // listing is not an explanation of anything on this one.
-    this.failures = new Map()
-    this.listing.reset()
-    this.states.clear()
   }
 
   /**
@@ -442,7 +450,7 @@ export class CaveSource implements DataSource {
    * one dataset.
    */
   private async runListing(signal?: AbortSignal): Promise<DatasetInfo[]> {
-    const options: CaveRequestOptions = signal ? { signal } : {}
+    const options = this.options(signal)
     // Through `datastack.ts`'s memo rather than a second call to the same URL: one fact, one
     // request, one invalidation rule — and the Datastack field's completions are then filled by
     // whichever of the two asked first.
@@ -450,9 +458,10 @@ export class CaveSource implements DataSource {
     /*
      * Only datastacks Coda has a spec for. The info service lists thirteen and most of them
      * would fail on the first Run — see `spec.ts` for why a CAVE datastack cannot describe its
-     * own roles. Offering a dataset that cannot work is worse than not offering it.
+     * own roles. Offering a dataset that cannot work is worse than not offering it. And only the
+     * ones on *this* deployment: another's are another source's to list.
      */
-    const specs = DATASTACK_SPECS.filter((s) => available.has(s.datastack))
+    const specs = specsOn(this.deployment).filter((s) => available.has(s.datastack))
     /*
      * Kept rather than swallowed, and this is the second half of the same bug. A tolerated
      * refusal is still the answer to "why is this dataset not in the picker" — and without it the
@@ -554,7 +563,7 @@ export class CaveSource implements DataSource {
      * `skeletons: true`" stays true of every later state of it.
      */
     const parsed = splitDatasetId(datasetId)
-    const spec = parsed ? specFor(parsed.datastack) : undefined
+    const spec = parsed ? specFor(this.deployment, parsed.datastack) : undefined
     if (spec && parsed && peekFlat(spec, parsed.version)?.skeletonUrl)
       return { skeletons: true }
 
@@ -576,7 +585,7 @@ export class CaveSource implements DataSource {
 
   schemasFor(datasetId: string): SourceSchemas {
     const parsed = splitDatasetId(datasetId)
-    const spec = parsed ? specFor(parsed.datastack) : undefined
+    const spec = parsed ? specFor(this.deployment, parsed.datastack) : undefined
     if (!spec) return this.schemas
     const state = this.state(spec.datastack)
     if (state.schemas) return state.schemas
@@ -609,7 +618,12 @@ export class CaveSource implements DataSource {
     const server = await this.serverFor(spec)
     let systems: string[] = []
     if (spec.annotations) {
-      const values = await uniqueStringValues(server, spec.datastack, spec.annotations.table)
+      const values = await uniqueStringValues(
+        server,
+        spec.datastack,
+        spec.annotations.table,
+        this.options(),
+      )
       systems = [...(values[spec.annotations.systemColumn] ?? [])].sort()
     }
     state.systems = systems
@@ -655,7 +669,7 @@ export class CaveSource implements DataSource {
     schema: SourceSchemas['neurons'],
     req: NeuronIndexRequest,
   ): Promise<TableValue> {
-    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+    const options = this.options(req.signal)
 
     /*
      * A wired chain replaces the datastack's labels, so its path fetches only the neuron list —
@@ -961,7 +975,7 @@ export class CaveSource implements DataSource {
     signal: AbortSignal | undefined,
   ): Promise<Edge[]> {
     const server = await this.serverFor(spec)
-    const options: CaveRequestOptions = signal ? { signal } : {}
+    const options = this.options(signal)
 
     if (spec.connections) {
       const links = spec.connections
@@ -1070,7 +1084,7 @@ export class CaveSource implements DataSource {
    */
   async fetchViewerScene(req: ViewerSceneRequest): Promise<NgScene | undefined> {
     const { spec } = this.require(req.datasetId)
-    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+    const options = this.options(req.signal)
     return caveScene(spec.datastack, await datastackRecord(spec.datastack, options))
   }
 
@@ -1197,7 +1211,7 @@ export class CaveSource implements DataSource {
     }
 
     const source = await this.meshSource(spec, req.signal)
-    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+    const options = this.options(req.signal)
 
     /*
      * The caller's triangle budget decides how hard each mesh is decimated — see
@@ -1323,7 +1337,7 @@ export class CaveSource implements DataSource {
    */
   async fetchSkeletons(req: GeometryRequest): Promise<SkeletonsValue> {
     const { spec, version } = this.require(req.datasetId)
-    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+    const options = this.options(req.signal)
 
     // The vocabulary half, shared with every other backend; the per-*dataset* refusals below
     // are the half only a probe can answer, and they name the materialization.
@@ -1366,7 +1380,7 @@ export class CaveSource implements DataSource {
 
     // Asked once per session and remembered: a datastack whose cache came back empty for a whole
     // set is not worth a round trip on every Run. An explicit choice always asks.
-    const service = serviceLooksEmpty(spec.datastack)
+    const service = serviceLooksEmpty(this.deployment, spec.datastack)
       ? undefined
       : await skeletonServiceFor(spec.datastack, options).catch(() => undefined)
     if (service) {
@@ -1395,10 +1409,10 @@ export class CaveSource implements DataSource {
   skeletonSourcesFor(datasetId: string): readonly SkeletonProvenance[] | undefined {
     const parsed = splitDatasetId(datasetId)
     if (!parsed) return undefined
-    const spec = specFor(parsed.datastack)
+    const spec = specFor(this.deployment, parsed.datastack)
     const flat = spec ? peekFlat(spec, parsed.version) : undefined
-    const service = peekSkeletonService(parsed.datastack)
-    const l2 = peekL2Cache(parsed.datastack)
+    const service = peekSkeletonService(this.deployment, parsed.datastack)
+    const l2 = peekL2Cache(this.deployment, parsed.datastack)
     if (service === undefined && l2 === undefined && !flat?.skeletonUrl) return undefined
 
     const routes: SkeletonProvenance[] = []
@@ -1475,7 +1489,7 @@ export class CaveSource implements DataSource {
     service: SkeletonService,
     known?: ReadonlySet<string>,
   ): Promise<SkeletonsValue> {
-    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+    const options = this.options(req.signal)
     req.onProgress?.(0.05, 'checking the skeleton cache')
     const held = known ?? (await existingSkeletons(service, req.neuronIds, options))
     const available = req.neuronIds.filter((id) => held.has(id))
@@ -1535,7 +1549,7 @@ export class CaveSource implements DataSource {
     req: GeometryRequest,
     spec: DatastackSpec,
   ): Promise<SkeletonsValue> {
-    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+    const options = this.options(req.signal)
 
     if (req.neuronIds.length > L2_SKELETON_WARN) {
       // Two chunkedgraph reads apiece, sixteen at a time: ~0.3 s a neuron once warm.
@@ -1615,7 +1629,7 @@ export class CaveSource implements DataSource {
    */
   async fetchSynapses(req: SynapseRequest): Promise<PointsValue> {
     const { spec, version } = this.require(req.datasetId)
-    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+    const options = this.options(req.signal)
     // The same resolution the edge list uses, so a datastack that can answer connectivity by
     // aggregation can also draw the synapses it aggregated. `positionColumn` is a *stem* the API
     // splits into `_x`/`_y`/`_z` — checked to behave identically on a declared table and a
@@ -1680,7 +1694,7 @@ export class CaveSource implements DataSource {
             resolution: NANOMETRES,
           },
           { of: `${synapses.table} (${side})`, consequence: INCOMPLETE_INDEX },
-          req.signal ? { signal: req.signal } : {},
+          options,
         )
         return [side, rows] as const
       }),
@@ -1724,9 +1738,9 @@ export class CaveSource implements DataSource {
     req: CoarseGeometryRequest,
   ): Promise<CoarseGeometry | CoarseRefusal | undefined> {
     const parsed = splitDatasetId(req.datasetId)
-    const spec = parsed ? specFor(parsed.datastack) : undefined
+    const spec = parsed ? specFor(this.deployment, parsed.datastack) : undefined
     if (!spec || !parsed) return undefined
-    const options: CaveRequestOptions = req.signal ? { signal: req.signal } : {}
+    const options = this.options(req.signal)
 
     const pyramid = await this.flatMeshDir(spec, parsed.version, req.signal)
     if (pyramid) {
@@ -1819,7 +1833,7 @@ export class CaveSource implements DataSource {
     signal: AbortSignal | undefined,
   ): Promise<GrapheneMeshSource> {
     const state = this.state(spec.datastack)
-    const options: CaveRequestOptions = signal ? { signal } : {}
+    const options = this.options(signal)
     state.meshes ??= (async () => {
       const info = await datastackRecord(spec.datastack, options)
       // The two absences are said apart: a datastack that names no segmentation at all, and one
@@ -1941,10 +1955,11 @@ export class CaveSource implements DataSource {
           `for example flywire_fafb_public:783.`,
       )
     }
-    const spec = specFor(parsed.datastack)
+    const spec = specFor(this.deployment, parsed.datastack)
     if (!spec) {
       throw new CaveError(
-        `Coda has no wiring for the CAVE datastack "${parsed.datastack}". A datastack has to ` +
+        `Coda has no wiring for the CAVE datastack "${parsed.datastack}" on ` +
+          `${caveServerLabel(this.deployment)}. A datastack has to ` +
           `say which of its tables are neurons and which are connections — see ` +
           `src/data/cave/spec.ts.`,
       )
@@ -1960,7 +1975,7 @@ export class CaveSource implements DataSource {
 
   /** The server a datastack is served from. */
   private serverFor(spec: DatastackSpec): Promise<string> {
-    return caveServerFor(spec.datastack)
+    return caveServerFor(spec.datastack, this.options())
   }
 }
 

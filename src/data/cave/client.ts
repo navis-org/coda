@@ -27,6 +27,7 @@ import { errorMessage } from '../../core/errors'
 import { bodyExcerpt } from '../errorBody'
 import { parseCaveJson } from './json'
 import { getToken, reportAuthFailure } from './credentials'
+import { DEFAULT_CAVE_SERVER, caveServerLabel, normaliseCaveServer } from './deployments'
 
 export class CaveError extends Error {
   /** HTTP status, or 0 for a failure that never got one — a refusal, or an unreachable host. */
@@ -95,6 +96,17 @@ export function refuseIfCapped(
 }
 
 export interface CaveRequestOptions {
+  /**
+   * The global server this request belongs to, which decides the token it carries.
+   *
+   * **Required, and that is the design rather than a formality.** The URL cannot say: a request to
+   * `prod.flywire-daf.com` or to a chunkedgraph belongs to whichever deployment's datastack record
+   * named that host, and one login service's token is honoured by many unrelated hosts (see
+   * `deployments.ts`). So the deployment is carried from wherever the dataset came from — a
+   * `CaveSource` instance, a Dataset value's `sourceId` — and a call site that forgets it is a
+   * compile error rather than a request quietly signed with the wrong account's token.
+   */
+  deployment: string
   signal?: AbortSignal | undefined
   token?: string | undefined
   /**
@@ -129,8 +141,7 @@ async function request<T>(
   init: RequestInit,
   options: CaveRequestOptions,
 ): Promise<T> {
-  const token = options.token ?? getToken()
-  if (!token) refuseNoToken(options)
+  const token = tokenFor(options)
 
   const headers = new Headers(init.headers)
   headers.set('Authorization', `Bearer ${token}`)
@@ -188,6 +199,13 @@ function refuseAuth(
   return refuse(authRefusal(url, status, body), status, options)
 }
 
+/** The token a request carries: the one it was handed, else its deployment's, else a refusal. */
+function tokenFor(options: CaveRequestOptions): string {
+  const token = options.token ?? getToken(options.deployment)
+  if (!token) refuseNoToken(options)
+  return token
+}
+
 /**
  * The refusal for a request that was never sent, because there is no credential to send.
  *
@@ -196,11 +214,17 @@ function refuseAuth(
  * other tells somebody who *has* a token to go and add one.
  */
 function refuseNoToken(options: CaveRequestOptions): never {
-  return refuse(
-    'No CAVE token. Add one in Connections — the branch icon in the toolbar.',
-    401,
-    options,
-  )
+  /*
+   * Names the deployment wherever it is not the one everybody means by "CAVE". A signed-in
+   * FlyWire user opening an H01 graph *has* a CAVE token — for the wrong login service — so "No
+   * CAVE token" would read as the app having forgotten one they can see in the panel.
+   */
+  const message =
+    normaliseCaveServer(options.deployment) === DEFAULT_CAVE_SERVER
+      ? 'No CAVE token. Add one in Connections — the branch icon in the toolbar.'
+      : `No CAVE token for ${caveServerLabel(options.deployment)}. Each CAVE deployment has its ` +
+        `own sign-in — add one for it in Connections ▸ CAVE.`
+  return refuse(message, 401, options)
 }
 
 /** Report unless the caller is carrying on without an answer, and throw either way. */
@@ -285,14 +309,14 @@ function explain(body: string): string {
   return bodyExcerpt(body)
 }
 
-export function caveGet<T>(url: string, options: CaveRequestOptions = {}): Promise<T> {
+export function caveGet<T>(url: string, options: CaveRequestOptions): Promise<T> {
   return request<T>(url, { method: 'GET' }, options)
 }
 
 export function cavePost<T>(
   url: string,
   body: unknown,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<T> {
   return request<T>(url, { method: 'POST', body: JSON.stringify(body) }, options)
 }
@@ -322,10 +346,9 @@ export function cavePost<T>(
 export async function cavePostBinary(
   url: string,
   body: BigUint64Array,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<BigUint64Array> {
-  const token = options.token ?? getToken()
-  if (!token) refuseNoToken(options)
+  const token = tokenFor(options)
   let response: Response
   try {
     response = await fetch(url, {
@@ -372,10 +395,9 @@ export async function cavePostBinary(
  */
 export async function caveGetBytes(
   url: string,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<ArrayBuffer | undefined> {
-  const token = options.token ?? getToken()
-  if (!token) refuseNoToken(options)
+  const token = tokenFor(options)
   let response: Response
   try {
     response = await fetch(url, {
@@ -399,7 +421,7 @@ export async function caveGetBytes(
 export function cavePostRaw<T>(
   url: string,
   body: string,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<T> {
   return request<T>(url, { method: 'POST', body }, options)
 }

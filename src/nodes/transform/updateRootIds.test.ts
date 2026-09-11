@@ -26,6 +26,7 @@ import { defaultParams, findParam, resolveColumn } from '../../core/node'
 import type { ColumnParam } from '../../core/node'
 import { T } from '../../core/types'
 import { requireNodeDef } from '../../core/registry'
+import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 import '../index'
 
 const DATASET = 'flywire_fafb_public:783'
@@ -143,7 +144,7 @@ beforeEach(() => {
   resetRootChecks()
   resetDatastackRecords()
   resetCredentials()
-  setToken('token')
+  setToken(DEFAULT_CAVE_SERVER, 'token')
 })
 
 afterEach(() => {

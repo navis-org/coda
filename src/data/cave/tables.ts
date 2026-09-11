@@ -61,7 +61,7 @@ import {
 import type { CaveRequestOptions, CaveRow } from './client'
 import type { DType } from '../../core/types'
 import { caveDType } from './json'
-import { getServer } from './credentials'
+import { caveSourceId, deploymentKey } from './deployments'
 import { caveServerFor, datastackRecord, resetDatastackRecords } from './datastack'
 import { resetFlatSources } from './flat'
 import { resetSkeletonServices } from './skeletonService'
@@ -132,16 +132,15 @@ export interface CaveColumnSample {
 // ---------------------------------------------------------------------------
 
 /**
- * Everything below is keyed by the **global server** as well as by the datastack.
+ * Everything below is keyed by the **deployment** as well as by the datastack.
  *
- * `datastack.ts` solves the same problem with a clock — one `filledFrom` that clears four maps
- * when `getServer()` moves. A key is the cheaper answer here: a stale entry is simply never
- * looked up again, so there is nothing to remember to clear and no second map that can be cleared
- * without its partner. The leak is bounded by servers × datastacks and each entry is a few
- * hundred bytes.
+ * Two deployments are two info services and nothing stops both publishing a datastack of the same
+ * name, so a datastack alone does not say which listing a table name was checked against. The
+ * deployment arrives with the request (`CaveRequestOptions.deployment`), or as an argument on a
+ * peek, which has no request to read it off.
  */
-function keyFor(datastack: string, version: number): string {
-  return `${getServer()}|${datastack}:${version}`
+function keyFor(deployment: string, datastack: string, version: number): string {
+  return deploymentKey(deployment, `${datastack}:${version}`)
 }
 
 /**
@@ -176,12 +175,12 @@ const referencesLoading = new Map<string, Promise<string | undefined>>()
 /**
  * Drop everything learned. **A test seam, and only that today.**
  *
- * It is *not* wired into a recovery path, and saying so matters: `datastack.ts` clears its four
- * maps automatically when `getServer()` moves, and this module reaches the same end by folding the
- * server into every key — but neither notices a **token** being pasted, so a listing read
- * anonymously outlives the credential that would have widened it. Closing that properly means a
- * generation counter in `credentials.ts` and one `resetCaveState()` fanning out to every CAVE
- * memo, which is a change to the shared teardown rather than to this module.
+ * It is *not* wired into a recovery path, and saying so matters: every memo here is keyed by
+ * deployment, so two deployments never share an entry — but nothing notices a **token** being
+ * pasted, so a listing read anonymously outlives the credential that would have widened it.
+ * Closing that properly means a generation counter in `credentials.ts` and one
+ * `resetCaveState()` fanning out to every CAVE memo, which is a change to the shared teardown
+ * rather than to this module.
  */
 export function resetCaveTables(): void {
   tableNames.clear()
@@ -227,7 +226,7 @@ function namesFor(
 ): Promise<string[]> {
   return memoPromise(
     tableNames,
-    keyFor(datastack, version),
+    keyFor(options.deployment, datastack, version),
     () =>
       caveServerFor(datastack, options).then((server) =>
         listTables(server, datastack, version, options),
@@ -250,7 +249,7 @@ function viewsFor(
 ): Promise<Record<string, ViewInfo>> {
   return memoPromise(
     viewInfos,
-    keyFor(datastack, version),
+    keyFor(options.deployment, datastack, version),
     () =>
       caveServerFor(datastack, options).then((server) =>
         listViews(server, datastack, version, options),
@@ -279,10 +278,10 @@ function viewsFor(
 export function tableListFor(
   datastack: string,
   version: number,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
   includeViews = true,
 ): Promise<CaveTableEntry[]> {
-  const key = `${keyFor(datastack, version)}|${includeViews ? 'v' : 't'}`
+  const key = `${keyFor(options.deployment, datastack, version)}|${includeViews ? 'v' : 't'}`
   return Promise.all([
     namesFor(datastack, version, options),
     includeViews ? viewsFor(datastack, version, options) : Promise.resolve({}),
@@ -301,7 +300,7 @@ export function tableListFor(
     // settled listing. The same channel a landed materialization list uses — and only when the
     // answer actually changed, since the underlying requests are memoised and every later caller
     // resolves from them.
-    if (!before) reportSourceLearned('cave')
+    if (!before) reportSourceLearned(caveSourceId(options.deployment))
     return entries
   })
 }
@@ -319,16 +318,17 @@ export function tableListFor(
  * the wrong thing entirely.
  */
 export function peekTableList(
+  deployment: string,
   datastack: string,
   version: number,
 ): CaveTableEntry[] | undefined {
-  const key = `${keyFor(datastack, version)}|v`
+  const key = `${keyFor(deployment, datastack, version)}|v`
   const known = listed.get(key)
   if (known || !datastack || listingAsked.has(key)) return known
   listingAsked.add(key)
   // Swallowed: a peek has no caller to report to, and a 401 already travels on its own channel
   // to the Connections panel. `peekMaterializations`' trade.
-  void tableListFor(datastack, version).catch(() => undefined)
+  void tableListFor(datastack, version, { deployment }).catch(() => undefined)
   return undefined
 }
 
@@ -354,9 +354,9 @@ export function tableFactsFor(
   datastack: string,
   version: number,
   name: string,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<CaveTableFacts> {
-  const key = `${keyFor(datastack, version)}|${name}`
+  const key = `${keyFor(options.deployment, datastack, version)}|${name}`
   return memoPromise(
     factsLoading,
     key,
@@ -366,7 +366,7 @@ export function tableFactsFor(
         // The promise is kept on success (`keep: 'resolved'`), so this runs once per key however
         // many callers there are — no "only the first time" guard, unlike `l2SourceFor`, which
         // keeps its promise only in flight and so really can load twice.
-        reportSourceLearned('cave')
+        reportSourceLearned(caveSourceId(options.deployment))
         return facts
       }),
     { keep: 'resolved' },
@@ -483,17 +483,18 @@ function resolution(
  * once while the listing lands, once while the facts do. `reportSourceLearned` drives both.
  */
 export function peekTableFacts(
+  deployment: string,
   datastack: string,
   version: number,
   name: string,
 ): CaveTableFacts | undefined {
   if (!datastack || !name) return undefined
-  const key = `${keyFor(datastack, version)}|${name}`
+  const key = `${keyFor(deployment, datastack, version)}|${name}`
   const known = factsKnown.get(key)
   if (known || factsAsked.has(key)) return known
-  if (!kindOf(peekTableList(datastack, version), name)) return undefined
+  if (!kindOf(peekTableList(deployment, datastack, version), name)) return undefined
   factsAsked.add(key)
-  void tableFactsFor(datastack, version, name).catch(() => undefined)
+  void tableFactsFor(datastack, version, name, { deployment }).catch(() => undefined)
   return undefined
 }
 
@@ -534,10 +535,10 @@ export function referenceTableFor(
   datastack: string,
   version: number,
   name: string,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<string | undefined> {
-  const key = `${keyFor(datastack, version)}|${name}`
-  const known = factsKnown.get(`${keyFor(datastack, version)}|table|${name}`)
+  const key = `${keyFor(options.deployment, datastack, version)}|${name}`
+  const known = factsKnown.get(key)
   if (known) return Promise.resolve(known.referenceTable)
   return memoPromise(
     referencesLoading,
@@ -568,9 +569,9 @@ export function tableColumnsFor(
   version: number,
   name: string,
   kind: CaveObjectKind,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<CaveColumnSample[]> {
-  const key = `${keyFor(datastack, version)}|${kind}|${name}`
+  const key = `${keyFor(options.deployment, datastack, version)}|${kind}|${name}`
   return memoPromise(
     columnsLoading,
     key,

@@ -34,6 +34,7 @@ import { DEFAULT_CATMAID_SERVER } from '../../data/catmaid/credentials'
 import { resetCredentials as resetCaveCredentials, setToken } from '../../data/cave/credentials'
 import { peekRootCheck, resetRootChecks } from '../../data/cave/rootIds'
 import { resetCache } from '../../data/cache'
+import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 import '../index'
 
 beforeAll(async () => {
@@ -312,6 +313,21 @@ describe('Custom CAVE', () => {
     expect(datasetRef(type)?.datasetId).toBe('somewhere:783')
   })
 
+  /*
+   * The deployment rides on the source id, which is how every node downstream learns which
+   * global server — and so which token — its requests go to. The default keeps the bare `cave`
+   * id every graph saved before deployments carries.
+   */
+  it('publishes a source per global server, and the bare cave id for the default', () => {
+    const def = requireNodeDef('dataset.cave')
+    const on = (params: Parameters<typeof ctxFor>[1]) =>
+      datasetRef(def.inferOutputs?.(ctxFor('dataset.cave', params))?.['dataset'])?.sourceId
+    expect(on({ datastack: 'somewhere', version: '783' })).toBe('cave')
+    expect(
+      on({ datastack: 'h01_c3_flat', version: '1229', server: 'global.brain-wire-test.org' }),
+    ).toBe('cave:https://global.brain-wire-test.org')
+  })
+
   it('refuses a materialization that is not a number, and accepts an empty one', () => {
     const def = requireNodeDef('dataset.cave')
     const bad =
@@ -327,7 +343,7 @@ describe('Custom CAVE', () => {
 
   it('completes the datastack name from what the token can see, and only once it can', async () => {
     const listed = ['b_stack', 'a_stack']
-    setToken('test-token')
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
     vi.stubGlobal('fetch', (url: string) =>
       Promise.resolve({
         ok: true,
@@ -392,6 +408,8 @@ describe('Custom CAVE', () => {
     expect(advanced('neuronTable')).toBe(false)
     expect(advanced('idColumn')).toBe(false)
     expect(advanced('connectionView')).toBe(true)
+    // Nearly every datastack is on the default deployment, so the server is not a card row.
+    expect(advanced('server')).toBe(true)
   })
 
   it('resolves an unpinned materialization by fetching, so the first Run works', async () => {
@@ -401,7 +419,7 @@ describe('Custom CAVE', () => {
      * on the first press and succeed on the second — the "runs twice, answers differently"
      * signature this codebase keeps being caught by.
      */
-    setToken('test-token')
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
     vi.stubGlobal('fetch', (url: string) => {
       const body = String(url).includes('/info/api/v2/datastack/full/')
         ? { local_server: 'https://local.example', segmentation_source: '' }
@@ -458,8 +476,8 @@ describe('Custom CAVE', () => {
     requireNodeDef('dataset.cave').inferOutputs?.(
       ctxFor('dataset.cave', { datastack: 'bare_one', version: '1' }),
     )
-    expect(specFor('bare_one')?.neurons).toBeUndefined()
-    expect(specFor('bare_one')?.datastack).toBe('bare_one')
+    expect(specFor(DEFAULT_CAVE_SERVER, 'bare_one')?.neurons).toBeUndefined()
+    expect(specFor(DEFAULT_CAVE_SERVER, 'bare_one')?.datastack).toBe('bare_one')
   })
 
   it('warns about a shipped datastack before asking for anything else on the card', () => {
@@ -512,7 +530,7 @@ describe('the root-drift advisory follows the wiring', () => {
     resetCache()
     resetRootChecks()
     resetDatastackRecords()
-    setToken('test-token')
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
     vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
       const text = String(url)
       const body = text.includes('/datastack/full/')
@@ -547,27 +565,27 @@ describe('the root-drift advisory follows the wiring', () => {
     const scheduler = new Scheduler({ resolveSource: (id) => requireSource(id) })
 
     await scheduler.run(graphWith(RETIRED), { mode: 'full' })
-    await until(() => peekRootCheck('somewhere:783')?.stale === 1)
+    await until(() => peekRootCheck(DEFAULT_CAVE_SERVER, 'somewhere:783')?.stale === 1)
 
     // The gesture: a repair upstream, so the dataset is handed different ids under a new key.
     await scheduler.run(graphWith(CURRENT), { mode: 'full' })
-    await until(() => peekRootCheck('somewhere:783')?.checked === 1)
-    expect(peekRootCheck('somewhere:783')?.stale).toBe(0)
+    await until(() => peekRootCheck(DEFAULT_CAVE_SERVER, 'somewhere:783')?.checked === 1)
+    expect(peekRootCheck(DEFAULT_CAVE_SERVER, 'somewhere:783')?.stale).toBe(0)
 
     // And back, which is the half that never fired at all.
     await scheduler.run(graphWith(RETIRED), { mode: 'full' })
-    await until(() => peekRootCheck('somewhere:783')?.stale === 1)
+    await until(() => peekRootCheck(DEFAULT_CAVE_SERVER, 'somewhere:783')?.stale === 1)
   })
 
   it('forgets the answer when the annotations come off', async () => {
     const scheduler = new Scheduler({ resolveSource: (id) => requireSource(id) })
     await scheduler.run(graphWith(RETIRED), { mode: 'full' })
-    await until(() => peekRootCheck('somewhere:783')?.stale === 1)
+    await until(() => peekRootCheck(DEFAULT_CAVE_SERVER, 'somewhere:783')?.stale === 1)
 
     let bare = emptyGraph('drift')
     bare = addNode(bare, node('dataset.cave', { datastack: 'somewhere', neuronTable: 'n' }))
     await scheduler.run(bare, { mode: 'full' })
-    expect(peekRootCheck('somewhere:783')).toBeUndefined()
+    expect(peekRootCheck(DEFAULT_CAVE_SERVER, 'somewhere:783')).toBeUndefined()
   })
 })
 

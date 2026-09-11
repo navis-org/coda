@@ -1,5 +1,5 @@
 /**
- * A datastack's info record, fetched at most once per datastack.
+ * A datastack's info record, fetched at most once per datastack **per deployment**.
  *
  * CAVE is two servers — a *global* info service that knows which datastacks exist and where each
  * is served from, and a per-datastack `local_server` that answers the queries — so almost every
@@ -12,13 +12,20 @@
  * apart issuing the same document twice — the idiom `loadCachedTable` and `state.discovering`
  * already use. A rejection is not kept, so the next caller retries rather than inheriting a
  * failure forever.
+ *
+ * **Every key carries the deployment** (`deploymentKey`), so there is nothing to clear when a
+ * second deployment is used: FlyWire on `global.daf-apis.com` and H01 on
+ * `global.brain-wire-test.org` share one session, and a key naming its deployment cannot be read
+ * by a request for another. The deployment arrives on `CaveRequestOptions` for anything that
+ * fetches, and as the first argument of each peek, which has no request to read it off.
  */
 
 import type { DatastackInfo } from './api'
 import type { VersionInfo } from './api'
 import { datastackInfo, listDatastacks, versionsMetadata } from './api'
 import type { CaveRequestOptions } from './client'
-import { getServer, getToken } from './credentials'
+import { getToken } from './credentials'
+import { caveSourceId, deploymentKey, normaliseCaveServer } from './deployments'
 import { memoPromise } from '../memoPromise'
 import { reportSourceLearned } from '../source'
 import type { GrapheneSource } from './graphene'
@@ -27,43 +34,23 @@ import { l2TableMapping, resetL2Cache } from './l2'
 
 const records = new Map<string, Promise<DatastackInfo>>()
 
-/**
- * Which global server everything here was filled from.
- *
- * **One clock for all four maps**, because the materializations are derived from the records —
- * `load` reads `datastackRecord` — so two generations could clear one and keep the other, and
- * did: each was checked only by its own entry point.
- */
-let filledFrom: string | undefined
-
-/**
- * Drop everything learned from a global server that is no longer the configured one, and answer
- * which server is current — so a caller cannot read `filledFrom` before it has been set.
- */
-function currentServer(): string {
-  const server = getServer()
-  if (filledFrom !== server) {
-    records.clear()
-    clearLearned()
-    filledFrom = server
-  }
-  return server
-}
-
 export function datastackRecord(
   datastack: string,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<DatastackInfo> {
-  const server = currentServer()
-  return memoPromise(records, datastack, () => datastackInfo(server, datastack, options), {
-    keep: 'resolved',
-  })
+  const deployment = normaliseCaveServer(options.deployment)
+  return memoPromise(
+    records,
+    deploymentKey(deployment, datastack),
+    () => datastackInfo(datastack, { ...options, deployment }),
+    { keep: 'resolved' },
+  )
 }
 
 /** The server that answers queries for a datastack. */
 export async function caveServerFor(
   datastack: string,
-  options?: CaveRequestOptions,
+  options: CaveRequestOptions,
 ): Promise<string> {
   return (await datastackRecord(datastack, options)).local_server
 }
@@ -85,11 +72,14 @@ export async function caveServerFor(
  * it and never will be. Its materializations are a fact about that one datastack, which is what
  * this module is for.
  */
-export function peekMaterializations(datastack: string): number[] | undefined {
-  currentServer()
-  const known = materializations.get(datastack)
-  if (known || !datastack || asked.has(datastack)) return known
-  asked.add(datastack)
+export function peekMaterializations(
+  deployment: string,
+  datastack: string,
+): number[] | undefined {
+  const key = deploymentKey(deployment, datastack)
+  const known = materializations.get(key)
+  if (known || !datastack || asked.has(key)) return known
+  asked.add(key)
   /*
    * Swallowed *and* `quiet`. The swallow is `NeuPrintSource.peekDatasets`' trade — a peek has no
    * caller to report to. The quiet is the other half, and it was missing: this reaches
@@ -97,9 +87,9 @@ export function peekMaterializations(datastack: string): number[] | undefined {
    * that opens the Connections panel **from a render**, which is the reported bug arriving by a
    * shorter route than the Run that first showed it. The Datastack field now offers every
    * datastack the listing names, refusable ones included, so picking a suggestion led straight
-   * here. A credential-level refusal is still loud, on `datastacksFor` above.
+   * here. A credential-level refusal is still loud, on `datastacksFor` below.
    */
-  void materializationsFor(datastack, { quiet: true }).catch(() => undefined)
+  void materializationsFor(datastack, { deployment, quiet: true }).catch(() => undefined)
   return undefined
 }
 
@@ -116,33 +106,35 @@ export function peekMaterializations(datastack: string): number[] | undefined {
  */
 export function materializationsFor(
   datastack: string,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<number[]> {
-  const server = currentServer()
+  const key = deploymentKey(options.deployment, datastack)
   return memoPromise(
     loading,
-    datastack,
+    key,
     () =>
-      load(datastack, options).then((versions) => {
-        if (server === filledFrom) {
-          materializations.set(datastack, versions)
-          // Not a data-changed event: nothing cached is invalidated and no run is scheduled. It
-          // only tells inference that a dropdown it drew empty can be filled in.
-          reportSourceLearned('cave')
-        }
+      load(key, datastack, options).then((versions) => {
+        materializations.set(key, versions)
+        // Not a data-changed event: nothing cached is invalidated and no run is scheduled. It
+        // only tells inference that a dropdown it drew empty can be filled in.
+        reportSourceLearned(caveSourceId(options.deployment))
         return versions
       }),
     { keep: 'inflight' },
   )
 }
 
-async function load(datastack: string, options: CaveRequestOptions): Promise<number[]> {
+async function load(
+  key: string,
+  datastack: string,
+  options: CaveRequestOptions,
+): Promise<number[]> {
   const info = await datastackRecord(datastack, options)
   const usable = usableVersions(await versionsMetadata(info.local_server, datastack, options))
   // Kept whole rather than reduced to numbers: the same reply carries each version's
   // `time_stamp`, which is what a root id is judged against, and asking for it separately would
   // be a second round trip for something already in hand.
-  versionInfo.set(datastack, usable)
+  versionInfo.set(key, usable)
   return usable.map((v) => v.version)
 }
 
@@ -183,9 +175,14 @@ export function parseCaveTimestamp(stamp: string): number | undefined {
  * `undefined` until the listing has landed, `peekMaterializations`' contract; the caller that
  * needs it can await `materializationsFor` first, which fills this as a side effect.
  */
-export function versionFrozenAt(datastack: string, version: number): number | undefined {
-  currentServer()
-  const stamp = versionInfo.get(datastack)?.find((v) => v.version === version)?.time_stamp
+export function versionFrozenAt(
+  deployment: string,
+  datastack: string,
+  version: number,
+): number | undefined {
+  const stamp = versionInfo
+    .get(deploymentKey(deployment, datastack))
+    ?.find((v) => v.version === version)?.time_stamp
   return stamp ? parseCaveTimestamp(stamp) : undefined
 }
 
@@ -214,41 +211,41 @@ const asked = new Set<string>()
 // ---------------------------------------------------------------------------
 
 /**
- * Every datastack the current token can see — the listing the Custom CAVE card's Datastack field
- * completes from, and the one `runListing` narrows to the specced datastacks.
+ * Every datastack a deployment's token can see — the listing the Custom CAVE card's Datastack
+ * field completes from, and the one `runListing` narrows to the specced datastacks.
  *
  * **One memo for one request**, which is this module's whole reason for existing: `CaveSource`
  * asked the same URL for its own listing, so the fact was fetched twice per session and cached
  * twice with different invalidation rules — the arrangement the module header records being
  * dissolved when the annotation providers became a second consumer.
  *
- * Keyed on the credential as well as the server, because the listing is filtered per account: a
- * list fetched for one is not an answer for the next. That doubles as `asked`'s rule — a
+ * Keyed on the credential as well as the deployment, because the listing is filtered per account:
+ * a list fetched for one is not an answer for the next. That doubles as `asked`'s rule — a
  * *failing* token keeps its spelling, so a 401 costs one request rather than one per keystroke,
- * and signing in is what re-asks. `clearLearned` drops it with everything else a server change
- * invalidates.
+ * and signing in is what re-asks.
  *
  * Deliberately **not** `quiet`: this is the credential-level question, so a refusal here really
  * does mean the token, and that is the one thing the Connections panel must still be told. The
  * per-datastack calls it leads to are the quiet ones.
  */
-export function datastacksFor(options: CaveRequestOptions = {}): Promise<string[]> {
-  const server = currentServer()
-  const token = getToken()
-  const current = listing?.token === token ? listing : undefined
+export function datastacksFor(options: CaveRequestOptions): Promise<string[]> {
+  const deployment = normaliseCaveServer(options.deployment)
+  const token = getToken(deployment)
+  const held = listings.get(deployment)
+  const current = held?.token === token ? held : undefined
   if (current?.names) return Promise.resolve(current.names)
   if (current?.pending) return current.pending
   const entry: Listing = { token }
-  listing = entry
-  entry.pending = listDatastacks(server, options)
+  listings.set(deployment, entry)
+  entry.pending = listDatastacks({ ...options, deployment })
     .then((names) => {
-      // Still the question that was asked? A server switch clears this and a sign-in replaces it,
-      // and neither can cancel a request already in flight.
-      if (listing !== entry) return names
+      // Still the question that was asked? A sign-in replaces it and cannot cancel a request
+      // already in flight.
+      if (listings.get(deployment) !== entry) return names
       entry.names = [...names].sort()
       // Not a data-changed event, `materializationsFor`'s rule: nothing cached is invalidated and
       // no run is scheduled. It only tells inference that a field it drew bare can be filled in.
-      reportSourceLearned('cave')
+      reportSourceLearned(caveSourceId(deployment))
       return entry.names
     })
     .finally(() => {
@@ -270,15 +267,16 @@ export function datastacksFor(options: CaveRequestOptions = {}): Promise<string[
  * fires `reportAuthFailure` as it goes*, so an ungated peek would raise "No CAVE token" at
  * somebody who has only dragged a node onto the canvas. The endpoint needs the token anyway: with
  * no `Authorization` header the info service answers `302` into `sticky_auth` and on to Google's
- * sign-in — measured against `global.daf-apis.com` — which from a browser `fetch` is a CORS
- * failure rather than a status anything could read or report on.
+ * sign-in — measured against `global.daf-apis.com` and `global.brain-wire-test.org` alike — which
+ * from a browser `fetch` is a CORS failure rather than a status anything could read or report on.
+ * Gated on *this deployment's* token: holding one for another deployment is not holding one here.
  */
-export function peekDatastacks(): string[] | undefined {
-  if (!getToken()) return undefined
+export function peekDatastacks(deployment: string): string[] | undefined {
+  if (!getToken(deployment)) return undefined
   // Swallowed: a peek has no caller to report to, and a refusal here already travels on its own
   // channel to the Connections panel. `peekMaterializations`' trade.
-  void datastacksFor().catch(() => undefined)
-  return listing?.names
+  void datastacksFor({ deployment }).catch(() => undefined)
+  return listings.get(normaliseCaveServer(deployment))?.names
 }
 
 /** The listing, the credential it was asked for, and the request if one is in flight. */
@@ -288,32 +286,19 @@ interface Listing {
   pending?: Promise<string[]>
 }
 
-let listing: Listing | undefined
+const listings = new Map<string, Listing>()
 
-/**
- * Everything learned from one global server, dropped together.
- *
- * One list rather than two hand-kept ones: `currentServer` and the test seam both cleared these
- * and the diff that added the third fact had to edit both in lockstep, with nothing catching a
- * half-edit. That is the failure this module's header already records — "two generations could
- * clear one and keep the other, and did".
- */
-function clearLearned(): void {
+/** Test seam: drop what is remembered between suites. */
+export function resetDatastackRecords(): void {
   records.clear()
   materializations.clear()
   versionInfo.clear()
   loading.clear()
   asked.clear()
-  listing = undefined
+  listings.clear()
   l2Sources.clear()
   l2Loading.clear()
   resetL2Cache()
-}
-
-/** Test seam: drop what is remembered between suites. */
-export function resetDatastackRecords(): void {
-  clearLearned()
-  filledFrom = undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -340,13 +325,13 @@ const l2Loading = new Map<string, Promise<GrapheneSource | undefined>>()
  * answer lands. Six of the thirteen datastacks the info service lists have a cache, which is why
  * a per-source answer was wrong for somebody whichever way it was set.
  */
-export function peekL2Cache(datastack: string): boolean | undefined {
-  currentServer()
-  if (l2Sources.has(datastack)) return l2Sources.get(datastack) !== null
-  if (!datastack || l2Loading.has(datastack)) return undefined
+export function peekL2Cache(deployment: string, datastack: string): boolean | undefined {
+  const key = deploymentKey(deployment, datastack)
+  if (l2Sources.has(key)) return l2Sources.get(key) !== null
+  if (!datastack || l2Loading.has(key)) return undefined
   // Swallowed and `quiet`, for `peekMaterializations`' reason exactly: this asks the same
   // datastack record, from a card that renders on every graph mutation.
-  void l2SourceFor(datastack, { quiet: true }).catch(() => undefined)
+  void l2SourceFor(datastack, { deployment, quiet: true }).catch(() => undefined)
   return undefined
 }
 
@@ -358,23 +343,22 @@ export function peekL2Cache(datastack: string): boolean | undefined {
  */
 export function l2SourceFor(
   datastack: string,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<GrapheneSource | undefined> {
-  const server = currentServer()
-  const known = l2Sources.get(datastack)
+  const key = deploymentKey(options.deployment, datastack)
+  const known = l2Sources.get(key)
   if (known !== undefined) return Promise.resolve(known ?? undefined)
 
   return memoPromise(
     l2Loading,
-    datastack,
+    key,
     () =>
       resolveL2(datastack, options).then((source) => {
-        if (server !== filledFrom) return source
-        const before = l2Sources.get(datastack)
-        l2Sources.set(datastack, source ?? null)
+        const before = l2Sources.get(key)
+        l2Sources.set(key, source ?? null)
         // Only when the answer *changed*, which for a memoised fact means only the first time.
         // Fired unconditionally it costs a whole-graph re-inference per Run of a Skeletons node.
-        if (before === undefined) reportSourceLearned('cave')
+        if (before === undefined) reportSourceLearned(caveSourceId(options.deployment))
         return source
       }),
     { keep: 'inflight' },

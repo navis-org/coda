@@ -44,6 +44,7 @@ import type { CaveReference } from '../cave/api'
 import { queryTableChecked, uniqueStringValues } from '../cave/api'
 import { referenceTableFor, tableColumnsFor } from '../cave/tables'
 import { caveServerFor } from '../cave/datastack'
+import { deploymentKey, normaliseCaveServer } from '../cave/deployments'
 import { splitDatasetId } from '../cave/spec'
 import {
   cachedAnnotationTable,
@@ -58,7 +59,16 @@ const INCOMPLETE = 'these annotations would be incomplete'
 
 export const CAVE_TABLE_PROVIDER = 'caveTable'
 
-/** What a CAVE table ref names. */
+/**
+ * What a CAVE table ref names.
+ *
+ * **Plus a `deployment` key, present only where it is not the default** — the global server the
+ * dataset belongs to, read through `requestFor`. Undeclared rather than an optional field for two
+ * reasons: an optional member does not fit this `Record<string, string>` without
+ * `exactOptionalPropertyTypes`, and — the one that matters — `refKey` writes every key into the
+ * annotation cache key, so declaring it on every ref would re-key every cached FlyWire and BANC
+ * annotation table to say something that was already true.
+ */
 export interface CaveTableConfig extends Record<string, string> {
   /** `datastack:materialization`, the same id a Dataset node publishes. */
   dataset: string
@@ -93,9 +103,17 @@ export interface CaveTableConfig extends Record<string, string> {
  */
 const discovery = new Map<string, string[] | undefined>()
 
-/** One key per (dataset, table, pivot column) — what a set of kinds is a fact about. */
+/** One key per (deployment, dataset, table, pivot column) — what a set of kinds is a fact about. */
 function kindKey(config: CaveTableConfig): string {
-  return `${config.dataset}|${config.table}|${config.pivotOn}`
+  return deploymentKey(
+    config['deployment'],
+    `${config.dataset}|${config.table}|${config.pivotOn}`,
+  )
+}
+
+/** What every read of a ref carries: its deployment, and the caller's signal where there is one. */
+function requestFor(config: CaveTableConfig, signal?: AbortSignal): CaveRequestOptions {
+  return { deployment: normaliseCaveServer(config['deployment']), signal }
 }
 
 class CaveTableProvider implements AnnotationProvider {
@@ -145,9 +163,10 @@ class CaveTableProvider implements AnnotationProvider {
     if (!parsed) return undefined
     // Once per ref, never once per peek: inference runs on every graph mutation. Swallowed, and
     // never retried from here — the rule `peekDatasets` follows.
+    const request = requestFor(config)
     void (async () => {
-      const server = await caveServerFor(parsed.datastack)
-      const values = await uniqueStringValues(server, parsed.datastack, config.table)
+      const server = await caveServerFor(parsed.datastack, request)
+      const values = await uniqueStringValues(server, parsed.datastack, config.table, request)
       discovery.set(key, [...(values[config.pivotOn] ?? [])].sort())
       reportAnnotationsLearned()
     })().catch(() => undefined)
@@ -170,9 +189,9 @@ class CaveTableProvider implements AnnotationProvider {
         `"${config.dataset}" does not name a CAVE dataset. Expected datastack:materialization.`,
       )
     }
-    const server = await caveServerFor(parsed.datastack)
+    const request = requestFor(config, options.signal)
+    const server = await caveServerFor(parsed.datastack, request)
     const { datastack, version } = parsed
-    const signal = options.signal ? { signal: options.signal } : {}
 
     if (config.pivotOn) {
       options.onProgress?.(0.1, 'reading annotation kinds')
@@ -183,8 +202,8 @@ class CaveTableProvider implements AnnotationProvider {
        * every long-form read — including every FlyWire one, which has no reference at all.
        */
       const [reference, values] = await Promise.all([
-        referenceFor(datastack, version, config, signal),
-        uniqueStringValues(server, datastack, config.table, signal),
+        referenceFor(datastack, version, config, request),
+        uniqueStringValues(server, datastack, config.table, request),
       ])
       const kinds = [...(values[config.pivotOn] ?? [])].sort()
       discovery.set(kindKey(config), kinds)
@@ -210,7 +229,7 @@ class CaveTableProvider implements AnnotationProvider {
               ...(reference ? { reference } : {}),
             },
             { of: `${config.table} (${kind})`, consequence: INCOMPLETE },
-            signal,
+            request,
           )
           options.onProgress?.(0.2 + (0.7 * (i + 1)) / Math.max(1, kinds.length), kind)
           return [kind, rows] as const
@@ -222,8 +241,8 @@ class CaveTableProvider implements AnnotationProvider {
     options.onProgress?.(0.2, 'reading annotations')
     // Serial here and not above, and the reason is the one asymmetry between the two branches:
     // a wide read cannot know which columns to name until it knows whether it is joining.
-    const reference = await referenceFor(datastack, version, config, signal)
-    const named = await wideColumns(datastack, version, config, Boolean(reference), signal)
+    const reference = await referenceFor(datastack, version, config, request)
+    const named = await wideColumns(datastack, version, config, Boolean(reference), request)
     const rows = await queryTableChecked(
       server,
       datastack,
@@ -234,7 +253,7 @@ class CaveTableProvider implements AnnotationProvider {
         ...(reference ? { reference } : {}),
       },
       { consequence: INCOMPLETE },
-      signal,
+      request,
     )
     options.onProgress?.(1, `${rows.length} rows`)
     return wideRows(rows, config, named)

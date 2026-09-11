@@ -45,7 +45,7 @@ import { reportSourceLearned } from '../source'
 import type { CaveRequestOptions } from './client'
 import { CaveError, caveGet, caveGetBytes, cavePostRaw } from './client'
 import { datastackRecord } from './datastack'
-import { getServer } from './credentials'
+import { caveSourceId, deploymentKey } from './deployments'
 import type { RawSkeletonInfo, SkeletonSource } from '../precomputed/skeletons'
 import { parseSkeleton, skeletonSourceFromInfo } from '../precomputed/skeletons'
 
@@ -114,21 +114,6 @@ function chooseVersion(versions: readonly number[]): number | undefined {
   return usable.length ? Math.max(...usable) : undefined
 }
 
-/**
- * Keyed by the **global server** as well as by the datastack, which is `tables.ts`'s answer to
- * the problem `datastack.ts` solves with a clock.
- *
- * The CAVE server is user-editable in the Connections panel. `clearLearned` drops the datastack
- * records, the materializations and the L2 sources together when it moves; a fourth memo kept
- * outside that list would go on offering a route resolved against a deployment nobody is talking
- * to — which is the incident `datastack.ts`'s own header records ("two generations could clear
- * one and keep the other, and did"). A key needs nothing remembered and no partner map: a stale
- * entry is simply never looked up again.
- */
-function keyFor(datastack: string): string {
-  return `${getServer()}|${datastack}`
-}
-
 const services = new Map<string, SkeletonService | null>()
 const loading = new Map<string, Promise<SkeletonService | undefined>>()
 
@@ -155,7 +140,7 @@ const asked = new Set<string>()
  */
 const barren = new Set<string>()
 
-/** Test seam, and what a changed global server drops. */
+/** Test seam. */
 export function resetSkeletonServices(): void {
   services.clear()
   loading.clear()
@@ -170,13 +155,16 @@ export function resetSkeletonServices(): void {
  * and `reportSourceLearned` re-infers when it lands so a dropdown that offered two routes offers
  * three without a reload.
  */
-export function peekSkeletonService(datastack: string): boolean | undefined {
-  const key = keyFor(datastack)
+export function peekSkeletonService(
+  deployment: string,
+  datastack: string,
+): boolean | undefined {
+  const key = deploymentKey(deployment, datastack)
   if (services.has(key)) return services.get(key) !== null
   if (!datastack || asked.has(key)) return undefined
   asked.add(key)
   // Swallowed: a peek has no caller to report to, and a 401 travels on its own channel.
-  void skeletonServiceFor(datastack).catch(() => undefined)
+  void skeletonServiceFor(datastack, { deployment }).catch(() => undefined)
   return undefined
 }
 
@@ -189,9 +177,9 @@ export function peekSkeletonService(datastack: string): boolean | undefined {
  */
 export function skeletonServiceFor(
   datastack: string,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<SkeletonService | undefined> {
-  const key = keyFor(datastack)
+  const key = deploymentKey(options.deployment, datastack)
   const known = services.get(key)
   if (known !== undefined) return Promise.resolve(known ?? undefined)
 
@@ -204,7 +192,7 @@ export function skeletonServiceFor(
         services.set(key, service ?? null)
         // Only when the answer *changed* — `l2SourceFor`'s rule, and for its reason: fired
         // unconditionally it costs a whole-graph re-inference per Run.
-        if (before === undefined) reportSourceLearned('cave')
+        if (before === undefined) reportSourceLearned(caveSourceId(options.deployment))
         return service
       }),
     // In flight only, and a failure is not remembered as a verdict: a failed read is transient
@@ -250,7 +238,7 @@ async function resolve(
 export async function existingSkeletons(
   service: SkeletonService,
   neuronIds: readonly NeuronId[],
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<Set<string>> {
   const batches: Array<readonly NeuronId[]> = []
   for (let at = 0; at < neuronIds.length; at += EXISTS_BATCH) {
@@ -270,7 +258,9 @@ export async function existingSkeletons(
     )
     for (const [id, there] of Object.entries(answer ?? {})) if (there) held.add(id)
   })
-  if (neuronIds.length > 0 && held.size === 0) barren.add(keyFor(service.datastack))
+  if (neuronIds.length > 0 && held.size === 0) {
+    barren.add(deploymentKey(options.deployment, service.datastack))
+  }
   return held
 }
 
@@ -280,8 +270,8 @@ export async function existingSkeletons(
  * False once a whole set has come back empty — see `barren`. It is a question about a *session*,
  * not about the datastack, which is why it is not persisted anywhere.
  */
-export function serviceLooksEmpty(datastack: string): boolean {
-  return barren.has(keyFor(datastack))
+export function serviceLooksEmpty(deployment: string, datastack: string): boolean {
+  return barren.has(deploymentKey(deployment, datastack))
 }
 
 /**
@@ -297,7 +287,7 @@ export function serviceLooksEmpty(datastack: string): boolean {
 export async function readServiceSkeletons(
   service: SkeletonService,
   neuronIds: readonly NeuronId[],
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
   onOne?: (id: string, skeleton: SkeletonGeometry) => void,
 ): Promise<void> {
   await mapWithConcurrency(neuronIds, SERVICE_CONCURRENCY, async (id) => {

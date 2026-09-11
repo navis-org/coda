@@ -53,6 +53,7 @@ import {
   peekRefColumns,
 } from './registry'
 import { refKey } from './types'
+import { DEFAULT_CAVE_SERVER } from '../cave/deployments'
 import './index'
 
 const fixture = (name: string) => readFileSync(join(__dirname, '__fixtures__', name), 'utf8')
@@ -94,7 +95,7 @@ beforeEach(() => {
   // The CAVE half memoises a datastack's server and a table's sampled columns too, and both
   // outlive a test file otherwise.
   resetCaveState()
-  setCaveToken('cave-token')
+  setCaveToken(DEFAULT_CAVE_SERVER, 'cave-token')
   resetGoogleSheetState()
   // Which route reached a host is module state too, and it is deliberately sticky in production.
   forgetSeaTableRoutes()

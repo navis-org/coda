@@ -29,6 +29,7 @@ import { resetCaveState, tableListFor } from '../../data/cave/tables'
 import { installCaveFetch } from '../../test/caveStubs'
 import '../index'
 import { makeInferContext } from '../../core/node'
+import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 
 const DATASET = 'flywire_fafb_public:783'
 
@@ -68,7 +69,7 @@ beforeEach(() => {
   resetCache()
   resetCaveState()
   resetCredentials()
-  setToken('token')
+  setToken(DEFAULT_CAVE_SERVER, 'token')
 })
 
 afterEach(() => {
@@ -239,7 +240,7 @@ describe('which datastack, refused on the card', () => {
   it('says nothing about an unknown table until the listing has landed, then names it', async () => {
     installCaveFetch()
     expect(issues('cave.tableInfo', { datastack: DATASET, table: 'nuclei_v2' })).toEqual([])
-    await tableListFor('flywire_fafb_public', 783)
+    await tableListFor('flywire_fafb_public', 783, { deployment: DEFAULT_CAVE_SERVER })
     expect(issues('cave.tableInfo', { datastack: DATASET, table: 'nuclei_v2' })[0]).toMatch(
       /is not in flywire_fafb_public:783.*Available:/s,
     )

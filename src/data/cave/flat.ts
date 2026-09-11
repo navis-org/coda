@@ -28,6 +28,8 @@ import { peekPrecomputed, probePrecomputed } from '../precomputed/probe'
 import type { FetchOptions } from '../precomputed/transport'
 import { parseNgSource } from '../neuroglancer/sourceUrl'
 import type { DatastackSpec } from './spec'
+import { specDeployment } from './spec'
+import { caveSourceId } from './deployments'
 
 /**
  * Where a materialization's flat bucket is, as something a browser can `fetch`.
@@ -71,7 +73,7 @@ export function peekFlat(
     // Swallowed: a peek has no caller to report to, and the failure is a verdict `probeFlat`
     // will hand to whoever does ask.
     void probePrecomputed(url)
-      .then(() => reportSourceLearned('cave'))
+      .then(() => reportSourceLearned(caveSourceId(specDeployment(spec))))
       .catch(() => undefined)
   }
   return undefined

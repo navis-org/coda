@@ -166,8 +166,9 @@ describe('source tabs', () => {
     expect(tab('CAVE').getAttribute('aria-selected')).toBe('true')
     expect(tab('neuPrint').getAttribute('aria-selected')).toBe('false')
     expect(screen.getByText(/CAVE rejected the token/)).not.toBeNull()
-    // Two credentialed sources now, so the field on screen has to be the one asked for.
-    expect(screen.getByText(/global.daf-apis.com/)).not.toBeNull()
+    // Two credentialed sources now, so the field on screen has to be the one asked for — and on
+    // the CAVE tab, the default deployment's row is there whether or not a token is held.
+    expect(screen.getByText('global.daf-apis.com', { selector: 'strong' })).not.toBeNull()
   })
 
   /*

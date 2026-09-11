@@ -49,9 +49,16 @@ import { SEATABLE_HOSTS } from '../../data/annotations/credentials'
 import { peekBases, resolveWorkspace } from '../../data/annotations/seaTable'
 
 import { joinAnnotations, joinedSchema } from '../lib/annotationOps'
-import { CAVE_DATASET_INPUT, caveDatastackIssues, caveDatastackParam } from '../lib/caveParams'
+import type { DatasetIdentity } from '../lib/caveParams'
+import {
+  CAVE_DATASET_INPUT,
+  caveDatastackIssues,
+  caveDatastackParam,
+  caveTarget,
+} from '../lib/caveParams'
 import { ANNOTATIONS_INPUT, annotationSchemaFrom } from '../lib/annotationParams'
 import { datasetRef } from '../../core/types'
+import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 
 /**
  * The columns this node publishes: whatever arrived, plus its own.
@@ -169,10 +176,7 @@ registerNode({
 
   inferOutputs: (ctx) => ({
     annotations: T.neurons(
-      chainSchema(
-        ctx.inputs.annotations,
-        caveRef(datasetRef(ctx.inputs.dataset)?.datasetId, ctx.params),
-      ),
+      chainSchema(ctx.inputs.annotations, caveRef(datasetRef(ctx.inputs.dataset), ctx.params)),
     ),
   }),
 
@@ -194,7 +198,7 @@ registerNode({
 
   evaluate: async (ctx) => {
     const dataset = ctx.input('dataset')
-    const ref = caveRef(dataset?.kind === 'dataset' ? dataset.datasetId : undefined, ctx.params)
+    const ref = caveRef(dataset?.kind === 'dataset' ? dataset : undefined, ctx.params)
     if (!ref) throw new Error('Name a datastack and a table, or wire a Dataset')
     return { annotations: await resolve(ctx, ref) }
   },
@@ -203,23 +207,29 @@ registerNode({
 /**
  * The ref this node stands for.
  *
- * Takes a `datasetId` rather than a context, because the two callers hold different things:
+ * Takes the two ids rather than a context, because the two callers hold different things:
  * inference has a `CodaType` and `evaluate` has a `DatasetValue`. A shape covering both would be
- * a union nobody can read, and the one field either can supply is the id.
+ * a union nobody can read, and the two fields either can supply are the ids.
  *
  * A wired Dataset wins over the param, which is the precedence a socket always takes here — the
  * wire is the more specific statement, and it is the one somebody made on the canvas rather than
  * in a field they may have forgotten.
  */
 function caveRef(
-  datasetId: string | undefined,
+  wired: DatasetIdentity | undefined,
   params: Record<string, unknown>,
 ): AnnotationRef | undefined {
   const table = String(params.table).trim()
   // The same wire-beats-field rule the card and `validate` apply, from the one place that states
   // it. Note this keeps the *unsplit* id, which is what `AnnotationRef.dataset` carries.
-  const dataset = datasetId ?? String(params.datastack).trim()
+  const dataset = wired?.datasetId ?? String(params.datastack).trim()
   if (!dataset || !table) return undefined
+  /*
+   * The deployment rides on the wire, and a typed name is the default one's (`caveTarget`). It
+   * goes into the config only where it is *not* the default: `refKey` writes every key into the
+   * annotation cache key, and every ref that existed before deployments did is on the default.
+   */
+  const deployment = caveTarget(wired, params)?.deployment
   return {
     provider: CAVE_TABLE_PROVIDER,
     config: {
@@ -229,6 +239,7 @@ function caveRef(
       pivotOn: String(params.pivotOn).trim(),
       valueColumn: String(params.valueColumn).trim(),
       columns: String(params.columns).trim(),
+      ...(deployment && deployment !== DEFAULT_CAVE_SERVER ? { deployment } : {}),
     },
   }
 }

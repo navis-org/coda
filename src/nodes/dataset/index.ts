@@ -39,7 +39,15 @@ import {
   resolveDatasetId,
   versionsFor,
 } from '../lib/datasetFamilies'
-import { DATASTACK_SPECS, datasetIdFor, registerDatastackSpec } from '../../data/cave/spec'
+import { datasetIdFor, registerDatastackSpec, shippedSpecFor } from '../../data/cave/spec'
+import {
+  DEFAULT_CAVE_SERVER,
+  caveServerLabel,
+  caveServerOfSource,
+  caveSourceId,
+} from '../../data/cave/deployments'
+import { publishedCaveSourceId } from '../../data/cave/registry'
+import { customCaveServer } from '../lib/caveParams'
 import { DEFAULT_CATMAID_SERVER } from '../../data/catmaid/credentials'
 import { catmaidSourceFor, normaliseCatmaidServer } from '../../data/catmaid/registry'
 import {
@@ -192,7 +200,7 @@ function buildDatasetNode(family: DatasetFamily) {
         ...annotationIssues(ctx.inputs.annotations),
         ...edgeSetIssues(ctx.params),
         ...populationIssues(discoveredNeuronSchema(source, datasetId), ctx.params, datasetId),
-        ...rootDriftIssues(datasetId),
+        ...rootDriftIssues(family.sourceId, datasetId),
       ]
     },
 
@@ -266,22 +274,41 @@ registerNode({
   cardHeight: 231,
   description: 'Any CAVE datastack configured by hand.',
   guide:
-    'This node allows working with arbitrary CAVE datastacks that Coda ships no preconfigured ' +
-    'node for. Unlike its neuPrint twin it needs more than a name: a datastack is a segmentation ' +
-    'plus whatever tables somebody attached to it, with nothing marking one of them as the ' +
-    'neurons — so name that table and the column its root ids are in. Materializations expire, ' +
-    'so pin one you have checked.',
+    'For CAVE datastacks Coda ships no node for. Name the global server that lists the ' +
+    'datastack (H01 is on global.brain-wire-test.org), the datastack, and — since nothing in a ' +
+    'datastack marks one table as the neurons — that table and its root-id column. Each ' +
+    'deployment has its own sign-in. Materializations expire, so pin one you have checked.',
   companion: DESCRIPTION_COMPANION,
   cost: 'cheap',
   inputs: [ANNOTATIONS_INPUT],
   outputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
   params: [
+    /*
+     * First, because everything below is answered by *this* deployment's info service: the
+     * datastack completions, the materialization list, and the token that asks for both. But
+     * inspector-only, unlike `Custom CATMAID`'s Server and `Custom neuPrint`'s: nearly every CAVE
+     * datastack anybody reaches for is on the default deployment, so on the card it would be a
+     * row that almost never changes, above the three that always do.
+     *
+     * The default is the URL rather than empty, as on the neuPrint twin: a graph saved before
+     * this field existed was written against the default deployment (or against a global setting
+     * that this field replaces), and reads as its declared default everywhere (`withDefaults`).
+     */
+    {
+      id: 'server',
+      kind: 'string',
+      label: 'Global server',
+      advanced: true,
+      placeholder: DEFAULT_CAVE_SERVER,
+      help: 'The CAVE deployment that lists this datastack: global.daf-apis.com for FlyWire, BANC and MICrONS, global.brain-wire-test.org for H01. Each has its own sign-in under Connections ▸ CAVE.',
+      default: DEFAULT_CAVE_SERVER,
+    },
     {
       id: 'datastack',
       kind: 'string',
       label: 'Datastack',
       placeholder: 'flywire_fafb_public',
-      help: 'Datastack name exactly as the CAVE info service lists it. Once a token is saved, the field completes from the datastacks that token can see.',
+      help: 'Datastack name exactly as the CAVE info service lists it. Once a token is saved for this deployment, the field completes from the datastacks that token can see.',
       default: '',
       /*
        * A `datalist` rather than the `enum` its neighbour above is, and the difference is the
@@ -296,7 +323,7 @@ registerNode({
        * dropping the name would leave the field's list disagreeing with the count the
        * Connections panel prints from the very same request.
        */
-      suggestions: () => peekDatastacks() ?? [],
+      suggestions: (ctx) => peekDatastacks(customCaveServer(ctx.params)) ?? [],
     },
     {
       id: 'version',
@@ -314,7 +341,7 @@ registerNode({
         const datastack = String(ctx.params.datastack).trim()
         const chosen = String(ctx.params.version).trim()
         if (!datastack) return [{ value: '', label: 'Name a datastack first' }]
-        const known = peekMaterializations(datastack)
+        const known = peekMaterializations(customCaveServer(ctx.params), datastack)
         if (!known) {
           return [
             { value: '', label: 'Latest' },
@@ -370,12 +397,14 @@ registerNode({
 
   inferOutputs: (ctx) => {
     const datasetId = customCaveDatasetId(ctx.params)
-    // Registers the spec if this is the first sight of the datastack. Synchronous and
-    // network-free, which is what makes it safe from inference — `neuPrintSourceFor`'s rule.
+    // Registers the source for a non-default deployment and the spec for this datastack, if this
+    // is the first sight of either. Both synchronous and network-free, which is what makes them
+    // safe from inference — `neuPrintSourceFor`'s rule.
+    const sourceId = publishedCaveSourceId(customCaveServer(ctx.params))
     registerCustomCaveSpec(ctx.params)
     return {
       dataset: T.dataset(
-        'cave',
+        sourceId,
         datasetId,
         annotationSchemaFrom(ctx.inputs.annotations),
         hasEdgeSet(ctx.params),
@@ -386,14 +415,16 @@ registerNode({
   validate: (ctx) => {
     const datastack = String(ctx.params.datastack).trim()
     if (!datastack) return ['Name a datastack, e.g. flywire_fafb_public']
+    const deployment = customCaveServer(ctx.params)
     /*
      * Checked before anything else on the card, because it makes everything else on the card
      * moot: `specFor` prefers the static table over a hand-registered spec — the right
      * precedence, since a shipped spec is checked and a typed one is not — so every setting here
      * is inert for a datastack that already has one. Asking for a neuron table first would be
-     * answering a question that does not matter.
+     * answering a question that does not matter. On the same deployment only: a same-named
+     * datastack elsewhere is a different datastack.
      */
-    if (DATASTACK_SPECS.some((spec) => spec.datastack === datastack)) {
+    if (shippedSpecFor(deployment, datastack)) {
       return [
         `Coda ships a node for "${datastack}" — use it instead; this card's table and column ` +
           `settings are ignored for a datastack that already has a spec.`,
@@ -420,7 +451,7 @@ registerNode({
      * silence `versionsFor` keeps for a listing in flight, since otherwise every Custom CAVE
      * card in the graph warns for the first second of every load.
      */
-    const known = peekMaterializations(datastack)
+    const known = peekMaterializations(deployment, datastack)
     if (known && version && !known.includes(Number(version))) {
       return [
         known.length
@@ -433,7 +464,7 @@ registerNode({
       ...edgeSetIssues(ctx.params),
       // Through the same resolver the node's own id goes through, unpinned case included — a
       // second spelling of the `datastack:materialization` grammar is a second place to drift.
-      ...rootDriftIssues(customCaveDatasetId(ctx.params)),
+      ...rootDriftIssues(caveSourceId(deployment), customCaveDatasetId(ctx.params)),
     ]
   },
 
@@ -448,11 +479,15 @@ registerNode({
      * name being wrong. Both halves read one memo, so the materialization the dropdown shows and
      * the one this uses cannot disagree.
      */
-    const version = pinned ? Number(pinned) : (await materializationsFor(datastack))[0]
+    const deployment = customCaveServer(ctx.params)
+    const version = pinned
+      ? Number(pinned)
+      : (await materializationsFor(datastack, { deployment, signal: ctx.signal }))[0]
     if (version === undefined || !Number.isInteger(version)) {
       throw new Error(
-        `${datastack} reports no usable materializations. Check the datastack name, or that ` +
-          `your token can see it.`,
+        `${datastack} reports no usable materializations on ${caveServerLabel(deployment)}. ` +
+          `Check the datastack name and the global server, or that your token for that ` +
+          `deployment can see it.`,
       )
     }
     const datasetId = datasetIdFor(datastack, version)
@@ -462,7 +497,7 @@ registerNode({
     // escape hatch useless for the case it exists for.
     const value = {
       kind: 'dataset',
-      sourceId: 'cave',
+      sourceId: publishedCaveSourceId(deployment),
       datasetId,
       label: `${datastack} ${version}`,
       ...annotationsFrom(ctx.input('annotations'), ctx.inputKey('annotations')),
@@ -497,13 +532,15 @@ registerNode({
  * does not move, and a datastack's own table is materialised with the version by construction.
  */
 function watchRootDrift(value: DatasetValue): void {
-  if (value.sourceId !== 'cave') return
+  const deployment = caveServerOfSource(value.sourceId)
+  if (!deployment) return
   const chain = value.annotations
   const ids = chain?.table.data[ID_COLUMN_NAME] ?? []
   startRootCheck(
     value.datasetId,
     chain?.key,
     ids.map((cell) => idText(cell) ?? '').filter(Boolean),
+    { deployment },
   )
 }
 
@@ -514,12 +551,14 @@ function watchRootDrift(value: DatasetValue): void {
  * this graph, and the run it describes has already produced a perfectly good dataset. Refusing
  * would be refusing over data the node did not fetch.
  *
- * Keyed on the dataset id, which is all `validate` can see — so two dataset nodes on one
- * datastack and materialization with *different* annotation chains share one entry, and whichever
- * ran last owns it. Uncommon, and the message says what was checked rather than whose it was.
+ * Keyed on the deployment and the dataset id, which is all `validate` can see — so two dataset
+ * nodes on one datastack and materialization with *different* annotation chains share one entry,
+ * and whichever ran last owns it. Uncommon, and the message says what was checked rather than
+ * whose it was. A source that is not CAVE has no chunkedgraph and nothing to say.
  */
-function rootDriftIssues(datasetId: string | undefined): string[] {
-  const check = datasetId ? peekRootCheck(datasetId) : undefined
+function rootDriftIssues(sourceId: string, datasetId: string | undefined): string[] {
+  const deployment = caveServerOfSource(sourceId)
+  const check = deployment && datasetId ? peekRootCheck(deployment, datasetId) : undefined
   if (!check || check.stale === 0) return []
   const some = check.examples.join(', ')
   const part =
@@ -549,7 +588,9 @@ function customCaveDatasetId(params: Record<string, unknown>): string | undefine
   const datastack = String(params.datastack).trim()
   if (!datastack) return undefined
   const pinned = String(params.version).trim()
-  const version = pinned ? Number(pinned) : peekMaterializations(datastack)?.[0]
+  const version = pinned
+    ? Number(pinned)
+    : peekMaterializations(customCaveServer(params), datastack)?.[0]
   // Through `datasetIdFor`, which `splitDatasetId` is the reader for — a third spelling of the
   // `datastack:materialization` grammar is a third place it can drift.
   return version !== undefined && Number.isInteger(version)
@@ -564,6 +605,7 @@ function registerCustomCaveSpec(params: Record<string, unknown>): void {
   const view = String(params.connectionView).trim()
   registerDatastackSpec({
     datastack,
+    server: customCaveServer(params),
     label: datastack,
     description: 'A CAVE datastack named by hand.',
     // Absent where none was named, which is a real configuration: the chain is then the neuron

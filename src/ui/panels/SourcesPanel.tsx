@@ -66,15 +66,21 @@ import {
   subscribeAuthFailure as subscribeCatmaidAuthFailure,
 } from '../../data/catmaid/credentials'
 import { listDatastacks } from '../../data/cave/api'
+import type { CaveSession } from '../../data/cave/credentials'
 import {
-  DEFAULT_CAVE_SERVER,
-  getServer as getCaveServer,
-  getSession as getCaveSession,
-  getToken as getCaveToken,
-  setServer as setCaveServer,
+  cleanToken as cleanCaveToken,
+  listCredentials as listCaveCredentials,
   setToken as setCaveToken,
   subscribeAuthFailure as subscribeCaveAuthFailure,
 } from '../../data/cave/credentials'
+import {
+  DEFAULT_CAVE_SERVER,
+  caveServerLabel,
+  normaliseCaveServer,
+  parseCaveServer,
+} from '../../data/cave/deployments'
+import { caveSourceFor } from '../../data/cave/registry'
+import { specDeployments, specsOn } from '../../data/cave/spec'
 import { CaveSignInError, signInToCave } from './caveSignIn'
 import { fetchDatasets, forgetRoutes } from '../../data/neuprint/client'
 import {
@@ -882,21 +888,6 @@ function SharingTab({ onSaved }: { onSaved: () => void }) {
 }
 
 /**
- * The CAVE token.
- *
- * Its own state rather than the shared `SourceTabProps` bundle, the call `SharingTab` and
- * `AssistantTab` already make and the one that bundle's own comment anticipated: it was written
- * "while there is one credentialed source", and there are two now. Threading a second token and
- * a second server through it would give the mock tab four fields belonging to nothing it does.
- *
- * There is no Base URL here, and its absence is the finding rather than an omission. neuPrint's
- * field exists because that deployment historically sent no CORS headers and had to be relayed;
- * every CAVE service Coda calls answers a browser directly, 401s included. What *is* here is a
- * global server, which is a different thing entirely — CAVE splits into one service that knows
- * which datastacks exist and a per-datastack server that answers queries, and only the first is
- * ever named. The second is discovered.
- */
-/**
  * CATMAID: a list of instances rather than one credential, which is the shape the backend forces.
  *
  * Every other tab here holds one token, because neuPrint has a canonical deployment and CAVE has
@@ -1140,33 +1131,84 @@ function CatmaidTab({ onSaved }: { onSaved: () => void }) {
 }
 
 /**
- * What the server field means, in the one form both things that read it need.
+ * CAVE: one row per deployment, because a token belongs to the login service that issued it.
  *
- * Written twice, it decides *both* which deployment is probed and which one is signed in to, and
- * the two disagreeing would be silent: a token minted at one server, tested against another.
- * `setServer` performs the same normalisation on the way to storage.
+ * This tab was one token and a "Global server" field, which made deployments *alternatives*: to
+ * use H01 on `global.brain-wire-test.org` you pointed the field there, and every FlyWire, BANC and
+ * MICrONS datastack dropped out of the session. A deployment is a separate `middle_auth` with its
+ * own accounts, so each row signs in on its own, and the dataset a node names decides which row
+ * its requests are signed with (`CaveRequestOptions.deployment`).
+ *
+ * **A row is a deployment, not a host pattern**, which is where this parts from `CatmaidTab`
+ * above. A CAVE token is honoured by many hosts nobody types — each datastack's `local_server`,
+ * its chunkedgraph, its skeleton service — so a row is keyed on the global server that issued it
+ * and on nothing else; see `data/cave/deployments.ts`.
+ *
+ * The rows the panel opens on are the default deployment, every deployment the spec table names,
+ * and every one a token is held for — a row somebody has to sign in to should exist before they
+ * know to add it, and the default always does.
+ *
+ * What carried over unchanged from the single-deployment tab: a sign-in **commits** (the user has
+ * already confirmed it at Google, in a window of its own, and leaving the result as an unsaved
+ * draft means closing the panel undoes it), a paste is a draft until Save, and typing over a
+ * token drops the account label a sign-in left, since a pasted token is not known to be that
+ * account's. There is no Base URL, and its absence is the finding rather than an omission: every
+ * CAVE service Coda calls answers a browser directly, 401s included.
  */
-function resolveServer(raw: string): string {
-  return raw.trim().replace(/\/+$/, '') || DEFAULT_CAVE_SERVER
+interface CaveRow {
+  /** Local only. Rows are added and removed, so an index is not a stable React key. */
+  key: string
+  /** As typed, on a row added here; a normalised origin on one the panel opened with. */
+  server: string
+  /** The draft token. Saved by Save, or at once by a sign-in. */
+  token: string
+  /** Present while the token is the one a sign-in produced and nobody has typed over it. */
+  session?: CaveSession | undefined
+  /** Opened with rather than added: its server is fixed, and Forget empties it rather than removing it. */
+  known: boolean
+  /** The last Test of this row. Any edit clears it: a stale tick beside a changed token is the one thing a Test button must never show. */
+  probe?: Probe | undefined
+  /*
+   * A second failure beside `probe`, rendering the same markup — kept apart for where it renders
+   * rather than for what it says. "Your browser blocked the sign-in window" belongs beside the
+   * button that was blocked; drawn where a failed Test lands it reads as a report about the token
+   * below it. It also clears differently: typing a token is a visible decision to stop signing in.
+   */
+  signInError?: string | undefined
+}
+
+let nextCaveRowKey = 0
+
+function newCaveRow(row: Omit<CaveRow, 'key'>): CaveRow {
+  return { key: `cave-${nextCaveRowKey++}`, ...row }
+}
+
+function initialCaveRows(): CaveRow[] {
+  const held = listCaveCredentials()
+  const servers = [
+    ...new Set([DEFAULT_CAVE_SERVER, ...specDeployments(), ...held.map((row) => row.server)]),
+  ]
+  return servers.map((server) => {
+    const stored = held.find((row) => row.server === server)
+    return newCaveRow({
+      server,
+      token: stored?.token ?? '',
+      session: stored?.session,
+      known: true,
+    })
+  })
+}
+
+/** What a deployment is for, in words: the datastacks Coda ships a node for there. */
+function hostedOn(server: string): string {
+  const labels = specsOn(server).map((spec) => spec.label)
+  return labels.length > 0 ? ` — ${labels.join(', ')}` : ''
 }
 
 function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () => void }) {
-  const [token, setTokenField] = useState(() => getCaveToken() ?? '')
-  const [server, setServerField] = useState(() => getCaveServer())
-  const [session, setSession] = useState(() => getCaveSession())
-  const [probe, setProbe] = useState<Probe>({ state: 'idle' })
-  const [signing, setSigning] = useState(false)
-  /*
-   * A second failure channel beside `probe`, and it renders the same markup — kept apart for
-   * where it renders rather than for what it says. "Your browser blocked the sign-in window"
-   * belongs beside the button that was blocked; drawn where a failed Test lands, under the
-   * server field, it reads as a report about the token below it. It also clears differently, and
-   * deliberately: a failed `probe` survives an edit to the field, while typing a token is a
-   * visible decision to stop signing in, which makes the sign-in's complaint stale.
-   */
-  const [signInError, setSignInError] = useState<string | undefined>(undefined)
-  const fieldRef = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => fieldRef.current?.focus(), [])
+  const [rows, setRows] = useState<CaveRow[]>(initialCaveRows)
+  /** The row a sign-in is running for. One at a time: a second click aborts the first. */
+  const [signingIn, setSigningIn] = useState<string | undefined>(undefined)
   const notify = useGraphStore((s) => s.setNotice)
 
   /*
@@ -1179,221 +1221,292 @@ function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () 
   const attempt = useRef<AbortController | undefined>(undefined)
   useEffect(() => () => attempt.current?.abort(), [])
 
-  // With the values it is handed rather than the stored ones, so a token can be checked before
-  // committing to it — `NeuPrintTab`'s rule, reached the same way. Taking them as arguments is
-  // what lets the sign-in run the same check on a token that is not in the field yet: a
-  // `useState` setter a line earlier has not reached this closure.
-  const probeWith = useCallback(async (candidate: string, deployment: string) => {
-    setProbe({ state: 'testing' })
-    try {
-      const base = resolveServer(deployment)
-      const names = await listDatastacks(base, {
-        token: candidate.trim().replace(/^Bearer\s+/i, ''),
-      })
-      setProbe({ state: 'ok', datasets: names.length, names: names.sort().slice(0, 6) })
-    } catch (error) {
-      setProbe({ state: 'failed', message: errorMessage(error) })
-    }
+  /** Merge a change into one row. */
+  const update = useCallback((key: string, change: Partial<CaveRow>) => {
+    setRows((current) => current.map((row) => (row.key === key ? { ...row, ...change } : row)))
   }, [])
 
+  /** An edit: the row is untested again, and a sign-in's complaint about it is stale. */
+  const patch = useCallback(
+    (key: string, change: Partial<CaveRow>) =>
+      update(key, { ...change, probe: undefined, signInError: undefined }),
+    [update],
+  )
+
+  // With the values it is handed rather than the stored ones, so a token can be checked before
+  // committing to it — `NeuPrintTab`'s rule. Taking them as arguments is what lets the sign-in run
+  // the same check on a token that is not in the row's state yet.
+  const probeWith = useCallback(
+    async (key: string, candidate: string, server: string) => {
+      update(key, { probe: { state: 'testing' } })
+      try {
+        const names = await listDatastacks({
+          deployment: normaliseCaveServer(server),
+          token: cleanCaveToken(candidate),
+        })
+        update(key, {
+          probe: { state: 'ok', datasets: names.length, names: names.sort().slice(0, 6) },
+        })
+      } catch (error) {
+        update(key, { probe: { state: 'failed', message: errorMessage(error) } })
+      }
+    },
+    [update],
+  )
+
   /**
-   * Sign in, and — unlike anything typed into this dialog — **commit what comes back**.
-   *
-   * Every other field here is a draft until Save, which is right for text somebody is still
-   * editing. A sign-in is not that: the user has already confirmed it at Google, in a window of
-   * its own, and leaving the result sitting unsaved in a textarea means the ceremony they just
-   * completed is undone by closing the panel. So the token and the deployment it belongs to are
-   * stored together, and the same check the Test button runs is run on them, so that "it
-   * worked" is on screen rather than assumed. The panel deliberately stays open to show it.
+   * Sign one deployment in, and — unlike anything typed into this dialog — **commit what comes
+   * back**, so that "it worked" is on screen rather than assumed. The panel stays open to show it.
    */
-  const signIn = useCallback(() => {
-    setSignInError(undefined)
-    setSigning(true)
-    attempt.current?.abort()
-    const cancel = (attempt.current = new AbortController())
-    const base = resolveServer(server)
-    // Not awaited before the call: `signInToCave` opens its window as its first act, and an
-    // `await` between the click and that is exactly what a pop-up blocker looks for.
-    signInToCave({ server: base, signal: cancel.signal })
-      .then(async ({ token: granted, email }) => {
-        const signedIn = { at: Date.now(), ...(email ? { email } : {}) }
-        setTokenField(granted)
-        setCaveToken(granted, signedIn)
-        setCaveServer(base)
-        setServerField(base)
-        setSession(signedIn)
-        // The panel may have opened *because* there was no token. There is one now, so the
-        // banner saying there is not stops being true at this line rather than at the next reload.
-        onResolved()
-        await probeWith(granted, base)
-      })
-      .catch((error: unknown) => {
-        // A cancellation is this component's own doing — an unmount, or a second click — so
-        // there is either nobody to tell or a fresh attempt already saying what it is doing.
-        if (error instanceof CaveSignInError && error.kind === 'cancelled') return
-        setSignInError(errorMessage(error))
-      })
-      .finally(() => setSigning(false))
-  }, [server, probeWith, onResolved])
+  const signIn = useCallback(
+    (row: CaveRow) => {
+      const deployment = parseCaveServer(row.server)
+      if (!deployment) return
+      update(row.key, { signInError: undefined })
+      setSigningIn(row.key)
+      attempt.current?.abort()
+      const cancel = (attempt.current = new AbortController())
+      // Not awaited before the call: `signInToCave` opens its window as its first act, and an
+      // `await` between the click and that is exactly what a pop-up blocker looks for.
+      signInToCave({ server: deployment, signal: cancel.signal })
+        .then(async ({ token: granted, email }) => {
+          const signedIn = { at: Date.now(), email }
+          setCaveToken(deployment, granted, signedIn)
+          patch(row.key, { server: deployment, token: granted, session: signedIn })
+          // The panel may have opened *because* there was no token. There is one now, so the
+          // banner saying there is not stops being true at this line rather than at a reload.
+          onResolved()
+          await probeWith(row.key, granted, deployment)
+        })
+        .catch((error: unknown) => {
+          // A cancellation is this component's own doing — an unmount, or a second click — so
+          // there is either nobody to tell or a fresh attempt already saying what it is doing.
+          if (error instanceof CaveSignInError && error.kind === 'cancelled') return
+          update(row.key, { signInError: errorMessage(error) })
+        })
+        .finally(() => setSigningIn((current) => (current === row.key ? undefined : current)))
+    },
+    [probeWith, onResolved, patch, update],
+  )
+
+  /**
+   * Forget a deployment's token at once, as the single-deployment tab's Forget did.
+   *
+   * A row the panel opened with stays, emptied — the default and every specced deployment are
+   * listed whether or not a token is held. One added here goes. A blank added row touches nothing
+   * stored: an empty server field normalises to the *default*, and forgetting that would sign
+   * somebody out of FlyWire for removing a row they had not filled in.
+   */
+  const forget = useCallback(
+    (row: CaveRow) => {
+      const deployment = parseCaveServer(row.server)
+      if (deployment) setCaveToken(deployment, undefined)
+      if (row.known) patch(row.key, { token: '', session: undefined })
+      else setRows((current) => current.filter((r) => r.key !== row.key))
+    },
+    [patch],
+  )
+
+  const save = () => {
+    // One row per deployment, preferring one that holds a token: two rows typed for the same
+    // server must not have the empty one erase the other.
+    const byServer = new Map<string, CaveRow>()
+    for (const row of rows) {
+      const deployment = parseCaveServer(row.server)
+      if (!deployment) continue
+      const held = byServer.get(deployment)
+      if (!held || (!cleanCaveToken(held.token) && cleanCaveToken(row.token))) {
+        byServer.set(deployment, row)
+      }
+    }
+    for (const [deployment, row] of byServer) setCaveToken(deployment, row.token, row.session)
+
+    const connected = [...byServer]
+      .filter(([, row]) => cleanCaveToken(row.token))
+      .map(([server]) => server)
+    if (connected.length > 0) onResolved()
+    // Re-list so the dataset pickers fill in without a reload, exactly as saving a neuPrint token
+    // does. A refusal has its own channel back to this panel, so failures are only counted out.
+    void Promise.allSettled(
+      connected.map((server) => caveSourceFor(server).listDatasets()),
+    ).then((results) => {
+      if (!results.some((result) => result.status === 'fulfilled')) return
+      const listed = results.flatMap((result) =>
+        result.status === 'fulfilled' ? result.value : [],
+      )
+      notify(`CAVE connected — ${listed.length} datasets`)
+    })
+    onSaved()
+  }
 
   return (
     <section className="sources__source">
       <p className="sources__note">
-        CAVE hosts e.g. FlyWire, BANC and Minnie. If you already have an CAVE account, make sure
-        to use the Google account it is linked to. Signing in for the first time will create a
-        new account.
+        Each CAVE deployment has its own sign-in. global.daf-apis.com hosts e.g. FlyWire, BANC
+        and Minnie; add another below for a datastack that lives elsewhere, such as H01. If you
+        already have a CAVE account, use the Google account it is linked to.
         <Why>
-          {'Sign in with the Google account you use for CAVE. The window that opens belongs to ' +
-            "CAVE's own auth service, so Coda never sees your password — what comes back is a " +
-            'token for CAVE and nothing else. This is a separate sign-in from neuPrint\u2019s, ' +
-            'because the two can be different accounts. Signing in for the first time creates a ' +
-            'CAVE account and asks you to choose a username before it finishes: that step is ' +
-            'part of it, and the sign-in completes when you submit the form. Which datasets the ' +
-            'new account may read is CAVE\u2019s to grant, so a query can still be refused ' +
-            'after a sign-in that worked.'}
+          {'Sign in with the Google account you use for that deployment. The window that opens ' +
+            "belongs to CAVE's own auth service, so Coda never sees your password — what comes " +
+            'back is a token for that deployment and nothing else. Deployments are separate ' +
+            'services with separate accounts, and so is neuPrint. Signing in for the first time ' +
+            'creates an account and asks you to choose a username before it finishes: that step ' +
+            'is part of it, and the sign-in completes when you submit the form. Which datasets ' +
+            'the new account may read is the deployment’s to grant, so a query can still be ' +
+            'refused after a sign-in that worked.'}
         </Why>
       </p>
 
-      <div className="sources__actions">
-        <button type="button" className="btn btn--primary" onClick={signIn} disabled={signing}>
-          {signing ? 'Signing in…' : 'Sign in with Google'}
-        </button>
-        {session && (
-          <span className="sources__hint">
-            Signed in{session.email ? ` as ${session.email}` : ''}
-            <Why>
-              {`Signed in on ${new Date(session.at).toLocaleDateString()}. A CAVE sign-in lasts ` +
-                'about a week; when it stops being accepted, sign in again.'}
-            </Why>
-          </span>
-        )}
-      </div>
+      <ul className="sources__list">
+        {rows.map((row) => {
+          const probe = row.probe ?? { state: 'idle' as const }
+          // Undefined for a row whose server field names no URL yet, which disables what needs one.
+          const deployment = parseCaveServer(row.server)
+          const isDefault = deployment === DEFAULT_CAVE_SERVER
+          return (
+            <li key={row.key} className="sources__row">
+              {row.known ? (
+                <p className="sources__hint">
+                  <strong>{caveServerLabel(row.server)}</strong>
+                  {hostedOn(row.server)}
+                </p>
+              ) : (
+                <label className="sources__field">
+                  <span>Global server</span>
+                  <input
+                    className="field field--mono"
+                    value={row.server}
+                    spellCheck={false}
+                    placeholder="https://global.brain-wire-test.org"
+                    onChange={(e) => patch(row.key, { server: e.target.value })}
+                  />
+                </label>
+              )}
 
-      {signInError && (
-        <p className="sources__result" data-tone="error">
-          {signInError}
-        </p>
-      )}
+              <div className="sources__actions">
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => signIn(row)}
+                  disabled={signingIn !== undefined || !deployment}
+                >
+                  {signingIn === row.key ? 'Signing in…' : 'Sign in with Google'}
+                </button>
+                {row.session && (
+                  <span className="sources__hint">
+                    Signed in{row.session.email ? ` as ${row.session.email}` : ''}
+                    <Why>
+                      {`Signed in on ${new Date(row.session.at).toLocaleDateString()}. A CAVE ` +
+                        'sign-in lasts about a week; when it stops being accepted, sign in again.'}
+                    </Why>
+                  </span>
+                )}
+              </div>
 
-      {/*
-       * Behind a disclosure, because it is now the second way in rather than the only one — and
-       * it stays reachable rather than being dropped, since a sign-in has exits that hand
-       * nothing back (a blocked pop-up, and middle_auth's own error pages), and since anybody
-       * already using CAVE from Python has a token in `~/.cloudvolume/secrets` to paste.
-       */}
-      <details className="sources__more">
-        <summary>… or paste a token manually</summary>
-        <label className="sources__field">
-          <span>Token</span>
-          <textarea
-            ref={fieldRef}
-            className="field field--area field--mono"
-            rows={2}
-            value={token}
-            spellCheck={false}
-            placeholder="a1b2c3d4…"
-            onChange={(e) => {
-              setTokenField(e.target.value)
-              setSignInError(undefined)
-            }}
-          />
-        </label>
-        <p className="sources__hint">
-          From{' '}
-          <a
-            href="https://global.daf-apis.com/auth/api/v1/create_token"
-            target="_blank"
-            rel="noreferrer"
-          >
-            global.daf-apis.com
-          </a>
-          <Why>
-            {'The same token caveclient stores in ~/.cloudvolume/secrets, so if you already use ' +
-              'CAVE from Python you have one. Pasting is also the way through if your browser ' +
-              'blocks the sign-in window, or if that window ends on an error page.'}
-          </Why>
-        </p>
-      </details>
+              {row.signInError && (
+                <p className="sources__result" data-tone="error">
+                  {row.signInError}
+                </p>
+              )}
 
-      <label className="sources__field">
-        <span>Global server</span>
-        <input
-          className="field field--mono"
-          value={server}
-          spellCheck={false}
-          placeholder={DEFAULT_CAVE_SERVER}
-          onChange={(e) => setServerField(e.target.value)}
-        />
-      </label>
-      <p className="sources__hint">
-        Leave this alone unless you use a different CAVE deployment.
-        <Why>
-          {'It is the service that lists datastacks and says which server holds each one; the ' +
-            'server that answers the actual queries is read from that listing rather than named ' +
-            'here. It is also what says where to sign in, which is why signing in saves it. Not ' +
-            "the same thing as a dataset node's version, which names a materialization."}
-        </Why>
-      </p>
+              {/*
+               * Behind a disclosure, because it is the second way in rather than the only one —
+               * and it stays reachable, since a sign-in has exits that hand nothing back (a
+               * blocked pop-up, and middle_auth's own error pages), and since anybody already
+               * using CAVE from Python has a token in `~/.cloudvolume/secrets` to paste.
+               */}
+              <details className="sources__more">
+                <summary>… or paste a token manually</summary>
+                <label className="sources__field">
+                  <span>Token</span>
+                  <textarea
+                    className="field field--area field--mono"
+                    rows={2}
+                    value={row.token}
+                    spellCheck={false}
+                    placeholder="a1b2c3d4…"
+                    // A typed token is not known to be the signed-in account's, so the label goes.
+                    onChange={(e) =>
+                      patch(row.key, { token: e.target.value, session: undefined })
+                    }
+                  />
+                </label>
+                {isDefault && (
+                  <p className="sources__hint">
+                    From{' '}
+                    <a
+                      href="https://global.daf-apis.com/auth/api/v1/create_token"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      global.daf-apis.com
+                    </a>
+                    <Why>
+                      {'The same token caveclient stores in ~/.cloudvolume/secrets, so if you ' +
+                        'already use CAVE from Python you have one. Pasting is also the way ' +
+                        'through if your browser blocks the sign-in window, or if that window ' +
+                        'ends on an error page.'}
+                    </Why>
+                  </p>
+                )}
+              </details>
+
+              <div className="sources__actions">
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => void probeWith(row.key, row.token, row.server)}
+                  disabled={
+                    !cleanCaveToken(row.token) || !deployment || probe.state === 'testing'
+                  }
+                >
+                  {probe.state === 'testing' ? 'Testing…' : 'Test'}
+                </button>
+                <div className="toolbar__spacer" />
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => forget(row)}
+                  disabled={row.known && !row.token}
+                >
+                  {row.known ? 'Forget' : 'Remove'}
+                </button>
+              </div>
+
+              {probe.state === 'ok' && (
+                <p className="sources__result" data-tone="ok">
+                  Connected — {probe.datasets} datastacks ({probe.names.join(', ')}
+                  {probe.datasets > probe.names.length ? ', …' : ''})
+                </p>
+              )}
+              {probe.state === 'failed' && (
+                <p className="sources__result" data-tone="error">
+                  {probe.message}
+                </p>
+              )}
+            </li>
+          )
+        })}
+      </ul>
 
       <div className="sources__actions">
         <button
           type="button"
           className="btn btn--ghost"
-          onClick={() => void probeWith(token, server)}
-          disabled={!token.trim() || probe.state === 'testing'}
+          onClick={() =>
+            setRows((current) => [
+              ...current,
+              newCaveRow({ server: '', token: '', known: false }),
+            ])
+          }
         >
-          {probe.state === 'testing' ? 'Testing…' : 'Test'}
-        </button>
-        <button
-          type="button"
-          className="btn btn--ghost"
-          onClick={() => {
-            setCaveToken(undefined)
-            setTokenField('')
-            setSession(undefined)
-            setProbe({ state: 'idle' })
-            setSignInError(undefined)
-          }}
-          disabled={!token}
-        >
-          Forget
+          + Add deployment
         </button>
         <div className="toolbar__spacer" />
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={() => {
-            // A typed token is somebody else's, so whatever the last sign-in was labelled with
-            // goes with it — `setToken` clears the session unless one is handed over, which is
-            // why this is `undefined` rather than a read-back.
-            setCaveToken(token)
-            setCaveServer(server)
-            setSession(undefined)
-            if (token.trim()) onResolved()
-            // Re-list so the dataset picker fills in without a reload, exactly as saving a
-            // neuPrint token does. Swallowed: the 401 has its own channel back to this panel.
-            void getSource('cave')
-              ?.listDatasets()
-              .then((datasets) => notify(`CAVE connected — ${datasets.length} datasets`))
-              .catch(() => undefined)
-            onSaved()
-          }}
-        >
+        <button type="button" className="btn btn--primary" onClick={save}>
           Save
         </button>
       </div>
-
-      {probe.state === 'ok' && (
-        <p className="sources__result" data-tone="ok">
-          Connected — {probe.datasets} datastacks ({probe.names.join(', ')}
-          {probe.datasets > probe.names.length ? ', …' : ''})
-        </p>
-      )}
-      {probe.state === 'failed' && (
-        <p className="sources__result" data-tone="error">
-          {probe.message}
-        </p>
-      )}
     </section>
   )
 }

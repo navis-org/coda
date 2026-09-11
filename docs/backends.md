@@ -372,6 +372,55 @@ ones are.
 rather than recalled**, and `live.test.ts` is that pass institutionalised — skipped without
 `CAVE_TOKEN`, the standing `scripts/check-export.py` has when navis is absent.
 
+### A deployment is a global server, and each has its own token
+
+A CAVE **deployment** is one global info service and the local servers it fronts:
+`global.daf-apis.com` lists FlyWire, BANC and MICrONS; `global.brain-wire-test.org` lists H01
+(`h01_c3_flat`) beside `fish1_full` and `fish1_test`, and sends every query to
+`local.brain-wire-test.org`. Measured live, September 2026: the two are separate `middle_auth`
+installations with separate account tables — a `global.daf-apis.com` token is answered **401** by
+`global.brain-wire-test.org`, and a tokenless request there is a 302 into its own `sticky_auth`.
+Its `auth_info` answers with `ACAO: *` like the default's, so signing in works unchanged.
+
+It used to be one token and one global-server setting, so reading H01 meant repointing the setting,
+which dropped FlyWire's datastacks from the session and would have sent one deployment's token to
+the other. The shape now is CATMAID's ([Credentials are a list](#credentials-are-a-list-because-catmaid-is-software-rather-than-a-service)),
+with one difference that decides the key:
+
+  - **Rows are keyed by the global server, never matched by host.** One token is honoured by hosts
+    nobody typed — the datastack's `local_server`, the chunkedgraph, the skeleton service — so a
+    host-pattern match would miss every request that matters. Instead **a request names its
+    deployment**: `CaveRequestOptions.deployment` is *required*, so a call site that forgets is a
+    compile error rather than a request signed with the wrong token. `credentials.ts` holds
+    `{server, token, session?}` rows under `coda.cave.credentials.v1`, and carries the old
+    single-token keys into a row for the server they were stored beside, once.
+  - **A source per deployment.** `deployments.ts` owns the vocabulary: the default keeps the bare
+    `cave` source id every saved graph carries; any other is `cave:<origin>`, and
+    `caveServerOfSource` reads it back. So the deployment rides on a Dataset's `sourceId`, and
+    every node downstream learns its deployment from the wire. `registry.ts`' `caveSourceFor`
+    creates them lazily. **The default is `registerBuiltinSources`' to register, never a node's**:
+    Custom CAVE registering it from `inferOutputs` put an unlisted `cave` source under the
+    exporter, which runs with none registered on purpose, and Find Neurons on FlyWire then checked
+    its filter rows against a schema with no `type` and dropped the filter from the golden
+    notebook. `publishedCaveSourceId` registers only a non-default one.
+  - **Every memo is keyed by deployment** — datastack records, table lists and facts, the skeleton
+    service, the L2 probe, root-id checks — so two deployments never share an answer and there is
+    no "server changed, reset everything" clock. Each peek takes the deployment as its first
+    argument, and `peekDatastacks` is gated on *that* deployment's token.
+  - **A typed datastack means the default deployment.** `CAVE table`, `List CAVE tables` and
+    `CAVE table info` take a `datastack:materialization` field with no room for a server, so a
+    datastack elsewhere is reached by wiring its Dataset; the field's help says so. An annotation
+    ref carries a `deployment` key **only where it is not the default**, because `refKey` writes
+    every key into the annotation cache key and every ref saved before deployments is on the
+    default.
+  - **The export writes `server_address=` only for a non-default deployment.** caveclient's own
+    default is `global.daf-apis.com`, so every FlyWire notebook and golden stays as it was.
+
+`live.test.ts`'s H01 block (`CAVE_H01_TOKEN`) runs with H01's token **and no other**, so a request
+that reached for the default's would go out unsigned and fail. Both H01 tables it reads answer root
+ids in different JSON types — `nucleus` as strings, `cells` as numbers past 2^53 — and both arrive
+as exact 18-digit text through `findNeurons`.
+
 ### Signing in, and why a static page can
 
 `data/cave/oauth.ts` plus `ui/panels/caveSignIn.ts`. CAVE's auth is seung-lab's `middle_auth`,
@@ -1625,7 +1674,7 @@ column that arrives null on every row breaks every picker that believed it.
   a gap.
 - **There is no Base URL field**, unlike neuPrint's, and its absence is the finding: every CAVE
   service Coda calls answers a browser directly, **including on its 401s**, which is the part
-  `reportAuthFailure` depends on. What the Connections tab does carry is a *global server*,
+  `reportAuthFailure` depends on. What the Connections tab does carry is a row per *global server*,
   which is a different thing — CAVE splits into one service that knows which datastacks exist
   and a per-datastack `local_server` that answers queries, and only the first is ever named.
 - **A CAVE 401 opens the CAVE tab.** `reportAuthFailure` carries no source id, so the Connections

@@ -8,6 +8,7 @@
 
 import type { PopulationFilter, TableSchema } from '../../../core/types'
 import { datasetRef } from '../../../core/types'
+import { backendOf } from '../../../data/source'
 import { TRACED_STATUS, populationColumns } from '../../../data/neuronFilter'
 import { pyIdList, pyStr } from '../py'
 import type { EmitContext } from '../types'
@@ -199,7 +200,8 @@ export function codaSynapses(ctx: EmitContext, frame: string): string {
  * it into a TODO before the branch is ever reached.
  */
 export function isCaveDataset(ctx: EmitContext, portId = 'dataset'): boolean {
-  return datasetRef(ctx.inputType(portId))?.sourceId === 'cave'
+  // Any deployment's: `cave` is only the default one's id (`caveSourceId`).
+  return backendOf(datasetRef(ctx.inputType(portId))?.sourceId ?? '') === 'cave'
 }
 
 /**

@@ -27,6 +27,7 @@ import { resetCaveState } from '../data/cave/tables'
 import { useGraphStore } from '../store/graphStore'
 import { installRefusingCaveFetch, TOS_FORM_URL } from '../test/caveStubs'
 import { clearStorage, installJsdomStubs } from '../test/jsdomStubs'
+import { DEFAULT_CAVE_SERVER } from '../data/cave/deployments'
 
 /** The form `missing_tos` names — the link this whole feature exists to make followable. */
 const TOS = TOS_FORM_URL
@@ -62,7 +63,7 @@ afterEach(() => {
  * to differ over *which* request refuses.
  */
 function installRefusingCave(): void {
-  setToken('a-working-token')
+  setToken(DEFAULT_CAVE_SERVER, 'a-working-token')
   installRefusingCaveFetch()
   registerSource(new CaveSource())
 }

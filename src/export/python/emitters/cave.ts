@@ -27,7 +27,12 @@
  */
 
 import { splitDatasetId, specFor } from '../../../data/cave/spec'
-import { datasetRef } from '../../../core/types'
+import { caveTarget, caveTargetOfType, customCaveServer } from '../../../nodes/lib/caveParams'
+import {
+  DEFAULT_CAVE_SERVER,
+  caveServerOfSource,
+  normaliseCaveServer,
+} from '../../../data/cave/deployments'
 import { DATASET_FAMILIES, resolveDatasetId } from '../../../nodes/lib/datasetFamilies'
 import { namedColumns } from '../../../data/annotations/types'
 import { SEATABLE_HOSTS } from '../../../data/annotations/credentials'
@@ -37,6 +42,26 @@ import type { EmitContext } from '../types'
 
 /** Backends these emitters are written against. */
 const CAVE_ONLY = ['cave'] as const
+
+/**
+ * A `CAVEclient` pinned to a datastack and materialization, on the deployment it lives on.
+ *
+ * **`server_address` only where the deployment is not the default**, and that asymmetry is the
+ * point rather than a saving. caveclient's own default global server is `global.daf-apis.com`, so
+ * leaving it out there is exactly what the canvas does — and the goldens, every exported FlyWire
+ * notebook, and the line a reader would have written by hand all stay as they were. Anywhere else
+ * it is the difference between the notebook asking the right info service and asking
+ * `global.daf-apis.com` about a datastack it has never heard of: H01's `h01_c3_flat` is listed by
+ * `global.brain-wire-test.org` alone, which is also what navis' `h01.py` passes.
+ *
+ * One spelling for every cell that builds a client, so no emitter can pin a version on one
+ * deployment and forget the server on another.
+ */
+function caveClient(deployment: string, datastack: string, version: number): string {
+  const server = normaliseCaveServer(deployment)
+  const address = server === DEFAULT_CAVE_SERVER ? '' : `, server_address=${pyStr(server)}`
+  return `CAVEclient(${pyStr(datastack)}${address}, version=${version})`
+}
 
 // ---------------------------------------------------------------------------
 // Reading a reference
@@ -68,9 +93,9 @@ function clientFor(
   const bound = ctx.input(portId)
   if (bound) return { expr: `${bound}.client`, setup: [] }
 
-  const datasetId = datasetRef(ctx.inputType(portId))?.datasetId
-  const parsed = datasetId ? splitDatasetId(datasetId) : undefined
-  if (!parsed) return undefined
+  // The wire alone: a reference port's typed field is its caller's to read.
+  const target = caveTargetOfType(ctx.inputType(portId), {})
+  if (!target) return undefined
   ctx.require('caveclient', 'CAVEclient')
   return {
     expr: local,
@@ -80,7 +105,7 @@ function clientFor(
           'value — and its cell is written below this one, so this builds its own client for ' +
           'the same datastack and materialization.',
       ),
-      `${local} = CAVEclient(${pyStr(parsed.datastack)}, version=${parsed.version})`,
+      `${local} = ${caveClient(target.deployment, target.datastack, target.version)}`,
     ],
   }
 }
@@ -98,7 +123,11 @@ function clientFor(
  * has to carry both. The helper's docstring says so; see `caveHelpers.ts` for why `labels` is
  * lazy rather than fetched here.
  */
-function datasetCell(ctx: EmitContext, datasetId: string | undefined): string[] {
+function datasetCell(
+  ctx: EmitContext,
+  datasetId: string | undefined,
+  deployment: string,
+): string[] {
   if (!datasetId) {
     return ctx.todo(
       'This CAVE dataset could not be resolved to a datastack and materialization, so there ' +
@@ -112,7 +141,7 @@ function datasetCell(ctx: EmitContext, datasetId: string | undefined): string[] 
   ctx.helper('CodaCaveDataset')
 
   const out = ctx.output('dataset')
-  const client = `CAVEclient(${pyStr(parsed.datastack)}, version=${parsed.version})`
+  const client = caveClient(deployment, parsed.datastack, parsed.version)
 
   /*
    * A wired chain replaces the datastack's own labels, which is what the socket means on the
@@ -134,7 +163,7 @@ function datasetCell(ctx: EmitContext, datasetId: string | undefined): string[] 
     ]
   }
 
-  const spec = specFor(parsed.datastack)
+  const spec = specFor(deployment, parsed.datastack)
   if (!spec?.neurons) {
     return [
       ...ctx.note(
@@ -170,7 +199,12 @@ for (const family of DATASET_FAMILIES) {
   if (family.notebook?.python !== 'caveclient') continue
   registerEmitter(
     `dataset.${family.key}`,
-    (ctx) => datasetCell(ctx, resolveDatasetId(family, ctx.params.version)),
+    (ctx) =>
+      datasetCell(
+        ctx,
+        resolveDatasetId(family, ctx.params.version),
+        caveServerOfSource(family.sourceId) ?? DEFAULT_CAVE_SERVER,
+      ),
     { backends: [...CAVE_ONLY] },
   )
 }
@@ -195,7 +229,7 @@ registerEmitter(
         ),
       ]
     }
-    return datasetCell(ctx, `${datastack}:${version}`)
+    return datasetCell(ctx, `${datastack}:${version}`, customCaveServer(ctx.params))
   },
   { backends: [...CAVE_ONLY] },
 )
@@ -238,8 +272,8 @@ registerEmitter(
       lines.push(...resolved.setup)
     } else {
       const datastackParam = String(ctx.params.datastack).trim()
-      const parsed = splitDatasetId(datastackParam)
-      if (!parsed) {
+      const typed = caveTarget(undefined, ctx.params)
+      if (!typed) {
         return ctx.todo(
           `"${datastackParam || '(none)'}" is not a datastack and materialization. Name one as ` +
             '`flywire_fafb_public:783`, or wire a Dataset.',
@@ -247,7 +281,7 @@ registerEmitter(
       }
       ctx.require('caveclient', 'CAVEclient')
       client = '_cave'
-      lines.push(`_cave = CAVEclient(${pyStr(parsed.datastack)}, version=${parsed.version})`)
+      lines.push(`_cave = ${caveClient(typed.deployment, typed.datastack, typed.version)}`)
     }
 
     ctx.helper('coda_cave_table')
@@ -314,9 +348,8 @@ registerEmitter(
        * read off the client — so honouring it means a second client rather than an argument.
        * Uncommon, and silently ignoring it would repair the ids to the wrong instant.
        */
-      const datasetId = datasetRef(ctx.inputType('dataset'))?.datasetId
-      const parsed = datasetId ? splitDatasetId(datasetId) : undefined
-      if (!parsed) {
+      const target = caveTargetOfType(ctx.inputType('dataset'), {})
+      if (!target) {
         return ctx.todo(
           'This Update root IDs pins a materialization, and the Dataset wired to it has not ' +
             'resolved to a datastack, so there is nothing to pin it against.',
@@ -325,7 +358,7 @@ registerEmitter(
       ctx.require('caveclient', 'CAVEclient')
       client = '_repair_at'
       lines.push(
-        `_repair_at = CAVEclient(${pyStr(parsed.datastack)}, version=${Number(version)})`,
+        `_repair_at = ${caveClient(target.deployment, target.datastack, Number(version))}`,
       )
     } else {
       const resolved = clientFor(ctx, 'dataset', '_repair_at')
@@ -470,12 +503,12 @@ function discoveryClient(ctx: EmitContext): { expr: string; setup: string[] } | 
   // because it may pin a *different* materialization than the dataset it hangs off.
   const local = '_cave'
   if (ctx.inputType('dataset')) return clientFor(ctx, 'dataset', local)
-  const parsed = splitDatasetId(String(ctx.params.datastack ?? '').trim())
-  if (!parsed) return undefined
+  const typed = caveTarget(undefined, ctx.params)
+  if (!typed) return undefined
   ctx.require('caveclient', 'CAVEclient')
   return {
     expr: local,
-    setup: [`${local} = CAVEclient(${pyStr(parsed.datastack)}, version=${parsed.version})`],
+    setup: [`${local} = ${caveClient(typed.deployment, typed.datastack, typed.version)}`],
   }
 }
 

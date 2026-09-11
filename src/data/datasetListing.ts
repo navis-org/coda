@@ -16,7 +16,7 @@
  *    (`docs/gotchas.md` has the incident: the first Run of a session behaved differently from the
  *    second). But inference runs on every graph mutation, so a failed listing retried *from a
  *    peek* would be a request per keystroke — or, with no token, an auth-failure popup per
- *    keystroke. The flag is not cleared on failure; `reset` is what re-arms it.
+ *    keystroke. The flag is not cleared on failure.
  *
  * 3. **A failed listing is retried next time** by anybody who awaits one — the Connections panel,
  *    a node's `evaluate`. That is the recovery rule 2 leaves room for. The memo is
@@ -30,13 +30,12 @@
  *
  * The list is published here, **before** `reportSourceLearned`, so the re-inference that event
  * causes finds it — a loader reporting before its caller had stored the answer would re-infer
- * against the empty listing it was meant to replace. And it is published only if nothing has
- * `reset` the listing since the request began: CAVE resets on a changed server, and a slow listing
- * from the old one must not land as the new one's.
+ * against the empty listing it was meant to replace. There is no reset: a source is one server for
+ * its whole life (CAVE's included, one per deployment), so no listing can land as another's.
  *
  * What stays in each source is what is genuinely its own: the loaders, neuPrint's merge-on-relist
  * (which keeps what discovery learned) and its `peekDataset`, which answers from per-dataset state
- * that exists before any listing; CAVE's kept failures and its per-server reset.
+ * that exists before any listing; CAVE's kept failures.
  */
 
 import { memoPromise, type Keep } from './memoPromise'
@@ -47,9 +46,8 @@ export class DatasetListing {
   private readonly load: (signal?: AbortSignal) => Promise<DatasetInfo[]>
   private readonly keep: Keep
   private list: DatasetInfo[] | undefined
-  /** The request in flight. `reset` clears it, so one started before a reset is never handed out. */
+  /** The request in flight. */
   private readonly pending = new Map<'listing', Promise<DatasetInfo[]>>()
-  private generation = 0
   /** Whether a peek has already asked. See rule 2 in the header. */
   private requested = false
 
@@ -66,18 +64,15 @@ export class DatasetListing {
   /** The listing, awaited. Retries after a failure; see `keep` for what it does after a success. */
   get(signal?: AbortSignal): Promise<DatasetInfo[]> {
     if (this.keep === 'resolved' && this.list) return Promise.resolve(this.list)
-    const generation = this.generation
     return memoPromise(
       this.pending,
       'listing',
       () =>
         this.load(signal).then((list) => {
-          if (generation === this.generation) {
-            this.list = list
-            // `peek` answers differently from here on, and a dataset node's "Latest" resolves
-            // through it — so anything already inferred against the empty listing is now wrong.
-            reportSourceLearned(this.sourceId)
-          }
+          this.list = list
+          // `peek` answers differently from here on, and a dataset node's "Latest" resolves
+          // through it — so anything already inferred against the empty listing is now wrong.
+          reportSourceLearned(this.sourceId)
           return list
         }),
       // In flight only: a kept success is `list`, above, which `revise` can update.
@@ -113,19 +108,5 @@ export class DatasetListing {
     if (!this.list?.some((dataset) => dataset.id === datasetId)) return false
     this.list = this.list.map((dataset) => (dataset.id === datasetId ? next(dataset) : dataset))
     return true
-  }
-
-  /**
-   * Forget everything: the list, the request in flight, and that a peek has asked.
-   *
-   * The in-flight request matters most. Without dropping it, a listing for the old CAVE server
-   * stays in flight, `get` hands that promise to a caller asking about the new one, and the
-   * dataset picker quietly shows the previous deployment's datastacks.
-   */
-  reset(): void {
-    this.generation++
-    this.pending.clear()
-    this.list = undefined
-    this.requested = false
   }
 }

@@ -82,7 +82,7 @@ const mappings = new Map<string, Promise<Record<string, unknown>>>()
 
 export function l2TableMapping(
   server: string,
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
 ): Promise<Record<string, unknown>> {
   /*
    * Only a 404 is the verdict "no L2 cache here", and a verdict is kept for the session like any
@@ -104,7 +104,7 @@ export function l2TableMapping(
   ).catch(() => ({}))
 }
 
-/** Test seam, and what a changed global server drops. */
+/** Test seam. */
 export function resetL2Cache(): void {
   mappings.clear()
 }
@@ -135,7 +135,7 @@ const ATTRIBUTE_BATCH = 5_000
 export async function readL2Skeletons(
   source: GrapheneSource,
   neuronIds: readonly NeuronId[],
-  options: CaveRequestOptions = {},
+  options: CaveRequestOptions,
   onProgress?: (fraction: number, note?: string) => void,
 ): Promise<SkeletonGeometry[]> {
   let read = 0

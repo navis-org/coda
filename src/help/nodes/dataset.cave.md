@@ -14,7 +14,8 @@ Annotations come from whatever you wire to the **Annotations** socket. A CAVE da
 
 ### Parameters
 
-- **Datastack**: the name as the CAVE info service lists it (e.g. `flywire_fafb_public`). Once a CAVE token is saved in **Connections** this field completes from the datastacks that token can see. It shows what your account may *view*, which can be more than it may query — CAVE checks each dataset's terms of service separately. It stays a text field either way, so a private datastack, or one on a deployment Coda has not asked, can still be typed in.
+- **Global server**: the CAVE deployment that lists the datastack. FlyWire, BANC and MICrONS are on `https://global.daf-apis.com`, the default; H01 is on `https://global.brain-wire-test.org`. Each deployment has its own sign-in, so add one for it in **Connections ▸ CAVE** — a token from one is refused by another.
+- **Datastack**: the name as that server lists it (e.g. `flywire_fafb_public`). Once you are signed in to the deployment this field completes from the datastacks your account can see. It shows what your account may *view*, which can be more than it may query — CAVE checks each dataset's terms of service separately. It stays a text field either way, so a private datastack the listing leaves out can still be typed in.
 - **Materialization**: which version to query; empty tracks the newest the server reports.
 - **Neuron table** (optional): a CAVE table with one row per neuron (e.g. `proofread_neurons`). Leave empty if the datastack has none and you are wiring annotations instead.
 - **ID column** (optional): which column holds root IDs, usually `pt_root_id`.
@@ -26,5 +27,5 @@ Annotations come from whatever you wire to the **Annotations** socket. A CAVE da
 > and falls back to querying the synapse table, which can be slow.
 
 ```coda-params
-dataset.cave: datastack, version, neuronTable, idColumn
+dataset.cave: server, datastack, version, neuronTable, idColumn
 ```

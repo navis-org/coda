@@ -53,6 +53,7 @@ import {
   setToken,
   subscribeAuthFailure,
 } from './credentials'
+import { DEFAULT_CAVE_SERVER } from './deployments'
 
 /** Collect what reaches the auth channel, which is what opens the Connections dialog. */
 function failures(): { raised: string[]; stop: () => void } {
@@ -372,7 +373,7 @@ beforeEach(() => {
   resetTransport()
   // Custom CAVE registers a spec from a node's params; it is module state like the rest.
   resetRuntimeSpecs()
-  setToken('test-token')
+  setToken(DEFAULT_CAVE_SERVER, 'test-token')
 })
 
 afterEach(() => {
@@ -554,14 +555,16 @@ describe('the datastacks a token can see', () => {
 
     // Invariant 2's ordinary state: this is read from a card that renders on every graph
     // mutation, so the first look starts the fetch and cannot answer it.
-    expect(peekDatastacks()).toBeUndefined()
+    expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toBeUndefined()
 
-    await vi.waitFor(() => expect(peekDatastacks()).toBeDefined())
-    expect(peekDatastacks()).toEqual([...(peekDatastacks() ?? [])].sort())
-    expect(peekDatastacks()).toContain('wclee_aedes_brain')
+    await vi.waitFor(() => expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toBeDefined())
+    expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toEqual(
+      [...(peekDatastacks(DEFAULT_CAVE_SERVER) ?? [])].sort(),
+    )
+    expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toContain('wclee_aedes_brain')
     // Everything the info service lists, not the three `spec.ts` wires: a datastack nobody has
     // written a spec for is exactly what this node exists for.
-    expect(peekDatastacks()).toHaveLength(13)
+    expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toHaveLength(13)
     expect(rowQueries(captured, '/info/api/v2/datastacks')).toHaveLength(1)
   })
 
@@ -570,26 +573,26 @@ describe('the datastacks a token can see', () => {
     // Both readers of `/info/api/v2/datastacks`: the card's completions and `runListing`, which
     // narrows the same list to the specced datastacks. They had a cache each — two round trips
     // for one fact, with two different invalidation rules.
-    peekDatastacks()
+    peekDatastacks(DEFAULT_CAVE_SERVER)
     await new CaveSource().listDatasets()
-    await vi.waitFor(() => expect(peekDatastacks()).toBeDefined())
+    await vi.waitFor(() => expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toBeDefined())
     expect(rowQueries(captured, '/info/api/v2/datastacks')).toHaveLength(1)
   })
 
   it('asks once however many cards look, and does not retry a token that failed', async () => {
     const captured = installFetch()
-    peekDatastacks()
-    await vi.waitFor(() => expect(peekDatastacks()).toBeDefined())
-    for (let i = 0; i < 20; i += 1) peekDatastacks()
+    peekDatastacks(DEFAULT_CAVE_SERVER)
+    await vi.waitFor(() => expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toBeDefined())
+    for (let i = 0; i < 20; i += 1) peekDatastacks(DEFAULT_CAVE_SERVER)
     expect(rowQueries(captured, '/info/api/v2/datastacks')).toHaveLength(1)
   })
 
   it('issues no request and raises nothing when there is no token', async () => {
     const captured = installFetch()
-    setToken(undefined)
+    setToken(DEFAULT_CAVE_SERVER, undefined)
     const { raised, stop } = failures()
 
-    expect(peekDatastacks()).toBeUndefined()
+    expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toBeUndefined()
     await Promise.resolve()
 
     /*
@@ -605,18 +608,18 @@ describe('the datastacks a token can see', () => {
 
   it('re-asks when the token changes, and does not keep the other account’s list', async () => {
     const captured = installFetch()
-    await vi.waitFor(() => expect(peekDatastacks()).toBeDefined())
+    await vi.waitFor(() => expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toBeDefined())
 
-    setToken('someone-else')
+    setToken(DEFAULT_CAVE_SERVER, 'someone-else')
     /*
      * The listing is permission-filtered, so what the previous credential could see is not an
      * answer about this one — and answering from the stale list is how a colleague's datastack
      * appears on a card that cannot query it. Undefined is the honest state until the new one
      * lands, which is the state the widget already draws (a plain text field).
      */
-    expect(peekDatastacks()).toBeUndefined()
-    await vi.waitFor(() => expect(peekDatastacks()).toBeDefined())
-    expect(peekDatastacks()).toHaveLength(13)
+    expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toBeUndefined()
+    await vi.waitFor(() => expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toBeDefined())
+    expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toHaveLength(13)
     expect(rowQueries(captured, '/info/api/v2/datastacks')).toHaveLength(2)
   })
 })
@@ -1712,17 +1715,23 @@ describe('credentials', () => {
    */
   it('labels a token that was signed in for, and drops the label when one is pasted', () => {
     resetCredentials()
-    expect(getSession()).toBeUndefined()
+    expect(getSession(DEFAULT_CAVE_SERVER)).toBeUndefined()
 
-    setToken('signed-in', { email: 'a@example.org', at: 1_700_000_000_000 })
-    expect(getSession()).toEqual({ email: 'a@example.org', at: 1_700_000_000_000 })
+    setToken(DEFAULT_CAVE_SERVER, 'signed-in', {
+      email: 'a@example.org',
+      at: 1_700_000_000_000,
+    })
+    expect(getSession(DEFAULT_CAVE_SERVER)).toEqual({
+      email: 'a@example.org',
+      at: 1_700_000_000_000,
+    })
 
-    setToken('pasted-by-hand')
-    expect(getSession()).toBeUndefined()
+    setToken(DEFAULT_CAVE_SERVER, 'pasted-by-hand')
+    expect(getSession(DEFAULT_CAVE_SERVER)).toBeUndefined()
 
-    setToken('signed-in-again', { at: 2 })
-    setToken(undefined)
-    expect(getSession()).toBeUndefined()
+    setToken(DEFAULT_CAVE_SERVER, 'signed-in-again', { at: 2 })
+    setToken(DEFAULT_CAVE_SERVER, undefined)
+    expect(getSession(DEFAULT_CAVE_SERVER)).toBeUndefined()
   })
 
   /*
@@ -1881,7 +1890,8 @@ describe('building a skeleton from the L2 graph', () => {
     base: 'https://cave.fanc-fly.com/segmentation/table/wclee_fly_cns_001_public',
   }
 
-  const one = async () => (await readL2Skeletons(SOURCE, ['1'], {}))[0]
+  const one = async () =>
+    (await readL2Skeletons(SOURCE, ['1'], { deployment: DEFAULT_CAVE_SERVER }))[0]
 
   it('turns the chunk graph into a tree with one root', async () => {
     installFetch({ '/lvl2_graph': CHAIN, '/attributes': COORDS })
@@ -1971,7 +1981,9 @@ describe('building a skeleton from the L2 graph', () => {
 
   it('answers nothing for a neuron of a single chunk', async () => {
     installFetch({ '/lvl2_graph': JSON.stringify({ edge_graph: [] }), '/attributes': COORDS })
-    expect(await readL2Skeletons(SOURCE, ['1'], {})).toEqual([])
+    expect(await readL2Skeletons(SOURCE, ['1'], { deployment: DEFAULT_CAVE_SERVER })).toEqual(
+      [],
+    )
   })
 
   it('asks for every neuron’s chunks in one attributes request, not one each', async () => {
@@ -1981,7 +1993,7 @@ describe('building a skeleton from the L2 graph', () => {
      * 1.64 s against roughly that for *each* of the twelve neurons they came from.
      */
     const captured = installFetch({ '/lvl2_graph': CHAIN, '/attributes': COORDS })
-    await readL2Skeletons(SOURCE, ['1', '2', '3'], {})
+    await readL2Skeletons(SOURCE, ['1', '2', '3'], { deployment: DEFAULT_CAVE_SERVER })
     expect(captured.filter((c) => c.url.includes('/lvl2_graph'))).toHaveLength(3)
     expect(captured.filter((c) => c.url.includes('/attributes'))).toHaveLength(1)
   })
@@ -2005,7 +2017,7 @@ describe('where a CAVE skeleton comes from', () => {
     // The first look cannot answer and starts the read — `peekL2Cache`'s contract, and the
     // reason `capabilitiesFor` may not await one (invariant 2).
     expect(source.capabilitiesFor!(DATASET)?.skeletons).not.toBe(true)
-    await probeFlat(specFor(DATASTACK)!, VERSION)
+    await probeFlat(specFor(DEFAULT_CAVE_SERVER, DATASTACK)!, VERSION)
     expect(source.capabilitiesFor!(DATASET)).toEqual({ skeletons: true })
   })
 
@@ -2040,8 +2052,8 @@ describe('where a CAVE skeleton comes from', () => {
     // this is legal to call from `inferOutputs` (invariant 2).
     expect(source.skeletonSourcesFor!(DATASET)).toBeUndefined()
 
-    await probeFlat(specFor(DATASTACK)!, VERSION)
-    await skeletonServiceFor(DATASTACK)
+    await probeFlat(specFor(DEFAULT_CAVE_SERVER, DATASTACK)!, VERSION)
+    await skeletonServiceFor(DATASTACK, { deployment: DEFAULT_CAVE_SERVER })
     /*
      * The service is offered even though its cache is empty, which is deliberate: whether it can
      * answer is a question about *these* root ids and is asked at fetch time. Hiding it here
@@ -2074,8 +2086,8 @@ describe('where a CAVE skeleton comes from', () => {
     // leads, and `capabilitiesFor` is derived from the same list rather than asked separately.
     installFetch({ '/l2cache/api/v1/table_mapping': L2_MAPPING }, { service: 'full' })
     const source = new CaveSource()
-    await l2SourceFor(DATASTACK)
-    await skeletonServiceFor(DATASTACK)
+    await l2SourceFor(DATASTACK, { deployment: DEFAULT_CAVE_SERVER })
+    await skeletonServiceFor(DATASTACK, { deployment: DEFAULT_CAVE_SERVER })
     expect(source.skeletonSourcesFor!(DATASET)?.map((r) => r.id)).toEqual(['service', 'l2'])
     expect(source.capabilitiesFor!(DATASET)).toEqual({ skeletons: true })
   })
@@ -2172,7 +2184,7 @@ describe('CAVE discovery', () => {
 
   it('lists tables off the v2 path and views off the v3 one, tables first and sorted', async () => {
     const captured = installFetch()
-    const entries = await tableListFor(DATASTACK, VERSION)
+    const entries = await tableListFor(DATASTACK, VERSION, { deployment: DEFAULT_CAVE_SERVER })
     expect(entries).toEqual([
       { name: 'fly_synapses_neuropil_v6', kind: 'table' },
       { name: 'hierarchical_neuron_annotations', kind: 'table' },
@@ -2194,15 +2206,23 @@ describe('CAVE discovery', () => {
 
   it('asks for no views when the node’s toggle is off', async () => {
     const captured = installFetch()
-    const entries = await tableListFor(DATASTACK, VERSION, {}, false)
+    const entries = await tableListFor(
+      DATASTACK,
+      VERSION,
+      { deployment: DEFAULT_CAVE_SERVER },
+      false,
+    )
     expect(entries.every((e) => e.kind === 'table')).toBe(true)
     expect(path(captured).some((u) => u.endsWith('/views'))).toBe(false)
   })
 
   it('memoises the listing, so two nodes on one datastack cost one pair of requests', async () => {
     const captured = installFetch()
-    await Promise.all([tableListFor(DATASTACK, VERSION), tableListFor(DATASTACK, VERSION)])
-    await tableListFor(DATASTACK, VERSION)
+    await Promise.all([
+      tableListFor(DATASTACK, VERSION, { deployment: DEFAULT_CAVE_SERVER }),
+      tableListFor(DATASTACK, VERSION, { deployment: DEFAULT_CAVE_SERVER }),
+    ])
+    await tableListFor(DATASTACK, VERSION, { deployment: DEFAULT_CAVE_SERVER })
     expect(path(captured).filter((u) => u.endsWith('/tables'))).toHaveLength(1)
     expect(path(captured).filter((u) => u.endsWith('/views'))).toHaveLength(1)
   })
@@ -2214,17 +2234,19 @@ describe('CAVE discovery', () => {
    */
   it('peeks undefined and starts exactly one fetch, however many times it is asked', async () => {
     const captured = installFetch()
-    expect(peekTableList(DATASTACK, VERSION)).toBeUndefined()
-    expect(peekTableList(DATASTACK, VERSION)).toBeUndefined()
-    expect(peekTableList(DATASTACK, VERSION)).toBeUndefined()
-    await tableListFor(DATASTACK, VERSION)
-    expect(peekTableList(DATASTACK, VERSION)).toHaveLength(9)
+    expect(peekTableList(DEFAULT_CAVE_SERVER, DATASTACK, VERSION)).toBeUndefined()
+    expect(peekTableList(DEFAULT_CAVE_SERVER, DATASTACK, VERSION)).toBeUndefined()
+    expect(peekTableList(DEFAULT_CAVE_SERVER, DATASTACK, VERSION)).toBeUndefined()
+    await tableListFor(DATASTACK, VERSION, { deployment: DEFAULT_CAVE_SERVER })
+    expect(peekTableList(DEFAULT_CAVE_SERVER, DATASTACK, VERSION)).toHaveLength(9)
     expect(path(captured).filter((u) => u.endsWith('/tables'))).toHaveLength(1)
   })
 
   it('reads a table’s facts, and keeps the two row counts apart', async () => {
     installFetch()
-    const facts = await tableFactsFor(DATASTACK, VERSION, 'proofread_neurons')
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'proofread_neurons', {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
     // The measured disagreement, fixtured: the annotation service counts the table as it
     // stands, the materialization engine counts what v783 froze.
     expect(facts.rows).toBe(139540)
@@ -2233,7 +2255,9 @@ describe('CAVE discovery', () => {
 
   it('trims a description, drops a null notice, and leaves a 1:1 resolution off', async () => {
     installFetch()
-    const facts = await tableFactsFor(DATASTACK, VERSION, 'nuclei_v1')
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'nuclei_v1', {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
     expect(facts.kind).toBe('table')
     expect(facts.schemaType).toBe('nucleus_detection')
     expect(facts.description?.startsWith('FlyWire nucleus description')).toBe(true)
@@ -2253,7 +2277,9 @@ describe('CAVE discovery', () => {
    */
   it('describes a view from the listing, asking no metadata endpoint and no count', async () => {
     const captured = installFetch()
-    const facts = await tableFactsFor(DATASTACK, VERSION, 'valid_connection_v2')
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'valid_connection_v2', {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
     expect(facts.kind).toBe('view')
     expect(facts.description?.startsWith('This is a summary table')).toBe(true)
     expect(facts.rows).toBeUndefined()
@@ -2264,9 +2290,9 @@ describe('CAVE discovery', () => {
 
   it('names every table in the datastack when the one asked for is not in it', async () => {
     installFetch()
-    await expect(tableFactsFor(DATASTACK, VERSION, 'nuclei_v2')).rejects.toThrow(
-      /not a table or view.*Available: fly_synapses_neuropil_v6/s,
-    )
+    await expect(
+      tableFactsFor(DATASTACK, VERSION, 'nuclei_v2', { deployment: DEFAULT_CAVE_SERVER }),
+    ).rejects.toThrow(/not a table or view.*Available: fly_synapses_neuropil_v6/s)
   })
 
   /*
@@ -2287,7 +2313,9 @@ describe('CAVE discovery', () => {
           } as Response)
         : inner(url, init),
     )
-    const facts = await tableFactsFor(DATASTACK, VERSION, 'nuclei_v1')
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'nuclei_v1', {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
     expect(facts.rows).toBeUndefined()
     expect(facts.materializedRows).toBe(143140)
     expect(facts.schemaType).toBe('nucleus_detection')
@@ -2296,18 +2324,18 @@ describe('CAVE discovery', () => {
   it('gates the facts peek on the listing, so a half-typed name requests nothing', async () => {
     const captured = installFetch()
     // The listing has not landed, so nothing about a name can be decided yet.
-    expect(peekTableFacts(DATASTACK, VERSION, 'nucl')).toBeUndefined()
-    await tableListFor(DATASTACK, VERSION)
+    expect(peekTableFacts(DEFAULT_CAVE_SERVER, DATASTACK, VERSION, 'nucl')).toBeUndefined()
+    await tableListFor(DATASTACK, VERSION, { deployment: DEFAULT_CAVE_SERVER })
     const before = captured.length
     // Now it has, and `nucl` is not in it — so still nothing, and still no request.
-    expect(peekTableFacts(DATASTACK, VERSION, 'nucl')).toBeUndefined()
+    expect(peekTableFacts(DEFAULT_CAVE_SERVER, DATASTACK, VERSION, 'nucl')).toBeUndefined()
     expect(captured).toHaveLength(before)
     // A real name does start one.
-    expect(peekTableFacts(DATASTACK, VERSION, 'nuclei_v1')).toBeUndefined()
-    await tableFactsFor(DATASTACK, VERSION, 'nuclei_v1')
-    expect(peekTableFacts(DATASTACK, VERSION, 'nuclei_v1')?.schemaType).toBe(
-      'nucleus_detection',
-    )
+    expect(peekTableFacts(DEFAULT_CAVE_SERVER, DATASTACK, VERSION, 'nuclei_v1')).toBeUndefined()
+    await tableFactsFor(DATASTACK, VERSION, 'nuclei_v1', { deployment: DEFAULT_CAVE_SERVER })
+    expect(
+      peekTableFacts(DEFAULT_CAVE_SERVER, DATASTACK, VERSION, 'nuclei_v1')?.schemaType,
+    ).toBe('nucleus_detection')
   })
 
   /*
@@ -2317,7 +2345,9 @@ describe('CAVE discovery', () => {
    */
   it('samples one row for the columns, keeping a wide id exact and as text', async () => {
     const captured = installFetch()
-    const columns = await tableColumnsFor(DATASTACK, VERSION, 'nuclei_v1', 'table')
+    const columns = await tableColumnsFor(DATASTACK, VERSION, 'nuclei_v1', 'table', {
+      deployment: DEFAULT_CAVE_SERVER,
+    })
     const by = new Map(columns.map((c) => [c.name, c]))
 
     expect(captured.at(-1)?.body).toMatchObject({ limit: 1 })
@@ -2339,7 +2369,11 @@ describe('CAVE discovery', () => {
 
   it('reads no columns off an empty result rather than inventing them', async () => {
     installFetch({ '/table/nuclei_v1/query': '[]' })
-    expect(await tableColumnsFor(DATASTACK, VERSION, 'nuclei_v1', 'table')).toEqual([])
+    expect(
+      await tableColumnsFor(DATASTACK, VERSION, 'nuclei_v1', 'table', {
+        deployment: DEFAULT_CAVE_SERVER,
+      }),
+    ).toEqual([])
   })
 })
 
@@ -2414,6 +2448,7 @@ describe('a datastack this account cannot read', () => {
      */
     const error = (await caveGet(
       'https://global.daf-apis.com/info/api/v2/datastack/full/minnie65_public',
+      { deployment: DEFAULT_CAVE_SERVER },
     ).catch((e: unknown) => e)) as Error
     expect(error.message).toContain('MICrONS Data Use')
     expect(error.message).toContain('/sticky_auth/api/v1/tos/3/accept')

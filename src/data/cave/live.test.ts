@@ -31,7 +31,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { CaveSource } from './CaveSource'
 import { resetCredentials, setToken } from './credentials'
-import { caveServerFor, datastackRecord, l2SourceFor, materializationsFor } from './datastack'
+import {
+  caveServerFor,
+  datastackRecord,
+  datastacksFor,
+  l2SourceFor,
+  materializationsFor,
+} from './datastack'
+import { caveSourceFor } from './registry'
 import { CAVE_MAX_ROWS, refuseIfCapped } from './client'
 import { countTable, queryTable, queryTableChecked, tableMetadata } from './api'
 import { resetCaveTables, tableColumnsFor, tableFactsFor, tableListFor } from './tables'
@@ -46,8 +53,11 @@ import { ID_COLUMN_NAME } from '../../core/ids'
 import { cableLength } from '../../core/values'
 import type { RestoreFetch } from '../../test/precomputedStubs'
 import { serveDracoWasmFromDisk } from '../../test/precomputedStubs'
+import { DEFAULT_CAVE_SERVER } from './deployments'
 
 const TOKEN = process.env.CAVE_TOKEN
+/** Every request below but the H01 block's is on the default deployment. */
+const ON_DEFAULT = { deployment: DEFAULT_CAVE_SERVER }
 const DATASET = 'flywire_fafb_public:783'
 /** One real proofread neuron, used as the seed for every connectivity check below. */
 const SEED = '720575940628857210'
@@ -56,7 +66,7 @@ const live = TOKEN ? describe : describe.skip
 
 let restoreFetch: RestoreFetch = () => {}
 beforeAll(async () => {
-  setToken(TOKEN)
+  setToken(DEFAULT_CAVE_SERVER, TOKEN)
   restoreFetch = await serveDracoWasmFromDisk()
 })
 afterAll(() => {
@@ -234,7 +244,7 @@ live('CAVE, live', () => {
  */
 describe.skipIf(!TOKEN)('CAVE, live — connectivity by aggregation', () => {
   it('builds an edge list from raw synapses on a datastack with no view', async () => {
-    setToken(TOKEN!)
+    setToken(DEFAULT_CAVE_SERVER, TOKEN!)
     registerDatastackSpec({
       datastack: 'wclee_aedes_brain',
       label: 'Aedes',
@@ -242,7 +252,7 @@ describe.skipIf(!TOKEN)('CAVE, live — connectivity by aggregation', () => {
       neurons: { table: 'nuclei_v1_aedes', idColumn: 'pt_root_id' },
     })
     const cave = new CaveSource()
-    const versions = await materializationsFor('wclee_aedes_brain')
+    const versions = await materializationsFor('wclee_aedes_brain', ON_DEFAULT)
     const dataset = `wclee_aedes_brain:${versions[0]}`
 
     // A real root id off the nuclei table rather than a literal: root ids change with edits, so
@@ -283,13 +293,13 @@ describe.skipIf(!TOKEN)('CAVE, live — connectivity by aggregation', () => {
  */
 describe.skipIf(!TOKEN)('CAVE, live — a built neuroglancer scene', () => {
   it('assembles a loadable scene from each datastack’s own record', async () => {
-    setToken(TOKEN!)
+    setToken(DEFAULT_CAVE_SERVER, TOKEN!)
     for (const datastack of [
       'wclee_aedes_brain',
       'flywire_fafb_public',
       'brain_and_nerve_cord_public',
     ]) {
-      const info = await datastackRecord(datastack)
+      const info = await datastackRecord(datastack, ON_DEFAULT)
       const scene = caveScene(datastack, info)
       if (!scene) throw new Error(`${datastack} built no scene`)
 
@@ -335,13 +345,13 @@ describe.skipIf(!TOKEN)('CAVE, live — a built neuroglancer scene', () => {
  */
 describe.skipIf(!TOKEN)('CAVE, live — L2 skeletons', () => {
   it('knows which datastacks can answer, and builds a real tree for one that can', async () => {
-    setToken(TOKEN!)
-    expect(await l2SourceFor('brain_and_nerve_cord_public')).toBeTruthy()
+    setToken(DEFAULT_CAVE_SERVER, TOKEN!)
+    expect(await l2SourceFor('brain_and_nerve_cord_public', ON_DEFAULT)).toBeTruthy()
     // A populated cache and no skeleton service at all — the datastack the service route misses.
-    expect(await l2SourceFor('wclee_aedes_brain')).toBeTruthy()
+    expect(await l2SourceFor('wclee_aedes_brain', ON_DEFAULT)).toBeTruthy()
     // Declares a skeleton service and has no cache, which is why that service is empty: it
     // generates from this. The one Coda ships a node for, and it genuinely cannot answer.
-    expect(await l2SourceFor('flywire_fafb_public')).toBeUndefined()
+    expect(await l2SourceFor('flywire_fafb_public', ON_DEFAULT)).toBeUndefined()
 
     registerDatastackSpec({
       datastack: 'brain_and_nerve_cord_public',
@@ -350,7 +360,7 @@ describe.skipIf(!TOKEN)('CAVE, live — L2 skeletons', () => {
       neurons: { table: 'cell_info', idColumn: 'pt_root_id' },
     })
     const cave = new CaveSource()
-    const version = (await materializationsFor('brain_and_nerve_cord_public'))[0]
+    const version = (await materializationsFor('brain_and_nerve_cord_public', ON_DEFAULT))[0]
     const dataset = `brain_and_nerve_cord_public:${version}`
     const ids = (
       (await cave.findNeurons({ datasetId: dataset, limit: 6 })).data[
@@ -395,8 +405,8 @@ describe.skipIf(!TOKEN)('CAVE, live — L2 skeletons', () => {
  */
 describe.skipIf(!TOKEN)('CAVE, live — the skeleton service', () => {
   it('is declared by FlyWire and holds nothing, which is what the fallback is for', async () => {
-    setToken(TOKEN!)
-    const service = await skeletonServiceFor('flywire_fafb_public')
+    setToken(DEFAULT_CAVE_SERVER, TOKEN!)
+    const service = await skeletonServiceFor('flywire_fafb_public', ON_DEFAULT)
     expect(service).toBeTruthy()
     // The highest version the deployment lists. `-1` means "latest" and is deliberately not
     // picked: a cache key on a number whose meaning moves is not a key.
@@ -406,9 +416,9 @@ describe.skipIf(!TOKEN)('CAVE, live — the skeleton service', () => {
       (await new CaveSource().findNeurons({ datasetId: 'flywire_fafb_public:783', limit: 5 }))
         .data[ID_COLUMN_NAME] as string[]
     ).slice(0, 5)
-    expect(await existingSkeletons(service!, ids)).toEqual(new Set())
+    expect(await existingSkeletons(service!, ids, ON_DEFAULT)).toEqual(new Set())
     // And having asked, `automatic` stops asking for the rest of the session.
-    expect(serviceLooksEmpty('flywire_fafb_public')).toBe(true)
+    expect(serviceLooksEmpty(DEFAULT_CAVE_SERVER, 'flywire_fafb_public')).toBe(true)
   }, 120_000)
 
   it('answers for minnie65, with radii and a real reconstruction', async () => {
@@ -418,8 +428,8 @@ describe.skipIf(!TOKEN)('CAVE, live — the skeleton service', () => {
      * level-2 route, which minnie65 also has. That is why the service leads the preference list
      * where both exist.
      */
-    setToken(TOKEN!)
-    const service = await skeletonServiceFor('minnie65_public')
+    setToken(DEFAULT_CAVE_SERVER, TOKEN!)
+    const service = await skeletonServiceFor('minnie65_public', ON_DEFAULT)
     expect(service).toBeTruthy()
 
     registerDatastackSpec({
@@ -429,7 +439,7 @@ describe.skipIf(!TOKEN)('CAVE, live — the skeleton service', () => {
       neurons: { table: 'proofreading_status_and_strategy', idColumn: 'pt_root_id' },
     })
     const cave = new CaveSource()
-    const version = (await materializationsFor('minnie65_public'))[0]
+    const version = (await materializationsFor('minnie65_public', ON_DEFAULT))[0]
     const dataset = `minnie65_public:${version}`
     const ids = (
       (await cave.findNeurons({ datasetId: dataset, limit: 3 })).data[
@@ -440,7 +450,7 @@ describe.skipIf(!TOKEN)('CAVE, live — the skeleton service', () => {
     // Every one of them, which is what `automatic` requires before it takes this route: a scene
     // mixing a reconstruction with a chunk decomposition is one where cable length means two
     // things.
-    expect((await existingSkeletons(service!, ids)).size).toBe(ids.length)
+    expect((await existingSkeletons(service!, ids, ON_DEFAULT)).size).toBe(ids.length)
 
     const skeletons = await cave.fetchSkeletons!({ datasetId: dataset, neuronIds: ids })
     expect(skeletons.provenance?.id).toBe('service')
@@ -459,7 +469,7 @@ describe.skipIf(!TOKEN)('CAVE, live — the skeleton service', () => {
      * genuinely there. That is `capabilitiesFor`'s contract showing through, and it is why the
      * dropdown grows rather than appearing complete.
      */
-    expect(await l2SourceFor('minnie65_public')).toBeTruthy()
+    expect(await l2SourceFor('minnie65_public', ON_DEFAULT)).toBeTruthy()
     expect(cave.skeletonSourcesFor!(dataset)?.map((r) => r.id)).toEqual(['service', 'l2'])
   }, 300_000)
 })
@@ -485,7 +495,7 @@ describe.skipIf(!TOKEN)('CAVE, live — discovery', () => {
 
   it('lists both kinds of object, and the view Connectivity prefers is only in one', async () => {
     resetCaveTables()
-    const entries = await tableListFor(DATASTACK, VERSION)
+    const entries = await tableListFor(DATASTACK, VERSION, ON_DEFAULT)
     const names = (kind: string) => entries.filter((e) => e.kind === kind).map((e) => e.name)
 
     expect(names('table')).toContain('proofread_neurons')
@@ -519,7 +529,7 @@ describe.skipIf(!TOKEN)('CAVE, live — discovery', () => {
    */
   it('reports two row counts for one table, and they are not the same number', async () => {
     resetCaveTables()
-    const facts = await tableFactsFor(DATASTACK, VERSION, 'proofread_neurons')
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'proofread_neurons', ON_DEFAULT)
     expect(facts.kind).toBe('table')
     expect(facts.rows).toBeGreaterThan(0)
     expect(facts.materializedRows).toBeGreaterThan(0)
@@ -533,7 +543,7 @@ describe.skipIf(!TOKEN)('CAVE, live — discovery', () => {
    */
   it('describes a table under the name the listing gave it, not the materialized one', async () => {
     resetCaveTables()
-    const facts = await tableFactsFor(DATASTACK, VERSION, 'nuclei_v1')
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'nuclei_v1', ON_DEFAULT)
     expect(facts.name).toBe('nuclei_v1')
     expect(facts.schemaType).toBe('nucleus_detection')
     expect(facts.description).toMatch(/nucleus/i)
@@ -541,7 +551,7 @@ describe.skipIf(!TOKEN)('CAVE, live — discovery', () => {
 
   it('describes a view from the listing, since it has neither a metadata record nor a count', async () => {
     resetCaveTables()
-    const facts = await tableFactsFor(DATASTACK, VERSION, 'valid_connection_v2')
+    const facts = await tableFactsFor(DATASTACK, VERSION, 'valid_connection_v2', ON_DEFAULT)
     expect(facts.kind).toBe('view')
     expect(facts.description).toMatch(/synaptic connections/i)
     expect(facts.rows).toBeUndefined()
@@ -558,7 +568,7 @@ describe.skipIf(!TOKEN)('CAVE, live — discovery', () => {
    */
   it('reads the materialized column set off one row, with a wide id exact and as text', async () => {
     resetCaveTables()
-    const columns = await tableColumnsFor(DATASTACK, VERSION, 'nuclei_v1', 'table')
+    const columns = await tableColumnsFor(DATASTACK, VERSION, 'nuclei_v1', 'table', ON_DEFAULT)
     const by = new Map(columns.map((c) => [c.name, c]))
 
     expect([...by.keys()]).toEqual(
@@ -573,7 +583,13 @@ describe.skipIf(!TOKEN)('CAVE, live — discovery', () => {
 
   it('samples a plain view in the time an aggregating one will not', async () => {
     resetCaveTables()
-    const columns = await tableColumnsFor(DATASTACK, VERSION, 'proofread_neurons_view', 'view')
+    const columns = await tableColumnsFor(
+      DATASTACK,
+      VERSION,
+      'proofread_neurons_view',
+      'view',
+      ON_DEFAULT,
+    )
     expect(columns.map((c) => c.name)).toContain('pt_root_id')
   }, 60_000)
 })
@@ -596,10 +612,10 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
   let version = 0
 
   beforeAll(async () => {
-    setToken(TOKEN)
-    server = await caveServerFor(BANC)
+    setToken(DEFAULT_CAVE_SERVER, TOKEN)
+    server = await caveServerFor(BANC, ON_DEFAULT)
     // Newest first, and a bare integer — the same ordering the version dropdown reads.
-    version = (await materializationsFor(BANC))[0]!
+    version = (await materializationsFor(BANC, ON_DEFAULT))[0]!
   }, 60_000)
 
   /*
@@ -667,7 +683,7 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
   }, 120_000)
 
   it('reports codex_annotations as a reference table, which is what the join hangs on', async () => {
-    const metadata = await tableMetadata(server, BANC, version, 'codex_annotations')
+    const metadata = await tableMetadata(server, BANC, version, 'codex_annotations', ON_DEFAULT)
     expect(metadata.schema_type).toBe('cell_type_reference')
     expect(metadata.reference_table).toBe('cell_representative_point')
   }, 60_000)
@@ -678,7 +694,13 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
      * unfiltered read really does return all of them — so counting rows against `CAVE_MAX_ROWS`
      * refused a *complete* answer, and told the user CAVE had truncated it.
      */
-    const total = await countTable(server, BANC, version, { table: 'codex_annotations' })
+    const total = await countTable(
+      server,
+      BANC,
+      version,
+      { table: 'codex_annotations' },
+      ON_DEFAULT,
+    )
     expect(total).toBeGreaterThan(CAVE_MAX_ROWS)
     expect(() =>
       refuseIfCapped(total, total, 'codex_annotations', 'they would be short'),
@@ -693,12 +715,12 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
       reference: { table: 'cell_representative_point', columns: ['pt_root_id'] },
     }
     const [rows, total] = await Promise.all([
-      queryTable(server, BANC, version, query),
-      countTable(server, BANC, version, query),
+      queryTable(server, BANC, version, query, ON_DEFAULT),
+      countTable(server, BANC, version, query, ON_DEFAULT),
     ])
     // And the same pair through the one function every read actually uses.
     expect(
-      await queryTableChecked(server, BANC, version, query, { consequence: 'x' }),
+      await queryTableChecked(server, BANC, version, query, { consequence: 'x' }, ON_DEFAULT),
     ).toHaveLength(rows.length)
 
     // Unsuffixed: `suffix_map` renames only what collides, and nothing here does.
@@ -725,11 +747,17 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
      * join is worth having: it names a column the user typed and no reason it should be wrong.
      */
     await expect(
-      queryTable(server, BANC, version, {
-        table: 'codex_annotations',
-        columns: ['pt_root_id', 'cell_type'],
-        limit: 1,
-      }),
+      queryTable(
+        server,
+        BANC,
+        version,
+        {
+          table: 'codex_annotations',
+          columns: ['pt_root_id', 'cell_type'],
+          limit: 1,
+        },
+        ON_DEFAULT,
+      ),
     ).rejects.toThrow(/pt_root_id not in model/)
   }, 60_000)
 })
@@ -749,7 +777,7 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
  * ignored the gate would put eight seconds of Google Storage in the ordinary suite.
  */
 live('CAVE, live — the flat segmentation beside a materialization', () => {
-  const FLYWIRE = specFor('flywire_fafb_public')!
+  const FLYWIRE = specFor(DEFAULT_CAVE_SERVER, 'flywire_fafb_public')!
 
   it('resolves the bucket root to a volume, not to a legacy mesh directory', async () => {
     /*
@@ -773,7 +801,9 @@ live('CAVE, live — the flat segmentation beside a materialization', () => {
   it('has no entry for a materialization nobody flattened', () => {
     // Sparse on purpose. An absent entry is the ordinary case and means the graphene route.
     expect(flatUrlFor(FLYWIRE, 571)).toBeUndefined()
-    expect(flatUrlFor(specFor('brain_and_nerve_cord_public')!, 888)).toBeUndefined()
+    expect(
+      flatUrlFor(specFor(DEFAULT_CAVE_SERVER, 'brain_and_nerve_cord_public')!, 888),
+    ).toBeUndefined()
   })
 
   it('answers one neuron’s coarsest level in two requests, inside the thumbnail ceiling', async () => {
@@ -823,4 +853,69 @@ live('CAVE, live — the flat segmentation beside a materialization', () => {
     // Same frame as the mesh above, which is the pair that says neither needed converting.
     expect(item.positions[0]!).toBeGreaterThan(600_000)
   }, 120_000)
+})
+
+/**
+ * A second deployment, with a sign-in of its own. **Skipped unless `CAVE_H01_TOKEN` is set.**
+ *
+ * H01 is listed by `global.brain-wire-test.org`, not by the default global server, so everything
+ * here goes through a deployment other than the one every block above uses — which is the whole
+ * of what is being checked: that the token a request carries is the one for *its* deployment, and
+ * that one deployment's listing is not another's.
+ *
+ *   CAVE_H01_TOKEN=$(jq -r .token ~/.cloudvolume/secrets/global.brain-wire-test.org-cave-secret.json) \
+ *     pnpm vitest run src/data/cave/live.test.ts
+ */
+const H01_TOKEN = process.env.CAVE_H01_TOKEN
+const H01_SERVER = 'https://global.brain-wire-test.org'
+const H01 = 'h01_c3_flat'
+
+describe.skipIf(!H01_TOKEN)('CAVE, live — H01 on a second deployment', () => {
+  const options = { deployment: H01_SERVER }
+  let version = 0
+
+  beforeAll(async () => {
+    // H01's token and nothing else, so a request that reached for the default deployment's token
+    // would go out unsigned and be refused rather than quietly succeed.
+    resetCredentials()
+    setToken(H01_SERVER, H01_TOKEN)
+    version = (await materializationsFor(H01, options))[0]!
+  }, 60_000)
+
+  it('lists the datastack on its own global server, which fronts a local server of its own', async () => {
+    expect(await datastacksFor(options)).toContain(H01)
+    expect(await caveServerFor(H01, options)).toBe('https://local.brain-wire-test.org')
+    expect(version).toBeGreaterThan(0)
+  }, 60_000)
+
+  it("reads the table listing with that deployment's token", async () => {
+    const names = (await tableListFor(H01, version, options)).map((t) => t.name)
+    expect(names).toEqual(expect.arrayContaining(['nucleus', 'cells', 'synapses']))
+  }, 60_000)
+
+  /*
+   * What a Custom CAVE card pointed at H01 registers, read through the source that card
+   * publishes. Both H01 tables are asked because they answer root ids in different JSON types —
+   * `nucleus` as strings, `cells` as numbers past 2^53 — and invariant 8 says either must arrive
+   * as the exact eighteen digits.
+   */
+  it.each(['nucleus', 'cells'])(
+    'finds neurons through a hand-registered spec on %s, ids exact and as text',
+    async (table) => {
+      registerDatastackSpec({
+        datastack: H01,
+        server: H01_SERVER,
+        label: 'H01',
+        description: 'A CAVE datastack named by hand.',
+        neurons: { table, idColumn: 'pt_root_id' },
+      })
+      const source = caveSourceFor(H01_SERVER)
+      expect(source.id).toBe(`cave:${H01_SERVER}`)
+      const found = await source.findNeurons({ datasetId: `${H01}:${version}`, limit: 5 })
+      const ids = found.data[ID_COLUMN_NAME] as unknown[]
+      expect(ids.length).toBeGreaterThan(0)
+      for (const id of ids) expect(id).toMatch(/^\d{18}$/)
+    },
+    60_000,
+  )
 })

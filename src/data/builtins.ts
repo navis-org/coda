@@ -20,7 +20,8 @@
  * — can simply call it. `registerSource` replaces by id, which is what makes that true.
  */
 
-import { CaveSource } from './cave/CaveSource'
+import { caveSourceFor } from './cave/registry'
+import { specDeployments } from './cave/spec'
 import { L1_CATMAID_SERVER } from './catmaid/credentials'
 import { catmaidSourceFor } from './catmaid/registry'
 import { MockSource } from './mock/MockSource'
@@ -42,7 +43,12 @@ export function registerBuiltinSources(options: BuiltinSourceOptions = {}): void
     ),
   )
   registerSource(new NeuPrintSource())
-  registerSource(new CaveSource())
+  /*
+   * One per deployment the spec table names, the default included, for CATMAID's reason below: a
+   * CAVE source is keyed on its global server, so a family on a second deployment needs its own
+   * source registered before its node first resolves one. Only the default today.
+   */
+  for (const deployment of specDeployments()) caveSourceFor(deployment)
   /*
    * One per instance, and CATMAID is the only backend that needs two lines here: a source is
    * keyed on the *server*, so VFB's FAFB deployment and its L1 deployment are two sources with

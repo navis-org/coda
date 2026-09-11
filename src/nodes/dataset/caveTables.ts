@@ -98,7 +98,7 @@ registerNode({
     const entries = await tableListFor(
       where.datastack,
       where.version,
-      { signal: ctx.signal },
+      { deployment: where.deployment, signal: ctx.signal },
       Boolean(ctx.params.includeViews),
     )
     return { out: listingTable(entries) }
@@ -184,7 +184,9 @@ registerNode({
      * graph of being broken. Same contract as `peekMaterializations`.
      */
     const where = caveTargetOfType(ctx.inputs.dataset, ctx.params)
-    const entries = where ? peekTableList(where.datastack, where.version) : undefined
+    const entries = where
+      ? peekTableList(where.deployment, where.datastack, where.version)
+      : undefined
     if (entries && !kindOf(entries, name)) {
       return [
         `"${name}" is not in ${where?.datastack}:${where?.version}. ` +
@@ -199,7 +201,7 @@ registerNode({
     if (!where) throw new Error('Name a datastack as `name:number`, or wire a CAVE Dataset')
     const name = String(ctx.params.table).trim()
     if (!name) throw new Error('Name a table or a view')
-    const options = { signal: ctx.signal }
+    const options = { deployment: where.deployment, signal: ctx.signal }
 
     /*
      * The listing first. It turns a mistyped name into a sentence naming every table in the

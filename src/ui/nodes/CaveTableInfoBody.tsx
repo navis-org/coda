@@ -20,6 +20,7 @@
 
 import type { CaveTableFacts } from '../../data/cave/tables'
 import { kindOf, peekTableFacts, peekTableList } from '../../data/cave/tables'
+import type { CaveTarget } from '../../nodes/lib/caveParams'
 import { caveDatastackIssues, caveTargetOfType } from '../../nodes/lib/caveParams'
 import { formatNumber } from '../format'
 import { MarkdownView } from '../MarkdownView'
@@ -37,7 +38,9 @@ export function CaveTableInfoBody({ node, ctx, compact }: NodeBodyProps) {
   const where = caveTargetOfType(ctx.inputs.dataset, params)
   const name = String(params['table'] ?? '').trim()
 
-  const facts = where ? peekTableFacts(where.datastack, where.version, name) : undefined
+  const facts = where
+    ? peekTableFacts(where.deployment, where.datastack, where.version, name)
+    : undefined
   if (!facts) {
     return (
       <p className="cave-info__empty">{absence(ctx.inputs.dataset, params, where, name)}</p>
@@ -165,14 +168,14 @@ function kindTitle(kind: CaveTableFacts['kind']): string {
 function absence(
   inputType: CodaType | undefined,
   params: Record<string, unknown>,
-  where: { datastack: string; version: number } | undefined,
+  where: CaveTarget | undefined,
   name: string,
 ): string {
   const issue = caveDatastackIssues(inputType, params)[0]
   if (issue) return `${issue}.`
   if (!where) return 'Waiting for the wired Dataset to name a datastack.'
   if (!name) return 'Name a table or a view. List CAVE tables is where the names come from.'
-  const entries = peekTableList(where.datastack, where.version)
+  const entries = peekTableList(where.deployment, where.datastack, where.version)
   if (!entries) return `${where.datastack}:${where.version} has not listed its tables yet.`
   if (!kindOf(entries, name)) {
     return `${where.datastack}:${where.version} publishes no "${name}".`
