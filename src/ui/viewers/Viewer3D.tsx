@@ -5,8 +5,10 @@
  * skeletons is ~40k segments, and rebuilding that on a colour change would stutter. Colour
  * lives in a per-vertex buffer so an encoding change only rewrites the colour attribute.
  *
- * Picking raycasts the skeleton lines and maps the hit vertex back to its neuron through a
- * segment→item lookup, which is why the geometry builder keeps that array around.
+ * Picking raycasts the skeleton lines and the neuron meshes. A skeleton hit maps back to its
+ * neuron through a segment→item lookup, which is why the geometry builder keeps that array
+ * around; a mesh is one object per neuron and names itself. Meshes raycast through a pick tree
+ * (`meshPicking.ts`), because three's own raycast is linear in triangles.
  *
  * Everything that is arithmetic rather than three.js lives in `viewer3dScene.ts`, because
  * jsdom has no WebGL: what stays in this file cannot be tested at all, so as little as
@@ -22,7 +24,7 @@
  * precision where the numbers are small.
  */
 
-import { Canvas, useThree } from '@react-three/fiber'
+import { Canvas, events, useThree } from '@react-three/fiber'
 import type { ThreeEvent } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, TrackballControls } from '@react-three/drei'
 import {
@@ -40,6 +42,7 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { FlexLineMaterial, setLineWidths } from './flexLineMaterial'
 import { applyOpacity } from './materialOpacity'
 import { AmbientOcclusion } from './ambientOcclusion'
+import { buildPickTree, pickRaycast } from './meshPicking'
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
 
@@ -58,6 +61,8 @@ import type { ExportSource } from './ViewerActions'
 import { ViewerActions } from './ViewerActions'
 import type {
   BackgroundChoice,
+  Dim,
+  DimOf,
   Framing,
   SkeletonSegments,
   SkeletonWidthMode,
@@ -74,6 +79,8 @@ import {
   labelIndex,
   neuronAtSegment,
   neuronAtVertex,
+  pointerNdc,
+  sceneDim,
   sceneLights,
   sceneMode,
   sceneSurface,
@@ -88,6 +95,7 @@ import {
   wantsAmbientOcclusion,
 } from './viewer3dScene'
 import { useStable } from './useStable'
+import { useLatest } from '../useLatest'
 import { rememberCamera, recallCamera, forgetCamera } from './cameraMemo'
 import { ViewerEmpty } from './ViewerEmpty'
 
@@ -137,9 +145,10 @@ export interface Viewer3DProps {
    *
    * Gates the draw sites rather than `onSelectionChange`, and the difference is the legend:
    * clearing the callback would take the labels' select with it, which is the one route into a
-   * selection that is unambiguous about what it names. Off means the skeleton object carries no
-   * `onClick` at all, so it leaves React Three Fiber's interaction set and stops being raycast —
-   * "not pickable" in the sense that costs nothing, rather than a handler that declines.
+   * selection that is unambiguous about what it names. Off means neither the skeletons nor the
+   * meshes carry an `onClick` at all, so they leave React Three Fiber's interaction set and stop
+   * being raycast — "not pickable" in the sense that costs nothing, rather than a handler that
+   * declines. Volumes never carry one: a region is not a neuron.
    */
   selectByClick: boolean
   /**
@@ -228,6 +237,24 @@ export interface Viewer3DProps {
  */
 const DRAG_SLOP = 4
 
+/**
+ * React Three Fiber's pointer events, with the one calculation that is wrong inside a zoomed card
+ * replaced — see `pointerNdc`. Everything else (hit sorting, propagation, the pointerdown hits a
+ * click is checked against) is the library's own, spread in rather than rewritten.
+ *
+ * The rect is read per event rather than taken from the store's measured size: a pan or zoom of
+ * the canvas moves the element without resizing it, so a cached position is one gesture stale.
+ */
+const zoomSafeEvents: typeof events = (store) => ({
+  ...events(store),
+  compute(event, state) {
+    const rect = state.gl.domElement.getBoundingClientRect()
+    const [x, y] = pointerNdc({ x: event.clientX, y: event.clientY }, rect)
+    state.pointer.set(x, y)
+    state.raycaster.setFromCamera(state.pointer, state.camera)
+  },
+})
+
 /** Resolved encodings for the three channels, computed once above the canvas. */
 interface SceneColors {
   skeletons: ResolvedColor
@@ -300,6 +327,8 @@ export function Viewer3D(props: Viewer3DProps) {
   // on black without.
   const ink = CHART_INK[sceneMode(background, mode)].primary
   const lights = sceneLights(lightIntensity)
+  // How a deselected neuron is drawn, off the same surface and mode as the background above.
+  const dim = useMemo(() => sceneDim(background, mode), [background, mode])
 
   /*
    * Memoised **by value**, which is the rule CLAUDE.md states and this viewer was breaking.
@@ -644,7 +673,7 @@ export function Viewer3D(props: Viewer3DProps) {
          * mesh pixel went from `#71a430` to `#61962d` without the curve. Reverting this means
          * finding another answer for the background, not just putting the curve back.
          */}
-        <Canvas flat frameloop="demand" camera={cameraProps}>
+        <Canvas flat frameloop="demand" camera={cameraProps} events={zoomSafeEvents}>
           <SceneSurface color={surface} />
           <ambientLight intensity={lights.ambient} />
           <directionalLight position={[1, 1, 1]} intensity={lights.key} />
@@ -655,6 +684,7 @@ export function Viewer3D(props: Viewer3DProps) {
               colors={colors}
               visible={visible}
               framing={framing}
+              dim={dim}
             />
           </PointerGestures>
           {/*
@@ -767,7 +797,7 @@ export function Viewer3D(props: Viewer3DProps) {
         <span>
           {[
             skeletons ? plural(skeletons.items.length, 'skeleton') : '',
-            meshes ? plural(meshes.items.length, 'mesh') : '',
+            meshes ? plural(meshes.items.length, 'mesh', 'meshes') : '',
             points ? plural(points.attributes.length, 'point') : '',
             volumes ? plural(volumes.items.length, 'volume') : '',
             /*
@@ -961,6 +991,47 @@ function PointerGestures({ children }: { children: React.ReactNode }) {
   return <Dragging.Provider value={dragged}>{children}</Dragging.Provider>
 }
 
+/** A click on something that names a neuron, or on something that names none. */
+type Pick = (neuronId: string | undefined, event: ThreeEvent<MouseEvent>) => void
+
+/**
+ * The one click handler both pickable channels share.
+ *
+ * One because the rules are the scene's rather than a channel's: a drag is not a click, an item
+ * with no id selects nothing, and a hit stops propagation so the object behind it — the skeleton
+ * running through the middle of an opaque mesh, usually the same neuron — does not toggle the
+ * selection straight back.
+ *
+ * A drag is not a click, and the DOM disagrees. `click` fires on pointerup whatever happened in
+ * between, so turning the scene selected whichever neuron happened to be under the cursor when
+ * the hand stopped — every time. It was invisible until the trackball started working at all;
+ * before that, dragging did nothing, so nothing followed it.
+ */
+function usePick(
+  enabled: boolean,
+  selection: string[],
+  onSelectionChange?: (ids: string[]) => void,
+): Pick | undefined {
+  const dragged = useContext(Dragging)
+  /*
+   * Stable across renders, reading the selection through `useLatest`: a fresh handler per render
+   * hands every mesh a changed `onClick`, and React Three Fiber answers a changed prop by
+   * re-applying it and invalidating — a full frame per unrelated store tick, over every triangle.
+   */
+  const latest = useLatest({ selection, onSelectionChange })
+  const pick = useCallback<Pick>(
+    (neuronId, event) => {
+      const { selection, onSelectionChange } = latest.current
+      if (dragged.current || !onSelectionChange || !neuronId) return
+      event.stopPropagation()
+      onSelectionChange(toggleSelection(selection, neuronId))
+    },
+    [dragged, latest],
+  )
+  // Absent while `Select by clicking` is off — see `Viewer3DProps.selectByClick`.
+  return enabled ? pick : undefined
+}
+
 /**
  * How close a click has to be to a skeleton to count as hitting it, in nanometres.
  *
@@ -1140,13 +1211,24 @@ function SceneContents({
   colors,
   visible,
   framing,
+  dim,
 }: Viewer3DProps & {
   colors: SceneColors
   visible: SceneVisibility
   framing: Framing
+  dim: Dim
 }) {
-  const selected = useMemo(() => new Set(selection), [selection])
   const { center } = framing
+  /*
+   * Whether each neuron is dimmed and how, resolved once for both channels that dim. Volumes are
+   * handed nothing: a region is not a neuron, so it is never deselected.
+   */
+  const dimOf = useMemo<DimOf | undefined>(() => {
+    if (selection.length === 0) return undefined
+    const selected = new Set(selection)
+    return (id) => (selected.has(id) ? undefined : dim)
+  }, [selection, dim])
+  const pick = usePick(selectByClick, selection, onSelectionChange)
 
   return (
     <group position={[-center[0], -center[1], -center[2]]}>
@@ -1164,14 +1246,12 @@ function SceneContents({
           nodeColorAt={skeletonNodeColor}
           {...(skeletonOpacity === undefined ? {} : { opacity: skeletonOpacity })}
           visible={visible.skeletons}
-          selected={selected}
+          dimOf={dimOf}
           width={skeletonWidth}
           widthMode={skeletonWidthMode}
           radiusWidth={skeletonRadiusWidth}
           worldWidth={skeletonWorldWidth}
-          pickable={selectByClick}
-          {...(onSelectionChange ? { onSelectionChange } : {})}
-          selection={selection}
+          pick={pick}
         />
       )}
       {shown.meshes && meshes && (
@@ -1180,7 +1260,8 @@ function SceneContents({
           colorAt={colors.meshes.at}
           visible={visible.meshes}
           opacity={meshOpacity}
-          dimmed={selected.size > 0 ? (id) => !selected.has(id) : undefined}
+          dimOf={dimOf}
+          pick={pick}
         />
       )}
       {shown.points && points && (
@@ -1230,7 +1311,8 @@ function MeshChannel({
   colorAt,
   visible,
   opacity,
-  dimmed,
+  dimOf,
+  pick,
 }: {
   prefix?: string
   items: readonly { id: string; positions: Float32Array; indices: Uint32Array }[]
@@ -1238,7 +1320,12 @@ function MeshChannel({
   visible: (index: number) => boolean
   opacity: number
   /** Omitted where nothing dims — a region is not a neuron, so shells never do. */
-  dimmed?: ((id: string) => boolean) | undefined
+  dimOf?: DimOf | undefined
+  /**
+   * Omitted where nothing is picked: while `Select by clicking` is off, and always for shells,
+   * which stay out of the interaction set and so never stand between a click and a neuron.
+   */
+  pick?: Pick | undefined
 }) {
   return (
     <>
@@ -1261,7 +1348,9 @@ function MeshChannel({
             indices={item.indices}
             color={colorAt(index)}
             opacity={opacity}
-            dimmed={dimmed?.(item.id) ?? false}
+            id={item.id}
+            dim={dimOf?.(item.id)}
+            pick={pick}
           />
         ) : null,
       )}
@@ -1282,14 +1371,12 @@ function SkeletonLines({
   nodeColorAt,
   opacity = 1,
   visible,
-  selected,
+  dimOf,
   width,
   widthMode,
   radiusWidth,
   worldWidth,
-  pickable,
-  selection,
-  onSelectionChange,
+  pick,
 }: {
   skeletons: SkeletonsValue
   colorAt: (index: number) => string
@@ -1297,14 +1384,14 @@ function SkeletonLines({
   /** 0..1. Passed to whichever of the two line paths draws. */
   opacity?: number
   visible: (itemIndex: number) => boolean
-  selected: Set<string>
+  /** Whether each neuron is dimmed and how — absent while nothing is selected. */
+  dimOf?: DimOf | undefined
   width: number
   widthMode: SkeletonWidthMode
   radiusWidth: number
   worldWidth: number
-  pickable: boolean
-  selection: string[]
-  onSelectionChange?: (ids: string[]) => void
+  /** Absent when `Select by clicking` is off, which takes the object out of the raycast. */
+  pick?: Pick | undefined
 }) {
   /**
    * Rebuilt when the skeletons change — or when the legend hides one of them.
@@ -1320,8 +1407,8 @@ function SkeletonLines({
 
   /** Colour is a separate memo, so restyling does not rebuild positions. */
   const colors = useMemo(
-    () => skeletonSegmentColors(built, skeletons, colorAt, selected, nodeColorAt),
-    [built, skeletons, colorAt, selected, nodeColorAt],
+    () => skeletonSegmentColors(built, skeletons, colorAt, dimOf, nodeColorAt),
+    [built, skeletons, colorAt, dimOf, nodeColorAt],
   )
 
   /**
@@ -1340,25 +1427,31 @@ function SkeletonLines({
   )
 
   /*
-   * A drag is not a click, and the DOM disagrees.
+   * Memoised, like `usePick` itself: a fresh handler per render is a changed prop to React Three
+   * Fiber, re-applied and answered with a frame on every unrelated store tick. Two, because the
+   * two line paths report a hit differently — a segment as `faceIndex`, a vertex as `index`.
    *
-   * `click` fires on pointerup whatever happened in between, so turning the scene selected
-   * whichever neuron happened to be under the cursor when the hand stopped — every time. It
-   * was invisible until the trackball started working at all; before that, dragging did
-   * nothing, so nothing followed it.
-   */
-  const dragged = useContext(Dragging)
-  const pick = (neuronId: string | undefined, event: ThreeEvent<MouseEvent>) => {
-    if (dragged.current || !onSelectionChange || !neuronId) return
-    event.stopPropagation()
-    onSelectionChange(toggleSelection(selection, neuronId))
-  }
-
-  /*
    * `undefined` rather than a conditional spread: R3F's `applyProps` deletes a handler it is
    * given `undefined` for, so `eventCount` still falls to zero and the object still leaves the
    * interaction set — which is the whole promise of `Select by clicking`.
    */
+  const onPickSegment = useMemo(
+    () =>
+      pick
+        ? (event: ThreeEvent<MouseEvent>) =>
+            pick(neuronAtSegment(built, skeletons, event.faceIndex ?? undefined), event)
+        : undefined,
+    [pick, built, skeletons],
+  )
+  const onPickVertex = useMemo(
+    () =>
+      pick
+        ? (event: ThreeEvent<MouseEvent>) =>
+            pick(neuronAtVertex(built, skeletons, event.index), event)
+        : undefined,
+    [pick, built, skeletons],
+  )
+
   if (plan.fat) {
     return (
       <FatSkeletonLines
@@ -1368,26 +1461,12 @@ function SkeletonLines({
         width={plan.uniform}
         widths={plan.widths}
         worldUnits={plan.worldUnits}
-        onPick={
-          pickable
-            ? (event) =>
-                pick(neuronAtSegment(built, skeletons, event.faceIndex ?? undefined), event)
-            : undefined
-        }
+        onPick={onPickSegment}
       />
     )
   }
   return (
-    <ThinSkeletonLines
-      built={built}
-      colors={colors}
-      opacity={opacity}
-      onPick={
-        pickable
-          ? (event) => pick(neuronAtVertex(built, skeletons, event.index), event)
-          : undefined
-      }
-    />
+    <ThinSkeletonLines built={built} colors={colors} opacity={opacity} onPick={onPickVertex} />
   )
 }
 
@@ -1579,15 +1658,28 @@ function MeshItem({
   indices,
   color,
   opacity,
-  dimmed,
+  dim,
+  id,
+  pick,
 }: {
   positions: Float32Array
   indices: Uint32Array
   color: string
   opacity: number
-  dimmed: boolean
+  /** The scene's dimming while this neuron is deselected, absent while it is not. */
+  dim?: Dim | undefined
+  /** The neuron this surface is, which a click on it selects. */
+  id: string
+  /** Absent when `Select by clicking` is off, which takes the object out of the raycast. */
+  pick?: Pick | undefined
 }) {
   const invalidate = useThree((state) => state.invalidate)
+  const pickable = pick !== undefined
+  /** Bound here and memoised, so the handler R3F sees changes only when picking does. */
+  const onClick = useMemo(
+    () => (pick ? (event: ThreeEvent<MouseEvent>) => pick(id, event) : undefined),
+    [pick, id],
+  )
 
   const geometry = useMemo(() => {
     const g = new THREE.BufferGeometry()
@@ -1602,10 +1694,25 @@ function MeshItem({
     return () => geometry.dispose()
   }, [geometry, invalidate])
 
-  const style = surfaceStyle(color, opacity, dimmed)
+  /*
+   * The pick tree, built only once somebody can click, and in a task of its own per mesh.
+   *
+   * Its own task because the set's build is ~330 ms at the default budget (`meshPicking.ts`),
+   * and paid inside the first pointerdown that would be a third of a second of trackball that
+   * does not move. Split per mesh, input interleaves between builds; and a click that lands
+   * before its mesh's tree exists falls back to three's own raycast, slow but correct. Built
+   * once per geometry: a restyle or a streamed publish reuses the memo above and the tree on it.
+   */
+  useEffect(() => {
+    if (!pickable) return
+    const handle = setTimeout(() => buildPickTree(geometry), 0)
+    return () => clearTimeout(handle)
+  }, [pickable, geometry])
+
+  const style = surfaceStyle(color, opacity, dim)
 
   return (
-    <mesh geometry={geometry}>
+    <mesh geometry={geometry} raycast={pickRaycast} onClick={onClick}>
       <meshStandardMaterial
         color={style.color}
         transparent={style.transparent}

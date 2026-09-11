@@ -13,9 +13,9 @@
 
 import type { Bounds3, MeshesValue, PointsValue, SkeletonsValue } from '../../core/values'
 import { boundsCenter, boundsSize } from '../../core/values'
-import { CHART_INK, chartSurface } from '../colors'
+import { CHART_INK, chartSurface, rgbToHex } from '../colors'
 import type { Mode } from '../colors'
-import { hexToRgbFloat } from '../encoding'
+import { hexToLinearRgb } from '../encoding'
 
 /** How the scene's background is chosen. `theme` follows the app; the others pin it. */
 export type BackgroundChoice = 'theme' | 'dark' | 'light' | 'black'
@@ -41,16 +41,138 @@ export type BackgroundChoice = 'theme' | 'dark' | 'light' | 'black'
  */
 export type SkeletonWidthMode = 'uniform' | 'radius' | 'world'
 
+/** The sRGB encoding, one channel in 0..1, linear light → encoded. */
+function toEncoded(c: number): number {
+  return c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055
+}
+
 /**
- * The colour a dimmed item takes while something else is selected.
- *
- * Read off the palette rather than written as a hex: `CHART_INK.muted` is the achromatic grey
- * every other viewer dims to, and it is the one colour guaranteed never to collide with a
- * categorical slot. It was a literal `#6a6a66` and a literal `[0.42, 0.42, 0.4]` — two
- * spellings of nearly the same grey, in one file, neither reachable from a palette change.
+ * Relative luminance, 0..1, with Rec. 709 / sRGB primaries — over *linear* light, as luminance
+ * is defined: a weighted sum of the encoded channels puts pure blue at 0.07 of the way to white
+ * where the right answer is nearer 0.3, i.e. a blue neuron would dim almost into a dark surface.
  */
-export const DIMMED_HEX = CHART_INK.dark.muted
-export const DIMMED_RGB: [number, number, number] = hexToRgbFloat(DIMMED_HEX)
+function luminanceOf(hex: string): number {
+  const [r, g, b] = hexToLinearRgb(hex)
+  // The weights sum to 1, so the luminance is already in 0..1.
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/** CIE L*, 0..100 — the scale on which "evenly spaced greys" means anything. */
+function lightnessOf(luminance: number): number {
+  return luminance > 216 / 24389 ? 116 * Math.cbrt(luminance) - 16 : (24389 / 27) * luminance
+}
+
+/** The inverse of `lightnessOf`. */
+function luminanceAt(lightness: number): number {
+  return lightness > 8 ? ((lightness + 16) / 116) ** 3 : (lightness * 27) / 24389
+}
+
+/** The grey of a given relative luminance, as a hex. */
+function greyAt(luminance: number): string {
+  const v = Math.round(toEncoded(Math.min(1, Math.max(0, luminance))) * 255)
+  return rgbToHex(v, v, v)
+}
+
+/**
+ * A function's answers kept by argument, for as long as the returned function lives.
+ *
+ * The colour paths ask a handful of distinct questions many thousands of times — ~100 colours
+ * across ~40k segments, four across 10^5 synapses, one grey per colour on every mesh render — so
+ * each keeps its answers here rather than spelling out the same get-or-set at every site.
+ */
+function cached<V>(answer: (key: string) => V): (key: string) => V {
+  const answers = new Map<string, V>()
+  return (key) => {
+    let found = answers.get(key)
+    if (found === undefined) {
+      found = answer(key)
+      answers.set(key, found)
+    }
+    return found
+  }
+}
+
+/** How a deselected item is drawn: its colour in, its dimmed grey out. See `dimFor`. */
+export type Dim = (hex: string) => string
+
+/**
+ * Whether an item is dimmed, and how: the scene's `Dim` for an id outside the selection,
+ * `undefined` for one inside it — and no `DimOf` at all while nothing is selected.
+ *
+ * One value rather than a "which ids" predicate beside a "how" rule: as two props they only
+ * meant something together, and a caller passing one without the other dimmed nothing, silently.
+ */
+export type DimOf = (id: string) => Dim | undefined
+
+/**
+ * The least contrast a dimmed item keeps against the surface.
+ *
+ * WCAG's floor for non-text marks, and the line `colors.ts` already draws: `CHART_INK.grid` sits
+ * under it *so that* it is invisible, and anything carrying data takes an ink above it. A dimmed
+ * arbour is still data — context, not decoration — and the network viewer measured what going
+ * under costs: `#383835` on `#1a1a19` read as the rest of the graph having been deleted.
+ */
+export const DIMMED_MIN_CONTRAST = 3
+
+/**
+ * How a deselected item is drawn while something else is selected: a grey of its own, **pulled
+ * back into a band between the visibility floor and the secondary ink**.
+ *
+ *  1. **The hue goes and the order stays.** Each colour is placed by how far its lightness is
+ *     from the surface, as a fraction of the furthest any colour can be — so a yellow neuron dims
+ *     paler than a blue one on a dark ground, and neighbouring arbours stay separable. One shared
+ *     grey — `CHART_INK.muted`, what this replaced — made every deselected neuron the same mark,
+ *     which is exactly the colour that separated them thrown away.
+ *  2. **That fraction is laid linearly across the band**: 0 at `DIMMED_MIN_CONTRAST` against the
+ *     surface, 1 at the scene's *secondary* ink. So every dimmed item is visible, none is brighter
+ *     than the chart's secondary register — the primary one belonging to the picture's subject —
+ *     and two items share a grey only if they shared a lightness.
+ *
+ * Two versions came first, and each fails in a way worth knowing. **The luminance-keeping grey**
+ * (hue out, contrast untouched) left the context as bright as it had been in colour: over the
+ * neuroglancer hash, 311 of 400 dimmed lighter than the old uniform grey, and the one neuron in
+ * colour was the hardest thing on screen to find. **Pulling that grey towards the surface by one
+ * factor and flooring it at 3:1** fixed the brightness and collapsed the order at the floor: 60 of
+ * 400 hashed neurons shared one grey on the dark surface, and on the light surface — where most
+ * of those colours already sit near white — nearly all 400 did. A band mapping has no clamp to
+ * pile up against.
+ *
+ * Both ends come from the surface the scene is drawn on, so a pinned light background recedes
+ * *upwards* by the same rule — `sceneDim` is the caller that knows which surface that is.
+ * What no grey can do is separate hues of equal lightness, and the validated categorical palette
+ * is built from exactly those: its eight slots dim to within a few L* of each other. The numbers
+ * are in `docs/viewers.md`.
+ */
+export function dimFor(surface: string, ceiling: string): Dim {
+  const surfaceY = luminanceOf(surface)
+  const surfaceL = lightnessOf(surfaceY)
+  const ceilingL = lightnessOf(luminanceOf(ceiling))
+  // Which way is "away from the surface": up towards white on a dark ground, down on a light one.
+  const darkGround = ceilingL > surfaceL
+  const extreme = darkGround ? 100 : 0
+  const floorY = darkGround
+    ? DIMMED_MIN_CONTRAST * (surfaceY + 0.05) - 0.05
+    : (surfaceY + 0.05) / DIMMED_MIN_CONTRAST - 0.05
+  const floorL = lightnessOf(Math.min(1, Math.max(0, floorY)))
+  // Cached per colour for the rule's life: every dimmed mesh asks again on each render.
+  return cached((hex) => {
+    // A colour on the far side of the surface — black on the dark ground — counts as no distance.
+    const reach = (lightnessOf(luminanceOf(hex)) - surfaceL) / (extreme - surfaceL)
+    const t = Math.min(1, Math.max(0, reach))
+    return greyAt(luminanceAt(floorL + (ceilingL - floorL) * t))
+  })
+}
+
+/**
+ * The dimming for the scene as drawn: its own surface, and the secondary ink of the mode *the
+ * scene* is in — which a pinned background can make different from the app's.
+ */
+export function sceneDim(background: BackgroundChoice, mode: Mode): Dim {
+  return dimFor(
+    sceneSurface(background, mode),
+    CHART_INK[sceneMode(background, mode)].secondary,
+  )
+}
 
 /**
  * Which surface colour the scene clears to.
@@ -251,7 +373,8 @@ export function skeletonSegmentColors(
   built: SkeletonSegments,
   skeletons: SkeletonsValue,
   colorAt: (index: number) => string,
-  selected: ReadonlySet<string>,
+  /** Whether each neuron is dimmed and how — absent while nothing is selected. */
+  dimOf: DimOf | undefined,
   /**
    * A colour per *node*, taking precedence over `colorAt` where it answers.
    *
@@ -264,15 +387,19 @@ export function skeletonSegmentColors(
   nodeColorAt?: (itemIndex: number, nodeIndex: number) => string | undefined,
 ): Float32Array {
   const buffer = new Float32Array(built.segments * 6)
-  const dimming = selected.size > 0
   /*
-   * One `hexToRgbFloat` per *item*, not per segment. The parse is cheap and the segment count
-   * is not: a hundred neurons is ~40k segments against ~100 distinct colours, so caching by
-   * item turns 40k string parses per restyle into 100.
+   * Parses cached by colour, to linear light: a hundred neurons is ~40k segments against ~100
+   * distinct colours, and a per-node channel answers three (compartment) or `maxStrahler` of them
+   * across seventeen thousand segments. A dimmed colour's grey goes through the same cache.
    */
-  const cache = new Map<number, [number, number, number]>()
-  /** Parsed hexes for the per-node channel, keyed by the colour rather than by the item. */
-  const byColor = new Map<string, readonly [number, number, number]>()
+  const parse = cached(hexToLinearRgb)
+  /** Per *item* too, which also saves the `colorAt` and `dimOf` calls per segment. */
+  const byItem = new Map<number, readonly [number, number, number]>()
+  /** The colour a neuron's segment is drawn in: its own, or its grey while it is deselected. */
+  const drawn = (itemIndex: number, hex: string) => {
+    const rule = dimOf?.(skeletons.items[itemIndex]?.id ?? '')
+    return parse(rule ? rule(hex) : hex)
+  }
 
   for (let s = 0; s < built.segments; s++) {
     const itemIndex = built.segmentItem[s]!
@@ -281,30 +408,18 @@ export function skeletonSegmentColors(
      * rather than into two branches that each dim and each write. Written as an early `continue`
      * the dimming rule and the two-vertex write both appeared twice in this one function, which
      * is two chances for a per-node scene and a per-neuron scene to disagree about what
-     * "deselected" looks like.
-     *
-     * `byColor` parses once per *distinct* colour rather than once per segment — the trick
-     * `buildPoints` documents below, needed here for the same reason. A per-node channel answers
-     * three colours (compartment) or `maxStrahler` of them (order) across seventeen thousand
-     * segments, so the uncached form was 17,000 `replace`/`parseInt` passes to produce a handful
-     * of answers.
+     * "deselected" looks like. A per-node colour dims to *its* grey, so a dimmed arbour keeps its
+     * compartments apart.
      */
     const own = nodeColorAt?.(itemIndex, built.segmentNode[s]!)
     let rgb: readonly [number, number, number]
     if (own !== undefined) {
-      let parsed = byColor.get(own)
-      if (!parsed) {
-        parsed = hexToRgbFloat(own)
-        byColor.set(own, parsed)
-      }
-      rgb = dimming && !selected.has(skeletons.items[itemIndex]?.id ?? '') ? DIMMED_RGB : parsed
+      rgb = drawn(itemIndex, own)
     } else {
-      let parsed = cache.get(itemIndex)
+      let parsed = byItem.get(itemIndex)
       if (!parsed) {
-        const neuronId = skeletons.items[itemIndex]?.id ?? ''
-        parsed =
-          dimming && !selected.has(neuronId) ? DIMMED_RGB : hexToRgbFloat(colorAt(itemIndex))
-        cache.set(itemIndex, parsed)
+        parsed = drawn(itemIndex, colorAt(itemIndex))
+        byItem.set(itemIndex, parsed)
       }
       rgb = parsed
     }
@@ -557,6 +672,30 @@ export function neuronAtVertex(
   return neuronAtSegment(built, skeletons, Math.floor(vertexIndex / 2))
 }
 
+/**
+ * Where a pointer event lands in normalised device coordinates (−1..1, y up), from its client
+ * position and the canvas's rect **as drawn on screen**.
+ *
+ * React Three Fiber's own calculation is `offsetX / size.width`, and inside a React Flow card the
+ * two operands are in different spaces: `offsetX` is measured in the element's own, untransformed
+ * CSS pixels, while `size` comes from `getBoundingClientRect`, which reports the zoomed ones. So at
+ * pane zoom *z* every ray landed at 1/z of the click, measured from the canvas's top-left — the
+ * same mismatch the canvas's *size* had (see the `!important` stretch in `Viewer3D.tsx`), on the
+ * pointer's side. Measured on a card at 0.48: a click on the neurons drawn at its centre selected
+ * nothing, and a click at 0.24 of the way across — empty canvas — selected the neuron at the
+ * scene's centre. Both operands here are on-screen pixels, so their ratio is the same at any zoom;
+ * outside a transform (the overlay, the dock) it is the old answer exactly.
+ */
+export function pointerNdc(
+  client: { x: number; y: number },
+  rect: { left: number; top: number; width: number; height: number },
+): [number, number] {
+  return [
+    ((client.x - rect.left) / rect.width) * 2 - 1,
+    -((client.y - rect.top) / rect.height) * 2 + 1,
+  ]
+}
+
 /** Click semantics: a click toggles its neuron in and out of the selection. */
 export function toggleSelection(selection: readonly string[], id: string): string[] {
   return selection.includes(id) ? selection.filter((x) => x !== id) : [...selection, id]
@@ -594,24 +733,18 @@ export function buildPoints(
   const positions = new Float32Array(count * 3)
   const colors = new Float32Array(count * 3)
   /*
-   * Parsed hexes, memoised by the string — the same trick `skeletonSegmentColors` documents
-   * twenty lines up, and needed more here than there: points is the channel with the most rows.
-   * A synapse cloud is 10^5 points and a handful of distinct colours, so without this it is 10^5
-   * `replace`/`parseInt` passes to produce four answers.
+   * Parses cached by colour, as in `skeletonSegmentColors` — and needed more here: points is the
+   * channel with the most rows. A synapse cloud is 10^5 points and a handful of distinct colours,
+   * so without this it is 10^5 `replace`/`parseInt` passes to produce four answers.
    */
-  const parsed = new Map<string, readonly [number, number, number]>()
+  const parse = cached(hexToLinearRgb)
   let out = 0
   for (let i = 0; i < total; i++) {
     if (!visible(i)) continue
     positions[out * 3] = points.positions[i * 3]!
     positions[out * 3 + 1] = points.positions[i * 3 + 1]!
     positions[out * 3 + 2] = points.positions[i * 3 + 2]!
-    const hex = colorAt(i)
-    let rgb = parsed.get(hex)
-    if (!rgb) {
-      rgb = hexToRgbFloat(hex)
-      parsed.set(hex, rgb)
-    }
+    const rgb = parse(colorAt(i))
     colors[out * 3] = rgb[0]
     colors[out * 3 + 1] = rgb[1]
     colors[out * 3 + 2] = rgb[2]
@@ -782,10 +915,16 @@ export interface SurfaceStyle {
  * never occludes anything — including the skeleton running through the middle of it, which
  * is precisely what an opaque mesh is for.
  */
-export function surfaceStyle(color: string, opacity: number, dimmed: boolean): SurfaceStyle {
-  const effective = dimmed ? Math.min(opacity, 0.35) : opacity
+export function surfaceStyle(
+  color: string,
+  opacity: number,
+  /** The scene's dimming when this surface is deselected, absent when it is not. */
+  dim: Dim | undefined,
+): SurfaceStyle {
+  const effective = dim ? Math.min(opacity, 0.35) : opacity
   return {
-    color: dimmed ? DIMMED_HEX : color,
+    // The rule skeletons follow — see `dimFor`.
+    color: dim ? dim(color) : color,
     opacity: effective,
     transparent: !isOpaqueSurface(effective),
     depthWrite: isOpaqueSurface(effective),

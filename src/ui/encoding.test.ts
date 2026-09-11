@@ -26,7 +26,7 @@ import {
   MAX_SHAPES,
   OTHER_SHAPE,
   clusterColor,
-  hexToRgbFloat,
+  hexToLinearRgb,
   literalColor,
   resolveColor,
   resolveShape,
@@ -452,19 +452,17 @@ describe('resolveSize', () => {
   })
 })
 
-describe('hexToRgbFloat', () => {
-  it('converts to the 0..1 triplet three.js buffers want', () => {
-    expect(hexToRgbFloat('#ffffff')).toEqual([1, 1, 1])
-    expect(hexToRgbFloat('#000000')).toEqual([0, 0, 0])
-    const [r, g, b] = hexToRgbFloat('#3987e5')
-    expect(r).toBeCloseTo(0x39 / 255, 5)
-    expect(g).toBeCloseTo(0x87 / 255, 5)
-    expect(b).toBeCloseTo(0xe5 / 255, 5)
+describe('hexToLinearRgb', () => {
+  it('converts to linear light, which is what three reads a vertex colour as', () => {
+    expect(hexToLinearRgb('#ffffff')).toEqual([1, 1, 1])
+    expect(hexToLinearRgb('#000000')).toEqual([0, 0, 0])
+    // A mid grey is the case pure primaries cannot show: encoded 0.502, linear 0.216.
+    for (const c of hexToLinearRgb('#808080')) expect(c).toBeCloseTo(0.2158605, 5)
   })
 
   it('expands shorthand and survives nonsense', () => {
-    expect(hexToRgbFloat('#fff')).toEqual([1, 1, 1])
-    expect(hexToRgbFloat('not-a-colour')).toEqual([1, 1, 1])
+    expect(hexToLinearRgb('#fff')).toEqual([1, 1, 1])
+    expect(hexToLinearRgb('not-a-colour')).toEqual([1, 1, 1])
   })
 })
 

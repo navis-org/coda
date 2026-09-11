@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { column, tableSchema } from '../../core/types'
 import type { Bounds3, MeshesValue, PointsValue, SkeletonsValue } from '../../core/values'
 import { makeTable } from '../../core/values'
-import { CHART_INK, chartSurface } from '../colors'
+import { CHART_INK, chartSurface, parseHex } from '../colors'
 import {
   DIM_SCALE,
   emphasisSizes,
@@ -22,8 +22,8 @@ import {
   buildSkeletonSegments,
   compassLayout,
   detailNote,
-  DIMMED_HEX,
-  DIMMED_RGB,
+  dimFor,
+  DIMMED_MIN_CONTRAST,
   framingFor,
   hiddenCount,
   idsForLabel,
@@ -33,7 +33,9 @@ import {
   MIN_LINE_WIDTH,
   neuronAtSegment,
   neuronAtVertex,
+  pointerNdc,
   referenceRadius,
+  sceneDim,
   sceneLights,
   sceneMode,
   sceneSurface,
@@ -48,11 +50,19 @@ import {
   toggleSelection,
   visibilityFor,
 } from './viewer3dScene'
+import type { DimOf } from './viewer3dScene'
 
 const SCHEMA = tableSchema(column('neuronId', 'i64'))
 
 /** The buffers are float32, so an expectation written in doubles never matches exactly. */
 const f32 = (rgb: readonly number[]) => [...new Float32Array(rgb)]
+
+/** A colour in linear light — the sRGB transfer written out independently of the implementation. */
+const linear = (hex: string) =>
+  parseHex(hex).map((byte) => {
+    const c = byte / 255
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }) as [number, number, number]
 const BOUNDS: Bounds3 = { min: [0, 0, 0], max: [100, 40, 20] }
 
 /**
@@ -366,23 +376,67 @@ describe('sceneLights', () => {
 describe('skeletonSegmentColors', () => {
   const built = buildSkeletonSegments(skeletons())
   const byItem = (index: number) => (index === 0 ? '#ff0000' : '#0000ff')
+  /*
+   * A stand-in for the scene's dimming, with a distinct answer per colour — so what is asserted
+   * here is the *wiring* (which colour is dimmed, and through what), and `dimFor` below is where
+   * the greys themselves are pinned.
+   */
+  const DIMS: Record<string, string> = {
+    '#ff0000': '#606060',
+    '#0000ff': '#404040',
+    '#00ff00': '#808080',
+  }
+  const dim = (hex: string) => DIMS[hex] ?? '#ffffff'
+  /** The scene's `dimOf` with these ids selected: every other neuron dims through `dim`. */
+  const except =
+    (...ids: string[]): DimOf =>
+    (id) =>
+      ids.includes(id) ? undefined : dim
+  const dimmed = (hex: string) => f32(linear(dim(hex)))
+
+  it('writes linear light, which is what three reads a vertex colour as', () => {
+    /*
+     * The encoded triplet written straight in is encoded a second time on screen: every skeleton
+     * drew lighter and greyer than its legend swatch. Pure primaries cannot show it — 0 and 1 are
+     * the same in both spaces — so a mid grey is the case: encoded 0.502, linear 0.216.
+     */
+    const colors = skeletonSegmentColors(built, skeletons(), () => '#808080', undefined)
+    expect(colors[0]).toBeCloseTo(0.2158605, 5)
+  })
 
   it('paints both vertices of a segment the same, in its own item colour', () => {
-    const colors = skeletonSegmentColors(built, skeletons(), byItem, new Set())
+    const colors = skeletonSegmentColors(built, skeletons(), byItem, undefined)
     expect([...colors.slice(0, 6)]).toEqual([1, 0, 0, 1, 0, 0])
     // The third segment belongs to the second neuron.
     expect([...colors.slice(12, 18)]).toEqual([0, 0, 1, 0, 0, 1])
   })
 
   it('dims everything the selection does not name, and only while there is one', () => {
-    const none = skeletonSegmentColors(built, skeletons(), byItem, new Set())
+    const none = skeletonSegmentColors(built, skeletons(), byItem, undefined)
     expect(none[12]).toBe(0)
 
-    const picked = skeletonSegmentColors(built, skeletons(), byItem, new Set(['111']))
+    const picked = skeletonSegmentColors(built, skeletons(), byItem, except('111'))
     // The selected neuron keeps its colour...
     expect([...picked.slice(0, 3)]).toEqual([1, 0, 0])
-    // ...and the other one takes the palette grey rather than its blue.
-    expect([...picked.slice(12, 15)]).toEqual(f32(DIMMED_RGB))
+    // ...and the other one is its blue, dimmed.
+    expect([...picked.slice(12, 15)]).toEqual(dimmed('#0000ff'))
+  })
+
+  it('dims each neuron from its own colour, so two deselected neurons stay apart', () => {
+    // The point of the rule: one shared grey made every deselected arbour the same mark.
+    const neither = skeletonSegmentColors(built, skeletons(), byItem, except('999'))
+    expect([...neither.slice(0, 3)]).toEqual(dimmed('#ff0000'))
+    expect([...neither.slice(12, 15)]).toEqual(dimmed('#0000ff'))
+  })
+
+  it('dims a per-node colour from that colour, not the neuron’s', () => {
+    // Topology's compartment channel: the arbour keeps its compartments apart while dimmed.
+    const byNode = (item: number, node: number) =>
+      item === 0 && node === 2 ? '#00ff00' : undefined
+    const colors = skeletonSegmentColors(built, skeletons(), byItem, except('999'), byNode)
+    // Segment 1 runs from node 2 of the first neuron; segment 0 from node 1 falls back.
+    expect([...colors.slice(6, 9)]).toEqual(dimmed('#00ff00'))
+    expect([...colors.slice(0, 3)]).toEqual(dimmed('#ff0000'))
   })
 
   it('selects on the geometry id, which is text', () => {
@@ -395,10 +449,10 @@ describe('skeletonSegmentColors', () => {
         { ...skeletons().items[1]!, id: '720575940622093457' },
       ],
     }
-    const picked = skeletonSegmentColors(built, wide, byItem, new Set(['720575940622093457']))
+    const picked = skeletonSegmentColors(built, wide, byItem, except('720575940622093457'))
     expect([...picked.slice(12, 15)]).toEqual([0, 0, 1])
     // The first is now the dimmed one.
-    expect([...picked.slice(0, 3)]).toEqual(f32(DIMMED_RGB))
+    expect([...picked.slice(0, 3)]).toEqual(dimmed('#ff0000'))
   })
 })
 
@@ -460,11 +514,17 @@ describe('buildPoints', () => {
     expect([...built.positions]).toEqual([0, 0, 0, 2, 2, 2])
     expect([...built.colors]).toEqual([1, 1, 1, 1, 0, 0])
   })
+
+  it('writes linear light, as three reads a vertex colour', () => {
+    // Same trap as the skeleton buffer; a mid grey is the case primaries cannot show.
+    const built = buildPoints(points, () => '#808080')
+    expect(built.colors[0]).toBeCloseTo(0.2158605, 5)
+  })
 })
 
 describe('surfaceStyle', () => {
   it('writes depth when opaque, so a mesh occludes the skeleton inside it', () => {
-    const style = surfaceStyle('#aabbcc', 1, false)
+    const style = surfaceStyle('#aabbcc', 1, undefined)
     expect(style).toEqual({
       color: '#aabbcc',
       opacity: 1,
@@ -477,22 +537,144 @@ describe('surfaceStyle', () => {
     // Otherwise whichever triangle draws first hides the ones behind it and a neuron reads as
     // a pile of facets. This is the pair that has to move together — the bug was one opacity
     // default away from being permanent.
-    const style = surfaceStyle('#aabbcc', 0.25, false)
+    const style = surfaceStyle('#aabbcc', 0.25, undefined)
     expect(style.transparent).toBe(true)
     expect(style.depthWrite).toBe(false)
   })
 
-  it('dims to the palette grey rather than to a hex nobody can find', () => {
-    const style = surfaceStyle('#aabbcc', 1, true)
-    expect(style.color).toBe(DIMMED_HEX)
-    expect(DIMMED_HEX).toBe(CHART_INK.dark.muted)
+  it('dims through the scene’s rule', () => {
+    const dim = (hex: string) => (hex === '#aabbcc' ? '#555555' : '#999999')
+    const style = surfaceStyle('#aabbcc', 1, dim)
+    expect(style.color).toBe('#555555')
     // A dimmed surface has to let the selection show through it, opaque setting or not.
     expect(style.transparent).toBe(true)
     expect(style.opacity).toBeLessThan(1)
   })
 
   it('never makes a dimmed surface more visible than the setting asked for', () => {
-    expect(surfaceStyle('#aabbcc', 0.1, true).opacity).toBe(0.1)
+    expect(surfaceStyle('#aabbcc', 0.1, () => '#555555').opacity).toBe(0.1)
+  })
+})
+
+describe('dimFor', () => {
+  /** WCAG relative luminance and CIE L*, written out independently of the implementation. */
+  const luminance = (hex: string) => {
+    const [r, g, b] = linear(hex)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+  const lightness = (hex: string) => {
+    const y = luminance(hex)
+    return y > 216 / 24389 ? 116 * Math.cbrt(y) - 16 : (24389 / 27) * y
+  }
+  const contrast = (a: string, b: string) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number]
+    return (hi + 0.05) / (lo + 0.05)
+  }
+
+  const dark = chartSurface('dark')
+  const light = chartSurface('light')
+  const onDark = dimFor(dark, CHART_INK.dark.secondary)
+  const onLight = dimFor(light, CHART_INK.light.secondary)
+  const onBlack = dimFor('#000000', CHART_INK.dark.secondary)
+  const HUES = ['#ff5470', '#3ec46d', '#4a9df5', '#d8ff6e', '#7a2b9c', '#ffff00', '#0000ff']
+  const EXTREMES = [...HUES, '#000000', '#808080', '#ffffff']
+
+  it('is achromatic', () => {
+    for (const dim of [onDark, onLight, onBlack]) {
+      for (const hex of EXTREMES) expect(dim(hex)).toMatch(/^#([0-9a-f]{2})\1\1$/)
+    }
+  })
+
+  it('keeps the lightness order, which is what tells two dimmed neurons apart', () => {
+    // Never reversed anywhere, and strictly kept above the floor — yellow, green, pink are all
+    // light enough to clear it on a dark ground.
+    const byLightness = [...EXTREMES].sort((a, b) => lightness(a) - lightness(b))
+    for (const dim of [onDark, onLight]) {
+      const out = byLightness.map((hex) => lightness(dim(hex)))
+      for (let i = 1; i < out.length; i++)
+        expect(out[i]).toBeGreaterThanOrEqual(out[i - 1]! - 0.5)
+    }
+    expect(lightness(onDark('#ffff00'))).toBeGreaterThan(lightness(onDark('#3ec46d')))
+    expect(lightness(onDark('#3ec46d'))).toBeGreaterThan(lightness(onDark('#ff5470')))
+    // On a light ground the same three are all near the surface, which is where a floor-and-clamp
+    // version piled them onto one grey. Paler still means nearer the surface, and still distinct.
+    expect(lightness(onLight('#ffff00'))).toBeGreaterThan(lightness(onLight('#3ec46d')))
+    expect(lightness(onLight('#3ec46d'))).toBeGreaterThan(lightness(onLight('#ff5470')))
+  })
+
+  it('keeps a dark hue off the floor that black sits on', () => {
+    // Pure blue is dark but not the surface; flooring it made it black's grey on a dark ground.
+    expect(onDark('#0000ff')).not.toBe(onDark('#000000'))
+    expect(lightness(onDark('#0000ff'))).toBeGreaterThan(lightness(onDark('#000000')))
+  })
+
+  it('pulls the brightest colour back to the secondary ink, not past it', () => {
+    // So nothing deselected outshines the chart's own secondary register — the complaint the
+    // luminance-keeping grey drew, where most of a hashed scene dimmed *lighter* than before.
+    expect(lightness(onDark('#ffffff'))).toBeCloseTo(lightness(CHART_INK.dark.secondary), 0)
+    expect(lightness(onLight('#000000'))).toBeCloseTo(lightness(CHART_INK.light.secondary), 0)
+    for (const hex of HUES) {
+      expect(lightness(onDark(hex))).toBeLessThanOrEqual(
+        lightness(CHART_INK.dark.secondary) + 0.5,
+      )
+    }
+  })
+
+  it('recedes: a colour lighter than the ink dims darker than it was', () => {
+    for (const hex of ['#ffff00', '#d8ff6e', '#ffffff']) {
+      expect(lightness(onDark(hex))).toBeLessThan(lightness(hex))
+    }
+  })
+
+  it('never goes under 3:1 against the surface, on any background', () => {
+    // A dimmed arbour is still data. Within one 8-bit step of the floor, which rounding can take.
+    for (const [dim, surface] of [
+      [onDark, dark],
+      [onLight, light],
+      [onBlack, '#000000'],
+    ] as const) {
+      for (const hex of EXTREMES) {
+        expect(contrast(dim(hex), surface)).toBeGreaterThan(DIMMED_MIN_CONTRAST - 0.05)
+      }
+    }
+  })
+})
+
+describe('sceneDim', () => {
+  it('dims against the surface the scene is drawn on, not the app’s', () => {
+    // A light background pinned under a dark app recedes towards white, by the light ink.
+    const pinned = sceneDim('light', 'dark')
+    const reference = dimFor(chartSurface('light'), CHART_INK.light.secondary)
+    for (const hex of ['#ff0000', '#0000ff', '#ffff00'])
+      expect(pinned(hex)).toBe(reference(hex))
+    expect(sceneDim('theme', 'dark')('#ffff00')).toBe(
+      dimFor(chartSurface('dark'), CHART_INK.dark.secondary)('#ffff00'),
+    )
+    expect(sceneDim('black', 'light')('#ffff00')).toBe(
+      dimFor('#000000', CHART_INK.dark.secondary)('#ffff00'),
+    )
+  })
+})
+
+describe('pointerNdc', () => {
+  const rect = { left: 100, top: 50, width: 200, height: 100 }
+
+  it('maps the canvas onto −1..1, y up', () => {
+    expect(pointerNdc({ x: 200, y: 100 }, rect)).toEqual([0, 0])
+    expect(pointerNdc({ x: 100, y: 50 }, rect)).toEqual([-1, 1])
+    expect(pointerNdc({ x: 300, y: 150 }, rect)).toEqual([1, -1])
+  })
+
+  it('lands the centre of a zoomed card on the centre of its scene', () => {
+    /*
+     * The card the probe measured: a 590px canvas drawn at pane zoom 0.48, 283.3px on screen.
+     * React Three Fiber's default put a click at its centre at offsetX 295 over a size of 283.3,
+     * i.e. x ≈ 1.08 — off the edge of the scene, and nothing was picked.
+     */
+    const zoomed = { left: 1276.3, top: 483.3, width: 283.29, height: 176.61 }
+    const [x, y] = pointerNdc({ x: 1276.3 + 283.29 / 2, y: 483.3 + 176.61 / 2 }, zoomed)
+    expect(x).toBeCloseTo(0, 9)
+    expect(y).toBeCloseTo(0, 9)
   })
 })
 

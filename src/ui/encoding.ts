@@ -614,8 +614,24 @@ export function describeLegend(legend: Legend): string {
   return `${legend.column} · ${formatCompact(legend.domain[0])}–${formatCompact(legend.domain[1])}`
 }
 
-/** Convert a CSS hex colour to the 0..1 RGB triplet three.js buffers want. */
-export function hexToRgbFloat(hex: string): [number, number, number] {
+/** The sRGB transfer function, one channel in 0..1, encoded → linear light. */
+function srgbToLinear(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+}
+
+/**
+ * Convert a CSS hex colour to its 0..1 RGB triplet in **linear light** — what a three.js vertex
+ * colour buffer holds, and what luminance is defined over.
+ *
+ * It returned the *encoded* triplet until every caller turned out to want the other thing. three
+ * reads a `color` attribute as already linear and encodes to sRGB on the way out, so an encoded
+ * triplet written straight in was encoded twice: every skeleton and synapse point drew lighter and
+ * greyer than its legend swatch — a grey asked for as `#8f`–`#97` rendered at `#c8`. A material's
+ * `color` never had the problem (`THREE.Color` converts a hex on the way in), which is why meshes
+ * were right all along. Linearising here rather than at each buffer builder is what stops the next
+ * vertex-colour writer making the same mistake: there is no encoded triplet left to write.
+ */
+export function hexToLinearRgb(hex: string): [number, number, number] {
   const clean = hex.replace('#', '')
   const value = Number.parseInt(
     clean.length === 3
@@ -627,5 +643,9 @@ export function hexToRgbFloat(hex: string): [number, number, number] {
     16,
   )
   if (!Number.isFinite(value)) return [1, 1, 1]
-  return [((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255]
+  return [
+    srgbToLinear(((value >> 16) & 255) / 255),
+    srgbToLinear(((value >> 8) & 255) / 255),
+    srgbToLinear((value & 255) / 255),
+  ]
 }

@@ -1262,6 +1262,20 @@ skeletons could do and meshes could not, for no reason either socket knows about
 in the canvas. Mesh and point colour used to resolve inside `SceneContents`, which is precisely
 why they had no key on screen: the strip could not see them.
 
+**Vertex colours are linear light, and for a long time they were not.** three reads a `color`
+attribute as already in its linear working space and encodes to sRGB on output, so the encoded
+triplet `hexToRgbFloat` returned, written straight into a buffer, was encoded twice. Every skeleton
+and synapse point drew lighter and greyer than the palette, its own legend swatch and
+neuroglancer's hash — measured on a dimmed skeleton scene, a grey the dimming rule asked for as
+`#8f`–`#97` rendered with its commonest pixel at `#c8`, and at `#90`–`#97` once converted (the
+same scene in a real browser, 36% of the achromatic pixels in that bin). Meshes were right
+throughout, because a
+material's `color` goes through `THREE.Color`, which converts a hex on the way in; that is also
+why nothing looked wrong in isolation, and it took a skeleton beside its swatch to see it.
+The fix is at the parse rather than at the two buffer builders: it is `hexToLinearRgb` now, and
+nothing in `src` wanted the encoded triplet, so no caller holds one to write by mistake — the next
+vertex-colour writer included.
+
 **The canvas is stretched to its box with `!important`, and the reason is a coordinate-space
 mismatch.** A renderer measures its container with `getBoundingClientRect` — _post_-transform
 pixels — then writes that number back as a CSS width, which inside React Flow's transformed card
@@ -1269,6 +1283,18 @@ is _pre_-transform. The zoom is applied twice and the canvas comes out short by 
 factor: measured on a card at 0.8, a 560px preview held a 458px canvas with 100px of dead surface
 down one side and the scene sitting off-centre inside it. Only the element is stretched; the
 drawing buffer keeps the screen-sized resolution the renderer chose, so this is not an upscale.
+
+**The pointer had the same mismatch, and it outlived the fix above by a long way.** React Three
+Fiber maps a click to the scene as `offsetX / size.width`: `offsetX` is the element's own,
+untransformed CSS pixels and `size` is `getBoundingClientRect`'s zoomed ones, so at pane zoom *z*
+every ray landed at 1/z of the click, measured from the canvas's top-left. Picking on a card
+therefore worked only at 100% zoom, and it read as "selection only works in the expanded view".
+Measured on a card at 0.48: a click on the neurons at its centre selected nothing, and a click at
+0.24 of the way across — empty canvas — selected the neuron at the scene's centre.
+`zoomSafeEvents` spreads the library's event manager and replaces only `compute`, through
+`pointerNdc`, whose two operands are both on-screen pixels; the rect is read per event, since a pan
+moves the element without resizing it. Outside a transform — the overlay, the dock, a dashboard
+cell — the answer is the old one exactly.
 
 **A flex child that refuses to shrink pushes the next one out of the bottom.** The card preview's
 canvas floor was 150px inside a `.viewer` that had 125px to give, so the canvas kept everything
@@ -1698,10 +1724,78 @@ protecting. So the skeleton object carries no `onClick` at all when picking is o
 means it leaves React Three Fiber's interaction set and stops being raycast: "not pickable" in the
 sense that costs nothing, rather than a handler that declines.
 
-**Only skeletons were ever pickable.** Meshes, points and volumes carry no click handler — the
-selection is of neurons and resolves against skeletons then meshes, but no mesh draw site ever
-reported a hit. The toggle therefore gates exactly one handler, and the wording on the param says
-"a click in the scene" rather than naming a socket.
+**Skeletons and neuron meshes are pickable; points and volumes are not.** For a long time only
+skeletons were — the selection resolved against skeletons then meshes, but no mesh draw site ever
+reported a hit, so a scene of meshes alone could be selected from the legend and nowhere else.
+Both channels now go through one `usePick`, which owns the three rules that are the scene's
+rather than a channel's: a drag is not a click, an item with no id selects nothing, and a hit
+stops propagation, so the skeleton running through an opaque mesh — usually the same neuron —
+does not toggle the selection straight back. Points are synapses and volumes are regions, so
+neither carries a handler; that also keeps a neuropil shell out of the interaction set, where it
+would otherwise catch every click aimed at the arbour inside it.
+
+**A mesh raycast is linear in triangles, and React Three Fiber pays it on every pointerdown.**
+Measured in Node on one mesh with a ray through its centre (a neuron's bounding sphere covers most
+of the screen, so the sphere early-out rarely helps): three's `Mesh.raycast` took 2.2 ms at 50k
+triangles, 6.8 ms at 200k, 17 ms at 500k and **49 ms at 1.5M** — the Meshes node's *default*
+budget for a set, with `high` at 6M. R3F raycasts every interactive object on `pointerdown` as well
+as on the click (it keeps the first hits to check the click landed on the same object), so with
+picking on that is paid twice per click and once at the start of **every trackball drag**. So
+meshes raycast through `three-mesh-bvh` (`meshPicking.ts`): under 0.03 ms a ray at every size, for
+a one-off build of ~330 ms per 1.5M triangles. The build runs only while `Select by clicking` is
+on, one mesh per task so input interleaves, and a mesh whose tree is pending falls back to three's
+raycast — slow, never wrong.
+
+**`indirect: true` is the load-bearing option, and dropping it would change nothing on screen.**
+`MeshBVH`'s default build reorders the geometry's index array in place, and `MeshItem`'s index
+attribute wraps the `MeshesValue`'s own `Uint32Array` without copying. A reordered index draws the
+same surface, so the viewer would look right while every other reader of the value got its
+triangles in a new order. `meshPicking.test.ts` pins the array untouched and the hit's `faceIndex`
+in the geometry's numbering rather than the tree's.
+
+The toggle's wording says "a click in the scene" rather than naming a socket, which is why it
+needed no change when meshes joined.
+
+**A deselected neuron dims to a grey of its own, laid into a band — and the band is the third
+version.** It was `CHART_INK.muted` for every skeleton and mesh, which answered "which is
+selected" and nothing else: pick one neuron of twenty and the other nineteen became one grey mass,
+the colour that separated them being exactly what dimming threw away. `dimFor` now places each
+item by how far its lightness sits from the scene's surface, as a fraction of the furthest any
+colour can be, and lays that fraction linearly across a band: from 3:1 against the surface
+(`DIMMED_MIN_CONTRAST`, the non-text floor `CHART_INK.grid` sits under *so that* it is invisible)
+to the scene's **secondary** ink. So a yellow neuron dims paler than a blue one on a dark ground,
+every dimmed item stays visible, none is brighter than the chart's secondary register, and two
+share a grey only if they shared a lightness. Both ends come from the surface the scene is drawn
+on (`sceneDim`), so a pinned light background recedes *upwards* by the same rule. A per-node
+colour (Topology's compartments) dims through the same rule, so a dimmed arbour keeps its
+compartments apart. Lightness is CIE L* over relative luminance in linear light — a sum of the
+*encoded* channels puts pure blue at 7% of the way to white rather than ~30%.
+
+Measured over 400 neuroglancer-hash colours (the default for both channels; in colour they span
+L* 34–97, median 71), against the old grey's L* 56 — reproduced by calling `sceneDim` over
+`segmentColor` for 400 ids and converting the result to L*:
+
+| rule | dark surface: L*, median | at one grey | light surface: L*, median | at one grey |
+| --- | --- | --- | --- | --- |
+| hue out, luminance kept | 34–97, 71 | — | as in colour | — |
+| pulled towards the surface by one factor, floored at 3:1 | 43–76, 56 | 60 of 400 | 57–61; p10 to max all 60.9 | ~all |
+| **floor → secondary ink band** (shipped) | **52–77, 67** | 1 | **44–61, 54** | 2 |
+
+The first kept every item's contrast exactly — and with it the brightness: 311 of 400 dimmed
+*lighter* than the old grey, and the one neuron in colour became the hardest thing on screen to
+find. The second fixed that and collapsed the order against its clamp — worst on a light surface,
+where most hashed colours already sit near white. The band has no clamp to pile against.
+
+**What it does not buy, measured rather than assumed.** On the dark surface the band pulls the
+top down (97 → 77) but moves the middle little, so 381 of 400 still sit above the old uniform
+grey; the room between "visible" (43) and the secondary ink (78) is all there is, and lowering the
+ceiling darkens the context by narrowing the spread with it — `muted` as the ceiling leaves 13 L*
+for 400 neurons. Meshes recede further regardless, dimming also capping them at 0.35 opacity. And
+**no grey separates hues of equal lightness**, which is what the validated categorical palette is
+made of: its eight slots dim to L* 58–63 on dark and 43–54 on light, two of them to the same
+grey. That is the network viewer's reason to keep a dimmed mark's hue and blend it towards the
+surface instead ("de-emphasis recedes, it never erases"); this viewer chose shades of grey, and
+`by category` scenes pay for it.
 
 **Clearing is the count itself, not a control beside it** — `3 selected ⨯`, the same affordance
 the histogram, distribution and pie viewers already put in this row, down to the class and the

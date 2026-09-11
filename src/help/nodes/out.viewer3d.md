@@ -77,9 +77,9 @@ The camera is a **trackball**, like neuroglancer's: drag to turn, with no up axi
 
 ## Picking neurons, and the pick is an output
 
-Selected neurons keep their colour while everything else dims to grey, and the selection leaves through `Selected` as an ordinary neuron table.
+Selected neurons keep their colour while everything else dims to **a grey of its own**: lighter colours to lighter greys, all of them pulled back towards the background, so the neurons you did not pick can still be told apart without competing with the ones you did. Colours of similar lightness — the eight of `by category` among them — dim to much the same grey. The selection leaves through `Selected` as an ordinary neuron table.
 
-**Clicking in the scene is off until you switch it on**, with `Select by clicking` on the **Scene** tab. After that a click on a skeleton selects it and a second click lets it go.
+**Clicking in the scene is off until you switch it on**, with `Select by clicking` on the **Scene** tab. After that a click on a skeleton or a mesh selects that neuron and a second click lets it go. Synapse points and volumes are not clickable, so a click passes through a neuropil shell to the neuron inside it.
 
 > [!NOTE] Why that is off by default
 > The selection takes part in the provenance key, so changing it marks everything downstream stale and re-runs it. A click that lands on a neurite while you are turning the scene would do that silently.

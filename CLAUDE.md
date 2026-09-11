@@ -1484,6 +1484,14 @@ Area-specific — the rule, then the doc that holds why:
   while an effect cleanup always runs**, so return the pass from the memo rather than writing it into a
   ref. Render an effect's own buffer before explaining why it looks weak, and measure on a real GPU —
   headless Chrome falls back to SwiftShader. See [docs/viewers.md](docs/viewers.md).
+- **A three.js vertex colour is linear light, so the one hex parse returns it.** three reads a `color`
+  attribute as already linear and encodes on output, so an sRGB triplet written straight in is
+  encoded twice: every skeleton and synapse point drew lighter and greyer than its own legend swatch
+  (a `#8f` grey rendered at `#c8`), while meshes — whose `THREE.Color` converts a hex on the way in —
+  were right, which is why nobody saw it. `hexToLinearRgb` (`encoding.ts`) linearises at the parse,
+  so no caller holds an encoded triplet to write; a **mid grey** is the test case, pure primaries
+  being the same in both spaces.
+  See [docs/viewers.md](docs/viewers.md).
 - **Restoring `layers` in the embedded neuroglancer is not safe under the pointer, and one bad id is
   not one bad id.** A layer is constructed — subscribing to the hover machinery — a whole loop before
   it is initialised, which is where `selectionState` is assigned, and neuroglancer never disposes that
