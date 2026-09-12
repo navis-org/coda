@@ -257,8 +257,7 @@ export const DATASET_GUIDE: readonly DatasetGuideEntry[] = [
     glyph: 'fly_cns',
     tier: 'start',
     clade: 'fly',
-    tagline:
-      'The whole central nervous system of an adult male fly.',
+    tagline: 'The whole central nervous system of an adult male fly.',
     specs: {
       specimen: 'Adult male Drosophila',
       region: 'Whole CNS — brain and ventral nerve cord',
@@ -276,9 +275,7 @@ The largest and most complete fly connectome to date.`,
       'Cross-references to hemibrain, FlyWire and MANC as first-class columns',
       'Served via neuPrint, which provides the most complete set of queries',
     ],
-    caveats: [
-      'None, unless you need a female brain',
-    ],
+    caveats: ['None, unless you need a female brain'],
     repositories: [
       {
         name: 'neuPrint',
@@ -321,8 +318,7 @@ The largest and most complete fly connectome to date.`,
       },
       { name: 'navis', language: 'Python', url: 'https://github.com/navis-org/navis' },
     ],
-    ratherThan:
-      'Pick this over FlyWire, BANC or Hemibrain unless you need the female brain.',
+    ratherThan: 'Pick this over FlyWire, BANC or Hemibrain unless you need the female brain.',
   },
   {
     key: 'flywire',
@@ -331,8 +327,7 @@ The largest and most complete fly connectome to date.`,
     glyph: 'fly_brain',
     tier: 'start',
     clade: 'fly',
-    tagline:
-      'A whole female brain, optic lobes included.',
+    tagline: 'A whole female brain, optic lobes included.',
     specs: {
       specimen: 'Adult female Drosophila',
       region: 'Whole brain (central brain + both optic lobes)',
@@ -376,7 +371,6 @@ Coda reads it through CAVE, so a version is a materialization number: \`783\` ma
         url: 'https://www.nature.com/collections/hgcfafejia',
         note: 'landing page for the FlyWire paper package',
       },
-
     ],
     citations: [
       {
@@ -503,9 +497,7 @@ Coda reads it through CAVE, so a version is a materialization number: \`783\` ma
       released: '2020',
     },
     about: `Janelia FlyEM's reconstruction of approximately half the central brain, extends across the midline to encompass the central complex.  The cell type naming is the vocabulary most later work is written in.`,
-    strengths: [
-      'Probably the best-proofread mushroom body and central complex',
-    ],
+    strengths: ['Probably the best-proofread mushroom body and central complex'],
     caveats: [
       'Half a brain, so no bilateral symmetry to check results against',
       'Neurons are truncated at the midline and at the optic lobe boundary, which needs to be taken into account when analysing connectivity, cell counts, morpholoy, etc.',
@@ -633,7 +625,8 @@ Coda reads it through CAVE, so a version is a materialization number: \`783\` ma
         url: 'https://github.com/connectome-neuprint/neuprint-python',
       },
     ],
-    ratherThan: 'Reach for this dataset if you want to focus on the ventral nerve cord alone or to confirm results from e.g. the MaleCNS.',
+    ratherThan:
+      'Reach for this dataset if you want to focus on the ventral nerve cord alone or to confirm results from e.g. the MaleCNS.',
   },
   {
     key: 'banc',
@@ -705,13 +698,12 @@ Like FlyWire this is a CAVE datastack which limits some of the analysis capabili
   },
   {
     key: 'catmaid.l1',
-    label: 'CATMAID L1',
+    label: 'L1',
     backend: 'catmaid',
     glyph: 'fly_larva',
     tier: 'reach',
     clade: 'fly-larva',
-    tagline:
-      'The first-instar larval central nervous system.',
+    tagline: 'The first-instar larval central nervous system.',
     specs: {
       specimen: 'First-instar Drosophila larva',
       region: 'Whole CNS — brain to abdominal neuromeres',
@@ -725,9 +717,7 @@ Like FlyWire this is a CAVE datastack which limits some of the analysis capabili
       'A complete brain connectome of a behaving animal',
       'Rich behavioural and genetic literature tied to identified neurons',
     ],
-    caveats: [
-      'Sparse outside the brain',
-    ],
+    caveats: ['Sparse outside the brain'],
     repositories: [
       {
         name: 'CATMAID (Virtual Fly Brain)',
@@ -765,13 +755,12 @@ Like FlyWire this is a CAVE datastack which limits some of the analysis capabili
 
   {
     key: 'catmaid.fafb',
-    label: 'CATMAID FAFB',
+    label: 'FAFB',
     backend: 'catmaid',
     glyph: 'fly_brain',
     tier: 'historical',
     clade: 'fly',
-    tagline:
-      'Manually traced neurons in the EM volume that eventually became FlyWire.',
+    tagline: 'Manually traced neurons in the EM volume that eventually became FlyWire.',
     specs: {
       specimen: 'Adult female Drosophila',
       region: 'Whole brain (volume); reconstructions are sparse',
@@ -783,9 +772,7 @@ Like FlyWire this is a CAVE datastack which limits some of the analysis capabili
     about: `The Female Adult Fly Brain volume, with sparse manual reconstructions in CATMAID from many labs over several years. Coda reads the published subset hosted by Virtual Fly Brain.
 
 Note that while this is the same EM volume as FlyWire, the latter is a re-aligned version of the former, so coordinates will differ somewhat.`,
-    strengths: [
-      'Some very high-quality hand-traced neurons (mileage may vary though)',
-    ],
+    strengths: ['Some very high-quality hand-traced neurons (mileage may vary though)'],
     caveats: [
       'Sparse — most of the brain was never traced, so absence of a partner means nothing',
     ],
