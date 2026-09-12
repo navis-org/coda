@@ -189,7 +189,7 @@
       -->
       <div class="detail" aria-hidden="true">
         <div class="detail__bar">
-          <span class="tb">Clear Results</span>
+          <span class="tb">Clear</span>
           <span class="tb">+ Add <b>Tab</b></span>
           <span class="tb">Commands <b>Space</b></span>
           <label class="tb tb--check"><i></i> Auto-run</label>
@@ -231,7 +231,7 @@
       <h2>Sockets are typed</h2>
       <p>
         A link carries a typed value, not a file. Each socket declares what it accepts, so a link
-        that cannot work is refused as you drag it &mdash; with the reason, at edit time.
+        that cannot work is refused as you drag it.
       </p>
       <div class="fig">
         <div class="legend">
@@ -244,13 +244,10 @@
           <div class="legend__row"><span class="swatch"><i class="sock" data-fam="layers" data-shape="ring"></i></span> <b class="ty ty--layers">Layers</b> &mdash; extra neuroglancer layers to draw alongside</div>
         </div>
         <p class="fig__cap">
-          Colour, shape and label &mdash; three channels, and none of them is decoration. Colour
-          names the <b>material</b> and shape separates the members within it, so a shape repeats
+          Colour names the <b>material</b> and shape separates the members within it, so a shape repeats
           <em>across</em> materials and never inside one: a skeleton and a table of Neurons are
-          both filled circles, Matrix and Transform both diamonds, and the hue says which. One
-          material can hold several shapes &mdash; the three marks above are all Geometries. Six
-          hues is past what an all-pairs colourblind check passes, which is exactly why the other
-          two channels carry the identity.
+          both filled circles, Matrix and Transform both diamonds, the hue says which. One
+          material can hold several shapes &mdash; the three marks above are all Geometries.
         </p>
       </div>
     </article>
@@ -272,15 +269,19 @@
         <strong>Auto-run</strong> means every edit re-runs the whole graph, expensive nodes included.
         On by default but can be turned off, so an expensive workflow is under your control.
       </p>
+      <p>
+        <strong>Clear</strong> removes all results, so you can start over. It does not remove any nodes or wiring.
+        Also worth trying if a node is stuck in e.g. an error.
+      </p>
     </article>
 
     <article class="beat" data-beat="3">
       <span class="beat__n">Chapter 4</span>
       <h2>A node for every question</h2>
       <p>
-        Coda provides nodes for many complex operations such as <code>Find&nbsp;Neurons</code>,
-        <code>Connectivity</code>, <code>Paths</code> or <code>Skeletons</code>. It also contains
-        primitives for many data processing steps - e.g.  <code>Filter</code>, <code>Group&nbsp;By</code>,
+        Coda provides nodes for complex operations such as <code>Find&nbsp;Neurons</code>,
+        <code>Connectivity</code>, <code>Paths</code> or <code>Skeletons</code>, and
+        primitives for basic data processing steps - e.g.  <code>Filter</code>, <code>Group&nbsp;By</code>,
         <code>Join</code>, <code>Pivot</code> and so on.
       </p>
       <p>

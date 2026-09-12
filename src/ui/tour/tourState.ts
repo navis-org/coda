@@ -117,7 +117,7 @@ export const TOURS = [
     id: 'map',
     label: 'Screen Map',
     short: 'Screen Map',
-    blurb: 'Everything on screen, labelled at once. About twenty seconds.',
+    blurb: 'Everything on screen, labelled at once.',
   },
   {
     id: 'guided',

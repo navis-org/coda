@@ -708,7 +708,7 @@ const CATMAID_FAMILIES: DatasetFamily[] = [
     family: '1',
     label: 'L1',
     description:
-      'Whole central nervous system of a first-instar fly larva. Published data hosted by VFB.',
+      'Central nervous system of a first-instar fly larva. Densely reconstructed brain, sparse elsewhere. Published data hosted by VFB.',
     guide:
       'The larval connectome: 5,013 hand-traced neurons across the whole first-instar central nervous system, brain to abdominal neuromeres, hosted by Virtual Fly Brain at https://l1em.catmaid.virtualflybrain.org/. Unlike FAFB this instance meta-annotates nothing, so a neuron\u2019s type is its own name and its large bag of annotations shows as Additional tags.',
     glyph: 'fly_larva',

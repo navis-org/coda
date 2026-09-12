@@ -457,7 +457,7 @@ export function Toolbar() {
               }}
             >
               <strong>Data &amp; Privacy</strong>
-              <span>How your data is handled and how to cite the datasets.</span>
+              <span>How data is handled and how to cite.</span>
             </button>
             <button
               type="button"

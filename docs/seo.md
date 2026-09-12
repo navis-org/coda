@@ -108,7 +108,7 @@ It has since been rewritten once more, for a reader the first pass did not have 
 reads:
 
 > A scientific web application for browser-based analysis and visualisation of public connectome
-> data: neuPrint, CAVE (FlyWire, MICrONS) and CATMAID.
+> data: neuPrint (male CNS, hemibrain), CAVE (FlyWire, BANC, MICrONS) and CATMAID.
 
 147 characters, with the weight in the first 120 because that is where a phone truncates. What
 changed and why: a search engine wants the backends by name, since those are the words somebody

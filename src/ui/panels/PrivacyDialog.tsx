@@ -61,63 +61,16 @@ function Dialog({ onClose }: { onClose: () => void }) {
       <ModalHeader onClose={onClose}>Data &amp; Privacy</ModalHeader>
 
       <div className="sources__body privacy__body">
-        <section className="privacy__group">
-          <h3>Where your data lives</h3>
-          <dl>
-            <div className="privacy__row">
-              <dt>Your workflow</dt>
-              <dd>
-                In this browser. Autosaved to local storage on this machine; a share link
-                carries the whole graph inside the address itself. There is no account and no
-                server of ours holding it.
-              </dd>
-            </div>
-            <div className="privacy__row">
-              <dt>Tokens &amp; keys</dt>
-              <dd>
-                In this browser&rsquo;s local storage, in the clear, on this machine only. Never
-                written into a saved graph or an export, never sent to us — each goes only to
-                the deployment it belongs to.
-              </dd>
-            </div>
-            <div className="privacy__row">
-              <dt>Connectome data</dt>
-              <dd>
-                Fetched straight from the publisher&rsquo;s servers to this page — neuPrint,
-                CAVE, CATMAID, Neuroglancer buckets — directly where they allow it, otherwise
-                through a same-origin relay. Analysis runs here, not on a server.
-              </dd>
-            </div>
-            <div className="privacy__row">
-              <dt>AI assistant</dt>
-              <dd>
-                Off unless you configure it. Your question and the graph on your canvas go
-                straight to the provider you pick, with no server of ours in between — as does a
-                summary of what its nodes last produced (row counts, value ranges, the commonest
-                values in a column), which you can switch off in the assistant drawer.
-              </dd>
-            </div>
-            <div className="privacy__row">
-              <dt>This site</dt>
-              <dd>
-                Counts page views only — no cookies, nothing kept in your browser, and{' '}
-                <a href={ANALYTICS_URL} target="_blank" rel="noreferrer noopener">
-                  the dashboard is public
-                </a>
-                . Nothing observes what you build.
-              </dd>
-            </div>
-          </dl>
-        </section>
-
         {/*
          * The callout, and the reason this dialog exists in a menu rather than in a document
          * nobody opens. Deliberately not a list of papers — see the file header.
          */}
         <section className="privacy__cite">
-          <h3>Citing the data</h3>
+          <h3>Citing the datasets</h3>
           <p>
-            <strong>The datasets Coda ships are public, but they are not unattributed.</strong>{' '}
+            <strong>
+              The datasets Coda queries are public, but they are not unattributed.
+            </strong>{' '}
             Each represents years of effort (sample prep, imaging, reconstruction, proofreading,
             curation, etc) by the group that published it, released on the understanding that
             work built on it says so.
@@ -133,6 +86,54 @@ function Dialog({ onClose }: { onClose: () => void }) {
             papers it asks for. If it does not, it is your responsibility to find the right
             citation.
           </p>
+        </section>
+
+        <section className="privacy__cite">
+          <h3>Where your data lives</h3>
+          <dl>
+            <div className="privacy__row">
+              <dt>Your workflow</dt>
+              <dd>
+                In this browser. Autosaved to local storage on this machine; a share link
+                carries the whole graph inside the address itself. There is no account and no
+                server of ours holding it.
+              </dd>
+            </div>
+            <div className="privacy__row">
+              <dt>Tokens &amp; keys</dt>
+              <dd>
+                In this browser&rsquo;s local storage, in the clear, on this machine only. Never
+                written into a saved graph or an export, never sent to us.
+              </dd>
+            </div>
+            <div className="privacy__row">
+              <dt>Connectome data</dt>
+              <dd>
+                Fetched straight from the publisher&rsquo;s servers to this page — neuPrint,
+                CAVE, CATMAID, Neuroglancer buckets. Analysis runs in your browser, not on a
+                server.
+              </dd>
+            </div>
+            <div className="privacy__row">
+              <dt>AI assistant</dt>
+              <dd>
+                Off unless you configure it. Your question and the graph on your canvas go
+                straight to the provider you pick, with no server of ours in between — as does a
+                summary of what its nodes last produced (row counts, value ranges, the commonest
+                values in a column), which you can switch off in the assistant drawer.
+              </dd>
+            </div>
+            <div className="privacy__row">
+              <dt>Visitor stats</dt>
+              <dd>
+                We count page views only — no cookies, nothing kept in your browser, and{' '}
+                <a href={ANALYTICS_URL} target="_blank" rel="noreferrer noopener">
+                  the dashboard is public
+                </a>
+                . Nothing tracks what you build.
+              </dd>
+            </div>
+          </dl>
         </section>
       </div>
     </Modal>
