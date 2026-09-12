@@ -67,7 +67,8 @@ import { configurableParams, defaultParams, makeInferContext } from '../core/nod
 import { getNodeDef, nodeDefsByCategory } from '../core/registry'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 import type { AttributePart, CodaType } from '../core/types'
-import { attributeSchema, columnNames, typeLabel } from '../core/types'
+import { socketLabel } from '../core/sockets'
+import { attributeSchema, columnNames } from '../core/types'
 import { plannableParams } from './planShape'
 
 /**
@@ -80,7 +81,13 @@ import { plannableParams } from './planShape'
  */
 function renderPort(port: PortDef, side: 'in' | 'out'): string {
   const optional = side === 'in' && port.required === false ? '?' : ''
-  return `${port.id}${optional} (${typeLabel(port.type)})`
+  /*
+   * `socketLabel`, so a port declared `T.any()` for a union prints the union's name. Not
+   * measured as a prompt change and not claimed as one — it is here because the alternative is
+   * the catalogue being the one surface still saying `Any` where five others say `Geometries`,
+   * and this file's own note is that a fact stated two ways is worse than either.
+   */
+  return `${port.id}${optional} (${socketLabel(port)})`
 }
 
 /**

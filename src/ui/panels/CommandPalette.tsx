@@ -20,8 +20,8 @@
 
 import { useMemo, useRef, useState } from 'react'
 
-import { typeLabel } from '../../core/types'
-import type { CodaType } from '../../core/types'
+import type { Socket } from '../../core/sockets'
+import { socketLabel } from '../../core/sockets'
 import { fuzzyRank } from './fuzzy'
 import type { PaletteAction, PaletteItem } from './paletteItems'
 import { PALETTE_ACTIONS, paletteSearchText } from './paletteItems'
@@ -35,8 +35,15 @@ export interface CommandPaletteProps {
   screenPosition: { x: number; y: number }
   /** Prefills the search box, e.g. "Add:" to restrict to node insertions. */
   initialQuery?: string
-  /** Set when opened by dragging from a socket. */
-  filterType?: CodaType
+  /**
+   * Set when opened by dragging from a socket: the end of the wire in flight.
+   *
+   * The whole socket rather than its type, because half the ports a drag can start from are
+   * declared `T.any()` with a `PortDef.kinds` beside them — dragging backwards out of `Mirror
+   * Neurons` reports `any`, and this header would then say "Nodes accepting Any" over a list
+   * narrowed to six.
+   */
+  filterSocket?: Socket
   onPick: (item: PaletteItem) => void
   onClose: () => void
 }
@@ -64,7 +71,7 @@ export function CommandPalette({
   items,
   screenPosition,
   initialQuery = '',
-  filterType,
+  filterSocket,
   onPick,
   onClose,
 }: CommandPaletteProps) {
@@ -109,13 +116,15 @@ export function CommandPalette({
       className="add-menu add-menu--palette"
       style={{ left, top, width }}
       role="dialog"
-      aria-label={filterType ? 'Add a connected node' : 'Command palette'}
+      aria-label={filterSocket ? 'Add a connected node' : 'Command palette'}
     >
       <input
         className="add-menu__search"
         autoFocus
         placeholder={
-          parsed.action === 'Add' || filterType ? 'Search nodes…' : 'Search commands and nodes…'
+          parsed.action === 'Add' || filterSocket
+            ? 'Search nodes…'
+            : 'Search commands and nodes…'
         }
         value={query}
         spellCheck={false}
@@ -139,9 +148,9 @@ export function CommandPalette({
         }}
       />
 
-      {filterType && (
+      {filterSocket && (
         <div className="add-menu__hint">
-          Nodes accepting <strong>{typeLabel(filterType)}</strong>
+          Nodes accepting <strong>{socketLabel(filterSocket)}</strong>
         </div>
       )}
 
@@ -193,10 +202,10 @@ export function CommandPalette({
         {ranked.length === 0 && (
           <div className="add-menu__empty">
             No matches
-            {filterType && (
+            {filterSocket && (
               <>
                 <br />
-                nothing accepts {typeLabel(filterType)} yet
+                nothing accepts {socketLabel(filterSocket)} yet
               </>
             )}
           </div>
@@ -207,7 +216,7 @@ export function CommandPalette({
         <span>↑↓ navigate</span>
         <span>⏎ run</span>
         <span>esc close</span>
-        {!parsed.action && !filterType && <span>Add: nodes only</span>}
+        {!parsed.action && !filterSocket && <span>Add: nodes only</span>}
       </div>
     </div>
   )

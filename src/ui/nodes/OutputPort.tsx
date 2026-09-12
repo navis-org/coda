@@ -40,7 +40,7 @@ import { createPortal } from 'react-dom'
 
 import type { PortDef } from '../../core/node'
 import type { CodaType } from '../../core/types'
-import { typeLabel } from '../../core/types'
+import { socketLabel } from '../../core/sockets'
 import { useGraphStore } from '../../store/graphStore'
 import { HOVER_DELAY_MS, useHoverPanel } from '../useHoverPanel'
 import { PortPreviewPanel } from './PortPreviewPanel'
@@ -120,7 +120,7 @@ export function OutputPort({
         title={
           open
             ? undefined
-            : `${label}: ${typeLabel(outputType)}` +
+            : `${label}: ${socketLabel(port, outputType)}` +
               (needsRun ? '\nRun this node to preview its output' : '')
         }
       />

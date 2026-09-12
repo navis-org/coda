@@ -40,6 +40,12 @@ const { nodes: NODES } = NODE_DATA as GuideData
  * inventory — the point is what the shapes mean, and a list generated from whatever types
  * happen to be in the registry would put `layout` between `network` and `skeletons` with
  * nothing to say about it.
+ *
+ * The last row is the one entry that is not a `CodaType` at all: it is what `portStyle` draws
+ * for a socket declaring `PortDef.kinds` over the geometry family, and it earns a line here for
+ * the same reason the filled circle above it does — a reader meets it on `Mirror Neurons` and
+ * has nowhere else to look it up. Hollow against filled is the whole distinction, and it is the
+ * lesson: the ring is a socket that *takes* the material, the disc is the material itself.
  */
 const LEGEND: ReadonlyArray<[fam: string, shape: string, name: string, why: string]> = [
   ['dataset', 'square', 'Dataset', 'a connectome to query'],
@@ -48,6 +54,7 @@ const LEGEND: ReadonlyArray<[fam: string, shape: string, name: string, why: stri
   ['matrix', 'diamond', 'Matrix', 'labelled rows × columns'],
   ['matrix', 'hex', 'Network', 'nodes and links'],
   ['geometry', 'circle', 'Geometry', 'skeletons, meshes, synapse points'],
+  ['geometry', 'ring', 'Geometries', 'a socket taking any of those three'],
 ]
 
 // ---------------------------------------------------------------------------

@@ -57,7 +57,13 @@
 
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
-import { elementNoun, emptyElement, isIterableKind, isIterableValue } from '../lib/iterables'
+import {
+  ITERABLE_KINDS,
+  elementNoun,
+  emptyElement,
+  isIterableKind,
+  isIterableValue,
+} from '../lib/iterables'
 import { isGroupMode, loopPlanFor, loopSliceFor } from './plan'
 
 registerNode({
@@ -80,8 +86,8 @@ registerNode({
    */
   cost: 'expensive',
   loop: 'begin',
-  inputs: [{ id: 'in', label: 'Items', type: T.any() }],
-  outputs: [{ id: 'item', label: 'Item', type: T.any() }],
+  inputs: [{ id: 'in', label: 'Items', type: T.any(), kinds: ITERABLE_KINDS }],
+  outputs: [{ id: 'item', label: 'Item', type: T.any(), kinds: ITERABLE_KINDS }],
   params: [
     {
       id: 'mode',

@@ -37,9 +37,9 @@
 import type { NodeCategory, NodeDefinition, ParamDef, PortDef } from '../core/node'
 import { getNodeDef } from '../core/registry'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
-import { isAssignable, typeLabel } from '../core/types'
+import { socketAccepts, socketLabel } from '../core/sockets'
 import { backendForNodeType } from '../nodes/lib/datasetFamilies'
-import { socketStyle } from '../ui/socketStyle'
+import { portStyle } from '../ui/socketStyle'
 import type { SocketFamily, SocketShape } from '../ui/socketStyle'
 import { paramIsPicker, paramValueLabel } from './paramText'
 
@@ -459,9 +459,11 @@ function portsOf(ports: readonly PortDef[]): FigurePort[] {
   return ports.map((port, index) => ({
     id: port.id,
     label: port.label ?? port.id,
-    ...socketStyle(port.type),
+    // The declaration, since a figure draws node types with nothing wired — `portStyle` and
+    // `socketLabel` are the pair that name a union `CodaType` cannot spell.
+    ...portStyle(port),
     required: port.required !== false,
-    type: typeLabel(port.type),
+    type: socketLabel(port),
     y: portY(index),
   }))
 }
@@ -508,16 +510,22 @@ function resolveWires(
       problems.push(`"${fromDef.type}" has no output "${line.fromPort ?? '(first)'}"`)
       continue
     }
+    /*
+     * `socketAccepts`, not `isAssignable`, on both halves. A port declared `T.any()` for a union
+     * `CodaType` cannot spell accepts everything as far as assignability is concerned, so this
+     * validator would pass a figure wiring a Linkage into `neuron.mirror`'s `in` — silently, and
+     * while the palette next door refuses that exact pair. `ResolvedPort` satisfies `Socket`.
+     */
     const into = line.toPort
       ? inputs.find((p) => p.id === line.toPort)
-      : (inputs.find((p) => isAssignable(out.type, p.type)) ?? inputs[0])
+      : (inputs.find((p) => socketAccepts(out, p)) ?? inputs[0])
     if (!into) {
       problems.push(`"${toDef.type}" has no input "${line.toPort ?? '(first)'}"`)
       continue
     }
-    if (!isAssignable(out.type, into.type)) {
+    if (!socketAccepts(out, into)) {
       problems.push(
-        `${fromDef.type}:${out.id} (${typeLabel(out.type)}) does not fit ${toDef.type}:${into.id} (${typeLabel(into.type)})`,
+        `${fromDef.type}:${out.id} (${socketLabel(out)}) does not fit ${toDef.type}:${into.id} (${socketLabel(into)})`,
       )
     }
 
@@ -527,7 +535,7 @@ function resolveWires(
       fromPort: out.id,
       to: line.to,
       toPort: into.id,
-      family: socketStyle(out.type).family,
+      family: portStyle(out).family,
       path: '',
     })
   }

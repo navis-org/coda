@@ -1483,6 +1483,57 @@ where before, two of the folds put two meanings on one hue *and* one shape.
 stylesheets that draw a socket. Do not add a seventh family without re-running the sweep;
 `theme.css` carries the numbers.
 
+### Geometries: a seventh row on the socket table that cost no seventh hue
+
+**Four ports were declared `T.any()` and drawn in the colour that means *anything at all*.**
+`CodaType` cannot spell "skeletons, meshes or points", so `Mirror Neurons`, `Transform Neurons`,
+`Stack Neurons` and `Split Neurons` all type their collection socket `any` and refuse the wrong
+kind in `validate` instead. The card drew that literally: a grey ring for the thing the node is
+*about*, beside a teal Warp and — once anything was wired — a violet Skeletons, so the same
+socket changed material the moment it was used.
+
+**The fix had to be free, because the section above says a seventh hue is not available.**
+`PortDef.kinds` names the set the node already refuses on, and `portStyle` draws a named set as
+a **ring** — the one shape the geometry family had not spent (circle is Skeletons, hex is Meshes,
+dot is Points). That is the shape channel doing exactly what the rule above asks of it: `ring`
+already means Table, Linkage and Layers, and the hue says which. No token, no stylesheet arm,
+nothing to re-measure.
+
+**The hue is asked of the set's members, not named beside its label**, and that is the half that
+would have gone wrong quietly. The first version read *if the set has a name, draw geometry/ring*
+— right for the only named set there is, and silently wrong for the next one: `kindSetLabel`
+gaining a "Collections" entry would have painted `For Each`'s table ports as violet geometry
+rings, in the passing direction, with no test to fail. `sharedFamily` asks each member kind for
+its own family and takes it only when they agree, so geometry answers violet, a mixed set answers
+the honest grey, and there is no second table to keep in step with the first.
+
+**Asking it *first* is what makes that true rather than written down.** The second version kept
+the name as an outer gate and consulted the members inside it — so the members-agree rule only
+ever ran on sets a name had already admitted, every one of them geometry, its interesting branch
+was unreachable through `portStyle`, and the helper had to be exported to be tested at all. The
+fix is one level down: `resolvedSocket` hands back the *kinds* rather than the set's name, each
+caller asks its own question of them, and `portStyle({ type: T.any(), kinds: ['matrix',
+'skeletons'] })` now answers grey where it can be seen. The two rules still have to agree about
+which kinds are geometry — `kindSetLabel` reads `GEOMETRY_KINDS`, `sharedFamily` reads the socket
+table — and a kind in one and not the other gives a violet ring labelled *Any*, so that
+coincidence is pinned directly.
+
+**Hollow against filled is the distinction, and it is the lesson.** A ring is a socket that
+*takes* the material; a disc is the material itself. The node guide's legend carries the pair for
+that reason — it is where a reader who meets the ring on a Mirror card goes to look it up.
+
+**A subset draws as the whole.** `Split Neurons` declines points, because a points collection's
+attribute rows are synapses rather than neurons, and it still says *Geometries* — a fifth
+silhouette for a set differing by one member buys nothing, and what the socket declines it still
+declines: `socketAccepts` reads the declared list, never this label. That asymmetry is also why
+`Geometries` is a **label rather than a `CodaType` kind**; see [nodes.md](nodes.md) for the whole
+argument, of which the short form is that a real union type would have to *admit* points on that
+port and refuse them one layer later, which is a looser filter than the one that shipped.
+
+Measured in Chrome on unwired cards: `#7f3df8` (`--socket-geometry`) at 2px over `--surface-2`,
+title `Neurons: Geometries`, against `#898781` on `For Each` and `Download`, which keep the grey
+because their sets have no name and no set at all respectively.
+
 ### A socket's hue is written down twice
 
 **`familyColorVar` answers it for the wire and a `data-family` rule answers it for the socket,
@@ -2031,6 +2082,80 @@ not turn it into per-dataset artwork.
 Note `fuzzyMatch` tries every occurrence of the query's first character as an anchor rather
 than scanning greedily once — without that, "res" ranks "Clear Results" below an item whose
 _description_ starts with "Rescale", because greedy takes the `r` in "Clea**r**".
+
+## Dropping a wire on empty canvas
+
+Letting go of a link drag over nothing opens the command palette filtered to nodes that can take
+what is on the wire, and picking one inserts it and wires it up. The filter was already there.
+**What it filtered on was `isAssignable`, and that is not the question.**
+
+**Dropping a `Tree` opened on five nodes that would all have refused it.** In order: `Mirror
+Neurons`, `Select One`, `Split Neurons`, `Stack Neurons`, `Transform Neurons` — then `Cut Tree`
+and `Dendrogram`, which are the only two nodes in the registry that take a linkage at all. Every
+one of the five leaders declares `T.any()` as a stand-in for a union `CodaType` cannot spell, and
+every one had the real answer written down already, as the predicate its own `validate` refuses
+on — `isGeometryKind`, `isSplitKind`, `isIterableKind`. Nothing connected the two, so the palette
+believed them and so did the card, which lit those sockets for every drag in the app.
+
+**`PortDef.kinds` is the connection, and it takes the same array.** Not a transcription of it:
+`GEOMETRY_KINDS` moved into `core/types.ts` (which kinds are geometry is a fact about `CodaType`),
+`ITERABLE_KINDS`, `SPLIT_KINDS` and `COLLECTABLE_KINDS` are exported from the modules that own
+them, and each node hands the port the array its predicate already reads. `registerNode` refuses
+the three spellings that fail silently — a set beside a concrete type, an empty set, `any` inside
+a set. `core/sockets.test.ts` sweeps the registry for an `any` port that declares neither
+`kinds` nor **`anyKind`** — the sibling field that says an `any` is deliberate — and one node
+holds it: **`out.download`, the only port that really means anything.** The exemption was an
+allow-list in the test first, which put a node fact in a test file with an unenforced prose twin
+in `download.ts`: you could delete the `kinds` off `Mirror Neurons`, add its name to the list,
+and ship a green build.
+
+**Then order, because filtering alone leaves 61 rows for a neuron table.** `socketTier` is four
+tiers — the kind itself, a widening `isAssignable` allows, a named union, a bare `any` — with
+*required before optional* under it. It is the mirror image of `wizard/demo.ts`' `tierOf`, which
+ranks the source end of the same question and was put there by two wrong demos. The optional key
+is what stopped a neuron table opening on eight dataset cards: every dataset has an optional
+`annotations` socket taking a table and `dataset` sorts first in the registry.
+
+**Declaration order stays inside the node**, and that was got wrong first in a way one row shows.
+Folded into the rank the caller sorts on, it made "the node whose *first* port takes this" beat
+"the node whose second port takes this", and a neuron drag opened on `Copy IDs` — whose only
+socket is a neuron table — above `Connectivity`, whose `neurons` port is its second. Between two
+nodes at one tier the order that means something is the registry's.
+
+**The drag carries the socket, not the type.** `dragPortSocket` reports the *declaration* on an
+input, which for these ports is `any` — so dragging backwards out of `Mirror Neurons` asked "what
+produces anything?" and answered with every producer there is. With the set it answers six, and
+the wire in flight leaves violet instead of grey, which is the second half of a sentence
+`draggedWireStyle`'s own doc comment had been making since before it was true.
+
+What it comes to, dropping from an output:
+
+| wire | before | after |
+| --- | --- | --- |
+| `Linkage` | 10 rows, `Mirror Neurons` first, `Cut Tree` sixth | **3 rows**, `Cut Tree`, `Dendrogram`, `Download` |
+| `Points` | `Split Neurons` offered | `Split Neurons` gone — it declines points — `syNBLAST` first |
+| `Skeletons` | 12 rows in category order | 12 rows, exact kinds first, unions next, `Download` last |
+| `Neurons` | 65 rows led by 8 dataset `annotations` sockets | 61 rows led by the queries; the datasets sit at 43–50 |
+
+**A wire outside a declared set is refused**, and that took a second round to get right. It
+shipped narrowing only what was *offered* — `producedBy`'s declaration-not-constraint line — and
+came back as a bug: `Mirror Neurons`' output draws as a violet Geometries ring and could be
+dropped straight onto a `Dataset` socket, which is a promise the picture makes and the behaviour
+broke. `checkConnection` reads the declaration now and says which two (`Geometries does not fit
+Dataset`, where the old message would have managed `Any does not fit Dataset`).
+
+**The half that made it invisible is worth more than the fix**: an unwired passthrough's
+`inferOutputs` hands back a perfectly truthy `T.any()`, so every reader that took the inferred
+type and stopped there threw away the only declaration that knew anything. Two did — the wire
+check and the *drag itself*, which is why the in-flight wire off that socket drew grey and dimmed
+nothing while the socket it left drew violet. `resolvedSocket` is that rule in one place, and
+`portStyle`'s "`any` counts as unresolved" clause turned out to be the same rule with a smaller
+reach. It also deleted work: `splice.ts` had grown a `socketAccepts` guard at each end for its own
+version of this, and `checkConnection` learning the rule subsumed both — the test that caught the
+spliced Mirror still passes with them gone, which is the evidence they were a symptom patch.
+
+An unresolved socket is still never refused: a bare `any` on either end passes, so a half-built
+graph wires up exactly as it did.
 
 ## Dropping a node onto a wire
 

@@ -137,7 +137,20 @@ describe('the two ends of a wire', () => {
     for (const [id, port] of added) expect(socketOf(id, port, 'target'), id).toEqual(geometry)
   })
 
-  it('keeps an unwired port on what it accepts, which is the whole of the fallback', async () => {
+  /*
+   * The fallback half, and what it draws changed once the declaration had something to say.
+   *
+   * It used to be the grey ring, which is `any`'s — correct while `any` was the whole of what
+   * `Stack Neurons` could declare, and a claim the node does not make now that `PortDef.kinds`
+   * exists: this socket takes skeletons, meshes or points and nothing else. A violet **ring**,
+   * so the family reads across the card while the shape still says nothing has arrived — a
+   * violet *circle* is Skeletons, which is a different statement.
+   *
+   * The ring is the one shape the geometry family had not spent, which is why `Geometries` cost
+   * no seventh hue; `socketStyle.ts` carries that argument and `theme.css` carries the
+   * measurement behind it.
+   */
+  it('draws an unwired port as the family it accepts, which is the whole of the fallback', async () => {
     // Nothing is flowing into `in2`, so there is nothing to report and the declaration stands.
     // Without this the rule reads as "inputs are inferred", which would leave an unwired port
     // with no type at all.
@@ -147,6 +160,6 @@ describe('the two ends of a wire', () => {
     await waitFor(() => {
       if (!socketOf(stack.id, 'in2', 'target')) throw new Error('drawing')
     })
-    expect(socketOf(stack.id, 'in2', 'target')).toEqual({ family: 'any', shape: 'ring' })
+    expect(socketOf(stack.id, 'in2', 'target')).toEqual({ family: 'geometry', shape: 'ring' })
   })
 })

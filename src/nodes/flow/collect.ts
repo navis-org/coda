@@ -40,10 +40,28 @@
  */
 
 import { registerNode } from '../../core/registry'
-import { T } from '../../core/types'
+import type { Kind } from '../../core/types'
+import { T, kindIn } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { stackTables } from '../lib/tableOps'
 import { isGeometryValue, stackGeometry } from '../lib/transformOps'
+
+/**
+ * The kinds `stackTables` or `stackGeometry` can put end to end.
+ *
+ * Declared above the node because both halves read it: `PortDef.kinds` on the two sockets, and
+ * `isCollectableKind` under `validate`. Written out here rather than composed from
+ * `ITERABLE_KINDS` and `GEOMETRY_KINDS`, whose union happens to be the same five today — an
+ * accident of two other nodes' requirements, and the sort of composition that turns a change to
+ * `For Each` into a silent change to what a loop can collect.
+ */
+const COLLECTABLE_KINDS = [
+  'table',
+  'neurons',
+  'skeletons',
+  'meshes',
+  'points',
+] as const satisfies readonly Kind[]
 
 registerNode({
   type: 'flow.collect',
@@ -62,10 +80,13 @@ registerNode({
   loop: 'end',
   /*
    * `any` on both ports, on `core.selectOne`'s reasoning: the type system cannot say "a table,
-   * skeletons or meshes", so the port says `any` and the refusal is a validation question.
+   * skeletons, meshes or points", so the port says `any` and the refusal is a validation
+   * question. `kinds` is the same list `validate` refuses on, so the palette stops offering a
+   * Collect for a wire it would then warn about — and it is a **fifth** list rather than
+   * `ITERABLE_KINDS` reused, because `points` can be stacked and cannot be stepped through.
    */
-  inputs: [{ id: 'in', label: 'Result', type: T.any() }],
-  outputs: [{ id: 'out', label: 'Collected', type: T.any() }],
+  inputs: [{ id: 'in', label: 'Result', type: T.any(), kinds: COLLECTABLE_KINDS }],
+  outputs: [{ id: 'out', label: 'Collected', type: T.any(), kinds: COLLECTABLE_KINDS }],
 
   /*
    * A pass-through of the *kind*, which is right for both halves of what this does: stacking N
@@ -119,13 +140,12 @@ registerNode({
   },
 })
 
-/** The kinds `stackTables` or `stackGeometry` can put end to end. */
+/**
+ * The kinds `stackTables` or `stackGeometry` can put end to end.
+ *
+ * The `any` arm `kindIn` supplies is unreachable here — the one caller has already excluded it,
+ * because an unresolved socket and a wrong one need different sentences on this node.
+ */
 function isCollectableKind(kind: string): boolean {
-  return (
-    kind === 'table' ||
-    kind === 'neurons' ||
-    kind === 'skeletons' ||
-    kind === 'meshes' ||
-    kind === 'points'
-  )
+  return kindIn(COLLECTABLE_KINDS, kind)
 }

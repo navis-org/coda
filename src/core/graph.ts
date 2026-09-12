@@ -709,6 +709,23 @@ export function nodePorts(node: GraphNode, side: 'input' | 'output'): readonly R
   return side === 'output' ? outputPorts(def, node.params) : inputPorts(def, node.params)
 }
 
+/**
+ * One of a node's resolved ports by id, or undefined.
+ *
+ * The `.find` on top of `nodePorts` that three sites had written out identically — the wire check
+ * in `inference.ts`, the drag origin, and the edge context menu. A fourth spelling had briefly
+ * appeared as a `findOutputPort` in `core/ports.ts`, which is the wrong level: a caller holding a
+ * `GraphNode` then has to find the definition and guard the unregistered case itself, which is
+ * the triple `nodePorts` exists to absorb.
+ */
+export function nodePort(
+  node: GraphNode,
+  side: 'input' | 'output',
+  portId: string,
+): ResolvedPort | undefined {
+  return nodePorts(node, side).find((port) => port.id === portId)
+}
+
 const NO_PORTS: readonly ResolvedPort[] = []
 
 export function setNodeParam(

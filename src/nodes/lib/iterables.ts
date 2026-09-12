@@ -25,7 +25,8 @@
  */
 
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
-import type { CodaType } from '../../core/types'
+import type { CodaType, Kind } from '../../core/types'
+import { kindIn } from '../../core/types'
 import type {
   CellValue,
   MeshesValue,
@@ -51,16 +52,22 @@ export function isIterableValue(v: Value | undefined): v is IterableValue {
  * One list rather than one per caller. Two copies is how a node starts refusing a kind its own
  * card still offers to step through.
  */
-const ITERABLE_KINDS = new Set<CodaType['kind']>([
-  'any',
+export const ITERABLE_KINDS = [
   'table',
   'neurons',
   'skeletons',
   'meshes',
-])
+] as const satisfies readonly Kind[]
 
+/*
+ * `any` is deliberately **not** in the array, and is added by `kindIn` instead. The two readers
+ * want opposite things from it: `validate` must let an unresolved socket through, and
+ * `PortDef.kinds` — which takes this same array, so `Select One` and `For Each` cannot come to
+ * declare one set and refuse another — would be cancelling itself, since a set admitting `any`
+ * admits every kind again. `registerNode` refuses that spelling outright.
+ */
 export function isIterableKind(kind: CodaType['kind'] | undefined): boolean {
-  return kind === undefined || ITERABLE_KINDS.has(kind)
+  return kindIn(ITERABLE_KINDS, kind)
 }
 
 /** What one element of this value is called, singular. For captions and messages. */

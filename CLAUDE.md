@@ -317,6 +317,60 @@ Area-specific — the rule, then the doc that holds why:
   reason. `moved` is a returned field now, and the test asserts the case jsdom can show: a decline
   keeps the routes.
   See [docs/canvas.md](docs/canvas.md).
+- **A port typed `T.any()` is usually not `any`, and six surfaces were believing it.** `CodaType`
+  has no union, so a socket meaning *skeletons, meshes or points* says `any` and its node refuses
+  the rest in `validate` — which was free until the palette, the socket dimming, the fill, the
+  tooltip, the inspector chip, the browser signature and the node guide all started reading the
+  declaration. Dropping a `Linkage` wire on empty canvas offered **`Mirror Neurons` first**, then
+  three more `… Neurons` nodes, with `Cut Tree` and `Dendrogram` — the only two nodes in the
+  registry that take a linkage — sixth and seventh; every leader would have been refused by its own
+  `validate` the moment it landed. `PortDef.kinds` takes **the array that predicate already reads**
+  (`GEOMETRY_KINDS` moved to `core/types.ts`, being a fact about `CodaType`; `SPLIT_KINDS`,
+  `ITERABLE_KINDS` and `COLLECTABLE_KINDS` stay where their judgement lives — five lists saying five
+  things, since points can be stacked and not stepped through). Three rules: the *predicates* keep
+  `any` (an unresolved socket is not a refusal) and the *declarations* may not, a set containing it
+  cancelling itself — `registerNode` throws, as it does on an empty set and on a set beside a
+  concrete type, all three being silent otherwise and two of them in the passing direction; kinds
+  are listed **as they arrive**, before `isAssignable`'s widening, so `ITERABLE_KINDS` names
+  `neurons` beside `table`; and **it refuses**, which was a second decision — it shipped as
+  `producedBy`'s declaration-not-constraint and came back as a bug inside the round, because once
+  a socket *draws* as Geometries a violet ring you can drop on a `Dataset` port is a promise the
+  picture makes and the behaviour breaks. That precedent covers facts that are not about *kinds*
+  and never reached a socket's appearance; refusing a kind mismatch with a reason is
+  `checkConnection`'s job. An unresolved socket is still never refused. Filtering alone was not enough (61 rows for a
+  neuron table), so `socketTier` orders — kind, widening, named union, bare `any`, with *required
+  before optional*, which is what stopped a neuron drag opening on eight dataset `annotations`
+  sockets. **Declaration order stays inside the node**: folded into the caller's rank it made "the
+  node whose *first* port takes this" win, and `Copy IDs` came up above `Connectivity`. Linkage:
+  10 rows → **3**. **`Geometries` is a label, not a `CodaType` kind**, and Split Neurons is the
+  argument — a real union would have to *admit* points there and refuse them at `validate`, i.e. a
+  looser filter than the one that shipped, on top of new cases in `isAssignable`, inference and
+  every key that hashes a type. It cost **no seventh hue**: violet was already geometry's and
+  `ring` the one shape that family had not spent, so hollow-vs-filled is the whole distinction
+  (a ring *takes* the material, a disc *is* it) and a **subset draws as the whole**. The family is
+  asked of the set's **members**, never of its label — gated on the label it only ever ran on sets
+  already admitted as geometry, so a second named set would have drawn violet in silence. The
+  clause easy to leave out: `any` counts as *unresolved* in the fill, since an unwired input has
+  no resolved type but an unwired passthrough **output** has one and it is `T.any()` — keyed on
+  `!== undefined`, a Mirror card reads violet on the left and grey on the right. **`resolvedSocket`
+  is that rule once**, for the name, the drawing, the wire check and the drag, and it is the one
+  five readers were each getting wrong the same way: `outputTypesFor` seeds a port's inferred type
+  from its own declaration before asking `inferOutputs`, so an unwired passthrough publishes a
+  perfectly *truthy* `T.any()` and `resolved ?? declared` keeps the wrong one. Three bugs from one
+  line of reasoning — a drop onto `Dataset` that landed, a wire that drew grey between two violet
+  sockets, and a backwards drag that dimmed nothing. Fixing it at that seam **deleted** the
+  `socketAccepts` guards `splice.ts` had grown at each end, its own test still passing — the tell
+  that those were a symptom patch. What it deliberately did **not** reach is `inferGraph`'s own
+  input check, which stays `isAssignable`: all seven ports declaring `kinds` took the array from a
+  `validate` that already reports, so a general check there is a second sentence on every card
+  that has one — and the worse sentence, since `socketLabel` can only name a set that *has* a
+  name. The cost is a pasted wire no gesture would have made, which the card still refuses in its
+  own words. **Absence means unaudited**,
+  so the one port that really is `any` says `anyKind: true` (`out.download`) and a registry sweep
+  refuses anything that says neither — an allow-list in the test came first and let a deleted
+  `kinds` ship green. The palette and `wizard/demo.ts` ask `socketAccepts` directly,
+  where every surface that merely *wires* one goes through `checkConnection`.
+  See [docs/nodes.md](docs/nodes.md) and [docs/canvas.md](docs/canvas.md).
 - **`defaultSize` sizes React Flow's _wrapper_, and only a viewer's card fills one**
   (`category: 'visualisation'`). Elsewhere it leaves the state bar hanging below the card. A
   node that only wants to be wider sets `NodeDefinition.cardWidth`.

@@ -50,6 +50,36 @@ and go through `ctx.column()` — see below.
 Then export it from [`src/nodes/index.ts`](../src/nodes/index.ts). That file is the node
 pack; importing it registers everything.
 
+### If a port has to be `T.any()`, say what it means
+
+`CodaType` has no union, so a port whose real answer is "skeletons, meshes or points" is typed
+`T.any()` and the node refuses the rest in `validate`. **Declare `kinds` beside it**, and hand it
+the array your `validate` already reads rather than a copy:
+
+```ts
+import { GEOMETRY_KINDS } from '../../core/types'
+
+inputs: [{ id: 'in', label: 'Neurons', type: T.any(), kinds: GEOMETRY_KINDS }],
+```
+
+Without it, every surface reads the `any` literally — the palette that opens when a wire is
+dropped on empty canvas offers your node for every wire in the app, the card lights its socket for
+every drag, and it draws in the grey that means *anything at all*. With it, the socket draws as
+the family, the offers narrow, and `checkConnection` **refuses** a kind outside the set with a
+message naming both ends (`Geometries does not fit Dataset`).
+
+Keep your `validate` exactly as it was: it still answers for the case the wire cannot, which is an
+upstream socket that has not resolved — `kinds` never refuses a bare `any`, because a half-built
+graph is not a wrong one.
+
+`registerNode` refuses `kinds` on a port with a concrete type, an empty set, and `any` inside the
+set, and `core/sockets.test.ts` sweeps the registry for an `any` that declares neither `kinds`
+nor `anyKind`. If your port really does take anything, say `anyKind: true` — absence otherwise
+means two things, "takes everything" and "nobody has looked at this yet", and only one of them
+should ship. `out.download` is the sole holder today.
+[nodes.md](nodes.md#portdefkinds-what-an-any-port-actually-means) has the five sets and why they
+are five.
+
 ## Prose
 
 Two fields, read in two places at two different moments, and both are required.

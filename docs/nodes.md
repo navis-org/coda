@@ -1933,6 +1933,96 @@ Coda: `LC4 → LC4a` on the one matching row, `group` created as `reviewed`/`<NA
 is the assertion that matters — it is what says the explicit `astype` is doing its job rather than
 the assignment silently upcasting to `object` on the way to becoming an error in pandas 3.
 
+## `PortDef.kinds`: what an `any` port actually means
+
+**Nine ports across six nodes are declared `T.any()`, and eight of them are not `any`.** The type
+system has no union, so a port whose real answer is *skeletons, meshes or points* says `any` and
+its node refuses the rest in `validate`. That was a fair trade for as long as nothing but the node
+read the declaration. Six surfaces do: the palette that opens when a wire is dropped on empty
+canvas, the socket dimming during a drag, the socket's own fill and tooltip, the inspector chip,
+the node browser's signature line, and the node guide. Every one of them believed `any` literally.
+
+The bill came due on the drop palette — dropping a `Linkage` opened on `Mirror Neurons` and three
+more `… Neurons` nodes above `Cut Tree` — and [canvas.md](canvas.md#dropping-a-wire-on-empty-canvas)
+has the numbers. What belongs here is the shape of the declaration.
+
+**It takes the array the predicate already reads, never a copy of it.** Five kind sets exist and
+each has one array:
+
+| set | where | who takes it |
+| --- | --- | --- |
+| `GEOMETRY_KINDS` | `core/types.ts` | Mirror, Transform, Stack Neurons |
+| `SPLIT_KINDS` | `nodes/lib/splitRows.ts` | Split Neurons |
+| `ITERABLE_KINDS` | `nodes/lib/iterables.ts` | Select One, For Each |
+| `COLLECTABLE_KINDS` | `nodes/flow/collect.ts` | Collect |
+| — (`anyKind: true`) | — | Download, the one port that means `any` literally |
+
+`GEOMETRY_KINDS` moved into `core/types.ts` from `transformOps.ts` because which kinds are
+geometry is a fact about `CodaType` and three modules outside `nodes/` need it. The other three
+stay where their *judgement* lives — `SPLIT_KINDS` is narrower than geometry because a points
+collection's attribute rows are synapses, `COLLECTABLE_KINDS` is wider than iterable because
+points can be stacked and cannot be stepped through, and that is five lists saying five things
+rather than one list being reused into being wrong.
+
+**Absence means "nobody has looked at this yet", so the one port that really is `any` says so.**
+`PortDef.anyKind` is the sibling field, held by `out.download` alone and by nothing else; it
+changes no behaviour — a declared-anything port and an undeclared one filter and draw identically
+— and exists so the sweep has something to read. It was an allow-list in the test file first,
+which is the shape this repo refuses elsewhere: a node fact living in a test, with `download.ts`
+carrying a second unenforced spelling in prose, and a green build available to anyone who deleted
+a real `kinds` and added the node's name to the list.
+
+**The predicates keep `any`; the declarations must not have it.** `isGeometryKind(undefined)` and
+`isGeometryKind('any')` are both true, because an unresolved upstream socket is not a refusal —
+that clause is why the predicate cannot simply be handed to the port. A *set* containing `any`
+admits every kind again, i.e. cancels itself, so `registerNode` throws on it, along with an empty
+set and a set beside a concrete type. All three fail silently otherwise, two of them in the
+passing direction.
+
+**List the kinds as they arrive, not as the node consumes them.** The set is intersected with
+what the wire carries *before* `isAssignable`'s widening, so a set meaning "anything tabular" has
+to name `neurons` beside `table` — which is why `ITERABLE_KINDS` has four members and not two.
+
+**It refuses, and that was a second decision.** It shipped as a declaration and not a
+constraint, on `producedBy` and `exclusiveGroup`'s line — narrow what is *offered* and what is
+*drawn*, and leave a hand-drawn wire to the node's own `validate`. That was reported as a bug
+inside the round: `Mirror Neurons`' output draws as a violet **Geometries** ring and could be
+dropped straight onto a `Dataset` socket. Once a declaration reaches the *picture*, letting the
+behaviour contradict it is not restraint. The precedent does not stretch this far either —
+`producedBy` and `exclusiveGroup` are not *kind* facts and never drove a socket's appearance,
+where refusing a kind mismatch with a reason is `checkConnection`'s whole job, and before `kinds`
+existed the socket drew grey `Any` and taking anything was honest.
+
+**What still never refuses is an unresolved socket.** `socketAccepts` passes a bare `any` on
+either end, so a half-built graph wires up as it always did, and each node's `validate` keeps the
+message for the case the wire cannot see.
+
+### Why "Geometries" is a label and not a `CodaType` kind
+
+A socket declaring only geometry kinds draws as a violet ring and reads *Geometries*
+([canvas.md](canvas.md#geometries-a-seventh-row-on-the-socket-table-that-cost-no-seventh-hue) has
+the colour argument, which is that it cost nothing). The obvious alternative was a real
+`{ kind: 'geometries' }` in `CodaType`, assignable from the three, and it is worse on the case
+that matters:
+
+- **`Split Neurons` declines points.** A union *type* would have to admit them on that port and
+  refuse them one layer later in `validate` — which is a **looser** filter than the one that
+  shipped, so the palette would go back to offering Split Neurons for a synapse cloud. With a
+  declared set the port takes two kinds, the palette offers it for two kinds, and it still draws
+  as the family, because a subset draws as the whole.
+- **A second mechanism would still be needed.** `ITERABLE_KINDS` is table + neurons + skeletons +
+  meshes, which no union type is going to be given a name for; `COLLECTABLE_KINDS` is a fifth
+  thing again. So the union would be an addition to `kinds`, not a replacement for it.
+- **It costs nothing to be wrong about.** A label touches drawing and offering. A kind touches
+  `isAssignable`, inference, every `kind === 'any'` branch and every provenance key that hashes a
+  type — for a gain the label already delivers.
+
+The price is that the name is only as narrow as the family: a reader looking at Split Neurons'
+socket is told *Geometries* and finds out about points from the node, not from the ring. That was
+the accepted trade — a fifth silhouette for a set differing by one member buys less than it costs
+— and it is checked rather than assumed: `socketAccepts` reads the declared list and never the
+label, with `core/sockets.test.ts` pinning both halves.
+
 ## Select One: stepping through a collection
 
 `core.selectOne`, `Add ▸ Transform ▸ Select One`. Forward and back through a table's rows, a
@@ -1971,7 +2061,9 @@ so in words, naming the position and the length — "emitting nothing" alone rea
 **`any` in, `any` out.** The type system cannot say "a table, skeletons or meshes", so the port
 says `any` and the refusal is a validation question — the same call `out.profile` makes about
 needing a `neuronId`. The output type is the input type untouched, so one row of a Neurons table is
-still Neurons with the same columns and nothing downstream loses a column picker.
+still Neurons with the same columns and nothing downstream loses a column picker. Both ports carry
+`kinds: ITERABLE_KINDS` beside the `any` — see [the section below](#portdefkinds-what-an-any-port-actually-means),
+which is about the five nodes that make this same call and the surfaces that were believing them.
 
 ### What an iterable is
 

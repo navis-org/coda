@@ -14,7 +14,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import { getNodeDef } from '../../core/registry'
-import { T } from '../../core/types'
+import { GEOMETRY_KINDS, T } from '../../core/types'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
@@ -361,6 +361,99 @@ describe('buildNodeItems', () => {
     const items = buildNodeItems({ type: T.neurons(), from: 'source' })
     expect(items.map((i) => i.nodeType)).toContain('core.filterTable')
   })
+
+  /*
+   * The reported case, which is what `PortDef.kinds` was added for.
+   *
+   * Dropping a `Tree` wire on empty canvas opened on `Mirror Neurons`, then `Select One`,
+   * `Split Neurons`, `Stack Neurons` and `Transform Neurons` — five ports declared `T.any()` to
+   * stand in for a union `CodaType` cannot spell, every one of which its own `validate` would
+   * have refused the moment the wire landed — with `Cut Tree` and `Dendrogram`, the only two
+   * nodes in the registry that take a linkage, sixth and seventh.
+   */
+  it('drops the passthroughs a Linkage cannot actually feed, and leads with the two that take one', () => {
+    const types = buildNodeItems({ type: T.linkage(), from: 'source' }).map((i) => i.nodeType)
+    expect(types.slice(0, 2)).toEqual(['cluster.cut', 'out.dendrogram'])
+    expect(types).not.toContain('neuron.mirror')
+    expect(types).not.toContain('neuron.stack')
+    expect(types).not.toContain('core.selectOne')
+    // Download is the one port that really does take anything, and it is offered last.
+    expect(types.at(-1)).toBe('out.download')
+  })
+
+  /*
+   * The narrowing a named union type could not have expressed, and the reason `Geometries` is a
+   * label rather than a `CodaType`: `Split Neurons` takes skeletons and meshes and refuses
+   * points, because a points collection's attribute rows are synapses. It still *draws* as
+   * Geometries — see `socketStyle.test.ts` — and it is still absent here.
+   */
+  it('honours a set narrower than the family it draws as', () => {
+    const points = buildNodeItems({ type: T.points(), from: 'source' }).map((i) => i.nodeType)
+    expect(points).toContain('neuron.mirror')
+    expect(points).not.toContain('neuron.splitNeurons')
+
+    const skeletons = buildNodeItems({ type: T.skeletons(), from: 'source' }).map(
+      (i) => i.nodeType,
+    )
+    expect(skeletons).toContain('neuron.splitNeurons')
+  })
+
+  /*
+   * Order, with nothing removed: exact kind, then a widening `isAssignable` allows, then a named
+   * union, then a bare `any`. Asserted as an ordering over one drag rather than as four rows,
+   * because the rows move whenever a node is registered and the *relation* is the rule.
+   */
+  it('ranks an exact port above a widened one, a union above a bare any', () => {
+    const types = buildNodeItems({ type: T.skeletons(), from: 'source' }).map((i) => i.nodeType)
+    const at = (type: string) => {
+      const index = types.indexOf(type)
+      expect(index, type).toBeGreaterThanOrEqual(0)
+      return index
+    }
+    // `Clean Skeletons` takes Skeletons; `Mirror` takes the family; `Download` takes anything.
+    expect(at('neuron.cleanSkeletons')).toBeLessThan(at('neuron.mirror'))
+    expect(at('neuron.mirror')).toBeLessThan(at('out.download'))
+  })
+
+  /*
+   * A required port before an optional one, which is the key that stopped a neuron table opening
+   * on eight dataset cards: every dataset has an optional `annotations` socket taking a table,
+   * and `dataset` sorts first in the registry. Wiring one is a real thing to do and stays
+   * offered — it is just not what somebody dragging a neuron table usually means.
+   */
+  it('puts a node built for the wire above one that merely has an optional socket for it', () => {
+    const types = buildNodeItems({ type: T.neurons(), from: 'source' }).map((i) => i.nodeType)
+    expect(types.indexOf('core.filterTable')).toBeLessThan(types.indexOf('dataset.flywire'))
+    expect(types).toContain('dataset.flywire')
+  })
+
+  /*
+   * Backwards out of a port typed `any`. `dragPortSocket` reports the declaration on an input,
+   * so
+   * without the set this asked "what produces anything?" and answered with every producer in the
+   * registry — for a socket that takes three kinds.
+   */
+  it('reads a declared set on the dragged end too, not only on the candidate', () => {
+    const types = buildNodeItems({
+      type: T.any(),
+      kinds: GEOMETRY_KINDS,
+      from: 'target',
+    }).map((i) => i.nodeType)
+    expect(types).toContain('neuron.skeletons')
+    expect(types).toContain('neuron.meshes')
+    expect(types).not.toContain('neuron.findNeurons')
+    expect(types).not.toContain('core.filterTable')
+  })
+
+  /*
+   * Best rather than first. `find` handed back whichever port was declared earliest, so a node
+   * with an exact socket after a widened one was wired to the wrong half of itself.
+   */
+  it("picks the node's best port rather than its first", () => {
+    const items = buildNodeItems({ type: T.neurons(), from: 'source' })
+    // `Connectivity` has a Dataset, then `neurons`, then an optional `labels` table.
+    expect(byId(items, 'node:neuron.connectivity').portId).toBe('neurons')
+  })
 })
 
 describe('CommandPalette', () => {
@@ -562,12 +655,30 @@ describe('CommandPalette', () => {
 
   it('names the required type when opened from a link drag', () => {
     open({
-      filterType: T.matrix(),
+      filterSocket: { type: T.matrix() },
       items: buildNodeItems({ type: T.matrix(), from: 'source' }),
     })
     expect(screen.getByPlaceholderText('Search nodes…')).toBeTruthy()
     expect(screen.getByText(/Nodes accepting/)).toBeTruthy()
     expect(screen.getByText('Matrix')).toBeTruthy()
+  })
+
+  /*
+   * The header names the *socket*, and this case is why the prop is one.
+   *
+   * Dragging backwards out of a geometry port reports `any` — the port is typed `T.any()` for a
+   * union `CodaType` cannot spell — so a header built from the type alone read "Nodes accepting
+   * Any" over a list narrowed to six rows. It also stands where a rename went silent once: the
+   * prop was `filterType` and `Editor` began passing `filterSocket`, which a conditional JSX
+   * spread lets past `tsc` and which this suite could not see, because it called the component
+   * directly with the old name.
+   */
+  it('names the declared set, not the `any` a geometry port is typed as', () => {
+    open({
+      filterSocket: { type: T.any(), kinds: GEOMETRY_KINDS },
+      items: buildNodeItems({ type: T.any(), kinds: GEOMETRY_KINDS, from: 'target' }),
+    })
+    expect(screen.getByText('Geometries')).toBeTruthy()
   })
 
   it('keeps itself on screen when opened near a viewport edge', () => {

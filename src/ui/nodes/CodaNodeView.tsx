@@ -27,7 +27,8 @@ import {
 } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
 import { hasHelp } from '../../help/registry'
-import { datasetRef, isAssignable, typeLabel } from '../../core/types'
+import { resolvedSocket, socketAccepts, socketLabel } from '../../core/sockets'
+import { datasetRef } from '../../core/types'
 import { describeValue, isDatasetValue } from '../../core/values'
 import { useGraphStore } from '../../store/graphStore'
 import { exportBaseName } from '../export'
@@ -35,8 +36,8 @@ import { formatDuration } from '../format'
 import { ParamField } from '../params/ParamField'
 import { IssueText } from '../IssueText'
 import { bucketParams } from '../params/paramGroups'
-import { socketStyle } from '../socketStyle'
-import { dragPortType, useDragOrigin } from '../dragOrigin'
+import { portStyle } from '../socketStyle'
+import { dragPortSocket, useDragOrigin } from '../dragOrigin'
 import { drawsFromInputs, ValuePreview } from '../viewers/ValuePreview'
 import { CacheAge } from './CacheAge'
 import { DatasetCacheAge } from './DatasetCacheAge'
@@ -398,10 +399,11 @@ function CodaNodeViewImpl({
    */
   const showHidden = !node.collapsed && !folded && hidden.length > 0
 
-  // The type being dragged, resolved once per render rather than per socket.
-  const draggedType =
+  // What is being dragged, resolved once per render rather than per socket. The whole socket,
+  // not just its type: a port declared `T.any()` for a named union reports `any` here.
+  const dragged =
     dragOrigin && dragOrigin.nodeId !== id
-      ? dragPortType(useGraphStore.getState().graph, inference, dragOrigin)
+      ? dragPortSocket(useGraphStore.getState().graph, inference, dragOrigin)
       : undefined
 
   return (
@@ -640,17 +642,35 @@ function CodaNodeViewImpl({
               (i) => i.severity === 'error' && input && i.portId === input.id,
             )
 
-            // Dragging from an output only concerns inputs, and vice versa.
+            /*
+             * Dragging from an output only concerns inputs, and vice versa.
+             *
+             * `socketAccepts` rather than `isAssignable`, and it is the same call the palette's
+             * filter makes: a port declared `T.any()` for a union `CodaType` cannot spell would
+             * otherwise stay lit for every wire in the app, so a Linkage drag lit up the input
+             * of every Mirror, Transform, Stack and Split card on the canvas.
+             *
+             * `resolvedSocket` on the output arm, or the backwards drag drops the declaration:
+             * an unwired passthrough's `outputType` is a truthy `T.any()`, so `{ type: outputType }`
+             * left every geometry output lit for a Linkage while `checkConnection` refused it —
+             * the same mistake this whole change is about, made once more inside the fix.
+             *
+             * **Dimming still means *this drop will be rejected***, which it briefly did not.
+             * `PortDef.kinds` shipped narrowing this and the palette but not `checkConnection`,
+             * so for one round a dim socket was merely a socket not offered — and a wire could
+             * be dropped on it anyway. That is the state the report came from, and
+             * `checkConnection` reads the declaration now, so the two are one statement again.
+             */
             const dimInput =
-              draggedType !== undefined &&
+              dragged !== undefined &&
               dragOrigin?.handleType === 'source' &&
               input !== undefined &&
-              !isAssignable(draggedType, input.type)
+              !socketAccepts(dragged, input)
             const dimOutput =
-              draggedType !== undefined &&
+              dragged !== undefined &&
               dragOrigin?.handleType === 'target' &&
               outputType !== undefined &&
-              !isAssignable(outputType, draggedType)
+              !socketAccepts(resolvedSocket(output, outputType), dragged)
 
             /*
              * **What it carries, falling back to what it accepts** — one rule, both sides, and
@@ -661,11 +681,11 @@ function CodaNodeViewImpl({
              * `Input 2`. No single socket was wrong; the reading flipped at every port because
              * one side of each pair answered a different question.
              *
-             * Not `dragPortType`, which answers that *other* question and has to keep doing so:
+             * Not `dragPortSocket`, which answers that *other* question and has to keep doing so:
              * what a port accepts is what the dimming above compares against.
              */
-            const inStyle = socketStyle(inputType ?? input?.type)
-            const outStyle = socketStyle(outputType)
+            const inStyle = portStyle(input, inputType)
+            const outStyle = portStyle(output, outputType)
             return (
               <div className="port-row" key={row}>
                 <div
@@ -683,7 +703,7 @@ function CodaNodeViewImpl({
                         data-family={inStyle.family}
                         data-shape={inStyle.shape}
                         data-compatible={dimInput ? 'false' : undefined}
-                        title={`${input.label ?? input.id}: ${typeLabel(inputType ?? input.type)}`}
+                        title={`${input.label ?? input.id}: ${socketLabel(input, inputType)}`}
                       />
                       <span className="port-label">{input.label ?? input.id}</span>
                     </>

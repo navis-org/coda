@@ -16,7 +16,7 @@
 import type { DataSource } from '../data/source'
 import type { CompanionSpec } from './companion'
 import { ID_COLUMN_NAME } from './ids'
-import type { AttributePart, CodaType, DType, TableSchema } from './types'
+import type { AttributePart, CodaType, DType, Kind, TableSchema } from './types'
 import { attributeSchema, columnsOfType, schemaOf } from './types'
 import { inputPorts, outputPorts } from './ports'
 import type { Value } from './values'
@@ -121,6 +121,54 @@ export interface PortDef {
    * rather than a rule that refuses.
    */
   exclusiveGroup?: string
+  /**
+   * The kinds this socket can hold, where `type` is `T.any()` because `CodaType` cannot spell
+   * the union. Legal **only** on an `any` port — `registerNode` refuses it anywhere else, since
+   * a second statement beside a concrete type is a second statement that can disagree.
+   *
+   * `any` on these ports never meant *anything*. `Mirror Neurons`, `Transform Neurons` and
+   * `Stack Neurons` want skeletons, meshes or points; `Split Neurons` wants two of those three;
+   * `Select One` and `For Each` want something steppable. Each already had the real list, as the
+   * predicate its own `validate` refuses on — so this field takes **that same array**, never a
+   * transcription of it, and the list stays one array per set.
+   *
+   * What reads it, and the asymmetry between the two sides:
+   *
+   * - **On an input it filters, and it refuses.** `socketAccepts` rejects a kind outside the set,
+   *   which is what stops the drop-a-wire-on-empty-canvas palette offering `Mirror Neurons` as
+   *   the first answer for a `Linkage` (it was, above both `Cut Tree` and `Dendrogram`), what
+   *   dims the socket during a drag it cannot take, and — since a round later — what
+   *   `checkConnection` refuses on. It shipped as a declaration only, on `producedBy`'s
+   *   precedent, and that was wrong here: those two are not *kind* facts and never drove a
+   *   socket's appearance, where this one draws the port as **Geometries** and a violet ring you
+   *   can drop on a `Dataset` socket is a picture the behaviour contradicts.
+   * - **On an output it only draws.** The backwards drag deliberately skips every `any` output,
+   *   declared set or not, on the argument `buildNodeItems` states: a pass-through cannot
+   *   *originate* a kind, so offering one answers the question with a node that needs the same
+   *   question asked again behind it. Declared there so an unwired `Mirror` reads violet in and
+   *   violet out rather than changing material halfway across its own card.
+   *
+   * **List the kinds as they arrive, not as they are consumed.** The set is intersected with
+   * what a wire carries *before* any widening, so a set that takes tables has to name `neurons`
+   * as well — which is why `ITERABLE_KINDS` has four members and not two.
+   */
+  kinds?: readonly Kind[]
+  /**
+   * Inputs and outputs: this `T.any()` really does mean *anything*, and nobody has to check.
+   *
+   * The counterpart to `kinds`, and it exists because absence otherwise says two things — "this
+   * port takes everything" and "nobody has audited this port yet". `sockets.test.ts` sweeps the
+   * registry for a bare `T.any()`, and while the exemption was an allow-list in that test file
+   * you could delete the `kinds` off `Mirror Neurons`, add its name to the list, and ship a green
+   * build. Here it is the port's own statement, in the file where the reason for it is.
+   *
+   * `out.download` is the only holder: its input takes whatever is wired and its output passes
+   * whatever it was given. `registerNode` refuses it beside a concrete type or beside `kinds`,
+   * both of which would be the port saying two things. It changes no behaviour — a declared-
+   * anything port and an undeclared one filter and draw identically — which is the point: it is
+   * a statement about the *author*, not about the wire.
+   */
+  anyKind?: true
 }
 
 /**

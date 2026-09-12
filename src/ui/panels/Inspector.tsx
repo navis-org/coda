@@ -11,7 +11,9 @@ import { IssueText } from '../IssueText'
 
 import { makeInferContext, visibleParams } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
-import { typeLabel } from '../../core/types'
+import type { Socket } from '../../core/sockets'
+import type { CodaType } from '../../core/types'
+import { socketLabel } from '../../core/sockets'
 import { describeValue } from '../../core/values'
 import { hasHelp } from '../../help/registry'
 import { useGraphStore, useSelectedNode } from '../../store/graphStore'
@@ -19,7 +21,7 @@ import { exportBaseName } from '../export'
 import { formatDuration } from '../format'
 import { nodeIssues } from '../nodes/nodeIssues'
 import { ParamField } from '../params/ParamField'
-import { familyColorVar, socketStyle } from '../socketStyle'
+import { familyColorVar, portStyle } from '../socketStyle'
 import { ValuePreview } from '../viewers/ValuePreview'
 import { firstOutputPort, inputPorts, outputPorts } from '../../core/ports'
 
@@ -194,10 +196,7 @@ export function Inspector() {
                       in
                     </span>
                     <span style={{ fontSize: 11, flex: 1 }}>{port.label ?? port.id}</span>
-                    <TypeChip
-                      label={typeLabel(resolved ?? port.type)}
-                      type={resolved ?? port.type}
-                    />
+                    <TypeChip socket={port} resolved={resolved} />
                   </div>
                 )
               })}
@@ -212,7 +211,7 @@ export function Inspector() {
                       out
                     </span>
                     <span style={{ fontSize: 11, flex: 1 }}>{port.label ?? port.id}</span>
-                    <TypeChip label={typeLabel(resolved)} type={resolved} />
+                    <TypeChip socket={port} resolved={resolved} />
                   </div>
                 )
               })}
@@ -287,12 +286,21 @@ export function Inspector() {
   )
 }
 
-function TypeChip({ label, type }: { label: string; type: Parameters<typeof socketStyle>[0] }) {
+/**
+ * The socket and what is on it, not a label and a type.
+ *
+ * Two props derived from one pair is how the dot and the words come to disagree, and they did:
+ * the label was moved to `socketLabel` and the dot left on the type alone,
+ * so an unwired `Mirror Neurons` input read "Geometries" beside a grey `any` dot. One pair in,
+ * both halves derived here.
+ */
+function TypeChip({ socket, resolved }: { socket: Socket; resolved?: CodaType }) {
+  const label = socketLabel(socket, resolved)
   return (
     <span className="type-chip" title={label}>
       <span
         className="type-chip__dot"
-        style={{ background: familyColorVar(socketStyle(type).family) }}
+        style={{ background: familyColorVar(portStyle(socket, resolved).family) }}
       />
       {label}
     </span>

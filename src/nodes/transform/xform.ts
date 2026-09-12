@@ -77,7 +77,7 @@
  */
 
 import { registerNode } from '../../core/registry'
-import { T } from '../../core/types'
+import { GEOMETRY_KINDS, T } from '../../core/types'
 import { isTransformValue } from '../../core/values'
 import {
   COMMON_SPACE,
@@ -127,7 +127,7 @@ registerNode({
   // `any` in, `any` out, on `core.selectOne`'s reasoning: the type system cannot say "skeletons,
   // meshes or points", so the port says `any` and the refusal is a validation question.
   inputs: [
-    { id: 'in', label: 'Neurons', type: T.any() },
+    { id: 'in', label: 'Neurons', type: T.any(), kinds: GEOMETRY_KINDS },
     /*
      * A registration this build does not ship. Wired, it **replaces the route entirely** —
      * Target and Space are ignored, because a supplied transform already says what it maps and
@@ -136,7 +136,7 @@ registerNode({
      */
     { id: 'transform', label: 'Transform', type: T.transform(), required: false },
   ],
-  outputs: [{ id: 'out', label: 'Transformed', type: T.any() }],
+  outputs: [{ id: 'out', label: 'Transformed', type: T.any(), kinds: GEOMETRY_KINDS }],
   params: [
     {
       id: 'target',

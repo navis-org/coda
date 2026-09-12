@@ -50,7 +50,8 @@ import { useCallback, useEffect, useMemo } from 'react'
 
 import { subgraphOf } from '../../core/clipboard'
 import type { GraphNode } from '../../core/graph'
-import { referenceEdgeIds } from '../../core/graph'
+import { nodesById, referenceEdgeIds } from '../../core/graph'
+import { outputSocket } from '../../core/inference'
 import { groupById } from '../../core/groups'
 import { FIT_VIEW_OPTIONS } from '../fitView'
 import type { CodaNodeData } from '../nodes/CodaNodeView'
@@ -152,6 +153,13 @@ function PeekPanel({ groupId }: { groupId: string }) {
     // node's wires looked live in the panel and ordinary on the canvas.
     const references = referenceEdgeIds(fragment)
     const muted = new Set(fragment.nodes.filter((n) => n.disabled).map((n) => n.id))
+    // The socket, not the inferred type alone — a passthrough with nothing wired infers a truthy
+    // `T.any()`, which drew a grey wire between two violet sockets. `Editor`'s rule, asked here.
+    const byId = nodesById(fragment)
+    const sourceSocket = (nodeId: string, portId: string) => {
+      const node = byId.get(nodeId)
+      return node ? outputSocket(node, inference, portId) : undefined
+    }
     return fragment.edges.map((edge) => ({
       id: edge.id,
       type: 'coda',
@@ -165,10 +173,7 @@ function PeekPanel({ groupId }: { groupId: string }) {
       deletable: false,
       reconnectable: false,
       ...(references.has(edge.id) ? { className: 'coda-edge--reference' } : {}),
-      style: wireStyle(
-        inference.nodes[edge.source]?.outputs[edge.sourceHandle],
-        muted.has(edge.source),
-      ),
+      style: wireStyle(sourceSocket(edge.source, edge.sourceHandle), muted.has(edge.source)),
     }))
   }, [fragment, inference])
 

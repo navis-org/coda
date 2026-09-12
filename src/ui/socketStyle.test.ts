@@ -1,7 +1,7 @@
 /**
  * The socket vocabulary, and the one part of it a test can reach.
  *
- * `socketStyle` itself is a lookup and its contract is that colour never carries the type alone
+ * `portStyle` itself is a lookup and its contract is that colour never carries the type alone
  * (`colors.ts`: only three chromatic families clear the all-pairs colourblind gate, which is why
  * every socket is hue **plus** shape **plus** a visible label). What is asserted here is the
  * shape half staying distinct, and the one geometric rule that lives in CSS and cannot be
@@ -14,18 +14,18 @@ import { describe, expect, it } from 'vitest'
 
 import { cssRule } from '../test/cssRule'
 
-import { T } from '../core/types'
-import { draggedWireStyle, familyColorVar, socketStyle, typeColorVar } from './socketStyle'
+import { GEOMETRY_KINDS, T } from '../core/types'
+import { draggedWireStyle, familyColorVar, portStyle, typeColorVar } from './socketStyle'
 import type { SocketFamily } from './socketStyle'
 
 const CSS = readFileSync('src/ui/editor.css', 'utf8')
 
 const rule = (selector: string) => cssRule(CSS, selector)
 
-describe('socketStyle', () => {
+describe('portStyle: the type table', () => {
   it('gives a matrix its own shape as well as its own hue', () => {
-    expect(socketStyle(T.matrix())).toEqual({ family: 'matrix', shape: 'diamond' })
-    expect(socketStyle(T.table()).shape).not.toBe('diamond')
+    expect(portStyle({ type: T.matrix() })).toEqual({ family: 'matrix', shape: 'diamond' })
+    expect(portStyle({ type: T.table() }).shape).not.toBe('diamond')
   })
 })
 
@@ -125,14 +125,109 @@ describe('a socket and its wire agree on the hue', () => {
 
 describe('draggedWireStyle', () => {
   it('is the origin type colour, and nothing else', () => {
-    expect(draggedWireStyle(T.matrix())).toEqual({ stroke: typeColorVar(T.matrix()) })
+    expect(draggedWireStyle({ type: T.matrix() })).toEqual({ stroke: typeColorVar(T.matrix()) })
     // No width and no dasharray: those live in `editor.css` and say *in flight*, not what is
     // flowing, so a wire that lands must not inherit them.
-    expect(Object.keys(draggedWireStyle(T.table()))).toEqual(['stroke'])
+    expect(Object.keys(draggedWireStyle({ type: T.table() }))).toEqual(['stroke'])
   })
 
   it('falls back to the achromatic token rather than to the accent', () => {
     // A drag from a port whose type has not resolved is grey, which is what its socket is.
     expect(draggedWireStyle(undefined).stroke).toBe('var(--socket-scalar)')
+  })
+
+  /*
+   * The half of this function's own doc comment that was not true until `PortDef.kinds` existed:
+   * "dragged backwards from an input it is the colour of what that port accepts". A geometry
+   * port declares `T.any()`, so the wire left `Mirror Neurons` grey and the reader was hunting
+   * for violet sockets with a grey wire in hand.
+   */
+  it('takes a declared kind set over the `any` the port is typed as', () => {
+    expect(draggedWireStyle({ type: T.any(), kinds: GEOMETRY_KINDS }).stroke).toBe(
+      'var(--socket-geometry)',
+    )
+    expect(draggedWireStyle({ type: T.any() }).stroke).toBe('var(--socket-scalar)')
+  })
+})
+
+/**
+ * The one row of the socket table that is not a `CodaType`.
+ *
+ * Both halves are load-bearing and both fail silently. The **family** is what makes the four
+ * `… Neurons` cards read as being about geometry at all; drawn from the type alone they
+ * were grey, which in this vocabulary means *anything at all* and is the claim `PortDef.kinds`
+ * exists to withdraw. The **shape** has to be one the geometry family has not already spent, or
+ * an unwired Mirror input is indistinguishable from a Skeletons — and `ring` was the only one
+ * left, which is why this needed no seventh hue and no stylesheet change (see `theme.css` on
+ * why a seventh hue is not available to spend).
+ */
+describe('portStyle', () => {
+  it('draws a geometry-only `any` port as a violet ring', () => {
+    expect(portStyle({ type: T.any(), kinds: GEOMETRY_KINDS })).toEqual({
+      family: 'geometry',
+      shape: 'ring',
+    })
+  })
+
+  it('draws a subset of geometry the same way — Split Neurons declines points and still says so', () => {
+    expect(portStyle({ type: T.any(), kinds: ['skeletons', 'meshes'] })).toEqual({
+      family: 'geometry',
+      shape: 'ring',
+    })
+  })
+
+  it('leaves a set with no name, and a bare `any`, in the achromatic ring', () => {
+    // `For Each` steps through tables as well as geometry, so no family names it.
+    expect(
+      portStyle({ type: T.any(), kinds: ['table', 'neurons', 'skeletons', 'meshes'] }),
+    ).toEqual({ family: 'any', shape: 'ring' })
+    expect(portStyle({ type: T.any() })).toEqual({ family: 'any', shape: 'ring' })
+  })
+
+  /*
+   * The family is asked of the *members*, never named beside the label — which is what keeps a
+   * second named set from silently drawing as geometry. Written as "if the set has a name, draw
+   * violet", `kindSetLabel` gaining a "Collections" entry would have painted `For Each`'s table
+   * ports as geometry rings, and nothing would have failed.
+   *
+   * Asked through `portStyle` itself, which it could not be while the name was the outer gate —
+   * the members-agree rule then only ran on sets `kindSetLabel` had already admitted, so its
+   * interesting branch was unreachable and the helper had to be exported to be reached at all.
+   */
+  it('derives the family from the members, so a mixed set can never borrow one', () => {
+    // Both matrix-family kinds, so they agree and the ring is drawable...
+    expect(portStyle({ type: T.any(), kinds: ['matrix', 'network'] })).toEqual({
+      family: 'matrix',
+      shape: 'ring',
+    })
+    // ...where a set spanning two families has no family to wear, named or not.
+    expect(portStyle({ type: T.any(), kinds: ['matrix', 'skeletons'] })).toEqual({
+      family: 'any',
+      shape: 'ring',
+    })
+  })
+
+  /*
+   * The two rules that have to agree, and they agree today by the coincidence of one entry.
+   * `kindSetLabel` names a set when every member is in `GEOMETRY_KINDS`; `portStyle` draws it
+   * when every member's row in the socket table gives the same family. A kind added to one and
+   * not the other gives a violet ring labelled "Any", or "Geometries" beside a grey dot — the
+   * exact disagreement `TypeChip` was just fixed for, one level up.
+   */
+  it('agrees with `kindSetLabel` about which kinds are geometry', () => {
+    for (const kind of GEOMETRY_KINDS) {
+      expect(portStyle({ type: { kind } }).family, kind).toBe('geometry')
+    }
+  })
+
+  it('keeps every shape in the geometry family distinct, or the ring says nothing', () => {
+    const shapes = [
+      portStyle({ type: T.any(), kinds: GEOMETRY_KINDS }),
+      portStyle({ type: T.skeletons() }),
+      portStyle({ type: T.meshes() }),
+      portStyle({ type: T.points() }),
+    ]
+    expect(shapes.every((s) => s.family === 'geometry')).toBe(true)
+    expect(new Set(shapes.map((s) => s.shape)).size).toBe(4)
   })
 })

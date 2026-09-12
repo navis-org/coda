@@ -210,6 +210,63 @@ export function schemaOf(t: CodaType | undefined): TableSchema | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Kind sets
+// ---------------------------------------------------------------------------
+
+/** Just the tag of a type, which is what a port declaring a union of kinds lists. */
+export type Kind = CodaType['kind']
+
+/**
+ * The three kinds that carry a neuron as something drawn in space.
+ *
+ * Here rather than in `nodes/lib/transformOps.ts`, where `isGeometryKind` used to spell it out,
+ * because which kinds are geometry is a fact about `CodaType` and three other modules need the
+ * same answer: `PortDef.kinds` declares it, `socketStyle` draws it, and the palette filters on
+ * it. One array, so the predicate and the declaration cannot come to disagree about `points`.
+ */
+export const GEOMETRY_KINDS = [
+  'skeletons',
+  'meshes',
+  'points',
+] as const satisfies readonly Kind[]
+
+/**
+ * The name a set of kinds goes by on screen, or undefined for a set with no name.
+ *
+ * **A subset counts, and that is the whole design.** `Split Neurons` takes skeletons and meshes
+ * but not points, and drawing it as *Geometries* is a better answer than drawing it as *Any*:
+ * the reader learns which material the socket is about, and the one kind it declines is refused
+ * by `portAccepts` — which reads the declared set, not this label — so the narrowing is not lost,
+ * only unnamed. Deliberately **not** a `{ kind: 'geometries' }` in `CodaType`: a real union type
+ * would have to admit points on that port and refuse them at `validate`, which is a *looser*
+ * filter than today's, on top of a new case in `isAssignable`, inference and every cache key.
+ *
+ * One named set today. A second — the four `ITERABLE_KINDS` a `For Each` steps through — was
+ * considered and left unnamed, because "Collections" is not a word this app uses anywhere else
+ * and an invented one is worse than the honest grey.
+ */
+export function kindSetLabel(kinds: readonly Kind[] | undefined): string | undefined {
+  if (!kinds?.length) return undefined
+  // A plain `includes`, not `kindIn`: this set has been declared and settled, where `kindIn`'s
+  // job is to let an *unresolved* socket through. `['skeletons', 'any']` is not Geometries.
+  const geometry: readonly string[] = GEOMETRY_KINDS
+  return kinds.every((kind) => geometry.includes(kind)) ? 'Geometries' : undefined
+}
+
+/**
+ * A declared kind set as `validate` asks it: **unresolved and unknown are never refusals.**
+ *
+ * One spelling of an idiom four predicates had written out — `isGeometryKind`, `isIterableKind`,
+ * `isSplitKind`, `isCollectableKind` — three of them byte-identical down to the
+ * `as readonly string[]` the `Kind[]`/`string` mismatch forces. The four *arrays* stay four
+ * arrays saying four different things; only the question asked of them is shared, and it was
+ * already one rule stated in three doc comments that cross-reference each other.
+ */
+export function kindIn(kinds: readonly Kind[], kind: string | undefined): boolean {
+  return kind === undefined || kind === 'any' || (kinds as readonly string[]).includes(kind)
+}
+
+// ---------------------------------------------------------------------------
 // Assignability
 // ---------------------------------------------------------------------------
 

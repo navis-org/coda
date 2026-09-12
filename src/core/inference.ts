@@ -8,11 +8,13 @@
  */
 
 import type { CodaGraph, GraphNode } from './graph'
-import { inboundIndex, nodesById, portKey, topoSort, wouldCreateCycle } from './graph'
+import { inboundIndex, nodePort, nodesById, portKey, topoSort, wouldCreateCycle } from './graph'
 import type { InferContext, NodeDefinition } from './node'
 import { makeInferContext, validateColumnParams } from './node'
 import { getNodeDef } from './registry'
 import { findInputPort, inputPorts, outputPorts } from './ports'
+import type { Socket } from './sockets'
+import { resolvedSocket, socketAccepts, socketLabel } from './sockets'
 import type { CodaType, TableSchema } from './types'
 import { isAssignable, typeLabel } from './types'
 
@@ -168,10 +170,30 @@ export function inferGraph(graph: CodaGraph, options: InferOptions = {}): Infere
         ? referenceType(nodes.get(edge.source), edge.sourceHandle)
         : result[edge.source]?.outputs[edge.sourceHandle]
       inputs[port.id] = upstream
+      /*
+       * **`isAssignable`, deliberately, where `checkConnection` forty lines down asks
+       * `socketAccepts`** — and the asymmetry is a decision, not the last unmigrated site.
+       *
+       * Asking `socketAccepts` here is the obvious move: this is the only gate a wire *nobody
+       * dragged* passes through, since `deserializeGraph` checks that a port exists and
+       * `insertFragment` checks nothing, so a paste or a share link is not covered by the drag
+       * check at all. It was built, and it is wrong twice over. **Every port that declares
+       * `PortDef.kinds` took that array from a `validate` that already reports the mismatch** —
+       * all seven of them — so the general check is not a backstop, it is a second sentence on
+       * every card that has one. And it is the *worse* sentence: `socketLabel` can only name a
+       * set that has a name, so `Select One` would gain "expects Any but receives Matrix"
+       * beside its own "Select One steps through a Table, Skeletons or Meshes. A matrix has no
+       * elements to step through."
+       *
+       * So the node keeps it. What that costs is a pasted graph carrying a wire no gesture would
+       * have made: it loads, and the card that receives it says so in its own words rather than
+       * in the type system's. `registerNode` has no way to require a `validate` beside a `kinds`,
+       * which is the thing that would make this safe to generalise.
+       */
       if (upstream && !isAssignable(upstream, port.type)) {
         issues.push({
           severity: 'error',
-          message: `Input "${port.label ?? port.id}" expects ${typeLabel(port.type)} but receives ${typeLabel(upstream)}`,
+          message: `Input "${port.label ?? port.id}" expects ${socketLabel(port)} but receives ${typeLabel(upstream)}`,
           portId: port.id,
         })
       }
@@ -237,6 +259,30 @@ export function hasErrors(inference: InferenceResult, nodeId: string): boolean {
   return nodeTypes(inference, nodeId).issues.some((i) => i.severity === 'error')
 }
 
+/**
+ * What is on a node's output port: the declaration and the inferred type, joined.
+ *
+ * The one accessor for a question five surfaces were each answering their own way, and all five
+ * the same way *wrongly* — by reading `inference.nodes[id].outputs[portId]` and stopping. That
+ * is a `CodaType`, and for an unwired passthrough it is a perfectly truthy `T.any()`, so the
+ * declaration that says *skeletons, meshes or points* was discarded exactly where it was the
+ * only thing that knew. The visible half was one bug reported as one sentence: `Mirror Neurons`'
+ * output drew violet, the wire leaving it drew grey, and it could be dropped on a `Dataset`.
+ *
+ * Here rather than in `sockets.ts`, which holds the *rule* (`resolvedSocket`) and may not import
+ * this module — `inference.ts` already imports `sockets.ts`, so the arrow runs one way.
+ */
+export function outputSocket(
+  node: GraphNode,
+  inference: InferenceResult,
+  portId: string,
+): Socket {
+  return resolvedSocket(
+    nodePort(node, 'output', portId),
+    nodeTypes(inference, node.id).outputs[portId],
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Connection validation (drag-time)
 // ---------------------------------------------------------------------------
@@ -269,10 +315,27 @@ export function checkConnection(
   const sourceType = nodeTypes(inference, from.nodeId).outputs[from.portId]
   if (!sourceType) return { ok: false, reason: 'Unknown output port' }
 
-  if (!isAssignable(sourceType, inPort.type)) {
+  /*
+   * `socketAccepts` over the *resolved sockets*, not `isAssignable` over two types.
+   *
+   * `PortDef.kinds` was a declaration and not a constraint at first, on `producedBy`'s precedent
+   * — offer fewer nodes, dim more sockets, and let the node's own `validate` name the remedy on
+   * a wire somebody drew anyway. That was reported as a bug within the round, and rightly: the
+   * socket **draws** as Geometries, and a violet ring you can drop on a `Dataset` port is a
+   * promise the picture makes and the behaviour breaks. The precedent does not stretch this far
+   * either — `producedBy` and `exclusiveGroup` are not *kind* facts, and refusing kind mismatches
+   * with a reason is exactly this function's job. Before `kinds` existed the socket drew grey
+   * `Any` and taking anything was honest; it is not honest now.
+   *
+   * `resolvedSocket` is what makes both ends say what they mean: an unwired passthrough infers
+   * `T.any()`, so reading the inferred type alone throws away the only declaration that knows.
+   * An unresolved socket is still never a refusal — `socketAccepts` passes a bare `any` on either
+   * end — so a half-built graph is unaffected.
+   */
+  if (!socketAccepts(outputSocket(sourceNode, inference, from.portId), inPort)) {
     return {
       ok: false,
-      reason: `${typeLabel(sourceType)} does not fit ${typeLabel(inPort.type)}`,
+      reason: `${socketLabel(outputSocket(sourceNode, inference, from.portId))} does not fit ${socketLabel(inPort)}`,
     }
   }
 

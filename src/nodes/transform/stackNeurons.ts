@@ -41,7 +41,7 @@
  */
 
 import { registerNode } from '../../core/registry'
-import { T } from '../../core/types'
+import { GEOMETRY_KINDS, T } from '../../core/types'
 import { STACK_PORT_LABEL, stackSchema } from '../lib/tableOps'
 import {
   readStackOptions,
@@ -77,12 +77,12 @@ registerNode({
   inputs: [
     {
       repeat: stackCountParam.id,
-      ports: [{ id: 'in', label: STACK_PORT_LABEL, type: T.any() }],
+      ports: [{ id: 'in', label: STACK_PORT_LABEL, type: T.any(), kinds: GEOMETRY_KINDS }],
       // What indices 1 and 2 were called when this node had a fixed pair.
       formerIds: ['top', 'bottom'],
     },
   ],
-  outputs: [{ id: 'out', label: 'Neurons', type: T.any() }],
+  outputs: [{ id: 'out', label: 'Neurons', type: T.any(), kinds: GEOMETRY_KINDS }],
   params: [
     stackCountParam,
     {

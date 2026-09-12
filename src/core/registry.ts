@@ -43,6 +43,7 @@ export function registerNode<P extends ParamValues>(def: NodeDefinition<P>): Nod
   }
   checkPortGroups(def as unknown as NodeDefinition)
   checkFormerParamIds(def as unknown as NodeDefinition)
+  checkPortKinds(def as unknown as NodeDefinition)
   definitions.set(def.type, def as unknown as NodeDefinition)
   referenceTypes = undefined
   loopTypes = undefined
@@ -183,6 +184,60 @@ function checkFormerParamIds(def: NodeDefinition): void {
       )
     }
     claimed.add(former)
+  }
+}
+
+/**
+ * `PortDef.kinds` is only a statement about an `any`, thrown at registration.
+ *
+ * Three of the four failures are silent, and two of those are silent in the *passing* direction.
+ * A set beside a concrete type is a second statement that can disagree with the first — and it is
+ * the set the palette and the socket dimming would read, so `type: T.skeletons(), kinds:
+ * ['meshes']` would draw and filter as meshes while `isAssignable` went on answering for
+ * skeletons. An empty set reads as "holds nothing" to `socketKinds` and as "not declared" to
+ * every `?.length` guard beside it, which is two answers to the one question the field exists to
+ * settle. And `any` inside the set is the field cancelling itself: `socketAccepts` would then
+ * admit every kind again, so the port would filter exactly as it did before anybody declared
+ * anything. The fourth — a repeated kind — diverges from nothing, every reader being an
+ * `includes`; it is here because a set is always a shared `as const`, so a repeat in one is a
+ * copy-paste slip rather than a preference, and this is the cheapest place to say so.
+ *
+ * Over `allInputPorts`/`allOutputPorts` rather than a hand-rolled walk of the slots, which is
+ * what `checkPortGroups` above already does with the same imports: expanding at `max` is the
+ * "every port this node could ever have" reading, and a second slot-flattening idiom is a second
+ * place a future `PortSlot` shape has to be taught about.
+ */
+function checkPortKinds(def: NodeDefinition): void {
+  for (const side of ['inputs', 'outputs'] as const) {
+    for (const port of side === 'inputs' ? allInputPorts(def) : allOutputPorts(def)) {
+      const where = `"${def.type}" port "${port.id}" (${side})`
+      // One rule, so one throw: both fields say something about an `any` and neither has anything
+      // to add to a concrete type, which already says what the port holds.
+      if ((port.kinds || port.anyKind) && port.type.kind !== 'any') {
+        throw new Error(
+          `${where} declares \`${port.kinds ? 'kinds' : 'anyKind'}\` beside type "${port.type.kind}". Both spell something about a union \`CodaType\` cannot, so they belong only on \`T.any()\`; a concrete type already says what the port holds.`,
+        )
+      }
+      if (port.anyKind && port.kinds) {
+        throw new Error(
+          `${where} declares both \`anyKind\` and \`kinds\`, which is the port saying it takes everything and that it takes four things.`,
+        )
+      }
+      if (!port.kinds) continue
+      if (port.kinds.length === 0) {
+        throw new Error(
+          `${where} declares an empty \`kinds\`. Omit the field instead: absent means "not known", which is what an undeclared \`any\` is.`,
+        )
+      }
+      if (port.kinds.includes('any')) {
+        throw new Error(
+          `${where} lists "any" in \`kinds\`, which cancels the declaration — every kind is admitted again. Omit the field instead.`,
+        )
+      }
+      if (new Set(port.kinds).size !== port.kinds.length) {
+        throw new Error(`${where} repeats a kind in \`kinds\`.`)
+      }
+    }
   }
 }
 

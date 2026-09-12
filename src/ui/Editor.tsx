@@ -37,11 +37,11 @@ import type {
 } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { GraphNode } from '../core/graph'
+import type { CodaGraph, GraphNode } from '../core/graph'
 import type { NodeSize } from '../layout/elkGraph'
 import { getNodeDef } from '../core/registry'
-import type { CodaType } from '../core/types'
-import { referenceEdgeIds } from '../core/graph'
+import { nodesById, referenceEdgeIds } from '../core/graph'
+import { outputSocket } from '../core/inference'
 import { groupsTouching } from '../core/groups'
 import type { CollapsedEdge } from '../layout/collapse'
 import { COLLAPSED_TYPE, collapsedView, isFolded } from '../layout/collapse'
@@ -67,7 +67,7 @@ import { AddMenu } from './panels/AddMenu'
 import { NodeBrowser } from './panels/NodeBrowser'
 import { GroupContextMenu } from './panels/GroupContextMenu'
 import { NodeContextMenu } from './panels/NodeContextMenu'
-import type { PaletteItem } from './panels/paletteItems'
+import type { DragFilter, PaletteItem } from './panels/paletteItems'
 import { buildCommandItems, buildNodeItems } from './panels/paletteItems'
 import { requestExportWarnings, useExportWarnings } from './exportWarnings'
 import { FIT_VIEW_OPTIONS, useFitAll, useFitSelected, useFitSelectedRequests } from './fitView'
@@ -79,7 +79,7 @@ import { TOUR_DECLINES, isTypingTarget } from './appShortcuts'
 import { useClipboardShortcuts } from './clipboard'
 import { LOCKED_NOTICE } from './lockCopy'
 import { draggedWireStyle, wireStyle } from './socketStyle'
-import { dragPortType, useDragOrigin } from './dragOrigin'
+import { dragPortSocket, useDragOrigin } from './dragOrigin'
 import { useArrange } from './useArrange'
 import { useDownloads } from './useDownloads'
 import { useRunNotify } from './notify'
@@ -148,7 +148,7 @@ interface MenuState {
   /** Prefilled search text. `Add:` narrows the list to node insertions. */
   initialQuery: string
   /** Present when the palette was opened by dragging a link into empty canvas. */
-  filter?: { type: CodaType; from: 'source' | 'target' }
+  filter?: DragFilter
   /** Set alongside `filter`, so the inserted node can be wired up immediately. */
   connectFrom?: { nodeId: string; portId: string; handleType: 'source' | 'target' }
 }
@@ -413,12 +413,17 @@ function EditorCanvas() {
    * identity that `GraphView`'s own `memo` is already losing on four inline props.
    */
   const connectionLineStyle = dragOrigin
-    ? draggedWireStyle(dragPortType(graph, inference, dragOrigin))
+    ? draggedWireStyle(dragPortSocket(graph, inference, dragOrigin))
     : IDLE_WIRE
 
   const rfEdges = useMemo<Edge[]>(() => {
     const wires: Edge[] = graph.edges.map((edge) => {
-      const sourceType = inference.nodes[edge.source]?.outputs[edge.sourceHandle]
+      // `outputSocket`, not the inferred type alone: a passthrough with nothing wired infers a
+      // truthy `T.any()`, so a wire off `Mirror Neurons` drew grey between two violet sockets.
+      const sourceNode = nodesById(graph).get(edge.source)
+      const sourceSocket = sourceNode
+        ? outputSocket(sourceNode, inference, edge.sourceHandle)
+        : undefined
       const muted = disabledIds.has(edge.source)
       /*
        * A route reaches the wire only under `orthogonal`. `curved` withholds it rather than
@@ -455,7 +460,7 @@ function EditorCanvas() {
           ]
             .filter(Boolean)
             .join(' ') || undefined,
-        style: wireStyle(sourceType, muted),
+        style: wireStyle(sourceSocket, muted),
         /*
          * A wire with an end inside a folded group is withheld, and `collapse.edges` draws the
          * merged stand-in instead. Hidden rather than dropped, for the reason a hidden card is:
@@ -465,11 +470,14 @@ function EditorCanvas() {
       }
     })
     for (const edge of collapse.edges) {
-      wires.push(collapsedWire(edge, inference, edgeRouting === 'orthogonal'))
+      wires.push(collapsedWire(edge, graph, inference, edgeRouting === 'orthogonal'))
     }
     return wires
   }, [
-    graph.edges,
+    // `graph`, not `graph.edges`: the source node's *declaration* is needed to colour a wire off
+    // a passthrough, and `referenceIds` above is keyed the same way for the same reason. Per the
+    // note there, this memo already recomputes on every frame of a drag either way.
+    graph,
     disabledIds,
     inference,
     edgeRouting,
@@ -650,14 +658,20 @@ function EditorCanvas() {
           : { x: event.touches[0]?.clientX ?? 0, y: event.touches[0]?.clientY ?? 0 }
 
       const handle = connectionState.fromHandle
-      // The palette filters on what this drag can connect to, which is the same answer the
-      // in-flight wire is coloured by and the same one every card dims its sockets against.
-      const type = dragPortType(graph, inference, {
+      /*
+       * The palette filters on what this drag can connect to, which is the same answer the
+       * in-flight wire is coloured by and the same one every card dims its sockets against.
+       *
+       * The *socket* rather than the type, because a port declared `T.any()` with a `kinds` list
+       * beside it reports `any` here — dragging backwards out of `Mirror Neurons`' input would
+       * otherwise offer every producer in the registry.
+       */
+      const socket = dragPortSocket(graph, inference, {
         nodeId: handle.nodeId,
         portId: handle.id ?? null,
         handleType: handle.type,
       })
-      if (!type) return
+      if (!socket) return
 
       setMenu({
         seq: ++menuSeq.current,
@@ -666,7 +680,7 @@ function EditorCanvas() {
         // The item list is already nodes-only here, so no prefix is needed — the type hint
         // above the list explains the narrowing.
         initialQuery: '',
-        filter: { type, from: handle.type === 'source' ? 'source' : 'target' },
+        filter: { ...socket, from: handle.type === 'source' ? 'source' : 'target' },
         connectFrom: {
           nodeId: handle.nodeId,
           portId: handle.id ?? '',
@@ -1379,7 +1393,7 @@ function EditorCanvas() {
           items={paletteItems}
           screenPosition={menu.screenPosition}
           initialQuery={menu.initialQuery}
-          {...(menu.filter ? { filterType: menu.filter.type } : {})}
+          filterSocket={menu.filter}
           onPick={handlePick}
           onClose={() => setMenu(null)}
         />
@@ -1484,13 +1498,23 @@ function anchorPoint(
  */
 function collapsedWire(
   edge: CollapsedEdge,
+  graph: CodaGraph,
   inference: ReturnType<typeof useGraphStore.getState>['inference'],
   step: boolean,
 ): Edge {
-  const types = new Set(
-    edge.origins.map((from) => inference.nodes[from.nodeId]?.outputs[from.portId]),
+  /*
+   * Agreement is asked of the *kinds*, then the colour is taken from the first origin's socket.
+   * A `Set` of sockets would never collapse — `outputSocket` mints one per call — and the kind is
+   * the whole of what "they agree" means here anyway.
+   */
+  const nodes = nodesById(graph)
+  const kinds = new Set(
+    edge.origins.map((from) => inference.nodes[from.nodeId]?.outputs[from.portId]?.kind),
   )
-  const only = types.size === 1 ? [...types][0] : undefined
+  const first = edge.origins[0]
+  const node = first && nodes.get(first.nodeId)
+  const only =
+    kinds.size === 1 && node && first ? outputSocket(node, inference, first.portId) : undefined
   return {
     id: edge.id,
     type: 'coda',

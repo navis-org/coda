@@ -18,7 +18,8 @@ import { useMemo } from 'react'
 import type { CodaGraph } from '../core/graph'
 import { nodePorts } from '../core/graph'
 import type { InferenceResult } from '../core/inference'
-import type { CodaType } from '../core/types'
+import type { Socket } from '../core/sockets'
+import { resolvedSocket } from '../core/sockets'
 
 export interface DragOrigin {
   nodeId: string
@@ -52,7 +53,7 @@ export function useDragOrigin(): DragOrigin | undefined {
 }
 
 /**
- * What a drag from that port carries — the inferred type on an output, the declared type on an
+ * What a drag from that port carries — the inferred type on an output, the declared socket on an
  * input.
  *
  * The asymmetry is the rule rather than a shortcut, and it is why this is not the same question
@@ -60,20 +61,36 @@ export function useDragOrigin(): DragOrigin | undefined {
  * and what a drag *from* an input is looking for is an output that port would accept: a wired
  * `any` input reporting `skeletons` here would grey out every output it can still legally take.
  * The card's fill asks the other question — what is flowing — and says so where it does.
+ *
+ * A whole `Socket` rather than a `CodaType`, because on that declared half the type is only
+ * half the declaration: a port typed `T.any()` for a union `CodaType` cannot spell carries its
+ * real answer in `PortDef.kinds`. Dragging backwards out of `Mirror Neurons` is the case — the
+ * type is `any`, and the three kinds it takes are the whole of what the reader is looking for.
+ * The set is never present on the inferred half, an inferred output being a concrete kind that
+ * says everything there is to say. There was a `dragPortType` beside this returning `.type`; it
+ * went when its last two callers — the palette's filter and the in-flight wire's colour — turned
+ * out to be exactly the two that needed the set.
  */
-export function dragPortType(
+export function dragPortSocket(
   graph: CodaGraph,
   inference: InferenceResult,
   origin: DragOrigin,
-): CodaType | undefined {
+): Socket | undefined {
   const { nodeId, portId, handleType } = origin
   if (!portId) return undefined
-  if (handleType === 'source') {
-    const resolved = inference.nodes[nodeId]?.outputs[portId]
-    if (resolved) return resolved
-  }
   const node = graph.nodes.find((n) => n.id === nodeId)
   if (!node) return undefined
   const side = handleType === 'source' ? 'output' : 'input'
-  return nodePorts(node, side).find((p) => p.id === portId)?.type
+  // The port itself: `ResolvedPort extends PortDef`, which carries `type` and `kinds`, so it
+  // satisfies `Socket` structurally — which is the reason `Socket` is a shape and not a class.
+  const port = nodePorts(node, side).find((p) => p.id === portId)
+  if (handleType !== 'source') return port
+  /*
+   * `resolvedSocket`, not the inferred type on its own. An unwired passthrough infers a perfectly
+   * truthy `T.any()`, so an early return on "did inference answer?" threw the declaration away
+   * exactly where it was the only thing that knew anything — a drag off `Mirror Neurons`' output
+   * reported bare `Any`, so the wire drew grey and dimmed nothing while the socket it left drew
+   * as a violet Geometries ring.
+   */
+  return resolvedSocket(port, inference.nodes[nodeId]?.outputs[portId])
 }

@@ -3,6 +3,7 @@ import { T, columnNames } from '../../core/types'
 import { resolveRows } from '../../data/filterRows'
 import { FILTERS_PARAM_ID, rowGrammarNote, rowsFromParams } from '../lib/filterRowParams'
 import {
+  SPLIT_KINDS,
   isSplitCollection,
   isSplitKind,
   matchesNothing,
@@ -90,14 +91,14 @@ registerNode({
    * `any`, like `neuron.stack` and `core.selectOne`: "skeletons or meshes" is not something the
    * type system can say, so the port says nothing and `validate` does the refusing.
    */
-  inputs: [{ id: 'in', label: 'Neurons', type: T.any() }],
+  inputs: [{ id: 'in', label: 'Neurons', type: T.any(), kinds: SPLIT_KINDS }],
   /*
    * `matched` first, so a link dragged off the node starts at the half somebody asked about —
    * `neuron.connectivity`'s rule for its two outputs, and `out.table`'s for its pass-through.
    */
   outputs: [
-    { id: 'matched', label: 'Matching', type: T.any() },
-    { id: 'rest', label: 'Rest', type: T.any() },
+    { id: 'matched', label: 'Matching', type: T.any(), kinds: SPLIT_KINDS },
+    { id: 'rest', label: 'Rest', type: T.any(), kinds: SPLIT_KINDS },
   ],
   params: [
     {

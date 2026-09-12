@@ -69,8 +69,10 @@
 import type { CodaGraph, GraphNode, NodeHint } from '../core/graph'
 import { addEdge, nodePorts, updateNode } from '../core/graph'
 import { addNodeWithCompanion } from '../core/companion'
+import type { Socket } from '../core/sockets'
+import { socketAccepts, socketOriginates } from '../core/sockets'
 import type { CodaType } from '../core/types'
-import { isAssignable, uniqueName } from '../core/types'
+import { uniqueName } from '../core/types'
 import { inferGraph, nodeTypes } from '../core/inference'
 import { getNodeDef, listableNodeDefs } from '../core/registry'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
@@ -509,7 +511,7 @@ function append(
   const claimed = new Set<string>()
   for (const port of defaultInputPorts(def)) {
     if (port.exclusiveGroup && claimed.has(port.exclusiveGroup)) continue
-    const candidates = sourcesFor(out, port.type)
+    const candidates = sourcesFor(out, port)
     // Clamped rather than wrapped: past the end of a short list the port keeps its last
     // candidate while a longer list beside it goes on being explored. `fresh` is what ends the
     // rank loop — once every port is clamped, the next rank would wire exactly what this one
@@ -601,7 +603,7 @@ function requiredWires(
 ): Map<string, Source> | undefined {
   const wires = new Map<string, Source>()
   for (const port of ports) {
-    const source = sourcesFor(graph, port.type)[0]
+    const source = sourcesFor(graph, port)[0]
     if (!source) return undefined
     wires.set(port.id, source)
   }
@@ -632,7 +634,7 @@ function addViewer(graph: CodaGraph, def: NodeDefinition, from: string): CodaGra
   const exact = all.filter((d) => defaultInputPorts(d)[0]?.type.kind === produced.kind)
   for (const viewer of [...exact, ...all]) {
     const ports = defaultInputPorts(viewer)
-    const port = ports.find((p) => isAssignable(produced, p.type))
+    const port = ports.find((p) => socketAccepts({ type: produced }, p))
     if (!port) continue
     /*
      * Only viewers whose *other* required inputs the graph can already answer — Neuroglancer and
@@ -669,25 +671,43 @@ function addViewer(graph: CodaGraph, def: NodeDefinition, from: string): CodaGra
  *
  * Within a kind, node order is chain order — see the module note.
  */
-function sourcesFor(graph: CodaGraph, want: CodaType): Source[] {
+function sourcesFor(graph: CodaGraph, into: Socket): Source[] {
   /*
-   * One walk and a stable sort, not four passes with a dedupe set. `isAssignable` is kind-based
+   * One walk and a stable sort, not four passes with a dedupe set. The accepts test is kind-based
    * and reflexive, so each "exact kind" pass was already a subset of the assignable one and the
    * set existed only to undo that overlap. A stable sort keeps chain order within a tier, which
    * is the other half of the ordering.
+   *
+   * **`socketAccepts`, and it takes the port rather than its type**, which is what makes the
+   * `any` bullet above stop being a heuristic. A port declared `T.any()` for a union `CodaType`
+   * cannot spell — `Mirror Neurons`' `in`, and eight more — passed `isAssignable` for *every*
+   * output in the graph, and `tierOf` then ranked a `neurons` output top, so the tier ladder was
+   * carrying a question `PortDef.kinds` now answers outright. The module note above records the
+   * same failure being papered over with scoring, on the grounds that "half these ports are
+   * `any`, which says nothing about what the node wants" — a sentence the declaration has since
+   * falsified.
    */
   const found: Source[] = []
   for (const node of graph.nodes) {
     for (const port of nodePorts(node, 'output')) {
-      if (isAssignable(port.type, want)) {
+      if (socketAccepts(port, into)) {
         found.push({ node: node.id, port: port.id, type: port.type })
       }
     }
   }
-  return found.sort((a, b) => tierOf(a.type, want) - tierOf(b.type, want))
+  return found.sort((a, b) => tierOf(a.type, into.type) - tierOf(b.type, into.type))
 }
 
-/** Lower is better. See `sourcesFor` for what each tier is doing there. */
+/**
+ * Lower is better. See `sourcesFor` for what each tier is doing there.
+ *
+ * **Not `core/sockets.ts`' `socketTier`, and the two invert on purpose.** That one ranks the
+ * *port* against a fixed wire and puts an exact kind first; this ranks the *source* against a
+ * fixed port and puts `neurons` ahead of `table` for a `table` port — because there the more
+ * specific end is the candidate, and a neuron table is what a `neuronId` picker downstream
+ * needs. One says "which node should I offer for this wire", the other "which wire should I
+ * give this node", and they are answered from opposite ends.
+ */
 function tierOf(from: CodaType, want: CodaType): number {
   if (want.kind === 'any' || want.kind === 'table') {
     if (from.kind === 'neurons') return 0
@@ -697,6 +717,7 @@ function tierOf(from: CodaType, want: CodaType): number {
   }
   // A passthrough's declared output accepts and produces anything, so it is the last thing to
   // reach for — which is what keeps the Dataset opening every workflow out of an `any` port.
+  // `socketOriginates`' rule, asked of a bare type because this ranks what a *source* carries.
   return from.kind === 'any' ? 3 : 2
 }
 
@@ -727,7 +748,9 @@ function grow(
      * Neurons table wired into its `Tree` port, which is the one *error* this whole pass
      * produced. A node that passes its input through does not make anything.
      */
-    const port = defaultOutputPorts(def).find((p) => p.type.kind === want.kind)
+    const port = defaultOutputPorts(def).find(
+      (p) => socketOriginates(p) && p.type.kind === want.kind,
+    )
     if (!port) continue
     const wires = requiredWires(graph, defaultInputPorts(def))
     if (!wires) continue

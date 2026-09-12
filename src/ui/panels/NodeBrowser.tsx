@@ -16,7 +16,8 @@ import { useMemo, useState } from 'react'
 
 import type { NodeCategory, NodeDefinition } from '../../core/node'
 import { listableNodeDefs, nodeDefsByCategory } from '../../core/registry'
-import { typeLabel } from '../../core/types'
+import type { Socket } from '../../core/sockets'
+import { socketLabel } from '../../core/sockets'
 import { useListNav } from '../useListNav'
 import { fuzzyRank } from './fuzzy'
 import { NodeThumbnail } from './NodeThumbnail'
@@ -188,14 +189,20 @@ export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
 
 /** "Dataset + Neurons → Table" — the node's port signature, in type names. */
 function signatureOf(def: NodeDefinition): string {
-  const inputs = defaultInputPorts(def).map((p) => shortType(p.type))
-  const outputs = defaultOutputPorts(def).map((p) => shortType(p.type))
+  const inputs = defaultInputPorts(def).map(shortType)
+  const outputs = defaultOutputPorts(def).map(shortType)
   const left = inputs.length ? inputs.join(' + ') : '—'
   const right = outputs.length ? outputs.join(' + ') : '—'
   return `${left} → ${right}`
 }
 
-/** Type name without the column list, which is unknown before wiring anyway. */
-function shortType(type: Parameters<typeof typeLabel>[0]): string {
-  return typeLabel(type).replace(/\{.*\}$/, '')
+/**
+ * Type name without the column list, which is unknown before wiring anyway.
+ *
+ * `socketLabel` rather than `typeLabel`, so the four geometry passthroughs read
+ * `Geometries → Geometries` here as they do on the card. This surface describes a node *type*
+ * with nothing wired, which is precisely the case a declared kind set exists to name.
+ */
+function shortType(port: Socket): string {
+  return socketLabel(port).replace(/\{.*\}$/, '')
 }

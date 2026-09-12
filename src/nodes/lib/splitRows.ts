@@ -26,7 +26,8 @@
 
 import type { FilterRow, RowProblem } from '../../data/filterRows'
 import type { MeshesValue, SkeletonsValue, Value } from '../../core/values'
-import type { CodaType } from '../../core/types'
+import type { CodaType, Kind } from '../../core/types'
+import { kindIn } from '../../core/types'
 import type { FieldTerm } from '../../data/terms'
 import { fieldTermsMatch, prepareFieldTerms } from '../../data/terms'
 import { partitionElements } from './iterables'
@@ -45,8 +46,13 @@ import { partitionElements } from './iterables'
  */
 export type SplitCollection = SkeletonsValue | MeshesValue
 
+/*
+ * Over `SPLIT_KINDS` below, on `isGeometryValue`'s reasoning: a list and a disjunction of the
+ * same members is the pair that comes to disagree. Not `kindIn` — a value has arrived, so the
+ * `any`/`undefined` arm that keeps an unresolved socket from being a refusal is wrong here.
+ */
 export function isSplitCollection(v: Value | undefined): v is SplitCollection {
-  return !!v && (v.kind === 'skeletons' || v.kind === 'meshes')
+  return !!v && (SPLIT_KINDS as readonly string[]).includes(v.kind)
 }
 
 /**
@@ -55,8 +61,10 @@ export function isSplitCollection(v: Value | undefined): v is SplitCollection {
  * `any` and `undefined` count, on `isIterableKind`' rule: unknown is not a refusal, and an
  * unresolved socket is the ordinary state before anything upstream has run.
  */
+export const SPLIT_KINDS = ['skeletons', 'meshes'] as const satisfies readonly Kind[]
+
 export function isSplitKind(kind: CodaType['kind'] | undefined): boolean {
-  return kind === undefined || kind === 'any' || kind === 'skeletons' || kind === 'meshes'
+  return kindIn(SPLIT_KINDS, kind)
 }
 
 /**

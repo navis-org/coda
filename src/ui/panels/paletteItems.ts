@@ -7,8 +7,9 @@
  * the user to know which kind of thing they want before they start typing.
  */
 
-import type { CodaType } from '../../core/types'
-import { isAssignable } from '../../core/types'
+import type { NodeDefinition, ResolvedPort } from '../../core/node'
+import type { Socket } from '../../core/sockets'
+import { socketAccepts, socketOriginates, socketTier } from '../../core/sockets'
 import { placeableIds } from '../../core/dashboard'
 import { groupsTouching } from '../../core/groups'
 import { isAnnotation, nodeDefsByCategory } from '../../core/registry'
@@ -93,64 +94,133 @@ export interface CommandContext {
 }
 
 /**
- * Node-insertion items, optionally filtered to those that can accept a dragged type.
+ * The end of the wire in flight: what it carries, and which way it was dragged.
+ *
+ * A `Socket` rather than a bare `CodaType` because half the sockets a drag can start from are
+ * declared `T.any()` with a `kinds` list beside them — dragging backwards out of `Mirror
+ * Neurons`' input reports `any`, and without the list the palette would offer every producer in
+ * the registry for a socket that takes three kinds.
+ */
+export interface DragFilter extends Socket {
+  from: 'source' | 'target'
+}
+
+/**
+ * Node-insertion items, optionally filtered *and ordered* by what a dragged wire can reach.
+ *
+ * Filtered was already true and was not enough. The list came back in registry order — category,
+ * then alphabetical — so dropping a `Linkage` on empty canvas opened on `Mirror Neurons`,
+ * `Select One`, `Split Neurons`, `Stack Neurons` and `Transform Neurons`, with `Cut Tree` and
+ * `Dendrogram` — the only two nodes in the registry that take a linkage at all — sixth and
+ * seventh. All five leaders were ports declared `T.any()` to stand in for a union `CodaType`
+ * cannot spell, and every one of them would have been refused by its own `validate` the moment
+ * it was wired. `PortDef.kinds` is what removes them; `socketTier` is what orders what is left.
  *
  * `locked` disables every row rather than dropping them. A palette that answers "find neurons"
  * with nothing at all reads as a broken search — a list of greyed rows saying why reads as the
  * lock, which is what it is.
  */
-export function buildNodeItems(
-  filter?: {
-    type: CodaType
-    from: 'source' | 'target'
-  },
-  locked = false,
-): PaletteItem[] {
-  const items: PaletteItem[] = []
+export function buildNodeItems(filter?: DragFilter, locked = false): PaletteItem[] {
+  const items: Array<{ item: PaletteItem; rank: number }> = []
 
   for (const { category, defs } of nodeDefsByCategory()) {
     for (const def of defs) {
       let portId: string | undefined
+      let rank = 0
       if (filter) {
-        /*
-         * Dragging from an output needs a compatible input on the new node, and vice versa.
-         *
-         * An `any` *output* is excluded from the second case, and the asymmetry is the point.
-         * `any` on an input means "I accept whatever you have", which is a real answer to
-         * "what could this feed?" — `out.download` genuinely takes anything. `any` on an
-         * output means "whatever I was given": a pass-through cannot *originate* a Dataset,
-         * so offering it when dragging back from a Dataset socket answers the question with a
-         * node that would need the same question asked again behind it.
-         */
-        const ports =
-          filter.from === 'source'
-            ? defaultInputPorts(def).filter((p) => isAssignable(filter.type, p.type))
-            : defaultOutputPorts(def).filter(
-                (p) => p.type.kind !== 'any' && isAssignable(p.type, filter.type),
-              )
-        portId = ports[0]?.id
-        if (!portId) continue
+        const best = bestPort(def, filter)
+        if (!best) continue
+        portId = best.port.id
+        rank = best.rank
       } else {
         portId = defaultOutputPorts(def)[0]?.id ?? ''
       }
 
       items.push({
-        id: `node:${def.type}`,
-        action: 'Add',
-        group: CATEGORY_LABELS[category],
-        label: def.label,
-        ...(locked
-          ? { hint: LOCKED_HINT, disabled: true }
-          : def.description
-            ? { hint: def.description }
-            : {}),
-        nodeType: def.type,
-        portId,
+        rank,
+        item: {
+          id: `node:${def.type}`,
+          action: 'Add',
+          group: CATEGORY_LABELS[category],
+          label: def.label,
+          ...(locked
+            ? { hint: LOCKED_HINT, disabled: true }
+            : def.description
+              ? { hint: def.description }
+              : {}),
+          nodeType: def.type,
+          portId,
+        },
       })
     }
   }
 
-  return items
+  /*
+   * The order inside a rank stays the registry's — category, then alphabetical — because `sort`
+   * has been stable since ES2019 and `wizard/demo.ts`' `sourcesFor` already leans on that bare,
+   * one directory over. `fuzzyRank` is stable too and falls back to caller order at equal score,
+   * which is what makes this the *whole* of the ordering while the query is empty and a
+   * tie-break once somebody types. Unfiltered, every rank is 0 and this returns its input.
+   */
+  return items.sort((a, b) => a.rank - b.rank).map((entry) => entry.item)
+}
+
+/**
+ * The port on this node that best answers the dragged wire, and how well — lower is better.
+ *
+ * **Best rather than first**, which is the smaller of the two fixes here and still a real one: a
+ * node may have several ports the wire fits, and `find` handed back whichever was declared
+ * earliest. The rank is `socketTier` with two keys under it:
+ *
+ * - **A required port before an optional one.** Dragging a neuron table used to open on eight
+ *   dataset cards, because every one of them has an optional `annotations` socket that takes a
+ *   table and `dataset` sorts first. Wiring a neuron table into a dataset's annotations is a
+ *   real thing to do and stays offered; it is not what somebody dragging one usually means, and
+ *   the port itself already says so.
+ * - **Then declaration order**, so a node's primary socket wins a tie with a later one.
+ *
+ * **Declaration order stays inside the node**, which was got wrong first and is visible in one
+ * row: folded into the rank the caller sorts on, it made "the node whose *first* port takes this"
+ * beat "the node whose second port takes this", and a `neurons` drag opened on `Copy IDs` —
+ * whose only socket is a neuron table — above `Connectivity`, whose `neurons` port is its
+ * second. Between two nodes at the same tier the order that means something is the registry's.
+ * So it is not in the rank at all: the walk is in declaration order and the comparison is
+ * strict, which is the same rule said in the one place it applies.
+ */
+function bestPort(
+  def: NodeDefinition,
+  filter: DragFilter,
+): { port: ResolvedPort; rank: number } | undefined {
+  /*
+   * Dragging from an output needs a compatible input on the new node, and vice versa.
+   *
+   * An `any` *output* is excluded from the second case — **`kinds` declared or not** — and the
+   * asymmetry is the point. `any` on an input means "I accept whatever you have", which is a
+   * real answer to "what could this feed?"; `out.download` genuinely takes anything, and every
+   * other one now says which family it means. `any` on an output means "whatever I was given":
+   * a pass-through cannot *originate* a Dataset, so offering it when dragging back from a
+   * Dataset socket answers the question with a node that would need the same question asked
+   * again behind it. A `Mirror Neurons` declaring `GEOMETRY_KINDS` on its output is declaring
+   * what it will pass on, not that it can produce a skeleton from nothing.
+   */
+  const fromSource = filter.from === 'source'
+  const ports = fromSource ? defaultInputPorts(def) : defaultOutputPorts(def)
+
+  let best: { port: ResolvedPort; rank: number } | undefined
+  for (const port of ports) {
+    const takes = fromSource
+      ? socketAccepts(filter, port)
+      : socketOriginates(port) && socketAccepts(port, filter)
+    if (!takes) continue
+    // Two keys packed into one number, `socketTier` being 0-3 and the optional flag 0-1. The
+    // caller sorts on it, so it has to be one comparable value rather than a tuple compare
+    // written out at a call site, which is where the second key quietly goes missing.
+    const rank = socketTier(port, filter) * 2 + (fromSource && port.required === false ? 1 : 0)
+    // Strictly less, walking in declaration order: the earlier port keeps a tie, which is the
+    // whole of what declaration order decides here. See above for why it decides nothing more.
+    if (!best || rank < best.rank) best = { port, rank }
+  }
+  return best
 }
 
 /** Commands, in the order they should appear when the query is empty. */

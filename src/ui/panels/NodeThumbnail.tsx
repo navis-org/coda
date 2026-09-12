@@ -27,7 +27,7 @@ import {
 } from '../../nodes/lib/datasetFamilies'
 import { GLYPH_BOX, GLYPH_STROKE_WIDTH, glyphShapes } from '../glyphs'
 import { glyphElements } from '../glyphElements'
-import { familyColorVar, nodeTintVar, socketStyle } from '../socketStyle'
+import { familyColorVar, nodeTintVar, portStyle } from '../socketStyle'
 import type { SocketShape } from '../socketStyle'
 import { plural } from '../format'
 import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
@@ -148,7 +148,10 @@ function dotY(index: number, count: number): number {
 }
 
 function SocketDot({ port, x, y }: { port: PortDef; x: number; y: number }) {
-  const { family, shape } = socketStyle(port.type)
+  // `portStyle`, not `socketStyle`: a thumbnail draws a node *type* with nothing wired, which is
+  // the one case a declared kind set answers and a bare `T.any()` does not. Left behind, this
+  // drew a grey ring beside a `NodeBrowser` signature line already reading `Geometries`.
+  const { family, shape } = portStyle(port)
   /*
    * `familyColorVar`, not a token name built from the family. The interpolated form was a sixth
    * spelling of the family table with no fallback, so a family whose token did not exist —

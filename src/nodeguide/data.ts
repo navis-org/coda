@@ -47,13 +47,20 @@ import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
  * like the rest of this module.
  */
 import { paramIsPicker, paramValueLabel } from '../help/paramText'
-import { socketStyle } from '../ui/socketStyle'
+import { kindSetLabel } from '../core/types'
+import { portStyle } from '../ui/socketStyle'
 import type { SocketFamily, SocketShape } from '../ui/socketStyle'
 
 export interface GuidePort {
   id: string
   label: string
-  /** Type *kind* rather than the full type: the column list is unknown before wiring. */
+  /**
+   * The socket's tag rather than the full type: the column list is unknown before wiring.
+   *
+   * A port declared `T.any()` for a union `CodaType` cannot spell reports the **set's** name
+   * instead — `geometries` for the four `… Neurons` passthroughs — because `any` on this page is
+   * a claim the node does not make, and the page's whole job is teaching the vocabulary.
+   */
   kind: string
   family: SocketFamily
   shape: SocketShape
@@ -139,12 +146,18 @@ function paramsOf(def: NodeDefinition): GuideParam[] {
     }))
 }
 
+/*
+ * `portStyle`/`socketLabel` rather than `socketStyle`/`typeLabel`, because this page describes
+ * node *types* with nothing wired — which is exactly the state a declared kind set is for. Drawn
+ * from the type alone, the four geometry passthroughs came out as grey `Any` rings on a page
+ * whose whole job is teaching the socket vocabulary.
+ */
 function portsOf(ports: readonly ResolvedPort[]): GuidePort[] {
   return ports.map((p) => ({
     id: p.id,
     label: p.label ?? p.id,
-    kind: p.type.kind,
-    ...socketStyle(p.type),
+    kind: (kindSetLabel(p.kinds) ?? p.type.kind).toLowerCase(),
+    ...portStyle(p),
     required: p.required !== false,
   }))
 }

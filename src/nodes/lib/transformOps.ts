@@ -37,7 +37,7 @@
 import type { Warner } from '../../core/limits'
 import { describeDuration } from '../../core/limits'
 import type { CodaType, ColumnSchema, TableSchema } from '../../core/types'
-import { T, column, tableSchema, uniqueName } from '../../core/types'
+import { GEOMETRY_KINDS, T, column, kindIn, tableSchema, uniqueName } from '../../core/types'
 import type {
   ColumnData,
   MeshDetail,
@@ -61,26 +61,33 @@ type Report = (fraction: number, note?: string) => void
 /** The three value kinds a transform moves. Not a `CodaType`; see `mirrorableKind`. */
 export type GeometryValue = SkeletonsValue | MeshesValue | PointsValue
 
+/*
+ * Over `GEOMETRY_KINDS`, not a disjunction beside it. The constant's own doc claims "one array,
+ * so the predicate and the declaration cannot come to disagree about `points`" — which was true
+ * of `isGeometryKind` and not of this, its value-level twin eight lines up: a fourth geometry
+ * kind would have been admitted by the port, by `isGeometryKind` and by the palette, and refused
+ * here at run time.
+ *
+ * Not `kindIn`, which admits `any` and `undefined` because an unresolved *socket* is not a
+ * refusal. A value has arrived; there is nothing unresolved about it.
+ */
 export function isGeometryValue(v: unknown): v is GeometryValue {
   if (!v || typeof v !== 'object') return false
   const kind = (v as { kind?: unknown }).kind
-  return kind === 'skeletons' || kind === 'meshes' || kind === 'points'
+  return typeof kind === 'string' && (GEOMETRY_KINDS as readonly string[]).includes(kind)
 }
 
 /**
  * Whether a *type* could carry geometry, which is what `validate` asks.
  *
  * `any` counts, on `isIterableKind`'s rule: unknown is not a refusal, and an unresolved socket
- * is the ordinary state before anything upstream has run.
+ * is the ordinary state before anything upstream has run. That is exactly the clause that makes
+ * this predicate the wrong thing for a *port* to declare, which is why the list moved to
+ * `core/types.ts` and the three geometry nodes hand `GEOMETRY_KINDS` itself to `PortDef.kinds`:
+ * a socket saying it accepts `any` would be saying nothing at all.
  */
 export function isGeometryKind(kind: string | undefined): boolean {
-  return (
-    kind === undefined ||
-    kind === 'any' ||
-    kind === 'skeletons' ||
-    kind === 'meshes' ||
-    kind === 'points'
-  )
+  return kindIn(GEOMETRY_KINDS, kind)
 }
 
 /** What one item of a value is called, for a message that reads. */

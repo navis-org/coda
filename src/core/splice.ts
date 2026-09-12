@@ -41,8 +41,20 @@ export interface SplicePorts {
  *
  * One re-inference, not one per candidate pair: the first compatible input is taken and the
  * outputs are then judged against it. A node whose second input would have worked where its
- * first did not is missed, which is the same "first compatible" simplification the palette's
- * link-drag already makes, and no node in the registry is shaped that way today.
+ * first did not is missed, and no node in the registry is shaped that way today. (The palette's
+ * link-drag *used* to make the same simplification and no longer does — `bestPort` ranks a
+ * node's ports rather than taking the first that fits — so this is now the only "first
+ * compatible" left, on its own merits rather than by precedent.)
+ *
+ * **`checkConnection` is the whole of the type question here, and briefly was not.** A port
+ * declared `T.any()` for a union `CodaType` cannot spell used to pass it for anything, so an
+ * isolated `Mirror Neurons` dropped on a `Cut Tree → Dendrogram` wire was accepted: the input
+ * check passed on the `any`, the passthrough re-inferred, the output check passed, and the
+ * gesture landed a card its own `validate` refuses. This file grew a `socketAccepts` guard at
+ * each end for it — and then `checkConnection` learned to read `PortDef.kinds` itself, which
+ * subsumed both. They are gone; the test that caught the Mirror case still passes, which is the
+ * evidence that it did. Worth knowing if a fourth port-picking surface ever needs one: it very
+ * probably does not.
  */
 export function spliceCandidate(
   graph: CodaGraph,
@@ -93,7 +105,8 @@ export function spliceCandidate(
         { nodeId: nodeId, portId: output.id },
         { nodeId: edge.target, portId: edge.targetHandle },
       )
-      if (downstream.ok) return { inPort: input.id, outPort: output.id }
+      if (!downstream.ok) continue
+      return { inPort: input.id, outPort: output.id }
     }
     return undefined
   }

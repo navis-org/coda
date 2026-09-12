@@ -47,6 +47,7 @@
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import {
+  ITERABLE_KINDS,
   elementAt,
   elementCount,
   emptyElement,
@@ -66,8 +67,8 @@ registerNode({
     'Step through a collection one element at a time — the manual For each. Explore Dataset → Select One → Skeletons → 3D View. Stepping is free (arrows move the card), Use this commits (re-runs downstream). Live mode couples browsing and committing.',
   // No network and no serious CPU: taking one element of a collection already in hand.
   cost: 'cheap',
-  inputs: [{ id: 'in', label: 'Items', type: T.any() }],
-  outputs: [{ id: 'item', label: 'Item', type: T.any() }],
+  inputs: [{ id: 'in', label: 'Items', type: T.any(), kinds: ITERABLE_KINDS }],
+  outputs: [{ id: 'item', label: 'Item', type: T.any(), kinds: ITERABLE_KINDS }],
   params: [
     {
       /*

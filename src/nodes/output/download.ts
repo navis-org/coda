@@ -49,12 +49,22 @@ registerNode({
   guide:
     'Save whatever is connected to a file — CSV for tables, SWC for skeletons, OBJ for meshes, SVG or PNG for an upstream chart.',
   cost: 'expensive',
-  // `T.any()`: a Download node refusing what it was wired to would be the one node in the tree
-  // that cares what it is carrying, and it does not.
-  inputs: [{ id: 'in', label: 'Value', type: T.any() }],
+  /*
+   * `T.any()`: a Download node refusing what it was wired to would be the one node in the tree
+   * that cares what it is carrying, and it does not.
+   *
+   * **The only port in the registry that means `any` literally**, alongside its own output.
+   * Every other one — both passthroughs, both loop ends, Select One — turned out to mean one of
+   * five named sets, which is what `PortDef.kinds` exists to say. `anyKind` is how this one says
+   * the omission is deliberate rather than unaudited, and `sockets.test.ts` sweeps the registry
+   * for a bare `T.any()` that says neither. It is last in `socketTier`, so it sits under every
+   * node that wanted the wire specifically, and it is still offered, because saving an
+   * intermediate is a real answer to any wire at all.
+   */
+  inputs: [{ id: 'in', label: 'Value', type: T.any(), anyKind: true }],
   // Passed through so it can sit mid-chain, exactly as the viewers do. An endpoint that broke
   // the chain would have to be the last node in every workflow that saves an intermediate.
-  outputs: [{ id: 'out', label: 'Value', type: T.any() }],
+  outputs: [{ id: 'out', label: 'Value', type: T.any(), anyKind: true }],
   /*
    * **Every param here is presentational, and that is not a stretch of the word.**
    *

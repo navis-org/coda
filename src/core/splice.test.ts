@@ -209,6 +209,30 @@ describe('the rewire', () => {
     expect(inbound[0]?.source).toBe('loose')
   })
 
+  /*
+   * The third surface where the *machine* picks a port, and it was the one left on
+   * `checkConnection` alone.
+   *
+   * `Mirror Neurons`' input is `T.any()` — `CodaType` cannot spell "skeletons, meshes or
+   * points" — so `checkConnection` passed it a neuron table, the passthrough re-inferred, the
+   * output check passed against `Skeletons`' `neurons` port, and the gesture landed a card whose
+   * own `validate` refuses what is on it.
+   *
+   * This file grew a `socketAccepts` guard at each end for that, and then `checkConnection`
+   * learned to read `PortDef.kinds` itself and both were deleted — **this test passing with them
+   * gone is the evidence they were a symptom patch**, which is the only reason it still names a
+   * surface it no longer tests directly.
+   *
+   * `core.filterTable` on the same wire is the control — an ordinary `table` port, still spliced,
+   * so the gate narrows rather than refusing the gesture.
+   */
+  it('refuses a splice the middle node would only reject in `validate`', () => {
+    const mirror = chain('neuron.mirror')
+    expect(candidate(mirror.graph, mirror.edgeId)).toBeUndefined()
+    const control = chain('core.filterTable')
+    expect(candidate(control.graph, control.edgeId)).toBeDefined()
+  })
+
   it('leaves the graph inference-clean, with the type carried through', () => {
     const { graph, edgeId } = chain('core.filterTable')
     const edge = graph.edges.find((e) => e.id === edgeId)!

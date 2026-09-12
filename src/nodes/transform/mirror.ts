@@ -56,7 +56,7 @@
  */
 
 import { registerNode } from '../../core/registry'
-import { T } from '../../core/types'
+import { GEOMETRY_KINDS, T } from '../../core/types'
 import { isTransformValue } from '../../core/values'
 import { allSpaces, spaceName } from '../../data/transforms/spaces'
 import { loadLandmarks, mirrorFor } from '../../data/transforms/landmarks'
@@ -114,7 +114,7 @@ registerNode({
    * output type is the input type with one column added, so nothing downstream loses a picker.
    */
   inputs: [
-    { id: 'in', label: 'Neurons', type: T.any() },
+    { id: 'in', label: 'Neurons', type: T.any(), kinds: GEOMETRY_KINDS },
     /*
      * Landmarks of your own, in place of the ones Coda ships. **It replaces the spline only.**
      * The flip is `x' = c - x` and `c` is a property of the template rather than of the
@@ -125,7 +125,7 @@ registerNode({
      */
     { id: 'warp', label: 'Warp', type: T.transform(), required: false },
   ],
-  outputs: [{ id: 'out', label: 'Mirrored', type: T.any() }],
+  outputs: [{ id: 'out', label: 'Mirrored', type: T.any(), kinds: GEOMETRY_KINDS }],
   params: [
     {
       id: 'warp',
