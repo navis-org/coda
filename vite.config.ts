@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react'
 import type { PluginOption } from 'vite'
 // vitest's re-export of defineConfig is the one that types the `test` block.
 import { defineConfig } from 'vitest/config'
+import { datasetGuideData } from './vite/datasetGuideData'
 import { goatCounter } from './vite/goatcounter'
 import { nodeGuideData } from './vite/nodeGuideData'
 import { seo } from './vite/seo'
@@ -300,6 +301,7 @@ export default defineConfig({
     reactTracksOff(),
     deploymentProxy(),
     nodeGuideData(),
+    datasetGuideData(),
     goatCounter(),
     seo(),
     stripComments(),
@@ -335,6 +337,7 @@ export default defineConfig({
         overview: fileURLToPath(new URL('./overview.html', import.meta.url)),
         tutorial: fileURLToPath(new URL('./tutorial.html', import.meta.url)),
         nodes: fileURLToPath(new URL('./nodes.html', import.meta.url)),
+        datasets: fileURLToPath(new URL('./datasets.html', import.meta.url)),
       },
     },
   },

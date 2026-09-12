@@ -1,13 +1,15 @@
-# The three published pages
+# The four published pages
 
-The overview, tutorial and node guide — extra vite entries that ship beside the app.
+The overview, tutorial, node guide and dataset guide — extra vite entries that ship beside
+the app.
 
 ## The overview page
 
 A **fourth** vite entry — `overview.html` at the root, `src/overview/{main.ts,overview.css}` —
-and the front door of the three documents that ship beside the app. The pair it completes reads
-in one order: this one is what Coda *is*, the field guide is how it works, the node guide is what
-each node does. Somebody deciding whether to open the editor at all reads this and nothing else.
+and the front door of the documents that ship beside the app. The set reads in one order: this
+one is what Coda *is*, the field guide is how it works, the node guide is what each node does,
+and the dataset guide is which connectome to point it at. Somebody deciding whether to open the
+editor at all reads this and nothing else.
 
 Same construction as the other two: plain TypeScript, no React and no store import, importing
 nothing from `src/ui` but `theme.css`. Verify with `pnpm build` — `overview-*.js` is **0.8 kB
@@ -196,6 +198,132 @@ entry has no route for anything else to catch going missing.
 The page itself has no test. jsdom does no layout, so the camera, the pinned stage and the wires
 are exactly the class of thing it cannot see; what was checked by hand is that it runs clean under
 jsdom across five viewport widths with every chapter resolving. Same standing as the WebGL viewers.
+
+## The dataset guide
+
+A **fifth** vite entry — `datasets.html` at the root, `src/datasetguide/`. It answers the one
+question the other three do not: *which connectome*. Linked from `? ▸ Documentation` beside the
+other documents, and from the Workflow Wizard's first question, which is where somebody meets the
+thirteen dataset names with nothing to choose between them.
+
+### It has no client renderer, and that is the whole design
+
+The node guide draws its grid in the browser and splices a static index in at build time, because
+it has a search box and 102 tiles. This page has a card per dataset, no filter and no state, so
+the split would buy nothing — and the static half is the half that matters. `render.ts` builds the
+entire document body and `vite/datasetGuideData.ts` splices it into `datasets.html` in place of
+`<!--@dataset-guide-->`; `main.ts` carries the stylesheet and the stored-theme read, and is the
+whole of the client script. Measured: **76 kB of HTML, 0.28 kB of JS, 19 kB of CSS** (nearly all
+of it `theme.css`), and `dist/datasets.html` references no `main-*` chunk.
+
+The reason is [seo.md](seo.md)'s: a page whose content arrives with the script is a page most
+crawlers never read, and "which fly connectome should I use" is asked of a search box and of a
+language model in roughly equal measure. Both get the whole document.
+
+### The content is a table, and three of its fields are a deliberate second spelling
+
+`src/datasetguide/datasets.ts` is the page. Every entry carries prose, specs, strengths, caveats,
+repositories and citations that exist nowhere else — `DatasetFamily.description` and `.guide` are
+a card's one-liner and a card's tooltip, written for somebody who has already picked.
+
+It also repeats three fields off the family table — `label`, `backend`, `glyph` — because the
+page **cannot import `nodes/lib/datasetFamilies.ts`**: that module reaches
+`data/catmaid/registry.ts` for `L1_CATMAID_SOURCE_ID`, which constructs a `CatmaidSource`, and
+`tableOps` for `aggColumnName`. The node guide's answer to the same problem is an SSR server that
+loads the registry in Node (660 kB, ~250 ms per build); that is the right trade for 102 nodes
+drawn from 102 definitions and the wrong one for three fields on a dozen rows. So the copy is
+made and `datasetGuide.test.ts` pins it, which is `anatomy.test.ts`' arrangement exactly — a
+hand-written document whose every borrowed value is held against the source it depicts.
+
+The properties there are what catch a dataset added next month: every family is listed **or
+declared in `EXCLUDED`**, every entry names a family, no key is in both, the three borrowed
+fields agree, and **a family the family table marks `starter: false` is in the `historical` tier
+here** — so a recommendation cannot outlive the thing it recommends. The converse is deliberately
+not asserted: a dataset can be a poor starting point for reasons the family table does not record.
+
+### The specimen tabs are CSS, because the page has no script to hang them on
+
+The comparison table filters to **All / Fly / Fly larva / Mouse**, and the strip behind that is a
+radio group plus a `:has()` rule — no JavaScript, which is what lets the page keep the property
+the section above is about. The inputs are real and visually hidden, each label is a `for=` pill,
+and one generated rule per clade hides the rows of every other. Keyboard behaviour, focus and the
+radio role are the browser's own.
+
+Five decisions, and four of them are silent when wrong:
+
+- **`:has()` rather than a stamped attribute**, inverting `editor.css`' rule on purpose: that one
+  exists where something in React *can* stamp an attribute, and nothing here can. The sibling
+  combinator (`~`) is supported further back and would also work, at the cost of putting the
+  inputs outside the element that carries `role="radiogroup"` — which leaves the radios with no
+  accessible group name. `@supports not selector(:has(*))` withdraws the strip instead, since a
+  tab that does nothing is worse than no tab.
+- **The filter rules are generated** from `CLADES` into a `<style>` beside the strip, not written
+  into `datasetguide.css`. Hand-written they would be the fourth place a clade id is spelled and
+  the one nothing would catch.
+- **The default is All**, so the no-CSS, no-JS and crawler views are the whole table.
+- **The inputs are hidden with the clip pattern**, never `display: none` or `visibility: hidden`
+  — both take the control out of the tab order. That is `canvas.md`'s add-menu trap reached from
+  the other side: there a closed surface had to be *unmounted* so its buttons left the tab order;
+  here a control has to stay in it while leaving the page.
+- **A clade is a field, not a substring of `specs.specimen`.** That cell is prose ("Adult male
+  Drosophila", "First-instar Drosophila larva"), and a tab whose membership is decided by a
+  match on it loses a dataset the day somebody rewords a cell. `render.ts` draws only the clades
+  that have a row, and none at all below two — so a zebrafish dataset gets a tab by being given a
+  clade.
+
+`pnpm probe:dataset-tabs` is the browser half, at 1440/900/412: each tab shows exactly the rows
+it counts, All shows every row, a hidden radio still takes focus, and the document is never wider
+than the viewport. jsdom can see none of it — it matches no `:has()` selector and answers `null`
+for `offsetParent` on everything — so `datasetGuide.test.ts` pins the strings (a tab per clade, a
+generated rule per tab, a `data-clade` per row, exactly one `checked`) and the probe pins the
+behaviour. **Its first run failed on its own arithmetic**: the rows are static html, so waiting
+for one let a measurement through before any CSS had applied, and the unstyled table — with no
+`overflow-x` container around it — read as 613px of document in a 412px viewport. It waits on a
+computed style the stylesheet is the only source of now.
+
+### Leaving a dataset out is a declaration, not an omission
+
+`Demo Data` is the synthetic connectome generated in the browser, and it has no row in the
+comparison table: no specimen, no resolution, nothing to cite, so its row would be six cells of
+"n/a" beside one real claim. It is still the answer to "I have no token yet", so it is not simply
+deleted — `EXCLUDED` carries the key, a `why`, and the `footnote` that is drawn under the table
+instead.
+
+That shape exists so the test can ask the question in the strong direction: a family that is
+neither listed nor excluded **fails**, which means dropping one from the guide has to be typed
+out with a reason rather than achieved by nobody noticing.
+
+### The masthead's count is hand-written and therefore pinned
+
+`datasets.html` opens by saying how many datasets Coda preconfigures, in words, and no build step
+can derive that — the file is markup spliced *into*, not generated. So `datasetGuide.test.ts`
+reads the file and holds the numeral against `DATASET_GUIDE.length` through `numberWord`. It
+earned its place immediately: the first draft said "thirteen" for a set of twelve, and the count
+then moved again when Demo Data left. A page that opens by misreporting its own contents is both
+invisible in review and the first thing a reader checks.
+
+### Ordered by recommendation, which is not how anything else orders them
+
+Three tiers — start here, reach for these, superseded but still cited — and within a tier, the
+array's own order. Not the family table's grouping, which is by backend because the New menu is;
+a reader who does not know which dataset to use is not asking which backend serves it.
+
+### No colour carries information
+
+A card's accent is its backend, and the four tokens are `theme.css`' own
+(`--cat-dataset`, `--cat-dataset-cave`, `--cat-dataset-catmaid`, `--cat-dataset-mock`) — mapped
+onto `--cat` in `datasetguide.css` because `theme.css` gives `[data-backend]` only `--cat-head`
+and `--cat-ink`, which is what a node *card* reads. Strengths and caveats are told apart by their
+heading and by a `+` / `−` marker, never by a red/green pair: that would be the page's only new
+hue and would fail the same colourblind gate `src/ui/colors.ts` records.
+
+### What is still open
+
+The entries carry `// TODO(facts)` markers wherever a number or a reference was not verifiable
+from inside this repository, and `datasets.html` carries a visible **Draft** note that goes with
+them. Every DOI that is there came from something already committed —
+`data/neuprint/__fixtures__/datasets.json`, `data/cave/spec.ts`, `src/help/nodes/*.md`.
+
 
 ## The node guide
 

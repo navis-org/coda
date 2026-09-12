@@ -431,6 +431,23 @@ export function Toolbar() {
                 <strong>Node Guide</strong>
                 <span>Catalogue of all nodes</span>
               </a>
+              {/*
+               * The other reference half, and it answers the question that comes *before* any of
+               * the three above: which connectome. Last because it is the one a reader returns
+               * for least often — the node guide is opened with a node in mind, this one is
+               * opened once while deciding what to build on. The Workflow Wizard's first
+               * question links to the same page for the reader who has not got that far.
+               */}
+              <a
+                className="dropdown__item"
+                href={`${import.meta.env.BASE_URL}datasets.html`}
+                target="_blank"
+                rel="noreferrer noopener"
+                onClick={close}
+              >
+                <strong>Dataset Guide</strong>
+                <span>Which connectome, and what to cite</span>
+              </a>
             </Submenu>
             {/*
              * The two reference cards. Both are dialogs that stay over the canvas, and both are

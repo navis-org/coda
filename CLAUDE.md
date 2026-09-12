@@ -1690,8 +1690,8 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   indicator, the start page, keyboard shortcuts.
 - [docs/dashboard.md](docs/dashboard.md) — the grid view: the cell model, the mode that unmounts
   the canvas, the two gestures and what was measured in a real browser.
-- [docs/pages.md](docs/pages.md) — overview, tutorial and node guide. Extra vite entries;
-  each must stay out of the main chunk.
+- [docs/pages.md](docs/pages.md) — overview, tutorial, node guide and dataset guide. Extra vite
+  entries; each must stay out of the main chunk.
 - [docs/help.md](docs/help.md) — the `?` on a node: the in-app overlay, the documents in
   `src/help/nodes/`, and the figures that draw real registry objects. **Read `## Voice` before
   writing or editing one** — the corpus was cut 34,060 → 28,528 words once and the five things

@@ -335,7 +335,28 @@ function Dialog() {
         {at === 'dataset' && (
           <Question
             title="Which dataset?"
-            hint="Pick the dataset you want to work with. You can change it on the canvas afterwards."
+            hint={
+              <>
+                Pick the dataset you want to work with. You can change it on the canvas
+                afterwards.{' '}
+                {/*
+                 * A new tab, like every other link out of the app to one of the published
+                 * documents, and through `BASE_URL` because `base` is './' — an absolute path
+                 * resolves to the domain root under a subpath deploy. A tab rather than
+                 * replacing the dialog: the wizard holds four answers, and a reader sent away
+                 * to read about datasets has to come back to them.
+                 */}
+                Don&rsquo;t know which one to use? Check out the{' '}
+                <a
+                  href={`${import.meta.env.BASE_URL}datasets.html`}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  Dataset Guide
+                </a>
+                .
+              </>
+            }
           >
             {families.map((family) => (
               <Option
@@ -518,7 +539,14 @@ function Question({
   children,
 }: {
   title: string
-  hint: string
+  /**
+   * `ReactNode` rather than `string` because the first question's hint carries a link.
+   *
+   * Widened here rather than given a second `aside` prop: a hint is one sentence about how to
+   * answer the question, and "here is where to read about the answers" is that sentence rather
+   * than a different kind of thing sitting beside it.
+   */
+  hint: React.ReactNode
   children: React.ReactNode
 }) {
   return (

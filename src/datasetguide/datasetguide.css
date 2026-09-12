@@ -1,0 +1,706 @@
+/*
+ * The Dataset Guide.
+ *
+ * Same construction as the node guide: tokens come from the app's own `theme.css` rather than a
+ * second copy of the palette, so a card's backend tint here is the tint the editor draws on the
+ * dataset node. Everything below is page layout.
+ *
+ * Like the node guide and unlike the field guide, this page does not pin a theme — it is a
+ * reference kept open beside the editor, so it follows `prefers-color-scheme` and the stored
+ * preference `main.ts` reads.
+ *
+ * **No colour carries information here.** A card's accent is its backend, which `theme.css`
+ * already assigns and which the node's name says in words anyway; strengths and caveats are told
+ * apart by their heading and their mark, not by a red/green pair that would be the page's only
+ * new hue and would fail the same colourblind gate `src/ui/colors.ts` records.
+ */
+
+@import '../ui/theme.css';
+
+:root {
+  --gutter: clamp(1rem, 4vw, 3rem);
+}
+
+/*
+ * The backend tint, as `--cat`.
+ *
+ * `theme.css` assigns `[data-backend]` a `--cat-head` and a `--cat-ink`, which is what a node
+ * *card* reads — a tinted header strip and the ink that stays legible on it. This page draws no
+ * card headers, so what it wants is the base hue, and `nodeguide/main.ts` already reaches for it
+ * the same way (`--cat: var(--cat-<category>)`, set per selection). Here it can be a selector
+ * because a dataset's backend is stamped on the element and never changes.
+ *
+ * The four tokens are `theme.css`', so a palette change reaches this page with no edit. What is
+ * deliberately *not* here is a fifth hue: the tint separates the three backends because the
+ * editor already separates them that way, and it says nothing a card does not also say in words.
+ */
+[data-backend] {
+  --cat: var(--cat-dataset);
+}
+[data-backend='cave'] {
+  --cat: var(--cat-dataset-cave);
+}
+[data-backend='catmaid'] {
+  --cat: var(--cat-dataset-catmaid);
+}
+[data-backend='mock'] {
+  --cat: var(--cat-dataset-mock);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  /* theme.css pins this off for the editor canvas; a document wants it back. */
+  overscroll-behavior: auto;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  text-wrap: balance;
+  letter-spacing: -0.028em;
+  font-weight: 800;
+  line-height: 1.12;
+}
+p {
+  margin: 0;
+}
+a {
+  color: inherit;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+}
+a:hover {
+  text-decoration-color: currentColor;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--surface-3);
+  border-radius: 4px;
+  padding: 0.08em 0.34em;
+}
+
+.shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-inline: var(--gutter);
+}
+
+/* --------------------------------------------------------------------------
+   Masthead — the node guide's, so the set reads as one publication
+   -------------------------------------------------------------------------- */
+.top {
+  position: relative;
+  border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(
+      900px 380px at 82% 10%,
+      color-mix(in srgb, var(--accent) 9%, transparent),
+      transparent 68%
+    ),
+    var(--canvas);
+  overflow: hidden;
+}
+.top__dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+  background-size: 22px 22px;
+  opacity: 0.8;
+  pointer-events: none;
+}
+.top__inner {
+  position: relative;
+  display: grid;
+  gap: 1.1rem;
+  padding-block: clamp(1.6rem, 4vw, 2.9rem) clamp(1.4rem, 3vw, 2rem);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.brand svg {
+  color: var(--text-primary);
+  flex: none;
+}
+.brand__tag {
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.1em 0.7em;
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+.brand__spacer {
+  flex: 1;
+}
+.brand a {
+  color: var(--text-muted);
+}
+.brand a:hover {
+  color: var(--text-primary);
+}
+.top h1 {
+  font-size: clamp(1.9rem, 4.4vw, 3.1rem);
+  max-width: 20ch;
+  letter-spacing: -0.035em;
+}
+.top h1 em {
+  font-style: normal;
+  color: var(--text-muted);
+}
+.top__sub {
+  max-width: 62ch;
+  color: var(--text-secondary);
+  font-size: clamp(1rem, 1.5vw, 1.12rem);
+}
+/* The masthead's asterisk note — what "preconfigures" is qualifying. */
+.top__draft {
+  justify-self: start;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  padding: 0.4em 0.8em;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.top__draft strong {
+  color: var(--text-primary);
+}
+
+/* --------------------------------------------------------------------------
+   At a glance
+   -------------------------------------------------------------------------- */
+.compare {
+  padding-block: clamp(2rem, 4vw, 3rem) 0;
+  display: grid;
+  gap: 0.8rem;
+}
+.compare h2 {
+  font-size: clamp(1.25rem, 2.2vw, 1.6rem);
+}
+.compare__note {
+  max-width: 70ch;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+/* A table is one of the three things allowed to be wider than the body — in its own
+   scroller, so the document itself never scrolls sideways. */
+/*
+ * The specimen tabs.
+ *
+ * The inputs are visually hidden but **focusable** — the clip pattern, never `display: none` or
+ * `visibility: hidden`, both of which take a control out of the tab order. That is the same trap
+ * `canvas.md` records for the add menu, reached from the other direction: there a closed surface
+ * had to be unmounted so its buttons left the tab order, here a control has to stay in it while
+ * leaving the page.
+ *
+ * The per-clade filter rules are **not** here: `render.ts` generates them from `CLADES` into a
+ * `<style>` beside the strip, so a clade added there needs no edit in this file.
+ */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+.tabs__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.tabs__label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.28em 0.85em;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.tabs__label:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+/* Selected is a filled pill, not a coloured one: every hue on this page is a backend. */
+.tabs__input:checked + .tabs__label {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.tabs__input:focus-visible + .tabs__label {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.tabs__n {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.tabs__input:checked + .tabs__label .tabs__n {
+  color: var(--text-secondary);
+}
+
+/*
+ * Footnotes under the table, for a dataset the table deliberately has no row for.
+ *
+ * Below the table rather than beside it: it is about something *absent* from what is directly
+ * above, which reads as a footnote and not as a caption.
+ */
+.compare__foot {
+  max-width: 78ch;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--border);
+}
+.compare__foot strong {
+  color: var(--text-secondary);
+}
+
+.compare__scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-1);
+}
+.compare__table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 860px;
+  font-size: 13.5px;
+}
+.compare__table th,
+.compare__table td {
+  text-align: left;
+  padding: 0.55rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.compare__table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.compare__table tbody th {
+  font-weight: 650;
+  white-space: nowrap;
+}
+.compare__table tbody th a {
+  text-decoration: none;
+  border-left: 3px solid var(--cat, var(--border-strong));
+  padding-left: 0.55rem;
+  margin-left: -0.55rem;
+}
+.compare__table tbody tr:last-child th,
+.compare__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.compare__table td {
+  color: var(--text-secondary);
+}
+/* The superseded rows are still worth reading and are not the answer to "which one". */
+.compare__table tr[data-tier='historical'] td,
+.compare__table tr[data-tier='historical'] th {
+  opacity: 0.72;
+}
+
+/* --------------------------------------------------------------------------
+   Tiers
+   -------------------------------------------------------------------------- */
+.tier {
+  padding-block: clamp(2.2rem, 5vw, 3.4rem) 0;
+  display: grid;
+  gap: 1.4rem;
+}
+.tier__head {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 72ch;
+}
+.tier__head h2 {
+  font-size: clamp(1.4rem, 2.6vw, 1.95rem);
+}
+.tier__head p {
+  color: var(--text-secondary);
+}
+.tier__cards {
+  display: grid;
+  gap: 1.2rem;
+}
+
+/* --------------------------------------------------------------------------
+   One dataset
+   -------------------------------------------------------------------------- */
+.ds {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-1);
+  padding: clamp(1rem, 2.4vw, 1.6rem);
+  display: grid;
+  gap: 1.1rem;
+  scroll-margin-top: 1rem;
+}
+.ds__head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 1rem;
+}
+.ds__mark {
+  color: var(--cat, var(--text-muted));
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--cat, var(--surface-3)) 12%, transparent);
+}
+.ds__title h3 {
+  font-size: clamp(1.15rem, 2.2vw, 1.5rem);
+}
+.ds__tagline {
+  margin-top: 0.3rem;
+  color: var(--text-secondary);
+  max-width: 70ch;
+}
+
+.ds__specs {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.7rem 1.2rem;
+  padding: 0.85rem 0;
+  border-block: 1px solid var(--border);
+}
+.ds__specs dt {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.ds__specs dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.93rem;
+  line-height: 1.4;
+}
+
+.ds__about {
+  display: grid;
+  gap: 0.7rem;
+  max-width: 78ch;
+  color: var(--text-secondary);
+}
+.ds__about strong {
+  color: var(--text-primary);
+}
+
+/* Two columns that are the same kind of thing said in opposite directions, so they are the
+   same kind of block — told apart by their heading and their marker, never by hue. */
+.ds__judge {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+.judge h4 {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.45rem;
+}
+.judge ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.45rem;
+}
+.judge li {
+  position: relative;
+  padding-left: 1.3rem;
+  font-size: 0.93rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.judge li::before {
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.judge--strength li::before {
+  content: '+';
+}
+.judge--caveat li::before {
+  content: '\2212'; /* minus sign, not a hyphen — it has to read as the pair of the plus */
+}
+
+.ds__block {
+  display: grid;
+  gap: 0.5rem;
+}
+.ds__block h3 {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.ds__none {
+  font-size: 0.93rem;
+  color: var(--text-muted);
+}
+
+.repos,
+.cites,
+.kits {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.repos {
+  display: grid;
+  gap: 0.45rem;
+}
+.repo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.6rem;
+  font-size: 0.93rem;
+}
+.repo__name {
+  font-weight: 600;
+}
+.repo__coda {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  border: 1px solid var(--cat, var(--border-strong));
+  border-radius: 999px;
+  padding: 0.1em 0.6em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.repo__note {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.cites {
+  display: grid;
+  gap: 0.4rem;
+}
+.cite {
+  font-size: 0.93rem;
+}
+.cite__what {
+  color: var(--text-muted);
+}
+.cite__req {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.1em 0.55em;
+  margin-left: 0.4rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.cite__todo {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.kits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.kits li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.22em 0.6em;
+  font-size: 0.86rem;
+}
+.kits__lang {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.ds__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.9rem;
+}
+.ds__rather {
+  max-width: 60ch;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+}
+.openflow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.42em 0.85em;
+  border: 1px solid var(--cat, var(--border-strong));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--cat, var(--surface-3)) 12%, transparent);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.openflow:hover {
+  background: color-mix(in srgb, var(--cat, var(--surface-3)) 22%, transparent);
+}
+.openflow svg {
+  /* Nudged rather than centred: the arrow's stem sits above its own box's middle. */
+  margin-top: 1px;
+}
+
+/* --------------------------------------------------------------------------
+   What else is out there
+   -------------------------------------------------------------------------- */
+.elsewhere {
+  padding-block: clamp(2.2rem, 5vw, 3.4rem) clamp(2rem, 4vw, 3rem);
+  display: grid;
+  gap: 1.4rem;
+}
+.elses {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+}
+.else {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-1);
+  padding: 1rem;
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
+}
+.else h3 {
+  font-size: 1rem;
+}
+.else p {
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+}
+.else__via strong {
+  color: var(--text-primary);
+}
+.else__where {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.8rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Footer
+   -------------------------------------------------------------------------- */
+.foot {
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+}
+.foot__inner {
+  display: grid;
+  gap: 1rem;
+  padding-block: 1.4rem 1.8rem;
+}
+.foot__ask {
+  max-width: 62ch;
+  font-size: 0.94rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.foot__ask strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.foot__ask a {
+  color: var(--accent);
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.foot__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Responsive
+   -------------------------------------------------------------------------- */
+@media (max-width: 560px) {
+  .ds__head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ds__mark {
+    width: 56px;
+    height: 56px;
+  }
+}

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coda Dataset Guide — which connectome should you use?</title>
+    <!-- one line, so `grep 'meta name="description"'` finds it — see index.html for why. -->
+    <!-- prettier-ignore -->
+    <meta name="description" content="An opinionated guide to the connectomes Coda opens: what each one covers, what it costs you, where else it lives, and what to cite." />
+    <link rel="icon" href="./logo.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#171716" />
+  </head>
+  <body>
+    <!-- ======================================================================
+         Masthead. Everything below it is rendered at build time by
+         `src/datasetguide/render.ts` from `src/datasetguide/datasets.ts` — see
+         `vite/datasetGuideData.ts`. There is no client renderer: the page has
+         no state, and the whole point is that a crawler reads the document.
+         ====================================================================== -->
+    <header class="top">
+      <div class="top__dots" aria-hidden="true"></div>
+      <div class="shell top__inner">
+        <div class="brand">
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 64 64"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              fill-rule="evenodd"
+              d="M32 12a18 20 0 1 0 0 40 18 20 0 1 0 0-40Zm0 3.6a12.24 16.4 0 1 1 0 32.8 12.24 16.4 0 1 1 0-32.8Z"
+            />
+            <rect x="30" y="5" width="4" height="54" rx="2" />
+            <rect x="7" y="30" width="50" height="4" rx="2" />
+          </svg>
+          <span>Coda &middot; Dataset guide</span>
+          <span class="brand__tag">Beta</span>
+          <span class="brand__spacer"></span>
+          <a href="./nodes.html">Node guide &rarr;</a>
+        </div>
+
+        <h1>Which connectome is right for you?</em></h1>
+
+        <p class="top__sub">
+          Coda preconfigures* eleven datasets for you. They differ by specimen, by sex, by
+          which part(s) of the nervous system they cover, by how much of it has been reconstructed/proofread,
+          and by what kind of data they come with. You should choose the one that best fits your question**.
+
+          <br><br> Heads-up: this is an opinionated summary.
+        </p>
+
+        <p class="top__draft" role="note">
+          *You can always bring in your own datasets using the <code>custom CAVE/neuPrint/CATMAID</code> nodes.
+        </p>
+        <p class="top__draft" role="note">
+        **That said, confirming a result in multiple datasets is generally a good idea. Coda provides the
+          tools to do so!
+        </p>
+      </div>
+    </header>
+
+    <main>
+      <!--@dataset-guide-->
+    </main>
+
+    <footer class="foot">
+      <div class="shell foot__inner">
+        <p class="foot__ask">
+          <strong>A dataset missing, or a claim here wrong?</strong>
+          <a
+            href="https://github.com/navis-org/coda/issues/new"
+            target="_blank"
+            rel="noreferrer noopener"
+            >Open an issue</a
+          >. The opinionated half of this page is opinion, and the factual half is only as good
+          as its last check against the publisher.
+        </p>
+        <div class="foot__meta">
+          <span><a href="./overview.html">Overview</a></span>
+          <span><a href="./tutorial.html">Field guide</a></span>
+          <span><a href="./nodes.html">Node guide</a></span>
+          <span><a href="https://github.com/navis-org/coda">Source</a></span>
+          <!-- The site counts page views and says so wherever it says anything else about
+               itself; the dashboard behind this is public. See docs/analytics.md. -->
+          <span><a href="https://coda-science.goatcounter.com/">Visitor stats</a></span>
+        </div>
+      </div>
+    </footer>
+
+    <script type="module" src="/src/datasetguide/main.ts"></script>
+  </body>
+</html>

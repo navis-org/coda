@@ -91,6 +91,16 @@ const PAGES: Record<string, Page> = {
     sources: ['nodes.html', 'src/nodeguide/', 'src/nodes/'],
     schema: 'WebPage',
   },
+  /*
+   * `sources` is wider than the entry file for the node guide's reason: this page's text lives
+   * in `src/datasetguide/datasets.ts`, so an edited dataset entry changes the document even
+   * though `datasets.html` is untouched.
+   */
+  'datasets.html': {
+    url: '/datasets.html',
+    sources: ['datasets.html', 'src/datasetguide/'],
+    schema: 'WebPage',
+  },
 }
 
 /** Absolute URL for a site-relative path. */
