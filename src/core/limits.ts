@@ -125,14 +125,30 @@ export function describeDuration(seconds: number): string {
  * statement from the old ceilings — it says what would be allocated and what the floor is, and
  * it never suggests raising anything, because there is nothing to raise.
  */
-export function refuseIfOverCrashFloor(what: string, bytes: number): void {
-  if (bytes <= CRASH_FLOOR_BYTES) return
-  throw new Error(
+export function refuseIfOverCrashFloor(what: string, bytes: number, remedy?: string): void {
+  const issue = crashFloorIssue(what, bytes, remedy)
+  if (issue) throw new Error(issue)
+}
+
+/**
+ * The same sentence without the throw, for a `validate` that can compute a shape from params
+ * alone and so should say it on the card before a Run. One comparison and one wording for both
+ * stages, rather than a node restating `bytes > CRASH_FLOOR_BYTES` to reach the edit-time half.
+ *
+ * `remedy` replaces the generic advice when the node knows which of its own controls shrinks the
+ * shape.
+ */
+export function crashFloorIssue(
+  what: string,
+  bytes: number,
+  remedy = 'Cut the shape upstream — filter, group, or split the run.',
+): string | undefined {
+  if (bytes <= CRASH_FLOOR_BYTES) return undefined
+  return (
     `${what} would allocate ${formatBytes(bytes)} in one go, past the ${formatBytes(
       CRASH_FLOOR_BYTES,
     )} a browser tab can be expected to survive. This is the one limit Coda still refuses ` +
-      `rather than warns about: there is no result on the other side of it. Cut the shape ` +
-      `upstream — filter, group, or split the run.`,
+    `rather than warns about: there is no result on the other side of it. ${remedy}`
   )
 }
 

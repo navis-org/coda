@@ -179,6 +179,13 @@ the undo stack alongside it).
   four times this shape while the node also emitted a long table of four `CellValue[]` columns,
   which was always the binding constraint; removing that port moved the ceiling out by about 4×,
   from roughly 2,000 neurons over the whole recording to 8,000.
+- `zapbench.recording`'s matrix — every cell × the window's level steps, so its shape is a function
+  of `Scale` and `Condition` alone and `validate` states the refusal on the card before a Run —
+  `crashFloorIssue`, the non-throwing half of `refuseIfOverCrashFloor`, so both stages make one
+  comparison in one wording. Full scale over the whole recording is 4.2 GB and half scale
+  1.1 GB; the default, quarter scale, is 269 MB, and full scale fits every single condition but
+  `dots`, `turning` and `open loop`. Its read also warns past `TRACE_BYTES_WARN`, which the default
+  (about 144 MB) always does.
 - `NBLAST_PAIRS_FLOOR` — the score matrix is one flat `Float64Array` of `rows * cols`.
 - `MAX_LINKAGE_OBSERVATIONS` (~11,585) — the condensed distance vector is `n(n-1)/2` float64s,
   so this is `sqrt(2 · CRASH_FLOOR_CELLS)` rather than a number anybody chose.

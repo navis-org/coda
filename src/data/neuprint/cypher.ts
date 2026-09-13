@@ -29,6 +29,7 @@ import { edgePropertyWeight } from '../source'
 import { isNeuronId } from '../../core/ids'
 import { SYNAPSE_UNITS } from '../synapseUnits'
 import type { PopulationFilter, TableSchema } from '../../core/types'
+import { isNumericDType } from '../../core/types'
 import {
   STATUS_COLUMN,
   TRACED_STATUS,
@@ -37,7 +38,7 @@ import {
   withoutStatedStatus,
 } from '../neuronFilter'
 import type { FilterRow } from '../filterRows'
-import { anchoredPattern, escapeRegex } from '../terms'
+import { anchoredPattern, escapeRegex, resolveColumn } from '../terms'
 import { CORE_NEURON_COLUMNS, neuprintProperty } from './schema'
 
 /**
@@ -96,12 +97,14 @@ function stringList(values: readonly string[]): string {
 const NEURON_COLUMNS = CORE_NEURON_COLUMNS.map((c) => `n.${neuprintProperty(c.name)}`)
 
 /**
- * Extra per-dataset properties appended to the standard seven.
- *
- * Requested by name so the RETURN clause stays predictable; unknown properties come back as
- * null rather than failing, which is what makes a dataset-specific schema safe to apply to
- * a dataset that turns out not to have every column.
+ * Whether the discovered schema types a field as a number — resolved the way `resolveRows` and the
+ * local matcher resolve it, so the three agree on which rows compare as numbers.
  */
+function isNumericField(schema: TableSchema | undefined, field: string): boolean {
+  const dtype = schema ? resolveColumn(schema, field)?.dtype : undefined
+  return dtype !== undefined && isNumericDType(dtype)
+}
+
 /**
  * A `WHERE` fragment accepting neurons whose property carries one of a set of labels.
  *
@@ -119,8 +122,17 @@ const NEURON_COLUMNS = CORE_NEURON_COLUMNS.map((c) => `n.${neuprintProperty(c.na
  * yields `null IN [...]` or `null =~ p`, both of which are null, and Cypher's `WHERE` keeps
  * only true. `toLower(null)` is null as well, so the case-insensitive form needs no guard.
  */
-function labelClause(match: LabelMatch): string {
+function labelClause(match: LabelMatch, schema: TableSchema | undefined): string {
   const prop = `n.${escapeIdentifier(neuprintProperty(match.field))}`
+  /*
+   * Number literals for a numeric property, asked of the discovered schema: `n.zapbenchId IN
+   * ['5']` compares a string against an integer and matches nothing, with no error. The schema
+   * rather than a flag on the request, so no caller has to know how the server stores a field. A
+   * local source needs nothing — it compares `String(cell)`, already an integer's canonical text.
+   */
+  if (isNumericField(schema, match.field)) {
+    return `${prop} IN [${match.values.map(numberLiteral).join(',')}]`
+  }
   if (match.regex) {
     // `(?i)` is Java's inline flag, which is what Neo4j's regex engine reads. Prefixed per
     // pattern rather than wrapped around a group, so an anchor the user wrote still applies
@@ -158,7 +170,7 @@ function labelClause(match: LabelMatch): string {
  * reads, and `toLower()` on both sides is the literal form's equivalent. Neither is a default:
  * `FieldTerm.ignoreCase` explains why this is per row rather than global.
  */
-function rowClause(row: FilterRow): string {
+function rowClause(row: FilterRow, schema: TableSchema | undefined): string {
   const prop = `n.${escapeIdentifier(neuprintProperty(row.field))}`
   const value = row.values[0] ?? ''
   // One spelling of the case fold, used by all three of the forms below. Written out three
@@ -174,6 +186,18 @@ function rowClause(row: FilterRow): string {
   // argument rather than writing the positive form out twice.
   const orNull = (clause: string, negate: boolean) =>
     negate ? nullSafeNot(clause, prop) : clause
+
+  /*
+   * An equality on a numeric property is a number, and case means nothing to it. `n.size = '5'`
+   * compares an integer to a string and matches **no neuron**, with no error — so `size is 5`
+   * returned nothing on neuPrint while the same row on a local source (`terms.ts`' `cellMatches`,
+   * which compares a numeric column as numbers) returned the neurons. Asked of the discovered
+   * schema, `labelClause`'s way; with no schema the text spelling stands, which is all a caller
+   * that knows nothing about the field can mean.
+   */
+  if (isNumericField(schema, row.field) && (row.op === 'is' || row.op === 'isNot')) {
+    return orNull(`${prop} = ${numberLiteral(value)}`, row.op === 'isNot')
+  }
 
   switch (row.op) {
     case 'is':
@@ -322,9 +346,9 @@ export function findNeuronsCypher(
   schema?: TableSchema,
 ): string {
   const where: string[] = []
-  for (const row of req.rows ?? []) where.push(rowClause(row))
+  for (const row of req.rows ?? []) where.push(rowClause(row, schema))
   // Empty values matches nothing, so the caller is expected not to send one — see `LabelMatch`.
-  if (req.labels && req.labels.values.length > 0) where.push(labelClause(req.labels))
+  if (req.labels && req.labels.values.length > 0) where.push(labelClause(req.labels, schema))
   /*
    * `idList`, never `stringList`: `bodyId` is an integer property, and `1 IN ['1']` is false
    * in Cypher — a string list here returns an empty result with no error to explain it. Note

@@ -2038,7 +2038,7 @@ earlier request re-fires it and the widget pops open unprompted.
 One drawing per node type, in `src/ui/glyphs.ts`. **A base shape names the material and the
 drawing on top names the operation** — Filter, Sort and Sample are all a table with something
 happening inside it; Mirror, Transform and Clean Skeletons are all an arbour — which is what
-makes a family legible before the label is read. Eleven base shapes cover 95 of the 108 node
+makes a family legible before the label is read. Eleven base shapes cover 97 of the 110 node
 types; the rest take their category's drawing. Colour is not part of it: every shape inherits
 `currentColor`, because the category tint is already spent on the header strip and the backend
 pip, and a second colour channel here would compete with the socket palette's three-hue budget.

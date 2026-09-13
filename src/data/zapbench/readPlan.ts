@@ -91,8 +91,13 @@ export interface TracePlan {
   cost: number
 }
 
-/** The chunk rows a window touches, with the local row span of each. */
-function rowSpans(window: TraceWindow): Array<{ chunkRow: number; lo: number; hi: number }> {
+/**
+ * The chunk rows a window touches, with the local row span of each. Exported for `recording.ts`,
+ * which walks a pyramid level's window the same way — a level's chunks are 512 steps too.
+ */
+export function rowSpans(
+  window: TraceWindow,
+): Array<{ chunkRow: number; lo: number; hi: number }> {
   const spans: Array<{ chunkRow: number; lo: number; hi: number }> = []
   const first = Math.floor(window.start / CHUNK_T)
   const last = Math.floor((window.end - 1) / CHUNK_T)

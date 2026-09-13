@@ -1250,6 +1250,35 @@ export function isKnownSchema(schema: TableSchema | undefined): schema is TableS
 }
 
 /**
+ * Batches of one query's results, end to end.
+ *
+ * Deliberately not `stackTables`: that reconciles two schemas and refuses on a dtype conflict,
+ * which is the right thing for two tables a user wired together and pure overhead for *n* answers
+ * to one question, all built by the same source from the same schema. Folding it pairwise would
+ * also be quadratic in the batch count. Shared by Influence's frontier and ZapBench to Neurons'
+ * cell lookup, the two callers that split one question into batches.
+ */
+export function concatBatches(parts: readonly TableValue[]): TableValue {
+  const first = parts[0]
+  if (!first) throw new Error('concatBatches: nothing to concatenate')
+  if (parts.length === 1) return first
+  let total = 0
+  for (const part of parts) total += part.length
+  const data: Record<string, ColumnData> = {}
+  for (const col of first.schema.columns) {
+    const out: ColumnData = new Array(total).fill(null)
+    let at = 0
+    for (const part of parts) {
+      const from = part.data[col.name]
+      if (from) for (let i = 0; i < part.length; i++) out[at + i] = from[i] ?? null
+      at += part.length
+    }
+    data[col.name] = out
+  }
+  return makeTable(first.schema, data, first.kind)
+}
+
+/**
  * Any number of tables end to end, keeping every column any of them has.
  *
  * A column only some inputs carry is filled with **null** for the others' rows, which is what

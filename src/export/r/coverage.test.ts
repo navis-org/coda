@@ -20,6 +20,14 @@ const NO_EMITTER: Record<string, string> = {
     'which would have to be handed the release\u2019s uncompressed chunk layout by hand ' +
     'rather than simply opening it. Unlike the Python entry this is not waiting on a probe; ' +
     'nothing in R opens this array today.',
+  'zapbench.recording':
+    'Every ZapBench cell \u2014 see `zapbench.traces`: nothing in R opens this zarr v3 array ' +
+    'today, and a downsampled row is named through a permutation file a hand-written reader ' +
+    'would also have to apply.',
+  'zapbench.neurons':
+    'ZapBench cells to fish2 neurons. `neuprint_fetch_custom` would take the same `IN` lookup, ' +
+    'but its cells come from a ZapBench Recording selection, which R cannot read (see ' +
+    '`zapbench.recording`), so the chunk would read a variable nothing binds.',
   'out.topology':
     'Neuron Topology \u2014 see the Python note. The natverse has the pieces (`nat::strahler_order`, `nat::seglengths`), but the axon/dendrite split is navis\u2019s synapse flow centrality with a branch-point correction and a fragment-stitching pass, and R has no counterpart that agrees with it node for node. Emitting an R split that quietly differs from the card is the failure this entry exists to avoid.',
   'compare.matchTypes':

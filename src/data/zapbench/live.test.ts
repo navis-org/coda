@@ -18,6 +18,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { resetTransport } from '../precomputed/transport'
+import { fetchRecording, resetLevelChecks, verifiedLevel } from './recording'
 import {
   SORTED_LEVEL,
   SORTED_TRACES,
@@ -49,6 +50,7 @@ async function directRead(t: number, f: number): Promise<number> {
 beforeEach(() => {
   resetTraceCache()
   resetSortingCheck()
+  resetLevelChecks()
   resetTransport()
 })
 
@@ -194,4 +196,60 @@ live('the transposed copy', () => {
     }
     expect(viaSorted.values.some((value) => value !== 0)).toBe(true)
   }, 120_000)
+})
+
+/**
+ * The pyramid levels `recording.ts` reads for the whole-population overview.
+ *
+ * Its header records what was measured by hand: a level is the mean of the block under it, `s2`
+ * is built from `s1`, and a partial row is exact. Those are facts about a derived product that
+ * calls itself `"example"`, so the check that decides whether a row can be named is run here
+ * against the bucket, along with one real read through the reader.
+ */
+live('the downsampled levels', () => {
+  it.each([
+    ['s1', [3940, 35861]],
+    ['s2', [1970, 17931]],
+  ])(
+    '%s has the shape and codecs the reader assumes',
+    async (level, shape) => {
+      const response = await fetch(
+        `https://storage.googleapis.com/zapbench-release/volumes/20240930/` +
+          `traces_rastermap_sorted/${level}/zarr.json`,
+      )
+      const meta = (await response.json()) as {
+        shape: number[]
+        chunk_grid: { configuration: { chunk_shape: number[] } }
+        codecs: Array<{ name: string; configuration?: { order?: number[] } }>
+      }
+      expect(meta.shape).toEqual(shape)
+      expect(meta.chunk_grid.configuration.chunk_shape).toEqual([CHUNK, CHUNK])
+      expect(meta.codecs.map((codec) => codec.name)).toEqual(['transpose', 'bytes'])
+      expect(meta.codecs[0]?.configuration?.order).toEqual([1, 0])
+    },
+    60_000,
+  )
+
+  it.each([2, 4] as const)(
+    'averages the full-resolution copy at scale %i',
+    async (scale) => {
+      expect(await verifiedLevel(scale, {})).toBe(true)
+    },
+    60_000,
+  )
+
+  it('names a quarter-scale row by cells whose full-resolution traces it averages', async () => {
+    const window = { start: 4000, end: 4008 }
+    const result = await fetchRecording({ product: 'traces', scale: 4, window })
+    expect(result.order).toBe('activity')
+    const row = 12345
+    const members = [...result.cells.subarray(row * 4, row * 4 + 4)]
+    expect(members.every((id) => id > 0)).toBe(true)
+    // Rebuild the bin from the published row-major copy, cell by cell, by independent reads.
+    let sum = 0
+    for (const id of members) {
+      for (let t = 4000; t < 4004; t++) sum += await directRead(t, id - 1)
+    }
+    expect(result.values[row * 2]).toBeCloseTo(sum / 16, 5)
+  }, 300_000)
 })

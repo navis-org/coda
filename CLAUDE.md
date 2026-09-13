@@ -221,7 +221,7 @@ Area-specific — the rule, then the doc that holds why:
   `seeAlso.test.ts` pins symmetry, that every entry has a document to open, and that **no
   documented node is a dead end**. See [docs/help.md](docs/help.md).
 - **A node's glyph is one drawing per type, and the table is data because a third surface has no
-  React.** `ui/glyphs.ts`: 95 drawings on eleven base shapes — the base shape names the material,
+  React.** `ui/glyphs.ts`: 97 drawings on eleven base shapes — the base shape names the material,
   the drawing on top names the operation. Four marks are shared and load-bearing (funnel =
   filtering, dashed outline = a user's selection, four-point spark = "cleaned", weight = role).
   Colour is not a channel; `currentColor` only. Primitives rather than JSX because `nodes.html`
@@ -969,10 +969,10 @@ Area-specific — the rule, then the doc that holds why:
   compared in bytes **plus requests priced in bytes** (`REQUEST_BYTES_EQUIVALENT`, 450 kB, from the
   same measurement — a request costs ~32 ms whatever its size against ~13.7 MiB/s marginal
   bandwidth), which is also what decides whether to bridge a gap or spend a request. **The pyramid
-  itself is unusable and that is the finding**: it is a real OME-NGFF multiscale, but
+  is unusable for a neuron's trace and that is the finding**: it is a real OME-NGFF multiscale, but
   `[[1,1],[2,2],[4,4]]` applies to *both* axes, so one level down averages each neuron with its
-  rastermap neighbours — a trace at `s1` is the mean of two cells and nothing downstream could
-  tell. Three traps. The permutation is **checked, never trusted** — `traces` is the published
+  rastermap neighbours — a trace at `s1` is the mean of two cells and nothing in the value could
+  tell. It is what the whole-population overview reads, next bullet. Three traps. The permutation is **checked, never trusted** — `traces` is the published
   contract and the sorted copy is a derived product calling itself `"example"`, so a re-sort
   returns a real neuron's real trace under another's name; `verifiedSorting` reads one cell from
   *each* array (two cells, one non-zero required, since padding reads as 0) and falls back to
@@ -986,6 +986,22 @@ Area-specific — the rule, then the doc that holds why:
   — the stub now refuses a non-HTTP URL. The cost warning is priced from the **chosen** plan
   (`TraceRequest.onCost`), or it announces 554 MB for a read that fetches 1.1 MiB.
   See [docs/backends.md](docs/backends.md).
+- **A ZapBench row at a reduced scale is a bin, and its label is the list of cells it averages.**
+  `zapbench.recording` reads every cell at a `Scale` — the release's own `s1`/`s2` — and names a row
+  `40211+40212+…` (`nodes/lib/zapbenchCells.ts`, `cellLabel` beside `cellIdsOf`), so
+  `Heatmap ▸ Selected Rows → zapbench.neurons` stays exact without the second node knowing the
+  scale; a scale param there would be a second copy of the first card's decision. Four measured
+  traps. **`s2` is built from `s1`**, so the two agree on a whole bin and part on a partial one —
+  the last `s2` step weights t 7878 double (0.068819 against a plain mean of 0.067784) — hence a
+  partial **time** bin is dropped and a partial **row**, exact at both levels, is kept. A row's name
+  rests on the permutation *and* on a level still averaging the one below, so `verifiedLevel` checks
+  the second beside `verifiedSorting` and **refuses** on failure: there is no slower route to the
+  same answer, every cell at full scale being 4.2 GB — which `validate` says on the card, the shape
+  being a function of params alone. **An integer property looked up as text matches nothing**:
+  `n.zapbenchId IN ['5']` returns no rows and no error, so neuPrint's `labelClause` spells values
+  as numbers wherever the **discovered schema** types the column numeric — a flag on `LabelMatch`
+  was the first shape, and made every caller know how a server stores a field. The lookup takes `datasetRequest`, never the population, or narrowed bodies are reported as
+  unmatched cells. See [docs/backends.md](docs/backends.md) and [docs/nodes.md](docs/nodes.md).
 - **A reduce over a matrix names the axis that *survives*, and its diagonal rule is not
   `skip_self`.** `core.reduceMatrix` is Pivot's counterpart — a matrix to one table row per line,
   carrying `n`/`sum`/`mean`/`sd`/`min`/`max`/`median` — and it exists because `Normalize` and

@@ -28,6 +28,8 @@ import './query/roiConnectivity'
 import './query/morphology'
 import './query/rawCypher'
 import './query/zapbenchTraces'
+import './query/zapbenchRecording'
+import './query/zapbenchNeurons'
 
 import './table/filter'
 import './table/sort'

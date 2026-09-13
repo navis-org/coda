@@ -56,27 +56,31 @@
  * picking a stimulus condition on somebody's behalf.
  */
 
-import { formatBytes, refuseIfOverCrashFloor } from '../../core/limits'
+import { refuseIfOverCrashFloor } from '../../core/limits'
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { getColumn, isTableValue, makeMatrix } from '../../core/values'
 import type { CellValue } from '../../core/values'
 import type { TraceCost } from '../../data/zapbench/traces'
 import {
-  TRACE_BYTES_WARN,
   TRACE_COLUMNS,
   TRACE_PRODUCTS,
-  TRACE_TIMESTEPS,
   WHOLE_RECORDING_ID,
-  ZAPBENCH_CONDITIONS,
   conditionWindow,
   fetchTraces,
   readProduct,
   traceColumnOf,
-  traceUnit,
   windowLength,
 } from '../../data/zapbench/traces'
 import { numericCell } from '../lib/chartSelection'
+import {
+  CONDITION_OPTIONS,
+  ZAPBENCH_ID_COLUMN,
+  noSuchCondition,
+  stepLabels,
+  traceCostWarning,
+  traceValueLabel,
+} from '../lib/zapbenchCells'
 
 /**
  * What becomes of a neuron the release has no trace for.
@@ -116,20 +120,9 @@ function matrixFill(unmatched: TraceUnmatched): number {
   return unmatched === 'zero' ? 0 : Number.NaN
 }
 
-/** Options for the window picker: the whole recording, then zapbench's nine, in its order. */
-const CONDITION_OPTIONS = [
-  {
-    value: WHOLE_RECORDING_ID,
-    label: `Whole recording (${TRACE_TIMESTEPS.toLocaleString()} steps)`,
-  },
-  ...ZAPBENCH_CONDITIONS.map((condition) => ({
-    value: condition.name,
-    label: `${condition.name} (${windowLength(condition.window).toLocaleString()} steps)`,
-  })),
-]
-
 /**
- * The two problems `validate` and `evaluate` both have to state, worded once each.
+ * The unset-picker refusal, worded once. Its sibling for an unknown condition is
+ * `noSuchCondition` in `nodes/lib/zapbenchCells.ts`, shared with ZapBench Recording.
  *
  * Said at edit time *and* refused at run time is the right shape — a card should not wait for a
  * Run to say its picker is unset — but written out at both stages the same sentence existed
@@ -139,13 +132,6 @@ function noIdColumn(available?: string): string {
   return (
     'No ZapBench ID column selected. On fish2 that column is "zapbenchId"' +
     (available === undefined ? '.' : `; this table has: ${available || '(none)'}`)
-  )
-}
-
-function noSuchCondition(name: string): string {
-  return (
-    `No ZapBench condition called "${name}" in this release. Available: ` +
-    `${WHOLE_RECORDING_ID}, ${ZAPBENCH_CONDITIONS.map((c) => c.name).join(', ')}`
   )
 }
 
@@ -187,7 +173,7 @@ registerNode({
       kind: 'column',
       label: 'ZapBench ID',
       from: 'in',
-      default: 'zapbenchId',
+      default: ZAPBENCH_ID_COLUMN,
       /*
        * `ColumnParam.excludeIds` is documented for a picker that wants a *label*; this is a
        * third use of it — blocking rule 3's likeliest substitution on a picker that wants
@@ -252,7 +238,7 @@ registerNode({
      * "type"`). What it cannot say is the case below, where the resolved column exists and is
      * simply not the one this node is about — a column somebody chose by hand.
      */
-    if (idColumn && idColumn !== 'zapbenchId') {
+    if (idColumn && idColumn !== ZAPBENCH_ID_COLUMN) {
       issues.push(
         `Reading ZapBench ids from "${idColumn}", not "zapbenchId". ` +
           `Check that is the column you meant.`,
@@ -378,33 +364,10 @@ registerNode({
      */
     refuseIfOverCrashFloor(`A ${selected.length} × ${steps} trace matrix`, cells * 8)
 
-    /*
-     * The cost is announced by the reader rather than computed here, because only it knows
-     * which of the two published layouts it will use and they differ by orders of magnitude —
-     * priced here, this said "about 554 MB" for a read that went on to fetch 1.1 MiB. It still
-     * arrives before the data and beside a live Cancel, which is what `ctx.warn`'s rule protects.
-     *
-     * Hand-phrased rather than through `warnOverThreshold`, the same call `data/csv.ts` makes
-     * for the upload thresholds: that helper prints `count` and `threshold` with
-     * `toLocaleString()` and no unit, which is right for the callers counting nodes, cells or
-     * neurons and wrong for bytes. Routed through it this announced itself as "580,902,912 bytes
-     * to read is past the size a ZapBench read is worth mentioning (67,108,864)" — unreadable
-     * digits, over a threshold with no meaning to name apart from the warning itself.
-     */
+    // Priced by the reader, which alone knows the layout; worded by `traceCostWarning`.
     const announceCost = (cost: TraceCost) => {
-      if (cost.bytes <= TRACE_BYTES_WARN) return
-      ctx.warn(
-        cost.layout === 'plain'
-          ? `${columns.length.toLocaleString()} traces land in ` +
-              `${cost.blocks.toLocaleString()} of the array’s ` +
-              `512-neuron blocks, so this reads about ${formatBytes(cost.bytes)}. Neurons sit ` +
-              `on the contiguous axis of that copy, so the cost follows the blocks rather than ` +
-              `the neuron count — narrowing Condition is what makes it smaller. Reading it ` +
-              `anyway.`
-          : `${columns.length.toLocaleString()} traces come to about ` +
-              `${formatBytes(cost.bytes)} in ${cost.reads.toLocaleString()} reads. Narrowing ` +
-              `Condition is what makes it smaller. Reading it anyway.`,
-      )
+      const warning = traceCostWarning(columns.length, cost)
+      if (warning) ctx.warn(warning)
     }
 
     /*
@@ -462,16 +425,12 @@ registerNode({
       values.set(result.values.subarray(at * steps, (at + 1) * steps), row * steps)
     }
 
-    const colLabels = Array.from({ length: steps }, (_, step) => String(window.start + step))
-
     return {
       traces: makeMatrix(
         selected.map((entry) => entry.label),
-        colLabels,
+        stepLabels(window),
         values,
-        conditionName === WHOLE_RECORDING_ID
-          ? traceUnit(product)
-          : `${traceUnit(product)} — ${conditionName}`,
+        traceValueLabel(product, conditionName),
       ),
     }
   },

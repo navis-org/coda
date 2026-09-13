@@ -63,6 +63,7 @@ import { ID_COLUMN_NAME, compareIds, idText } from '../../core/ids'
 import type { NeuronId } from '../../core/ids'
 import type { ConnectionDirection } from '../../data/source'
 import { endpointSchema } from './connectivityOps'
+import { concatBatches } from './tableOps'
 
 // The query-relative column names a `fetchConnectivity` result arrives under. Restated here
 // rather than imported from `connectivityOps`, which keeps them private and renames them on the
@@ -704,34 +705,6 @@ export function batched(fetch: InfluenceFetch, size: number = FRONTIER_BATCH): I
     }
     return concatBatches(parts)
   }
-}
-
-/**
- * Batches of one query's results, end to end.
- *
- * Deliberately not `stackTables`: that reconciles two schemas and refuses on a dtype conflict,
- * which is the right thing for two tables a user wired together and pure overhead for *n* answers
- * to one question, all built by the same source from the same schema. Folding it pairwise would
- * also be quadratic in the batch count.
- */
-function concatBatches(parts: readonly TableValue[]): TableValue {
-  const first = parts[0]
-  if (!first) throw new Error('concatBatches: nothing to concatenate')
-  if (parts.length === 1) return first
-  let total = 0
-  for (const part of parts) total += part.length
-  const data: Record<string, ColumnData> = {}
-  for (const col of first.schema.columns) {
-    const out: ColumnData = new Array(total).fill(null)
-    let at = 0
-    for (const part of parts) {
-      const from = part.data[col.name]
-      if (from) for (let i = 0; i < part.length; i++) out[at + i] = from[i] ?? null
-      at += part.length
-    }
-    data[col.name] = out
-  }
-  return makeTable(first.schema, data, first.kind)
 }
 
 /**

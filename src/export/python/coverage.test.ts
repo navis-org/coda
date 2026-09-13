@@ -72,6 +72,17 @@ const NO_EMITTER: Record<string, string> = {
     '`out.topology` argues must be checked by *running* it against the node rather than read ' +
     'and believed \u2014 both exporters have silently disagreed with the canvas before. Until ' +
     'a probe runs the emitted cell, no emitter is a better answer than one that looks right.',
+  'zapbench.recording':
+    'Every ZapBench cell, or a listed set \u2014 see `zapbench.traces`, whose two reasons apply ' +
+    'unchanged: tensorstore would be a fourth dependency, and a cell restating the condition ' +
+    'bounds, the pyramid level and the permutation that names a downsampled row is exactly what ' +
+    'has to be checked by running it. The permutation is the sharper half here: a notebook that ' +
+    'labelled a row by the wrong cells would still draw a perfectly plausible heatmap.',
+  'zapbench.neurons':
+    'ZapBench cells to fish2 neurons. The lookup itself is one `neu.fetch_custom` with ' +
+    '`n.zapbenchId IN [...]`, but its cells arrive from a selection on a ZapBench Recording ' +
+    'heatmap, and that node has no emitter \u2014 so the cell would read a variable nothing ' +
+    'binds. Worth writing together with the Recording emitter, not before it.',
   'note.text': 'An annotation. It becomes a markdown cell, which the walk does directly.',
   'flow.forEach':
     'A loop, and the one refusal here that is about the *shape* of the output rather than about ' +

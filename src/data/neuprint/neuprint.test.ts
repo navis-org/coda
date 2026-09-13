@@ -257,6 +257,26 @@ describe('query building', () => {
       )
     })
 
+    it('compares a numeric property to a number, which a string literal never equals', () => {
+      const schema = tableSchema(column('size', 'i64'), column('type', 'str'))
+      const numeric = (row: FilterRow) =>
+        findNeuronsCypher({ datasetId: 'x', rows: [row] }, [], schema)
+          .split('\n')
+          .find((line) => line.startsWith('WHERE'))!
+      expect(numeric({ field: 'size', op: 'is', values: ['5'] })).toContain('n.`size` = 5')
+      // Still null-safe when negated, and case folding means nothing to a number.
+      expect(
+        numeric({ field: 'size', op: 'isNot', values: ['5'], ignoreCase: true }),
+      ).toContain('(NOT (n.`size` = 5) OR n.`size` IS NULL)')
+      // Resolved the way the local matcher resolves a field, case-insensitively.
+      expect(numeric({ field: 'Size', op: 'is', values: ['5'] })).toContain('= 5')
+      expect(numeric({ field: 'type', op: 'is', values: ['LC4'] })).toContain(
+        "n.`type` = 'LC4'",
+      )
+      // With no schema nothing is known about the field, so the text spelling stands.
+      expect(clause({ field: 'size', op: 'is', values: ['5'] })).toContain("n.`size` = '5'")
+    })
+
     it('compiles a set to an indexed IN list rather than an alternation', () => {
       // Same neurons either way; `IN` uses the index neuPrint keeps on the properties people
       // look neurons up by, where `=~ '^(?:LC4|LC6)$'` scans every :Neuron in the dataset.
@@ -337,6 +357,16 @@ describe('query building', () => {
         labels: { field: 'instance', values: ["a'L(R)"] },
       })
       expect(query).toContain("n.`instance` IN ['a\\'L(R)']")
+    })
+
+    it('writes number literals for a property the schema says is an integer', () => {
+      const query = findNeuronsCypher(
+        { datasetId: 'x', labels: { field: 'zapbenchId', values: ['5', '71720'] } },
+        [],
+        tableSchema(column('zapbenchId', 'i64')),
+      )
+      expect(query).toContain('n.`zapbenchId` IN [5,71720]')
+      expect(query).not.toContain("'5'")
     })
 
     it('lowers both sides for a case-insensitive literal', () => {

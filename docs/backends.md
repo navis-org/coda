@@ -2632,13 +2632,13 @@ plans are compared in bytes **plus requests priced in bytes**: `REQUEST_BYTES_EQ
 bandwidth ~13.7 MiB/s). That constant is also what decides whether to bridge a gap between two
 wanted neurons or spend a second request on them.
 
-**The pyramid itself is unusable here, and that is the finding rather than an omission.** The
-group is a real OME-NGFF multiscale (`multiScale: true`,
+**The pyramid is unusable for a neuron's trace, and that is the finding rather than an omission.**
+The group is a real OME-NGFF multiscale (`multiScale: true`,
 `downsamplingFactors: [[1,1],[2,2],[4,4]]`), but both factors apply to **both axes** — a level
 down averages each neuron with its rastermap neighbours. A "trace" at `s1` is the mean of two
-different cells and nothing downstream could tell. No level of it answers "the trace of neuron X"
-more cheaply than `s0`. It is the right input for a whole-population overview picture, which is a
-different feature.
+different cells and nothing in the value could tell. No level of it answers "the trace of neuron X"
+more cheaply than `s0`, so `traces.ts` never reads one. `recording.ts` does, for the
+whole-population overview — see below.
 
 Three rules the route carries:
 
@@ -2665,6 +2665,42 @@ nowhere for a round, because `sorting.json` was addressed by its `gs://` URI and
 speaks HTTP. Nothing failed — `loadTraceSorting` answers `undefined` for any failure and the
 reader fell back — so every value was still correct, by the slow path. The stub now refuses a
 non-HTTP URL so it cannot hide that again.
+
+### The pyramid: a row is a bin
+
+`src/data/zapbench/recording.ts` reads every cell at once for `zapbench.recording`, and that is
+what the pyramid is for. `s1` is `[3940, 35861]` and `s2` is `[1970, 17931]`, both
+`chunks [512, 512]`, both `transpose` then `bytes` with no compressor. Measured against the
+bucket rather than read off the metadata:
+
+- **A level is the mean of the block under it.** `s1[0, 0]` against the mean of the 2 × 2 block
+  of `s0`: 0.1668079 and 0.1668079; `s2[0, 0]` against the 4 × 4 mean, likewise.
+- **`s2` is built from `s1`, not from `s0`**, and the two readings part only at a *partial* bin.
+  The last `s1` step (t 7878 beside a padding step) is the mean of the one real step, not half of
+  it. The last `s2` step is the mean of four `s1` cells, one of them that single-step mean, so
+  t 7878 counts double: **0.068819** — the mean of the `s1` block to the digit — against 0.067784
+  for the plain mean of its three real steps. So a partial **time** bin is dropped (`levelWindow`
+  floors the end).
+- **A partial row is exact at both levels.** 71,721 = 4 × 17,930 + 1, so the last `s2` row holds one
+  real cell, which `s1` averaged alone: 0.181029 against that cell's 4-step mean of 0.181029, where
+  a padded mean would be 0.045. So a partial row is kept, its label naming the one cell.
+
+A row's *name* rests on two derived products — the permutation, and that a level still averages
+the one below — so `verifiedLevel` reads two level cells and the `s0` blocks under them before a
+reduced scale is used, beside `verifiedSorting`. Unlike the sorted route in `traces.ts` there is
+**no slower way to the same answer** (every cell at full scale is 4.2 GB), so a failed check
+refuses and names Full as the remedy. The probes sit at multiples of four, inside one chunk at
+every level and away from the partial bins where the two ways of building `s2` differ. An abort
+during the check is rethrown rather than remembered, or a Cancel would refuse every reduced scale
+for the session.
+
+Full scale reads the **row-major** copy and places rows through the permutation: every cell is
+every block anyway, and over `flash` row-major is 179 MB where the transposed copy bridges nearly
+whole chunks for 423 MB. At full scale a label comes from the column rather than the permutation,
+so an unverifiable sort falls back to cell order with a warning and mislabels nothing.
+
+`live.test.ts` checks both levels' shape and codecs, runs `verifiedLevel` at both scales, and
+rebuilds one real quarter-scale row from sixteen independent row-major reads.
 
 ### The id seam
 

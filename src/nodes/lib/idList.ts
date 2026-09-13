@@ -26,7 +26,7 @@ import { idText, isTypedId } from '../../core/ids'
  * characters, which is what keeps `12a` a single bad token rather than a `12` with something
  * quietly discarded after it.
  */
-const SEPARATORS = /[\s,;[\]()'"]+/
+export const SEPARATORS = /[\s,;[\]()'"]+/
 
 /** Hoisted, like `SEPARATORS` above — `parseIdList` runs on every keystroke of the ids field. */
 const LEADING_ZEROS = /^0+(?=\d)/

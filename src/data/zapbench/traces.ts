@@ -72,7 +72,7 @@ export const TRACE_COLUMNS = 71721
  * 1.45 s at 12 — so this is where the curve flattens, and going higher only spends request
  * slots a shared bucket may want for somebody else.
  */
-const FETCH_CONCURRENCY = 6
+export const FETCH_CONCURRENCY = 6
 
 /**
  * Which array to read.
@@ -120,6 +120,16 @@ const PRODUCTS = new Map(TRACE_PRODUCTS.map((entry) => [entry.value, entry]))
 /** The unit a product's numbers are in, for a matrix's `valueLabel`. */
 export function traceUnit(product: TraceProduct): string {
   return PRODUCTS.get(product)!.unit
+}
+
+/** A product's name, as the picker shows it. */
+export function traceLabel(product: TraceProduct): string {
+  return PRODUCTS.get(product)!.label
+}
+
+/** Whether the release carries a transposed, downsampled copy of this product. */
+export function hasSortedCopy(product: TraceProduct): boolean {
+  return PRODUCTS.get(product)!.sorted
 }
 
 /**
@@ -374,13 +384,13 @@ export interface TraceResult {
  * below does — and because building it there meant importing `ZAPBENCH_RELEASE` across a module
  * cycle, which silently produced `"undefined/traces_rastermap_sorted"`. See that file's header.
  *
- * **`s1` and `s2` are deliberately unused.** The group is a real OME-NGFF pyramid
+ * **`s1` and `s2` are never read here.** The group is a real OME-NGFF pyramid
  * (`multiScale: true`, `downsamplingFactors: [[1,1],[2,2],[4,4]]`), but both factors apply to
  * **both axes** — so one level down averages each neuron with its rastermap neighbours. That
- * destroys exactly the per-neuron identity this node exists to preserve: a "trace" at `s1` is
- * the mean of two different cells and nothing downstream could tell. They are the right input
- * for a whole-population overview picture, which is a different feature. No level of this
- * pyramid answers "the trace of neuron X" more cheaply than `s0` does.
+ * destroys exactly the per-neuron identity this reader exists to preserve: a "trace" at `s1` is
+ * the mean of two different cells and nothing in the value could say so. No level of this
+ * pyramid answers "the trace of neuron X" more cheaply than `s0` does. `recording.ts` reads them
+ * for the whole-population overview, where a row *is* a bin and its label names the members.
  */
 export const SORTED_TRACES = `${ZAPBENCH_RELEASE}/traces_rastermap_sorted`
 export const SORTED_LEVEL = 's0'
@@ -390,14 +400,16 @@ export const SORTED_LEVEL = 's0'
  * `stimulus_evoked_response_rastermap_sorted` — which is why the layout is chosen per product
  * rather than per session.
  */
-function chunkUrl(
+export function chunkUrl(
   product: TraceProduct,
   layout: TraceLayout,
   chunkRow: number,
   chunkCol: number,
+  /** The pyramid level of the transposed copy; the row-major copy has only one. */
+  level: string = SORTED_LEVEL,
 ): string {
   const base =
-    layout === 'sorted' ? `${SORTED_TRACES}/${SORTED_LEVEL}` : `${ZAPBENCH_RELEASE}/${product}`
+    layout === 'sorted' ? `${SORTED_TRACES}/${level}` : `${ZAPBENCH_RELEASE}/${product}`
   const uri = `${base}/c/${chunkRow}/${chunkCol}`
   const url = objectStoreUrl(uri)
   // `objectStoreUrl` answers undefined only for a scheme it does not know, and this one is a
@@ -406,7 +418,7 @@ function chunkUrl(
   return url
 }
 
-async function readRange(
+export async function readRange(
   url: string,
   from: number,
   to: number,
@@ -542,6 +554,27 @@ export function resetSortingCheck(): void {
 }
 
 /**
+ * One read landed: report it, throttled to whole percents.
+ *
+ * `ctx.progress` is not local — it sets state and notifies the host, which walks the graph for
+ * observed schemas and re-renders — and a plain row-major plan is up to 141 blocks × 16 chunk
+ * rows, so one call per read was ~2,250 full-graph walks inside a single fetch. A percent nobody
+ * can read changing more than a hundred times buys nothing. Shared with `recording.ts`, whose
+ * whole-population reads are the same count of the same chunks.
+ */
+export function readTicker(total: number, onProgress: TraceRequest['onProgress']): () => void {
+  let done = 0
+  let shown = -1
+  return () => {
+    done += 1
+    const percent = Math.floor((done * 100) / total)
+    if (percent === shown) return
+    shown = percent
+    onProgress?.(done / total, `${done}/${total} reads`)
+  }
+}
+
+/**
  * Read the traces for `columns` over `window`.
  *
  * Fetches only what the cache cannot answer, so a selection that grew by one neuron costs one
@@ -593,7 +626,7 @@ export async function fetchTraces(request: TraceRequest): Promise<TraceResult> {
   }
 
   const missing = [...rowsOfColumn.keys()]
-  const inverse = PRODUCTS.get(product)!.sorted
+  const inverse = hasSortedCopy(product)
     ? await verifiedSorting({ signal, refresh })
     : undefined
   const plan = chooseTracePlan(
@@ -609,14 +642,7 @@ export async function fetchTraces(request: TraceRequest): Promise<TraceResult> {
     layout: plan.layout,
   })
 
-  /*
-   * Throttled to whole percents. `ctx.progress` is not local — it sets state and notifies the
-   * host, which walks the graph for observed schemas and re-renders — and a plain row-major plan
-   * is up to 141 blocks × 16 chunk rows, so one call per read was ~2,250 full-graph walks inside
-   * a single fetch. A percent nobody can read changing more than a hundred times buys nothing.
-   */
-  let done = 0
-  let shown = -1
+  const tick = readTicker(plan.reads.length, onProgress)
   onProgress?.(0, `${columns.length} traces in ${plan.reads.length} reads`)
 
   const read = await mapWithConcurrency(plan.reads, FETCH_CONCURRENCY, async (job) => {
@@ -652,12 +678,7 @@ export async function fetchTraces(request: TraceRequest): Promise<TraceResult> {
         for (const row of rows) values[row * steps + offset + step] = value
       }
     }
-    done += 1
-    const percent = Math.floor((done * 100) / plan.reads.length)
-    if (percent !== shown) {
-      shown = percent
-      onProgress?.(done / plan.reads.length, `${done}/${plan.reads.length} reads`)
-    }
+    tick()
     return chunk.byteLength
   })
 

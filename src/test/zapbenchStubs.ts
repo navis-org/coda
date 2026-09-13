@@ -61,6 +61,12 @@ export interface TraceStoreOptions {
    * applies it from one that ignores it.
    */
   sorting?: number[]
+  /**
+   * Serve pyramid levels that no longer average the level below them, 1% off at every cell — the
+   * re-release `verifiedLevel` exists for, where every row would still look like activity. Relative,
+   * because this store's values run to millions and a fixed offset hides inside any tolerance.
+   */
+  skewLevels?: boolean
 }
 
 /**
@@ -74,10 +80,72 @@ export function defaultSorting(): number[] {
   return Array.from({ length: TRACE_COLUMNS }, (_, position) => TRACE_COLUMNS - 1 - position)
 }
 
+/** The pyramid level a URL addresses, as its averaging factor. The row-major copy is 1. */
+function levelScale(href: string): number {
+  const level = /traces_rastermap_sorted\/s(\d)\//.exec(href)
+  return level ? 2 ** Number(level[1]) : 1
+}
+
+/** Mean of `valueAt` over each bin of `scale` along an axis of `length`, the last bin partial. */
+function binMeans(
+  length: number,
+  scale: number,
+  valueAt: (index: number) => number,
+): Float64Array {
+  const out = new Float64Array(Math.ceil(length / scale))
+  for (let bin = 0; bin < out.length; bin++) {
+    let sum = 0
+    const end = Math.min((bin + 1) * scale, length)
+    for (let index = bin * scale; index < end; index++) sum += valueAt(index)
+    out[bin] = sum / (end - bin * scale)
+  }
+  return out
+}
+
+/**
+ * What the fake store holds at `(t, row)` of a level of the sorted copy: the mean of the
+ * full-resolution cells under it, clipped to the release.
+ *
+ * A plain mean over whatever real cells a bin covers, where the release builds `s2` from `s1` and
+ * so weights a partial *time* bin differently (see `recording.ts`). The reader never reads one.
+ */
+export function levelCellValue(
+  t: number,
+  row: number,
+  scale: number,
+  sorting: readonly number[] = defaultSorting(),
+): number {
+  const lastStep = Math.min((t + 1) * scale, TRACE_TIMESTEPS)
+  let steps = 0
+  for (let step = t * scale; step < lastStep; step++) steps += step
+  const lastCell = Math.min((row + 1) * scale, TRACE_COLUMNS)
+  let cells = 0
+  for (let position = row * scale; position < lastCell; position++) cells += sorting[position]!
+  return cellValue(steps / (lastStep - t * scale), cells / (lastCell - row * scale))
+}
+
 export function serveTraceChunks(options: TraceStoreOptions = {}): TraceStoreCall[] {
   const calls: TraceStoreCall[] = []
-  const sorting = options.sorting ?? defaultSorting()
   // sorted position -> original column, so the fake can fill a transposed chunk.
+  const sorting = options.sorting ?? defaultSorting()
+  /*
+   * `cellValue` is linear, so a level's mean over a block is the mean timestep × 1000 plus the
+   * mean column — one table per axis per level, built once rather than per cell per request.
+   */
+  const axes = new Map<string, { time: Float64Array; cell: Float64Array }>()
+  const axesFor = (scale: number, sorted: boolean) => {
+    const key = `${scale}:${sorted}`
+    const held = axes.get(key)
+    if (held) return held
+    const built = {
+      time: binMeans(TRACE_TIMESTEPS, scale, (step) => step),
+      cell: binMeans(TRACE_COLUMNS, scale, (position) =>
+        sorted ? sorting[position]! : position,
+      ),
+    }
+    axes.set(key, built)
+    return built
+  }
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
     const href = String(url)
     const range = new Headers(init?.headers).get('Range') ?? undefined
@@ -115,25 +183,34 @@ export function serveTraceChunks(options: TraceStoreOptions = {}): TraceStoreCal
     }
     const chunkRow = Number(match[1])
     const chunkCol = Number(match[2])
-    const chunk = new Float32Array(CHUNK_T * CHUNK_F)
-    for (let localT = 0; localT < CHUNK; localT++) {
-      for (let localA = 0; localA < CHUNK; localA++) {
-        const t = chunkRow * CHUNK + localT
-        const axis = chunkCol * CHUNK + localA
-        /*
-         * The sorted copy holds the same values under a permuted column, stored transposed
-         * (`order: [1, 0]`) so a neuron's timesteps are contiguous. Building the fake that way
-         * round — rather than transposing a plain chunk — is what makes it able to disagree with
-         * the reader if the reader's offsets are wrong.
-         */
-        const f = isSorted ? sorting[axis]! : axis
-        const value = t < TRACE_TIMESTEPS && axis < TRACE_COLUMNS ? cellValue(t, f) : 0
-        chunk[isSorted ? localA * CHUNK + localT : localT * CHUNK + localA] = value
-      }
-    }
-    const whole = new Uint8Array(chunk.buffer)
+    const scale = levelScale(href)
+    const { time, cell } = axesFor(scale, isSorted)
+    /*
+     * Only the requested values are built, since a whole-population read asks for hundreds of
+     * chunks and the unrequested ones cost as much to fill as the rest. The value at an index is
+     * the same either way, so this changes the cost of the fake and nothing it answers.
+     */
     const parsed = range ? /bytes=(\d+)-(\d+)/.exec(range) : null
-    const body = parsed ? whole.slice(Number(parsed[1]), Number(parsed[2]) + 1) : whole.slice()
+    const first = parsed ? Number(parsed[1]) / 4 : 0
+    const last = parsed ? (Number(parsed[2]) + 1) / 4 : CHUNK_T * CHUNK_F
+    const chunk = new Float32Array(last - first)
+    for (let index = first; index < last; index++) {
+      /*
+       * The sorted copy holds the same values under a permuted column, stored transposed
+       * (`order: [1, 0]`) so a neuron's timesteps are contiguous. Building the fake that way
+       * round — rather than transposing a plain chunk — is what makes it able to disagree with
+       * the reader if the reader's offsets are wrong.
+       */
+      const localT = isSorted ? index % CHUNK : Math.floor(index / CHUNK)
+      const localA = isSorted ? Math.floor(index / CHUNK) : index % CHUNK
+      const t = chunkRow * CHUNK + localT
+      const axis = chunkCol * CHUNK + localA
+      chunk[index - first] =
+        t < time.length && axis < cell.length
+          ? (time[t]! * 1000 + cell[axis]!) * (options.skewLevels && scale > 1 ? 1.01 : 1)
+          : 0
+    }
+    const body = new Uint8Array(chunk.buffer)
     return Promise.resolve({
       ok: true,
       status: parsed ? 206 : 200,

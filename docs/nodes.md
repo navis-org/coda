@@ -4357,3 +4357,86 @@ The unit cached is one neuron's windowed trace (31.5 kB over the whole recording
 1 MiB chunk it arrived in, because that is the unit a *changed selection* hits on: adding a neuron
 to a set of fifty reads one block and answers the other forty-nine from memory. Pinned by a test
 that grows a selection and asserts which block was read.
+
+## ZapBench Recording and ZapBench to Neurons: the way back from activity
+
+`ZapBench Traces` starts from neurons. These two go the other way: `zapbench.recording` draws the
+recording, a Heatmap selection names a band of cells, and `zapbench.neurons` looks up the fish2
+neurons carrying them — `Recording → Heatmap ▸ Selected Rows → ZapBench to Neurons → Skeletons`,
+with nothing to set on the last three. The array facts behind both are in
+[backends.md](backends.md#the-pyramid-a-row-is-a-bin).
+
+### A row is a cell, and at a reduced scale a row is several
+
+`Every cell` reads the whole population over a window at a **Scale** — the release's own `s1` and
+`s2`, which average 2 × 2 and 4 × 4 blocks of neighbouring cells *and* timesteps. `Cells I list`
+reads typed ids at full resolution through `fetchTraces`, the reader `ZapBench Traces` uses. Scale
+is hidden for a list on purpose: a listed cell is cheap at full scale by the transposed route, and
+at a reduced one it would come back averaged with neighbours nobody listed.
+
+**The label carries the members** — `40211+40212+40213+40214` — which is `nodes/lib/zapbenchCells.ts`'
+grammar, `cellLabel` writing it beside `cellIdsOf` reading it. That is what keeps a selection exact
+without the second node knowing the scale that drew it. The rejected alternative was a `Scale` param
+on `ZapBench to Neurons` expanding a row index: a second copy of a fact the first card decided, and
+wrong the moment somebody changed one card and not the other. A label also survives the Heatmap's
+Filter and Order tabs, which an index does not.
+
+Rows are in **activity order** — the rastermap permutation — because that is the only order in
+which 72,000 rows of calcium activity look like anything. A typed list keeps the order it was typed
+in, because somebody chose it; the Heatmap's Order tab re-sorts either.
+
+### The size is decided by params, so it is said on the card
+
+Every cell at full scale over the whole recording is a **4.2 GB** matrix, and at half scale
+**1.1 GB** — both past `CRASH_FLOOR_BYTES`. The shape depends on nothing but `Scale` and `Condition`,
+so `validate` computes it and puts the sentence on the card before a Run, and `evaluate` refuses
+with the same words. The default is **quarter scale over the whole recording**: 17,931 × 1,969,
+about 144 MB read and 269 MB held. Full scale is fine over any single condition but the three long
+ones (`dots`, `turning`, `open loop`).
+
+Full scale reads the **row-major** copy even though the transposed one exists: every cell is every
+block anyway, and row-major costs only the window's rows of each where the transposed copy bridges
+nearly a whole chunk to reach them — 179 MB against 423 MB over `flash`. There is **no session
+cache**, unlike `traces.ts`: that cache's unit is a neuron because a changed *selection* re-reads
+one, and nothing here changes by one.
+
+### The lookup is an integer lookup, and a string one matches nothing
+
+neuPrint stores `zapbenchId` as an integer, and `n.zapbenchId IN ['5']` matches **nothing** with no
+error. So neuPrint's `labelClause` writes number literals for any label lookup on a column the
+**discovered schema** types `i64` or `f64` — asked of the schema rather than carried as a flag on
+`LabelMatch`, which was the first version and made every caller remember how a server stores a
+field. A local source needs nothing: it compares `String(cell)`, already an integer's canonical
+text. The same seam was broken one clause over and is fixed the same way: a Find Neurons row
+`size is 5` compiled to `n.size = '5'` and returned no neuron on neuPrint, while the identical row on
+a local source compared as numbers and returned them. `rowClause` now reads the schema too, so
+`is`/`is not` on a numeric column write a number literal and drop case folding — `cellMatches`'
+rule, and resolved case-insensitively as `resolveRows` resolves the field.
+
+Four more decisions on `ZapBench to Neurons`:
+
+- **No population filter** — `datasetRequest`, not `neuronSetRequest`. A cell id names a body
+  already, and narrowing a named set to Traced would report the narrowed bodies as *cells with no
+  EM neuron*: a false claim about the release. `Input IDs`' reason, one layer over.
+- **The picker takes `excludeIds` and is `optional`.** `excludeIds` filters `neuronId` alone (a
+  first draft skipped it on the belief that the name rule `isIdentifierColumn` would hide
+  `zapbenchId` too — it is not what `availableColumns` reads), and `optional` means rule 3 never
+  substitutes a first compatible column for a missing `label`. A neuron id wired under another name
+  meets the **range refusal** — out of range by four orders of magnitude, so the message says that
+  is what they look like and names `Selected to Neurons`. The likeliest way there is a Heatmap fed
+  by `ZapBench Traces`, whose rows *are* neuron ids.
+- **Unmatched cells are counted, never an error.** 62,178 of 71,721 cells carry a match, so a
+  quarter-scale selection routinely names cells with none; a count is what tells that apart from a
+  lookup that half failed. A dataset whose neurons carry no `zapbenchId` at all *is* refused, since
+  every cell would otherwise be reported as unmatched.
+- **Rows follow the cells' order**, and the lookup is **batched** at Influence's `FRONTIER_BATCH` and
+  joined by `concatBatches` (now in `tableOps.ts`) — the measured `IN`-list size, borrowed rather
+  than re-measured for this query.
+
+Neither node has an exporter: `zapbench.recording` for `zapbench.traces`' reasons plus the
+permutation a notebook would have to apply, and `zapbench.neurons` because its cells arrive from a
+node that has none.
+
+**Not verified against a live server:** the integer lookup against neuPrint fish2 (the Cypher is
+pinned by `neuprint.test.ts`, and `probe:zapbench` already reads the property as a number), and the
+Heatmap's behaviour at 17,931 × 1,969 in a real browser — drawing, zoom and a shift-drag selection.
