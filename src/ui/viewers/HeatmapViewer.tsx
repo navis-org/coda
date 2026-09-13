@@ -6,12 +6,12 @@ import type { ColorLimits, HeatmapPalette } from '../../nodes/lib/heatmapParams'
 import { CHART_INK, chartSurface, currentMode } from '../colors'
 import { exportBaseName as makeBaseName, matrixToCsv } from '../export'
 import { formatCompact, formatNumber, formatZoom } from '../format'
+import { RAMP_STEPS, rampColors, rampNotes } from '../encoding'
 import { drawHeatmap, heatmapToSvg } from './heatmapDraw'
 import { CRASH_FLOOR_CELLS } from '../../core/limits'
 import type { HeatmapWindow } from './heatmapPlot'
 import {
   HEATMAP_CELLS_WARN,
-  RAMP_STEPS,
   axisMarks,
   clipZones,
   buildHeatmapSpec,
@@ -24,7 +24,6 @@ import {
   matrixExtent,
   panWindow,
   pointToMatrix,
-  rampColors,
   selectionBands,
   valueMarks,
   windowScale,
@@ -742,34 +741,20 @@ export function HeatmapViewer({
             labels thinned
           </span>
         )}
-        {clipped && !compact && (
-          <span
-            className="viewer__note"
-            title={`The colour scale stops at ${formatCompact(domain.lo)} and ${formatCompact(
-              domain.hi,
-            )}, and this matrix runs ${formatCompact(extent.min)} to ${formatCompact(
-              extent.max,
-            )}. Cells outside are drawn in the end colour they passed, not dropped.`}
-          >
-            values clipped
-          </span>
-        )}
-        {domain.log && !compact && (
-          <span
-            className="viewer__note"
-            title="The colour runs on a log scale, so equal steps of colour are not equal steps of value. The numbers — the printed cells, the tooltip and the two ends of the bar — are the values themselves."
-          >
-            log colour
-          </span>
-        )}
-        {limits.problem && !compact && (
-          <span
-            className="viewer__note"
-            title={`The colour limits are being ignored because ${limits.problem}. The scale is the one the data gives.`}
-          >
-            limits ignored
-          </span>
-        )}
+        {!compact &&
+          // The words every colour bar in the app uses — `rampNotes` — with the matrix's own
+          // range, so `values clipped` can say how far past the ends the cells run.
+          rampNotes({
+            domain: [domain.lo, domain.hi],
+            log: domain.log,
+            clipped,
+            problem: limits.problem,
+            extent,
+          }).map((note) => (
+            <span key={note.kind} className="viewer__note" title={note.title}>
+              {note.text}
+            </span>
+          ))}
         {(selectedCount.rows > 0 || selectedCount.columns > 0) && !compact && (
           // The count is the caption's, where the scatter puts its own: the inspector's field
           // says how many *lines* are stored, and only this knows how many of them the matrix

@@ -37,6 +37,7 @@ import {
   piePlan,
   scatterPlan,
   tableViewerPlan,
+  valueScaleNote,
   viewer3dPlan,
 } from '../../plans/viewers'
 
@@ -824,6 +825,8 @@ registerEmitter('out.scatter', (ctx) => {
   const opacity = Number(ctx.params.opacity)
   if (Number.isFinite(opacity) && opacity < 1) args.push(`alpha=${opacity}`)
 
+  const scaleNote = valueScaleNote(colorSpec)
+  if (scaleNote) lines.push(``, ...ctx.note(scaleNote))
   lines.push(``, `plt.figure(figsize=(8, 6))`, `sns.scatterplot(${args.join(', ')})`)
   if (ctx.params.xLog === true) lines.push(`plt.xscale('log')`)
   if (ctx.params.yLog === true) lines.push(`plt.yscale('log')`)

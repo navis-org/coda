@@ -121,6 +121,7 @@ registerNode({
     ...colorParams({
       prefix: 'point',
       allowLiteral: true,
+      valueScale: true,
       from: 'in',
       label: 'Colour',
       defaultMode: 'constant',

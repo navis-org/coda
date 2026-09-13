@@ -143,6 +143,37 @@ describe('an input with nothing matching', () => {
   })
 })
 
+describe('a stored column the picker has narrowed away', () => {
+  /*
+   * A `dtypes` function makes a column's eligibility a question of the params:
+   * `colorParams({ valueScale })` offers numbers only under `by value`. The column is still in the
+   * table, so "missing" would send somebody looking for something that is right there.
+   */
+  const table = T.table(SCHEMA)
+  const numeric = (extra: Partial<ParamDef> = {}): ParamDef =>
+    picker({
+      dtypes: (params: Record<string, unknown>) =>
+        params.mode === 'numbers' ? ['i64', 'f64'] : undefined,
+      ...extra,
+    } as Partial<ParamDef>)
+
+  it('says the chosen column is the wrong type, not that it is gone', () => {
+    expect(issues(def(numeric()), { mode: 'numbers', col: 'type' }, table)).toEqual([
+      'Column "type" is not i64/f64, which "Column" needs',
+    ])
+  })
+
+  it('says nothing about a default the narrowing replaced, since nobody chose it', () => {
+    expect(
+      issues(def(numeric({ default: 'type' })), { mode: 'numbers', col: 'type' }, table),
+    ).toEqual([])
+  })
+
+  it('says nothing once the mode gives the column back', () => {
+    expect(issues(def(numeric()), { mode: 'text', col: 'type' }, table)).toEqual([])
+  })
+})
+
 describe('a stored column that has disappeared', () => {
   const table = T.table(SCHEMA)
 

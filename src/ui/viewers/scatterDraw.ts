@@ -96,10 +96,10 @@ export interface CanvasDrawOptions {
  *
  * Marks are batched by `colour|shape`, one path and one fill per bucket. With a categorical
  * encoding that is at most nine buckets for any number of points, which is the difference
- * between a redraw that keeps up with a pan and one that does not. A sequential ramp defeats
- * the batching by construction — every value is its own colour — and is left to do so rather
- * than quantised, because quantising here would put a colour on screen that `resolveColor`
- * never returned.
+ * between a redraw that keeps up with a pan and one that does not. A sequential ramp batches
+ * less well — up to `RAMP_STEPS` buckets, since `resolveColor` reads it from the shared lookup
+ * table — and nothing here quantises further, because a coarser step would put a colour on
+ * screen that `resolveColor` never returned.
  */
 export function drawScatter(
   context: CanvasRenderingContext2D,

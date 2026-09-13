@@ -34,6 +34,7 @@ import {
   piePlan,
   scatterPlan,
   tableViewerPlan,
+  valueScaleNote,
   viewer3dPlan,
 } from '../../plans/viewers'
 
@@ -556,6 +557,8 @@ registerEmitter('out.scatter', (ctx) => {
   ]
   const opacity = Number(ctx.params.opacity)
 
+  const scaleNote = valueScaleNote(colorSpec)
+  if (scaleNote) lines.push(``, ...ctx.note(scaleNote))
   lines.push(``, `ggplot(${out}, aes(${aes.join(', ')})) +`)
   lines.push(
     `  geom_point(${Number.isFinite(opacity) && opacity < 1 ? `alpha = ${opacity}` : ''}) +`,

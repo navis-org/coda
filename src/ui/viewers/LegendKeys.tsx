@@ -13,7 +13,7 @@
 
 import type { SizeSpec } from '../../nodes/lib/encodingParams'
 import type { MarkerShape, ResolvedColor, ResolvedSize } from '../encoding'
-import { ALL_SHAPES } from '../encoding'
+import { ALL_SHAPES, rampNotes } from '../encoding'
 import { formatCompact } from '../format'
 import { markPath } from './scatterDraw'
 
@@ -274,6 +274,16 @@ export function ColorKey({
         />
         {formatCompact(legend.domain[1])}
       </span>
+      {/*
+       * What the bar alone would misstate. Here rather than in each viewer's caption because this
+       * component is the one colour bar the Scatter, Network and 3D strips share, and the words
+       * are `rampNotes`', which the Heatmap caption reads too.
+       */}
+      {rampNotes(legend).map((note) => (
+        <span key={note.kind} className="legend__item legend__more" title={note.title}>
+          {note.text}
+        </span>
+      ))}
     </span>
   )
 }

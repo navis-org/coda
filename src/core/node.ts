@@ -1649,11 +1649,30 @@ export function validateColumnParams(def: NodeDefinition, ctx: InferContext): st
          * what the plural has always said: this column is missing. It reaches `evaluate` and
          * fails there naming the column, which beats a quiet success on a different one.
          */
+        /*
+         * Present, but of a type the picker currently refuses — which a `dtypes` function makes a
+         * question of the *params*: `colorParams({ valueScale })` narrows to numbers under
+         * `by value`, so `type` is still in the table and back in the picker the moment the mode
+         * changes. "Gone" would send somebody looking for a column that is right there, so only
+         * the wording changes — with one exception: a narrowed-away default says nothing, or
+         * choosing `by value` would badge the card over a column nobody picked.
+         */
+        const dtypes = dtypesOf(p, ctx.params)
+        const narrowed =
+          dtypes !== undefined &&
+          columnSchemaFor(p, ctx.inputs, ctx.params)?.columns.some(
+            (c) => c.name === stored && !dtypes.includes(c.dtype),
+          ) === true
+        const gone = narrowed && dtypes ? `is not ${dtypes.join('/')}` : 'is gone'
         if (p.optional) {
-          if (stored !== p.default) issues.push(`Column "${stored}" is gone`)
+          if (stored !== p.default) issues.push(`Column "${stored}" ${gone}`)
         } else if (stored !== p.default) {
-          issues.push(`Missing column: ${stored}`)
-        } else {
+          issues.push(
+            narrowed
+              ? `Column "${stored}" ${gone}, which "${p.label}" needs`
+              : `Missing column: ${stored}`,
+          )
+        } else if (!narrowed) {
           issues.push(`Column "${stored}" is gone — using "${available[0]}"`)
         }
       }

@@ -10,9 +10,10 @@
 import { describe, expect, it } from 'vitest'
 
 import { defaultParams, visibleParams } from '../../core/node'
-import type { ParamDef } from '../../core/node'
+import type { ParamDef, ParamValues } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
-import { CONSTANT_COLOR_OPTIONS } from '../lib/encodingParams'
+import { CONSTANT_COLOR_OPTIONS, VALUE_RAMP_OPTIONS } from '../lib/encodingParams'
+import { DIVERGING_PALETTE_OPTIONS, SEQUENTIAL_PALETTE_OPTIONS } from '../lib/heatmapParams'
 import '../index'
 
 const def = () => requireNodeDef('out.viewer3d')
@@ -157,6 +158,93 @@ describe('colour defaults', () => {
     const values = CONSTANT_COLOR_OPTIONS.map((o) => o.value)
     expect(values).toContain('black')
     expect(values).toContain('white')
+  })
+})
+
+describe('by value', () => {
+  /*
+   * `colorParams({ valueScale })` on all four sockets: a ramp, both ends, a centre and a log. The
+   * resolution is `resolveColor`'s and is tested in `ui/encoding.test.ts`; what belongs here is
+   * that every socket offers them, where they sit, and when each is on screen.
+   */
+  const GROUP: Record<string, string> = {
+    skeleton: 'skeletons',
+    mesh: 'meshes',
+    point: 'points',
+    volume: 'volumes',
+  }
+  const CONTROLS = ['ColorRamp', 'ColorMin', 'ColorCenter', 'ColorMax', 'ColorLog']
+
+  it('offers a ramp, both ends, a centre and a log on every socket, in its colour row', () => {
+    for (const [prefix, group] of Object.entries(GROUP)) {
+      for (const control of CONTROLS) {
+        const p = param(`${prefix}${control}`)
+        const at = `${prefix}${control}`
+        // Styling, never data: a ramp change must not stale the selection downstream.
+        expect(p.presentational, at).toBe(true)
+        expect(p.advanced, at).toBe(true)
+        expect(p.group, at).toBe(group)
+        expect(p.composite?.key, at).toBe(`${prefix}Color`)
+        expect(p.composite?.role, at).toBe('extra')
+      }
+    }
+  })
+
+  it('shows them only under by value, and only the ones the ramp’s kind uses', () => {
+    const shown = (params: ParamValues) =>
+      visibleParams(def(), { ...defaultParams(def()), ...params }).map((p) => p.id)
+
+    const hashed = shown({})
+    for (const control of CONTROLS) expect(hashed).not.toContain(`skeleton${control}`)
+
+    const oneWay = shown({ skeletonColorMode: 'sequential' })
+    for (const id of [
+      'skeletonColorRamp',
+      'skeletonColorMin',
+      'skeletonColorMax',
+      'skeletonColorLog',
+    ]) {
+      expect(oneWay, id).toContain(id)
+    }
+    expect(oneWay).not.toContain('skeletonColorCenter')
+
+    // Centred: symmetric arms, so one spread and no minimum; and no log across the middle.
+    const centred = shown({
+      skeletonColorMode: 'sequential',
+      skeletonColorRamp: 'diverging:RdBu',
+    })
+    for (const id of ['skeletonColorRamp', 'skeletonColorCenter', 'skeletonColorMax']) {
+      expect(centred, id).toContain(id)
+    }
+    expect(centred).not.toContain('skeletonColorMin')
+    expect(centred).not.toContain('skeletonColorLog')
+  })
+
+  it('narrows the column picker to numbers under by value, and gives text back after', () => {
+    const by = param('skeletonColorBy')
+    if (by.kind !== 'column' || typeof by.dtypes !== 'function') {
+      throw new Error('expected a column picker with a dtypes function')
+    }
+    expect(by.dtypes({ skeletonColorMode: 'sequential' })).toEqual(['i64', 'f64'])
+    expect(by.dtypes({ skeletonColorMode: 'categorical' })).toBeUndefined()
+    expect(by.dtypes({ skeletonColorMode: 'hash' })).toBeUndefined()
+  })
+
+  it('opens on the ramp it always drew, so a saved graph looks the same', () => {
+    for (const prefix of Object.keys(GROUP)) {
+      expect(param(`${prefix}ColorRamp`).default, prefix).toBe('coda')
+      expect(param(`${prefix}ColorMin`).default, prefix).toBe('')
+      expect(param(`${prefix}ColorMax`).default, prefix).toBe('')
+      expect(param(`${prefix}ColorLog`).default, prefix).toBe(false)
+    }
+  })
+
+  it('offers every Heatmap ramp, the diverging ones as centred', () => {
+    const values = VALUE_RAMP_OPTIONS.map((o) => o.value)
+    expect(values).toEqual([
+      ...SEQUENTIAL_PALETTE_OPTIONS.map((o) => o.value),
+      ...DIVERGING_PALETTE_OPTIONS.map((o) => `diverging:${o.value}`),
+    ])
   })
 })
 

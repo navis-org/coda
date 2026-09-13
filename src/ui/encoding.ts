@@ -12,16 +12,19 @@
 
 import type { CellValue, TableValue } from '../core/values'
 import { getColumn } from '../core/values'
-import type { ColorSpec, ShapeSpec, SizeSpec } from '../nodes/lib/encodingParams'
+import type { ColorSpec, ShapeSpec, SizeSpec, ValueScale } from '../nodes/lib/encodingParams'
+import type { ColorLimits, HeatmapPalette } from '../nodes/lib/heatmapParams'
+import { isDivergingPalette, isSequentialPalette } from '../nodes/lib/heatmapParams'
 import type { Mode } from './colors'
 import {
   CHART_INK,
   MAX_SERIES,
   OTHER_LABEL,
   cycleColor,
+  heatmapDivergingColor,
+  heatmapSequentialColor,
   paletteColors,
   seriesColor,
-  sequentialColor,
 } from './colors'
 import { formatCompact } from './format'
 import { segmentColor } from './segmentColor'
@@ -65,9 +68,18 @@ export interface CategoricalLegend {
 export interface SequentialLegend {
   kind: 'sequential'
   column: string
+  /** The values at the two ends of the ramp — typed limits where there are some, else the data's. */
   domain: [number, number]
   /** Sampled stops for a colour bar. */
   stops: string[]
+  /** The value a centred ramp's middle colour stands for. Absent on a one-way ramp. */
+  center?: number
+  /** The colour runs on a log scale. `domain` is still the values. */
+  log?: true
+  /** Some values fall outside `domain` and take the end colour they passed. */
+  clipped?: true
+  /** Why typed limits are being ignored; `domain` is then the data's. */
+  problem?: string
 }
 
 export type Legend = CategoricalLegend | SequentialLegend | undefined
@@ -296,6 +308,170 @@ function numeric(cell: unknown): number | undefined {
 }
 
 /**
+ * The value range a ramp is resolved against.
+ *
+ * `neutral` is the end of the scale that means "nothing here" — the low end for a sequential
+ * ramp, the centre for a diverging one — and is what makes "the strongest cell in this block" a
+ * well-defined thing for the Heatmap to keep when folding.
+ */
+export interface ColorDomain {
+  lo: number
+  hi: number
+  neutral: number
+  /**
+   * Map a value to the ramp through `log(1 + v - lo)` rather than linearly.
+   *
+   * On the **colour only**: printed values, tooltips and a colour bar's two ends are the numbers
+   * themselves, because a log axis is a way of *looking* at a distribution and a relabelled value
+   * is a way of misreading one. Connectivity is the case it exists for — a handful of strong
+   * pairs and a long tail of ones, where a linear ramp paints the tail as empty.
+   *
+   * Offered on a sequential ramp alone, which is what makes the shift by `lo` safe: `lo` is the
+   * bottom of the ramp, so `v - lo` is never negative and the logarithm always exists. With `lo`
+   * of 0 this is exactly `log10(1 + v)`, which is the expression the Heatmap's exporters emit.
+   */
+  log?: boolean
+}
+
+/**
+ * Ramp position of a value in [0, 1], clamped — the one place the linear and log mappings live.
+ *
+ * Here rather than in `heatmapPlot.ts`, where it was written, because `by value` in the Scatter,
+ * Network and 3D viewers now reads it too: two copies of a log mapping are two pictures of one
+ * number. The log arm is `log1p` of the distance from the bottom over `log1p` of the span —
+ * natural logs, because a ratio of two logs is the same in any base, so this and an exporter's
+ * `log10` draw the same picture.
+ */
+export function normalize(value: number, domain: ColorDomain): number {
+  const span = domain.hi - domain.lo
+  if (!(span > 0)) return 0
+  const above = value - domain.lo
+  if (above <= 0) return 0
+  if (above >= span) return 1
+  return domain.log ? Math.log1p(above) / Math.log1p(span) : above / span
+}
+
+/**
+ * Where a ramp starts and stops — the Heatmap's colour domain and `by value`'s, as one rule.
+ *
+ *  - **A typed end replaces one end**, and an out-of-range value clamps to the end it passed, as
+ *    in matplotlib; each caller's legend or caption admits it rather than letting it vanish.
+ *  - **A diverging ramp is symmetric about its centre**: `max` is the distance from the centre to
+ *    either end, and absent it is the furthest the data reaches from the centre on either side —
+ *    so the middle colour means the centre and equal steps of colour are equal amounts. `min` and
+ *    `log` do not apply there.
+ *  - **An automatic bottom is the one place the callers differ.** `floor: 'zero'` is the
+ *    Heatmap's, so an all-positive matrix reads against a baseline of nothing; the default is
+ *    `by value`'s, the data's own minimum, which is what it always drew.
+ */
+export function rampDomain(
+  extent: { min: number; max: number },
+  options: {
+    diverging?: boolean
+    center?: number
+    limits?: ColorLimits
+    log?: boolean
+    floor?: 'data' | 'zero'
+  } = {},
+): ColorDomain {
+  const { limits = {}, center = 0 } = options
+  if (options.diverging) {
+    const magnitude =
+      limits.max ??
+      (Math.max(Math.abs(extent.min - center), Math.abs(extent.max - center)) || 1)
+    return { lo: center - magnitude, hi: center + magnitude, neutral: center }
+  }
+  const lo = limits.min ?? (options.floor === 'zero' ? Math.min(0, extent.min) : extent.min)
+  const hi = limits.max ?? extent.max
+  return { lo, hi, neutral: lo, ...(options.log ? { log: true } : {}) }
+}
+
+/**
+ * `by value`'s domain: `rampDomain` over the node's controls, plus the one refusal a typed end
+ * needs there. `parseColorLimits` already refuses an inverted typed pair; the case left is one
+ * typed end on the wrong side of the data's other end, which would draw every value in one colour.
+ */
+export function valueDomain(
+  extent: { min: number; max: number },
+  scale: ValueScale | undefined,
+): { domain: ColorDomain; problem?: string } {
+  if (!scale) return { domain: rampDomain(extent) }
+  const { problem } = scale.limits
+  const limits = problem ? {} : scale.limits
+  const admitted = problem ? { problem } : {}
+
+  if (scale.diverging) {
+    return {
+      domain: rampDomain(extent, { diverging: true, center: scale.center, limits }),
+      ...admitted,
+    }
+  }
+
+  const domain = rampDomain(extent, { limits, log: scale.log })
+  if (domain.lo >= domain.hi && (limits.min !== undefined || limits.max !== undefined)) {
+    return {
+      domain: rampDomain(extent, { log: scale.log }),
+      problem:
+        limits.min !== undefined
+          ? `the minimum (${limits.min}) is not below the largest value (${extent.max})`
+          : `the maximum (${limits.max}) is not above the smallest value (${extent.min})`,
+    }
+  }
+  return { domain, ...admitted }
+}
+
+/**
+ * Steps a colour ramp is sampled into, shared by every surface that maps a number to a colour:
+ * the Heatmap's fills and colour bar, and `by value` in `resolveColor`.
+ *
+ * A lookup table rather than a ramp call per value, and that is not a micro-optimisation: each of
+ * those calls parses two hex strings and formats a third. Measured in a browser, 285,000 of them —
+ * one grid cell per pixel of a full-width plot — cost **65 ms** against **2 ms** through the table.
+ * `by value` pays the same per synapse point, 10^5 at a time, and a table also turns the 3D
+ * viewer's per-colour parse cache from a miss per point into a hit.
+ *
+ * It does not put a colour on screen the ramp would not have drawn, in any visible sense — checked
+ * rather than assumed, over 200,000 samples of both scales in both modes: the ramps are
+ * piecewise-linear in RGB and the output is 8 bits a channel, so the whole of the blue ramp is 453
+ * distinct colours and the diverging scale 621–1,006. Against those, **512 steps is within one
+ * channel value of exact for sequential and two for diverging** — 256 measures the same, so this is
+ * headroom rather than the edge of it. The objection to quantising is real for a *categorical*
+ * palette, where a substituted slot means a different category; here a colour is a magnitude and
+ * the substitute is the same magnitude to within a rounding step.
+ */
+export const RAMP_STEPS = 512
+
+/** Ramp bucket of a value — its index into a `rampColors` table of `RAMP_STEPS`. */
+export function bucketOf(value: number, domain: ColorDomain): number {
+  return Math.round(normalize(value, domain) * (RAMP_STEPS - 1))
+}
+
+/**
+ * A ramp, resolved to hex.
+ *
+ * One function for every lookup table and every colour bar, so a bar cannot come to describe a
+ * scale the marks are not drawn in — the two were separate samplings of the same ramp before,
+ * which is exactly how that drifts.
+ */
+export function rampColors(
+  scale: 'sequential' | 'diverging',
+  mode: Mode,
+  steps = RAMP_STEPS,
+  palette: HeatmapPalette = 'coda',
+): string[] {
+  // A name from the other scale's list is not an error, just not an answer: Coda's own ramp
+  // stands in, which is also what `heatmapPaletteOf` hands a caller reading the params.
+  const sequential = isSequentialPalette(palette) ? palette : 'coda'
+  const diverging = isDivergingPalette(palette) ? palette : 'coda'
+  return Array.from({ length: steps }, (_, i) => {
+    const t = steps === 1 ? 0 : i / (steps - 1)
+    return scale === 'diverging'
+      ? heatmapDivergingColor(t * 2 - 1, mode, diverging)
+      : heatmapSequentialColor(t, mode, sequential)
+  })
+}
+
+/**
  * The two achromatic extremes are **not** theme-flipped, unlike everything else here.
  *
  * Every other colour in this module answers to the mode, because a chart's ink has to stay
@@ -484,15 +660,32 @@ export function resolveColor(
       if (v > max) max = v
     }
     if (!Number.isFinite(min)) return fallback
-    const span = max - min || 1
-    const stops = Array.from({ length: 9 }, (_, i) => sequentialColor(i / 8, mode))
+    const { scale } = spec
+    const { domain, problem } = valueDomain({ min, max }, scale)
+    /*
+     * The Heatmap's lookup table, so a palette name means one set of colours app-wide and a row
+     * costs arithmetic rather than a ramp sample — see `RAMP_STEPS`. `coda` sequential is
+     * `sequentialColor` itself, which keeps a node that never opted in on the ramp it drew.
+     */
+    const kind = scale?.diverging ? 'diverging' : 'sequential'
+    const ramp = rampColors(kind, mode, RAMP_STEPS, scale?.palette)
+    const clipped = min < domain.lo || max > domain.hi
     return {
       at: (rowIndex) => {
         const v = numeric(data[rowIndex])
-        if (v === undefined) return MUTED
-        return sequentialColor((v - min) / span, mode)
+        return v === undefined ? MUTED : ramp[bucketOf(v, domain)]!
       },
-      legend: { kind: 'sequential', column: spec.column, domain: [min, max], stops },
+      legend: {
+        kind: 'sequential',
+        column: spec.column,
+        domain: [domain.lo, domain.hi],
+        // Nine stops, an odd count, so a centred ramp's bar has its middle colour on a stop.
+        stops: rampColors(kind, mode, 9, scale?.palette),
+        ...(scale?.diverging ? { center: domain.neutral } : {}),
+        ...(domain.log ? { log: true } : {}),
+        ...(clipped ? { clipped: true } : {}),
+        ...(problem ? { problem } : {}),
+      },
     }
   }
 
@@ -612,6 +805,80 @@ export function describeLegend(legend: Legend): string {
     return `${legend.column} · ${legend.entries.length}${legend.truncated ? '+' : ''} values`
   }
   return `${legend.column} · ${formatCompact(legend.domain[0])}–${formatCompact(legend.domain[1])}`
+}
+
+/** One thing a colour bar alone would misstate. `kind` is for a caller that says fewer of them. */
+export interface RampNote {
+  kind: 'centre' | 'clipped' | 'log' | 'ignored'
+  text: string
+  title: string
+}
+
+/**
+ * What a colour bar alone would misstate, in words — for every surface that draws one.
+ *
+ * The Heatmap caption, the shared `ColorKey` and an exported bar's title all read this, so a
+ * reworded note reaches every one of them. `extent` is the data's range where the caller has it,
+ * which lets `values clipped` say how far past the ends the values run.
+ */
+export function rampNotes(ramp: {
+  domain: [number, number]
+  center?: number | undefined
+  log?: boolean | undefined
+  clipped?: boolean | undefined
+  problem?: string | undefined
+  extent?: { min: number; max: number }
+}): RampNote[] {
+  const [lo, hi] = ramp.domain
+  const notes: RampNote[] = []
+  // A centre of zero is a diverging ramp's ordinary meaning, and says nothing.
+  if (ramp.center !== undefined && ramp.center !== 0) {
+    const center = formatCompact(ramp.center)
+    notes.push({
+      kind: 'centre',
+      text: `centred on ${center}`,
+      title: `The middle colour stands for ${center}, and both arms are the same length.`,
+    })
+  }
+  if (ramp.clipped) {
+    const runs = ramp.extent
+      ? `, and the values run ${formatCompact(ramp.extent.min)} to ${formatCompact(ramp.extent.max)}`
+      : ''
+    notes.push({
+      kind: 'clipped',
+      text: 'values clipped',
+      title: `The colour scale stops at ${formatCompact(lo)} and ${formatCompact(hi)}${runs}. Values outside are drawn in the end colour they passed, not dropped.`,
+    })
+  }
+  if (ramp.log) {
+    notes.push({
+      kind: 'log',
+      text: 'log colour',
+      title:
+        'The colour runs on a log scale, so equal steps of colour are not equal steps of value. ' +
+        'The numbers — on the colour bar and wherever a value is printed — are the values themselves.',
+    })
+  }
+  if (ramp.problem) {
+    notes.push({
+      kind: 'ignored',
+      text: 'limits ignored',
+      title: `The colour limits are being ignored because ${ramp.problem}. The scale is the one the data gives.`,
+    })
+  }
+  return notes
+}
+
+/**
+ * A colour bar's title in an exported file, carrying what the screen says in notes beside it.
+ *
+ * A figure outlives the card, and a log ramp or a clamp that the file does not mention is a
+ * picture read as linear and complete. `limits ignored` is left out on purpose: the file's two
+ * ends are then the data's, which is already true of the picture it labels.
+ */
+export function rampLabel(legend: SequentialLegend): string {
+  const notes = rampNotes(legend).filter((note) => note.kind !== 'ignored')
+  return [legend.column, ...notes.map((note) => note.text)].join(' · ')
 }
 
 /** The sRGB transfer function, one channel in 0..1, encoded → linear light. */

@@ -91,7 +91,14 @@ export interface ColorLimits {
   problem?: string
 }
 
-function readLimit(value: unknown): { value?: number; problem?: string } {
+/**
+ * One typed number off a `string` param: empty is absent, anything unreadable is a problem.
+ *
+ * Exported because a limit is not the only number typed this way — a diverging colour's centre
+ * (`colorParams`' `valueScale`) is the same field with the same "empty means the default" rule,
+ * and a second parser is a second opinion on whether `" 3 "` is a number.
+ */
+export function readLimit(value: unknown): { value?: number; problem?: string } {
   if (typeof value === 'number' && Number.isFinite(value)) return { value }
   if (typeof value !== 'string') return {}
   const text = value.trim()
@@ -112,8 +119,19 @@ function readLimit(value: unknown): { value?: number; problem?: string } {
  * answer is the automatic domain plus a note saying why, rather than a picture of one colour.
  */
 export function readColorLimits(params: ParamValues): ColorLimits {
-  const min = readLimit(params.colorMin)
-  const max = readLimit(params.colorMax)
+  return parseColorLimits(params.colorMin, params.colorMax)
+}
+
+/**
+ * `readColorLimits` over any two stored values, for an encoding whose params carry a prefix.
+ *
+ * The Heatmap's ids are bare (`colorMin`), where `colorParams({ valueScale })` generates
+ * `<prefix>ColorMin` per channel; the rule for what a typed pair means is the same one either
+ * way, so it is written once and both readers pass their own two cells in.
+ */
+export function parseColorLimits(minValue: unknown, maxValue: unknown): ColorLimits {
+  const min = readLimit(minValue)
+  const max = readLimit(maxValue)
   const problem = min.problem ?? max.problem
   if (problem) return { problem }
   if (min.value !== undefined && max.value !== undefined && min.value >= max.value) {

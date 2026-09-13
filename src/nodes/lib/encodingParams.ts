@@ -13,8 +13,17 @@
 
 import type { AttributePart, DType } from '../../core/types'
 import { NUMERIC_DTYPES } from '../../core/types'
-import type { CompositeRef, EnumOption, ParamDef } from '../../core/node'
+import type { CompositeRef, EnumOption, ParamDef, ParamValues } from '../../core/node'
 import { ALL_SHAPES } from '../../ui/encoding'
+import type { ColorLimits, DivergingPalette, SequentialPalette } from './heatmapParams'
+import {
+  DIVERGING_PALETTE_OPTIONS,
+  SEQUENTIAL_PALETTE_OPTIONS,
+  isDivergingPalette,
+  isSequentialPalette,
+  parseColorLimits,
+  readLimit,
+} from './heatmapParams'
 
 /**
  * `default` assigns no colour at all and lets the renderer decide. Only offered where that
@@ -211,6 +220,27 @@ export interface ColorParamOptions {
    */
   palettes?: boolean
   /**
+   * Give `by value` the Heatmap's colour controls: a ramp, the two ends, a centre and a log.
+   *
+   * Opt-in, and it also narrows the column picker to numeric columns while `by value` is the
+   * mode — which is what "these controls apply to a numeric column" means in a param system
+   * whose `visibleIf` cannot see a schema. Without the narrowing a text column under `by value`
+   * lands on the flat fallback with every control beside it inert.
+   *
+   * The vocabulary is `heatmapParams.ts`' and the arithmetic is `ui/encoding.ts`' `valueDomain`
+   * over the Heatmap's own `normalize`, so a ramp named here is the ramp a Heatmap draws and a
+   * typed limit that one ignores this one ignores too. **One departure, which is the default
+   * rather than the rule**: an automatic bottom is the data's minimum, as `by value` has always
+   * been, where the Heatmap starts a ramp at zero — a cable length reading against nothing is a
+   * picture of the longest neurons, not of the spread.
+   *
+   * A diverging ramp is **symmetric about its centre**, the Heatmap's rule generalised off zero:
+   * one magnitude sets both ends, so equal steps of colour are equal amounts either side and the
+   * middle colour means the centre. That is why `Min` is not offered there and `Max` is the
+   * distance from the centre to either end.
+   */
+  valueScale?: boolean
+  /**
    * Which data-driven modes to offer; defaults to both.
    *
    * Exists because a mode can be wrong for a *mark* rather than for a node. `sequential` on a
@@ -321,6 +351,17 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
       from,
       ...(part ? { part } : {}),
       default: options.defaultColumn ?? '',
+      /*
+       * Numeric only while `by value` is the mode, and only where the value controls are offered.
+       * A function of the params, so switching back to `by category` gives the text columns back
+       * without a second picker.
+       */
+      ...(options.valueScale
+        ? {
+            dtypes: (params: ParamValues) =>
+              isByValue(params, modeId) ? NUMERIC_DTYPES : undefined,
+          }
+        : {}),
       visibleIf: (params) => !DATALESS_MODES.has(String(params[modeId])),
     },
     {
@@ -365,6 +406,7 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
           },
         ] satisfies ParamDef[])
       : []),
+    ...(options.valueScale ? valueScaleParams(prefix, modeId, label, base, facet) : []),
     ...(options.alpha
       ? ([
           {
@@ -431,6 +473,110 @@ export function colorParams(options: ColorParamOptions): ParamDef[] {
           },
         ] satisfies ParamDef[])
       : []),
+  ]
+}
+
+/** Whether an encoding's mode is `by value`, which is what every value control turns on. */
+function isByValue(params: ParamValues, modeId: string): boolean {
+  return String(params[modeId]) === 'sequential'
+}
+
+/**
+ * A diverging ramp's stored value: its palette name behind a prefix.
+ *
+ * One dropdown holds both kinds, where the Heatmap has a `Colour scale` beside two palette params.
+ * The Heatmap's shape keeps a palette choice when the scale is toggled; this one spends one control
+ * rather than three in a colour row that already carries a mode, a column and, on a surface, an
+ * opacity. The names are the Heatmap's either way, so the two cannot mean different colours. The
+ * lists share a value space, and `coda` names one ramp in each — hence the prefix.
+ */
+const DIVERGING_RAMP = 'diverging:'
+
+/** Every ramp `by value` can run through: the sequential ones, then the diverging ones. */
+export const VALUE_RAMP_OPTIONS: EnumOption[] = [
+  ...SEQUENTIAL_PALETTE_OPTIONS,
+  ...DIVERGING_PALETTE_OPTIONS.map((option) => ({
+    value: `${DIVERGING_RAMP}${option.value}`,
+    label: `${option.label}, centred`,
+  })),
+]
+
+function isDivergingRamp(value: unknown): boolean {
+  return String(value).startsWith(DIVERGING_RAMP)
+}
+
+/**
+ * The five `by value` controls, each a facet of the colour row and each shown only under
+ * `by value`. See `ColorParamOptions.valueScale`.
+ *
+ * `string` limits for the Heatmap's reason — a `number` param has no unset state and `0` is an
+ * ordinary limit — so empty is automatic, and the centre's empty is zero.
+ */
+function valueScaleParams(
+  prefix: string,
+  modeId: string,
+  label: string,
+  base: { presentational: boolean; advanced?: boolean; group?: string },
+  facet: (role: CompositeRef['role'], extra?: Partial<CompositeRef>) => CompositeRef,
+): ParamDef[] {
+  const rampId = `${prefix}ColorRamp`
+  const byValue = (params: ParamValues) => isByValue(params, modeId)
+  const diverging = (params: ParamValues) => byValue(params) && isDivergingRamp(params[rampId])
+  const sequential = (params: ParamValues) =>
+    byValue(params) && !isDivergingRamp(params[rampId])
+  /** One facet of the colour row; its name is the facet and the last word of the label. */
+  const control = <T extends { id: string; kind: ParamDef['kind'] }>(
+    name: string,
+    rest: T,
+  ) => ({
+    ...base,
+    presentational: true,
+    composite: facet('extra', { facet: name }),
+    label: `${label} ${name}`,
+    ...rest,
+  })
+  return [
+    control('ramp', {
+      id: rampId,
+      kind: 'enum',
+      default: 'coda',
+      options: VALUE_RAMP_OPTIONS,
+      visibleIf: byValue,
+      help:
+        'The colours "by value" runs through. Coda blue reverses with the theme; the rest are ' +
+        'matplotlib’s, drawn as published. A centred ramp puts its middle colour on Centre.',
+    }),
+    control('min', {
+      id: `${prefix}ColorMin`,
+      kind: 'string',
+      default: '',
+      placeholder: 'auto',
+      visibleIf: sequential,
+      help: 'The value at the bottom of the ramp. Empty lets the data decide. Values below it take the end colour.',
+    }),
+    control('centre', {
+      id: `${prefix}ColorCenter`,
+      kind: 'string',
+      default: '',
+      placeholder: '0',
+      visibleIf: diverging,
+      help: 'The value the middle colour stands for. Empty means 0. Both arms stay the same length, so equal steps of colour are equal amounts either side.',
+    }),
+    control('max', {
+      id: `${prefix}ColorMax`,
+      kind: 'string',
+      default: '',
+      placeholder: 'auto',
+      visibleIf: byValue,
+      help: 'The value at the top of the ramp; empty lets the data decide. On a centred ramp it is the distance from Centre to either end.',
+    }),
+    control('log', {
+      id: `${prefix}ColorLog`,
+      kind: 'boolean',
+      default: false,
+      visibleIf: sequential,
+      help: 'Spread the colour over a log scale — the mapping only; the numbers on the colour bar stay the values. Not offered on a centred ramp.',
+    }),
   ]
 }
 
@@ -746,6 +892,74 @@ export interface ColorSpec {
    * and the marks it keys have to agree, and one place decides.
    */
   palette?: PaletteName
+  /**
+   * How `by value` maps a number to a colour. Absent where the node did not opt in, and absent
+   * under every other mode — which leaves the old ramp, data minimum to maximum on Coda blue.
+   */
+  scale?: ValueScale
+}
+
+/**
+ * `by value`'s ramp, ends, centre and log, parsed. See `ColorParamOptions.valueScale`.
+ *
+ * A union on `diverging`, so a palette can only be a name from its own kind's list and each arm
+ * carries only what applies to it: a centre to the diverging one, a log to the sequential one.
+ */
+export type ValueScale = {
+  /**
+   * Typed ends. Sequential: `min` and `max`. Diverging: `max` alone, the distance from `center` to
+   * either end. `problem` means both are being ignored, for the legend to admit.
+   */
+  limits: ColorLimits
+} & (
+  | { diverging: false; palette: SequentialPalette; log: boolean }
+  | {
+      diverging: true
+      palette: DivergingPalette
+      /** The value the middle colour stands for. */
+      center: number
+    }
+)
+
+/**
+ * The `by value` controls off a node's params, or undefined where the node declares none.
+ *
+ * One reader for the three viewers and both exporters, `readColorLimits`' reasoning: a limit being
+ * ignored is ignored everywhere. Tolerant like the rest of this module — an unknown ramp is Coda's
+ * own of its kind, an unreadable centre drops the typed ends with a `problem`, and so does a spread
+ * that is not above zero, since a ramp of width zero is one colour with no explanation.
+ */
+export function readValueScale(
+  prefix: string,
+  params: Record<string, unknown>,
+): ValueScale | undefined {
+  const ramp = params[`${prefix}ColorRamp`]
+  if (ramp === undefined) return undefined
+
+  if (!isDivergingRamp(ramp)) {
+    return {
+      diverging: false,
+      palette: isSequentialPalette(ramp) ? ramp : 'coda',
+      limits: parseColorLimits(params[`${prefix}ColorMin`], params[`${prefix}ColorMax`]),
+      log: params[`${prefix}ColorLog`] === true,
+    }
+  }
+
+  const name = String(ramp).slice(DIVERGING_RAMP.length)
+  const center = readLimit(params[`${prefix}ColorCenter`])
+  const max = readLimit(params[`${prefix}ColorMax`])
+  const problem =
+    center.problem ??
+    max.problem ??
+    (max.value !== undefined && !(max.value > 0)
+      ? `the spread (${max.value}) is not above zero`
+      : undefined)
+  return {
+    diverging: true,
+    palette: isDivergingPalette(name) ? name : 'coda',
+    center: center.value ?? 0,
+    limits: problem ? { problem } : max.value !== undefined ? { max: max.value } : {},
+  }
 }
 
 export interface SizeSpec {
@@ -761,8 +975,10 @@ export function readColorSpec(
 ): ColorSpec {
   const mode = String(params[`${prefix}ColorMode`] ?? 'constant') as ColorMode
   const overrides = readOverrides(params[`${prefix}ColorOverrides`])
+  const scale = mode === 'sequential' ? readValueScale(prefix, params) : undefined
   return {
     mode,
+    ...(scale ? { scale } : {}),
     column: DATALESS_MODES.has(mode) ? undefined : resolveColumn(`${prefix}ColorBy`),
     constant: String(params[`${prefix}Color`] ?? '0'),
     // Tolerant like the rest of this reader: a graph saved before the dropdown existed has no

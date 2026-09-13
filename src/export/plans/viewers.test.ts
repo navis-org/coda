@@ -14,6 +14,7 @@ import type { ParamValues } from '../../core/node'
 import type { TableSchema } from '../../core/types'
 import { encodeRange } from '../../nodes/lib/chartSelection'
 import { encodeClauses, resolveFilters } from '../../nodes/lib/tableFilter'
+import { readColorSpec } from '../../nodes/lib/encodingParams'
 import {
   barChartPlan,
   dendrogramSelection,
@@ -23,9 +24,52 @@ import {
   piePlan,
   scatterPlan,
   tableViewerPlan,
+  valueScaleNote,
   viewer3dPlan,
 } from './viewers'
 import { fakeNeutralContext } from './testContext'
+
+describe('a scatter coloured by value', () => {
+  /*
+   * Neither document reproduces the ramp controls yet, so each says so rather than drawing a
+   * different picture in silence — and says nothing where the card is on the defaults.
+   */
+  const spec = (params: Record<string, unknown>) =>
+    readColorSpec(
+      'point',
+      { pointColorMode: 'sequential', pointColorRamp: 'coda', ...params },
+      () => 'pre',
+    )
+
+  it('says nothing on the defaults, or under any other mode', () => {
+    expect(valueScaleNote(spec({}))).toBeUndefined()
+    expect(
+      valueScaleNote(spec({ pointColorMode: 'categorical', pointColorRamp: 'viridis' })),
+    ).toBeUndefined()
+  })
+
+  it('names what the plot does not reproduce', () => {
+    expect(
+      valueScaleNote(
+        spec({ pointColorRamp: 'viridis', pointColorMax: '20', pointColorLog: true }),
+      ),
+    ).toBe(
+      "On the canvas pre is coloured with the viridis ramp, a maximum of 20, a log colour scale. This plot uses the library's default ramp over the data's range.",
+    )
+    // A centred ramp: the minimum a one-way ramp left behind is not part of what the card draws.
+    expect(
+      valueScaleNote(
+        spec({ pointColorRamp: 'diverging:RdBu', pointColorMin: '1', pointColorMax: '5' }),
+      ),
+    ).toBe(
+      "On the canvas pre is coloured with the RdBu ramp centred on 0, a spread of 5. This plot uses the library's default ramp over the data's range.",
+    )
+  })
+
+  it('leaves out typed ends the card is ignoring too', () => {
+    expect(valueScaleNote(spec({ pointColorMin: '9', pointColorMax: '1' }))).toBeUndefined()
+  })
+})
 
 const ctx = (type: string, params: ParamValues, wires: Record<string, string> = {}) =>
   fakeNeutralContext({ type, params, wires })

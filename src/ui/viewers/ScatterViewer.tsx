@@ -24,7 +24,7 @@ import { rowKeys } from '../../nodes/lib/rowIds'
 import type { TableValue } from '../../core/values'
 import { CHART_INK, chartSurface, currentMode } from '../colors'
 import type { MarkerShape } from '../encoding'
-import { resolveColor, resolveShape, resolveSize } from '../encoding'
+import { rampLabel, resolveColor, resolveShape, resolveSize } from '../encoding'
 import { exportBaseName as makeBaseName, tableToCsvParts } from '../export'
 import { formatCell, formatCompact, formatNumber, plural } from '../format'
 import { GestureMarquee } from './GestureMarquee'
@@ -444,7 +444,7 @@ export function ScatterViewer({
         const ramp =
           colors.legend?.kind === 'sequential'
             ? {
-                label: colors.legend.column,
+                label: rampLabel(colors.legend),
                 stops: colors.legend.stops,
                 low: formatCompact(colors.legend.domain[0]),
                 high: formatCompact(colors.legend.domain[1]),

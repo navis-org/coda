@@ -339,6 +339,9 @@ registerNode({
       // has hues, so which palette is a real choice rather than a preference: it is how many
       // types get a colour of their own before the ramp comes round.
       palettes: true,
+      // Nodes only: links offer no `by value` at all, the hairline receding-end measurement the
+      // `modes` option records.
+      valueScale: true,
       from: 'in',
       part: 'nodes',
       label: 'Node colour',

@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 
 import { makeMatrix } from '../../core/values'
 import { heatmapPaletteStops, sequentialColor } from '../colors'
+import { RAMP_STEPS, bucketOf, normalize, rampColors } from '../encoding'
 import {
   DIVERGING_PALETTE_OPTIONS,
   SEQUENTIAL_PALETTE_OPTIONS,
@@ -18,10 +19,8 @@ import {
 import {
   HEATMAP_CELLS_WARN,
   axisMarks,
-  RAMP_STEPS,
   axisMap,
   buildHeatmapSpec,
-  bucketOf,
   cellAt,
   cellRect,
   colorDomain,
@@ -30,10 +29,8 @@ import {
   labelTicks,
   linesInRect,
   matrixExtent,
-  normalize,
   panWindow,
   pointToMatrix,
-  rampColors,
   selectionBands,
   valueMarks,
   windowScale,
@@ -541,11 +538,11 @@ describe('the log colour mapping', () => {
 
 describe('the ramp lookup', () => {
   /*
-   * `ScatterViewer` declines to quantise a sequential ramp, on the grounds that it would put a
-   * colour on screen the encoding never returned. This pins the measurement that says a heatmap
-   * can: the ramps are piecewise-linear in RGB and the output is 8 bits a channel, so sampling
-   * them into `RAMP_STEPS` buckets lands within a rounding step of exact. Shrink `RAMP_STEPS`
-   * far enough and this fails, which is the point of having it.
+   * Quantising a ramp could put a colour on screen the ramp itself never returns. This pins the
+   * measurement that says it does not, visibly — the Heatmap's fills and `by value` in
+   * `resolveColor` both lean on it: the ramps are piecewise-linear in RGB and the output is 8 bits
+   * a channel, so sampling them into `RAMP_STEPS` buckets lands within a rounding step of exact.
+   * Shrink `RAMP_STEPS` far enough and this fails, which is the point of having it.
    */
   const channels = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
 

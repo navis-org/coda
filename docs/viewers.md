@@ -2006,6 +2006,63 @@ already offers `default`, which sends no colours and lets neuroglancer hash them
 hash _is_ neuroglancer's, adding the mode there would put two spellings of one behaviour in one
 dropdown.
 
+### `by value`'s controls: the Heatmap's colour domain, shared
+
+A ramp, two ends, a centre and a log on `by value`, through `colorParams({ valueScale: true })`.
+On for all four 3D sockets, Scatter's point colour and Network's **node** colour — not its links,
+whose `by value` was withheld for the hairline measurement recorded above.
+
+**One arithmetic, lifted rather than copied.** `ColorDomain`, `normalize`, `rampDomain`,
+`RAMP_STEPS`, `bucketOf` and `rampColors` live in `ui/encoding.ts`, and the Heatmap and
+`resolveColor` both read them; the typed ends go through `parseColorLimits`, which
+`readColorLimits` is now a caller of. So a palette name, an inverted pair being ignored, the
+symmetric centred ramp and the log's `log1p(v − lo) / log1p(span)` each mean one thing app-wide.
+`rampDomain` differs between its callers in one default only: **an automatic bottom is the data's
+minimum** for `by value`, which is what it always drew, where the Heatmap's `colorDomain` passes
+`floor: 'zero'`. `valueDomain` adds the one refusal `by value` needs on top — a single typed end on
+the wrong side of the data — which the Heatmap does not make. `encoding.test.ts` pins that a node
+on the defaults draws the ramp it drew before, legend included.
+
+**`by value` reads the Heatmap's lookup table.** A row is a bucket into `rampColors`' 512 steps
+rather than a ramp sample — the 65 ms against 2 ms `RAMP_STEPS` records, paid here per synapse
+point — and the same measurement is what says the quantisation is within a channel value or two
+of exact. It also turns the 3D viewer's per-colour parse cache from a miss per point into a hit.
+
+**A centred ramp is symmetric about its centre** — the Heatmap's zero-centred rule, generalised
+off zero. One magnitude sets both ends, so equal steps of colour are equal amounts either side and
+the middle colour means the centre. The alternative, min → centre → max with each arm stretched on
+its own, honours three typed numbers and makes a colour step mean a different amount on each side,
+which is the thing a diverging ramp is read for. So there is no `Min` there, `Max` is the distance
+from the centre to either end, a spread not above zero is ignored with a reason, and there is no
+`Log` (a log across a centre compresses the arms differently). `readValueScale` enforces those on a
+stored value too, since `visibleIf` hides a stale `Min` from the panel and not from the params.
+
+**One dropdown for both kinds of ramp**, where the Heatmap has a `Colour scale` beside two palette
+params. The Heatmap's shape keeps a palette choice when the scale is toggled; this one spends one
+control rather than three in a colour row that already holds a mode, a column and, on a surface,
+an opacity. The names are the Heatmap's either way. The lists share a value space, and `coda`
+names a ramp in each, so a diverging value carries a `diverging:` prefix.
+
+**"When the column is numeric" is a picker restriction, because `visibleIf` cannot see a schema.**
+`ColorBy`'s `dtypes` is a function of the mode: numbers under `by value`, anything otherwise. That
+needed one change in `validateColumnParams`: a stored column present in the table but of a type
+the picker currently refuses said `Missing column: type`, sending somebody looking for a column
+that is right there. It says `Column "type" is not i64/f64, which "…" needs` now, and says nothing
+when the stored value is the declared default — `neuronId` on a 3D socket switched to `by value`
+falls through to the first numeric column, and nobody chose the one it replaced.
+
+**What a colour bar would misstate is `rampNotes`, one list for every surface.** `centred on …`
+(non-zero only), `values clipped`, `log colour` and `limits ignored`, read by `ColorKey` — the one
+colour bar the three viewers share — by the Heatmap's caption, and by `rampLabel`, which titles an
+exported bar and leaves out `limits ignored`: the file's ends are then the data's, which is
+already true of the picture.
+
+**Not reproduced in either exported document.** Scatter's `hue=` and `colour =` choose their own ramp
+over the data's range, as they did before these controls. `valueScaleNote` says what the card does
+that the plot does not, rather than drawing a different picture in silence. Reproducing it
+(`hue_norm`, `scale_colour_viridis_c(limits =)`, a centred norm) wants the Heatmap exporters'
+treatment: written, then checked by running both.
+
 ### Switching a whole socket off
 
 `showSkeletons` / `showMeshes` / `showPoints` / `showVolumes`, and the switches at the head of

@@ -18,6 +18,7 @@ import { SVG_NS, element, round, svgRoot, textNode } from './svgElement'
 import type { NetworkValue } from '../../core/values'
 import { getColumn } from '../../core/values'
 import type { Legend, MarkerShape } from '../encoding'
+import { rampLabel } from '../encoding'
 import { markPath } from './scatterDraw'
 import { formatNumber } from '../format'
 
@@ -387,6 +388,6 @@ function drawLegend(
       'text-anchor': 'end',
     }),
   )
-  group.append(textNode(legend.column, { x: x + barWidth + 10, y }))
+  group.append(textNode(rampLabel(legend), { x: x + barWidth + 10, y }))
   return group
 }

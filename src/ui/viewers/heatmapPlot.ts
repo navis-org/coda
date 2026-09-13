@@ -60,10 +60,10 @@
 
 import type { MatrixValue } from '../../core/values'
 import { formatCompact, labelStep, truncateLabel } from '../format'
-import type { Mode } from '../colors'
-import { heatmapDivergingColor, heatmapSequentialColor, inkOn } from '../colors'
-import type { ColorLimits, HeatmapPalette } from '../../nodes/lib/heatmapParams'
-import { isDivergingPalette, isSequentialPalette } from '../../nodes/lib/heatmapParams'
+import { inkOn } from '../colors'
+import type { ColorDomain } from '../encoding'
+import { RAMP_STEPS, rampDomain } from '../encoding'
+import type { ColorLimits } from '../../nodes/lib/heatmapParams'
 
 /**
  * How many cells this viewer will fold, above which it says so instead.
@@ -105,27 +105,6 @@ import { isDivergingPalette, isSequentialPalette } from '../../nodes/lib/heatmap
  */
 export const HEATMAP_CELLS_WARN = 4_000_000
 
-/**
- * Steps the colour ramp is sampled into, shared by the fills and the caption's colour bar.
- *
- * A lookup table rather than a `sequentialColor` call per cell, and that is not a micro-
- * optimisation: each of those calls parses two hex strings and formats a third. Measured in a
- * browser, 285,000 of them — one grid cell per pixel of a full-width plot — cost **65 ms**
- * against **2 ms** through the table, and that is a cost the old code paid on every render
- * rather than every fold.
- *
- * **`ScatterViewer` declines to quantise a sequential ramp** — "quantising would put a colour
- * on screen that `resolveColor` never returned" — so this was checked rather than assumed, over
- * 200,000 samples of both scales in both modes. It does not, in any visible sense: the ramps
- * are piecewise-linear in RGB and the output is 8 bits a channel, so the whole of the blue ramp
- * is 453 distinct colours and the diverging scale 621–1,006. Against those, **512 steps is
- * within one channel value of exact for sequential and two for diverging** — 256 measures the
- * same, so this is headroom rather than the edge of it. The scatter's objection is real for a
- * *categorical* palette, where a substituted slot means a different category; here a colour is
- * a magnitude and the substitute is the same magnitude to within a rounding step.
- */
-export const RAMP_STEPS = 512
-
 /** Font size of the axis labels, and so the pitch a label needs to stay legible. */
 const LABEL_FONT = 10
 const LABEL_PITCH = LABEL_FONT + 1
@@ -153,34 +132,6 @@ export interface LabelTick {
 export interface HeatmapExtent {
   min: number
   max: number
-}
-
-/**
- * The value range a fill is resolved against.
- *
- * `neutral` is the end of the scale that means "nothing here" — the low end for a sequential
- * ramp, zero for a diverging one — and is what makes "the strongest cell in this block" a
- * well-defined thing to keep when folding.
- */
-export interface ColorDomain {
-  lo: number
-  hi: number
-  neutral: number
-  /**
-   * Map a value to the ramp through `log(1 + v - lo)` rather than linearly.
-   *
-   * On the **colour only**: the printed cell values, the tooltip and the colour bar's two ends
-   * are the numbers themselves, because a log axis is a way of *looking* at a distribution and
-   * a relabelled cell is a way of misreading one. Connectivity is the case it exists for — a
-   * handful of strong pairs and a long tail of ones, where a linear ramp paints the tail as
-   * empty.
-   *
-   * Offered on a sequential scale alone (see `heatmapLogColor`), which is what makes the shift
-   * by `lo` safe: `lo` is the bottom of the ramp, so `v - lo` is never negative and the
-   * logarithm always exists. With the usual `lo` of 0 this is exactly `log10(1 + v)`, which is
-   * the expression both exporters emit.
-   */
-  log?: boolean
 }
 
 /**
@@ -288,57 +239,19 @@ export function matrixExtent(values: Float64Array): HeatmapExtent {
 }
 
 /**
- * What maps to each end of the ramp.
+ * What maps to each end of the Heatmap's ramp: `rampDomain`, centred on zero, floored at zero.
  *
- * Sequential runs from zero (or lower, where the data goes negative) to the maximum, so an
- * all-positive matrix reads against a baseline of nothing rather than against its own smallest
- * cell. Diverging is symmetric about zero, or the two arms would encode different magnitudes.
- *
- * **A manual limit replaces one end, and on a diverging scale there is only one to replace.**
- * The two arms of a diverging ramp have to stay the same length or the neutral colour stops
- * meaning zero, which is the one thing that ramp is read for — so `max` there is the magnitude
- * of both arms and `min` is not offered. Out-of-range cells clamp to the end they passed, as
- * they do in matplotlib; the viewer's caption admits it rather than letting them vanish.
+ * The floor is the Heatmap's own default — sequential runs from zero (or lower, where the data goes
+ * negative) to the maximum, so an all-positive matrix reads against a baseline of nothing rather
+ * than against its own smallest cell. Everything else, the symmetric diverging arms and a manual
+ * limit replacing one end, is `rampDomain`'s rule, shared with `by value`.
  */
 export function colorDomain(
   extent: HeatmapExtent,
   scale: HeatmapScale,
   options: { limits?: ColorLimits; log?: boolean } = {},
 ): ColorDomain {
-  const { limits = {}, log } = options
-  if (scale === 'diverging') {
-    const magnitude = limits.max ?? (Math.max(Math.abs(extent.min), Math.abs(extent.max)) || 1)
-    return { lo: -magnitude, hi: magnitude, neutral: 0 }
-  }
-  const lo = limits.min ?? Math.min(0, extent.min)
-  const hi = limits.max ?? extent.max
-  return { lo, hi, neutral: lo, ...(log ? { log: true } : {}) }
-}
-
-/**
- * Ramp position of a value in [0, 1], the one place the linear and log mappings both live.
- *
- * The log arm is `log1p` of the distance from the bottom over `log1p` of the span — natural
- * logs, because a ratio of two logs is the same in any base, so this and the exporters'
- * `log10` draw the same picture.
- */
-function rampPosition(value: number, domain: ColorDomain): number {
-  const span = domain.hi - domain.lo
-  if (!(span > 0)) return 0
-  const above = value - domain.lo
-  if (above <= 0) return 0
-  if (above >= span) return 1
-  return domain.log ? Math.log1p(above) / Math.log1p(span) : above / span
-}
-
-/** Ramp position of a value, clamped to [0, 1]. */
-export function normalize(value: number, domain: ColorDomain): number {
-  return rampPosition(value, domain)
-}
-
-/** Ramp bucket of a value. */
-export function bucketOf(value: number, domain: ColorDomain): number {
-  return Math.round(normalize(value, domain) * (RAMP_STEPS - 1))
+  return rampDomain(extent, { ...options, diverging: scale === 'diverging', floor: 'zero' })
 }
 
 // ---------------------------------------------------------------------------
@@ -473,31 +386,6 @@ export function gridIndexOf(map: AxisMap, index: number): number {
   if (!map.folded) return index - map.first
   const g = Math.floor(((index - map.start) * map.count) / Math.max(MIN_SPAN, map.span))
   return Math.min(map.count - 1, Math.max(0, g))
-}
-
-/**
- * The ramp, resolved to hex.
- *
- * One function for the cell fills and for the caption's colour bar, so the bar cannot come to
- * describe a scale the cells are not drawn in — the two were separate samplings of the same
- * ramp before, which is exactly how that drifts.
- */
-export function rampColors(
-  scale: HeatmapScale,
-  mode: Mode,
-  steps = RAMP_STEPS,
-  palette: HeatmapPalette = 'coda',
-): string[] {
-  // A name from the other scale's list is not an error, just not an answer: Coda's own ramp
-  // stands in, which is also what `heatmapPaletteOf` hands a caller reading the params.
-  const sequential = isSequentialPalette(palette) ? palette : 'coda'
-  const diverging = isDivergingPalette(palette) ? palette : 'coda'
-  return Array.from({ length: steps }, (_, i) => {
-    const t = steps === 1 ? 0 : i / (steps - 1)
-    return scale === 'diverging'
-      ? heatmapDivergingColor(t * 2 - 1, mode, diverging)
-      : heatmapSequentialColor(t, mode, sequential)
-  })
 }
 
 /**

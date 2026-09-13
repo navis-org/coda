@@ -1303,6 +1303,14 @@ Area-specific — the rule, then the doc that holds why:
   **monotonic**, so the fold's strongest-cell rule needed no case. seaborn's **`annot` takes a frame of
   its own** and ggplot gets a `fill_` column beside the untouched `value`: that is how the numbers stay
   raw under a transformed fill, and both were run. See [docs/viewers.md](docs/viewers.md).
+- **`by value` on the 3D, Scatter and Network viewers is the Heatmap's colour domain, not a copy.**
+  `colorParams({ valueScale })` adds a ramp, both ends, a centre and a log; `rampDomain`,
+  `rampColors` (the 512-step table), `rampNotes` and `normalize` live in `ui/encoding.ts` for both.
+  Three rules: an automatic bottom is the **data's
+  minimum** (the Heatmap's is zero), so a node on the defaults draws what it always drew; a centred
+  ramp is **symmetric** about its centre, so it has no `Min`, `Max` is a distance and there is no
+  log; and "numeric columns only" is `ColorBy`'s `dtypes` as a function of the mode, since
+  `visibleIf` cannot see a schema. See [docs/viewers.md](docs/viewers.md).
 - **A heatmap's rectangle selection is a set of positions, and "store the meaning, not the
   position" is the rule that had to bend.** Shift- or ⌘/Ctrl-drag selects, **alt-shift-drag adds**,
   ⌫ or a modifier-click clears, bare drag still pans (`ScatterViewer`'s division and React Flow's),

@@ -105,6 +105,12 @@ The other four are published sets used exactly as published, so the pale members
 
 The legend lists twelve keys and then says `+N more`. Everything past the twelfth is still drawn; the cap is on the strip, not on the picture.
 
+## Colouring nodes by a number
+
+**Nodes ▸ Colour ▸ `by value`** maps a numeric column onto a ramp, and the row then carries four more controls: the `ramp` (Coda blue or one of matplotlib's; the ones marked `centred` are diverging), the values at its `min` and `max` ends, a `centre` for a centred ramp, and `log`. Empty ends follow the data. A centred ramp keeps both arms the same length, so `max` there is the distance from the centre to either end. The legend says `values clipped` when nodes fall outside the ends, and `log colour` when the ramp is on a log scale.
+
+Links have no `by value`: a one-pixel line cannot show a ramp's pale end against the background.
+
 ## Two colour modes a column cannot express
 
 - **Nodes ▸ Colour ▸ `by connected component`** gives every connected component its own colour, which a drawing answers badly: a force layout can pack two components into one blob and spread one across the canvas. Components are numbered by size, so `1` is the biggest, and they ignore link direction — a component that followed arrows would be a *reachable set*. It is the same partition `Select connected component` uses.

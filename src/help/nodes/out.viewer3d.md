@@ -50,6 +50,17 @@ The three encodings are independent: neurons by cell type while their synapses g
 
 `by category` ranks values by frequency and hands them the palette's eight colours in that order, coming round to the first after the eighth; the caption says when it has repeated. `a colour each` derives a colour per value, so it never runs out — but the hues cover the whole circle with no colourblind check.
 
+**`by value` has controls of its own**, in the same colour row, and while it is the mode the column picker offers only numeric columns:
+
+| Control | What it does |
+| --- | --- |
+| `ramp` | Coda blue, or one of matplotlib's — viridis, magma, cividis and the rest. The ones marked `centred` are diverging, with their middle colour on `centre` |
+| `min` / `max` | the values at the two ends; empty lets the data decide. Anything outside takes the end colour, and the legend says `values clipped` |
+| `centre` | centred ramps only, and empty means 0. Both arms stay the same length, so there is no `min` and `max` is the distance from the centre to either end |
+| `log` | spreads the colour over a log scale; the numbers on the colour bar stay the values. Not offered on a centred ramp |
+
+Ends that make no ramp — a minimum above the maximum — are ignored, and the legend says `limits ignored`. The same controls are on `Scatter Plot` and on the node colour of `Network Viewer`.
+
 > [!NOTE] The legend lists twelve
 > A hash key is one row per neuron, so the strip shows the first twelve and says `+28 more`. The rest are still drawn in colours of their own; they just have no key to click.
 

@@ -13,6 +13,7 @@
 
 import type { ParamValues } from '../../core/node'
 import type { FieldTerm } from '../../data/terms'
+import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import type { ValueRange } from '../../nodes/lib/chartSelection'
 import {
   MISSING_LABEL,
@@ -195,6 +196,38 @@ export interface ScatterPlan {
   /** The lassoed ids and the column they are matched against. */
   selected: Noted<{ column: string; ids: string[] }>
   drawn: Noted<{ x: string; y: string }>
+}
+
+/**
+ * What neither document reproduces of `by value`'s ramp, as the sentence both write.
+ *
+ * seaborn's `hue=` and ggplot's `colour =` each choose a ramp of their own over the data's range,
+ * so a ramp, typed ends, a centre or a log chosen on the card is a picture the exported plot does
+ * not draw. Said rather than silently dropped; undefined on the defaults, which neither library
+ * matched before these controls existed either, and while typed ends are being ignored on the
+ * card too. Reproducing them — `hue_norm`, `scale_colour_viridis_c(limits =)` — is left for when
+ * it can be checked by running both, as the Heatmap's were.
+ */
+export function valueScaleNote(spec: ColorSpec): string | undefined {
+  // `readColorSpec` sets a scale under `by value` alone, so its presence is the mode check.
+  const { scale } = spec
+  if (!scale || !spec.column) return undefined
+  const limits = scale.limits.problem ? {} : scale.limits
+  const parts: string[] = []
+  if (scale.diverging) {
+    parts.push(`the ${scale.palette} ramp centred on ${scale.center}`)
+    if (limits.max !== undefined) parts.push(`a spread of ${limits.max}`)
+  } else {
+    if (scale.palette !== 'coda') parts.push(`the ${scale.palette} ramp`)
+    if (limits.min !== undefined) parts.push(`a minimum of ${limits.min}`)
+    if (limits.max !== undefined) parts.push(`a maximum of ${limits.max}`)
+    if (scale.log) parts.push('a log colour scale')
+  }
+  if (parts.length === 0) return undefined
+  return (
+    `On the canvas ${spec.column} is coloured with ${parts.join(', ')}. This plot uses the ` +
+    `library's default ramp over the data's range.`
+  )
 }
 
 export function scatterPlan(ctx: ChartContext): ScatterPlan {

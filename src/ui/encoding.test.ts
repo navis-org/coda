@@ -19,22 +19,29 @@ import {
   foldByRank,
   paletteColors,
   seriesColor,
+  sequentialColor,
 } from './colors'
 import {
   LEGEND_KEYS,
   MARKER_SHAPES,
   MAX_SHAPES,
   OTHER_SHAPE,
+  RAMP_STEPS,
   clusterColor,
   hexToLinearRgb,
   literalColor,
+  normalize,
+  rampColors,
+  rampLabel,
   resolveColor,
   resolveShape,
   resolveSize,
 } from './encoding'
+import type { ColorSpec } from '../nodes/lib/encodingParams'
+import type { HeatmapPalette } from '../nodes/lib/heatmapParams'
 import { segmentColor } from './segmentColor'
 import type { ShapeSpec } from '../nodes/lib/encodingParams'
-import { readOverrides } from '../nodes/lib/encodingParams'
+import { readColorSpec, readOverrides, readValueScale } from '../nodes/lib/encodingParams'
 
 const SCHEMA = tableSchema(column('id', 'str'), column('type', 'str'), column('weight', 'f64'))
 
@@ -200,6 +207,216 @@ describe('resolveColor', () => {
     expect(resolveColor(data, spec, 'light').at(0)).not.toBe(
       resolveColor(data, spec, 'dark').at(0),
     )
+  })
+})
+
+describe('resolveColor — by value, with the value controls', () => {
+  /*
+   * `colorParams({ valueScale })`: a ramp, typed ends, a centre and a log. The arithmetic is the
+   * Heatmap's (`normalize`, the two ramp functions), so these assert against those functions
+   * rather than against hex — a palette re-sampling must not read as a regression here.
+   */
+  const data = table([
+    { id: 'a', type: 'x', weight: 10 },
+    { id: 'b', type: 'x', weight: 20 },
+    { id: 'c', type: 'x', weight: 30 },
+  ])
+  const signed = table([
+    { id: 'a', type: 'x', weight: -2 },
+    { id: 'b', type: 'x', weight: 0 },
+    { id: 'c', type: 'x', weight: 10 },
+  ])
+  const spec = (params: Record<string, unknown>): ColorSpec => ({
+    mode: 'sequential',
+    column: 'weight',
+    constant: '0',
+    scale: readValueScale('point', { pointColorRamp: 'coda', ...params })!,
+  })
+  const legendOf = (result: ReturnType<typeof resolveColor>) => {
+    if (result.legend?.kind !== 'sequential') throw new Error('expected a sequential legend')
+    return result.legend
+  }
+  /** Where a ramp position lands in the shared lookup table, which is what `at` reads. */
+  const lut = (
+    kind: 'sequential' | 'diverging',
+    palette: HeatmapPalette,
+    t: number,
+    mode: 'light' | 'dark' = 'dark',
+  ) => rampColors(kind, mode, RAMP_STEPS, palette)[Math.round(t * (RAMP_STEPS - 1))]
+
+  it('draws the ramp it drew before on the defaults: Coda blue, minimum to maximum', () => {
+    // A node that opts in must not change a saved graph's picture until somebody touches a control.
+    const before = resolveColor(
+      data,
+      { mode: 'sequential', column: 'weight', constant: '0' },
+      'dark',
+    )
+    const after = resolveColor(data, spec({}), 'dark')
+    for (const row of [0, 1, 2]) expect(after.at(row)).toBe(before.at(row))
+    expect(after.legend).toEqual(before.legend)
+    expect(before.at(0)).toBe(sequentialColor(0, 'dark'))
+    expect(before.at(2)).toBe(sequentialColor(1, 'dark'))
+  })
+
+  it('runs through the named ramp, in the Heatmap’s own colours', () => {
+    const result = resolveColor(data, spec({ pointColorRamp: 'viridis' }), 'light')
+    expect(result.at(0)).toBe(lut('sequential', 'viridis', 0, 'light'))
+    expect(result.at(1)).toBe(lut('sequential', 'viridis', 0.5, 'light'))
+    expect(result.at(2)).toBe(lut('sequential', 'viridis', 1, 'light'))
+    expect(legendOf(result).stops).toEqual(rampColors('sequential', 'light', 9, 'viridis'))
+  })
+
+  it('puts typed ends on the ramp and clamps what falls outside, saying so', () => {
+    const result = resolveColor(
+      data,
+      spec({ pointColorMin: '15', pointColorMax: '25' }),
+      'dark',
+    )
+    const legend = legendOf(result)
+    expect(legend.domain).toEqual([15, 25])
+    expect(legend.clipped).toBe(true)
+    expect(result.at(0)).toBe(lut('sequential', 'coda', 0))
+    expect(result.at(1)).toBe(lut('sequential', 'coda', 0.5))
+    expect(result.at(2)).toBe(lut('sequential', 'coda', 1))
+  })
+
+  it('takes one typed end and leaves the other to the data', () => {
+    const legend = legendOf(resolveColor(data, spec({ pointColorMax: '100' }), 'dark'))
+    expect(legend.domain).toEqual([10, 100])
+    expect(legend.clipped).toBeUndefined()
+  })
+
+  it('drops one end typed on the wrong side of the data, rather than drawing one colour', () => {
+    const legend = legendOf(resolveColor(data, spec({ pointColorMin: '50' }), 'dark'))
+    expect(legend.domain).toEqual([10, 30])
+    expect(legend.problem).toMatch(/minimum \(50\)/)
+    expect(legend.clipped).toBeUndefined()
+  })
+
+  it('drops an inverted or unreadable pair whole, as the Heatmap does', () => {
+    const inverted = legendOf(
+      resolveColor(data, spec({ pointColorMin: '25', pointColorMax: '15' }), 'dark'),
+    )
+    expect(inverted.domain).toEqual([10, 30])
+    expect(inverted.problem).toMatch(/not below/)
+    expect(
+      legendOf(resolveColor(data, spec({ pointColorMax: 'lots' }), 'dark')).problem,
+    ).toMatch(/not a number/)
+  })
+
+  it('logs the colour and leaves the numbers on the bar alone', () => {
+    const result = resolveColor(data, spec({ pointColorLog: true }), 'dark')
+    const legend = legendOf(result)
+    expect(legend.log).toBe(true)
+    expect(legend.domain).toEqual([10, 30])
+    expect(result.at(1)).toBe(lut('sequential', 'coda', Math.log1p(10) / Math.log1p(20)))
+  })
+
+  describe('a centred ramp', () => {
+    it('is symmetric about zero by default, reaching as far as the data does either side', () => {
+      const result = resolveColor(signed, spec({ pointColorRamp: 'diverging:RdBu' }), 'dark')
+      const legend = legendOf(result)
+      expect(legend.domain).toEqual([-10, 10])
+      expect(legend.center).toBe(0)
+      expect(result.at(1)).toBe(lut('diverging', 'RdBu', 0.5))
+      expect(result.at(2)).toBe(lut('diverging', 'RdBu', 1))
+      // Equal steps are equal amounts: -2 is a fifth of the way along the negative arm, not the
+      // far end of it, which is what a two-slope mapping would have drawn.
+      const position = normalize(-2, { lo: -10, hi: 10, neutral: 0 })
+      expect(position).toBeCloseTo(0.4, 12)
+      expect(result.at(0)).toBe(lut('diverging', 'RdBu', position))
+    })
+
+    it('moves its middle to a typed centre, and one typed spread sets both arms', () => {
+      const legend = legendOf(
+        resolveColor(
+          signed,
+          spec({ pointColorRamp: 'diverging:coda', pointColorCenter: '4', pointColorMax: '3' }),
+          'dark',
+        ),
+      )
+      expect(legend.domain).toEqual([1, 7])
+      expect(legend.center).toBe(4)
+      expect(legend.clipped).toBe(true)
+    })
+
+    it('reads no minimum and no log, whatever the params still hold from a one-way ramp', () => {
+      const scale = readValueScale('point', {
+        pointColorRamp: 'diverging:PuOr',
+        pointColorMin: '-100',
+        pointColorLog: true,
+      })!
+      expect(scale).not.toHaveProperty('log')
+      expect(scale.limits.min).toBeUndefined()
+      const legend = legendOf(
+        resolveColor(
+          signed,
+          { mode: 'sequential', column: 'weight', constant: '0', scale },
+          'dark',
+        ),
+      )
+      expect(legend.domain).toEqual([-10, 10])
+      expect(legend.log).toBeUndefined()
+    })
+
+    it('refuses a spread that is not above zero, and an unreadable centre', () => {
+      expect(
+        readValueScale('p', { pColorRamp: 'diverging:coda', pColorMax: '0' })!.limits.problem,
+      ).toMatch(/spread \(0\)/)
+      const scale = readValueScale('p', { pColorRamp: 'diverging:coda', pColorCenter: 'mid' })!
+      expect(scale.limits.problem).toMatch(/not a number/)
+      if (!scale.diverging) throw new Error('expected a centred ramp')
+      expect(scale.center).toBe(0)
+    })
+  })
+
+  it('reads an unknown ramp as Coda’s own of its kind', () => {
+    expect(readValueScale('p', { pColorRamp: 'jet' })).toMatchObject({
+      diverging: false,
+      palette: 'coda',
+    })
+    expect(readValueScale('p', { pColorRamp: 'diverging:jet' })).toMatchObject({
+      diverging: true,
+      palette: 'coda',
+    })
+  })
+
+  it('carries the controls only under by value, and only for a node that declared them', () => {
+    const column = () => 'weight'
+    expect(readValueScale('p', { pColorMode: 'sequential' })).toBeUndefined()
+    expect(
+      readColorSpec('p', { pColorMode: 'categorical', pColorRamp: 'viridis' }, column).scale,
+    ).toBeUndefined()
+    expect(
+      readColorSpec('p', { pColorMode: 'sequential', pColorRamp: 'viridis' }, column).scale,
+    ).toMatchObject({ palette: 'viridis' })
+  })
+
+  it('titles an exported colour bar with what the screen says in notes', () => {
+    expect(
+      rampLabel(
+        legendOf(
+          resolveColor(data, spec({ pointColorLog: true, pointColorMax: '25' }), 'dark'),
+        ),
+      ),
+    ).toBe('weight · values clipped · log colour')
+    expect(
+      rampLabel(
+        legendOf(
+          resolveColor(
+            signed,
+            spec({ pointColorRamp: 'diverging:coda', pointColorCenter: '4' }),
+            'dark',
+          ),
+        ),
+      ),
+    ).toBe('weight · centred on 4')
+    // A centre of zero is the ramp's ordinary meaning, and says nothing.
+    expect(
+      rampLabel(
+        legendOf(resolveColor(signed, spec({ pointColorRamp: 'diverging:coda' }), 'dark')),
+      ),
+    ).toBe('weight')
   })
 })
 
