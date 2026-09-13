@@ -14,7 +14,7 @@
 
 import { create } from 'zustand'
 
-import type { CodaGraph, GraphEdge, GraphGroup, GraphNode } from '../core/graph'
+import type { CodaGraph, GraphEdge, GraphGroup, GraphNode, NodeHint } from '../core/graph'
 import type { NodeCategory } from '../core/node'
 import type { FeedbackCategory } from '../data/feedback'
 import type { ApplyResult } from '../assistant/apply'
@@ -32,6 +32,7 @@ import {
   removeEdges,
   removeNodes,
   setNodeParam,
+  setNodeHints,
   updateNode,
 } from '../core/graph'
 import {
@@ -267,7 +268,21 @@ interface DocStash {
   /** Both name a group by id, and two documents opened from one file share their ids. */
   peekGroupId: string | undefined
   editingGroupId: string | undefined
+  editingHint: HintTarget | undefined
   autoLayout: boolean
+}
+
+/**
+ * Which hint the hint editor is writing: one already on the card, or — `hint` absent — a new one
+ * appended to them.
+ *
+ * **The hint object, not its position.** The graph is immutable, so the object names that hint
+ * until an edit replaces it; a position is reused by a neighbour the moment an undo or a plan
+ * shifts the list, and a Save would then write over the wrong sentence.
+ */
+export interface HintTarget {
+  nodeId: string
+  hint?: NodeHint
 }
 
 /**
@@ -725,6 +740,24 @@ export interface GraphState {
    */
   editingGroupId: string | undefined
   editGroupTitle(groupId: string | undefined): void
+  /**
+   * Hint whose text is being written, if any — see `HintTarget`.
+   *
+   * `editingGroupId`'s reasoning exactly: the node menu's **Add Hint…** and the ✎ on a hint box
+   * inside a card both open the one editor, and neither surface can reach the other. Session
+   * state, never the document, and dropped when the document changes, since a node id means
+   * nothing in the next graph.
+   */
+  editingHint: HintTarget | undefined
+  editHint(target: HintTarget | undefined): void
+  /**
+   * Replace a node's hints — one undo step, no auto-run (a hint changes nothing `evaluate` reads).
+   *
+   * **Live under the lock**, like `renameNode` and `renameGroup`: the lock freezes the canvas's
+   * structure and geometry, and a sentence docked to a card is neither. Distinct from dismissing
+   * one, which is not an edit at all (`ui/hints.ts`).
+   */
+  setHints(nodeId: string, hints: readonly NodeHint[]): void
   /**
    * Node whose output is docked down the right-hand side of the canvas, if any.
    *
@@ -1785,6 +1818,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       edgePanelNode: s.edgePanelNode,
       peekGroupId: s.peekGroupId,
       editingGroupId: s.editingGroupId,
+      editingHint: s.editingHint,
       autoLayout: s.autoLayout,
     }
   }
@@ -1827,6 +1861,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       edgePanelNode: undefined,
       peekGroupId: undefined,
       editingGroupId: undefined,
+      editingHint: undefined,
     }
   }
 
@@ -2277,6 +2312,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
     peekGroup: (groupId) => set({ peekGroupId: groupId }),
     editingGroupId: undefined,
     editGroupTitle: (groupId) => set({ editingGroupId: groupId }),
+    editingHint: undefined,
+    editHint: (target) => set({ editingHint: target }),
+    setHints: (nodeId, hints) => {
+      commit((g) => setNodeHints(g, nodeId, hints), { autoRun: false })
+    },
 
     expandNode: (nodeId) =>
       set((s) =>

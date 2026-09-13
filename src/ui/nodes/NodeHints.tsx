@@ -24,9 +24,12 @@
  * an *author* has to say, and the two read as one thing the moment they share a band: a reader
  * who cannot tell "the graph is broken" from "here is where to start" will act on neither.
  *
- * **The × is the whole interaction.** Dismissing is not an edit — see `ui/hints.ts` — so there is
- * no store action here, no undo step and nothing to lock: a hint can be put away on a locked
- * canvas exactly as it can on an unlocked one, because nothing about the document changes.
+ * **Two buttons, and they are two different kinds of act.** The × dismisses, which is not an edit
+ * — see `ui/hints.ts` — so it has no store action, no undo step and nothing to lock: it puts the
+ * hint away *for this reader*. The ✎ opens the hint editor (`panels/HintEditor.tsx`), whose Save
+ * and Delete *are* edits and reach everybody who opens the workflow. Side by side because an
+ * author tidying a workflow will otherwise reach for the × to delete their own sentence, see it
+ * vanish, and share a file that still carries it.
  *
  * `nodrag` on the stack. A hint sticking out into empty canvas that drags the card when grabbed
  * is a surprise, and a × that sometimes starts a drag instead of dismissing is worse — the Text
@@ -34,9 +37,11 @@
  */
 
 import { memo } from 'react'
+import type { ReactNode } from 'react'
 
 import type { GraphNode, HintSide, NodeHint } from '../../core/graph'
-import { HINT_SIDES } from '../../core/graph'
+import { DEFAULT_HINT_TONE, HINT_SIDES } from '../../core/graph'
+import { useGraphStore } from '../../store/graphStore'
 import { MarkdownView } from '../MarkdownView'
 import { dismissHint, hintKey, splitHints, useDismissedHints } from '../hints'
 
@@ -44,7 +49,31 @@ export interface NodeHintsProps {
   node: GraphNode
 }
 
-function Stack({ side, hints }: { side: HintSide; hints: NodeHint[] }) {
+/**
+ * One hint's box — what a card docks, and what the hint editor previews, so the preview is the
+ * box rather than a copy of its markup.
+ */
+export function HintBox({ hint, children }: { hint: NodeHint; children?: ReactNode }) {
+  return (
+    <div
+      className="node-hint"
+      /*
+       * `role="note"` rather than an `<aside>` element, which is what this was. Both say the
+       * same thing to a screen reader; the element does not, to a `querySelector`. A default
+       * canvas draws three of these, and `panels.test.tsx` proves the inspector is absent by
+       * counting `aside`s — so shipping the element would have made a wizard hint read as an
+       * open panel in a test about something else entirely.
+       */
+      role="note"
+      data-tone={hint.tone ?? DEFAULT_HINT_TONE}
+    >
+      <MarkdownView source={hint.text} className="node-hint__text" />
+      {children}
+    </div>
+  )
+}
+
+function Stack({ nodeId, side, hints }: { nodeId: string; side: HintSide; hints: NodeHint[] }) {
   if (hints.length === 0) return null
   return (
     <div className="node-hints nodrag" data-side={side}>
@@ -53,24 +82,24 @@ function Stack({ side, hints }: { side: HintSide; hints: NodeHint[] }) {
          * Keyed by the digest rather than by index: dismissing the first of two stacked hints
          * must leave the second drawing the same box rather than re-mounting it as the first.
          */
-        <div
-          key={hintKey(hint)}
-          className="node-hint"
-          /*
-           * `role="note"` rather than an `<aside>` element, which is what this was. Both say the
-           * same thing to a screen reader; the element does not, to a `querySelector`. A default
-           * canvas draws three of these, and `panels.test.tsx` proves the inspector is absent by
-           * counting `aside`s — so shipping the element would have made a wizard hint read as an
-           * open panel in a test about something else entirely.
-           */
-          role="note"
-          data-tone={hint.tone ?? 'note'}
-        >
-          <MarkdownView source={hint.text} className="node-hint__text" />
+        <HintBox key={hintKey(hint)} hint={hint}>
+          <button
+            type="button"
+            className="node-hint__edit"
+            title="Edit or delete this hint, for everybody who opens the workflow"
+            aria-label="Edit hint"
+            onClick={(event) => {
+              event.stopPropagation()
+              // The object itself — `splitHints` hands back the node's own — see `HintTarget`.
+              useGraphStore.getState().editHint({ nodeId, hint })
+            }}
+          >
+            ✎
+          </button>
           <button
             type="button"
             className="node-hint__close"
-            title="Dismiss this hint. It will not come back — the ? menu has it if you want it."
+            title="Hide this hint for yourself. It stays in the workflow — Show Hints brings it back."
             aria-label="Dismiss hint"
             onClick={(event) => {
               // The canvas turns a click into a selection and a double-click into "add a node
@@ -81,7 +110,7 @@ function Stack({ side, hints }: { side: HintSide; hints: NodeHint[] }) {
           >
             ×
           </button>
-        </div>
+        </HintBox>
       ))}
     </div>
   )
@@ -93,7 +122,7 @@ function NodeHintsImpl({ node }: NodeHintsProps) {
   return (
     <>
       {HINT_SIDES.map((side) => (
-        <Stack key={side} side={side} hints={unread[side]} />
+        <Stack key={side} nodeId={node.id} side={side} hints={unread[side]} />
       ))}
     </>
   )

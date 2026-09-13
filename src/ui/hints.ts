@@ -39,6 +39,7 @@
 import { useSyncExternalStore } from 'react'
 
 import type { GraphNode, HintSide, NodeHint } from '../core/graph'
+import { DEFAULT_HINT_SIDE } from '../core/graph'
 import { hashString } from '../core/hash'
 import { channel } from '../data/channel'
 import { loadDismissedHints, saveDismissedHints } from '../store/persistence'
@@ -118,7 +119,7 @@ export function restoreHints(hints?: readonly NodeHint[]): void {
  *
  * One function for every caller, so the card and the context menu cannot disagree about what is
  * left to show — the menu offers back exactly what the card is not drawing. `side` defaults to
- * `bottom` here exactly as `NodeHint` documents, which is the one place that default is spent.
+ * `DEFAULT_HINT_SIDE` here exactly as `NodeHint` documents.
  */
 export function splitHints(
   node: GraphNode,
@@ -128,7 +129,7 @@ export function splitHints(
   const put: NodeHint[] = []
   for (const hint of node.hints ?? []) {
     if (seen.has(hintKey(hint))) put.push(hint)
-    else unread[hint.side ?? 'bottom'].push(hint)
+    else unread[hint.side ?? DEFAULT_HINT_SIDE].push(hint)
   }
   return { unread, dismissed: put }
 }

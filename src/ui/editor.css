@@ -1831,7 +1831,9 @@ select.field {
   padding-left: 16px;
 }
 
-.node-hint__close {
+/* The × and the ✎ are one button in two uses; only the glyph's size differs. */
+.node-hint__close,
+.node-hint__edit {
   flex: none;
   width: 14px;
   height: 14px;
@@ -1844,13 +1846,121 @@ select.field {
   line-height: 1;
   cursor: pointer;
 }
-.node-hint__close:hover {
+.node-hint__close:hover,
+.node-hint__edit:hover {
   background: color-mix(in srgb, var(--cal) 22%, transparent);
   color: var(--text-primary);
 }
-.node-hint__close:focus-visible {
+.node-hint__close:focus-visible,
+.node-hint__edit:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/*
+ * The ✎ beside the ×: quiet until the box is pointed at, since most people who see a hint only
+ * ever read it. Only where there *is* a hover — on a touch screen it stays drawn, or it could
+ * never be reached.
+ */
+.node-hint__edit {
+  font-size: 10px;
+}
+@media (hover: hover) {
+  .node-hint__edit {
+    opacity: 0;
+  }
+  .node-hint:hover .node-hint__edit,
+  .node-hint:focus-within .node-hint__edit {
+    opacity: 1;
+  }
+}
+
+/*
+ * The hint editor (`panels/HintEditor.tsx`): a `.context-menu` panel holding a form. Fixed width
+ * rather than content-sized, so typing does not resize the box under the cursor.
+ */
+.hint-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  padding: 8px;
+}
+.hint-editor__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.hint-editor__title {
+  flex: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.hint-editor__card {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Over `.field`, as `.feedback__message` is: a field that holds prose wraps and grows. */
+.hint-editor__text {
+  height: auto;
+  min-height: 64px;
+  padding: 6px 7px;
+  line-height: 1.45;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+.hint-editor__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.hint-editor__choices {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.hint-editor__choices button {
+  padding: 2px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.hint-editor__choices button + button {
+  border-left: 1px solid var(--border);
+}
+.hint-editor__choices button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+.hint-editor__preview {
+  max-width: 100%;
+}
+.hint-editor__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.hint-editor__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hint-editor__spacer {
+  flex: 1;
+}
+.hint-editor__delete {
+  color: var(--status-error);
 }
 
 /* Progress hairline while a node runs. */

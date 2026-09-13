@@ -27,11 +27,11 @@
  *
  * ## The one thing that would have gone wrong silently
  *
- * `measureCardSizes` and `useArrange`'s port measurement read `.react-flow__node[data-id]` out
+ * `measureCardSizes`, `cardElement` and `useArrange`'s port measurement read `.react-flow__node[data-id]` out
  * of the *document*. A second flow puts elements carrying the same ids into the page — and while
  * a group is folded those copies are the only ones, so ELK would have sized the graph from cards
  * drawn in a modal, and `structureKey` would have changed the moment a peek opened: with
- * auto-layout on, opening one re-arranged the canvas behind it. Both queries are scoped to
+ * auto-layout on, opening one re-arranged the canvas behind it. All three are scoped to
  * `.canvas-area` now. Nothing here needs measuring — React Flow measures its own flow through
  * its own store.
  *

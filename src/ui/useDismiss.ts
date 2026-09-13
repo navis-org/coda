@@ -21,22 +21,27 @@ export interface DismissOptions {
   onEscape?: boolean
   /** Skip binding entirely — for popovers that stay mounted while closed. */
   enabled?: boolean
+  /**
+   * Close on a press outside — the default. Off for a popover holding work a stray press would
+   * throw away (the hint editor's draft), which still closes on Escape if `onEscape` says so.
+   */
+  onOutside?: boolean
 }
 
 export function useDismissOnOutside(
   ref: RefObject<HTMLElement | null>,
   onClose: () => void,
-  { onEscape = false, enabled = true }: DismissOptions = {},
+  { onEscape = false, enabled = true, onOutside = true }: DismissOptions = {},
 ): void {
   const latest = useLatest(onClose)
   useOverlayEscape(onEscape && enabled ? onClose : undefined)
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || !onOutside) return
     const onPointerDown = (event: PointerEvent) => {
       if (!ref.current?.contains(event.target as Node)) latest.current()
     }
     window.addEventListener('pointerdown', onPointerDown, true)
     return () => window.removeEventListener('pointerdown', onPointerDown, true)
-  }, [ref, enabled, latest])
+  }, [ref, enabled, onOutside, latest])
 }

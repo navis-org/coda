@@ -1,4 +1,5 @@
 import { isOnDashboard, placeableIds } from '../../core/dashboard'
+import { MAX_HINTS } from '../../core/graph'
 import { groupsTouching } from '../../core/groups'
 import { getNodeDef, isAnnotation } from '../../core/registry'
 import { hasHelp } from '../../help/registry'
@@ -58,6 +59,7 @@ export function NodeContextMenu({
    * how they come to disagree about what "read" means.
    */
   const putAway = splitHints(node, seenHints).dismissed
+  const atHintCap = (node.hints?.length ?? 0) >= MAX_HINTS
 
   // The selection is what bulk actions apply to; a right-click on an unselected node
   // acts on that node alone.
@@ -149,6 +151,25 @@ export function NodeContextMenu({
             onClick={act(() => actions.toggleParamRows(targets))}
           >
             {node.paramsCollapsed ? 'Show parameters & ports' : 'Hide parameters & ports'}
+          </button>
+          {/*
+           * Live under the lock, like renaming a card: a sentence docked to one is neither the
+           * canvas's structure nor its geometry. Greyed at `MAX_HINTS` with the reason, because
+           * the editor would otherwise open on a hint that `setNodeHints` then drops on save.
+           * The clicked card only — a hint says something about one card, not a selection.
+           */}
+          <button
+            type="button"
+            className="context-menu__item"
+            disabled={atHintCap}
+            title={
+              atHintCap
+                ? `This card already carries ${MAX_HINTS} hints, the most one card draws`
+                : 'Dock a short note to this card for whoever opens the workflow'
+            }
+            onClick={act(() => actions.editHint({ nodeId }))}
+          >
+            Add Hint…
           </button>
           {/*
            * Only when there is something to bring back, so the row is not a permanent reminder

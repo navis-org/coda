@@ -766,8 +766,8 @@ identical coordinates, since each is `round(centre − width / 2)` of one shared
 A small dismissable box docked to a card's top or bottom border, carrying guidance somebody wrote
 *about that card*: "search and tick neurons here". The document side is `NodeHint` on `GraphNode`
 (`core/graph.ts`), the box is `ui/nodes/NodeHints.tsx`, and what has been read is `ui/hints.ts`.
-The Workflow Wizard writes them (`docs/wizard.md`), and nothing in the app adds one by hand — see
-below for why that is a decision rather than a gap.
+The Workflow Wizard writes them (`docs/wizard.md`), and so does anybody preparing a workflow to
+share, through the node menu's **Add Hint…** — see the end of this section.
 
 **A hint is a field on the node, not a document-level list.** `GraphGroup` has to be a document
 object because a frame spans several cards; a hint belongs to exactly one. Putting it on the node
@@ -832,10 +832,32 @@ three words. So the lists are held together by a type-level assertion in
 lacks, and the stylesheet agrees by sharing `.markdown__callout`'s own `--cal` token and its tone
 table rather than carrying a second one.
 
-**There is no in-app way to write one, and that is the current scope.** A hint is authored by
-whatever generated the document. Anything a user wants to say about their own graph is a Text
-note, which is a card they position, keep, and edit — the two are different objects, and a
-right-click "Add hint" would immediately raise the question of which one a sentence belongs in.
+**Writing one is an edit, and dismissing one still is not.** The node menu's **Add Hint…** and the
+✎ on a box open `ui/panels/HintEditor.tsx`, a popover hung under the card with the text, a tone, a
+side and a preview at the card's own width. Save and Delete go through `setNodeHints`, which runs
+the loader's own `validHints`, so a hint written in the app obeys exactly what a mailed file does —
+no empty hint, no unknown tone, no more than `MAX_HINTS` — rather than a second set of rules the
+next load quietly disagrees with.
+
+This reverses a scope line this section used to draw: that a right-click "Add hint" would compete
+with the Text note for the same sentence. The wizard had settled that split by then (`docs/wizard.md`,
+*Why three of the four moved off the canvas*): a sentence whose subject is **one card** is a hint, a
+sentence about **the graph** is a note. What is left is four rules.
+
+- **Live under the lock**, like renaming a card or a frame. The lock freezes structure and geometry,
+  and a sentence docked to a card is neither; `store/lock.test.ts` classifies both actions.
+- **The ✎ sits beside the ×, because they are opposite acts.** An author tidying a workflow reaches
+  for the × to delete their own sentence, watches it go, and shares a file that still carries it.
+  The editor's footer says it in words: the × hides a hint for one reader, Delete removes it for
+  everybody. The ✎ is drawn only on hover where there is hover, and always on a touch screen.
+- **The popover does not close on a press elsewhere**, unlike every `ContextMenu`. It holds a
+  half-written paragraph, and the press that lands outside it is usually the author clicking the
+  card to check what it does. Escape, Cancel and Save are the ways out.
+- **Saving restores that text's dismissal.** Dismissal is keyed on the words, so an author who once
+  dismissed the same sentence elsewhere would otherwise save a hint they cannot see.
+
+Wizard hints are ordinary hints here — editable, deletable — which is what somebody tidying a
+generated workflow for colleagues wants, and why there is no "authored by" flag to keep true.
 
 ## Groups
 

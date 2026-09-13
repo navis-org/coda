@@ -42,7 +42,7 @@ export interface GraphNode {
    */
   size?: { width: number; height: number }
   /**
-   * Guidance docked to the card's edge, authored by whoever generated the graph.
+   * Guidance docked to the card's edge, authored by whoever generated or shared the graph.
    *
    * On the node rather than in a document-level list, which is the whole reason there is nothing
    * to keep in step: duplicate, copy/paste, `subgraphOf` and delete carry a hint with its card
@@ -50,8 +50,9 @@ export interface GraphNode {
    * spans nodes and has to be a document object; a hint belongs to exactly one card.
    *
    * Absent on almost every node, and that is the point — a hint is written by the Workflow
-   * Wizard, a starter or a Zoo entry, never by an ordinary edit, so it stays out of a saved file
-   * unless somebody put it there.
+   * Wizard, a starter or a Zoo entry, or by somebody preparing a workflow to share (the node
+   * menu's **Add Hint…**, through `setNodeHints`), so it stays out of a saved file unless somebody
+   * put it there. Writing one *is* an edit, where dismissing one is not — see `NodeHint`.
    */
   hints?: NodeHint[]
   /**
@@ -99,6 +100,34 @@ export type HintTone = (typeof HINT_TONES)[number]
 export const HINT_SIDES = ['top', 'bottom'] as const
 export type HintSide = (typeof HINT_SIDES)[number]
 
+/** What an absent `NodeHint.tone` and `NodeHint.side` mean — the one spelling of each default. */
+export const DEFAULT_HINT_TONE: HintTone = 'note'
+export const DEFAULT_HINT_SIDE: HintSide = 'bottom'
+
+/**
+ * A hint with its defaults left out, so a saved file carries only decisions — spent by
+ * `validHints`, so every hint a file or the editor hands over arrives in this form.
+ */
+function normalHint({ text, tone, side }: NodeHint): NodeHint {
+  return {
+    text,
+    ...(tone && tone !== DEFAULT_HINT_TONE ? { tone } : {}),
+    ...(side && side !== DEFAULT_HINT_SIDE ? { side } : {}),
+  }
+}
+
+/** Two hint lists that draw the same boxes — an explicit default and an absent one agree. */
+export function sameHints(a: readonly NodeHint[], b: readonly NodeHint[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((h, i) => {
+      const x = normalHint(h)
+      const y = normalHint(b[i]!)
+      return x.text === y.text && x.tone === y.tone && x.side === y.side
+    })
+  )
+}
+
 /**
  * A dismissable box docked to a node's top or bottom border.
  *
@@ -123,9 +152,9 @@ export interface NodeHint {
    * a control the reader then has to find by guessing which words were literal.
    */
   text: string
-  /** Default `note`. */
+  /** Absent means `DEFAULT_HINT_TONE`. */
   tone?: HintTone
-  /** Default `bottom` — under the card, where the wire out of it is not. */
+  /** Absent means `DEFAULT_HINT_SIDE` — under the card, where the wire out of it is not. */
   side?: HintSide
 }
 
@@ -966,7 +995,37 @@ function validSize(raw: unknown): { width: number; height: number } | undefined 
  * node with boxes the reader has to dismiss one at a time. Silent, like a dropped group
  * membership — the document still means what it said, minus decoration.
  */
-const MAX_HINTS = 4
+export const MAX_HINTS = 4
+
+/**
+ * Replace one node's hints — the edit behind the node menu's **Add Hint…** and the box's ✎.
+ *
+ * **Through `validHints`, the loader's own pass**, so a hint written in the app obeys exactly the
+ * rules a hint arriving in a mailed file does: an empty one is dropped, an unknown tone never
+ * reaches a stylesheet, and the stack stops at `MAX_HINTS`. A second set of rules here is how the
+ * editor comes to save something the next load silently throws away.
+ *
+ * No hints left means **no field**, deleted rather than left as `[]`, for the reason `size` and
+ * `captionOf` stay out of a saved file: the key would carry no decision. And a list that says what
+ * the node already says returns the graph **by identity**, so `commit` records no undo step for a
+ * Save that changed nothing.
+ */
+export function setNodeHints(
+  graph: CodaGraph,
+  id: string,
+  hints: readonly NodeHint[],
+): CodaGraph {
+  const node = graph.nodes.find((n) => n.id === id)
+  if (!node) return graph
+  const kept = validHints(hints)
+  if (sameHints(kept, node.hints ?? [])) return graph
+  const nodes = graph.nodes.map((n) => {
+    if (n.id !== id) return n
+    const { hints: _old, ...rest } = n
+    return kept.length ? { ...rest, hints: kept } : rest
+  })
+  return { ...graph, nodes }
+}
 
 function validHints(raw: unknown): NodeHint[] {
   if (!Array.isArray(raw)) return []
@@ -977,11 +1036,7 @@ function validHints(raw: unknown): NodeHint[] {
     if (typeof text !== 'string' || !text.trim()) continue
     const named = HINT_TONES.find((t) => t === tone)
     const docked = HINT_SIDES.find((s) => s === side)
-    hints.push({
-      text,
-      ...(named ? { tone: named } : {}),
-      ...(docked ? { side: docked } : {}),
-    })
+    hints.push(normalHint({ text, tone: named, side: docked }))
     if (hints.length === MAX_HINTS) break
   }
   return hints

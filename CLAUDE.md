@@ -505,7 +505,10 @@ Area-specific — the rule, then the doc that holds why:
   dock it with no measurement and no `ViewportPortal`. **Dismissal is `localStorage`, keyed on the
   hint's text** — in the document it would be an undo step, a dirty file, and a share link arriving
   pre-dismissed for the person being shown the workflow. Cost: reworded copy comes back for
-  everybody and nothing is forgotten, hence **Show Hints** and **Show Hints Again**. Tone is a name
+  everybody and nothing is forgotten, hence **Show Hints** and **Show Hints Again**. *Writing* one
+is an edit (**Add Hint…** and the box's ✎ → `HintEditor` → `setNodeHints`, which runs the loader's
+own `validHints`), live under the lock like a rename; the ✎ sits beside the × because an author's
+× hides their own hint from them alone and the shared file still carries it. Tone is a name
   off `HINT_TONES` over `markdown.ts`'s `CalloutTone`, held by a type-level assertion since `core`
   cannot import it. See [docs/canvas.md](docs/canvas.md) and [docs/wizard.md](docs/wizard.md).
 - **A group frame is not a React Flow node — and a *folded* one is, the same argument reaching the

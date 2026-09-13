@@ -59,9 +59,9 @@ afterEach(cleanup)
 /**
  * A filter node on an empty canvas carrying these hints.
  *
- * Written straight onto the graph rather than through an action, because there is no action: a
- * hint is authored by whatever generated the document (`buildWorkflow`, a starter, a Zoo entry),
- * and the store has nothing that adds one. That absence is the feature — see `NodeHint`.
+ * Written straight onto the graph rather than through `setHints`, so these tests stay about
+ * drawing and dismissing: a hint that arrives in a generated or loaded document never passed
+ * through the store's action either. Writing one is `store/hints.test.ts`.
  */
 function addCardWithHints(hints: NodeHint[]): string {
   let id = ''
@@ -80,8 +80,9 @@ function addCardWithHints(hints: NodeHint[]): string {
   return id
 }
 
+/** The boxes docked to cards — scoped to a stack, since the hint editor previews one too. */
 function boxes(): HTMLElement[] {
-  return [...document.querySelectorAll('.node-hint')] as HTMLElement[]
+  return [...document.querySelectorAll('.node-hints .node-hint')] as HTMLElement[]
 }
 
 describe('a hint on a card', () => {
@@ -240,5 +241,26 @@ describe('the key', () => {
       hintKey({ text: '  Same words.  ', tone: 'warning', side: 'top' }),
     )
     expect(hintKey({ text: 'Same words.' })).not.toBe(hintKey({ text: 'Other words.' }))
+  })
+})
+
+describe('editing one from the card', () => {
+  it('opens the editor from the ✎, and saving rewords the box as one undo step', async () => {
+    render(<App />)
+    addCardWithHints([{ text: 'Keep me.' }, { text: 'Old words.' }])
+    await waitFor(() => expect(boxes()).toHaveLength(2))
+
+    act(() => {
+      fireEvent.click(screen.getAllByLabelText('Edit hint')[1]!)
+    })
+    const dialog = await screen.findByRole('dialog', { name: 'Edit hint' })
+    expect((dialog.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Old words.')
+
+    act(() => {
+      fireEvent.change(dialog.querySelector('textarea')!, { target: { value: 'New words.' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    })
+    await waitFor(() => expect(boxes()[1]!.textContent).toContain('New words.'))
+    expect(screen.queryByRole('dialog', { name: 'Edit hint' })).toBeNull()
   })
 })

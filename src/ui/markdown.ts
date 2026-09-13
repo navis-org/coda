@@ -369,7 +369,8 @@ function readFence(
   return Math.min(i, lines.length - 1)
 }
 
-const TONE_TITLE: Record<CalloutTone, string> = {
+/** A tone's name as a reader sees it — the callout's default title, and the hint editor's choices. */
+export const TONE_TITLE: Record<CalloutTone, string> = {
   note: 'Note',
   warning: 'Warning',
   tip: 'Tip',

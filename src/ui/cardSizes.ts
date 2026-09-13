@@ -20,6 +20,19 @@
 
 import type { MeasuredSizes, NodeSize } from '../layout/elkGraph'
 
+/**
+ * One card's element on the canvas, for a reader that wants a single card rather than all of them
+ * — a splice under a dragged card, the hint editor hanging under one.
+ *
+ * Scoped to `.canvas-area` for `measureCardSizes`' reason below: the group peek draws the same
+ * cards with the same `data-id`s in a modal, and while a group is folded those are the only ones.
+ */
+export function cardElement(nodeId: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    `.canvas-area .react-flow__node[data-id="${nodeId}"]`,
+  )
+}
+
 export function measureCardSizes(): MeasuredSizes {
   const sizes = new Map<string, NodeSize>()
   /*

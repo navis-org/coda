@@ -66,6 +66,7 @@ import { EdgeContextMenu } from './panels/EdgeContextMenu'
 import { AddMenu } from './panels/AddMenu'
 import { NodeBrowser } from './panels/NodeBrowser'
 import { GroupContextMenu } from './panels/GroupContextMenu'
+import { HintEditor } from './panels/HintEditor'
 import { NodeContextMenu } from './panels/NodeContextMenu'
 import type { DragFilter, PaletteItem } from './panels/paletteItems'
 import { buildCommandItems, buildNodeItems } from './panels/paletteItems'
@@ -76,6 +77,7 @@ import { isTourActive, refreshTour } from './tour/tourState'
 // panel and which view is up, and none of them needs the canvas. This handler keeps the keys that
 // do. Both listeners share the two guards below.
 import { TOUR_DECLINES, isTypingTarget } from './appShortcuts'
+import { cardElement } from './cardSizes'
 import { useClipboardShortcuts } from './clipboard'
 import { LOCKED_NOTICE } from './lockCopy'
 import { draggedWireStyle, wireStyle } from './socketStyle'
@@ -506,10 +508,7 @@ function EditorCanvas() {
     const store = useGraphStore.getState()
     const node = store.graph.nodes.find((n) => n.id === nodeId)
     if (!node) return undefined
-    // Scoped to the canvas: the group peek draws the same cards, with the same ids, in a modal.
-    const el = document.querySelector<HTMLElement>(
-      `.canvas-area .react-flow__node[data-id="${nodeId}"]`,
-    )
+    const el = cardElement(nodeId)
     if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return undefined
 
     const edgeId = edgeUnderRect(
@@ -1419,6 +1418,9 @@ function EditorCanvas() {
           onClose={() => setContextMenu(null)}
         />
       )}
+
+      {/* Reads `editingHint` itself: the node menu and a hint box inside a card both open it. */}
+      <HintEditor />
 
       {groupMenu && (
         <GroupContextMenu

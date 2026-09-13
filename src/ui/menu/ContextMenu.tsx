@@ -1,6 +1,6 @@
 /**
  * A menu that belongs to the pointer: `position: fixed` at a point, kept inside the window, and
- * closed by Escape or a press anywhere else.
+ * closed by Escape or — unless `dismissOnOutside` is off — a press anywhere else.
  *
  * **Measured, not estimated.** The seven menus that wear `.context-menu` each clamped against a
  * size typed beside them — 190×230, 210×110, 220×210 plus 67 when a chip row appeared, 264×520
@@ -38,6 +38,11 @@ export interface ContextMenuProps {
    * context (a React Flow `<Panel>`) that would cap its `z-index`. The host is `Modal`'s.
    */
   portal?: boolean
+  /**
+   * Close on a press anywhere else — the default. `false` for a popover holding a draft, where
+   * the press that lands outside is usually somebody checking what they are writing about.
+   */
+  dismissOnOutside?: boolean
   children: ReactNode
 }
 
@@ -50,10 +55,11 @@ export function ContextMenu({
   margin = 0,
   onKeyDown,
   portal = false,
+  dismissOnOutside = true,
   children,
 }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
-  useDismissOnOutside(ref, onClose, { onEscape: true })
+  useDismissOnOutside(ref, onClose, { onEscape: true, onOutside: dismissOnOutside })
 
   const { x, y } = at
   const [place, setPlace] = useState({ left: x, top: y })
