@@ -3,6 +3,7 @@
 import type { EmitContext } from '../types'
 import type { PopulationFilter, TableSchema } from '../../../core/types'
 import { TRACED_STATUS, populationColumns } from '../../../data/neuronFilter'
+import { carryable } from '../../../nodes/lib/carryParams'
 import { rStr } from '../r'
 
 /**
@@ -71,4 +72,66 @@ export function rPopulationPredicate(
     }
   }
   return parts.join(' | ')
+}
+
+/**
+ * Columns of a frame written onto a neuronlist's own metadata frame.
+ *
+ * Two callers, as in the Python seam: the `Carry fields` param, which passes its list and the id
+ * column, and `neuron.attachAttributes`, which passes a picked list and a picked key.
+ *
+ * nat's answer to the same question, and a cleaner one than navis': a `neuronlist` carries a
+ * `data.frame` beside its neurons, `nl[, ]` *is* that frame, and assigning a column to it is
+ * `nl[, "name"] <- values`. So there is no reserved-name problem here — the frame is a plain
+ * `data.frame`, and `type` is a column like any other where navis makes it a read-only property.
+ * That is the second place these two exporters diverge on this node's behalf, and it is the
+ * libraries' data models rather than a gap in either cell.
+ *
+ * `match(leftKeys, frame[[key]])` is the join: a neuronlist is named by body id as character,
+ * which is what a Coda id column is on every source, and `match` answers `NA` for a neuron the
+ * table upstream does not mention — Coda's left join exactly. Checked by running it: the columns
+ * land on the frame, `NA` where unmatched, and they **survive subsetting**, so a Split Neurons
+ * chunk downstream can filter on a carried column.
+ *
+ * The column filter is **`carryable`**, imported rather than restated: this function had its own
+ * weaker filter (the right key only) and so assigned over the geometry's own id whenever a table
+ * carried a `neuronId` of its own under `Attach Attributes`' every-column default. Neither golden
+ * can discriminate that — no fixture table has both a `neuronId` and a different key — so the
+ * predicate's own unit test is the pin. See `carryParams.test.ts`.
+ */
+export function carryLines(
+  list: string,
+  frame: string,
+  carry: readonly string[],
+  /** The frame column holding the ids, matched against `leftKeys`. */
+  keyColumn: string,
+  /**
+   * The ids on the left: `names(nl)` for a neuronlist, a column for a frame.
+   *
+   * An argument because `Attach Attributes` also takes a **synapse cloud**, which is a
+   * `data.frame` here rather than a neuronlist. Everything else is identical, `df[, "x"] <- v`
+   * being the same assignment for both: it overwrites a column of that name **in place** and
+   * appends a new one at the end, which is Coda's `foldNodeColumns` rule without this cell
+   * having to state it. Not defaulted — a caller that can leave the join's left side unsaid is
+   * one that can get it wrong without writing anything down.
+   */
+  leftKeys: string,
+): string[] {
+  const taken = carry.filter((name) => carryable(name, keyColumn))
+  if (taken.length === 0) return []
+  /*
+   * `frame[[name]]` for the key rather than `neuronIds(frame)`: that helper spells `$neuronId`,
+   * which is right where the name is fixed and wrong here, where a picked column may be called
+   * anything and `$` partial-matches — `[[` is exact. One spelling for both callers rather than
+   * a branch on whether the key happens to be the default, which moved two lines of the `Carry
+   * fields` golden from `$neuronId` to `[["neuronId"]]`. Equivalent R, and the stricter of the two.
+   *
+   * The `match` is hoisted into `idx_` rather than repeated per column, which is what the first
+   * version emitted: under the every-column default that was one hash build over the table's
+   * whole key vector *per column*, and the key vector can be 165k long.
+   */
+  return [
+    `idx_ <- match(${leftKeys}, ${frame}[[${rStr(keyColumn)}]])`,
+    ...taken.map((name) => `${list}[, ${rStr(name)}] <- ${frame}[[${rStr(name)}]][idx_]`),
+  ]
 }

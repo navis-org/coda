@@ -272,7 +272,7 @@ live('DVID skeletons, live', () => {
  * commonly reachable by anyone holding the address, so the address does not belong in a public
  * repository.
  */
-const withToken = process.env.NEUPRINT_TEST_APPLICATION_CREDENTIALS ? describe : describe.skip
+const withToken = process.env.NEUPRINT_APPLICATION_CREDENTIALS ? describe : describe.skip
 
 withToken('a published state as the only mesh source, live', () => {
   const SERVER = 'https://neuprint-fish2.janelia.org'

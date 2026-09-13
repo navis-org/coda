@@ -1326,6 +1326,26 @@ export function stackTables(
 }
 
 // ---------------------------------------------------------------------------
+// Shared column names
+// ---------------------------------------------------------------------------
+
+/**
+ * The column a table keyed by a matrix axis or a tree leaf calls its key.
+ *
+ * `ID_COLUMN_NAME`'s rule applied to a second name: a constant exists to link the places where
+ * a mismatch fails **silently**, and this is one of those. `core.embed`, `Cut Tree` and
+ * `core.reduceMatrix` all emit one row per observation keyed on this name, which is what makes
+ * `Embedding ⋈ Cut Tree` and `Reduce Matrix ⋈ Cut Tree` an ordinary Join with nothing
+ * configured — and a table that spelled it differently would still join, only after somebody
+ * set two pickers, so nothing would ever report the drift.
+ *
+ * It is deliberately **not** `neuronId`. A matrix's axis labels are whatever the node above put
+ * there, which after a Heatmap relabel or a Pivot is a cell type; `neuronId` is a claim
+ * (invariant 8) that every id node downstream would act on.
+ */
+export const LABEL_COLUMN_NAME = 'label'
+
+// ---------------------------------------------------------------------------
 // Group by + aggregate
 // ---------------------------------------------------------------------------
 

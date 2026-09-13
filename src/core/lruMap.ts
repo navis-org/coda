@@ -15,9 +15,18 @@
  * are costly to hold calls `makeRoom` before building the next one, so the new value and the one
  * it displaces never coexist — `neuronSearch.ts`, whose haystacks are 24 MB apiece.
  *
- * Two hand-written loops remain, deliberately: `ui/viewers/keyedCache.ts` evicts against a
- * **weight** budget rather than a count, so one insert may drop several entries; and
- * `data/precomputed/sharded.ts` caps a map it hands to `memoPromise`, which takes a real `Map`.
+ * Hand-written loops remain, deliberately, and they divide into two kinds. `ui/viewers/keyedCache.ts`
+ * and `data/precomputed/sharded.ts` are the odd ones out on *mechanism*: the first evicts against a
+ * **weight** budget rather than a count, so one insert may drop several entries, and the second caps
+ * a map it hands to `memoPromise`, which takes a real `Map`.
+ *
+ * The other kind is a **byte-budgeted, read-promoting** cache — `data/geometryCache.ts` and
+ * `data/zapbench/traces.ts` — and both differ from this class on the rule above rather than on the
+ * budget: there, *a read counts as a use*, because the thing being held is a download somebody
+ * keeps asking for rather than a value somebody keeps rewriting. Sharing this class would mean
+ * every hit calling `set` to promote, which is the escape hatch `layoutMemo` uses and a poor
+ * default. They are two implementations of one shape and could be one helper in `src/data`; that
+ * is worth doing when a third appears, not before.
  */
 export class LruMap<K, V> {
   private readonly entries = new Map<K, V>()

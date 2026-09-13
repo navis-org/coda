@@ -252,6 +252,37 @@ export function everythingGraph(): CodaGraph {
     },
     { id: 'syn', type: 'neuron.synapses', col: 2, row: 7, params: { polarity: 'pre' } },
     /*
+     * Attach Attributes on the reduced similarity matrix, which is the chain this node exists
+     * for and the arm that matters here: the table keys on `label` rather than `neuronId`, so
+     * `matchOn` is doing work and both cells emit a picked key instead of the fixed one
+     * `Carry fields` emits three cards up. `columns` is left empty — every column, which is the
+     * node's own rule and the opposite of the param's.
+     */
+    {
+      id: 'attach',
+      type: 'neuron.attachAttributes',
+      col: 11,
+      row: 3,
+      params: { matchOn: 'label', columns: ['sim_mean', 'sim_max'] },
+    },
+    /*
+     * A second instance, reaching the three things the first cannot. It is on the **synapse
+     * cloud**, which is a frame in both languages rather than a NeuronList — Python writes
+     * columns off an indexed frame where it otherwise calls `set_neuron_attributes`, and R
+     * passes a column of ids where it otherwise passes `names()`. Its `columns` is **empty**,
+     * which is this node's "every column" default. And the table it reads is a neuron table
+     * carrying its own `neuronId`, which is the *left* key: the emitted cells must not assign
+     * over the geometry's own id, and before `carryable` was shared they both did — the canvas
+     * dropped it and neither golden could show the disagreement.
+     */
+    {
+      id: 'attachPoints',
+      type: 'neuron.attachAttributes',
+      col: 11,
+      row: 7,
+      params: { matchOn: 'neuronId', columns: [] },
+    },
+    /*
      * A second Synapses node, for the reason there are two NBLAST nodes: both emitters branch on
      * this node's two new controls, and the first one takes neither. `synapseUnit` and
      * `minConfidence` are each a *divergence* note in one export and an argument in the other —
@@ -696,6 +727,39 @@ export function everythingGraph(): CodaGraph {
       params: { rows: 'preType', columns: 'postType', value: 'weight', agg: 'sum' },
     },
     { id: 'norm', type: 'core.normalize', col: 12, params: { mode: 'row' } },
+    /*
+     * Reduce twice, on `unpivot`'s reasoning: one instance reaches half of the emitter. The
+     * halves here are the axis — every expression is written against rows, so the column arm is
+     * a transpose nothing else exercises — and the diagonal, which only applies where the two
+     * label lists agree and so can only be shown on a matrix that is square over one
+     * population. Between them they also emit all seven statistics, which is what pins the
+     * `min`/`max` helpers and pandas' `ddof=1`.
+     */
+    {
+      id: 'reduce',
+      type: 'core.reduceMatrix',
+      col: 10,
+      row: 3,
+      params: {
+        axis: 'rows',
+        /*
+         * Six of the seven. `min` is deliberately absent: `coda_min` is requested by exactly one
+         * node in this graph — the Group By — which is what lets `export.test.ts` show that the
+         * R emitter asks for the helpers a statistic needs rather than generating both. The
+         * `min` arm is pinned there instead, beside its mirror.
+         */
+        stats: ['mean', 'median', 'sd', 'max', 'sum', 'n'],
+        prefix: 'sim',
+        excludeDiagonal: true,
+      },
+    },
+    {
+      id: 'reduceCols',
+      type: 'core.reduceMatrix',
+      col: 13,
+      row: 1,
+      params: { axis: 'columns', stats: ['mean', 'max'], prefix: '' },
+    },
     /*
      * Unpivot twice, because one instance reaches half of its emitter. Against a *known* schema
      * it can name the kept columns and does; against the pivot's wide table — which publishes no
@@ -1471,6 +1535,8 @@ export function everythingGraph(): CodaGraph {
     ['pivot', 'matrix', 'heatFiltered', 'in'],
     ['pivot', 'matrix', 'heatLog', 'in'],
     ['simil', 'matrix', 'heatNamed', 'in'],
+    ['simil', 'matrix', 'reduce', 'in'],
+    ['pivot', 'matrix', 'reduceCols', 'in'],
     // The neuron table that named the observations, naming the axes — see `out.heatmap`.
     ['find', 'neurons', 'heatNamed', 'annotations'],
     ['pivot', 'table', 'table', 'in'],
@@ -1494,6 +1560,10 @@ export function everythingGraph(): CodaGraph {
     ['central', 'out', 'netmetrics', 'in'],
     ['syn', 'points', 'synblast', 'query'],
     ['skel', 'skeletons', 'cleanskel', 'in'],
+    ['skel', 'skeletons', 'attach', 'in'],
+    ['reduce', 'out', 'attach', 'table'],
+    ['syn', 'points', 'attachPoints', 'in'],
+    ['find', 'neurons', 'attachPoints', 'table'],
     ['skel', 'skeletons', 'cleanskeldown', 'in'],
     ['mesh', 'meshes', 'cleanmesh', 'in'],
     ['nblast', 'scores', 'matchtop', 'in'],

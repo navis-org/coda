@@ -33,14 +33,11 @@ import { getColumn, makeTable } from '../../core/values'
 import type { KnnGraph } from '../../umap/run'
 import type { LinkageTransform } from '../../pyodide/linkage'
 import { checkSquarePopulation } from './linkageOps'
-import { labelOf } from './tableOps'
+import { LABEL_COLUMN_NAME, labelOf } from './tableOps'
 
 // ---------------------------------------------------------------------------
 // The output
 // ---------------------------------------------------------------------------
-
-/** What each row is. `cluster.cut`'s name for the same thing, so the two tables join. */
-export const EMBED_LABEL_COLUMN = 'label'
 
 /** The two coordinates, named the way scanpy and Seurat name them. */
 export const EMBED_X_COLUMN = 'umap1'
@@ -70,7 +67,7 @@ export const EMBED_ANNOTATION_COLUMN = 'annotation'
  */
 export function embedSchema(): TableSchema {
   return tableSchema(
-    column(EMBED_LABEL_COLUMN, 'str'),
+    column(LABEL_COLUMN_NAME, 'str'),
     column(EMBED_X_COLUMN, 'f64'),
     column(EMBED_Y_COLUMN, 'f64'),
     column(EMBED_ANNOTATION_COLUMN, 'str'),
@@ -108,7 +105,7 @@ export function embedTable(
     annotation[i] = annotations?.get(name) ?? null
   }
   return makeTable(embedSchema(), {
-    [EMBED_LABEL_COLUMN]: label,
+    [LABEL_COLUMN_NAME]: label,
     [EMBED_X_COLUMN]: x,
     [EMBED_Y_COLUMN]: y,
     [EMBED_ANNOTATION_COLUMN]: annotation,

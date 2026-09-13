@@ -331,6 +331,20 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M13.5 18.8A7.4 7.4 0 0 0 13.5 4.4' }],
     ['path', { d: 'M15.7 6.5 13.5 4.4l2.9-.9' }],
   ],
+  /*
+   * A grid beside a single column of filled cells. Deliberately **not** the fan: that mark means
+   * several lines becoming one line, which is `core.groupBy`, where a reduce collapses the cells
+   * *within* each line and leaves the lines where they were. Three rows in, three cells out, so
+   * the count is what says which operation this is.
+   */
+  'core.reduceMatrix': [
+    ['rect', { x: '3', y: '4.8', width: '9.2', height: '14.4', rx: '1.2' }],
+    ['path', { d: 'M3 9.6h9.2M3 14.4h9.2M6.07 4.8v14.4M9.13 4.8v14.4' }],
+    ['path', { d: 'M13.2 12h2.4M14.4 10.8 15.6 12l-1.2 1.2' }],
+    ['rect', { x: '17', y: '5.4', width: '3.8', height: '3.6', fill: 'currentColor', stroke: 'none' }],
+    ['rect', { x: '17', y: '10.2', width: '3.8', height: '3.6', fill: 'currentColor', stroke: 'none' }],
+    ['rect', { x: '17', y: '15', width: '3.8', height: '3.6', fill: 'currentColor', stroke: 'none' }],
+  ],
   'core.relabel': [
     ['path', { d: 'M3.6 8h4.4M3.6 16h4.4' }],
     ['path', { d: 'M16 8h4.4M16 16h4.4' }],
@@ -365,6 +379,18 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['rect', { x: '4.6', y: '4.6', width: '4.2', height: '4.2', fill: 'currentColor', stroke: 'none' }],
     ['rect', { x: '9.9', y: '9.9', width: '4.2', height: '4.2', fill: 'currentColor', stroke: 'none' }],
     ['rect', { x: '15.2', y: '15.2', width: '4.2', height: '4.2', fill: 'currentColor', stroke: 'none' }],
+  ],
+  /*
+   * Three traces with one transient each, at three different times. The registry has no line
+   * chart, so a wave is an unspent silhouette — and it is the right one here: what this node
+   * hands on is a population's activity against time, which no matrix or table glyph says. The
+   * transients are offset rather than aligned, because a column of simultaneous spikes would
+   * read as a stimulus rather than as several neurons.
+   */
+  'zapbench.traces': [
+    ['path', { d: 'M3 6h4l1.5-3L11 6h10' }],
+    ['path', { d: 'M3 12h9l1.5-3.4L16 12h5' }],
+    ['path', { d: 'M3 18h5l1.5-2.6L11 18h10' }],
   ],
   'neuron.nblastMatches': [
     ['rect', { x: '4', y: '4', width: '16', height: '16', rx: '1.5' }],
@@ -429,6 +455,19 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M17.6 19.4v-4.2l2.4-2.6M17.6 15.2l-2.4-2M15.2 13.2l.4-2.6' }],
     ['path', { d: 'M9 3.8 11.2 6.4V8.2L12.8 7.4V6.4L15 3.8Z' }],
     ['path', { d: 'M11.4 8.6 8.6 11M12.6 8.6 15.4 11' }],
+  ],
+  /*
+   * An arbour with two filled cells arriving on it. The arbour says the material is a neuron
+   * rather than a row (the family mark), the filled blocks are values — `core.normalize`'s and
+   * `core.reduceMatrix`'s fill — and the arrow points *at* the neuron, which is the whole
+   * direction of this node: the table does not come out, the geometry does.
+   */
+  'neuron.attachAttributes': [
+    ['circle', { cx: '5.4', cy: '19', r: '1.8' }],
+    ['path', { d: 'M6.6 17.8 9.8 14.2M9.8 14.2l2.6-2.8M9.8 14.2l1 3.4' }],
+    ['rect', { x: '14.4', y: '4', width: '6.6', height: '3.4', fill: 'currentColor', stroke: 'none' }],
+    ['rect', { x: '14.4', y: '8.6', width: '6.6', height: '3.4', fill: 'currentColor', stroke: 'none' }],
+    ['path', { d: 'M14.8 13.4 12.2 16M12.2 16h2M12.2 16v-2' }],
   ],
   'core.landmarkTransform': [
     ['path', { d: 'M4 7c5.4-2 10.6-2 16 0M4 12.6c5.4-2 10.6-2 16 0M4 18.2c5.4-2 10.6-2 16 0' }],

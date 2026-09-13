@@ -378,6 +378,13 @@ coda_matrix_selection <- function(labels, picked, arrival = NULL) {
 }
 
 
+#' Coda's `max` aggregation: NA rather than -Inf for a group with no values.
+coda_max <- function(x) {
+  kept <- x[!is.na(x)]
+  if (length(kept) == 0) NA_real_ else max(kept)
+}
+
+
 #' Coda's `min` aggregation: NA rather than Inf for a group with no values.
 coda_min <- function(x) {
   kept <- x[!is.na(x)]
@@ -1601,8 +1608,9 @@ roi_counts <- neuprint_get_roiInfo(find_neurons$neuronId, conn = hemibrain_neupr
 ```{r skeletons}
 # ── Skeletons ──
 skeletons <- neuprint_read_neurons(head(find_neurons$neuronId, 20), conn = hemibrain_neuprint)
-skeletons[, "status"] <- find_neurons[["status"]][match(names(skeletons), find_neurons$neuronId)]
-skeletons[, "type"] <- find_neurons[["type"]][match(names(skeletons), find_neurons$neuronId)]
+idx_ <- match(names(skeletons), find_neurons[["neuronId"]])
+skeletons[, "status"] <- find_neurons[["status"]][idx_]
+skeletons[, "type"] <- find_neurons[["type"]][idx_]
 ```
 
 ```{r meshes}
@@ -2054,6 +2062,18 @@ stack_neurons <- bind_rows(
 # implementation Coda ran.
 ```
 
+```{r attach-attributes}
+# ── Attach Attributes ──
+attach_attributes <- synapses
+idx_ <- match(attach_attributes[["neuronId"]], find_neurons[["neuronId"]])
+attach_attributes[, "type"] <- find_neurons[["type"]][idx_]
+attach_attributes[, "instance"] <- find_neurons[["instance"]][idx_]
+attach_attributes[, "status"] <- find_neurons[["status"]][idx_]
+attach_attributes[, "size"] <- find_neurons[["size"]][idx_]
+attach_attributes[, "pre"] <- find_neurons[["pre"]][idx_]
+attach_attributes[, "post"] <- find_neurons[["post"]][idx_]
+```
+
 ```{r relabel}
 # ── Relabel ──
 relabel <- coda_relabel(find_neurons, "type", combine_columns, "type", "label", into = "shared", unmatched = "keep")
@@ -2323,6 +2343,22 @@ heatmap_out |>
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
+```{r reduce-matrix}
+# ── Reduce Matrix ──
+m_ <- as.matrix(similarity_matrix_2)
+m_[!is.finite(m_)] <- NA
+# Only where the two label lists agree: a square matrix is not necessarily a
+# self-comparison, and Coda declines to guess.
+if (identical(rownames(m_), colnames(m_))) diag(m_) <- NA
+reduce_matrix <- data.frame(`label` = rownames(m_))
+reduce_matrix[["sim_mean"]] <- rowMeans(m_, na.rm = TRUE)
+reduce_matrix[["sim_median"]] <- apply(m_, 1, median, na.rm = TRUE)
+reduce_matrix[["sim_sd"]] <- apply(m_, 1, sd, na.rm = TRUE)
+reduce_matrix[["sim_max"]] <- apply(m_, 1, coda_max)
+reduce_matrix[["sim_sum"]] <- rowSums(m_, na.rm = TRUE)
+reduce_matrix[["sim_n"]] <- rowSums(!is.na(m_))
+```
+
 ```{r cut-tree}
 # ── Cut Tree ──
 # TODO: This Cut Tree groups by which datasets each cluster draws from,
@@ -2378,6 +2414,14 @@ cut_tree_3_tree_clusters <- cl_
 ```{r deduplicate}
 # ── Deduplicate ──
 deduplicate <- sample_df[!duplicated(sample_df[c("preType", "postType")], fromLast = TRUE), ]
+```
+
+```{r attach-attributes-2}
+# ── Attach Attributes ──
+attach_attributes_2 <- skeletons
+idx_ <- match(names(attach_attributes_2), reduce_matrix[["label"]])
+attach_attributes_2[, "sim_mean"] <- reduce_matrix[["sim_mean"]][idx_]
+attach_attributes_2[, "sim_max"] <- reduce_matrix[["sim_max"]][idx_]
 ```
 
 ```{r dendrogram}
@@ -2853,6 +2897,16 @@ heatmap_6_out |>
   geom_text(aes(label = signif(value, 3)), size = 3) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r reduce-matrix-2}
+# ── Reduce Matrix ──
+# Reducing each column, so the lines are the transpose's rows.
+m_ <- t(as.matrix(pivot_matrix_df))
+m_[!is.finite(m_)] <- NA
+reduce_matrix_2 <- data.frame(`label` = rownames(m_))
+reduce_matrix_2[["mean"]] <- rowMeans(m_, na.rm = TRUE)
+reduce_matrix_2[["max"]] <- apply(m_, 1, coda_max)
 ```
 
 ```{r table-df-2}

@@ -1525,6 +1525,10 @@ export function resolveColumns(
 ): string[] {
   const stored = params[param.id]
   if (!Array.isArray(stored)) return []
+  // Nothing stored resolves to nothing, and asking what is *available* to filter it against
+  // builds two arrays over the whole schema first — on every graph mutation, for every node
+  // whose multi-picker nobody has touched, which is most of them.
+  if (stored.length === 0) return []
   if (!columnsKnown(param, inputs, params)) return stored
   const available = availableColumns(param, inputs, params)
   return stored.filter((name) => available.includes(name))

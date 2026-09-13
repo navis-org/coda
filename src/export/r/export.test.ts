@@ -391,11 +391,13 @@ describe('the population filters', () => {
  * The four aggregations whose R spelling is not the bare function name, each because base R
  * answers something Coda does not once a null is in the column.
  *
- * `min` reaches the golden through the fixture's own Group By, and `probe-r-helpers.R` runs the
- * emitted `coda_min` against an all-absent group. `max` is that helper's mirror and gets no node
- * of its own — two adjacent Group By cells differing only in an enum is noise in a document
- * somebody reads — so it is pinned here, where what matters is that the emitter reaches for the
- * helper at all rather than for `max()`.
+ * `min` reaches the golden through the fixture's own Group By — the *only* node in that graph
+ * requesting it, which is what makes the third assertion below showable at all — and
+ * `probe-r-helpers.R` runs the emitted `coda_min` against an all-absent group. `max` is that
+ * helper's mirror and gets no Group By of its own — two adjacent cells differing only in an enum
+ * is noise in a document somebody reads — so it is pinned here, where what matters is that the
+ * emitter reaches for the helper at all rather than for `max()`. Reduce Matrix requests it too,
+ * one seam over and by the same rule.
  */
 describe('the aggregations R spells differently', () => {
   /** The whole fixture with its Group By re-aggregated, so the graph stays a valid one. */

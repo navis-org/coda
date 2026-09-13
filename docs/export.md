@@ -779,7 +779,13 @@ every one of them had been two copies and some
 had come apart; each emitter keeps only its syntax, helpers and its own wording. Plans are not
 beside their nodes because they are export policy and the exporters are a lazily loaded chunk.
 `neutral.ts` holds only what several share — the `NeutralContext` a plan reads (each plan takes a
-`Pick` of it naming what it reads), `Refusable`, `Noted`, the comparison table and `dtypeOf`.
+`Pick` of it naming what it reads), `Refusable`, `Noted`, the comparison table, `dtypeOf` and
+**`asFrame`**: whether a geometry value is a data frame in both translations rather than a neuron
+list. That last one is the rule arriving late rather than a new kind of thing — `stackPlan` asked
+`kind === 'points'` inline, and when `neuron.attachAttributes` had to ask it twice more, in two
+languages, the third copy was the one that made it a decision with no language in it. It is
+deliberately not a `kinds` list: the question is about the *library mapping*, so a fourth geometry
+kind has to answer it one way or the other, and having that answered in one file is the point.
 
 How a plan carries a note is one rule, so a renderer never decides *whether* a note applies:
 

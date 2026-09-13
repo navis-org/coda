@@ -17,6 +17,7 @@
  */
 
 import {
+  LABEL_COLUMN_NAME,
   aggColumnName,
   combineLayout,
   keepsUnmatchedRight,
@@ -25,12 +26,19 @@ import {
 import { unpivotPlan } from '../../../nodes/lib/tableOps'
 import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
+import { readAttach } from '../../../nodes/transform/attachAttributes'
+import { carryable } from '../../../nodes/lib/carryParams'
+import { ID_COLUMN_NAME } from '../../../core/ids'
+import { asFrame } from '../../neutral'
+import type { ReduceStat } from '../../../nodes/lib/matrixReduce'
+import { readReduceOptions, reduceColumnName } from '../../../nodes/lib/matrixReduce'
 import type { AggFn } from '../../../nodes/lib/tableOps'
 import type { CellValue } from '../../../core/values'
 import type { DType } from '../../../core/types'
 import { decodeSetters, disabledEditNote, editPlan } from '../../../nodes/lib/tableEdits'
 import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { filterMasks } from './tableFilters'
+import { carryLines } from './common'
 import { pyList, pyStr, pyValue } from '../py'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
@@ -55,6 +63,74 @@ import {
 export function col(frame: string, name: string): string {
   return `${frame}[${pyStr(name)}]`
 }
+
+// ---------------------------------------------------------------------------
+// Attach Attributes
+// ---------------------------------------------------------------------------
+
+/**
+ * `Attach Attributes`: the columns of a table written onto whatever the geometry is here.
+ *
+ * Two arms, because **a synapse cloud is a frame** where skeletons and meshes are a
+ * `NeuronList`: `set_neuron_attributes` on a frame raises, and a frame's columns cannot be set
+ * on a neuron. `asFrame` is the predicate, shared with `stackPlan`, which faces the same split
+ * for the same reason — `docs/export.md`'s rule that a decision with no language in it belongs
+ * above both emitters.
+ *
+ * The list arm is the same `carryLines` the `Carry fields` param emits: this node is that param
+ * with the key picked rather than fixed, and the cell should be the same cell.
+ *
+ * **The list arm diverges from the canvas, and the divergence is navis' data model rather than
+ * this cell's.** `set_neuron_attributes` writes onto the neuron objects, and a `NeuronList`
+ * shares them, so the attributes appear on the input list as well — where Coda's node leaves its
+ * input untouched and publishes a new value. A deep copy to avoid that would duplicate every
+ * skeleton in the scene, so the note says it instead. Neither the frame arm nor R has the
+ * problem, both copying on write.
+ */
+registerEmitter('neuron.attachAttributes', (ctx) => {
+  const geometry = ctx.wired('in')
+  const frame = ctx.wired('table')
+  const out = ctx.output('out')
+  const { key, columns } = readAttach(ctx, ctx.schema('table'))
+  const taken = columns.filter((name) => carryable(name, key))
+
+  if (asFrame(ctx.inputType('in'))) {
+    ctx.require('pandas')
+    if (taken.length === 0) return [`${out} = ${geometry}`]
+    /*
+     * `map` off an indexed right frame rather than `merge`, which is what the first version
+     * wrote and what pandas makes needlessly hard: a merge suffixes a colliding column `_x`/`_y`
+     * where Coda writes *over* it, and appends where Coda keeps the overwritten column's slot,
+     * so reproducing the rule cost a pre-drop, a key-drop and a full reindex. **Assigning to an
+     * existing column does both for free** — pandas keeps its position — and a key missing from
+     * the right gives `NaN`, which is the left join.
+     *
+     * Columns are subset *before* `drop_duplicates`, which is the whole-frame copy: with this
+     * node's every-column default the frame can be a 165k-row neuron table.
+     */
+    return [
+      `_right = ${frame}[${pyList([key, ...taken])}]`,
+      // `keep='first'` is `joinTables`' rule: the side being matched into is deduplicated by
+      // key, first occurrence winning, so a neuron listed twice annotates from the same row the
+      // canvas used.
+      `_right = _right.drop_duplicates(subset=${pyStr(key)}, keep='first').set_index(${pyStr(key)})`,
+      `${out} = ${geometry}.copy()`,
+      ...taken.map(
+        (name) => `${col(out, name)} = ${col(out, ID_COLUMN_NAME)}.map(_right[${pyStr(name)}])`,
+      ),
+    ]
+  }
+
+  return [
+    ...ctx.note(
+      'navis keeps attributes on the neuron objects themselves and a `NeuronList` shares them, ' +
+        'so these columns appear on the input list too. On the canvas this node leaves its ' +
+        'input untouched.',
+    ),
+    `${out} = ${geometry}`,
+    ...carryLines(ctx, out, frame, taken, key),
+  ]
+})
 
 // ---------------------------------------------------------------------------
 // Filter
@@ -927,6 +1003,80 @@ registerEmitter('core.editTable', (ctx) => {
   }
   for (const target of plan.targets) {
     if (target.problems.length > 0) lines.push(...ctx.note(disabledEditNote(target)))
+  }
+  return lines
+})
+
+// ---------------------------------------------------------------------------
+// Reduce Matrix
+// ---------------------------------------------------------------------------
+
+/**
+ * Coda's seven statistics as pandas reductions over `axis=1`.
+ *
+ * Every one of them is pandas' default behaviour rather than a spelling chosen here, which is
+ * the whole reason this emitter is worth writing: `skipna=True` is the default, `sum` of an
+ * all-absent line is `0` and `mean` of one is `NaN`, `std` is `ddof=1` and `NaN` below two
+ * values, and `median` interpolates linearly. That is Coda's null rule, line for line, with the
+ * one exception handled in the cell — see `_m` below.
+ */
+const REDUCE_EXPRESSIONS: Record<ReduceStat, (m: string) => string> = {
+  n: (m) => `${m}.count(axis=1)`,
+  sum: (m) => `${m}.sum(axis=1)`,
+  mean: (m) => `${m}.mean(axis=1)`,
+  sd: (m) => `${m}.std(axis=1)`,
+  min: (m) => `${m}.min(axis=1)`,
+  max: (m) => `${m}.max(axis=1)`,
+  median: (m) => `${m}.median(axis=1)`,
+}
+
+registerEmitter('core.reduceMatrix', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const options = readReduceOptions(ctx.params)
+
+  ctx.require('pandas')
+  ctx.require('numpy')
+
+  /*
+   * Transposed once for the column axis so every reduction below is `axis=1`. The alternative —
+   * passing `axis=0` for one of the two — puts the axis word in seven places and leaves the
+   * labels being read off `columns` in one arm and `index` in the other.
+   */
+  const lines: string[] =
+    options.axis === 'rows'
+      ? [`_m = ${src}`]
+      : [`# Reducing each column, so the lines are the transpose's rows.`, `_m = ${src}.T`]
+  lines.push(
+    /*
+     * The one place pandas and Coda disagree, and it is about infinities rather than about
+     * nulls: `skipna` skips `NaN` and keeps `±inf`, where Coda skips every non-finite cell.
+     * A `log` Normalize upstream is where one comes from.
+     */
+    `# Coda skips every non-finite cell, where skipna skips only NaN.`,
+    `_m = _m.replace([np.inf, -np.inf], np.nan)`,
+  )
+
+  if (options.excludeDiagonal) {
+    lines.push(
+      `# Only where the two label lists agree: a square matrix is not necessarily a`,
+      `# self-comparison, and Coda declines to guess.`,
+      `if _m.index.equals(_m.columns):`,
+      `    _m = _m.mask(np.eye(len(_m), dtype=bool))`,
+    )
+  }
+
+  /*
+   * `.to_numpy()` on every assignment, and it is load-bearing rather than tidy: a reduction
+   * comes back indexed by the *label*, the frame being built is indexed 0..n-1, and assigning
+   * one to the other aligns on the index and fills the column with `NaN` throughout. Silent,
+   * and it looks exactly like a matrix of absences.
+   */
+  lines.push(`${out} = pd.DataFrame({${pyStr(LABEL_COLUMN_NAME)}: _m.index.astype('string')})`)
+  for (const stat of options.stats) {
+    lines.push(
+      `${col(out, reduceColumnName(stat, options.prefix))} = ${REDUCE_EXPRESSIONS[stat]('_m')}.to_numpy()`,
+    )
   }
   return lines
 })

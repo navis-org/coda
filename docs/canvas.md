@@ -2038,10 +2038,10 @@ earlier request re-fires it and the widget pops open unprompted.
 One drawing per node type, in `src/ui/glyphs.ts`. **A base shape names the material and the
 drawing on top names the operation** — Filter, Sort and Sample are all a table with something
 happening inside it; Mirror, Transform and Clean Skeletons are all an arbour — which is what
-makes a family legible before the label is read. Eleven base shapes cover 103 nodes. Colour is
-not part of it: every shape inherits `currentColor`, because the category tint is already spent
-on the header strip and the backend pip, and a second colour channel here would compete with
-the socket palette's three-hue budget.
+makes a family legible before the label is read. Eleven base shapes cover 95 of the 108 node
+types; the rest take their category's drawing. Colour is not part of it: every shape inherits
+`currentColor`, because the category tint is already spent on the header strip and the backend
+pip, and a second colour channel here would compete with the socket palette's three-hue budget.
 
 Four marks are shared across families and each is load-bearing. **The funnel** is filtering, on
 `core.filterTable` and on `net.filter`; reusing it is what says the two nodes are the same verb
@@ -2052,8 +2052,8 @@ drawing: the larger or filled disc is the node the question is about.
 **It is data, not JSX, and that is about the third surface.** Three things draw these: the
 browser thumbnail and the start page's tile art (React, via `glyphElements`), and `nodes.html`
 (plain strings, via `glyphMarkup`) — a separate vite entry with no React in it, which is why it
-carried a hand-kept transcription of the six category glyphs instead. Fine at six; 103 chances
-to drift once every node had one of its own. So the shapes are primitives and each surface has
+carried a hand-kept transcription of the six category glyphs instead. Fine at six; 95 chances
+to drift once nodes started having one of their own. So the shapes are primitives and each surface has
 its own six-line renderer, which is the arrangement `markGeometry.ts` already arrived at for
 GLSL. The page pays 8.6 kB gzipped for the table, measured, in a chunk it shares with the app —
 that is its own content, since it draws 102 tiles.

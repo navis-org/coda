@@ -14,10 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { ID_COLUMN_NAME } from '../../core/ids'
 import { column, columnNames, tableSchema } from '../../core/types'
 import type { SkeletonsValue, TableValue } from '../../core/values'
 import { makeTable, tableFromRows } from '../../core/values'
-import { carriedGeometry, carriedSchema, carryParam } from './carryParams'
+import { carriedGeometry, carriedSchema, carryParam, carryable } from './carryParams'
 
 /** What a neuPrint fetch publishes: the canonical morphology schema. */
 const MORPHOLOGY = tableSchema(
@@ -81,15 +82,15 @@ describe('the two halves', () => {
       ['type'],
       ['pre', 'type'],
     ]) {
-      const promised = carriedSchema(MORPHOLOGY, NEURONS, carry)
-      const built = carriedGeometry(skeletons(), neurons(), carry).attributes
+      const promised = carriedSchema(MORPHOLOGY, NEURONS, carry, ID_COLUMN_NAME)
+      const built = carriedGeometry(skeletons(), neurons(), carry, ID_COLUMN_NAME).attributes
       expect(columnNames(promised), carry.join()).toEqual(columnNames(built.schema))
       expect(promised?.columns, carry.join()).toEqual(built.schema.columns)
     }
   })
 
   it('promises nothing extra until a column is chosen', () => {
-    expect(carriedSchema(MORPHOLOGY, NEURONS, [])).toBe(MORPHOLOGY)
+    expect(carriedSchema(MORPHOLOGY, NEURONS, [], ID_COLUMN_NAME)).toBe(MORPHOLOGY)
   })
 
   /* An unresolved dataset publishes no morphology schema; a promise built on a stand-in would
@@ -101,17 +102,22 @@ describe('the two halves', () => {
    * invariant 5's "unknown is not empty" both times.
    */
   it('promises nothing when the dataset has published no morphology schema', () => {
-    expect(carriedSchema(undefined, NEURONS, ['pre'])).toBeUndefined()
+    expect(carriedSchema(undefined, NEURONS, ['pre'], ID_COLUMN_NAME)).toBeUndefined()
   })
 
   it('falls back to the fetch’s own fields when the neuron table is unknown', () => {
-    expect(carriedSchema(MORPHOLOGY, undefined, ['pre'])).toBe(MORPHOLOGY)
+    expect(carriedSchema(MORPHOLOGY, undefined, ['pre'], ID_COLUMN_NAME)).toBe(MORPHOLOGY)
   })
 })
 
 describe('carrying', () => {
   it('adds the chosen columns, matched by neuronId', () => {
-    const out = carriedGeometry(skeletons(), neurons(), ['cellBodyFiber', 'pre'])
+    const out = carriedGeometry(
+      skeletons(),
+      neurons(),
+      ['cellBodyFiber', 'pre'],
+      ID_COLUMN_NAME,
+    )
     expect(columnNames(out.attributes.schema)).toEqual([
       'neuronId',
       'type',
@@ -131,7 +137,7 @@ describe('carrying', () => {
    * still one skeleton for it, carrying the first row's values.
    */
   it('annotates from a repeated id rather than multiplying the geometry', () => {
-    const out = carriedGeometry(skeletons(), neurons(), ['cellBodyFiber'])
+    const out = carriedGeometry(skeletons(), neurons(), ['cellBodyFiber'], ID_COLUMN_NAME)
     expect(out.items).toHaveLength(3)
     expect(out.attributes.length).toBe(3)
     expect(out.attributes.data.cellBodyFiber?.[0]).toBe('AVLP')
@@ -139,7 +145,7 @@ describe('carrying', () => {
 
   /* A left join: an id the table upstream does not mention keeps its skeleton and carries null. */
   it('keeps a neuron the incoming table has no row for', () => {
-    const out = carriedGeometry(skeletons(), neurons(), ['somaSide'])
+    const out = carriedGeometry(skeletons(), neurons(), ['somaSide'], ID_COLUMN_NAME)
     expect(out.items.map((i) => i.id)).toEqual(['1', '2', '3'])
     expect(out.attributes.data.somaSide).toEqual(['L', 'R', null])
   })
@@ -157,7 +163,7 @@ describe('carrying', () => {
    * column of the morphology schema and stays the second column.
    */
   it('replaces a column of the same name, in its own slot', () => {
-    const out = carriedGeometry(skeletons(), neurons(), ['type'])
+    const out = carriedGeometry(skeletons(), neurons(), ['type'], ID_COLUMN_NAME)
     expect(columnNames(out.attributes.schema)).toEqual(['neuronId', 'type', 'status', 'points'])
     expect(out.attributes.data.type).toEqual(['LC4', 'LC6', null])
     expect(out.attributes.data.type_r).toBeUndefined()
@@ -165,7 +171,7 @@ describe('carrying', () => {
 
   /* A carried column the geometry did not have is appended, in the order it was asked for. */
   it('appends a new column after the fetch’s own', () => {
-    const out = carriedGeometry(skeletons(), neurons(), ['somaSide', 'pre'])
+    const out = carriedGeometry(skeletons(), neurons(), ['somaSide', 'pre'], ID_COLUMN_NAME)
     expect(columnNames(out.attributes.schema)).toEqual([
       'neuronId',
       'type',
@@ -178,7 +184,7 @@ describe('carrying', () => {
 
   it('leaves the geometry itself untouched — items, bounds and frame', () => {
     const before = skeletons()
-    const out = carriedGeometry(before, neurons(), ['pre'])
+    const out = carriedGeometry(before, neurons(), ['pre'], ID_COLUMN_NAME)
     expect(out.kind).toBe('skeletons')
     expect(out.items).toBe(before.items)
     expect(out.bounds).toBe(before.bounds)
@@ -192,9 +198,9 @@ describe('carrying', () => {
    */
   it('hands the value straight back when there is nothing to carry', () => {
     const before = skeletons()
-    expect(carriedGeometry(before, neurons(), [])).toBe(before)
-    expect(carriedGeometry(before, undefined, ['pre'])).toBe(before)
-    expect(carriedGeometry(before, neurons(), ['nosuchcolumn'])).toBe(before)
+    expect(carriedGeometry(before, neurons(), [], ID_COLUMN_NAME)).toBe(before)
+    expect(carriedGeometry(before, undefined, ['pre'], ID_COLUMN_NAME)).toBe(before)
+    expect(carriedGeometry(before, neurons(), ['nosuchcolumn'], ID_COLUMN_NAME)).toBe(before)
   })
 })
 
@@ -221,5 +227,95 @@ describe('the param', () => {
     for (const noun of ['skeleton', 'mesh'] as const) {
       expect(carryParam(noun).help).toContain('replaces one of the same name')
     }
+  })
+})
+
+/**
+ * The same engine with the right-hand key picked rather than fixed — `neuron.attachAttributes`.
+ *
+ * Everything above runs on the `Carry fields` param, whose key is always `neuronId` on both
+ * sides. What is new is only the right key, so what is worth pinning is the two things that go
+ * wrong when a key is chosen rather than assumed: the join has to read the *named* column, and
+ * neither key column may be carried — the right one because it is the key, the left one because
+ * it is the geometry's own identity and writing over it would rename every item in the scene.
+ */
+describe('a right-hand key that is not neuronId', () => {
+  /** A Reduce Matrix's shape: keyed on `label`, and carrying an id column of its own. */
+  const STATS = tableSchema(
+    column('label', 'str'),
+    column('zap_mean', 'f64'),
+    column('neuronId', 'str'),
+  )
+
+  const stats = (): TableValue =>
+    tableFromRows(STATS, [
+      { label: '2', zap_mean: 0.5, neuronId: '999' },
+      { label: '1', zap_mean: 0.25, neuronId: '888' },
+    ])
+
+  it('matches on the named column rather than on neuronId', () => {
+    const out = carriedGeometry(skeletons(), stats(), ['zap_mean'], 'label')
+    // Row order is the *geometry's*, and the table's rows are deliberately the other way round.
+    expect(out.attributes.data.neuronId).toEqual(['1', '2', '3'])
+    expect(out.attributes.data.zap_mean).toEqual([0.25, 0.5, null])
+  })
+
+  it('never carries the key itself, which the join drops anyway', () => {
+    const out = carriedGeometry(skeletons(), stats(), ['label', 'zap_mean'], 'label')
+    expect(columnNames(out.attributes.schema)).not.toContain('label')
+  })
+
+  it('never writes over the geometry’s own id', () => {
+    /*
+     * The table has a `neuronId` of its own — a Qualify Ids result, a cross-dataset id — and it
+     * is the *left* key here, so carrying it would rename every item in the scene.
+     *
+     * This asserts the **property, not the guard**: `carryable` excludes the left key, and so
+     * would `kept` plus `foldNodeColumns` on their own. Mutation testing is how that was found —
+     * removing the exclusion leaves every test here green — so the guard is documented as the
+     * waste-avoidance it is, and this case pins the thing that must stay true.
+     */
+    const out = carriedGeometry(skeletons(), stats(), ['neuronId', 'zap_mean'], 'label')
+    expect(out.attributes.data.neuronId).toEqual(['1', '2', '3'])
+    expect(columnNames(out.attributes.schema)).toEqual([
+      'neuronId',
+      'type',
+      'status',
+      'points',
+      'zap_mean',
+    ])
+  })
+
+  it('keeps the two halves agreeing on a picked key', () => {
+    for (const carry of [['zap_mean'], ['label', 'zap_mean'], ['neuronId'], []]) {
+      const promised = carriedSchema(MORPHOLOGY, STATS, carry, 'label')
+      const built = carriedGeometry(skeletons(), stats(), carry, 'label').attributes
+      expect(columnNames(promised), carry.join()).toEqual(columnNames(built.schema))
+    }
+  })
+})
+
+/**
+ * The predicate on its own, because it is the one rule with a reader no golden can discriminate.
+ *
+ * `carryable` is read by four surfaces: `carryPlan` here, and both emitters' `carryLines`. On the
+ * canvas its left-key half is unobservable (see "never writes over the geometry's own id" above),
+ * and in the *emitters* it is the whole rule — but the export goldens cannot show it either, for
+ * a dull reason: pinning it needs a fixture table carrying both a `neuronId` of its own **and** a
+ * different key to match on, and no table in `everythingGraph()` has that shape. Every sensible
+ * candidate either keys on `neuronId` (where the two halves coincide) or has no `neuronId` at all.
+ *
+ * So this is the pin. Mutation-checked: replacing either emitter's `carryable(name, keyColumn)`
+ * with `name !== keyColumn` leaves both goldens byte-identical, which is exactly how the weaker
+ * filter shipped in the first place.
+ */
+describe('carryable', () => {
+  it('refuses both keys and nothing else', () => {
+    expect(carryable('zap_mean', 'label')).toBe(true)
+    // The right key: not a carried column, and `joinTables` drops its copy anyway.
+    expect(carryable('label', 'label')).toBe(false)
+    // The left key: the geometry's own identity, whatever the right key is called.
+    expect(carryable(ID_COLUMN_NAME, 'label')).toBe(false)
+    expect(carryable(ID_COLUMN_NAME, ID_COLUMN_NAME)).toBe(false)
   })
 })

@@ -35,10 +35,16 @@ full. **Read it before deciding a rule does not apply to your case.**
    Because it reads whatever is cached, something has to say when a degraded answer is
    worth redoing: fire `reportSourceLearned` for anything inference reads synchronously.
 
-3. **Schema half and value half must agree.** Every op in `src/nodes/lib/tableOps.ts` that
-   shapes its output has a `*Schema` and a `*Table` function side by side (a row-only op —
-   filter, dedupe, sort, sample — passes the schema through and has none). If they disagree,
-   downstream column pickers break only after a run.
+3. **Schema half and value half must agree, and sit side by side.** Every op in
+   `src/nodes/lib/tableOps.ts` that shapes its output has a `*Schema` and a `*Table` function
+   adjacent to it (a row-only op — filter, dedupe, sort, sample — passes the schema through and
+   has none). If they disagree, downstream column pickers break only after a run. What matters
+   is **adjacency plus an agreement test**, not that file: a pair bringing its own vocabulary may
+   live in a focused sibling module carrying its own sweep, which is what
+   `nodes/lib/matrixReduce.ts` does — four hundred lines, its own statistic type, its own param
+   reader and its own cache, and `matrixReduce.test.ts` asserts the agreement at every arity.
+   `tableOps.test.ts` is hand-written per op rather than a registry sweep, so nothing catches a
+   pair that is simply never checked anywhere.
 
 4. **Cache keys are provenance, not content** — `hash(type, params, upstream keys)`. So
    `evaluate` must be deterministic; hidden mutable state needs an explicit nonce param.
@@ -215,7 +221,7 @@ Area-specific — the rule, then the doc that holds why:
   `seeAlso.test.ts` pins symmetry, that every entry has a document to open, and that **no
   documented node is a dead end**. See [docs/help.md](docs/help.md).
 - **A node's glyph is one drawing per type, and the table is data because a third surface has no
-  React.** `ui/glyphs.ts`: 103 drawings on eleven base shapes — the base shape names the material,
+  React.** `ui/glyphs.ts`: 95 drawings on eleven base shapes — the base shape names the material,
   the drawing on top names the operation. Four marks are shared and load-bearing (funnel =
   filtering, dashed outline = a user's selection, four-point spark = "cleaned", weight = role).
   Colour is not a channel; `currentColor` only. Primitives rather than JSX because `nodes.html`
@@ -911,6 +917,110 @@ Area-specific — the rule, then the doc that holds why:
   is gone". The other two `ids` params stay uncovered on purpose: one rule over "ids params" would
   be three grammars under one name. See [docs/nodes.md](docs/nodes.md) and
   [docs/wizard.md](docs/wizard.md).
+- **A ZapBench trace is priced in *blocks*, not neurons, and the id that finds it is off by one.**
+  The released array (`gs://zapbench-release/volumes/20240930/traces`) is zarr v3, `[7879, 71721]`,
+  `float32`, **uncompressed** — `codecs` is `bytes` and nothing else, which is what makes every byte
+  offset arithmetic and a partial chunk read possible at all; `live.test.ts` checks that codec list,
+  since a compressor added upstream would not fail but return noise shaped like a trace. Axes are
+  `['t', 'f']`, so **neurons are on the contiguous axis**: a fixed `t` is 512 adjacent neurons in
+  2,048 contiguous bytes, a fixed neuron is 512 values 2,048 bytes apart. So one neuron costs what
+  512 adjacent ones cost, the bill is `blocks × timesteps × 2,048` (16 MiB and ~1.4 s a block over
+  the whole recording, concurrency 6 against 10 s at 1), and **`Condition` is the only control that
+  reduces it** — subsampling time does not, a chunk row already spanning 512 timesteps. A
+  multi-range request would be the obvious win and GCS refuses it outright (**400, "Multiple
+  ranges"**), so the unit is a contiguous row span carrying all 512 of that chunk's neurons whether
+  they were wanted or not. The seam is worse than the fetch: a `zapbenchId` is the **1-based
+  segmentation label** and the column is one lower, both readings are in range for every id but the
+  two at the ends, so a wrong choice returns the *neighbouring cell's* trace — real, plausible, and
+  wrong. The range could not settle it (fish2's ids are 5…71,720) and **geometry did**: an affine
+  fitted from the released centroids to `somaLocation` over 20,342 well-registered neurons gives a
+  median residual of **522 at `id - 1` against 1,453 at `id`**, with ±3 around it at 1,473–1,995 —
+  the **offset sweep being what makes that mean anything**, since a fit insensitive to the offset
+  would have flattered either answer. Two more traps. `resolveColumn`'s **rule 3** hands a required
+  picker on its declared default *the first compatible column*, so on a table with no `zapbenchId`
+  the node would fetch at indices derived from body ids; `excludeIds`, a `validate` warning naming
+  the column it is about to read, and a run-time range refusal are three answers because none alone
+  is enough — and the `validate` half is a **warning**, since a column holding these ids under
+  another name is legitimate and nothing at edit time can tell it from the substitution. The node emits a
+  **matrix and nothing else**: a second port carried the same values long, for `core.similarity`
+  (which takes a table, not a matrix), and was removed because a trace matrix is *dense* — the long
+  form is a row per neuron per timestep in four boxed `CellValue[]` columns against one
+  `Float64Array`, four times the memory, built on every run whether anything read it, and it set the
+  refusal ceiling at a quarter of the matrix's. What that **removed** is worth naming, because half of it
+  is still missing: `core.reduceMatrix` now answers the per-neuron statistic — one output row per
+  matrix line, mean/median/sd/min/max/sum/n, which is what a colour-by-activity chain reads — but
+  nothing downstream of a `Matrix` computes a *correlation*, `Linkage` taking a matrix and reading
+  it as *distances*, which a trace matrix is not. The remaining gap is a matrix layout on
+  `core.similarity`.
+  The Heatmap is the *only* view for a trace population, there being no line chart. Separately, the **stimuli are not
+  readable at sensible cost** — `stimuli_features` is `chunks [1, 26]`, one object per timestep, so
+  820 kB is 7,879 requests (the blosc/zstd is *not* the blocker: chunks are stored `MEMCPYED`, raw
+  float32 behind a 16-byte header). See [docs/backends.md](docs/backends.md) and
+  [docs/nodes.md](docs/nodes.md).
+- **The ZapBench release holds the same numbers twice, transposed, and neither copy wins — so the
+  reader costs both per request.** `traces` is row-major (a timestep is 512 adjacent neurons in
+  2,048 contiguous bytes); `traces_rastermap_sorted/s0` is the same values permuted into a 1-D
+  activity embedding and carrying a **`transpose` codec** (`order: [1, 0]`), which makes a
+  *neuron's* timesteps contiguous — same shape, same chunking, same missing compressor. On 36
+  scattered neurons over the whole recording that is **576 MiB against 1.1 MiB, 60.5 s against
+  18.5 s** at identical request counts, and 23.7 s byte-exact through the node. The crossover is
+  real and is why both are kept: row-major wins on a **narrow window over many neurons**, where the
+  transposed read bridges hundreds of unwanted neurons for a few values each. Hence plans are
+  compared in bytes **plus requests priced in bytes** (`REQUEST_BYTES_EQUIVALENT`, 450 kB, from the
+  same measurement — a request costs ~32 ms whatever its size against ~13.7 MiB/s marginal
+  bandwidth), which is also what decides whether to bridge a gap or spend a request. **The pyramid
+  itself is unusable and that is the finding**: it is a real OME-NGFF multiscale, but
+  `[[1,1],[2,2],[4,4]]` applies to *both* axes, so one level down averages each neuron with its
+  rastermap neighbours — a trace at `s1` is the mean of two cells and nothing downstream could
+  tell. Three traps. The permutation is **checked, never trusted** — `traces` is the published
+  contract and the sorted copy is a derived product calling itself `"example"`, so a re-sort
+  returns a real neuron's real trace under another's name; `verifiedSorting` reads one cell from
+  *each* array (two cells, one non-zero required, since padding reads as 0) and falls back to
+  row-major, a slower route to the identical answer. **`sorting.ts` imports nothing from
+  `traces.ts`**, because the cycle is safe only while every read is inside a function: building the
+  sorted path at module scope silently produced `"undefined/traces_rastermap_sorted"` under the
+  ordinary import order, with the whole suite green, where a browser build would throw a TDZ error.
+  And **only `traces` has a sorted copy**, so the layout is chosen per *product*. One bug only the
+  live test could see: `sorting.json` was addressed by its `gs://` URI where `fetchText` speaks
+  HTTP, so the route engaged nowhere for a round and every value was still correct by the fallback
+  — the stub now refuses a non-HTTP URL. The cost warning is priced from the **chosen** plan
+  (`TraceRequest.onCost`), or it announces 554 MB for a read that fetches 1.1 MiB.
+  See [docs/backends.md](docs/backends.md).
+- **A reduce over a matrix names the axis that *survives*, and its diagonal rule is not
+  `skip_self`.** `core.reduceMatrix` is Pivot's counterpart — a matrix to one table row per line,
+  carrying `n`/`sum`/`mean`/`sd`/`min`/`max`/`median` — and it exists because `Normalize` and
+  `Embed` hand a matrix back, `Linkage` reads one as *distances*, and everything else that works
+  in numbers takes a table, so a trace matrix had no route to "one number per neuron". Four
+  decisions. **`axis: 'rows'` means each row across its columns**, `matrixShape.ts`' convention
+  (`axisTotals(m, 'rows')` is already per-row) and the type is shared so the two cannot drift —
+  but the user's phrasing for the same operation names the axis that *disappears*, so both halves
+  are in the option labels and the wrong reading is a silently transposed answer; the two arms are
+  one index walk, and the test asserts each is the other's transpose because a wrong stride still
+  returns plausible numbers. **Absence is `Group By`'s rule**, which is what ZapBench's
+  `unmatched: null` needs: non-finite cells skipped, null for a line with none, **0** for `sum`
+  (the identity, not a measurement), `sd` null below *two* — and pandas differs on infinities
+  alone (`skipna` keeps `±inf`), so both emitters replace them first. The spread is **Welford's**:
+  the closed form on `[b+1, b+2, b+3]`, whose sd is 1 at every `b`, is right to 1e7, answers **0**
+  at 1e8–1e9 and a *negative* variance at 1e10, and 0 is the worse failure because it claims the
+  line is constant. And **`Exclude diagonal` applies only where the two label lists are equal**,
+  ignored with a warning elsewhere — the deliberate opposite of `nblastMatches`' `skip_self`,
+  which is positional for navis parity on a matrix arriving from NBLAST one node up, where any
+  matrix arrives here and a 400-neuron trace over a 400-step window is square with 400 real
+  measurements on its diagonal; the predicate is `linkageOps.ts`' `isSquarePopulation`, whose
+  two questions Linkage and Embed already ask as a *refusal*, and `visibleIf` takes params so the
+  control is offered everywhere and the run is the only place that can tell
+  (`filterNetwork.ts`' arrangement). Two smaller ones. The key column is **`LABEL_COLUMN_NAME`**
+  — `core.embed`'s and `Cut Tree`'s, lifted into `tableOps.ts` because it had become three
+  declarations of one wire name — never `neuronId` (a relabelled axis is a cell type, and
+  `neuronId` is a claim invariant 8's readers act on). And **two params in the key change no
+  number**: `Prefix` names the columns, and the chips choose among six statistics one pass
+  computes anyway, so the reduction is memoised on `heatmap.ts`' `SHAPED` idiom keyed on
+  `axis`/diagonal/`median` alone and **one slot rather than four** — 108 ms for a 3,000 × 7,879
+  matrix, 1,175 ms with `median`, **0.0 ms** for a keystroke *or* a chip, warnings replayed or
+  the ignored-diagonal line vanishes as somebody types. Two costs measured and left: the
+  per-line sort is nine tenths of the median's time and quickselect belongs beside
+  `quantileSorted` rather than here, and the strided column walk costs 6 ms, not the 3-6× a
+  blocked gather was proposed against. See [docs/nodes.md](docs/nodes.md).
 - **A collection's attribute table is not the table that named its neurons, and `Carry fields` is
   the bridge.** Each source builds a geometry value's attributes from `SourceSchemas.morphology` —
   seven columns on neuPrint, three plus the annotation chain's on CAVE, two on a precomputed bucket
@@ -929,11 +1039,37 @@ Area-specific — the rule, then the doc that holds why:
   nothing reads, when `TableViewer`, CSV export and GraphML key ids are all `schema.columns` in
   order.
   **Empty hands the value back by identity**, so a graph saved before the param produces what it
-  always did; the list *is* in the provenance key, and `geometryCache` absorbs the re-fetch. What it can carry is **what is on the neuron
-  table already**: the port is `T.neurons()`, so neither a `Cut Tree` cluster table nor a
-  `core.join` result can feed it — the latter because `joinTables` keeps its left kind at run time
-  while `core.join`'s `inferOutputs` says `T.table` regardless, which is one line to fix when
-  somebody wants it.
+  always did; the list *is* in the provenance key, and `geometryCache` absorbs the re-fetch. What the *param* can carry is **what is on the
+  neuron table already**: the port is `T.neurons()`, so neither a `Cut Tree` cluster table, a
+  `Reduce Matrix` statistic nor a `core.join` result can feed it — the last because `joinTables`
+  keeps its left kind at run time while `core.join`'s `inferOutputs` says `T.table` regardless.
+  **`neuron.attachAttributes` is the answer to all three and shares this join rather than copying
+  it**, taking the geometry on one port and any table on the other; the only generalisation it
+  needed was the right-hand key, which the param always spells `neuronId`. Five things are its
+  own. The fetch is the wrong home for a computed table — half of what you attach is *downstream*
+  of the geometry (NBLAST scores, a clustering of these very skeletons), which a port on the fetch
+  node makes a cycle, and that node is `expensive` where this is `cheap`. **Empty means every
+  column**, `core.select`'s rule and the deliberate opposite of the param's empty, on `unpivot`'s
+  grounds: there empty is the identity of an opt-in extra, here it is the whole card. **Neither
+  key is ever carried**, which the generalisation forced — the right one because the join drops it
+  anyway, the *left* one because it is the geometry's identity and a table carrying its own
+  `neuronId` would otherwise rename every item in a scene — and `carryable` is **exported**,
+  because both emitters had written their own weaker filter and so assigned over the id in two
+  notebooks while the canvas dropped it, which no golden could show until the fixture grew an
+  every-column arm over an id-carrying table. **Points are accepted where `Split Neurons`
+  refuses them**, that refusal being about partitioning connectors rather than annotating them.
+  And **`validate` says nothing about the picker**: `validateColumnParams` already names a rule-3
+  substitution (`Column "neuronId" is gone — using "label"`) for every node on every mutation, so
+  a line here would be `out.scatter`'s recorded second-badge — which is also why
+  `zapbench.traces` declines it and adds only what the framework cannot say. The exporters diverge on **kind**, through
+  `asFrame` in `export/neutral.ts` — one predicate, `stackPlan` having asked it inline for the
+  same reason before this node asked it twice more. Skeletons and meshes emit the param's own
+  cell; a synapse cloud is a frame, which R handles with one extra argument (`df[, "x"] <- v`
+  overwrites in place and appends at the end, `foldNodeColumns`' rule for free) and Python with
+  `map` off an indexed right frame — **not `merge`**, which was the first version: it suffixes a
+  colliding column `_x`/`_y` where Coda writes over it and appends where Coda keeps the slot, so
+  reproducing the rule cost a pre-drop, a key-drop and a full reindex that assigning to an
+  existing column does for nothing.
   **`onPartial` carries too**, or a scene coloured by a carried column draws nothing until the last
   body lands. And **no bespoke error for a vanished column**: `resolveColumns` drops it and
   `validateColumnParams` reports `Missing column(s)` at edit time, so the `ctx.warn` written first

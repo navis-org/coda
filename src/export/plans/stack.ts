@@ -18,6 +18,7 @@ import { inputPorts } from '../../core/ports'
 import { readStackOptions } from '../../nodes/lib/stackParams'
 import { stackLabelAt } from '../../nodes/lib/tableOps'
 import type { NeutralContext } from '../neutral'
+import { asFrame } from '../neutral'
 
 /**
  * Whether it stacks frames or neuron objects, the variable on each socket in order, and the
@@ -37,7 +38,7 @@ export function stackPlan(ctx: StackContext, geometry: boolean): StackPlan {
   const inputs = ports.map((port) => ctx.wired(port.id))
   const options = readStackOptions(ctx.params, inputs.length)
   const column = options.sourceColumn
-  const points = geometry && ctx.inputType(ports[0]?.id ?? '')?.kind === 'points'
+  const points = geometry && asFrame(ctx.inputType(ports[0]?.id ?? ''))
   return {
     as: geometry && !points ? 'neurons' : 'frames',
     inputs,

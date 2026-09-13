@@ -161,6 +161,128 @@ Unlike Pivot, **the schema is derived rather than observed**: every output colum
 param or copied from the input, so a picker downstream fills before the first run. Pivot cannot
 do that because its wide columns *are* the data.
 
+## Reduce Matrix: the way out of a matrix
+
+`core.reduceMatrix` takes a `MatrixValue` to a table with one row per matrix line, carrying
+whichever of `n`, `sum`, `mean`, `sd`, `min`, `max` and `median` are ticked. It is Pivot's
+counterpart at the other end of the same journey, and it exists because a matrix was a dead end
+for everything that is not a picture: `Normalize` and `Embed` take one and hand one back,
+`Linkage` takes one and reads it as *distances*, and every node that works with numbers per
+neuron — Filter, Sort, Join, Build Network, every colour encoding — takes a table.
+
+The question that forced it is ZapBench's. A trace matrix is 3,000 neurons against 7,879
+timesteps; what somebody wants from it is one number per neuron to colour a 3D scene by, and
+before this node the only thing downstream of it was the Heatmap. `ZapBench Traces → Reduce
+Matrix → Join → Skeletons` is that chain. Nothing in the node knows what a trace is: a
+Similarity, Adjacency, NBLAST or Pivot matrix reduces identically, which is what `Exclude
+diagonal` is for.
+
+**The axis control names what comes out, not what is consumed**, and both readings are in the
+option labels for that reason. `axis: 'rows'` reduces *each row across its columns* and yields
+one output row per matrix row — `matrixShape.ts`' convention, where `axisTotals(m, 'rows')` is
+already a per-row vector, and the two files share `MatrixAxis` so they cannot drift. The user's
+phrasing for the same operation is the opposite one ("reduce over the columns"), naming the axis
+that disappears; both are reasonable and the wrong one is a silently *transposed* answer, which
+is why the options read "each row, across its columns" rather than picking a side. The two arms
+are one index walk — a row is `cols` cells one apart, a column is `rows` cells `cols` apart — so
+nothing below the stride mentions an axis, and the test asserts each answer is the other's
+transpose rather than checking numbers twice. A wrong stride still returns plausible numbers.
+
+**Absence is `Group By`'s rule, not a new one.** Non-finite cells are skipped, which is
+`axisTotals`' behaviour and what the ZapBench node's `unmatched: null` setting needs — a neuron
+with no `zapbenchId` arrives as a row of `NaN`, and what should come out is *no measurement*
+rather than a zero among real ones. So a line with no finite cell answers null for `mean`, `sd`,
+`min`, `max` and `median`, and **0** for `sum`, which is the identity of addition rather than a
+value; `sd` is null below *two* finite cells, `profileStats`' rule, since one value has no
+spread where 0 claims it was measured to have none. The one place pandas differs is infinities
+— `skipna` skips `NaN` and keeps `±inf` — so both emitters replace them before reducing.
+
+**The spread is Welford's, and the closed form is the reason.** `Σx² − (Σx)²/n` subtracts two
+numbers that agree to fifteen digits. Measured on `[b+1, b+2, b+3]`, whose sd is 1 at every `b`:
+it is right to 1e7, answers **0** at 1e8 and 1e9, and at 1e10 answers a negative variance and so
+`NaN` under the root. Both wrong answers are worse than noise — 0 is a claim that the line is
+constant — and 1e8 is not an exotic magnitude for a raw coordinate or a voxel count.
+
+**`Exclude diagonal` needs labels that line up, which departs from `skip_self`.** It drops cell
+`(i, i)`, but only where the matrix is square *and* its two label lists are equal, and otherwise
+is ignored with a warning. `neuron.nblastMatches` made the opposite call deliberately — its
+`skip_self` "is the diagonal rather than a name comparison", holding parity with navis on a
+matrix that arrives from NBLAST one node up. Here any matrix arrives: a 400-neuron trace matrix
+over a 400-timestep condition window is square, and its diagonal is 400 real measurements a
+positional rule would delete from every statistic on the card. Requiring the labels to agree
+costs nothing where the control is meant, a similarity or adjacency matrix over one neuron set
+having identical label lists by construction. The predicate is `linkageOps.ts`' — `Linkage` and
+`core.embed` already ask those same two questions of those same matrices, as a refusal rather
+than as a boolean, and its header records that the pair was extracted the first time the second
+node restated them. `visibleIf` cannot help here — it takes params, and a matrix's shape is not
+one — so the control is offered on every matrix and the run is the only place that can tell;
+`filterNetwork.ts` records the same arrangement for the same reason.
+
+**The key column is `LABEL_COLUMN_NAME`**, which is what `core.embed` and `Cut Tree` key on, so
+`Reduce Matrix ⋈ Cut Tree` needs no configuration and a Join onto a neuron table needs its
+`Match on` picker and nothing else. That used to be three declarations of one wire name — a
+constant in `embedOps.ts` whose comment already said "so the two tables join", a literal in
+`clusterSchema`, and a third here — so it is now one in `tableOps.ts`, on `ID_COLUMN_NAME`'s
+rule: a constant earns its place by linking the sites where a mismatch fails **silently**, and
+a table that spelled this differently would still join, only after somebody set two pickers.
+Deliberately not `neuronId`: a matrix's row labels are whatever the node above put there, which
+after a Heatmap relabel or a Pivot is a cell type, and `neuronId` is a claim (invariant 8) every
+id node downstream would then act on.
+
+**The prefix is a param rather than a downstream Rename** because two of these meeting at one
+Join is the ordinary case: `mean` and `max` from a trace matrix beside `mean` and `max` from an
+adjacency is four columns of two names, and `core.join`'s suffix rule then names them `mean` and
+`mean_r` — the case `foldNodeColumns` exists to stop, one picker with two answers of which the
+second is stale. `zap_mean` beside `adj_mean` needs no rule at all. A trailing separator is
+dropped rather than doubled, so `zap` and `zap_` both give `zap_mean`.
+
+**Two params are in the provenance key and change no number**, which is what made the reduction
+a memo. `Prefix` has to be in the key — it names the output columns (invariant 4), which is also
+why it cannot be `presentational` — so every keystroke in that field re-enters `evaluate` with
+the same arithmetic to do; and the **chips** decide which columns come out, where the single pass
+computes all six of the cheap statistics regardless (`min` is two compares, Welford's `m2` two
+multiplies, against a division for the mean that every ticking pays anyway). So the key is
+`axis`, `Exclude diagonal` and whether `median` was asked for, and nothing else.
+
+Measured on a 3,000 × 7,879 matrix: **108 ms** for the six single-pass statistics, **1,175 ms**
+once `median` is ticked, and **0.0 ms** both for a prefix keystroke and for ticking any of the
+six. Unticking `median` costs the 108 ms again. It is `heatmap.ts`' `SHAPED` idiom with **one
+slot instead of four** — that file keeps four because two Heatmaps read one upstream matrix with
+different tabs and a miss there is a Pyodide round trip, where here the keys number at most eight
+and a session touches one or two — and what is held is `lines × 6` cells rather than a second copy
+of the grid. The warnings are held with the answer and replayed, or the "Exclude diagonal was
+ignored" line would vanish from a card the moment somebody typed a prefix, which is the cache
+showing through. That capture-and-replay contract is now in five places (`heatmap.ts`,
+`displayLabels.ts`, `editTable.ts`, `neuronSearch.ts`, here), each restating the reasoning; it
+wants one helper beside `LruMap`, and this is the smallest of the five and a poor first caller
+for it.
+
+**The median is where real time is left on the table, deliberately.** The per-line sort is
+~307M comparisons on that matrix — nine tenths of the 1,175 ms — and quickselect would be about
+3.5× faster. It is not taken here because `quantileSorted` is the app's one definition of a
+quantile, moved down into `core/stats.ts` precisely so there would not be two, and a selection
+written in this file would be a second definition of the median. If it is wanted it belongs
+beside `quantileSorted`, with the sort as its oracle.
+
+**The strided axis was costed and measured away.** Reducing each *column* walks the
+`Float64Array` with stride `cols`, eight times the cache lines, so a blocked gather per axis
+looked necessary: measured, the six statistics take 108 ms down the rows against **114 ms**
+across the columns, and with `median` ticked the strided walk is the *faster* of the two (929 ms
+against 1,175). Both are bound by the 189 MB the grid occupies rather than by line fetches. A
+second spelling of the arithmetic would buy 6 ms, so there is one index walk: a row is `cols`
+cells one apart, a column is `rows` cells `cols` apart, and nothing below the stride mentions an
+axis.
+
+Empty chips are a legitimate state and mean **the labels alone**: a matrix's line names as a
+table, which is a perfectly good thing to want. `emptyLabel` says so where the chips would be.
+
+The schema is **derived, never observed**: every output column is named by a param, so the
+pickers downstream fill as soon as the chips are ticked, with nothing run. Both emitters are
+faithful and each says where its language differs — pandas' reductions *are* Coda's null rule
+line for line (`skipna` by default, `sum` of an absent line 0, `std` at `ddof=1` and `NaN`
+below two), while base R needs `coda_min`/`coda_max` for `min(x, na.rm = TRUE)`'s `Inf`, which
+is `Group By`'s reason for the same two helpers.
+
 ## Connectivity similarity: Partner Vectors and Similarity Matrix
 
 `neuron.partnerVectors` and `core.similarity`, both under `Add ▸ Analysis`. Together they take
@@ -383,15 +505,19 @@ other 41 was to filter the table *before* the fetch — which answers a differen
 half, not both) and costs a second fetch for the other. Reached for from three directions now:
 this node's own picker, the 3D View's colour encoding, and `Download`.
 
-**What it reaches is what is on that table already** — the dataset's own published properties, an
-annotation chain's labels, a column a `Relabel` rewrote. Two things it cannot reach, both for one
-reason: the port is `T.neurons()`, so a value typed `table` cannot feed it. A `Cut Tree` cluster
-table is one (and on the NBLAST route it would be a cycle besides, the clusters being downstream
-of the geometry), and a `core.join` result is the other — `joinTables` preserves its left input's
+**What the param reaches is what is on that table already** — the dataset's own published
+properties, an annotation chain's labels, a column a `Relabel` rewrote. What it cannot reach is
+anything typed `table`, the port being `T.neurons()`: a `Cut Tree` cluster table (which on the
+NBLAST route would be a cycle besides, the clusters being downstream of the geometry), a
+`Reduce Matrix` row of statistics, a `core.join` result — `joinTables` preserves its left input's
 kind at run time while `core.join`'s `inferOutputs` publishes `T.table` unconditionally, so "join
-the extra columns on, then carry them" cannot be wired today. Worth knowing before promising
-either in prose, which an earlier draft of this section did. The second is one line in
-`table/join.ts` following `relabel.ts`' pattern, whenever somebody wants it.
+the extra columns on, then carry them" cannot be wired. Worth knowing before promising any of them
+in prose, which an earlier draft of this section did.
+
+**`Attach Attributes` is the answer to all three, and it shares this join rather than copying
+it** — see the section below. The param stays because it is one card and no second wire for the
+overwhelmingly common case, carrying `type` onto the skeletons you were fetching anyway, and
+because both exporters already emit it.
 
 **The join is `core.join`'s, both halves of it.** `joinSchema` and `joinTables` are one layout
 function behind two halves, so carrying inherits every rule already argued there: duplicate keys
@@ -455,6 +581,113 @@ left join exactly. Checked by running the golden's own lines: the columns land, 
 unmatched, and they **survive subsetting** — so a `Split Neurons` chunk downstream filters on a
 carried column, which is the two features composing in the export as they do on the canvas. R's
 Meshes emitter is unaffected: it was already a TODO, neuprintr having no neuron-mesh fetch.
+
+## Attach Attributes: the general form of Carry fields
+
+`neuron.attachAttributes` takes geometry on one port and **any table** on the other and joins the
+table's columns onto the attribute table the collection carries. It is the same operation the
+`Carry fields` param performs, through the same `carriedSchema`/`carriedGeometry` pair, with one
+difference: the right-hand key is a picker rather than always `neuronId`.
+
+It exists because everything a *graph computes* lived in tables with nowhere to go. A collection's
+attributes come from its source, and a `Cut Tree` cluster, a `Reduce Matrix` statistic, a
+`Group By` total and an uploaded CSV are all typed `table`, which `Carry fields`' `T.neurons()`
+port refuses. `ZapBench Traces → Reduce Matrix → Attach Attributes → 3D View`, coloured by
+`zap_mean`, is the chain it was written for, and it was unwireable before.
+
+**Why not simply widen the param's port.** Because the fetch is the wrong place for a table the
+graph computes. Half of what somebody wants to attach is *downstream* of the geometry — NBLAST
+scores, a clustering of these skeletons, a metric measured off them — and a port on the fetch node
+would be a cycle. The param also sits in the provenance key of a node that downloads, so adding a
+column re-runs the fetch (`geometryCache` absorbs it, but that is still the wrong shape for "try
+colouring by this instead"), where this node is `cheap` and the same edit re-joins a table already
+in memory.
+
+Both stay, and one of the two reasons is mechanical rather than a matter of taste: `carry` is in
+the provenance key, and a *hidden* param is excluded from that key — so retiring the control the
+repo's usual way would silently re-key every saved graph that uses one (invariant 4). There is no
+cheap way to take it back, which is worth knowing before treating it as superseded.
+
+**The geometry side of the key is fixed** at the collection's `neuronId`, which
+`SkeletonsValue.attributes` requires every collection to carry. A picker there would buy the
+per-group join — attach one row per cell type, matched `type` to `type` — and cost a third control
+plus a second way to build a join that matches nothing.
+
+It is **not "a param away"**, which an earlier draft of this claimed: `carryParams.ts` hardcodes
+the *left* key (only `joinTables` beneath it takes both), and both exporters are structurally
+identity-keyed — Python keys its `set_neuron_attributes` dict on `neuron.id`, R indexes by
+`names(nl)`. A left key other than `neuronId` has no representation in navis or nat at all, so it
+would need the frame mechanism in both languages on top of the engine change.
+
+**Empty means every column**, `core.select`'s own rule and the *opposite* of the `Carry fields`
+param's empty. The two differ because what empty costs differs: there it is the identity of an
+opt-in extra on a node that worked before the param existed, and here it is the whole purpose of
+the card — a node that does nothing until a picker is filled reads as broken. `unpivot.ts`' two
+pickers with deliberately opposite defaults is the precedent for that being a decision rather than
+an inconsistency.
+
+**Neither key column is ever carried**, which the generalisation forced. The right key is not a
+carried column (`joinTables` drops its copy anyway), and the *left* key is the geometry's own
+identity — the draw and export key every item is addressed by — so a table with a `neuronId` of
+its own, a `Qualify Ids` result say, must not rename every item in the scene. With the param the
+two keys are the same name and this was the single check it always was.
+
+`carryable` is that rule, and it is **exported because four surfaces read it**. It was
+module-private first, and both emitters then wrote their own weaker filter — the right key only —
+so under the every-column default a table carrying its own `neuronId` had it assigned over the
+geometry's id in both notebooks while the canvas dropped it. Neither golden could show the
+disagreement until the fixture grew a second instance with empty `columns` over a neuron table,
+which is what that arm is for. Mutation testing is also what established that the *left* half of
+this predicate is unobservable on the canvas — `kept` plus `foldNodeColumns` already keep the id —
+so on the canvas it saves an array, and in the emitters it is the whole rule.
+
+**Points are accepted, where `Split Neurons` refuses them.** Its reason does not reach here: a
+points row is a *connector*, so partitioning a cloud divides synapses rather than neurons — but
+annotating one is exactly right, every connector taking its neuron's value, and a synapse cloud
+coloured by the presynaptic neuron's cell type or activity is a thing people want. The join
+already annotates rather than multiplying, which is what makes the many-rows-per-key shape safe.
+
+**The picker's fallback is real, and the node says nothing about it.** `resolveColumn`'s rule 3
+hands a required picker sitting on its declared default the *first compatible column*, so a table
+with no `neuronId` — a Reduce Matrix keys on `label` — matches on whatever comes first, which may
+be a column of numbers and joins nothing while the card looks configured. A line about it was
+written here first and then deleted: `validateColumnParams` runs for every node on every graph
+mutation and already emits exactly this case, `Column "neuronId" is gone — using "label"`, so the
+node's own sentence was the second badge for one fact that `out.scatter` and `out.barChart` have
+both recorded rules against — and `zapbench.traces`, which the first draft cited as precedent for
+writing it, in fact declines it for that reason and adds only what the framework cannot say. The
+test asserts it through `validateColumnParams` instead, so the coverage survives the node not
+duplicating it.
+
+Worth naming the generalisation that is actually missing, since three nodes now work around it: a
+`ColumnParam` flag meaning *this default is a decision, not a suggestion* — skip rule 3, keep the
+stored name, fail in `evaluate`. `resolveColumn`'s own doc frames rule 3 as being for a default
+that is "a suggestion rather than a decision", and `excludeIds` is the precedent for declaring
+that meaning at the param. The tell is `zapbench.traces` needing three separate answers for one
+trap.
+
+**The exporters diverge on the kind, through one shared predicate.** A synapse cloud is a frame
+in both languages where skeletons and meshes are a `NeuronList`/`neuronlist`, so both emitters
+branch — which `docs/export.md`'s rule puts above them: `asFrame` in `export/neutral.ts`, one
+predicate, since `stackPlan` had asked it inline for the same reason and this node then asked it
+twice more.
+
+For skeletons and meshes both emit exactly what `Carry fields` emits, through the same helper. For
+a frame, R passes a column of ids where it otherwise passes `names(nl)` and `df[, "x"] <- v` is
+the same assignment either way, overwriting in place and appending at the end — `foldNodeColumns`'
+rule for free. Python writes `out[name] = out['neuronId'].map(right[name])` off an indexed right
+frame. It was a `merge` first, and that is worth recording: a merge suffixes a colliding column
+`_x`/`_y` where Coda writes *over* it, and appends where Coda keeps the overwritten column's slot,
+so reproducing the rule took a pre-drop, a key-drop and a full reindex — all of which assigning to
+an existing column does for nothing. Both languages now subset columns *before* the whole-frame
+`drop_duplicates`, and R hoists its `match` into `idx_` rather than repeating it per column, both
+of which matter under the every-column default where the table can be 165k rows.
+
+The Python `NeuronList` arm also carries a NOTE that it **diverges from the canvas** —
+`set_neuron_attributes` writes onto the neuron objects and a `NeuronList` shares them, so the
+attributes appear on the input list too, where this node leaves its input untouched. A deep copy
+to avoid that would duplicate every skeleton in the scene. Neither the frame arm nor R has the
+problem, both copying on write.
 
 ## Split Neurons: both halves of a filter, on a collection
 
@@ -3978,3 +4211,149 @@ eighteen-digit root id *is* text by the time anything in Coda can see it, and a 
 `i64` would advertise a type no consumer will get. The notebook exporter's counterpart reports the
 **pandas** dtype (`Int64` there) for the same reason from the other side — both are true of their
 own runtime, and a notebook claiming Coda's answer would describe a frame the reader does not have.
+
+## ZapBench Traces: a join across two modalities of one specimen
+
+`zapbench.traces` reads the released ZapBench calcium-imaging traces for whichever neurons in a
+fish2 table carry a `zapbenchId`. The array facts, the cost model and the id measurement are in
+[backends.md](backends.md#zapbench-a-released-zarr-array-not-a-server); what belongs here is what
+the node decides.
+
+### One output, and what removing the second one cost
+
+`Matrix` only. The Heatmap is the only view for a trace population — there is no line chart in
+the registry — and a matrix is what it takes.
+
+There **was** a second port emitting the same values long (`label, zapbenchId, t, value`),
+because `core.similarity` takes a table rather than a matrix and no matrix→table node exists. It
+was removed because a trace matrix is **dense**: the long form is one row per neuron *per
+timestep*, carrying the same numbers in four boxed `CellValue[]` columns against the matrix's one
+`Float64Array`. Four times the memory, built on **every** run whether or not anything was wired
+to it, and it was what set the node's refusal ceiling — `cells * 32` against the matrix's
+`cells * 8`, so roughly 2,000 neurons over the whole recording rather than 8,000.
+
+**That is a capability removed, not a tidy-up**, and the gap is worth stating precisely: nothing
+downstream of a `Matrix` can currently compute a per-neuron statistic or a correlation.
+`Normalize` and `Embed` take a matrix; `Linkage` takes one but reads it as *distances*, which a
+trace matrix is not. Both belong one level up rather than in this node:
+
+- **a reduction over a matrix's rows** — mean/max/min/sum/sd per row label — which is what
+  "colour neurons by their activity" needs, and which is cheap on a dense matrix because it
+  contracts rather than expands;
+- **a matrix layout on `core.similarity`**, which for dense feature vectors is *cheaper* than
+  either of its existing layouts rather than a relocation of the cost this removal saved.
+
+Until one of those exists, a trace matrix is a dead end for everything that is not a picture.
+
+### Row labels
+
+`Label by` names each row of the matrix. It is **data, not decoration** — the opposite of
+`out.dendrogram`'s `Annotations` pickers, and for the Heatmap's reason: what it writes is what the
+Heatmap's Filter tab matches and what its Order tab sorts, so a presentational rename there would
+show `LC4` while a filter typed `LC4` matched nothing.
+
+A blank label falls back to the neuron's id, because blanks collide with each other on an axis
+the Heatmap filters. A kept-but-unmatched neuron has no id to fall back to, so it falls back to
+its **one-based row number in the input table**.
+
+### Two ways to get the wrong neuron's trace, and both are silent
+
+This is the whole reason the node has as much checking as it does.
+
+**The id is off by one.** A `zapbenchId` is the 1-based segmentation label and the trace column is
+one lower. Both readings are in range for every id but the two at the ends, so choosing wrongly
+returns the *neighbouring cell's* trace — a real trace of a real neuron. `traceColumnOf` is the
+one statement of the subtraction and `pnpm probe:zapbench` is the measurement behind it. There is
+deliberately **no configuration flag**: a two-valued base was built first and the second value was
+read by nothing, which is a setting pretending to be a measurement.
+
+**The picker cannot be trusted, and that is `resolveColumn`'s rule 3.** A required picker still
+holding its declared default falls back to *the first compatible column* when the schema lacks the
+name. So on a table with no `zapbenchId` at all, `ZapBench ID` silently resolves to whatever comes
+first and the node fetches traces at indices derived from body ids. Three things answer it, and
+none of them alone is enough:
+
+- `excludeIds` keeps `neuronId` out of the draw, which is the single likeliest substitution on a
+  neuron table.
+- `validate` says which column it is about to read whenever that is not `zapbenchId` — a
+  **warning, not an error**, because a column holding these ids under another name is perfectly
+  legitimate and nothing at edit time can tell that case from the substitution.
+- `evaluate` refuses on an id set inconsistent with the configured base, naming both the observed
+  range and the 71,721 columns the release has. This is the one that actually catches it: a fish2
+  bodyId is around 10⁸, four orders of magnitude past the ceiling.
+
+`traceColumnOf` answering `undefined` is where that last check lives, and `evaluate` **refuses**
+on it rather than skipping the row: an id the release cannot place means the wrong column was
+wired, not one bad row to drop. That is the one place this node refuses an id rather than counting
+it, and the message names both the observed range and the 71,721 columns the release has.
+
+### An unmatched neuron is kept or dropped, counted either way, never an error
+
+"Some but not all" is the ordinary state of fish2: 62,178 of 235,057 neurons carry a match. So a
+row with no id is left out, and the **count is warned about** — a matrix silently shorter than the
+table it came from reads as a fetch that half worked. A row whose value is not a whole number is
+counted separately, because that is a different thing from an absence: it says the column is not
+what it looks like.
+
+Only a table where *nothing* carries an id throws, and the message says that only some of fish2
+does rather than implying the fetch failed.
+
+**`Unmatched neurons` is which of the two you get**, and it exists because dropping silently
+changes the row *order* as well as the count. That is right for a heatmap or a correlation — a
+matrix of real measurements — and wrong the moment the result is joined back onto the table it
+came from, or read as a colour channel, or clustered alongside it. Keeping holds position.
+
+Three options rather than a boolean plus a fill picker: the two kept variants differ in one
+value, and a second param meaning nothing under `drop` spends a row of the card being disabled
+two thirds of the time.
+
+**`NaN`, not `0`.** `NaN` is the house spelling for "no cell here" — `tableOps`' line totals write
+it and `heatmapPlot` skips non-finite cells rather than reading them as zero — so a kept-but-
+unmeasured neuron draws as a gap and aggregates as absent.
+
+**Zeros are offered and are the dangerous one.** They are what some downstream code wants, and
+they are a manufactured measurement among real ones — afterwards indistinguishable from a neuron
+that was recorded and did nothing, which is `groupByTable`'s own argument for answering null over
+an empty group. The warning says so in those words when that option is chosen.
+
+(An earlier shape of this wrote `NaN` into the matrix and `null` into the long table, and that
+asymmetry was argued at length: a `Float64Array` has no spelling for absence but a `CellValue[]`
+does. The long table is gone, so there is one spelling and the argument with it.)
+
+Two things the param deliberately does **not** reach. An **out-of-range integer still refuses** —
+that means the wrong column was wired, not a missing match, and folding it in would turn a
+`bodyId` into a silent matrix of nothing, which is the exact failure the range check exists for.
+And a table where **nothing** matched still throws under every option, because a matrix of
+nothing but gaps is not a result to hand on.
+
+No `absentMeans`: a graph saved before this param dropped unmatched neurons, and `drop` is the
+default, so absence and the default agree — the case `Min confidence` records as *not*
+`absentMeans`'.
+
+### `Condition` is not a convenience
+
+Nine stimulus blocks, trimmed one timestep at each end exactly as zapbench's own
+`get_condition_bounds` trims them (`[offset + 1, next - 1)`, inclusive-min/exclusive-max). The
+axis carries **absolute timesteps of the full recording**, so a windowed read keeps its real
+offsets and two windows are comparable.
+
+It is the only control that reduces cost on the row-major copy, because neurons are on that
+array's contiguous axis — [limits.md](limits.md) has the arithmetic. On the transposed copy the
+node usually reads (see [backends.md](backends.md#two-layouts-and-why-the-reader-chooses-per-request))
+a wide window is cheap and a narrow one over many neurons is what gets expensive, which is why
+the *reader* chooses the layout and the node only reports what it chose. The default is still the whole recording: that is the
+honest answer to "the traces for these neurons", and the cost is said out loud rather than
+pre-empted by picking a stimulus condition on somebody's behalf.
+
+### Why no `dataCache`
+
+There is a session cache, but it is in memory rather than `loadCachedTable`'s IndexedDB layer —
+`geometryCache.ts`' argument, plus its own: a structured clone of hundreds of megabytes of chunk
+has a cost of its own, and the pain being solved is within-session iteration. So the node
+deliberately does not declare `dataCache`, which would put a **Clear Cache** button on it naming a
+persistent copy there is none of. `ctx.refresh` is still honoured.
+
+The unit cached is one neuron's windowed trace (31.5 kB over the whole recording) rather than the
+1 MiB chunk it arrived in, because that is the unit a *changed selection* hits on: adding a neuron
+to a set of fifty reads one block and answers the other forty-nine from memory. Pinned by a test
+that grows a selection and asserts which block was read.

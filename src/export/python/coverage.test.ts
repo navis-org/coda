@@ -60,6 +60,18 @@ const NO_EMITTER: Record<string, string> = {
     'result yet: the morphology emitters are written against neuprint-python, so a cell binding ' +
     'a CloudVolume would sit above a Meshes cell that is itself a TODO for this backend. One ' +
     'emitter is worth writing when the pair is.',
+  'zapbench.traces':
+    'ZapBench traces. The faithful route is short and obvious \u2014 `tensorstore.open` against ' +
+    'the same `gs://zapbench-release/\u2026/traces/` zarr3 kvstore zapbench\u2019s own ' +
+    '`constants.SPECS` names, then `ds[t0:t1, ids - 1]` \u2014 and the off-by-one it would have ' +
+    'had to guess at is now measured (`pnpm probe:zapbench`), so this is a genuine candidate ' +
+    'rather than a refusal on principle. Two things stop it today. It is a **fourth ' +
+    'dependency**: this exporter is neuprint-python, pandas and navis and nothing else, and ' +
+    'tensorstore is a large one to add for one node. And the cell would have to restate the ' +
+    'condition bounds and the id arithmetic, which is exactly the kind of emitter ' +
+    '`out.topology` argues must be checked by *running* it against the node rather than read ' +
+    'and believed \u2014 both exporters have silently disagreed with the canvas before. Until ' +
+    'a probe runs the emitted cell, no emitter is a better answer than one that looks right.',
   'note.text': 'An annotation. It becomes a markdown cell, which the walk does directly.',
   'flow.forEach':
     'A loop, and the one refusal here that is about the *shape* of the output rather than about ' +

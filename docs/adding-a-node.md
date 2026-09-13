@@ -148,8 +148,11 @@ inferOutputs: (ctx) => {
 
 ### Keep the schema half and the value half together
 
-If your node reshapes a table, write the schema computation and the data computation as a
-pair in [`src/nodes/lib/tableOps.ts`](../src/nodes/lib/tableOps.ts):
+If your node reshapes a table, write the schema computation and the data computation as an
+adjacent pair — in [`src/nodes/lib/tableOps.ts`](../src/nodes/lib/tableOps.ts) for anything
+that reads a table's schema, or in a focused sibling module where the pair brings a vocabulary
+of its own ([`matrixReduce.ts`](../src/nodes/lib/matrixReduce.ts) reduces a *matrix*, so there
+is no input schema to thread and it owns its own statistic type, param reader and cache):
 
 ```ts
 export function myOpSchema(schema, params) { /* schema in, schema out */ }
@@ -158,7 +161,9 @@ export function myOpTable(table, params)   { /* values in, values out */ }
 
 They **must agree**. If `myOpSchema` promises a `sum_weight` column and `myOpTable` emits
 `total`, everything downstream breaks only *after* a run — the worst kind of bug to trace.
-`tableOps.test.ts` asserts the agreement for every existing op; add a case for yours.
+`tableOps.test.ts` asserts the agreement for every existing op; add a case for yours — or, in a
+sibling module, the same assertion in that module's own test. It is hand-written per op rather
+than a registry sweep, so a pair nobody adds a case for is checked nowhere.
 
 ### When the columns *are* data values
 

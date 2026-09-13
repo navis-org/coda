@@ -22,6 +22,7 @@ import type {
 import type { MatrixAxis } from './matrixShape'
 import { labelsOf, takeMatrix } from './matrixShape'
 import { SYMMETRY_OPTIONS } from './nblastOps'
+import { LABEL_COLUMN_NAME } from './tableOps'
 
 /**
  * The linkage methods Coda offers, and — as much to the point — the two it does not.
@@ -89,7 +90,7 @@ export const MAX_LINKAGE_OBSERVATIONS = Math.floor(Math.sqrt(2 * CRASH_FLOOR_CEL
 /** Cluster numbers and the leaf order, one row per observation. */
 export function clusterSchema(): TableSchema {
   return tableSchema(
-    column('label', 'str'),
+    column(LABEL_COLUMN_NAME, 'str'),
     column('cluster', 'i64'),
     column('order', 'i64'),
     column('size', 'i64'),
@@ -109,6 +110,13 @@ export function clusterSchema(): TableSchema {
  * the same two questions of the same matrices and had restated them, which is two statements of
  * one rule and the way they come to disagree about *what* is checked. What stays here is the
  * size, which genuinely differs — a tree needs two observations and a neighbourhood needs four.
+ *
+ * A **third** reader wants the same question as a boolean rather than as a refusal, which is
+ * `isSquarePopulation` below: `core.reduceMatrix`'s `Exclude diagonal` applies only where the
+ * diagonal is a self-comparison and ignores itself with a warning where it is not. The
+ * element-wise comparison — the half easy to get wrong — is `labelsAgree`, written once and
+ * read by both. This function cannot simply *call* the predicate, because its two messages
+ * exist to say which of the two answers failed.
  */
 export function checkSquarePopulation(
   matrix: MatrixValue,
@@ -124,7 +132,7 @@ export function checkSquarePopulation(
         `An NBLAST with a Target wired compares two different sets, which has no ${lacks}.`,
     )
   }
-  if (matrix.rowLabels.some((label, i) => label !== matrix.colLabels[i])) {
+  if (!labelsAgree(matrix)) {
     throw new Error(
       `This matrix is square but its rows and columns are different things, so reading it as ` +
         `one population would pair unrelated things. ${subject} needs one population compared ` +
@@ -132,6 +140,15 @@ export function checkSquarePopulation(
         `Adjacency of a set against itself.`,
     )
   }
+}
+
+/** The same two questions as a boolean, for a caller that ignores rather than refuses. */
+export function isSquarePopulation(matrix: MatrixValue): boolean {
+  return matrix.rowLabels.length === matrix.colLabels.length && labelsAgree(matrix)
+}
+
+function labelsAgree(matrix: MatrixValue): boolean {
+  return matrix.rowLabels.every((label, i) => label === matrix.colLabels[i])
 }
 
 export function checkLinkageInput(ctx: Warner, matrix: MatrixValue): void {

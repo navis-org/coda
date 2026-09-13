@@ -20,14 +20,23 @@ import {
   nothingMatchesReason,
   unresolvedRowsReason,
 } from '../../../nodes/lib/splitRows'
-import { codaIds } from './common'
+import { carryLines, codaIds } from './common'
 import { REGEX_FLAVOUR_NOTE, filterPredicates } from './tableFilters'
 import type { AggFn } from '../../../nodes/lib/tableOps'
-import { aggColumnName, combineLayout, renameMapping } from '../../../nodes/lib/tableOps'
+import {
+  LABEL_COLUMN_NAME,
+  aggColumnName,
+  combineLayout,
+  renameMapping,
+} from '../../../nodes/lib/tableOps'
 import { unpivotPlan } from '../../../nodes/lib/tableOps'
 import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
+import { readAttach } from '../../../nodes/transform/attachAttributes'
+import type { ReduceStat } from '../../../nodes/lib/matrixReduce'
+import { readReduceOptions, reduceColumnName } from '../../../nodes/lib/matrixReduce'
 import { rCol, rStr, rValue, rVector } from '../r'
+import { asFrame } from '../../neutral'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 import { COMPARISON } from '../../neutral'
@@ -50,6 +59,36 @@ import {
 
 /** The short local name this file uses forty times over. The rule itself is `rCol`. */
 const col = rCol
+
+// ---------------------------------------------------------------------------
+// Attach Attributes
+// ---------------------------------------------------------------------------
+
+/**
+ * `Attach Attributes`, as columns on the neuronlist's own metadata frame.
+ *
+ * The same assignment `Carry fields` emits, through the same `carryLines`: the node is that
+ * param with the key picked rather than fixed. nat's data model gives this the canvas'
+ * semantics for free — a `neuronlist` carries a `data.frame` beside its neurons, `nl[, ]` *is*
+ * that frame, and R copies on modify, so the input list is genuinely untouched where the
+ * Python cell has to warn that it is not.
+ */
+registerEmitter('neuron.attachAttributes', (ctx) => {
+  const geometry = ctx.wired('in')
+  const frame = ctx.wired('table')
+  const out = ctx.output('out')
+  const { key, columns } = readAttach(ctx, ctx.schema('table'))
+  /*
+   * A synapse cloud is a `data.frame` here rather than a neuronlist, so its ids are a column
+   * rather than `names()`. That is the whole difference in R — the assignment and the `match`
+   * are the same — where the Python cell needs a different mechanism entirely. `asFrame` is the
+   * predicate, shared with `stackPlan` and with the Python emitter.
+   */
+  const leftKeys = asFrame(ctx.inputType('in'))
+    ? `${out}[[${rStr(ID_COLUMN_NAME)}]]`
+    : `names(${out})`
+  return [`${out} <- ${geometry}`, ...carryLines(out, frame, columns, key, leftKeys)]
+})
 
 // ---------------------------------------------------------------------------
 // Filter
@@ -384,8 +423,15 @@ const AGG_EXPRESSIONS: Record<AggFn, (x: string) => string> = {
   join: (x) => `coda_join(${x})`,
 }
 
-/** The generated helpers an aggregation needs, so the emitter requests exactly those. */
-const AGG_HELPERS: Partial<Record<AggFn, readonly string[]>> = {
+/**
+ * The generated helpers an aggregation needs, so the emitter requests exactly those.
+ *
+ * Keyed on `AggFn | ReduceStat` because what it records is a fact about **base R** rather than
+ * about either node's vocabulary: `min`/`max` answer `±Inf` on an all-`NA` vector whoever asked.
+ * `Reduce Matrix` reads the same two entries, where a second table of its own could drift from
+ * the helper names in `helpers.ts`.
+ */
+const AGG_HELPERS: Partial<Record<AggFn | ReduceStat, readonly string[]>> = {
   min: ['coda_min'],
   max: ['coda_max'],
   join: ['coda_join'],
@@ -985,6 +1031,84 @@ registerEmitter('core.editTable', (ctx) => {
   }
   for (const target of plan.targets) {
     if (target.problems.length > 0) lines.push(...ctx.note(disabledEditNote(target)))
+  }
+  return lines
+})
+
+// ---------------------------------------------------------------------------
+// Reduce Matrix
+// ---------------------------------------------------------------------------
+
+/**
+ * Coda's seven statistics as base-R reductions over a matrix's rows.
+ *
+ * `rowSums`/`rowMeans` where they exist and `apply` where they do not, which is not a style
+ * choice: the two vectorised ones are an order of magnitude faster on the shapes this node is
+ * written for (a trace matrix is thousands of lines by thousands of cells), and `apply` on the
+ * other four is the only spelling that reaches a per-line function at all.
+ *
+ * Two divergences from pandas one seam over, both deliberate and both marked:
+ *
+ *  - `min`/`max` go through `coda_min`/`coda_max`, because `min(x, na.rm = TRUE)` answers
+ *    `Inf` for a line with no values — with a warning per line — and `Inf` survives `is.na`,
+ *    is not dropped by a `filter`, and plots off the end of an axis. This is `Group By`'s
+ *    reason for the same two helpers, and the helpers are the same ones.
+ *  - `rowMeans(na.rm = TRUE)` answers `NaN` rather than `NA` for a line with no values. That is
+ *    R's own answer and `is.na(NaN)` is `TRUE`, so nothing downstream treats it as a number;
+ *    naming it `NA_real_` would cost a helper for a distinction R does not draw.
+ */
+const REDUCE_EXPRESSIONS: Record<ReduceStat, (m: string) => string> = {
+  n: (m) => `rowSums(!is.na(${m}))`,
+  sum: (m) => `rowSums(${m}, na.rm = TRUE)`,
+  mean: (m) => `rowMeans(${m}, na.rm = TRUE)`,
+  sd: (m) => `apply(${m}, 1, sd, na.rm = TRUE)`,
+  min: (m) => `apply(${m}, 1, coda_min)`,
+  max: (m) => `apply(${m}, 1, coda_max)`,
+  median: (m) => `apply(${m}, 1, median, na.rm = TRUE)`,
+}
+
+registerEmitter('core.reduceMatrix', (ctx) => {
+  const src = ctx.wired('in')
+  const out = ctx.output('out')
+  const options = readReduceOptions(ctx.params)
+  for (const stat of options.stats) {
+    for (const helper of AGG_HELPERS[stat] ?? []) ctx.helper(helper)
+  }
+
+  /*
+   * Transposed once for the column axis, so every expression above reduces rows and the labels
+   * are `rownames` in both arms.
+   *
+   * `as.matrix` for `viewers.ts`' reason, and it is not defensive clutter: `coda_similarity_*`
+   * hands back whatever `Matrix` gave it, which for a symmetric metric is a `dsyMatrix` rather
+   * than a base matrix, and `is.finite` on one of those is an error rather than a coercion. A
+   * no-op on anything already dense.
+   */
+  const lines: string[] =
+    options.axis === 'rows'
+      ? [`m_ <- as.matrix(${src})`]
+      : [
+          `# Reducing each column, so the lines are the transpose's rows.`,
+          `m_ <- t(as.matrix(${src}))`,
+        ]
+
+  // Coda skips every non-finite cell, and `na.rm` reaches only `NA` and `NaN` — an `Inf` from a
+  // `log` Normalize upstream would otherwise take a whole line's mean with it.
+  lines.push(`m_[!is.finite(m_)] <- NA`)
+
+  if (options.excludeDiagonal) {
+    lines.push(
+      `# Only where the two label lists agree: a square matrix is not necessarily a`,
+      `# self-comparison, and Coda declines to guess.`,
+      `if (identical(rownames(m_), colnames(m_))) diag(m_) <- NA`,
+    )
+  }
+
+  lines.push(`${out} <- data.frame(${col(LABEL_COLUMN_NAME)} = rownames(m_))`)
+  for (const stat of options.stats) {
+    lines.push(
+      `${out}[[${rStr(reduceColumnName(stat, options.prefix))}]] <- ${REDUCE_EXPRESSIONS[stat]('m_')}`,
+    )
   }
   return lines
 })

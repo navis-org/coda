@@ -67,6 +67,23 @@ export const COMPARISON: Record<string, string> = {
 }
 
 /** The dtype of a named column on a port, when both are known. */
+/**
+ * Whether a geometry value is a **data frame** in both translations rather than a neuron list.
+ *
+ * A point cloud is a `pandas.DataFrame` and a `data.frame`; skeletons and meshes are a navis
+ * `NeuronList` and a nat `neuronlist`. Every emitter that writes onto geometry therefore
+ * branches here, and `docs/export.md`'s rule puts a decision with no language in it above both:
+ * `stackPlan` asked it inline first, then `neuron.attachAttributes` asked it twice more, in two
+ * languages, for the same reason.
+ *
+ * Not a `kinds` list, because the question is about the *library mapping* rather than about what
+ * Coda admits: a fourth geometry kind would have to answer it one way or the other, and having
+ * it answered in one file is the point.
+ */
+export function asFrame(type: CodaType | undefined): boolean {
+  return type?.kind === 'points'
+}
+
 export function dtypeOf(
   ctx: Pick<NeutralContext, 'schema'>,
   portId: string,

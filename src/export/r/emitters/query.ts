@@ -32,7 +32,7 @@ import { CYPHER_PLACEHOLDERS, adjacencyExportQuery } from '../../plans/connectiv
 import { filterPredicates } from './tableFilters'
 import type { EmitContext } from '../types'
 import { neuprintProperty } from '../../../data/neuprint/schema'
-import { cypherIdList, neuronIds, rPopulationPredicate } from './common'
+import { carryLines, cypherIdList, neuronIds, rPopulationPredicate } from './common'
 import { STATUS_COLUMN, withoutStatedStatus } from '../../../data/neuronFilter'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 
@@ -570,31 +570,6 @@ registerEmitter('neuron.rawCypher', (ctx) => {
 // Morphology
 // ---------------------------------------------------------------------------
 
-/**
- * `Carry fields`, as columns on the neuronlist's own metadata frame.
- *
- * nat's answer to the same question, and a cleaner one than navis': a `neuronlist` carries a
- * `data.frame` beside its neurons, `nl[, ]` *is* that frame, and assigning a column to it is
- * `nl[, "name"] <- values`. So there is no reserved-name problem here — the frame is a plain
- * `data.frame`, and `type` is a column like any other where navis makes it a read-only property.
- * That is the second place these two exporters diverge on this node's behalf, and it is the
- * libraries' data models rather than a gap in either cell.
- *
- * `match(names(nl), frame$neuronId)` is the join: a neuronlist is named by body id as character,
- * which is what a Coda id column is on every source, and `match` answers `NA` for a neuron the
- * table upstream does not mention — Coda's left join exactly. Checked by running it: the columns
- * land on the frame, `NA` where unmatched, and they **survive subsetting**, so a Split Neurons
- * chunk downstream can filter on a carried column.
- */
-function carryLines(ctx: EmitContext, list: string, frame: string): string[] {
-  const carry = ctx.columns(CARRY_PARAM_ID)
-  if (carry.length === 0) return []
-  return carry.map(
-    (name) =>
-      `${list}[, ${rStr(name)}] <- ${frame}[[${rStr(name)}]][match(names(${list}), ${neuronIds(frame)})]`,
-  )
-}
-
 /** `neuprint_read_neurons` reads neuPrint's own SWC. */
 const SKELETON_NOTES: Record<SkeletonsNote, string> = {
   publishedLayer:
@@ -617,7 +592,7 @@ registerEmitter('neuron.skeletons', (ctx) => {
   return [
     ...notes.flatMap((note) => ctx.note(SKELETON_NOTES[note])),
     `${out} <- neuprint_read_neurons(${ids}, conn = ${conn})`,
-    ...carryLines(ctx, out, neurons),
+    ...carryLines(out, neurons, ctx.columns(CARRY_PARAM_ID), ID_COLUMN_NAME, `names(${out})`),
   ]
 })
 

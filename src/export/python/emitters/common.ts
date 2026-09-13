@@ -10,7 +10,9 @@ import type { PopulationFilter, TableSchema } from '../../../core/types'
 import { datasetRef } from '../../../core/types'
 import { backendOf } from '../../../data/source'
 import { TRACED_STATUS, populationColumns } from '../../../data/neuronFilter'
-import { pyIdList, pyStr } from '../py'
+import { ID_COLUMN_NAME } from '../../../core/ids'
+import { carryable } from '../../../nodes/lib/carryParams'
+import { pyIdList, pyList, pyStr } from '../py'
 import type { EmitContext } from '../types'
 
 /**
@@ -71,13 +73,20 @@ export function cypherIdList(frame: string): string {
  * to the id convention would have missed that cell in silence. The column name is `idSeries`'
  * now; the cast is deliberately spelled in both, since the two differ on where the cap goes.
  */
-export function neuronIdKey(frame: string): string {
-  return `${idSeries(frame)}.astype('int64')`
+function neuronIdKey(frame: string, column: string): string {
+  return `${idSeries(frame, column)}.astype('int64')`
 }
 
-/** The id column of a frame that has been through `coda_neurons`. One spelling of the name. */
-function idSeries(frame: string): string {
-  return `${frame}['neuronId']`
+/**
+ * The id column of a frame that has been through `coda_neurons`. One spelling of the name.
+ *
+ * The column is an argument only for `Attach Attributes`, whose key is a picker: the ids it
+ * matches on may be under any name (`label` on a Reduce Matrix), while the cast stays the one
+ * this file owns — `fetch_skeletons` assigns `n.id = r.bodyId` as an integer, so a `str` key
+ * matches nothing and `na='propagate'` fills every neuron with `None`.
+ */
+function idSeries(frame: string, column = ID_COLUMN_NAME): string {
+  return `${frame}[${pyStr(column)}]`
 }
 
 /**
@@ -96,7 +105,7 @@ function idSeries(frame: string): string {
  * since overriding a stale connectome `type` is the commonest reason to carry a colliding name —
  * and `nodes` exists only in CATMAID's schema, which these neuPrint-only emitters never see.
  */
-export const NAVIS_RESERVED: ReadonlySet<string> = new Set([
+const NAVIS_RESERVED: ReadonlySet<string> = new Set([
   'type',
   'soma',
   'connectors',
@@ -268,4 +277,86 @@ export function pyMaskFrame(
     ...masks.map((mask, i) => `    ${i === 0 ? '' : `${join} `}${mask}`),
     ']',
   ]
+}
+
+/**
+ * Columns of a frame written onto a `NeuronList` as per-neuron attributes.
+ *
+ * Two callers: the `Carry fields` param on Skeletons and Meshes, which passes its own list and
+ * the id column, and `neuron.attachAttributes`, which passes a picked list and a picked key. The
+ * navis call, the reserved-name refusal and the rules below are the same for both, which is why
+ * this is one function and not one per node.
+ *
+ * The faithful spelling, and it is navis' own: `NeuronList.set_neuron_attributes` takes a
+ * `{neuron.id: value}` dict, and `register=True` is what puts the attribute in
+ * `NeuronList.summary()` — which is where a reader looks for it and what `plot3d(color_by=)`
+ * reads. `na='propagate'` fills `None` for a neuron the dict does not cover, which is exactly
+ * Coda's left join: the neuron keeps its geometry and the field is absent. All three arguments
+ * were read off the installed signature, and the call was run against a synthetic list.
+ *
+ * **The dict is keyed by `neuronIdKey`, the same expression that named the bodies.**
+ * `fetch_skeletons` assigns `n.id = r.bodyId`, an integer, and `neuronIdInts` is what this cell
+ * passed it — so the two are one function now rather than two spellings of a cast. A `str` key
+ * would match nothing and `na='propagate'` would fill every neuron with `None`: a cell that runs
+ * and carries an empty column, which is the failure shape this exporter minds most.
+ *
+ * The column filter is **`carryable`**, imported rather than restated: this function had its own
+ * weaker filter (the right key only) and so assigned over the geometry's own id whenever a table
+ * carried a `neuronId` of its own under `Attach Attributes`' every-column default. Neither golden
+ * can discriminate that — no fixture table has both a `neuronId` and a different key — so the
+ * predicate's own unit test is the pin. See `carryParams.test.ts`.
+ *
+ * **`drop_duplicates` before `set_index`, because `to_dict` is last-wins and Coda is first.**
+ * `joinTables` deduplicates the side being matched into with the *first* occurrence winning, and
+ * the node's own test pins it; a bare `set_index(...).to_dict()` keeps the last, so a neuron
+ * listed twice upstream would be annotated from a different row here than on the canvas. Found by
+ * reading the two rules against each other rather than by running it, which is why it is written
+ * out with the reason attached.
+ */
+export function carryLines(
+  ctx: EmitContext,
+  list: string,
+  frame: string,
+  carry: readonly string[],
+  /** The frame column holding the ids, matched against `neuron.id`. */
+  keyColumn: string,
+): string[] {
+  if (carry.length === 0) return []
+  const carried = carry.filter((name) => carryable(name, keyColumn))
+
+  const refused = carried.filter((name) => NAVIS_RESERVED.has(name))
+  const writable = carried.filter((name) => !NAVIS_RESERVED.has(name))
+  const lines: string[] =
+    refused.length > 0
+      ? ctx.note(
+          `This node carries ${refused.map((n) => `\`${n}\``).join(', ')} onto the geometry, ` +
+            'and navis computes that attribute itself — `type` is the neuron class, ' +
+            '`cable_length` and `soma` are read off the skeleton — so it cannot be set on a ' +
+            'neuron and is left out here. Rename the column upstream if the notebook needs it.',
+        )
+      : []
+  if (writable.length === 0) return lines
+
+  const keyed = `${ctx.name}_carry`
+  lines.push(
+    // Columns subset *before* the dedupe, which is the whole-frame copy: under
+    // `Attach Attributes`' every-column default the frame can be a 165k-row neuron table, and
+    // the dicts below only ever read these.
+    `${keyed} = ${frame}[${pyList([keyColumn, ...writable])}]`,
+    `${keyed} = ${keyed}.drop_duplicates(subset=${pyStr(keyColumn)}, keep='first')`,
+    `${keyed} = ${keyed}.set_index(${neuronIdKey(keyed, keyColumn)})`,
+  )
+  for (const name of writable) {
+    lines.push(
+      `${list}.set_neuron_attributes(`,
+      `    ${keyed}[${pyStr(name)}].to_dict(),`,
+      `    name=${pyStr(name)},`,
+      // Registered, or the attribute is on the neurons and in no summary a reader would see.
+      `    register=True,`,
+      // Coda's left join: a neuron the table upstream does not mention keeps its geometry.
+      `    na='propagate',`,
+      `)`,
+    )
+  }
+  return lines
 }

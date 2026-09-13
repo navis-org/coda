@@ -15,15 +15,26 @@
  * only route to the other 41 was to filter the table *before* the fetch, which answers a
  * different question (one half, not both) and costs a second fetch to get the other.
  *
- * **What it reaches is what is on that table already** — the dataset's own published properties,
- * an annotation chain's labels, a column a `Relabel` rewrote. Two things it deliberately cannot
- * reach, both for the same reason: the port is `T.neurons()`, so a value typed `table` cannot
- * feed it. A `Cut Tree` cluster table is one (and on the NBLAST route it would be a cycle
- * besides, the clusters being downstream of the geometry), and a `core.join` result is the other
- * — `joinTables` preserves its left input's kind at run time but `core.join`'s `inferOutputs`
- * publishes `T.table` unconditionally, so the obvious "join the extra columns on, then carry
- * them" cannot be wired today. Worth knowing before promising either in prose; the second is one
- * line in `table/join.ts` whenever somebody wants it.
+ * **What the param reaches is what is on that table already** — the dataset's own published
+ * properties, an annotation chain's labels, a column a `Relabel` rewrote. What it cannot reach is
+ * anything typed `table`, the port being `T.neurons()`: a `Cut Tree` cluster table, a
+ * `Reduce Matrix` row of statistics, a `core.join` result (whose `inferOutputs` publishes
+ * `T.table` unconditionally even though `joinTables` keeps its left kind at run time).
+ *
+ * **`neuron.attachAttributes` is the answer to all three**, and it is why this module's join is
+ * shared rather than duplicated: that node takes the geometry on one port and *any* table on the
+ * other, matched on a column of its own choosing, so it reaches everything the param cannot at
+ * the cost of a second card.
+ *
+ * The param stays, and two reasons of very different weight say so. The design one: it is one
+ * card and no second wire for the overwhelmingly common case, carrying `type` onto the skeletons
+ * you were fetching anyway. The mechanical one, which is what actually settles it: `carry` is in
+ * the provenance key, and `registry.ts` records that a hidden param is *excluded* from that key —
+ * so retiring this control by hiding it would silently re-key every saved graph that uses one
+ * (invariant 4). There is no cheap way to take it back.
+ *
+ * Everything below is shared by the two, with the **right-hand key as the only difference**: the
+ * param's is always `neuronId`, the node's is a picker.
  *
  * ## The join is the Join node's, both halves of it
  *
@@ -84,12 +95,18 @@ export const CARRY_PARAM_ID = 'carry'
 type CarryNoun = 'skeleton' | 'mesh'
 const PLURAL: Record<CarryNoun, string> = { skeleton: 'skeletons', mesh: 'meshes' }
 
-/** The join every carry is: annotate the geometry's own rows, keep them all, keep their order. */
-const CARRY_JOIN = {
-  leftKey: ID_COLUMN_NAME,
-  rightKey: ID_COLUMN_NAME,
-  how: 'left',
-} as const
+/**
+ * The join every carry is: annotate the geometry's own rows, keep them all, keep their order.
+ *
+ * The **left** key is always the geometry's `neuronId`, which every collection is required to
+ * carry (`SkeletonsValue.attributes`: "Must contain `neuronId`"). The right key is an argument
+ * because `neuron.attachAttributes` matches an arbitrary table, whose key is whatever that table
+ * calls it — `label` on a Reduce Matrix or a Cut Tree, `neuronId` for the `Carry fields` param
+ * that was this module's only caller.
+ */
+function carryJoin(rightKey: string) {
+  return { leftKey: ID_COLUMN_NAME, rightKey, how: 'left' } as const
+}
 
 /**
  * The control, shared by every node that fetches geometry for a neuron set.
@@ -139,8 +156,13 @@ function carryPlan(
   morphology: TableSchema,
   neurons: TableSchema,
   carry: readonly string[],
+  rightKey: string,
 ): { taken: ColumnSchema[]; kept: string[]; schema: TableSchema } {
-  const taken = pickColumns(neurons, carry.filter(named))?.columns ?? []
+  const taken =
+    pickColumns(
+      neurons,
+      carry.filter((name) => carryable(name, rightKey)),
+    )?.columns ?? []
   const names = new Set(taken.map((c) => c.name))
   return {
     taken,
@@ -151,9 +173,28 @@ function carryPlan(
   }
 }
 
-/** The id is the key rather than a carried column, and `joinTables` drops the right's copy. */
-function named(name: string): boolean {
-  return name !== ID_COLUMN_NAME
+/**
+ * Which of the right table's columns can be carried: everything but the two keys. With the
+ * `Carry fields` param the two are the same name, and this is the single check it always was.
+ *
+ * **Exported because both emitters need it**, which is what made this rule a rule rather than a
+ * detail of `carryPlan`. They each had their own filter — the right key only — so a table
+ * carrying a `neuronId` of its own under `Attach Attributes`' "every column" default assigned
+ * over the geometry's id in both notebooks while the canvas dropped it. One predicate, four
+ * readers.
+ *
+ * **The right key is load-bearing and the left key is not**, which mutation testing is what
+ * established — worth recording, because the two read identically. Dropping the right key's
+ * exclusion breaks invariant 3: `joinedColumns` skips a right column named `rightKey` while
+ * `foldNodeColumns` does not, so the schema half promises a column the value half has not got,
+ * and both agreement tests fail. Dropping the left key's changes **nothing observable** — the
+ * id is kept by `kept` below and `foldNodeColumns` writes a carried `neuronId` over the slot the
+ * geometry's own id already holds, so the final `selectTable` picks the left's value either way.
+ * It stays because it saves joining and selecting a column that is then discarded, which on a
+ * 165k-row neuron table is a real array; it is not what makes the id safe.
+ */
+export function carryable(name: string, rightKey: string): boolean {
+  return name !== ID_COLUMN_NAME && name !== rightKey
 }
 
 /**
@@ -168,9 +209,13 @@ export function carriedSchema(
   morphology: TableSchema | undefined,
   neurons: TableSchema | undefined,
   carry: readonly string[],
+  /** The right table's key. `ID_COLUMN_NAME` for the `Carry fields` param, a picker's answer
+   *  for `Attach Attributes`. Not defaulted: a join key that can be left unsaid is one a caller
+   *  can get wrong without writing anything down. */
+  rightKey: string,
 ): TableSchema | undefined {
   if (!morphology || !neurons || carry.length === 0) return morphology
-  const plan = carryPlan(morphology, neurons, carry)
+  const plan = carryPlan(morphology, neurons, carry, rightKey)
   return plan.taken.length === 0 ? morphology : plan.schema
 }
 
@@ -196,19 +241,30 @@ export function carriedGeometry<V extends { attributes: TableValue }>(
   value: V,
   neurons: Value | undefined,
   carry: readonly string[],
+  /** As `carriedSchema`'s, and required for the same reason. */
+  rightKey: string,
 ): V {
   if (!isTableValue(neurons) || carry.length === 0) return value
-  const plan = carryPlan(value.attributes.schema, neurons.schema, carry)
+  const plan = carryPlan(value.attributes.schema, neurons.schema, carry, rightKey)
   if (plan.taken.length === 0) return value
 
   const joined = joinTables(
     selectTable(value.attributes, plan.kept),
-    selectTable(neurons, [ID_COLUMN_NAME, ...plan.taken.map((c) => c.name)]),
-    CARRY_JOIN,
+    selectTable(neurons, [rightKey, ...plan.taken.map((c) => c.name)]),
+    carryJoin(rightKey),
   )
-  // Back into the plan's order, which is `foldNodeColumns`': an overridden column keeps the slot
-  // it had rather than moving to the end, where every downstream table and CSV would show it.
-  return { ...value, attributes: selectTable(joined, columnNames(plan.schema)) }
+  /*
+   * Back into the plan's order, which is `foldNodeColumns`': an overridden column keeps the slot
+   * it had rather than moving to the end, where every downstream table and CSV would show it.
+   *
+   * Skipped where the join already produced that order, which is every carry that overrode
+   * nothing — the common case. `selectTable` copies no rows (it re-uses the column arrays by
+   * reference), but it does scan the schema twice per name and re-check every column's length in
+   * `makeTable`, which on a wide table is a rebuild of a table that was already right.
+   */
+  const order = columnNames(plan.schema)
+  if (sameOrder(columnNames(joined.schema), order)) return { ...value, attributes: joined }
+  return { ...value, attributes: selectTable(joined, order) }
 }
 
 /**
@@ -225,6 +281,7 @@ export function carriedMorphology(ctx: InferContext): TableSchema | undefined {
     schemasFromType(ctx.inputs.dataset).morphology,
     ctx.schema('neurons'),
     ctx.columns(CARRY_PARAM_ID),
+    ID_COLUMN_NAME,
   )
 }
 
@@ -243,5 +300,9 @@ export function carrying(
 ): <V extends { attributes: TableValue }>(value: V) => V {
   const carry = ctx.columns(CARRY_PARAM_ID)
   const neurons = ctx.input('neurons')
-  return (value) => carriedGeometry(value, neurons, carry)
+  return (value) => carriedGeometry(value, neurons, carry, ID_COLUMN_NAME)
+}
+
+function sameOrder(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((name, i) => name === b[i])
 }
