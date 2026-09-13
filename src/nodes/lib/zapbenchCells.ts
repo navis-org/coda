@@ -1,7 +1,7 @@
 /**
  * ZapBench cell ids as they travel between nodes, and the vocabulary the ZapBench nodes share.
  *
- * **A row label is the list of cells it averages, joined with `+`.** `ZapBench Recording` names a
+ * **A row label is the list of cells it averages, joined with `+`.** `ZapBench Traces` names a
  * row at a reduced scale `40211+40212`, and `ZapBench to Neurons` reads the same string back, so
  * the grammar has one owner: `cellLabel` writes it and `cellIdsOf` reads it, side by side. Carrying
  * the members in the label is what lets a Heatmap selection reach the neurons with nothing
@@ -56,7 +56,7 @@ export function cellIdsOf(cell: CellValue): number[] | undefined {
 /**
  * A pasted list of cell ids: separated the way `Input IDs` separates a pasted id list (`idList.ts`'
  * `SEPARATORS`, so `[1203, 4410]` out of a Python session reads the same in both fields), `a-b` for
- * an inclusive range, and a Recording row label read as its members.
+ * an inclusive range, and a ZapBench Traces row label read as its members.
  *
  * What cannot be read is handed back rather than skipped, so both stages can name it — a list that
  * silently lost `12O4` reads as a cell with no trace.
@@ -97,7 +97,7 @@ function some(items: readonly (string | number)[]): string {
 function unreadableCells(tokens: readonly string[]): string {
   return (
     `Not cell ids: ${some(tokens)}. List whole numbers, ranges like 100-200, or row labels ` +
-    `from ZapBench Recording.`
+    `from ZapBench Traces.`
   )
 }
 
@@ -106,7 +106,7 @@ const BODY_ID_FLOOR = 1_000_000
 
 /**
  * The refusal for ids the release has no cell for — naming a neuron id for what it is, since the
- * likeliest way to get one is a Heatmap fed by `ZapBench Traces`, whose rows *are* neuron ids.
+ * likeliest way to get one is a Heatmap fed by `Neurons to ZapBench Traces`, whose rows *are* neuron ids.
  */
 export function cellsOutsideRelease(ids: readonly number[]): string {
   return (
@@ -141,7 +141,7 @@ const EMPTY_LIST: CellListRead = { ids: [], cells: [], issues: [] }
 
 /**
  * Recent lists by their text. More than one, because `validate` runs for **every** node on every
- * graph mutation: a Recording listing cells beside a ZapBench to Neurons with an empty field
+ * graph mutation: a ZapBench Traces card listing cells beside a ZapBench to Neurons with an empty field
  * evicted a single slot on every pass, re-parsing the long list each time. Insertion order is
  * the eviction order.
  */

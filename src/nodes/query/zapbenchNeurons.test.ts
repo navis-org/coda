@@ -150,7 +150,7 @@ describe('a column that is not cells', () => {
       def.validate!({ params: { ...defaultParams(def), ids: '3, abc' }, inputs: {} } as never),
     ).toEqual([
       'Not cell ids: abc. List whole numbers, ranges like 100-200, or row labels from ZapBench ' +
-        'Recording.',
+        'Traces.',
     ])
   })
 })

@@ -60,7 +60,7 @@ const NO_EMITTER: Record<string, string> = {
     'result yet: the morphology emitters are written against neuprint-python, so a cell binding ' +
     'a CloudVolume would sit above a Meshes cell that is itself a TODO for this backend. One ' +
     'emitter is worth writing when the pair is.',
-  'zapbench.traces':
+  'zapbench.neuronTraces':
     'ZapBench traces. The faithful route is short and obvious \u2014 `tensorstore.open` against ' +
     'the same `gs://zapbench-release/\u2026/traces/` zarr3 kvstore zapbench\u2019s own ' +
     '`constants.SPECS` names, then `ds[t0:t1, ids - 1]` \u2014 and the off-by-one it would have ' +
@@ -72,17 +72,17 @@ const NO_EMITTER: Record<string, string> = {
     '`out.topology` argues must be checked by *running* it against the node rather than read ' +
     'and believed \u2014 both exporters have silently disagreed with the canvas before. Until ' +
     'a probe runs the emitted cell, no emitter is a better answer than one that looks right.',
-  'zapbench.recording':
-    'Every ZapBench cell, or a listed set \u2014 see `zapbench.traces`, whose two reasons apply ' +
+  'zapbench.traces':
+    'Every ZapBench cell, or a listed set \u2014 see `zapbench.neuronTraces`, whose two reasons apply ' +
     'unchanged: tensorstore would be a fourth dependency, and a cell restating the condition ' +
     'bounds, the pyramid level and the permutation that names a downsampled row is exactly what ' +
     'has to be checked by running it. The permutation is the sharper half here: a notebook that ' +
     'labelled a row by the wrong cells would still draw a perfectly plausible heatmap.',
   'zapbench.neurons':
     'ZapBench cells to fish2 neurons. The lookup itself is one `neu.fetch_custom` with ' +
-    '`n.zapbenchId IN [...]`, but its cells arrive from a selection on a ZapBench Recording ' +
+    '`n.zapbenchId IN [...]`, but its cells arrive from a selection on a ZapBench Traces ' +
     'heatmap, and that node has no emitter \u2014 so the cell would read a variable nothing ' +
-    'binds. Worth writing together with the Recording emitter, not before it.',
+    'binds. Worth writing together with the ZapBench Traces emitter, not before it.',
   'note.text': 'An annotation. It becomes a markdown cell, which the walk does directly.',
   'flow.forEach':
     'A loop, and the one refusal here that is about the *shape* of the output rather than about ' +

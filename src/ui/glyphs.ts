@@ -387,7 +387,7 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
    * transients are offset rather than aligned, because a column of simultaneous spikes would
    * read as a stimulus rather than as several neurons.
    */
-  'zapbench.traces': [
+  'zapbench.neuronTraces': [
     ['path', { d: 'M3 6h4l1.5-3L11 6h10' }],
     ['path', { d: 'M3 12h9l1.5-3.4L16 12h5' }],
     ['path', { d: 'M3 18h5l1.5-2.6L11 18h10' }],
@@ -397,7 +397,7 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
    * selection of it. The frame is the matrix's own outline, which is what makes this the
    * overview a selection is drawn from.
    */
-  'zapbench.recording': [
+  'zapbench.traces': [
     ['rect', { x: '3', y: '4', width: '18', height: '16', rx: '1.5' }],
     ['path', { d: 'M5.5 9h3.5l1.3-2.6L12.6 9h5.9' }],
     ['path', { d: 'M5.5 13h6.5l1.3-2.6L15.6 13h2.9' }],

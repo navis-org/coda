@@ -8,7 +8,7 @@
  * had nowhere to go: a `Cut Tree` cluster, a `Reduce Matrix` row of statistics, a `Group By`
  * total, an uploaded CSV. Colouring a scene by any of them was unwireable.
  *
- * `ZapBench Traces → Reduce Matrix → Attach Attributes → 3D View`, coloured by `zap_mean`, is
+ * `Neurons to ZapBench Traces → Reduce Matrix → Attach Attributes → 3D View`, coloured by `zap_mean`, is
  * the chain this was written for. `Skeletons ▸ Carry fields` could not do it: its port is
  * `T.neurons()` and a matrix reduction is a `table`.
  *
@@ -190,7 +190,7 @@ registerNode({
    * Deliberately **nothing about the key picker**: `validateColumnParams` runs for every node on
    * every mutation and already says `Column "neuronId" is gone — using "label"` for exactly the
    * rule-3 substitution this node's one trap is. A line of its own would be the same fact twice,
-   * which is `out.scatter`'s and `out.barChart`'s recorded rule — and `zapbench.traces`, which
+   * which is `out.scatter`'s and `out.barChart`'s recorded rule — and `zapbench.neuronTraces`, which
    * this file once claimed as precedent for writing it, in fact declines it for that reason and
    * adds only what the framework cannot say.
    */
@@ -208,7 +208,7 @@ registerNode({
      * declared default the schema lacks, so a table keyed on `label` silently matches on
      * whatever comes first — a real answer, plausibly shaped, and empty. It cannot be an error
      * because a column of ids under another name is perfectly legitimate, and nothing at edit
-     * time tells that apart from the substitution. `zapbench.traces` carries the same line for
+     * time tells that apart from the substitution. `zapbench.neuronTraces` carries the same line for
      * the same rule.
      */
     return []

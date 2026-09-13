@@ -172,7 +172,7 @@ neuron — Filter, Sort, Join, Build Network, every colour encoding — takes a 
 
 The question that forced it is ZapBench's. A trace matrix is 3,000 neurons against 7,879
 timesteps; what somebody wants from it is one number per neuron to colour a 3D scene by, and
-before this node the only thing downstream of it was the Heatmap. `ZapBench Traces → Reduce
+before this node the only thing downstream of it was the Heatmap. `Neurons to ZapBench Traces → Reduce
 Matrix → Join → Skeletons` is that chain. Nothing in the node knows what a trace is: a
 Similarity, Adjacency, NBLAST or Pivot matrix reduces identically, which is what `Exclude
 diagonal` is for.
@@ -592,7 +592,7 @@ difference: the right-hand key is a picker rather than always `neuronId`.
 It exists because everything a *graph computes* lived in tables with nowhere to go. A collection's
 attributes come from its source, and a `Cut Tree` cluster, a `Reduce Matrix` statistic, a
 `Group By` total and an uploaded CSV are all typed `table`, which `Carry fields`' `T.neurons()`
-port refuses. `ZapBench Traces → Reduce Matrix → Attach Attributes → 3D View`, coloured by
+port refuses. `Neurons to ZapBench Traces → Reduce Matrix → Attach Attributes → 3D View`, coloured by
 `zap_mean`, is the chain it was written for, and it was unwireable before.
 
 **Why not simply widen the param's port.** Because the fetch is the wrong place for a table the
@@ -654,7 +654,7 @@ be a column of numbers and joins nothing while the card looks configured. A line
 written here first and then deleted: `validateColumnParams` runs for every node on every graph
 mutation and already emits exactly this case, `Column "neuronId" is gone — using "label"`, so the
 node's own sentence was the second badge for one fact that `out.scatter` and `out.barChart` have
-both recorded rules against — and `zapbench.traces`, which the first draft cited as precedent for
+both recorded rules against — and `zapbench.neuronTraces`, which the first draft cited as precedent for
 writing it, in fact declines it for that reason and adds only what the framework cannot say. The
 test asserts it through `validateColumnParams` instead, so the coverage survives the node not
 duplicating it.
@@ -663,7 +663,7 @@ Worth naming the generalisation that is actually missing, since three nodes now 
 `ColumnParam` flag meaning *this default is a decision, not a suggestion* — skip rule 3, keep the
 stored name, fail in `evaluate`. `resolveColumn`'s own doc frames rule 3 as being for a default
 that is "a suggestion rather than a decision", and `excludeIds` is the precedent for declaring
-that meaning at the param. The tell is `zapbench.traces` needing three separate answers for one
+that meaning at the param. The tell is `zapbench.neuronTraces` needing three separate answers for one
 trap.
 
 **The exporters diverge on the kind, through one shared predicate.** A synapse cloud is a frame
@@ -4212,9 +4212,9 @@ eighteen-digit root id *is* text by the time anything in Coda can see it, and a 
 **pandas** dtype (`Int64` there) for the same reason from the other side — both are true of their
 own runtime, and a notebook claiming Coda's answer would describe a frame the reader does not have.
 
-## ZapBench Traces: a join across two modalities of one specimen
+## Neurons to ZapBench Traces: a join across two modalities of one specimen
 
-`zapbench.traces` reads the released ZapBench calcium-imaging traces for whichever neurons in a
+`zapbench.neuronTraces` reads the released ZapBench calcium-imaging traces for whichever neurons in a
 fish2 table carry a `zapbenchId`. The array facts, the cost model and the id measurement are in
 [backends.md](backends.md#zapbench-a-released-zarr-array-not-a-server); what belongs here is what
 the node decides.
@@ -4358,11 +4358,11 @@ The unit cached is one neuron's windowed trace (31.5 kB over the whole recording
 to a set of fifty reads one block and answers the other forty-nine from memory. Pinned by a test
 that grows a selection and asserts which block was read.
 
-## ZapBench Recording and ZapBench to Neurons: the way back from activity
+## ZapBench Traces and ZapBench to Neurons: the way back from activity
 
-`ZapBench Traces` starts from neurons. These two go the other way: `zapbench.recording` draws the
+`Neurons to ZapBench Traces` starts from neurons. These two go the other way: `zapbench.traces` draws the
 recording, a Heatmap selection names a band of cells, and `zapbench.neurons` looks up the fish2
-neurons carrying them — `Recording → Heatmap ▸ Selected Rows → ZapBench to Neurons → Skeletons`,
+neurons carrying them — `ZapBench Traces → Heatmap ▸ Selected Rows → ZapBench to Neurons → Skeletons`,
 with nothing to set on the last three. The array facts behind both are in
 [backends.md](backends.md#the-pyramid-a-row-is-a-bin).
 
@@ -4370,7 +4370,7 @@ with nothing to set on the last three. The array facts behind both are in
 
 `Every cell` reads the whole population over a window at a **Scale** — the release's own `s1` and
 `s2`, which average 2 × 2 and 4 × 4 blocks of neighbouring cells *and* timesteps. `Cells I list`
-reads typed ids at full resolution through `fetchTraces`, the reader `ZapBench Traces` uses. Scale
+reads typed ids at full resolution through `fetchTraces`, the reader `Neurons to ZapBench Traces` uses. Scale
 is hidden for a list on purpose: a listed cell is cheap at full scale by the transposed route, and
 at a reduced one it would come back averaged with neighbours nobody listed.
 
@@ -4424,7 +4424,7 @@ Four more decisions on `ZapBench to Neurons`:
   substitutes a first compatible column for a missing `label`. A neuron id wired under another name
   meets the **range refusal** — out of range by four orders of magnitude, so the message says that
   is what they look like and names `Selected to Neurons`. The likeliest way there is a Heatmap fed
-  by `ZapBench Traces`, whose rows *are* neuron ids.
+  by `Neurons to ZapBench Traces`, whose rows *are* neuron ids.
 - **Unmatched cells are counted, never an error.** 62,178 of 71,721 cells carry a match, so a
   quarter-scale selection routinely names cells with none; a count is what tells that apart from a
   lookup that half failed. A dataset whose neurons carry no `zapbenchId` at all *is* refused, since
@@ -4433,7 +4433,7 @@ Four more decisions on `ZapBench to Neurons`:
   joined by `concatBatches` (now in `tableOps.ts`) — the measured `IN`-list size, borrowed rather
   than re-measured for this query.
 
-Neither node has an exporter: `zapbench.recording` for `zapbench.traces`' reasons plus the
+Neither node has an exporter: `zapbench.traces` for `zapbench.neuronTraces`' reasons plus the
 permutation a notebook would have to apply, and `zapbench.neurons` because its cells arrive from a
 node that has none.
 

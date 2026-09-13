@@ -73,7 +73,7 @@ describe('the node', () => {
   it('arrives computing the mean, since a card that does nothing says nothing', () => {
     const { out } = run({})
     expect(columnNames(out.schema)).toEqual(['label', 'mean'])
-    // The second neuron's row is all NaN — the shape `ZapBench Traces` produces for a neuron
+    // The second neuron's row is all NaN — the shape `Neurons to ZapBench Traces` produces for a neuron
     // with no id under `unmatched: null`, which is what this node has to leave as an absence.
     expect(out.data.mean).toEqual([2, null])
   })

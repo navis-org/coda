@@ -175,11 +175,11 @@ the undo stack alongside it).
   the product of two independently-resolved column pickers. This is the shape of the 9 GB
   incident in [gotchas.md](gotchas.md), and note that the _fix_ for that was `resolveColumn`
   keeping a chosen column, not this check.
-- `zapbench.traces`' matrix — one flat `Float64Array` of `neurons × timesteps`. It was priced at
+- `zapbench.neuronTraces`' matrix — one flat `Float64Array` of `neurons × timesteps`. It was priced at
   four times this shape while the node also emitted a long table of four `CellValue[]` columns,
   which was always the binding constraint; removing that port moved the ceiling out by about 4×,
   from roughly 2,000 neurons over the whole recording to 8,000.
-- `zapbench.recording`'s matrix — every cell × the window's level steps, so its shape is a function
+- `zapbench.traces`'s matrix — every cell × the window's level steps, so its shape is a function
   of `Scale` and `Condition` alone and `validate` states the refusal on the card before a Run —
   `crashFloorIssue`, the non-throwing half of `refuseIfOverCrashFloor`, so both stages make one
   comparison in one wording. Full scale over the whole recording is 4.2 GB and half scale

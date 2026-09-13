@@ -8,7 +8,7 @@
  *
  * Written for the question a ZapBench trace matrix raises and could not answer: 3,000 neurons
  * against 7,879 timesteps draws a heatmap, and what somebody wants from it is one number per
- * neuron to colour a 3D scene by. `ZapBench Traces → Reduce Matrix → Join → Skeletons` is that
+ * neuron to colour a 3D scene by. `Neurons to ZapBench Traces → Reduce Matrix → Join → Skeletons` is that
  * chain, and before this node the only thing downstream of a trace matrix was the picture.
  *
  * It is not trace-specific and nothing here knows what a trace is: a Similarity, Adjacency,

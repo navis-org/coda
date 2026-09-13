@@ -987,7 +987,7 @@ Area-specific — the rule, then the doc that holds why:
   (`TraceRequest.onCost`), or it announces 554 MB for a read that fetches 1.1 MiB.
   See [docs/backends.md](docs/backends.md).
 - **A ZapBench row at a reduced scale is a bin, and its label is the list of cells it averages.**
-  `zapbench.recording` reads every cell at a `Scale` — the release's own `s1`/`s2` — and names a row
+  `zapbench.traces` reads every cell at a `Scale` — the release's own `s1`/`s2` — and names a row
   `40211+40212+…` (`nodes/lib/zapbenchCells.ts`, `cellLabel` beside `cellIdsOf`), so
   `Heatmap ▸ Selected Rows → zapbench.neurons` stays exact without the second node knowing the
   scale; a scale param there would be a second copy of the first card's decision. Four measured
@@ -1077,7 +1077,7 @@ Area-specific — the rule, then the doc that holds why:
   And **`validate` says nothing about the picker**: `validateColumnParams` already names a rule-3
   substitution (`Column "neuronId" is gone — using "label"`) for every node on every mutation, so
   a line here would be `out.scatter`'s recorded second-badge — which is also why
-  `zapbench.traces` declines it and adds only what the framework cannot say. The exporters diverge on **kind**, through
+  `zapbench.neuronTraces` declines it and adds only what the framework cannot say. The exporters diverge on **kind**, through
   `asFrame` in `export/neutral.ts` — one predicate, `stackPlan` having asked it inline for the
   same reason before this node asked it twice more. Skeletons and meshes emit the param's own
   cell; a synapse cloud is a frame, which R handles with one extra argument (`df[, "x"] <- v`

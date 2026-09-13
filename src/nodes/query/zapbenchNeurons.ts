@@ -1,7 +1,7 @@
 /**
  * ZapBench to Neurons: the fish2 neurons matched to a set of ZapBench cells.
  *
- * The other half of the way back from activity to anatomy. `ZapBench Recording` draws cells, a
+ * The other half of the way back from activity to anatomy. `ZapBench Traces` draws cells, a
  * Heatmap selection or a pasted list names some of them, and this looks up the EM neurons carrying
  * those cells' `zapbenchId` — so `Selected Rows → ZapBench to Neurons → Skeletons` wires with
  * nothing to set, the picker defaulting to the `label` column a selection carries.
@@ -20,7 +20,7 @@
  * discovered schema says the column is `i64`; nothing here has to ask for it.
  *
  * **A body id is refused, not searched for.** The likeliest wrong wire is a Heatmap fed by
- * `ZapBench Traces`, whose rows are neuron ids: out of range by four orders of magnitude, so the
+ * `Neurons to ZapBench Traces`, whose rows are neuron ids: out of range by four orders of magnitude, so the
  * message says that is what they look like and names `Selected to Neurons`.
  *
  * **Rows follow the cells' order.** The source answers in its own; a selection has one.
@@ -59,7 +59,7 @@ registerNode({
   description:
     'The fish2 neurons matched to ZapBench cells — from a Heatmap selection or a list.',
   guide:
-    'Looks up the fish2 neurons whose zapbenchId matches a set of ZapBench cells, so a selection on a ZapBench Recording heatmap can go on to Skeletons or Meshes. Wire the Heatmap’s Selected Rows into Cells — the label column is read by default, and a downsampled row’s label lists every cell it averages, so all of them are looked up — or type cell ids. About one ZapBench cell in eight has no EM neuron; those are counted, not errors. Wire it to a fish2 Dataset: no other connectome carries zapbenchId.',
+    'Looks up the fish2 neurons whose zapbenchId matches a set of ZapBench cells, so a selection on a ZapBench Traces heatmap can go on to Skeletons or Meshes. Wire the Heatmap’s Selected Rows into Cells — the label column is read by default, and a downsampled row’s label lists every cell it averages, so all of them are looked up — or type cell ids. About one ZapBench cell in eight has no EM neuron; those are counted, not errors. Wire it to a fish2 Dataset: no other connectome carries zapbenchId.',
   cost: 'expensive',
 
   inputs: [
@@ -126,7 +126,7 @@ registerNode({
     if (unparsed > 0 && ids.length === 0) {
       throw new Error(
         `"${columnName}" holds no ZapBench cell ids. Pick the column holding them — the label ` +
-          `of a ZapBench Recording selection, or a zapbenchId.`,
+          `of a ZapBench Traces selection, or a zapbenchId.`,
       )
     }
 
