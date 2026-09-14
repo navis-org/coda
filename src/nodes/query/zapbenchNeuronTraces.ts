@@ -159,7 +159,7 @@ registerNode({
   description:
     'Calcium-imaging traces from ZapBench for the fish2 neurons that carry a zapbenchId.',
   guide:
-    'Reads the released ZapBench activity traces for whichever neurons in the input table carry a zapbenchId — some but not all of fish2 does — and hands them on as a matrix — for the Heatmap, or for Reduce Matrix to get one number per neuron. The thing to know is what a request costs: neurons sit on the contiguous axis of the published array, so the bill is set by how many 512-neuron blocks your selection lands in rather than by how many neurons you asked for, at roughly 16 MiB a block over the whole recording. Narrowing Condition to one of the nine stimulus blocks is the only thing that makes it cheaper — subsampling time does not, because a chunk already spans 512 timesteps.',
+    'Reads the released ZapBench calcium traces for the neurons in a fish2 table that carry a zapbenchId, as a matrix for the Heatmap or Reduce Matrix. A read is priced in 512-cell blocks of the array, not in neurons — about 16 MiB a block over the whole recording — and Condition is the only setting that makes it smaller.',
   cost: 'expensive',
   // The session cache in `data/zapbench/traces.ts` is in memory, not `loadCachedTable`'s
   // IndexedDB layer, so this deliberately does not declare `dataCache`: the Clear Cache button
@@ -191,7 +191,7 @@ registerNode({
       label: 'Label by',
       from: 'in',
       default: 'neuronId',
-      help: 'What names each row of the matrix. Data rather than decoration: it is what a Heatmap filter matches and what Similarity Matrix groups by.',
+      help: 'What names each row of the matrix. Data rather than decoration: it is what a Heatmap filter matches and what Reduce Matrix names its rows by.',
     },
     {
       id: 'condition',

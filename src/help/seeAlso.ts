@@ -98,6 +98,8 @@ const RELATED: readonly (readonly string[])[] = [
   ['neuron.splitNeurons', 'core.filterTable'],
   // Same rows, different shape.
   ['core.groupBy', 'core.pivot', 'core.join', 'core.stack'],
+  // A matrix to a table: Pivot run backwards, and Group By over lines instead of keys.
+  ['core.reduceMatrix', 'core.pivot', 'core.groupBy'],
   // Choosing by hand rather than by predicate, and where you look at the result.
   ['core.editTable', 'core.selectOne', 'out.table'],
 
@@ -132,6 +134,8 @@ const RELATED: readonly (readonly string[])[] = [
   // --- geometry -------------------------------------------------------------
   // The three things a dataset will hand you in space, and taking a collection of them apart.
   ['neuron.skeletons', 'neuron.meshes', 'neuron.roiMeshes', 'neuron.splitNeurons'],
+  // Columns onto geometry after the fetch, and the two things that read them.
+  ['neuron.attachAttributes', 'neuron.skeletons', 'neuron.splitNeurons'],
   // Both move geometry through a registration; Mirror is Transform with the sides swapped.
   ['neuron.mirror', 'neuron.xform'],
   // The two ways to look at neurons in space: Coda's own scene, and the viewer the field uses.
@@ -147,6 +151,10 @@ const RELATED: readonly (readonly string[])[] = [
   // --- looking at it --------------------------------------------------------
   // A table, a chart of two of its columns, and a picture of the whole of it.
   ['out.table', 'out.scatter', 'out.heatmap'],
+
+  // --- activity -------------------------------------------------------------
+  // ZapBench both ways round, and the Heatmap a selection of cells is made on.
+  ['zapbench.traces', 'zapbench.neuronTraces', 'zapbench.neurons', 'out.heatmap'],
 
   // --- running it several times ---------------------------------------------
   // The pair: nothing else uses either.

@@ -114,12 +114,7 @@ registerNode({
   category: 'transform',
   description: 'Join a table’s columns onto skeletons, meshes or points.',
   guide:
-    'Joins a table onto the attribute table that geometry carries, matched on a column you pick ' +
-    '— which is what makes anything a graph computes reachable from a scene. A Cut Tree cluster, ' +
-    'a Reduce Matrix statistic, a Group By total or an uploaded CSV all live in tables the ' +
-    'Skeletons node’s own Carry fields cannot see, because that port takes a neuron table. With ' +
-    'no columns picked it carries every column; an item the table does not mention keeps its ' +
-    'geometry and carries nulls.',
+    'Joins a table onto the attributes that skeletons, meshes or points carry, matched on a column you pick, so what a graph computes (a Cut Tree cluster, a Reduce Matrix statistic, an uploaded CSV) can colour or split a scene. With no columns picked it carries every column; an item the table does not mention keeps its geometry and carries nulls.',
   cost: 'cheap',
 
   /*

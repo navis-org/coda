@@ -105,7 +105,7 @@ registerNode({
   description:
     'Activity for every ZapBench cell, or for cells you list — the overview to select cells from.',
   guide:
-    'Reads the ZapBench calcium-imaging recording for every cell at once, or for a list of cell ids, as a matrix for the Heatmap. It is the way back from activity to anatomy: shift-drag a band of rows on the expanded Heatmap and wire Selected Rows into ZapBench to Neurons. Rows are cells rather than neurons, and about one cell in eight has no EM match. Every cell is a lot of data, so Scale averages 2 × 2 or 4 × 4 blocks of neighbouring cells and timesteps — each row label then lists the cells it averages, which is what keeps a selection exact — and Condition narrows the window. The default, quarter scale over the whole recording, reads about 144 MB.',
+    'Reads the ZapBench recording starting from its cells: every cell at a reduced Scale, or listed cell ids at full resolution, as a matrix for the Heatmap. Shift-drag rows on the expanded Heatmap and wire Selected Rows into ZapBench to Neurons. Rows are in activity order, and a row’s label lists the cells it averages. Quarter scale over the whole recording reads about 144 MB.',
   cost: 'expensive',
 
   inputs: [],

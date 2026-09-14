@@ -59,7 +59,7 @@ registerNode({
   description:
     'The fish2 neurons matched to ZapBench cells — from a Heatmap selection or a list.',
   guide:
-    'Looks up the fish2 neurons whose zapbenchId matches a set of ZapBench cells, so a selection on a ZapBench Traces heatmap can go on to Skeletons or Meshes. Wire the Heatmap’s Selected Rows into Cells — the label column is read by default, and a downsampled row’s label lists every cell it averages, so all of them are looked up — or type cell ids. About one ZapBench cell in eight has no EM neuron; those are counted, not errors. Wire it to a fish2 Dataset: no other connectome carries zapbenchId.',
+    'Looks up the fish2 neurons whose zapbenchId matches a set of ZapBench cells, for Skeletons or Meshes. Wire a Heatmap’s Selected Rows into Cells — a downsampled row’s label is read as every cell it averages — or type cell ids. About one cell in eight has no EM neuron; those are counted, not errors. Wire it to a fish2 Dataset.',
   cost: 'expensive',
 
   inputs: [

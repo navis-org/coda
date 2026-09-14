@@ -48,13 +48,7 @@ registerNode({
   category: 'transform',
   description: 'Aggregate a matrix’s rows or columns into one table row each.',
   guide:
-    'Turns a matrix into a table with one row per matrix row — or per column — carrying whichever ' +
-    'statistics you tick: mean, median, sd, min, max, sum, and n. This is the way out of a matrix ' +
-    'for everything that is not a picture: a trace or similarity matrix has no per-neuron number ' +
-    'until something reduces it, and a table has one you can sort, filter, join onto a neuron ' +
-    'table and colour a 3D scene by. Note that the control names the axis that *survives* — ' +
-    '“each row, across its columns” — and that non-finite cells are skipped, so a neuron whose ' +
-    'row is all NaN comes out null rather than zero.',
+    'Turns a matrix into a table with one row per matrix row, or per column, carrying the statistics you tick: mean, median, sd, min, max, sum, n. It is the way from a trace or similarity matrix to a per-neuron number you can sort, join or colour a scene by. Non-finite cells are skipped, so an all-NaN row comes out null rather than zero.',
   cost: 'cheap',
 
   inputs: [{ id: 'in', label: 'Matrix', type: T.matrix() }],
