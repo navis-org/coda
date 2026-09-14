@@ -1858,6 +1858,12 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   already excused them, and the plan is **held rather than applied** so the turn is still one
   commit. That round measured **6/10 against 6/10**; it ships for the wire nothing refuses, and
   wants re-measuring on Sonnet.
+- [docs/mcp.md](docs/mcp.md) — the seam with `navis-org/coda-mcp`: `src/mcp/index.ts` is built
+  into `dist/mcp/v1/coda.js` and deployed with the site, and the server downloads it. **Every export
+  there is a public interface** with installed consumers in another repository — a breaking change
+  is a `v2` directory. Also why the server is offline by default (asking the build for its catalogue
+  fires requests, and so does checking any real dataset node), and why the hosted server hands out
+  short links rather than packed ones: a model has to retype a link, and base64 does not survive it.
 - [docs/zoo.md](docs/zoo.md) — the Coda Zoo, and why its index is a committed file rather
   than an API listing. Read before changing `ZooIndex`.
 - [docs/analytics.md](docs/analytics.md) — the GoatCounter beacon: what it collects, the two

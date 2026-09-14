@@ -10,7 +10,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build -c vite.mcp.config.ts",
+    "build:mcp": "vite build -c vite.mcp.config.ts",
     "dev": "vite",
     "export:check": "vitest run src/export && python3 scripts/check-export.py && python3 scripts/probe-py-helpers.py && Rscript scripts/check-export.R",
     "export:golden": "UPDATE_GOLDEN=1 vitest run src/export",

@@ -36,6 +36,9 @@ declare module 'draco3d/draco_decoder_nodejs.js' {
 /** Injected by vite's `define` from package.json — see `vite.config.ts`. */
 declare const __APP_VERSION__: string
 
+/** A commit in the MCP build, `dev` in every other — see `BUILD_ID` in `vite.mcp.config.ts`. */
+declare const __BUILD_ID__: string
+
 /**
  * The two `import.meta.env` fields this project uses, declared for the same reason `*?url` is
  * declared above rather than pulling in `vite/client`.

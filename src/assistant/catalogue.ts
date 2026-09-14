@@ -462,7 +462,8 @@ function producedColumns(def: NodeDefinition): string[] {
   return carriesLines(nodeTypes(inferGraph(probe), 'probe').outputs)
 }
 
-function renderNode(def: NodeDefinition, detail: CatalogueDetail): string {
+/** One node's catalogue entry. Exported for `src/mcp`, which serves a single entry at `full`. */
+export function renderNode(def: NodeDefinition, detail: CatalogueDetail): string {
   const lines: string[] = []
   lines.push(`## ${def.type} — ${def.label} (${def.category}, ${def.cost})`)
   if (def.description) lines.push(def.description)

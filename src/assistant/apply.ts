@@ -32,7 +32,7 @@ import {
   removeNodes,
   updateNode,
 } from '../core/graph'
-import type { IssueSeverity } from '../core/inference'
+import type { InferenceResult, IssueSeverity } from '../core/inference'
 import { checkConnection, inferGraph, nodeTypes } from '../core/inference'
 import type { NodeDefinition, ParamDef, ParamValue, ParamValues } from '../core/node'
 import { configurableParams, defaultParams, findParam, validateParamValue } from '../core/node'
@@ -317,7 +317,7 @@ export function applyPlan(graph: CodaGraph, plan: AssistantPlan): ApplyResult {
     mark(wire.to.node)
   }
 
-  return { ok: true, graph: next, created, warnings: collectWarnings(next, touched) }
+  return { ok: true, graph: next, created, warnings: collectWarnings(next, { scope: touched }) }
 }
 
 // ---------------------------------------------------------------------------
@@ -636,17 +636,24 @@ function positionsFor(
 // ---------------------------------------------------------------------------
 
 /**
- * Edit-time issues on the nodes this plan touched.
+ * Edit-time issues on the nodes in `scope`, or on every node when there is none.
  *
- * Scoped to what was touched on purpose: a graph that already had an unset picker three nodes
- * away did not acquire it here, and reporting it alongside the edit reads as the assistant
- * having broken something.
+ * A plan scopes it to what the plan touched, on purpose: a graph that already had an unset picker
+ * three nodes away did not acquire it here, and reporting it alongside the edit reads as the
+ * assistant having broken something.
+ *
+ * Unscoped, it is `src/mcp`'s `check`. One loop for both, because the MCP build's first version was a
+ * loop of its own and already named a card differently — the drift `concernsFrom`'s header records
+ * between two walks. `inference` lets a caller that needs the pass for itself hand it over.
  */
-function collectWarnings(graph: CodaGraph, touched: ReadonlySet<string>): ApplyWarning[] {
-  const inference = inferGraph(graph)
+export function collectWarnings(
+  graph: CodaGraph,
+  options: { scope?: ReadonlySet<string>; inference?: InferenceResult } = {},
+): ApplyWarning[] {
+  const inference = options.inference ?? inferGraph(graph)
   const warnings: ApplyWarning[] = []
   for (const node of graph.nodes) {
-    if (!touched.has(node.id)) continue
+    if (options.scope && !options.scope.has(node.id)) continue
     const label = node.title ?? getNodeDef(node.type)?.label ?? node.type
     for (const issue of nodeTypes(inference, node.id).issues) {
       warnings.push({

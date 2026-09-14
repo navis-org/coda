@@ -83,6 +83,9 @@ export default tseslint.config(
       // Python only because `umap-learn` needs numba and Pyodide has none; that is a fact about
       // the runtime available, not a reason for it to sit closer to the UI than the others.
       'src/umap/**/*.ts',
+      // The build the MCP server runs in Node. It has no DOM to reach for, so an import of the
+      // UI or the store would build green and throw on load in somebody else's process.
+      'src/mcp/**/*.ts',
     ],
     rules: {
       'no-restricted-imports': [

@@ -306,7 +306,9 @@ export default defineConfig({
     seo(),
     stripComments(),
   ],
-  define: { __APP_VERSION__: JSON.stringify(version) },
+  // `__BUILD_ID__` belongs to the MCP build (`vite.mcp.config.ts`). Defined here too, so the app and
+  // the test suite can read it plainly: nothing built by this config is a build the id could name.
+  define: { __APP_VERSION__: JSON.stringify(version), __BUILD_ID__: JSON.stringify('dev') },
   // Relative base so the built bundle works from a subpath (GitHub Pages) as well as root.
   base: './',
   /*
