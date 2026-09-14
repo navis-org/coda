@@ -1860,12 +1860,77 @@ Two rules now keep it at one, and both were verified with the same instrumentati
   knows, about the same two.
 - **A card does not draw while the overlay owns its node.** The overlay is modal and covers the
   canvas, so nothing behind it is visible; the card's `showPreview` takes `expandedNodeId` into
-  account. The cost is a remount when the overlay closes, which re-frames the card's camera —
-  the right way round, since somebody who has just been working full size is not also curating
-  the thumbnail behind it.
+  account. For the 3D viewers that no longer costs the scene: the renderer is handed back to the
+  card rather than rebuilt (below). The network viewer still remounts, restoring its layout and
+  camera from `layoutMemo`.
 
 Both are DOM facts, so `liveRenderers.test.tsx` covers them in jsdom even though the thing they
 are protecting against is invisible there.
+
+### A 3D renderer is handed between surfaces, not rebuilt
+
+**Standing down kept the count at one, and every switch still paid for a whole renderer.** The
+card and the overlay are two mounts, so expanding a node destroyed one WebGL context and built
+another: every geometry and its vertex normals, every upload, every program, and every mesh's pick
+tree. Measured with `pnpm probe:viewer3d-switch` on 40 LC10 meshes from male-CNS (M3 Max, ANGLE
+Metal, dev server), each direction alike:
+
+| scene | main thread busy | longest task | contexts | uploaded | programs |
+| --- | --- | --- | --- | --- | --- |
+| 1.3 M triangles, before | ~270 ms | ~150 ms | 1 | 31 MB | 10 |
+| 7.7 M triangles, before | ~1.06 s | ~850 ms | 1 | 180 MB | 10 |
+| 7.7 M triangles, picking on, before | ~2.8 s | ~870 ms | 1 | 180 MB | 10 |
+| 7.7 M triangles, picking on, **after** | **~45 ms** | **none** | **0** | **0** | **0** |
+
+Before, normals were ~780 ms of the 7.7 M switch and pick trees another ~1.6 s. What is left
+after is React re-rendering the chrome (dev mode) and one `setSize` for the new box.
+
+**Caching the CPU half was the alternative and was measured first.** Normals are 6 B per triangle
+and pick trees another 11–13, so keeping them across mounts would have cost 46 MB — 143 MB with
+picking — beside 134 MB of mesh data, and still re-uploaded and recompiled on every switch. Keeping
+the renderer costs nothing extra while a surface shows the node, and a parked one for 5 s after.
+
+**What is kept is the renderer core, never the viewer component.** `PersistentCanvas` replaces
+React Three Fiber's `<Canvas>` — a thin wrapper around `createRoot(canvas)` that measures, calls
+`configure({ size })` and `render(children)` on every commit — with one whose root, canvas and
+event host live in `persistentRoots.ts` under a key. The next surface renders the same element tree
+into the same root, React Three Fiber reconciles it in place, and every memo in the scene survives.
+The whole-viewer version (an app-level host portalling the viewer into whichever surface is live)
+was designed and rejected before a line of it was written: React events follow the component tree,
+and React Flow's click-to-select, double-click and node context menu are React props on the node
+wrapper, as is the card's own double-click to expand. A portal owned elsewhere would draw correctly
+and stop answering all of them.
+
+Four rules, each silent when wrong:
+
+- **No context bridge.** `<Canvas>` forwards DOM-side contexts into the scene through a component
+  minted per instance, so a new surface would hand the root a new component type at the top of
+  its tree and remount everything under it — the one cost this exists to avoid. Nothing in the
+  scene reads a DOM-side context; one that starts to will quietly get its default.
+- **The key names the workflow as well as the node** (`scopedKey`, off the `WorkflowScope` context `App` provides once; the camera memo uses the same
+  key), because two documents
+  opened from one file share node ids and one root answering for both draws the wrong scene.
+- **A second live lease on one key gets a private root**, which is the old behaviour: the inspector draws
+  a Topology card beside the canvas one. A root that throws is discarded rather than handed on.
+- **Parked in a hidden lot in the document, released after `RELEASE_AFTER_MS` (5 s).** Long enough
+  for a switch, a dashboard round trip or a glance at another workflow; short enough that a
+  collapsed card or a closed document does not hold a context — Chrome keeps about sixteen and
+  kills the oldest.
+
+`persistentRoots.test.ts` covers the lease, park and release rules with counters for roots. That
+the canvas really is handed over, draws, still picks, still turns, keeps the camera and is released
+is a browser fact: `pnpm probe:viewer3d-switch -- --detail 6000000 --pick --cycles 2 --interact`.
+
+**Neuron Topology gets it for free**, drawing through `Viewer3D` — with one consequence that had to
+be paid for. Its camera was framed afresh on a new neuron only by accident, when an uncached page
+unmounted the viewer (a cached page never was), and a kept renderer keeps its camera, so every page
+opened at the last neuron's distance and angle. It names the neuron it draws as `frameKey` now — the
+skeleton's id, not the page, so nothing frames onto the last arbour while the next loads — and a new
+one is framed (`shouldFrame`); the camera memo stores the key, so a restore onto another neuron
+frames too. `pnpm probe:viewer3d-switch -- --topology --dataset dataset.hemibrain --cycles 1
+--interact` checks both halves. **The network viewer does not
+yet**: sigma is built and killed in one effect whose handlers close over local state, it already
+restores layout and camera from `layoutMemo`, and its switch cost has not been measured.
 
 ### The `Volumes` socket
 

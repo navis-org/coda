@@ -24,7 +24,7 @@
  * precision where the numbers are small.
  */
 
-import { Canvas, events, useThree } from '@react-three/fiber'
+import { events, useThree } from '@react-three/fiber'
 import type { ThreeEvent } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, TrackballControls } from '@react-three/drei'
 import {
@@ -43,6 +43,7 @@ import { FlexLineMaterial, setLineWidths } from './flexLineMaterial'
 import { applyOpacity } from './materialOpacity'
 import { AmbientOcclusion } from './ambientOcclusion'
 import { buildPickTree, pickRaycast } from './meshPicking'
+import { PersistentCanvas } from './PersistentCanvas'
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
 
@@ -84,6 +85,7 @@ import {
   sceneLights,
   sceneMode,
   sceneSurface,
+  shouldFrame,
   skeletonNote,
   skeletonSegmentColors,
   skeletonWidthPlan,
@@ -139,6 +141,12 @@ export interface Viewer3DProps {
    * camera, which is right for a comparable set and wrong when the elements are far apart.
    */
   refit?: boolean
+  /**
+   * What the scene is *of*, for a viewer that shows one subject at a time — Neuron Topology's
+   * current neuron. A new value frames the camera afresh, where otherwise it stays where it was put.
+   * See `shouldFrame`.
+   */
+  frameKey?: string | undefined
   selection: string[]
   /**
    * Whether a click in the scene picks the neuron under it.
@@ -216,10 +224,13 @@ export interface Viewer3DProps {
   /** Writes the legend's own params — hidden keys and colour overrides — back to the node. */
   onParamChange?: (paramId: string, value: ParamValue) => void
   /**
-   * Which viewer this is, for the camera that outlives it.
+   * Which viewer this is, for what outlives this component — the node's key within its workflow
+   * (`scopedKey`), which `ValuePreview` resolves.
    *
-   * The node id, so the card and the overlay are one continuous view of the same scene rather
-   * than two that reset each other. `NetworkViewer` takes the same prop for the same reason.
+   * Two things are held under it: the renderer, which the card, the overlay, the dock and a
+   * dashboard cell hand to each other rather than each building one (`PersistentCanvas`), and the
+   * camera, for when that renderer has been released. Without it both live and die with this
+   * component.
    */
   viewerId?: string
   compact?: boolean
@@ -309,6 +320,7 @@ export function Viewer3D(props: Viewer3DProps) {
     onExpand,
     onError,
     viewerId,
+    frameKey,
   } = props
 
   /*
@@ -673,7 +685,13 @@ export function Viewer3D(props: Viewer3DProps) {
          * mesh pixel went from `#71a430` to `#61962d` without the curve. Reverting this means
          * finding another answer for the background, not just putting the curve back.
          */}
-        <Canvas flat frameloop="demand" camera={cameraProps} events={zoomSafeEvents}>
+        <PersistentCanvas
+          persistKey={viewerId}
+          flat
+          frameloop="demand"
+          camera={cameraProps}
+          events={zoomSafeEvents}
+        >
           <SceneSurface color={surface} />
           <ambientLight intensity={lights.ambient} />
           <directionalLight position={[1, 1, 1]} intensity={lights.key} />
@@ -714,6 +732,7 @@ export function Viewer3D(props: Viewer3DProps) {
             framing={framing}
             resetAt={resetAt}
             refit={refit}
+            frameKey={frameKey}
             {...(viewerId ? { viewerId } : {})}
           />
           <Compass ink={ink} compact={compact} />
@@ -725,7 +744,7 @@ export function Viewer3D(props: Viewer3DProps) {
             />
           )}
           <CaptureBridge target={captureRef} renderFrame={renderFrameRef} />
-        </Canvas>
+        </PersistentCanvas>
       </div>
 
       {(CHANNELS.some((channel) => shown[channel.key] && colors[channel.key].legend) ||
@@ -1899,7 +1918,7 @@ function PointCloud({
  * away, and so did expanding the card to the overlay — those are two instances of one node, and
  * a camera that lives in the component dies with it.
  *
- * So there are exactly three things that move it:
+ * So these, and only these, move it:
  *
  *  1. **The first time this scene has an extent at all.** Not the first mount: a viewer with
  *     nothing run yet has bounds of size 1, and framing on that and calling it done would leave
@@ -1907,6 +1926,9 @@ function PointCloud({
  *  2. **A remount, from `cameraMemo`** — which is what makes the card and the overlay one
  *     continuous view. The memo's existence is also the record that (1) has happened.
  *  3. **The Reset view control**, which forgets the memo and does (1) again.
+ *  4. **A new subject** (`frameKey`), for a viewer showing one neuron at a time — see `shouldFrame`.
+ *  5. **Any real extent change, opt-in** (`refit`, `Frame each`), for a `For Each` stepping through
+ *     neurons in different parts of the volume.
  *
  * A bounds change still updates the clip planes, because those describe the *space* rather than
  * the view: a scene ten times larger under an unchanged camera clips through its own near plane
@@ -1916,18 +1938,22 @@ function CameraRig({
   framing,
   resetAt,
   refit,
+  frameKey,
   viewerId,
 }: {
   framing: Framing
   resetAt: number
-  /** See `Viewer3DProps.refit`: the switch that turns the three rules above into four. */
+  /** See `Viewer3DProps.refit`: rule 5 above. */
   refit: boolean
+  /** See `Viewer3DProps.frameKey`. */
+  frameKey: string | undefined
   viewerId?: string
 }) {
   const camera = useThree((state) => state.camera)
   const gl = useThree((state) => state.gl)
   const invalidate = useThree((state) => state.invalidate)
-  const framed = useRef(false)
+  /** The subject the camera was last framed for, `null` until it is framed — see `shouldFrame`. */
+  const framedFor = useRef<string | undefined | null>(null)
 
   /** Everything an extent change is allowed to touch. */
   const clip = useCallback(() => {
@@ -1954,7 +1980,8 @@ function CameraRig({
       camera.up.fromArray(remembered.up)
       camera.quaternion.fromArray(remembered.quaternion)
       clip()
-      framed.current = true
+      // Framed — and for the subject it was saved on, so a restore onto another one still frames.
+      framedFor.current = remembered.frameKey
       invalidate()
     }
     // Deliberately mount-only: this is the restore, and re-running it on a prop change is the
@@ -1963,33 +1990,20 @@ function CameraRig({
   }, [])
 
   useEffect(() => {
-    // `size > 1` is how a real extent is told from the placeholder one `framingFor(undefined)`
-    // returns. Before a run there is nothing to frame *on*.
-    if (!framed.current && framing.size > 1) {
-      framed.current = true
-      frame()
-      return
-    }
-    /*
-     * The fourth thing that moves the camera, and the only one that is opt-in: `Frame each`.
-     *
-     * Everything the rule above protects still holds while it is off, which is the default. On,
-     * an extent change re-frames — which is what a `For Each` stepping through neurons in
-     * different parts of the volume needs, and what anybody turning a scene by hand does not.
-     * Guarded on a real extent for the same reason as the first framing: a pass whose element
-     * produced nothing must not throw the camera at a placeholder box.
-     */
-    if (refit && framing.size > 1) {
+    // Rules 1, 4 and 5 above; `shouldFrame` is where a test can reach them.
+    if (shouldFrame({ framedFor: framedFor.current, frameKey, refit, size: framing.size })) {
+      framedFor.current = frameKey
       frame()
       return
     }
     clip()
     invalidate()
-  }, [framing, frame, clip, invalidate, refit])
+  }, [framing, frame, clip, invalidate, refit, frameKey])
 
   useEffect(() => {
     if (resetAt === 0) return
-    framed.current = true
+    // Framed now, whatever the subject: the next subject change still frames it.
+    if (framedFor.current === null) framedFor.current = undefined
     frame()
   }, [resetAt, frame])
 
@@ -2007,6 +2021,7 @@ function CameraRig({
         position: camera.position.toArray() as [number, number, number],
         up: camera.up.toArray() as [number, number, number],
         quaternion: camera.quaternion.toArray() as [number, number, number, number],
+        frameKey: framedFor.current ?? undefined,
       })
     }
     const element = gl.domElement

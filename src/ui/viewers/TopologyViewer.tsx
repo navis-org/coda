@@ -112,6 +112,8 @@ export interface TopologyViewerProps {
   /** The flat skeleton colour, as a hex. Written by the Visuals tab's picker. */
   skeletonColor: string
   onSkeletonColor: (hex: string) => void
+  /** The node's key within its workflow, handed to `Viewer3D` — see its `viewerId`. */
+  viewerId?: string
   compact?: boolean
 }
 
@@ -272,6 +274,7 @@ export function TopologyViewer(props: TopologyViewerProps) {
     skeletonColor,
     onSkeletonColor,
     compact = false,
+    viewerId,
   } = props
 
   /*
@@ -715,6 +718,9 @@ export function TopologyViewer(props: TopologyViewerProps) {
           {data?.skeletons && data.skeletons.items.length > 0 ? (
             <LazyViewer3D
               skeletons={data.skeletons}
+              // The neuron actually drawn rather than the page asked for, so the camera is framed
+              // onto the new arbour once it has arrived, not onto the last one while it loads.
+              frameKey={skeleton?.id}
               {...(showMesh && mesh.status === 'ready' ? { meshes: mesh.mesh } : {})}
               {...(showSynapses && scenePoints ? { points: scenePoints } : {})}
               skeletonColor={constantColor(skeletonColor)}
@@ -750,6 +756,7 @@ export function TopologyViewer(props: TopologyViewerProps) {
                 volumes: false,
               }}
               compact={compact}
+              {...(viewerId ? { viewerId } : {})}
             />
           ) : (
             <div className="viewer__empty">

@@ -4,8 +4,12 @@
  * A framing is *earned* in the same way a force layout is — turned until the arbour reads,
  * pulled in until the branch you care about is on screen — and it used to be thrown away by
  * anything that remounted the component. Expanding the card to the overlay and closing it again
- * was enough, because those are two instances of the same node, and so was an upstream node
- * re-running under it.
+ * was enough, because those are two instances of the same node.
+ *
+ * That switch no longer remounts the camera — the renderer, and the `CameraRig` inside it, is
+ * handed between surfaces (`PersistentCanvas`). What this still covers is everything that outlives
+ * the kept renderer: one released after its grace period, and a private root built beside a held
+ * one. Keyed like the renderer, by `scopedKey`, so two open copies of one file keep two cameras.
  *
  * Deliberately session-scoped and module-level, exactly as `layoutMemo` is and for the same
  * reasons:
@@ -28,6 +32,8 @@ export interface CameraMemo {
   up: [number, number, number]
   /** Orientation as a quaternion, so a rolled trackball view survives verbatim. */
   quaternion: [number, number, number, number]
+  /** The subject it was framed for, so a restore onto another one still frames — `shouldFrame`. */
+  frameKey?: string | undefined
 }
 
 /**

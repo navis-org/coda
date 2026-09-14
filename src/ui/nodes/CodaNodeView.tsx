@@ -302,9 +302,10 @@ function CodaNodeViewImpl({
    * already on screen. That the store refuses to hold one node in both the dock and the overlay
    * caps this at two possible surfaces rather than three; this caps the live ones at one.
    *
-   * The cost of standing down is a remount when the surface closes, which re-frames the card's
-   * camera. That is the right way round: somebody who has just been working full size is not
-   * also curating the thumbnail behind it.
+   * Standing down no longer costs the scene. The 3D viewers hand one held renderer between the
+   * card and the surface that took the node over (`PersistentCanvas`), so closing the overlay
+   * remounts the chrome around the canvas and nothing on the GPU. The network viewer still
+   * rebuilds, restoring its layout and camera from `layoutMemo`.
    */
   const showPreview =
     isViewer(def) &&

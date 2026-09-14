@@ -25,6 +25,7 @@ import {
   dimFor,
   DIMMED_MIN_CONTRAST,
   framingFor,
+  shouldFrame,
   hiddenCount,
   idsForLabel,
   KEY_INTENSITY,
@@ -675,6 +676,34 @@ describe('pointerNdc', () => {
     const [x, y] = pointerNdc({ x: 1276.3 + 283.29 / 2, y: 483.3 + 176.61 / 2 }, zoomed)
     expect(x).toBeCloseTo(0, 9)
     expect(y).toBeCloseTo(0, 9)
+  })
+})
+
+describe('shouldFrame', () => {
+  const settled = { framedFor: 'a', frameKey: 'a', refit: false, size: 5000 }
+
+  it('frames the first real extent, and never the placeholder one', () => {
+    expect(shouldFrame({ ...settled, framedFor: null })).toBe(true)
+    expect(shouldFrame({ ...settled, framedFor: null, size: 1 })).toBe(false)
+  })
+
+  it('leaves a framed camera alone while the subject is the same — a kept renderer included', () => {
+    expect(shouldFrame(settled)).toBe(false)
+  })
+
+  it('frames a new subject, which is what paging a Topology card is', () => {
+    expect(shouldFrame({ ...settled, frameKey: 'b' })).toBe(true)
+    // Not onto an empty scene while the next neuron loads.
+    expect(shouldFrame({ ...settled, frameKey: 'b', size: 1 })).toBe(false)
+  })
+
+  it('names no subject on a viewer that does not page, so only the first extent frames', () => {
+    expect(shouldFrame({ ...settled, framedFor: undefined, frameKey: undefined })).toBe(false)
+  })
+
+  it('frames every real extent under Frame each, subject or not', () => {
+    expect(shouldFrame({ ...settled, refit: true })).toBe(true)
+    expect(shouldFrame({ ...settled, refit: true, size: 1 })).toBe(false)
   })
 })
 

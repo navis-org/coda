@@ -39,7 +39,19 @@ const CHROME =
  * `firstPage` attaches to the old one. That failure presents as the *next* probe measuring
  * something impossible, which is a bad afternoon.
  */
-export async function launchChrome({ port, profile, width = 1600, height = 1000, dpr = 1 }) {
+export async function launchChrome({
+  port,
+  profile,
+  width = 1600,
+  height = 1000,
+  dpr = 1,
+  /**
+   * Extra command-line flags. A probe timing WebGL needs `--use-angle=metal --enable-gpu`: without
+   * them headless Chrome falls back to SwiftShader, which penalises full-screen passes and uploads
+   * in ways no GPU does (`docs/viewers.md`, the ambient-occlusion cost measurement).
+   */
+  args = [],
+}) {
   if (!existsSync(CHROME)) {
     console.error(`No Chrome at ${CHROME}. Set CHROME_PATH.`)
     process.exit(2)
@@ -54,6 +66,7 @@ export async function launchChrome({ port, profile, width = 1600, height = 1000,
       '--no-first-run',
       `--window-size=${width},${height}`,
       `--user-data-dir=${profile}`,
+      ...args,
       'about:blank',
     ],
     { stdio: 'ignore' },
@@ -194,6 +207,26 @@ export async function launchChrome({ port, profile, width = 1600, height = 1000,
       })
   }
 
+  /**
+   * Press and release at a point: a real click, which a capture-phase `pointerdown` listener
+   * hears — a dismiss-on-outside, say — where `element.click()` from `evaluate` fires none.
+   * `modifiers` is `dragHold`'s bitmask, on both events for the same reason. A function rather than
+   * a method, so `doubleClick` can call it from an object every probe destructures.
+   */
+  async function click(x, y, modifiers = 0, clickCount = 1) {
+    for (const type of ['mousePressed', 'mouseReleased']) {
+      await send('Input.dispatchMouseEvent', {
+        type,
+        x,
+        y,
+        button: 'left',
+        buttons: type === 'mousePressed' ? 1 : 0,
+        clickCount,
+        modifiers,
+      })
+    }
+  }
+
   await send('Page.enable')
   await send('Runtime.enable')
   await setDevice(width, height, dpr)
@@ -215,23 +248,11 @@ export async function launchChrome({ port, profile, width = 1600, height = 1000,
     mouseTo(x, y) {
       return send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0 })
     },
-    /**
-     * Press and release at a point: a real click, which a capture-phase `pointerdown` listener
-     * hears — a dismiss-on-outside, say — where `element.click()` from `evaluate` fires none.
-     * `modifiers` is `dragHold`'s bitmask, on both events for the same reason.
-     */
-    async click(x, y, modifiers = 0) {
-      for (const type of ['mousePressed', 'mouseReleased']) {
-        await send('Input.dispatchMouseEvent', {
-          type,
-          x,
-          y,
-          button: 'left',
-          buttons: type === 'mousePressed' ? 1 : 0,
-          clickCount: 1,
-          modifiers,
-        })
-      }
+    click,
+    /** A `dblclick`: the browser fires one only when the second press says `clickCount: 2`. */
+    async doubleClick(x, y) {
+      await click(x, y, 0, 1)
+      await click(x, y, 0, 2)
     },
     /** Press, move in six steps a frame apart, release. See `dragHold` for the modifier rule. */
     async drag(from, to, modifiers = 0) {

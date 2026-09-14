@@ -778,6 +778,17 @@ own `validHints`), live under the lock like a rename; the ✎ sits beside the ×
   also the one `serializeGraph` caller passing **`compact`**; byte-identity across paths was never a
   property, since every call stamps a fresh `modifiedAt`. Numbers: `pnpm probe:autosave-budget`.
   See [docs/persistence.md](docs/persistence.md).
+- **A 3D renderer is handed between surfaces, not rebuilt — and what is kept is the root, never the
+  viewer component.** `PersistentCanvas` replaces React Three Fiber's `<Canvas>`: the root, its
+  canvas and the element events bind to are held under `scopedKey(workflowId, nodeId)`, parked
+  off screen when a surface unmounts and released after 5 s. A card ↔ overlay switch at 7.7 M
+  triangles went from ~2.8 s of main thread (one ~870 ms freeze, a new context, 180 MB uploaded)
+  to ~45 ms and nothing uploaded. Two traps, both silent: a portal owning the *whole* viewer moves
+  its React events off the surface's tree, and React Flow's select, double-click and context menu
+  are React props on the node wrapper; and a context bridge is a component minted per instance, so
+  bridging remounts the scene it exists to keep. Node ids repeat across two workflows opened from
+  one file, hence the workflow in the key. The network viewer still rebuilds.
+  See [docs/viewers.md](docs/viewers.md).
 - **A pinned viewer is a grid column, and one node is never live in two full-size surfaces.** `⇥`
   docks a viewer beside the canvas rather than over it, so `showPreview` stands the card down for
   `pinnedNodeId` exactly as for `expandedNodeId` — the same three WebGL contexts. The store refuses

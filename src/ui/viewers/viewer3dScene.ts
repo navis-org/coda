@@ -1086,6 +1086,25 @@ export function framingFor(bounds: Bounds3 | undefined): Framing {
   }
 }
 
+/**
+ * Whether `CameraRig` should frame the scene now, rather than leave the view where it was put: on
+ * the first real extent, under `Frame each` (`refit`), and on a new subject (`frameKey`). Why the
+ * last exists is in `docs/viewers.md`. `size > 1` tells a real extent from the placeholder
+ * `framingFor(undefined)` returns, so nothing frames onto an empty scene.
+ */
+export function shouldFrame(args: {
+  /** The subject the camera was last framed for — `null` while it has never been framed. */
+  framedFor: string | undefined | null
+  /** The subject on screen now, for a viewer that names one. */
+  frameKey: string | undefined
+  refit: boolean
+  size: number
+}): boolean {
+  if (!(args.size > 1)) return false
+  if (args.framedFor === null || args.refit) return true
+  return args.frameKey !== undefined && args.frameKey !== args.framedFor
+}
+
 // ---------------------------------------------------------------------------
 // Compass
 

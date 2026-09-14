@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useContext, useMemo } from 'react'
 import type { ReactNode } from 'react'
 
 import type { GraphNode } from '../../core/graph'
@@ -53,6 +53,7 @@ import type { RoiView } from './roiProjection'
 import { ProfileViewer } from './ProfileViewer'
 import { TopologyViewer } from './TopologyViewer'
 import { ExportNodeContext } from './exportRegistry'
+import { scopedKey, WorkflowScope } from './workflowScope'
 import { ScatterViewer } from './ScatterViewer'
 import { DendrogramViewer } from './DendrogramViewer'
 import type { WhiskerRule } from './boxStats'
@@ -182,6 +183,13 @@ function ValuePreviewInner({
   const selection = useMemo(() => idList(params.selection), [params.selection])
 
   /*
+   * The node's key within its workflow, for what a viewer holds beyond a render — a kept renderer,
+   * a remembered camera. Resolved here, where every surface's viewer is dispatched with the node in
+   * hand, rather than in each viewer that keeps something. See `WorkflowScope`.
+   */
+  const viewerKey = scopedKey(useContext(WorkflowScope), node.id)
+
+  /*
    * A summary means "no second renderer", not just "no grid".
    *
    * `summary` was introduced for the table — a 60-column grid in a 320px panel is three
@@ -215,6 +223,7 @@ function ValuePreviewInner({
       onParamChange,
       onSelectionChange,
       selection,
+      viewerKey,
     })
     if (drawn !== undefined) return drawn
   }
@@ -325,6 +334,8 @@ type ViewerProps = Pick<
   choice: <T extends string>(id: string) => T
   shared: SharedViewerProps
   selection: string[]
+  /** The node's key within its workflow — a WebGL viewer's `viewerId`. See `scopedKey`. */
+  viewerKey: string
 }
 
 interface ViewerEntry {
@@ -436,7 +447,6 @@ const VIEWERS: Record<string, ViewerEntry> = {
   'out.viewer3d': {
     withoutValue: true,
     render: ({
-      node,
       ctx,
       params,
       choice,
@@ -445,6 +455,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
       onParamChange,
       onSelectionChange,
       selection,
+      viewerKey,
     }) => {
       const skeletons = inputValues?.skeletons
       const meshes = inputValues?.meshes
@@ -478,7 +489,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
           volumeOpacity={Number(params.volumeOpacity)}
           // The node id, so the card and the overlay share one camera instead of resetting each
           // other — the same prop the network viewer takes for its layout and camera.
-          viewerId={node.id}
+          viewerId={viewerKey}
           background={choice<BackgroundChoice>('background')}
           refit={params.refit === true}
           // Through the reader beside `readColorSpec`, because `colorParams({ legend })` is what
@@ -648,7 +659,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
     },
   },
   'out.topology': {
-    render: ({ params, choice, shared, inputValues, onParamChange, selection }) => {
+    render: ({ params, choice, shared, inputValues, onParamChange, selection, viewerKey }) => {
       // Drawn from the *input*, like Profile and the 3D viewer: this node's own `out` port is a
       // pass-through, so keying the card on it would show the same table twice over.
       const neurons = inputValues?.neurons
@@ -699,6 +710,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
           skeletonColor={String(params.skeletonColor)}
           onSkeletonColor={(hex) => onParamChange?.('skeletonColor', hex)}
           onVisual={(id, next) => onParamChange?.(id, next)}
+          viewerId={viewerKey}
           {...shared}
         />
       )

@@ -27,6 +27,7 @@ import { GroupPeek } from './ui/panels/GroupPeek'
 import { ViewerOverlay } from './ui/panels/ViewerOverlay'
 import { ScreenMap } from './ui/tour/ScreenMap'
 import { useNarrowShell } from './ui/smallScreen'
+import { WorkflowScope } from './ui/viewers/workflowScope'
 
 export function App() {
   const theme = useGraphStore((s) => s.theme)
@@ -37,6 +38,8 @@ export function App() {
    */
   const docked = useGraphStore((s) => s.pinnedNodeId !== undefined)
   const dockFraction = useGraphStore((s) => s.dockFraction)
+  // The workflow every surface below is drawing — see `WorkflowScope`.
+  const workflowId = useGraphStore((s) => s.activeTabId)
   /*
    * The inspector's column is declared on `.app` too, so the same rule applies to it: `.app` is
    * what has to know. The narrow shell is the first arrangement that needs to *combine* the two
@@ -73,100 +76,102 @@ export function App() {
   }, [theme])
 
   return (
-    <div
-      className="app"
-      data-dock={docked ? 'open' : undefined}
-      data-inspector={inspectorOpen ? 'open' : undefined}
-      data-narrow={narrow ? 'true' : undefined}
-      style={{ '--dock-width': `${dockFraction * 100}%` } as React.CSSProperties}
-    >
-      <Toolbar />
-      {dashboardOpen ? <DashboardView /> : <Editor />}
-      {/*
-       * Between the canvas and the inspector, and before it in the DOM so tab order runs left to
-       * right across the shell.
-       *
-       * Gone entirely while the dashboard is up, and structurally rather than by a check inside
-       * the cell. The dock exists to keep one viewer live *beside the graph you are working on*,
-       * and there is no graph beside it here — but the real reason is the exclusion: the dock is
-       * its own grid column, so it survives the view swap, and pinning after the grid opened
-       * would put one node live in a cell and in the dock at once. That is exactly the two
-       * contexts the store refuses for the overlay. `openDashboard` already dropped the pin on
-       * the way in; this is what stops it coming back.
-       */}
-      {!dashboardOpen && <ViewerDock />}
-      <Inspector />
-      <AssistantPanel />
-      <StatusBar />
-      <ViewerOverlay />
-      {/*
-       * Beside the viewer overlay, and for the same reason it is beside the dock: both are a
-       * full-size look at part of the graph. Never both at once in practice — a folded group's
-       * cards are not on the canvas to be expanded from.
-       */}
-      <GroupPeek />
-      {/*
-       * Above the viewer overlay, because it is opened *from* one: an expanded chart has a `?`
-       * of its own, and a help document that rendered underneath the thing it was opened from
-       * would read as the button doing nothing.
-       */}
-      <HelpOverlay />
-      <ShareDialog />
-      {/*
-       * Beside the share dialog rather than below the viewer overlay: an expanded chart is one
-       * of the places somebody presses Escape and wonders what else the keyboard does.
-       */}
-      <ShortcutsDialog />
-      <PrivacyDialog />
-      {/* Opened from the status bar's memory readout and the palette. */}
-      <MemoryDialog />
-      {/* Same idiom, opened from the `?` menu, the palette, the start page and the nudge below. */}
-      <FeedbackDialog />
-      {/* Last, and on top: it can be reopened over an expanded viewer. */}
-      <StartPage />
-      {/*
-       * The first visit's first screen, in front of the welcome page it hands over to. Never
-       * both — `useLaunchStage` gives the two one answer between them — so the order here only
-       * decides which wins if that ever stops being true, and being asked to take the Basics is
-       * the more useful thing to be looking at on the visit where it can happen.
-       */}
-      <GuidesDialog />
-      {/*
-       * The Screen Map, above every dialog it can be launched from and below the small-screen
-       * notice, which is a claim that none of this fits. Mounted here rather than lazily: it has
-       * no dependency of its own — the whole reason the tours are behind an `import()` is
-       * driver.js — and a guide that arrives a frame after the click is a guide that flashes an
-       * unlabelled shell at the reader first.
-       */}
-      <ScreenMap />
-      {/*
-       * Above the start page, which is one of the three surfaces that open it — `openWizard`
-       * closes that page on the way in, so the two are never both up, and the ordering only
-       * decides which wins if that ever stops being true.
-       */}
-      <WizardDialog />
-      {/*
-       * Under the start page rather than over it: `openZoo` closes the start page on the way in,
-       * so the two are never both up, and the ordering only decides which wins if that ever
-       * stops being true — where the welcome modal is the safer thing to be looking at.
-       */}
-      <ZooGate />
-      {/*
-       * Above even the start page: a link somebody followed is the most specific intent on the
-       * screen, and the store already withholds the welcome modal when there is one.
-       */}
-      <SharedLinkGate />
-      {/*
-       * A standing card, not a dialog — it withholds itself while the start page is up, so it
-       * never competes with the one modal that already asks for attention on load.
-       */}
-      <FeedbackNudge />
-      {/*
-       * Last of all, and over every other dialog including the share gate: on a viewport this
-       * small nothing behind it can be used, so anything drawn on top of it would be a question
-       * asked through a window the reader cannot see out of. Draws nothing at any ordinary size.
-       */}
-      <SmallScreenGate />
-    </div>
+    <WorkflowScope.Provider value={workflowId}>
+      <div
+        className="app"
+        data-dock={docked ? 'open' : undefined}
+        data-inspector={inspectorOpen ? 'open' : undefined}
+        data-narrow={narrow ? 'true' : undefined}
+        style={{ '--dock-width': `${dockFraction * 100}%` } as React.CSSProperties}
+      >
+        <Toolbar />
+        {dashboardOpen ? <DashboardView /> : <Editor />}
+        {/*
+         * Between the canvas and the inspector, and before it in the DOM so tab order runs left to
+         * right across the shell.
+         *
+         * Gone entirely while the dashboard is up, and structurally rather than by a check inside
+         * the cell. The dock exists to keep one viewer live *beside the graph you are working on*,
+         * and there is no graph beside it here — but the real reason is the exclusion: the dock is
+         * its own grid column, so it survives the view swap, and pinning after the grid opened
+         * would put one node live in a cell and in the dock at once. That is exactly the two
+         * contexts the store refuses for the overlay. `openDashboard` already dropped the pin on
+         * the way in; this is what stops it coming back.
+         */}
+        {!dashboardOpen && <ViewerDock />}
+        <Inspector />
+        <AssistantPanel />
+        <StatusBar />
+        <ViewerOverlay />
+        {/*
+         * Beside the viewer overlay, and for the same reason it is beside the dock: both are a
+         * full-size look at part of the graph. Never both at once in practice — a folded group's
+         * cards are not on the canvas to be expanded from.
+         */}
+        <GroupPeek />
+        {/*
+         * Above the viewer overlay, because it is opened *from* one: an expanded chart has a `?`
+         * of its own, and a help document that rendered underneath the thing it was opened from
+         * would read as the button doing nothing.
+         */}
+        <HelpOverlay />
+        <ShareDialog />
+        {/*
+         * Beside the share dialog rather than below the viewer overlay: an expanded chart is one
+         * of the places somebody presses Escape and wonders what else the keyboard does.
+         */}
+        <ShortcutsDialog />
+        <PrivacyDialog />
+        {/* Opened from the status bar's memory readout and the palette. */}
+        <MemoryDialog />
+        {/* Same idiom, opened from the `?` menu, the palette, the start page and the nudge below. */}
+        <FeedbackDialog />
+        {/* Last, and on top: it can be reopened over an expanded viewer. */}
+        <StartPage />
+        {/*
+         * The first visit's first screen, in front of the welcome page it hands over to. Never
+         * both — `useLaunchStage` gives the two one answer between them — so the order here only
+         * decides which wins if that ever stops being true, and being asked to take the Basics is
+         * the more useful thing to be looking at on the visit where it can happen.
+         */}
+        <GuidesDialog />
+        {/*
+         * The Screen Map, above every dialog it can be launched from and below the small-screen
+         * notice, which is a claim that none of this fits. Mounted here rather than lazily: it has
+         * no dependency of its own — the whole reason the tours are behind an `import()` is
+         * driver.js — and a guide that arrives a frame after the click is a guide that flashes an
+         * unlabelled shell at the reader first.
+         */}
+        <ScreenMap />
+        {/*
+         * Above the start page, which is one of the three surfaces that open it — `openWizard`
+         * closes that page on the way in, so the two are never both up, and the ordering only
+         * decides which wins if that ever stops being true.
+         */}
+        <WizardDialog />
+        {/*
+         * Under the start page rather than over it: `openZoo` closes the start page on the way in,
+         * so the two are never both up, and the ordering only decides which wins if that ever
+         * stops being true — where the welcome modal is the safer thing to be looking at.
+         */}
+        <ZooGate />
+        {/*
+         * Above even the start page: a link somebody followed is the most specific intent on the
+         * screen, and the store already withholds the welcome modal when there is one.
+         */}
+        <SharedLinkGate />
+        {/*
+         * A standing card, not a dialog — it withholds itself while the start page is up, so it
+         * never competes with the one modal that already asks for attention on load.
+         */}
+        <FeedbackNudge />
+        {/*
+         * Last of all, and over every other dialog including the share gate: on a viewport this
+         * small nothing behind it can be used, so anything drawn on top of it would be a question
+         * asked through a window the reader cannot see out of. Draws nothing at any ordinary size.
+         */}
+        <SmallScreenGate />
+      </div>
+    </WorkflowScope.Provider>
   )
 }
