@@ -3504,12 +3504,11 @@ Three things it has to get right, each of which was a way to get it wrong:
    match anything and the memo would be dead code. What the memo stores alongside the state is
    the identity of the scene that was *asked for* when it was read — the same comparison
    `canMerge` makes, which is the same question: same place, same deployment.
-2. **The read is a `useLayoutEffect` cleanup.** React runs a layout cleanup while the subtree is
-   still in the document and a passive one after the host node has been removed, and **a detached
-   iframe has no browsing context** — so from `useEffect` the read returns null every time, and a
-   null here is indistinguishable from the cross-origin degrade. The test's `contentWindow` stub
-   is a getter that honours `isConnected` for that reason; move the capture to `useEffect` and one
-   test fails.
+2. **The read happens while the frame is still in the document.** It was a `useLayoutEffect`
+   cleanup for that reason, and is now the frame registry's `destroy`, which runs before the host is
+   removed (see the next section). **A detached iframe has no browsing context**, so a read after
+   removal returns null every time, and a null here is indistinguishable from the cross-origin
+   degrade. The test's `contentWindow` stub is a getter that honours `isConnected` for that reason.
 3. **Reload forgets.** That button is how somebody escapes a frame that has gone wrong, so
    resuming into the state it went wrong in is the one outcome it must not have.
 
@@ -3517,6 +3516,62 @@ Same-origin only, since it reuses the same read `spliceSegments` needs, and it d
 way: no proxy, no memory, and the embed behaves as it did. The frame in `Neuron Profile` passes no
 `viewerId` and so remembers nothing — it is a tile showing one neuron at the published framing,
 with no identity of its own to hand anything to.
+
+### The Neuroglancer frame is handed between surfaces, not reloaded
+
+`sceneMemo` carries the *state* across a switch, and every switch still reloaded the application:
+neuroglancer booted again, refetched and re-uploaded everything, and restored — slow on a large
+scene, and in a deployed build, where the frame is cross-origin and nothing can be read, not even
+the state came back. The 3D viewer's answer (keep the renderer, move its element) does not transfer
+directly, because **an iframe reloads when it is moved**: `appendChild` detaches it, and a detached
+iframe has no document. `Element.moveBefore` is the exception — a state-preserving move, Chrome and
+Edge 133+ and Firefox 144+, not Safari.
+
+Measured in Chrome 153 on a bare page first, with a same-origin frame carrying a JavaScript marker,
+`example.com` and the public neuroglancer demo, counting `load` events on each element:
+
+| move | marker | new `load` events |
+| --- | --- | --- |
+| `moveBefore` into a `transform: scale` container (a zoomed card) | kept | none |
+| `moveBefore` into the hidden parking lot, and back out | kept | none |
+| `moveBefore` of an ancestor holding the frame | kept | none |
+| `appendChild` (control) | lost | one each — all three reloaded |
+
+Then in the app (`pnpm probe:viewer3d-switch -- --neuroglancer --limit 10`, male-CNS, the dev proxy
+making the frame same-origin): card → overlay → card, twice, the same element every time, no `load`
+event, the marker set in its document still there and neuroglancer's own hash unchanged; parked
+while the dashboard hid the card, released after `RELEASE_AFTER_MS`, a fresh frame on the way back.
+Screenshots at both sizes confirm it draws. What the app run could not show is the cross-origin case,
+which is what a deployed build has — the bare-page table is the evidence there.
+
+So `NeuroglancerViewer` leases its frame from `persistentRoots.ts` exactly as `PersistentCanvas`
+leases a root, and five rules are what make it work:
+
+- **Kept only where `moveBefore` exists** — `keepOnlyIfMovable` on the registry, so it is the
+  registry's rule rather than something each caller remembers to check. Moved any other way the frame
+  reloads onto whatever `src` it was last given — a `#!+` patch as often as not, which loads onto
+  neuroglancer's defaults rather than the published scene — while the component still believes it is
+  showing that scene. Without it each surface builds its own frame and `sceneMemo` resumes, as before.
+- **What the component knows about the frame lives with the frame** (`HeldFrame.applied` and
+  `.loaded`, which were refs). A surface adopting a live frame has to know what it already shows;
+  without it the new instance takes the frame for an empty one and sends it the full scene, resetting
+  exactly the camera and layers keeping it exists to carry. With it, adopting navigates nothing — the
+  effect's "already applied" guard returns — and the next selection merges as it always did.
+- **The registry places the host itself** (`lease(key, parent)`) and makes every later move, since
+  `moveBefore` only moves between connected parents and one `appendChild` anywhere in the path is a
+  reload — no caller holds the element to move it any other way. The lot is shared by every registry,
+  and a frame's host is **pinned at the size it had** while parked (`pinWhenParked`): neuroglancer
+  watches its own size and would otherwise follow the lot down to one pixel and back. Pinned on
+  principle rather than measured to harm, and opt-in because the size read forces a layout, which a
+  React Three Fiber host — sized by its surface — would pay for nothing.
+- **`sceneMemo` is written as a frame is destroyed** (the registry's `destroy`), which runs while the
+  host is still in the document — a removed iframe has no document to read. So a frame handed to the
+  next surface is never read at all, and one released after its grace period or built privately
+  (Safari, a second surface on the key) is. Reload discards before it forgets, so the way out still
+  leaves nothing behind.
+- **The key names the workflow** (`viewerKey` in `ValuePreview`): a kept frame answering for one node
+  id in two open copies of a file would show one workflow's scene in the other. Reload discards the
+  kept frame rather than parking it, and the profile tile, passing no `viewerId`, keeps nothing.
 
 **Merges are debounced** (`MERGE_DEBOUNCE_MS`), trailing-edge, and only merges — the first
 navigation is immediate. Auto-run turns one upstream edit into a scene per keystroke, and

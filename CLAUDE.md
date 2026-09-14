@@ -787,7 +787,11 @@ own `validHints`), live under the lock like a rename; the ✎ sits beside the ×
   its React events off the surface's tree, and React Flow's select, double-click and context menu
   are React props on the node wrapper; and a context bridge is a component minted per instance, so
   bridging remounts the scene it exists to keep. Node ids repeat across two workflows opened from
-  one file, hence the workflow in the key. The network viewer still rebuilds.
+  one file, hence the workflow in the key. The network viewer still rebuilds. **The Neuroglancer
+  card's iframe is kept the same way, and only where `Element.moveBefore` exists** — any other move
+  reloads an iframe, onto whatever `src` it last had (often a `#!+` patch, so onto neuroglancer's
+  defaults) while its bookkeeping still claims the scene; so the frame's `applied`/`loaded` travel
+  with it, the registry places and moves the host itself (`lease(key, parent)`, `keepOnlyIfMovable`), and without `moveBefore` (Safari) `sceneMemo` resumes.
   See [docs/viewers.md](docs/viewers.md).
 - **A pinned viewer is a grid column, and one node is never live in two full-size surfaces.** `⇥`
   docks a viewer beside the canvas rather than over it, so `showPreview` stands the card down for

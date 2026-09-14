@@ -38,6 +38,7 @@
  *   pnpm probe:viewer3d-switch -- --memory --pick --cycles 0   # bytes of normals and pick trees
  *   pnpm probe:viewer3d-switch -- --pick --cycles 1 --interact  # pick, turn and double-click after a handover
  *   pnpm probe:viewer3d-switch -- --topology --dataset dataset.hemibrain   # a Neuron Topology card instead
+ *   pnpm probe:viewer3d-switch -- --neuroglancer --limit 10   # the Neuroglancer frame, kept rather than reloaded
  */
 
 import { existsSync, readFileSync, rmSync } from 'node:fs'
@@ -55,11 +56,15 @@ const pick = args.all.includes('--pick')
 const withSkeletons = args.all.includes('--skeletons')
 /** `--topology`: a Neuron Topology card instead of a 3D View, which draws through the same viewer. */
 const topology = args.all.includes('--topology')
+/** `--neuroglancer`: a Neuroglancer card, whose frame is handed between surfaces by `moveBefore`. */
+const neuroglancer = args.all.includes('--neuroglancer')
 /** The dataset node type the scene is fetched from. Any neuPrint family the token can read. */
 const datasetType = args.value('--dataset') ?? 'dataset.malecns'
 
 /** How long nothing has to happen before a switch counts as settled. */
 const QUIET_MS = 1500
+/** `RELEASE_AFTER_MS` in `persistentRoots.ts`, which a script cannot import. */
+const GRACE_MS = 5000
 /** How long a switch may take before the probe gives up on it. */
 const MAX_SETTLE_MS = 60_000
 const PROFILE = '/tmp/coda-probe-viewer3d-switch'
@@ -274,6 +279,12 @@ const ids = await inStore(`
   wire(ds, 'dataset', find, 'dataset')
   S.getState().setParam(find, 'filters', encodeRows([{ field: 'type', op: 'matches', values: [${JSON.stringify(typePattern)}] }]))
   S.getState().setParam(find, 'limit', ${limit})
+  if (${neuroglancer}) {
+    const view = st.addNode('out.neuroglancer', at(60, 380))
+    wire(ds, 'dataset', view, 'dataset')
+    wire(find, 'neurons', view, 'neurons')
+    return { view }
+  }
   if (${topology}) {
     // Neuron Topology fetches its own skeleton, one neuron at a time, and draws through Viewer3D.
     const view = st.addNode('out.topology', at(60, 380))
@@ -300,6 +311,8 @@ const ids = await inStore(`
 const VIEW = JSON.stringify(ids.view)
 const CARD_CANVAS = `.react-flow__node[data-id="${ids.view}"] .viewer3d-canvas canvas`
 const OVERLAY_CANVAS = `.viewer-panel .viewer3d-canvas canvas`
+const CARD_FRAME = `.react-flow__node[data-id="${ids.view}"] .ng-frame iframe`
+const OVERLAY_FRAME = `.viewer-panel .ng-frame iframe`
 const CAPTION = `.react-flow__node[data-id="${ids.view}"] .viewer__caption`
 const present = (selector) => evaluate(`!!document.querySelector(${JSON.stringify(selector)})`)
 const waitForSelector = (selector, what) =>
@@ -314,9 +327,11 @@ let caption = ''
  * canvas.
  */
 const sceneReady = async () =>
-  topology
-    ? await present(CARD_CANVAS)
-    : /\bmesh/.test(caption) && (!withSkeletons || /\bskeleton/.test(caption))
+  neuroglancer
+    ? await present(CARD_FRAME)
+    : topology
+      ? await present(CARD_CANVAS)
+      : /\bmesh/.test(caption) && (!withSkeletons || /\bskeleton/.test(caption))
 for (let attempt = 1; attempt <= 4 && !(await sceneReady()); attempt++) {
   const started = Date.now()
   await inStore(`await S.getState().runAll()`)
@@ -329,12 +344,12 @@ if (!(await sceneReady())) {
   const card = await evaluate(
     `(document.querySelector('.react-flow__node[data-id=${VIEW}]')?.textContent ?? '(no card)').replace(/\\s+/g, ' ').slice(0, 400)`,
   )
-  console.error(`No geometry on the ${topology ? 'Topology' : '3D View'} card. Caption: "${caption}".`)
+  console.error(`Nothing drawn on the ${neuroglancer ? 'Neuroglancer' : topology ? 'Topology' : '3D View'} card. Caption: "${caption}".`)
   console.error(`Card text: ${card}`)
   console.error(`Screenshot: ${await screenshot('probe-viewer3d-switch-not-ready')}`)
   process.exit(1)
 }
-await waitForSelector(CARD_CANVAS, 'the card canvas')
+await waitForSelector(neuroglancer ? CARD_FRAME : CARD_CANVAS, 'the card')
 console.log(`scene     ${caption.replace(/\s+/g, ' ').trim()}  (type ${typePattern}, limit ${limit}, detail ${detail}${pick ? ', picking on' : ''})`)
 
 /** Open or close the overlay and wait for the canvas to arrive where it should now be. */
@@ -342,6 +357,73 @@ async function switchTo(expanded, selector, settleMs = 800) {
   await inStore(`S.getState().expandNode(${expanded ? VIEW : 'undefined'})`)
   await waitForSelector(selector, `the canvas at ${selector}`)
   await sleep(settleMs)
+}
+
+/*
+ * `--neuroglancer`: the Neuroglancer card's frame, handed between surfaces rather than reloaded.
+ *
+ * `moveBefore` keeps an iframe's document where `appendChild` reloads it, so the checks are the ones
+ * only a real browser can answer: the overlay shows the *same element*, it fires no `load` (a reload
+ * would), and — where the dev proxy makes the frame same-origin — a marker set inside its document and
+ * the state neuroglancer writes to its own hash are still there. Then the release: parked while
+ * nothing shows the node, gone after the grace period, and a fresh frame on the way back.
+ */
+if (neuroglancer) {
+  // Long enough for neuroglancer to boot and restore its scene, so there is a document worth keeping.
+  await sleep(8000)
+  const origin = await evaluate(`(() => {
+    const f = document.querySelector(${JSON.stringify(CARD_FRAME)})
+    window.__ngFrame = f
+    f.__loads = 0
+    f.addEventListener('load', () => f.__loads++)
+    try {
+      f.contentWindow.__codaKept = true
+      return 'same-origin'
+    } catch {
+      return 'cross-origin'
+    }
+  })()`)
+  const frameState = (selector) =>
+    evaluate(`(() => {
+      const f = document.querySelector(${JSON.stringify(selector)})
+      if (!f) return null
+      let kept = null
+      let hash = null
+      try {
+        kept = f.contentWindow.__codaKept === true
+        hash = f.contentWindow.location.hash
+      } catch {}
+      return { same: f === window.__ngFrame, loads: f.__loads ?? null, kept, hash }
+    })()`)
+  const start = await frameState(CARD_FRAME)
+
+  console.log(`\nneuroglancer frame across surfaces (${origin})`)
+  const route = [
+    [true, OVERLAY_FRAME, 'overlay'],
+    [false, CARD_FRAME, 'card'],
+    [true, OVERLAY_FRAME, 'overlay, again'],
+    [false, CARD_FRAME, 'card, again'],
+  ]
+  for (const [expanded, selector, where] of route) {
+    await switchTo(expanded, selector, 2000)
+    const at = await frameState(selector)
+    check(at?.same === true, `the ${where} shows the same iframe element`)
+    check(at?.loads === 0, `…which fired no load event (${at?.loads})`)
+    if (origin === 'same-origin') {
+      check(at?.kept === true, '…and kept its document')
+      check(at?.hash === start.hash, '…and the state neuroglancer wrote to its hash')
+    }
+    // A kept document can still be drawn wrong — pinned at its parked size, or off its scale.
+    if (args.keep) {
+      console.log(`  → ${await screenshot(`probe-neuroglancer-${where.replace(/\W+/g, '-')}`)}`)
+    }
+  }
+
+  await checkRelease(CARD_FRAME, async () => [
+    (await frameState(CARD_FRAME))?.same === false,
+    'a fresh frame built when the card came back',
+  ])
+  await endProbe()
 }
 
 // ── One switch ─────────────────────────────────────────────────────────────────────────────────
@@ -642,27 +724,44 @@ if (topology && args.all.includes('--interact')) {
 }
 
 /*
- * The other half of the contract: a renderer nobody is looking at is released, not held for ever.
- * Opening the dashboard unmounts the canvas and the card with it, and this node is on no cell — so
- * its renderer should sit parked for the grace period, then be gone, and a fresh one be built on
- * the way back.
+ * The other half of the contract: what nobody is looking at is released, not held for ever. Opening
+ * the dashboard unmounts the canvas and the card with it, and this node is on no cell — so what it held
+ * should sit parked for the grace period, then be gone. `rebuilt` says whether a fresh one was built
+ * on the way back, which is a different question for a renderer and for a frame.
  */
-if (cycles > 0) {
+async function checkRelease(cardSelector, rebuilt) {
   const PARKED = `document.querySelector('[data-persistent-roots]')?.children.length ?? 0`
   console.log('\nrelease')
   await inStore(`S.getState().setDashboardOpen(true)`)
   await sleep(1000)
   const parked = await evaluate(PARKED)
   check(parked === 1, `parked while nothing shows the node (${parked} held)`)
-  await sleep(5500)
+  await sleep(GRACE_MS + 500)
   const released = await evaluate(PARKED)
   check(released === 0, `released after the grace period (${released} held)`)
   await evaluate(`window.__probe.reset(); true`)
   await inStore(`S.getState().setDashboardOpen(false)`)
-  await waitForSelector(CARD_CANVAS, 'the card canvas after the dashboard')
-  await sleep(1500)
-  const rebuilt = await evaluate(`window.__probe.contexts`)
-  check(rebuilt === 1, `a fresh renderer built when the card came back (${rebuilt} context${rebuilt === 1 ? '' : 's'})`)
+  await waitForSelector(cardSelector, 'the card after the dashboard')
+  const [ok, line] = await rebuilt()
+  check(ok, line)
+}
+
+async function endProbe() {
+  close()
+  await sleep(500)
+  finish('See the note at the top of this file.')
+  process.exit(0)
+}
+
+if (cycles > 0) {
+  await checkRelease(CARD_CANVAS, async () => {
+    await sleep(1500)
+    const contexts = await evaluate(`window.__probe.contexts`)
+    return [
+      contexts === 1,
+      `a fresh renderer built when the card came back (${contexts} context${contexts === 1 ? '' : 's'})`,
+    ]
+  })
 }
 
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]
@@ -676,7 +775,4 @@ for (const direction of ['card → overlay', 'overlay → card']) {
   )
 }
 
-close()
-await sleep(500)
-finish('See the note at the top of this file.')
-process.exit(0)
+await endProbe()

@@ -18,7 +18,7 @@ import type { ReconcilerRoot, RenderProps, RootState, Size } from '@react-three/
 import * as THREE from 'three'
 
 import { RootRegistry } from './persistentRoots'
-import type { CanvasLease } from './persistentRoots'
+import type { RootLease } from './persistentRoots'
 
 /*
  * The catalogue of intrinsic three elements, which `<Canvas>` registers on its first render. Its
@@ -29,13 +29,20 @@ extend(THREE as unknown as Parameters<typeof extend>[0])
 
 type Root = ReconcilerRoot<HTMLCanvasElement>
 
-/** How long a scene nobody is looking at keeps its renderer — see `docs/viewers.md`. */
-const RELEASE_AFTER_MS = 5000
+/** A canvas in a host that fills its surface, and a React Three Fiber root on it. */
+function createCanvasRoot(): { host: HTMLElement; root: Root } {
+  const host = document.createElement('div')
+  host.style.width = '100%'
+  host.style.height = '100%'
+  const canvas = document.createElement('canvas')
+  canvas.style.display = 'block'
+  host.appendChild(canvas)
+  return { host, root: createRoot(canvas) }
+}
 
 const roots = new RootRegistry<Root>({
-  create: createRoot,
+  create: createCanvasRoot,
   destroy: (root) => root.unmount(),
-  graceMs: RELEASE_AFTER_MS,
 })
 
 /**
@@ -68,7 +75,7 @@ export function PersistentCanvas({
 }: PersistentCanvasProps) {
   const outer = useRef<HTMLDivElement>(null)
   /** The lease this surface draws into, and whether it still owes an adopted canvas a frame. */
-  const held = useRef<{ lease: CanvasLease<Root>; fresh: boolean } | null>(null)
+  const held = useRef<{ lease: RootLease<Root>; fresh: boolean } | null>(null)
   const [size, setSize] = useState<Size | null>(null)
   const [error, setError] = useState<unknown>(undefined)
 
@@ -84,8 +91,7 @@ export function PersistentCanvas({
   useLayoutEffect(() => {
     const element = outer.current
     if (!element) return
-    const lease = roots.lease(persistKey)
-    element.appendChild(lease.host)
+    const lease = roots.lease(persistKey, element)
     held.current = { lease, fresh: true }
     return () => {
       held.current = null

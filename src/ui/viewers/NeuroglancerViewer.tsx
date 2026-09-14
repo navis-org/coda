@@ -41,12 +41,14 @@
  * a randomised colour seed — because the merge is per top-level key and `layers` is replaced
  * whole. Sending a shorter layer list to dodge that deletes the EM volume instead.
  *
- * **A remount is the other way that state dies, and `sceneMemo` is what carries it across.**
- * None of the above helps when the component itself goes away: expanding the card hands the node
- * to the overlay, which is a second instance, so the card stands down and the overlay opens a
- * frame of its own — and closing it does the same in reverse. Given a `viewerId`, the live state
- * is read on the way out and the next mount navigates to *that*, with the current selection
- * spliced in, instead of to the published scene. Same-origin only, like the splice it reuses.
+ * **A remount is the other way that state dies, and two things carry it across.** Expanding the
+ * card hands the node to the overlay, which is a second instance, so the card stands down and the
+ * overlay mounts — and closing it does the same in reverse. Where the browser can move an element
+ * without reloading it (`moveBefore`), the frame itself is kept and handed over (`frames`, below),
+ * so the application never stops and there is nothing to resume. Where it cannot, or once a kept
+ * frame has been released, `sceneMemo` resumes instead: given a `viewerId`, the live state is read
+ * on the way out and the next mount navigates to *that*, with the current selection spliced in.
+ * Same-origin only, like the splice it reuses.
  *
  * Merges are debounced. Auto-run turns one upstream edit into a stream of scenes, and applying
  * each would have neuroglancer rebuilding its layers several times a second underneath whatever
@@ -79,6 +81,8 @@ import type { ColorSpec } from '../../nodes/lib/encodingParams'
 import { errorMessage } from '../../core/errors'
 import { describeLegend, resolveColor } from '../encoding'
 import { copyText } from '../export'
+import { RootRegistry } from './persistentRoots'
+import type { RootLease } from './persistentRoots'
 import { forgetScene, recallScene, rememberScene } from './sceneMemo'
 import { ViewerActions } from './ViewerActions'
 import { plural } from '../format'
@@ -121,11 +125,11 @@ export interface NeuroglancerViewerProps {
   datasetId?: string | undefined
   extraLayers?: number | undefined
   /**
-   * A key this embed's live state is remembered under, so a remount resumes rather than resets.
-   *
-   * The graph node id, exactly as `Viewer3D` and `NetworkViewer` take one: the card and the
-   * overlay are two instances of one node and only the id says so. Undefined means remember
-   * nothing, which is what a frame with no identity of its own should do.
+   * The key this embed's frame is kept under between surfaces, and its live state remembered under
+   * once the frame is gone — the node's key within its workflow (`scopedKey`), exactly as `Viewer3D`
+   * takes one: the card and the overlay are two instances of one node and only the key says so.
+   * Undefined keeps and remembers nothing, which is what a frame with no identity of its own — the
+   * profile tile — should do.
    */
   viewerId?: string | undefined
   compact?: boolean
@@ -163,6 +167,77 @@ function readLiveScene(frame: HTMLIFrameElement): NgScene | undefined {
     return undefined
   }
 }
+
+/**
+ * A frame, and what has been done to it — the part that has to outlive any one component.
+ *
+ * Kept with the frame rather than in the component's refs because a surface that adopts a live
+ * frame has to know what it is already showing. Adopted without it, the next instance would take
+ * the frame for an empty one and send it the full scene, resetting exactly the camera and layers
+ * that keeping the frame exists to carry.
+ */
+interface HeldFrame {
+  frame: HTMLIFrameElement
+  /** What the frame was last pointed at, so the next change knows how to apply itself. */
+  applied:
+    | { url: string; base: string; identity: string; viewerType?: ViewerKind | undefined }
+    | undefined
+  /** Whether a document has finished loading in the frame, i.e. whether there is state to merge into. */
+  loaded: boolean
+  /** Where its live state is remembered once the frame is gone — the leasing surface's `viewerId`. */
+  memoKey: string | undefined
+}
+
+function createFrame(): { host: HTMLElement; root: HeldFrame } {
+  const frame = document.createElement('iframe')
+  frame.className = 'ng-frame__doc nodrag nowheel'
+  frame.title = 'Neuroglancer'
+  frame.referrerPolicy = 'no-referrer'
+  frame.allow = 'fullscreen'
+  const held: HeldFrame = { frame, applied: undefined, loaded: false, memoKey: undefined }
+  // The first load is all this needs: it latches, and a document is there to merge into from then on.
+  frame.addEventListener(
+    'load',
+    () => {
+      held.loaded = true
+    },
+    { once: true },
+  )
+  return { host: frame, root: held }
+}
+
+/**
+ * Read a frame's live state into `sceneMemo` as it is destroyed, so the next instance can resume it.
+ *
+ * Only when a frame is *gone* — released after nothing adopted it, built privately where it could not
+ * be kept, or discarded — since a frame handed to the next surface is still showing that state and a
+ * read would be parsed for nothing. The registry calls this while the frame is still in the document:
+ * a detached iframe has no `contentWindow`, and a null read looks exactly like the cross-origin degrade.
+ * Nothing is stored before the first `load` or for a hand-edited URL (`applied` undefined), because in
+ * neither case is there a state belonging to a scene this component can name.
+ */
+function rememberFrame(held: HeldFrame): void {
+  if (!held.memoKey || !held.applied || !held.loaded) return
+  const live = readLiveScene(held.frame)
+  if (live) {
+    rememberScene(held.memoKey, {
+      base: held.applied.base,
+      identity: held.applied.identity,
+      scene: live,
+    })
+  }
+}
+
+/**
+ * Frames kept between surfaces — only where `moveBefore` keeps one alive through a move, and pinned
+ * at their size while parked, since neuroglancer watches its own. See `docs/viewers.md`.
+ */
+const frames = new RootRegistry<HeldFrame>({
+  create: createFrame,
+  destroy: rememberFrame,
+  keepOnlyIfMovable: true,
+  pinWhenParked: true,
+})
 
 /**
  * The same-origin path serving this deployment, **where this build is behind one**.
@@ -206,21 +281,15 @@ export function NeuroglancerViewer({
   onExpand,
   onError,
 }: NeuroglancerViewerProps) {
-  const frameRef = useRef<HTMLIFrameElement>(null)
-  /** What the live frame was last pointed at, so the next change knows how to apply itself. */
-  const appliedRef = useRef<
-    | { url: string; base: string; identity: string; viewerType?: ViewerKind | undefined }
-    | undefined
-  >(undefined)
-  /** Whether a document has finished loading in the frame, i.e. whether there is state to merge into. */
-  const loadedRef = useRef(false)
+  /** The frame this surface shows, kept or private — see `frames`. */
+  const leaseRef = useRef<RootLease<HeldFrame> | null>(null)
   /**
-   * Bumped to throw the current document away and fetch a fresh one.
+   * Bumped to throw the frame away and build a fresh one.
    *
    * There is no other way to reload a foreign-origin frame: `contentWindow.location.reload()`
    * is blocked, and re-assigning `src` with the same URL is a same-document fragment
-   * navigation — the very property the merge depends on, working against us here. Remounting
-   * the element is what forces a real load.
+   * navigation — the very property the merge depends on, working against us here. A new element
+   * is what forces a real load.
    */
   const [reloadCount, setReloadCount] = useState(0)
   /** The element the pointer enters, which is the frame plus its own padding. */
@@ -246,6 +315,8 @@ export function NeuroglancerViewer({
   const [pointerInside, setPointerInside] = useState(false)
   /** Whether a navigation is waiting on that, so the resume knows it is not a fresh one. */
   const heldRef = useRef(false)
+  /** Whether there is a frame box to put a frame in — none before the node has run. */
+  const hasUrl = url !== ''
 
   /*
    * Native listeners rather than React's `onMouseEnter`/`onMouseLeave`, and the reason is the
@@ -265,19 +336,36 @@ export function NeuroglancerViewer({
       box.removeEventListener('mouseenter', enter)
       box.removeEventListener('mouseleave', leave)
     }
-  }, [])
+  }, [hasUrl])
+
+  /*
+   * Take a frame — the one this node already has, where it can be kept — into the box, and give it
+   * back on the way out. A layout effect, so it runs before the navigation effect reads the lease.
+   */
+  useLayoutEffect(() => {
+    const box = boxRef.current
+    if (!box) return
+    const lease = frames.lease(viewerId, box)
+    lease.root.memoKey = viewerId
+    leaseRef.current = lease
+    return () => {
+      leaseRef.current = null
+      lease.release()
+    }
+  }, [viewerId, reloadCount, hasUrl])
 
   useEffect(() => {
-    const frame = frameRef.current
-    if (!frame || !url) return
+    const kept = leaseRef.current?.root
+    if (!kept || !url) return
     // Re-running for a URL already applied would renavigate for nothing — and under
     // StrictMode's double-invoked effects it would send a patch as the frame's *first*
-    // navigation, merging onto neuroglancer's defaults instead of the published scene.
+    // navigation, merging onto neuroglancer's defaults instead of the published scene. It is also
+    // what makes adopting a kept frame free: it is already showing this URL.
     // The chosen flavour as well as the URL: it is not *in* the URL — `sceneForViewer`
     // normalises — so flipping the control alone leaves this guard true and the frame showing
     // the scene built for the other one. The prop rather than the resolved kind, since
     // `viewerKind` is a pure function of the URL that is already being compared.
-    if (appliedRef.current?.url === url && appliedRef.current.viewerType === viewerType) return
+    if (kept.applied?.url === url && kept.applied.viewerType === viewerType) return
 
     /*
      * Nothing is written into a document somebody has the pointer in — see `pointerInside`.
@@ -286,7 +374,7 @@ export function NeuroglancerViewer({
      * ask, so the opening navigation is never held and a card under the cursor still fills in.
      * The effect re-runs when the pointer leaves and picks this up from the top.
      */
-    if (loadedRef.current && pointerInside) {
+    if (kept.loaded && pointerInside) {
       heldRef.current = true
       return
     }
@@ -296,8 +384,8 @@ export function NeuroglancerViewer({
     const split = splitSceneUrl(url)
     if (!split) {
       // Not a shape this understands — a hand-edited viewer URL. Navigate and stop guessing.
-      frame.src = url
-      appliedRef.current = undefined
+      kept.frame.src = url
+      kept.applied = undefined
       return
     }
 
@@ -312,12 +400,12 @@ export function NeuroglancerViewer({
      * way round — see `viewerKind`.
      */
     const kind = viewerType ?? viewerKind(split.base)
-    const applied = appliedRef.current
+    const applied = kept.applied
     const canMerge =
       // Nothing to merge *into* until the first document has loaded. Without this, changing a
       // selection during the second or two neuroglancer takes to boot would land a patch as
       // the opening navigation, merging onto its defaults instead of the published scene.
-      loadedRef.current &&
+      kept.loaded &&
       applied !== undefined &&
       applied.base === split.base &&
       applied.identity === identity
@@ -327,9 +415,9 @@ export function NeuroglancerViewer({
      * looking at the same place through the same deployment.
      *
      * Only consulted when there is no live frame to read — that is the whole case it exists for:
-     * the card and the overlay are never up at once, so the hand-off between them arrives here
-     * as a fresh mount with an empty frame. The gate is the one `canMerge` uses, asked of the
-     * scene that *was* applied rather than of the state read back: see `sceneMemo`.
+     * a frame that could not be kept arrives here as a fresh mount with an empty frame. The gate
+     * is the one `canMerge` uses, asked of the scene that *was* applied rather than of the state
+     * read back: see `sceneMemo`.
      */
     const remembered = viewerId ? recallScene(viewerId) : undefined
     const resumable =
@@ -344,7 +432,7 @@ export function NeuroglancerViewer({
        * Two questions, and they are independent: *what* state to write, and *how* to write it.
        *
        * What. Best first:
-       * 1. Splice: take the state the viewer is showing — or, on a fresh mount, the one the last
+       * 1. Splice: take the state the viewer is showing — or, on a fresh frame, the one the last
        *    instance was showing — and put our selection into it. Everything the user has done,
        *    hidden layers, layers of their own, ordering, camera, is in the state we started
        *    from, so none of it is lost. Needs a same-origin frame to have been read.
@@ -356,7 +444,7 @@ export function NeuroglancerViewer({
        * full form, which is exactly why resuming has to happen through the state rather than
        * through the URL form: the whole scene, restored in one navigation.
        */
-      const live = canMerge ? readLiveScene(frame) : resumable
+      const live = canMerge ? readLiveScene(kept.frame) : resumable
       const spliced =
         live && datasetId
           ? spliceSegments(
@@ -366,10 +454,10 @@ export function NeuroglancerViewer({
             )
           : undefined
       const scene = spliced ?? split.scene
-      frame.src = canMerge
+      kept.frame.src = canMerge
         ? scenePatchUrl(frameBase, scene, kind)
         : sceneUrl(frameBase, scene, kind)
-      appliedRef.current = { url, base: split.base, identity, viewerType }
+      kept.applied = { url, base: split.base, identity, viewerType }
     }
 
     /*
@@ -385,49 +473,9 @@ export function NeuroglancerViewer({
     }
     const timer = setTimeout(navigate, MERGE_DEBOUNCE_MS)
     return () => clearTimeout(timer)
-    // `reloadCount` belongs here rather than only on the element: the effect's own guard
-    // returns early for a URL already applied, so a remount with no reason to renavigate would
-    // leave a blank frame.
+    // `reloadCount` belongs here: the lease it swaps holds a frame that has applied nothing, and
+    // this effect is what points it somewhere.
   }, [url, reloadCount, viewerType, datasetId, extraLayers, viewerId, pointerInside])
-
-  /*
-   * Read the live state on the way out, so the next instance can resume it.
-   *
-   * `useLayoutEffect`, and that is the load-bearing part: React runs a layout cleanup while the
-   * subtree is still in the document, and a passive one after the host node has been removed. A
-   * detached iframe has no `contentWindow`, so the passive version reads `undefined` every time
-   * and remembers nothing — a null result that looks exactly like the cross-origin degrade.
-   *
-   * `viewerId` is the only dependency, so in practice this runs once and its cleanup fires on
-   * unmount; everything else it reads is a ref, deliberately, so a re-render cannot make it
-   * fire early. Nothing is stored before the first `load` or for a hand-edited URL
-   * (`appliedRef` undefined), because in neither case is there a state belonging to a scene
-   * this component can name.
-   */
-  useLayoutEffect(() => {
-    if (!viewerId) return
-    return () => {
-      /*
-       * The ref read *in* the cleanup, which is what the exhaustive-deps warning objects to and
-       * is deliberate: Reload remounts the iframe element (`key={reloadCount}`), so an element
-       * captured when the effect ran would be the discarded one by the time this fires. React
-       * detaches a host ref after running the layout destroys above it, so the current one is
-       * still there — the same ordering the read itself depends on.
-       */
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      const frame = frameRef.current
-      const applied = appliedRef.current
-      if (!frame || !applied || !loadedRef.current) return
-      const live = readLiveScene(frame)
-      if (live) {
-        rememberScene(viewerId, {
-          base: applied.base,
-          identity: applied.identity,
-          scene: live,
-        })
-      }
-    }
-  }, [viewerId])
 
   /*
    * Recomputed rather than carried on the value: same table, same spec, same palette, so it
@@ -462,21 +510,15 @@ export function NeuroglancerViewer({
     void copyText(url).catch((err: unknown) => onError?.(errorMessage(err)))
   }
 
-  /*
-   * Both refs are cleared first, and both matter. `appliedRef` is what the effect checks before
-   * doing anything, so leaving it set means the remount produces an empty frame; `loadedRef`
-   * decides merge-versus-replace, and merging into a document that no longer exists lands the
-   * patch on neuroglancer's defaults rather than on the published scene.
-   */
   const reload = () => {
-    appliedRef.current = undefined
-    loadedRef.current = false
-    // And any hold, which is bookkeeping about a navigation that is now moot: left set, it
-    // would put the fresh document's opening navigation behind the merge timer.
+    // Bookkeeping about a navigation that is now moot: left set, it would put the fresh document's
+    // opening navigation behind the merge timer.
     heldRef.current = false
-    // And the remembered state, which is the third thing a reload has to throw away: this is the
-    // button somebody presses when the frame has gone wrong, so resuming into it is the one
-    // outcome it must not have. Reload means the published scene.
+    // Thrown away rather than parked: this is the button somebody presses when the frame has gone
+    // wrong, and the next lease builds one from nothing, with no `applied` and no `loaded`.
+    leaseRef.current?.discard()
+    // And forgotten *after* the discard, which remembers the frame as it goes: resuming into the
+    // state that went wrong is the one outcome Reload must not have. It means the published scene.
     if (viewerId) forgetScene(viewerId)
     setReloadCount((n) => n + 1)
   }
@@ -489,22 +531,7 @@ export function NeuroglancerViewer({
         // A stored file could carry anything; a zero or negative scale divides the frame's
         // size by it and produces an element with no size, or an infinite one.
         style={{ '--ng-scale': safeScale(scale) } as React.CSSProperties}
-      >
-        <iframe
-          // Remounting is the reload: see `reloadCount`.
-          key={reloadCount}
-          ref={frameRef}
-          className="ng-frame__doc nodrag nowheel"
-          title="Neuroglancer"
-          referrerPolicy="no-referrer"
-          allow="fullscreen"
-          // Fires for fragment navigations as well as real loads, which is harmless here:
-          // this only ever latches, and both mean a document is present to merge into.
-          onLoad={() => {
-            loadedRef.current = true
-          }}
-        />
-      </div>
+      />
 
       {legend?.kind === 'categorical' && !compact && (
         <div className="legend">

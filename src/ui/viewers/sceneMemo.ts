@@ -27,6 +27,11 @@
  *    `.coda.json` would hand somebody else's panel layout to whoever opened the file.
  *  - **Module-level rather than a ref**, because surviving unmount is the entire point.
  *
+ * **It is now the fallback rather than the handover.** Where the browser has `moveBefore`, the frame
+ * itself is kept between surfaces (`NeuroglancerViewer`'s `frames`), so nothing reloads and there is
+ * nothing to resume. This is what carries the state where a frame cannot be kept — Safari — and
+ * after a kept frame has been released for want of a surface to adopt it.
+ *
  * Only reachable where the viewer is proxied same-origin — a cross-origin frame's
  * `location.hash` cannot be read, so nothing is ever stored and the embed behaves as it did.
  * The same condition `spliceSegments` runs under, and the same honest degrade.

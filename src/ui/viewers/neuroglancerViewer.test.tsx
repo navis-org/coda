@@ -17,8 +17,9 @@ import { column, tableSchema } from '../../core/types'
 import { tableFromRows } from '../../core/values'
 import type { NgScene } from '../../data/neuroglancer/scene'
 import { parseSceneUrl, sceneUrl } from '../../data/neuroglancer/scene'
-import { installJsdomStubs } from '../../test/jsdomStubs'
+import { installJsdomStubs, installMoveBeforeStub } from '../../test/jsdomStubs'
 import { NeuroglancerViewer } from './NeuroglancerViewer'
+import { RELEASE_AFTER_MS } from './persistentRoots'
 import { resetSceneMemos } from './sceneMemo'
 
 beforeAll(() => installJsdomStubs({ width: 800, height: 500 }))
@@ -102,9 +103,8 @@ function scaleBox(container: HTMLElement): HTMLElement | null {
  * state survives a remount: **a detached iframe has no browsing context**, so its
  * `contentWindow` is null. jsdom would happily keep answering from a removed element, which
  * would let the read on the way out pass here and return nothing in a browser — and a nothing
- * that looks exactly like the cross-origin degrade. This is what makes the capture a
- * `useLayoutEffect`: React runs a layout cleanup while the subtree is still in the document
- * and a passive one after it has gone.
+ * that looks exactly like the cross-origin degrade. This is why the registry destroys a frame —
+ * which is when its state is read — before it removes the element.
  */
 function frameShowing(container: HTMLElement, scene: unknown): void {
   const found = frame(container)!
@@ -509,6 +509,121 @@ describe('holding an update back while the pointer is in the frame', () => {
     )
     enter(container)
     expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+  })
+})
+
+describe('handing the live frame to the next surface', () => {
+  /*
+   * Where the browser can move an element without reloading it, the card and the overlay share one
+   * frame: the application never stops, so there is nothing to resume. jsdom has no `moveBefore`,
+   * so it is stood in for by an `insertBefore`, which keeps the element — what is checked is that
+   * the next instance adopts the frame rather than building and navigating one of its own.
+   */
+  let stub: ReturnType<typeof installMoveBeforeStub>
+  beforeEach(() => {
+    stub = installMoveBeforeStub()
+  })
+
+  afterEach(() => {
+    cleanup()
+    // Release what the last test parked, so no kept frame outlives its test.
+    vi.advanceTimersByTime(RELEASE_AFTER_MS + 1)
+    stub.restore()
+  })
+
+  /** A mount that loaded and went away — the card handing the node to the overlay. */
+  function handOff(viewerId: string) {
+    const view = render(
+      <NeuroglancerViewer
+        url={URL_A}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+        viewerId={viewerId}
+      />,
+    )
+    frameLoaded(view.container)
+    const element = frame(view.container)!
+    const src = element.getAttribute('src')
+    view.unmount()
+    return { element, src }
+  }
+
+  it('shows the same frame, still pointed where it was, and navigates nothing', () => {
+    const { element, src } = handOff('kept-a')
+    const { container } = render(
+      <NeuroglancerViewer
+        url={URL_A}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+        viewerId="kept-a"
+      />,
+    )
+    expect(frame(container)).toBe(element)
+    expect(frameSrc(container)).toBe(src)
+  })
+
+  it('merges the next selection into the frame it adopted, since a document is already there', () => {
+    handOff('kept-b')
+    const props = { color: CATEGORICAL, datasetId: OWNED, viewerId: 'kept-b' }
+    const { container, rerender } = render(<NeuroglancerViewer url={URL_A} {...props} />)
+    rerender(<NeuroglancerViewer url={URL_B} {...props} />)
+    flushMerge()
+    expect(frameSrc(container)).toContain('#!+')
+  })
+
+  it('builds a new frame on Reload, which is how somebody leaves one that has gone wrong', () => {
+    const { element } = handOff('kept-c')
+    const { container } = render(
+      <NeuroglancerViewer
+        url={URL_A}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+        viewerId="kept-c"
+      />,
+    )
+    act(() => {
+      fireEvent.click(screen.getByLabelText('Reload the viewer'))
+    })
+    expect(frame(container)).not.toBe(element)
+    expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))
+  })
+
+  it('keeps nothing without a viewerId, which the profile tile does not pass', () => {
+    const first = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} />,
+    )
+    const element = frame(first.container)
+    first.unmount()
+    const { container } = render(
+      <NeuroglancerViewer url={URL_A} color={CATEGORICAL} datasetId={OWNED} />,
+    )
+    expect(frame(container)).not.toBe(element)
+  })
+})
+
+describe('where moving a frame would reload it', () => {
+  it('builds a frame per mount and leaves the resume to sceneMemo', () => {
+    // No `moveBefore`: kept and moved the ordinary way, the frame would reload onto whatever `src`
+    // it was last given while still claiming to show the scene it had applied.
+    const first = render(
+      <NeuroglancerViewer
+        url={URL_A}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+        viewerId="unkept"
+      />,
+    )
+    const element = frame(first.container)
+    first.unmount()
+    const { container } = render(
+      <NeuroglancerViewer
+        url={URL_A}
+        color={CATEGORICAL}
+        datasetId={OWNED}
+        viewerId="unkept"
+      />,
+    )
+    expect(frame(container)).not.toBe(element)
   })
 })
 

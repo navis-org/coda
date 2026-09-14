@@ -718,7 +718,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
   },
   'out.neuroglancer': {
     readsInputs: true,
-    render: ({ node, value, ctx, params, shared, inputValues }) => {
+    render: ({ value, ctx, params, shared, inputValues, viewerKey }) => {
       // The scene, the segments and the colours are all in the URL the node emitted; the
       // neuron table comes along only so the legend can be drawn beside the frame.
       const neurons = inputValues?.neurons
@@ -738,10 +738,11 @@ const VIEWERS: Record<string, ViewerEntry> = {
           viewerType={chosenViewerKind(params)}
           datasetId={dataset?.kind === 'dataset' ? dataset.datasetId : undefined}
           extraLayers={extra?.kind === 'layers' ? extra.items.length : 0}
-          // The node id, so the card and the overlay are one continuous viewer session rather than
-          // two — the same prop, for the same reason, as the 3D viewer's camera and the network
-          // viewer's layout. Here it carries the entire neuroglancer state, camera included.
-          viewerId={node.id}
+          // The node's key within its workflow, so the card and the overlay are one continuous
+          // viewer session rather than two: the frame itself is kept under it, and its whole state
+          // remembered under it once the frame is gone. Scoped, since a kept frame answering for
+          // the same node id in another open workflow would show that workflow's scene.
+          viewerId={viewerKey}
           {...shared}
         />
       )

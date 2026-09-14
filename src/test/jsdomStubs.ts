@@ -389,6 +389,37 @@ export function installFullscreenStub(): {
   return { requests, exits, setElement }
 }
 
+/**
+ * `Element.moveBefore`, which jsdom does not have: the state-preserving move a kept Neuroglancer frame
+ * depends on (`persistentRoots.ts`). Stood in for by an `insertBefore`, which keeps the element — enough
+ * to ask whether a move *went through* `moveBefore`, never whether a document survived one, since jsdom
+ * loads none.
+ *
+ * Opt in per suite, like `installFullscreenStub`: installed for everyone it would put every suite on the
+ * kept path. Restore it in `afterEach`.
+ */
+export function installMoveBeforeStub(): {
+  /** Each call, as the parent moved into and the node moved. */
+  moves: Array<{ parent: Element; node: Node }>
+  restore: () => void
+} {
+  const moves: Array<{ parent: Element; node: Node }> = []
+  Object.defineProperty(Element.prototype, 'moveBefore', {
+    configurable: true,
+    writable: true,
+    value(this: Element, node: Node, child: Node | null) {
+      moves.push({ parent: this, node })
+      this.insertBefore(node, child)
+    },
+  })
+  return {
+    moves,
+    restore: () => {
+      delete (Element.prototype as { moveBefore?: unknown }).moveBefore
+    },
+  }
+}
+
 /** Clear localStorage where the environment provides it; tolerate where it doesn't. */
 export function clearStorage(): void {
   try {
