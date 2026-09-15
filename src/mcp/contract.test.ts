@@ -123,6 +123,8 @@ describe('mcp contract v1', () => {
       'return an empty plan',
       'What a run tells you',
       'An empty canvas',
+      'catalogue above',
+      'returned after every plan',
     ]) {
       expect(guide).not.toContain(appOnly)
     }

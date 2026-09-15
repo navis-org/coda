@@ -212,7 +212,9 @@ server to put one on. Four decisions:
 - **Running a workflow.** The server authors and checks; results need the app, a browser and, for
   most datasets, a person's own token.
 - **Loading an existing graph or share link into a draft.** It needs `deserializeGraph` in the
-  contract, which is an additive export.
+  contract, which is an additive export. It would not bring run results with it — a file or a link
+  carries the graph, not a session — so the guide's missing `ran:` rules stay right. Those come back
+  (`RUN_RULES` in the `mcp` assembly, `catalogue.ts`) only if the server ever runs or previews nodes.
 - **Wizard starters.** `buildWorkflow` would be a strong first step for a complex request, and adding
   it is an additive export.
 - **Open-in-browser and save-to-file tools.** They were the answer to long links for a *local*

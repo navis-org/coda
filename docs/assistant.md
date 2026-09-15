@@ -340,6 +340,11 @@ user as usual"); a model using the server flagged it as instructions in a tool r
 instructions, which is exactly what it was. **A change to the plan rules reaches both readers; a
 change to a framing reaches one**, and `mcp/contract.test.ts` holds the MCP guide free of the app's.
 
+The same reader caught a wording error in the shared rules: three mentions of "the catalogue *above*",
+in a prompt that has always put the catalogue *after* the rules. They now say "the catalogue", in both
+prompts. That is the one change to the app prompt since the split, and it is **unmeasured** — a
+correction of a layout claim rather than a new instruction.
+
 ## What is deliberately not built
 
 **No tool loop.** It was the plan for the values half until the questions turned out to be

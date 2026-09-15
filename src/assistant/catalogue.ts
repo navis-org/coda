@@ -559,10 +559,16 @@ export function catalogueText(detail: CatalogueDetail = DEFAULT_DETAIL): string 
  * instructions in a tool result rewriting other instructions — correctly, since that is what it was.
  * So each reader gets its own intro and closing, and the rules about plans stay one text.
  *
- * **The `app` assembly is byte-identical to the single string it was split from.** It is the cached
- * prefix (see `buildSystemPrompt`) and every measurement in `docs/assistant.md` was taken against it;
- * the split was checked by comparing the assembled prompt, lean and full, before and after. `mcp`
- * leaves out `RUN_RULES`, since nothing runs through the server and no `ran:` line ever appears.
+ * **The `app` assembly was byte-identical to the single string it was split from** — checked lean and
+ * full, before and after — because it is the cached prefix (see `buildSystemPrompt`) and every
+ * measurement in `docs/assistant.md` was taken against it. One change since, unmeasured: three
+ * mentions of "the catalogue above" became "the catalogue", the catalogue having always followed the
+ * rules in both prompts.
+ *
+ * `mcp` leaves out `RUN_RULES`: nothing runs through the server, and a graph loaded from a file or a
+ * link carries no results either, so no `ran:` line can appear. **Put `RUN_RULES` back in the `mcp`
+ * assembly if the server ever runs or previews nodes** — that, not importing a graph, is when a model
+ * would have real values to read.
  */
 type RulesHost = 'app' | 'mcp'
 
@@ -582,8 +588,8 @@ wire and applies a plan atomically — whole or not at all — and a refusal nam
 Getting it right first time is cheaper than being clever.
 
 The current-graph listing, which the rules below refer to, is the draft as the tools report it:
-every node id, the columns each output carries, the params that are set, and every wire. It is
-returned after every plan that applies, and on request.
+every node id, the columns each output carries, the params that are set, and every wire. The
+tools report it on request; ask for it whenever you are unsure what the draft holds.
 `.trim()
 
 const PLAN_RULES = `
@@ -593,7 +599,7 @@ How a plan is written:
   appears on the canvas.
 - Existing nodes are named by the id shown in the current-graph listing. A ref must not be one
   of those ids.
-- \`connect\` wires an output to an input, naming ports by the ids in the catalogue above.
+- \`connect\` wires an output to an input, naming ports by the ids in the catalogue.
   Input ports take one wire: connecting to an occupied input re-points it rather than failing.
 - \`disconnect\` cuts a wire, named by its *input* end.
 - \`remove\` deletes existing nodes, and takes their wires with them.
@@ -602,7 +608,7 @@ How a plan is written:
 
 const FAILURE_RULES = `
 What makes a plan fail:
-- A node type that is not in the catalogue above, a port that node does not have, a param that
+- A node type that is not in the catalogue, a port that node does not have, a param that
   node does not have, or a value of the wrong kind.
 - A param value written in the wrong JSON type. The catalogue names each param's kind right
   after its id: a \`number\` or \`int\` takes \`3\`, not \`"3"\`; a \`boolean\` takes \`true\`, not
@@ -618,7 +624,7 @@ Column params — set them when you can, and you often can:
 - A \`carries:\` line says which columns a port holds. Use those names. A Bar Chart fed by a
   Connectivity node should name its category and value, not be left blank.
 - The current-graph listing carries the same line per node, and it is the authoritative one:
-  a dataset adds properties the catalogue above cannot know about.
+  a dataset adds properties the catalogue cannot know about.
 - An \`options:\` line lists what a param whose catalogue entry says *options depend on the
   input* actually offers on **that** node, as it is wired right now. Where one is present it is
   the only correct source: write the value exactly as listed. \`… and N more\` means the list was

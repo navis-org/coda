@@ -949,6 +949,9 @@ describe('the catalogue', () => {
       'Answer with a plan and nothing else',
     )
     expect(buildSystemPrompt('lean', 'mcp')).toContain(catalogueText())
+    // The catalogue follows the rules in both prompts, so neither may point up at it.
+    expect(buildSystemPrompt()).not.toContain('catalogue above')
+    expect(buildSystemPrompt('lean', 'mcp')).not.toContain('catalogue above')
   })
 })
 

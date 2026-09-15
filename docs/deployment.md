@@ -3,7 +3,7 @@
 [`coda-mcp`](https://github.com/navis-org/coda-mcp) at `https://flyem.mrc-lmb.cam.ac.uk/coda-mcp/`.
 Connector URL: `https://flyem.mrc-lmb.cam.ac.uk/coda-mcp/mcp`. Design and contract: [mcp.md](mcp.md).
 
-Status (2026-09-15): deployed, Coda build `a917eae1bda7`. Verified from outside: MCP session, short
+Status (2026-09-15): deployed; the Coda build in use is in the log's first line. Verified from outside: MCP session, short
 link redirect, a 15,494-char `Location` through nginx, and the `.json` fallback for a 29,664-char link.
 Network mode (schema peeking) on since 2026-09-15.
 
