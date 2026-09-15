@@ -81,6 +81,7 @@ import {
   neuronAtSegment,
   neuronAtVertex,
   pointerNdc,
+  perspectivePointSize,
   sceneDim,
   sceneLights,
   sceneMode,
@@ -1768,6 +1769,12 @@ function PointSprites({
   opacity: number
 }) {
   const invalidate = useThree((state) => state.invalidate)
+  const camera = useThree((state) => state.camera)
+  // A nanometre size means nanometres only once three's attenuation is given the field of view.
+  const drawnSize =
+    attenuate && camera instanceof THREE.PerspectiveCamera
+      ? perspectivePointSize(size, camera.fov)
+      : size
 
   const geometry = useMemo(() => {
     const built = buildPoints(points, colorAt, visible)
@@ -1817,7 +1824,12 @@ function PointSprites({
 
   return (
     <points geometry={geometry}>
-      <pointsMaterial ref={material} vertexColors size={size} sizeAttenuation={attenuate} />
+      <pointsMaterial
+        ref={material}
+        vertexColors
+        size={drawnSize}
+        sizeAttenuation={attenuate}
+      />
     </points>
   )
 }

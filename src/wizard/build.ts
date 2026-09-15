@@ -1182,7 +1182,6 @@ function bodyOf(
                       ? {
                           pointColorMode: 'categorical',
                           pointColorBy: 'polarity',
-                          pointSize: 90,
                         }
                       : {}),
                   },

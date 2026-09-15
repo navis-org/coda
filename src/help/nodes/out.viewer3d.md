@@ -110,7 +110,7 @@ out.viewer3d: meshOpacity, pointSize, background
 
 **Volume colour is a single grey by default**, where skeletons and meshes start on a colour each: 63 neuropils over an eight-colour palette repeats a hue every eighth region. Switch it to `by category` on `roi` when the regions are the subject rather than the room.
 
-**Point size is in nanometres**, not pixels, so synapses keep their size relative to the neuron as you zoom. On a whole-brain scene the default is a speck.
+**Point size is in nanometres**, not pixels, so synapses keep their size relative to the neuron as you zoom. The default, 800 nm, is larger than a real synapse, so the dots show beside a mesh. Zoomed right out on a whole brain they shrink to specks.
 
 **`Light intensity`** scales the scene's lighting; 1 is the default the palette was checked against. Past about 1.4 the brightest surfaces **clip** — there is no highlight roll-off — and at the top of the slider roughly a quarter of the visible surface is white rather than its own colour.
 

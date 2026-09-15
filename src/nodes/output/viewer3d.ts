@@ -380,9 +380,15 @@ registerNode({
       id: 'pointSize',
       kind: 'number',
       label: 'Point size',
-      default: 60,
+      /*
+       * A true diameter since `perspectivePointSize` corrected three's attenuation, which drew
+       * every dot at 0.41× the number here. 60 was a speck under that, and gone entirely beside
+       * a mesh; 400 (what 1000 looked like before the correction) was still too small zoomed
+       * out, judged in a browser.
+       */
+      default: 800,
       min: 5,
-      max: 2000,
+      max: 4000,
       step: 5,
       presentational: true,
       advanced: true,

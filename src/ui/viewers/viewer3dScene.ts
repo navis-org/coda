@@ -780,6 +780,19 @@ export function emphasisSizes(size: number): { lit: number; dim: number } {
   return { lit: size * EMPHASIS_SCALE, dim: size * DIM_SCALE }
 }
 
+/**
+ * The `PointsMaterial.size` that draws a dot `diameter` scene units across under a perspective
+ * camera with vertical field of view `fovDegrees`.
+ *
+ * three's attenuation is `size · (height / 2) / depth` pixels, and the projection puts a length
+ * `d` at `d · (height / 2) / (depth · tan(fov / 2))`. The two agree only at a 90° field of view,
+ * so at the viewer's 45° a "60 nm" dot was drawn 25 nm across: neither the stated diameter nor a
+ * screen size, which is how it was reported. Dividing by the tangent puts the missing term back.
+ */
+export function perspectivePointSize(diameter: number, fovDegrees: number): number {
+  return diameter / Math.tan((fovDegrees * Math.PI) / 360)
+}
+
 // ---------------------------------------------------------------------------
 // The interactive legend
 

@@ -17,6 +17,7 @@ import { CHART_INK, chartSurface, parseHex } from '../colors'
 import {
   DIM_SCALE,
   emphasisSizes,
+  perspectivePointSize,
   AMBIENT_INTENSITY,
   buildPoints,
   buildSkeletonSegments,
@@ -998,5 +999,23 @@ describe('the two sizes a split synapse cloud is drawn at', () => {
     const b = emphasisSizes(12)
     expect(b.lit).toBeCloseTo(a.lit * 2)
     expect(b.dim).toBeCloseTo(a.dim * 2)
+  })
+})
+
+describe('perspectivePointSize', () => {
+  // three draws `size · (h/2) / depth` pixels; a true diameter projects to
+  // `d · (h/2) / (depth · tan(fov/2))`. Asserted as that projection, not as the formula's shape.
+  it('draws a dot at its stated diameter on screen', () => {
+    const fov = 45
+    const height = 800
+    const depth = 50_000
+    const diameter = 400
+    const threePixels = (perspectivePointSize(diameter, fov) * (height / 2)) / depth
+    const projected = (diameter * (height / 2)) / (depth * Math.tan((fov * Math.PI) / 360))
+    expect(threePixels).toBeCloseTo(projected)
+  })
+
+  it('needs no correction at a 90° field of view', () => {
+    expect(perspectivePointSize(400, 90)).toBeCloseTo(400)
   })
 })
