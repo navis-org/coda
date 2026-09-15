@@ -1864,6 +1864,8 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   is a `v2` directory. Also why the server is offline by default (asking the build for its catalogue
   fires requests, and so does checking any real dataset node), and why the hosted server hands out
   short links rather than packed ones: a model has to retype a link, and base64 does not survive it.
+- [docs/deployment.md](docs/deployment.md) — where the hosted MCP server is installed and configured
+  (`flyem1.lmb`), and the commands to run it.
 - [docs/zoo.md](docs/zoo.md) — the Coda Zoo, and why its index is a committed file rather
   than an API listing. Read before changing `ZooIndex`.
 - [docs/analytics.md](docs/analytics.md) — the GoatCounter beacon: what it collects, the two

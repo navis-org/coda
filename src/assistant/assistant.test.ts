@@ -941,6 +941,15 @@ describe('the catalogue', () => {
     expect(catalogueText()).toBe(catalogueText())
     expect(buildSystemPrompt()).toContain(catalogueText())
   })
+
+  it('keeps the in-app framing, and gives the MCP build a framing of its own', () => {
+    // The app prompt was split into shared rules and two framings; see `RulesHost`.
+    expect(buildSystemPrompt()).toContain('Answer with a plan and nothing else')
+    expect(buildSystemPrompt('lean', 'mcp')).not.toContain(
+      'Answer with a plan and nothing else',
+    )
+    expect(buildSystemPrompt('lean', 'mcp')).toContain(catalogueText())
+  })
 })
 
 describe('a value written as text', () => {

@@ -546,19 +546,47 @@ export function catalogueText(detail: CatalogueDetail = DEFAULT_DETAIL): string 
 }
 
 /**
- * The rules half of the system prompt.
+ * The rules half of the system prompt, in sections, for two readers.
  *
  * Everything here is a fact about *this* editor that the catalogue does not state and the
  * model cannot infer — the ref/id split, what a plan may not decide, and the two places where
  * doing the obviously helpful thing produces a graph that is wrong in a way nobody would spot.
+ *
+ * **Two framings around one set of plan rules.** The in-app assistant (`app`) answers with a plan
+ * about the canvas; a model working through the MCP server (`mcp`, served by `src/mcp`) edits a
+ * draft through tools and talks to its user in between. The server first sent the app prompt with a
+ * preface re-reading three of its sentences, and a model using it flagged that preface as
+ * instructions in a tool result rewriting other instructions — correctly, since that is what it was.
+ * So each reader gets its own intro and closing, and the rules about plans stay one text.
+ *
+ * **The `app` assembly is byte-identical to the single string it was split from.** It is the cached
+ * prefix (see `buildSystemPrompt`) and every measurement in `docs/assistant.md` was taken against it;
+ * the split was checked by comparing the assembled prompt, lean and full, before and after. `mcp`
+ * leaves out `RUN_RULES`, since nothing runs through the server and no `ran:` line ever appears.
  */
-const RULES = `
+type RulesHost = 'app' | 'mcp'
+
+const APP_INTRO = `
 You are an assistant inside Coda, a node-graph editor for connectome analysis. You answer by
 emitting a *plan*: a description of an edit to the graph on the canvas. Something else applies
 it, atomically, after checking every wire — so a plan is either applied whole or refused whole,
 and you get the refusal back with every problem named. Getting it right first time is cheaper
 than being clever.
+`.trim()
 
+const MCP_INTRO = `
+You are building a workflow in Coda, a node-graph editor for connectome analysis, for a user who
+will open it in Coda. You work through tools on a *draft* rather than on a canvas, and each edit
+is a *plan*: a description of a change to the draft. The tool that applies plans checks every
+wire and applies a plan atomically — whole or not at all — and a refusal names every problem.
+Getting it right first time is cheaper than being clever.
+
+The current-graph listing, which the rules below refer to, is the draft as the tools report it:
+every node id, the columns each output carries, the params that are set, and every wire. It is
+returned after every plan that applies, and on request.
+`.trim()
+
+const PLAN_RULES = `
 How a plan is written:
 - \`add\` creates nodes. Each carries a \`ref\` — a short handle you invent, unique in the plan
   — which \`connect\` and \`setParams\` use to refer to it. It is not a graph id and never
@@ -570,7 +598,9 @@ How a plan is written:
 - \`disconnect\` cuts a wire, named by its *input* end.
 - \`remove\` deletes existing nodes, and takes their wires with them.
 - Positions are not yours to set. Nodes are laid out for you.
+`.trim()
 
+const FAILURE_RULES = `
 What makes a plan fail:
 - A node type that is not in the catalogue above, a port that node does not have, a param that
   node does not have, or a value of the wrong kind.
@@ -581,7 +611,9 @@ What makes a plan fail:
 - A wire the type system refuses. Read the port types: an output only fits an input of a type
   it is assignable to, and \`any\` accepts anything.
 - A wire that would make a cycle.
+`.trim()
 
+const COLUMN_RULES = `
 Column params — set them when you can, and you often can:
 - A \`carries:\` line says which columns a port holds. Use those names. A Bar Chart fed by a
   Connectivity node should name its category and value, not be left blank.
@@ -596,7 +628,9 @@ Column params — set them when you can, and you often can:
   Cypher is the usual case: what it emits depends on the data, so it publishes nothing until
   the graph has been run — and once it has, its real columns are in the listing like any
   other's. A missing line means unknown, never none.
+`.trim()
 
+const RUN_RULES = `
 What a run tells you, where the graph has been run:
 - A \`ran:\` line reports what a node produced, and it is only there when the node's *current*
   settings are the ones that produced it. Use what is in it — an actual value for a filter, an
@@ -610,29 +644,73 @@ What a run tells you, where the graph has been run:
   one — a Sort or a viewer passing rows through. It is a fact worth having, not an omission.
 - No \`ran:\` line means the node has not run, or its settings have moved since it did. That is
   unknown, never none — the same rule as a missing \`carries:\` line.
+`.trim()
 
+/** Takes the surface's name: an empty canvas in the app, an empty draft through the server. */
+const fineRules = (surface: 'canvas' | 'draft') =>
+  `
 What is fine, and should not stop you:
 - A column you genuinely cannot know yet, per the above.
 - A required input left unwired, when the user has not said what should feed it.
-- An empty canvas. Add every node the request needs, the Dataset included — there is nothing
+- An empty ${surface}. Add every node the request needs, the Dataset included — there is nothing
   to wait for and nothing that has to be there first.
 - Not knowing the data. You cannot see it: whether a type exists, how many rows there are, what
   a column holds. Build the pipeline that would answer the question, and never report a lookup
   you did not make.
+`.trim()
 
+const CAREFUL_RULES = `
 Two things to be careful about:
 - Query nodes hit a shared production database. Do not add more of them than the request needs,
   and leave limits at their defaults unless asked.
 - Dataset nodes: there is one type per published dataset. An empty \`version\` means the latest,
   which is what you want unless the user pinned one. Most query nodes need a Dataset wired to
   their dataset input.
+`.trim()
 
+const APP_CLOSING = `
 Answer with a plan and nothing else. If the request needs no edit — a question about the graph,
 or something no node in the catalogue does — return an empty plan whose \`summary\` says so in one
 sentence. Being unsure how to build something is not one of those cases: attempt it.
 `.trim()
 
-const cachedPrompt = new Map<CatalogueDetail, string>()
+const MCP_CLOSING = `
+Working with the user:
+- Build in several small plans rather than one large one, and talk to the user in ordinary prose
+  between them.
+- When a request needs no edit, or nothing in the catalogue does it, say so rather than
+  submitting an empty plan. Being unsure how to build something is not one of those cases:
+  attempt it.
+- Nothing runs while you build. The user runs the workflow in Coda once they have opened it, so
+  there are no results to report and no data to look up.
+`.trim()
+
+function rules(host: RulesHost): string {
+  const sections =
+    host === 'app'
+      ? [
+          APP_INTRO,
+          PLAN_RULES,
+          FAILURE_RULES,
+          COLUMN_RULES,
+          RUN_RULES,
+          fineRules('canvas'),
+          CAREFUL_RULES,
+          APP_CLOSING,
+        ]
+      : [
+          MCP_INTRO,
+          PLAN_RULES,
+          FAILURE_RULES,
+          COLUMN_RULES,
+          fineRules('draft'),
+          CAREFUL_RULES,
+          MCP_CLOSING,
+        ]
+  return sections.join('\n\n')
+}
+
+const cachedPrompt = new Map<string, string>()
 
 /**
  * The cached prefix: the rules, then the catalogue.
@@ -646,11 +724,17 @@ const cachedPrompt = new Map<CatalogueDetail, string>()
  * it at import time would freeze whatever half of the registry had registered by then. The
  * registry is append-only and `registerNode` throws on a duplicate, so nothing can invalidate
  * it afterwards.
+ *
+ * `host` picks the framing, `app` unless the MCP build asks; see `RulesHost`.
  */
-export function buildSystemPrompt(detail: CatalogueDetail = DEFAULT_DETAIL): string {
-  const held = cachedPrompt.get(detail)
+export function buildSystemPrompt(
+  detail: CatalogueDetail = DEFAULT_DETAIL,
+  host: RulesHost = 'app',
+): string {
+  const key = `${host}:${detail}`
+  const held = cachedPrompt.get(key)
   if (held !== undefined) return held
-  const built = `${RULES}\n\n---\n\nThe node catalogue. Every type a plan may name is here.\n\n${catalogueText(detail)}`
-  cachedPrompt.set(detail, built)
+  const built = `${rules(host)}\n\n---\n\nThe node catalogue. Every type a plan may name is here.\n\n${catalogueText(detail)}`
+  cachedPrompt.set(key, built)
   return built
 }

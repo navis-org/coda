@@ -114,4 +114,19 @@ describe('mcp contract v1', () => {
       expect.arrayContaining(['add', 'connect', 'setParams']),
     )
   })
+
+  it("frames the guide for a model working through tools, with none of the app's framing", () => {
+    const guide = coda.guide()
+    for (const appOnly of [
+      'You are an assistant inside Coda',
+      'Answer with a plan and nothing else',
+      'return an empty plan',
+      'What a run tells you',
+      'An empty canvas',
+    ]) {
+      expect(guide).not.toContain(appOnly)
+    }
+    expect(guide).toContain('How a plan is written:')
+    expect(guide).toContain('The node catalogue.')
+  })
 })

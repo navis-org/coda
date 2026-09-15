@@ -53,7 +53,7 @@ The costs of the chosen shape, stated so they are not rediscovered:
 | Export | What it is |
 | ------ | ---------- |
 | `CONTRACT_VERSION`, `APP_VERSION`, `BUILD_ID` | `1`; package.json's version, which does **not** change between deploys; the commit, with `-dirty` for a modified tree |
-| `guide(detail)` | the in-app assistant's rules followed by the catalogue (`buildSystemPrompt`) |
+| `guide(detail)` | the plan rules framed for a model working through tools, then the catalogue (`buildSystemPrompt(detail, 'mcp')`) |
 | `nodeTypeIds()` | every type a plan may name |
 | `nodeEntry(type, detail)`, `nodeHelp(type)` | one node's catalogue entry (`full` by default); its `?` document as markdown |
 | `planSchema()`, `parsePlan(text)` | the plan's JSON Schema; the lenient reader that normalises a model's reply |

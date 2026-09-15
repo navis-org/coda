@@ -49,9 +49,12 @@ export const APP_VERSION: string = __APP_VERSION__
  */
 export const BUILD_ID: string = __BUILD_ID__
 
-/** The in-app assistant's rules followed by the whole node catalogue, `lean` unless asked. */
+/**
+ * The plan rules, framed for a model editing a draft through tools rather than for the in-app
+ * assistant, then the whole node catalogue. `lean` unless asked.
+ */
 export function guide(detail?: CatalogueDetail): string {
-  return buildSystemPrompt(detail)
+  return buildSystemPrompt(detail, 'mcp')
 }
 
 /** Every node type a plan may name. */

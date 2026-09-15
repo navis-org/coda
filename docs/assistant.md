@@ -328,6 +328,18 @@ The free path is real and is what the last two rounds were measured on: `ollama 
 ollama.com. `docs/ollama.md` records it as 5/5 in 16 s; on today's seven-case suite it is nearer
 6/7 at ~25 s with two cases that flake, so read that figure as more deterministic than the model is.
 
+## The MCP framing
+
+`buildSystemPrompt(detail, host)` assembles one set of plan rules for two readers. `app` is the prompt
+every measurement above was taken against, and its assembly is **byte-identical** to the single
+string it was split from — checked lean and full, before and after. `mcp` is what `src/mcp`'s
+`guide()` serves a model editing a draft through the MCP server: its own intro and closing, and no
+`ran:` section, since nothing runs there. The split replaced a preface the server had put on the app
+prompt, re-reading three of its sentences ("answer with a plan and nothing else" meaning "talk to the
+user as usual"); a model using the server flagged it as instructions in a tool result rewriting other
+instructions, which is exactly what it was. **A change to the plan rules reaches both readers; a
+change to a framing reaches one**, and `mcp/contract.test.ts` holds the MCP guide free of the app's.
+
 ## What is deliberately not built
 
 **No tool loop.** It was the plan for the values half until the questions turned out to be
