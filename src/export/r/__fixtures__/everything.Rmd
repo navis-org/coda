@@ -1644,6 +1644,21 @@ synapses <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn =
 synapses_2 <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn = hemibrain_neuprint)
 ```
 
+```{r synapses-between}
+# ── Synapses Between ──
+# NOTE: The open side is neuPrint’s :Neuron label, where the canvas counts
+# the neurons the Dataset node’s population selects — the same set unless
+# that population narrows further.
+.sources <- paste0("[", paste(find_neurons$neuronId, collapse = ","), "]")
+synapses_between <- neuprint_fetch_custom(
+  sub("{sources}", .sources, "MATCH (n:Segment)\nWHERE n.bodyId IN {sources}\nMATCH (n)-[:Contains]->(nss:SynapseSet)-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m:Neuron)\nMATCH (nss)-[:Contains]->(ns:Synapse)-[:SynapsesTo]->(ms:Synapse)<-[:Contains]-(mss)\nRETURN n.bodyId, n.type, m.bodyId, m.type, ns.location.x, ns.location.y,\n       ns.location.z, ns.confidence", fixed = TRUE),
+  conn = hemibrain_neuprint
+)
+names(synapses_between) <- c("neuronId", "type", "partnerId", "partnerType", "x", "y", "z", "confidence")
+synapses_between <- coda_ids(synapses_between, "neuronId", "partnerId")
+synapses_between$polarity <- "pre"
+```
+
 ```{r scatter-plot}
 # ── Scatter Plot ──
 scatter_plot_out <- find_neurons
@@ -1873,6 +1888,44 @@ paths_paths <- neuprint_get_paths(
   weightT = 10,
   conn = hemibrain_neuprint
 )
+```
+
+```{r synapses-between-2}
+# ── Synapses Between ──
+.sources <- paste0("[", paste(find_neurons$neuronId, collapse = ","), "]")
+.targets <- paste0("[", paste(ids_from_label$neuronId, collapse = ","), "]")
+synapses_between_2 <- neuprint_fetch_custom(
+  sub("{targets}", .targets, sub("{sources}", .sources, "MATCH (n:Segment)\nWHERE n.bodyId IN {sources}\nMATCH (n)-[:Contains]->(nss:SynapseSet)-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m)\nWHERE m.bodyId IN {targets}\nMATCH (nss)-[:Contains]->(ns:Synapse)-[:SynapsesTo]->(ms:Synapse)<-[:Contains]-(mss)\nRETURN n.bodyId, n.type, m.bodyId, m.type, ns.location.x, ns.location.y,\n       ns.location.z, ns.confidence", fixed = TRUE), fixed = TRUE),
+  conn = hemibrain_neuprint
+)
+names(synapses_between_2) <- c("neuronId", "type", "partnerId", "partnerType", "x", "y", "z", "confidence")
+synapses_between_2 <- coda_ids(synapses_between_2, "neuronId", "partnerId")
+synapses_between_2$polarity <- "pre"
+```
+
+```{r synapses-between-3}
+# ── Synapses Between ──
+.sources <- paste0("[", paste(find_neurons$neuronId, collapse = ","), "]")
+.targets <- paste0("[", paste(ids_from_label$neuronId, collapse = ","), "]")
+synapses_between_3 <- neuprint_fetch_custom(
+  sub("{targets}", .targets, sub("{sources}", .sources, "MATCH (n:Segment)\nWHERE n.bodyId IN {sources}\nMATCH (n)-[:Contains]->(nss:SynapseSet)-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m)\nWHERE m.bodyId IN {targets}\nMATCH (nss)-[:Contains]->(ns:Synapse)-[:SynapsesTo]->(ms:Synapse)<-[:Contains]-(mss)\nWHERE ns.confidence >= 0.8 AND ms.confidence >= 0.8\nRETURN n.bodyId, n.type, m.bodyId, m.type, ms.location.x, ms.location.y,\n       ms.location.z, ms.confidence", fixed = TRUE), fixed = TRUE),
+  conn = hemibrain_neuprint
+)
+names(synapses_between_3) <- c("neuronId", "type", "partnerId", "partnerType", "x", "y", "z", "confidence")
+synapses_between_3 <- coda_ids(synapses_between_3, "neuronId", "partnerId")
+synapses_between_3$polarity <- "post"
+```
+
+```{r synapses-between-4}
+# ── Synapses Between ──
+.targets <- paste0("[", paste(ids_from_label$neuronId, collapse = ","), "]")
+synapses_between_4 <- neuprint_fetch_custom(
+  sub("{targets}", .targets, "MATCH (m:Segment)\nWHERE m.bodyId IN {targets}\nMATCH (n)-[:Contains]->(nss:SynapseSet)-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m)\nMATCH (nss)-[:Contains]->(ns:Synapse)-[:SynapsesTo]->(ms:Synapse)<-[:Contains]-(mss)\nRETURN n.bodyId, n.type, m.bodyId, m.type, ns.location.x, ns.location.y,\n       ns.location.z, ns.confidence", fixed = TRUE),
+  conn = hemibrain_neuprint
+)
+names(synapses_between_4) <- c("neuronId", "type", "partnerId", "partnerType", "x", "y", "z", "confidence")
+synapses_between_4 <- coda_ids(synapses_between_4, "neuronId", "partnerId")
+synapses_between_4$polarity <- "pre"
 ```
 
 ```{r filter-table}

@@ -25,7 +25,12 @@ import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource, GeometryRequest, SourceCapabilities } from '../../data/source'
 import { registerSource, requireSource } from '../../data/source'
 import { T, column, columnNames, tableSchema } from '../../core/types'
-import type { MeshesValue, SkeletonProvenance, SkeletonsValue } from '../../core/values'
+import type {
+  MeshesValue,
+  PointsValue,
+  SkeletonProvenance,
+  SkeletonsValue,
+} from '../../core/values'
 import { MAX_NEURONS } from './morphology'
 import { SYNAPSE_UNIT_PARAM } from '../lib/synapseParams'
 import { CARRY_PARAM_ID } from '../lib/carryParams'
@@ -134,6 +139,158 @@ function pipeline(geometryType: string, limit: number): CodaGraph {
   })
   return setNodeParam(g, 'geo', 'limit', limit)
 }
+
+describe('Synapses Between', () => {
+  /** dataset → find → synapsesBetween, the found table on each of `ports`. */
+  function between(
+    ports: ReadonlyArray<'sources' | 'targets'>,
+    params: Record<string, unknown> = {},
+  ): CodaGraph {
+    const def = requireNodeDef('neuron.synapsesBetween')
+    let g = pipeline('neuron.skeletons', MAX_NEURONS)
+    g = addNode(g, {
+      id: 'syn',
+      type: def.type,
+      position: { x: 0, y: 0 },
+      params: { ...defaultParams(def), ...params } as GraphNode['params'],
+    })
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'syn',
+      targetHandle: 'dataset',
+    })
+    for (const port of ports) {
+      g = addEdge(g, {
+        source: 'find',
+        sourceHandle: 'neurons',
+        target: 'syn',
+        targetHandle: port,
+      })
+    }
+    return g
+  }
+
+  it('declares the oriented schema before anything runs, so pickers downstream fill', () => {
+    const def = requireNodeDef('neuron.synapsesBetween')
+    const inferred = def.inferOutputs!(makeInferContext(def, defaultParams(def), {}))
+    // A points type carries its attribute schema, but is not tabular, so `schemaOf` declines it.
+    const points = inferred.points
+    expect(columnNames(points?.kind === 'points' ? points.schema : undefined)).toEqual([
+      'neuronId',
+      'type',
+      'partnerId',
+      'partnerType',
+      'polarity',
+      'confidence',
+    ])
+  })
+
+  it('is expensive, since it is a backend query', () => {
+    expect(requireNodeDef('neuron.synapsesBetween').cost).toBe('expensive')
+  })
+
+  it.each(['pre', 'post'] as const)(
+    'runs with Location %s and delivers what it declared',
+    async (location) => {
+      const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
+      await sched.run(between(['sources', 'targets'], { location }), { mode: 'full' })
+      const info = sched.info('syn')
+      expect(info.error ?? info.state).toBe('ok')
+      const points = sched.output('syn', 'points') as PointsValue
+      expect(points.kind).toBe('points')
+      expect(columnNames(points.attributes.schema)).toEqual([
+        'neuronId',
+        'type',
+        'partnerId',
+        'partnerType',
+        'polarity',
+        'confidence',
+      ])
+      for (const polarity of points.attributes.data.polarity ?? [])
+        expect(polarity).toBe(location)
+    },
+  )
+
+  it('asks for Sources, Targets or both, and is satisfied by either alone', () => {
+    const def = requireNodeDef('neuron.synapsesBetween')
+    const issues = (inputs: Record<string, ReturnType<typeof T.neurons>>) =>
+      def.validate!(makeInferContext(def, defaultParams(def), inputs)).join(' ')
+    expect(issues({})).toMatch(/Wire Sources, Targets or both/)
+    expect(issues({ sources: T.neurons() })).toBe('')
+    expect(issues({ targets: T.neurons() })).toBe('')
+  })
+
+  it.each(['sources', 'targets'] as const)(
+    'runs with only %s wired, the other side open',
+    async (port) => {
+      const sched = new Scheduler({ resolveSource: (id) => requireSource(id) })
+      await sched.run(between([port], { includeFragments: true }), { mode: 'full' })
+      const info = sched.info('syn')
+      expect(info.error ?? info.state).toBe('ok')
+      const points = sched.output('syn', 'points') as PointsValue
+      expect(points.attributes.length).toBeGreaterThan(0)
+      // The bound side is the found set; the open side is whoever the edges name.
+      const found = new Set(
+        (
+          sched.output('find', 'neurons') as { data: Record<string, unknown[]> }
+        ).data.neuronId!.map(String),
+      )
+      const bound =
+        port === 'sources' ? points.attributes.data.neuronId : points.attributes.data.partnerId
+      for (const id of bound ?? []) expect(found.has(String(id))).toBe(true)
+    },
+  )
+
+  it('drops fragments on the open side unless Include fragments is on, and never on the bound side', async () => {
+    /*
+     * A dataset that publishes only even-numbered bodies as neurons when asked by id — which is
+     * the only way `publishedNeurons` asks. Find Neurons asks by rows, so the bound set is
+     * untouched and any odd id left in the bound column would be the filter reaching too far.
+     */
+    class HalfPublished extends MockSource {
+      override findNeurons(req: Parameters<MockSource['findNeurons']>[0]) {
+        if (!req.neuronIds) return super.findNeurons(req)
+        return super.findNeurons({
+          ...req,
+          neuronIds: req.neuronIds.filter((id) => Number(id) % 2 === 0),
+        })
+      }
+    }
+    const halfPublished = new HalfPublished({ latencyMs: 0 })
+    const run = async (includeFragments: boolean) => {
+      const sched = new Scheduler({ resolveSource: () => halfPublished })
+      await sched.run(between(['sources'], { includeFragments }), { mode: 'full' })
+      expect(sched.info('syn').error ?? sched.info('syn').state).toBe('ok')
+      return (sched.output('syn', 'points') as PointsValue).attributes.data
+    }
+    const filtered = await run(false)
+    const everything = await run(true)
+    expect((everything.partnerId ?? []).some((id) => Number(id) % 2 === 1)).toBe(true)
+    expect((filtered.partnerId ?? []).every((id) => Number(id) % 2 === 0)).toBe(true)
+    expect((filtered.partnerId ?? []).length).toBeLessThan((everything.partnerId ?? []).length)
+    expect(new Set(filtered.neuronId)).toEqual(new Set(everything.neuronId))
+  })
+
+  it('refuses a source that publishes synapses but cannot narrow them to a pair of sets', () => {
+    const def = requireNodeDef('neuron.synapsesBetween')
+    const capable = { synapses: true } as Partial<SourceCapabilities>
+    registerSource({
+      ...new MockSource({ latencyMs: 0 }),
+      id: 'no-between',
+      label: 'No Between',
+      capabilities: { ...new MockSource({ latencyMs: 0 }).capabilities, ...capable },
+      fetchSynapsesBetween: undefined,
+    } as unknown as DataSource)
+    const issues = def.validate!(
+      makeInferContext(def, defaultParams(def), {
+        dataset: T.dataset('no-between', 'optic-lobe-mini'),
+        sources: T.neurons(),
+      }),
+    )
+    expect(issues.join(' ')).toMatch(/cannot fetch the synapses between two neuron sets/)
+  })
+})
 
 describe('an oversized set', () => {
   it.each(MORPHOLOGY_NODES)('%s names the real constraint, not the viewer', async (type) => {

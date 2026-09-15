@@ -35,7 +35,7 @@ import {
   makeTable,
   tableFromRows,
 } from '../../core/values'
-import { ID_COLUMN_NAME } from '../../core/ids'
+import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import type {
   AdjacencyRequest,
   CoarseGeometry,
@@ -57,6 +57,7 @@ import type {
   GroupTotalsRequest,
   SynapseLinksRequest,
   SynapseRequest,
+  SynapsesBetweenRequest,
   SynapseTotalsRequest,
   ViewerSceneRequest,
 } from '../source'
@@ -68,6 +69,8 @@ import {
   connectivitySchemaWithEdgeProperties,
   connectivitySchemaWithRoi,
   SYNAPSE_TOTALS_SCHEMA,
+  SYNAPSES_BETWEEN_SCHEMA,
+  asksForNoSynapses,
   ROI_CONNECTIVITY_SCHEMA,
   ROI_MESH_SCHEMA,
   reportSourceLearned,
@@ -115,6 +118,7 @@ import {
   sampleStatusesCypher,
   synapseTotalsCypher,
   synapseLinksCypher,
+  synapsesBetweenCypher,
   synapsesCypher,
 } from './cypher'
 import type { CypherResponse } from './decode'
@@ -1444,6 +1448,71 @@ export class NeuPrintSource implements DataSource {
       attributes: makeTable(schema, data),
       bounds: boundsOf([positions]),
       ...this.frame(req.datasetId),
+    }
+  }
+
+  /**
+   * The synapses from one neuron set onto another, in one query bound at both ends.
+   *
+   * `synapsesBetweenCypher` holds the query and why its order matters. Oriented, not
+   * query-relative: `neuronId` is always the presynaptic body and `polarity` the end the point
+   * is drawn at — see `SYNAPSES_BETWEEN_SCHEMA`.
+   */
+  async fetchSynapsesBetween(req: SynapsesBetweenRequest): Promise<PointsValue> {
+    await this.discover(req.datasetId, req.signal)
+    const scale = this.scaleFor(req.datasetId)
+    const frame = this.frame(req.datasetId)
+    if (asksForNoSynapses(req)) {
+      return {
+        kind: 'points',
+        positions: new Float32Array(0),
+        attributes: emptyTable(SYNAPSES_BETWEEN_SCHEMA),
+        bounds: EMPTY_BOUNDS,
+        ...frame,
+      }
+    }
+
+    req.onProgress?.(0.15, 'querying')
+    const response = await runCypher(
+      synapsesBetweenCypher(req),
+      req.datasetId,
+      this.options(req.signal),
+    )
+    req.onProgress?.(0.7, `${response.data.length} synapses`)
+
+    // RETURN order: neuronId, type, partnerId, partnerType, x, y, z, confidence.
+    const length = response.data.length
+    const positions = new Float32Array(length * 3)
+    const neuronIds = new Array<string | null>(length)
+    const types = new Array<string | null>(length)
+    const partnerIds = new Array<string | null>(length)
+    const partnerTypes = new Array<string | null>(length)
+    const polarities = new Array<string>(length).fill(req.location)
+    const confidences = new Array<number | null>(length)
+    response.data.forEach((row, i) => {
+      positions[i * 3] = (Number(row[4]) || 0) * scale[0]
+      positions[i * 3 + 1] = (Number(row[5]) || 0) * scale[1]
+      positions[i * 3 + 2] = (Number(row[6]) || 0) * scale[2]
+      neuronIds[i] = idText(row[0] as CellValue)
+      types[i] = row[1] === null || row[1] === undefined ? null : String(row[1])
+      partnerIds[i] = idText(row[2] as CellValue)
+      partnerTypes[i] = row[3] === null || row[3] === undefined ? null : String(row[3])
+      confidences[i] = row[7] === null || row[7] === undefined ? null : Number(row[7])
+    })
+
+    return {
+      kind: 'points',
+      positions,
+      attributes: makeTable(SYNAPSES_BETWEEN_SCHEMA, {
+        [ID_COLUMN_NAME]: neuronIds,
+        type: types,
+        partnerId: partnerIds,
+        partnerType: partnerTypes,
+        polarity: polarities,
+        confidence: confidences,
+      }),
+      bounds: boundsOf([positions]),
+      ...frame,
     }
   }
 

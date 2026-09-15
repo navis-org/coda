@@ -585,6 +585,157 @@ describe('synapses', () => {
   })
 })
 
+describe('synapses between', () => {
+  /** A `connectors/links/` row: skeleton, connector, x, y, z, confidence, then bookkeeping. */
+  const link = (skeleton: number, connector: number, xyz: number[], confidence: number) => [
+    skeleton,
+    connector,
+    ...xyz,
+    confidence,
+    1,
+    1,
+    '2020-01-01T00:00:00+00:00',
+    '2020-01-01T00:00:00+00:00',
+  ]
+  /*
+   * Skeleton 16 is presynaptic on connectors 1, 2 and 3. Connector 1 lands on 430; connector 2 on
+   * 430 *and* 6582, which is two connections from one site; connector 3 lands on nobody asked
+   * for. The post answer also carries 999 on connector 4, which no source drives.
+   */
+  const routes = (url: string): unknown => {
+    const path = url.split('?')[0] ?? ''
+    if (!path.endsWith('/connectors/links/')) return defaultRoutes(url)
+    return decodeURIComponent(url).includes('relation_type=presynaptic_to')
+      ? {
+          links: [
+            link(16, 1, [10, 20, 30], 5),
+            link(16, 2, [40, 50, 60], 3),
+            link(16, 3, [70, 80, 90], 5),
+          ],
+        }
+      : {
+          links: [
+            link(430, 1, [10, 20, 30], 4),
+            link(430, 2, [40, 50, 60], 5),
+            link(6582, 2, [40, 50, 60], 5),
+            link(999, 4, [1, 1, 1], 5),
+          ],
+        }
+  }
+
+  it('is the connectors the two sets share, one row per post link', async () => {
+    stubFetch(routes)
+    const points = await source().fetchSynapsesBetween({
+      datasetId: '1',
+      sourceIds: ['16'],
+      targetIds: ['430', '6582'],
+      location: 'pre',
+    })
+    expect(points.attributes.data.neuronId).toEqual(['16', '16', '16'])
+    expect(points.attributes.data.partnerId).toEqual(['430', '430', '6582'])
+    expect(points.attributes.data.polarity).toEqual(['pre', 'pre', 'pre'])
+    expect([...points.positions]).toEqual([10, 20, 30, 40, 50, 60, 40, 50, 60])
+    // Exactly one GET per relation: the sources' outgoing links and the targets' incoming ones.
+    const relations = calls
+      .filter((call) => call.url.includes('connectors/links'))
+      .map((call) => decodeURIComponent(call.url))
+    expect(relations).toHaveLength(2)
+    expect(relations.some((url) => url.includes('relation_type=presynaptic_to'))).toBe(true)
+    expect(relations.some((url) => url.includes('relation_type=postsynaptic_to'))).toBe(true)
+  })
+
+  /*
+   * One end open: the bound end's connectors with every link on each, and the relation ids read
+   * from the project rather than assumed. Connector 1 carries 16 → 430 and 16 → 999; connector 2
+   * carries 16 → 430 with a weak presynaptic link; connector 3 has no postsynaptic link at all.
+   * The relation ids are deliberately *not* FAFB's 14 and 17, so a hard-coded pair fails here.
+   */
+  const open = (url: string): unknown => {
+    const path = url.split('?')[0] ?? ''
+    if (path.endsWith('/ontology/relations')) return { presynaptic_to: 3, postsynaptic_to: 4 }
+    if (path.endsWith('/connectors/')) {
+      const link = (skeleton: number, relation: number, confidence: number) => [
+        1,
+        1,
+        skeleton,
+        relation,
+        confidence,
+        1,
+        0,
+        0,
+      ]
+      return {
+        connectors: [
+          [1, 10, 20, 30, 5],
+          [2, 40, 50, 60, 5],
+          [3, 70, 80, 90, 5],
+        ],
+        partners: {
+          '1': [link(16, 3, 5), link(430, 4, 4), link(999, 4, 5)],
+          '2': [link(16, 3, 3), link(430, 4, 5)],
+          '3': [link(16, 3, 5)],
+        },
+        tags: {},
+      }
+    }
+    return defaultRoutes(url)
+  }
+
+  it('names every partner on the bound end’s connectors when targets are left open', async () => {
+    stubFetch(open)
+    const points = await source().fetchSynapsesBetween({
+      datasetId: '1',
+      sourceIds: ['16'],
+      location: 'pre',
+    })
+    expect(points.attributes.data.neuronId).toEqual(['16', '16', '16'])
+    expect(points.attributes.data.partnerId).toEqual(['430', '999', '430'])
+    expect([...points.positions]).toEqual([10, 20, 30, 10, 20, 30, 40, 50, 60])
+    const post = calls.find(
+      (call) => call.method === 'POST' && call.url.includes('/connectors/'),
+    )
+    expect(decodeURIComponent(post!.body)).toContain('relation_type=presynaptic_to')
+    expect(decodeURIComponent(post!.body)).toContain('with_partners=true')
+  })
+
+  it('keeps only the bound targets when sources are left open, and floors both links', async () => {
+    stubFetch(open)
+    const up = await source().fetchSynapsesBetween({
+      datasetId: '1',
+      targetIds: ['430'],
+      location: 'post',
+      minConfidence: 4,
+    })
+    // Connector 2's presynaptic link scores 3; 999 is not a target.
+    expect(up.attributes.data.neuronId).toEqual(['16'])
+    expect(up.attributes.data.partnerId).toEqual(['430'])
+    expect(up.attributes.data.confidence).toEqual([4])
+  })
+
+  it('floors confidence on both links, and reports the drawn end’s', async () => {
+    stubFetch(routes)
+    const floored = await source().fetchSynapsesBetween({
+      datasetId: '1',
+      sourceIds: ['16'],
+      targetIds: ['430', '6582'],
+      location: 'pre',
+      minConfidence: 4,
+    })
+    // Connector 2's presynaptic link scores 3, which takes both of its connections with it.
+    expect(floored.attributes.data.partnerId).toEqual(['430'])
+
+    stubFetch(routes)
+    const post = await source().fetchSynapsesBetween({
+      datasetId: '1',
+      sourceIds: ['16'],
+      targetIds: ['430', '6582'],
+      location: 'post',
+    })
+    expect(post.attributes.data.confidence).toEqual([4, 5, 5])
+    expect(post.attributes.data.polarity).toEqual(['post', 'post', 'post'])
+  })
+})
+
 describe('volumes as region meshes', () => {
   it('reads the column table rather than assuming records', async () => {
     stubFetch(defaultRoutes)

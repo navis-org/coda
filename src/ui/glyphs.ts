@@ -447,6 +447,15 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M9.8 12h3.6' }],
     ['path', { d: 'M12.2 10.2 14 12l-1.8 1.8' }],
   ],
+  // Synapses' pair of points held between two bars: the same material, narrowed to one pair of
+  // populations rather than everything a neuron set touches.
+  'neuron.synapsesBetween': [
+    ['path', { d: 'M3.6 6.4v11.2M20.4 6.4v11.2' }],
+    ['circle', { cx: '7.8', cy: '12', r: '2.2', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '16.2', cy: '12', r: '2.2', fill: 'currentColor', stroke: 'none' }],
+    ['path', { d: 'M10.6 12h2.6' }],
+    ['path', { d: 'M12.4 10.6 13.8 12l-1.4 1.4' }],
+  ],
   'neuron.mirror': [
     ['path', { d: 'M12 3.6v16.8', strokeDasharray: '2.6 2.4' }],
     ['path', { d: 'M7.6 19.4v-5.2L4.8 11M7.6 14.2l3-2.6M10.6 11.6l-.8-2.8' }],

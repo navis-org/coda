@@ -30,6 +30,7 @@ import { kindIn } from '../../core/types'
 import type {
   CellValue,
   MeshesValue,
+  PointsValue,
   SkeletonsValue,
   TableValue,
   Value,
@@ -275,6 +276,37 @@ export function partitionElements<V extends IterableValue>(
     else rest.push(i)
   }
   return { matched: sliceElements(v, matched), rest: sliceElements(v, rest) }
+}
+
+/**
+ * A point cloud's subset, points and attribute rows taken together.
+ *
+ * Not `sliceElements`, because a point cloud is not an `IterableValue` — nobody steps through
+ * synapses one at a time — so the family's selection deliberately leaves it out. What it shares
+ * is the contract that makes one index address both halves: `attributes` row `i` is the point at
+ * `positions[3i..3i+2]`. Bounds are recomputed, units and space carried, for `sliceElements`'
+ * reasons.
+ */
+export function selectPoints(v: PointsValue, keep: (index: number) => boolean): PointsValue {
+  const indices: number[] = []
+  for (let i = 0; i < v.attributes.length; i++) if (keep(i)) indices.push(i)
+  if (indices.length === v.attributes.length) return v
+  const positions = new Float32Array(indices.length * 3)
+  const source = v.positions
+  for (let to = 0; to < indices.length; to++) {
+    const from = indices[to]! * 3
+    positions[to * 3] = source[from]!
+    positions[to * 3 + 1] = source[from + 1]!
+    positions[to * 3 + 2] = source[from + 2]!
+  }
+  return {
+    kind: 'points',
+    positions,
+    attributes: selectRows(v.attributes, indices),
+    bounds: indices.length ? boundsOf([positions]) : EMPTY_BOUNDS,
+    ...(v.units ? { units: v.units } : {}),
+    ...(v.space ? { space: v.space } : {}),
+  }
 }
 
 function sliceElements<V extends IterableValue>(v: V, indices: number[]): V {

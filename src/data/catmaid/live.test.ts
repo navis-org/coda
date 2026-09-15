@@ -68,6 +68,65 @@ live('CATMAID against the real FAFB instance', () => {
     expect(cableLength(coarse)).toBeGreaterThan(0)
   }, 120_000)
 
+  /*
+   * The synapses between skeleton 16 and its strongest downstream partners, as the connectors the
+   * two sets share. Two tokenless GETs; the property checked is that the intersection is exactly
+   * the rows a synapse count would sum, so per pair it should meet the connectivity weight.
+   */
+  it('reads the synapses between two skeleton sets as shared connectors', async () => {
+    const catmaid = source()
+    const edges = await catmaid.fetchConnectivity({
+      datasetId: FAFB,
+      neuronIds: ['16'],
+      direction: 'outputs',
+    })
+    const partners = edges.data.partnerId!
+    const weights = edges.data.weight!
+    const order = [...weights.keys()].sort((a, b) => Number(weights[b]) - Number(weights[a]))
+    const top = order.slice(0, 3)
+    const points = await catmaid.fetchSynapsesBetween!({
+      datasetId: FAFB,
+      sourceIds: ['16'],
+      targetIds: top.map((i) => String(partners[i])),
+      location: 'pre',
+    })
+    expect(points.positions.length).toBe(points.attributes.length * 3)
+    for (const i of top) {
+      const rows = points.attributes.data.partnerId!.filter(
+        (p) => p === String(partners[i]),
+      ).length
+      expect(rows, `16 -> ${partners[i]}`).toBe(Number(weights[i]))
+    }
+  }, 120_000)
+
+  /*
+   * The same skeleton with Targets left open — the one-POST route (`connectors/` with partners,
+   * relation ids read from the project). Held to the same weights as the both-bound route, for
+   * every partner rather than three.
+   */
+  it('reads every synapse a skeleton makes when the target end is open', async () => {
+    const catmaid = source()
+    const edges = await catmaid.fetchConnectivity({
+      datasetId: FAFB,
+      neuronIds: ['16'],
+      direction: 'outputs',
+    })
+    const expected = new Map<string, number>()
+    edges.data.partnerId!.forEach((partner, i) =>
+      expected.set(String(partner), Number(edges.data.weight![i])),
+    )
+    const points = await catmaid.fetchSynapsesBetween!({
+      datasetId: FAFB,
+      sourceIds: ['16'],
+      location: 'pre',
+    })
+    const got = new Map<string, number>()
+    for (const partner of points.attributes.data.partnerId!) {
+      got.set(String(partner), (got.get(String(partner)) ?? 0) + 1)
+    }
+    expect(got).toEqual(expected)
+  }, 120_000)
+
   it('fetches a skeleton in nanometres, as a tree', async () => {
     const skeletons = await source().fetchSkeletons({ datasetId: FAFB, neuronIds: ['16'] })
     expect(skeletons.units).toBe('nm')

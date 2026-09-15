@@ -36,6 +36,90 @@ function someNeuronIds(count: number): string[] {
     .map((n) => String(n.neuronId))
 }
 
+describe('MockSource synapses between', () => {
+  /*
+   * The property the seam promises every source, held where it is cheapest to: grouping rows by
+   * (source, target) reproduces the connection weight. Measured on neuPrint for 1,173 real pairs;
+   * the mock is where a regression in the contract itself shows first.
+   */
+  const connectome = getConnectome('optic-lobe-mini')!
+  const sources = someNeuronIds(4)
+  const edges = sources.flatMap((id) => connectome.out.get(Number(id)) ?? [])
+  // Half the partners, so an edge to a partner nobody asked for is part of what is tested.
+  const partners = [...new Set(edges.map((e) => e.post))]
+  const targets = partners.slice(0, Math.max(1, Math.ceil(partners.length / 2))).map(String)
+
+  /** Rows per (source, target) pair, from a cloud's attributes. */
+  const sum = (rows: { neuronId?: unknown[]; partnerId?: unknown[] }) => {
+    const got = new Map<string, number>()
+    for (let i = 0; i < (rows.neuronId ?? []).length; i++) {
+      const key = `${rows.neuronId![i]}>${rows.partnerId![i]}`
+      got.set(key, (got.get(key) ?? 0) + 1)
+    }
+    return got
+  }
+  /** Synapses per pair, from the generated edges. */
+  const expectFrom = (list: typeof edges) => {
+    const want = new Map<string, number>()
+    for (const edge of list) {
+      const key = `${edge.pre}>${edge.post}`
+      want.set(key, (want.get(key) ?? 0) + edge.weight)
+    }
+    return want
+  }
+
+  it('returns one row per synapse, only onto the targets asked for', async () => {
+    expect(partners.length).toBeGreaterThan(1)
+    const points = await source.fetchSynapsesBetween({
+      datasetId: 'optic-lobe-mini',
+      sourceIds: sources,
+      targetIds: targets,
+      location: 'pre',
+    })
+    expect(sum(points.attributes.data)).toEqual(
+      expectFrom(edges.filter((edge) => targets.includes(String(edge.post)))),
+    )
+    expect(points.positions.length).toBe(points.attributes.length * 3)
+  })
+
+  it('leaves either end open: every synapse the sources make, or every one onto the targets', async () => {
+    const down = await source.fetchSynapsesBetween({
+      datasetId: 'optic-lobe-mini',
+      sourceIds: sources,
+      location: 'pre',
+    })
+    expect(sum(down.attributes.data)).toEqual(expectFrom(edges))
+
+    const up = await source.fetchSynapsesBetween({
+      datasetId: 'optic-lobe-mini',
+      targetIds: targets,
+      location: 'pre',
+    })
+    const incoming = targets.flatMap((id) => connectome.in.get(Number(id)) ?? [])
+    expect(incoming.length).toBeGreaterThan(0)
+    expect(sum(up.attributes.data)).toEqual(expectFrom(incoming))
+
+    await expect(
+      source.fetchSynapsesBetween({ datasetId: 'optic-lobe-mini', location: 'pre' }),
+    ).rejects.toThrow(/sources, targets or both/)
+  })
+
+  it('moves the points and nothing else when Location changes', async () => {
+    const ask = (location: 'pre' | 'post') =>
+      source.fetchSynapsesBetween({
+        datasetId: 'optic-lobe-mini',
+        sourceIds: sources,
+        targetIds: targets,
+        location,
+      })
+    const [pre, post] = await Promise.all([ask('pre'), ask('post')])
+    expect(post.attributes.data.neuronId).toEqual(pre.attributes.data.neuronId)
+    expect(post.attributes.data.partnerId).toEqual(pre.attributes.data.partnerId)
+    expect(new Set(post.attributes.data.polarity)).toEqual(new Set(['post']))
+    expect([...post.positions]).not.toEqual([...pre.positions])
+  })
+})
+
 describe('generateSkeleton', () => {
   it('produces a valid rooted tree', () => {
     const skeleton = generateSkeleton(12345, ['LO(R)', 'PVLP(R)'])

@@ -190,6 +190,58 @@ live('CAVE, live', () => {
   }, 600_000)
 
   /*
+   * The synapses between the seed and its strongest targets, one query bound at both ends.
+   *
+   * **Not** held to Connectivity's weights, and that is the finding worth keeping: FlyWire's
+   * Connectivity reads `valid_connection_v2`, a view over the synapse table *filtered* by
+   * `valid_synapses_nt_v2`, while a synapse cloud reads the table itself. Measured on this seed's
+   * top five targets: 252 / 205 / 153 / 135 / 111 table rows against the view's 166 / 140 / 100 /
+   * 86 / 74 — about 1.5× — and still 219 / 193 / 137 / 112 / 100 at `cleft_score >= 50`, so the
+   * gap is the validity table and not the score alone. The Synapses node has always read the same
+   * table. What is asserted is the shape: every row between the sets, ids exact, oriented, and the
+   * server-side cut doing something.
+   */
+  it('reads the synapses between two root-id sets, oriented, with the score cut on the server', async () => {
+    const edges = await source.fetchConnectivity({
+      datasetId: DATASET,
+      neuronIds: [SEED],
+      direction: 'outputs',
+    })
+    const partners = edges.data.partnerId!
+    const weights = edges.data.weight!
+    const order = [...weights.keys()].sort((a, b) => Number(weights[b]) - Number(weights[a]))
+    const targets = order.slice(0, 5).map((i) => String(partners[i]))
+
+    const all = await source.fetchSynapsesBetween!({
+      datasetId: DATASET,
+      sourceIds: [SEED],
+      targetIds: targets,
+      location: 'post',
+    })
+    expect(all.units).toBe('nm')
+    expect(new Set(all.attributes.data[ID_COLUMN_NAME])).toEqual(new Set([SEED]))
+    const seen = new Set(all.attributes.data.partnerId!.map(String))
+    for (const partner of seen) expect(targets).toContain(partner)
+    // The table holds at least what the filtered view counts, per target.
+    for (const i of order.slice(0, 5)) {
+      const rows = all.attributes.data.partnerId!.filter(
+        (p) => p === String(partners[i]),
+      ).length
+      expect(rows).toBeGreaterThanOrEqual(Number(weights[i]))
+    }
+
+    const cut = await source.fetchSynapsesBetween!({
+      datasetId: DATASET,
+      sourceIds: [SEED],
+      targetIds: targets,
+      location: 'post',
+      minConfidence: 50,
+    })
+    expect(cut.attributes.length).toBeGreaterThan(0)
+    expect(cut.attributes.length).toBeLessThan(all.attributes.length)
+  }, 600_000)
+
+  /*
    * The Detail control on the flat route, which is a published pyramid rather than a knob: a
    * lower budget picks a coarser *level*, and nothing is simplified. The two properties that
    * matter are that the level actually moves, and that `detail` says which of the two happened —

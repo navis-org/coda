@@ -56,6 +56,29 @@ export function minSynapseConfidence(params: ParamValues): number {
   return Number(params[MIN_CONFIDENCE_PARAM]) || 0
 }
 
+/**
+ * The `Min confidence` control, for both synapse nodes.
+ *
+ * `0` is off, the type is a `number` and there is no `max` — the scale is the backend's own, see
+ * `SynapseRequest.minConfidence` and the Synapses node's note on why this was once a weight.
+ * `lead` is the per-node sentence, since one node cuts a synapse and the other a connection; what
+ * the scale is and what a source without one does are the same for both and written once.
+ */
+export function minConfidenceParam(lead: string): ParamDef {
+  return {
+    id: MIN_CONFIDENCE_PARAM,
+    kind: 'number',
+    label: 'Min confidence',
+    default: 0,
+    min: 0,
+    step: 0.05,
+    advanced: true,
+    help:
+      `${lead} The scale belongs to the data source — 0–1 on neuPrint, a tracer’s 1–5 on ` +
+      'CATMAID, cleft_score on FlyWire. Sources without one say so and return everything.',
+  }
+}
+
 /** The units a Dataset socket's source can deliver, or undefined while nothing is wired. */
 function unitsFromType(type: CodaType | undefined): SynapseUnits | undefined {
   return synapseUnitsOf(sourceFromType(type))

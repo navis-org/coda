@@ -35,7 +35,14 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import { boundsOf, cableLength, makeMatrix, selectRows, tableFromRows } from '../../core/values'
+import {
+  boundsOf,
+  cableLength,
+  makeMatrix,
+  makeTable,
+  selectRows,
+  tableFromRows,
+} from '../../core/values'
 import { geometryFrame } from '../transforms/spaces'
 import { mapWithConcurrency } from '../concurrency'
 import {
@@ -61,21 +68,32 @@ import type {
   SourceCapabilities,
   SourceSchemas,
   SynapseRequest,
+  SynapsesBetweenRequest,
 } from '../source'
 import {
   ROI_MESH_SCHEMA,
+  SYNAPSES_BETWEEN_SCHEMA,
+  asksForNoSynapses,
   reportSourceLearned,
   requireSkeletonRoute,
   throwIfAborted,
 } from '../source'
 import { SYNAPSE_UNITS } from '../synapseUnits'
-import type { AnnotationListResponse, CatmaidProject, CompactSkeleton } from './api'
+import type {
+  AnnotationListResponse,
+  CatmaidProject,
+  CompactSkeleton,
+  ConnectorsResponse,
+  LinksResponse,
+} from './api'
 import type { SkeletonSummary } from './api'
 import {
   annotationList,
   compactSkeleton,
   connectivityMatrix,
   connectorLinks,
+  connectorsWithPartners,
+  relationIds,
   listProjects,
   listSkeletons,
   listVolumes,
@@ -251,6 +269,8 @@ export class CatmaidSource implements DataSource {
   /** The whole-project annotation index, derived once. */
   private readonly labelIndexes = new Map<string, Promise<LabelIndex>>()
   private readonly volumeLists = new Map<string, Promise<VolumeEntry[]>>()
+  /** A project's relation name → id map, which does not move under a session. */
+  private readonly relationMaps = new Map<string, Promise<Record<string, number>>>()
 
   constructor(server: string, id: string, label: string) {
     this.server = server
@@ -832,6 +852,179 @@ export class CatmaidSource implements DataSource {
       positions,
       attributes: tableFromRows(this.schemas.synapses, rows),
       bounds: boundsOf([positions]),
+      ...this.frame(req.datasetId),
+    }
+  }
+
+  /**
+   * The synapses from one skeleton set onto another, as the connectors the two share.
+   *
+   * **Two GETs and an intersection, no new endpoint.** `connectors/links/` answers a skeleton
+   * set's links for one relation, so the sources' `presynaptic_to` links and the targets'
+   * `postsynaptic_to` links meeting on a `connectorId` are exactly the synapses between them — one
+   * row per (pre link, post link) pair on a connector, which is one row per connection and what a
+   * connectivity count sums. Both GETs are tokenless, as `fetchSynapses`' are.
+   *
+   * **One position per connector, whichever `location` says.** A link row carries the connector's
+   * own coordinate rather than either treenode's, so both ends draw at the connector — the point a
+   * tracer placed at the synapse. `polarity` still records what was asked for, so the column means
+   * the same on every source.
+   *
+   * The confidence floor applies to both links, `fetch_synapse_connections`' rule; the returned
+   * score is the drawn end's link.
+   */
+  /** `relationIds`, once per project — `volumeLists`' arrangement. */
+  private relations(
+    datasetId: string,
+    projectId: number,
+    options: { signal?: AbortSignal },
+  ): Promise<Record<string, number>> {
+    return memoPromise(
+      this.relationMaps,
+      datasetId,
+      () => relationIds(this.server, projectId, options),
+      { keep: 'resolved' },
+    )
+  }
+
+  async fetchSynapsesBetween(req: SynapsesBetweenRequest): Promise<PointsValue> {
+    const projectId = this.projectId(req.datasetId)
+    const options = req.signal ? { signal: req.signal } : {}
+    const min = req.minConfidence ?? 0
+
+    /*
+     * Filled by column, as the neuPrint and CAVE versions are: a cloud here is every link on every
+     * connector of a traced neuron, and a row object per synapse handed to `tableFromRows` is
+     * that function's documented not-a-hot-path.
+     */
+    const positions: number[] = []
+    const pres: number[] = []
+    const posts: number[] = []
+    const confidences: number[] = []
+    const add = (
+      pre: number,
+      post: number,
+      confidence: number,
+      x: number,
+      y: number,
+      z: number,
+    ) => {
+      positions.push(x, y, z)
+      pres.push(pre)
+      posts.push(post)
+      confidences.push(confidence)
+    }
+
+    let index: LabelIndex | undefined
+    if (!asksForNoSynapses(req)) {
+      const labels = this.labelIndex(req.datasetId, options).catch(() => undefined)
+      req.onProgress?.(0.15, 'querying')
+      if (req.sourceIds && req.targetIds) {
+        const [outgoing, incoming] = await Promise.all([
+          connectorLinks(
+            this.server,
+            projectId,
+            numericIds(req.sourceIds),
+            'presynaptic_to',
+            options,
+          ),
+          connectorLinks(
+            this.server,
+            projectId,
+            numericIds(req.targetIds),
+            'postsynaptic_to',
+            options,
+          ),
+        ])
+        req.onProgress?.(0.8, 'matching connectors')
+
+        const received = new Map<number, LinksResponse['links']>()
+        for (const link of incoming.links) {
+          if (min > 0 && link[5] < min) continue
+          const onConnector = received.get(link[1])
+          if (onConnector) onConnector.push(link)
+          else received.set(link[1], [link])
+        }
+        for (const pre of outgoing.links) {
+          if (min > 0 && pre[5] < min) continue
+          for (const post of received.get(pre[1]) ?? []) {
+            add(
+              pre[0],
+              post[0],
+              req.location === 'post' ? post[5] : pre[5],
+              pre[2],
+              pre[3],
+              pre[4],
+            )
+          }
+        }
+      } else {
+        /*
+         * One end open. `connectors/links/` cannot answer it — it needs the far end's skeleton ids —
+         * so this is the connector list for the bound end **with every link on each connector**,
+         * one POST, and the far end is whoever the links name. The two GETs above stay for the
+         * both-bound case: tokenless, and they return only the links asked about rather than every
+         * link on every connector.
+         */
+        const outgoing = req.sourceIds !== undefined
+        const bound = numericIds(outgoing ? req.sourceIds! : req.targetIds!)
+        const [answer, relations] = await Promise.all([
+          connectorsWithPartners(
+            this.server,
+            projectId,
+            bound,
+            outgoing ? 'presynaptic_to' : 'postsynaptic_to',
+            options,
+          ),
+          this.relations(req.datasetId, projectId, options),
+        ])
+        req.onProgress?.(0.8, 'reading partners')
+        const preRelation = relations.presynaptic_to
+        const postRelation = relations.postsynaptic_to
+        if (preRelation === undefined || postRelation === undefined) {
+          throw new Error(
+            `${this.label} names no presynaptic_to/postsynaptic_to relation, so its synapses cannot be told apart.`,
+          )
+        }
+
+        const isBound = new Set(bound)
+        type Link = ConnectorsResponse['partners'][string][number]
+        for (const [connectorId, x, y, z] of answer.connectors) {
+          // One pass over the connector's links: the floor, the relation and the bound end at once.
+          const preLinks: Link[] = []
+          const postLinks: Link[] = []
+          for (const link of answer.partners[String(connectorId)] ?? []) {
+            if (min > 0 && link[4] < min) continue
+            if (link[3] === preRelation) {
+              if (!outgoing || isBound.has(link[2])) preLinks.push(link)
+            } else if (link[3] === postRelation) {
+              if (outgoing || isBound.has(link[2])) postLinks.push(link)
+            }
+          }
+          for (const pre of preLinks) {
+            for (const post of postLinks) {
+              add(pre[2], post[2], req.location === 'post' ? post[4] : pre[4], x, y, z)
+            }
+          }
+        }
+      }
+      index = await labels
+    }
+
+    const typeOf = (skeletonId: number) => index?.labels.get(skeletonId)?.type ?? null
+    const buffer = Float32Array.from(positions)
+    return {
+      kind: 'points',
+      positions: buffer,
+      attributes: makeTable(SYNAPSES_BETWEEN_SCHEMA, {
+        [ID_COLUMN_NAME]: pres.map((id) => idText(id)),
+        type: pres.map(typeOf),
+        partnerId: posts.map((id) => idText(id)),
+        partnerType: posts.map(typeOf),
+        polarity: new Array<string>(pres.length).fill(req.location),
+        confidence: confidences,
+      }),
+      bounds: boundsOf([buffer]),
       ...this.frame(req.datasetId),
     }
   }

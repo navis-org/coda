@@ -32,7 +32,7 @@ import { CYPHER_PLACEHOLDERS, adjacencyExportQuery } from '../../plans/connectiv
 import { filterPredicates } from './tableFilters'
 import type { EmitContext } from '../types'
 import { neuprintProperty } from '../../../data/neuprint/schema'
-import { carryLines, cypherIdList, neuronIds, rPopulationPredicate } from './common'
+import { carryLines, codaIds, cypherIdList, neuronIds, rPopulationPredicate } from './common'
 import { STATUS_COLUMN, withoutStatedStatus } from '../../../data/neuronFilter'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 
@@ -44,6 +44,7 @@ import {
   neuprintNodePlan,
   rawCypherPlan,
   skeletonsPlan,
+  synapsesBetweenPlan,
 } from '../../plans/query'
 
 // ---------------------------------------------------------------------------
@@ -657,5 +658,51 @@ registerEmitter('neuron.synapses', (ctx) => {
         )
       : []),
     `${ctx.output('points')} <- neuprint_get_synapses(${args.join(', ')}, conn = ${conn})`,
+  ]
+})
+
+/**
+ * Synapses Between, through the canvas's own Cypher.
+ *
+ * neuprintr has no synapse-connection call — `neuprint_get_synapses` takes one body set and names
+ * no partner — so the choice was between transcribing neuprint-python's query into R and running
+ * the one the canvas runs. The second: `synapsesBetweenPlan`'s query with placeholders the chunk fills,
+ * which is `Connectivity`'s edge-property route. So unlike the Synapses chunk above, this frame is
+ * already in Coda's vocabulary, types included, and needs no note about it.
+ */
+registerEmitter('neuron.synapsesBetween', (ctx) => {
+  const conn = ctx.wired('dataset')
+  const sources = ctx.input('sources')
+  const targets = ctx.input('targets')
+  const plan = synapsesBetweenPlan(ctx.params, {
+    sources: sources !== undefined,
+    targets: targets !== undefined,
+  })
+  if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+  ctx.library('neuprintr')
+  const labelled = plan.open !== undefined && !plan.includeFragments
+  const out = ctx.output('points')
+  let filled = rStr(plan.query)
+  if (sources)
+    filled = `sub(${rStr(CYPHER_PLACEHOLDERS.sources)}, .sources, ${filled}, fixed = TRUE)`
+  if (targets)
+    filled = `sub(${rStr(CYPHER_PLACEHOLDERS.targets)}, .targets, ${filled}, fixed = TRUE)`
+  return [
+    ...(labelled
+      ? ctx.note(
+          'The open side is neuPrint’s :Neuron label, where the canvas counts the neurons the ' +
+            'Dataset node’s population selects — the same set unless that population narrows further.',
+        )
+      : []),
+    ...(sources ? [`.sources <- ${cypherIdList(sources)}`] : []),
+    ...(targets ? [`.targets <- ${cypherIdList(targets)}`] : []),
+    `${out} <- neuprint_fetch_custom(`,
+    `  ${filled},`,
+    `  conn = ${conn}`,
+    `)`,
+    // By position: neuprint_fetch_custom names its columns after the RETURN expressions.
+    `names(${out}) <- ${rVector(['neuronId', 'type', 'partnerId', 'partnerType', 'x', 'y', 'z', 'confidence'])}`,
+    codaIds(ctx, out, 'neuronId', 'partnerId'),
+    `${out}$polarity <- ${rStr(plan.location)}`,
   ]
 })

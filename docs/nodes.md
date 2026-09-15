@@ -2921,6 +2921,121 @@ The fixture carries a **second Synapses node** for the reason it carries two NBL
 emitters branch on these two controls, and the first node takes neither, so with only it the
 goldens pinned the branch that emits nothing.
 
+## Synapses Between: a connection's synapses, bound at both ends
+
+`neuron.synapsesBetween` answers "where do these connect to those" — every synapse from a Sources
+set onto a Targets set, as a point cloud — and is neuprint-python's `fetch_synapse_connections`.
+Three shapes were on the table and two were rejected for reasons worth keeping:
+
+- **A partner filter on Synapses.** Restricting a Synapses cloud to a partner makes every row a
+  connection, so its `Rows` control (sites vs links) stops meaning anything the moment the port is
+  wired — a control whose meaning depends on a wire elsewhere on the card.
+- **A partner column on Synapses plus a Filter node.** Filtering afterwards cannot shrink the
+  download. neuPrint drops the partner columns from the site cloud because resolving them is a
+  join (57,034 rows for male-CNS body 10003, twenty times its site cloud), and a CAVE query narrowed
+  on one end can hit the row cap one narrowed on both would not.
+
+So it is a node and a seam of its own, `DataSource.fetchSynapsesBetween`, implemented by all four
+sources — deliberately **not** `fetchSynapseLinks` with a partner list. That method exists only
+because neuPrint drops partners, and the Topology viewer reads its absence on CAVE as "the site
+cloud already names them"; implementing it on CAVE to serve this node would have told that viewer
+something false.
+
+**A row is one synapse connection**, so there is no `Rows` control: a T-bar onto three densities
+of one target is three rows, and rows grouped by `(neuronId, partnerId)` are the connection weight.
+Measured live on `male-cns:v1.0`: sixty LC4s onto themselves, 4,007 rows over 1,173 pairs, every
+pair equal to `ConnectsTo.weight`, the same rows neuprint-python returns — in 1.2 s against its 28 s,
+since it batches per connection.
+
+**The columns are oriented and never swap.** `neuronId`/`type` are the source, `partnerId`/
+`partnerType` the target, and `polarity` is the end the point is drawn at — the one column
+`Location` moves. Synapses' rule ("the point belongs to `neuronId`") was the alternative, and it
+would re-point every colour-by and join downstream when somebody changed where a dot is drawn.
+`SYNAPSES_BETWEEN_SCHEMA` is one constant for every source, since inference must name it before one
+answers.
+
+Per backend:
+
+| backend | query | `Location` | confidence |
+| --- | --- | --- | --- |
+| neuPrint | `synapsesBetweenCypher`: bind `n`, filter `m` on the SynapseSet pair, *then* walk `SynapsesTo` | `ns` or `ms`, a few tens of voxels apart | floor on both synapses, `fetch_synapse_connections`' rule |
+| CAVE | one `query_table` with `in` filters on both root-id columns — the AND `fetchSynapses` must avoid | that end's bound point, `endPositionColumn` | server-side on the table's score column, or a warning |
+| CATMAID | two tokenless `connectors/links/` GETs (sources `presynaptic_to`, targets `postsynaptic_to`) intersected on `connectorId` | the connector's own coordinate for both | floor on both links |
+| mock | `weight` points per generated edge | each end on its own arbour | warns |
+
+Each real backend has a live test (`live.test.ts`) run when this shipped: neuPrint and CATMAID are
+held to rows-per-pair equal to their own connectivity weight at both locations, and both passed;
+CAVE is held to less, for the third finding below.
+
+Three findings, each silent if missed:
+
+- **The neuPrint bind is `:Segment`, not `:Neuron`.** Sources arrive from any neuron table, which
+  after Connectivity's `Include fragments` holds bodies with no `:Neuron` label. A fragment onto
+  body 10003 is one synapse by `ConnectsTo` and **zero rows** under `:Neuron`. It is not slower:
+  0.42 s against 0.73 s (top five targets of 10003), 1.22 s against 2.83 s (the LC4 case) —
+  `:Neuron` ran first each time, so a warm cache may flatter the second.
+- **The CAVE position column is the drawn end's, not the datastack's.** `SynapseTableSpec.
+  positionColumn` is a per-datastack choice of where to draw a synapse (FlyWire draws at
+  `pre_pt_position`); a Location of `post` falling back to it would draw every point on the wrong
+  arbour. `endPositionColumn` derives `post_pt_position` from `post_pt_root_id` by
+  emannotationschemas' bound-point naming and refuses a column not named that way.
+- **On FlyWire this cloud does not add up to Connectivity's weights, and neither does Synapses'.**
+  Connectivity reads `valid_connection_v2`, a view over `synapses_nt_v1` filtered by
+  `valid_synapses_nt_v2`; both synapse nodes read the table. On root `720575940628857210`'s five
+  strongest targets the table has 252 / 205 / 153 / 135 / 111 rows against the view's 166 / 140 /
+  100 / 86 / 74, and still 219 / 193 / 137 / 112 / 100 at `cleft_score >= 50` — so the gap is the
+  validity table, not the score. Not fixed here: it is a decision about both synapse nodes at once.
+
+### Either end may be left open
+
+Wiring only Sources asks for every synapse they make; only Targets, every synapse onto them —
+`fetch_synapse_connections(sources, None)` and its mirror. Both ports are `required: false` and
+`validate` asks for at least one, since both open is the whole synapse table (`asksForNoSynapses`
+refuses it at the seam as well, and neuprint-python asserts the same). Absent and empty differ all
+the way down: an absent list is "any partner", an empty one binds the end to nothing.
+
+**A wired port with nothing on it is not an open side, and the two layers had to be told apart
+separately.** On the canvas it is free: `gatherInputs` blocks a node whose *optional* port is wired
+to an upstream that cannot run, so a failed Sources never becomes every synapse onto the Targets.
+The exporters are not: `input()` answers undefined for an unwired port and for a muted one alike, so
+both emitters check the inferred type — present means wired — and emit a TODO rather than the far
+larger open query.
+
+**`Include fragments` is Connectivity's control with Connectivity's answer**, for the open side
+only. A far end is mostly fragments: body 10003's downstream synapses are 30,020 rows over every
+partner and 17,085 over `:Neuron` ones (upstream is 27,014 against 26,348, so it matters mostly one
+way). Off by default, and asked of the Dataset card's population through `publishedNeurons` after
+the fetch, as Connectivity asks it, so two nodes on one card cannot disagree about what a neuron is.
+A bound side is never filtered — those ids were asked for. neuprint-python's own open side is
+`NeuronCriteria()`, which is `:Neuron`, so the default is also that library's.
+
+Per backend: neuPrint moves the bind to whichever end is given (an unbound `n` with a bound `m` is
+still bound-then-expanded) — 0.86 s for every downstream synapse of 10003, 1.17 s upstream, row
+counts exactly `n.downstream` and `n.upstream`. CAVE drops the filter on the open column, which makes
+the row cap likelier and the refusal says to wire both ends. CATMAID cannot use `connectors/links/`,
+which needs the far end's skeleton ids, so an open side is one POST to `connectors/` with
+`with_partners` — every link on every connector of the bound end — with relation ids read from
+`ontology/relations` (14 and 17 on FAFB; the unit test uses other numbers so a hard-coded pair
+fails). Live, skeleton 16 with Targets open matched its connectivity weight for **every** partner.
+That POST needs a token, where the both-bound GETs do not.
+
+**The Python export of an open side is Coda's Cypher, not `fetch_synapse_connections`.** Through
+neuprint-python, every downstream synapse of body 10003 failed with a **504 after 183 s**, twice,
+where `synapsesBetweenCypher` answers in 0.59 s; the upstream mirror returned (26,348 rows in 10.9 s,
+the canvas's `:Neuron` count). So the library call is kept where both ends are bound and its rows
+were checked identical, and an open side goes through `fetch_custom` — R's route — with `:Neuron`
+standing in for the population a notebook cannot ask.
+
+**Exports.** Python uses `fetch_synapse_connections` on neuPrint and `query_table` with the
+canvas's own filters on CAVE (`synapse_query` refuses without the table named and has no score
+floor), both through `coda_synapses_between`. Both generated cells were **run** live: the neuPrint
+cells return the canvas's rows exactly, coordinate for coordinate (4,007 at `pre`; 2,278 at `post`
+with a 0.8 floor), ids as `string`; the CAVE cell keeps eighteen-digit ids exact. R has no
+neuprintr route, so it runs the canvas's own Cypher — `synapsesBetweenCypher` rendered through
+`CypherRendering` by `synapsesBetweenPlan`, which both exporters share — with
+`{sources}`/`{targets}` placeholders — which also makes it the one export carrying types. The R
+chunk has not been run: neuprintr was not installed where this was written.
+
 ## Connectivity: hops and direction
 
 `Direction` offers `both`, and `Hops` traverses further than one synapse. Both changed what the

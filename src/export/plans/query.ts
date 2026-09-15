@@ -20,6 +20,10 @@ import { datasetFamily, resolveDatasetId } from '../../nodes/lib/datasetFamilies
 import { parseIdList } from '../../nodes/lib/idList'
 import { SKELETON_SOURCE_PARAM } from '../../nodes/lib/skeletonParams'
 import type { NeutralContext, Noted, Refusable } from '../neutral'
+import { synapsesBetweenCypher } from '../../data/neuprint/cypher'
+import type { SynapseLocation } from '../../data/source'
+import { minSynapseConfidence } from '../../nodes/lib/synapseParams'
+import { CYPHER_PLACEHOLDERS } from './connectivity'
 
 // ---------------------------------------------------------------------------
 // Dataset nodes
@@ -121,6 +125,61 @@ export function inputIdsPlan(
 export function rawCypherPlan(params: ParamValues): Refusable<{ query: string }> {
   const query = String(params.query).trim()
   return query ? { query } : { refusal: 'This Raw Cypher node has no query.' }
+}
+
+// ---------------------------------------------------------------------------
+// Synapses Between
+// ---------------------------------------------------------------------------
+
+/** What a Synapses Between export decides before either language writes a line. */
+export type SynapsesBetweenPlan = Refusable<{
+  location: SynapseLocation
+  minConfidence: number
+  includeFragments: boolean
+  /** The column naming the side left open, when one is. */
+  open: typeof ID_COLUMN_NAME | 'partnerId' | undefined
+  /**
+   * The canvas's Cypher with each wired end's list a placeholder, and an open end labelled
+   * `:Neuron` unless fragments are included — neuprint-python's own default for an open side,
+   * standing in for the Dataset-card population a document cannot ask.
+   */
+  query: string
+}>
+
+/**
+ * Synapses Between's shared decisions, `adjacencyExportQuery`'s arrangement one level up: both
+ * exporters read the open side, the label and the query from here, so the notebook and the R
+ * document cannot come to run different queries for one card.
+ *
+ * `wired` is which ports carry a value. A wired port whose upstream emitted nothing never reaches
+ * an emitter — the walk blocks the node first — so absent here really is unwired.
+ */
+export function synapsesBetweenPlan(
+  params: ParamValues,
+  wired: { sources: boolean; targets: boolean },
+): SynapsesBetweenPlan {
+  if (!wired.sources && !wired.targets) {
+    return { refusal: 'Neither Sources nor Targets is wired, so there is nothing to ask for.' }
+  }
+  const location = params.location === 'post' ? 'post' : 'pre'
+  const minConfidence = minSynapseConfidence(params)
+  const includeFragments = params.includeFragments === true
+  const open = !wired.sources ? ID_COLUMN_NAME : !wired.targets ? 'partnerId' : undefined
+  const query = synapsesBetweenCypher(
+    {
+      datasetId: '',
+      location,
+      minConfidence,
+      ...(wired.sources ? { sourceIds: [] } : {}),
+      ...(wired.targets ? { targetIds: [] } : {}),
+    },
+    {
+      sourceIds: CYPHER_PLACEHOLDERS.sources,
+      targetIds: CYPHER_PLACEHOLDERS.targets,
+      ...(open && !includeFragments ? { partnerLabel: 'Neuron' as const } : {}),
+    },
+  )
+  return { location, minConfidence, includeFragments, open, query }
 }
 
 // ---------------------------------------------------------------------------

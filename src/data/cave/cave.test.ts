@@ -1117,6 +1117,131 @@ describe('synapses', () => {
   })
 })
 
+describe('synapses between', () => {
+  const SOURCE = '720575940628857210'
+  const TARGET = '720575940618002747'
+  // Written as text, not built with JSON.stringify: an eighteen-digit id as a JS number is already
+  // a different neuron, and the point of the fixture is that the wire carries the exact digits.
+  const ROWS =
+    '[{"pre_pt_root_id":720575940628857210,"post_pt_root_id":720575940618002747,' +
+    '"pre_pt_position_x":10,"pre_pt_position_y":20,"pre_pt_position_z":30,' +
+    '"post_pt_position_x":40,"post_pt_position_y":50,"post_pt_position_z":60,"cleft_score":80}]'
+  const QUERY = '/table/synapses_nt_v1/query'
+
+  it('narrows at the server on both ends in one query', async () => {
+    const captured = installFetch({ [QUERY]: ROWS })
+    await new CaveSource().fetchSynapsesBetween({
+      datasetId: DATASET,
+      sourceIds: [SOURCE],
+      targetIds: [TARGET],
+      location: 'pre',
+    })
+    const queries = rowQueries(captured, QUERY)
+    // The AND that `fetchSynapses` has to avoid is exactly the question here.
+    expect(queries).toHaveLength(1)
+    const filters = (
+      queries[0]!.body as { filter_in_dict: Record<string, Record<string, unknown[]>> }
+    ).filter_in_dict.synapses_nt_v1!
+    expect(Object.keys(filters).sort()).toEqual(['post_pt_root_id', 'pre_pt_root_id'])
+    expect(filters.pre_pt_root_id!.map(String)).toEqual([SOURCE])
+    expect(filters.post_pt_root_id!.map(String)).toEqual([TARGET])
+    expect((queries[0]!.body as { desired_resolution?: number[] }).desired_resolution).toEqual([
+      1, 1, 1,
+    ])
+  })
+
+  it('reads the drawn end’s own position column, not the datastack’s configured one', async () => {
+    // FlyWire's spec draws at `pre_pt_position`; asking for the post end must not fall back to it.
+    const captured = installFetch({ [QUERY]: ROWS })
+    const points = await new CaveSource().fetchSynapsesBetween({
+      datasetId: DATASET,
+      sourceIds: [SOURCE],
+      targetIds: [TARGET],
+      location: 'post',
+    })
+    const body = rowQueries(captured, QUERY)[0]!.body as { select_columns?: unknown }
+    expect(JSON.stringify(body.select_columns)).toContain('post_pt_position')
+    expect(JSON.stringify(body.select_columns)).not.toContain('pre_pt_position')
+    expect([...points.positions]).toEqual([40, 50, 60])
+  })
+
+  it('keeps the columns oriented and the ids exact, whichever end is drawn', async () => {
+    installFetch({ [QUERY]: ROWS })
+    const cave = new CaveSource()
+    for (const location of ['pre', 'post'] as const) {
+      const points = await cave.fetchSynapsesBetween({
+        datasetId: DATASET,
+        sourceIds: [SOURCE],
+        targetIds: [TARGET],
+        location,
+      })
+      expect(points.attributes.schema.columns.map((c) => c.name)).toEqual([
+        'neuronId',
+        'type',
+        'partnerId',
+        'partnerType',
+        'polarity',
+        'confidence',
+      ])
+      // The source stays `neuronId` when the point moves to the target's arbour.
+      expect(points.attributes.data.neuronId).toEqual([SOURCE])
+      expect(points.attributes.data.partnerId).toEqual([TARGET])
+      expect(points.attributes.data.polarity).toEqual([location])
+      expect(points.attributes.data.confidence).toEqual([80])
+      expect(points.units).toBe('nm')
+    }
+  })
+
+  it('cuts confidence on the server, where it saves the download', async () => {
+    const captured = installFetch({ [QUERY]: ROWS })
+    await new CaveSource().fetchSynapsesBetween({
+      datasetId: DATASET,
+      sourceIds: [SOURCE],
+      targetIds: [TARGET],
+      location: 'pre',
+      minConfidence: 50,
+    })
+    expect(rowQueries(captured, QUERY)[0]!.body).toMatchObject({
+      filter_greater_equal_dict: { synapses_nt_v1: { cleft_score: 50 } },
+    })
+  })
+
+  it('filters only the bound end when the other is left open', async () => {
+    const captured = installFetch({ [QUERY]: ROWS })
+    const points = await new CaveSource().fetchSynapsesBetween({
+      datasetId: DATASET,
+      sourceIds: [SOURCE],
+      location: 'pre',
+    })
+    const filters = (
+      rowQueries(captured, QUERY)[0]!.body as {
+        filter_in_dict: Record<string, Record<string, unknown[]>>
+      }
+    ).filter_in_dict.synapses_nt_v1!
+    expect(Object.keys(filters)).toEqual(['pre_pt_root_id'])
+    expect(points.attributes.data.partnerId).toEqual([TARGET])
+  })
+
+  it('refuses a request bound at neither end', async () => {
+    installFetch({ [QUERY]: ROWS })
+    await expect(
+      new CaveSource().fetchSynapsesBetween({ datasetId: DATASET, location: 'pre' }),
+    ).rejects.toThrow(/sources, targets or both/)
+  })
+
+  it('asks nothing of the server when either set is empty', async () => {
+    const captured = installFetch({ [QUERY]: ROWS })
+    const points = await new CaveSource().fetchSynapsesBetween({
+      datasetId: DATASET,
+      sourceIds: [SOURCE],
+      targetIds: [],
+      location: 'pre',
+    })
+    expect(points.attributes.length).toBe(0)
+    expect(rowQueries(captured, QUERY)).toHaveLength(0)
+  })
+})
+
 // ---------------------------------------------------------------------------
 
 describe('meshes', () => {

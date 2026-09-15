@@ -387,3 +387,92 @@ live('partner-resolved synapses, live', () => {
     }
   }, 120_000)
 })
+
+/**
+ * The synapses between two sets, checked against the same connection weights.
+ *
+ * `synapsesBetweenCypher` binds both ends, so what can go wrong is the opposite of the query above:
+ * a filter that prunes a partner it should not, or one applied after the walk rather than on the
+ * SynapseSet pair. Neither is visible in a plausible table; per-pair row counts equal to
+ * `ConnectsTo.weight` are. Measured when this was written: body 10003 onto its top five targets,
+ * 1,045 rows in 0.42 s, every pair exact.
+ */
+live('synapses between two sets, live', () => {
+  const DATASET = 'male-cns:v1.0'
+  const BODY = '10003'
+
+  it('returns one row per connection, agreeing with ConnectsTo per pair, at either end', async () => {
+    setToken(TOKEN!)
+    const source = new NeuPrintSource()
+    const reference = await source.fetchConnectivity({
+      datasetId: DATASET,
+      neuronIds: [BODY],
+      direction: 'outputs',
+    })
+    const refPartner = getColumn(reference, 'partnerId')!
+    const refWeight = getColumn(reference, 'weight')!
+    const order = [...refWeight.keys()].sort(
+      (a, b) => Number(refWeight[b]) - Number(refWeight[a]),
+    )
+    const targets = order.slice(0, 5).map((i) => String(refPartner[i]))
+
+    const counts: number[] = []
+    for (const location of ['pre', 'post'] as const) {
+      const points = await source.fetchSynapsesBetween!({
+        datasetId: DATASET,
+        sourceIds: [BODY],
+        targetIds: targets,
+        location,
+      })
+      expect(points.positions.length).toBe(points.attributes.length * 3)
+      expect(new Set(getColumn(points.attributes, 'neuronId'))).toEqual(new Set([BODY]))
+      const perTarget = new Map<string, number>()
+      for (const partner of getColumn(points.attributes, 'partnerId')!) {
+        perTarget.set(String(partner), (perTarget.get(String(partner)) ?? 0) + 1)
+      }
+      for (const i of order.slice(0, 5)) {
+        expect(perTarget.get(String(refPartner[i]))).toBe(Number(refWeight[i]))
+      }
+      counts.push(points.attributes.length)
+    }
+    // Location moves the points and never the row set.
+    expect(counts[0]).toBe(counts[1])
+  }, 120_000)
+
+  it('leaves either end open, answering every synapse the body makes or receives', async () => {
+    /*
+     * The open query binds whichever end is given. What pins it is that an open end with no
+     * filter at all is the body's whole side: `n.downstream` rows for Sources only, `n.upstream`
+     * for Targets only — 30,020 and 27,014 on this body when written.
+     */
+    setToken(TOKEN!)
+    const source = new NeuPrintSource()
+    const totals = await source.fetchSynapseTotals!({
+      datasetId: DATASET,
+      neuronIds: [BODY],
+      side: 'outputs',
+      basis: 'all',
+    })
+    const down = await source.fetchSynapsesBetween!({
+      datasetId: DATASET,
+      sourceIds: [BODY],
+      location: 'pre',
+    })
+    expect(down.attributes.length).toBe(Number(getColumn(totals, 'total')![0]))
+    expect(new Set(getColumn(down.attributes, 'neuronId'))).toEqual(new Set([BODY]))
+
+    const up = await source.fetchSynapsesBetween!({
+      datasetId: DATASET,
+      targetIds: [BODY],
+      location: 'post',
+    })
+    const inTotals = await source.fetchSynapseTotals!({
+      datasetId: DATASET,
+      neuronIds: [BODY],
+      side: 'inputs',
+      basis: 'all',
+    })
+    expect(up.attributes.length).toBe(Number(getColumn(inTotals, 'total')![0]))
+    expect(new Set(getColumn(up.attributes, 'partnerId'))).toEqual(new Set([BODY]))
+  }, 180_000)
+})

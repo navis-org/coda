@@ -103,6 +103,28 @@ export const STANDARD_SYNAPSE_COLUMNS = {
   positionColumn: 'ctr_pt_position',
 } as const
 
+/**
+ * The position column of one end of a synapse, read off that end's root-id column.
+ *
+ * Not a guess: `emannotationschemas` defines a bound point `<name>` as the columns
+ * `<name>_root_id`, `<name>_supervoxel_id` and `<name>_position`, so `pre_pt_root_id` has its
+ * position in `pre_pt_position` on every table whose schema is `synapse` — declared or configured.
+ * Checked live on `synapses_nt_v1`, which carries `pre_pt_position_*` and `post_pt_position_*`.
+ * A root-id column not named that way is not a bound point this rule can speak for, and callers
+ * refuse rather than drawing the synapse somewhere else.
+ *
+ * Here rather than in `CaveSource` because the notebook export asks the same question and must
+ * get the same column.
+ */
+export function endPositionColumn(
+  spec: Pick<SynapseTableSpec, 'preColumn' | 'postColumn'>,
+  end: 'pre' | 'post',
+): string | undefined {
+  const idColumn = end === 'pre' ? spec.preColumn : spec.postColumn
+  const suffix = '_root_id'
+  return idColumn.endsWith(suffix) ? `${idColumn.slice(0, -suffix.length)}_position` : undefined
+}
+
 export interface SynapseTableSpec {
   table: string
   preColumn: string

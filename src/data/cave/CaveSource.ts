@@ -42,7 +42,14 @@ import type {
   SkeletonsValue,
   TableValue,
 } from '../../core/values'
-import { boundsOf, makeTable, selectRows, tableFromRows } from '../../core/values'
+import {
+  EMPTY_BOUNDS,
+  boundsOf,
+  emptyTable,
+  makeTable,
+  selectRows,
+  tableFromRows,
+} from '../../core/values'
 import { geometryFrame } from '../transforms/spaces'
 import type {
   AdjacencyRequest,
@@ -57,9 +64,15 @@ import type {
   SourceCapabilities,
   SourceSchemas,
   SynapseRequest,
+  SynapsesBetweenRequest,
   ViewerSceneRequest,
 } from '../source'
-import { reportSourceLearned, requireSkeletonRoute } from '../source'
+import {
+  SYNAPSES_BETWEEN_SCHEMA,
+  asksForNoSynapses,
+  reportSourceLearned,
+  requireSkeletonRoute,
+} from '../source'
 import { SYNAPSE_UNITS, confidenceIgnoredWarning } from '../synapseUnits'
 import { schemaFingerprint } from '../cache'
 import type { NeuronIndexRequest } from '../neuronIndex'
@@ -134,6 +147,7 @@ import type { DatastackSpec, NeuronTableSpec, SynapseTableSpec } from './spec'
 import {
   STANDARD_SYNAPSE_COLUMNS,
   datasetIdFor,
+  endPositionColumn,
   specFor,
   splitDatasetId,
   specsOn,
@@ -282,6 +296,31 @@ function idFilters(
 const INCOMPLETE_EDGES =
   'the edge list would be incomplete. Ask about fewer neurons, or use a datastack that ' +
   'publishes a connection roll-up'
+
+/**
+ * The confidence cut a synapse query can push to the server — or, where the table has no score
+ * column to cut on, nothing and a warning saying so.
+ *
+ * Both synapse fetches read it, so "server-side, or say so" is one piece of code; `fetchSynapses`
+ * records why a silent drop is not an option.
+ */
+function scoreCut(
+  req: { minConfidence?: number; onWarn?: (message: string) => void },
+  label: string,
+  synapses: SynapseTableSpec,
+): { column: string; atLeast: number } | undefined {
+  const wanted = req.minConfidence ?? 0
+  if (wanted <= 0) return undefined
+  if (!synapses.scoreColumn) {
+    req.onWarn?.(confidenceIgnoredWarning(`${label}'s synapse table (${synapses.table})`))
+    return undefined
+  }
+  return { column: synapses.scoreColumn, atLeast: wanted }
+}
+
+const INCOMPLETE_SYNAPSES_BETWEEN =
+  'the synapse cloud would be missing connections. Ask about fewer sources or targets, or wire ' +
+  'both ends so the query is narrowed on both'
 
 const INCOMPLETE_INDEX =
   'the neuron index would be incomplete. This datastack is too large to read in one request, ' +
@@ -1668,13 +1707,7 @@ export class CaveSource implements DataSource {
      * conventionally cut at 50 — nothing like neuPrint's 0..1 — which is why `SynapseRequest`
      * refuses to pretend there is one scale.
      */
-    const wanted = req.minConfidence ?? 0
-    const cut = wanted > 0 ? synapses.scoreColumn : undefined
-    if (wanted > 0 && !cut) {
-      req.onWarn?.(
-        confidenceIgnoredWarning(`${spec.label}'s synapse table (${synapses.table})`),
-      )
-    }
+    const cut = scoreCut(req, spec.label, synapses)
     req.onProgress?.(0.15, 'querying')
 
     const perSide = await Promise.all(
@@ -1688,7 +1721,7 @@ export class CaveSource implements DataSource {
             table: synapses.table,
             filters: {
               in: { [column]: [...req.neuronIds] },
-              ...(cut ? { atLeast: { [cut]: wanted } } : {}),
+              ...(cut ? { atLeast: { [cut.column]: cut.atLeast } } : {}),
             },
             columns,
             resolution: NANOMETRES,
@@ -1708,6 +1741,111 @@ export class CaveSource implements DataSource {
       this.schemasFor(req.datasetId).synapses,
       this.frame(req.datasetId),
     )
+  }
+
+  /**
+   * The synapses from one root-id set onto another: one query, filtered on both id columns.
+   *
+   * **The `IN` on both columns that `fetchSynapses` has to avoid is exactly what this wants.** Two
+   * `in` filters in one query are an AND, which there would be "synapses a neuron makes onto
+   * itself" and here is "synapses from these onto those" — so the server narrows on both ends and
+   * `refuseIfCapped` is measured against the connection, not against either side's whole cloud.
+   *
+   * The position column is the **drawn end's** bound point, not `SynapseTableSpec.positionColumn`:
+   * that one is a per-datastack choice of where to draw a synapse (the cleft centre on a standard
+   * table, `pre_pt_position` on FlyWire), and `Location` is a choice the node makes. See
+   * `endPositionColumn` for how it is found.
+   *
+   * Types come from the neuron index, as `fetchConnectivity`'s do — and unlike there, a datastack
+   * whose index cannot be built still answers, with null types: a type is a label on this cloud
+   * rather than what it is about.
+   */
+  async fetchSynapsesBetween(req: SynapsesBetweenRequest): Promise<PointsValue> {
+    const { spec, version } = this.require(req.datasetId)
+    const frame = this.frame(req.datasetId)
+    if (asksForNoSynapses(req)) {
+      return {
+        kind: 'points',
+        positions: new Float32Array(0),
+        attributes: emptyTable(SYNAPSES_BETWEEN_SCHEMA),
+        bounds: EMPTY_BOUNDS,
+        ...frame,
+      }
+    }
+    const options = this.options(req.signal)
+    const synapses = await this.synapsesFor(spec, options)
+    if (!synapses) throw new CaveError(`${spec.label} publishes no synapse table.`)
+    const position = endPositionColumn(synapses, req.location)
+    if (!position) {
+      throw new CaveError(
+        `${spec.label}'s synapse table names its ${req.location}synaptic end ` +
+          `"${req.location === 'pre' ? synapses.preColumn : synapses.postColumn}", so Coda cannot ` +
+          `tell which column holds that end's position.`,
+      )
+    }
+    const server = await this.serverFor(spec)
+
+    const cut = scoreCut(req, spec.label, synapses)
+    const columns = [synapses.preColumn, synapses.postColumn, position]
+    if (synapses.scoreColumn) columns.push(synapses.scoreColumn)
+    req.onProgress?.(0.15, 'querying')
+
+    const [rows, types] = await Promise.all([
+      queryTableChecked(
+        server,
+        spec.datastack,
+        version,
+        {
+          table: synapses.table,
+          filters: {
+            // Only the bound ends: an absent list is "any partner", which is no filter at all.
+            in: idFilters(synapses, {
+              ...(req.sourceIds ? { pre: req.sourceIds } : {}),
+              ...(req.targetIds ? { post: req.targetIds } : {}),
+            }),
+            ...(cut ? { atLeast: { [cut.column]: cut.atLeast } } : {}),
+          },
+          columns,
+          resolution: NANOMETRES,
+        },
+        { of: synapses.table, consequence: INCOMPLETE_SYNAPSES_BETWEEN },
+        options,
+      ),
+      this.typeLookup(req).catch(() => new Map<string, string>()),
+    ])
+    req.onProgress?.(0.8, `${rows.length} synapses`)
+
+    const positions = new Float32Array(rows.length * 3)
+    const neuronIds = new Array<string>(rows.length)
+    const partnerIds = new Array<string>(rows.length)
+    const confidences = new Array<number | null>(rows.length)
+    const xKey = `${position}_x`
+    const yKey = `${position}_y`
+    const zKey = `${position}_z`
+    rows.forEach((row, i) => {
+      positions[i * 3] = Number(row[xKey] ?? 0)
+      positions[i * 3 + 1] = Number(row[yKey] ?? 0)
+      positions[i * 3 + 2] = Number(row[zKey] ?? 0)
+      neuronIds[i] = String(row[synapses.preColumn])
+      partnerIds[i] = String(row[synapses.postColumn])
+      const score = synapses.scoreColumn ? row[synapses.scoreColumn] : undefined
+      confidences[i] = score === null || score === undefined ? null : Number(score)
+    })
+
+    return {
+      kind: 'points',
+      positions,
+      attributes: makeTable(SYNAPSES_BETWEEN_SCHEMA, {
+        [ID_COLUMN_NAME]: neuronIds,
+        type: neuronIds.map((id) => types.get(id) ?? null),
+        partnerId: partnerIds,
+        partnerType: partnerIds.map((id) => types.get(id) ?? null),
+        polarity: new Array<string>(rows.length).fill(req.location),
+        confidence: confidences,
+      }),
+      bounds: boundsOf([positions]),
+      ...frame,
+    }
   }
 
   /**

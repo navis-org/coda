@@ -173,6 +173,39 @@ registerHelper({
 })
 
 /**
+ * A synapse-connection frame — neuprint-python's `fetch_synapse_connections` or a CAVE synapse
+ * table read with `split_positions=True` — as the canvas's Synapses Between cloud.
+ *
+ * One helper for both backends because the rule is the node's and not either library's: the
+ * presynaptic body is `neuronId` and the postsynaptic one `partnerId` **whichever end is drawn**,
+ * `polarity` names that end, and `x`/`y`/`z` are its coordinate. Each backend hands in its own
+ * column names; `position` is a template with `{axis}` in it, since the two libraries put the axis
+ * at opposite ends of the name (`x_pre` against `pre_pt_position_x`).
+ *
+ * The confidence column may be absent — a CAVE table with no score — and then the column is
+ * empty rather than missing, as it is on the canvas.
+ */
+registerHelper({
+  name: 'coda_synapses_between',
+  needs: ['coda_ids'],
+  requires: [['pandas']],
+  source: [
+    'def coda_synapses_between(df, pre, post, position, confidence, location):',
+    '    """A synapse-connection frame as Coda\'s Synapses Between cloud: source, target, one end."""',
+    '    out = pd.DataFrame(index=df.index)',
+    "    out['neuronId'] = df[pre]",
+    "    out['partnerId'] = df[post]",
+    "    out['polarity'] = location",
+    "    out['confidence'] = (",
+    "        df[confidence].astype('float64') if confidence in df.columns else float('nan')",
+    '    )',
+    "    for axis in 'xyz':",
+    '        out[axis] = df[position.format(axis=axis)].to_numpy()',
+    "    return coda_ids(out.reset_index(drop=True), 'neuronId', 'partnerId')",
+  ],
+})
+
+/**
  * Coda's Combine Columns node, both halves.
  *
  * `df[columns].bfill(axis=1).iloc[:, 0]` is the obvious pandas spelling and is a *different

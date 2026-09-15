@@ -296,6 +296,29 @@ export function everythingGraph(): CodaGraph {
       row: 8,
       params: { polarity: 'pre', synapseUnit: 'links', minConfidence: 0.8 },
     },
+    /*
+     * Synapses Between, twice for the Synapses pair's reason: both emitters branch on `location`
+     * and on whether a floor is set, and a node on its defaults pins only the branch that emits
+     * neither. The targets come from `labels` so the two ports carry two different frames.
+     */
+    { id: 'between', type: 'neuron.synapsesBetween', col: 2, row: 9 },
+    {
+      id: 'betweenPost',
+      type: 'neuron.synapsesBetween',
+      col: 2,
+      row: 10,
+      params: { location: 'post', minConfidence: 0.8 },
+    },
+    // One side open each way, and each fragments setting once: the open end labelled `:Neuron`
+    // against a bare one, in both the notebook's `fetch_custom` cell and the R chunk.
+    { id: 'betweenDown', type: 'neuron.synapsesBetween', col: 2, row: 11 },
+    {
+      id: 'betweenUp',
+      type: 'neuron.synapsesBetween',
+      col: 2,
+      row: 12,
+      params: { includeFragments: true },
+    },
 
     /*
      * Two NBLAST nodes, for the reason there are two Select One nodes: the emitters branch on
@@ -1446,6 +1469,10 @@ export function everythingGraph(): CodaGraph {
     ['ds', 'dataset', 'mesh', 'dataset'],
     ['ds', 'dataset', 'syn', 'dataset'],
     ['ds', 'dataset', 'synLinks', 'dataset'],
+    ['ds', 'dataset', 'between', 'dataset'],
+    ['ds', 'dataset', 'betweenPost', 'dataset'],
+    ['ds', 'dataset', 'betweenDown', 'dataset'],
+    ['ds', 'dataset', 'betweenUp', 'dataset'],
     ['ds', 'dataset', 'desc', 'dataset'],
 
     ['find', 'neurons', 'conn', 'neurons'],
@@ -1466,6 +1493,12 @@ export function everythingGraph(): CodaGraph {
     ['find', 'neurons', 'mesh', 'neurons'],
     ['find', 'neurons', 'syn', 'neurons'],
     ['find', 'neurons', 'synLinks', 'neurons'],
+    ['find', 'neurons', 'between', 'sources'],
+    ['labels', 'neurons', 'between', 'targets'],
+    ['find', 'neurons', 'betweenPost', 'sources'],
+    ['labels', 'neurons', 'betweenPost', 'targets'],
+    ['find', 'neurons', 'betweenDown', 'sources'],
+    ['labels', 'neurons', 'betweenUp', 'targets'],
     ['find', 'neurons', 'scatter', 'in'],
     ['find', 'neurons', 'combine', 'in'],
     ['find', 'neurons', 'joined', 'in'],
@@ -1739,6 +1772,27 @@ export function caveGraph(): CodaGraph {
       row: 3,
       params: { datastack: 'flywire_fafb_public:783', table: 'nuclei_v1' },
     },
+    /*
+     * Synapses Between on both CAVE branches: FlyWire's configured synapse table, named and with
+     * a score column the floor reaches, and the Aedes datastack beside it, whose table the emitter
+     * has to take from elsewhere and which has no score for the floor to cut.
+     */
+    {
+      id: 'between',
+      type: 'neuron.synapsesBetween',
+      col: 6,
+      row: 4,
+      params: { minConfidence: 50 },
+    },
+    {
+      id: 'betweenAedes',
+      type: 'neuron.synapsesBetween',
+      col: 1,
+      row: 4,
+      params: { location: 'post', minConfidence: 2 },
+    },
+    // Sources only, fragments off: one `in` filter and the index membership after it.
+    { id: 'betweenDown', type: 'neuron.synapsesBetween', col: 6, row: 5 },
   ]
   for (const spec of nodes) g = place(g, spec)
 
@@ -1757,6 +1811,14 @@ export function caveGraph(): CodaGraph {
     ['ds', 'dataset', 'summary', 'dataset'],
     ['ds', 'dataset', 'explore', 'dataset'],
     ['ds', 'dataset', 'tables', 'dataset'],
+    ['ds', 'dataset', 'between', 'dataset'],
+    ['find', 'neurons', 'between', 'sources'],
+    ['find', 'neurons', 'between', 'targets'],
+    ['custom', 'dataset', 'betweenAedes', 'dataset'],
+    ['find', 'neurons', 'betweenAedes', 'sources'],
+    ['find', 'neurons', 'betweenAedes', 'targets'],
+    ['ds', 'dataset', 'betweenDown', 'dataset'],
+    ['find', 'neurons', 'betweenDown', 'sources'],
   ]
   for (const [from, out, to, into] of edges) g = wire(g, from, out, to, into)
   return g

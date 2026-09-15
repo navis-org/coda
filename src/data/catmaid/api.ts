@@ -263,6 +263,52 @@ export function connectorLinks(
   )
 }
 
+/**
+ * Every connector on a skeleton set's links of one relation, **with every link on each** — the
+ * partners on the other side included, whoever they are.
+ *
+ * The route to a synapse whose far end is not known in advance, which `connectorLinks` cannot
+ * give: it needs the far end's skeleton ids to ask about them. POST-only, so it needs a token;
+ * checked live against VFB's FAFB with its published one.
+ *
+ * A connector row is `[connectorId, x, y, z, confidence, …]` and a partner link is
+ * `[linkId, treenodeId, skeletonId, relationId, confidence, …]`. The relation is an **id** that
+ * belongs to the project, read through `relationIds` rather than assumed — 14 and 17 on FAFB.
+ */
+export interface ConnectorsResponse {
+  connectors: [number, number, number, number, number, ...unknown[]][]
+  partners: Record<string, [number, number, number, number, number, ...unknown[]][]>
+}
+
+export function connectorsWithPartners(
+  server: string,
+  projectId: number,
+  skeletonIds: readonly number[],
+  relation: 'presynaptic_to' | 'postsynaptic_to',
+  options?: CatmaidRequestOptions,
+): Promise<ConnectorsResponse> {
+  return catmaidPost<ConnectorsResponse>(
+    server,
+    `/${projectId}/connectors/`,
+    { skeleton_ids: skeletonIds, relation_type: relation, with_partners: true },
+    options,
+  )
+}
+
+/** A project's relation names to their ids — `presynaptic_to` → 14 on FAFB. */
+export function relationIds(
+  server: string,
+  projectId: number,
+  options?: CatmaidRequestOptions,
+): Promise<Record<string, number>> {
+  return catmaidGet<Record<string, number>>(
+    server,
+    `/${projectId}/ontology/relations`,
+    {},
+    options,
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Volumes — the neuropil shells
 // ---------------------------------------------------------------------------

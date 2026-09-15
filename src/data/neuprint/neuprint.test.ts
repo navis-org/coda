@@ -57,6 +57,7 @@ import {
   idList,
   pathStepCypher,
   synapseLinksCypher,
+  synapsesBetweenCypher,
   synapsesCypher,
 } from './cypher'
 import type { DatasetInfo } from '../source'
@@ -2298,5 +2299,94 @@ describe('synapseLinksCypher', () => {
   it('applies a confidence floor to the queried neuron’s own synapse', () => {
     const cypher = synapseLinksCypher({ datasetId: 'd', neuronIds: ['1'], minConfidence: 0.5 })
     expect(cypher).toContain('ns.confidence >= 0.5')
+  })
+})
+
+describe('synapsesBetweenCypher', () => {
+  const base = {
+    datasetId: 'd',
+    sourceIds: ['10003'],
+    targetIds: ['20001', '20002'],
+    location: 'pre' as const,
+  }
+
+  it('binds the sources, then filters the targets, before walking a single synapse', () => {
+    /*
+     * `synapseLinksCypher`'s ordering rule one step further. The target filter sits on the
+     * SynapseSet pair, which is per partner, so it prunes whole partners before `SynapsesTo` is
+     * expanded — moved after the synapse MATCH, the query returns the same rows having first
+     * walked every synapse of every partner.
+     */
+    const lines = synapsesBetweenCypher(base).split('\n')
+    expect(lines.slice(0, 5)).toEqual([
+      'MATCH (n:Segment)',
+      'WHERE n.bodyId IN [10003]',
+      'MATCH (n)-[:Contains]->(nss:SynapseSet)-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m)',
+      'WHERE m.bodyId IN [20001,20002]',
+      'MATCH (nss)-[:Contains]->(ns:Synapse)-[:SynapsesTo]->(ms:Synapse)<-[:Contains]-(mss)',
+    ])
+  })
+
+  it('binds a Segment rather than a Neuron, so a fragment source is not silently dropped', () => {
+    // Measured live: a fragment onto male-CNS body 10003 is zero rows under `:Neuron`.
+    expect(synapsesBetweenCypher(base)).not.toContain(':Neuron')
+  })
+
+  it('draws the end Location names, and never unions or de-duplicates', () => {
+    const pre = synapsesBetweenCypher(base)
+    expect(pre).toContain('ns.location.x')
+    expect(pre).not.toContain('ms.location')
+    const post = synapsesBetweenCypher({ ...base, location: 'post' })
+    expect(post).toContain('ms.location.x')
+    expect(post).toContain('ms.confidence')
+    // One direction, and a T-bar onto three densities of one target is three connections.
+    expect(pre).not.toContain('UNION')
+    expect(pre).not.toContain('DISTINCT')
+  })
+
+  it('returns the ids and types oriented source-first', () => {
+    expect(synapsesBetweenCypher(base)).toContain('RETURN n.bodyId, n.type, m.bodyId, m.type,')
+  })
+
+  it('binds the given end and leaves the other open, from either side', () => {
+    // Sources only: everything they synapse onto. No target filter, and still bound first.
+    const down = synapsesBetweenCypher({ ...base, targetIds: undefined }).split('\n')
+    expect(down.slice(0, 3)).toEqual([
+      'MATCH (n:Segment)',
+      'WHERE n.bodyId IN [10003]',
+      'MATCH (n)-[:Contains]->(nss:SynapseSet)-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m)',
+    ])
+    expect(down.join('\n')).not.toContain('m.bodyId IN')
+    // Targets only: the bind moves to `m`, or the query would expand every body in the dataset.
+    const up = synapsesBetweenCypher({ ...base, sourceIds: undefined }).split('\n')
+    expect(up.slice(0, 2)).toEqual(['MATCH (m:Segment)', 'WHERE m.bodyId IN [20001,20002]'])
+    expect(up.join('\n')).not.toContain('n.bodyId IN')
+    // The columns stay oriented whichever end was bound.
+    expect(up.join('\n')).toContain('RETURN n.bodyId, n.type, m.bodyId, m.type,')
+  })
+
+  it('refuses a request bound at neither end, which is the whole synapse table', () => {
+    expect(() => synapsesBetweenCypher({ datasetId: 'd', location: 'pre' })).toThrow(
+      /sources, targets or both/,
+    )
+  })
+
+  it('renders placeholders for the bound ends and labels only an open one', () => {
+    const render = { sourceIds: '{s}', targetIds: '{t}', partnerLabel: 'Neuron' } as const
+    const down = synapsesBetweenCypher({ ...base, targetIds: undefined }, render)
+    expect(down).toContain('WHERE n.bodyId IN {s}')
+    expect(down).toContain('<-[:Contains]-(m:Neuron)')
+    const up = synapsesBetweenCypher({ ...base, sourceIds: undefined }, render)
+    expect(up).toContain('WHERE m.bodyId IN {t}')
+    expect(up).toContain('MATCH (n:Neuron)-[:Contains]')
+    // Both bound: nothing is open, so there is nothing to label.
+    expect(synapsesBetweenCypher(base, render)).not.toContain(':Neuron')
+  })
+
+  it('floors confidence on both synapses of a connection, as fetch_synapse_connections does', () => {
+    expect(synapsesBetweenCypher(base)).not.toContain('confidence >=')
+    expect(synapsesBetweenCypher({ ...base, minConfidence: 0.7 })).toContain(
+      'WHERE ns.confidence >= 0.7 AND ms.confidence >= 0.7',
+    )
   })
 })

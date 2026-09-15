@@ -42,11 +42,14 @@ import type {
   SourceCapabilities,
   SourceSchemas,
   SynapseRequest,
+  SynapsesBetweenRequest,
   SynapseTotalsBasis,
   SynapseTotalsRequest,
 } from '../source'
 import {
   CANONICAL_SCHEMAS,
+  SYNAPSES_BETWEEN_SCHEMA,
+  asksForNoSynapses,
   GROUP_TOTALS_SCHEMA,
   PATH_STEP_SCHEMA,
   ROI_COMPLETENESS_SCHEMA,
@@ -852,6 +855,83 @@ export class MockSource implements DataSource {
       kind: 'points',
       positions: buffer,
       attributes: tableFromRows(this.schemas.synapses, rows),
+      bounds: boundsOf([buffer]),
+      ...this.frame(req.datasetId),
+    }
+  }
+
+  /**
+   * The synapses from one set onto another, one point per synapse of each connection.
+   *
+   * Where `fetchSynapses` draws one point per *connection* (carrying its weight), this draws
+   * `weight` points, because the seam promises rows-per-pair equal to the connection weight — the
+   * property a test can hold every source to, and the mock is where it is cheap to. The two ends
+   * are generated on their own neuron's arbour, so `location` moves the cloud from the source's
+   * skeleton to the target's as it does on a real dataset.
+   */
+  async fetchSynapsesBetween(req: SynapsesBetweenRequest): Promise<PointsValue> {
+    await delay(this.latencyMs, req.signal)
+    const connectome = this.require(req.datasetId)
+    if ((req.minConfidence ?? 0) > 0) {
+      req.onWarn?.(confidenceIgnoredWarning('The mock connectome'))
+    }
+
+    const skeletons = new Map<number, ReturnType<typeof generateSkeleton>>()
+    const skeletonOf = (neuronId: number) => {
+      let skeleton = skeletons.get(neuronId)
+      if (!skeleton) {
+        const rois = connectome.roiCounts
+          .filter((rc) => rc.neuronId === neuronId)
+          .map((rc) => rc.roi)
+        skeleton = generateSkeleton(neuronId, rois)
+        skeletons.set(neuronId, skeleton)
+      }
+      return skeleton
+    }
+
+    const positions: number[] = []
+    const rows: Array<Record<string, CellValue>> = []
+    /*
+     * Walked from whichever end is bound: every outgoing edge of the sources, kept when the
+     * target end is open or names the edge's post; or, with only targets, every incoming edge.
+     */
+    const edges: MockConnection[] = []
+    if (!asksForNoSynapses(req)) {
+      if (req.sourceIds) {
+        const targets = req.targetIds && new Set(numericIds(req.targetIds))
+        for (const pre of numericIds(req.sourceIds)) {
+          for (const edge of connectome.out.get(pre) ?? []) {
+            if (!targets || targets.has(edge.post)) edges.push(edge)
+          }
+        }
+      } else {
+        for (const post of numericIds(req.targetIds ?? []))
+          edges.push(...(connectome.in.get(post) ?? []))
+      }
+    }
+    for (const edge of edges) {
+      throwIfAborted(req.signal)
+      const drawnOn = req.location === 'post' ? edge.post : edge.pre
+      const other = req.location === 'post' ? edge.pre : edge.post
+      for (let k = 0; k < edge.weight; k++) {
+        const [x, y, z] = synapsePosition(skeletonOf(drawnOn), (other % 65521) * 64 + k)
+        positions.push(x, y, z)
+        rows.push({
+          [ID_COLUMN_NAME]: publishedId(edge.pre),
+          type: connectome.byId.get(edge.pre)?.type ?? null,
+          partnerId: publishedId(edge.post),
+          partnerType: connectome.byId.get(edge.post)?.type ?? null,
+          polarity: req.location,
+          confidence: null,
+        })
+      }
+    }
+
+    const buffer = Float32Array.from(positions)
+    return {
+      kind: 'points',
+      positions: buffer,
+      attributes: tableFromRows(SYNAPSES_BETWEEN_SCHEMA, rows),
       bounds: boundsOf([buffer]),
       ...this.frame(req.datasetId),
     }

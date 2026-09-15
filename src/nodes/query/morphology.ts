@@ -11,7 +11,15 @@ import { datasetRequest } from '../lib/datasetParam'
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
-import { requireDataset, schemasFromType, sourceSupports } from '../lib/datasetParam'
+import {
+  publishedNeurons,
+  requireDataset,
+  schemasFromType,
+  sourceLabel,
+  sourceSupports,
+} from '../lib/datasetParam'
+import { ID_COLUMN_NAME, idText } from '../../core/ids'
+import { selectPoints } from '../lib/iterables'
 import type { Warner } from '../../core/limits'
 import { warnOverThreshold } from '../../core/limits'
 import { warnAboveParam } from '../lib/limitParams'
@@ -22,9 +30,10 @@ import {
 } from '../lib/skeletonParams'
 import { asSkeletonRoute } from '../../data/skeletonRoutes'
 import { resolveSynapseUnit } from '../../data/synapseUnits'
-import { synapseUnitsOf } from '../../data/source'
+import { SYNAPSES_BETWEEN_SCHEMA, synapseUnitsOf } from '../../data/source'
 import {
   SYNAPSE_UNIT_PARAM,
+  minConfidenceParam,
   minSynapseConfidence,
   pinnedSynapseUnit,
   synapseUnitParam,
@@ -330,16 +339,7 @@ registerNode({
      * scores below 0.5004), so this is a control for cutting *further* and not one a card needs
      * to carry.
      */
-    {
-      id: 'minConfidence',
-      kind: 'number',
-      label: 'Min confidence',
-      default: 0,
-      min: 0,
-      step: 0.05,
-      advanced: true,
-      help: 'Drop synapses scoring below this; 0 keeps every one. The scale belongs to the data source — 0–1 on neuPrint, a tracer’s 1–5 on CATMAID, cleft_score on FlyWire. Sources without one say so and return everything.',
-    },
+    minConfidenceParam('Drop synapses scoring below this; 0 keeps every one.'),
     warnAboveParam({
       threshold: MAX_NEURONS,
       min: 1,
@@ -398,6 +398,171 @@ registerNode({
       unit,
       signal: ctx.signal,
     })
+    return { points }
+  },
+})
+
+/**
+ * The synapses between two neuron sets — neuprint-python's `fetch_synapse_connections`.
+ *
+ * **A node of its own rather than a filter on Synapses**, for two reasons that are both about
+ * cost and meaning rather than taste. Restricting a Synapses cloud to a partner makes every row a
+ * connection, which leaves that node's `Rows` control meaning nothing once the port is wired. And
+ * filtering afterwards cannot shrink the download: neuPrint drops partner columns from the site
+ * cloud because resolving them is a join, and a CAVE query narrowed on one end can hit the row cap
+ * that one narrowed on both ends would not. So `fetchSynapsesBetween` binds both ends at the
+ * server.
+ *
+ * **The columns are oriented and never swap.** `neuronId` is the source and `partnerId` the
+ * target whatever `Location` says; `polarity` is the one column that follows it. Letting the
+ * point "own" `neuronId` — Synapses' rule — would re-point every colour-by and join downstream on
+ * a change to where a dot is drawn.
+ */
+registerNode({
+  type: 'neuron.synapsesBetween',
+  label: 'Synapses Between',
+  category: 'query',
+  description: 'Fetch the synapses from one set of neurons onto another as a 3D point cloud.',
+  guide:
+    'Where two populations actually connect: every synapse from the Sources onto the Targets, one point per synapse connection, narrowed at the server rather than fetched for one side and filtered. Wire only Sources for everything they synapse onto, or only Targets for everything onto them — the open side then counts published neurons unless Include fragments is on. Each point carries its source as neuronId and its target as partnerId, so counting points per pair gives the Connectivity weight; Location picks whether a point sits at the presynaptic or the postsynaptic site.',
+  cost: 'expensive',
+  /*
+   * Both optional, at least one wired — `fetch_synapse_connections(sources, None)` and its mirror.
+   * Neither is refused in `validate`, since both open is the whole synapse table. A port wired to
+   * a node that cannot run is *not* an open side: the scheduler blocks an optional port whose
+   * upstream is unavailable (`gatherInputs`), so a failed Sources can never quietly turn into
+   * every synapse onto the Targets.
+   */
+  inputs: [
+    { id: 'dataset', label: 'Dataset', type: T.dataset() },
+    { id: 'sources', label: 'Sources', type: T.neurons(), required: false },
+    { id: 'targets', label: 'Targets', type: T.neurons(), required: false },
+  ],
+  outputs: [{ id: 'points', label: 'Points', type: T.points() }],
+  params: [
+    /*
+     * In the key, not presentational: it moves every coordinate `evaluate` returns. `pre` first
+     * because it is what both neuPrint's T-bar and FlyWire's configured position column draw.
+     */
+    {
+      id: 'location',
+      kind: 'enum',
+      label: 'Location',
+      default: 'pre',
+      options: [
+        { value: 'pre', label: 'presynaptic site' },
+        { value: 'post', label: 'postsynaptic site' },
+      ],
+      help: 'Which end of each connection a point is drawn at. neuPrint and CAVE have both; CATMAID has one position per connector and draws it for either. The columns do not change — neuronId stays the source, partnerId the target, and polarity says which end this is.',
+    },
+    /*
+     * Connectivity's control, with Connectivity's answer, for the side left open.
+     *
+     * An open side is a far end, and a far end is mostly fragments: body 10003's downstream
+     * synapses are 30,020 rows over every partner and 17,085 over `:Neuron` ones. So off by
+     * default, and "published" is asked of the Dataset card's population through
+     * `publishedNeurons` — `findNeurons`, as Connectivity asks it — rather than of a label, so the
+     * two nodes on one card cannot disagree about what a neuron is. neuprint-python's own open
+     * side (`NeuronCriteria()` with no body id) is `:Neuron` too, so the default is also that
+     * library's.
+     *
+     * A bound side is never filtered: those ids were asked for, and a fragment somebody wired in
+     * is one they meant — Connectivity's seed exemption. Which is also why this does nothing
+     * with both ports wired, and the help says so rather than `visibleIf` hiding it: `visibleIf`
+     * reads params, not wires. No `absentMeans` — no stored node predates it.
+     */
+    {
+      id: 'includeFragments',
+      kind: 'boolean',
+      label: 'Include fragments',
+      default: false,
+      help: 'Only matters with Sources or Targets unwired. Off, the open side counts only published neurons — set what counts on the Dataset node. On, fragments count too, and they are most of a neuron’s partners.',
+    },
+    minConfidenceParam(
+      'Drop a connection when either of its synapses scores below this; 0 keeps every one.',
+    ),
+    warnAboveParam({
+      threshold: MAX_NEURONS,
+      min: 1,
+      counting: 'fetching synapses for more than this many sources or targets',
+    }),
+  ],
+
+  inferOutputs: () => ({ points: T.points(SYNAPSES_BETWEEN_SCHEMA) }),
+
+  validate: (ctx) => {
+    if (ctx.inputs.sources === undefined && ctx.inputs.targets === undefined) {
+      return ['Wire Sources, Targets or both']
+    }
+    const dataset = ctx.inputs.dataset
+    if (!dataset) return []
+    if (!sourceSupports(dataset, 'synapses'))
+      return ['This data source has no synapse locations']
+    if (!sourceSupports(dataset, 'synapsesBetween')) {
+      return [
+        `${sourceLabel(dataset) ?? 'This data source'} cannot fetch the synapses between two neuron sets`,
+      ]
+    }
+    return []
+  },
+
+  evaluate: async (ctx) => {
+    const dataset = requireDataset(ctx.input('dataset'))
+    const source = ctx.resolveSource(dataset.sourceId)
+    if (!source.fetchSynapsesBetween) {
+      throw new Error(`${source.label} cannot fetch the synapses between two neuron sets`)
+    }
+    const limit = Number(ctx.params.limit)
+    const cost = 'These arrive in one query, but it returns a row per synapse connection.'
+    // `input` is undefined only for an unwired port here: a wired one whose upstream could not
+    // run has already blocked this node.
+    const sources = ctx.input('sources')
+    const targets = ctx.input('targets')
+    if (sources === undefined && targets === undefined) {
+      throw new Error('Wire Sources, Targets or both')
+    }
+    const sourceIds =
+      sources === undefined ? undefined : neuronIdsFrom(ctx, sources, limit, cost)
+    const targetIds =
+      targets === undefined ? undefined : neuronIdsFrom(ctx, targets, limit, cost)
+    ctx.progress(
+      0.1,
+      sourceIds && targetIds
+        ? `${sourceIds.length} → ${targetIds.length} neurons`
+        : sourceIds
+          ? `${sourceIds.length} neurons → any`
+          : `any → ${targetIds!.length} neurons`,
+    )
+
+    let points = await source.fetchSynapsesBetween({
+      ...datasetRequest(dataset),
+      ...(sourceIds ? { sourceIds } : {}),
+      ...(targetIds ? { targetIds } : {}),
+      location: ctx.params.location === 'post' ? 'post' : 'pre',
+      minConfidence: minSynapseConfidence(ctx.params),
+      onProgress: ctx.progress,
+      onWarn: ctx.warn,
+      signal: ctx.signal,
+    })
+
+    // The open side's fragments, asked of the Dataset card's population — see the param.
+    const open =
+      sourceIds === undefined
+        ? ID_COLUMN_NAME
+        : targetIds === undefined
+          ? 'partnerId'
+          : undefined
+    if (open && ctx.params.includeFragments !== true && points.attributes.length > 0) {
+      // One `idText` pass, read by both the lookup and the filter.
+      const ids = (points.attributes.data[open] ?? []).map((cell) => idText(cell))
+      const partners = [...new Set(ids.filter((id): id is string => id !== null))]
+      ctx.progress(0.9, `checking ${partners.length} partners`)
+      const published = await publishedNeurons(source, dataset, ctx.signal)(partners)
+      points = selectPoints(points, (i) => {
+        const id = ids[i]
+        return typeof id === 'string' && published.has(id)
+      })
+    }
     return { points }
   },
 })

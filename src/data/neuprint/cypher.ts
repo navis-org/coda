@@ -23,9 +23,10 @@ import type {
   RoiCountsRequest,
   SynapseLinksRequest,
   SynapseRequest,
+  SynapsesBetweenRequest,
   SynapseTotalsRequest,
 } from '../source'
-import { edgePropertyWeight } from '../source'
+import { asksForNoSynapses, edgePropertyWeight } from '../source'
 import { isNeuronId } from '../../core/ids'
 import { SYNAPSE_UNITS } from '../synapseUnits'
 import type { PopulationFilter, TableSchema } from '../../core/types'
@@ -843,6 +844,79 @@ export function synapseLinksCypher(req: SynapseLinksRequest): string {
   if (req.polarity === 'pre') return arm(true)
   if (req.polarity === 'post') return arm(false)
   return `${arm(true)}\nUNION ALL\n${arm(false)}`
+}
+
+/**
+ * Every synapse from one neuron set onto another, each row one synapse connection.
+ *
+ * neuprint-python's `_fetch_synapse_connections` pattern. With both ends bound it filters `m` on the
+ * `SynapseSet` pair *before* expanding a single synapse — a `SynapseSet` is per partner, so the
+ * filter prunes whole partners rather than rows — which is the difference from
+ * `synapseLinksCypher`, which leaves `m` open to name every partner.
+ *
+ * Ordering is `synapseLinksCypher`'s load-bearing rule, one step further: bind and filter `n`,
+ * expand its SynapseSets to `m` and filter `m`, and only then walk `SynapsesTo`. One direction
+ * only — the caller named which side is presynaptic — so there is no union and no arm to get
+ * backwards.
+ *
+ * **No `DISTINCT`.** neuprint-python has one and says it is semantically unnecessary; `(ns, ms)`
+ * is already unique per row, and a T-bar onto three densities of the same target is three
+ * connections, which is what makes rows-per-pair equal `ConnectsTo.weight`.
+ *
+ * The confidence floor is applied to **both** synapses, as `fetch_synapse_connections` applies
+ * its `SynapseCriteria` to `ns` and `ms` alike; the returned score is the drawn end's.
+ *
+ * **Exporters render it through `CypherRendering`** — each wired end's list as a placeholder and
+ * `partnerLabel` on an open end — so the notebook and the R document run this text rather than a
+ * transcription of it.
+ *
+ * **`:Segment`, not `:Neuron`, on the bound end**, and that was measured rather than chosen. The
+ * Sources port takes whatever a neuron table holds, which after Connectivity's `Include fragments`
+ * includes bodies with no `:Neuron` label. On `male-cns:v1.0` a fragment onto body 10003 is one
+ * synapse by `ConnectsTo` and **zero rows** under `:Neuron`, one under `:Segment`. It is not the
+ * slower label either: 0.42 s against 0.73 s for body 10003 onto its top five targets, 1.22 s
+ * against 2.83 s for sixty LC4s onto themselves (4,007 rows over 1,173 pairs, every pair's row
+ * count equal to its `ConnectsTo.weight`, and the same row count neuprint-python's
+ * `fetch_synapse_connections` returns in 28 s). The target end is unlabelled for the same reason
+ * `synapseLinksCypher`'s is.
+ *
+ * **Either list may be absent, meaning any partner at that end**, and the bind moves to whichever
+ * end is given: an unbound `n` with a bound `m` is still bound-then-expanded, just from the other
+ * side. Measured on body 10003: every downstream synapse is 30,020 rows in 0.86 s and every
+ * upstream one 27,014 in 1.17 s — exactly `n.downstream` and `n.upstream`. The open end stays
+ * unlabelled here; whether a fragment counts is the node's `Include fragments`, asked of the
+ * Dataset card's population rather than of a label, as Connectivity asks it.
+ */
+export function synapsesBetweenCypher(
+  req: SynapsesBetweenRequest,
+  render: CypherRendering = {},
+): string {
+  asksForNoSynapses(req) // refuses a request bound at neither end
+  const sources = req.sourceIds && (render.sourceIds ?? idList(req.sourceIds))
+  const targets = req.targetIds && (render.targetIds ?? idList(req.targetIds))
+  const min = req.minConfidence ?? 0
+  const drawn = req.location === 'post' ? 'ms' : 'ns'
+  // Only an open end takes the label: a bound one names the bodies it wants.
+  const label = render.partnerLabel ? `:${render.partnerLabel}` : ''
+  const sets =
+    `MATCH (n${sources === undefined ? label : ''})-[:Contains]->(nss:SynapseSet)` +
+    `-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m${targets === undefined ? label : ''})`
+  const bind =
+    sources !== undefined
+      ? [
+          'MATCH (n:Segment)',
+          `WHERE n.bodyId IN ${sources}`,
+          sets,
+          ...(targets !== undefined ? [`WHERE m.bodyId IN ${targets}`] : []),
+        ]
+      : ['MATCH (m:Segment)', `WHERE m.bodyId IN ${targets}`, sets]
+  return [
+    ...bind,
+    'MATCH (nss)-[:Contains]->(ns:Synapse)-[:SynapsesTo]->(ms:Synapse)<-[:Contains]-(mss)',
+    ...(min > 0 ? [`WHERE ns.confidence >= ${min} AND ms.confidence >= ${min}`] : []),
+    `RETURN n.bodyId, n.type, m.bodyId, m.type, ${drawn}.location.x, ${drawn}.location.y,`,
+    `       ${drawn}.location.z, ${drawn}.confidence`,
+  ].join('\n')
 }
 
 /**

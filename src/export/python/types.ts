@@ -209,9 +209,11 @@ export interface EmitContext<P extends ParamValues = ParamValues> {
    */
   wired(portId: string): string
   /**
-   * The Python variable on an **optional** input port, or undefined when there is none —
-   * unconnected, muted upstream, or upstream emitted nothing. All three are the same fact
-   * here, exactly as they are the same `blocked` to the scheduler.
+   * The Python variable on an **optional** input port, or undefined when it is unwired.
+   *
+   * Only unwired: a port wired to an upstream that is muted or emitted nothing never reaches an
+   * emitter, because the walk blocks the node first (`blockedBy`), exactly as the scheduler does.
+   * So an emitter may read undefined here as "nothing connected" and nothing else.
    */
   input(portId: string): string | undefined
   /** The Python variable this node's output port will be bound to. */

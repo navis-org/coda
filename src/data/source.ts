@@ -537,6 +537,71 @@ export interface SynapseLinksRequest extends GeometryRequest {
   minConfidence?: number
 }
 
+/**
+ * Which end of a connection a synapse point is drawn at: the presynaptic site or the
+ * postsynaptic one. Two coordinates a few tens of nanometres apart on neuPrint and CAVE; one
+ * connector node on CATMAID, which answers both with it.
+ */
+export type SynapseLocation = 'pre' | 'post'
+
+/**
+ * Every synapse from one neuron set onto another — neuprint-python's `fetch_synapse_connections`.
+ *
+ * **Directed, and bound at whichever ends are given.** `sourceIds` are presynaptic and `targetIds`
+ * postsynaptic, and a source narrows the query at the server on every bound end rather than
+ * fetching one side's whole cloud and filtering: with both bound, on neuPrint that is the
+ * difference between walking the SynapseSets of one pair and resolving every partner of a large
+ * cell (57,034 rows on male-CNS body 10003), and on CAVE it is one query that stays under the row
+ * cap where the one-sided read may not. An absent end is "any partner" (see the fields).
+ *
+ * A row is **one connection between two synapses** by construction, which is why there is no
+ * `unit` here: a T-bar onto three densities of the same target is three rows, and grouping rows by
+ * `(neuronId, partnerId)` reproduces the connection weight. `SynapseLinksRequest`'s reasoning.
+ *
+ * A list that is present but **empty** answers an empty cloud rather than "every partner" — asking
+ * nothing answers nothing, the rule `Find Neurons` follows. Neither end bound is refused outright;
+ * see `asksForNoSynapses`.
+ */
+export interface SynapsesBetweenRequest extends DatasetRequest {
+  /**
+   * Presynaptic neurons, or **absent for any** — every synapse onto `targetIds`, which is
+   * `fetch_synapse_connections(None, targets)`. Absent and empty are different answers: an empty
+   * list binds the end to nothing and the cloud is empty.
+   */
+  sourceIds?: NeuronId[]
+  /** Postsynaptic neurons, or absent for any — every synapse `sourceIds` make. */
+  targetIds?: NeuronId[]
+  /** Which end's coordinate each point takes. Required: it decides what is drawn. */
+  location: SynapseLocation
+  /**
+   * Drop a connection when **either** synapse scores below this — `SynapseRequest.minConfidence`'s
+   * scale, and both ends because that is what `fetch_synapse_connections` does (its
+   * `SynapseCriteria` is applied to `ns` and to `ms`). A source that cannot honour it says so
+   * through `onWarn`.
+   */
+  minConfidence?: number
+  onProgress?: (fraction: number, note?: string) => void
+  onWarn?: (message: string) => void
+  signal?: AbortSignal
+}
+
+/**
+ * Whether a synapses-between request has nothing to ask — an end bound to an empty list — and a
+ * refusal for one bound at neither end.
+ *
+ * Both ends open is the whole connectome's synapse table, which no source should be asked for by
+ * accident; neuprint-python refuses it too (`fetch_synapse_connections` asserts one criteria). One
+ * function so the four sources cannot disagree about which of the three cases is which.
+ */
+export function asksForNoSynapses(
+  req: Pick<SynapsesBetweenRequest, 'sourceIds' | 'targetIds'>,
+): boolean {
+  if (req.sourceIds === undefined && req.targetIds === undefined) {
+    throw new Error('Synapses between two sets needs sources, targets or both.')
+  }
+  return req.sourceIds?.length === 0 || req.targetIds?.length === 0
+}
+
 export interface SynapseRequest extends GeometryRequest {
   /** Restrict to synapses of this polarity. Undefined returns both. */
   polarity?: 'pre' | 'post'
@@ -1044,6 +1109,21 @@ export interface DataSource {
    * is the wrong cloud to measure a neuron with.
    */
   fetchSynapseLinks?(req: SynapseLinksRequest): Promise<PointsValue>
+  /**
+   * Every synapse from `sourceIds` onto `targetIds`, one row per synapse connection.
+   *
+   * **A third method, not `fetchSynapseLinks` with a partner list**, because it is answered by
+   * different sources for different reasons. `fetchSynapseLinks` exists only because neuPrint
+   * drops the partner columns, so only neuPrint implements it and the Topology viewer reads its
+   * absence elsewhere as "the site cloud already names partners". This one narrows at the server
+   * on both ends, which every source with synapses can do and each does its own way — a widened
+   * `fetchSynapseLinks` implemented on CAVE would have told that viewer something false.
+   *
+   * The attributes are always `SYNAPSES_BETWEEN_SCHEMA`, whichever source answered, and are
+   * **oriented rather than query-relative**: `neuronId` is the source and `partnerId` the target
+   * whatever `location` says, with `polarity` naming the end the point is drawn at.
+   */
+  fetchSynapsesBetween?(req: SynapsesBetweenRequest): Promise<PointsValue>
 
   rawQuery?(req: RawQueryRequest): Promise<TableValue>
 }
@@ -1376,6 +1456,28 @@ export const CANONICAL_SCHEMAS: SourceSchemas = {
     column('weight', 'i64', 'synapses'),
   ),
 }
+
+/**
+ * The attributes of a `fetchSynapsesBetween` cloud — one constant, every source.
+ *
+ * Canonical names so a 3D colour-by, Stack Neurons and Attach Attributes read it as they read a
+ * Synapses cloud, but **oriented**: `neuronId`/`type` are always the presynaptic source and
+ * `partnerId`/`partnerType` the postsynaptic target. `polarity` is the end the point was drawn at,
+ * which is the one thing the `Location` control changes — so flipping it never re-points a column
+ * downstream. `confidence` is that same end's score, null where the source has none.
+ *
+ * Constant rather than per source (`SourceSchemas`) because inference has to name it before a
+ * source answers, and every source can fill all six: a CAVE type comes from the neuron index and
+ * a CATMAID one from the label index, null for an unlabelled body.
+ */
+export const SYNAPSES_BETWEEN_SCHEMA: TableSchema = tableSchema(
+  column('neuronId', 'str'),
+  column('type', 'str'),
+  column('partnerId', 'str'),
+  column('partnerType', 'str'),
+  column('polarity', 'str'),
+  column('confidence', 'f64'),
+)
 
 // ---------------------------------------------------------------------------
 // Source registry
@@ -1716,6 +1818,21 @@ export function canFetchSynapseLinks(
 ): boolean {
   if (!source) return true
   return Boolean(source.fetchSynapseLinks) && capabilityOf(source, datasetId, 'synapses')
+}
+
+/**
+ * Whether this dataset can answer the synapses between two neuron sets.
+ *
+ * `canFetchSynapseLinks`' shape and for its reason — the method and the per-dataset capability
+ * are two facts, and a source may publish synapses without implementing this. An unresolved
+ * source refuses nothing.
+ */
+export function canFetchSynapsesBetween(
+  source: DataSource | undefined,
+  datasetId: string | undefined,
+): boolean {
+  if (!source) return true
+  return Boolean(source.fetchSynapsesBetween) && capabilityOf(source, datasetId, 'synapses')
 }
 
 /**

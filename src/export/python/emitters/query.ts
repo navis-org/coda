@@ -34,8 +34,11 @@ import {
   neuprintNodePlan,
   rawCypherPlan,
   skeletonsPlan,
+  synapsesBetweenPlan,
 } from '../../plans/query'
 import { neuprintProperty } from '../../../data/neuprint/schema'
+import { STANDARD_SYNAPSE_COLUMNS, endPositionColumn, specFor } from '../../../data/cave/spec'
+import { caveTargetOfType } from '../../../nodes/lib/caveParams'
 import {
   carryLines,
   caveLabels,
@@ -812,6 +815,159 @@ registerEmitter('neuron.synapses', (ctx) => {
       : []),
   ]
 })
+
+/**
+ * Synapses Between, on both backends, each through its library's own route to the same rows.
+ *
+ * **neuPrint** is `fetch_synapse_connections`, which Coda's query is transcribed from — checked
+ * live to return the same row count as the canvas (4,007 over 1,173 LC4 pairs on male-CNS, and a
+ * fragment source included where a `:Neuron` bind would have dropped it). Its `SynapseCriteria` is
+ * passed only when the node sets a floor, for the Synapses emitter's reason: its default is the
+ * dataset's own `postHighAccuracyThreshold`, which neuPrint applied at ingest, where `confidence=0`
+ * would disable it.
+ *
+ * **CAVE** is `query_table` with the canvas's two `in` filters and its score cut, not
+ * `synapse_query`: that one refuses without the table named and has no score floor, so it would
+ * be the same call with less of the node in it.
+ */
+registerEmitter(
+  'neuron.synapsesBetween',
+  (ctx) => {
+    const c = ctx.wired('dataset')
+    const sources = ctx.input('sources')
+    const targets = ctx.input('targets')
+    const plan = synapsesBetweenPlan(ctx.params, {
+      sources: sources !== undefined,
+      targets: targets !== undefined,
+    })
+    if (plan.refusal !== undefined) return ctx.todo(plan.refusal)
+    const { location, minConfidence, includeFragments, open } = plan
+    const out = ctx.output('points')
+    const typeNote = ctx.note(
+      'This frame names the two bodies of each synapse but not their cell types, which the ' +
+        'canvas fills from the dataset — join them from a neuron table if you need them.',
+    )
+
+    if (isCaveDataset(ctx)) {
+      const target = caveTargetOfType(ctx.inputType('dataset'), {})
+      const spec = target ? specFor(target.deployment, target.datastack)?.synapses : undefined
+      const columns = spec ?? STANDARD_SYNAPSE_COLUMNS
+      const position = endPositionColumn(columns, location)
+      if (!position) {
+        return ctx.todo(
+          `This datastack's synapse table names its ${location}synaptic end ` +
+            `"${location === 'pre' ? columns.preColumn : columns.postColumn}", which is not a ` +
+            'bound point, so there is no position column to read — the canvas refuses it too.',
+        )
+      }
+      const score = spec?.scoreColumn
+      ctx.helper('coda_synapses_between')
+      return [
+        ...(spec
+          ? []
+          : ctx.note(
+              'This datastack declares its synapse table in its info record rather than in ' +
+                'Coda’s table of datastacks, so the name is read from there, as the canvas does.',
+            )),
+        `${out} = ${c}.client.materialize.query_table(`,
+        `    ${spec ? pyStr(spec.table) : `${c}.client.info.get_datastack_info()['synapse_table']`},`,
+        `    filter_in_dict={`,
+        ...(sources ? [`        ${pyStr(columns.preColumn)}: ${neuronIdInts(sources)},`] : []),
+        ...(targets ? [`        ${pyStr(columns.postColumn)}: ${neuronIdInts(targets)},`] : []),
+        `    },`,
+        ...(minConfidence > 0 && score
+          ? [`    filter_greater_equal_dict={${pyStr(score)}: ${minConfidence}},`]
+          : []),
+        `    desired_resolution=[1, 1, 1],`,
+        `    split_positions=True,`,
+        `)`,
+        `${out} = coda_synapses_between(`,
+        `    ${out},`,
+        `    ${pyStr(columns.preColumn)},`,
+        `    ${pyStr(columns.postColumn)},`,
+        `    ${pyStr(`${position}_{axis}`)},`,
+        `    ${score ? pyStr(score) : 'None'},`,
+        `    ${pyStr(location)},`,
+        `)`,
+        // The open side's fragments: on CAVE "published" is the datastack's index, which is what
+        // the canvas's `findNeurons` reads.
+        ...(open && !includeFragments
+          ? [
+              `${out} = ${out}[${out}[${pyStr(open)}].isin(${caveLabels(c)}['neuronId'])].reset_index(drop=True)`,
+            ]
+          : []),
+        ...(minConfidence > 0 && !score
+          ? ctx.note(
+              `This synapse table has no score column, so Min confidence (${minConfidence}) is ` +
+                'ignored — on the canvas too, which says so on the card.',
+            )
+          : []),
+        ...typeNote,
+      ]
+    }
+
+    /*
+     * **An open side runs the canvas's own Cypher, not `fetch_synapse_connections(…, None)`**,
+     * and that was measured rather than preferred. Through neuprint-python, body 10003's every
+     * downstream synapse on male-CNS failed with a **504 after 183 s**, twice; the same question as
+     * `synapsesBetweenCypher` answers in 0.59 s. (Its mirror, every synapse onto 10003, did return —
+     * 26,348 rows in 10.9 s, the same count.) So the library call is kept for the both-bound case,
+     * where its rows were checked identical to the canvas's, and the open case is `fetch_custom`,
+     * R's route. Fragments off is a `:Neuron` label there — neuprint-python's own default for an
+     * open side — since a notebook has no Dataset-card population to ask.
+     */
+    if (open) {
+      ctx.require('neuprint', 'fetch_custom')
+      let filled = pyStr(plan.query)
+      if (sources) {
+        filled += `.replace(${pyStr(CYPHER_PLACEHOLDERS.sources)}, ${cypherIdList(sources)})`
+      }
+      if (targets) {
+        filled += `.replace(${pyStr(CYPHER_PLACEHOLDERS.targets)}, ${cypherIdList(targets)})`
+      }
+      return [
+        ...ctx.note(
+          'Coda’s own query rather than fetch_synapse_connections, which timed out (504) asking ' +
+            'for every synapse a large neuron makes.',
+        ),
+        ...(includeFragments
+          ? []
+          : ctx.note(
+              'The open side is neuPrint’s :Neuron label, where the canvas counts the neurons ' +
+                'the Dataset node’s population selects — the same set unless that population ' +
+                'narrows further.',
+            )),
+        `${out} = fetch_custom(`,
+        `    ${filled},`,
+        `    client=${c},`,
+        `)`,
+        // By position: fetch_custom names its columns after the RETURN expressions.
+        `${out}.columns = ['neuronId', 'type', 'partnerId', 'partnerType', 'x', 'y', 'z', 'confidence']`,
+        codaIds(ctx, out, 'neuronId', 'partnerId'),
+        `${out}['polarity'] = ${pyStr(location)}`,
+      ]
+    }
+
+    ctx.require('neuprint', 'NeuronCriteria', 'fetch_synapse_connections')
+    if (minConfidence > 0) ctx.require('neuprint', 'SynapseCriteria')
+    ctx.helper('coda_synapses_between')
+    return [
+      `${out} = fetch_synapse_connections(`,
+      `    NeuronCriteria(bodyId=${neuronIdInts(sources!)}, client=${c}),`,
+      `    NeuronCriteria(bodyId=${neuronIdInts(targets!)}, client=${c}),`,
+      ...(minConfidence > 0
+        ? [`    SynapseCriteria(confidence=${minConfidence}, client=${c}),`]
+        : []),
+      `    client=${c},`,
+      `)`,
+      `${out} = coda_synapses_between(`,
+      `    ${out}, 'bodyId_pre', 'bodyId_post', ${pyStr(`{axis}_${location}`)}, ${pyStr(`confidence_${location}`)}, ${pyStr(location)}`,
+      `)`,
+      ...typeNote,
+    ]
+  },
+  { backends: ['neuprint', 'cave'] },
+)
 
 // ---------------------------------------------------------------------------
 // ROI Completeness / ROI Connectivity

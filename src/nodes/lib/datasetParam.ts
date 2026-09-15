@@ -31,6 +31,7 @@ import {
   allSources,
   backendOf,
   canFetchEdgeProperties,
+  canFetchSynapsesBetween,
   edgePropertiesRefusal,
   edgePropertyWeight,
   edgeSetPropertiesRefusal,
@@ -52,14 +53,15 @@ export function sourceFromType(type: CodaType | undefined): DataSource | undefin
 /**
  * What `sourceSupports` can be asked.
  *
- * Every `SourceCapabilities` key, plus the one question whose answer is not a flag:
- * `groupTotals` is decided by whether the source implements `fetchGroupTotals`, and there is
- * nothing per-dataset for a capability table to publish about it. It rides here rather than in
+ * Every `SourceCapabilities` key, plus the questions whose answer is not a flag of their own:
+ * `groupTotals` is decided by whether the source implements `fetchGroupTotals`, and
+ * `synapsesBetween` by `fetchSynapsesBetween` on top of the `synapses` flag — nothing per-dataset
+ * for a capability table to publish about either. It rides here rather than in
  * a helper of its own because three of the arms below already do not answer their flag either —
  * this is a table of *questions*, which happens to spell most of them the way the flags are
  * spelled.
  */
-export type SupportedQuestion = keyof SourceCapabilities | 'groupTotals'
+export type SupportedQuestion = keyof SourceCapabilities | 'groupTotals' | 'synapsesBetween'
 
 /**
  * Edit-time capability check, so a source that cannot do the thing says so on the node rather
@@ -102,6 +104,9 @@ export function sourceSupports(
   // than by a helper beside this one so that every node keeps asking edit-time capability
   // questions one way — and so the `edges` reading above stays written once.
   if (capability === 'groupTotals') return canTotalGroups(source, datasetId, edges)
+  // `groupTotals`' kind of question: a method as well as the `synapses` flag, and nothing an edge
+  // set could add or remove, since a file of `pre, post, weight` carries no coordinates.
+  if (capability === 'synapsesBetween') return canFetchSynapsesBetween(source, datasetId)
   return capabilityOf(source, datasetId, capability)
 }
 
