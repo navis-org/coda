@@ -23,6 +23,7 @@
  */
 
 import { deploymentKey, normaliseCaveServer } from './deployments'
+import type { CaveObjectKind } from './tables'
 
 /** Where a datastack's neuron identities come from. */
 export interface NeuronTableSpec {
@@ -126,7 +127,13 @@ export function endPositionColumn(
 }
 
 export interface SynapseTableSpec {
+  /** The table's name — or the view's, when `kind` says so. */
   table: string
+  /**
+   * Absent means a table. A view is posted to `/views/` and counted there, which is safe only for
+   * a view that joins rather than aggregates — see `queryViewChecked`.
+   */
+  kind?: CaveObjectKind
   preColumn: string
   postColumn: string
   /** Position column *stem*: the API splits it into `<stem>_x`, `_y`, `_z`. */
@@ -263,8 +270,19 @@ export const DATASTACK_SPECS: readonly DatastackSpec[] = [
       postColumn: 'post_pt_root_id',
       weightColumn: 'n_syn',
     },
+    /*
+     * The *valid* synapses, not `synapses_nt_v1`, so a synapse cloud counts what Connectivity's
+     * weights count. `valid_connection_v2` is `synapses_nt_v1` joined to `valid_synapses_nt_v2`
+     * (`cleft_score > 50`, plus merging a pair's synapses whose presynaptic sites lie within
+     * 100 nm) and grouped; this view is the same join without the grouping. Measured on v783 for
+     * root 720575940628857210: the view's rows per partner equal `n_syn` for all 4,818 output
+     * partners and all 1,072 input partners, where the raw table held 14,986 outputs against 9,161
+     * — about 1.5× on its top partners, and still 1.3× at `cleft_score >= 50`, so no score cut
+     * could have closed the gap. Same columns, same nanometre positions, and `count=true` answers.
+     */
     synapses: {
-      table: 'synapses_nt_v1',
+      table: 'valid_synapses_nt_v2_view',
+      kind: 'view',
       preColumn: 'pre_pt_root_id',
       postColumn: 'post_pt_root_id',
       positionColumn: 'pre_pt_position',

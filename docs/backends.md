@@ -786,12 +786,14 @@ exactly-the-cap tell, which is no worse than what it replaced.
 not have, and a `limit` would make the count agree with a deliberately short read by
 construction.
 
-**Cheap only where the query is**, which is why nothing counts a view and every call site is
-either filtered or reading a table the browser was going to download anyway. Measured:
+**Cheap only where the query is**, which is why no aggregating view is counted and every call site
+is either filtered or reading a table the browser was going to download anyway. A view that only
+*joins* counts like a table, which is what `queryViewChecked` is for. Measured:
 
 ```text
 count query                                                   time
 synapses_nt_v1 filtered to one root id                        0.6 s
+valid_synapses_nt_v2_view (a join view) filtered to one root  0.8 s
 codex_annotations, whole table (1,994,371 rows)               0.7 s
 synapses_nt_v1, unfiltered (~130M rows)                     > 180 s   (times out)
 valid_connection_v2 — an aggregating view                   > 300 s   (times out)
@@ -954,8 +956,11 @@ deployment truncates at, where the view path is one row per pair and cannot.
 
 **Which synapse table is three answers in order, and the order matters.** A configured
 `spec.synapses` wins, because it can name a curated table and the column that scores it —
-FlyWire's `synapses_nt_v1` with `cleft_score`, on a datastack that declares
-`synapse_table: null`. Otherwise the datastack's **own declaration**, which is what makes a
+FlyWire's `valid_synapses_nt_v2_view` with `cleft_score`, on a datastack that declares
+`synapse_table: null`. That one is a **view** (`SynapseTableSpec.kind`), chosen so a synapse cloud
+counts what `valid_connection_v2`'s weights count: the raw `synapses_nt_v1` held about 1.5× the
+weight on a neuron's top partners, and 1.3× even at `cleft_score >= 50`. The view matched `n_syn`
+on every one of 4,818 output and 1,072 input partners. See [nodes.md](nodes.md), Synapses Between. Otherwise the datastack's **own declaration**, which is what makes a
 hand-named datastack work with no configuration at all: 7 of the 13 the info service lists set
 it, `wclee_aedes_brain` among them. Its columns are `STANDARD_SYNAPSE_COLUMNS`, which is a
 definition rather than a guess — a table whose registered schema is `synapse` has
@@ -1550,7 +1555,9 @@ three datastacks and produces a confidently wrong host for the third.
 
 **Synapses are the cheapest capability on this source and needed no new transport.** It is
 `queryTable` with a root-id filter — the same call connectivity makes — over `synapses_nt_v1`.
-Measured: 14,986 synapses for one neuron in 1.8 s.
+Measured: 14,986 synapses for one neuron in 1.8 s. FlyWire has since moved to
+`valid_synapses_nt_v2_view`, through `queryViewChecked`: the same neuron is 9,161 valid synapses
+in 1.5 s.
 
 - **`desired_resolution: [1, 1, 1]` is where the nanometres come from**, and it is passed
   explicitly rather than inherited. The table stores **4x4x40 nm voxels**, established by asking

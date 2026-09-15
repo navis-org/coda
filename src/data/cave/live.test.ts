@@ -192,14 +192,12 @@ live('CAVE, live', () => {
   /*
    * The synapses between the seed and its strongest targets, one query bound at both ends.
    *
-   * **Not** held to Connectivity's weights, and that is the finding worth keeping: FlyWire's
-   * Connectivity reads `valid_connection_v2`, a view over the synapse table *filtered* by
-   * `valid_synapses_nt_v2`, while a synapse cloud reads the table itself. Measured on this seed's
-   * top five targets: 252 / 205 / 153 / 135 / 111 table rows against the view's 166 / 140 / 100 /
-   * 86 / 74 — about 1.5× — and still 219 / 193 / 137 / 112 / 100 at `cleft_score >= 50`, so the
-   * gap is the validity table and not the score alone. The Synapses node has always read the same
-   * table. What is asserted is the shape: every row between the sets, ids exact, oriented, and the
-   * server-side cut doing something.
+   * **Held to Connectivity's weights exactly**, which is why FlyWire's synapses are
+   * `valid_synapses_nt_v2_view`: Connectivity reads `valid_connection_v2`, the same validity join
+   * grouped. Against the raw `synapses_nt_v1` this seed's top five targets were 252 / 205 / 153 /
+   * 135 / 111 rows against the weights' 166 / 140 / 100 / 86 / 74, and still 219 / 193 / 137 /
+   * 112 / 100 at `cleft_score >= 50` — a gap no score cut closes. The view has no row below 51, so
+   * the cut is asserted at 100.
    */
   it('reads the synapses between two root-id sets, oriented, with the score cut on the server', async () => {
     const edges = await source.fetchConnectivity({
@@ -222,12 +220,12 @@ live('CAVE, live', () => {
     expect(new Set(all.attributes.data[ID_COLUMN_NAME])).toEqual(new Set([SEED]))
     const seen = new Set(all.attributes.data.partnerId!.map(String))
     for (const partner of seen) expect(targets).toContain(partner)
-    // The table holds at least what the filtered view counts, per target.
+    // One row per synapse Connectivity counted, per target.
     for (const i of order.slice(0, 5)) {
       const rows = all.attributes.data.partnerId!.filter(
         (p) => p === String(partners[i]),
       ).length
-      expect(rows).toBeGreaterThanOrEqual(Number(weights[i]))
+      expect(rows).toBe(Number(weights[i]))
     }
 
     const cut = await source.fetchSynapsesBetween!({
@@ -235,7 +233,7 @@ live('CAVE, live', () => {
       sourceIds: [SEED],
       targetIds: targets,
       location: 'post',
-      minConfidence: 50,
+      minConfidence: 100,
     })
     expect(cut.attributes.length).toBeGreaterThan(0)
     expect(cut.attributes.length).toBeLessThan(all.attributes.length)

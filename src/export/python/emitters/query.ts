@@ -828,7 +828,9 @@ registerEmitter('neuron.synapses', (ctx) => {
  *
  * **CAVE** is `query_table` with the canvas's two `in` filters and its score cut, not
  * `synapse_query`: that one refuses without the table named and has no score floor, so it would
- * be the same call with less of the node in it.
+ * be the same call with less of the node in it. `query_view` where the spec names a view, which on
+ * FlyWire it does — `valid_synapses_nt_v2_view` takes the same filter, resolution and split
+ * arguments, checked against caveclient 8.2.1's signature.
  */
 registerEmitter(
   'neuron.synapsesBetween',
@@ -869,7 +871,7 @@ registerEmitter(
               'This datastack declares its synapse table in its info record rather than in ' +
                 'Coda’s table of datastacks, so the name is read from there, as the canvas does.',
             )),
-        `${out} = ${c}.client.materialize.query_table(`,
+        `${out} = ${c}.client.materialize.${spec?.kind === 'view' ? 'query_view' : 'query_table'}(`,
         `    ${spec ? pyStr(spec.table) : `${c}.client.info.get_datastack_info()['synapse_table']`},`,
         `    filter_in_dict={`,
         ...(sources ? [`        ${pyStr(columns.preColumn)}: ${neuronIdInts(sources)},`] : []),

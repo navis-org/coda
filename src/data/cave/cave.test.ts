@@ -313,7 +313,8 @@ function installFetch(
     }
     if (url.includes('/views/valid_connection_v2/query'))
       return answer(fixture('connections.txt'))
-    if (url.includes('/table/synapses_nt_v1/query')) return answer(fixture('synapses.txt'))
+    if (url.includes('/views/valid_synapses_nt_v2_view/query'))
+      return answer(fixture('synapses.txt'))
     if (url.includes('/segmentation/1.0/flywire_public/info'))
       return answer(fixture('segmentation.json'))
     if (url.includes('/meshing/api/v1/table/flywire_public/manifest/'))
@@ -469,7 +470,7 @@ describe('datasets and versions', () => {
     expect(flywire!.description).toMatch(/\*\*Coda reads this datastack as:\*\*/)
     expect(flywire!.description).toContain('- Neurons — `proofread_neurons`')
     expect(flywire!.description).toContain('- Annotations — `hierarchical_neuron_annotations`')
-    expect(flywire!.description).toContain('- Synapses — `synapses_nt_v1`')
+    expect(flywire!.description).toContain('- Synapses — `valid_synapses_nt_v2_view` (a view)')
     // Named as a view, because that is why this datastack answers connectivity without counting.
     expect(flywire!.description).toMatch(/- Connectivity — `valid_connection_v2` \(a view/)
     // Per materialization, not per datastack: 783's bucket is not 630's, and a datastack whose
@@ -965,7 +966,9 @@ describe('synapses', () => {
       polarity: 'pre',
     })
 
-    const query = captured.find((c) => c.url.includes('/table/synapses_nt_v1/query'))!
+    const query = captured.find((c) =>
+      c.url.includes('/views/valid_synapses_nt_v2_view/query'),
+    )!
     /*
      * The table stores 4x4x40 nm voxels — established by asking for both resolutions and
      * watching the values divide by exactly 4, 4 and 40. The server's current default happens to
@@ -975,6 +978,28 @@ describe('synapses', () => {
     expect((query.body as { desired_resolution?: number[] }).desired_resolution).toEqual([
       1, 1, 1,
     ])
+  })
+
+  /*
+   * FlyWire's synapses are a view, so both halves of the checked read go to `/views/`: the rows
+   * and the count. A count posted to `/table/` would 404, degrade to `undefined` in silence, and
+   * leave truncation to the row-count fallback — correct-looking and weaker.
+   */
+  it('reads and counts a synapse view on the views endpoint', async () => {
+    const captured = installFetch()
+    await new CaveSource().fetchSynapses({
+      unit: SYNAPSE_UNITS.links,
+      datasetId: DATASET,
+      neuronIds: ['720575940628857210'],
+      polarity: 'pre',
+    })
+    const urls = captured
+      .map((c) => c.url)
+      .filter((u) => u.includes('valid_synapses_nt_v2_view'))
+    expect(urls.filter((u) => !u.includes('count=true'))).toHaveLength(1)
+    expect(urls.filter((u) => u.includes('count=true'))).toHaveLength(1)
+    expect(urls.every((u) => u.includes('/views/valid_synapses_nt_v2_view/query'))).toBe(true)
+    expect(captured.some((c) => c.url.includes('/table/valid_synapses_nt_v2_view'))).toBe(false)
   })
 
   it('reads positions as a point cloud in nanometres, one attribute row apiece', async () => {
@@ -1035,9 +1060,11 @@ describe('synapses', () => {
     // control doing nothing against the query whose only backstop is the 500,000-row cap. 50 and
     // not 0.7: the scale is `cleft_score`'s, which runs to a few hundred — see
     // `SynapseRequest.minConfidence` on why there is no normalising the three backends onto one.
-    const query = captured.find((c) => c.url.includes('/table/synapses_nt_v1/query'))!
+    const query = captured.find((c) =>
+      c.url.includes('/views/valid_synapses_nt_v2_view/query'),
+    )!
     expect(query.body).toMatchObject({
-      filter_greater_equal_dict: { synapses_nt_v1: { cleft_score: 50 } },
+      filter_greater_equal_dict: { valid_synapses_nt_v2_view: { cleft_score: 50 } },
     })
   })
 
@@ -1049,7 +1076,9 @@ describe('synapses', () => {
       neuronIds: ['720575940628857210'],
       polarity: 'pre',
     })
-    const query = captured.find((c) => c.url.includes('/table/synapses_nt_v1/query'))!
+    const query = captured.find((c) =>
+      c.url.includes('/views/valid_synapses_nt_v2_view/query'),
+    )!
     expect(query.body).not.toHaveProperty('filter_greater_equal_dict')
   })
 
@@ -1103,14 +1132,14 @@ describe('synapses', () => {
       datasetId: DATASET,
       neuronIds: ['720575940628857210'],
     })
-    const queries = rowQueries(captured, '/table/synapses_nt_v1/query')
+    const queries = rowQueries(captured, '/views/valid_synapses_nt_v2_view/query')
     expect(queries).toHaveLength(2)
     // An `IN` on both columns of one query is an AND, which is the synapses a neuron makes onto
     // itself rather than the synapses it makes at all.
     const filtered = (c: Captured) =>
       Object.keys(
         (c.body as { filter_in_dict: Record<string, Record<string, unknown>> }).filter_in_dict
-          .synapses_nt_v1 ?? {},
+          .valid_synapses_nt_v2_view ?? {},
       )
     expect(filtered(queries[0]!)).toEqual(['pre_pt_root_id'])
     expect(filtered(queries[1]!)).toEqual(['post_pt_root_id'])
@@ -1126,7 +1155,7 @@ describe('synapses between', () => {
     '[{"pre_pt_root_id":720575940628857210,"post_pt_root_id":720575940618002747,' +
     '"pre_pt_position_x":10,"pre_pt_position_y":20,"pre_pt_position_z":30,' +
     '"post_pt_position_x":40,"post_pt_position_y":50,"post_pt_position_z":60,"cleft_score":80}]'
-  const QUERY = '/table/synapses_nt_v1/query'
+  const QUERY = '/views/valid_synapses_nt_v2_view/query'
 
   it('narrows at the server on both ends in one query', async () => {
     const captured = installFetch({ [QUERY]: ROWS })
@@ -1141,7 +1170,7 @@ describe('synapses between', () => {
     expect(queries).toHaveLength(1)
     const filters = (
       queries[0]!.body as { filter_in_dict: Record<string, Record<string, unknown[]>> }
-    ).filter_in_dict.synapses_nt_v1!
+    ).filter_in_dict.valid_synapses_nt_v2_view!
     expect(Object.keys(filters).sort()).toEqual(['post_pt_root_id', 'pre_pt_root_id'])
     expect(filters.pre_pt_root_id!.map(String)).toEqual([SOURCE])
     expect(filters.post_pt_root_id!.map(String)).toEqual([TARGET])
@@ -1202,7 +1231,7 @@ describe('synapses between', () => {
       minConfidence: 50,
     })
     expect(rowQueries(captured, QUERY)[0]!.body).toMatchObject({
-      filter_greater_equal_dict: { synapses_nt_v1: { cleft_score: 50 } },
+      filter_greater_equal_dict: { valid_synapses_nt_v2_view: { cleft_score: 50 } },
     })
   })
 
@@ -1217,7 +1246,7 @@ describe('synapses between', () => {
       rowQueries(captured, QUERY)[0]!.body as {
         filter_in_dict: Record<string, Record<string, unknown[]>>
       }
-    ).filter_in_dict.synapses_nt_v1!
+    ).filter_in_dict.valid_synapses_nt_v2_view!
     expect(Object.keys(filters)).toEqual(['pre_pt_root_id'])
     expect(points.attributes.data.partnerId).toEqual([TARGET])
   })
@@ -1622,7 +1651,9 @@ describe('connectivity with no connection view', () => {
     })
     // FlyWire's roll-up is orders of magnitude cheaper and can push the weight cut down with it.
     expect(captured.some((c) => c.url.includes('/views/valid_connection_v2/query'))).toBe(true)
-    expect(captured.some((c) => c.url.includes('/table/synapses_nt_v1/query'))).toBe(false)
+    expect(captured.some((c) => c.url.includes('/views/valid_synapses_nt_v2_view/query'))).toBe(
+      false,
+    )
   })
 
   it('refuses when there is neither, naming both', async () => {

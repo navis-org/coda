@@ -121,7 +121,14 @@ import { SKELETON_ROUTES, route } from '../skeletonRoutes'
 import type { CaveRequestOptions, CaveRow } from './client'
 import type { DatastackInfo } from './api'
 import { CaveError } from './client'
-import { queryTableChecked, queryView, uniqueStringValues, versionsMetadata } from './api'
+import {
+  queryTableChecked,
+  queryView,
+  queryViewChecked,
+  uniqueStringValues,
+  versionsMetadata,
+} from './api'
+import type { CaveQuery } from './api'
 import { reportAuthFailure } from './credentials'
 import {
   DEFAULT_CAVE_SERVER,
@@ -316,6 +323,40 @@ function scoreCut(
     return undefined
   }
   return { column: synapses.scoreColumn, atLeast: wanted }
+}
+
+/**
+ * A checked read of a datastack's synapses, from a table or — FlyWire's case — a view.
+ *
+ * One door for the three readers, so none of them can post a view's name to `/table/`: that
+ * answers a 404, which reads as a datastack with no synapses.
+ */
+function querySynapseRows(
+  server: string,
+  datastack: string,
+  version: number,
+  synapses: SynapseTableSpec,
+  query: Omit<CaveQuery, 'limit'>,
+  refusal: { of?: string; consequence: string },
+  options: CaveRequestOptions,
+): Promise<CaveRow[]> {
+  return synapses.kind === 'view'
+    ? queryViewChecked(
+        server,
+        datastack,
+        version,
+        { ...query, view: synapses.table },
+        refusal,
+        options,
+      )
+    : queryTableChecked(
+        server,
+        datastack,
+        version,
+        { ...query, table: synapses.table },
+        refusal,
+        options,
+      )
 }
 
 const INCOMPLETE_SYNAPSES_BETWEEN =
@@ -1056,12 +1097,12 @@ export class CaveSource implements DataSource {
      * bound point, so the supervoxel id comes along and the transfer is about twice what the two
      * columns suggest. Measured rather than assumed, on Aedes.
      */
-    const rows = await queryTableChecked(
+    const rows = await querySynapseRows(
       server,
       spec.datastack,
       version,
+      synapses,
       {
-        table: synapses.table,
         filters: { in: idFilters(synapses, ids) },
         columns: [synapses.preColumn, synapses.postColumn],
       },
@@ -1096,8 +1137,8 @@ export class CaveSource implements DataSource {
    * Which table holds this datastack's synapses, if any.
    *
    * Three answers in order, and the order is the point. **A configured spec wins**, because it
-   * can name a curated table and the column that scores it — FlyWire's `synapses_nt_v1` with
-   * `cleft_score`, which the datastack itself declares as `synapse_table: null`. **Otherwise the
+   * can name a curated table and the column that scores it — FlyWire's `valid_synapses_nt_v2_view`
+   * with `cleft_score`, on a datastack that itself declares `synapse_table: null`. **Otherwise the
    * datastack's own declaration**, which is what makes a hand-named datastack work with no
    * configuration: 7 of the 13 the info service lists set it, Aedes among them. Its columns are
    * the standard `synapse` schema's, which is a definition rather than a guess.
@@ -1713,12 +1754,12 @@ export class CaveSource implements DataSource {
     const perSide = await Promise.all(
       sides.map(async (side) => {
         const column = side === 'pre' ? synapses.preColumn : synapses.postColumn
-        const rows = await queryTableChecked(
+        const rows = await querySynapseRows(
           server,
           spec.datastack,
           version,
+          synapses,
           {
-            table: synapses.table,
             filters: {
               in: { [column]: [...req.neuronIds] },
               ...(cut ? { atLeast: { [cut.column]: cut.atLeast } } : {}),
@@ -1791,12 +1832,12 @@ export class CaveSource implements DataSource {
     req.onProgress?.(0.15, 'querying')
 
     const [rows, types] = await Promise.all([
-      queryTableChecked(
+      querySynapseRows(
         server,
         spec.datastack,
         version,
+        synapses,
         {
-          table: synapses.table,
           filters: {
             // Only the bound ends: an absent list is "any partner", which is no filter at all.
             in: idFilters(synapses, {
@@ -2347,7 +2388,11 @@ function codaReads(spec: DatastackSpec, version: number, info: DatastackInfo): s
           ? `counted from \`${synapses}\`, since this datastack publishes no roll-up view`
           : 'unavailable: no roll-up view and no synapse table'
     }`,
-    `- Synapses — ${synapses ? `\`${synapses}\`` : 'none published'}`,
+    `- Synapses — ${
+      synapses
+        ? `\`${synapses}\`${spec.synapses?.kind === 'view' ? ' (a view)' : ''}`
+        : 'none published'
+    }`,
   )
   /*
    * Said from the spec rather than from a probe, and that is a deliberate narrowing of what this

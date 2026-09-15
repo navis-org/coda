@@ -2979,12 +2979,18 @@ Three findings, each silent if missed:
   `pre_pt_position`); a Location of `post` falling back to it would draw every point on the wrong
   arbour. `endPositionColumn` derives `post_pt_position` from `post_pt_root_id` by
   emannotationschemas' bound-point naming and refuses a column not named that way.
-- **On FlyWire this cloud does not add up to Connectivity's weights, and neither does Synapses'.**
-  Connectivity reads `valid_connection_v2`, a view over `synapses_nt_v1` filtered by
-  `valid_synapses_nt_v2`; both synapse nodes read the table. On root `720575940628857210`'s five
-  strongest targets the table has 252 / 205 / 153 / 135 / 111 rows against the view's 166 / 140 /
-  100 / 86 / 74, and still 219 / 193 / 137 / 112 / 100 at `cleft_score >= 50` — so the gap is the
-  validity table, not the score. Not fixed here: it is a decision about both synapse nodes at once.
+- **On FlyWire a synapse cloud has to read the view Connectivity's weights are counted from.**
+  Connectivity reads `valid_connection_v2`: `synapses_nt_v1` joined to `valid_synapses_nt_v2`
+  (`cleft_score > 50`, and a pair's synapses merged where their presynaptic sites lie within
+  100 nm), then grouped. Both synapse nodes first read the raw table. On root
+  `720575940628857210`'s five strongest targets that gave 252 / 205 / 153 / 135 / 111 rows against
+  weights of 166 / 140 / 100 / 86 / 74, and still 219 / 193 / 137 / 112 / 100 at
+  `cleft_score >= 50`, so no score cut closes the gap. FlyWire's spec now names
+  `valid_synapses_nt_v2_view`, the same join without the grouping: its rows per partner equal
+  `n_syn` for all 4,818 output and 1,072 input partners of that root. It is a *view*, so the read
+  goes to `/views/` and is counted there (`queryViewChecked`), which is safe because it joins
+  rather than aggregates. Its lowest `cleft_score` is 51, so a Min confidence at or below 50 cuts
+  nothing.
 
 ### Either end may be left open
 

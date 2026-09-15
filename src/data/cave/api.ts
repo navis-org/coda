@@ -418,27 +418,41 @@ export function queryTable(
  *
  * **Cheap only where the query is.** Measured: 0.6 s for a filtered synapse query and 0.7 s for
  * an unfiltered 2M-row annotation table, but over 180 s unfiltered on FlyWire's 130M-row
- * `synapses_nt_v1` and over 5 minutes on an aggregating *view* — which is why nothing counts a
- * view, and why every caller here is either filtered or reading a table of a size a browser was
- * going to download anyway.
+ * `synapses_nt_v1` and over 5 minutes on an aggregating *view* — which is why no aggregating view
+ * is counted, and why every caller here is either filtered or reading a table of a size a browser
+ * was going to download anyway. A view that only *joins* is another matter: filtered to one root
+ * id, `valid_synapses_nt_v2_view` counts in 0.8 s and agrees with the rows returned, which is what
+ * `queryViewChecked` relies on.
  */
-export async function countTable(
+export function countTable(
   server: string,
   datastack: string,
   version: number,
   query: CaveTableQuery,
   options: CaveRequestOptions,
 ): Promise<number> {
+  // The base table, even for a reference query: the join endpoint answers rows to `count=true`
+  // rather than a count. See `CaveReference`.
+  return countRows(server, datastack, version, 'table', query.table, query.filters, options)
+}
+
+async function countRows(
+  server: string,
+  datastack: string,
+  version: number,
+  segment: 'table' | 'views',
+  name: string,
+  filters: CaveFilters | undefined,
+  options: CaveRequestOptions,
+): Promise<number> {
   const rows = await cavePost<CaveRow[]>(
-    // The base table, even for a reference query: the join endpoint answers rows to `count=true`
-    // rather than a count. See `CaveReference`.
-    queryUrl(server, datastack, version, 'table', query.table, '&count=true'),
-    filterBody(query.table, query.filters),
+    queryUrl(server, datastack, version, segment, name, '&count=true'),
+    filterBody(name, filters),
     options,
   )
   const count = rows[0]?.count
   if (typeof count !== 'number') {
-    throw new CaveError(`CAVE answered no count for "${query.table}"`)
+    throw new CaveError(`CAVE answered no count for "${name}"`)
   }
   return count
 }
@@ -507,6 +521,33 @@ export function queryView(
   options: CaveRequestOptions,
 ): Promise<CaveRow[]> {
   return runQuery(server, datastack, version, 'views', query.view, query, options)
+}
+
+/**
+ * `queryTableChecked` for a view, and **only for one that joins rather than aggregates**.
+ *
+ * The count runs over the view's own `count=true`, which answers in under a second on a filtered
+ * join view (`valid_synapses_nt_v2_view`, 0.8 s for one root id) and does not return at all on an
+ * aggregating one (`valid_connection_v2`, over 5 minutes). Nothing about a view says which kind it
+ * is, so the caller decides; the connection roll-up is read through `queryView`, unchecked, because
+ * one row per pair cannot approach a cap in the first place.
+ */
+export async function queryViewChecked(
+  server: string,
+  datastack: string,
+  version: number,
+  query: Omit<CaveQuery, 'limit'> & { view: string },
+  refusal: { of?: string; consequence: string },
+  options: CaveRequestOptions,
+): Promise<CaveRow[]> {
+  const [rows, total] = await Promise.all([
+    queryView(server, datastack, version, query, options),
+    optionalCount(
+      countRows(server, datastack, version, 'views', query.view, query.filters, options),
+    ),
+  ])
+  refuseIfCapped(rows.length, total, refusal.of ?? query.view, refusal.consequence)
+  return rows
 }
 
 // ---------------------------------------------------------------------------
