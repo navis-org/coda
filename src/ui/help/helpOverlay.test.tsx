@@ -62,14 +62,53 @@ function prose(dialog: HTMLElement): HTMLElement {
   return dialog.querySelector('.help-doc__body') as HTMLElement
 }
 
+/**
+ * How long a document may take to arrive. It is a dynamic `import()` of a markdown module, so
+ * the wait is a module graph being pulled in rather than anything this test drives — testing
+ * library's 1 s default is thin for that on a loaded runner, and was the third failure of the
+ * same round.
+ */
+const DOC_LOAD_MS = 5000
+
+/**
+ * How long a sweep over the whole corpus may take.
+ *
+ * Both sweeps below are one assertion per help document, so what they cost is the number of
+ * documents — 71 today, thirteen of them written in the last month. Against vitest's 5 s default
+ * that is a deadline the corpus walks into rather than a slow test: it does not fail on the
+ * change that breaks it, it fails on whichever document happens to be the one too many. Generous
+ * on purpose, because the number it is protecting against is the corpus size and not the runner.
+ */
+const SWEEP_MS = 60_000
+
 /** Open the overlay on a type and wait for its document to have loaded. */
 async function openHelp(type: string) {
   render(<App />)
+  return showHelp(type)
+}
+
+/**
+ * Point an overlay that is already on screen at another type, and wait for that document.
+ *
+ * The two sweeps below are the reason this is separate from `openHelp`: their cost is a
+ * function of the *corpus*, so a `render(<App />)` per document is 71 App mounts and climbing
+ * with every help file written. That crossed vitest's 5 s default on a CI runner (2.2 s → 4.3 s
+ * → past 5 s over three weeks, with nothing about the feature having changed), and raising the
+ * timeout would only move the same cliff further out.
+ *
+ * Switching in place is equivalent rather than merely cheaper: `HelpOverlay` re-seeds the trail
+ * from `helpType`, and `HelpBody`'s effect clears the document and goes back to "Loading…"
+ * synchronously on a type change — so the wait below cannot be satisfied by the *previous*
+ * document still on screen, which is the way this shortcut would otherwise be silently wrong.
+ */
+async function showHelp(type: string) {
   act(() => {
     useGraphStore.getState().openHelp(type)
   })
   const dialog = await screen.findByRole('dialog', { name: /help/i })
-  await waitFor(() => expect(within(dialog).queryByText('Loading…')).toBeNull())
+  await waitFor(() => expect(within(dialog).queryByText('Loading…')).toBeNull(), {
+    timeout: DOC_LOAD_MS,
+  })
   return dialog
 }
 
@@ -175,13 +214,17 @@ describe('the help overlay', () => {
     expect(dialog.querySelectorAll('.cfig__card').length).toBeGreaterThan(focused.length)
   })
 
-  it('never draws a figure that failed to build', async () => {
-    for (const type of helpTypes()) {
-      cleanup()
-      const dialog = await openHelp(type)
-      expect(dialog.querySelector('.cfig__problems'), `${type}`).toBeNull()
-    }
-  })
+  it(
+    'never draws a figure that failed to build',
+    async () => {
+      render(<App />)
+      for (const type of helpTypes()) {
+        const dialog = await showHelp(type)
+        expect(dialog.querySelector('.cfig__problems'), `${type}`).toBeNull()
+      }
+    },
+    SWEEP_MS,
+  )
 
   it('follows a cross-reference in place, and comes back', async () => {
     const dialog = await openHelp('neuron.nblast')
@@ -190,7 +233,9 @@ describe('the help overlay', () => {
     act(() => {
       link.click()
     })
-    await waitFor(() => expect(screen.getByText(/What a linkage is/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/What a linkage is/)).toBeTruthy(), {
+      timeout: DOC_LOAD_MS,
+    })
     // The store still holds where the reader came in, so Back has somewhere to go.
     expect(useGraphStore.getState().helpType).toBe('neuron.nblast')
 
@@ -198,7 +243,9 @@ describe('the help overlay', () => {
     act(() => {
       back.click()
     })
-    await waitFor(() => expect(screen.getByText(/What NBLAST does/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/What NBLAST does/)).toBeTruthy(), {
+      timeout: DOC_LOAD_MS,
+    })
   })
 
   it('says so rather than blanking, for a node with no document', async () => {
@@ -269,7 +316,9 @@ describe('opening a workflow from the overlay', () => {
         .getByRole('button', { name: /Linkage/i })
         .click()
     })
-    await waitFor(() => expect(screen.getByText(/What a linkage is/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/What a linkage is/)).toBeTruthy(), {
+      timeout: DOC_LOAD_MS,
+    })
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Open in a workflow' }))
     await waitFor(() => {
@@ -281,17 +330,20 @@ describe('opening a workflow from the overlay', () => {
 
   /* Every documented node has one, which is the claim that makes it worth putting in the header
      rather than on the few nodes somebody remembered to add it to. */
-  it('is on every documented node', async () => {
-    for (const type of helpTypes()) {
-      cleanup()
-      act(() => useGraphStore.getState().openHelp(undefined))
-      const dialog = await openHelp(type)
-      expect(
-        within(dialog).queryByRole('button', { name: 'Open in a workflow' }),
-        type,
-      ).not.toBeNull()
-    }
-  })
+  it(
+    'is on every documented node',
+    async () => {
+      render(<App />)
+      for (const type of helpTypes()) {
+        const dialog = await showHelp(type)
+        expect(
+          within(dialog).queryByRole('button', { name: 'Open in a workflow' }),
+          type,
+        ).not.toBeNull()
+      }
+    },
+    SWEEP_MS,
+  )
 })
 
 /**

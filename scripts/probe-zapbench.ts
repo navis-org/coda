@@ -33,7 +33,7 @@
  * So `zapbenchId` is the **1-based segmentation label** and the trace column is `id - 1`, which
  * is what `ZAPBENCH_ID_BASE = 'label'` encodes.
  *
- *   NEUPRINT_TEST_APPLICATION_CREDENTIALS=… node scripts/probe-zapbench.mjs
+ *   NEUPRINT_APPLICATION_CREDENTIALS=… node scripts/probe-zapbench.mjs
  *
  * The token is read from the environment and never printed. Nothing about this deployment is
  * written down beyond its public hostname.
@@ -54,17 +54,19 @@ const DATASET = 'fish2'
 const TRACES = objectStoreUrl(`${ZAPBENCH_RELEASE}/traces`)
 
 /*
- * Either spelling, because the repo holds both: `data/dvid/live.test.ts` gates on
- * `NEUPRINT_APPLICATION_CREDENTIALS` and authenticates with
- * `NEUPRINT_TEST_APPLICATION_CREDENTIALS`, which is why its two fish2 tests run and then 401.
- * Reading both here means this probe works whichever one a machine has set, rather than
- * picking the half of that pair that happens to be empty.
+ * One spelling, which it was not always. This probe used to read either
+ * `NEUPRINT_APPLICATION_CREDENTIALS` or `NEUPRINT_TEST_APPLICATION_CREDENTIALS`, because
+ * `data/dvid/live.test.ts` gated on the first and then authenticated with the second — so its
+ * two fish2 tests ran and 401'd for anyone holding only the documented token, and reading both
+ * here was how this probe avoided picking the half of that pair that happened to be empty. The
+ * test authenticates with the variable it gates on now, so there is one name again; a fallback
+ * kept past that is a second spelling nothing needs.
  */
-const ENV_KEYS = ['NEUPRINT_APPLICATION_CREDENTIALS', 'NEUPRINT_TEST_APPLICATION_CREDENTIALS']
-const token = ENV_KEYS.map((key) => process.env[key]).find(Boolean)
+const ENV_KEY = 'NEUPRINT_APPLICATION_CREDENTIALS'
+const token = process.env[ENV_KEY]
 if (!token) {
   console.error(
-    `Set one of ${ENV_KEYS.join(' or ')} to a neuPrint token for ` +
+    `Set ${ENV_KEY} to a neuPrint token for ` +
       `${SERVER}. This probe reads one property off fish2 and nothing else.`,
   )
   process.exit(2)

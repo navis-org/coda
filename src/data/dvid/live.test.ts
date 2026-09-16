@@ -280,7 +280,7 @@ withToken('a published state as the only mesh source, live', () => {
 
   async function publishedState() {
     const response = await fetch(`${SERVER}/api/npexplorer/nglayers/${DATASET}.json`, {
-      headers: { Authorization: `Bearer ${process.env.NEUPRINT_TEST_APPLICATION_CREDENTIALS}` },
+      headers: { Authorization: `Bearer ${process.env.NEUPRINT_APPLICATION_CREDENTIALS}` },
     })
     return (await response.json()) as Parameters<typeof meshSourceFromState>[0]
   }
