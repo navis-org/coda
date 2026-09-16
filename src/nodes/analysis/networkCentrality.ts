@@ -62,7 +62,8 @@ registerNode({
   type: 'net.centrality',
   label: 'Network Centrality',
   category: 'analysis',
-  description: 'Betweenness, closeness, PageRank and communities for a network’s nodes.',
+  description:
+    'Betweenness, closeness, PageRank and communities for a network’s nodes. Each measure switched on adds its own column: `betweenness`, `closeness`, `pagerank`, `eigenvector`, `community`.',
   guide:
     'Adds centrality columns to a network’s nodes: betweenness and harmonic closeness from a ' +
     'shortest-path sweep, PageRank, eigenvector centrality and Louvain communities. Expensive ' +

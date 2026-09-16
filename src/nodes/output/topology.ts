@@ -103,7 +103,8 @@ registerNode({
   type: 'out.topology',
   label: 'Neuron Topology',
   category: 'visualisation',
-  description: 'Measure one neuron’s arbour and see where its partners synapse onto it.',
+  description:
+    'Measure one neuron’s arbour and see where its partners synapse onto it. Morphometrics is one row per neuron — `cableLength`, `nodes`, `branchPoints`, `endPoints`, `maxStrahler` and more — and splitting axon from dendrite adds `splitStatus`, `cableAxon`, `cableDendrite` and their synapse counts.',
   guide:
     'Morphometrics for the neurons you feed it — cable length, branch points, Strahler order, ' +
     'tortuosity — beside a 3D view of the cell, and a partner list that lights up exactly where ' +

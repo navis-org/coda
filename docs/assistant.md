@@ -128,6 +128,17 @@ annotation node to it. The worst offenders were `net.build` (renames your picked
 suffixed `_2`), `core.pivot` (column names are data, knowable only after a run), the annotation nodes
 (`cell_type` arrives as `type`) and `core.qualifyIds` (ids become the text `dataset:id`).
 
+**A `carries:` line in the catalogue is rendered at the node's defaults**, which the same reader
+caught next: `core.reduceMatrix` advertises `label, mean`, and ticking a second statistic produces
+`label, mean, sd` with nothing saying so. That is worse than the silence above — a line that is
+*wrong* rather than absent — and it applies to every node whose columns follow a param:
+`net.centrality` (one column per measure), `out.topology` (the axon/dendrite split), `neuron.influence`
+(per-query scoring), `neuron.connectivity` and `neuron.paths` (normalising), `compare.connectivity`
+(a column per dataset name). Their descriptions now say which param adds what. The deeper fix —
+marking the line as "at the defaults", or probing each param the way `gateNote` already probes
+`visibleIf` — is not built: it would render for all 102 nodes, most of which have constant schemas,
+and probing a dataset node's params starts the listings `producedColumns` is careful not to.
+
 ### Live options on this node — `options:`
 
 The instance half of the same problem: `optionLines()` prints what a param actually offers on the

@@ -14,6 +14,12 @@
  * downstream picker pointed at a column name that no longer exists, which `validate` reports only
  * once the plan has been applied.
  *
+ * **Two kinds are listed below.** A node whose output names are a function of its *input* schema
+ * (Group By, Join, Rename) has no catalogue `carries:` line at all. A node whose names are a
+ * function of its *params* (Reduce Matrix, Centrality, Topology) has one, rendered at the defaults —
+ * which is worse than none when the param moves, because it advertises a shape the node stops
+ * producing: `carries: label, mean` stays put while `stats: [mean, sd]` produces `label, mean, sd`.
+ *
  * The fragments are what a reader has to be told, not the whole sentence: reword freely, keep the
  * names.
  */
@@ -43,6 +49,15 @@ const MINTED: Record<string, string[]> = {
   'neuron.nblastKnn': ['`queryId`', '`targetId`'],
   'neuron.nblastMatches': ['`query`', '`matches`'],
   'out.describe': ['`non_nulls`'],
+  // Columns that change with a param. The catalogue's `carries:` line is rendered at the defaults,
+  // so it advertises one shape and the node produces another the moment the param moves.
+  'core.reduceMatrix': ['`label`', 'one column per statistic', '`zap_mean`'],
+  'net.centrality': ['`betweenness`', '`community`'],
+  'out.topology': ['`cableLength`', '`cableAxon`'],
+  'neuron.influence': ['`influence`', '`queryId`'],
+  'neuron.connectivity': ['`preId`', '`weightNorm`', '`roi`'],
+  'neuron.paths': ['`bottleneck`', '`bottleneckNorm`'],
+  'compare.connectivity': ['`weight_<name>`', '`present_<name>`'],
 }
 
 describe('a node that renames columns says so in its description', () => {

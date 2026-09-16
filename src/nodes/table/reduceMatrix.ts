@@ -46,7 +46,8 @@ registerNode({
   type: 'core.reduceMatrix',
   label: 'Reduce Matrix',
   category: 'transform',
-  description: 'Aggregate a matrix’s rows or columns into one table row each.',
+  description:
+    'Aggregate a matrix’s rows or columns into one table row each. The result is `label` and one column per statistic you tick — a second tick adds a column — and `Prefix` renames them all, so `zap` gives `zap_mean`.',
   guide:
     'Turns a matrix into a table with one row per matrix row, or per column, carrying the statistics you tick: mean, median, sd, min, max, sum, n. It is the way from a trace or similarity matrix to a per-neuron number you can sort, join or colour a scene by. Non-finite cells are skipped, so an all-NaN row comes out null rather than zero.',
   cost: 'cheap',

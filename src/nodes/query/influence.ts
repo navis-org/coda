@@ -101,7 +101,7 @@ registerNode({
   label: 'Influence',
   category: 'query',
   description:
-    'Score every neuron by how strongly it drives, or is driven by, a set of neurons.',
+    'Score every neuron by how strongly it drives, or is driven by, a set of neurons. Columns are `influence`, `influenceLog`, `hops` and `isSeed`; scoring per query adds `queryId` and `queryType`.',
   /*
    * Under 400 characters, which `help.test.ts` enforces for a node that has a document: the
    * overlay prints this above the document under a `TL;DR` label, and a nine-sentence paragraph

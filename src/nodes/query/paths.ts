@@ -92,7 +92,8 @@ registerNode({
   // Wide enough for the `Collapse types` label and a number field to share a line — see
   // `.paths-body` in the stylesheet, which widens the shared label column for it.
   cardWidth: 260,
-  description: 'Find the strongest routes from one set of neurons to another.',
+  description:
+    'Find the strongest routes from one set of neurons to another. The Paths table is `rank`, `source`, `target`, `hops`, `bottleneck` and `path`, plus `bottleneckNorm` when normalizing.',
   guide:
     'Not “what is wired to this?” but “how does this reach that?” — the strongest feed-forward ' +
     'routes from sources to targets, ranked by their weakest link rather than by a sum, since a ' +

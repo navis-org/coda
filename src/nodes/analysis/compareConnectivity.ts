@@ -240,7 +240,7 @@ registerNode({
   label: 'Compare Connectivity',
   category: 'analysis',
   description:
-    'Put the same type-to-type connection side by side across two or more connectomes.',
+    'Put the same type-to-type connection side by side across two or more connectomes. Columns are `preLabel`, `postLabel`, then `weight_<name>` and `present_<name>` for each dataset, named by its `Name` param.',
   guide:
     'Takes each dataset’s edge list plus its labels from Match Cell Types, rewrites both ends into the shared label space and sums per type pair, so one row reads “LC4 to DNp01 is 30 synapses here and 6 there”. Read the present columns before the weights: 0 is a real absence, empty means the type is missing there.',
   cost: 'cheap',
