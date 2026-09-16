@@ -331,7 +331,11 @@ Four entry points, all opening the same overlay keyed on the node **type**:
 
 **Not the node browser**, and that is a markup fact rather than a decision about usefulness: a
 browser row is itself a `<button>`, and nesting an interactive element inside one is invalid. The
-browser's footer already links the node guide, which is the reference the row's reader wants.
+browser's footer already links the node guide, which is the reference the row's reader wants —
+and a rest on a row opens `NodeDefinition.guide` in a hover panel, which is not a second door
+into *this* document: it is the registry's own two or three sentences, and a panel is
+`pointer-events: none`, so the markup rule above does not reach it. See
+[canvas](canvas.md) for where it lands.
 
 Keyed on the type rather than on a node id is the whole design. A document is about a *kind* of
 node, which is what lets the same overlay open from a card, from a menu, and from a

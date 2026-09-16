@@ -2038,6 +2038,38 @@ In `NodeBrowser`, chips and search are mutually exclusive — typing clears the 
 clears the query. Don't "fix" this into chip-as-hard-filter: that reintroduces empty results
 with no visible cause.
 
+**A rest on a row opens the node's `guide`, and the row's one line is not a shorter version of
+it.** `.node-row__desc` is a single ellipsised line sized for scanning; somebody who has stopped
+on a row is asking the other question — *is this the node at all* — which is the question
+`NodeDefinition.guide` is written for. So the tip carries that prose, the same two or three
+sentences `nodes.html` prints, with `guideData`'s own fallback to `description` spelled here too
+so the two surfaces cannot disagree about a node that has only the one line. Every listable node
+carries a `guide` today and `nodeBrowser.test.tsx` holds it; the `??` is what stops a node
+registered next month offering a hover that opens nothing.
+
+**Not the `?` document**, which is the other thing "the guide" could have meant. Those are
+markdown in a lazy chunk each — hundreds of words, and a chunk fetched per row a pointer merely
+crossed — where `guide` is already in memory. And **not the `?` button**: [help](help.md) keeps
+that out of this surface because a row is a `<button>` and nesting an interactive element in one
+is invalid markup. A hover panel is not interactive — `.hover-panel` is `pointer-events: none` —
+so that rule does not reach it.
+
+The gesture is `useHoverPanel`'s, at the **dense** delay (260ms, the sockets' rather than the
+thumbnail's): a row is a target a pointer crosses on its way to the one it wants, a hundred of
+them down one list. A component per row rather than a loop body, because the hook is per anchor;
+the **row** is the anchor, since a pointer at rest is somewhere along 1,066px of row and the
+thumbnail it happens to be near is not what it is resting on.
+
+Placement is `hoverPlacement`'s `prefer: 'right'` — everything the reader is comparing against is
+inside the modal, so the side that costs least is the gutter beyond it. `pnpm probe:node-tip`
+measures that in a browser, the modal capping at 1080px being what makes the width matter: at
+1600 the tip sits whole in the gutter (row at 267, tip at 1246), at 1180 and 820 it clamps back
+over the meta column (826 and 466) and still clears every row's name and description. The clamp
+rather than a flip is that file's argument. Two more properties only a browser has: the portal,
+since `.overlay__panel` is `overflow: hidden` and `.node-browser__list` scrolls — which clips
+*both* axes — and that a scroll dismisses it, which is the hook's per-frame rect watch and not a
+`scroll` listener.
+
 The palette's item list comes from `paletteItems.ts`, rebuilt on every store change so
 `disabled` flags stay honest.
 

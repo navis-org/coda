@@ -34,6 +34,7 @@
     "probe:explore-preview": "node scripts/probe-explore-preview.mjs",
     "probe:explore-columns": "node scripts/probe-explore-columns.mjs",
     "probe:port-preview": "node scripts/probe-port-preview.mjs",
+    "probe:node-tip": "node scripts/probe-node-tip.mjs",
     "probe:matches": "node scripts/probe-matches.mjs",
     "probe:heatmap-select": "node scripts/probe-heatmap-select.mjs",
     "probe:viewer3d-switch": "node scripts/probe-viewer3d-switch.mjs",

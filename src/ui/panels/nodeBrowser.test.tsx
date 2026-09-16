@@ -32,7 +32,7 @@ import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
 import { demoWorkflow } from '../../wizard/build'
-import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
+import { clearStorage, installJsdomStubs, pointerEvent } from '../../test/jsdomStubs'
 import { NodeBrowser } from './NodeBrowser'
 import { NodeThumbnail } from './NodeThumbnail'
 
@@ -154,6 +154,62 @@ describe('NodeBrowser layout', () => {
       (r) => r.querySelector('.node-row__name')?.textContent === 'Sort',
     )!
     expect(sortRow.querySelector('.node-row__cost')).toBeNull()
+  })
+})
+
+/**
+ * The hover tip.
+ *
+ * The gesture itself — the delay, the mouse-only guard, the rect watch — is `useHoverPanel`'s and
+ * is exercised whole in `portPreviewHover.test.tsx`. What is here is what this surface decides:
+ * that a rest opens the node's own `guide` rather than the one line the row already shows, and
+ * that every row has something to open. Where the tip lands is `hoverPlacement.test.ts`'s, jsdom
+ * laying out nothing.
+ */
+describe('NodeBrowser guide tip', () => {
+  const tip = () => document.querySelector('.node-guide-tip')
+
+  const rowFor = (container: HTMLElement, label: string) => {
+    const row = [...container.querySelectorAll('.node-row')].find(
+      (r) => r.querySelector('.node-row__name')?.textContent === label,
+    )
+    if (!row) throw new Error(`no "${label}" row`)
+    return row
+  }
+
+  it('opens the node’s guide on a rest, not on the way past', async () => {
+    const { container } = open()
+    const def = requireNodeDef('core.pivot')
+    fireEvent(rowFor(container, def.label), pointerEvent('pointerover'))
+    // A hundred rows down one list: a pointer crossing them must not open a hundred tips.
+    expect(tip()).toBeNull()
+
+    await waitFor(() => expect(tip()).not.toBeNull())
+    // The guide, which is the two or three sentences — not `description`, the ellipsised line
+    // the row already draws.
+    expect(tip()!.querySelector('.node-guide-tip__text')?.textContent).toBe(def.guide)
+    expect(tip()!.querySelector('.node-guide-tip__name')?.textContent).toBe(def.label)
+  })
+
+  it('goes away when the pointer leaves the row', async () => {
+    const { container } = open()
+    const row = rowFor(container, requireNodeDef('core.pivot').label)
+    fireEvent(row, pointerEvent('pointerover'))
+    await waitFor(() => expect(tip()).not.toBeNull())
+    fireEvent(row, pointerEvent('pointerout'))
+    await waitFor(() => expect(tip()).toBeNull())
+  })
+
+  /*
+   * What stops a node registered next month offering a hover that does nothing — the thumbnail
+   * test's property, one surface over. `guide` is optional on a definition, so this is a real
+   * gap rather than a type-level one; the fallback to `description` is the node guide page's own
+   * (`guideData`), which is why the assertion is about the pair.
+   */
+  it('has something to say for every listed node', () => {
+    for (const def of listableNodeDefs()) {
+      expect(def.guide ?? def.description).toBeTruthy()
+    }
   })
 })
 
