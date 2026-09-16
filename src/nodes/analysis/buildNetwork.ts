@@ -101,7 +101,8 @@ registerNode({
   type: 'net.build',
   label: 'Build Network',
   category: 'analysis',
-  description: 'Turn an edge table into a network of nodes and links.',
+  description:
+    'Turn an edge table into a network of nodes and links. The columns you pick are renamed: links carry `source`, `target`, `weight` and `edges`, and nodes carry `id`, `degreeIn`, `degreeOut`, `weightIn` and `weightOut` — those are the names downstream pickers see.',
   guide:
     'Turn an edge table into a network: nodes, links plus associated properties including derived ones such as in and out degree/weight. Both halves carry an ordinary attribute table, so colouring by cell type is a column picker.',
   cost: 'cheap',

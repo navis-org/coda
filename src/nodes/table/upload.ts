@@ -40,7 +40,8 @@ registerNode({
   // The status line is a sentence — the "not in this browser" state has to be readable without a
   // tooltip, since it is what a colleague opening a shared graph sees.
   cardWidth: 300,
-  description: 'Bring in a CSV of your own — annotations, cell types, an embedding.',
+  description:
+    'Bring in a CSV of your own — annotations, cell types, an embedding. A chosen id column is renamed `neuronId` and a chosen type column `type`.',
   guide:
     'Your own CSV: annotations, cell types, embeddings. The only node with no inputs and no backend. Rows live in this browser, not in the graph — a .coda.json sent to a colleague arrives without them. The card shows which file is missing if you need to pick it again.',
   // No network and no parse: `evaluate` is one IndexedDB read of an already-parsed table.

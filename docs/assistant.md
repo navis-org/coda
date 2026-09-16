@@ -110,6 +110,24 @@ cannot go missing. Both lean on Automatic: empty is the default and almost alway
 is a provenance decision somebody has to have asked for — a route the dataset lacks is an error,
 never a substitution.
 
+### Column names a node mints — in the `description`
+
+`core.groupBy` renames an aggregate to `<agg>_<column>`, and a model working through the MCP server
+wired `sum_weight` into a Sort and a Bar Chart **in the plan that created the node** — before any
+listing could show it — because that rule is in the node's `description`. It then asked which other
+nodes rename columns and stay quiet. An audit of the registry: **Group By was the only one.**
+
+The description is the one surface that always reaches a planner. `lean` is what ships, so param
+`help` is absent; a help document is served only when `coda_node_details` asks for one; and
+`producedColumns` can render a `carries:` line only for a node that names columns with nothing wired,
+which is exactly not a renaming node — its output names are a function of its input schema, so they
+appear in the graph listing only *after* the plan lands. So: **a node that renames or mints columns
+states the names in its `description`**, and `nodes/naming.test.ts` holds nineteen of them plus every
+annotation node to it. The worst offenders were `net.build` (renames your picked columns to `source`,
+`target`, `weight` and adds five node columns), `core.rename` (an incumbent of a target name is
+suffixed `_2`), `core.pivot` (column names are data, knowable only after a run), the annotation nodes
+(`cell_type` arrives as `type`) and `core.qualifyIds` (ids become the text `dataset:id`).
+
 ### Live options on this node — `options:`
 
 The instance half of the same problem: `optionLines()` prints what a param actually offers on the
@@ -342,8 +360,11 @@ change to a framing reaches one**, and `mcp/contract.test.ts` holds the MCP guid
 
 The same reader caught a wording error in the shared rules: three mentions of "the catalogue *above*",
 in a prompt that has always put the catalogue *after* the rules. They now say "the catalogue", in both
-prompts. That is the one change to the app prompt since the split, and it is **unmeasured** — a
-correction of a layout claim rather than a new instruction.
+prompts. The same reader also found a node in its draft that no plan had added — the Description
+card every Dataset node arrives with (`core/companion.ts`) — so `PLAN_RULES` now says so, since a
+plan's summary is otherwise an incomplete account of what happened. Those are the two changes to the
+app prompt since the split, both **unmeasured**: a corrected layout claim, and one sentence about a
+node that was already appearing in every listing.
 
 ## What is deliberately not built
 

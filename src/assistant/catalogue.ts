@@ -604,6 +604,8 @@ How a plan is written:
 - \`disconnect\` cuts a wire, named by its *input* end.
 - \`remove\` deletes existing nodes, and takes their wires with them.
 - Positions are not yours to set. Nodes are laid out for you.
+- A Dataset node arrives with a Description card wired to it, which you did not ask for and will
+  see in the listing. It carries the dataset's credit, is an ordinary node, and can be left alone.
 `.trim()
 
 const FAILURE_RULES = `

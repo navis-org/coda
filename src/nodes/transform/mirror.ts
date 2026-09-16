@@ -89,7 +89,8 @@ registerNode({
   type: 'neuron.mirror',
   label: 'Mirror Neurons',
   category: 'transform',
-  description: 'Flip skeletons, meshes or points to the other side of the brain.',
+  description:
+    'Flip skeletons, meshes or points to the other side of the brain. The attribute table gains a `mirrored` column.',
   /*
    * Held under 400 characters because this node has a help document, and the overlay prints
    * this above it under a `TL;DR` label. Everything that used to be here and is not now — the

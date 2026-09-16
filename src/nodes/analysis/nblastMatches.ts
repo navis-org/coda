@@ -61,7 +61,8 @@ registerNode({
   type: 'neuron.nblastMatches',
   label: 'NBLAST Matches',
   category: 'analysis',
-  description: 'Pull each neuron’s best matches out of a score matrix, as a table.',
+  description:
+    'Pull each neuron’s best matches out of a score matrix, as a table. Columns are `query`, `target`, `rank` and `score`, or `query` and `matches` when counting — note that NBLAST k-NN calls the same pair `queryId` and `targetId`.',
   guide:
     'Turns a score matrix into the long table every other node wants: one row per match, with ' +
     'the neuron, its match, the rank and the score. Take the top N per neuron, everything ' +

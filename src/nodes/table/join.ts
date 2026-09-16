@@ -38,7 +38,8 @@ registerNode({
   type: 'core.join',
   label: 'Join',
   category: 'transform',
-  description: 'Annotate the left table with matching rows from the right table.',
+  description:
+    'Annotate the left table with matching rows from the right table. A right-hand column colliding with a left-hand name is suffixed, `_r` by default.',
   guide:
     'Annotate the left table with matching rows from the right. Join type decides which rows survive: left keeps every left row, inner only matches, outer all rows, right every right row. Right-hand columns that collide get a suffix rather than being dropped. Chain for more tables.',
   cost: 'cheap',

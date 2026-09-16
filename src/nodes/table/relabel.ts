@@ -61,7 +61,8 @@ registerNode({
   type: 'core.relabel',
   label: 'Relabel',
   category: 'transform',
-  description: 'Rewrite a column through a two-column mapping table.',
+  description:
+    'Rewrite a column through a two-column mapping table. The result takes the name in `Into`, or rewrites the column in place when that is empty; any other column already holding the name is suffixed `_2`.',
   guide:
     'Rewrite one column by looking each value up in a mapping table: pick the column to rewrite, ' +
     "then the mapping's key and value columns. Leave Result empty to rewrite in place, or name a " +

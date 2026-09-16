@@ -113,7 +113,8 @@ registerNode({
   type: 'core.qualifyIds',
   label: 'Qualify Ids',
   category: 'transform',
-  description: 'Tag a neuron id with the dataset it came from, or take that tag off again.',
+  description:
+    'Tag a neuron id with the dataset it came from, or take that tag off again. A tagged id reads `dataset:id` and its column becomes text, so filters, joins and lookups downstream have to match that form.',
   guide:
     'Rewrites an id column to dataset:id, which is what lets two connectomes share one table ' +
     'without neuron 12345 in one being mistaken for neuron 12345 in the other — the shape ' +

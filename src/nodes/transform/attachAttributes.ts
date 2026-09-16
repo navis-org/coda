@@ -112,7 +112,8 @@ registerNode({
   type: 'neuron.attachAttributes',
   label: 'Attach Attributes',
   category: 'transform',
-  description: 'Join a table’s columns onto skeletons, meshes or points.',
+  description:
+    'Join a table’s columns onto skeletons, meshes or points. A carried column replaces a same-named one and keeps its place, rather than being suffixed.',
   guide:
     'Joins a table onto the attributes that skeletons, meshes or points carry, matched on a column you pick, so what a graph computes (a Cut Tree cluster, a Reduce Matrix statistic, an uploaded CSV) can colour or split a scene. With no columns picked it carries every column; an item the table does not mention keeps its geometry and carries nulls.',
   cost: 'cheap',

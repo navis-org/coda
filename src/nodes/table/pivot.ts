@@ -30,7 +30,9 @@ registerNode({
   label: 'Pivot',
   category: 'transform',
   description:
-    'Reshape a long table into a matrix of rows × columns, as a matrix and a wide table.',
+    'Reshape a long table into a matrix of rows × columns, as a matrix and a wide table. The wide ' +
+    "table's columns are the distinct values found in the Columns field, so nothing can name them " +
+    'until it has run.',
   guide:
     'Reshape a long table into rows × columns — the step between a connectivity result and a heatmap. Emits both shapes of the same pivot: a Matrix for heatmaps and normalization, the same thing wide as a Table for sorting, filtering, and export — they never disagree.',
   cost: 'cheap',

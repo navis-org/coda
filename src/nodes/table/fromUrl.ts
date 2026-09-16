@@ -74,7 +74,8 @@ registerNode({
   type: 'core.tableFromUrl',
   label: 'Table from URL',
   category: 'utility',
-  description: 'Fetch a CSV from a URL and read it as a table.',
+  description:
+    'Fetch a CSV from a URL and read it as a table. A chosen id column is renamed `neuronId` and a chosen type column `type`.',
   guide:
     'Fetch a CSV from a URL — the reproducible counterpart to Upload Table. A colleague opening your .coda.json re-fetches and gets the same data. Trade-off: will not work on disk-only files, behind logins, or on hosts that send no CORS headers. Bump Refresh to re-fetch when the remote file changes.',
   cost: 'expensive',

@@ -101,7 +101,8 @@ registerNode({
    * `NodeDefinition.cardHeight`.
    */
   cardHeight: 265,
-  description: 'Neuron labels from an annotation table inside a CAVE datastack.',
+  description:
+    'Neuron labels from an annotation table inside a CAVE datastack. A `cell_type` column arrives renamed `type`, the name Coda reads a cell type from.',
   guide:
     'Reads a CAVE annotation table and hands it to a Dataset as its labels. Name the datastack; ' +
     'wire the Dataset input to read from a different datastack only (wiring both ways is a cycle). ' +
@@ -253,7 +254,9 @@ function buildSeaTableNode(spec: { key: string; label: string; host: string; gui
     type: `annotation.${spec.key}`,
     label: spec.label,
     category: 'dataset',
-    description: `Neuron labels from a ${spec.label} base.`,
+    description:
+      `Neuron labels from a ${spec.label} base. A \`cell_type\` column arrives renamed ` +
+      '`type`, the name Coda reads a cell type from.',
     guide: spec.guide,
     cost: 'expensive',
     dataCache: true,
@@ -421,7 +424,8 @@ registerNode({
   type: 'annotation.googleSheet',
   label: 'Google Sheet',
   category: 'dataset',
-  description: 'Neuron labels from a shared Google Sheet, read through its CSV export URL.',
+  description:
+    'Neuron labels from a shared Google Sheet, read through its CSV export URL. A `cell_type` column arrives renamed `type`, the name Coda reads a cell type from.',
   guide:
     'Reads a Google Sheet that needs no login — Share as anyone-with-link ▸ Viewer. Paste the URL into Sheet; Tab selects a different tab by its numeric gid. The output is an ordinary neuron table, so Filter or Sort can edit it before the Dataset.',
   cost: 'expensive',

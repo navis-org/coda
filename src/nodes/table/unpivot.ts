@@ -59,7 +59,8 @@ registerNode({
   type: 'core.unpivot',
   label: 'Unpivot',
   category: 'transform',
-  description: 'Fold wide columns into one name column and one value column.',
+  description:
+    'Fold wide columns into one name column and one value column. The two are named by `Name into` and `Value into` — `name` and `value` unless you say otherwise.',
   guide:
     'Fold a wide table into a long one: pick the columns to fold and each becomes rows, with ' +
     'the column name in one new column and the cell in another. This is the direction Pivot ' +

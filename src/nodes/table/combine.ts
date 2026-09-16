@@ -52,7 +52,8 @@ registerNode({
   type: 'core.combineColumns',
   label: 'Combine Columns',
   category: 'transform',
-  description: 'Make one column out of several — the first with a value wins.',
+  description:
+    'Make one column out of several — the first with a value wins. The result takes the name in `Into` (`type` by default), backfilling that column in place when it is one of the picked ones and suffixing any other column of that name `_2`.',
   guide:
     'Make one column out of several. The columns are tried in the order you pick them and the ' +
     'first one holding a value wins, so cell_type then hemibrain_type means "the hemibrain type ' +

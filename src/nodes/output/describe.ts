@@ -37,7 +37,8 @@ registerNode({
   type: 'out.describe',
   label: 'Describe Table',
   category: 'visualisation',
-  description: 'Per-column summary of a table: how much is filled in, and the numeric spread.',
+  description:
+    'Per-column summary of a table: how much is filled in, and the numeric spread. Its columns are `column`, `dtype`, `non_nulls`, `nulls`, `non_zero`, `unique`, `min`, `q1`, `median`, `q3`, `max` and `mean` — snake_case, unlike the rest of Coda.',
   guide:
     'Summarises a table one row per column — the dtype, how many values are present, how many ' +
     'are missing, how many are distinct, and for numeric columns the non-zero count, the ' +

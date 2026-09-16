@@ -41,7 +41,8 @@ registerNode({
   type: 'neuron.nblastKnn',
   label: 'NBLAST k-NN',
   category: 'analysis',
-  description: 'Find each neuron’s most similar neurons, as a table of matches.',
+  description:
+    'Find each neuron’s most similar neurons, as a table of matches. Columns are `queryId`, `targetId`, `rank` and `score`.',
   guide:
     'A version of NBLAST that gives you the top-k matches for each query neuron. Each row is one ' +
     'match — neuron, neighbour, rank and score — so Build Network turns it straight into a ' +

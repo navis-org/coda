@@ -159,7 +159,8 @@ define({
   type: 'cluster.selectedToNeurons',
   label: 'Selected to Neurons',
   inputLabel: 'Selected',
-  description: 'Turn a Dendrogram selection into neurons.',
+  description:
+    'Turn a Dendrogram selection into neurons. The selection’s columns ride along, and one whose name the neuron table already uses is suffixed `_c`.',
   guide:
     'A Dendrogram selects branch names, not neurons. This turns those names back into the ' +
     'clustered neurons, ready for Neuroglancer, a 3D view, or Skeletons. Wire the original ' +
@@ -172,7 +173,8 @@ define({
   label: 'Clusters to Neurons',
   inputLabel: 'Clusters',
   expects: 'cluster',
-  description: 'Put cluster numbers back onto the neurons they belong to.',
+  description:
+    'Put cluster numbers back onto the neurons they belong to. `cluster`, `order` and `size` ride along, and a column whose name the neuron table already uses is suffixed `_c`.',
   guide:
     'Cut Tree gives cluster numbers for leaf names, not neurons. This maps those clusters ' +
     'back onto the neurons they came from, so Neuroglancer can colour by cluster, Filter ' +

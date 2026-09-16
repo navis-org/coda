@@ -34,7 +34,8 @@ registerNode({
   type: 'cluster.cut',
   label: 'Cut Tree',
   category: 'analysis',
-  description: 'Take groups out of a merge tree, by count or by distance.',
+  description:
+    'Take groups out of a merge tree, by count or by distance. The Clusters table is `label`, `cluster`, `order` and `size`.',
   guide:
     'Cut a tree into groups by count (exactly N clusters), by distance threshold, or — for two ' +
     'connectomes clustered together — wherever a group is lopsided, so every group draws from ' +
