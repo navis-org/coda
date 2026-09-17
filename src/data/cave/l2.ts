@@ -47,8 +47,9 @@ export const L2_CONCURRENCY = 16
 /**
  * Where an L2 skeleton build starts saying how long it will be.
  *
- * Far above `MESH_WARN_NEURONS`, which is 20 because one graphene mesh is several hundred
- * requests; a skeleton is two. Far below what a source publishing ready-made skeletons has to
+ * A count, where the mesh control next door is a *wait* (`MESH_WARN_SECONDS`): a skeleton is two
+ * requests and costs the same two every time, so a number of them is a number of requests, where
+ * one graphene mesh is anything from 4 fragments to 600 and only the clock says what that means. Far below what a source publishing ready-made skeletons has to
  * say about, because those are one request each and served from a bucket.
  *
  * A refusal at 100 until it stopped being one. Every FlyWire question of any size arrives here

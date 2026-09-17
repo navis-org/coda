@@ -12,12 +12,6 @@
  * `0..65535` for 16-bit quantisation. There is no need for a patched build.
  */
 
-export interface DecodedMesh {
-  /** Physical coordinates, xyz interleaved. */
-  positions: Float32Array
-  indices: Uint32Array
-}
-
 /* eslint-disable @typescript-eslint/no-explicit-any -- draco3d ships no type declarations. */
 type DracoModule = any
 
@@ -29,6 +23,7 @@ type DracoModule = any
  * everything. Importing the binary with `?url` and handing it over as `wasmBinary` removes
  * that guess entirely, and makes vite emit the wasm as a tracked asset.
  */
+import type { MeshArrays } from '../meshParts'
 import wasmUrl from 'draco3d/draco_decoder.wasm?url'
 
 let modulePromise: Promise<DracoModule> | undefined
@@ -57,7 +52,7 @@ export async function decodeDracoFragment(
   bytes: ArrayBuffer,
   scale: readonly [number, number, number],
   offset: readonly [number, number, number],
-): Promise<DecodedMesh> {
+): Promise<MeshArrays> {
   const draco = await decoderModule()
   const decoder = new draco.Decoder()
   const buffer = new draco.DecoderBuffer()

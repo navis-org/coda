@@ -11,8 +11,8 @@
  */
 
 import { decodeDracoFragment } from './draco'
-import { concatMeshes, readLegacyMesh } from './legacy'
-import type { RawMesh } from './legacy'
+import { readLegacyMesh } from './legacy'
+import { concatMeshes, type MeshArrays } from '../meshParts'
 import type { MultiResInfo, MultiResManifest } from './multires'
 import {
   chooseLod,
@@ -63,7 +63,7 @@ export type MeshBodyReader = (
   source: MeshSource,
   neuronId: string,
   options: FetchOptions,
-) => Promise<RawMesh | Oversize | undefined>
+) => Promise<MeshArrays | Oversize | undefined>
 
 export interface MeshSource {
   /** Absolute URL of the mesh directory. */
@@ -599,7 +599,7 @@ async function readLodFragments(
   neuronId: string,
   lod: number,
   options: FetchOptions,
-): Promise<{ positions: Float32Array; indices: Uint32Array } | undefined> {
+): Promise<MeshArrays | undefined> {
   const level = manifest.levels[lod]
   if (!level || level.sizes.length === 0) return undefined
   const url = fragmentsUrl(source.base, BigInt(neuronId), info.sharding)
@@ -612,7 +612,7 @@ async function readLodFragments(
     range: [start, start + level.totalBytes - 1],
   })
 
-  const parts: Array<{ positions: Float32Array; indices: Uint32Array }> = []
+  const parts: MeshArrays[] = []
   let at = 0
   for (let fragment = 0; fragment < level.sizes.length; fragment++) {
     const size = level.sizes[fragment]!

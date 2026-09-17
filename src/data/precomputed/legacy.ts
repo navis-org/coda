@@ -11,16 +11,12 @@
  * 107k vertices, 195k triangles. Callers have to cap the neuron count instead.
  */
 
+import { concatMeshes, type MeshArrays } from '../meshParts'
 import type { FetchOptions } from './transport'
 import { fetchBytes, fetchJson } from './transport'
 
 export interface LegacyManifest {
   fragments: string[]
-}
-
-export interface RawMesh {
-  positions: Float32Array
-  indices: Uint32Array
 }
 
 /**
@@ -29,7 +25,7 @@ export interface RawMesh {
  * The trailing index block is whatever is left after the vertices, so a truncated file shows
  * up as a non-multiple-of-three index count rather than as silently missing geometry.
  */
-export function parseLegacyFragment(buffer: ArrayBuffer): RawMesh {
+export function parseLegacyFragment(buffer: ArrayBuffer): MeshArrays {
   if (buffer.byteLength < 4)
     throw new Error('Mesh fragment is too short to hold a vertex count')
   const view = new DataView(buffer)
@@ -63,7 +59,7 @@ export async function readLegacyMesh(
   base: string,
   neuronId: bigint,
   options: FetchOptions = {},
-): Promise<RawMesh | undefined> {
+): Promise<MeshArrays | undefined> {
   let manifest: LegacyManifest
   try {
     manifest = await fetchJson<LegacyManifest>(`${base}/${neuronId}:0`, options)
@@ -75,30 +71,10 @@ export async function readLegacyMesh(
   const fragments = manifest.fragments ?? []
   if (fragments.length === 0) return undefined
 
-  const parts: RawMesh[] = []
+  const parts: MeshArrays[] = []
   for (const name of fragments) {
     const bytes = await fetchBytes(`${base}/${name}`, options)
     parts.push(parseLegacyFragment(bytes))
   }
   return concatMeshes(parts)
-}
-
-/** Join meshes into one, shifting each part's indices past the vertices already emitted. */
-export function concatMeshes(parts: readonly RawMesh[]): RawMesh {
-  if (parts.length === 1) return parts[0]!
-  const vertexTotal = parts.reduce((sum, p) => sum + p.positions.length, 0)
-  const indexTotal = parts.reduce((sum, p) => sum + p.indices.length, 0)
-  const positions = new Float32Array(vertexTotal)
-  const indices = new Uint32Array(indexTotal)
-
-  let vertexAt = 0
-  let indexAt = 0
-  for (const part of parts) {
-    positions.set(part.positions, vertexAt)
-    const base = vertexAt / 3
-    for (let i = 0; i < part.indices.length; i++) indices[indexAt + i] = part.indices[i]! + base
-    vertexAt += part.positions.length
-    indexAt += part.indices.length
-  }
-  return { positions, indices }
 }

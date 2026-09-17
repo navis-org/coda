@@ -10,7 +10,9 @@
 import { describe, expect, it } from 'vitest'
 
 import { generateRoiMesh } from './mock/morphology'
-import { decimateMesh } from './meshDecimate'
+import { mulberry32 } from './mock/generate'
+import { decimateMesh, decimateParts } from './meshDecimate'
+import { concatMeshes, type MeshArrays } from './meshParts'
 
 /** Axis-aligned bounds, for comparing a shape against its reduction. */
 function bounds(positions: Float32Array): { min: number[]; max: number[] } {
@@ -27,14 +29,7 @@ function bounds(positions: Float32Array): { min: number[]; max: number[] } {
 }
 
 /** A dense sphere, standing in for a full-resolution neuropil. */
-function sphere(
-  rings = 150,
-  segments = 220,
-  radius = 1000,
-): {
-  positions: Float32Array
-  indices: Uint32Array
-} {
+function sphere(rings = 150, segments = 220, radius = 1000): MeshArrays {
   const positions: number[] = []
   const indices: number[] = []
   for (let i = 0; i <= rings; i++) {
@@ -57,6 +52,32 @@ function sphere(
     }
   }
   return { positions: new Float32Array(positions), indices: Uint32Array.from(indices) }
+}
+
+/** A triangle with no extent: nothing to cluster, and a divide by zero if anything tries. */
+const DEGENERATE: MeshArrays = {
+  positions: new Float32Array([5, 5, 5, 5, 5, 5, 5, 5, 5]),
+  indices: Uint32Array.from([0, 1, 2]),
+}
+
+/**
+ * How many cells a mesh occupies, written the slow obvious way.
+ *
+ * A string key per vertex — what `decimateMesh`'s own comment rejects for allocating half a
+ * million throwaway strings — which is exactly what makes it a usable oracle: it cannot collide,
+ * so any disagreement is the packed key's.
+ */
+function clusterWithStringKeys(positions: Float32Array, grid: number): number {
+  const { min, max } = bounds(positions)
+  const cell = Math.max(max[0]! - min[0]!, max[1]! - min[1]!, max[2]! - min[2]!) / grid
+  const seen = new Set<string>()
+  for (let i = 0; i < positions.length; i += 3) {
+    const cx = Math.floor((positions[i]! - min[0]!) / cell)
+    const cy = Math.floor((positions[i + 1]! - min[1]!) / cell)
+    const cz = Math.floor((positions[i + 2]! - min[2]!) / cell)
+    seen.add(`${cx},${cy},${cz}`)
+  }
+  return seen.size
 }
 
 describe('decimateMesh', () => {
@@ -148,9 +169,150 @@ describe('decimateMesh', () => {
   })
 
   it('refuses to divide by zero on a degenerate mesh', () => {
-    const flat = new Float32Array([5, 5, 5, 5, 5, 5, 5, 5, 5])
-    const result = decimateMesh(flat, Uint32Array.from([0, 1, 2]))
-    expect(result.positions).toBe(flat)
+    const result = decimateMesh(DEGENERATE.positions, DEGENERATE.indices)
+    expect(result.positions).toBe(DEGENERATE.positions)
     expect(decimateMesh(new Float32Array(0), new Uint32Array(0)).positions).toHaveLength(0)
+  })
+})
+
+/**
+ * The same clustering over a mesh that arrives in pieces — see `decimateParts` for why skipping
+ * the join is safe.
+ *
+ * That argument is what is tested: it is only worth anything if it changes no pixel, so the two
+ * routes are compared **byte-identical**, not close.
+ */
+describe('decimateParts', () => {
+  /**
+   * The sphere cut into `n` fragments, the way a manifest hands one over.
+   *
+   * A fragment is its own little mesh in world coordinates, so the slice is contiguous and a
+   * vertex's local index is just `global - from` — which also means `concatMeshes` of the parts
+   * reproduces the sphere exactly, and every part is non-empty by construction.
+   */
+  function fragments(n: number): MeshArrays[] {
+    const whole = sphere(60, 90)
+    const vertices = whole.positions.length / 3
+    const parts: MeshArrays[] = []
+    for (let k = 0; k < n; k++) {
+      const from = Math.floor((k * vertices) / n)
+      const to = Math.floor(((k + 1) * vertices) / n)
+      const inside = (i: number): boolean => i >= from && i < to
+      const indices: number[] = []
+      for (let t = 0; t + 2 < whole.indices.length; t += 3) {
+        const a = whole.indices[t]!
+        const b = whole.indices[t + 1]!
+        const c = whole.indices[t + 2]!
+        if (inside(a) && inside(b) && inside(c)) indices.push(a - from, b - from, c - from)
+      }
+      parts.push({
+        positions: whole.positions.subarray(from * 3, to * 3),
+        indices: Uint32Array.from(indices),
+      })
+    }
+    return parts
+  }
+
+  it('is byte-identical to joining the parts and decimating that, at every grid', () => {
+    // The grid decides how much merges, and how much merges is what the two walks could disagree
+    // about — a coarse grid shares cells across fragment boundaries, a fine one barely does.
+    const parts = fragments(17)
+    const joined = concatMeshes(parts)
+    for (const grid of [4, 16, 24, 64, 256]) {
+      const viaJoin = decimateMesh(joined.positions, joined.indices, grid)
+      const direct = decimateParts(parts, grid)
+      expect(direct.positions.length).toBeGreaterThan(0)
+      expect(Array.from(direct.positions)).toEqual(Array.from(viaJoin.positions))
+      expect(Array.from(direct.indices)).toEqual(Array.from(viaJoin.indices))
+    }
+  })
+
+  it('never allocates the joined mesh, which is the whole point', () => {
+    /*
+     * Counted rather than read off the code, because the failure mode is a future edit that
+     * quietly joins first and still passes every test above.
+     */
+    const parts = fragments(9)
+    const real = Float32Array
+    let allocated = 0
+    class Counting extends Float32Array {
+      constructor(length: number) {
+        super(length)
+        allocated += length
+      }
+    }
+    const total = parts.reduce((sum, part) => sum + part.positions.length, 0)
+    try {
+      globalThis.Float32Array = Counting as unknown as Float32ArrayConstructor
+      decimateParts(parts, 24)
+    } finally {
+      globalThis.Float32Array = real
+    }
+    // The output only. A joined copy would add every input vertex on top of it.
+    expect(allocated).toBeLessThan(total)
+  })
+
+  it('joins rather than refusing, for the cases with nothing to merge', () => {
+    /*
+     * `decimateMesh` hands its caller's arrays straight back in these cases; over parts the same
+     * answer is the parts joined, so a caller never has to tell "reduced" from "as given" apart.
+     */
+    expect(decimateParts([]).positions).toHaveLength(0)
+    const tri: MeshArrays = {
+      positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+      indices: Uint32Array.from([0, 1, 2]),
+    }
+    // A grid too coarse to be a grid, and a mesh with no extent — both divide by zero otherwise.
+    expect(decimateParts([tri], 1).positions).toBe(tri.positions)
+    expect(decimateParts([DEGENERATE]).positions).toBe(DEGENERATE.positions)
+
+    // Two parts with nothing to merge come back joined, and the join is a real one.
+    const joined = decimateParts([tri, tri], 1)
+    expect(joined.positions).toHaveLength(tri.positions.length * 2)
+    expect(Array.from(joined.indices)).toEqual([0, 1, 2, 3, 4, 5])
+  })
+})
+
+/**
+ * The packed cell key, which neither test above can see.
+ *
+ * Both compare `decimateParts` against `decimateMesh`, and those are the same code — so a key
+ * that is injective and one that is not give both sides the same answer. A sphere cannot show it
+ * either: its box is a cube, so every axis multiplier is equal and a wrong one is
+ * indistinguishable from a right one.
+ */
+describe('the cell key', () => {
+  it('collides on no box, including one that is nothing like a cube', () => {
+    /*
+     * The key packs three cell indices into one number with **per-axis** multipliers, and the two
+     * tests above cannot see that: they compare `decimateParts` against `decimateMesh`, which is
+     * the same code, so any key that is injective *or not* gives both sides the same answer. A
+     * sphere cannot see it either — its box is a cube, so every multiplier is equal and a wrong
+     * one is indistinguishable.
+     *
+     * So this is an independent oracle: the same clustering written the obvious slow way, with a
+     * string key that cannot collide, over a deliberately oblong mesh. A multiplier that is too
+     * small merges two cells that should stay apart, which shows up here as fewer vertices out.
+     */
+    const rnd = mulberry32(99)
+    const count = 4000
+    const positions = new Float32Array(count * 3)
+    for (let i = 0; i < count; i++) {
+      // 40 : 4 : 1, so the three axes need three different cell counts.
+      positions[i * 3] = rnd() * 40000
+      positions[i * 3 + 1] = rnd() * 4000
+      positions[i * 3 + 2] = rnd() * 1000
+    }
+    const indices = new Uint32Array((count - 2) * 3)
+    for (let t = 0; t + 2 < count; t++) {
+      indices[t * 3] = t
+      indices[t * 3 + 1] = t + 1
+      indices[t * 3 + 2] = t + 2
+    }
+
+    for (const grid of [8, 32, 128]) {
+      const expected = clusterWithStringKeys(positions, grid)
+      expect(decimateMesh(positions, indices, grid).positions.length / 3).toBe(expected)
+    }
   })
 })

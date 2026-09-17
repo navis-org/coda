@@ -89,13 +89,15 @@ import { mapWithConcurrency } from '../concurrency'
 import type { GrapheneMeshSource } from './meshes'
 import type { FragmentTally } from './meshes'
 import {
+  MB_PER_NEURON,
   MESH_WARN_NEURONS,
   NO_FRAGMENTS,
-  decimateGridFor,
+  SECONDS_PER_NEURON,
   fragmentConcurrencyFor,
   openGrapheneMeshes,
   readGrapheneMesh,
 } from './meshes'
+import { decimateGridFor } from '../meshDecimate'
 import type { MeshResult, MeshSource } from '../precomputed'
 import { OVERSIZE } from '../precomputed/transport'
 import {
@@ -1270,14 +1272,16 @@ export class CaveSource implements DataSource {
    *
    * The cost is said here rather than on the node, because it is a fact about graphene and not
    * about the Meshes node: the same node against neuPrint's multi-resolution meshes is cheap at
-   * a thousand, where this is several hundred requests and 1.2–14 MB for *one* neuron. That is
-   * what `onWarn` exists for — the node cannot know it, and the source cannot reach the card.
+   * a thousand, where this is tens to hundreds of requests for *one* neuron. That is what
+   * `onWarn` exists for — the node cannot know it, and the source cannot reach the card.
    *
    * It was a refusal at twenty until it became clear what that meant: twenty is a figure, and a
-   * FlyWire question about a hundred neurons is an ordinary question. So the number stayed and
-   * its verdict changed — past `MESH_WARN_NEURONS` the fetch says how long it will be and then
-   * goes and does it, with `MESH_CONCURRENCY` and the session geometry cache doing the actual
-   * work of making that survivable.
+   * FlyWire question about a hundred neurons is an ordinary question. So the verdict changed —
+   * the fetch says how long it will be and then goes and does it, with `MESH_CONCURRENCY` and the
+   * session geometry cache doing the actual work of making that survivable. The *number* went
+   * too, in the end: it is `MESH_WARN_SECONDS` now, five minutes, and the neuron count is derived
+   * from it. Twenty neurons is half a minute, and warning about half a minute is how a reader
+   * learns to dismiss the next one.
    */
   private async grapheneMeshes(
     req: GeometryRequest,
@@ -1292,26 +1296,39 @@ export class CaveSource implements DataSource {
 
     if (req.neuronIds.length > MESH_WARN_NEURONS) {
       /*
-       * Deliberately the slow end rather than a mean — an estimate that is never shorter than
-       * the wait is the right kind of wrong for a warning — and **per layout**, because the two
-       * differ by an order of magnitude and the estimate used to be built on the one where this
-       * costs least. FlyWire's manifests are all plain objects: 492 fragments, ~1.2 MB, about
-       * four seconds a neuron. A datastack with a frozen half reads the *shard files* as well,
-       * and one mosquito neuron is 471 fragments and 14.2 MB — twelve times the bytes, at ~30 kB
-       * a fragment against FlyWire's ~2.4 kB. `unshardedDir` is the discriminator because it is
-       * the same thing that says a freeze happened: a segmentation naming one has an `initial/`
-       * beside it. It costs no extra request, `meshSource` having just read the `info`.
+       * `MESH_WARN_NEURONS` is `MESH_WARN_SECONDS / SECONDS_PER_NEURON`, so reaching here means
+       * the duration below is over five minutes — the condition and the sentence are the same
+       * arithmetic, which is what stops one drifting from the other.
+       *
+       * Those per-neuron figures were measured over **sets of 25**, on three datastacks, because
+       * a lone neuron does not predict a set and the first version of this sentence was built
+       * from one:
+       *
+       *   FlyWire   132 fragments/neuron (median), 1.59 s, 0.51 MB — unsharded
+       *   BANC       10                          , 0.39 s, 0.46 MB — sharded
+       *   mosquito   51                          , 1.29 s, 3.92 MB — sharded
+       *
+       * Two things that shipped wrong are in that table. It said **12 s and 14 MB a neuron for a
+       * sharded datastack**, which told somebody fetching 25 mosquito meshes to expect five
+       * minutes and 350 MB for a wait that is half a minute and 98 MB. The bytes came from one
+       * neuron with 471 fragments, and across the set the median is 51 — the fragment count
+       * varies more than a hundredfold *within* a datastack (4 to 608 here), so no per-neuron
+       * constant is ever going to be more than an order of magnitude. And the split on
+       * `unshardedDir` was invented rather than measured: it does not predict cost in either
+       * direction — the unsharded datastack is the *slowest* per neuron of the three, and the two
+       * sharded ones differ from each other by 8×. So there is one figure, and the sentence says
+       * the spread out loud rather than implying a precision it cannot have.
        */
-      const sharded = source.unshardedDir !== undefined
-      const mbEach = sharded ? 14 : 1.2
-      const secondsEach = sharded ? 12 : 4
+      const count = req.neuronIds.length
       req.onWarn?.(
-        `${req.neuronIds.length.toLocaleString()} graphene meshes from ${spec.label} is up to ` +
-          `${describeDuration(req.neuronIds.length * secondsEach)} and around ` +
-          `${Math.round(req.neuronIds.length * mbEach).toLocaleString()} MB. A graphene mesh ` +
-          `has no level of detail, so each one is dozens to hundreds of requests — this is the ` +
-          `slow route, and a materialization with a flat segmentation beside it does the same ` +
-          `set in two requests a neuron. Fetching anyway; cancel if that is not what you meant.`,
+        `${count.toLocaleString()} graphene meshes from ${spec.label} is ` +
+          `${describeDuration(count * SECONDS_PER_NEURON)} and ` +
+          `${Math.round(count * MB_PER_NEURON.low)}–${Math.round(count * MB_PER_NEURON.high)} MB. ` +
+          `A graphene mesh has no level of detail, so each one is dozens to hundreds of separate ` +
+          `requests, and how many varies by more than a hundredfold between neurons — this is ` +
+          `the slow route, and a materialization with a flat segmentation beside it does the ` +
+          `same set in two requests a neuron. Fetching anyway; cancel if that is not what you ` +
+          `meant.`,
       )
     }
 

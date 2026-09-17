@@ -43,7 +43,13 @@ import { l2SourceFor, peekDatastacks } from './datastack'
 import { probeFlat } from './flat'
 import { skeletonServiceFor, skeletonServiceUrl } from './skeletonService'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
-import { MESH_WARN_NEURONS, decimateGridFor, fragmentConcurrencyFor } from './meshes'
+import {
+  MESH_WARN_NEURONS,
+  MESH_WARN_SECONDS,
+  SECONDS_PER_NEURON,
+  fragmentConcurrencyFor,
+} from './meshes'
+import { decimateGridFor } from '../meshDecimate'
 import { quoteWideIntegers, parseCaveJson } from './json'
 import { installRefusingCaveFetch, materializations } from '../../test/caveStubs'
 import {
@@ -1429,6 +1435,30 @@ describe('meshes', () => {
     expect(fragmentConcurrencyFor(3) * 3).toBeLessThanOrEqual(32)
   })
 
+  /** Distinct ids, built as text — see below for why that is not incidental. */
+  const meshIds = (count: number): string[] =>
+    Array.from({ length: count }, (_, i) => `7205759406288${String(57000 + i)}`)
+
+  const warningsFor = async (ids: string[]): Promise<string[]> => {
+    const said: string[] = []
+    await new CaveSource()
+      .fetchMeshes({ datasetId: DATASET, neuronIds: ids, onWarn: (m) => said.push(m) })
+      .catch(() => undefined)
+    return said
+  }
+
+  it('says nothing about an ordinary set, however many requests it is', async () => {
+    /*
+     * The threshold is a **wait**, and this is the case that moved it. Twenty-five mosquito
+     * meshes is 2,614 fragments and half a minute — a lot of requests, and nothing anybody needs
+     * warning about. Gated on a neuron count of 20 it produced "up to about 5 minutes and around
+     * 350 MB" over a 25-second fetch, which is how a reader learns to dismiss the next one.
+     */
+    installFetch()
+    const said = await warningsFor(meshIds(25))
+    expect(said.filter((m) => m.includes('graphene meshes'))).toEqual([])
+  })
+
   it('says what a large graphene set will cost, and fetches it anyway', async () => {
     installFetch()
     /*
@@ -1436,31 +1466,43 @@ describe('meshes', () => {
      * `Number.MAX_SAFE_INTEGER`, so every element came out as the same string — invariant 8's
      * exact trap, reproduced inside a CAVE test. It passed, because only `.length` is read.
      */
-    const ids = Array.from(
-      { length: MESH_WARN_NEURONS + 1 },
-      (_, i) => `7205759406288${String(57000 + i)}`,
-    )
+    const ids = meshIds(MESH_WARN_NEURONS + 1)
     expect(new Set(ids).size).toBe(ids.length)
 
     /*
-     * This used to reject on the count alone. Twenty graphene meshes is a slow fetch, not an
-     * impossible one, and the difference between those two is the whole of what `onWarn` was
-     * added for — so what is pinned is that the warning is raised *and the fetch starts*. It
-     * then dies on the stub, which serves no mesh fragments; that it got that far is the point.
+     * This used to reject on the count alone. A slow fetch is not an impossible one, and the
+     * difference between those two is the whole of what `onWarn` was added for — so what is
+     * pinned is that the warning is raised *and the fetch starts*. It then dies on the stub,
+     * which serves no mesh fragments; that it got that far is the point.
      */
-    const said: string[] = []
-    await new CaveSource()
-      .fetchMeshes({ datasetId: DATASET, neuronIds: ids, onWarn: (m) => said.push(m) })
-      .catch(() => undefined)
-    expect(said.join(' ')).toMatch(
-      /no level of detail, so each one is dozens to hundreds of requests/,
+    const said = (await warningsFor(ids)).join(' ')
+    expect(said).toMatch(
+      /no level of detail, so each one is dozens to hundreds of separate requests/,
     )
     // And it names the alternative, which for this datastack is not hypothetical: FlyWire's own
     // materializations were flattened, and only a stub with no bucket sends it down this route.
-    expect(said.join(' ')).toMatch(
-      /flat segmentation beside it does the same set in two requests/,
+    expect(said).toMatch(/flat segmentation beside it does the same set in two requests/)
+    expect(said).toMatch(/Fetching anyway/)
+  })
+
+  it('raises the warning exactly where the duration it prints crosses five minutes', async () => {
+    /*
+     * The condition and the sentence are one piece of arithmetic — `MESH_WARN_NEURONS` is
+     * `MESH_WARN_SECONDS / SECONDS_PER_NEURON` — and this is what holds them together. Asserted
+     * through the *printed* text rather than against the constants, because a test that recomputes
+     * the threshold from the same constants would pass however far either had drifted from what a
+     * fetch really costs; it was a drift of 10× that made this control worth rewriting.
+     */
+    installFetch()
+    expect(MESH_WARN_NEURONS * SECONDS_PER_NEURON).toBe(MESH_WARN_SECONDS)
+    expect((await warningsFor(meshIds(MESH_WARN_NEURONS))).join(' ')).not.toMatch(
+      /graphene meshes/,
     )
-    expect(said.join(' ')).toMatch(/Fetching anyway/)
+
+    const said = (await warningsFor(meshIds(MESH_WARN_NEURONS + 1))).join(' ')
+    const minutes = /about (\d+) minutes/.exec(said)
+    expect(minutes).not.toBeNull()
+    expect(Number(minutes![1])).toBeGreaterThanOrEqual(MESH_WARN_SECONDS / 60)
   })
 })
 

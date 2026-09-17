@@ -1,13 +1,15 @@
 /**
  * What a mesh read out of a file looks like, and nothing else.
  *
- * A leaf on purpose: `obj.ts`, `stl.ts` and `ply.ts` all need this shape, and `meshFile.ts` needs
- * all three of them. Declared in the dispatcher it would close a cycle — every reader importing
- * the module that imports it — which is safe only while nothing is read at module scope, and is
- * exactly the arrangement `precomputed`'s `sorting.ts` records as having produced a silently
- * `undefined` path under the ordinary import order. So the shared shape sits where it can import
- * nothing at all.
+ * `obj.ts`, `stl.ts` and `ply.ts` all need this shape, and `meshFile.ts` needs all three of them.
+ * Declared in the dispatcher it would close a cycle — every reader importing the module that
+ * imports it — which is safe only while nothing is read at module scope, and is exactly the
+ * arrangement `precomputed`'s `sorting.ts` records as having produced a silently `undefined` path
+ * under the ordinary import order. So the shared shape sits where the readers can reach it and it
+ * reaches nothing but `meshParts.ts`, which is a leaf itself.
  */
+
+import type { MeshArrays } from './meshParts'
 
 /**
  * A mesh in the file's own units, with no normals.
@@ -17,11 +19,7 @@
  * counters exist because a file can be read successfully and still be worth a sentence: a
  * quadrilateral mesh is fanned, and a face naming a vertex that was never declared is skipped.
  */
-export interface ParsedMesh {
-  /** xyz interleaved, in the file's own units. */
-  positions: Float32Array
-  /** Triangle indices into `positions`. */
-  indices: Uint32Array
+export interface ParsedMesh extends MeshArrays {
   /** How many source faces had more than three corners and were fanned. */
   polygons: number
   /** Face corners that named a vertex the file never declared. */

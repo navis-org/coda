@@ -1648,7 +1648,40 @@ own `validHints`), live under the lock like a rename; the ✎ sits beside the ×
   meshes; **`unaddressable` is split from `missing`**, only one of them being a retry; and **a
   neuron that failed whole is a second sentence** off `fetched.missing`, or the fix trades "a
   twentieth of the neuron, silently" for "no neuron, silently". The assertion is **live** — a URL
-  is only right if the bucket answers it. See [docs/backends.md](docs/backends.md).
+  is only right if the bucket answers it. Downstream of that: with every fragment now arriving,
+  **the mesh is decimated over the fragments rather than over a joined copy of them**
+  (`decimateParts`), since `concatMeshes` + `decimateMesh` allocates a second full-resolution copy
+  of a mesh about to shrink by two orders of magnitude. Clustering needs no adjacency (the cell is
+  off the *global* box, the slot off visit order), so it is **byte-identical** — the whole licence,
+  and therefore asserted at four grids and once against a real neuron rather than argued. Saving:
+  **23.6 MB and 31 → 16 ms** at a twenty-neuron grid, the 23.6 being the joined copy. Four traps,
+  every one of which shipped wrong first and all of them in the *probe* rather than the code.
+  **Typed arrays are not on the JS heap** — a 100 MB `Float32Array` moves `heapUsed` by 0.5 MB —
+  so a probe reading `heapUsed` measures everything *except* a joined mesh; `arrayBuffers` is the
+  number. A **sampling interval cannot fire inside a synchronous call**. A mesh fixture built from
+  **random indices is not a surface** (817,582 triangles from 7,066 vertices, 130× the real ratio),
+  and one scattered through a **cube** is the one shape that leaves a per-axis cell key
+  unexercised. And **one reading is not a number**: 111 / 83 / 98 ms for the same row, so each
+  column is a median of three taken *per column* — reporting the fastest run's memory is picking a
+  memory sample at random. Relatedly `concatMeshes` and then `decimateGridFor` both moved out of
+  network-fetching modules into leaves (`meshParts.ts`, `meshDecimate.ts`) — the first let the
+  sentinel return go and gave `RawMesh`/`DecodedMesh`/`X3dMesh`/`DecimatedMesh` one name, the
+  second let the probe compute its grids instead of transcribing them, which had already drifted
+  to one no budget produces. Fifth trap, same family and this one reached a user: **a lone neuron
+  does not price a set, and the neuron you measure alone is by selection a big one.** The graphene
+  cost warning was built from one mosquito body (471 fragments, 14.2 MB) and told somebody fetching
+  25 meshes to expect *five minutes and 350 MB* for half a minute and 98 MB — the median across
+  that set is **51** fragments, the range 4 to 608. Re-measured over sets of 25 on three
+  datastacks: 0.4–1.6 s and 0.5–3.9 MB a neuron. It also retired a split invented rather than
+  measured — `unsharded_mesh_dir` predicts cost in *neither* direction, the unsharded datastack
+  being the slowest per neuron and the two sharded ones differing by 8×. And it moved the
+  threshold from a **count to a wait**: `MESH_WARN_SECONDS` is five minutes and the neuron count
+  is `MESH_WARN_SECONDS / SECONDS_PER_NEURON`, so the condition and the sentence are one piece of
+  arithmetic and a re-measure moves both. Twenty neurons had been inherited from a *refusal*,
+  where it guarded a fan-out `MESH_CONCURRENCY` actually guards; as a warning it announced five
+  minutes over a 25-second fetch, which is how a reader learns to dismiss the next one. A limit
+  worth arguing about is stated in the units of the thing it protects.
+  See [docs/backends.md](docs/backends.md).
 - **A skeleton is not one product, and which route answered is a fact about the *value*.** A dataset
   usually has more than one place to get one from, and cable length means something different down
   each — so `SkeletonsValue.provenance` rides on the value and the Skeletons node's `Source` is where

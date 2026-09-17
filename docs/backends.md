@@ -1305,10 +1305,10 @@ Measured over eight v783 proofread neurons, against the graphene route for the s
 
 | | graphene | `gs://flywire_v141_m783` |
 | --- | --- | --- |
-| requests per neuron | 492 | 2 |
+| requests per neuron | 10–130 median, past 600 | 2 |
 | levels | 1 | 3–5 |
 | coarsest level | — | one fragment, 73 kB – 1.44 MB |
-| finest level | ~1.2 MB | 0.3 – 10.8 MB |
+| finest level | 0.5 – 3.9 MB | 0.3 – 10.8 MB |
 | `triangleBudget` honoured by | decimation, exactly | choosing a level, overshooting at the floor |
 
 Four things this is, and each is a decision rather than a consequence.
@@ -1426,13 +1426,101 @@ negative that the verbatim name is never requested. A URL is only right if the b
 so `live.test.ts` fetches through `fetchMeshes` and asserts `detail.fragments` is `missing: 0` —
 which reports 54 against the old rule.
 
-One thing the fix changes downstream: the cost sentence was built on FlyWire, the one datastack
-where this never bit. A sharded neuron is **14.2 MB over 471 fragments (~30 kB each)** against
-FlyWire's 1.2 MB over 492 (~2.4 kB), so the estimate branches on `unsharded_mesh_dir` — a
-segmentation naming one is a segmentation with a frozen half. Coalescing the shard reads was
-measured and rejected: the 449 frozen fragments land in 131 shard files but at scattered offsets,
-so merging whole files is 3.5 GB (366×) and bridging gaps under 64 kB buys 449 → 399 requests for
-an extra megabyte.
+Coalescing the shard reads was measured and rejected: the 449 frozen fragments of one neuron land
+in 131 shard files but at scattered offsets, so merging whole files is 3.5 GB (366×) and bridging
+gaps under 64 kB buys 449 → 399 requests for an extra megabyte.
+
+### A lone neuron does not price a set, and the one you measure is the big one
+
+The cost sentence this fix put on `grapheneMeshes` was built from **one** neuron: the mosquito
+body that had just been debugged, 471 fragments and 14.2 MB. From it came "12 seconds and 14 MB a
+neuron for a sharded datastack", and from that a card telling somebody fetching 25 mosquito meshes
+to expect **five minutes and 350 MB** for a wait that is half a minute and 98 MB. Re-measured over
+sets of 25 on three datastacks:
+
+| datastack | layout | fragments/neuron (median) | s/neuron | MB/neuron |
+|---|---|---|---|---|
+| FlyWire | unsharded | 132 | 1.59 | 0.51 |
+| BANC | sharded | 10 | 0.39 | 0.46 |
+| mosquito | sharded | 51 | 1.29 | 3.92 |
+
+Three things in that table, and the first two are the reasons the estimate was wrong rather than
+merely stale. **The fragment count varies more than a hundredfold within one datastack** —
+mosquito's 25 ran from 4 to 608 — so the neuron that gets measured alone is by selection the one
+somebody had open, which is a big one; 471 against a median of 51. And **`unsharded_mesh_dir` does
+not predict cost in either direction**: that split was reasoned from the *layout* rather than
+measured, and the unsharded datastack turns out to be the slowest per neuron of the three while
+the two sharded ones differ from each other by 8×. It is gone; there is one figure now, and the
+sentence says the spread out loud instead of implying a precision it cannot have.
+
+The third is the general one, and it is why the file header carries the set numbers rather than
+the neuron: **a per-neuron constant measured on a lone neuron is latency-bound in a way a set is
+not.** The fragment budget is shared (`fragmentConcurrencyFor`), so a set amortises what a single
+fetch pays in full — which is also why the one-neuron measurement is still the right fixture for
+tuning `FRAGMENT_CONCURRENCY`, where isolating the fan-out is the point.
+
+### Decimating over the fragments, rather than over a copy of them
+
+The fix above made this path matter: before it, 449 of 471 fragments were dropped, so the mesh
+being assembled was a twentieth of the size it should have been. With all of them arriving,
+`concatMeshes` followed by `decimateMesh` allocates a **second full-resolution copy** of a mesh
+that is about to be reduced by two orders of magnitude — 8.0 MB of positions and 15.3 MB of
+indices for one FlyWire neuron, beside the fragments it was built from, with `MESH_CONCURRENCY`
+neurons in flight. It also spends an index rebase pass, one add and one write per index, 3.8 M of
+them for that neuron, renumbering vertices that the very next pass renumbers again.
+
+`decimateParts` clusters over the fragments where they already are, and joins them itself in the
+one case where there is nothing to merge — which is what `concatMeshes` moving out of
+`precomputed/legacy.ts` into the `src/data/meshParts.ts` leaf bought. It had been sitting in a
+`neuroglancer_legacy_mesh` *parser* that fetches over the network, while four of its five importers
+were not that format; the misplacement had started to cost something, since a decimator that cannot
+join without pulling a network module into a pure-arithmetic one has to return a sentinel and make
+every caller write the join out instead. The same move gave the three structurally identical
+`{positions, indices}` types — `RawMesh`, `DecodedMesh`, `DecimatedMesh`, plus two anonymous
+spellings in `precomputed/index.ts` — one name, `MeshArrays`. The tell that the name was missing was
+the signature this change first shipped with: `decimateParts(parts: readonly DecimatedMesh[])`,
+taking as *input* the least decimated thing in the system.
+
+Nothing in the clustering needs them adjacent: a vertex's cell comes from the **global** bounding box and the cell size, and
+the slot a cell takes comes only from the order vertices are visited in — so walking the parts in
+order visits the exact sequence the joined array would have held. **The result is byte-identical**,
+which is the whole licence for doing it, so it is asserted rather than argued: `meshDecimate.test.ts`
+compares the two routes at four grids over a sphere cut into fragments, and the real mosquito
+neuron's 471 fragments were compared once by hand (1,444 vertices, 4,539 triangles, equal array
+for array).
+
+`pnpm probe:mesh-decimate` is the measurement, at that neuron's shape and at the grids a triangle
+budget actually asks for — computed from `decimateGridFor`, not transcribed, at twenty, five and
+one neuron:
+
+| grid | join, then decimate | decimate over parts |
+|---|---|---|
+| 332  | 31 ms, 47.5 MB | **16 ms, 23.9 MB** |
+| 664  | 30 ms, 63.6 MB | **27 ms, 39.9 MB** |
+| 1485 | 64 ms, 91.5 MB | **51 ms, 38.5 MB** |
+
+The saving is the joined copy — 23.6 MB, the fixture's own size — at the two coarser grids, and
+more at the finest, where the join route's extra buffers outlive more of the call.
+
+**Read that in `arrayBuffers`, not `heapUsed`**, and this is the trap worth keeping: typed arrays
+are not on the JS heap. A 100 MB `Float32Array` moves `heapUsed` by 0.5 MB on Node 26 and
+`arrayBuffers` by 100. A joined mesh is *entirely* typed arrays, so the first version of this probe
+read `heapUsed` and therefore measured everything except the thing the change removes — it printed
+a confident 76.7 MB against 49.5 MB whose difference was really its own scratch allocations and GC
+timing. Three more things the probe got wrong and had to be measured out of: its 1 ms sampling
+interval **could never fire**, since the call it wraps is synchronous; a fixture built from random
+indices per fragment produced 817,582 output triangles from 7,066 output vertices, a ratio no
+closed surface can have and 130× the real neuron's, which put the cost in an index pass a real mesh
+barely pays; and its fragments were scattered through a **cube**, which is the one shape that
+leaves the per-axis cell key unexercised. A single reading is also not a number — the same row
+measured 111 / 83 / 98 ms — so each column is a median of three, taken per column, because
+reporting the fastest run's memory is picking a memory sample at random.
+
+Two things `decimateParts` deliberately does not do. It **does not free each fragment as it goes**,
+which would halve the remaining peak again: `parts` is the caller's array, and a reader that quietly
+empties its argument is a worse trade than 23 MB. And it **does not fuse the bounds pass into the
+clustering pass** — it cannot, since `cell` and the origin are global and a vertex cannot be
+assigned before they are known; the bounds pass is about 5% of the call.
 
 ### Three routes to a skeleton, and which one answered is the user's to choose
 
@@ -1526,7 +1614,7 @@ every run at 8 and 16 returned all 40. `mapWithConcurrency` turns a failed neuro
 `undefined` indistinguishable from a neuron that genuinely has no skeleton, so the missing ones
 do not announce themselves.
 
-`L2_SKELETON_WARN` is 100 — far above `MESH_WARN_NEURONS`' 20, because a skeleton is one
+`L2_SKELETON_WARN` is 100 — a count where the mesh control is a *wait* (`MESH_WARN_SECONDS`), because a skeleton is one
 chunk-graph read where a graphene mesh is several hundred requests, and far below what a source
 publishing ready-made skeletons has anything to say about. It **warns and builds** rather than
 refusing: every FlyWire question of any size arrives on this route, so refusing to pay its cost
@@ -1675,7 +1763,7 @@ lists supervoxel fragments at full resolution, where neuPrint's multi-resolution
 a handful at a chosen LOD. Three constants follow from that, and each is a measurement rather
 than a guess:
 
-- **`MESH_WARN_NEURONS` is 20**, against the shared `MAX_NEURONS` of 10,000. Said by the
+- **`MESH_WARN_SECONDS` is five minutes**, and the neuron count (150) is derived from it, against the shared `MAX_NEURONS` of 10,000. Said by the
   *source* rather than by the node, because it is a fact about graphene: the same Meshes node
   against neuPrint has nothing to remark on. It reaches the card through
   `GeometryRequest.onWarn` — which is the per-source seam the old note here wanted, arrived at

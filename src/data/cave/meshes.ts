@@ -4,8 +4,8 @@
  * CAVE's segmentation is `graphene://`, which is not a bucket you can read by id: a root id is
  * a *dynamic* agglomeration of supervoxels, so the fragment list has to be asked for. The
  * server answers a manifest, the fragments themselves sit in an ordinary precomputed bucket,
- * and from there it is `src/data/precomputed`'s job — `decodeDracoFragment` and `concatMeshes`
- * do the rest unchanged.
+ * and from there it is `decodeDracoFragment` and `decimateParts`' job — the fragments are never
+ * joined, which `src/data/meshDecimate.ts` argues.
  *
  * Four things established against the live service rather than assumed, each of which would
  * otherwise be a plausible wrong picture:
@@ -24,19 +24,29 @@
  *    so this works from a static deploy with no proxy.
  *
  * **What it costs is requests, and there is no level of detail to trade against.** A graphene
- * manifest lists supervoxel fragments at full resolution — 492 requests and ~1.2 MB for one
- * neuron — where neuPrint's multi-resolution meshes answer in a handful at a chosen LOD. That
- * is why `MESH_WARN_NEURONS` is what it is, and why `fetchCoarseGeometry` does not come through
- * here: there is no cheap representation among these fragments to draw a thumbnail from. It
- * draws from the flat pyramid where a materialization has one and from the level-2 chunk graph
- * where it does not — see `CaveSource.fetchCoarseGeometry`. Measured on one neuron: 13.3 s to
- * fetch, and 1,276,736 triangles before decimation.
+ * manifest lists supervoxel fragments at full resolution, where neuPrint's multi-resolution
+ * meshes answer in a handful at a chosen LOD. Measured over sets of 25 neurons, which is the
+ * measurement `CaveSource.grapheneMeshes` states its cost from and the one to re-take rather than
+ * extrapolate — **a lone neuron does not predict a set, and the neurons that get measured on
+ * their own are the ones somebody had open, which are the big ones**:
+ *
+ *   FlyWire   132 fragments/neuron (median), 1.59 s, 0.51 MB — unsharded
+ *   BANC       10                          , 0.39 s, 0.46 MB — sharded
+ *   mosquito   51                          , 1.29 s, 3.92 MB — sharded
+ *
+ * The spread within one datastack is wider than the spread between them: mosquito's 25 ran from
+ * 4 fragments to 608. That is why `MESH_WARN_SECONDS` is stated as a wait rather than a count of
+ * neurons, and why the sentence it raises says the spread out loud.
+ *
+ * It is also why `fetchCoarseGeometry` does not come through here: there is no cheap
+ * representation among these fragments to draw a thumbnail from. It draws from the flat pyramid
+ * where a materialization has one and from the level-2 chunk graph where it does not — see
+ * `CaveSource.fetchCoarseGeometry`.
  */
 
 import { mapWithConcurrency } from '../concurrency'
-import { decimateMesh } from '../meshDecimate'
-import { concatMeshes } from '../precomputed/legacy'
-import type { DecodedMesh } from '../precomputed/draco'
+import { decimateParts } from '../meshDecimate'
+import type { MeshArrays } from '../meshParts'
 import { decodeDracoFragment } from '../precomputed/draco'
 import { fetchBytes, objectStoreUrl } from '../precomputed/transport'
 import type { CaveRequestOptions } from './client'
@@ -44,60 +54,56 @@ import { caveGet } from './client'
 import { parseGrapheneSource } from './graphene'
 
 /**
- * Where a graphene mesh request starts saying how long it will be.
+ * What a graphene mesh costs, per neuron, over a **set**.
  *
- * Far below the ten thousand the neuron-count controls share, and the gap is the whole point:
- * at 492 requests and ~1.2 MB apiece, a thousand neurons is half a million requests. It is said
- * by the *source* rather than by the node because it is a fact about graphene rather than about
- * the Meshes node — the same node against neuPrint's multi-resolution meshes has nothing to warn
- * about at all.
+ * The three figures the file header measures, taken at their slow end: 1.59 s a neuron on FlyWire,
+ * 3.92 MB on mosquito, 0.46 MB at the bottom. Rounded out rather than averaged, because the point
+ * of quoting them is a wait somebody is about to sit through.
  *
- * It was `MAX_MESH_NEURONS = 20`, and a refusal. Twenty was never a scientific quantity of
- * neurons; what it protected against was an unbounded fan-out, and `MESH_CONCURRENCY` plus the
- * session geometry cache are what actually do that. So the number survives as the point where
- * the cost is worth a sentence, and the fetch goes ahead — see `core/limits.ts` for why every
- * guard rail in the tree made the same move.
+ * They are exported as constants rather than written into the sentence because the *threshold* is
+ * derived from them — see `MESH_WARN_SECONDS`. A message that says five minutes, raised by a
+ * condition that means something else, is two numbers to keep in step and eventually one bug.
  */
-export const MESH_WARN_NEURONS = 20
+export const SECONDS_PER_NEURON = 2
+export const MB_PER_NEURON = { low: 0.5, high: 4 } as const
 
 /**
- * Triangles a decimated mesh comes out at, per grid step.
+ * How long a fetch has to threaten before it says so: **five minutes**.
  *
- * `decimateMesh` clusters to roughly one vertex per occupied cell, so the count follows the
- * grid's square. Measured on one FlyWire neuron, down from 1,276,736 triangles: grid 96 gives
- * 6,308, grid 192 gives 25,548, grid 256 gives 44,091 — all three within 2% of
- * `0.68 * grid²`, which is what makes the inverse below sound rather than a guess.
+ * A wait rather than a neuron count, which is the whole of this control. It was 20 neurons, and
+ * 20 was inherited from a refusal where it had protected against an unbounded fan-out — a job
+ * `MESH_CONCURRENCY` and the session geometry cache actually do. As a *warning* threshold it was
+ * answering the wrong question: twenty graphene meshes is half a minute, and a sentence about
+ * cancelling in front of half a minute is a sentence that teaches people to dismiss the next one.
+ *
+ * Expressed here, the number is arguable on its own terms — five minutes is about where a wait
+ * stops being something you sit through — where "20 neurons" could only be argued about by
+ * somebody who already knew what a neuron costs.
  */
-const TRIANGLES_PER_CELL = 0.68
-
-/** Below this a neuron stops being an arbor and becomes a smear. */
-const MIN_DECIMATE_GRID = 48
+export const MESH_WARN_SECONDS = 300
 
 /**
- * The grid that lands a set of `count` neurons on the caller's triangle budget.
+ * The neuron count that reaches `MESH_WARN_SECONDS`, which is what the fetch actually tests.
  *
- * This is what `GeometryRequest.triangleBudget` means for a source with **no** levels of detail.
- * The seam says a source with one level ignores it, and that is written for a publisher whose
- * levels are fixed — graphene is the other case: one level, but a continuous knob, so it is the
- * only source in the tree that can hit an arbitrary budget exactly instead of snapping to a
- * published one. Ignoring it would leave the Meshes node's `Detail` control — non-advanced, on
- * the card, reading "Triangle budget for the whole set" — doing nothing at all here.
+ * **Derived, so the threshold and the sentence cannot disagree**: the warning fires exactly when
+ * the duration it is about to print exceeds five minutes. Re-measuring `SECONDS_PER_NEURON` moves
+ * both at once, which is the property that was missing when the estimate drifted by 10× and the
+ * threshold did not notice.
  *
- * The floor is what stops "low — many neurons" against twenty neurons erasing the arbor; the
- * caption admits the decimation either way.
+ * It is said by the *source* rather than by the node because it is a fact about graphene rather
+ * than about the Meshes node — the same node against neuPrint's multi-resolution meshes has
+ * nothing to warn about at all.
  */
-export function decimateGridFor(triangleBudget: number, count: number): number {
-  const perNeuron = Math.max(1, triangleBudget) / Math.max(1, count)
-  return Math.max(MIN_DECIMATE_GRID, Math.round(Math.sqrt(perNeuron / TRIANGLES_PER_CELL)))
-}
+export const MESH_WARN_NEURONS = Math.ceil(MESH_WARN_SECONDS / SECONDS_PER_NEURON)
 
 /**
  * How many fragment requests are in flight across the whole run.
  *
- * The work is latency rather than bytes — 492 fragments averaging about 2.4 kB — so this is the
- * number that decides the wait. Measured against the live bucket on **one** neuron: 18.9 s at
- * 12, 13.3 s at 32, 11.3 s at 64. Past 32 the gain is small and it is already a lot of parallel
- * requests at one host.
+ * The work is latency rather than bytes — a fragment averages 3-4 kB on FlyWire and BANC — so
+ * this is the number that decides the wait. Measured against the live bucket on **one** neuron,
+ * which is the right shape of fixture for this one question because it isolates the fan-out:
+ * 18.9 s at 12, 13.3 s at 32, 11.3 s at 64. Past 32 the gain is small and it is already a lot of
+ * parallel requests at one host.
  *
  * A **shared** budget rather than a per-neuron one, because the per-neuron figure above is what
  * was measured and a fixed 32 apiece times the neurons in flight is not it: three neurons would
@@ -303,7 +309,7 @@ export const NO_FRAGMENTS: FragmentTally = { named: 0, missing: 0, unaddressable
 /** One neuron's mesh and the accounting that says how much of it this is. */
 export interface GrapheneMesh {
   /** Undefined where the segment has no mesh at all. */
-  mesh?: DecodedMesh
+  mesh?: MeshArrays
   tally: FragmentTally
 }
 
@@ -387,7 +393,7 @@ export async function readGrapheneMesh(
   // a mesh, where a thrown request is a neuron missing from the scene with nothing saying why.
   // Only the partial-failure case survives this: `mapWithConcurrency` has already thrown if
   // every fragment failed, and an empty fragment list returned above.
-  const decoded = parts.filter((p): p is DecodedMesh => p !== undefined)
+  const decoded = parts.filter((p): p is MeshArrays => p !== undefined)
   const tally: FragmentTally = {
     named: fragments.length,
     missing: fragments.length - decoded.length,
@@ -396,14 +402,15 @@ export async function readGrapheneMesh(
 
   /*
    * Decimated on arrival, and this is not optional at graphene's resolution: one FlyWire neuron
-   * concatenates to 668,750 vertices and 1,276,736 triangles, so a set of twenty at full detail
-   * is twenty-five million triangles in a WebGL scene that also has to draw synapses. The same
-   * call the ROI shells make, at the same grid — a *feature size* rather than a vertex target,
-   * so a small neuron keeps proportionally as much shape as a large one, and a mesh already
-   * below the target is returned untouched.
+   * is 668,750 vertices and 1,276,736 triangles across its fragments, so a set of twenty at full
+   * detail is twenty-five million triangles in a WebGL scene that also has to draw synapses. The
+   * same reduction the ROI shells get, at the same grid — a *feature size* rather than a vertex
+   * target, so a small neuron keeps proportionally as much shape as a large one.
    *
-   * It reduces memory and draw cost, not the wait: the 492 requests are already paid by here.
+   * Over the **fragments**, not over a joined copy of them, which is the difference between
+   * holding one full-resolution mesh here and holding two.
+   *
+   * It reduces memory and draw cost, not the wait: the requests are already paid for by here.
    */
-  const joined = concatMeshes(decoded)
-  return { mesh: decimateMesh(joined.positions, joined.indices, grid), tally }
+  return { mesh: decimateParts(decoded, grid), tally }
 }

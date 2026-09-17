@@ -15,6 +15,7 @@
     "dev": "vite",
     "export:check": "vitest run src/export && python3 scripts/check-export.py && python3 scripts/probe-py-helpers.py && Rscript scripts/check-export.R",
     "export:golden": "UPDATE_GOLDEN=1 vitest run src/export",
+    "probe:mesh-decimate": "NODE_OPTIONS=--expose-gc vite-node scripts/probe-mesh-decimate.ts",
     "probe:zapbench": "vite-node scripts/probe-zapbench.ts",
     "probe:nblast": "node scripts/probe-nblast.mjs",
     "probe:netexport": "vite-node scripts/probe-network-export.ts && python3 scripts/probe-network-export.py && Rscript scripts/probe-network-export.R",

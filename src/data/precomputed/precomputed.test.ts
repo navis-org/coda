@@ -27,7 +27,8 @@ import {
   thumbnailCeiling,
   withinCeiling,
 } from './index'
-import { concatMeshes, parseLegacyFragment } from './legacy'
+import { parseLegacyFragment } from './legacy'
+import { concatMeshes } from '../meshParts'
 import type { MultiResInfo } from './multires'
 import { chooseLod, fragmentOffset, fragmentTransform, parseMultiResManifest } from './multires'
 import { hashUint64, murmurHash3x86_128 } from './murmur'

@@ -15,11 +15,7 @@
  * here; see `POINTS_ARE_NM` in `api.ts` for the cross-check that established it.
  */
 
-/** A parsed `IndexedTriangleSet`: xyz-interleaved positions and triangle indices. */
-export interface X3dMesh {
-  positions: Float32Array
-  indices: Uint32Array
-}
+import type { MeshArrays } from '../meshParts'
 
 /**
  * Read the numbers out of one single-quoted attribute.
@@ -61,7 +57,7 @@ function numbers(text: string): number[] {
   return out
 }
 
-export function parseX3dMesh(source: string): X3dMesh {
+export function parseX3dMesh(source: string): MeshArrays {
   const indexText = attribute(source, INDEX_RE)
   const pointText = attribute(source, POINT_RE)
   if (indexText === undefined || pointText === undefined) {
