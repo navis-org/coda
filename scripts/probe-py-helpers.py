@@ -1170,6 +1170,65 @@ else:
     check("umap call: precomputed_knn takes the helper's arrays as they are",
           _xy2.shape == (40, 2) and np.isfinite(_xy2).all(), str(_xy2.shape))
 
+# ---- coda_in_volumes --------------------------------------------------------
+#
+# Points in Volumes. Run rather than read because the whole helper is a fold over a library call
+# whose *return shape* is the thing the cell depends on: `navis.in_volume` takes a single Volume,
+# a sequence of them or a dict, and answers a different shape for each. The helper passes one at
+# a time and casts with `np.asarray(..., dtype=bool)`; a version that started returning a frame
+# or a dict there would still run and would fill the column with something else.
+#
+# Two properties are the node's rather than navis's and neither is visible in the text: **the
+# first volume on the wire wins** where two contain a point, and a point inside none comes out
+# `None` rather than `NaN`, which is what makes the two ports `notna()`/`isna()` rather than a
+# dtype question. Both are checked with overlapping cubes, since a tiling region set — the
+# ordinary case — cannot show either.
+try:
+    import navis as _navis
+    import trimesh as _trimesh
+except ImportError:
+    print()
+    print('skipped: coda_in_volumes needs navis')
+else:
+    print()
+    vns = load_cell(FIXTURES / "everything.ipynb", "def coda_in_volumes(",
+                    {"pd": pd, "np": np, "navis": _navis})
+
+    def _cube(name, centre, half=1.0):
+        box = _trimesh.creation.box(extents=(half * 2, half * 2, half * 2))
+        box.apply_translation(centre)
+        return _navis.Volume(box.vertices, box.faces, name=name)
+
+    # `a` and `b` overlap in x 0.5..1; `c` is on its own. A point in the overlap is in two.
+    _vols = [_cube('a', (0, 0, 0)), _cube('b', (1.5, 0, 0)), _cube('c', (10, 0, 0))]
+    _cloud = pd.DataFrame({
+        'neuronId': ['1', '2', '3', '4'],
+        'x': [0.0, 0.75, 10.0, -50.0],
+        'y': [0.0, 0.0, 0.0, 0.0],
+        'z': [0.0, 0.0, 0.0, 0.0],
+    })
+    _out, _overlapping = vns['coda_in_volumes'](_cloud, _vols, 'roi')
+
+    check('in_volumes: every input row survives', len(_out) == len(_cloud), str(len(_out)))
+    check('in_volumes: a point in one volume takes its name',
+          _out['roi'].iloc[0] == 'a', repr(_out['roi'].iloc[0]))
+    check('in_volumes: a point in two takes the first on the wire',
+          _out['roi'].iloc[1] == 'a', repr(_out['roi'].iloc[1]))
+    check('in_volumes: overlap is counted, not hidden', _overlapping == 1, str(_overlapping))
+    check('in_volumes: a later volume still names its own points',
+          _out['roi'].iloc[2] == 'c', repr(_out['roi'].iloc[2]))
+    check('in_volumes: a point inside nothing is None, not NaN',
+          _out['roi'].iloc[3] is None, repr(_out['roi'].iloc[3]))
+    check('in_volumes: the column is object, so notna() splits it',
+          _out['roi'].dtype == object, str(_out['roi'].dtype))
+    check('in_volumes: the two ports partition the cloud',
+          len(_out[_out['roi'].notna()]) + len(_out[_out['roi'].isna()]) == len(_cloud))
+    check('in_volumes: the input frame is not written into', 'roi' not in _cloud.columns)
+
+    _empty, _none = vns['coda_in_volumes'](_cloud.iloc[:0], _vols, 'roi')
+    check('in_volumes: an empty cloud keeps the column',
+          'roi' in _empty.columns and len(_empty) == 0 and _none == 0, str(list(_empty.columns)))
+
 print()
 print(f'{len(fails)} failed' if fails else 'all passed')
 sys.exit(1 if fails else 0)

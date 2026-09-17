@@ -48,6 +48,7 @@
     "knip:update": "node scripts/knip-check.mjs --update",
     "preview": "vite preview",
     "probe:roimeshes": "node scripts/probe-roimeshes.mjs",
+    "probe:points-in-volumes": "vite-node scripts/probe-points-in-volumes.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b --noEmit && tsc -p tsconfig.scripts.json --noEmit",

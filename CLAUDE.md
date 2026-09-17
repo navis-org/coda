@@ -1116,6 +1116,46 @@ own `validHints`), live under the lock like a rename; the ✎ sits beside the ×
   `nl[, "type"] <- …[match(names(nl), frame$neuronId)]` with no restriction at all, and a carried
   column survives subsetting — the two features composing in the export as on the canvas.
   See [docs/nodes.md](docs/nodes.md).
+- **A synapse carries no region, and the node that fixes that is a ray per point.** neuPrint's
+  `Synapse` nodes return a location and a confidence, CAVE's synapse tables coordinates and root ids,
+  CATMAID's connectors neither — so "which of these outputs are in `LO(R)`" had no route on the
+  canvas, `ROI Counts` answering the *count* and no locations. `Points in Volumes`
+  (`neuron.pointsInVolumes`) takes points on one socket and the same `Volumes` wire the 3D View
+  takes on the other. **Two ports *and* a column, because one wire carries many volumes**: sixty-three
+  shells make a bare pair of ports answer "in something" and throw away which, while a bare column
+  makes "keep the ones inside" a second card; one pass computes both, and `Outside` carries the
+  column holding null so the two ports are one type a Stack can rejoin. The name is a param
+  (`roi`), since the volumes need not be neuropils, and `foldNodeColumns` writes it **over** a
+  same-named column in its own slot. **Overlap is counted, not assumed away** — the primary set
+  tiles but the published list nests and neuron meshes interdigitate, so every box candidate is
+  tested, first in item order wins, and the count is said; short-circuiting gives the same *answer*
+  and passes every test about it, which is why the count is returned rather than derived. Four
+  silent failures — and a fifth that is about the *node* rather than the ray: **`evaluate` is on the
+  main thread, so a loop that never awaits cannot be cancelled by the click it is checking for**,
+  and reports progress nothing paints; the point walk *and* the tree build are sliced now. What is
+  shared is the **loop**, not the yield: a first pass lifted `SLICE_MS`/`yieldToBrowser` to
+  `core/slice.ts` and left every caller to write the loop, which is exactly what had been
+  re-derived three ways (`runUmap` per epoch, this node through a throwing `onTick`, `brandesSweep`
+  **never yielding at all**) — so `sliced` is that statement, tested in `core/slice.test.ts` rather
+  than in whichever node happens to call it, reading its clock every 64th item because
+  `performance.now()` is 23.7 ns in-loop and 52% of a cheap body. The warning is raised before any
+  tree is built (`volumeBoxes` is separate and synchronous) and the counting sweep is skipped
+  entirely unless `points × volumes` can reach the threshold; the boxes are **`boundsOf`'s** so the
+  `WeakMap` every `MeshesValue` already populated answers them. The minted column is folded by
+  `tableOps`' **`foldColumns`** — the general rule, which `foldNodeColumns` now wraps with the
+  `id` default that was only ever the network's — and its guard asks about the **incumbent** rather
+  than the name: an id column refuses, any other collision warns, where `isIdentifierColumn(name)`
+  alone both refused names nothing collided with and let `confidence` be destroyed in silence. The
+  four ray traps are:
+  `MeshBVH` reorders the index array **in place** without `indirect: true`, and  Deferred twice — dynamically imported so `nodes.html` gets no renderer, **and external in
+  `vite.mcp.config.ts`**, whose `inlineDynamicImports` had put three in the MCP bundle anyway:
+  2,482 kB → 4,345 kB, back to +12 kB. The `external` list is a fact somebody has to remember, so
+  a **size budget** in that config is what notices when they do not — three arrived by a dynamic
+  import three directories away and was found by hand, after shipping, because the artifact is
+  built on every push and nothing looked at it. Both exporters are short for once (`navis.in_volume`,
+  `nat::pointsinside`) and both were run against **overlapping** cubes, a tiling set agreeing with a
+  short-circuiting implementation; R needs `Rvcg`, which nat only suggests, and the cell says so.
+  See [docs/nodes.md](docs/nodes.md) and [docs/limits.md](docs/limits.md).
 - **A split is one pass, because two filters with opposite conditions are not a partition.**
   `Split Neurons` (`neuron.splitNeurons`) is **`Stack Neurons` run backwards**: it asks the attribute
   table a collection carries a set of Find Neurons rows and hands back both halves, so

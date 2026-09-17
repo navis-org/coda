@@ -447,6 +447,71 @@ export function kindClashMessage(
 }
 
 /**
+ * Two geometry values disagreeing about the frame their coordinates are in.
+ *
+ * **Structured rather than a sentence**, which is `kindClashMessage`'s shape eleven lines up and
+ * the correction of what this was first: an exported string *fragment* (`SPACES_APART`) that each
+ * caller glued in front of a lower-case clause of its own. Two things were wrong with that. The
+ * grammar contract — "this continues `…, so`, so start lower-case" — was enforced by nothing but
+ * the next author's attention. And it only ever covered the *space* arm, because that was the
+ * clause that happened to have been copied verbatim; the units arm went on writing its own prose
+ * in every caller, so one rule had two spellings and the shared half was chosen by accident.
+ *
+ * So the check answers **which axis disagrees and what the two values are**, and rendering is
+ * `frameClashMessage`'s. That also dissolves the objection that kept `checkStackable` from using
+ * this: its two axes can be stated by *different inputs*, so it needs to name them per axis —
+ * which it can, because it does the naming.
+ */
+export interface FrameClash {
+  axis: 'units' | 'space'
+  left: string
+  right: string
+}
+
+export function frameClash(
+  left: { units?: string; space?: string } | undefined,
+  right: { units?: string; space?: string } | undefined,
+): FrameClash | undefined {
+  if (!left || !right) return undefined
+  if (left.units && right.units && left.units !== right.units) {
+    return { axis: 'units', left: left.units, right: right.units }
+  }
+  if (left.space && right.space && left.space !== right.space) {
+    return { axis: 'space', left: left.space, right: right.space }
+  }
+  return undefined
+}
+
+/**
+ * What to say about one, in the caller's own terms.
+ *
+ * `names` are what the two sides are called *on this card* — `Input 1` and `Input 4` for a stack,
+ * `The points` and `the volumes` for Points in Volumes — and `consequence` is what actually goes
+ * wrong there, which is the part that genuinely differs (two clouds in opposite corners of a
+ * scene; nothing found inside anything). Everything a reader meeting two of these must recognise
+ * as one complaint is here, including the clause about template spaces that used to be an
+ * exported fragment.
+ *
+ * Both consequences are whole sentences. That is the other half of the fix: under the fragment
+ * the space one had to begin lower-case and the units one upper-case, for no reason a caller
+ * could see.
+ */
+export function frameClashMessage(
+  clash: FrameClash,
+  names: { left: string; right: string },
+  consequence: { units: string; space: string },
+): string {
+  const where = `${names.left} is in ${clash.left} and ${names.right} is in ${clash.right}.`
+  return clash.axis === 'units'
+    ? `${where} ${consequence.units}`
+    : `${where} Two template spaces are hundreds of micrometres apart, so ${lowerFirst(consequence.space)}`
+}
+
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1)
+}
+
+/**
  * Whether a set of geometry values can be stacked, and what to say when it cannot.
  *
  * Three questions, in the order that a reader would want them answered — and each of the three
@@ -503,19 +568,32 @@ export function checkStackable(inputs: readonly GeometryValue[]): StackedFrame {
         ),
       )
     }
-    if (units && input.units && input.units !== units.value) {
+    /*
+     * Per axis, because the two can be stated by *different* inputs — input 1 may state units
+     * only and input 2 space only — and a refusal has to name the input that actually has to
+     * change. `frameClashMessage` owns the sentence; what is supplied here is the naming and what
+     * goes wrong when a collection is drawn at two scales or in two brains.
+     */
+    for (const [axis, stated] of [
+      ['units', units],
+      ['space', space],
+    ] as const) {
+      if (!stated) continue
+      const clash = frameClash({ [axis]: stated.value }, input)
+      if (!clash) continue
       throw new Error(
-        `${stackInputName(units.input)} is in ${units.value} and ${where} is in ` +
-          `${input.units}. Stacked, part of the collection would be drawn at the wrong scale ` +
-          'with nothing to say so.',
-      )
-    }
-    if (space && input.space && input.space !== space.value) {
-      throw new Error(
-        `${stackInputName(space.input)} is in ${space.value} and ${where} is in ` +
-          `${input.space}. Two template spaces are hundreds of micrometres apart, so this would ` +
-          'draw two clouds in opposite corners of an empty scene. Put every input through ' +
-          'Transform Neurons first.',
+        frameClashMessage(
+          clash,
+          { left: stackInputName(stated.input), right: where },
+          {
+            units:
+              'Stacked, part of the collection would be drawn at the wrong scale with nothing ' +
+              'to say so.',
+            space:
+              'This would draw two clouds in opposite corners of an empty scene. Put every ' +
+              'input through Transform Neurons first.',
+          },
+        ),
       )
     }
   })

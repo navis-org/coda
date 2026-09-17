@@ -35,6 +35,7 @@ import { decodeRenames } from '../../../nodes/lib/renames'
 import { readAttach } from '../../../nodes/transform/attachAttributes'
 import type { ReduceStat } from '../../../nodes/lib/matrixReduce'
 import { readReduceOptions, reduceColumnName } from '../../../nodes/lib/matrixReduce'
+import { volumeColumnName } from '../../../nodes/lib/pointsInMeshes'
 import { rCol, rStr, rValue, rVector } from '../r'
 import { asFrame } from '../../neutral'
 import { registerEmitter } from '../registry'
@@ -237,6 +238,50 @@ registerEmitter('neuron.splitNeurons', (ctx) => {
     `    pull(.coda_match)`,
     `${matched} <- ${src}[${mask}]`,
     `${rest} <- ${src}[!${mask}]`,
+  ]
+})
+
+/**
+ * Points in Volumes: `nat::pointsinside`, once per shell.
+ *
+ * R is the easier language here for once, and it is the same reason `Split Neurons` goes the
+ * other way: that node needs an attribute table, which nat has and navis does not, while this
+ * one needs a coordinate matrix and a surface, which both have. `neuron.roiMeshes` emits a
+ * **named** list of `mesh3d`, so `coda_in_volumes` fills the column with region names rather
+ * than indices with no extra work.
+ *
+ * Two notes, matching the Python emitter's, and one that is R's alone:
+ *
+ * - **Rvcg.** `nat::pointsinside` dispatches to it and nat only *suggests* it, so a reader with
+ *   nat alone gets an error naming the package. Said here rather than worked around: the
+ *   alternative is a bounding-box fallback, which answers a different question quietly.
+ * - **A different containment test**, as in the notebook — this one is Rvcg's ray casting
+ *   rather than Coda's BVH, so a point on a face is each library's answer.
+ * - **The column vocabulary is neuprintr's**, which this export already says at the Synapses
+ *   cell: `x`/`y`/`z` are the columns the helper reads and they are the same in both, but the
+ *   frame around them carries `bodyid` where the canvas carries `neuronId`.
+ */
+registerEmitter('neuron.pointsInVolumes', (ctx) => {
+  const points = ctx.wired('points')
+  const volumes = ctx.wired('volumes')
+  const name = volumeColumnName(ctx.params)
+  const inside = ctx.output('inside')
+  const outside = ctx.output('outside')
+  const split = `${ctx.name}_split`
+
+  ctx.library('nat')
+  ctx.helper('coda_in_volumes')
+  return [
+    ...ctx.note(
+      'nat::pointsinside needs the Rvcg package, which nat suggests rather than depends on — ' +
+        'install.packages("Rvcg") if this errors. It casts its own rays where Coda descends a ' +
+        'bounding volume hierarchy, so the two agree on any closed mesh except at its surface.',
+    ),
+    `${split} <- coda_in_volumes(${points}, ${volumes}, ${rStr(name)})`,
+    `${inside} <- ${split}$points[!is.na(${split}$points[[${rStr(name)}]]), ]`,
+    `${outside} <- ${split}$points[is.na(${split}$points[[${rStr(name)}]]), ]`,
+    `cat(nrow(${inside}), "points inside ·", nrow(${outside}), "outside ·",`,
+    `    ${split}$overlapping, "in more than one volume\n")`,
   ]
 })
 

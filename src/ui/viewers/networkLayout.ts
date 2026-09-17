@@ -8,6 +8,11 @@
  * lobula, or PN → KC → MBON — so it earns its place for connectomics.
  */
 
+// `core/slice.ts`' yield, not a local `setTimeout(…, 0)`: this loop hands back about 130
+// times inside `PREFUSE_BUDGET_MS`, and past five nesting levels Chrome's timer clamp costs
+// ~4 ms of dead wall clock each — half a second on the graph this code exists for. The shared
+// one prefers `scheduler.yield()`, which has no clamp. `PREFUSE_YIELD_MS` stays its own number.
+import { yieldToBrowser } from '../../core/slice'
 import type Graph from 'graphology'
 
 import type { CellValue, NetworkValue } from '../../core/values'
@@ -858,7 +863,6 @@ async function prefusePositions(
   }
   const positions = new Map<string, Positioned>()
   const deadline = Date.now() + PREFUSE_BUDGET_MS
-  const breathe = () => new Promise((resolve) => setTimeout(resolve, 0))
 
   /**
    * Lay one node set out, handing the thread back if it is big enough to be worth it.
@@ -876,14 +880,14 @@ async function prefusePositions(
       if (now > deadline) break
       if (now - checkpoint > PREFUSE_YIELD_MS) {
         checkpoint = now
-        await breathe()
+        await yieldToBrowser()
       }
     }
     return run.positions
   }
 
   if (options.partition === false) {
-    await breathe()
+    await yieldToBrowser()
     const out = await layOut(topology.ids.length, topology.edges)
     topology.ids.forEach((id, i) => positions.set(id, { x: out.x[i]!, y: out.y[i]! }))
     return positions
@@ -949,7 +953,7 @@ async function prefusePositions(
     if (now - checkpoint > PREFUSE_YIELD_MS) {
       checkpoint = now
       stopped = stopped || now > deadline
-      await breathe()
+      await yieldToBrowser()
     }
   }
 

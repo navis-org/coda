@@ -27,6 +27,7 @@ import { unpivotPlan } from '../../../nodes/lib/tableOps'
 import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
 import { readAttach } from '../../../nodes/transform/attachAttributes'
+import { volumeColumnName } from '../../../nodes/lib/pointsInMeshes'
 import { carryable } from '../../../nodes/lib/carryParams'
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import { asFrame } from '../../neutral'
@@ -269,6 +270,55 @@ registerEmitter('neuron.splitNeurons', (ctx) => {
       `\`${ctx.output('matched')} = ${src}[mask.to_numpy()]\`, ` +
       `\`${ctx.output('rest')} = ${src}[~mask.to_numpy()]\`.`,
   )
+})
+
+/**
+ * Points in Volumes: `navis.in_volume`, once per shell, folded by the node's own rules.
+ *
+ * The faithful route and a genuinely short cell, which is the opposite of its `Split Neurons`
+ * neighbour above — there the refusal is that a navis `NeuronList` has no attribute table to
+ * filter, here both operands are exactly what navis takes: a frame of coordinates and a
+ * `Volume`, which is what `neuron.roiMeshes` already emits (`navis.interfaces.neuprint.fetch_roi`
+ * returns `Volume.from_object(ob, name=roi)`, so the names the column is filled with are the
+ * region names and not indices — read off the installed source rather than recalled).
+ *
+ * `coda_in_volumes` carries the loop and the first-wins rule; see it for why every volume is
+ * tested. What stays here is the pair of ports and the two divergences, and both are notes
+ * rather than refusals because the *answer* is the same question honestly asked:
+ *
+ * - **The containment test is a different implementation.** navis goes through ncollpyde and
+ *   the canvas casts a BVH ray, so a point on a face — or any point at all in a surface that is
+ *   not closed — is each library's own answer rather than a shared one.
+ * - **The overlap count is returned rather than warned.** A notebook has no status bar, so the
+ *   number the canvas puts in a warning is bound to a name and printed.
+ */
+registerEmitter('neuron.pointsInVolumes', (ctx) => {
+  const points = ctx.wired('points')
+  const volumes = ctx.wired('volumes')
+  const name = volumeColumnName(ctx.params)
+  const inside = ctx.output('inside')
+  const outside = ctx.output('outside')
+  // `ctx.name`-scoped, as the R emitter's `_split` is: a bare `_overlapping` is a
+  // document-level global that a second Points in Volumes node would silently reuse.
+  const labelled = `${ctx.name}_labelled`
+  const overlapping = `${ctx.name}_overlapping`
+
+  ctx.require('navis')
+  ctx.helper('coda_in_volumes')
+  return [
+    ...ctx.note(
+      'navis tests containment with ncollpyde where Coda casts a ray through a bounding ' +
+        'volume hierarchy. The two agree on any closed mesh except at its surface, so a ' +
+        'point exactly on a face — and every point at all in a mesh that is not watertight — ' +
+        'is each library’s own answer.',
+    ),
+    `${labelled}, ${overlapping} = coda_in_volumes(${points}, ${volumes}, ${pyStr(name)})`,
+    `${inside} = ${labelled}[${labelled}[${pyStr(name)}].notna()].reset_index(drop=True)`,
+    `${outside} = ${labelled}[${labelled}[${pyStr(name)}].isna()].reset_index(drop=True)`,
+    ``,
+    `print(f"{len(${inside})} points inside · {len(${outside})} outside · "`,
+    `      f"{${overlapping}} in more than one volume")`,
+  ]
 })
 
 // ---------------------------------------------------------------------------

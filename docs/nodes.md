@@ -842,6 +842,235 @@ with both partitions summing and `Matching`'s bounding box recomputed to its own
 fixture carries two rows, one of them a regex, because a single-row node exercises neither the R
 predicate join nor the regex note.
 
+## Points in Volumes: the region a synapse is in
+
+`neuron.pointsInVolumes` takes a point cloud on one socket and meshes on the other, and hands back
+both halves — the points inside some volume and the rest — with a column naming *which* volume each
+one landed in.
+
+### Why it had to exist
+
+**A synapse cloud carries no region.** neuPrint's `Synapse` nodes are matched by body and polarity
+and return `s.location` and `s.confidence` (`synapsesCypher`); a CAVE synapse table carries
+coordinates and root ids; a CATMAID connector carries neither. So "which of these LC4 outputs are in
+`LO(R)`" — an ordinary question on any connectome — had no route on the canvas at all.
+
+`ROI Counts` is the one node adjacent to it and answers a different question: it gives the *count*
+per region and no locations, so it cannot colour a scene, cannot feed a filter downstream, and stops
+existing the moment the volume is a neuron's own mesh rather than a neuropil. Wiring `Meshes` into
+the `Volumes` socket instead of `ROI Meshes` asks which synapses lie inside another cell, with no
+change to the node.
+
+### Two ports **and** a column, because one wire carries many volumes
+
+`Split Neurons`' gesture, on points — but that node splits on a *filter*, where here the answer is a
+name. A wire from `ROI Meshes` carries sixty-three shells, so a bare pair of ports answers "in
+something" and throws away which; a bare column makes the common case ("keep the ones inside") a
+second card. One pass computes both: the column is the labelling, the ports are that column read as
+a predicate.
+
+**`Outside` carries the column too, holding null in every row.** Two ports of one type is what lets
+a `Stack Neurons` put the halves back together and what makes `inferOutputs` one answer rather than
+two — and an all-null column on the half defined by having no value is not information lost, it is
+the definition written down.
+
+The name is a **param** defaulting to `roi`, not a constant, because the wire does not have to carry
+neuropils: a column called `roi` naming a body id is a lie that survives into a CSV.
+`volumeColumnSchema` folds it in through `foldColumns`, so a cloud that already has a `roi` gets it
+**written over in place** rather than beside — two `roi` columns give every picker downstream two
+answers and the second is the stale one — and the surviving one keeps its slot, since `TableViewer`,
+the CSV export and GraphML key ids are all `schema.columns` in order. That is the half
+`naming.test.ts` requires the `description` to state.
+
+**The guard over that rule asks about the incumbent, not the name**, and the first version asked
+the wrong one of the two. `isIdentifierColumn(name)` alone refuses `neuronId` on a cloud that has
+no such column, and says nothing at all when somebody types `confidence` over a real one — so the
+hole it left was every column that is not id-shaped, destroyed in silence. `columnClash` asks what
+is actually there: an id column is a **refusal** (invariant 8 — the table still has every column,
+still joins, and joins wrongly, so there is no useful answer on the other side), anything else is a
+**warning** naming what was replaced, which is `docs/limits.md`' tiering and `relabelTarget`'s rule
+for the overwrite case — "overwriting a column somebody did not name in this node is not a thing to
+do quietly".
+
+### Overlap is counted, not assumed away
+
+A dataset's primary set tiles, so a point is in one region and the first hit is the only hit.
+Nothing guarantees that — the published list *nests* (230 regions on hemibrain against the 63 that
+tile), and neuron meshes overlap wherever two arbours interdigitate. So every box candidate is
+tested rather than stopping at the first, **the first in item order wins**, and the count of points
+that were in more than one is said out loud.
+
+Stopping early would be faster by the overlap rate and would make the difference between "these
+synapses are in `LO(R)`" and "these synapses are in `LO(R)` and also three other things" invisible.
+It is also what makes the tests mean something: an implementation that short-circuited passes every
+assertion about the *answer*, because the answer is the same. The count is the only thing that
+separates them, which is why it is returned rather than derived.
+
+### The frame check is a refusal, and it is the one silent failure here
+
+`checkSameFrame` is `checkStackable`'s argument arriving at a different node. Two template spaces are
+hundreds of micrometres apart, so a cloud in `FLYWIRE` against shells in `JRCFIB2022M` puts every
+point outside every volume — and that is a **result**, not an error: an empty `Inside` port and a
+green card, which reads as a dataset with no synapses in those regions. Units the same way, a factor
+of eight between raw and calibrated hemibrain coordinates.
+
+It cannot be raised at edit time, and that is a fact about `CodaType` rather than a choice: units and
+a template space live on the *value*, and a type carries a kind and a schema. `neuron.stackNeurons`
+hits the same wall and says so. What `validate` *can* see is the one expensive mistake — a column
+name whose last word is `id`, which the write-over rule would use to replace every synapse's body id
+with a region name, leaving a table that still has all its columns and still joins, wrongly
+(invariant 8). Said in both places, because a stored graph carrying one must not run.
+
+### The ray, and three things that are silent when wrong
+
+`nodes/lib/meshInside.ts` owns the containment test and nothing else in the node knows what a BVH is.
+
+- **`indirect: true`**, which is `ui/viewers/meshPicking.ts`' finding at a second call site.
+  `MeshBVH` builds by reordering the geometry's index array **in place**, and the array here is
+  `MeshGeometry.indices` — the `Uint32Array` belonging to the `MeshesValue` on the wire, held by the
+  3D viewer and the OBJ export too. A reordered index draws the identical surface, which is exactly
+  why it would go unnoticed.
+- **The probe ray is deliberately oblique.** Containment is one ray plus the sign of the face normal
+  it first meets, which is exact for a closed, consistently wound surface and fails on a ray grazing
+  an edge shared by two triangles. Region meshes are marching-cubes surfaces over voxel masks —
+  walls of axis-aligned faces — met by synapse coordinates that are themselves integers on the same
+  grid, so an axis-aligned ray would meet those shared edges constantly. Fixed rather than random,
+  because invariant 4 needs `evaluate` deterministic.
+- **`DoubleSide`.** With three's default the first hit from inside a shell is the far wall's
+  *outside* face, and every point reads as out.
+
+The trees are held in a `WeakMap` against the mesh items, which is sound for `iterables.ts`'
+`groupIndexes` reason: geometry buffers here are immutable by convention, so an item that is the same
+object is the same surface. It is what makes the second Run free.
+
+### What it costs, measured
+
+`pnpm probe:points-in-volumes`, against the shipped module:
+
+| triangles per volume | tree build | one containment ray |
+| --- | --- | --- |
+| 20,164 | 10 ms | 1.50 µs |
+| 99,856 | 19 ms | 1.57 µs |
+| 399,424 | 84 ms | 1.66 µs |
+| 1,000,000 | 198 ms | 1.81 µs |
+
+(One run; the per-ray figure moves by about ±0.1 µs between runs, so `RAYS_PER_SECOND` takes the
+slow end — an estimate that is never shorter than the wait is the right kind of wrong.)
+
+The finding is that **a ray barely moves with the surface** — a tree descent is logarithmic, so
+the cost scales with the cloud and not with the meshes, which is what lets the threshold be a ray
+count at all. `RAY_WARN` is 7.5 M of them, about fourteen seconds: the first point at which
+somebody waits with no fetch to blame, and far above an ordinary hundred-thousand-synapse cloud
+against a primary set (two or three hundred thousand rays, well under half a second).
+
+**Those numbers were wrong first, and the error is the part worth keeping.** The probe samples
+points in a box larger than the mesh — deliberately, since a cloud that only partly overlaps the
+volumes is the realistic case — and then divided the elapsed time by the *point* count. So it was
+timing `containing` calls, of which barely a third cast a ray at all, and published **0.67 µs for
+something that costs about 1.8**. Nothing failed: the threshold, the rate constant behind the
+warning's sentence, this table and two other documents all inherited it, and the node's stated
+"thirteen seconds" was really thirty-six. `candidateCount` gives the exact denominator for free
+and the probe uses it now. A measurement whose denominator is the loop's *iterations* rather than
+its *work* is the shape to watch for.
+
+The box prefilter is what keeps a point from costing a ray per volume, and it is cheap enough to
+spend on *knowing*: 200,000 points against 63 volumes is 12.6 M box tests in 41 ms, which is how
+`countRays` can raise the warning before a single ray is cast rather than after the wait.
+`networkMetrics`' `TRIANGLE_WORK_WARN` is the same shape. The sweep is itself skipped unless
+`points × volumes` — an exact upper bound on the ray count, one multiply — can reach the
+threshold, so the ordinary cloud pays nothing to discover it has nothing to be warned about.
+
+The boxes themselves are `boundsOf`'s, not a sweep of this module's own. That is not twenty lines
+saved: `boundsOf` memoises each buffer's box in a `WeakMap`, and every `MeshesValue` on the wire was
+built by calling it — so in the ordinary case the answer already exists. Written out here it was a
+second full pass over every vertex of every volume, and **100% of a second Run's cost**, since the
+trees are free by then. Not the BVH's own root box either: that needs the tree the prefilter runs
+before, allocates a `Box3` per call, and is padded by `FLOAT32_EPSILON`, so it would hand back
+strictly more ray candidates.
+
+### `expensive`, and it is the geometry rather than a request
+
+Nothing here fetches. It is the other clause of the rule — a tree per volume and a ray per candidate
+— and `cheap` would re-run all of it on the keystroke that renamed the column.
+
+**Which means the walk has to yield, and that is not a nicety.** `evaluate` runs on the main
+thread, so a point loop that never awaits reports progress the browser never paints *and cannot
+observe the abort it checks for* — the click that would set the signal cannot be dispatched while
+the loop holds the event loop. Written straight through, the node's own warning threshold described
+thirteen seconds of frozen tab behind a dead progress bar and a Cancel button that did nothing,
+with a comment saying "the only place a ray phase can be interrupted" over the code that made it
+uninterruptible. **The tree build was the same thing one line up** and was left out of the first
+fix, under a comment in the node calling it "the one stretch of this run with no abort check in
+it" — a fifth of a second for a primary set, seconds for full-resolution neuron surfaces.
+
+Both are sliced now, and the loop is `core/slice.ts`' rather than this node's. That is the part
+worth recording: the first attempt shared `SLICE_MS` and `yieldToBrowser` — a constant and a
+two-line primitive — and left every caller to write the loop, which is precisely what had already
+been re-derived three ways. `runUmap` checks a signal and reports per epoch; this node took a
+throwing `onTick` because it had no signal; `brandesSweep` reports every 64 sources and **never
+yields at all**, so the Cancel button and progress bar on a node whose own warning says "minutes"
+are ornamental. Nobody was going to rewrite `yieldToBrowser`; what people re-derive is *report,
+check the abort, yield on a clock*. `sliced` is that, with `core/slice.test.ts` pinning it once
+instead of one node's suite pinning it for everybody — and its clock is read every 64th item,
+because `performance.now()` measured 23.7 ns in-loop, which is 3% on a body that casts a ray and
+**52%** on one that does nothing.
+
+The other half of "before the work" is that **the cost warning is raised before a single tree is
+built**: `volumeBoxes` is separate from `buildInsideTests` and synchronous, because the prefilter
+needs neither the library nor a tree. Asked for the trees first, the warning arrived after a second of
+building that the reader was never told about and — the tree build being the one stretch with no abort
+check in it — could not cancel. A wire with no volumes on it is answered before the dynamic import
+even happens.
+
+### The library is deferred twice, and the second one is a measurement
+
+
+`three` and `three-mesh-bvh` are in the tree for the *UI*. A static import from `src/nodes` would put
+a renderer in `nodes.html`'s bundle, which is a static page with no React in it. So the import is
+inside the function — `src/umap/run.ts`' shape.
+
+That is not enough on its own. `vite.mcp.config.ts` sets `inlineDynamicImports: true`, so a dynamic
+import anywhere in the node pack lands in the single file the MCP server downloads: **2,482 kB →
+4,345 kB**, 75% more for a library that bundle can never reach, since nothing `src/mcp/index.ts`
+exports runs a node. Marking the two external there took it to **+12 kB**, and leaves a bare
+`import("three")` in the output so a future path that really did reach it fails loudly.
+
+The criterion written beside that option is "reachable only from `evaluate`", which is why it is a
+list rather than a pattern on the package name. `elkjs` is deliberately outside it — layout is
+reachable from `applyPlan`. Two libraries that *do* meet it predate this change and are recorded
+there rather than moved: `umap-js` and `graphology` + `graphology-communities-louvain` would take the
+bundle from 2,494 kB to **2,067 kB**.
+
+### The exporters, and what running them showed
+
+This is the rare node where **R has the easier job and Python is no harder** — the opposite of
+`Split Neurons` two sections up, and for the same reason: that node needs an attribute table, which
+nat has and navis does not, while this one needs a coordinate matrix and a surface, which both have.
+`navis.in_volume` takes a `Volume` and `nat::pointsinside` a `mesh3d`, and `neuron.roiMeshes` already
+emits exactly those.
+
+`coda_in_volumes` exists in both languages because the rules are the *node's* and not either
+library's: neither `in_volume` nor `pointsinside` has any notion of several volumes, so the loop, the
+first-on-the-wire rule, the null for a point inside none and the overlap count would otherwise be
+written into a cell nobody can run.
+
+Both were **run** — `pnpm probe:helpers` and `pnpm probe:r-helpers`, against three overlapping cubes,
+because a tiling region set agrees with a short-circuiting implementation and says nothing. The
+fixtures check that the first volume wins, that the overlap is counted, that a point inside nothing
+is `None`/`NA` rather than a sentinel (which is what makes the two ports `notna()`/`is.na()`), and
+that the input frame is not written into.
+
+Three divergences, all notes rather than refusals:
+
+- **The containment test is a different implementation in each.** navis goes through ncollpyde, nat
+  through Rvcg, Coda casts a BVH ray. The three agree on any closed mesh except at its surface — a
+  point exactly on a face, and every point at all in a mesh that is not watertight, is each
+  library's own answer.
+- **The overlap count is printed rather than warned**, a notebook having no status bar.
+- **R needs `Rvcg`**, which nat *suggests* rather than depends on, so the emitted cell names the
+  package. Said rather than worked around: a bounding-box fallback would answer a different question
+  quietly. `probe-r-helpers.R` skips where it is absent, which is the same message the reader meets.
+
 ## Adjacency: a matrix, and the same connections as links
 
 `neuron.adjacency` emits **two outputs describing one fetch**, which is `neuron.roiConnectivity`'s

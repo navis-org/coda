@@ -1253,3 +1253,54 @@ registerHelper({
     '    return labels, indices, dists',
   ],
 })
+
+/**
+ * Each point's enclosing volume, as Coda's `Points in Volumes` column.
+ *
+ * A helper rather than lines in the emitter for the reason the rest of this file exists: the
+ * rules are the *node's* and not navis's. `navis.in_volume` answers one volume at a time and
+ * says nothing about what to do when two of them contain a point, so the loop, the
+ * first-on-the-wire rule, the null for a point inside none and the overlap count would
+ * otherwise be written out in the cell where nobody can run them.
+ *
+ * **Every volume is tested, not just until one hits**, which is what makes `overlaps` a real
+ * number rather than a guess. The canvas does the same and for the same reason: it is the only
+ * way "these synapses are in LO(R)" can be told from "these synapses are in LO(R) and three
+ * other things", and short-circuiting hides it behind a perfectly ordinary table.
+ *
+ * **`None` in an object column, not `NaN`**, so the two ports below are `notna()`/`isna()` and
+ * a region name and an absence never share a dtype question. An empty frame keeps the column
+ * and its dtype, which is what stops a downstream `groupby` raising on a cloud that happened to
+ * miss every shell.
+ *
+ * The one thing it cannot promise is cell-for-cell agreement with the canvas: navis tests
+ * containment through ncollpyde and Coda through a BVH ray, so a point exactly on a face, or
+ * any point at all in a mesh that is not closed, is each library's own answer. The emitter says
+ * so; a helper cannot fix it.
+ */
+registerHelper({
+  name: 'coda_in_volumes',
+  requires: [['pandas'], ['numpy'], ['navis']],
+  source: [
+    'def coda_in_volumes(df, volumes, column):',
+    '    """Each point\'s enclosing volume; first volume wins. Coda\'s Points in Volumes."""',
+    "    xyz = df[['x', 'y', 'z']].to_numpy(dtype='float64')",
+    '    named = np.full(len(df), None, dtype=object)',
+    '    found = np.zeros(len(df), dtype=bool)',
+    '    # Boolean, not a counter: the only question asked of it is "more than one", and an',
+    '    # int64 column is eight bytes a point where this is one.',
+    '    ambiguous = np.zeros(len(df), dtype=bool)',
+    '    # An empty cloud still keeps the column and its dtype, so the loop is skipped rather',
+    '    # than the frame short-circuited.',
+    '    for i, volume in enumerate(volumes if len(df) else []):',
+    '        hit = np.asarray(navis.in_volume(xyz, volume), dtype=bool)',
+    '        # A point is ambiguous the moment a volume claims one something else already had.',
+    '        ambiguous |= hit & found',
+    '        # First on the wire wins, so only points nothing has claimed are named here.',
+    '        named[hit & ~found] = getattr(volume, "name", None) or str(i)',
+    '        found |= hit',
+    '    out = df.copy()',
+    "    out[column] = pd.Series(named, index=out.index, dtype='object')",
+    '    return out, int(ambiguous.sum())',
+  ],
+})

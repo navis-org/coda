@@ -1382,6 +1382,18 @@ export function everythingGraph(): CodaGraph {
       row: 9,
       params: { rois: ['EB', 'FB'] },
     },
+    {
+      /*
+       * Points in Volumes on the pair already here — the synapse cloud and the two named
+       * region shells — which is the graph the node exists for. The column is left at its
+       * default, since the emitters spell whatever `volumeColumnName` answers and a renamed
+       * one pins no branch the default does not.
+       */
+      id: 'inrois',
+      type: 'neuron.pointsInVolumes',
+      col: 3,
+      row: 11,
+    },
     { id: 'v3d', type: 'out.viewer3d', col: 3, row: 5 },
     { id: 'ng', type: 'out.neuroglancer', col: 3, row: 6 },
     { id: 'profile', type: 'out.profile', col: 3, row: 7, params: { selection: ['1001'] } },
@@ -1634,6 +1646,8 @@ export function everythingGraph(): CodaGraph {
     ['skel', 'skeletons', 'v3d', 'skeletons'],
     ['ds', 'dataset', 'roimesh', 'dataset'],
     ['roimesh', 'meshes', 'v3d', 'volumes'],
+    ['syn', 'points', 'inrois', 'points'],
+    ['roimesh', 'meshes', 'inrois', 'volumes'],
     ['stack', 'out', 'muted', 'in'],
     ['url', 'out', 'rename', 'in'],
     ['find', 'neurons', 'edit', 'in'],

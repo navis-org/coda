@@ -24,6 +24,8 @@
  * sigma's doctrine, and the same one `canExport.ts` follows for the emitters.
  */
 
+import { SLICE_MS, yieldToBrowser } from '../core/slice'
+
 /** How far along, and what is happening. Both halves reach the node's status bar. */
 type Report = (fraction: number, note?: string) => void
 
@@ -88,30 +90,6 @@ function mulberry32(seed: number): () => number {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
-}
-
-/**
- * How long a slice of the optimisation loop may run before yielding to the browser.
- *
- * Above a frame budget on purpose, and the yield below is why: a chain of `setTimeout(…, 0)`
- * hits Chrome's nested-timer clamp past five levels and costs about 4 ms of dead wall clock per
- * yield whatever the delay asked for. At 24 ms that is a sixth of the run spent waiting; the
- * shorter slices a smoother bar would want make it worse, not better. `scheduler.yield()` has
- * no such clamp and is used where the engine has it.
- */
-const SLICE_MS = 24
-
-/**
- * Hand the browser a turn, without paying the nested-timer clamp where it can be avoided.
- *
- * `scheduler.yield()` resumes on the same task queue with no minimum delay; `setTimeout` is the
- * fallback and is still a *task* rather than a microtask, which is the part that matters — an
- * `await Promise.resolve()` runs before the browser gets to paint, so the progress it reports
- * would be progress nobody sees.
- */
-function yieldToBrowser(): Promise<void> {
-  const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler
-  return scheduler?.yield ? scheduler.yield() : new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 /** Where the fuzzy-set construction ends and the optimisation's own progress begins. */

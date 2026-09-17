@@ -1262,3 +1262,49 @@ registerHelper({
     '}',
   ],
 })
+
+/**
+ * Each point's enclosing volume — `nat::pointsinside`, folded by Coda's rules.
+ *
+ * The Python helper of the same name one language over, and the same three rules: every volume
+ * is tested rather than stopping at the first hit, so the overlap count is a real number; the
+ * **first volume on the wire** names a point two of them contain; and a point inside none gets
+ * `NA` rather than a sentinel, which is what makes the two ports `!is.na()` and `is.na()`.
+ *
+ * `nat::pointsinside` needs **Rvcg**, which nat lists as a suggestion rather than a dependency,
+ * so a reader with nat alone meets an error naming the package. It is named in the emitter's
+ * note rather than papered over, because a helper that fell back to a bounding-box test would
+ * answer a different question in silence.
+ *
+ * The volume list is named — `neuron.roiMeshes` emits `names(out) <- out_rois` — so the column
+ * is filled with region names. `seq_along` is the fallback for a list that has none, which is
+ * what a hand-built list of `mesh3d`s arrives as.
+ */
+registerHelper({
+  name: 'coda_in_volumes',
+  requires: ['nat'],
+  source: [
+    'coda_in_volumes <- function(df, volumes, column) {',
+    '  xyz <- as.matrix(df[, c("x", "y", "z")])',
+    '  labels <- names(volumes)',
+    '  if (is.null(labels)) labels <- as.character(seq_along(volumes))',
+    '  named <- rep(NA_character_, nrow(df))',
+    '  found <- logical(nrow(df))',
+    '  ambiguous <- logical(nrow(df))',
+    '  # Skipped wholesale on an empty cloud: pointsinside dispatches to Rvcg, which builds the',
+    '  # mesh KD-tree per call whatever the point count, so the loop would cost every tree to',
+    '  # answer nothing. The column and its type are still set below.',
+    '  for (i in if (nrow(df)) seq_along(volumes) else integer(0)) {',
+    '    hit <- as.logical(nat::pointsinside(xyz, volumes[[i]]))',
+    '    hit[is.na(hit)] <- FALSE',
+    '    # A point is ambiguous the moment a volume claims one something else already had.',
+    '    ambiguous <- ambiguous | (hit & found)',
+    '    # First on the wire wins, so only points nothing has claimed are named here.',
+    '    named[hit & !found] <- labels[[i]]',
+    '    found <- found | hit',
+    '  }',
+    '  df[[column]] <- named',
+    '  list(points = df, overlapping = sum(ambiguous))',
+    '}',
+  ],
+})

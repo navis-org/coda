@@ -46,6 +46,9 @@ const MINTED: Record<string, string[]> = {
   'cluster.clustersToNeurons': ['`_c`'],
   'neuron.mirror': ['`mirrored`'],
   'neuron.attachAttributes': ['replaces a same-named one'],
+  // The name is a param, so the fragment is the default the description quotes plus the
+  // overwrite rule — the half that is not obvious, since a cloud can already carry a `roi`.
+  'neuron.pointsInVolumes': ['`roi`', 'written over'],
   'neuron.nblastKnn': ['`queryId`', '`targetId`'],
   'neuron.nblastMatches': ['`query`', '`matches`'],
   'out.describe': ['`non_nulls`'],

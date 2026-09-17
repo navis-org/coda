@@ -799,5 +799,46 @@ if (!requireNamespace("uwot", quietly = TRUE)) {
         isTRUE(all(dim(xy2) == c(40, 2)) && all(is.finite(xy2))), paste(dim(xy2), collapse = "x"))
 }
 
+# ---- coda_in_volumes --------------------------------------------------------
+#
+# Points in Volumes. `nat::pointsinside` dispatches to Rvcg, which nat *suggests* rather than
+# depends on, so this skips where the emitted cell would error — and the skip is the point as
+# much as the checks are: a reader with nat alone meets the same message.
+#
+# What is checked is the node's rules rather than nat's answer: the first volume on the wire
+# names a point two of them contain, a point inside none is `NA_character_` (which is what makes
+# the two ports `is.na()` rather than a sentinel comparison), and the overlap count is real.
+# Overlapping cubes, because a tiling region set cannot show any of it.
+if (!requireNamespace("Rvcg", quietly = TRUE)) {
+  cat("skip coda_in_volumes: nat::pointsinside needs Rvcg\n")
+} else {
+  cube <- function(centre, half = 1) {
+    v <- as.matrix(expand.grid(c(-half, half), c(-half, half), c(-half, half)))
+    v <- sweep(v, 2, centre, "+")
+    # The eight corners in `expand.grid` order, wound outwards as twelve triangles.
+    f <- rbind(c(1, 3, 2), c(2, 3, 4), c(5, 6, 7), c(6, 8, 7), c(1, 2, 5), c(2, 6, 5),
+               c(3, 7, 4), c(4, 7, 8), c(1, 5, 3), c(3, 5, 7), c(2, 4, 6), c(4, 8, 6))
+    rgl::tmesh3d(vertices = t(v), indices = t(f), homogeneous = FALSE)
+  }
+  vols <- list(a = cube(c(0, 0, 0)), b = cube(c(1.5, 0, 0)), c = cube(c(10, 0, 0)))
+  cloud <- data.frame(neuronId = c("1", "2", "3", "4"),
+                      x = c(0, 0.75, 10, -50), y = 0, z = 0, stringsAsFactors = FALSE)
+  res <- coda_in_volumes(cloud, vols, "roi")
+
+  check("in_volumes: every input row survives", nrow(res$points) == nrow(cloud), nrow(res$points))
+  check("in_volumes: a point in one volume takes its name",
+        identical(res$points$roi[1], "a"), res$points$roi[1])
+  check("in_volumes: a point in two takes the first on the wire",
+        identical(res$points$roi[2], "a"), res$points$roi[2])
+  check("in_volumes: overlap is counted, not hidden", res$overlapping == 1L, res$overlapping)
+  check("in_volumes: a later volume still names its own points",
+        identical(res$points$roi[3], "c"), res$points$roi[3])
+  check("in_volumes: a point inside nothing is NA", is.na(res$points$roi[4]), res$points$roi[4])
+  check("in_volumes: the two ports partition the cloud",
+        sum(!is.na(res$points$roi)) + sum(is.na(res$points$roi)) == nrow(cloud))
+  check("in_volumes: an unnamed list falls back to positions",
+        identical(coda_in_volumes(cloud, unname(vols), "roi")$points$roi[1], "1"))
+}
+
 cat("\n", if (fails > 0L) paste(fails, "failed") else "all passed", "\n", sep = "")
 quit(status = if (fails > 0L) 1L else 0L)

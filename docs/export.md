@@ -85,6 +85,24 @@ Skeletons cell, or merge a neuron frame on the ids and index the list with the m
 `NO_EMITTER` entry, because the fallback's words are "no notebook equivalent *yet*", and this is not
 a matter of nobody having written it.
 
+**`Points in Volumes` is the pair's counter-example, and it is worth reading beside it.** Same
+family of question — a collection and a test over it — and here *both* libraries have exactly what is
+needed: `navis.in_volume` takes a `Volume`, `nat::pointsinside` takes a `mesh3d`, and
+`neuron.roiMeshes` already emits those in both languages. So neither export refuses and neither is
+long. What the asymmetry above was really about is the *data model* rather than the language: Split
+Neurons needs an attribute table navis does not keep, where this needs a coordinate matrix both have.
+
+Both sides go through a `coda_in_volumes` helper for the reason the rest of that registry exists:
+neither library has any notion of *several* volumes, so the loop, the first-on-the-wire rule, the
+null for a point inside none and the overlap count are the node's rules and would otherwise be
+written into a cell nobody can run. Both were run — `pnpm probe:helpers` and `pnpm probe:r-helpers`,
+against three **overlapping** cubes, because a tiling region set agrees with a short-circuiting
+implementation and so proves nothing. Three divergences, all notes: the containment test is
+ncollpyde in Python, Rvcg in R and a BVH ray on the canvas, which agree on any closed mesh except at
+its surface; the overlap count is printed rather than warned, a notebook having no status bar; and
+`nat::pointsinside` needs **Rvcg**, which nat only suggests, so the cell names the package rather
+than falling back to a bounding-box test that would answer a different question quietly.
+
 **`Carry fields` diverges on the same seam, from the other side.** The control on `Skeletons` and
 `Meshes` carries columns of the incoming neuron table onto the fetched geometry, and each language
 writes it the way its library models per-neuron metadata. R has the easier job: a nat `neuronlist`

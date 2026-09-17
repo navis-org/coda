@@ -718,6 +718,18 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M10.8 11.4l3 3' }],
     ['path', { d: 'M13.9 12.3v2.6h-2.6' }],
   ],
+  /*
+   * The blob again, with dots. Points in Volumes is the only node whose subject is a *point*
+   * inside a region, so it takes the region family's silhouette — this is a question about
+   * places — and says what is being asked with filled discs in and an open one out. Not the
+   * funnel: nothing is thrown away, both halves leave.
+   */
+  'neuron.pointsInVolumes': [
+    ['path', { d: 'M5.6 10.6c.8-3.7 4.4-6.3 8.1-5.8 3.7.5 6.6 4 6.3 7.8-.3 3.8-3.6 6.9-7.4 6.9-3.8 0-7.8-5.2-7-8.9z' }],
+    ['circle', { cx: '10.4', cy: '10.6', r: '1.3', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '14.6', cy: '13.4', r: '1.3', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '20.4', cy: '6.4', r: '1.3' }],
+  ],
   'out.rois': [
     ['circle', { cx: '12', cy: '12', r: '7.6' }],
     ['path', { d: 'M12 4.4v15.2' }],

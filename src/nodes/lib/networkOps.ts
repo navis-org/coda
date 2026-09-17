@@ -27,9 +27,10 @@
  */
 
 import type { ColumnSchema, TableSchema } from '../../core/types'
-import { column, findColumn, tableSchema } from '../../core/types'
+import { column, tableSchema } from '../../core/types'
 import type { ColumnData, NetworkValue, TableValue } from '../../core/values'
 import { getColumn, makeTable, selectRows } from '../../core/values'
+import { foldColumns } from './tableOps'
 
 export interface NetworkFilter {
   /** Drop links weighing less than this. 0 keeps everything. */
@@ -91,13 +92,9 @@ export function foldNodeColumns(
   nodes: TableSchema | undefined,
   wanted: readonly ColumnSchema[],
 ): TableSchema {
-  if (!nodes) return tableSchema(column('id', 'str'), ...wanted)
-  return tableSchema(
-    ...nodes.columns.map(
-      (existing) => wanted.find((c) => c.name === existing.name) ?? existing,
-    ),
-    ...wanted.filter((c) => !findColumn(nodes, c.name)),
-  )
+  // The general half is `tableOps.foldColumns`; what is the network's is the answer with no
+  // incoming schema, which promises `id` because that is what a node table always has.
+  return nodes ? foldColumns(nodes, wanted) : tableSchema(column('id', 'str'), ...wanted)
 }
 
 /**
