@@ -27,7 +27,9 @@ documentation and against `count.js` itself:
 - **No stored IP and no stored full User-Agent.** A session is `site + IP + User-Agent` held *in
   memory* for up to 8 hours and mapped to a random string; the random string is what reaches the
   database.
-- **Aggregates, not a log of you.** Browser, OS, country, screen width, referrer, path.
+- **Aggregates, not a log of you.** Browser, OS, country, screen width, referrer, path — and the
+  query string and page title, which are sent on every beacon whatever the path is pinned to; see
+  below for why that matters and why it is empty here.
 - **Open source and self-hostable**, so the escape hatch if the hosted service goes away is real
   rather than notional.
 
@@ -63,11 +65,10 @@ third party their operator never chose. An unset variable has to be the safe def
 **The path is pinned, never read off the address bar.** GoatCounter's default path is
 `location.pathname + location.search`. The fragment is excluded, and a Coda share link carries
 the whole workflow in the fragment (`#!gh://…`, or the packed graph) — so nothing leaks today.
-That is a fact about how sharing currently works, not a promise about it. The day a query
-parameter appears anywhere in the app, its contents would silently become analytics data.
-Sending a literal per entry closes that off before it can happen, and reads the same on the
-dashboard wherever the site is mounted — Pages serves from `/coda/`, and `/overview` does not
-care.
+That is a fact about how sharing currently works, not a promise about it. Sending a literal per
+entry means a route added later cannot start reporting whatever the address bar holds, and reads
+the same on the dashboard wherever the site is mounted — Pages serves from `/coda/`, and
+`/overview` does not care.
 
 The literal is derived from the entry filename rather than looked up in a table, so a fifth
 entry added to `build.rollupOptions.input` cannot arrive unlabelled or fall back to the default:
@@ -81,6 +82,29 @@ entry added to `build.rollupOptions.input` cannot arrive unlabelled or fall back
 
 `index.html` is `/editor` rather than `/` because a `/` sitting above `/overview` in a list of
 four reads as their total.
+
+**What pinning the path does not do**, because the obvious reading of the paragraph above is that
+it closes the query string off altogether: it does not. Read against the live `count.js`, every
+beacon carries `q: location.search` and `t: document.title` beside the pinned `p`,
+unconditionally. Pinning stops a query string being *named as a page* on the dashboard; it does
+not stop one being sent. So this is a channel to keep watching rather than one already answered.
+It is empty today — the app reads `location.hash` and never `location.search` — and the title is
+a fixed string, apart from the few seconds `flashTitle` replaces it after a run
+(`src/ui/notify.ts`), which is a notification and not a workflow name. The day a query parameter
+is introduced, closing it means suppressing `q`, not the path — and `count.js` has no setting for
+`q` the way it has for `path`, `referrer` and `title`, so it would mean replacing
+`window.goatcounter.get_data`. Worth knowing before assuming a one-line fix is available.
+
+**One parameter is deliberately in it.** The hosted MCP server's `/w/<id>` short links redirect to
+`?ref=coda-mcp`, which is what makes an open from a model-built workflow a row in Top referrers.
+Without it those visits are invisible: a 302 carries the referrer of the *original* navigation, so
+the redirecting host never appears, and an open from a chat client or a terminal has no referrer
+at all — indistinguishable from a pasted link. GoatCounter reads `ref` in place of the HTTP
+referrer. The marker is a word the server operator chooses (`CODA_MCP_REFERRER_MARK`, empty to
+turn it off); it says where a link came from and nothing about the workflow, which stays in the
+fragment. It does not propagate either: `shareUrl` rebuilds a link from `BASE_URL` and keeps only
+origin and path, so a workflow re-shared from a session that arrived this way carries no marker.
+See [docs/mcp.md](mcp.md).
 
 **Settings go on `window.goatcounter`, not `data-goatcounter-settings`.** The attribute takes
 JSON and vite serialises attribute values into double quotes without escaping the ones inside,

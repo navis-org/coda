@@ -160,7 +160,7 @@ character by character, from the tool result into its reply, and base64 is exact
 wrong character makes unreadable. A three-node workflow is 525 characters, the old bundled examples
 1,500–2,000, a 10,000-neuron selection ~56,000. So a hosted server stores the draft and returns
 `https://<host>/w/<id>`, and it is the server's feature rather than Coda's, because Coda has no
-server to put one on. Four decisions:
+server to put one on. Six decisions:
 
 - **The id is 22 base64url characters of SHA-256 over the draft**, so asking twice is one entry and
   an id cannot be guessed without the workflow. Over the draft object, not the `.coda.json`:
@@ -180,6 +180,14 @@ server to put one on. Four decisions:
   prompt is correct, and it is why this form is the fallback.
 - **Kept forever unless a retention is set**, and opening a link counts as use. A packed link cannot
   rot; a short one dies with the server's directory.
+- **The redirect carries `?ref=coda-mcp`**, which is the only way an open through the server is
+  countable. A browser carries the referrer of the *original* navigation through a 302, so the
+  server's own host never reaches the site's analytics, and a link clicked in a chat client or a
+  terminal arrives with no referrer at all — identical to a pasted one. GoatCounter reads `ref` in
+  place of the HTTP referrer, the marker goes before the fragment (which is the workflow), and
+  nothing in Coda reads `location.search`, so it is inert here. `CODA_MCP_REFERRER_MARK` is the
+  server's setting for it, and `full_link` — which reaches no server — carries no marker at all.
+  See [docs/analytics.md](analytics.md).
 - **The threshold is a stopgap, and the fix belongs in this repository.** The prompt on the JSON form
   exists because a bare `https://` names a host nobody has heard of, and the hosted server is not
   that. Once its domain is chosen, trusting it in `resolve.ts`'s `shareTarget` — a host list, or a

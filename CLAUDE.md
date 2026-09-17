@@ -166,7 +166,12 @@ Cross-cutting — these bite in code that is not obviously "about" the area:
   `location.pathname + location.search`; a share link carries the workflow in the *fragment*, so
   nothing leaks today — but that is a fact about sharing, not a promise, and one query param
   would turn workflow content into analytics data. `vite/goatcounter.ts` sends a literal per
-  entry, derived from the filename so a fifth entry cannot arrive unlabelled. The tag is
+  entry, derived from the filename so a fifth entry cannot arrive unlabelled. **Pinning the path
+  does not close the query string**, which is the half that reads backwards: `count.js` sends
+  `q: location.search` and `t: document.title` on every beacon whatever `path` is, and offers no
+  setting to suppress `q` — empty today, and deliberately carrying the MCP server's
+  `?ref=coda-mcp`, without which an open through a short link is indistinguishable from a pasted
+  one, a 302 passing the *original* referrer through. The tag is
   `apply: 'build'` **and** gated on `CODA_ANALYTICS`, set only in `deploy.yml`: this repo is
   public and permissively licensed, so without the second gate a fork's readers get reported to
   a dashboard its operator never chose. There is deliberately **no event tracking**.

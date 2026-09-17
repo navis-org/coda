@@ -24,10 +24,14 @@
  *    `location.pathname + location.search`. The fragment is excluded, and a Coda share link
  *    carries the entire workflow in the fragment (`#!gh://…`, or the packed graph) — so nothing
  *    leaks *today*. That is a property of how sharing currently happens, not a guarantee about
- *    it: the day a query parameter appears anywhere, its contents would become analytics data
- *    with nothing on screen to say so. Sending a literal per entry closes that off in advance,
- *    and is also base-independent — Pages serves from `/coda/`, and a pinned `/overview` reads
- *    the same on the dashboard wherever the site is mounted.
+ *    it. Sending a literal per entry stops a route added later reporting whatever the address
+ *    bar holds, and is also base-independent — Pages serves from `/coda/`, and a pinned
+ *    `/overview` reads the same on the dashboard wherever the site is mounted. What it does
+ *    **not** do is close the query string off: `count.js` sends `q: location.search` (and
+ *    `t: document.title`) on every beacon whatever `path` is set to, with no setting to
+ *    suppress it. Empty here, since nothing in the app reads `location.search` — except the
+ *    `?ref=` the MCP server's short links redirect through, which is how those opens are
+ *    counted. See [docs/analytics.md](../docs/analytics.md).
  *
  *  - **Settings go on `window.goatcounter`, not `data-goatcounter-settings`.** The attribute
  *    takes JSON, and vite serialises tag attributes into double quotes without escaping the

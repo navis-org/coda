@@ -3,9 +3,10 @@
 [`coda-mcp`](https://github.com/navis-org/coda-mcp) at `https://flyem.mrc-lmb.cam.ac.uk/coda-mcp/`.
 Connector URL: `https://flyem.mrc-lmb.cam.ac.uk/coda-mcp/mcp`. Design and contract: [mcp.md](mcp.md).
 
-Status (2026-09-15): deployed; the Coda build in use is in the log's first line. Verified from outside: MCP session, short
+Status (2026-09-17): deployed; the Coda build in use is in the log's first line. Verified from outside: MCP session, short
 link redirect, a 15,494-char `Location` through nginx, and the `.json` fallback for a 29,664-char link.
-Network mode (schema peeking) on since 2026-09-15.
+Network mode (schema peeking) on since 2026-09-15. Redirects have carried `?ref=coda-mcp` since
+2026-09-17, verified from outside on a 938-char `Location` with the marker before the fragment.
 
 ## Host
 
@@ -43,7 +44,9 @@ Set in `start.sh`; everything else is the server's default.
 | tokens | from `secrets.env` via `node --env-file` |
 
 Defaults in effect: Coda build `https://coda.science/mcp/v1/coda.js`, re-checked every 10 min;
-links kept forever; redirect ≤ 16000 chars; accepted `Host` = public host + loopback.
+links kept forever; redirect ≤ 16000 chars; accepted `Host` = public host + loopback; redirects
+marked `?ref=coda-mcp` (`CODA_MCP_REFERRER_MARK`, empty to turn it off), which is what makes an open
+through this server countable on coda.science — see [analytics.md](analytics.md).
 
 ## supervisor
 
@@ -103,6 +106,7 @@ All as `jefferis`, with `export PATH=~/.local/opt/node-v24.21.0-linux-x64/bin:$P
 | Update Coda | none: deploy coda.science; new sessions use it within 10 min |
 | Upgrade Node | unpack into `~/.local/opt/`, edit `PATH` in `start.sh`, rebuild, restart |
 | Check from outside | `curl -sI https://flyem.mrc-lmb.cam.ac.uk/coda-mcp/w/AAAAAAAAAAAAAAAAAAAAAA` → `404` |
+| Check a redirect | `id=$(ls /fafbz/coda/mcp/links \| head -1 \| sed 's/\.json$//'); curl -sI .../coda-mcp/w/$id` → `302` to `https://coda.science/?ref=coda-mcp#!c1.…`. The 404 above never reaches the redirect, so it cannot show the marker |
 
 ## Notes
 
