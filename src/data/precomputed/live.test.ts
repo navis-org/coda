@@ -31,6 +31,8 @@ const live = process.env.PRECOMPUTED_LIVE ? describe : describe.skip
 
 const MALECNS = 'precomputed://gs://flyem-male-cns/v1.0/segmentation'
 const HEMIBRAIN = 'gs://neuroglancer-janelia-flyem-hemibrain/v1.2/segmentation'
+/** A bare mesh directory with a segment-property sidecar of its own — mosquito glomeruli. */
+const AEDES = 'https://flyem.mrc-lmb.cam.ac.uk/flyconnectome/aedes/al_meshes'
 
 /** One hemibrain body, the same one `precomputed.test.ts` pins its shard maths against. */
 const BODY = '1158187240'
@@ -228,6 +230,37 @@ live('precomputed datasources, live', () => {
     // The central complex sits in the middle of a ~250 µm volume, not at the origin.
     expect(meshes.bounds.min[0]!).toBeGreaterThan(0)
     expect(meshes.bounds.max[0]!).toBeLessThan(1_000_000)
+  }, 120_000)
+
+  it('reads region shells from a mesh directory that names its own sidecar', async () => {
+    /*
+     * The other shape a published shell set takes, and the one that was broken: no volume at all,
+     * a `neuroglancer_legacy_mesh` info naming `segment_properties` beside itself. Its labels are
+     * the 144 antennal-lobe glomeruli of the mosquito atlas, and before the probe read that field
+     * outside the volume branch this source reported no names — so ROI Meshes refused it and
+     * pointed at an `Input IDs` node the node has no socket for.
+     */
+    const source = sourceFor(`${AEDES}|neuroglancer-precomputed:`)
+    const probe = await probePrecomputed(parseNgSource(AEDES)!.url!)
+    expect(probe.ok && probe.source.kind).toBe('meshes')
+    expect(probe.ok && probe.source.segmentPropertiesUrl).toMatch(/segment_properties$/)
+
+    const names = await source.neuronIndex({ datasetId: source.datasetId })
+    expect(names.length).toBe(144)
+    const labels = names.data['label']!.map(String)
+    expect(labels).toContain('G12_L')
+
+    const meshes = await source.fetchRoiMeshes({
+      datasetId: source.datasetId,
+      rois: ['G12_L', 'G62_R'],
+    })
+    expect(meshes.items.map((m) => m.id)).toEqual(['G12_L', 'G62_R'])
+    expect(meshes.attributes.data['roi']).toEqual(['G12_L', 'G62_R'])
+    for (const item of meshes.items) {
+      expect(item.positions.length).toBeGreaterThan(0)
+      expect(item.indices.length % 3).toBe(0)
+      for (const index of item.indices) expect(index).toBeLessThan(item.positions.length / 3)
+    }
   }, 120_000)
 
   it('lists hemibrain’s 63 regions, and its 22,706 labelled neurons', async () => {

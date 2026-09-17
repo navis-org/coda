@@ -94,6 +94,41 @@ describe('probing a precomputed directory', () => {
     expect(probe.ok && probe.source.summary).toBe('segmentation · multi-resolution meshes')
   })
 
+  it('reads the sidecar a *mesh directory* names, not only the one a volume names', async () => {
+    /*
+     * `https://flyem.mrc-lmb.cam.ac.uk/flyconnectome/aedes/al_meshes` exactly: a bucket of
+     * neuropil shells with no volume above them, whose `neuroglancer_legacy_mesh` info names
+     * `segment_properties` holding 144 glomerulus names. Read only in the volume branch it came
+     * back nameless, so `capabilities.roiMeshes` was false and ROI Meshes refused a source
+     * publishing precisely what it asks for — and named a remedy (`Input IDs`) that node has no
+     * socket for. neuroglancer's own `parseMeshMetadata` reads the field here.
+     */
+    const base = 'https://flyem.example/aedes/al_meshes'
+    serve({
+      [`${base}/info`]: {
+        '@type': 'neuroglancer_legacy_mesh',
+        spatial_index: null,
+        segment_properties: 'segment_properties',
+      },
+    })
+    const probe = await probePrecomputed(base)
+    expect(probe.ok && probe.source.kind).toBe('meshes')
+    expect(probe.ok && probe.source.meshUrl).toBe(base)
+    expect(probe.ok && probe.source.segmentPropertiesUrl).toBe(`${base}/segment_properties`)
+  })
+
+  it('reads the sidecar a skeleton directory names, for the same reason', async () => {
+    // `parseSkeletonMetadata` reads it too. One rule for all three branches, or the next bucket
+    // shaped like this one is a second bug report about the same line.
+    const base = 'https://storage.googleapis.com/bucket/skels'
+    serve({
+      [`${base}/info`]: { '@type': 'neuroglancer_skeletons', segment_properties: 'props' },
+    })
+    const probe = await probePrecomputed(base)
+    expect(probe.ok && probe.source.kind).toBe('skeletons')
+    expect(probe.ok && probe.source.segmentPropertiesUrl).toBe(`${base}/props`)
+  })
+
   it('reads an info with no @type and nothing to point at as a legacy mesh directory', async () => {
     // `openMeshDir` treats it as one — and the two must agree, or a URL this calls unreadable
     // fetches perfectly well.
@@ -554,6 +589,62 @@ describe('segment properties', () => {
     await expect(source.neuronIndex({ datasetId: source.datasetId })).rejects.toThrow(
       /no segment properties/,
     )
+  })
+
+  it('names a remedy ROI Meshes can take, rather than the one Explore can', async () => {
+    /*
+     * The listing refusal above points at an `Input IDs` node, which is right for Explore and
+     * Find Neurons and unreachable from ROI Meshes — that node's only input is a Dataset, so
+     * somebody following the sentence finds nowhere to plug the ids in. Reported as "there is no
+     * apparent way to supply ids instead", which is the whole of what is wrong with it.
+     */
+    const base = 'https://storage.googleapis.com/nameless-rois/seg'
+    serve({ [`${base}/info`]: { '@type': 'neuroglancer_legacy_mesh' } })
+    const source = sourceFor('gs://nameless-rois/seg')
+    await expect(source.fetchRoiMeshes({ datasetId: source.datasetId })).rejects.toThrow(
+      /Input IDs node into a Meshes node, wired to the 3D View/,
+    )
+  })
+
+  /**
+   * A bare mesh directory with a sidecar of its own — the aedes glomeruli, in miniature.
+   *
+   * The probe case above proves the URL is read; this proves the two halves meet, which is a
+   * separate question: `roiMeshes` is gated on a mesh directory *and* names, and both come off
+   * one `info` here rather than off a volume and its subdirectory.
+   */
+  function serveMeshDirRegions(base: string) {
+    return serve({
+      [`${base}/info`]: {
+        '@type': 'neuroglancer_legacy_mesh',
+        segment_properties: 'segment_properties',
+      },
+      [`${base}/segment_properties/info`]: SIDECAR,
+    })
+  }
+
+  it('offers region shells from a mesh directory that names its own sidecar', async () => {
+    const base = 'https://storage.googleapis.com/aedes/al_meshes'
+    serveMeshDirRegions(base)
+    await probePrecomputed(base)
+    expect(sourceFor('gs://aedes/al_meshes').capabilitiesFor()).toEqual({
+      meshes: true,
+      skeletons: false,
+      neuronIndex: true,
+      roiMeshes: true,
+    })
+  })
+
+  it('fetches those shells by name, asking the directory itself for each one', async () => {
+    // The directory *is* the base, so the fragment manifests sit beside the `info` rather than
+    // under a `mesh` subdirectory — which is the half a probe test cannot show.
+    const base = 'https://storage.googleapis.com/aedes2/al_meshes'
+    const served = serveMeshDirRegions(base)
+    const source = sourceFor('gs://aedes2/al_meshes')
+    const meshes = await source.fetchRoiMeshes({ datasetId: source.datasetId, rois: ['EB'] })
+    expect(served.urls).toContain(`${base}/3:0`)
+    // The label, not the segment id — `ROI_MESH_SCHEMA` says that is what a region is called.
+    expect(meshes.attributes.schema.columns.map((c) => c.name)).toEqual(['roi', 'primary'])
   })
 })
 

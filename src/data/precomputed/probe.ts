@@ -171,6 +171,20 @@ async function classify(
   signal: AbortSignal | undefined,
 ): Promise<Omit<PrecomputedDescription, 'summary'>> {
   /*
+   * Read before the branches, because **a mesh or skeleton directory may name a sidecar of its
+   * own** — checked against neuroglancer's own parser rather than assumed: `parseMeshMetadata`
+   * and `parseSkeletonMetadata` each read `segment_properties` exactly as the volume parser
+   * does. Read only in the volume branch, a bucket that publishes shells and their names side by
+   * side — `.../aedes/al_meshes`, a `neuroglancer_legacy_mesh` whose `info` names
+   * `segment_properties` holding 144 glomerulus names — came back with no names at all, so
+   * `capabilities.roiMeshes` was false and ROI Meshes refused a source that publishes exactly
+   * what it asks for.
+   */
+  const properties = info.segment_properties
+    ? { segmentPropertiesUrl: `${base}/${info.segment_properties}` }
+    : {}
+
+  /*
    * Asked before the switch, and asked of `isVolumeInfo` rather than restated here: a volume may
    * carry no `@type` at all, so a `switch` on that field alone sent every pre-`@type` flat
    * segmentation down the mesh-directory branch. Sharing the predicate with `openMeshSource` is
@@ -195,9 +209,7 @@ async function classify(
       ...(mesh ? { mesh } : {}),
       ...(skeletonUrl ? { skeletonUrl } : {}),
       ...(skeletons ? { skeletons } : {}),
-      ...(info.segment_properties
-        ? { segmentPropertiesUrl: `${base}/${info.segment_properties}` }
-        : {}),
+      ...properties,
     }
   }
 
@@ -207,6 +219,7 @@ async function classify(
         kind: 'skeletons',
         skeletonUrl: base,
         ...spread('skeletons', await tryOpen(base, openSkeletonSource, signal)),
+        ...properties,
       }
     case 'neuroglancer_annotations_v1':
       return { kind: 'annotations' }
@@ -225,6 +238,7 @@ async function classify(
         kind: 'meshes',
         meshUrl: base,
         ...spread('mesh', await tryOpen(base, openMeshDir, signal)),
+        ...properties,
       }
     default:
       return { kind: 'unknown' }

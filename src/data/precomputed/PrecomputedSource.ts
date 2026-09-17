@@ -501,6 +501,22 @@ export class PrecomputedSource implements DataSource {
    */
   async fetchRoiMeshes(req: RoiMeshRequest): Promise<MeshesValue> {
     /*
+     * Asked here rather than left to `neuronIndex`, because **a remedy has to be one the caller
+     * can take**. The sidecar refusal below names an `Input IDs` node, which is the answer for
+     * Explore and Find Neurons and is unreachable from this one: the ROI Meshes node's only
+     * input is a Dataset, so a reader following that sentence finds nowhere to plug the ids in.
+     * Costs no request — `describe` is the probe's memo, which `meshDir` reads a line later.
+     */
+    const described = await this.describe(req.signal ? { signal: req.signal } : {})
+    if (!described.segmentPropertiesUrl) {
+      throw new Error(
+        `${this.ref.canonical} publishes no segment properties, so its meshes have no region ` +
+          `names and nothing can list them — it is ${described.summary}. Fetch them by id ` +
+          `instead: an Input IDs node into a Meshes node, wired to the 3D View’s Volumes socket.`,
+      )
+    }
+
+    /*
      * Through `neuronIndex`, not around it. Reading the sidecar directly fetched half a megabyte
      * a second time on hemibrain, ignored `refresh`, and handed `idsForLabels` a different table
      * object each call — which defeats the `LABEL_INDEX` memo keyed on its identity.

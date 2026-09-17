@@ -1230,6 +1230,26 @@ source's 63 — so downloading it because somebody typed a URL is invariant 6's 
 first *ask*, and the peek that cannot answer starts it and fires `reportSourceLearned`, which is
 how the region picker fills a moment later.
 
+**The URL comes off whatever the `info` is, not off a volume.** A mesh or skeleton directory names
+a sidecar as readily as a volume does — neuroglancer's own `parseMeshMetadata` and
+`parseSkeletonMetadata` read `segment_properties` with the same line its volume parser uses — and
+the probe read the field in the volume branch alone. So
+`https://flyem.mrc-lmb.cam.ac.uk/flyconnectome/aedes/al_meshes`, a `neuroglancer_legacy_mesh`
+directory of 144 mosquito antennal-lobe glomeruli naming `segment_properties` beside itself, came
+back nameless — and since `capabilities.roiMeshes` is gated on a mesh directory **and** names, ROI
+Meshes refused a source publishing precisely what it asks for. Read once at the top of `classify`
+and spread into all three branches, or the next bucket shaped like this one is a second report of
+the same line.
+
+**A refusal has to name a remedy its caller can take.** The listing refusal points at an
+`Input IDs` node, which is the answer for Explore and Find Neurons and unreachable from ROI Meshes:
+that node's only input is a Dataset, so somebody following the sentence finds nowhere to plug the
+ids in — reported, in as many words, as "there is no apparent way to supply ids instead". So
+`fetchRoiMeshes` asks the question itself, ahead of the `neuronIndex` that would otherwise answer
+for it — `describe` is the probe's memo, which the next line reads anyway, so it costs no request —
+and names what a *region* fetch can do instead: an Input IDs node into a Meshes node, wired to the
+3D View's Volumes socket.
+
 **Every route to it goes through `neuronIndex`**, i.e. through `loadCachedTable` like every other
 source's index — so it persists across sessions, honours Explore's refresh and the node menu's
 Clear Cache, and reports its age to the dataset card. It had a memo of its own, which got none of
