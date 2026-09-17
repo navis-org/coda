@@ -5719,6 +5719,15 @@ a.viewer-actions__btn {
   color: var(--text-primary);
   font-weight: 600;
 }
+/*
+ * A second statement in the band, for the one section that has two: which of the two routes to
+ * an LLM you are looking at, and what a key here costs. A block with a gap rather than a second
+ * `<p>`, which would take the band's padding as its own and draw as two bands.
+ */
+.sources__privacy-next {
+  display: block;
+  margin-top: 5px;
+}
 
 /* Same underline idiom as the styling sidebar's tabs — a tab bar should read as one thing. */
 /*

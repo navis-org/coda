@@ -42,7 +42,8 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { basename } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import type { Plugin, ResolvedConfig } from 'vite'
 
 /**
@@ -53,6 +54,18 @@ import type { Plugin, ResolvedConfig } from 'vite'
  * stripped so every join below is `${SITE_URL}/…`.
  */
 const SITE_URL = (process.env.CODA_SITE_URL ?? 'https://coda.science').replace(/\/+$/, '')
+
+/**
+ * The hosted MCP server, which is the one address on this site that is not a page of it.
+ *
+ * Declared here because `llms.txt` states it: that file exists so a model does not have to
+ * fetch a second document to act, and an entry pointing at `mcp.html` without the URL on it
+ * would defeat the only thing it is for. That makes two spellings — this one and the page's own
+ * markup — so `src/mcppage/mcpPage.test.ts` imports this constant and holds the page to it. It
+ * is deliberately *not* spread any wider: the four in-app notes name the page, never the host,
+ * because a hostname in a React panel outlives the deployment it names.
+ */
+export const MCP_ENDPOINT = 'https://flyem.mrc-lmb.cam.ac.uk/coda-mcp/mcp'
 
 /** The social card. 1200×630; regenerate with `pnpm og:card` — see `scripts/og-card.svg`. */
 const OG_IMAGE = { path: '/og.png', width: 1200, height: 630 }
@@ -68,6 +81,16 @@ const OG_IMAGE = { path: '/og.png', width: 1200, height: 630 }
 interface Page {
   /** Path under `SITE_URL`. The editor is the site root, not `/index.html`. */
   url: string
+  /**
+   * Where this page sits in the order somebody should meet them.
+   *
+   * Stated rather than derived. It was the URL's *length* before `llms.txt` existed, which put
+   * the pages in an order nobody chose and happened not to matter — a sitemap's order means
+   * nothing to a crawler. `llms.txt` is read as a list by something deciding what to open, so
+   * the order is content there, and a fifth page must not be able to land in the middle of it
+   * by being short.
+   */
+  order: number
   /** Paths `git log` is asked about, in the repo's own spelling. */
   sources: readonly string[]
   /** schema.org type for the page's JSON-LD block. */
@@ -75,19 +98,27 @@ interface Page {
 }
 
 const PAGES: Record<string, Page> = {
-  'index.html': { url: '/', sources: ['index.html', 'src/'], schema: 'SoftwareApplication' },
+  'index.html': {
+    url: '/',
+    order: 0,
+    sources: ['index.html', 'src/'],
+    schema: 'SoftwareApplication',
+  },
   'overview.html': {
     url: '/overview.html',
+    order: 1,
     sources: ['overview.html', 'src/overview/'],
     schema: 'WebPage',
   },
   'tutorial.html': {
     url: '/tutorial.html',
+    order: 2,
     sources: ['tutorial.html', 'src/tutorial/'],
     schema: 'WebPage',
   },
   'nodes.html': {
     url: '/nodes.html',
+    order: 3,
     sources: ['nodes.html', 'src/nodeguide/', 'src/nodes/'],
     schema: 'WebPage',
   },
@@ -98,7 +129,20 @@ const PAGES: Record<string, Page> = {
    */
   'datasets.html': {
     url: '/datasets.html',
+    order: 4,
     sources: ['datasets.html', 'src/datasetguide/'],
+    schema: 'WebPage',
+  },
+  /*
+   * The MCP server's page. `src/mcp/` is *not* in `sources`: that directory is
+   * the contract the server imports, and a change to it moves what the server
+   * can do rather than what this document says about it — a `lastmod` off it
+   * would report the page as edited on every deploy that touched an export.
+   */
+  'mcp.html': {
+    url: '/mcp.html',
+    order: 5,
+    sources: ['mcp.html', 'src/mcppage/'],
     schema: 'WebPage',
   },
 }
@@ -277,11 +321,11 @@ export function seo(): Plugin {
     },
 
     /**
-     * `sitemap.xml` and `robots.txt`, emitted rather than committed to `public/`.
+     * `sitemap.xml`, `robots.txt` and `llms.txt`, emitted rather than committed to `public/`.
      *
-     * Both name `SITE_URL`, and a static file in `public/` would be a second place to write it —
-     * the thing the whole file is arranged to avoid. Emitting also means the sitemap's page list
-     * *is* the build's entry list, so the two cannot disagree.
+     * All three name `SITE_URL`, and a static file in `public/` would be a second place to write
+     * it — the thing the whole file is arranged to avoid. Emitting also means each list *is* the
+     * build's entry list, so they cannot disagree with it or with each other.
      */
     generateBundle() {
       /*
@@ -302,10 +346,7 @@ export function seo(): Plugin {
         .map((file) => ({ file, page: PAGES[file] }))
         .filter((r): r is { file: string; page: Page } => Boolean(r.page))
         // The editor first, then the documents in the order they are meant to be read.
-        .sort(
-          (a, b) =>
-            a.page.url.length - b.page.url.length || a.page.url.localeCompare(b.page.url),
-        )
+        .sort((a, b) => a.page.order - b.page.order)
 
       const missing = files.filter((f) => !PAGES[f])
       if (missing.length) {
@@ -356,6 +397,59 @@ User-agent: *
 Allow: /
 
 Sitemap: ${abs('/sitemap.xml')}
+`,
+      })
+
+      /*
+       * `llms.txt` — the same list again, for the reader that arrives without a browser.
+       *
+       * The convention (llmstxt.org) is a markdown file at the root: a name, a one-line summary
+       * in a blockquote, then sections of links with a sentence each. Support for it is uneven
+       * and it may come to nothing; it costs one emitted file derived from what is already here,
+       * which is the whole reason to try it. It is **not** a second sitemap — a crawler has that
+       * one — but the thing a sitemap cannot be: a page that says what the links *are*, in the
+       * order somebody should read them, and states the one fact that is actionable without
+       * reading any of them.
+       *
+       * That fact is the MCP endpoint, and it is why this file is worth more here than on most
+       * sites: a model asked to build a Coda workflow can do it, and the only thing standing
+       * between it and that is knowing an address. Sending it to `mcp.html` to find one would be
+       * a second fetch for a single line.
+       *
+       * Titles and descriptions come off each page's own markup, read from disk rather than
+       * from `transformIndexHtml`'s cache: this hook's order against that one is vite's business
+       * and not a thing to depend on, and the parse is the same `pageText` either way.
+       */
+      const entry = ({ file, page }: { file: string; page: Page }) => {
+        const { title, description } = pageText(readFileSync(join(config.root, file), 'utf8'))
+        return `- [${title ?? file}](${abs(page.url)})${description ? `: ${description}` : ''}`
+      }
+
+      this.emitFile({
+        type: 'asset',
+        fileName: 'llms.txt',
+        source: `# Coda — connectome data analysis
+
+> A browser-based node-graph editor for connectome data. Query neuPrint, CAVE, CATMAID and
+> precomputed Neuroglancer sources, wire up the analysis, and see each step's result where it
+> sits. Nothing to install, no account, and every workflow exports as Python or R.
+
+An AI client can build a Coda workflow directly, through the project's MCP server:
+
+\`${MCP_ENDPOINT}\`
+
+Add it as a remote MCP server (streamable HTTP, no sign-in), ask for a pipeline in plain
+language, and it hands back a link that opens the finished workflow in a browser. It authors
+and checks workflows; it does not run them, and it reads no data.
+
+## Pages
+
+${rows.map(entry).join('\n')}
+
+## Source
+
+- [navis-org/coda](https://github.com/navis-org/coda): the editor itself. MIT licensed.
+- [navis-org/coda-mcp](https://github.com/navis-org/coda-mcp): the MCP server above.
 `,
       })
     },

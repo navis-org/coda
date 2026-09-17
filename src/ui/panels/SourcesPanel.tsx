@@ -355,28 +355,48 @@ const SECTIONS: readonly [Section, ...Section[]] = [
     subscribe: subscribeAiAuthFailure,
     render: ({ onClose }) => <AssistantTab onSaved={onClose} />,
     /*
-     * The one section that keeps a second sentence on screen. Where a key is kept is a promise
-     * about us, and a reader who does not open the `?` has lost nothing; that the question and
-     * the *graph* leave the machine is a consequence for them, and it is the thing nobody can
-     * infer from a key field. A consent line behind a tooltip is not a consent line.
+     * The one section that keeps three sentences on screen, and the order is the argument.
+     *
+     * The *choice* comes first, because this tab is where somebody who has decided they want an
+     * LLM involved lands, and a key field is the only thing on it — so the other route reads as
+     * absent rather than as unmentioned. It is also the route that costs nothing and needs no
+     * account, which makes burying it under a key field the wrong way round.
+     *
+     * Then the consent line, which the band kept before this and still must: where a key is
+     * kept is a promise about us, and a reader who does not open the `?` has lost nothing;
+     * that the question and the *graph* leave the machine is a consequence for them, and it is
+     * the thing nobody can infer from a key field. A consent line behind a tooltip is not a
+     * consent line. It opens "A key here means" because it is now true of one of the two
+     * options and not the other — the MCP server needs no key and sends us nothing.
      */
     privacy: (
       <>
-        <strong>Your key, your account, your bill.</strong> Your question, the graph on your
-        canvas and — unless you switch it off in the drawer — a summary of what it last produced
-        go to the provider you pick.
-        <Why>
-          {"Keys are held in this browser's local storage on this machine only, are never " +
-            'written into a saved graph or an export, and are never sent to us — requests go ' +
-            'straight from this page to the provider you pick, with no server of ours in ' +
-            'between. The summary is the one part you can decline — Send run values, in the ' +
-            'assistant drawer. It describes what a node produced rather than reproducing it: ' +
-            'row counts, ranges, and the commonest values of a column, for nodes whose results ' +
-            'are current. No rows are sent, and neuron ids are never listed. A model running ' +
-            'on your own machine under Ollama sends nothing off it at all — but an Ollama ' +
-            'model whose name ends in -cloud runs on ollama.com, and is no more local than ' +
-            'the rest.'}
-        </Why>
+        <strong>Two ways to get AI in Coda.</strong> Either point your own client at{' '}
+        <a href={`${import.meta.env.BASE_URL}mcp.html`} target="_blank" rel="noreferrer">
+          Coda&rsquo;s MCP server
+        </a>{' '}
+        — Claude, ChatGPT and the rest can then build workflows for you — or give a provider key
+        below and use the assistant built in.
+        {/* A block, not a `<br />`: these are two statements, and at 11px a bare break ran the
+            second into the first. The class is what carries the gap. */}
+        <span className="sources__privacy-next">
+          <strong>A key here is your account and your bill.</strong> Your question, the graph on
+          your canvas and — unless you switch it off in the drawer — a summary of what it last
+          produced go to the provider you pick.{' '}
+          {/* Inside the block, or the `?` drops onto a line of its own under it. */}
+          <Why>
+            {"Keys are held in this browser's local storage on this machine only, are never " +
+              'written into a saved graph or an export, and are never sent to us — requests go ' +
+              'straight from this page to the provider you pick, with no server of ours in ' +
+              'between. The summary is the one part you can decline — Send run values, in the ' +
+              'assistant drawer. It describes what a node produced rather than reproducing it: ' +
+              'row counts, ranges, and the commonest values of a column, for nodes whose ' +
+              'results are current. No rows are sent, and neuron ids are never listed. A model ' +
+              'running on your own machine under Ollama sends nothing off it at all — but an ' +
+              'Ollama model whose name ends in -cloud runs on ollama.com, and is no more ' +
+              'local than the rest.'}
+          </Why>
+        </span>
       </>
     ),
   },

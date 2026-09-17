@@ -324,13 +324,15 @@ export default defineConfig({
   worker: { format: 'es' },
 
   /*
-   * Four entries. `overview.html` is the front door, `tutorial.html` the
-   * scroll-through introduction and `nodes.html` the node guide — all three
-   * plain TypeScript and CSS, importing nothing from `src/ui` but `theme.css`,
-   * so they share the editor's palette without pulling React, sigma or three
-   * into documents that draw none of them. Naming all four here is what stops
-   * vite treating `index.html` as the only root and silently dropping the
-   * others: they build green and 404 in production.
+   * The editor, and five documents beside it. `overview.html` is the front
+   * door, `tutorial.html` the scroll-through introduction, `nodes.html` the
+   * node guide, `datasets.html` the dataset guide and `mcp.html` the MCP
+   * server's page — every one of them plain TypeScript and CSS, importing
+   * nothing from `src/ui` but `theme.css`, so they share the editor's palette
+   * without pulling React, sigma or three into documents that draw none of
+   * them. Naming each here is what stops vite treating `index.html` as the
+   * only root and silently dropping the rest: they build green and 404 in
+   * production.
    */
   build: {
     rollupOptions: {
@@ -340,6 +342,7 @@ export default defineConfig({
         tutorial: fileURLToPath(new URL('./tutorial.html', import.meta.url)),
         nodes: fileURLToPath(new URL('./nodes.html', import.meta.url)),
         datasets: fileURLToPath(new URL('./datasets.html', import.meta.url)),
+        mcp: fileURLToPath(new URL('./mcp.html', import.meta.url)),
       },
     },
   },

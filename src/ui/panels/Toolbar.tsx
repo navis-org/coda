@@ -392,8 +392,9 @@ export function Toolbar() {
              * `BASE_URL`, since `base` is './' and an absolute path would resolve to the domain
              * root under a subpath deploy.
              *
-             * Three documents, in the order somebody meets them: what Coda is, how it works,
-             * then what each node does.
+             * The documents, in the order somebody meets them: what Coda is, how it works,
+             * what each node does, which connectome to point it at — and last, the way in that
+             * starts outside this window.
              */}
             <Submenu label="Documentation" blurb="Overview, Help, Contents, etc.">
               <a
@@ -447,6 +448,23 @@ export function Toolbar() {
               >
                 <strong>Dataset Guide</strong>
                 <span>Which connectome, and what to cite</span>
+              </a>
+              {/*
+               * Last, and the only row here that is not about using this window: it is how to
+               * get a workflow built somewhere else and opened here. A reader who wants it
+               * usually does not know it exists, which is the whole reason it is in a menu
+               * they already open — the two surfaces that mention it otherwise (the assistant
+               * drawer, the Connections dialog) both cost a decision to reach.
+               */}
+              <a
+                className="dropdown__item"
+                href={`${import.meta.env.BASE_URL}mcp.html`}
+                target="_blank"
+                rel="noreferrer noopener"
+                onClick={close}
+              >
+                <strong>MCP Server</strong>
+                <span>Build workflows from your own AI client</span>
               </a>
             </Submenu>
             {/*

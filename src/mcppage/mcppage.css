@@ -1,0 +1,592 @@
+/*
+ * The MCP page.
+ *
+ * The fifth document beside the app. The overview is the front door, the field
+ * guide teaches the model, the node guide answers "what does this node do" —
+ * this one answers "how do I drive Coda from my own AI client", which is the
+ * one route into the app that starts somewhere else entirely.
+ *
+ * Tokens come from the app's own `theme.css`, the rule every static entry
+ * follows; the layout idiom is `overview.css`'s, copied rather than imported.
+ * That is the page-CSS precedent here — `tutorial.css` and `overview.css`
+ * already carry their own `.hero`, `.rise` and `.cta` — and importing one
+ * page's sheet into another would drag 1,500 lines of node cards, chains and
+ * dashboard figures into a document that draws none of them.
+ */
+
+@import '../ui/theme.css';
+
+:root {
+  --measure: 34rem;
+  --gutter: clamp(1.25rem, 5vw, 4rem);
+  --t-dataset: var(--socket-dataset);
+  --t-table: var(--socket-table);
+
+  /*
+   * The syntax palette for the two code figures, taken from `overview.css`
+   * unchanged — including the reason it is per-mode: these are 11.5px glyphs,
+   * so the floor is 4.5:1 rather than the 3:1 a mark gets, and no single value
+   * clears it on both surfaces. Contrast against `--surface-1` in each mode is
+   * recorded there.
+   */
+  --code-comment: #6d6b66;
+  --code-string: #0a7a52;
+  --code-call: #1f63b4;
+  --code-keyword: #4a3aa7;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --code-comment: #898781;
+    --code-string: #199e70;
+    --code-call: #3987e5;
+    --code-keyword: #9085e9;
+  }
+}
+:root[data-theme='dark'] {
+  --code-comment: #898781;
+  --code-string: #199e70;
+  --code-call: #3987e5;
+  --code-keyword: #9085e9;
+}
+
+/* --------------------------------------------------------------------------
+   Base
+   -------------------------------------------------------------------------- */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 17px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  /* theme.css pins this off for the editor canvas; a document wants it back. */
+  overscroll-behavior: auto;
+}
+
+a {
+  color: inherit;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+}
+a:hover {
+  text-decoration-color: currentColor;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+  margin: 0;
+  letter-spacing: -0.028em;
+  font-weight: 800;
+  line-height: 1.06;
+}
+p {
+  margin: 0;
+}
+strong {
+  font-weight: 650;
+}
+code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.36em;
+}
+
+.shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-inline: var(--gutter);
+}
+
+/* Scroll reveal. Gated on `.js`, which `main.ts` claims and gives back if it
+   throws, so a page whose script dies is static rather than blank. */
+.js .rise {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.7s ease,
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.js .rise.is-in {
+  opacity: 1;
+  transform: none;
+}
+.js .rise[data-delay='1'] {
+  transition-delay: 0.08s;
+}
+.js .rise[data-delay='2'] {
+  transition-delay: 0.16s;
+}
+.js .rise[data-delay='3'] {
+  transition-delay: 0.24s;
+}
+
+/* --------------------------------------------------------------------------
+   Hero
+   -------------------------------------------------------------------------- */
+
+.hero {
+  position: relative;
+  display: grid;
+  align-content: center;
+  padding-block: clamp(3.5rem, 11vh, 6.5rem) clamp(2.5rem, 7vh, 4rem);
+  background:
+    radial-gradient(
+      1100px 620px at 74% 30%,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 66%
+    ),
+    var(--canvas);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+.hero__dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+  background-size: 22px 22px;
+  opacity: 0.85;
+  pointer-events: none;
+}
+/* `width: 100%` is load-bearing — see the note in `overview.css`: auto margins
+   on a grid item disable the stretch that would otherwise size it. */
+.hero__inner {
+  position: relative;
+  width: 100%;
+  display: grid;
+  gap: 1.7rem;
+}
+.hero__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.hero__brand svg {
+  color: var(--text-primary);
+}
+.hero__tag {
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.15em 0.7em;
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+.hero h1 {
+  font-size: clamp(2.1rem, 5.4vw, 3.8rem);
+  max-width: 20ch;
+  letter-spacing: -0.035em;
+}
+.hero h1 em {
+  font-style: normal;
+  color: var(--text-muted);
+}
+.hero__sub {
+  font-size: 1.1rem;
+  color: var(--text-secondary);
+  max-width: var(--measure);
+}
+.hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.hero__meta span {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.hero__meta span + span::before {
+  content: '';
+  width: 1px;
+  height: 11px;
+  background: var(--border-strong);
+}
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.68rem 1.35rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.cta[data-primary='true'] {
+  background: var(--text-primary);
+  color: var(--canvas);
+  border-color: var(--text-primary);
+}
+.cta:hover {
+  border-color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+   Chapters
+   -------------------------------------------------------------------------- */
+
+.chapter {
+  padding-block: clamp(3.5rem, 10vh, 6.5rem);
+  border-top: 1px solid var(--border);
+}
+.chapter:first-of-type {
+  border-top: 0;
+}
+.chapter__head {
+  display: grid;
+  gap: 0.85rem;
+  max-width: var(--measure);
+  margin-bottom: clamp(1.75rem, 4.5vh, 2.75rem);
+}
+/* `flex-start`, not `center`: a title that wraps would float its icon halfway
+   down the block, beside nothing in particular. */
+.chapter__head h2 {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  font-size: clamp(1.6rem, 3.2vw, 2.3rem);
+}
+.chapter__head p {
+  color: var(--text-secondary);
+}
+.h2icon {
+  flex: none;
+  display: inline-flex;
+  margin-top: 0.09em;
+  color: var(--text-secondary);
+}
+.h2icon svg {
+  width: 0.86em;
+  height: 0.86em;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(1.75rem, 4vw, 3.5rem);
+  align-items: start;
+}
+.split--wide {
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+}
+.stack {
+  display: grid;
+  gap: 1.4rem;
+  align-content: start;
+}
+.point {
+  display: grid;
+  gap: 0.3rem;
+}
+.point h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.point p {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   Surfaces: the app-frame idiom the other documents draw their mock-ups in
+   -------------------------------------------------------------------------- */
+
+.surface {
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-1);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+.surface__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 7px 10px;
+  background: var(--surface-3);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.surface__bar strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.surface__bar .spacer {
+  flex: 1;
+}
+.code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.75;
+  padding: 12px 14px;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--text-secondary);
+  tab-size: 2;
+}
+.code .c {
+  color: var(--code-comment);
+}
+.code .k {
+  color: var(--code-keyword);
+}
+.code .s {
+  color: var(--code-string);
+}
+.code .f {
+  color: var(--code-call);
+}
+.cellbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.cellbar em {
+  font-style: normal;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.fig__cap {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.fig__cap b {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+/* The conversation mock-up. Same shape as the overview's assistant figure,
+   with the tool calls standing in for that one's plan rows. */
+.chat {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+.bubble {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 9px 11px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.bubble[data-me='true'] {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  color: var(--text-primary);
+}
+.toolrow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 0;
+  color: var(--text-muted);
+}
+.toolrow em {
+  flex: none;
+  font-style: normal;
+  color: var(--text-secondary);
+}
+.toolrow b {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.linkout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+}
+.linkout b {
+  color: var(--text-primary);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   The endpoint, the clients, the tools
+   -------------------------------------------------------------------------- */
+
+/* The one string a reader came for. Selectable, wraps on a phone rather than
+   scrolling sideways — a URL you cannot copy whole is no URL at all. */
+.endpoint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  font-family: var(--font-mono);
+  font-size: clamp(12px, 1.9vw, 15px);
+  overflow-wrap: anywhere;
+}
+.endpoint b {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.endpoint em {
+  flex: none;
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.clients {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+.client {
+  display: grid;
+  gap: 0.45rem;
+  align-content: start;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.client h3 {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+.client p,
+.client ol {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+.client ol {
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.2rem;
+}
+/*
+ * A command is a block, not an inline run.
+ *
+ * `code`'s border and background are painted per *line fragment*, so a
+ * terminal line long enough to wrap — which the one in this card is at every
+ * width — draws as three separately boxed pieces with the ends chopped. A
+ * block wraps inside one box.
+ */
+.client code {
+  display: block;
+  padding: 6px 8px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   Closing
+   -------------------------------------------------------------------------- */
+
+.outro {
+  padding-block: clamp(3.5rem, 11vh, 6.5rem) clamp(2.5rem, 7vh, 4rem);
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+.outro h2 {
+  font-size: clamp(1.8rem, 4.2vw, 2.8rem);
+}
+.outro p {
+  color: var(--text-secondary);
+  max-width: 46ch;
+  margin: 1rem auto 0;
+}
+.outro__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  margin-top: 2rem;
+}
+.colophon {
+  padding-block: 1.5rem 3rem;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.8;
+}
+
+/* --------------------------------------------------------------------------
+   Responsive
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .split,
+  .split--wide {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 620px) {
+  body {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .js .rise {
+    opacity: 1;
+    transform: none;
+  }
+}

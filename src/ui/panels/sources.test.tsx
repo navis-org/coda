@@ -478,7 +478,23 @@ describe('what each half promises about a credential', () => {
     open()
     fireEvent.click(section('AI assistant'))
 
-    expect(privacy()?.textContent ?? '').toMatch(/your key, your account, your bill/i)
+    expect(privacy()?.textContent ?? '').toMatch(/your account and your bill/i)
+  })
+
+  /*
+   * The band leads with the choice, because a tab whose only control is a key field says by its
+   * shape that a key is the only way to get a model involved — and the other way needs no
+   * account and costs nothing, so burying it is the wrong way round. Asserted as *the link*
+   * rather than as the sentence: the wording is editorial, a route the reader cannot reach is
+   * the failure.
+   */
+  it('offers the MCP server beside the key, since one of the two needs no key at all', () => {
+    render(<SourcesPanel />)
+    open()
+    fireEvent.click(section('AI assistant'))
+
+    const link = privacy()?.querySelector('a')
+    expect(link?.getAttribute('href')).toContain('mcp.html')
   })
 })
 

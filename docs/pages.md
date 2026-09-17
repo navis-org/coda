@@ -1,7 +1,7 @@
-# The four published pages
+# The five published pages
 
-The overview, tutorial, node guide and dataset guide — extra vite entries that ship beside
-the app.
+The overview, tutorial, node guide, dataset guide and the MCP page — extra vite entries that
+ship beside the app.
 
 ## The overview page
 
@@ -673,3 +673,52 @@ The deeper reading is that **megabyte-scale values as React props are a hazard i
 because React re-renders on them but because its dev tooling reads them. Nothing here does that
 today beyond the viewers, which need the data they draw; a component that wants only a *fact*
 about a table should take the fact.
+
+## The MCP page
+
+A **fifth** entry — `mcp.html` at the root, `src/mcppage/{main.ts,mcppage.css}` — and the one
+document about a way into Coda that starts somewhere else entirely: an MCP client builds the
+workflow and hands back a link. `docs/mcp.md` is the seam's engineering record; this page is what
+a user is told, and the two are written for different readers.
+
+**Why a page rather than a paragraph.** Four surfaces advertise the server — the README, the
+assistant drawer, the Connections dialog's AI tab and the overview's AI section — and each of them
+is one sentence long, because none of them is a place to put a hostname, a per-client setup
+procedure and an argument about what is stored. One destination means **the endpoint is written
+down twice in this repository**: on this page and in `README.md`. A moved endpoint is then two
+edits and not six, and `mcpPage.test.ts` pins that every URL *on the page* is the same one — the
+failure to expect is a half-edited host, where the prose and the config snippet disagree and both
+look right in isolation.
+
+**`src/mcppage/`, not `src/mcp/`.** That directory is the headless contract the server imports,
+inside the lint boundary (invariant 1); a page entry importing `theme.css` from it would fail the
+boundary rule, and on the way there would put a stylesheet into `vite.mcp.config.ts`'s bundle.
+The awkward directory name is the cheapest possible marker that these are two different things.
+
+**The stylesheet is `overview.css`'s idiom copied, not imported.** Per-page CSS is the standing
+precedent here — `tutorial.css` and `overview.css` already carry their own `.hero`, `.rise`,
+`.cta` and `.colophon` — and importing one page's sheet into another drags 1,500 lines of node
+cards, analysis chains and dashboard figures into a document that draws none of them. What is
+shared is `theme.css`, as everywhere, plus the four measured `--code-*` values, which are copied
+with the contrast note that justifies them.
+
+**Almost nothing on it is checkable from here.** The tool names, their descriptions and the short
+link's shape are the server's, in another repository, and asserting them against a snapshot would
+pin this page to whatever that repository looked like on the day. So the tripwires are the two
+things the page says about *itself*: one endpoint wherever it names one, and its own entry script.
+What the page claims was checked against the live server by hand when it was written — an
+`initialize` and a `tools/list` over curl, and a 404 from `/coda-mcp/w/<id>` confirming where short
+links live.
+
+**It stops at two sections, and the cut is the design.** A tool-by-tool list and a section on what
+the server stores were both written and both removed: a reader here is deciding whether to paste a
+URL into their client, and neither question is one they have yet. The server's own README carries
+both for anybody who does. What survives from them is one clause in the hero — *authors and checks,
+never runs* — and the sentence under "You get a link" saying the workflow opens where the
+credentials already are, because those two are the ones somebody would otherwise have to assume.
+
+`vite/seo.ts` gets the page with `sources: ['mcp.html', 'src/mcppage/']` and **deliberately not**
+`src/mcp/`: a change to the contract moves what the server can do, not what this document says
+about it, and a `lastmod` off it would report the page as edited on every deploy that touched an
+export.
+

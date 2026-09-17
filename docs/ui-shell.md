@@ -808,7 +808,12 @@ panel has been told, and `sources.test.tsx` pins that half separately from the c
 the AI section keeps a **second** visible sentence, because where a key is kept is a promise about
 us that costs a reader nothing to skip, while the question and the *graph* leaving the machine is a
 consequence for them that no key field implies — a consent line behind a tooltip is not a consent
-line. The tests read both halves through a `promise()` helper, since what they are about is which
+line. That section's band now **opens on the choice** rather than on the consent line: the MCP
+server is the other way to get a model involved, it needs no key and no account, and a tab whose
+only control is a key field says by its shape that there is no other way. The consent line follows
+it and is scoped — *a key here* — because it is true of one of the two routes and not the other.
+`sources.test.tsx` asserts the *link* rather than the sentence, the wording being editorial where a
+route a reader cannot reach is the failure. The tests read both halves through a `promise()` helper, since what they are about is which
 claims are made rather than where; the negative ones ("does not claim a proxy") then mean nowhere
 in the section, tooltip included.
 

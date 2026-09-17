@@ -90,12 +90,35 @@ nobody searches for `Coda`: not knowing it exists is the problem this file is ab
 | `/overview.html` | Coda Overview — connectome analysis for neuPrint, CAVE, CATMAID |
 | `/tutorial.html` | Coda Field Guide — build a connectome analysis pipeline |
 | `/nodes.html` | Coda Node Guide — every dataset, query, transform and viewer |
+| `/datasets.html` | Coda Dataset Guide — which connectome should you use? |
+| `/mcp.html` | Connectome workflows from your AI client — Coda MCP server |
 
 Three rules held them to that shape. **The brand goes first**, because Google truncates around 60
 characters and cuts the *tail* — a title front-loaded with query terms loses its own name on the
 results page. **All four stay under 60**, which is why the overview names three backends and not
 five. And **they must differ from each other in the first few words**: four titles opening `Coda —`
 read as one page duplicated, which is a thing Google actively discounts.
+
+### One page puts the brand last, because the brand is taken
+
+`mcp.html` inverts the first rule, and it is the only page that may. "Coda MCP" is **Coda.io's**
+phrase: measured in September 2026, a search for `coda.science connectome workflow MCP server`
+returned ten results and every one of them was Coda.io — their help centre, their community
+announcement, Composio's connector, and three unrelated community servers literally named
+`coda-mcp`. A second search naming this project (`navis-org coda-mcp connectome node editor MCP`)
+ranked `navis-org/coda` first and **did not return `navis-org/coda-mcp` at all**. The official MCP
+registry tells the same story: 0 servers for `connectome`, 19 for `coda`, all of them Coda.io or
+Codacy.
+
+Brand-first is good advice when the brand is a term you can win. Here it front-loads the title
+with the two words that hand the page to a competitor with orders of magnitude more authority, so
+the page leads with what is unambiguously ours — *connectome* — and keeps `Coda MCP server` in the
+tail, where it is the disambiguator rather than the bid. 58 characters, so the rule that actually
+protects the reader still holds.
+
+The same reasoning is why the fix that matters for this page is **not** on this page: an MCP
+server is found through the [official registry](https://registry.modelcontextprotocol.io) and the
+client directories, not through search. See [mcp.md](mcp.md).
 
 `og:title`, `twitter:title` and the JSON-LD `name` all follow automatically, since the plugin reads
 them off the page.
@@ -204,6 +227,32 @@ content, since a workflow lives in the URL fragment and no crawler ever sees one
 discovery channel described at the top. If that judgement ever changes, the block goes in
 `vite/seo.ts` and nowhere else.
 
+## `llms.txt`
+
+A third emitted file, at the site root, following [llmstxt.org](https://llmstxt.org): a name, a
+one-line summary in a blockquote, then the pages as a list with a sentence each. Generated in the
+same hook as the other two and from the same table, so it cannot list a page the build does not
+have, and its titles and descriptions are read off each page's own markup rather than written
+again here.
+
+**Three things about it are decisions, not defaults.**
+
+It **states the MCP endpoint** rather than linking `mcp.html`, which is the one place in this
+repository where that URL appears outside the page itself. The entire point of the file is that a
+model can act without a second fetch, and "the address is on another page" defeats it. Two
+spellings is the cost; `src/mcppage/mcpPage.test.ts` holds them to each other by reading both files
+as text.
+
+The page list has an **explicit order** (`Page.order`). It was the URL's length before this file
+existed — an order nobody chose, which was fine, because a sitemap's order means nothing to a
+crawler. A list a model reads to decide what to open is different: the order is content, and
+without the field a page lands in the middle of it by being short.
+
+And it is **worth trying without being worth believing in**. Support is uneven and the convention
+may come to nothing; what it costs is one emitted file derived from what was already here, and the
+one thing it might do — hand an assistant an address it can use immediately — is the thing this
+project most lacks. If it turns out to be dead weight, deleting it is deleting one `emitFile`.
+
 ## `SITE_URL`, and what a fork gets
 
 `https://coda.science` by default, overridable with `CODA_SITE_URL`, which may carry a path
@@ -255,7 +304,7 @@ against a directory that does not exist and the way out of a 404 would itself 40
 `pnpm build`, then:
 
 ```bash
-cat dist/robots.txt dist/sitemap.xml
+cat dist/robots.txt dist/sitemap.xml dist/llms.txt
 grep -c 'class="entry"' dist/nodes.html      # must equal the listable node count
 grep -o 'rel="canonical" href="[^"]*"' dist/*.html
 grep -c -- '<!--' dist/*.html                 # 0 each, 404.html included

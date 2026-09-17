@@ -5,6 +5,37 @@ answer is [`navis-org/coda-mcp`](https://github.com/navis-org/coda-mcp), an MCP 
 repository, plus **one file in this one**: `dist/mcp/v1/coda.js`, built from `src/mcp/index.ts` by
 `vite.mcp.config.ts` and deployed with the site. This document is the seam between the two.
 
+## Where it is advertised
+
+`mcp.html` is the user-facing page (`docs/pages.md` has its construction), and six surfaces point
+at it in one sentence each: `README.md`, `index.html`'s `<noscript>` list, the overview page's AI
+section, `?` ▸ Documentation, the assistant drawer's empty state, and the Connections dialog's
+**AI assistant** tab — where it is the *first* thing the band says, the two routes being a choice
+and only one of them needing the key field below (`docs/ui-shell.md`). The rule those follow is
+that **the page carries the endpoint and they carry none of it**: a hostname in an in-app note is
+a hostname that outlives the deployment it names, and none of them can carry the per-client setup
+anyway. The single exception is `llms.txt`, which exists so a model need not fetch a second
+document — [seo.md](seo.md) argues it, and a test holds the two spellings together.
+
+## Being found at all, which is not this repository's problem to fix
+
+Worth stating because the work above looks like discoverability and mostly is not. Measured in
+September 2026: the endpoint is reachable, unauthenticated and works; and **nothing points at it**.
+`navis-org/coda-mcp` does not appear in a web search naming this project, the official MCP registry
+holds no connectome server of any kind, there is no `.well-known` discovery on the host, and the
+repository has no topics and no homepage. Every surface listed above is read by somebody who has
+already found *Coda*; none of them is read by somebody who has an MCP client and a question.
+
+The three things that would change that are all outside this repository, in rough order of effect:
+publishing to the [official registry](https://registry.modelcontextprotocol.io) (which is what the
+client directories index in turn), giving the server repository a description and topics naming
+connectomics rather than "the MCP server for coda.science", and listing it in the third-party
+directories. `seo.md` records the naming half of the same problem: "Coda MCP" is Coda.io's phrase
+and this project will not win it. The rule those four follow is
+that **the page carries the endpoint and they carry none of it** — a hostname in an in-app note is
+a hostname that outlives the deployment it names, and none of those surfaces can carry the
+per-client setup anyway.
+
 ## What each side owns
 
 **This repository owns every fact about Coda.** The node catalogue, the plan format and its

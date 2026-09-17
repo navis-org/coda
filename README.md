@@ -13,6 +13,7 @@
 - download/export results as CSV, SWC, images, Neuroglancer URLs, etc.
 - convert workflows to Python or R code to run locally
 - AI assistant for generating workflows from natural language queries
+- [MCP server](https://coda.science/mcp.html) so Claude, ChatGPT & co. can build workflows for you
 - share workflows via links
 
 ## Quickstart
@@ -23,6 +24,7 @@ Other useful links:
 - ["Feature Overview"](https://coda.science/overview.html)
 - ["Field Guide"](https://coda.science/tutorial.html)
 - ["Node Guide"](https://coda.science/nodes.html)
+- ["MCP Server"](https://coda.science/mcp.html) — drive Coda from your own AI client
 
 Check out `?` ▶ `Guides` for in-app tutorials and `Examples` for pre-built workflows.
 

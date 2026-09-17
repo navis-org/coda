@@ -428,6 +428,25 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
             )}
           </p>
         )}
+        {/*
+         * The other way in, said once and only on an empty log — a conversation
+         * in progress is not the moment to point somewhere else. Muted, and the
+         * page is where the URL and the per-client setup live: this drawer has
+         * no business carrying a hostname that the server's own page states.
+         */}
+        {entries.length === 0 && (
+          <p className="assistant__note">
+            Alternatively, let your own AI client build workflows for you, through Coda&rsquo;s{' '}
+            <a
+              href={`${import.meta.env.BASE_URL}mcp.html`}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              MCP server
+            </a>
+            .
+          </p>
+        )}
         {entries.map((entry, index) => (
           <Entry key={index} entry={entry} />
         ))}

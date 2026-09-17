@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Named for the thing it is, not for what it is called. "Coda MCP" is Coda.io's phrase — a
+      search for it returns their connectors, their help centre and three community servers of
+      the same name, and nothing here. The words that are ours are the connectome ones, so they
+      lead; `docs/seo.md` has the searches this was measured against.
+    -->
+    <title>Connectome workflows from your AI client — Coda MCP server</title>
+    <!-- one line, so `grep 'meta name="description"'` finds it — see index.html for why. -->
+    <!-- prettier-ignore -->
+    <meta name="description" content="Connect Claude, ChatGPT or any MCP client to Coda: the model builds a connectome workflow node by node and hands back a link that opens it in your browser." />
+    <link rel="icon" href="./logo.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f9f9f7" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#171716" />
+  </head>
+  <body>
+<!-- ==========================================================================
+     Section icons.
+     Both are lifted from src/ui/Icons.tsx, so this page and the toolbar draw the
+     same glyph.
+     ========================================================================== -->
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+  <defs>
+    <!-- Assistant, from Icons.tsx. The eyes are filled dots rather than circles:
+         at this size a stroked one closes up into a smudge. -->
+    <g id="i-assistant" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="4" y="8.5" width="16" height="11.5" rx="3"/>
+      <path d="M12 5.5v3"/>
+      <path d="M2 13v3M22 13v3"/>
+      <circle cx="12" cy="4" r="1.4" fill="currentColor" stroke="none"/>
+      <circle cx="9.25" cy="14" r="1.3" fill="currentColor" stroke="none"/>
+      <circle cx="14.75" cy="14" r="1.3" fill="currentColor" stroke="none"/>
+    </g>
+    <!-- Connections, from Icons.tsx: a branch, which is the shape everybody
+         already reads as one thing splitting into another. -->
+    <g id="i-connections" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 4.5v11"/>
+      <circle cx="6" cy="18" r="2.5"/>
+      <circle cx="18" cy="6" r="2.5"/>
+      <path d="M18 8.5a9.5 9.5 0 0 1-9.5 9.5"/>
+    </g>
+  </defs>
+</svg>
+
+<header class="hero">
+  <div class="hero__dots" aria-hidden="true"></div>
+  <div class="shell hero__inner">
+    <div class="hero__brand">
+      <svg width="22" height="22" viewBox="0 0 64 64" fill="currentColor" aria-hidden="true">
+        <path fill-rule="evenodd" d="M32 12a18 20 0 1 0 0 40 18 20 0 1 0 0-40Zm0 3.6a12.24 16.4 0 1 1 0 32.8 12.24 16.4 0 1 1 0-32.8Z"/>
+        <rect x="30" y="5" width="4" height="54" rx="2"/>
+        <rect x="7" y="30" width="50" height="4" rx="2"/>
+      </svg>
+      <span>Coda &middot; MCP server</span>
+      <span class="hero__tag">Beta</span>
+    </div>
+
+    <h1>Build connectome workflows <em>from your own AI client</em></h1>
+
+    <p class="hero__sub">
+      Coda has an assistant built in. The MCP server is the same thing from the other side: point
+      Claude, ChatGPT or any other MCP client at one URL, ask for a pipeline in plain language, and
+      get back a link that opens the finished workflow in your browser.
+    </p>
+
+    <div class="hero__meta">
+      <span>one URL, nothing to install</span>
+      <span>authors and checks &mdash; never runs</span>
+      <span>same node catalogue as the app</span>
+    </div>
+  </div>
+</header>
+
+<!-- ==========================================================================
+     What it is
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise">
+      <h2>
+        <span class="h2icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-assistant"/></svg></span>
+        What it is
+      </h2>
+      <p>
+        MCP &mdash; the Model Context Protocol &mdash; is how an AI client learns about a tool.
+      </p>
+    </div>
+
+    <div class="split split--wide">
+      <div class="stack">
+        <div class="point rise">
+          <h3>The model does the wiring</h3>
+          <p>
+            It reads Coda&rsquo;s own node catalogue, adds the nodes, connects the ports and sets the
+            parameters &mdash; then checks the result against the same rules the cards on the canvas
+            use, and fixes what it finds before answering.
+          </p>
+        </div>
+        <div class="point rise" data-delay="1">
+          <h3>You get a link</h3>
+          <p>
+            The workflow opens in Coda in your browser, where your credentials are, and you run it,
+            edit it, and take it from there. Nothing is computed on the way.
+          </p>
+        </div>
+        <div class="point rise" data-delay="2">
+          <h3>Always the current Coda</h3>
+          <p>
+            The server reads the node definitions out of the deployed build, so a node added this
+            week is one the model can use today &mdash; no version to match, nothing to upgrade.
+          </p>
+        </div>
+      </div>
+
+      <div class="surface rise" data-delay="1">
+        <div class="surface__bar">
+          <strong>Claude</strong><span class="spacer"></span><span>coda &middot; 8 tools</span>
+        </div>
+        <div class="chat">
+          <div class="bubble" data-me="true">
+            In the hemibrain, what do LC4 neurons talk to? Group it by cell type and chart it.
+          </div>
+          <div class="bubble">
+            <div class="toolrow"><em>&#9656;</em><b>coda_guide</b><span>the rules and the catalogue</span></div>
+            <div class="toolrow"><em>&#9656;</em><b>coda_apply_plan</b><span>4 nodes, 4 wires</span></div>
+            <div class="toolrow"><em>&#9656;</em><b>coda_check_draft</b><span>no problems</span></div>
+            <div class="toolrow"><em>&#9656;</em><b>coda_get_link</b></div>
+            <div style="margin-top: 9px">
+              Hemibrain &rarr; Find Neurons <code style="font-size: 11px">^LC4$</code> &rarr;
+              Connectivity, downstream &rarr; Group By postType &rarr; Bar Chart. Open it and press Run:
+            </div>
+            <div class="linkout">
+              <b>flyem.mrc-lmb.cam.ac.uk/coda-mcp/w/</b><span>2QbS7&hellip;</span>
+            </div>
+          </div>
+        </div>
+        <div class="cellbar"><span>&#9654;</span><em>one conversation</em><span>&middot; the workflow is built, not run</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Connecting
+     ========================================================================== -->
+<section class="chapter">
+  <div class="shell">
+    <div class="chapter__head rise">
+      <h2>
+        <span class="h2icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-connections"/></svg></span>
+        Connect it
+      </h2>
+      <p>
+        It is hosted, so there is nothing to install and no key to paste. Wherever your client keeps
+        remote MCP servers, add this URL:
+      </p>
+    </div>
+
+    <div class="surface rise">
+      <div class="surface__bar"><strong>Server URL</strong><span class="spacer"></span><span>streamable HTTP &middot; no sign-in</span></div>
+      <div class="endpoint">
+        <em>MCP</em>
+        <b>https://flyem.mrc-lmb.cam.ac.uk/coda-mcp/mcp</b>
+      </div>
+    </div>
+
+    <div class="clients">
+      <div class="client rise">
+        <h3>Claude</h3>
+        <ol>
+          <li>Settings &rarr; Connectors</li>
+          <li>Add custom connector</li>
+          <li>Paste the URL, connect</li>
+        </ol>
+      </div>
+      <div class="client rise" data-delay="1">
+        <h3>Claude Code</h3>
+        <p>One line in a terminal:</p>
+        <p><code>claude mcp add --transport http coda https://flyem.mrc-lmb.cam.ac.uk/coda-mcp/mcp</code></p>
+      </div>
+      <div class="client rise" data-delay="2">
+        <h3>ChatGPT, Cursor, VS&nbsp;Code, Zed&hellip;</h3>
+        <p>
+          Anything that speaks MCP takes a remote server by URL &mdash; in a connector setting, or in
+          the client&rsquo;s own config file, as below.
+        </p>
+      </div>
+    </div>
+
+    <div class="surface rise" data-delay="1" style="margin-top: 1.25rem">
+      <div class="surface__bar"><strong>mcp.json</strong><span class="spacer"></span><span>the shape most clients use</span></div>
+      <div class="code">{
+  <span class="s">"mcpServers"</span>: {
+    <span class="s">"coda"</span>: {
+      <span class="s">"type"</span>: <span class="s">"http"</span>,
+      <span class="s">"url"</span>: <span class="s">"https://flyem.mrc-lmb.cam.ac.uk/coda-mcp/mcp"</span>
+    }
+  }
+}</div>
+    </div>
+
+    <p class="fig__cap rise" data-delay="2" style="margin-top: 1.1rem; max-width: 52rem">
+      Then just ask. A model that has never seen Coda reads <b>coda_guide</b> first, which is the
+      whole catalogue &mdash; every node type, its ports and its parameters &mdash; so no prompting
+      of your own is needed.
+    </p>
+  </div>
+</section>
+
+<!-- ==========================================================================
+     Outro
+     ========================================================================== -->
+<section class="outro">
+  <div class="shell">
+    <h2 class="rise">Try it</h2>
+    <p class="rise" data-delay="1">
+      Add the URL to your client, then ask it for a connectome workflow. If you would rather not
+      leave Coda at all, the assistant inside the app does the same job with your own API key.
+    </p>
+    <div class="outro__actions rise" data-delay="2">
+      <a class="cta" data-primary="true" href="./index.html">Open Coda</a>
+      <!-- Relative, so they work from a subpath deploy. -->
+      <a class="cta" href="./overview.html">Feature overview</a>
+      <a class="cta" href="./nodes.html">Node guide</a>
+      <a class="cta" href="https://github.com/navis-org/coda-mcp" target="_blank" rel="noreferrer noopener">Server source</a>
+    </div>
+  </div>
+</section>
+
+<footer class="colophon">
+  <div class="shell">
+    Coda &mdash; connectome data analysis &middot; Fly Connectomics Group, Cambridge<br>
+    The MCP server is <a href="https://github.com/navis-org/coda-mcp">navis-org/coda-mcp</a>,
+    open source and hosted at the LMB.<br>
+    Page views are counted with <a href="https://coda-science.goatcounter.com/">GoatCounter</a>
+    &mdash; no cookies, nothing kept in your browser, and the dashboard is public.
+  </div>
+</footer>
+    <script type="module" src="/src/mcppage/main.ts"></script>
+  </body>
+</html>
