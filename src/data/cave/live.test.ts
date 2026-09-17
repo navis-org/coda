@@ -40,6 +40,7 @@ import {
 } from './datastack'
 import { caveSourceFor } from './registry'
 import { CAVE_MAX_ROWS, refuseIfCapped } from './client'
+import { grapheneFragmentNames, openGrapheneMeshes } from './meshes'
 import { countTable, queryTable, queryTableChecked, tableMetadata } from './api'
 import { resetCaveTables, tableColumnsFor, tableFactsFor, tableListFor } from './tables'
 import { caveScene } from './scene'
@@ -696,6 +697,60 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
 
     // And it says so: a source with no levels reports that it simplified, not "level 0 of 0".
     expect(low.detail?.decimated).toBe(true)
+  }, 600_000)
+
+  /*
+   * Every fragment a verified manifest names is *reachable*, which is the assertion the test
+   * above cannot make: it asks about the triangle count of whatever arrived, and a mesh built
+   * from a twentieth of its fragments decimates to a perfectly ordinary number of triangles in
+   * a perfectly ordinary place.
+   *
+   * That is what shipped. A frozen fragment is named `~<layer>/<shard>:<offset>:<length>`, and
+   * the `~` is a marker rather than a path — the shard file is under `initial/<layer>/` and the
+   * two numbers are a `Range` header. Read verbatim as an object under the mesh root, every one
+   * 404s; `mapWithConcurrency` tolerates a dropped fragment on purpose, so the neuron arrived
+   * looking whole. Measured on `wclee_aedes_brain` before the fix: 22 of 471 fragments, i.e. the
+   * pieces somebody had edited since the freeze, and nothing on screen to say so.
+   *
+   * Live rather than fixture because that is the half a fixture cannot hold: `cave.test.ts` pins
+   * the URL this builds, and a URL is only right if the bucket answers it.
+   */
+  it('reaches every fragment a verified manifest names, frozen ones included', async () => {
+    const options = { deployment: DEFAULT_CAVE_SERVER }
+    const record = await datastackRecord(BANC, options)
+    const source = (await openGrapheneMeshes(record.segmentation_source ?? '', options))!
+    expect(source).toBeTruthy()
+
+    const ids = (
+      await new CaveSource().findNeurons({ datasetId: `${BANC}:${version}`, limit: 4 })
+    ).data[ID_COLUMN_NAME] as string[]
+
+    /*
+     * A neuron with *some* frozen fragment, which is what the bug was about — a fully re-meshed
+     * neuron is entirely `dynamic` and passes either way, and which neurons those are moves with
+     * proofreading. So it is asked of the manifests rather than assumed of the first id, through
+     * the same function the fetch uses so the `verify=True` half cannot drift between them.
+     */
+    const manifests = await Promise.all(
+      ids.map((id) => grapheneFragmentNames(source, id, options)),
+    )
+    const at = manifests.findIndex((names) => names.some((name) => name.startsWith('~')))
+    // Below zero would mean the assertion never ran — the silent pass this test exists against.
+    expect(at).toBeGreaterThanOrEqual(0)
+
+    /*
+     * Through `fetchMeshes` rather than `readGrapheneMesh`, so what is pinned is the whole seam:
+     * that every fragment is reachable *and* that the accounting reaches something a reader sees.
+     * The count rides on the value, so there is no probe callback to keep this test honest.
+     */
+    const warnings: string[] = []
+    const meshes = await new CaveSource().fetchMeshes({
+      datasetId: `${BANC}:${version}`,
+      neuronIds: [ids[at]!],
+      onWarn: (message) => warnings.push(message),
+    })
+    expect(meshes.detail?.fragments).toEqual({ named: manifests[at]!.length, missing: 0 })
+    expect(warnings.filter((message) => message.includes('incomplete'))).toEqual([])
   }, 600_000)
 
   it('draws a thumbnail from the level-2 chunk graph, since there is no pyramid here', async () => {

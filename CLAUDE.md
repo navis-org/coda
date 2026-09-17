@@ -1634,10 +1634,21 @@ own `validHints`), live under the lock like a rename; the ✎ sits beside the ×
   root loop forever. See [docs/backends.md](docs/backends.md).
 - **Two ways a mesh source resolves to somewhere with no meshes in it**, both reported as neurons that
   have none. `@type` is optional on a precomputed volume, so `isVolumeInfo` — not a `switch` on
-  `@type` — is the one predicate `openMeshSource` and `probe.ts` ask. And a graphene manifest is not
-  all shards: it mixes shard reads with plain objects under `mesh_metadata.unsharded_mesh_dir`, so the
-  neuron arrives whole minus every piece anyone has edited. `fragmentUrl` matches on `.shard:`.
-  See [docs/backends.md](docs/backends.md).
+  `@type` — is the one predicate `openMeshSource` and `probe.ts` ask. And a graphene fragment **name is an
+  instruction, not a path**: `~<layer>/<shard>:<offset>:<length>` means a `Range` read of
+  `initial/<layer>/<shard>`, the `~` being a marker, while anything else is a plain object under
+  `mesh_metadata.unsharded_mesh_dir`. `mapWithConcurrency` tolerates a dropped fragment, so either
+  half read wrongly draws **a mesh in the right place that is a fraction of the neuron** — 449 of
+  471 fragments gone on mosquito, under a green node. FlyWire's public segmentation exercises
+  neither branch, which is what hid both. Hence a tolerated partial answer has to be **counted**,
+  and this is the one fan-out *below* the item level — everywhere else a dropped item is an id in
+  `cachedGeometry`'s `missing`, which beats a count. Three rules from the reporting: **the tally
+  rides on the value, not the fetch** (`MeshDetail.fragments`), since `cachedGeometry` skips
+  `fetch` entirely on a second Run and a per-run counter then reads zero beside the same short
+  meshes; **`unaddressable` is split from `missing`**, only one of them being a retry; and **a
+  neuron that failed whole is a second sentence** off `fetched.missing`, or the fix trades "a
+  twentieth of the neuron, silently" for "no neuron, silently". The assertion is **live** — a URL
+  is only right if the bucket answers it. See [docs/backends.md](docs/backends.md).
 - **A skeleton is not one product, and which route answered is a fact about the *value*.** A dataset
   usually has more than one place to get one from, and cable length means something different down
   each — so `SkeletonsValue.provenance` rides on the value and the Skeletons node's `Source` is where

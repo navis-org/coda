@@ -1183,7 +1183,7 @@ export function skeletonNote(
 /**
  * What a mesh set's level of detail should say, or undefined when the source published none.
  *
- * Two ways a mesh set can be coarser than what the source holds, and they need different
+ * Three ways a mesh set can be less than what the source holds, and they need different
  * words. A multi-resolution source *picked a level*, so the useful number is which of how
  * many; a source with none *simplified what it fetched*, where naming a level would report
  * "0 of 0" while most of the triangles have gone. Both admit the trade and both name the
@@ -1196,6 +1196,23 @@ export function detailNote(
   if (!detail) return undefined
   const triangles = detail.triangles.toLocaleString()
   const tail = ' Raise Detail on the Meshes node, or fetch fewer neurons, for a finer surface.'
+  /*
+   * Incompleteness wins the label where both apply, because they are different claims: simplified
+   * says the surface is coarser than the source holds, missing says part of the neuron is not
+   * here at all. Said on the caption rather than only in a warning because it is a fact about the
+   * value — a second Run comes out of the geometry cache and fetches nothing, so the warning goes
+   * quiet while the same short mesh is still drawn.
+   */
+  const short = detail.fragments && detail.fragments.missing > 0 ? detail.fragments : undefined
+  if (short) {
+    return {
+      label: 'meshes incomplete',
+      title:
+        `${short.missing.toLocaleString()} of ${short.named.toLocaleString()} mesh fragments ` +
+        `are not in this result, so part of the geometry is missing rather than simplified. ` +
+        `Clear Cache on the Meshes node and Run to fetch them again.`,
+    }
+  }
   return detail.decimated
     ? {
         label: 'meshes simplified',

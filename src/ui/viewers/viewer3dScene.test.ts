@@ -831,6 +831,44 @@ describe('detailNote', () => {
     }
   })
 
+  it('says incomplete rather than simplified, and says it over a set that is also simplified', () => {
+    /*
+     * Two different claims: simplified means the surface is coarser than the source holds,
+     * incomplete means part of the neuron is not here at all. A graphene set is *always*
+     * decimated, so a set that also lost fragments would say only "meshes simplified" if
+     * incompleteness did not win the label — which is the silent half, since the picture looks
+     * exactly like a neuron drawn at low detail.
+     */
+    const note = detailNote({
+      ...base,
+      detail: {
+        lod: 0,
+        levels: 1,
+        triangles: 900,
+        decimated: true,
+        fragments: { named: 471, missing: 449 },
+      },
+    })
+    expect(note?.label).toBe('meshes incomplete')
+    expect(note?.title).toContain('449 of 471')
+    // The remedy differs too — raising Detail cannot bring back a fragment that never arrived.
+    expect(note?.title).toContain('Clear Cache')
+  })
+
+  it('keeps the ordinary note where every fragment arrived', () => {
+    const note = detailNote({
+      ...base,
+      detail: {
+        lod: 0,
+        levels: 1,
+        triangles: 900,
+        decimated: true,
+        fragments: { named: 471, missing: 0 },
+      },
+    })
+    expect(note?.label).toBe('meshes simplified')
+  })
+
   it('is absent for a source that publishes nothing about it', () => {
     expect(detailNote(base)).toBeUndefined()
     expect(detailNote(undefined)).toBeUndefined()

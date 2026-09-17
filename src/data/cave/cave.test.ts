@@ -73,6 +73,8 @@ const QUERY_ARGS = 'return_pyarrow=false&arrow_format=false&split_positions=fals
 interface Captured {
   url: string
   body?: unknown
+  /** The `Range` header, where one was sent — a shard read is a byte range, not a path. */
+  range?: string
 }
 
 /**
@@ -212,7 +214,8 @@ function installFetch(
   const captured: Captured[] = []
   vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
-    captured.push({ url, ...(body ? { body } : {}) })
+    const range = (init?.headers as Record<string, string> | undefined)?.['Range']
+    captured.push({ url, ...(body ? { body } : {}), ...(range ? { range } : {}) })
     const rowsAnswer = (text: string) =>
       Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(text) } as Response)
     /*
@@ -1300,16 +1303,11 @@ describe('meshes', () => {
     )
   })
 
-  it('reads a recently edited fragment from unsharded_mesh_dir, not from the mesh root', async () => {
+  it('reads a frozen fragment as a byte range under initial/, and an edited one from unsharded_mesh_dir', async () => {
     /*
-     * A verified manifest mixes two kinds of fragment: frozen ones inside shard files, and plain
-     * objects covering the parts of the neuron somebody has edited since. BANC publishes the
-     * second lot under `"dynamic"` — one neuron's manifest was 40 sharded and 21 not — and read
-     * from the mesh root every one of them 404s. `mapWithConcurrency` turns each into a dropped
-     * fragment, so the neuron arrives looking whole, minus every piece anyone has touched.
-     *
-     * FlyWire's public segmentation is frozen and declares no such directory, which is why the
-     * fixture above never exercised this and the datastack that does was silently short.
+     * The address each kind of manifest name decomposes to — see `fragmentLocation`, and
+     * `docs/backends.md` for what reading either one verbatim cost. This is the half a fixture
+     * can pin; that the bucket answers these URLs is `live.test.ts`'.
      */
     const captured = installFetch({
       '/segmentation/1.0/flywire_public/info': JSON.stringify({
@@ -1329,11 +1327,18 @@ describe('meshes', () => {
       .catch(() => undefined)
 
     const bucket = 'https://storage.googleapis.com/a_bucket/seg/graphene_meshes'
-    const fragments = captured.map((c) => c.url).filter((url) => url.startsWith(bucket))
-    // The byte range is what makes a name a shard read; the `~<layer>/` prefix is part of the
-    // path to the shard file and stays under the mesh root.
-    expect(fragments).toContain(`${bucket}/~3/529288-0.shard:8331489:4061`)
-    expect(fragments).toContain(`${bucket}/dynamic/305453950923010514:0:30720-32768_0-4096`)
+    const fragments = captured.filter((c) => c.url.startsWith(bucket))
+    const urls = fragments.map((c) => c.url)
+    const shard = fragments.find((c) => c.url.includes('.shard'))
+    expect(shard?.url).toBe(`${bucket}/initial/3/529288-0.shard`)
+    // Inclusive, as HTTP ranges are: 4,061 bytes from 8,331,489 ends at 8,335,549. An exclusive
+    // end reads one byte past the fragment, which Draco decodes anyway — so only the header
+    // records the off-by-one.
+    expect(shard?.range).toBe('bytes=8331489-8335549')
+    expect(urls).toContain(`${bucket}/dynamic/305453950923010514:0:30720-32768_0-4096`)
+    // The verbatim manifest name is never asked for — the assertion above would miss it only if
+    // both forms were requested, which is exactly what a half-applied fix looks like.
+    expect(urls).not.toContain(`${bucket}/~3/529288-0.shard:8331489:4061`)
   })
 
   it('prefers the flat pyramid over graphene where the materialization publishes one', async () => {

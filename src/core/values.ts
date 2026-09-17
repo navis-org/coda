@@ -336,6 +336,19 @@ export interface MeshDetail {
    * the silent-thinning failure `labels thinned` and `cells merged` both exist to prevent.
    */
   decimated?: boolean
+  /**
+   * How many of the pieces a source named actually arrived, where a mesh is assembled from many.
+   *
+   * The same argument as `decimated` one notch worse, and it rides on the **value** rather than
+   * on a warning for a reason a warning cannot meet: a geometry cache means the second Run
+   * fetches nothing, so a per-fetch sentence goes quiet while the same short mesh is still on
+   * screen. A graphene neuron is hundreds of supervoxel fragments and a dropped one is tolerated
+   * on purpose — one missing of 471 is a mesh, 449 missing is a picture of somebody's recent
+   * edits, and nothing else about the value can tell those apart.
+   *
+   * Absent means the source does not assemble meshes from pieces, not that none went missing.
+   */
+  fragments?: { named: number; missing: number }
 }
 
 export interface MeshesValue {

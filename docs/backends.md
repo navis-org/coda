@@ -1372,23 +1372,67 @@ look.
 Measured on four BANC v888 neurons: 19, 310, 1,266 and 2,684 chunks, and 0.4–4.0 s apiece for the
 graph read.
 
-### `unsharded_mesh_dir`, or the neuron that arrives whole minus everything anyone edited
+### A graphene fragment name is an instruction, not a path — and half of it is a `Range` header
 
-A verified graphene manifest mixes two kinds of fragment: the frozen ones, named
-`~<layer>/<shard>-0.shard:<offset>:<length>` and read out of shard files under the mesh directory,
-and plain objects covering the parts of the neuron somebody has edited since — which live under
-`mesh_metadata.unsharded_mesh_dir`. One BANC neuron's manifest was **40 sharded and 21 not**.
+A verified graphene manifest mixes two kinds of fragment, and **neither is an object path as
+written**:
 
-Read from the mesh root every unsharded one 404s, and `mapWithConcurrency` turns each into a
-dropped fragment rather than a failure — the rule that keeps one bad supervoxel out of 492 from
-taking a neuron down. So the neuron arrives looking whole, minus every piece anyone has touched,
-under a green node.
+  - **Frozen**, `~<layer>/<shard>-0.shard:<offset>:<length>`. Every part of that is an
+    instruction: the shard file is `<mesh dir>/initial/<layer>/<shard>-0.shard`, and the two
+    numbers are a byte range to ask for with `Range`. The leading `~` is a **marker** saying
+    "frozen", not a directory. `SHARDED_MESH_DIR` is the literal `"initial"` because that is what
+    it is — cloudvolume's `GrapheneMeshMetadata.sharded_mesh_dir` is the same constant, beside
+    `unsharded_mesh_dir`, which *is* published in the `info`.
+  - **Recently edited**, a plain object under `mesh_metadata.unsharded_mesh_dir` — `"dynamic"` on
+    both mosquito and BANC.
 
-FlyWire's public segmentation is frozen and declares no such directory, which is why this went
-unnoticed: **the datastack the mesh path was built against never exercises it**, and the one that
-does is now the datastack that takes this route at all. `fragmentUrl` matches on `.shard:` rather
-than on the leading `~<layer>/` — the layer prefix is part of the path to the shard file, and the
-byte range is what makes a name a shard read.
+`mapWithConcurrency` turns a failed fragment into a dropped one rather than a failure — the rule
+that keeps one bad supervoxel out of 492 from taking a neuron down — so getting either half wrong
+produces the same symptom, and it is the worst kind: **a mesh, drawn in the right place, at the
+right scale, that is a fraction of the neuron**, under a green node.
+
+Both halves were wrong at some point, and the second was far worse than the first. Reading the
+unsharded ones from the mesh root lost every piece anybody had edited. Reading the *frozen* ones
+verbatim — as an object literally called `~3/127630-0.shard:10686716:600`, and in full, the range
+never becoming a header — lost everything that had **not** been edited, which is nearly all of it.
+Measured on `wclee_aedes_brain`: **449 of 471 fragments gone**, so what reached the scene was the
+22 pieces somebody had touched since the freeze. On BANC, 54 of a neuron's fragments.
+
+FlyWire's public segmentation is what hid both. It declares no unsharded directory *and* its
+manifests carry no `~` name at all — 136 plain objects under the mesh root for one neuron — so
+**the datastack the mesh path was built against exercises neither branch**, and the flat pyramid
+means it no longer takes this route anyway.
+
+The consequence for the design: a partial answer that is tolerated has to be **counted**, and this
+is the one fan-out in the tree *below* the item level. Everywhere else `mapWithConcurrency` runs
+over neurons, so a dropped one is an id absent from `cachedGeometry`'s `missing` — a list, which is
+strictly better than a count. Fragments are parts of one neuron, so nothing above `readGrapheneMesh`
+can see them go.
+
+Three rules came out of getting that reporting right, and the first is the one that is easy to miss.
+**The count rides on the value, not on the fetch.** `cachedGeometry` calls `fetch` only for ids it
+does not hold, so a counter accumulated across the run reports zero on the second Run beside the
+very same short meshes — the tally is cached with each mesh and summed from the result, and reaches
+the viewer as `MeshDetail.fragments`, which is the same argument `MeshDetail.decimated` already
+makes one notch less severe. **`unaddressable` is split out of `missing`, because only one of them
+is a retry**: a 404 may well come back next time, where a name this build cannot parse will parse
+the same way forever, and telling somebody to try again is telling them to do the one thing that
+cannot work. And **a neuron that failed entirely is a second sentence**, off `fetched.missing`, the
+pattern the flat route in the same method already follows — without it the fix would have converted
+"a twentieth of the neuron, silently" into "no neuron, silently".
+
+`cave.test.ts` pins the address each name decomposes to, path and inclusive `Range`, plus the
+negative that the verbatim name is never requested. A URL is only right if the bucket answers it,
+so `live.test.ts` fetches through `fetchMeshes` and asserts `detail.fragments` is `missing: 0` —
+which reports 54 against the old rule.
+
+One thing the fix changes downstream: the cost sentence was built on FlyWire, the one datastack
+where this never bit. A sharded neuron is **14.2 MB over 471 fragments (~30 kB each)** against
+FlyWire's 1.2 MB over 492 (~2.4 kB), so the estimate branches on `unsharded_mesh_dir` — a
+segmentation naming one is a segmentation with a frozen half. Coalescing the shard reads was
+measured and rejected: the 449 frozen fragments land in 131 shard files but at scattered offsets,
+so merging whole files is 3.5 GB (366×) and bridging gaps under 64 kB buys 449 → 399 requests for
+an extra megabyte.
 
 ### Three routes to a skeleton, and which one answered is the user's to choose
 

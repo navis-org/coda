@@ -149,16 +149,16 @@ export interface GrapheneMeshSource {
   /**
    * Where the *unsharded* fragments live, when the segmentation names a separate directory.
    *
-   * `mesh_metadata.unsharded_mesh_dir`, and it is load-bearing rather than a detail. A verified
-   * manifest mixes two kinds of fragment: the frozen ones, named `~<layer>/<shard>.shard:off:len`
-   * and read out of the shard files beside them, and the ones covering *recently edited* parts of
-   * the neuron, which are plain objects in this subdirectory. BANC publishes `"dynamic"` and one
-   * neuron's manifest was 40 sharded fragments and 21 unsharded; read from the mesh root they all
-   * 404, and `mapWithConcurrency` turns each into a dropped fragment — so the neuron arrives
-   * looking whole, minus every piece anyone has touched.
+   * `mesh_metadata.unsharded_mesh_dir`, holding the fragments that cover *recently edited* parts
+   * of a neuron — `"dynamic"` on both mosquito and BANC. `fragmentLocation` is where the split
+   * between these and the frozen ones is stated; read from the mesh root instead, every one 404s
+   * and the neuron arrives looking whole minus every piece anyone has touched.
    *
-   * FlyWire's public segmentation is frozen and its manifests are entirely sharded, which is why
-   * this went unnoticed: the datastack the mesh path was built against never exercises it.
+   * Its **absence** is load-bearing too: a segmentation naming one is a segmentation with a
+   * frozen half, which is what `grapheneMeshes` reads it as when it says what a fetch will cost.
+   * FlyWire's public segmentation names none and its manifests are entirely plain objects — 136
+   * for one neuron, no `~` name among them — which is why the datastack this path was built
+   * against exercises neither branch.
    */
   unshardedDir?: string
   /** Where to ask for a root id's fragment list. */
@@ -203,36 +203,122 @@ export async function openGrapheneMeshes(
 }
 
 /**
- * Where one named fragment actually is.
+ * Where the **frozen** shard files sit, under the mesh directory.
  *
- * The name says which of the two it is: a sharded fragment carries `.shard:<offset>:<length>`
- * and sits under the mesh directory, and anything else is an unsharded object under
- * `unsharded_mesh_dir`. Matched on `.shard:` rather than on the leading `~<layer>/`, because the
- * layer prefix is part of the *path* to the shard file and would still be there if the naming
- * changed; the byte range is what makes it a shard read.
+ * A constant rather than something read off the segmentation `info`, because it is not published
+ * there: cloudvolume's `GrapheneMeshMetadata.sharded_mesh_dir` is the literal `"initial"`, beside
+ * `unsharded_mesh_dir` which *is* published. Checked against the bucket — `graphene_meshes/`
+ * holds exactly `initial/` and `dynamic/` on mosquito, with the shard files under
+ * `initial/<layer>/`.
  */
-function fragmentUrl(source: GrapheneMeshSource, name: string): string {
-  const base =
-    source.unshardedDir && !name.includes('.shard:')
-      ? `${source.fragmentBase}/${source.unshardedDir}`
-      : source.fragmentBase
-  return `${base}/${name}`
+const SHARDED_MESH_DIR = 'initial'
+
+/**
+ * A sharded fragment name: `~<layer>/<shard file>:<byte offset>:<length>`.
+ *
+ * cloudvolume's own (`datasource/graphene/mesh/sharded.py`), character for character, because
+ * this is the only written-down statement of the grammar — the meshing API documents none.
+ */
+const SHARDED_FRAGMENT = /^~(\d+)\/([\d-]+\.shard):(\d+):(\d+)$/
+
+/** A fetchable address for one fragment: a shard read carries the byte range it needs. */
+interface FragmentLocation {
+  url: string
+  range?: readonly [number, number]
 }
 
 /**
- * One neuron's mesh, or undefined where the segment has none.
+ * Where one named fragment actually is.
  *
- * Undefined rather than an error for the reason `readLegacyMesh` answers the same way: an
- * unproofread or merged-away segment having no mesh is normal, and failing the whole request
- * over one of them would make a set of twenty as fragile as its worst member.
+ * **The leading `~` is a marker, not a path**, and that is the whole of what this gets right.
+ * A verified manifest mixes two kinds of name:
+ *
+ *  - `~3/127630-0.shard:10686716:600` — frozen, and every part of it is an instruction:
+ *    layer `3`, shard file `127630-0.shard` under `initial/3/`, and 600 bytes from offset
+ *    10,686,716. It is **not** an object path. Left as written it asks the bucket for an object
+ *    literally called `~3/127630-0.shard:10686716:600`, which is a 404 — and asks for the whole
+ *    of it, since the range never became a `Range` header.
+ *  - `396932493720355753:0:32768-36864_…` — recently edited, a plain object under
+ *    `unsharded_mesh_dir`.
+ *
+ * The previous rule discriminated on `.shard:` and kept the name verbatim under the mesh root,
+ * reasoning that `~<layer>/` was part of the path. It is not, and the symptom is the one this
+ * whole file is arranged to avoid: `mapWithConcurrency` turns each 404 into a dropped fragment,
+ * so on mosquito 449 of 471 fragments vanished and the neuron arrived as the 22 pieces somebody
+ * had edited — a mesh, drawn in the right place, that is a twentieth of the neuron.
+ *
+ * Undefined for a name that parses as neither, which `readGrapheneMesh` counts and reports
+ * rather than guessing a URL for.
  */
-export async function readGrapheneMesh(
+function fragmentLocation(
+  source: GrapheneMeshSource,
+  name: string,
+): FragmentLocation | undefined {
+  const sharded = SHARDED_FRAGMENT.exec(name)
+  if (sharded) {
+    const [, layer, file, offset, length] = sharded
+    const start = Number(offset)
+    return {
+      url: `${source.fragmentBase}/${SHARDED_MESH_DIR}/${layer}/${file}`,
+      range: [start, start + Number(length) - 1],
+    }
+  }
+  // A `~` name that did not parse is a shard read this build cannot address; guessing an object
+  // path for it is how the bug above happened.
+  if (name.startsWith('~')) return undefined
+  const base = source.unshardedDir
+    ? `${source.fragmentBase}/${source.unshardedDir}`
+    : source.fragmentBase
+  return { url: `${base}/${name}` }
+}
+
+/**
+ * How much of a neuron actually arrived.
+ *
+ * **This is the only fan-out in the tree below the item level**, and that is what makes a count
+ * here necessary rather than duplicated. Everywhere else `mapWithConcurrency` runs over neurons,
+ * so a dropped one is an id absent from `cachedGeometry`'s `missing` — a list, which is strictly
+ * better than a count and which two sources already turn into a sentence. Fragments are *parts of
+ * one neuron*, so nothing above this function can see them go: a mesh short one supervoxel of 471
+ * is a mesh, a mesh short 449 is a picture of somebody's recent edits, and both decode, both sit
+ * where the neuron is, and both decimate to an ordinary triangle count.
+ *
+ * `unaddressable` is split out of `missing` because the **remedy differs and only one of them is
+ * a retry**: a fragment that 404'd may well arrive next time, where a name this build cannot
+ * parse will parse the same way forever — it is a bug in Coda, and telling somebody to try again
+ * is telling them to do the one thing that cannot work.
+ */
+export interface FragmentTally {
+  /** Fragments the manifest named. */
+  named: number
+  /** Named fragments whose geometry is not in the result, `unaddressable` included. */
+  missing: number
+  /** Of `missing`, those whose name this build could not turn into a request at all. */
+  unaddressable: number
+}
+
+/** A segment the manifest names no fragments for — not a partial answer, an absent one. */
+export const NO_FRAGMENTS: FragmentTally = { named: 0, missing: 0, unaddressable: 0 }
+
+/** One neuron's mesh and the accounting that says how much of it this is. */
+export interface GrapheneMesh {
+  /** Undefined where the segment has no mesh at all. */
+  mesh?: DecodedMesh
+  tally: FragmentTally
+}
+
+/**
+ * The fragment names a verified manifest lists for one root id.
+ *
+ * Exported because `verify=True` is load-bearing (see the top of this file) and a second caller
+ * spelling the URL out is a second place for that to be forgotten — the live test asks the same
+ * question to decide which neuron is worth asserting about.
+ */
+export async function grapheneFragmentNames(
   source: GrapheneMeshSource,
   neuronId: string,
-  grid: number,
-  fragmentLimit: number,
   options: CaveRequestOptions,
-): Promise<DecodedMesh | undefined> {
+): Promise<string[]> {
   /*
    * A manifest failure is *not* swallowed, which is the opposite of `readLegacyMesh`'s call and
    * deliberately so. That one reads a static bucket, where a 404 genuinely means "this body has
@@ -246,14 +332,51 @@ export async function readGrapheneMesh(
     `${source.manifestBase}/${neuronId}:0?verify=True`,
     options,
   )
-  const fragments = manifest.fragments ?? []
-  if (fragments.length === 0) return undefined
+  return manifest.fragments ?? []
+}
 
-  const parts = await mapWithConcurrency(fragments, fragmentLimit, async (name) => {
-    const bytes = await fetchBytes(
-      fragmentUrl(source, name),
-      options.signal ? { signal: options.signal } : {},
+/**
+ * One neuron's mesh, with the accounting that says how much of it arrived.
+ *
+ * An absent mesh rather than an error for the reason `readLegacyMesh` answers the same way: an
+ * unproofread or merged-away segment having no mesh is normal, and failing the whole request
+ * over one of them would make a set of twenty as fragile as its worst member.
+ *
+ * Returned rather than reported through a callback, which is the shape every sibling here
+ * already has — `fetchSkeletons` answers `{ skeletons, missing }`, `cachedGeometry` answers
+ * `{ ordered, missing }`. It also closes the hole an out-param leaves: a tally fired just before
+ * the return says nothing on the two early exits, which are the cases where the *most* is
+ * missing.
+ */
+export async function readGrapheneMesh(
+  source: GrapheneMeshSource,
+  neuronId: string,
+  grid: number,
+  fragmentLimit: number,
+  options: CaveRequestOptions,
+): Promise<GrapheneMesh> {
+  const fragments = await grapheneFragmentNames(source, neuronId, options)
+  if (fragments.length === 0) return { tally: NO_FRAGMENTS }
+
+  /*
+   * Names are resolved in **one pass before the fan-out**, not inside it. Two reasons, and the
+   * second is the one that matters: a datastack whose shard files are named some other way makes
+   * *every* fragment unaddressable, and inside the worker that is 471 `Error` constructions with
+   * stack capture per neuron of which `mapWithConcurrency` keeps exactly one. Out here it is one
+   * throw, immediately, naming the fragment that could not be read.
+   */
+  const located = fragments.map((name) => fragmentLocation(source, name))
+  const addressable = located.filter((at): at is FragmentLocation => at !== undefined)
+  const unaddressable = fragments.length - addressable.length
+  if (addressable.length === 0) {
+    throw new Error(
+      `This build cannot address any of the ${fragments.length} mesh fragments the manifest ` +
+        `names for ${neuronId} — the first is "${fragments[0]}".`,
     )
+  }
+
+  const parts = await mapWithConcurrency(addressable, fragmentLimit, async (at) => {
+    const bytes = await fetchBytes(at.url, { range: at.range, signal: options.signal })
     // Identity scale and offset: a graphene fragment decodes to world nanometres already, so
     // the chunk transform `multires.ts` computes for neuPrint has no counterpart here.
     return decodeDracoFragment(bytes, IDENTITY_SCALE, NO_OFFSET)
@@ -265,6 +388,11 @@ export async function readGrapheneMesh(
   // Only the partial-failure case survives this: `mapWithConcurrency` has already thrown if
   // every fragment failed, and an empty fragment list returned above.
   const decoded = parts.filter((p): p is DecodedMesh => p !== undefined)
+  const tally: FragmentTally = {
+    named: fragments.length,
+    missing: fragments.length - decoded.length,
+    unaddressable,
+  }
 
   /*
    * Decimated on arrival, and this is not optional at graphene's resolution: one FlyWire neuron
@@ -277,5 +405,5 @@ export async function readGrapheneMesh(
    * It reduces memory and draw cost, not the wait: the 492 requests are already paid by here.
    */
   const joined = concatMeshes(decoded)
-  return decimateMesh(joined.positions, joined.indices, grid)
+  return { mesh: decimateMesh(joined.positions, joined.indices, grid), tally }
 }

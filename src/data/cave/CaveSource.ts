@@ -87,8 +87,10 @@ import {
 } from '../neuronFilter'
 import { mapWithConcurrency } from '../concurrency'
 import type { GrapheneMeshSource } from './meshes'
+import type { FragmentTally } from './meshes'
 import {
   MESH_WARN_NEURONS,
+  NO_FRAGMENTS,
   decimateGridFor,
   fragmentConcurrencyFor,
   openGrapheneMeshes,
@@ -420,6 +422,19 @@ function noRoute(
     `${missing}, so the Skeletons node cannot take that route here. Set its Source back to ` +
       `Automatic, which picks whichever route this dataset does have.`,
   )
+}
+
+/**
+ * What the geometry cache holds per graphene neuron: the mesh, and how much of it this is.
+ *
+ * The tally travels **in the cached value** rather than being accumulated over the fetch, because
+ * `cachedGeometry` calls `fetch` only for ids it does not already hold — so on a second Run the
+ * short meshes come back with nothing having run, and a count accumulated over the fetch reports
+ * zero beside them. `assemble` drops it again: a `MeshGeometry` is what a viewer draws, and this
+ * is a fact about how it was obtained. See `FragmentTally` for why it is counted at all.
+ */
+interface CachedGrapheneMesh extends Omit<MeshGeometry, 'id'> {
+  fragments: FragmentTally
 }
 
 /**
@@ -1255,8 +1270,8 @@ export class CaveSource implements DataSource {
    *
    * The cost is said here rather than on the node, because it is a fact about graphene and not
    * about the Meshes node: the same node against neuPrint's multi-resolution meshes is cheap at
-   * a thousand, where this is 492 requests and ~1.2 MB for *one* neuron. That is what
-   * `onWarn` exists for — the node cannot know it, and the source cannot reach the card.
+   * a thousand, where this is several hundred requests and 1.2–14 MB for *one* neuron. That is
+   * what `onWarn` exists for — the node cannot know it, and the source cannot reach the card.
    *
    * It was a refusal at twenty until it became clear what that meant: twenty is a figure, and a
    * FlyWire question about a hundred neurons is an ordinary question. So the number stayed and
@@ -1272,26 +1287,33 @@ export class CaveSource implements DataSource {
     // names one immutable agglomeration — an edit mints a new one — so the mesh for an id from
     // v783 is the same mesh whichever version named it. The flat route above is the opposite
     // case, which is why it is keyed by version and this is not.
-    if (req.neuronIds.length > MESH_WARN_NEURONS) {
-      /*
-       * FlyWire's numbers, and deliberately the slow end rather than a mean: 492 fragments and
-       * ~1.2 MB apiece, eight at a time, which is about four seconds a neuron. How far off that
-       * is for another datastack depends on how its meshing agglomerates — BANC's answers one
-       * neuron in 61 fragments, because it serves chunkedgraph layers 2–6 rather than leaves. An
-       * estimate that is never shorter than the wait is the right kind of wrong for a warning.
-       */
-      req.onWarn?.(
-        `${req.neuronIds.length.toLocaleString()} graphene meshes from ${spec.label} is up to ` +
-          `${describeDuration(req.neuronIds.length * 4)} and around ` +
-          `${Math.round(req.neuronIds.length * 1.2)} MB. A graphene mesh has no level of ` +
-          `detail, so each one is dozens to hundreds of requests — this is the slow route, and ` +
-          `a materialization with a flat segmentation beside it does the same set in two ` +
-          `requests a neuron. Fetching anyway; cancel if that is not what you meant.`,
-      )
-    }
-
     const source = await this.meshSource(spec, req.signal)
     const options = this.options(req.signal)
+
+    if (req.neuronIds.length > MESH_WARN_NEURONS) {
+      /*
+       * Deliberately the slow end rather than a mean — an estimate that is never shorter than
+       * the wait is the right kind of wrong for a warning — and **per layout**, because the two
+       * differ by an order of magnitude and the estimate used to be built on the one where this
+       * costs least. FlyWire's manifests are all plain objects: 492 fragments, ~1.2 MB, about
+       * four seconds a neuron. A datastack with a frozen half reads the *shard files* as well,
+       * and one mosquito neuron is 471 fragments and 14.2 MB — twelve times the bytes, at ~30 kB
+       * a fragment against FlyWire's ~2.4 kB. `unshardedDir` is the discriminator because it is
+       * the same thing that says a freeze happened: a segmentation naming one has an `initial/`
+       * beside it. It costs no extra request, `meshSource` having just read the `info`.
+       */
+      const sharded = source.unshardedDir !== undefined
+      const mbEach = sharded ? 14 : 1.2
+      const secondsEach = sharded ? 12 : 4
+      req.onWarn?.(
+        `${req.neuronIds.length.toLocaleString()} graphene meshes from ${spec.label} is up to ` +
+          `${describeDuration(req.neuronIds.length * secondsEach)} and around ` +
+          `${Math.round(req.neuronIds.length * mbEach).toLocaleString()} MB. A graphene mesh ` +
+          `has no level of detail, so each one is dozens to hundreds of requests — this is the ` +
+          `slow route, and a materialization with a flat segmentation beside it does the same ` +
+          `set in two requests a neuron. Fetching anyway; cancel if that is not what you meant.`,
+      )
+    }
 
     /*
      * The caller's triangle budget decides how hard each mesh is decimated — see
@@ -1328,18 +1350,18 @@ export class CaveSource implements DataSource {
      * shape `NeuPrintSource.fetchMeshes` already uses, and the one that cannot fall out of step.
      */
     const assemble = (
-      pairs: ReadonlyArray<[string, Omit<MeshGeometry, 'id'>]>,
+      pairs: ReadonlyArray<[string, CachedGrapheneMesh]>,
       detail?: MeshesValue['detail'],
     ): MeshesValue =>
       this.meshValue(
         req,
-        pairs.map(([id, mesh]) => ({ id, ...mesh })),
+        pairs.map(([id, { positions, indices }]) => ({ id, positions, indices })),
         types,
         detail,
       )
 
     let done = 0
-    const fetched = await cachedGeometry<Omit<MeshGeometry, 'id'>>({
+    const fetched = await cachedGeometry<CachedGrapheneMesh>({
       ids: req.neuronIds,
       key: (id) => `cave:${this.id}:${req.datasetId}:mesh:${grid}:${id}`,
       bytes: (m) => byteLengthOf(m.positions, m.indices),
@@ -1349,12 +1371,63 @@ export class CaveSource implements DataSource {
       onPartial: req.onPartial && ((pairs) => req.onPartial?.(assemble(pairs))),
       fetch: async (missing, deliver) => {
         await mapWithConcurrency(missing, MESH_CONCURRENCY, async (neuronId) => {
-          const mesh = await readGrapheneMesh(source, neuronId, grid, fragmentLimit, options)
+          const { mesh, tally } = await readGrapheneMesh(
+            source,
+            neuronId,
+            grid,
+            fragmentLimit,
+            options,
+          )
           req.onProgress?.(++done / missing.length, `${done}/${missing.length} meshes`)
-          if (mesh) deliver(neuronId, { positions: mesh.positions, indices: mesh.indices })
+          // The tally is cached **with** the mesh, which is what makes it survive: on a second
+          // Run `fetch` is not called at all, so a count accumulated here would come out zero
+          // beside the very same short meshes.
+          if (mesh)
+            deliver(neuronId, {
+              positions: mesh.positions,
+              indices: mesh.indices,
+              fragments: tally,
+            })
         })
       },
     })
+
+    /*
+     * Summed over what is in the *result*, cached entries included, and said once for the set
+     * rather than per neuron — a whole class of fragment addressed wrongly is 449 of 471 gone on
+     * every neuron at once, and twenty copies of one sentence is how a warning stops being read.
+     */
+    const fragments = fetched.ordered.reduce<FragmentTally>(
+      (sum, [, m]) => ({
+        named: sum.named + m.fragments.named,
+        missing: sum.missing + m.fragments.missing,
+        unaddressable: sum.unaddressable + m.fragments.unaddressable,
+      }),
+      NO_FRAGMENTS,
+    )
+    const shortMeshes = fetched.ordered.filter(([, m]) => m.fragments.missing > 0).length
+
+    if (fragments.missing > 0) {
+      req.onWarn?.(
+        `${shortMeshes.toLocaleString()} of the meshes from ${spec.label} are incomplete: ` +
+          `${fragments.missing.toLocaleString()} of ${fragments.named.toLocaleString()} ` +
+          `fragments are not in the result, so what is drawn is less than the neuron. ` +
+          // Two remedies, and only one of them is a retry — see `FragmentTally.unaddressable`.
+          (fragments.unaddressable === fragments.missing
+            ? `Their names are in a form this build cannot address, which is a bug in Coda ` +
+              `rather than something a retry will fix.`
+            : `Clear Cache on this node and Run to try the missing ones again.`),
+      )
+    }
+    // The other half, and the house pattern 150 lines up: a neuron whose manifest or whose every
+    // fragment failed is absent from the scene entirely, which `fragments` cannot report because
+    // there is no cached value to carry its tally.
+    if (fetched.missing.length > 0) {
+      req.onWarn?.(
+        `No mesh for ${fetched.missing.length.toLocaleString()} of ` +
+          `${req.neuronIds.length.toLocaleString()} neurons on ${spec.label}.`,
+      )
+    }
 
     const triangles = fetched.ordered.reduce((sum, [, m]) => sum + m.indices.length / 3, 0)
     await typesReady
@@ -1364,7 +1437,13 @@ export class CaveSource implements DataSource {
      * to know is that 98% of the triangles were merged away, on the same rule that keeps `labels
      * thinned` and `cells merged` on screen.
      */
-    return assemble(fetched.ordered, { lod: 0, levels: 1, triangles, decimated: true })
+    return assemble(fetched.ordered, {
+      lod: 0,
+      levels: 1,
+      triangles,
+      decimated: true,
+      fragments: { named: fragments.named, missing: fragments.missing },
+    })
   }
 
   /**
