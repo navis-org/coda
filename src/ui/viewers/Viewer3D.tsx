@@ -43,6 +43,7 @@ import { FlexLineMaterial, setLineWidths } from './flexLineMaterial'
 import { applyOpacity } from './materialOpacity'
 import { AmbientOcclusion } from './ambientOcclusion'
 import { buildPickTree, pickRaycast } from './meshPicking'
+import { computeNormals, drawRanges } from './drawLimits'
 import { PersistentCanvas } from './PersistentCanvas'
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
@@ -1701,18 +1702,55 @@ function MeshItem({
     [pick, id],
   )
 
-  const geometry = useMemo(() => {
-    const g = new THREE.BufferGeometry()
-    g.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    g.setIndex(new THREE.BufferAttribute(indices, 1))
-    g.computeVertexNormals()
-    return g
+  /**
+   * One geometry per draw call, sharing a single set of vertex buffers.
+   *
+   * Almost always one — `drawRanges` splits only past `MAX_INDICES_PER_DRAW`, which is Firefox's
+   * refusal point and the reason a full-resolution graphene neuron drew nothing while every byte
+   * of it was on the GPU. The `position` and `normal` attributes are the **same objects** across
+   * the pieces, which is what keeps the split free: three keys its buffer cache by attribute, so
+   * a shared one uploads once however many geometries name it. Only the index is sliced, and a
+   * `subarray` is a view rather than a copy.
+   *
+   * Normals come from `computeNormals` rather than `BufferGeometry.computeVertexNormals()`, which
+   * is 693 ms against 105 ms on a neuron this size — in React's render phase, so it was 1.3 s of
+   * blocked main thread before a two-neuron scene painted. Taking the arrays is also what lets
+   * this skip building a full-resolution geometry purely to throw it away, which is what getting
+   * whole-mesh normals out of three used to require.
+   *
+   * The bounding sphere is computed **once** and handed on. three computes it lazily per geometry
+   * during culling, and the pieces share one position array, so the spheres would be identical at
+   * 60 ms apiece inside the render loop — and a piece cannot cull independently anyway, its
+   * sphere covering the whole neuron either way.
+   */
+  const geometries = useMemo(() => {
+    const position = new THREE.BufferAttribute(positions, 3)
+    const normal = new THREE.BufferAttribute(computeNormals(positions, indices), 3)
+    const ranges = drawRanges(indices.length)
+    const whole = ranges.length === 1
+    let sphere: THREE.Sphere | null = null
+    return ranges.map(([start, count]) => {
+      const piece = new THREE.BufferGeometry()
+      piece.setAttribute('position', position)
+      piece.setAttribute('normal', normal)
+      piece.setIndex(
+        new THREE.BufferAttribute(whole ? indices : indices.subarray(start, start + count), 1),
+      )
+      if (sphere) piece.boundingSphere = sphere
+      else {
+        piece.computeBoundingSphere()
+        sphere = piece.boundingSphere
+      }
+      return piece
+    })
   }, [positions, indices])
 
   useEffect(() => {
     invalidate()
-    return () => geometry.dispose()
-  }, [geometry, invalidate])
+    return () => {
+      for (const piece of geometries) piece.dispose()
+    }
+  }, [geometries, invalidate])
 
   /*
    * The pick tree, built only once somebody can click, and in a task of its own per mesh.
@@ -1725,23 +1763,29 @@ function MeshItem({
    */
   useEffect(() => {
     if (!pickable) return
-    const handle = setTimeout(() => buildPickTree(geometry), 0)
-    return () => clearTimeout(handle)
-  }, [pickable, geometry])
+    const handles = geometries.map((piece) => setTimeout(() => buildPickTree(piece), 0))
+    return () => {
+      for (const handle of handles) clearTimeout(handle)
+    }
+  }, [pickable, geometries])
 
   const style = surfaceStyle(color, opacity, dim)
 
   return (
-    <mesh geometry={geometry} raycast={pickRaycast} onClick={onClick}>
-      <meshStandardMaterial
-        color={style.color}
-        transparent={style.transparent}
-        opacity={style.opacity}
-        depthWrite={style.depthWrite}
-        side={THREE.DoubleSide}
-        roughness={0.9}
-      />
-    </mesh>
+    <>
+      {geometries.map((piece, at) => (
+        <mesh key={at} geometry={piece} raycast={pickRaycast} onClick={onClick}>
+          <meshStandardMaterial
+            color={style.color}
+            transparent={style.transparent}
+            opacity={style.opacity}
+            depthWrite={style.depthWrite}
+            side={THREE.DoubleSide}
+            roughness={0.9}
+          />
+        </mesh>
+      ))}
+    </>
   )
 }
 

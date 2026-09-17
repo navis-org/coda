@@ -11,7 +11,15 @@ import { describe, expect, it } from 'vitest'
 
 import { generateRoiMesh } from './mock/morphology'
 import { mulberry32 } from './mock/generate'
-import { decimateMesh, decimateParts } from './meshDecimate'
+import {
+  decimateMesh,
+  decimateParts,
+  downsampleParts,
+  downsamples,
+  gridForFactor,
+  reduceToTriangles,
+  reductionFor,
+} from './meshDecimate'
 import { concatMeshes, type MeshArrays } from './meshParts'
 
 /** Axis-aligned bounds, for comparing a shape against its reduction. */
@@ -314,5 +322,184 @@ describe('the cell key', () => {
       const expected = clusterWithStringKeys(positions, grid)
       expect(decimateMesh(positions, indices, grid).positions.length / 3).toBe(expected)
     }
+  })
+})
+
+/**
+ * `Downsample` on the Meshes node: reduce a mesh to roughly `1 / factor` of its triangles.
+ *
+ * The property is that the factor asked for is near the factor delivered, on meshes of very
+ * different shapes — which a grid computed from `0.68 · grid²` is not. That model is a *surface's*
+ * law, and a neuron is a thin tree in a large box; measured on four real mosquito neurons the
+ * exponent runs 1.6 to 2.0, so asking for half the triangles of the sparsest delivered a
+ * twenty-seventh of them.
+ */
+describe('downsampleParts', () => {
+  it("reduces by the factor asked for, from each mesh's own triangle count", () => {
+    /*
+     * `Downsample`, not `Detail`. The seam says a source with one level ignores `triangleBudget`,
+     * and graphene is that source — so the budget used to be honoured here by clustering
+     * vertices, which made one control mean "pick a published level" on neuPrint and "recompute
+     * the geometry" on FlyWire. The factor is the explicit half, and it is taken from **each
+     * mesh's own** triangle count so every neuron in a set is reduced by the same ratio.
+     */
+    expect(gridForFactor(1_000_000, 4)).toBeLessThan(gridForFactor(1_000_000, 1))
+    // Halving the triangles is a grid smaller by √2, the clustering being an area.
+    expect(gridForFactor(1_000_000, 2) / gridForFactor(1_000_000, 8)).toBeCloseTo(2, 1)
+    // Two neurons of different sizes, same factor: the ratio is what is preserved, not the count.
+    expect(gridForFactor(1_000_000, 4)).toBeGreaterThan(gridForFactor(100_000, 4))
+    // Never so coarse that the arbor goes — the floor is under every factor.
+    expect(gridForFactor(1_000, 1_000_000)).toBe(gridForFactor(1, 1))
+  })
+
+  it('treats 0 and 1 as full resolution, and only >1 as a reduction', () => {
+    // Four surfaces ask "is this on", which is exactly how it comes to be spelled `> 1` in three
+    // of them and `>= 1` in the fourth.
+    expect(downsamples(undefined)).toBe(false)
+    expect(downsamples(0)).toBe(false)
+    expect(downsamples(1)).toBe(false)
+    expect(downsamples(2)).toBe(true)
+  })
+
+  /**
+   * A dense surface, whose occupied cells really do grow as the square of the grid.
+   *
+   * Full resolution deliberately: `sphere(60, 90)` is *already* coarser than `MIN_DECIMATE_GRID`
+   * can reduce — its vertices sit 70 apart where the floor's cells are 42 — so it saturates at
+   * 1.24× whatever is asked, which says nothing about the fit. That saturation is real and a
+   * caller meets it on an already-coarse mesh; it is just not what this test is about.
+   */
+  const dense = (): MeshArrays[] => [sphere()]
+
+  /**
+   * A thin tube wandering through a box many times its own thickness — the shape the area model
+   * gets wrong, and a mild stand-in for an arbor: on a real neuron the model is out by more.
+   */
+  function sparse(): MeshArrays[] {
+    const rnd = mulberry32(7)
+    const steps = 4000
+    const ring = 8
+    const positions = new Float32Array(steps * ring * 3)
+    const indices: number[] = []
+    let x = 0,
+      y = 0,
+      z = 0
+    for (let t = 0; t < steps; t++) {
+      x += (rnd() - 0.5) * 400
+      y += (rnd() - 0.5) * 400
+      z += (rnd() - 0.5) * 400
+      for (let r = 0; r < ring; r++) {
+        const a = (r / ring) * Math.PI * 2
+        const at = (t * ring + r) * 3
+        positions[at] = x + Math.cos(a) * 30
+        positions[at + 1] = y + Math.sin(a) * 30
+        positions[at + 2] = z
+        if (t + 1 < steps) {
+          const here = t * ring + r
+          const next = t * ring + ((r + 1) % ring)
+          indices.push(here, next, here + ring, next, next + ring, here + ring)
+        }
+      }
+    }
+    return [{ positions, indices: Uint32Array.from(indices) }]
+  }
+
+  const triangles = (parts: readonly MeshArrays[]): number =>
+    parts.reduce((n, p) => n + p.indices.length / 3, 0)
+
+  it('lands near the factor asked for, on a surface and on a tube alike', () => {
+    for (const build of [dense, sparse]) {
+      const parts = build()
+      const before = triangles(parts)
+      for (const factor of [2, 4]) {
+        const achieved = before / (downsampleParts(parts, factor).indices.length / 3)
+        /*
+         * A factor of two either way, and honestly so: the grid is fitted from two probes of a
+         * power law that is only approximately one, so this is "the right order of reduction"
+         * rather than a guarantee. What it rules out is the failure it was written for — the
+         * unfitted model returned a *twenty-seventh* of a real neuron for a requested half. Measured on
+         * four of those, spanning
+         * 111k to 23.8M triangles, the fit lands at 1.7–2.0× for ÷2 and 3.2–3.4× for ÷4: a little
+         * under, which is the safe direction, since erring the other way deletes geometry nobody
+         * asked to lose.
+         */
+        expect(achieved).toBeGreaterThan(factor / 2)
+        expect(achieved).toBeLessThan(factor * 2)
+      }
+    }
+  })
+
+  it('is closer than the unfitted model on the shape the model is wrong about', () => {
+    /*
+     * The comparative claim, which is the one that survives a change of fixture. A thin tube is
+     * where `0.68 · grid²` fails — it is a surface's law — and the synthetic one here is milder
+     * than a real neuron — see `countCells` for the figure there.
+     */
+    const parts = sparse()
+    const before = triangles(parts)
+    for (const factor of [2, 16]) {
+      const modelled =
+        before / (decimateParts(parts, gridForFactor(before, factor)).indices.length / 3)
+      const fitted = before / (downsampleParts(parts, factor).indices.length / 3)
+      expect(Math.abs(fitted - factor)).toBeLessThan(Math.abs(modelled - factor))
+    }
+  })
+
+  it('hands back the join, by identity where it can, for a factor that asks for nothing', () => {
+    // 0 and 1 are the default and the identity. A caller never has to branch, so neither may
+    // quietly become a reduction.
+    const parts = dense()
+    for (const factor of [undefined, 0, 1]) {
+      const out = downsampleParts(parts, factor as number)
+      expect(out.positions).toBe(parts[0]!.positions)
+    }
+  })
+})
+
+/**
+ * `Downsample`'s automatic setting: keep as much as a scene can draw, and nothing less.
+ *
+ * It is a *triangle target* rather than a factor because no factor is right for two datasets at
+ * once — one aedes neuron is 13.1 M triangles where one FlyWire neuron is 1.3 M, so the factor
+ * that makes the first drawable erases the second. That is not hypothetical: the control shipped
+ * for one round with 0 meaning "off", and the two aedes neurons in an ordinary workflow came to
+ * 472 MB of typed arrays and drew nothing at all.
+ */
+describe('reduceToTriangles', () => {
+  it('hands a mesh that already fits straight back, untouched', () => {
+    // The property that makes automatic free on a small mesh, and on a pyramid whose level was
+    // already chosen against the same budget — otherwise every scene would pay a fit it did not
+    // need, and every caption would claim a reduction nobody made.
+    const parts = [sphere(60, 90)]
+    const triangles = parts[0]!.indices.length / 3
+    const out = reduceToTriangles(parts, triangles * 2)
+    expect(out.positions).toBe(parts[0]!.positions)
+    expect(out.indices).toBe(parts[0]!.indices)
+  })
+
+  it('brings a mesh that does not fit down near the target', () => {
+    const parts = [sphere()]
+    const before = parts[0]!.indices.length / 3
+    const out = reduceToTriangles(parts, before / 8)
+    const after = out.indices.length / 3
+    expect(after).toBeLessThan(before)
+    // The same tolerance the factor gets, and for the same reason: the grid is fitted, so this
+    // is "the right order of reduction" rather than a guarantee — measured at 3.8× for a target
+    // of an eighth on this fixture, which errs towards keeping geometry.
+    expect(before / after).toBeGreaterThan(8 / 2.5)
+    expect(before / after).toBeLessThan(8 * 2)
+  })
+
+  it('splits the ceiling between the neurons in the set', () => {
+    // A scene's budget is the *scene's*, so twenty neurons each get a twentieth of it — which is
+    // what stops a set being reduced by whichever neuron in it is largest.
+    expect(reductionFor('auto', 1, 1_500_000)).toEqual({ targetTriangles: 1_500_000 })
+    expect(reductionFor('auto', 20, 1_500_000)).toEqual({ targetTriangles: 75_000 })
+  })
+
+  it('reads 1 and absent as full resolution, and a number above 1 as a ratio', () => {
+    expect(reductionFor(undefined, 2, 1_500_000)).toBeUndefined()
+    expect(reductionFor(1, 2, 1_500_000)).toBeUndefined()
+    expect(reductionFor(4, 2, 1_500_000)).toEqual({ factor: 4 })
   })
 })

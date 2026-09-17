@@ -49,7 +49,6 @@ import {
   SECONDS_PER_NEURON,
   fragmentConcurrencyFor,
 } from './meshes'
-import { decimateGridFor } from '../meshDecimate'
 import { quoteWideIntegers, parseCaveJson } from './json'
 import { installRefusingCaveFetch, materializations } from '../../test/caveStubs'
 import {
@@ -1414,17 +1413,6 @@ describe('meshes', () => {
     // Two requests, and neither of them the meshing API.
     expect(captured.filter((c) => c.url.includes('/meshing/api/v1/'))).toEqual([])
     expect(captured.filter((c) => c.url.includes('/lvl2_graph'))).toHaveLength(1)
-  })
-
-  it('turns the triangle budget into a decimation grid, since graphene has no levels', async () => {
-    // The seam says a source with one level ignores `triangleBudget`; that is written for a
-    // publisher whose levels are fixed. Graphene has one level and a continuous knob, so it is
-    // the only source that can hit an arbitrary budget exactly — and the Meshes node's `Detail`
-    // control is otherwise dead here.
-    expect(decimateGridFor(1_500_000, 20)).toBeGreaterThan(decimateGridFor(150_000, 20))
-    expect(decimateGridFor(1_500_000, 1)).toBeGreaterThan(decimateGridFor(1_500_000, 20))
-    // Never so coarse that the arbor goes: `low` against a full set still clears the floor.
-    expect(decimateGridFor(150_000, 20)).toBeGreaterThanOrEqual(48)
   })
 
   it('divides the fragment budget between the neurons in flight', async () => {

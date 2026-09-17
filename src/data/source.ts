@@ -38,8 +38,11 @@ import type { FilterRow } from './filterRows'
 
 export type { NeuronIndexRequest } from './neuronIndex'
 
+import { boundsOf, meshTriangleCount } from '../core/values'
 import type { NeuronId } from '../core/ids'
 import { ID_COLUMN_NAME } from '../core/ids'
+import { achievedDownsample, applyReduction, reductionFor } from './meshDecimate'
+import { DEFAULT_TRIANGLE_BUDGET } from './precomputed'
 
 /**
  * One property a dataset's connections carry beside their `weight`.
@@ -443,9 +446,39 @@ export interface GeometryRequest {
   neuronIds: NeuronId[]
   /**
    * Target triangle count for the whole set, for sources with levels of detail. The source
-   * picks the finest level that fits; a source with one level ignores it.
+   * picks the finest level that fits; **a source with one level ignores it**.
+   *
+   * That last clause is the whole of why `downsample` exists beside it. This knob can only ever
+   * choose among what a publisher already built, so on graphene — which publishes supervoxel
+   * fragments at one resolution and nothing coarser — it had no levels to choose between, and
+   * the CAVE source honoured it by quietly clustering vertices instead. One control meaning
+   * "pick a level" on one dataset and "recompute the geometry" on the next is the kind of thing
+   * a reader can only discover by measuring, which is how it was in fact discovered.
    */
   triangleBudget?: number
+  /**
+   * How much geometry to keep: a factor, `'auto'`, or nothing.
+   *
+   * `'auto'` is what the Meshes node sends by default and means *as much detail as a 3D view can
+   * draw* — each mesh reduced only as far as the scene's triangle ceiling requires, and not at
+   * all where it already fits. A **number above 1** is somebody overriding that with a ratio:
+   * roughly `1 / n` of each mesh's triangles. **Absent** is full resolution, which is what a
+   * caller not drawing a scene wants and what the node sends for an explicit `1`.
+   *
+   * Automatic is not a factor because no factor is right for two datasets at once — `Reduction`
+   * carries the measurement.
+   *
+   * Unlike `triangleBudget` this is not a hint a source may decline; `fetchMeshesFor` is the seam
+   * that makes that true rather than hoped for. **Per mesh, from its own triangle count**, so a
+   * set is not reduced by whichever neuron in it is largest. Clustering is approximate, so what
+   * arrives is near what was asked; `MeshDetail.downsample` reports the factor achieved.
+   *
+   * It rides on the *request* rather than being applied to the result because a graphene mesh is
+   * assembled from hundreds of fragments, and reducing them where they already are is what avoids
+   * holding a second full-resolution copy of every neuron — see `decimateParts`. The cost of that
+   * choice is that it is part of the geometry cache key, so changing it re-fetches.
+   */
+  downsample?: number | 'auto'
   /**
    * Called as work lands, with a 0..1 fraction and an optional phase note.
    *
@@ -1037,6 +1070,17 @@ export interface DataSource {
    * dropdown; not implementing it costs only that.
    */
   skeletonSourcesFor?(datasetId: string): readonly SkeletonProvenance[] | undefined
+
+  /**
+   * Whether this dataset's meshes come in levels of detail, from whatever peeks have landed.
+   *
+   * `undefined` means nobody has looked yet, which is most of a fresh session — the same three
+   * states `skeletonSourcesFor` has and for the same reason: this reads memoised probe results
+   * and may not await one (invariant 2). It is what the Meshes node's `Detail` control asks, so
+   * that a budget with no levels to spend it on is drawn as the dead control it is rather than
+   * as a knob that silently does something else.
+   */
+  meshLevelsFor?(datasetId: string): boolean | undefined
   /**
    * What *this dataset* can do, where it differs from the source.
    *
@@ -1630,6 +1674,22 @@ export function skeletonRoutesOf(
 }
 
 /**
+ * Whether a dataset's meshes have levels of detail, read the way `skeletonRoutesOf` reads a route
+ * list — through the seam, so `src/nodes` never reaches into a source.
+ *
+ * Three states, and the third is the one that matters at edit time: `undefined` is "no peek has
+ * landed", which must not be drawn as "no levels". A control that greys itself out for the first
+ * second of every session is a control people learn to distrust.
+ */
+export function meshLevelsOf(
+  source: DataSource | undefined,
+  datasetId: string | undefined,
+): boolean | undefined {
+  if (!source || !datasetId) return undefined
+  return source.meshLevelsFor?.(datasetId)
+}
+
+/**
  * The synapse units a source can deliver, read the way `skeletonRoutesOf` reads a route list.
  *
  * The seam, and only the seam: `src/nodes` asks here rather than reaching into
@@ -1833,6 +1893,58 @@ export function canFetchSynapsesBetween(
 ): boolean {
   if (!source) return true
   return Boolean(source.fetchSynapsesBetween) && capabilityOf(source, datasetId, 'synapses')
+}
+
+/**
+ * `fetchMeshes`, with `downsample` guaranteed rather than hoped for.
+ *
+ * **`triangleBudget` is the cautionary tale this exists for.** Its contract said a source with one
+ * level ignores it; nothing enforced that, and what "ignored" came to mean on graphene was a
+ * source honouring it by *recomputing the geometry* — so one dropdown meant two different things
+ * and nobody could tell which without measuring. `downsample`'s contract says the opposite, that
+ * a source may not decline it, and a contract stated at a seam and honoured at four leaves is the
+ * same arrangement that produced the first problem. `MockSource` already declines it silently.
+ *
+ * So the seam closes it, in the only two ways a seam can:
+ *
+ *  - **The fallback.** A source that returned meshes without reducing them gets them reduced here.
+ *    Slower than doing it at the fetch — a graphene source reduces over the fragments, before the
+ *    join, which is the whole reason the factor rides on the request — but *slower* is a different
+ *    kind of answer from *ignored*, and only one of them is a bug somebody has to find.
+ *  - **The receipt.** `MeshDetail.downsample` is stamped whatever route ran. Without it the case
+ *    the control was written for — a flat bucket with one level, too big — reduced the geometry
+ *    and put nothing on screen, because all three sources build `detail` only when `lod` is known
+ *    and a flat bucket has no `lod`. `core/values.ts` says the field is on the value precisely to
+ *    stop that, which made it the silent-thinning failure its own doc comment names.
+ *
+ * A source opts out of the fallback by reporting `detail.downsample` itself, which is how it says
+ * it did the work already.
+ */
+export async function fetchMeshesFor(
+  source: DataSource,
+  req: GeometryRequest,
+): Promise<MeshesValue> {
+  if (!source.fetchMeshes) throw new Error(`${source.label} does not provide meshes`)
+  const value = await source.fetchMeshes(req)
+  const reduction = reductionFor(req.downsample, req.neuronIds.length, DEFAULT_TRIANGLE_BUDGET)
+  if (!reduction || value.detail?.downsample !== undefined) return value
+
+  const before = meshTriangleCount(value)
+  const items = value.items.map((item) => {
+    const reduced = applyReduction([item], reduction)
+    return { ...item, positions: reduced.positions, indices: reduced.indices }
+  })
+  const triangles = items.reduce((n, item) => n + item.indices.length / 3, 0)
+  const achieved = achievedDownsample(before, triangles)
+  if (achieved === undefined) return value
+
+  return {
+    ...value,
+    items,
+    bounds: boundsOf(items.map((item) => item.positions)),
+    // Spread rather than rebuilt field by field, so a fifth `MeshDetail` field survives this.
+    detail: { lod: 0, levels: 1, ...value.detail, triangles, downsample: achieved },
+  }
 }
 
 /**

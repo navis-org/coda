@@ -252,7 +252,7 @@ live('CAVE, live', () => {
       source.fetchMeshes({ datasetId: DATASET, neuronIds: [SEED], triangleBudget: 150_000 }),
       source.fetchMeshes({ datasetId: DATASET, neuronIds: [SEED], triangleBudget: 20_000_000 }),
     ])
-    expect(low.detail?.decimated).toBeUndefined()
+    expect(low.detail?.downsample).toBeUndefined()
     expect(low.detail?.levels).toBeGreaterThan(1)
     expect(low.detail!.lod).toBeGreaterThan(high.detail!.lod!)
     expect(low.items[0]!.indices.length).toBeLessThan(high.items[0]!.indices.length)
@@ -696,7 +696,7 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
     expect(triangles).toBeGreaterThan(5_000)
 
     // And it says so: a source with no levels reports that it simplified, not "level 0 of 0".
-    expect(low.detail?.decimated).toBe(true)
+    expect(low.detail?.downsample).toBeUndefined()
   }, 600_000)
 
   /*

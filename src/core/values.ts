@@ -326,20 +326,25 @@ export interface MeshDetail {
   levels: number
   triangles: number
   /**
-   * Simplified on arrival rather than fetched at a published level.
+   * The reduction factor a mesh set **achieved**, where one was asked for.
    *
-   * A source with no levels of detail can still hit a triangle budget, by decimating what it
-   * was given — which is what CAVE does, because a graphene manifest lists supervoxel fragments
-   * at full resolution and there is nothing coarser to ask for. `lod`/`levels` describe nothing
-   * in that case, so the caption needs this to say what actually happened: the alternative is a
-   * viewer reporting "level 0 of 0" while 98% of the triangles have been merged away, which is
-   * the silent-thinning failure `labels thinned` and `cells merged` both exist to prevent.
+   * Absent means full resolution. It is on the value because a reduction nobody can see is the
+   * silent-thinning failure `labels thinned` and `cells merged` both exist to prevent: a mesh at
+   * a fifth of its triangles looks like a mesh, and `lod`/`levels` say nothing about it — they
+   * describe a level a *publisher* built, and this happened afterwards.
+   *
+   * Achieved rather than asked for, and that is the half to keep: `Downsample`'s default setting
+   * is automatic, which has no asked-for factor at all, and an explicit one is approximate because
+   * the grid that hits it is fitted. `achievedDownsample` is the one place that number is
+   * computed. It was a `decimated: boolean` when the reduction was automatic and the factor was
+   * nobody's decision; the number is what the caption has to name for the control to be findable
+   * from the picture.
    */
-  decimated?: boolean
+  downsample?: number
   /**
    * How many of the pieces a source named actually arrived, where a mesh is assembled from many.
    *
-   * The same argument as `decimated` one notch worse, and it rides on the **value** rather than
+   * The same argument as `downsample` above one notch worse, and it rides on the **value** rather
    * on a warning for a reason a warning cannot meet: a geometry cache means the second Run
    * fetches nothing, so a per-fetch sentence goes quiet while the same short mesh is still on
    * screen. A graphene neuron is hundreds of supervoxel fragments and a dropped one is tolerated

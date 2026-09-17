@@ -45,7 +45,8 @@
  */
 
 import { mapWithConcurrency } from '../concurrency'
-import { decimateParts } from '../meshDecimate'
+import type { Reduction } from '../meshDecimate'
+import { applyReduction } from '../meshDecimate'
 import type { MeshArrays } from '../meshParts'
 import { decodeDracoFragment } from '../precomputed/draco'
 import { fetchBytes, objectStoreUrl } from '../precomputed/transport'
@@ -311,6 +312,14 @@ export interface GrapheneMesh {
   /** Undefined where the segment has no mesh at all. */
   mesh?: MeshArrays
   tally: FragmentTally
+  /**
+   * Triangles the fragments held before any reduction.
+   *
+   * Cached beside the mesh rather than recomputed, because it is the denominator the caption's
+   * factor is a ratio of — and on a second Run nothing is fetched, so a count taken during the
+   * fetch would be gone exactly when the same reduced meshes are still on screen.
+   */
+  fullTriangles: number
 }
 
 /**
@@ -357,12 +366,12 @@ export async function grapheneFragmentNames(
 export async function readGrapheneMesh(
   source: GrapheneMeshSource,
   neuronId: string,
-  grid: number,
+  reduction: Reduction | undefined,
   fragmentLimit: number,
   options: CaveRequestOptions,
 ): Promise<GrapheneMesh> {
   const fragments = await grapheneFragmentNames(source, neuronId, options)
-  if (fragments.length === 0) return { tally: NO_FRAGMENTS }
+  if (fragments.length === 0) return { tally: NO_FRAGMENTS, fullTriangles: 0 }
 
   /*
    * Names are resolved in **one pass before the fan-out**, not inside it. Two reasons, and the
@@ -401,16 +410,16 @@ export async function readGrapheneMesh(
   }
 
   /*
-   * Decimated on arrival, and this is not optional at graphene's resolution: one FlyWire neuron
-   * is 668,750 vertices and 1,276,736 triangles across its fragments, so a set of twenty at full
-   * detail is twenty-five million triangles in a WebGL scene that also has to draw synapses. The
-   * same reduction the ROI shells get, at the same grid — a *feature size* rather than a vertex
-   * target, so a small neuron keeps proportionally as much shape as a large one.
+   * Reduced here where the fragments already are, rather than after joining them, which is the
+   * difference between holding one full-resolution mesh and holding two — `decimateParts` argues
+   * it. With no reduction asked for this joins and nothing else.
    *
-   * Over the **fragments**, not over a joined copy of them, which is the difference between
-   * holding one full-resolution mesh here and holding two.
-   *
-   * It reduces memory and draw cost, not the wait: the requests are already paid for by here.
+   * It used to reduce *always*, at a grid derived from the caller's triangle budget, because
+   * graphene publishes one resolution and a budget with no levels to spend would otherwise have
+   * done nothing here. That made one control mean two different things depending on the dataset;
+   * `GeometryRequest.downsample` is the explicit half, and full resolution is what a graphene
+   * fetch answers when nobody asks for less.
    */
-  return { mesh: decimateParts(decoded, grid), tally }
+  const fullTriangles = decoded.reduce((n, part) => n + part.indices.length / 3, 0)
+  return { mesh: applyReduction(decoded, reduction), tally, fullTriangles }
 }

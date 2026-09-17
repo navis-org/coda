@@ -89,6 +89,7 @@ import {
   fetchCoarseMesh,
   fetchMeshes,
   meshProgress,
+  meshFormatHasLevels,
   openMeshSource,
 } from '../precomputed'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
@@ -264,6 +265,8 @@ interface DatasetState {
   publishedResolving?: Promise<SkeletonSource | null>
   /** Whether an edit-time peek has already started the two reads it could not answer from. */
   skeletonsPeeked?: boolean
+  /** The same, for the mesh source — asked by `meshLevelsFor`, which may not await. */
+  meshPeeked?: boolean
   /** The published neuroglancer state, from the same endpoint. Null when there is none. */
   scene?: NgScene | null
   sceneResolving?: Promise<NgScene | null>
@@ -1060,6 +1063,32 @@ export class NeuPrintSource implements DataSource {
         .catch(() => undefined)
     }
     return undefined
+  }
+
+  /**
+   * Whether this dataset's mesh bucket is a pyramid, from the probe `fetchMeshes` already needs.
+   *
+   * neuPrint's meshes are a precomputed layer named by the published neuroglancer state, and both
+   * formats occur — hemibrain and optic-lobe publish `neuroglancer_multilod_draco`, where a
+   * legacy bucket has one flat mesh per body. Only the first has levels for `triangleBudget` to
+   * choose between.
+   */
+  meshLevelsFor(datasetId: string): boolean | undefined {
+    const state = this.stateFor(datasetId)
+    if (state.meshSource === undefined) {
+      if (!state.meshPeeked) {
+        state.meshPeeked = true
+        // The same arrangement `skeletonSourcesFor` makes, and swallowed for the same reason: a
+        // peek has no caller to report to, and whoever asks for geometry gets the failure.
+        void this.meshSourceFor(datasetId)
+          .then(() => reportSourceLearned(this.id))
+          .catch(() => undefined)
+      }
+      return undefined
+    }
+    // Null is a *settled* "this dataset publishes no meshes", which is not a levels question at
+    // all — `capabilityOf(…, 'meshes')` is where that gets asked and answered.
+    return state.meshSource ? meshFormatHasLevels(state.meshSource.format) : undefined
   }
 
   /**

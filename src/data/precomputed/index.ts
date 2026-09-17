@@ -625,6 +625,26 @@ async function readLodFragments(
 }
 
 /**
+ * Whether a mesh format publishes levels of detail for a triangle budget to choose between.
+ *
+ * Exhaustive rather than `format === 'multilod-draco'`, which is `thumbnailCeiling`'s argument
+ * one function down and matters more here: the three sources that ask this drive whether the
+ * Meshes node's `Detail` control is drawn at all, and a ternary's permissive arm would answer
+ * "no levels" for a fourth format that has them — greying out a live control on a source that
+ * publishes a pyramid, which is the opposite of what the split exists to do.
+ */
+export function meshFormatHasLevels(format: MeshFormat | undefined): boolean {
+  switch (format) {
+    case 'multilod-draco':
+      return true
+    case 'legacy':
+    case 'dvid-ngmesh':
+    case undefined:
+      return false
+  }
+}
+
+/**
  * Triangle budget behind `CoarseGeometryRequest.detail = 'fine'`.
  *
  * Named for what the data layer knows — a detail level — rather than for Explore's hover preview,

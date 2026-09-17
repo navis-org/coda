@@ -106,6 +106,7 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
           label={label}
           value={typeof value === 'string' ? value : param.default}
           options={options}
+          {...(param.empty ? { empty: param.empty } : {})}
           onChange={onChange}
         />
       )

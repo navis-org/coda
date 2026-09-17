@@ -719,7 +719,7 @@ function sameDetail(a: MeshDetail, b: MeshDetail): boolean {
   return (
     a.lod === b.lod &&
     a.levels === b.levels &&
-    a.decimated === b.decimated &&
+    a.downsample === b.downsample &&
     // Included for the same reason as the rest, and it is the member where getting it wrong is
     // worst: two sets that lost different amounts keep no detail at all rather than the first
     // one's, which would let a complete set's caption speak for an incomplete one stacked onto it.

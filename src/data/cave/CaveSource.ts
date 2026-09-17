@@ -97,13 +97,14 @@ import {
   openGrapheneMeshes,
   readGrapheneMesh,
 } from './meshes'
-import { decimateGridFor } from '../meshDecimate'
+import { achievedDownsample, reductionFor, reductionKey } from '../meshDecimate'
 import type { MeshResult, MeshSource } from '../precomputed'
 import { OVERSIZE } from '../precomputed/transport'
 import {
   DEFAULT_TRIANGLE_BUDGET,
   fetchCoarseMesh,
   fetchMeshes as fetchFlatMeshes,
+  meshFormatHasLevels,
   meshProgress,
 } from '../precomputed'
 import type { SkeletonSource } from '../precomputed/skeletons'
@@ -112,7 +113,7 @@ import {
   openSkeletonSource,
   skeletonFetchOptions,
 } from '../precomputed/skeletons'
-import { FLAT_SKELETON_MB, FLAT_SKELETON_WARN, peekFlat, probeFlat } from './flat'
+import { FLAT_SKELETON_MB, FLAT_SKELETON_WARN, flatUrlFor, peekFlat, probeFlat } from './flat'
 import type { SkeletonService } from './skeletonService'
 import {
   existingSkeletons,
@@ -437,6 +438,8 @@ function noRoute(
  */
 interface CachedGrapheneMesh extends Omit<MeshGeometry, 'id'> {
   fragments: FragmentTally
+  /** What this mesh held before it was reduced — the caption's denominator. */
+  fullTriangles: number
 }
 
 /**
@@ -1333,15 +1336,17 @@ export class CaveSource implements DataSource {
     }
 
     /*
-     * The caller's triangle budget decides how hard each mesh is decimated — see
-     * `decimateGridFor`. This is the one source in the tree that can honour `triangleBudget`
-     * exactly rather than snapping to a published level, because graphene has no levels but
-     * `decimateMesh` has a continuous knob.
+     * `downsample` is honoured here rather than ignored, and honoured **over the fragments** —
+     * see `downsampleParts`. It is the one control that can make this route workable at scale,
+     * graphene having no levels of detail for `triangleBudget` to choose between; that budget is
+     * deliberately *not* read on this route any more, having meant "recompute the geometry" here
+     * and "pick a published level" everywhere else.
      */
     const inFlight = Math.min(MESH_CONCURRENCY, req.neuronIds.length)
-    const grid = decimateGridFor(
-      req.triangleBudget ?? DEFAULT_TRIANGLE_BUDGET,
+    const reduction = reductionFor(
+      req.downsample,
       req.neuronIds.length,
+      DEFAULT_TRIANGLE_BUDGET,
     )
     const fragmentLimit = fragmentConcurrencyFor(inFlight)
 
@@ -1352,8 +1357,8 @@ export class CaveSource implements DataSource {
      *
      * Safe to hold indefinitely for the reason stated above — a root id names one immutable
      * agglomeration, and an edit mints a new id — but the *decimation* is not part of the id, so
-     * it goes in the key. `decimateGridFor` depends on both the triangle budget and the batch
-     * size, so a scene grown from twenty neurons to forty legitimately re-reads them all.
+     * it goes in the key — which is the price of reducing the fragments rather than the result,
+     * and the reason `downsample` is a knob somebody sets once rather than sweeps.
      */
     // Started alongside the download rather than before it, and nothing publishes until it lands
     // — see `morphologyTypes`.
@@ -1380,7 +1385,7 @@ export class CaveSource implements DataSource {
     let done = 0
     const fetched = await cachedGeometry<CachedGrapheneMesh>({
       ids: req.neuronIds,
-      key: (id) => `cave:${this.id}:${req.datasetId}:mesh:${grid}:${id}`,
+      key: (id) => `cave:${this.id}:${req.datasetId}:mesh:${reductionKey(reduction)}:${id}`,
       bytes: (m) => byteLengthOf(m.positions, m.indices),
       refresh: req.refresh,
       onFetched: req.onFetched,
@@ -1388,10 +1393,10 @@ export class CaveSource implements DataSource {
       onPartial: req.onPartial && ((pairs) => req.onPartial?.(assemble(pairs))),
       fetch: async (missing, deliver) => {
         await mapWithConcurrency(missing, MESH_CONCURRENCY, async (neuronId) => {
-          const { mesh, tally } = await readGrapheneMesh(
+          const { mesh, tally, fullTriangles } = await readGrapheneMesh(
             source,
             neuronId,
-            grid,
+            reduction,
             fragmentLimit,
             options,
           )
@@ -1404,6 +1409,7 @@ export class CaveSource implements DataSource {
               positions: mesh.positions,
               indices: mesh.indices,
               fragments: tally,
+              fullTriangles,
             })
         })
       },
@@ -1447,18 +1453,21 @@ export class CaveSource implements DataSource {
     }
 
     const triangles = fetched.ordered.reduce((sum, [, m]) => sum + m.indices.length / 3, 0)
+    const fullTriangles = fetched.ordered.reduce((sum, [, m]) => sum + m.fullTriangles, 0)
     await typesReady
     /*
-     * One level, and decimated — which the caption has to say. Graphene publishes supervoxel
-     * fragments at full resolution, so `lod`/`levels` describe nothing here; what a reader needs
-     * to know is that 98% of the triangles were merged away, on the same rule that keeps `labels
-     * thinned` and `cells merged` on screen.
+     * One level, which is the fact about graphene, plus the reduction if somebody asked for one —
+     * both of which the caption has to say, on the rule that keeps `labels thinned` and `cells
+     * merged` on screen.
      */
     return assemble(fetched.ordered, {
       lod: 0,
       levels: 1,
       triangles,
-      decimated: true,
+      // The factor achieved — see `achievedDownsample`, which is the one home for that rule.
+      ...(achievedDownsample(fullTriangles, triangles) !== undefined
+        ? { downsample: achievedDownsample(fullTriangles, triangles)! }
+        : {}),
       fragments: { named: fragments.named, missing: fragments.missing },
     })
   }
@@ -1596,6 +1605,33 @@ export class CaveSource implements DataSource {
     if (service) routes.push(SERVICE_ROUTE)
     if (l2) routes.push(L2_ROUTE)
     return routes
+  }
+
+  /**
+   * Levels only where a materialization publishes a **flat** pyramid beside the graphene one.
+   *
+   * Graphene itself has none — supervoxel fragments at one resolution — which is the whole reason
+   * `downsample` exists, and `fetchMeshes` already prefers the pyramid where there is one. So
+   * this is the same question `grapheneMeshes` vs the flat route answers, asked at edit time.
+   */
+  meshLevelsFor(datasetId: string): boolean | undefined {
+    const parsed = splitDatasetId(datasetId)
+    if (!parsed) return undefined
+    const spec = specFor(this.deployment, parsed.datastack)
+    if (!spec) return undefined
+    /*
+     * **`flatUrlFor` is the settled half, and reading it is the whole of why this works.**
+     * `peekFlat` answers `undefined` for a probe in flight *and* for a bucket that is not there,
+     * and taking that at face value meant this never returned `false` — so `Detail` stayed a live
+     * three-way choice on graphene, which is the one source the control does nothing on and the
+     * reason the split exists at all. The spec's own flat entry needs no network: absent, there
+     * is no pyramid and there never will be for this version.
+     */
+    if (!flatUrlFor(spec, parsed.version)) return false
+    const flat = peekFlat(spec, parsed.version)
+    // Now `undefined` really does mean "the probe has not landed", which `meshLevelsOf` argues
+    // must leave the control alone rather than grey it out on a guess.
+    return flat ? meshFormatHasLevels(flat.mesh?.format) : undefined
   }
 
   /**

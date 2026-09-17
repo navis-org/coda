@@ -813,22 +813,37 @@ describe('detailNote', () => {
     expect(note?.title).toContain('12,345')
   })
 
-  it('says simplified instead, where naming a level would report "0 of 0"', () => {
+  it('names the reduction and the control, where naming a level would say "0 of 0"', () => {
     const note = detailNote({
       ...base,
-      detail: { lod: 0, levels: 0, triangles: 900, decimated: true },
+      detail: { lod: 0, levels: 0, triangles: 900, downsample: 4 },
     })
-    expect(note?.label).toBe('meshes simplified')
+    expect(note?.label).toBe('meshes ÷4')
+    expect(note?.title).toContain('Downsample')
+    // The share spelled out, because "÷4" on the chip is the ratio and the sentence is what makes
+    // it findable — a caption naming no control is a picture nobody can get back from. As a
+    // fraction rather than a word: a four-entry lookup gave correct English for 2-5 and "a 1/8"
+    // for everything past it, including the factors the tests themselves use.
+    expect(note?.title).toContain('1/4')
+    // "roughly", because the factor named is the one achieved and the grid that hits it is
+    // fitted — and because the default has no typed value to quote back at all.
+    expect(note?.title).toContain('roughly')
+    // It points at the control rather than quoting it, and says what the default does.
+    expect(note?.title).toContain('as a 3D view can draw')
     expect(note?.title).not.toContain('level 0 of')
   })
 
-  it('names the control that changes it, either way', () => {
-    for (const detail of [
-      { lod: 1, levels: 3, triangles: 10 },
-      { lod: 0, levels: 0, triangles: 10, decimated: true },
-    ]) {
-      expect(detailNote({ ...base, detail })?.title).toContain('Detail')
-    }
+  it('names the control that changes it, and they are different controls', () => {
+    // The whole point of the split: a budget spent among published levels, and a reduction of the
+    // geometry. A caption that named `Detail` for both sent people to a dropdown that, on a
+    // single-level source, does nothing at all.
+    expect(
+      detailNote({ ...base, detail: { lod: 1, levels: 3, triangles: 10 } })?.title,
+    ).toContain('Detail')
+    expect(
+      detailNote({ ...base, detail: { lod: 0, levels: 0, triangles: 10, downsample: 4 } })
+        ?.title,
+    ).toContain('Downsample')
   })
 
   it('says incomplete rather than simplified, and says it over a set that is also simplified', () => {
@@ -845,7 +860,7 @@ describe('detailNote', () => {
         lod: 0,
         levels: 1,
         triangles: 900,
-        decimated: true,
+        downsample: 4,
         fragments: { named: 471, missing: 449 },
       },
     })
@@ -862,11 +877,18 @@ describe('detailNote', () => {
         lod: 0,
         levels: 1,
         triangles: 900,
-        decimated: true,
+        downsample: 4,
         fragments: { named: 471, missing: 0 },
       },
     })
-    expect(note?.label).toBe('meshes simplified')
+    expect(note?.label).toBe('meshes ÷4')
+  })
+
+  it('says nothing about a reduction nobody asked for', () => {
+    // Full resolution is the default on a single-level source now, where it used to be reduced
+    // automatically — so a caption claiming a reduction would be claiming a decision nobody made.
+    const note = detailNote({ ...base, detail: { lod: 0, levels: 1, triangles: 900 } })
+    expect(note?.label).not.toContain('÷')
   })
 
   it('is absent for a source that publishes nothing about it', () => {

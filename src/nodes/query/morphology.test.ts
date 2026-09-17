@@ -19,12 +19,15 @@ import { addEdge, addNode, emptyGraph, setNodeParam } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { defaultParams, makeInferContext, validateColumnParams } from '../../core/node'
 import type { NodeDefinition } from '../../core/node'
+import { meshDetailRequest } from '../lib/meshDetailParams'
+import { fetchMeshesFor } from '../../data/source'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource, GeometryRequest, SourceCapabilities } from '../../data/source'
 import { registerSource, requireSource } from '../../data/source'
 import { T, column, columnNames, tableSchema } from '../../core/types'
+import { makeTable } from '../../core/values'
 import type {
   MeshesValue,
   PointsValue,
@@ -804,3 +807,187 @@ function routedToRecorder(node: GraphNode): GraphNode {
     ? { ...node, params: { ...node.params, source: 'records-route' } }
     : node
 }
+
+describe('the two reduction controls', () => {
+  const def = requireNodeDef('neuron.meshes')
+
+  /** A source whose answer to "does this dataset have mesh levels" is whatever the test says. */
+  function withLevels(id: string, levels: boolean | undefined) {
+    const base = new MockSource({ latencyMs: 0 })
+    registerSource(
+      Object.assign(Object.create(base) as DataSource, { id, meshLevelsFor: () => levels }),
+    )
+    return T.dataset(id, 'ds:1')
+  }
+
+  it('offers the budget where the source has levels to spend it among', () => {
+    const options = enumOptions(def, 'detail', withLevels('levelled', true))
+    expect(options.map((o) => o.value)).toEqual(['150000', '1500000', '6000000'])
+  })
+
+  it('draws Detail dead where the source publishes one level', () => {
+    /*
+     * The control used to be live here and to mean something else: `triangleBudget`'s contract
+     * says a single-level source ignores it, so the CAVE source honoured it by clustering
+     * vertices instead — one dropdown picking a published level on neuPrint and recomputing the
+     * geometry on FlyWire.
+     *
+     * **No options**, which is how `ParamField` already draws a dead control: a genuinely
+     * `disabled` select carrying `EnumParam.empty`. One inert-looking option was the first shape
+     * and is worse than it sounds — a `select` with a single entry is operable, focusable and
+     * indistinguishable from a real choice until you open it.
+     */
+    expect(enumOptions(def, 'detail', withLevels('flat', false))).toEqual([])
+    const param = def.params?.find((p) => p.id === 'detail')
+    expect(param?.kind === 'enum' && param.empty).toMatch(/one level of detail/)
+  })
+
+  it('keeps a stored budget while the control is dead, so swapping back finds it', () => {
+    // The reason this is not `visibleIf`, beyond `visibleIf` being handed params alone: a hidden
+    // param leaves the provenance key and its value stops being anybody's.
+    const param = def.params?.find((p) => p.id === 'detail')
+    expect(param?.visibleIf).toBeUndefined()
+    expect(param?.presentational).toBeUndefined()
+  })
+
+  it('leaves Detail alone while no peek has landed', () => {
+    // `undefined` is "nobody has looked", which is most of a fresh session. A control that greys
+    // itself out for the first second every time is one people learn to distrust.
+    expect(enumOptions(def, 'detail', withLevels('unknown', undefined))).toHaveLength(3)
+  })
+
+  it('defaults to full resolution, and reads absence as the automatic it used to be', () => {
+    /*
+     * Two different answers about a picture, which is what `absentMeans` is for. The **default**
+     * is full resolution: a full-resolution mesh drew nothing until `drawRanges` split it across
+     * draw calls, and that was a drawing bug — reducing the geometry by default would have been
+     * papering over it. **Absence** is automatic, because a workflow saved before this control
+     * existed was drawn by a build that reduced graphene meshes out of `triangleBudget`, so
+     * opening it at full resolution would silently make it several times heavier than the picture
+     * it was saved as.
+     */
+    const param = def.params?.find((p) => p.id === 'downsample')
+    expect(param?.default).toBe(1)
+    expect(param?.absentMeans).toBe(0)
+  })
+
+  it('sends automatic for 0, and full resolution for 1', () => {
+    // Three values, three meanings: 1 is what a source publishes, 0 asks for as much as a scene
+    // can draw, and above 1 is a ratio.
+    expect(meshDetailRequest({ detail: '1500000', downsample: 0 })).toEqual({
+      triangleBudget: 1_500_000,
+      downsample: 'auto',
+    })
+    expect(meshDetailRequest({ detail: '1500000', downsample: 1 })).toEqual({
+      triangleBudget: 1_500_000,
+    })
+    expect(meshDetailRequest({ detail: '1500000', downsample: 4 })).toEqual({
+      triangleBudget: 1_500_000,
+      downsample: 4,
+    })
+  })
+
+  it('keeps the budget and the factor independent', () => {
+    // They compose on a pyramid: the budget picks which published level to read, the factor
+    // reduces what came back. Somebody already at the coarsest level can still go further.
+    expect(meshDetailRequest({ detail: '150000', downsample: 8 })).toEqual({
+      triangleBudget: 150_000,
+      downsample: 8,
+    })
+  })
+})
+
+/**
+ * `fetchMeshesFor`: the seam that makes `downsample` a request a source cannot silently decline.
+ *
+ * It exists because the contract was otherwise honoured by hand at four leaves, which is exactly
+ * how `triangleBudget` came to mean two different things — and `MockSource` declines it, so the
+ * failure is in the tree rather than hypothetical.
+ */
+describe('the downsample seam', () => {
+  /** A source that hands back a fixed mesh and records what it was asked for. */
+  function meshSource(
+    id: string,
+    build: (req: GeometryRequest) => MeshesValue,
+  ): { type: ReturnType<typeof T.dataset>; seen: GeometryRequest[] } {
+    const seen: GeometryRequest[] = []
+    const base = new MockSource({ latencyMs: 0 })
+    registerSource(
+      Object.assign(Object.create(base) as DataSource, {
+        id,
+        fetchMeshes: (req: GeometryRequest) => {
+          seen.push(req)
+          return Promise.resolve(build(req))
+        },
+      }),
+    )
+    return { type: T.dataset(id, 'ds:1'), seen }
+  }
+
+  /** A square grid of `n` triangles, which reduces predictably. */
+  function meshValue(triangles: number, detail?: MeshesValue['detail']): MeshesValue {
+    const positions = new Float32Array((triangles + 2) * 3)
+    for (let i = 0; i < triangles + 2; i++) {
+      positions[i * 3] = (i % 64) * 100
+      positions[i * 3 + 1] = Math.floor(i / 64) * 100
+      positions[i * 3 + 2] = (i % 7) * 50
+    }
+    const indices = new Uint32Array(triangles * 3)
+    for (let t = 0; t < triangles; t++) {
+      indices[t * 3] = t
+      indices[t * 3 + 1] = t + 1
+      indices[t * 3 + 2] = t + 2
+    }
+    return {
+      kind: 'meshes',
+      items: [{ id: '1', positions, indices }],
+      attributes: makeTable(tableSchema(column('neuronId', 'str')), { neuronId: ['1'] }),
+      bounds: { min: [0, 0, 0], max: [6400, 6400, 350] },
+      ...(detail ? { detail } : {}),
+    }
+  }
+
+  it('reduces a source that ignored the request, and says so', async () => {
+    // `MockSource` declines `downsample` outright, which is the case the wrapper exists for.
+    const { type } = meshSource('declines', () => meshValue(40_000))
+    const source = requireSource('declines')
+    const out = await fetchMeshesFor(source, {
+      datasetId: 'ds:1',
+      neuronIds: ['1'],
+      downsample: 4,
+    })
+    expect(out.items[0]!.indices.length / 3).toBeLessThan(40_000)
+    // The receipt, without which a reduction is invisible — `core/values.ts` on `downsample`.
+    expect(out.detail?.downsample).toBeGreaterThanOrEqual(2)
+    void type
+  })
+
+  it('does not reduce a second time over a source that already did', async () => {
+    /*
+     * The bug this pins. The seam's opt-out is the receipt, and for one round only the graphene
+     * route wrote it — so the flat, pyramid and neuPrint routes reduced at the fetch and were
+     * reduced **again** here, delivering a sixteenth for a requested quarter.
+     */
+    const { type } = meshSource('already', () =>
+      meshValue(10_000, { lod: 0, levels: 1, triangles: 10_000, downsample: 4 }),
+    )
+    const source = requireSource('already')
+    const out = await fetchMeshesFor(source, {
+      datasetId: 'ds:1',
+      neuronIds: ['1'],
+      downsample: 4,
+    })
+    expect(out.items[0]!.indices.length / 3).toBe(10_000)
+    expect(out.detail?.downsample).toBe(4)
+    void type
+  })
+
+  it('leaves a set alone where nothing was asked for, and claims nothing', async () => {
+    const { type } = meshSource('full', () => meshValue(10_000))
+    const source = requireSource('full')
+    const out = await fetchMeshesFor(source, { datasetId: 'ds:1', neuronIds: ['1'] })
+    expect(out.items[0]!.indices.length / 3).toBe(10_000)
+    expect(out.detail?.downsample).toBeUndefined()
+    void type
+  })
+})

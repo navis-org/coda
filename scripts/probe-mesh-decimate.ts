@@ -19,21 +19,19 @@
  * `no-console` exemption in `eslint.config.js` reaches only the JavaScript ones.
  */
 
-import { decimateGridFor, decimateMesh, decimateParts } from '../src/data/meshDecimate'
-import { DEFAULT_TRIANGLE_BUDGET } from '../src/data/precomputed/index'
+import { decimateMesh, decimateParts, gridForFactor } from '../src/data/meshDecimate'
 import { concatMeshes, type MeshArrays } from '../src/data/meshParts'
 import { mulberry32 } from '../src/data/mock/generate'
 
 /**
- * The grids a triangle budget actually asks for, at one, five and twenty neurons.
+ * The grids the `Downsample` control actually asks for, at factors 2, 8 and 32.
  *
- * Computed rather than transcribed, now that `decimateGridFor` lives in `meshDecimate.ts` and not
- * behind `cave/meshes.ts`' wasm import: the budget is shared across the set, so a lone neuron asks
- * for a grid an order of magnitude finer than a scene of twenty does, and the fine end is where
- * the index pass and the cell map are largest. The transcribed list had already drifted to a 96
- * that no (budget, count) pair produces.
+ * Computed rather than transcribed, now that the conversion lives in `meshDecimate.ts` and not
+ * behind `cave/meshes.ts`' wasm import — a transcribed list had already drifted to a grid no
+ * setting produces. Spread wide because the cost is not flat in the grid: the fine end is where
+ * the index pass and the cell map are largest, and it is where a *light* reduction lands.
  */
-const GRIDS = [20, 5, 1].map((neurons) => decimateGridFor(DEFAULT_TRIANGLE_BUDGET, neurons))
+const GRIDS = [2, 8, 32].map((factor) => gridForFactor(1_289_598, factor))
 
 /** One FlyWire neuron's measured shape — see `cave/meshes.ts`, where it was taken. */
 const FRAGMENTS = 471

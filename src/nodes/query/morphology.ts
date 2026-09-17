@@ -30,7 +30,7 @@ import {
 } from '../lib/skeletonParams'
 import { asSkeletonRoute } from '../../data/skeletonRoutes'
 import { resolveSynapseUnit } from '../../data/synapseUnits'
-import { SYNAPSES_BETWEEN_SCHEMA, synapseUnitsOf } from '../../data/source'
+import { SYNAPSES_BETWEEN_SCHEMA, fetchMeshesFor, synapseUnitsOf } from '../../data/source'
 import {
   SYNAPSE_UNIT_PARAM,
   minConfidenceParam,
@@ -41,6 +41,7 @@ import {
 } from '../lib/synapseParams'
 import { idColumn } from '../lib/tableOps'
 import { carriedMorphology, carryParam, carrying } from '../lib/carryParams'
+import { detailParam, downsampleParam, meshDetailRequest } from '../lib/meshDetailParams'
 
 /**
  * Where every neuron-count control starts warning, so one number governs all of them.
@@ -214,7 +215,7 @@ registerNode({
   category: 'query',
   description: 'Fetch surface meshes for the incoming neurons.',
   guide:
-    'Neuron surface meshes. Where they come from and the level(s) of detail available varies by source. **Detail** is a triangle budget for the whole batch, so asking for more neurons gets you coarser ones. A collection carries only the fetch’s own attributes, so use Carry fields for anything else you want to filter or colour by.',
+    'Neuron surface meshes; where they come from varies by source. **Detail** spends a triangle budget among the levels a source publishes, and does nothing where there is only one — **Downsample** reduces the geometry itself, anywhere. A collection carries only the fetch’s own attributes, so use Carry fields for anything else.',
   cost: 'expensive',
   inputs: [
     { id: 'dataset', label: 'Dataset', type: T.dataset() },
@@ -238,18 +239,8 @@ registerNode({
       counting: 'fetching more than this many meshes',
     }),
     carryParam('mesh'),
-    {
-      id: 'detail',
-      kind: 'enum',
-      label: 'Detail',
-      default: '1500000',
-      help: 'Triangle budget for the whole set. Sources with levels of detail pick the finest level that fits, so asking for more neurons gets you coarser ones.',
-      options: [
-        { value: '150000', label: 'low — many neurons' },
-        { value: '1500000', label: 'balanced' },
-        { value: '6000000', label: 'high — a few neurons' },
-      ],
-    },
+    detailParam(),
+    downsampleParam(),
   ],
 
   inferOutputs: (ctx) => ({ meshes: T.meshes(carriedMorphology(ctx)) }),
@@ -270,14 +261,16 @@ registerNode({
       ctx,
       ctx.input('neurons'),
       Number(ctx.params.limit),
-      'Each mesh is a separate fetch, and a source without levels of detail sends full resolution.',
+      'Each mesh is a separate fetch, and a source without levels of detail sends full resolution unless Downsample is set.',
     )
     ctx.progress(0.02, `${neuronIds.length} neurons`)
     const carry = carrying(ctx)
-    const meshes = await source.fetchMeshes({
+    // Through the seam rather than the method: `fetchMeshesFor` is what makes `downsample` a
+    // request a source cannot silently decline, and what stamps the receipt whichever route ran.
+    const meshes = await fetchMeshesFor(source, {
       ...datasetRequest(dataset),
       neuronIds,
-      triangleBudget: Number(ctx.params.detail) || 1_500_000,
+      ...meshDetailRequest(ctx.params),
       onProgress: ctx.progress,
       // A cost only the backend knows: see `GeometryRequest.onWarn`.
       onWarn: ctx.warn,

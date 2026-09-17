@@ -67,25 +67,324 @@ const TRIANGLES_PER_CELL = 0.68
 const MIN_DECIMATE_GRID = 48
 
 /**
- * The grid that lands a set of `count` neurons on the caller's triangle budget.
+ * Whether a factor asks for any reduction at all. 0 and 1 both mean full resolution.
  *
- * This is what `GeometryRequest.triangleBudget` means for a source with **no** levels of detail.
- * It lives here rather than beside its one caller for the reason `concatMeshes` moved: it is
- * arithmetic about this decimator's own behaviour, and `cave/meshes.ts` is a module that fetches
- * over the network — which also put it out of reach of `probe-mesh-decimate.ts`, whose grids were
- * transcribed and had drifted to one no budget produces.
- * The seam says a source with one level ignores it, and that is written for a publisher whose
- * levels are fixed — graphene is the other case: one level, but a continuous knob, so it is the
- * only source in the tree that can hit an arbitrary budget exactly instead of snapping to a
- * published one. Ignoring it would leave the Meshes node's `Detail` control — non-advanced, on
- * the card, reading "Triangle budget for the whole set" — doing nothing at all here.
+ * One predicate because seven places ask — the node that sends the factor, the three sources that
+ * forward it, the two that honour it, and the caption — and "is this on" is exactly the kind of
+ * thing that comes to be spelled `> 1` in some of them and `>= 1` in the rest. It shipped that way
+ * for a round: the node said `> 1` by hand and the three forwards used bare truthiness, which let
+ * a `downsample: 1` through to a `down1` geometry cache key — a second entry holding meshes
+ * byte-identical to the `down0` ones beside it, and a full re-fetch to build them.
  *
- * The floor is what stops "low — many neurons" against twenty neurons erasing the arbor; the
- * caption admits the decimation either way.
+ * A type predicate, so a guarded `factor` needs no `!` at the four sites that then use it.
  */
-export function decimateGridFor(triangleBudget: number, count: number): number {
-  const perNeuron = Math.max(1, triangleBudget) / Math.max(1, count)
-  return Math.max(MIN_DECIMATE_GRID, Math.round(Math.sqrt(perNeuron / TRIANGLES_PER_CELL)))
+export function downsamples(factor: number | undefined): factor is number {
+  return factor !== undefined && factor > 1
+}
+
+/**
+ * What a fetch was asked to do about size, resolved once from the request.
+ *
+ * Three answers, and the middle one is the reason this is not just a number. `'auto'` is the
+ * default and means *as much detail as a scene can draw*, which no factor can express: one aedes
+ * neuron is **13.1 M triangles** where one FlyWire neuron is 1.3 M, so the factor that makes the
+ * first drawable erases the second. A bare factor is somebody overriding that, and `undefined` is
+ * full resolution — asked for explicitly, or by a caller that is not drawing a scene at all.
+ *
+ * The ceiling is `DEFAULT_TRIANGLE_BUDGET`, which is the same number the multi-resolution path
+ * already spends among published levels. Not a coincidence worth removing: it is one policy —
+ * *a 3D scene targets about this many triangles* — arrived at from two directions, and using the
+ * same figure is what makes a graphene scene and a neuPrint scene comparable in weight.
+ */
+export type Reduction = { targetTriangles: number } | { factor: number }
+
+export function reductionFor(
+  downsample: number | 'auto' | undefined,
+  neuronCount: number,
+  ceiling: number,
+): Reduction | undefined {
+  if (downsample === 'auto') return { targetTriangles: ceiling / Math.max(1, neuronCount) }
+  return downsamples(downsample) ? { factor: downsample } : undefined
+}
+
+/**
+ * A reduction's share of a geometry cache key — **quantised**, which is the whole point.
+ *
+ * An automatic target is `ceiling / neuronCount`, so it moves whenever the set does: keyed
+ * exactly, a twenty-neuron set caches under `t75000` and adding a twenty-first makes it `t71429`
+ * — a miss on all twenty-one. `CaveSource`'s own comment beside the key says what that costs:
+ * *"one graphene mesh is several hundred Range requests and about a megabyte, so re-fetching
+ * twenty because a twenty-first was added is thousands of round trips for nothing."* And it is
+ * the **default** path, since `Downsample`'s `absentMeans: 0` puts every previously-saved
+ * workflow in automatic.
+ *
+ * Rounded to a power of two, so the key moves only when the target roughly halves. That costs
+ * nothing in fidelity: the fitted grid is accurate to about 30% anyway, so a target of 75,000 and
+ * one of 71,429 are the same request in everything but arithmetic. `triangleBudget` never had
+ * this shape because `lod` is a four-to-eight rung ladder that one extra neuron rarely moves.
+ */
+export function reductionKey(reduction: Reduction | undefined): string {
+  if (!reduction) return 'full'
+  if ('factor' in reduction) return `f${reduction.factor}`
+  const rung = 2 ** Math.round(Math.log2(Math.max(1, reduction.targetTriangles)))
+  return `t${rung}`
+}
+
+/**
+ * The factor a reduction actually achieved, or undefined where nothing shrank.
+ *
+ * One home because it is the feature's one user-visible output — the `meshes ÷N` chip — and it
+ * was written twice, once at the seam and once on the graphene route, each with its own floor and
+ * its own rounding. Two copies of the number on the screen can disagree by route for one mesh.
+ *
+ * The factor **achieved**, not the one asked for: automatic has no asked-for factor at all, and
+ * an explicit one is approximate because the grid that hits it is fitted. Floored at 2, since a
+ * chip reading `÷1` claims a reduction that did not happen.
+ */
+export function achievedDownsample(before: number, after: number): number | undefined {
+  if (after <= 0 || after >= before) return undefined
+  return Math.max(2, Math.round(before / after))
+}
+
+/** Apply whatever `reductionFor` decided, or join where it decided nothing. */
+export function applyReduction(
+  parts: readonly MeshArrays[],
+  reduction: Reduction | undefined,
+): MeshArrays {
+  if (!reduction) return concatMeshes(parts)
+  return 'factor' in reduction
+    ? downsampleParts(parts, reduction.factor)
+    : reduceToTriangles(parts, reduction.targetTriangles)
+}
+
+/**
+ * The grid that reduces a mesh of `triangles` to roughly `1 / factor` of them.
+ *
+ * `decimateMesh` clusters to about `TRIANGLES_PER_CELL * grid²`, so this is that inverted — and
+ * it is taken from **the mesh's own triangle count**, which is what makes the factor mean the
+ * same thing for every neuron in a set. Its predecessor divided one triangle *budget* across the
+ * set instead (`GeometryRequest.triangleBudget`), which reduced a large neuron harder than a
+ * small one and, worse, meant the Meshes node's `Detail` control did something different on a
+ * source with levels of detail than on a source without: pick a published level there, silently
+ * recompute the geometry here. `downsample` is the second thing, said out loud.
+ *
+ * The floor is what stops a large factor erasing the arbor rather than thinning it; past it the
+ * control saturates, and the caption's triangle count is what says so.
+ */
+export function gridForFactor(triangles: number, factor: number): number {
+  const target = Math.max(1, triangles) / Math.max(1, factor)
+  return Math.max(MIN_DECIMATE_GRID, Math.round(Math.sqrt(target / TRIANGLES_PER_CELL)))
+}
+
+/**
+ * The cell size and the two packing strides a grid implies, or nothing for a mesh with no extent.
+ *
+ * Shared by the probe and the real pass, and that sharing is structural rather than tidy: the fit
+ * measures a clustering at one grid to predict the clustering at another, so if the two walks
+ * disagreed about a stride the prediction would describe a partition nobody computes. It also
+ * gives `countCells` the degenerate-span guard it was missing on its own — a flat or single-point
+ * mesh divides by a zero cell and hashes `Infinity`, which collapses to one cell and reads as a
+ * mesh that clusters perfectly.
+ *
+ * Returned as a small object, computed once per pass: the per-vertex arithmetic stays inline in
+ * each loop, which is where the cost is.
+ */
+function cellLattice(
+  box: PartsBounds,
+  grid: number,
+): { cell: number; cellsY: number; cellsZ: number } | undefined {
+  const span = Math.max(box.maxX - box.minX, box.maxY - box.minY, box.maxZ - box.minZ)
+  if (!Number.isFinite(span) || span <= 0 || grid < 2) return undefined
+  const cell = span / grid
+  return {
+    cell,
+    cellsY: Math.floor((box.maxY - box.minY) / cell) + 1,
+    cellsZ: Math.floor((box.maxZ - box.minZ) / cell) + 1,
+  }
+}
+
+/** Close enough to stop refining: within half a factor of two either way. */
+const TOLERANCE = 1.5
+
+/**
+ * How many cells a grid puts the vertices in — the clustering pass with everything but the map.
+ *
+ * It exists because **the grid that hits a target cannot be computed, only measured.**
+ * `gridForFactor`'s `0.68 · grid²` models a surface filling its box, which is what a neuropil
+ * shell is; an arbor is a thin tree in a large box and its occupied cells grow more slowly.
+ * Measured on four real mosquito neurons the exponent runs **1.6 to 2.0**, and it is a property
+ * of the individual neuron — so a fixed model asked for half the triangles of the sparsest and
+ * delivered **a twenty-seventh** of them. That figure is the one this whole arrangement is
+ * justified by; everything below cites it rather than restating it, the first round having
+ * written it out three times and drifted to two different numbers.
+ */
+function countCells(parts: readonly MeshArrays[], box: PartsBounds, grid: number): number {
+  const lattice = cellLattice(box, grid)
+  if (!lattice) return 0
+  const { cell, cellsY, cellsZ } = lattice
+  const seen = new Set<number>()
+  for (const part of parts) {
+    const p = part.positions
+    for (let i = 0; i < p.length; i += 3) {
+      const cx = Math.floor((p[i]! - box.minX) / cell)
+      const cy = Math.floor((p[i + 1]! - box.minY) / cell)
+      const cz = Math.floor((p[i + 2]! - box.minZ) / cell)
+      seen.add((cx * cellsY + cy) * cellsZ + cz)
+    }
+  }
+  return seen.size
+}
+
+/*
+ * Two things measured here and *not* done, so the next reader does not re-derive them.
+ *
+ * **Fusing the two probes into one walk saves nothing.** The walk over positions is 3-4 ms of a
+ * 54 ms probe; the rest is hashing. One walk inserting into two sets measured 54.6 ms against
+ * 53.7 ms — within noise, for a second stride pair and a shift-derivation argument.
+ *
+ * **Subsampling the probe destroys the slope**, which is the one thing it exists to measure. The
+ * probe grids are deliberately fine — at factor 2 the fine grid holds 668,773 cells for 680,124
+ * vertices, occupancy ≈ 1 — so a stride-k sample divides both counts by about k and the ratio
+ * collapses towards 1: measured slope 0.86 at full, 0.33 at k=2, 0.02 at k=4. A slope near zero
+ * goes into `Math.pow(target / guess, 1 / slope)` and comes out as an unbounded grid.
+ *
+ * What *would* pay is the container: a `Set` of 668k packed keys is ~31 MB of JS heap and 33 ms,
+ * where a bitset over the cell space is 3 ms and an open-addressed `Float64Array` 9 ms — and both
+ * sidestep the small-integer cliff `decimateParts` documents, which this inherits at grids twice
+ * as fine. Left alone as forty lines of hand-rolled hash table against ~45 ms on a path whose
+ * fetch is 1.3 s a neuron; the measurement is here so the trade can be re-taken rather than
+ * re-discovered.
+ */
+
+/**
+ * A mesh's fragments, reduced to roughly `1 / factor` of their triangles.
+ *
+ * The shape every source honouring `GeometryRequest.downsample` wants: it clusters **over the
+ * fragments** rather than over a joined copy of them, and a factor asking for nothing joins and
+ * hands that back so a caller never has to branch.
+ *
+ * ## The grid is fitted, not calculated
+ *
+ * `gridForFactor` alone is a good guess for a large dense neuron and a bad one for a sparse
+ * neuron — its `grid²` is a surface's law and an arbor is closer to `grid^1.6`. So the exponent
+ * is **measured on this mesh**: two counting passes at grids a factor of two apart give the local
+ * slope, and the grid that lands on the target follows from it. One full pass then does the work.
+ *
+ * Two probes rather than one because a single point fixes no slope, and rather than three because
+ * the third buys less than it costs — a probe is a walk over every vertex. Measured over four
+ * real neurons spanning 111k to 23.8M triangles, asking for ÷2, ÷4 and ÷16: the fitted grid lands
+ * within about 30% of the factor asked for, against `countCells`' figure for the model alone.
+ * It is still an approximation, which is why `MeshDetail.downsample` reports the factor
+ * *achieved* rather than the one asked for.
+ */
+export function downsampleParts(parts: readonly MeshArrays[], factor: number): MeshArrays {
+  if (!downsamples(factor)) return concatMeshes(parts)
+  const box = partsBounds(parts)
+  return fitToTriangles(parts, box, box.indexCount / 3 / factor)
+}
+
+/**
+ * The same reduction, aimed at **a triangle count** rather than at a ratio.
+ *
+ * What `Downsample`'s automatic setting needs: a scene has a size it can draw, and what that
+ * costs a given neuron is a fact about the neuron, not a ratio — see `Reduction` for the
+ * measurement that settles it.
+ *
+ * Hands the parts back joined where they already fit, which is what makes the automatic setting
+ * free on a source whose meshes are small and on a pyramid whose level was already chosen against
+ * the same budget.
+ */
+export function reduceToTriangles(
+  parts: readonly MeshArrays[],
+  targetTriangles: number,
+): MeshArrays {
+  /*
+   * The triangle count first, which is a sum over *parts*; `partsBounds` walks every vertex and
+   * costs 26 ms on an aedes neuron. Automatic asks this of every mesh on every fetch and the
+   * answer is usually "it already fits" — on a pyramid always, the level having been chosen
+   * against the same budget — so the cheap question has to come first for that to be free.
+   */
+  let triangles = 0
+  for (const part of parts) triangles += part.indices.length / 3
+  if (triangles <= targetTriangles) return concatMeshes(parts)
+  return fitToTriangles(parts, partsBounds(parts), targetTriangles)
+}
+
+function fitToTriangles(
+  parts: readonly MeshArrays[],
+  box: PartsBounds,
+  targetTriangles: number,
+): MeshArrays {
+  if (box.vertexCount === 0 || box.indexCount === 0) return concatMeshes(parts)
+
+  const triangles = box.indexCount / 3
+  /*
+   * The target is **triangles**, which is what the factor means and what the caller sees. The
+   * probes below count *cells*, which is what clustering controls — so they are converted through
+   * this mesh's own triangles-per-vertex to make a first guess, and every step after that is
+   * measured in triangles directly. Targeting cells and hoping the ratio survives was the first
+   * shape and it stopped early on a tube: the vertex count landed on target while the triangle
+   * count had barely moved, because how many faces a merge collapses is not a constant.
+   */
+  const target = Math.max(1, targetTriangles)
+  const perVertex = triangles / Math.max(1, box.vertexCount)
+  const coarse = gridForFactor(triangles, triangles / target)
+  const fine = coarse * 2
+  const atCoarse = countCells(parts, box, coarse)
+  const atFine = countCells(parts, box, fine)
+
+  /*
+   * The slope, in logs. Guarded because a mesh can be flat in this window — every vertex already
+   * in its own cell at both grids, so the two counts agree and there is no slope to take. The
+   * model's own exponent is the fallback, which is where this started.
+   */
+  const slope =
+    atFine > atCoarse && atCoarse > 0
+      ? Math.log(atFine / atCoarse) / Math.log(fine / coarse)
+      : 2
+
+  /*
+   * Bounded below by `decimateMesh`'s floor and **not bounded above**, which was tried and was
+   * wrong: any ceiling expressible here is derived from the area model, and that model being
+   * wrong on sparse meshes is the entire reason this function exists — capping the fitted grid at
+   * `gridForFactor(triangles, 1)` took the sparsest real neuron straight back to the answer the
+   * model alone gives. An over-fine grid is harmless: `decimateParts` merges nothing and hands
+   * back the join.
+   */
+  const guess = Math.max(1, atCoarse) * perVertex
+  const first = Math.max(
+    MIN_DECIMATE_GRID,
+    Math.round(coarse * Math.pow(target / guess, 1 / slope)),
+  )
+  const attempt = decimateParts(parts, first, box)
+  /** How far a result is from the target, in logs — one metric for both questions below. */
+  const missBy = (got: number): number => Math.abs(Math.log(Math.max(1, got) / target))
+  const got = attempt.indices.length / 3
+  if (missBy(got) < Math.log(TOLERANCE)) return attempt
+
+  /*
+   * One correction, from the **result** rather than from a model.
+   *
+   * Two probes fit a power law, and a mesh need not be one: a thin tube has a plateau where every
+   * ring collapses to a point at any usable grid, and a fit that steps across it lands the far
+   * side. The attempt and the probe now bracket the target in a way the two probes did not, so
+   * the slope between them is the one that matters.
+   *
+   * It keeps whichever of the two came closer, so a second pass can never make the answer worse —
+   * and it is capped at one, because each is a walk over every vertex and the measured case needs
+   * none: on four real neurons the first attempt lands within 30% and this never runs.
+   */
+  const slopeNow =
+    got > 0 && got !== guess && first !== coarse
+      ? Math.log(got / guess) / Math.log(first / coarse)
+      : slope
+  const second = Math.max(
+    MIN_DECIMATE_GRID,
+    Math.round(first * Math.pow(target / Math.max(1, got), 1 / slopeNow)),
+  )
+  if (second === first) return attempt
+  const retry = decimateParts(parts, second, box)
+  return missBy(retry.indices.length / 3) < missBy(got) ? retry : attempt
 }
 
 /**
@@ -130,17 +429,26 @@ export function decimateMesh(
 export function decimateParts(
   parts: readonly MeshArrays[],
   grid = DEFAULT_DECIMATE_GRID,
+  /**
+   * The extents, where the caller has already walked them.
+   *
+   * `downsampleParts` computes them to size its probes and then calls this once or twice; without
+   * this each call re-walked every vertex, three times over for a corrected fit — 1.1-1.9 ms a
+   * walk, so 2-4% of the call for nothing.
+   */
+  measured?: PartsBounds,
 ): MeshArrays {
-  const box = partsBounds(parts)
+  const box = measured ?? partsBounds(parts)
   if (box.indexCount === 0 || grid < 2) return concatMeshes(parts)
 
-  const span = Math.max(box.maxX - box.minX, box.maxY - box.minY, box.maxZ - box.minZ)
   // A degenerate mesh — one point, or a perfectly flat axis in every direction — has nothing to
-  // cluster and would divide by zero.
-  if (!Number.isFinite(span) || span <= 0) return concatMeshes(parts)
+  // cluster and would divide by zero; `cellLattice` is where that is decided, once, for this pass
+  // and for the probes that predict it.
+  const lattice = cellLattice(box, grid)
+  if (!lattice) return concatMeshes(parts)
 
   const { minX, minY, minZ, vertexCount, indexCount } = box
-  const cell = span / grid
+  const { cell, cellsY, cellsZ } = lattice
 
   /*
    * A cell key packed into one number rather than a string.
@@ -160,10 +468,9 @@ export function decimateParts(
    * extent, so `floor((x - minX) / cell)` is at most `floor(extent / cell)` — within the axis's
    * own count by construction — which makes the `Math.min` this used to carry unable to bind, and
    * with it gone the x count has no reader: a positional numbering needs a stride per axis after
-   * the first, not for it.
+   * the first, not for it. `cellLattice` derives the pair, above, so the probes that predict this
+   * clustering cannot disagree with it about a stride.
    */
-  const cellsY = Math.floor((box.maxY - minY) / cell) + 1
-  const cellsZ = Math.floor((box.maxZ - minZ) / cell) + 1
 
   // cell key -> index into the output vertex list
   const slot = new Map<number, number>()
@@ -232,7 +539,7 @@ export function decimateParts(
 }
 
 /** Every part's extents and totals, in the one pass that has to finish before any clustering. */
-function partsBounds(parts: readonly MeshArrays[]): {
+interface PartsBounds {
   vertexCount: number
   indexCount: number
   minX: number
@@ -241,7 +548,9 @@ function partsBounds(parts: readonly MeshArrays[]): {
   maxX: number
   maxY: number
   maxZ: number
-} {
+}
+
+function partsBounds(parts: readonly MeshArrays[]): PartsBounds {
   let vertexCount = 0
   let indexCount = 0
   let minX = Infinity

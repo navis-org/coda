@@ -76,7 +76,13 @@ import {
 import { geometryFrame } from '../transforms/spaces'
 import type { NgSourceRef } from '../neuroglancer/sourceUrl'
 import type { MeshResult, MeshSource } from './index'
-import { DEFAULT_TRIANGLE_BUDGET, fetchMeshes, meshProgress, openMeshDir } from './index'
+import {
+  DEFAULT_TRIANGLE_BUDGET,
+  fetchMeshes,
+  meshFormatHasLevels,
+  meshProgress,
+  openMeshDir,
+} from './index'
 import type { SkeletonSource } from './skeletons'
 import { fetchSkeletons, openSkeletonSource, skeletonFetchOptions } from './skeletons'
 import { idsForLabels, labelsOf, readSegmentProperties } from './segmentProperties'
@@ -420,6 +426,13 @@ export class PrecomputedSource implements DataSource {
     const capabilities = this.cache?.capabilities
     if (!capabilities) return undefined
     return capabilities.skeletons ? [PRECOMPUTED_ROUTE] : []
+  }
+
+  /** Whether the probed directory's meshes are a pyramid. `undefined` until it settles. */
+  meshLevelsFor(): boolean | undefined {
+    this.ensureProbe()
+    const mesh = this.cache?.source.mesh
+    return mesh ? meshFormatHasLevels(mesh.format) : undefined
   }
 
   async listDatasets(signal?: AbortSignal): Promise<DatasetInfo[]> {

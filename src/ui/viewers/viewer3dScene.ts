@@ -12,6 +12,7 @@
  */
 
 import type { Bounds3, MeshesValue, PointsValue, SkeletonsValue } from '../../core/values'
+import { downsamples } from '../../data/meshDecimate'
 import { boundsCenter, boundsSize } from '../../core/values'
 import { CHART_INK, chartSurface, rgbToHex } from '../colors'
 import type { Mode } from '../colors'
@@ -1183,8 +1184,10 @@ export function skeletonNote(
 /**
  * What a mesh set's level of detail should say, or undefined when the source published none.
  *
- * Three ways a mesh set can be less than what the source holds, and they need different
- * words. A multi-resolution source *picked a level*, so the useful number is which of how
+ * Three ways a mesh set can be less than what the source holds, and they need different words —
+ * and the order matters: incomplete beats reduced beats levelled, because each is a stronger
+ * claim about the picture than the one under it. A source with one level and nobody asking for a
+ * reduction says nothing at all, full resolution being what it hands over. A multi-resolution source *picked a level*, so the useful number is which of how
  * many; a source with none *simplified what it fetched*, where naming a level would report
  * "0 of 0" while most of the triangles have gone. Both admit the trade and both name the
  * control that changes it.
@@ -1213,13 +1216,13 @@ export function detailNote(
         `Clear Cache on the Meshes node and Run to fetch them again.`,
     }
   }
-  return detail.decimated
+  return downsamples(detail.downsample)
     ? {
-        label: 'meshes simplified',
+        label: `meshes ÷${detail.downsample}`,
         title:
-          `This source publishes one level of detail, so meshes are simplified on arrival ` +
-          `to fit the triangle budget — ${triangles} triangles here.` +
-          tail,
+          `Each mesh was reduced to roughly 1/${detail.downsample} of its triangles — ` +
+          `${triangles} here. Downsample on the Meshes node decides how much: 0 keeps as much ` +
+          `as a 3D view can draw, 1 is full resolution, and a larger number reduces further.`,
       }
     : {
         label: `mesh LOD ${detail.lod}/${detail.levels - 1}`,

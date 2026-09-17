@@ -501,6 +501,21 @@ export interface EnumParam extends ParamBase {
   /** Static list, or derived from resolved input types (e.g. aggregations per dtype). */
   options: EnumOption[] | ((ctx: InferContext) => EnumOption[])
   /**
+   * What the control says when `options` comes back **empty**, where it renders disabled.
+   *
+   * An empty list is already how a column picker draws a port with nothing on it, and the widget
+   * already renders that as a genuinely `disabled` select — this only gives an enum the sentence
+   * to put in it. A dead control that reads as live is the failure it exists for: the Meshes
+   * node's `Detail` is a triangle budget, and on a source publishing one level there is nothing
+   * to spend it on, so the honest drawing is greyed out and saying why rather than three choices
+   * that all do the same nothing.
+   *
+   * The stored value is untouched while it is empty. That is the half a `visibleIf` could not
+   * give — a hidden param is dropped from the provenance key and its value is nobody's — where a
+   * dataset swapped back to one with levels has to find the budget exactly as it was left.
+   */
+  empty?: string
+  /**
    * True when resolving `options` reaches no peek — no fetch is started by asking.
    *
    * **Named for the negative on purpose.** Almost every dynamic options function is "derived

@@ -1430,6 +1430,134 @@ Coalescing the shard reads was measured and rejected: the 449 frozen fragments o
 in 131 shard files but at scattered offsets, so merging whole files is 3.5 GB (366×) and bridging
 gaps under 64 kB buys 449 → 399 requests for an extra megabyte.
 
+### `Detail` and `Downsample`, and why one control could not be both
+
+`GeometryRequest.triangleBudget` has always carried the clause **"a source with one level ignores
+it"**. Graphene is that source — supervoxel fragments at one resolution, nothing coarser published
+— so the CAVE source honoured the budget the only way it could, by clustering vertices. The result
+was one dropdown labelled `Detail` that picked a published level of detail on neuPrint and silently
+recomputed the geometry on FlyWire, which is a difference a reader could only find by measuring.
+
+They are two controls now. `Detail` spends a budget among levels a publisher built, and is **drawn
+dead where there are none** — `DataSource.meshLevelsFor` is the question, asked through
+`meshLevelsOf` and answered from peeks that have already landed, with `undefined` meaning *nobody
+has looked* rather than *no levels*. `Downsample` is an explicit factor, defaults to off, applies
+to every source, and rides on the request rather than the result so graphene can reduce the
+fragments where they already are.
+
+### What stopped a full-resolution neuron drawing was the draw call, not the memory
+
+`Downsample` defaults to **1 — full resolution**, and the two aedes neurons an ordinary workflow
+selects drew **nothing at all**. They are 13.1 M and 12.9 M triangles.
+
+The first diagnosis was that 472 MB of typed arrays plus normals was more than the GPU would take.
+That was inferred from the symptom and it was **wrong** — and the thing that showed it was wrong is
+worth keeping: neuroglancer draws dozens of the same meshes from the same dataset happily. A probe
+settled it (`pnpm probe:mesh-upload`): 627 MB uploads fine on an M3 Max, as one buffer set per
+neuron *and* as 471 per-fragment sets. Memory was never the limit.
+
+The console said what it actually was:
+
+```
+WebGL warning: drawElementsInstanced: Context's max indexCount is 30000000,
+but 39429663 requested. [webgl.max-vert-ids-per-draw]
+```
+
+**Firefox caps the index values one draw call may ask for at 30,000,000**, and 13.1 M triangles is
+39.4 M of them — 31% over. The draw is refused and the geometry silently does not appear. It is a
+limit on a *draw*, not on a mesh, which is exactly why neuroglancer is fine: it draws each of the
+~471 supervoxel fragments separately where Coda merges them for everything downstream.
+
+The fix is at the draw, not at the geometry. It lives in `ui/viewers/drawLimits.ts` — its own
+module, having started in `meshPicking.ts`, which is about raycasting: a renderer limit filed there
+is found only by somebody already reading about picking, which is nobody about to add a fourth
+geometry channel. That module records which channels can reach the cap (indexed meshes: neuron and
+region, which share one leaf) and which cannot (thin lines and points, where memory bites first),
+and that fat skeleton lines *might* if Firefox multiplies its count by `instanceCount` — unverified,
+written down so the next reader starts from the analysis rather than the symptom.
+
+Concretely: `drawRanges` splits past `MAX_INDICES_PER_DRAW`
+(24 M, for headroom and divisible by three so a split never lands inside a triangle), and
+`MeshItem` renders one `<mesh>` per range. The pieces **share the `position` and `normal`
+attribute objects** — three keys its buffer cache by attribute, so a shared one uploads once
+however many geometries name it, and only the index is sliced, as a `subarray` view rather than a
+copy. Normals are computed once on a throwaway geometry that is never rendered: three has no
+standalone normal pass, and computing them per piece would smooth each as if the others were not
+there, leaving a seam down the middle of the neuron. Two neurons of this size cost two extra draw
+calls and no extra memory. Normals come from a direct loop over the two arrays rather than
+`BufferGeometry.computeVertexNormals()` — **693 ms against 105 ms** on a neuron this size, for
+byte-identical output, and it runs in React's render phase, so that was 1.3 s of blocked main
+thread before a two-neuron scene painted. Taking the arrays is also what lets the split skip
+building a full-resolution geometry purely to throw it away.
+
+Chrome enforces no such cap, which is the other half of why this took three guesses to find: it
+reproduces in one browser, on large meshes only, as an absence.
+
+The default stayed at full resolution once the draw was fixed, which is the point: this was a
+*drawing* bug, and reducing the geometry by default would have papered over it. `0` remains
+available as the automatic setting, worth having for a large set on a source with one level of
+detail. **Absence is a third answer** (`ParamBase.absentMeans`, `0`): a workflow saved before this
+control existed was drawn by a build that reduced graphene meshes out of `triangleBudget`, so
+opening it at full resolution would silently make it several times heavier than the picture it was
+saved as.
+
+**The factor cannot be calculated, only measured.****The factor cannot be calculated, only measured.** `gridForFactor` inverts `decimateMesh`'s
+`0.68 · grid²`, which is a *surface's* law — right for a neuropil shell, wrong for an arbor, which
+is a thin tree in a large box. Measured over four real mosquito neurons the exponent runs **1.6 to
+2.0** and is a property of the individual neuron, so the model alone asked for half the triangles
+of the sparsest and delivered **a twenty-seventh** of them:
+
+| neuron | triangles | ÷2 modelled | ÷2 fitted | ÷4 fitted | ÷16 fitted |
+|---|---|---|---|---|---|
+| a | 1,817,245 | 2.5× | 1.7× | 3.2× | 12.0× |
+| b | 23,851,138 | 2.1× | 1.7× | 3.3× | 11.8× |
+| c | 111,673 | **27.5×** | 2.0× | 3.3× | 12.3× |
+| d | 1,459,947 | 6.8× | 1.9× | 3.4× | 11.6× |
+
+The contract is closed at the **seam**, not at the leaves: `fetchMeshesFor` in `source.ts` is what
+the Meshes node calls, and it reduces the geometry itself where a source handed it back untouched
+and stamps `MeshDetail.downsample` whichever route ran. Both halves were needed. `MockSource`
+already declined the request silently, which is the `triangleBudget` failure repeating inside the
+change that was fixing it — a contract stated at a seam and honoured by hand at four leaves. And
+all three sources build `detail` only when `lod` is known, so a flat bucket reduced 4× and put
+**nothing on screen**: the exact silent-thinning failure `core/values.ts` says the field exists to
+prevent, in the case the control was written for.
+
+Two more things the fix needed to be true rather than nearly true. `CaveSource.meshLevelsFor` has
+to read **`flatUrlFor`**, which answers with no network: `peekFlat` returns `undefined` both for a
+probe in flight and for a bucket that is not there, so taking it at face value meant `false` was
+never returned and `Detail` stayed a live three-way choice on graphene — the one source it does
+nothing on, and the reason the split exists. And "drawn dead" means **no options**, which is how
+`ParamField` already renders a disabled select; one inert-looking entry was the first shape, and a
+`select` with a single option is operable, focusable and indistinguishable from a real choice until
+you open it.
+
+So the grid is fitted: two counting passes a factor of two apart give the local slope, one full
+pass does the work, and a single correction runs from the **result** where the first attempt misses
+by more than half a factor — keeping whichever came closer, so a second pass can never make the
+answer worse. On these four it never runs. Cost is about 2.5× the unfitted pass (110 ms against
+45 ms on a 1.29 M-triangle mesh), against a fetch measured at 1.3 s a neuron.
+
+Two things measured on the probe itself and deliberately **not** done, recorded so they are not
+re-derived: fusing the two probes into one walk saves nothing (the walk is 3–4 ms of a 54 ms probe,
+the rest is hashing — 54.6 ms against 53.7 ms fused), and **subsampling destroys the slope**, which
+is the one thing the probe measures — the grids are deliberately fine enough that occupancy is
+near 1, so a stride-k sample divides both counts by about k and the ratio collapses towards 1
+(slope 0.86 at full, 0.33 at k=2, 0.02 at k=4), which then goes into `Math.pow(target/guess, 1/slope)`
+as an unbounded grid. What would pay is the container — a `Set` of 668k packed keys is ~31 MB of JS
+heap and 33 ms against 3 ms for a bitset — and that is left alone as forty lines of hand-rolled
+table against ~45 ms on a path whose fetch is 1.3 s a neuron.
+
+Three things that shipped wrong on the way, all of them the same mistake in different clothes —
+reasoning where a measurement was available. Targeting **cells** and converting to triangles
+through the input's ratio stopped early on a tube, the vertex count landing on target while the
+triangle count had barely moved; the fit works in triangles throughout now. Capping the fitted grid
+at `gridForFactor(triangles, 1)` looked principled and took neuron **c** straight back to the
+model's answer — any ceiling expressible here is derived from the model this exists to correct, so
+there is none. And the first test fixture was a sphere at 60×90, which is *already* coarser than
+`MIN_DECIMATE_GRID` can touch and saturates at 1.24× whatever is asked; that saturation is real and
+a caller meets it on an already-coarse mesh, but it says nothing about the fit.
+
 ### A lone neuron does not price a set, and the one you measure is the big one
 
 The cost sentence this fix put on `grapheneMeshes` was built from **one** neuron: the mosquito

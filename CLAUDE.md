@@ -382,6 +382,41 @@ Area-specific — the rule, then the doc that holds why:
   `kinds` ship green. The palette and `wizard/demo.ts` ask `socketAccepts` directly,
   where every surface that merely *wires* one goes through `checkConnection`.
   See [docs/nodes.md](docs/nodes.md) and [docs/canvas.md](docs/canvas.md).
+- **One control cannot mean "pick a published level" on one dataset and "recompute the geometry" on
+  the next.** `GeometryRequest.triangleBudget` says *a source with one level ignores it*, and
+  graphene is that source — so CAVE honoured the Meshes node's `Detail` by clustering vertices
+  instead, which nobody could discover without measuring. Two controls now: `Detail` spends a
+  budget among published levels and is **drawn dead where there are none** (`meshLevelsFor` →
+  `meshLevelsOf`, `undefined` meaning *nobody has looked* rather than *no levels* — a control that
+  greys itself out for the first second of a session is one people distrust), and `Downsample` is
+  a factor on the **request**, so graphene reduces the fragments where they already are. It
+  defaults to **1, full resolution** — the bug that looked like a size limit was a *draw* limit,
+  below, and reducing by default would have papered over it — while `0` is automatic, a **triangle
+  target** rather than a factor because no factor suits two datasets at once (13.1 M triangles a
+  neuron on mosquito against 1.3 M on FlyWire); its ceiling is the `DEFAULT_TRIANGLE_BUDGET` the
+  pyramid path already spends, so both routes make scenes of comparable weight and automatic costs
+  a pyramid nothing. **Absence is a third answer** (`absentMeans: 0`): a graph saved before the
+  control existed was drawn by a build that reduced graphene automatically, so full resolution
+  would silently make an old scene several times heavier than it was saved as.
+- **A draw call has its own limit, and it is not memory.** Full-resolution graphene meshes drew
+  *nothing* in Firefox, which caps index values per draw at **30,000,000**
+  (`webgl.max-vert-ids-per-draw`); 13.1 M triangles is 39.4 M of them and the draw is refused in
+  silence. `drawRanges`/`MAX_INDICES_PER_DRAW` split a mesh across draws, sharing the `position`
+  and `normal` attribute *objects* so three uploads them once, slicing only the index as a
+  `subarray`; normals are computed once on a throwaway geometry, or each piece smooths as if the
+  others were absent and a seam runs down the neuron. **The diagnosis that this was GPU memory was
+  wrong and shipped into these notes** — 627 MB uploads fine either way (`pnpm probe:mesh-upload`),
+  and the tell was the user's own question: *neuroglancer draws dozens of these*. It does, because
+  it draws each of ~471 fragments separately. Chrome enforces no cap, so this reproduces in one
+  browser, on large meshes only, as an absence. **The factor is fitted, not calculated**: `0.68 · grid²` is a *surface's* law
+  and an arbor is a thin tree in a big box, measured at exponent **1.6–2.0 per neuron**, so the
+  model asked for ½ the triangles of the sparsest real neuron and delivered **1/27**. Two counting
+  probes give the local slope, one pass does the work, one correction runs from the *result* and
+  keeps whichever came closer. Three wrong turns worth not retaking: targeting **cells** and
+  converting stops early on a tube (the vertex count lands, the triangles do not); any **ceiling**
+  on the fitted grid is derived from the model being corrected, so there is none; and a fixture
+  already coarser than `MIN_DECIMATE_GRID` saturates and says nothing about the fit.
+  See [docs/backends.md](docs/backends.md) and [docs/nodes.md](docs/nodes.md).
 - **`defaultSize` sizes React Flow's _wrapper_, and only a viewer's card fills one**
   (`category: 'visualisation'`). Elsewhere it leaves the state bar hanging below the card. A
   node that only wants to be wider sets `NodeDefinition.cardWidth`.
