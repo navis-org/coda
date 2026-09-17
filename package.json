@@ -49,6 +49,7 @@
     "preview": "vite preview",
     "probe:roimeshes": "node scripts/probe-roimeshes.mjs",
     "probe:points-in-volumes": "vite-node scripts/probe-points-in-volumes.ts",
+    "probe:upload-mesh": "node scripts/probe-upload-mesh.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b --noEmit && tsc -p tsconfig.scripts.json --noEmit",

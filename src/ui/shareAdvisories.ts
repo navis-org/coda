@@ -35,19 +35,27 @@ export interface ShareAdvisory {
 export const LONG_LINK_CHARS = 8_000
 
 /**
- * Nodes holding a table that lives in this browser rather than in the document.
+ * Files that live in this browser rather than in the document.
  *
- * The rows are in IndexedDB by content address (see `data/uploads.ts`), so a `.coda.json` has
- * always arrived without them and a link does the same. What the sender can do about it is send
- * the file too — so the advisory names the **file**, not the node and not the content hash,
- * because the filename is the only part of this anybody can act on.
+ * Rows or geometry — both are content-addressed in IndexedDB (see `data/uploads.ts`), so a
+ * `.coda.json` has always arrived without them and a link does the same. What the sender can do
+ * about it is send the file too, so the advisory names the **file**, not the node and not the
+ * content hash, because the filename is the only part of this anybody can act on.
+ *
+ * **Derived from `ParamBase.browserStored` rather than from a list of node types here.** The list
+ * was one type, then two, and the class it is trying to name has more members than anybody
+ * maintaining it here would think to add — which is the bet `credentialledDatasets` below is a
+ * written post-mortem of. A node declaring the fact beside the param that holds the filename is
+ * counted for free.
  */
 function uploadFiles(graph: CodaGraph): string[] {
   const names: string[] = []
   for (const node of graph.nodes) {
-    if (node.type !== 'core.uploadTable') continue
-    const file = node.params?.['fileName']
-    names.push(typeof file === 'string' && file ? file : 'an uploaded table')
+    for (const param of getNodeDef(node.type)?.params ?? []) {
+      if (!param.browserStored) continue
+      const file = node.params?.[param.id]
+      names.push(typeof file === 'string' && file ? file : param.browserStored)
+    }
   }
   return names
 }
@@ -106,8 +114,10 @@ export function shareAdvisories(
       id: 'uploads',
       text:
         files.length === 1
-          ? `${files[0]} is stored in this browser, not in the workflow — send the file separately, and whoever opens the link can pick it up again on the Upload Table card.`
-          : `${files.join(', ')} are stored in this browser, not in the workflow — send the files separately, and whoever opens the link can pick them up again on the Upload Table cards.`,
+          ? `${files[0]} is stored in this browser, not in the workflow — send the file separately, and whoever opens the link can pick it up again on the card that names it.`
+          : // "the Upload Table cards" until an Upload Mesh node could be among them, at which
+            // point it names a card half the set is not on. The cards name their own files.
+            `${files.join(', ')} are stored in this browser, not in the workflow — send the files separately, and whoever opens the link can pick them up again on the cards that name them.`,
     })
   }
 

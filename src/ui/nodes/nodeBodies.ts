@@ -43,6 +43,7 @@ import { SelectOneBody } from './SelectOneBody'
 import { SplitNeuronsBody } from './SplitNeuronsBody'
 import { ForEachBody } from './ForEachBody'
 import { UploadBody } from './UploadBody'
+import { UploadMeshBody } from './UploadMeshBody'
 
 export interface NodeBodyProps {
   node: GraphNode
@@ -72,6 +73,13 @@ export interface NodeBodyEntry {
    * Off by default: a body earns an expand button by having something that benefits from room.
    * A dataset node's body is a preview and two fields — expanding it fills the screen with
    * whitespace, and its button sits where a viewer's would, so the two get confused.
+   *
+   * This is also what caps the overlay's width: `panels/expandedWidth.ts` reads it, because a
+   * *body* expanded is the card's own markup — prose, param rows, a listing — which has a
+   * measure, where a *viewer* expanded is a picture that wants the pixels. That was a hand-kept
+   * second list of exactly these five types, and it was the one per-type table with no registry
+   * sweep over it: this change's own entry was missed there and found by review rather than by
+   * looking at a screen.
    */
   expandable?: boolean
   /**
@@ -146,6 +154,12 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * not belong on a canvas.
    */
   'core.uploadTable': { Component: UploadBody, expandable: true },
+  /*
+   * `expandable` for the same reason and a different listing: which regions arrived under which
+   * names is what somebody checks after picking a directory of shells, and a set of sixty of
+   * them does not belong on a canvas.
+   */
+  'core.uploadMesh': { Component: UploadMeshBody, expandable: true },
   /*
    * Not `expandable`: the whole widget is a row of buttons and a checkbox, so an overlay of it is
    * whitespace, and what is worth looking at full size is whatever the Item port is wired to.

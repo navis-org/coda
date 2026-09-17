@@ -1,6 +1,12 @@
 import { registerNode } from '../../core/registry'
 import { T, columnNames, findColumn } from '../../core/types'
-import { getUpload, peekUploadSchema, uploadPeekSettled } from '../../data/uploads'
+import {
+  getUpload,
+  peekUploadSchema,
+  uploadMissingBadge,
+  uploadMissingReason,
+  uploadPeekSettled,
+} from '../../data/uploads'
 import { importShapeIssues, importShapeParams, readImportShape } from '../lib/importParams'
 import { uploadIsNeurons, uploadShapeSchema, uploadShapeTable } from '../lib/tableOps'
 
@@ -69,6 +75,8 @@ registerNode({
       default: '',
       advanced: true,
       presentational: true,
+      // What the share dialog names when a link is about to go out without the file.
+      browserStored: 'an uploaded table',
     },
     ...importShapeParams({ read: (params) => peekUploadSchema(String(params.dataId ?? '')) }),
   ],
@@ -100,10 +108,7 @@ registerNode({
     if (!dataId) return ['No file chosen — use the button on the node']
     if (!uploadPeekSettled(dataId)) return []
     const schema = peekUploadSchema(dataId)
-    if (!schema) {
-      const name = String(ctx.params.fileName) || 'this file'
-      return [`${name} is not stored in this browser — pick the file again`]
-    }
+    if (!schema) return [uploadMissingBadge(String(ctx.params.fileName), 'table')]
     return importShapeIssues(ctx, schema, String(ctx.params.fileName) || 'the file')
   },
 
@@ -118,12 +123,8 @@ registerNode({
      * on and the filename is the thing to go and find. This is the state a graph opened on
      * another machine lands in, so it has to read as an instruction and not as a fault.
      */
-    if (!table) {
-      throw new Error(
-        `"${name}" is not stored in this browser. Uploaded rows stay on the machine that ` +
-          `uploaded them — pick the file again on this node to restore it.`,
-      )
-    }
+    if (!table)
+      throw new Error(uploadMissingReason(String(ctx.params.fileName), 'table', 'node'))
 
     const idColumn = String(ctx.params.idColumn)
     if (idColumn && !findColumn(table.schema, idColumn)) {

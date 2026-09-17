@@ -32,23 +32,8 @@
  * and merging groups is exactly what a caller wants from a file that has them.
  */
 
-export interface ObjMesh {
-  /** xyz interleaved, in the file's own units. */
-  positions: Float32Array
-  /** Triangle indices into `positions`. */
-  indices: Uint32Array
-  /** How many source faces had more than three corners and were fanned. */
-  polygons: number
-  /** Face corners that named a vertex the file never declared. */
-  dropped: number
-}
-
-const EMPTY: ObjMesh = {
-  positions: new Float32Array(0),
-  indices: new Uint32Array(0),
-  polygons: 0,
-  dropped: 0,
-}
+import type { ParsedMesh } from './parsedMesh'
+import { EMPTY_MESH } from './parsedMesh'
 
 /**
  * Parse an OBJ into flat typed arrays.
@@ -57,8 +42,8 @@ const EMPTY: ObjMesh = {
  * is the usual way this fails — parses to zero vertices, and the caller is expected to say so
  * in terms somebody can act on. Throwing here would have every caller catch and re-word it.
  */
-export function parseObj(text: string): ObjMesh {
-  if (!text) return EMPTY
+export function parseObj(text: string): ParsedMesh {
+  if (!text) return EMPTY_MESH
 
   const positions: number[] = []
   const indices: number[] = []
@@ -120,7 +105,7 @@ export function parseObj(text: string): ObjMesh {
    */
   if (positions.length === 0 || indices.length === 0) {
     return {
-      positions: positions.length > 0 ? Float32Array.from(positions) : EMPTY.positions,
+      positions: positions.length > 0 ? Float32Array.from(positions) : EMPTY_MESH.positions,
       indices: new Uint32Array(0),
       polygons,
       dropped,
@@ -142,7 +127,7 @@ export function parseObj(text: string): ObjMesh {
  * from a region mesh endpoint overwhelmingly means an error page arrived with a 200, and quoting
  * the first line of what did arrive is the difference between a fixable report and a shrug.
  */
-export function objProblem(mesh: ObjMesh, text: string, what: string): string | undefined {
+export function objProblem(mesh: ParsedMesh, text: string, what: string): string | undefined {
   if (mesh.positions.length > 0 && mesh.indices.length > 0) return undefined
   const head = text.trim().slice(0, 80).replace(/\s+/g, ' ')
   if (!head) return `${what} came back empty.`

@@ -1308,3 +1308,33 @@ registerHelper({
     '}',
   ],
 })
+
+/**
+ * Read one mesh file, whichever of the three formats it is.
+ *
+ * A helper rather than a definition inside `core.uploadMesh`'s own chunk, which is what every
+ * other `coda_*` function here is and what `resolveHelpers` dedupes: emitters run once per node,
+ * so two Upload Mesh cards wrote the definition into the document twice.
+ *
+ * **Three routes, because R has no one reader.** `rgl::readOBJ` answers a `mesh3d` directly.
+ * `rgl::readSTL` with `plot = FALSE` answers a **matrix of triangle corners**, so `m$vb` on it is
+ * "$ operator is invalid for atomic vectors", which reads as a corrupt file — `tmesh3d` is what
+ * turns it into a mesh. PLY has no reader in rgl at all and goes through `Rvcg::vcgImport`, which
+ * nat only *suggests* — the node's own note is what tells a reader with PLY files to install it.
+ */
+registerHelper({
+  name: 'coda_read_mesh',
+  // No `requires`: every call is namespaced, rgl is in nat's `Depends` so it is already attached,
+  // and naming Rvcg in the setup chunk would demand it of a reader whose files are all OBJ.
+  source: [
+    'coda_read_mesh <- function(path) {',
+    '  ext <- tolower(tools::file_ext(path))',
+    '  if (ext == "obj") return(rgl::readOBJ(path))',
+    '  if (ext == "stl") {',
+    '    corners <- rgl::readSTL(path, plot = FALSE)',
+    '    return(rgl::tmesh3d(t(corners), seq_len(nrow(corners)), homogeneous = FALSE))',
+    '  }',
+    '  Rvcg::vcgImport(path)',
+    '}',
+  ],
+})

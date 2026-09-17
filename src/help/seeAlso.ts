@@ -141,6 +141,13 @@ const RELATED: readonly (readonly string[])[] = [
   // The two ways to look at neurons in space: Coda's own scene, and the viewer the field uses.
   ['out.viewer3d', 'out.neuroglancer', 'neuron.skeletons'],
 
+  // Two lines rather than one four-member group, because a group claims every member is worth
+  // reading beside every other and this relation is a star: Upload Table has nothing to do with
+  // ROI Meshes or the 3D View. Bringing your own shells belongs with the node that fetches the
+  // published ones and the viewer that draws them; bringing your own *file* is the other relation.
+  ['core.uploadMesh', 'neuron.roiMeshes', 'out.viewer3d'],
+  ['core.uploadMesh', 'core.uploadTable'],
+
   // --- regions --------------------------------------------------------------
   // Counts and completeness are per neuron, connectivity is region to region, and the viewer is
   // where you find out which regions there are.

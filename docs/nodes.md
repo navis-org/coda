@@ -2018,6 +2018,160 @@ map: keyed by the pasted text instead of the fetched address, a node pointed at 
 one pointed at the raw address would learn the same table's shape separately, and the second would
 look unfetched.
 
+## Upload Mesh: somebody else's regions
+
+`core.uploadMesh`, added from `Add ▸ Utility ▸ Upload Mesh`. `ROI Meshes`' local counterpart and
+`Upload Table`'s sibling, and nearly every decision above carries over unchanged — the graph holds
+a content-addressed `dataId` and nothing else, `fileName` is `presentational` for the same reason,
+the geometry lives in the same IndexedDB database, the peek and the revision-counter snapshot are
+the same machinery. What follows is only what differs.
+
+**Why the node exists at all.** A dataset's neuropils are the ones its curators named, so a
+glomerulus somebody segmented last week, a shell from another lab's template, or one hemisphere of
+a structure a connectome lists whole had no route onto a wire: `ROI Meshes` can only ask a server
+for what the server publishes. The `Volumes` socket accepted exactly one producer.
+
+**The output is `ROI Meshes`' output.** `roi` and `primary` under those names, so `Points in
+Volumes` reads `roi` with no configuration, the 3D View's `Volumes` socket colours by `primary`,
+and `Download` writes OBJ — a custom region is not a second kind of thing. `primary` is true
+throughout for the reason the precomputed and CATMAID sources give: it is the licence to sum, and
+nothing in a pile of files says which shells nest. `ROI_MESH_SCHEMA` is deliberately **not**
+imported — `data/source.ts` is the `DataSource` seam's vocabulary and an upload is not a source, so
+what is shared is the column *names*, which is the only thing anything downstream reads. The third
+column, `file`, is the one a fetch has no counterpart for: a region is named after its file's stem,
+so two directories each holding `LO.obj` produce two regions called `LO` and nothing else says
+which is which.
+
+**Units are applied in `evaluate`, not at the upload.** The stored geometry is in the file's own
+numbers and `UPLOAD_MESH_UNITS` scales on the way out, so a wrong setting costs a re-run rather
+than another trip to the file picker — and the stored bytes remain what the file said, which is the
+only form a second look at them can be checked against. It is an ordinary param in the provenance
+key, which is what makes that re-run happen. The failure it exists to prevent is silent: everything
+in Coda is nanometres, and a micron file drawn as nanometres is internally consistent and a
+thousand times too small. Three units and not voxels — a voxel is not a unit without a dataset to
+ask, and its factor differs per axis, which is a transform rather than a scale. One table with
+three readers (the param's options, `evaluate`, both exporters), because written out three times a
+corrected factor reaches the canvas and leaves two documents scaling by the old one.
+
+**`uploadPeekSettled` starts the read it cannot answer**, and this node is what found that it did
+not. `Upload Table`'s `inferOutputs` peeks its schema on every graph mutation, so by the time its
+`validate` asks "has the read finished?" the answer is always already on its way; this node's output
+shape is constant and peeks nothing, so the same question answered `false` forever — a graph whose
+geometry is genuinely absent said nothing at all until somebody pressed Run. **The card would have
+hidden it**, since `useUploadState` peeks too, which is what makes it worth a sentence: the bug is
+invisible on a canvas and real everywhere else. It was first fixed by ordering two lines inside this
+node's `validate`, which pins one caller and leaves the next one to rediscover it; the peek starting
+its own read is CLAUDE.md's standing rule for `peekDatasets` and `schemasFor`, and putting it back
+made the ordering here stop mattering.
+
+**One mesh per file, and picking replaces.** The picker is `multiple` because a region set is a
+directory; a file holding several objects merges to one mesh, which is `parseObj`'s standing rule
+and right for a shell exported in pieces. Adding to an existing set would mean reading the stored
+geometry back to re-hash it, and the gesture that does the same thing without that is picking the
+files together.
+
+**A file that is not a mesh is skipped and counted, not fatal** — `fetchRoiMeshSet`'s rule for a
+region the server has no shape for, which is the same situation: a directory of shells with a
+`README.txt` in it should import the shells and say what it left.
+
+### Three formats, one shape
+
+`data/meshFile.ts` dispatches on the extension, and on the bytes when there is none. `obj.ts` was
+already here, written for a *fetch* — neuPrint serves its region meshes as OBJ — and STL and PLY
+are new because those are what the tools that make a custom shell write. `parsedMesh.ts` holds the
+shared type as a leaf so that no reader imports the module that imports it; declared in the
+dispatcher it would close a cycle, which is safe only while nothing is read at module scope and is
+the arrangement `precomputed/sorting.ts` records as having produced a silently `undefined` path.
+
+- **The STL dialect is decided by arithmetic, never by `solid`.** A binary STL carries 80 bytes of
+  free-text header that several exporters fill with the word `solid` and a name, which is exactly
+  how an ASCII one begins. Read as ASCII such a file has no `vertex` lines in it and comes back
+  empty, which reads as corruption. `isBinaryStl` asks whether the length is exactly
+  `84 + 50 × triangles`, and the sniff and the parse share it so they cannot disagree about one
+  file.
+- **An STL is welded on read, exactly.** The format has no index list — a closed shell is N
+  independent triangles, six times the vertices of an OBJ of the same shape. Left alone that costs
+  the memory and it costs the *picture*: `Viewer3D` calls `computeVertexNormals`, which on unshared
+  corners shades every face flat, so an uploaded shell looks faceted beside a fetched one. Exact,
+  on the float32 values as written, never on a tolerance — a tolerance is a decimation, and this is
+  somebody's own data rather than a display surface a server published. Paid once, at upload.
+  **Keyed on the float32 bits and not on their text**: the obvious `${x},${y},${z}` key measured at
+  610 ms and +262 MB for a 25 MB file against 48 ms and +18 MB, and at the 200 MB ceiling that is
+  the difference between a freeze somebody was warned about and a tab that dies. The bit key is
+  *stricter* than the string one in exactly one case, which has to be handled rather than inherited:
+  `String(-0)` is `"0"`, so the text key merged negative and positive zero — `+ 0` normalises it and
+  a test pins it.
+- **A PLY's header is walked in full, including what is not read.** A PLY commonly carries normals,
+  colours, confidences and whole extra elements, and in the binary arm a field that is skipped still
+  has to be *stepped over* by its declared width. A reader that looked only for `x`/`y`/`z` and
+  stepped by twelve bytes would read a colour byte as the next vertex's x and produce a mesh whose
+  every coordinate is plausible and wrong. Both byte orders, because `DataView` takes the flag per
+  read and a second reader would buy nothing.
+- **The header offset is found in the raw bytes**, not by decoding the file as text: a binary body
+  is not valid UTF-8, `TextDecoder` replaces what it cannot read, and that changes the length — so
+  the body offset moves, silently, only for files with certain bytes in them.
+- **Nothing hands back a `subarray`.** A typed-array view keeps its whole backing buffer alive, and
+  — the half that makes it more than a heap note — the structured clone IndexedDB stores serialises
+  the **entire** buffer rather than the view's range. An STL welds about 6:1, so a shell returned as
+  a view wrote and re-read six times its own size, on disk, for the life of the upload: 17.9 MB held
+  and stored where 3.0 MB was needed. `slice` costs 0.2 ms.
+- **Both readers size their output from the header.** The vertex count and the face count are both
+  declared, so `positions` and `indices` are allocated rather than grown — a `number[]` holds
+  float32 values as 8-byte doubles, reallocates as it grows, and is then copied into the result
+  beside itself. Measured over two million faces at 94 ms and 26 MB against 133 ms and 80 MB. A fan
+  needs *more* than three indices per face, which is the one case that grows it.
+- **The PLY body reads its scalars by number, not by name.** `Scalar` was a string union, so every
+  value in the body cost two string-keyed width lookups and a string `switch` — 343 ms against
+  **146 ms** on a 53 MB binary file, and the `read` closure alone 182 ms against 43. The trap it
+  leaves is that `int8` is code **0**: every "is there a type here" test has to be `!== undefined`,
+  or `property list char int vertex_indices` reads as a plain scalar and the file parses to no
+  faces at all. A test pins it. Its row loop also hoists the two `element.name` comparisons, which
+  were one string compare **per property per row** — twelve million of one constant question on a
+  million-vertex file with normals and colours, and worth a further 25–29% of the whole parse.
+- **The weld's table doubles rather than being sized from the corner count.** Corners weld about
+  6:1, so `2 × corners` sizes for a mesh that cannot exist: 134 MB of `Int32Array` at the 200 MB
+  ceiling, beside a 144 MB `positions` and a 144 MB `corners`, for a mesh that welds into 17 MB.
+  Free at that size, 29% faster at a million triangles because the small table stays in cache, and
+  slower only on a file with no shared corners at all — which is not a file a mesher produces.
+- **None of the three throws.** `parseObj`'s rule: a file that is not a mesh parses to zero
+  vertices and the caller words the refusal. `meshFileProblem` is that sentence for an upload and is
+  deliberately not `objProblem`, which exists to recognise an HTML error page arriving over the wire
+  with a 200 — a file off a disk is never that, and quoting its first eighty bytes at somebody who
+  can see its name in a file picker helps nobody. It distinguishes a point cloud from a wrong file,
+  those being different mistakes.
+
+`meshFile.test.ts` holds one icosphere written five ways to the same 42 vertices and 80 triangles.
+The shape is built in the test rather than checked in, so the encodings are provably one mesh; the
+counts are `trimesh`'s, and all three readers were additionally run against real files that library
+wrote, which is what says the hand-built ones are shaped like the ones people will pick.
+
+### The exporters, where the two languages part
+
+Python is one call for all three formats: `navis.read_mesh(path, output='volume')` reads OBJ, STL
+and PLY through trimesh and **names each Volume after the file's stem**, which is exactly the `roi`
+Coda writes. R needs three routes and each was checked by running it — `rgl::readOBJ` answers a
+`mesh3d`; `rgl::readSTL(path, plot = FALSE)` answers a **matrix of triangle corners**, so `m$vb` on
+it is "`$ operator is invalid for atomic vectors`", which reads as a corrupt file, and `tmesh3d` is
+what turns it into a mesh; PLY has no reader in rgl at all and goes through `Rvcg::vcgImport`,
+which nat only *suggests* — the same note `Points in Volumes` carries for `pointsinside`. No
+`ctx.library` call: rgl is in nat's `Depends`, so it is attached already, and naming Rvcg in the
+setup chunk would demand it of a reader whose files are all OBJ.
+
+One difference the emitted R document states rather than leaves to be discovered: `readSTL` does
+not weld, where Coda's reader does. The same sphere is 42 vertices on the canvas and 240 in the
+document, with identical triangles and identical shape — so a vertex count taken from one will not
+match the other.
+
+`pnpm probe:upload-mesh` is the browser half, for the four properties jsdom cannot answer: a real
+`FileList` on a real file input, where the component test defines the input's `files` itself;
+the `accept` attribute, which jsdom never reads and which is extensions rather than media types
+because none of the three formats has a registered one and a dialog handed a type it does not know
+hides every file; geometry reaching a WebGL scene, where an index past the end or a bounds box that
+does not contain it draws nothing while passing every count; and the units, where a thousandfold
+error is internally consistent and only the scene's own bounds can show it. (It is *not* the only
+cover for reading bytes — `installJsdomStubs` polyfills `Blob.prototype.arrayBuffer`, so the
+component test exercises the real path.)
+
 ## Type column, and combining several into one
 
 Two names are Coda's rather than a backend's — `neuronId` and `type` (`annotationColumn` in

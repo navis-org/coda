@@ -1013,6 +1013,19 @@ export function everythingGraph(): CodaGraph {
       params: { fileName: 'annotations.csv', idColumn: 'root_id', textColumns: ['cluster'] },
     },
     {
+      /*
+       * Microns rather than nanometres, because the scaling arm is the half that can be wrong:
+       * a file already in nanometres emits the read and nothing else, so the branch the goldens
+       * have to hold is the one that multiplies — and the one where the two exporters have to
+       * agree on the factor and on what to call the unit.
+       */
+      id: 'meshupload',
+      type: 'core.uploadMesh',
+      col: 3,
+      row: 2,
+      params: { fileName: 'glomeruli.obj', units: 'um' },
+    },
+    {
       id: 'url',
       type: 'core.tableFromUrl',
       col: 3,

@@ -23,13 +23,13 @@ import { addEdge, addNode, emptyGraph, setNodeParam } from '../../core/graph'
 import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import { requireNodeDef } from '../../core/registry'
-import { Scheduler } from '../../core/scheduler'
 import { column, columnNames, schemaOf, tableSchema } from '../../core/types'
 import type { TableValue } from '../../core/values'
 import { isTableValue, tableFromRows } from '../../core/values'
 import { putUpload, resetUploads, uploadPeekSettled } from '../../data/uploads'
 import '../index'
 import { node } from '../../test/graph'
+import { sourcelessScheduler } from '../../test/scheduler'
 
 const ANNOTATIONS = tableSchema(
   column('root_id', 'i64'),
@@ -43,14 +43,6 @@ function annotations(): TableValue {
     { root_id: 102, cellType: 'LC6', cluster: 1 },
     { root_id: 103, cellType: 'LC4', cluster: 3 },
   ])
-}
-
-function makeScheduler(): Scheduler {
-  return new Scheduler({
-    resolveSource: (id) => {
-      throw new Error(`the upload node must not reach a source (asked for ${id})`)
-    },
-  })
 }
 
 /** upload → sort, so there is something downstream to observe being invalidated. */
@@ -203,7 +195,7 @@ describe('core.uploadTable — validation', () => {
 describe('core.uploadTable — evaluate', () => {
   it('emits the stored rows, renamed', async () => {
     const id = await stored()
-    const scheduler = makeScheduler()
+    const scheduler = sourcelessScheduler()
     await scheduler.run(pipeline({ dataId: id, idColumn: 'root_id' }), { mode: 'full' })
 
     const out = scheduler.output('up', 'out')
@@ -217,7 +209,7 @@ describe('core.uploadTable — evaluate', () => {
 
   it('reads a chosen column as text without touching the rest', async () => {
     const id = await stored()
-    const scheduler = makeScheduler()
+    const scheduler = sourcelessScheduler()
     await scheduler.run(pipeline({ dataId: id, textColumns: ['cluster'] }), { mode: 'full' })
 
     const out = scheduler.output('up', 'out')
@@ -237,7 +229,7 @@ describe('core.uploadTable — evaluate', () => {
     resetUploads()
     globalThis.indexedDB = new IDBFactory()
 
-    const scheduler = makeScheduler()
+    const scheduler = sourcelessScheduler()
     const graph = pipeline({ dataId: id, fileName: 'annotations.csv' })
     await scheduler.run(graph, { mode: 'full' })
 
@@ -254,7 +246,7 @@ describe('core.uploadTable — evaluate', () => {
 
   it('refuses an ID column the file does not have, listing what it does', async () => {
     const id = await stored()
-    const scheduler = makeScheduler()
+    const scheduler = sourcelessScheduler()
     await scheduler.run(pipeline({ dataId: id, idColumn: 'neuronId' }), { mode: 'full' })
     const error = scheduler.info('up').error ?? ''
     expect(error).toContain('neuronId')
@@ -267,7 +259,7 @@ describe('core.uploadTable — provenance', () => {
     // The content address doing its job: two imports of one file produce the same params, so
     // the key is unchanged and nothing downstream is disturbed.
     const first = await stored('annotations.csv')
-    const scheduler = makeScheduler()
+    const scheduler = sourcelessScheduler()
     const graph = pipeline({ dataId: first, fileName: 'annotations.csv' })
     await scheduler.run(graph, { mode: 'full' })
 
@@ -279,7 +271,7 @@ describe('core.uploadTable — provenance', () => {
 
   it('a different file invalidates the node and everything after it', async () => {
     const id = await stored()
-    const scheduler = makeScheduler()
+    const scheduler = sourcelessScheduler()
     const graph = pipeline({ dataId: id })
     await scheduler.run(graph, { mode: 'full' })
     expect(scheduler.info('sort').state).toBe('ok')
@@ -303,7 +295,7 @@ describe('core.uploadTable — provenance', () => {
     // It exists so the card and the error can name something actionable. Two people importing
     // the same file under different names must not get two different cache entries.
     const id = await stored()
-    const scheduler = makeScheduler()
+    const scheduler = sourcelessScheduler()
     const graph = pipeline({ dataId: id, fileName: 'annotations.csv' })
     await scheduler.run(graph, { mode: 'full' })
 
@@ -315,7 +307,7 @@ describe('core.uploadTable — provenance', () => {
 
   it('changing what a column means does re-run it', async () => {
     const id = await stored()
-    const scheduler = makeScheduler()
+    const scheduler = sourcelessScheduler()
     const graph = pipeline({ dataId: id })
     await scheduler.run(graph, { mode: 'full' })
 

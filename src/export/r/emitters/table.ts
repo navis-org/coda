@@ -20,6 +20,7 @@ import {
   nothingMatchesReason,
   unresolvedRowsReason,
 } from '../../../nodes/lib/splitRows'
+import { uploadMeshUnit } from '../../../nodes/query/uploadMesh'
 import { carryLines, codaIds } from './common'
 import { REGEX_FLAVOUR_NOTE, filterPredicates } from './tableFilters'
 import type { AggFn } from '../../../nodes/lib/tableOps'
@@ -868,6 +869,61 @@ registerEmitter('core.uploadTable', (ctx) => {
     ),
     `${out} <- read_csv(${rStr(fileName || 'your-table.csv')}, show_col_types = FALSE)`,
     ...shapingLines(ctx, out),
+  ]
+})
+
+/**
+ * Region shells read off disk, as `mesh3d`.
+ *
+ * Three formats and, unlike navis's one call, **three different routes** — which is the finding
+ * rather than an inconvenience, since each was checked by running it:
+ *
+ *  - OBJ is `rgl::readOBJ`, which answers a `mesh3d` directly.
+ *  - STL is `rgl::readSTL`, which with `plot = FALSE` answers a **matrix of triangle corners**,
+ *    not a mesh — `m$vb` on it is "$ operator is invalid for atomic vectors", which reads as a
+ *    corrupt file. `tmesh3d` is what turns it into one.
+ *  - PLY has no reader in rgl at all, so it goes through `Rvcg::vcgImport` — which nat only
+ *    *suggests*, so the cell says so, exactly as `Points in Volumes` does for `pointsinside`.
+ *
+ * One more difference worth stating rather than discovering: an STL stores every triangle's
+ * corners separately and `readSTL` does not merge them, where Coda's reader does. The same
+ * sphere is 42 vertices on the canvas and 240 here, with identical triangles and identical
+ * shape — so a vertex count taken from this document will not match the card's.
+ */
+registerEmitter('core.uploadMesh', (ctx) => {
+  /*
+   * No `ctx.library` call: every reader is namespaced. **rgl is in nat's `Depends`**, so it is
+   * attached the moment anything else in this document runs, and Rvcg is only *suggested* — so
+   * `Rvcg::vcgImport` is the same arrangement `Points in Volumes` makes for `pointsinside`,
+   * where naming the package in the setup chunk would demand it of a reader whose files are all
+   * OBJ.
+   */
+  ctx.helper('coda_read_mesh')
+  const out = ctx.output('meshes')
+  const fileName = String(ctx.params.fileName)
+  const unit = uploadMeshUnit(ctx.params.units)
+
+  return [
+    ...ctx.note(
+      fileName
+        ? `Coda stores uploaded meshes in the browser, not in the graph, so the geometry is ` +
+            `not in this document. Point this at your copy of "${fileName}". OBJ and STL go ` +
+            `through rgl, which comes with nat; PLY needs Rvcg, which nat only suggests — ` +
+            `install.packages("Rvcg").`
+        : 'This Upload Mesh node has no files. Point the paths below at your OBJ, STL or PLY.',
+    ),
+    `${out}_paths <- c(${rStr(fileName || 'your-region.obj')})`,
+    `${out} <- lapply(${out}_paths, coda_read_mesh)`,
+    // The stem, which is what Coda calls a region and what navis's reader names a Volume.
+    `names(${out}) <- tools::file_path_sans_ext(basename(${out}_paths))`,
+    ...(unit.nm === 1
+      ? []
+      : [
+          ``,
+          `# Coda's Units param, applied: everything downstream is nanometres, and these files`,
+          `# are in ${unit.label}.`,
+          `${out} <- lapply(${out}, function(m) { m$vb[1:3, ] <- m$vb[1:3, ] * ${unit.nm}; m })`,
+        ]),
   ]
 })
 

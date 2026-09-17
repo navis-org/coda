@@ -7,12 +7,8 @@
  *
  * ## Four states, and telling them apart is the point
  *
- * `empty` — nothing picked yet. `loading` — a reference in the graph whose meta the peek has
- * not answered for. `ready` — the rows are in this browser. `absent` — they are not, which is
- * what a graph opened on another machine looks like and the only one that needs a sentence
- * rather than a number. Collapsing `loading` into `absent` would put "not in this browser" on
- * every card for the first frame after every reload, which is how a real message stops being
- * read.
+ * `useUploadState`'s, shared with the Upload Mesh card, which is where the four are described
+ * and why none of them may be folded into another.
  *
  * ## The file is read here, not in the node
  *
@@ -23,29 +19,18 @@
  * still cheap.
  */
 
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useRef, useState } from 'react'
 
-import { getNodeDef } from '../../core/registry'
 import { parseDelimited } from '../../data/csv'
-import {
-  MAX_UPLOAD_BYTES,
-  UPLOAD_WARN_BYTES,
-  peekUploadMeta,
-  putUpload,
-  subscribeUploadLearned,
-  uploadPeekSettled,
-  uploadRevision,
-} from '../../data/uploads'
+import { putUpload } from '../../data/uploads'
 import { formatBytes, formatNumber } from '../format'
-import { ParamField } from '../params/ParamField'
 import type { NodeBodyProps } from './nodeBodies'
-import { cardParams } from '../params/paramGroups'
+import { UploadAbsent, UploadFields, checkUploadSize, useUploadState } from './uploadCard'
 
 /** Big enough that a header and a few rows are legible; small enough not to own the card. */
 const PASTE_ROWS = 4
 
 export function UploadBody({ node, ctx, compact, setParam, onError }: NodeBodyProps) {
-  const def = getNodeDef(node.type)
   const inputRef = useRef<HTMLInputElement>(null)
   const [pasting, setPasting] = useState(false)
   const [pasted, setPasted] = useState('')
@@ -54,29 +39,7 @@ export function UploadBody({ node, ctx, compact, setParam, onError }: NodeBodyPr
   const dataId = String(node.params.dataId ?? '')
   const fileName = String(node.params.fileName ?? '')
 
-  /*
-   * Subscribed to the uploads store directly, not to the graph store.
-   *
-   * The learned signal does re-infer the graph, so reading this off a graph-store tick would
-   * *work* — and would make this card's ability to stop saying "looking…" depend on a
-   * re-inference happening elsewhere for an unrelated reason. Here the dependency is the one
-   * that is actually true.
-   *
-   * The snapshot is the **revision counter**, not the peeked value, and that is load-bearing:
-   * `loading` and `absent` both peek to `undefined`, so a value snapshot never changes when
-   * the read lands and the card never leaves "looking…". See `uploadRevision`.
-   */
-  useSyncExternalStore(subscribeUploadLearned, uploadRevision)
-  const meta = peekUploadMeta(dataId)
-  const settled = uploadPeekSettled(dataId)
-
-  const state: 'empty' | 'loading' | 'ready' | 'absent' = !dataId
-    ? 'empty'
-    : meta
-      ? 'ready'
-      : settled
-        ? 'absent'
-        : 'loading'
+  const { meta, state } = useUploadState(dataId, 'table')
 
   /**
    * Parse and store, then point the node at the result.
@@ -119,24 +82,7 @@ export function UploadBody({ node, ctx, compact, setParam, onError }: NodeBodyPr
       // Clear it, or picking the same file twice in a row fires no change event at all.
       event.target.value = ''
       if (!file) return
-      /*
-       * Checked against the file's own size, before a byte is read — the same call `pivotTable`
-       * makes about shape rather than about the array it is about to allocate. Two tiers: the
-       * refusal is where the parse would run the tab out of memory, and below it a large file
-       * is announced and read, because "large for a spreadsheet" and "too large for a browser"
-       * are two orders of magnitude apart and this used to conflate them.
-       */
-      if (file.size > MAX_UPLOAD_BYTES) {
-        onError(
-          `"${file.name}" is ${formatBytes(file.size)}, past the ${formatBytes(MAX_UPLOAD_BYTES)} a browser can parse without running out of memory. Split it, or filter it before uploading.`,
-        )
-        return
-      }
-      if (file.size > UPLOAD_WARN_BYTES) {
-        onError(
-          `"${file.name}" is ${formatBytes(file.size)} — parsing will take a moment and the tab will be unresponsive while it does. Reading it anyway.`,
-        )
-      }
+      if (!checkUploadSize([file], 'Split it, or filter it before uploading.', onError)) return
       void file.text().then(
         (text) => ingest(file.name, text),
         (err: unknown) => onError(`Could not read "${file.name}": ${String(err)}`),
@@ -152,11 +98,6 @@ export function UploadBody({ node, ctx, compact, setParam, onError }: NodeBodyPr
     setPasted('')
     void ingest('Pasted rows', text)
   }, [ingest, pasted])
-
-  // The generic card renders every non-advanced param; a body replaces that area outright, so
-  // it renders the same set rather than a chosen few — a control a body forgot is reachable
-  // only from the inspector, which on screen is indistinguishable from one never added.
-  const fields = useMemo(() => cardParams(def, node.params), [def, node.params])
 
   return (
     <div className="upload-body nodrag">
@@ -210,36 +151,10 @@ export function UploadBody({ node, ctx, compact, setParam, onError }: NodeBodyPr
             </span>
           </>
         )}
-        {/*
-         * The one state that needs a sentence. It names the file, says where the rows went and
-         * what to do — this is what a colleague opening a shared graph sees, so it has to read
-         * as an instruction rather than as a fault.
-         */}
-        {!busy && state === 'absent' && (
-          <span className="upload-body__absent">
-            ⚠ “{fileName || 'This upload'}” is not stored in this browser. Uploaded rows stay on
-            the machine that uploaded them — choose the file again.
-          </span>
-        )}
+        {!busy && state === 'absent' && <UploadAbsent fileName={fileName} kind="table" />}
       </div>
 
-      {state === 'ready' && (
-        <div className="upload-body__fields">
-          {fields.map((param) => (
-            <label key={param.id} className="upload-body__field">
-              <span className="param__label" title={param.help ?? param.label}>
-                {param.label}
-              </span>
-              <ParamField
-                param={param}
-                value={node.params[param.id]}
-                ctx={ctx}
-                onChange={(value) => setParam(param.id, value)}
-              />
-            </label>
-          ))}
-        </div>
-      )}
+      {state === 'ready' && <UploadFields node={node} ctx={ctx} setParam={setParam} />}
 
       {!compact && state === 'ready' && meta && (
         <table className="upload-body__schema">

@@ -256,6 +256,19 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M4 13h16' }],
     ['path', { d: 'M12 2.6v5.4M9.5 5.1 12 2.6l2.5 2.5' }],
   ],
+  /*
+   * The region blob under Upload Table's own arrow: the base shape names the material and the
+   * mark on top names the operation, so this reads as "a region, brought in" beside
+   * `neuron.roiMeshes`' "a region, fetched". Scaled down and pushed to the floor of the box so
+   * the arrow has the room it has on the table card — `strokeWidth` is `GLYPH_STROKE_WIDTH / 0.72`,
+   * which is what puts back exactly the weight the scale takes away.
+   */
+  'core.uploadMesh': [
+    ['g', { transform: 'translate(2.57 6.14) scale(0.72)', strokeWidth: '2.22' }, [
+      ['path', { d: 'M5.6 10.6c.8-3.7 4.4-6.3 8.1-5.8 3.7.5 6.6 4 6.3 7.8-.3 3.8-3.6 6.9-7.4 6.9-3.8 0-7.8-5.2-7-8.9z' }],
+    ]],
+    ['path', { d: 'M12 2.6v5.4M9.5 5.1 12 2.6l2.5 2.5' }],
+  ],
   'core.tableFromUrl': [
     ['circle', { cx: '12', cy: '6.1', r: '3.6' }],
     ['path', { d: 'M8.4 6.1h7.2' }],

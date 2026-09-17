@@ -931,6 +931,17 @@ coda_qualify_ids <- function(df, column, direction = "add", prefix = "", into = 
 }
 
 
+coda_read_mesh <- function(path) {
+  ext <- tolower(tools::file_ext(path))
+  if (ext == "obj") return(rgl::readOBJ(path))
+  if (ext == "stl") {
+    corners <- rgl::readSTL(path, plot = FALSE)
+    return(rgl::tmesh3d(t(corners), seq_len(nrow(corners)), homogeneous = FALSE))
+  }
+  Rvcg::vcgImport(path)
+}
+
+
 #' Rewrite `column` by looking each value up in `mapping`. Coda's Relabel node.
 coda_relabel <- function(df, column, mapping, key, value, into = NULL,
                          unmatched = "null") {
@@ -1377,6 +1388,21 @@ upload_table <- read_csv("annotations.csv", show_col_types = FALSE)
 upload_table <- upload_table |> rename(neuronId = `root_id`)
 upload_table <- coda_ids(upload_table, "neuronId")
 upload_table <- upload_table |> mutate(across(all_of(c("cluster")), as.character))
+```
+
+```{r upload-mesh}
+# ── Upload Mesh ──
+# NOTE: Coda stores uploaded meshes in the browser, not in the graph, so the
+# geometry is not in this document. Point this at your copy of
+# "glomeruli.obj". OBJ and STL go through rgl, which comes with nat; PLY
+# needs Rvcg, which nat only suggests — install.packages("Rvcg").
+upload_mesh_paths <- c("glomeruli.obj")
+upload_mesh <- lapply(upload_mesh_paths, coda_read_mesh)
+names(upload_mesh) <- tools::file_path_sans_ext(basename(upload_mesh_paths))
+
+# Coda's Units param, applied: everything downstream is nanometres, and these files
+# are in microns.
+upload_mesh <- lapply(upload_mesh, function(m) { m$vb[1:3, ] <- m$vb[1:3, ] * 1000; m })
 ```
 
 ```{r table-from-url}

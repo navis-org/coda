@@ -318,6 +318,20 @@ interface ParamBase {
    */
   presentational?: boolean
   /**
+   * This param names something held in *this browser* rather than in the document, and the noun
+   * for it — "an uploaded table", "uploaded meshes".
+   *
+   * Content-addressed in IndexedDB, so a `.coda.json` and a share link both arrive without it.
+   * The declaration is here rather than as a list of node types in the share dialog because the
+   * class already has three members and a hand-kept list had two: `shareAdvisories.ts` twenty
+   * lines below its own post-mortem of exactly this bet — a hardcoded "neuPrint token" that
+   * "became a wrong instruction the day a CAVE one shipped", fixed by deriving it.
+   *
+   * The value is the filename, which is the only part of this anybody can act on; the noun is
+   * what stands in when the param is empty.
+   */
+  browserStored?: string
+  /**
    * Which tab of a grouped styling panel this param belongs to, naming an entry in the node's
    * `paramGroups`. Opt-in per node: a definition declaring no groups keeps the flat list, so
    * adding this changed nothing for any node that has not asked for it.

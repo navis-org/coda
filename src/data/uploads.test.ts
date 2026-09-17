@@ -29,15 +29,19 @@ import { column, tableSchema } from '../core/types'
 import type { TableValue } from '../core/values'
 import { tableFromRows } from '../core/values'
 import {
+  getMeshUpload,
   getUpload,
   getUploadMeta,
+  peekMeshUpload,
   peekUploadMeta,
   peekUploadSchema,
+  putMeshUpload,
   putUpload,
   resetUploads,
   subscribeUploadLearned,
   uploadPeekSettled,
 } from './uploads'
+import { tetra } from '../test/meshes'
 
 const SCHEMA = tableSchema(column('neuronId', 'i64'), column('cellType', 'str'))
 
@@ -71,10 +75,13 @@ describe('storing', () => {
   it('keeps a descriptor that can be read without the rows', async () => {
     const id = await putUpload('annotations.csv', SAMPLE(), 4096)
     const meta = await getUploadMeta(id)
-    expect(meta?.name).toBe('annotations.csv')
-    expect(meta?.rows).toBe(2)
-    expect(meta?.bytes).toBe(4096)
-    expect(meta?.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'cellType'])
+    // Narrowed rather than asserted through: the descriptor is a union now, and the `kind` is
+    // what a card reads before it decides which of the two it can draw.
+    if (meta?.kind !== 'table') throw new Error('expected a table descriptor')
+    expect(meta.name).toBe('annotations.csv')
+    expect(meta.rows).toBe(2)
+    expect(meta.bytes).toBe(4096)
+    expect(meta.schema.columns.map((c) => c.name)).toEqual(['neuronId', 'cellType'])
   })
 
   it('resolves to nothing for an id this browser does not have', async () => {
@@ -136,7 +143,8 @@ describe('the peek', () => {
 
     await vi.waitFor(() => expect(uploadPeekSettled(id)).toBe(true))
     expect(peekUploadSchema(id)?.columns.map((c) => c.name)).toEqual(['neuronId', 'cellType'])
-    expect(peekUploadMeta(id)?.rows).toBe(2)
+    const meta = peekUploadMeta(id)
+    expect(meta?.kind === 'table' && meta.rows).toBe(2)
   })
 
   it('announces a miss too, so an absent upload stops looking', async () => {
@@ -198,5 +206,97 @@ describe('without storage', () => {
     delete globalThis.indexedDB
     resetUploads()
     expect(await getUpload('u_anything')).toBeUndefined()
+  })
+})
+
+describe('meshes, in the same database', () => {
+  it('stores typed arrays and hands back the same numbers', async () => {
+    // IndexedDB's structured clone carries a `Float32Array` as one, which is the whole reason
+    // geometry can live here rather than being re-encoded into something JSON can hold.
+    const id = await putMeshUpload('2 files', [tetra('LO_R'), tetra('ME_R')], 512)
+    const back = await getMeshUpload(id)
+    expect(back?.map((mesh) => mesh.name)).toEqual(['LO_R', 'ME_R'])
+    expect(back?.[0]?.positions).toBeInstanceOf(Float32Array)
+    expect([...(back?.[0]?.positions ?? [])]).toEqual([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1])
+  })
+
+  it('keeps a descriptor that lists the meshes without loading them', async () => {
+    const id = await putMeshUpload('2 files', [tetra('LO_R'), tetra('ME_R')], 512)
+    const meta = await getUploadMeta(id)
+    if (meta?.kind !== 'meshes') throw new Error('expected a mesh descriptor')
+    expect(meta.items).toEqual([
+      { name: 'LO_R', file: 'LO_R.obj', vertices: 4, triangles: 4 },
+      { name: 'ME_R', file: 'ME_R.obj', vertices: 4, triangles: 4 },
+    ])
+  })
+
+  it('addresses by content, over the names as well as the geometry', async () => {
+    // Two files holding one shell under two names are two uploads: the name is what the region
+    // is called downstream, so an id blind to it would hand back somebody else's labels.
+    const a = await putMeshUpload('one', [tetra('LO_R')], 64)
+    const again = await putMeshUpload('a different label', [tetra('LO_R')], 999)
+    const renamed = await putMeshUpload('one', [tetra('ME_R')], 64)
+    expect(again).toBe(a)
+    expect(renamed).not.toBe(a)
+  })
+
+  it('does not run two items together, which would collide two different picks', async () => {
+    // `['ab', 'c']` and `['a', 'bc']` concatenate to the same text — the separator's whole job,
+    // and the same one `uploadId` uses for cells.
+    const first = await putMeshUpload('x', [tetra('ab'), tetra('c')], 64)
+    const second = await putMeshUpload('x', [tetra('a'), tetra('bc')], 64)
+    expect(first).not.toBe(second)
+  })
+
+  it('answers the peek for its own kind and not for the other', async () => {
+    /*
+     * The two ids are indistinguishable strings, so a node handed the wrong one must reach its
+     * own "not in this browser" rather than wait for a read that has already landed.
+     */
+    const meshes = await putMeshUpload('one', [tetra('LO_R')], 64)
+    const table = await putUpload('annotations.csv', SAMPLE(), 128)
+
+    expect(peekMeshUpload(meshes)?.items).toHaveLength(1)
+    expect(peekUploadSchema(meshes)).toBeUndefined()
+    expect(peekMeshUpload(table)).toBeUndefined()
+    expect(peekUploadSchema(table)).toBeDefined()
+    // Both settled either way: "the wrong kind" is an answer, not a wait.
+    expect(uploadPeekSettled(meshes)).toBe(true)
+    expect(uploadPeekSettled(table)).toBe(true)
+  })
+
+  it('reads a record written before meshes existed as a table', async () => {
+    /*
+     * Every upload any user already has was written by a build in which `kind` did not exist, so
+     * this writes one the way that build did — straight into the store, with the field absent —
+     * rather than deleting it from a copy, which would assert nothing. Read without the default
+     * such a record is neither kind, so a perfectly good CSV draws as "not in this browser": the
+     * one state whose sentence tells somebody to go and find a file they still have.
+     */
+    const id = await putUpload('annotations.csv', SAMPLE(), 128)
+    const meta = await getUploadMeta(id)
+    if (meta?.kind !== 'table') throw new Error('expected a table descriptor')
+    const { kind: _kind, ...legacy } = meta
+    await new Promise<void>((resolve, reject) => {
+      const open = indexedDB.open('coda-uploads', 2)
+      open.onerror = () => reject(open.error)
+      open.onsuccess = () => {
+        const db = open.result
+        const tx = db.transaction(['meta'], 'readwrite')
+        tx.objectStore('meta').put(legacy, id)
+        tx.oncomplete = () => {
+          db.close()
+          resolve()
+        }
+        tx.onerror = () => reject(tx.error)
+      }
+    })
+
+    resetUploads()
+    expect(peekUploadMeta(id)).toBeUndefined()
+    await vi.waitFor(() => expect(uploadPeekSettled(id)).toBe(true))
+    expect(peekUploadMeta(id)?.kind).toBe('table')
+    // And it is usable, not merely labelled: the schema is what every column picker reads.
+    expect(peekUploadSchema(id)?.columns.map((c) => c.name)).toEqual(['neuronId', 'cellType'])
   })
 })

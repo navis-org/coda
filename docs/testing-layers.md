@@ -347,6 +347,8 @@ uses itself is its vocabulary rather than dead code.
 | `data/uploads.test.ts`                   | the store against real IndexedDB: content addressing incl. a separator collision, a write that rejects, and the peek's one read  |
 | `nodes/table/upload.test.ts`             | the node: the schema arriving by peek, the neuronId rename, what a graph opened elsewhere says, and the filename costing nothing   |
 | `ui/nodes/uploadBody.test.tsx`           | the card's four states — and that 'looking' is never printed as 'not here' — plus the size ceiling refusing before it reads      |
+| `nodes/query/uploadMesh.test.ts`         | the mesh node: units scaling in `evaluate` and re-running because of it, the columns matching `ROI Meshes`', and `validate` being what starts the peek |
+| `ui/nodes/uploadMeshBody.test.tsx`       | its card: several files at once, a non-mesh skipped rather than fatal, the ceiling summed over the selection, and the listing kept to the overlay |
 | `nodes/table/fromUrl.test.ts`            | the fetch: deferred by the auto pass, Refresh as the only re-fetch, the schema keyed by URL, and what each refusal blames        |
 | `nodes/lib/idList.test.ts`               | reading pasted ids: every separator, a bad token refusing the list, an eighteen-digit id kept exactly, and the 19-digit ceiling  |
 | `nodes/query/inputIds.test.ts`           | the node: no dataset means no query, the seam asked in numbers, no status filter, empty never all                                |
@@ -369,6 +371,7 @@ uses itself is its vocabulary rather than dead code.
 | `ui/raster.test.ts`                      | triangles and lines to masks, and masks to outlines: clipping, brightest-wins, a concavity kept, split blobs, the closed-ring simplify — and `drawSegment`'s three properties a quad-and-fill would not have: an unbroken diagonal, a sub-pixel segment that still marks its ends, and thickness read as a *diameter* so an even width does not collapse to one pixel |
 | `ui/viewers/roiProjection.test.ts`       | the three anatomical planes, an outline that keeps its notch, the explode proved non-uniform, the frame held at full, and mesh volume |
 | `data/obj.test.ts`                       | reading somebody else's OBJ: every face-index form agreeing, polygons fanned, CRLF, and what a 200 that is not a mesh says |
+| `data/meshFile.test.ts`                  | the three readers held to one icosphere in five encodings: the `solid`-headed binary STL, an STL welded back to shared corners, and a PLY whose colours are stepped over rather than through |
 | `nodes/output/rois.test.ts`              | the ROI Viewer: no ports at all, every control costing no run, and what it says with a source publishing no region meshes |
 | `data/meshDecimate.test.ts`              | vertex clustering: the silhouette surviving, no degenerate faces, determinism, and welding a seam counted apart from decimating |
 | `ui/viewers/roiOutlines.test.ts`         | what survives when the meshes are released: three planes per region, the size claim, and a fingerprint that re-fetches on a changed region list |

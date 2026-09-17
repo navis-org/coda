@@ -14,6 +14,7 @@ import { ID_COLUMN_NAME } from '../../../core/ids'
 import { rawFileNote } from '../../../data/rawFileUrl'
 import { portIdAt } from '../../../core/ports'
 import { centralityOptions } from '../../../nodes/analysis/networkCentrality'
+import { uploadMeshUnit } from '../../../nodes/query/uploadMesh'
 import { registerEmitter } from '../registry'
 import type { EmitContext } from '../types'
 import { codaIds } from './common'
@@ -310,6 +311,49 @@ registerEmitter('core.uploadTable', (ctx) => {
   ]
 
   return [...lines, ...shapingLines(ctx, out)]
+})
+
+// ---------------------------------------------------------------------------
+// Upload Mesh
+// ---------------------------------------------------------------------------
+
+/**
+ * Region shells read off disk, as `navis.Volume`s.
+ *
+ * `Upload Table`'s arrangement — the geometry is in this browser's IndexedDB and a `.coda.json`
+ * already arrives without it, so the notebook names the files rather than carrying them — and
+ * one call covers all three formats: `navis.read_mesh(path, output='volume')` reads OBJ, STL and
+ * PLY through trimesh and **names each Volume after the file's stem**, which is exactly the `roi`
+ * Coda writes. Checked by running it on all three.
+ *
+ * The scaling is emitted only when there is one, so a file already in nanometres produces a cell
+ * with nothing in it to mistrust.
+ */
+registerEmitter('core.uploadMesh', (ctx) => {
+  ctx.require('navis')
+  const out = ctx.output('meshes')
+  const fileName = String(ctx.params.fileName)
+  const unit = uploadMeshUnit(ctx.params.units)
+
+  return [
+    ...ctx.note(
+      fileName
+        ? `Coda stores uploaded meshes in the browser, not in the graph, so the geometry is ` +
+            `not in this notebook. Point this at your copy of "${fileName}".`
+        : 'This Upload Mesh node has no files. Point the paths below at your OBJ, STL or PLY.',
+    ),
+    `_paths = [${pyStr(fileName || 'your-region.obj')}]`,
+    `${out} = [navis.read_mesh(_p, output="volume") for _p in _paths]`,
+    ...(unit.nm === 1
+      ? []
+      : [
+          ``,
+          `# Coda's Units param, applied: everything downstream is nanometres, and these`,
+          `# files are in ${unit.label}.`,
+          `for _v in ${out}:`,
+          `    _v.vertices = _v.vertices * ${unit.nm}`,
+        ]),
+  ]
 })
 
 // ---------------------------------------------------------------------------

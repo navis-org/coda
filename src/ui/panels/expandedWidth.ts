@@ -25,6 +25,8 @@
  * plain table and not something cleverer.
  */
 
+import { NODE_BODIES } from '../nodes/nodeBodies'
+
 /** A px cap, or the backdrop's full width. */
 export type ExpandedWidth = number | 'full'
 
@@ -37,18 +39,25 @@ export type ExpandedWidth = number | 'full'
  */
 export const MEASURED_WIDTH = 1500
 
+/**
+ * The viewers that want a cap.
+ *
+ * Only viewers: an expandable *body* gets `MEASURED_WIDTH` from `NODE_BODIES` below, since that is
+ * what an expandable body always wants and keeping a second list of them here is how this table
+ * came to be missing one.
+ */
 const EXPANDED_WIDTHS: Record<string, ExpandedWidth> = {
   // Tile grids.
   'out.profile': MEASURED_WIDTH,
   'out.datasetSummary': MEASURED_WIDTH,
   'net.metrics': MEASURED_WIDTH,
-  // Prose, and a list of rows.
-  'dataset.description': MEASURED_WIDTH,
-  'cave.tableInfo': MEASURED_WIDTH,
-  'core.uploadTable': MEASURED_WIDTH,
-  'neuron.explore': MEASURED_WIDTH,
 }
 
 export function expandedWidth(nodeType: string): ExpandedWidth {
-  return EXPANDED_WIDTHS[nodeType] ?? 'full'
+  const capped = EXPANDED_WIDTHS[nodeType]
+  if (capped !== undefined) return capped
+  const body = NODE_BODIES[nodeType]
+  // Prose, param rows and listings have a measure; a picture does not, and neither does a card
+  // with no overlay to size.
+  return body?.expandable ? MEASURED_WIDTH : 'full'
 }

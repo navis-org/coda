@@ -17,3 +17,18 @@ export function mockScheduler(source: DataSource): Scheduler {
     },
   })
 }
+
+/**
+ * A Scheduler with no sources at all, refusing any id loudly.
+ *
+ * For the two upload nodes, whose whole point is that they reach no backend — a test that let one
+ * quietly resolve a source would stop being a test of that. Written out in both suites before this;
+ * see the module note.
+ */
+export function sourcelessScheduler(): Scheduler {
+  return new Scheduler({
+    resolveSource: (id) => {
+      throw new Error(`this node must not reach a source (asked for ${id})`)
+    },
+  })
+}
