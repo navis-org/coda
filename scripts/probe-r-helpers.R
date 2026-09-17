@@ -840,5 +840,118 @@ if (!requireNamespace("Rvcg", quietly = TRUE)) {
         identical(coda_in_volumes(cloud, unname(vols), "roi")$points$roi[1], "1"))
 }
 
+# ---- coda_synapse_edges ------------------------------------------------------
+# Synapses to Edges, asked exactly what `probe-py-helpers.py` asks one language over and what
+# `synapseEdges.test.ts` asks of the canvas — three implementations of one fold, so the
+# assertions are the same or the three are free to drift while all three stay green.
+#
+# Base R throughout, which is what the helper is: the parts most worth running are the ones R
+# spells differently — `ifelse` over a flip mask, a first-appearance order out of `match`, and a
+# group's first non-missing type assigned in reverse rather than by a groupwise `first()`.
+qr <- data.frame(
+  neuronId = c("1", "1", "1", "1"),
+  type = c("LC4", "LC4", "LC4", "LC4"),
+  partnerId = c("3", "3", "2", "2"),
+  partnerType = c("PLP1", "PLP1", "T4a", "T4a"),
+  polarity = c("pre", "pre", "post", "post"),
+  roi = c("LO(R)", "PLP(R)", "LO(R)", "LO(R)"),
+  stringsAsFactors = FALSE
+)
+pairs <- function(e) paste(e$preId, e$postId, e$weight, sep = ">")
+
+flipped <- coda_synapse_edges(qr, "neuronId", "partnerId", "type", "partnerType", "polarity")
+check("synapse_edges: a post row is flipped, so inputs and outputs stay apart",
+      identical(pairs(flipped$edges), c("1>3>2", "2>1>2")),
+      paste(pairs(flipped$edges), collapse = " "))
+check("synapse_edges: both types flip with the ids",
+      identical(flipped$edges$preType, c("LC4", "T4a")),
+      paste(flipped$edges$preType, collapse = " "))
+check("synapse_edges: nothing is dropped or unreadable here",
+      flipped$dropped == 0 && flipped$unoriented == 0)
+
+fixed <- coda_synapse_edges(qr, "neuronId", "partnerId", "type", "partnerType", NULL)
+check("synapse_edges: the fixed orientation counts them the canvas's other way",
+      identical(pairs(fixed$edges), c("1>3>2", "1>2>2")),
+      paste(pairs(fixed$edges), collapse = " "))
+
+check("synapse_edges: Connectivity's column order, split columns after the weight",
+      identical(names(coda_synapse_edges(qr, "neuronId", "partnerId", "type", "partnerType",
+                                         NULL, c("roi"))$edges),
+                c("preId", "preType", "postId", "postType", "weight", "roi")))
+
+split <- coda_synapse_edges(qr, "neuronId", "partnerId", NULL, NULL, NULL, c("roi"))$edges
+check("synapse_edges: a split column breaks the pair and keeps first-appearance order",
+      identical(paste(split$preId, split$postId, split$roi, split$weight),
+                c("1 3 LO(R) 1", "1 3 PLP(R) 1", "1 2 LO(R) 2")),
+      paste(paste(split$preId, split$postId, split$roi, split$weight), collapse = " | "))
+check("synapse_edges: no type picked means no type column",
+      identical(names(split), c("preId", "postId", "weight", "roi")),
+      paste(names(split), collapse = " "))
+
+ragged <- data.frame(
+  neuronId = c("1", "1", "1", "1"),
+  type = c(NA, "LC4", "LC4", "LC4"),
+  partnerId = c("3", "3", NA, "4"),
+  partnerType = c("PLP1", "PLP1", "PLP1", "PLP1"),
+  polarity = c("pre", "pre", "pre", "sideways"),
+  roi = c("LO(R)", "LO(R)", "LO(R)", NA),
+  stringsAsFactors = FALSE
+)
+rag <- coda_synapse_edges(ragged, "neuronId", "partnerId", "type", "partnerType", "polarity",
+                          c("roi"))
+check("synapse_edges: a synapse with no id at one end is dropped and counted",
+      rag$dropped == 1, rag$dropped)
+
+# The same blank-id assertion `probe-py-helpers.py` makes, because the rule is `idText`'s and
+# the two helpers spell it differently -- R with `blank()`, pandas with a strip-and-replace.
+blanks <- coda_synapse_edges(
+  data.frame(neuronId = c("1", "1", "  "), partnerId = c("2", "", "2"),
+             stringsAsFactors = FALSE),
+  "neuronId", "partnerId", NULL, NULL, NULL)
+check("synapse_edges: a blank id is an absence, not an end",
+      blanks$dropped == 2 && identical(blanks$edges$preId, "1"),
+      paste(blanks$dropped, paste(blanks$edges$preId, collapse = " ")))
+check("synapse_edges: an unreadable polarity is counted, not flipped",
+      rag$unoriented == 1 && identical(rag$edges$preId, c("1", "1")),
+      paste(rag$edges$preId, collapse = " "))
+check("synapse_edges: a group's type is its first non-missing one",
+      identical(rag$edges$preType, c("LC4", "LC4")),
+      paste(rag$edges$preType, collapse = " "))
+check("synapse_edges: a null split value is a group of its own",
+      sum(is.na(rag$edges$roi)) == 1, paste(rag$edges$roi, collapse = " "))
+
+# Invariant 8, and R answers it differently from Python -- which is the finding, not a wart.
+# `coda_ids` keeps a character id exact through the fold, and two adjacent eighteen-digit ids
+# stay two neurons.
+wide <- data.frame(neuronId = c("720575940632499757", "720575940632499758"),
+                   partnerId = c("3", "3"), stringsAsFactors = FALSE)
+wide_pre <- coda_synapse_edges(wide, "neuronId", "partnerId", NULL, NULL, NULL)$edges$preId
+check("synapse_edges: wide ids held as text stay two neurons",
+      identical(wide_pre, c("720575940632499757", "720575940632499758")),
+      paste(wide_pre, collapse = " "))
+
+# And the half that is R's alone, pinned because it is what the fetch cell's `coda_ids` call is
+# for. **A wide id that arrives as a double is already lost** -- R has no 64-bit integer, so
+# `720575940632499757` is `...712` before any helper sees it, and no amount of `format()` in
+# `coda_ids` can recover a digit. Python's `Int64` step holds the same value exactly, which is
+# why `probe-py-helpers.py` asserts the opposite of this line. The one guard is that the cast
+# happens at the *seam*, in the cell that fetched the frame.
+# Worse than a wrong digit, which is why it is asserted rather than described: the two ids round
+# onto the *same* double, so the fold sees one neuron and hands back a single connection of
+# weight 2 where the canvas has two of weight 1. A perfectly ordinary-looking row.
+lost <- coda_synapse_edges(
+  data.frame(neuronId = c(720575940632499757, 720575940632499758), partnerId = c(3, 3)),
+  "neuronId", "partnerId", NULL, NULL, NULL)$edges
+check("synapse_edges: two wide ids arriving as R doubles collapse into one neuron",
+      identical(lost$preId, "720575940632499712") && identical(lost$weight, 2L),
+      paste(pairs(lost), collapse = " "))
+
+empty <- coda_synapse_edges(qr[0, ], "neuronId", "partnerId", "type", "partnerType", NULL,
+                            c("roi"))$edges
+check("synapse_edges: an empty cloud keeps every column",
+      nrow(empty) == 0 &&
+        identical(names(empty), c("preId", "preType", "postId", "postType", "weight", "roi")),
+      paste(names(empty), collapse = " "))
+
 cat("\n", if (fails > 0L) paste(fails, "failed") else "all passed", "\n", sep = "")
 quit(status = if (fails > 0L) 1L else 0L)

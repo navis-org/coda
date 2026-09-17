@@ -37,6 +37,7 @@ import { readAttach } from '../../../nodes/transform/attachAttributes'
 import type { ReduceStat } from '../../../nodes/lib/matrixReduce'
 import { readReduceOptions, reduceColumnName } from '../../../nodes/lib/matrixReduce'
 import { volumeColumnName } from '../../../nodes/lib/pointsInMeshes'
+import { edgePlanRefusal, groupColumns, readPlan } from '../../../nodes/lib/synapseEdges'
 import { rCol, rStr, rValue, rVector } from '../r'
 import { asFrame } from '../../neutral'
 import { registerEmitter } from '../registry'
@@ -283,6 +284,53 @@ registerEmitter('neuron.pointsInVolumes', (ctx) => {
     `${outside} <- ${split}$points[is.na(${split}$points[[${rStr(name)}]]), ]`,
     `cat(nrow(${inside}), "points inside ·", nrow(${outside}), "outside ·",`,
     `    ${split}$overlapping, "in more than one volume\n")`,
+  ]
+})
+
+/**
+ * Synapses to Edges: the fold, in `coda_synapse_edges`.
+ *
+ * Base R, and the cell is the call plus the two counts the canvas warns about — `cat` where the
+ * notebook prints, for `Points in Volumes`' reason one node upstream.
+ *
+ * **The one note is R's alone, and it is about the cell above rather than this one.** The R
+ * `Synapses` emitter says out loud that neuprintr answers in its own vocabulary — `bodyid` and a
+ * 0/1 `prepost` where Coda carries `neuronId` and a `"pre"`/`"post"` polarity — and normalises
+ * nothing. The names here are resolved against the *canvas's* schema (`readPlan`, invariant 5),
+ * so on that path they name columns the R frame does not have. It is exactly the polarity
+ * orientation that reaches this node down that path, which is what the note is gated on;
+ * `Synapses Between` emits Coda's names in R as it does in Python, and needs nothing said.
+ */
+registerEmitter('neuron.synapseEdges', (ctx) => {
+  const src = ctx.wired('in')
+  const plan = readPlan(ctx)
+  const refusal = edgePlanRefusal(plan)
+  if (refusal !== undefined) return ctx.todo(refusal)
+  const out = ctx.output('out')
+  const fold = `${ctx.name}_fold`
+
+  ctx.helper('coda_synapse_edges')
+  return [
+    ...(plan.polarity
+      ? ctx.note(
+          'These column names are the canvas\u2019s. A cloud from the Synapses cell above is in ' +
+            'neuprintr\u2019s vocabulary instead \u2014 bodyid and a 0/1 prepost \u2014 so rename it first, or ' +
+            'read this cell as the shape rather than as the spelling.',
+        )
+      : []),
+    `${fold} <- coda_synapse_edges(`,
+    `  ${src},`,
+    `  ${rValue(plan.source)},`,
+    `  ${rValue(plan.target)},`,
+    `  ${rValue(plan.sourceType)},`,
+    `  ${rValue(plan.targetType)},`,
+    `  ${rValue(plan.polarity)},`,
+    // `rVector` already answers `character(0)` for an empty list, and says why.
+    `  ${rVector(groupColumns(plan))}`,
+    `)`,
+    `${out} <- ${fold}$edges`,
+    `cat(nrow(${out}), "connections \u00b7", ${fold}$dropped, "synapses with no id at one end \u00b7",`,
+    `    ${fold}$unoriented, "with an unreadable polarity\n")`,
   ]
 })
 

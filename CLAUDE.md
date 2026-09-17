@@ -1161,6 +1161,45 @@ own `validHints`), live under the lock like a rename; the ✎ sits beside the ×
   `nat::pointsinside`) and both were run against **overlapping** cubes, a tiling set agreeing with a
   short-circuiting implementation; R needs `Rvcg`, which nat only suggests, and the cell says so.
   See [docs/nodes.md](docs/nodes.md) and [docs/limits.md](docs/limits.md).
+- **A synapse cloud folded into an edge list has to say which end was presynaptic, and `polarity`
+  says two opposite things.** `Synapses to Edges` (`neuron.synapseEdges`) counts a point cloud into
+  `neuron.connectivity`'s own columns, so `Synapses Between ▸ Points in Volumes ▸ Synapses to Edges`
+  answers "how are these wired *inside `LO(R)`*" — which neuPrint answers only as whole-connection
+  `roiInfo` and CAVE and CATMAID not at all. `Split by` takes extra columns, so the region column
+  the card above minted gives one row per pair per region in one node, `Connectivity`'s
+  `Split by region` for the backends that have none; which is also why those columns sit **after
+  `weight`** rather than in front of the keys, a per-region edge list from either node then reading
+  the same way across. **Two things carry the node and only one is a capability argument**: nothing
+  in the catalogue can swap a pair of columns per row, and `core.groupBy` names its count `n` by
+  construction so it cannot emit a Connectivity-shaped table at all. Widening `isAssignable` would
+  have been wrong on its own terms — the two carry different *values*, so every `isTableValue`
+  guard would start failing at run time on a link the type system had just approved. **`polarity` is the *drawn
+  end* on a `Synapses Between` cloud — constant, set by `Location` — and the queried neuron's own
+  *role* on a `Synapses` one**, so counting the second unflipped merges a neuron's inputs and
+  outputs into an edge list with half its arrows reversed, right shape, right weights; and it
+  cannot be detected, both clouds carrying `neuronId`/`partnerId`/`polarity` and `Location: post`
+  filling that column with `post` in every row — hence `Orientation` is a control, and a cell
+  reading neither `pre` nor `post` is counted and **not** flipped, since flipping on "not pre"
+  turns every null into a reversed edge. A weight is a **row count, never a sum**: CAVE's point
+  `weight` is a cleft score and neuPrint's `confidence` a predictor score, so there is no
+  value-column picker, and the `synapses` unit on it asserts one row is one connection — true for
+  every cloud that can reach the port, since `synapsesBetween` is one point per connection on all
+  three backends and the partnerless clouds, whose unit is the one that varies, are refused before
+  they arrive. Both ends go through `idText`, which on the canvas is discipline rather than
+  load-bearing — every source publishes an id as `str` already — and earns its place at the
+  *export* seam, which `probe-r-helpers.R` pins. The one line `validate` adds is the one the framework cannot: `resolveColumn`'s rule 3
+  puts **both** pickers on `neuronId` for a partnerless neuPrint cloud (that node drops the
+  partner, resolving one being a join), and two pickers each resolving perfectly well onto one
+  column describe no edge at all. **That sentence is `edgePlanRefusal`'s, not four files'** —
+  `validate`, `evaluate` and both emitters render one function, `kindClashMessage`'s rule, which
+  written out per layer had already drifted into three different remedies inside the change that
+  introduced it; it **exceeds** `columnClash`, which stops at two layers and so lets the notebook
+  overwrite a column the canvas refuses. The orientation control is also the **second** instance of
+  one missing field, not a fact about this node: the producer knows in both cases and throws it
+  away, and `data/synapseUnits.ts` records that a `PointsValue` carries no unit either. No
+  `Min weight`, deliberately: every other control is a click, and a scrubbable number on a `cheap`
+  node re-folds the whole cloud per frame where `Filter Table` is one card down.
+  See [docs/nodes.md](docs/nodes.md).
 - **A split is one pass, because two filters with opposite conditions are not a partition.**
   `Split Neurons` (`neuron.splitNeurons`) is **`Stack Neurons` run backwards**: it asks the attribute
   table a collection carries a set of Find Neurons rows and hands back both halves, so

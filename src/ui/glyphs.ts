@@ -469,6 +469,21 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M10.6 12h2.6' }],
     ['path', { d: 'M12.4 10.6 13.8 12l-1.4 1.4' }],
   ],
+  /*
+   * The cloud on the left, the edge list on the right. Synapses' filled dots — a synapse is a
+   * location — folding into `net.build`'s three rows, which is the mark for a table here, with
+   * `neuron.roiConnectivity`'s arrow between them for the fold. Nothing borrows the graph
+   * family's hollow circles: what leaves this node is a table, and the node that turns one into
+   * a network is the next card along.
+   */
+  'neuron.synapseEdges': [
+    ['circle', { cx: '5.2', cy: '7.4', r: '1.6', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '8', cy: '12.2', r: '1.6', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '4.8', cy: '16.8', r: '1.6', fill: 'currentColor', stroke: 'none' }],
+    ['path', { d: 'M11.2 12h2.4' }],
+    ['path', { d: 'M12.9 10.3 14.6 12l-1.7 1.7' }],
+    ['path', { d: 'M16.8 8h3.8M16.8 12h3.8M16.8 16h3.8' }],
+  ],
   'neuron.mirror': [
     ['path', { d: 'M12 3.6v16.8', strokeDasharray: '2.6 2.4' }],
     ['path', { d: 'M7.6 19.4v-5.2L4.8 11M7.6 14.2l3-2.6M10.6 11.6l-.8-2.8' }],

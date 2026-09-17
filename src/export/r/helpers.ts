@@ -1338,3 +1338,88 @@ registerHelper({
     '}',
   ],
 })
+
+/**
+ * A synapse cloud counted into an edge list, as Coda's `Synapses to Edges`.
+ *
+ * The notebook helper's twin, and base R rather than dplyr for once — the whole of it is a
+ * grouped count with a first-appearance order, which `match`/`tabulate` say directly, where
+ * `group_by |> summarise()` would need `.drop = FALSE` reasoning about factors and still sort.
+ *
+ * Three rules it carries, all the node's (see `nodes/lib/synapseEdges.ts`): a row whose polarity
+ * reads `post` swaps both ids *and* both types; a group's type is its first non-missing one; and
+ * an end with no id is not an edge, so the row is dropped and counted.
+ *
+ * The composite key's two sentinels are not the TypeScript's and cannot be — R refuses an
+ * embedded nul in a character vector outright, so `rowKey`'s own missing-value sentinel has no
+ * spelling here. The line that uses them says the rest.
+ */
+registerHelper({
+  name: 'coda_synapse_edges',
+  needs: ['coda_ids', 'coda_match_keys'],
+  source: [
+    "#' Count a synapse cloud into an edge list. Coda's Synapses to Edges.",
+    'coda_synapse_edges <- function(df, source, target, source_type, target_type,',
+    '                               polarity, by = character(0)) {',
+    '  df <- coda_ids(df, source, target)',
+    '  # A column that was not picked stands in as all-missing rather than being indexed out of',
+    '  # the frame: with one type picked and not the other, a flipped row has nothing to carry.',
+    '  held <- function(name) {',
+    '    if (is.null(name)) rep(NA_character_, nrow(df)) else as.character(df[[name]])',
+    '  }',
+    '  if (is.null(polarity)) {',
+    '    flip <- rep(FALSE, nrow(df))',
+    '    unoriented <- 0L',
+    '  } else {',
+    '    text <- tolower(trimws(as.character(df[[polarity]])))',
+    '    flip <- !is.na(text) & text == "post"',
+    '    # `%in%` never yields NA, so an unreadable cell is already counted here; the',
+    '    # `!is.na` above is needed because `NA == "post"` is NA rather than FALSE.',
+    '    unoriented <- sum(!text %in% c("pre", "post"))',
+    '  }',
+    '  # `idText` trims first, so "  " is an absence and not an id -- pandas strips in the',
+    '  # notebook helper for the same reason.',
+    '  blank <- function(v) { v <- trimws(v); v[!is.na(v) & v == ""] <- NA_character_; v }',
+    '  # `ifelse` evaluates both arms over the whole frame, so the fixed orientation -- the',
+    '  # default, and what the fixture emits -- takes the column it was given and no temporary.',
+    '  side <- function(when_flipped, otherwise) {',
+    '    if (is.null(polarity)) return(held(otherwise))',
+    '    ifelse(flip, held(when_flipped), held(otherwise))',
+    '  }',
+    '  pre <- blank(side(target, source))',
+    '  post <- blank(side(source, target))',
+    '  keep <- !is.na(pre) & !is.na(post)',
+    '  dropped <- sum(!keep)',
+    '  kept <- which(keep)',
+    '  pre <- pre[kept]; post <- post[kept]',
+    "  # `coda_match_keys` is rowKey's rule one language over, and the helper it belongs to asks",
+    '  # to be needed rather than copied -- a logical column keys "true", not "TRUE".',
+    '  parts <- c(list(pre, post), lapply(by, function(name) coda_match_keys(df[[name]][kept])))',
+    '  # \\x1f stands for a missing value and \\x1e separates the fields, so two columns cannot',
+    '  # be read as one. R has no spelling for an embedded nul, which is what rowKey uses.',
+    '  parts <- lapply(parts, function(v) { v[is.na(v)] <- "\\x1f"; v })',
+    '  keys <- do.call(paste, c(parts, list(sep = "\\x1e")))',
+    '  # `duplicated` gives the first occurrences directly; `match(groups, keys)` would hash',
+    '  # every key a third time to recover them.',
+    '  first <- which(!duplicated(keys))',
+    '  groups <- keys[first]',
+    '  at <- match(keys, groups)',
+    '  # Assigned in reverse so the *earliest* non-missing value of each group is the one left',
+    "  # standing -- the canvas's first-non-null rule, without a loop over groups.",
+    '  carried <- function(values) {',
+    '    values <- as.character(values)[kept]',
+    '    out <- rep(NA_character_, length(groups))',
+    '    ok <- rev(which(!is.na(values)))',
+    '    out[at[ok]] <- values[ok]',
+    '    out',
+    '  }',
+    '  edges <- data.frame(preId = pre[first], stringsAsFactors = FALSE)',
+    '  if (!is.null(source_type)) edges$preType <- carried(side(target_type, source_type))',
+    '  edges$postId <- post[first]',
+    '  if (!is.null(target_type)) edges$postType <- carried(side(source_type, target_type))',
+    '  edges$weight <- tabulate(at, nbins = length(groups))',
+    '  for (name in by) edges[[name]] <- df[[name]][kept[first]]',
+    '  list(edges = edges, dropped = dropped, unoriented = unoriented)',
+    '}',
+  ],
+})

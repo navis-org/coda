@@ -325,11 +325,20 @@ export function rowKey(columns: ReadonlyArray<ColumnData>, row: number): string 
   let key = ''
   for (let k = 0; k < columns.length; k++) {
     const cell = columns[k]![row]
-    if (k > 0) key += '\u0001'
+    if (k > 0) key += KEY_SEPARATOR
     key += cell === null || cell === undefined ? '\u0000' : String(cell)
   }
   return key
 }
+
+/**
+ * The separator above, for a caller that builds part of a key itself.
+ *
+ * Exported because `synapseEdges.ts` prefixes two ids onto a `rowKey` and was spelling the
+ * character again, with a paragraph re-deriving the escape-versus-literal rule this function's
+ * own header already states. One constant, and the rule stays stated once.
+ */
+export const KEY_SEPARATOR = '\u0001'
 
 // ---------------------------------------------------------------------------
 // Deduplicate

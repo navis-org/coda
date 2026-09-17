@@ -155,6 +155,17 @@ const RELATED: readonly (readonly string[])[] = [
   // A neuron's own summary, and the two queries it folds up.
   ['out.profile', 'neuron.connectivity', 'neuron.roiCounts'],
 
+  // Where the synapses are, and the connectivity you get by counting them somewhere. Three of
+  // the four have no document yet, so this group relates nothing today — which is what the
+  // "may name the node whose document arrives next month" rule is for: the relation is the
+  // thing worth writing down, and it is exactly the one nobody would reconstruct later.
+  [
+    'neuron.synapsesBetween',
+    'neuron.pointsInVolumes',
+    'neuron.synapseEdges',
+    'neuron.connectivity',
+  ],
+
   // --- looking at it --------------------------------------------------------
   // A table, a chart of two of its columns, and a picture of the whole of it.
   ['out.table', 'out.scatter', 'out.heatmap'],

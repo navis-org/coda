@@ -1304,3 +1304,78 @@ registerHelper({
     '    return out, int(ambiguous.sum())',
   ],
 })
+
+/**
+ * A synapse cloud counted into an edge list, as Coda's `Synapses to Edges`.
+ *
+ * A helper rather than lines in the cell for `coda_in_volumes`' reason: the rules are the
+ * *node's*, and three of them are exactly the ones a reader writing this by hand gets wrong —
+ * which is also why the node exists. See `nodes/lib/synapseEdges.ts`.
+ *
+ * - **The flip.** A row whose polarity reads `post` holds the downstream neuron in the column
+ *   the pickers call presynaptic, so both ids *and* both types swap. Under the fixed
+ *   orientation nothing is read and nothing swaps.
+ * - **`sort=False`**, because the canvas emits groups in first-appearance order and pandas
+ *   sorts by default — a diff of the two tables would otherwise be every row.
+ * - **`dropna=False`**, because a split column is routinely null: `Points in Volumes` writes
+ *   one on both ports and the `Outside` half holds nothing else.
+ *
+ * A type is `first()`, which skips nulls in pandas — `labelsByNeuron`'s first-non-null rule,
+ * for free and by coincidence rather than by design, so it is asserted in the probe rather
+ * than assumed here. A synapse with no id at either end is not an edge and is dropped, counted,
+ * and printed by the cell, a notebook having no status bar to warn into.
+ */
+registerHelper({
+  name: 'coda_synapse_edges',
+  requires: [['pandas']],
+  needs: ['coda_ids'],
+  source: [
+    'def coda_synapse_edges(df, source, target, source_type, target_type, polarity, by):',
+    '    """Count a synapse cloud into an edge list. Coda\'s Synapses to Edges."""',
+    '    # Only the two id columns are cast, so only they are copied: a million-point cloud',
+    '    # carries x/y/z as well, and `coda_ids` writes into the frame it is handed.',
+    '    ids = coda_ids(df[[source, target]].copy(), source, target)',
+    '    if polarity:',
+    "        text = df[polarity].astype('string').str.strip().str.lower()",
+    "        flip = text.eq('post').fillna(False)",
+    "        unoriented = int((~text.isin(['pre', 'post'])).sum())",
+    '    else:',
+    '        flip = pd.Series(False, index=df.index)',
+    '        unoriented = 0',
+    '    # `where` keeps the left where the condition holds, so a flipped row reads the target',
+    '    # column as its presynaptic end. Both types swap with them or a pair is named backwards.',
+    '    rows = pd.DataFrame(index=df.index)',
+    "    rows['preId'] = ids[target].where(flip, ids[source])",
+    "    rows['postId'] = ids[source].where(flip, ids[target])",
+    '    if source_type or target_type:',
+    '        left = df[source_type] if source_type else pd.Series(pd.NA, index=df.index)',
+    '        right = df[target_type] if target_type else pd.Series(pd.NA, index=df.index)',
+    '        if source_type:',
+    "            rows['preType'] = right.where(flip, left)",
+    '        if target_type:',
+    "            rows['postType'] = left.where(flip, right)",
+    '    for name in by:',
+    '        rows[name] = df[name]',
+    '    # `idText` reads a blank as an absence, so a blank id is not an end — the same rule',
+    '    # the R helper spells as `blank()`. Without it a cloud with an empty id cell yields',
+    '    # a real edge the canvas never counted, and `dropped` under-reports by those rows.',
+    "    for end in ('preId', 'postId'):",
+    "        rows[end] = rows[end].astype('string').str.strip().replace('', pd.NA)",
+    "    kept = rows[rows['preId'].notna() & rows['postId'].notna()]",
+    '    dropped = int(len(rows) - len(kept))',
+    "    keys = ['preId', 'postId'] + list(by)",
+    "    aggs = {'weight': ('preId', 'size')}",
+    "    for name in ('preType', 'postType'):",
+    '        if name in kept.columns:',
+    "            aggs[name] = (name, 'first')",
+    '    edges = (',
+    '        kept.groupby(keys, dropna=False, sort=False)',
+    '        .agg(**aggs)',
+    '        .reset_index()',
+    '    )',
+    "    # Connectivity's column order, which is what makes the two results interchangeable.",
+    "    order = [c for c in ('preId', 'preType', 'postId', 'postType', 'weight')",
+    '             if c in edges.columns]',
+    '    return edges[order + list(by)], dropped, unoriented',
+  ],
+})

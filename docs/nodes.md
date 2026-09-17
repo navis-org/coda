@@ -3425,6 +3425,156 @@ neuprintr route, so it runs the canvas's own Cypher — `synapsesBetweenCypher` 
 `{sources}`/`{targets}` placeholders — which also makes it the one export carrying types. The R
 chunk has not been run: neuprintr was not installed where this was written.
 
+## Synapses to Edges: connectivity counted where the synapses are
+
+`neuron.synapseEdges` takes a synapse point cloud and hands back an edge list — one row per
+connected pair, `weight` being the number of synapses between them, under
+`neuron.connectivity`'s own column names.
+
+### Why it exists: the chain, and the question at the end of it
+
+`Synapses Between ▸ Points in Volumes ▸ Synapses to Edges` answers **"how are these neurons wired
+inside `LO(R)`"**. Each card on its own already existed and the question did not: the first says
+where every synapse is, the second (the section further up) says which region each one is in, and
+nothing turned a labelled cloud back into connectivity. neuPrint answers a near-neighbour of this
+from `ConnectsTo.roiInfo` — whole connections broken down by region, which `Connectivity`'s
+`Split by region` reads — and CAVE and CATMAID answer nothing of the kind at all, their synapse
+tables carrying coordinates and root ids and no region. Counting the cloud is the only route they
+have, and it is the *same* route on all three.
+
+`Split by` generalises it in one control: extra columns that break each pair, so splitting on the
+region column the card above minted gives one row per pair per region in a single node. That is
+`Connectivity`'s `Split by region` for the two backends that have none — which is also why those
+columns sit **after `weight`** in the schema rather than in front of the keys, where a grouped
+table would normally put them. A per-region edge list from either node then reads the same way
+across.
+
+### Why it is not a Group By
+
+A `PointsValue` is not assignable to `T.table()` — `isAssignable` widens `neurons` into `table`
+and nothing else — so a synapse cloud has no route into `core.groupBy` at all. That is the
+mechanical half, and widening it would be wrong on its own terms: the two carry different
+*values*, so every `isTableValue` guard in every table node would start failing at run time on a
+link the type system had just approved.
+
+**Two things carry the node**, and only the first is a capability argument. Nothing in the
+catalogue can swap a pair of columns per row, so the flip below is unreachable from any
+arrangement of existing cards; and `core.groupBy` names its count `n` and its aggregates
+`<agg>_<column>` by construction, so it cannot produce a Connectivity-shaped table at all — which
+is the whole of what makes this result interchangeable with one.
+
+The two after it read like correctness arguments and are not, so they are recorded as what they
+are — a default worth getting right, and a note about the exporter:
+
+**`polarity` means two opposite things under one name**, so grouping a query-relative cloud by
+`(neuronId, partnerId)` merges a neuron's inputs and its outputs into one edge list with half its
+arrows backwards. That is the one reason that needs code, and the `Orientation` section below has
+it in full.
+
+**A weight is a row count, never a sum.** CAVE's point `weight` is a cleft score and neuPrint's
+`confidence` a predictor score; summing either gives a number in the right sort of range that is
+not a synapse count. `core.groupBy` counts perfectly well — what the node buys here is that there
+is no value-column picker to get wrong.
+
+The count is declared in `synapses`, which asserts **one row is one synaptic connection** — and
+`data/synapseUnits.ts` exists because that is backend-dependent (neuPrint returns a row per T-bar
+per partner, CATMAID one per connector, and the `sites`/`links` control on `Synapses` picks).
+It holds for every cloud that can reach this port: `Synapses Between` is one point per connection
+on all three backends, and the partnerless clouds — which are the ones whose unit varies — are
+refused before they get here.
+
+**Both ends go through `idText`** (invariant 8), which on the canvas is discipline rather than
+load-bearing: every source already publishes an id as `str`, so a Group By would group them
+correctly today. It earns its place at the *export* seam, where the R probe pins two adjacent root
+ids arriving as R doubles rounding onto the **same** value — the fold then hands back one
+connection of weight 2 where the canvas has two of weight 1.
+
+### `Orientation` is chosen, not detected
+
+Two readings — the pickers are already oriented (the default) or a polarity column says which way
+each row goes — and the node will not guess between them, because **nothing can**. The two clouds
+that reach this port carry the same three columns, `neuronId`, `partnerId` and `polarity`; and
+sniffing the *values* fails too, since a `Synapses Between` cloud with `Location: post` reads
+`post` in every row of the column that would drive the flip. A detector would be right on the
+common case and silently reverse a whole edge list on the other.
+
+The safe direction is written into the fold as well: a polarity cell reading neither `pre` nor
+`post` is **counted and left alone**, so the row says what the pickers name. Flipping on "not pre"
+would turn every null into a reversed edge.
+
+What the control is *standing in for* is worth naming, because it is the second instance of one
+gap rather than a fact about this node. The producer knows the answer in both cases —
+`fetchSynapsesBetween`'s contract says "oriented rather than query-relative" in prose, and
+`neuron.synapses` on a pinned polarity is oriented too — and throws it away, so a card three steps
+later asks the reader for it. `data/synapseUnits.ts` has already recorded the same shape for a
+different fact: a `PointsValue` carries no unit either, so nothing says which one answered after a
+run. A provenance block on the value would close both, and would have to survive every node that
+rebuilds a cloud — `Points in Volumes`, `Transform`, `Mirror`, `Attach Attributes`, and a
+`Stack Neurons` that would need a clash rule for two clouds that disagree. Left as the control, and
+recorded so the two instances are findable from each other.
+
+### What `validate` says, and the one thing only this node knows
+
+`resolveColumn`'s rule 3 hands a picker still on its declared default the *first compatible
+column*. A `Synapses` cloud from neuPrint carries no partner column at all — that node drops it
+because resolving a partner is a join — so `Postsynaptic`, defaulting to `partnerId`, resolves onto
+`neuronId`, the same column as `Presynaptic`. `validateColumnParams` already reports the
+substitution on every node; what it cannot say is what the *pair* means, which is that every edge
+would be a self-loop. That sentence is `edgePlanRefusal`'s — one function rendered by `validate`,
+`evaluate` and both emitters, which **exceeds** the `columnClash` convention it follows: that one
+stops at two layers, so the notebook for `Points in Volumes` still overwrites a column the canvas
+refuses.
+
+The other line is the split columns it will ignore. A name the node owns would appear twice in one
+schema, and a CAVE synapse cloud really does carry a column called `weight`; a column already spent
+on an endpoint would repeat itself, or — for the polarity column under the polarity orientation —
+split every pair in two by the thing the fold has just used up. **Dropped rather than refused, with
+the node saying which**: a picker keeps what somebody chose, and emptying it on their behalf is the
+substitution a column picker is not allowed to make. Only where it is doing the orienting, though:
+under the fixed reading a polarity column is an ordinary column and a legitimate thing to split on.
+
+### `cheap`, and the params are what make that safe
+
+One pass over an attribute table, nothing fetched — `core.groupBy`'s own cost, and this is
+`core.groupBy` with a smaller question. Every control is a click rather than a keystroke, which is
+the other half: there is deliberately **no `Min weight`**, because a scrubbable number on a `cheap`
+node re-folds the whole cloud per frame and `Filter Table` is one card downstream saying the same
+thing.
+
+### The exporters, and what running them showed
+
+`coda_synapse_edges` in both languages, for `coda_in_volumes`' reason one card up: the rules are the
+node's rather than pandas' or base R's. Nothing diverges — both languages can say every rule here —
+so neither cell carries a note about the answer, and both print the two counts the canvas raises as
+warnings.
+
+Both were **run**, `pnpm probe:helpers` and `pnpm probe:r-helpers`, against the same fixtures
+`synapseEdges.test.ts` uses, so the three implementations are asked the same questions or they are
+free to drift while all three stay green. Two things came out of running them:
+
+- **pandas' `GroupBy.first()` skips nulls**, which is the canvas's first-non-null rule for free —
+  behaviour of the library rather than anything the helper says, so it is asserted rather than
+  assumed. Base R has no groupwise equivalent, and gets the same answer by assigning in reverse so
+  the earliest value is the one left standing.
+- **The composite key's sentinels differ between the two.** `rowKey` stands a missing value up as
+  ` `; R refuses an embedded nul in a character vector outright, so the R helper uses the unit
+  and record separators. Nothing leaves either function, so the only property that has to hold is
+  that neither character appears in real data.
+
+The R cell carries one note, and it is about the cell *above* it — neuprintr answers in its own
+vocabulary and the R `Synapses` emitter normalises nothing, so the names resolved here (invariant
+5, against the canvas's schema) are not the ones in that frame. The emitter argues the gating.
+
+One thing the fixture rewire cost, argued at the fixture itself: `Points in Volumes` now sits on
+a cloud in Coda's own vocabulary only, which costs nothing while nothing on that chain reads a
+column name.
+
+**The polarity branch has no honest configuration in either export fixture**, and that is worth
+stating rather than leaving as a hole. It wants a query-relative cloud carrying a partner, which
+only CAVE's `Synapses` produces — and both `neuron.synapses` emitters are written for neuPrint. So
+the fixture carries the fixed orientation on the chain the node exists for, and the flip is run
+rather than emitted, in both probes.
+
 ## Connectivity: hops and direction
 
 `Direction` offers `both`, and `Hops` traverses further than one synapse. Both changed what the

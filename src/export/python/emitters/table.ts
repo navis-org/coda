@@ -28,6 +28,7 @@ import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
 import { readAttach } from '../../../nodes/transform/attachAttributes'
 import { volumeColumnName } from '../../../nodes/lib/pointsInMeshes'
+import { edgePlanRefusal, groupColumns, readPlan } from '../../../nodes/lib/synapseEdges'
 import { carryable } from '../../../nodes/lib/carryParams'
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import { asFrame } from '../../neutral'
@@ -318,6 +319,45 @@ registerEmitter('neuron.pointsInVolumes', (ctx) => {
     ``,
     `print(f"{len(${inside})} points inside · {len(${outside})} outside · "`,
     `      f"{${overlapping}} in more than one volume")`,
+  ]
+})
+
+/**
+ * Synapses to Edges: the fold, in `coda_synapse_edges`.
+ *
+ * Nothing here is a divergence — pandas can say every rule this node has — so the cell is the
+ * call, the two counts the canvas warns about, and no note. What it *does* have to get right is
+ * the column names, which come through `readPlan` rather than off `ctx.params`: invariant 5's
+ * corollary for an emitter, and with five column pickers on this node it is five chances to
+ * write a name the run never used. The refusal is `edgePlanRefusal`'s for the same reason one
+ * layer over — the canvas says this in the same words.
+ */
+registerEmitter('neuron.synapseEdges', (ctx) => {
+  const src = ctx.wired('in')
+  const plan = readPlan(ctx)
+  const refusal = edgePlanRefusal(plan)
+  if (refusal !== undefined) return ctx.todo(refusal)
+  const out = ctx.output('out')
+  const dropped = `${ctx.name}_dropped`
+  const unoriented = `${ctx.name}_unoriented`
+
+  ctx.require('pandas')
+  ctx.helper('coda_synapse_edges')
+  return [
+    `${out}, ${dropped}, ${unoriented} = coda_synapse_edges(`,
+    `    ${src},`,
+    `    ${pyValue(plan.source)},`,
+    `    ${pyValue(plan.target)},`,
+    `    ${pyValue(plan.sourceType)},`,
+    `    ${pyValue(plan.targetType)},`,
+    `    ${pyValue(plan.polarity)},`,
+    `    ${pyList(groupColumns(plan))},`,
+    `)`,
+    ``,
+    // The canvas raises both as warnings; a notebook has no status bar, so they are printed —
+    // `coda_in_volumes`' arrangement at the cell one node upstream.
+    `print(f"{len(${out})} connections · {${dropped}} synapses with no id at one end · "`,
+    `      f"{${unoriented}} with an unreadable polarity")`,
   ]
 })
 

@@ -1217,6 +1217,71 @@ coda_similarity_wide <- function(df, id_column, columns, metric = "cosine",
 }
 
 
+#' Count a synapse cloud into an edge list. Coda's Synapses to Edges.
+coda_synapse_edges <- function(df, source, target, source_type, target_type,
+                               polarity, by = character(0)) {
+  df <- coda_ids(df, source, target)
+  # A column that was not picked stands in as all-missing rather than being indexed out of
+  # the frame: with one type picked and not the other, a flipped row has nothing to carry.
+  held <- function(name) {
+    if (is.null(name)) rep(NA_character_, nrow(df)) else as.character(df[[name]])
+  }
+  if (is.null(polarity)) {
+    flip <- rep(FALSE, nrow(df))
+    unoriented <- 0L
+  } else {
+    text <- tolower(trimws(as.character(df[[polarity]])))
+    flip <- !is.na(text) & text == "post"
+    # `%in%` never yields NA, so an unreadable cell is already counted here; the
+    # `!is.na` above is needed because `NA == "post"` is NA rather than FALSE.
+    unoriented <- sum(!text %in% c("pre", "post"))
+  }
+  # `idText` trims first, so "  " is an absence and not an id -- pandas strips in the
+  # notebook helper for the same reason.
+  blank <- function(v) { v <- trimws(v); v[!is.na(v) & v == ""] <- NA_character_; v }
+  # `ifelse` evaluates both arms over the whole frame, so the fixed orientation -- the
+  # default, and what the fixture emits -- takes the column it was given and no temporary.
+  side <- function(when_flipped, otherwise) {
+    if (is.null(polarity)) return(held(otherwise))
+    ifelse(flip, held(when_flipped), held(otherwise))
+  }
+  pre <- blank(side(target, source))
+  post <- blank(side(source, target))
+  keep <- !is.na(pre) & !is.na(post)
+  dropped <- sum(!keep)
+  kept <- which(keep)
+  pre <- pre[kept]; post <- post[kept]
+  # `coda_match_keys` is rowKey's rule one language over, and the helper it belongs to asks
+  # to be needed rather than copied -- a logical column keys "true", not "TRUE".
+  parts <- c(list(pre, post), lapply(by, function(name) coda_match_keys(df[[name]][kept])))
+  # \x1f stands for a missing value and \x1e separates the fields, so two columns cannot
+  # be read as one. R has no spelling for an embedded nul, which is what rowKey uses.
+  parts <- lapply(parts, function(v) { v[is.na(v)] <- "\x1f"; v })
+  keys <- do.call(paste, c(parts, list(sep = "\x1e")))
+  # `duplicated` gives the first occurrences directly; `match(groups, keys)` would hash
+  # every key a third time to recover them.
+  first <- which(!duplicated(keys))
+  groups <- keys[first]
+  at <- match(keys, groups)
+  # Assigned in reverse so the *earliest* non-missing value of each group is the one left
+  # standing -- the canvas's first-non-null rule, without a loop over groups.
+  carried <- function(values) {
+    values <- as.character(values)[kept]
+    out <- rep(NA_character_, length(groups))
+    ok <- rev(which(!is.na(values)))
+    out[at[ok]] <- values[ok]
+    out
+  }
+  edges <- data.frame(preId = pre[first], stringsAsFactors = FALSE)
+  if (!is.null(source_type)) edges$preType <- carried(side(target_type, source_type))
+  edges$postId <- post[first]
+  if (!is.null(target_type)) edges$postType <- carried(side(source_type, target_type))
+  edges$weight <- tabulate(at, nbins = length(groups))
+  for (name in by) edges[[name]] <- df[[name]][kept[first]]
+  list(edges = edges, dropped = dropped, unoriented = unoriented)
+}
+
+
 coda_traverse_connectivity <- function(seed_ids, direction, hops, min_weight,
                                        all_segments, conn) {
   # Coda's Connectivity node past one hop: a breadth-first walk returning an edge list.
@@ -2177,20 +2242,6 @@ attach_attributes[, "pre"] <- find_neurons[["pre"]][idx_]
 attach_attributes[, "post"] <- find_neurons[["post"]][idx_]
 ```
 
-```{r points-in-volumes}
-# ── Points in Volumes ──
-# NOTE: nat::pointsinside needs the Rvcg package, which nat suggests rather
-# than depends on — install.packages("Rvcg") if this errors. It casts its
-# own rays where Coda descends a bounding volume hierarchy, so the two agree
-# on any closed mesh except at its surface.
-points_in_volumes_split <- coda_in_volumes(synapses, roi_meshes, "roi")
-points_in_volumes_inside <- points_in_volumes_split$points[!is.na(points_in_volumes_split$points[["roi"]]), ]
-points_in_volumes_outside <- points_in_volumes_split$points[is.na(points_in_volumes_split$points[["roi"]]), ]
-cat(nrow(points_in_volumes_inside), "points inside ·", nrow(points_in_volumes_outside), "outside ·",
-    points_in_volumes_split$overlapping, "in more than one volume
-")
-```
-
 ```{r relabel}
 # ── Relabel ──
 relabel <- coda_relabel(find_neurons, "type", combine_columns, "type", "label", into = "shared", unmatched = "keep")
@@ -2222,6 +2273,20 @@ partner_vectors_3 <- coda_partner_vectors(
 ```{r qualify-ids-2}
 # ── Qualify Ids ──
 qualify_ids_2 <- coda_qualify_ids(qualify_ids, "neuronId", direction = "remove", into = "dataset")
+```
+
+```{r points-in-volumes}
+# ── Points in Volumes ──
+# NOTE: nat::pointsinside needs the Rvcg package, which nat suggests rather
+# than depends on — install.packages("Rvcg") if this errors. It casts its
+# own rays where Coda descends a bounding volume hierarchy, so the two agree
+# on any closed mesh except at its surface.
+points_in_volumes_split <- coda_in_volumes(synapses_between_2, roi_meshes, "roi")
+points_in_volumes_inside <- points_in_volumes_split$points[!is.na(points_in_volumes_split$points[["roi"]]), ]
+points_in_volumes_outside <- points_in_volumes_split$points[is.na(points_in_volumes_split$points[["roi"]]), ]
+cat(nrow(points_in_volumes_inside), "points inside ·", nrow(points_in_volumes_outside), "outside ·",
+    points_in_volumes_split$overlapping, "in more than one volume
+")
 ```
 
 ```{r sort-df}
@@ -2396,6 +2461,23 @@ embedding_3 <- coda_relabel(
   into = "annotation",
   unmatched = "null"
 )
+```
+
+```{r synapses-to-edges}
+# ── Synapses to Edges ──
+synapses_to_edges_fold <- coda_synapse_edges(
+  points_in_volumes_inside,
+  "neuronId",
+  "partnerId",
+  "type",
+  "partnerType",
+  NULL,
+  c("roi")
+)
+synapses_to_edges <- synapses_to_edges_fold$edges
+cat(nrow(synapses_to_edges), "connections ·", synapses_to_edges_fold$dropped, "synapses with no id at one end ·",
+    synapses_to_edges_fold$unoriented, "with an unreadable polarity
+")
 ```
 
 ```{r sample-df}

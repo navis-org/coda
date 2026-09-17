@@ -1170,6 +1170,102 @@ else:
     check("umap call: precomputed_knn takes the helper's arrays as they are",
           _xy2.shape == (40, 2) and np.isfinite(_xy2).all(), str(_xy2.shape))
 
+# ---- coda_synapse_edges -----------------------------------------------------
+# Synapses to Edges. The canvas's own assertions, run against pandas, because three of the four
+# rules here are ones `synapseEdges.test.ts` pins in TypeScript and nothing executes on this
+# side: the flip, first-appearance order, and a group's type being its first non-missing one —
+# that last resting on `GroupBy.first()` skipping nulls, which is pandas' behaviour rather than
+# anything the helper says, so it is checked rather than assumed.
+sens = load_cell(FIXTURES / "everything.ipynb", "def coda_ids(", {"pd": pd, "np": np})
+sens = load_cell(FIXTURES / "everything.ipynb", "def coda_synapse_edges(", sens)
+_edges = sens['coda_synapse_edges']
+
+# One neuron's inputs and its outputs in one query-relative cloud: 1 drives 3 twice, and 2 drives
+# 1 twice, which the cloud writes as two `post` rows on body 1.
+_qr = pd.DataFrame({
+    'neuronId': ['1', '1', '1', '1'],
+    'type': ['LC4', 'LC4', 'LC4', 'LC4'],
+    'partnerId': ['3', '3', '2', '2'],
+    'partnerType': ['PLP1', 'PLP1', 'T4a', 'T4a'],
+    'polarity': ['pre', 'pre', 'post', 'post'],
+    'roi': ['LO(R)', 'PLP(R)', 'LO(R)', 'LO(R)'],
+})
+
+_flipped, _dropped, _unoriented = _edges(
+    _qr, 'neuronId', 'partnerId', 'type', 'partnerType', 'polarity', [])
+_pairs = list(zip(_flipped['preId'], _flipped['postId'], _flipped['weight']))
+check('synapse_edges: a post row is flipped, so inputs and outputs stay apart',
+      _pairs == [('1', '3', 2), ('2', '1', 2)], repr(_pairs))
+check('synapse_edges: both types flip with the ids',
+      list(_flipped['preType']) == ['LC4', 'T4a'], repr(list(_flipped['preType'])))
+check('synapse_edges: nothing is dropped or unreadable here',
+      (_dropped, _unoriented) == (0, 0), repr((_dropped, _unoriented)))
+
+_fixed, _, _ = _edges(_qr, 'neuronId', 'partnerId', 'type', 'partnerType', None, [])
+_pairs = list(zip(_fixed['preId'], _fixed['postId'], _fixed['weight']))
+check('synapse_edges: the fixed orientation counts them the canvas\'s other way',
+      _pairs == [('1', '3', 2), ('1', '2', 2)], repr(_pairs))
+
+check('synapse_edges: Connectivity\'s column order, split columns after the weight',
+      list(_edges(_qr, 'neuronId', 'partnerId', 'type', 'partnerType', None, ['roi'])[0].columns)
+      == ['preId', 'preType', 'postId', 'postType', 'weight', 'roi'])
+
+_split, _, _ = _edges(_qr, 'neuronId', 'partnerId', None, None, None, ['roi'])
+check('synapse_edges: a split column breaks the pair and keeps first-appearance order',
+      list(zip(_split['preId'], _split['postId'], _split['roi'], _split['weight']))
+      == [('1', '3', 'LO(R)', 1), ('1', '3', 'PLP(R)', 1), ('1', '2', 'LO(R)', 2)],
+      repr(_split.to_dict('records')))
+check('synapse_edges: no type picked means no type column',
+      list(_split.columns) == ['preId', 'postId', 'weight', 'roi'], repr(list(_split.columns)))
+
+# The rules that only show on a ragged cloud: a missing end is not an edge, a null region is a
+# group of its own, an unreadable polarity is counted and left alone, and a group's type is its
+# first non-missing one.
+_ragged = pd.DataFrame({
+    'neuronId': ['1', '1', '1', '1'],
+    'type': [None, 'LC4', 'LC4', 'LC4'],
+    'partnerId': ['3', '3', None, '4'],
+    'partnerType': ['PLP1', 'PLP1', 'PLP1', 'PLP1'],
+    'polarity': ['pre', 'pre', 'pre', 'sideways'],
+    'roi': ['LO(R)', 'LO(R)', 'LO(R)', None],
+})
+_out, _dropped, _unoriented = _edges(
+    _ragged, 'neuronId', 'partnerId', 'type', 'partnerType', 'polarity', ['roi'])
+check('synapse_edges: a synapse with no id at one end is dropped and counted',
+      _dropped == 1, str(_dropped))
+
+check("synapse_edges: a group's type is its first non-missing one",
+      list(_out['preType']) == ['LC4', 'LC4'], repr(list(_out['preType'])))
+check('synapse_edges: a null split value is a group of its own',
+      _out['roi'].isna().sum() == 1, repr(list(_out['roi'])))
+
+# `idText` reads a blank as an absence, so a blank id is not an end. Asserted in all three
+# implementations because nothing else would notice them drifting: the R helper spells it
+# `blank()`, and pandas' `notna()` alone happily keeps an empty string.
+_blank = pd.DataFrame({'neuronId': ['1', '1', '  '], 'partnerId': ['2', '', '2']})
+_blankOut, _blankDropped, _ = _edges(_blank, 'neuronId', 'partnerId', None, None, None, [])
+check('synapse_edges: a blank id is an absence, not an end',
+      _blankDropped == 2 and list(_blankOut['preId']) == ['1'], repr(list(_blankOut['preId'])))
+check('synapse_edges: an unreadable polarity is counted, not flipped',
+      _unoriented == 1 and list(_out['preId']) == ['1', '1'], repr(list(_blankOut['preId'])))
+
+# Invariant 8, the reason the ids go through `coda_ids` at all: two adjacent eighteen-digit root
+# ids are two neurons, and a float64 would round them together.
+_wide = pd.DataFrame({
+    'neuronId': [720575940632499757, 720575940632499758],
+    'partnerId': [3, 3],
+})
+_out, _, _ = _edges(_wide, 'neuronId', 'partnerId', None, None, None, [])
+check('synapse_edges: wide integer ids come out as exact text, and stay two neurons',
+      list(_out['preId']) == ['720575940632499757', '720575940632499758'],
+      repr(list(_out['preId'])))
+
+_empty, _, _ = _edges(_qr.iloc[:0], 'neuronId', 'partnerId', 'type', 'partnerType', None, ['roi'])
+check('synapse_edges: an empty cloud keeps every column',
+      len(_empty) == 0
+      and list(_empty.columns) == ['preId', 'preType', 'postId', 'postType', 'weight', 'roi'],
+      repr(list(_empty.columns)))
+
 # ---- coda_in_volumes --------------------------------------------------------
 #
 # Points in Volumes. Run rather than read because the whole helper is a fold over a library call

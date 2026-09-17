@@ -49,6 +49,14 @@ export const PRE_ID = 'preId'
 export const PRE_TYPE = 'preType'
 export const POST_ID = 'postId'
 export const POST_TYPE = 'postType'
+/**
+ * The count itself.
+ *
+ * Here beside the other four rather than a literal, because "the same columns Connectivity
+ * emits" is a claim a second node now makes (`nodes/lib/synapseEdges.ts`), and it was enforced
+ * by import for four names out of five.
+ */
+export const WEIGHT_COLUMN = 'weight'
 export const HOP_COLUMN = 'hop'
 export const DIRECTION_COLUMN = 'direction'
 /** The fraction: `weight / weightTotal`, or null where the denominator is not known. */
@@ -99,7 +107,7 @@ export function foundAs(direction: ConnectionDirection): EdgeDirection {
  */
 export const RESERVED_EDGE_COLUMNS: ReadonlySet<string> = new Set([
   ...Object.entries(DOWNSTREAM_NAMES).flat(),
-  'weight',
+  WEIGHT_COLUMN,
   CONNECTIVITY_ROI_COLUMN,
   HOP_COLUMN,
   DIRECTION_COLUMN,

@@ -1397,15 +1397,37 @@ export function everythingGraph(): CodaGraph {
     },
     {
       /*
-       * Points in Volumes on the pair already here — the synapse cloud and the two named
-       * region shells — which is the graph the node exists for. The column is left at its
-       * default, since the emitters spell whatever `volumeColumnName` answers and a renamed
-       * one pins no branch the default does not.
+       * Points in Volumes on the pair already here — a synapse cloud and the two named region
+       * shells — which is the graph the node exists for. The column is left at its default,
+       * since the emitters spell whatever `volumeColumnName` answers and a renamed one pins no
+       * branch the default does not.
+       *
+       * The cloud is `between`'s rather than `syn`'s so that `Synapses to Edges` below it has a
+       * partner column to count against: `neuron.synapses` on neuPrint carries none, which is
+       * that node's own rule and not something to work around here. Nothing about this cell
+       * changes — it reads x/y/z — and the chain the three now form is the one the two nodes
+       * were built for.
        */
       id: 'inrois',
       type: 'neuron.pointsInVolumes',
       col: 3,
       row: 11,
+    },
+    {
+      /*
+       * Synapses to Edges on the region-labelled cloud, split on the column the node above
+       * minted: `Connectivity ▸ Split by region` for a backend that has none, which is the
+       * workflow this node exists for. Left on the fixed orientation, which is the reading a
+       * `Synapses Between` cloud needs — the polarity branch has no honest configuration in
+       * either fixture (it wants a query-relative cloud carrying a partner, which only CAVE's
+       * `Synapses` produces, and that node's emitters are neuPrint's), so it is run rather than
+       * emitted: `probe-py-helpers.py` and `probe-r-helpers.R` exercise both orientations.
+       */
+      id: 'synedges',
+      type: 'neuron.synapseEdges',
+      col: 4,
+      row: 11,
+      params: { by: ['roi'] },
     },
     { id: 'v3d', type: 'out.viewer3d', col: 3, row: 5 },
     { id: 'ng', type: 'out.neuroglancer', col: 3, row: 6 },
@@ -1659,8 +1681,9 @@ export function everythingGraph(): CodaGraph {
     ['skel', 'skeletons', 'v3d', 'skeletons'],
     ['ds', 'dataset', 'roimesh', 'dataset'],
     ['roimesh', 'meshes', 'v3d', 'volumes'],
-    ['syn', 'points', 'inrois', 'points'],
+    ['between', 'points', 'inrois', 'points'],
     ['roimesh', 'meshes', 'inrois', 'volumes'],
+    ['inrois', 'inside', 'synedges', 'in'],
     ['stack', 'out', 'muted', 'in'],
     ['url', 'out', 'rename', 'in'],
     ['find', 'neurons', 'edit', 'in'],
