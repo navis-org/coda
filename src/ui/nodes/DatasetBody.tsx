@@ -12,15 +12,20 @@
 
 import { datasetRef } from '../../core/types'
 import { getSource } from '../../data/source'
-import { datasetFamily, splitDataset, versionsFor } from '../../nodes/lib/datasetFamilies'
-import { serverLabel } from '../../data/neuprint/servers'
-import { findParam } from '../../core/node'
+import {
+  backendForNodeType,
+  datasetFamily,
+  splitDataset,
+  versionsFor,
+} from '../../nodes/lib/datasetFamilies'
+import { findParam, withDefaults } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
 import { formatNumber } from '../format'
 import { useGraphStore } from '../../store/graphStore'
 import { edgeSetLabel, hasEdgeSet } from '../../nodes/lib/edgeParams'
 import { discoveredNeuronSchema, populationSummary } from '../../nodes/lib/populationParams'
 import { ParamField } from '../params/ParamField'
+import { cardParams } from '../params/paramGroups'
 import type { NodeBodyProps } from './nodeBodies'
 import { DatasetPreview } from './DatasetPreview'
 
@@ -53,9 +58,18 @@ export function DatasetBody({ node, ctx, compact, setParam }: NodeBodyProps) {
    */
   const neuronSchema = source ? discoveredNeuronSchema(source, datasetId) : undefined
 
-  const versionParam = def ? findParam(def, 'version') : undefined
+  /*
+   * The fields on the card: this node's own non-`advanced` params, in declaration order.
+   *
+   * It was a list of three ids — `server`, `dataset`, `version` — which is a list every dataset
+   * node had to be *remembered* in, and the CAVE escape hatch was not (`nodeBodies.ts` carries
+   * what that cost). `cardParams` is the rule the generic band uses and nine other bodies share,
+   * so a dataset card with a body and one without ask the same questions, and a dataset node
+   * added later needs no edit here.
+   */
+  const fields = cardParams(def, node.params)
   const serverParam = def ? findParam(def, 'server') : undefined
-  const datasetParam = def ? findParam(def, 'dataset') : undefined
+  const backend = backendForNodeType(node.type)
 
   const [, version] = splitDataset(datasetId ?? '')
   const known = family ? versionsFor(family) : []
@@ -103,23 +117,22 @@ export function DatasetBody({ node, ctx, compact, setParam }: NodeBodyProps) {
       <DatasetPreview glyph={family?.glyph ?? 'specimen'} caption={caption} />
 
       <div className="dataset-body__fields">
-        {/* Rendered in the order they are asked for: which server, then which dataset, then
-            which version. A custom node has the first two; a family node only the third. */}
-        {[serverParam, datasetParam, versionParam].map((param) =>
-          param ? (
-            <label key={param.id} className="dataset-body__field">
-              <span className="param__label" title={param.help ?? param.label}>
-                {param.label}
-              </span>
-              <ParamField
-                param={param}
-                value={node.params[param.id]}
-                ctx={ctx}
-                onChange={(value) => setParam(param.id, value)}
-              />
-            </label>
-          ) : null,
-        )}
+        {/* Rendered in the order they are asked for: a family node asks only which version, the
+            neuPrint escape hatch which server and which dataset, the CAVE one which datastack,
+            materialization, neuron table and id column. */}
+        {fields.map((param) => (
+          <label key={param.id} className="dataset-body__field">
+            <span className="param__label" title={param.help ?? param.label}>
+              {param.label}
+            </span>
+            <ParamField
+              param={param}
+              value={node.params[param.id]}
+              ctx={ctx}
+              onChange={(value) => setParam(param.id, value)}
+            />
+          </label>
+        ))}
         {/*
          * What the population checkboxes are *doing*, in one line — the boxes themselves are
          * `advanced` and live in the inspector.
@@ -153,10 +166,20 @@ export function DatasetBody({ node, ctx, compact, setParam }: NodeBodyProps) {
         <span className="dataset-body__id" title={datasetId ?? 'no dataset resolved'}>
           {datasetId ?? '—'}
         </span>
-        {/* Only the custom node has a server worth naming; a family node's is always Janelia. */}
-        {!compact && serverParam && (
+        {/*
+         * Only an escape-hatch node has a server worth naming; a family node's is fixed.
+         *
+         * Through the **backend's own** labeller (`DatasetBackend.serverLabel`), because each of
+         * the three normalises differently and a card drawing all three cannot pick one by name:
+         * `serverLabel` is neuPrint's and resolves anything it cannot parse — an empty field
+         * included — to `neuprint.janelia.org`, which is what a Custom CAVE card saved before its
+         * Server field existed would have been labelled with. Read through `withDefaults`, since
+         * a param nothing stored reads as its declared default everywhere else (invariant 4) and
+         * that default *is* the deployment such a graph was written against.
+         */}
+        {!compact && def && serverParam && backend?.serverLabel && (
           <span className="dataset-body__server">
-            {serverLabel(String(node.params.server ?? ''))}
+            {backend.serverLabel(String(withDefaults(def, node.params).server ?? ''))}
           </span>
         )}
         {facts.length > 0 && <span className="dataset-body__facts">{facts.join(' · ')}</span>}

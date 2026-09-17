@@ -31,7 +31,9 @@ import type { DatasetInfo } from '../../data/source'
  * it reads.
  */
 import { getSource } from '../../data/source'
-import { L1_CATMAID_SOURCE_ID } from '../../data/catmaid/registry'
+import { L1_CATMAID_SOURCE_ID, normaliseCatmaidServer } from '../../data/catmaid/registry'
+import { caveServerLabel } from '../../data/cave/deployments'
+import { serverLabel } from '../../data/neuprint/servers'
 
 /**
  * The backends a dataset can be served by.
@@ -51,6 +53,22 @@ export interface DatasetBackend {
   id: string
   /** What goes in a node's name: `MaleCNS (neuPrint)`. Empty adds no suffix. */
   label: string
+  /**
+   * This backend's server URL as a host, for the one line a dataset card spends naming it.
+   *
+   * A function member where the rest of this table is flags, and the reason is that the answer is
+   * a *fact about the backend* that three `data/` modules already state: each owns a normaliser
+   * (`normaliseServer`, `normaliseCaveServer`, `normaliseCatmaidServer`) and each resolves a
+   * pasted address bar, a bare host and an empty field differently — neuPrint's empty field means
+   * its default deployment, CAVE's means the default *global server*, and a path on either is
+   * dropped to the origin. A card reaching for one of them by name gets the other two wrong, and
+   * a generic scheme-strip in the UI gets all three slightly wrong: it would print
+   * `global.daf-apis.com/info` for a URL somebody pasted. So the dispatch is here, beside the
+   * other per-backend facts, rather than as a fourth definition in a component.
+   *
+   * Absent means this backend's nodes name no server — the mock's.
+   */
+  serverLabel?: (raw: string | undefined) => string
   /**
    * What a *menu group* of this backend's datasets is headed. Absent means `label`.
    *
@@ -111,16 +129,31 @@ export interface DatasetBackend {
  * an exporter's TODO says "precomputed" rather than "neuroglancer". That fallback exists for
  * exactly this case, and it is the cheaper of the two.
  */
+/**
+ * A CATMAID instance's host, for a message or a card line about it.
+ *
+ * **Not `serverLabel`**, which is neuPrint's and normalises anything it cannot parse — an empty
+ * field included — to `neuprint.janelia.org`. Naming the wrong server in a message about a server
+ * is worse than naming none. Its two neighbours ship this shape already (`serverLabel`,
+ * `caveServerLabel`); this one lived privately in `nodes/dataset/index.ts` until `DatasetBackend`
+ * gave the three somewhere to be asked for by backend rather than by name.
+ */
+export function catmaidServerLabel(raw: string | undefined): string {
+  return normaliseCatmaidServer(String(raw ?? '')).replace(/^https?:\/\//, '')
+}
+
 export const BACKENDS: Record<string, DatasetBackend> = {
   neuprint: {
     id: 'neuprint',
     label: 'neuPrint',
     population: true,
+    serverLabel,
   },
   cave: {
     id: 'cave',
     label: 'CAVE',
     acceptsAnnotations: true,
+    serverLabel: caveServerLabel,
   },
   /*
    * CATMAID takes no Annotations socket, which puts it with neuPrint rather than with CAVE.
@@ -138,6 +171,7 @@ export const BACKENDS: Record<string, DatasetBackend> = {
     // edge list has nothing to add. See `DatasetBackend.edgeSets`.
     edgeSets: false,
     label: 'CATMAID',
+    serverLabel: catmaidServerLabel,
   },
   /*
    * The synthetic family gets a backend too, and its label is deliberately empty: `Demo Data`

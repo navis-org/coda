@@ -66,8 +66,16 @@ async function customCaveCard(): Promise<HTMLElement> {
   })
 }
 
+/*
+ * The questions on the card's face, as the **dataset body** draws them.
+ *
+ * Deliberately not the generic band's `.param` rows as well: this card drew those for as long as
+ * it had no `NODE_BODIES` entry, which is how it silently lost the whole foot — the resolved
+ * dataset id, the refresh and the Edge data button — while this assertion stayed green. A
+ * selector matching both spellings would let that happen again.
+ */
 const rows = (card: HTMLElement) =>
-  [...card.querySelectorAll('.param .param__label')].map((l) => l.textContent)
+  [...card.querySelectorAll('.dataset-body__field .param__label')].map((l) => l.textContent)
 
 /** The Datastack field, and the options of whatever list it points at. */
 function datastackField(card: HTMLElement): {

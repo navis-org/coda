@@ -305,6 +305,48 @@ as finished when it is not. Nothing similar is true of the connection view: not 
 ordinary configuration whose whole consequence is that Connectivity declines, said on the node
 that declines.
 
+**A dataset node with no `NODE_BODIES` entry loses the foot, not a field** — and `dataset.cave`
+had none for a month. A body is a lookup keyed by node type; a node that is not in it falls back
+to the generic param band, which draws exactly the same questions, so the card looked finished.
+What it silently did not draw is everything `DatasetBody` puts *under* the fields: the resolved
+`datastack:materialization`, the ⟳ that re-fetches the metadata, and the **Edge data** button —
+which is the only door to `EdgeSetPanel` anywhere in the app, `edgeSetId` and `edgeSetName` being
+`internal` params no inspector row renders. So the CAVE escape hatch declared the two params,
+carried `edgeSetIssues` in `validate` and `edgesFrom` in `evaluate` from the day it was added, and
+an attached edge set could not be reached from it at all. The history is the tell rather than a
+judgement: `dataset.cave` shipped in August, the body was given to `dataset.neuprint` in a
+September pass whose message is *solve some inconsistencies*, and that pass measured this card's
+`cardHeight` at **231** — the bodyless card — and moved on.
+
+The fix is the entry, plus the half that would let it happen again: **the field band is asked of
+the definition rather than listed by id.** `DatasetBody` rendered `[server, dataset, version]`,
+which is a list every dataset node has to be *remembered* in; it calls `cardParams` now — the
+shared rule in `ui/params/paramGroups.ts` that the generic band uses and that nine other bodies
+already import for exactly this reason, whose own comment records the failure it exists to stop.
+The three existing cards are unmoved by construction: a family node's non-`advanced` params are
+`version` alone, the neuPrint hatch's are `server` and `dataset` in that order. Custom CAVE's are
+its four, which is what `caveDatastackField.test.tsx` already asserted — against a selector that
+matched the *generic* band, which is how that test stayed green while the card lost its foot, and
+which is now the body's row alone so that it cannot again.
+
+Two things came with it. **The foot's server line is asked of the backend**
+(`DatasetBackend.serverLabel`) rather than of a function the component happened to import. It read
+`serverLabel`, which is *neuPrint's* and resolves anything it cannot parse — an empty field
+included — to `neuprint.janelia.org`: a Custom CAVE graph saved before that node grew its Server
+field stores no value at all, so the one line naming a deployment named the wrong backend's. A
+generic scheme-strip in the UI was the first fix and is wrong in the other direction — it keeps a
+pasted `global.daf-apis.com/info/` whole, where `normaliseCaveServer` drops it to the origin — so
+the dispatch sits on the table that already holds `edgeSets`, `acceptsAnnotations` and
+`population`, and `catmaidServerLabel` moved there out of `nodes/dataset/index.ts` rather than
+staying a third private copy of *normalise, then strip*. A function member among flags is the
+price; a fourth definition of a fact three `data/` modules already state is the thing it buys off.
+And the card is `DATASET_CARD_WIDTH` like every other dataset card: at the default 232 it was 16px
+narrower than the Description credit hanging directly under it, which is `DATASET_CARD_WIDTH`'s
+own rule read backwards. Re-measured in a browser on a cold session with no credentials, the way
+`DATASET_CARD_HEIGHTS` is: **371 × 248**, three readings, against the same probe reproducing the
+recorded 231 exactly on the unchanged card. `dataset.catmaid` is still bodyless and would gain the
+first two of the three — `DatasetBackend.edgeSets` is false there, so not the button.
+
 **`DatasetFamily.starter` decides where somebody *begins*, and nothing else.** Absent means yes;
 `starter: false` on Optic Lobe, FIB-19 and Mushroom Body keeps them out of the New menu and off
 the start page's dataset rail. The node is registered either way, `Add ▸ Dataset` lists all of

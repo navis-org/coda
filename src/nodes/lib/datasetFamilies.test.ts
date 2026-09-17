@@ -20,7 +20,9 @@ import {
 } from '../../data/neuprint/servers'
 import { resetCredentials, setBaseUrl } from '../../data/neuprint/credentials'
 import {
+  BACKENDS,
   DATASET_FAMILIES,
+  catmaidServerLabel,
   compareVersions,
   datasetFamily,
   resolveDatasetId,
@@ -227,6 +229,38 @@ describe('deployment URLs', () => {
 
   it('labels a deployment by host', () => {
     expect(serverLabel('https://neuprint.janelia.org')).toBe('neuprint.janelia.org')
+  })
+})
+
+/*
+ * The one line a dataset card spends naming a server, asked of the backend rather than by name.
+ *
+ * Each of the three normalises differently, which is the whole reason the dispatch exists: a card
+ * reaching for `serverLabel` because it is the one it imported answers `neuprint.janelia.org` for
+ * an empty CAVE field — the deployment such a graph was actually written against being CAVE's own
+ * default. Asserted per backend, since a table wired to the same function three times would pass
+ * any test that only checked one.
+ */
+describe('DatasetBackend.serverLabel', () => {
+  it('normalises through the backend that owns the URL, not through neuPrint', () => {
+    expect(BACKENDS.neuprint?.serverLabel?.('')).toBe('neuprint.janelia.org')
+    expect(BACKENDS.cave?.serverLabel?.('')).toBe('global.daf-apis.com')
+    expect(BACKENDS.catmaid?.serverLabel?.('')).toBe(catmaidServerLabel(''))
+    expect(BACKENDS.cave?.serverLabel?.('')).not.toBe(BACKENDS.neuprint?.serverLabel?.(''))
+  })
+
+  it('drops a pasted path to the origin, which a bare scheme strip would keep', () => {
+    expect(BACKENDS.cave?.serverLabel?.('https://global.brain-wire-test.org/info/')).toBe(
+      'global.brain-wire-test.org',
+    )
+    expect(BACKENDS.neuprint?.serverLabel?.('neuprint.janelia.org/results')).toBe(
+      'neuprint.janelia.org',
+    )
+  })
+
+  // The mock's nodes name no server, and absent is how that is said.
+  it('is absent for a backend whose nodes have no Server field', () => {
+    expect(BACKENDS.mock?.serverLabel).toBeUndefined()
   })
 })
 

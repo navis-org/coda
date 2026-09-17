@@ -126,6 +126,15 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
   ),
   'dataset.neuprint': { Component: DatasetBody },
   /*
+   * The CAVE escape hatch draws it too, and its absence here was the whole of the bug: a dataset
+   * node with no entry falls back to the generic param band, which draws its four questions and
+   * nothing else — no resolved `datastack:materialization`, no refresh, and no way at all into
+   * the Edge data panel, whose two params `dataset.cave` declares and whose only door is this
+   * body's button. `dataset.catmaid` is still bodyless for the same reason and would gain the
+   * first two (`DatasetBackend.edgeSets` is false there, so not the third).
+   */
+  'dataset.cave': { Component: DatasetBody },
+  /*
    * `expandable`, because the card is the dataset card's width and that is narrow for prose: the
    * datasets publishing two paragraphs and a nested list of citations do not fit any card worth
    * putting on a canvas, and the overlay is where they are actually read.

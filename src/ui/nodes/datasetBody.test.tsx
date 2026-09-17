@@ -140,6 +140,17 @@ describe('dataset node body', () => {
       expect(useGraphStore.getState().edgePanelNode).toBe(id)
     })
 
+    it('is on the CAVE escape hatch, which declares the params and had no body to draw them', async () => {
+      /*
+       * `dataset.cave` carried `EDGE_SET_PARAMS`, `edgeSetIssues` and `edgesFrom` from the day it
+       * was added and had no entry in `NODE_BODIES`, so the panel it declares was reachable from
+       * nowhere: the two params are `internal`, and this button is their only door.
+       */
+      openStarter('dataset.cave')
+      await waitFor(() => expect(datasetCard()).toBeTruthy())
+      expect(within(datasetCard()).getByRole('button', { name: /Edge data/ })).toBeTruthy()
+    })
+
     it('is absent on a backend that does not offer one', async () => {
       // CATMAID, by `DatasetBackend.edgeSets` — not a capability gap, a control nobody there is
       // expected to reach for. The button follows the param rather than a second list.

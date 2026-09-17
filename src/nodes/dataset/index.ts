@@ -35,6 +35,7 @@ import { datasetChainNote } from '../lib/annotationChain'
 import {
   BACKENDS,
   DATASET_FAMILIES,
+  catmaidServerLabel,
   familyLabel,
   resolveDatasetId,
   versionsFor,
@@ -49,7 +50,7 @@ import {
 import { publishedCaveSourceId } from '../../data/cave/registry'
 import { customCaveServer } from '../lib/caveParams'
 import { DEFAULT_CATMAID_SERVER } from '../../data/catmaid/credentials'
-import { catmaidSourceFor, normaliseCatmaidServer } from '../../data/catmaid/registry'
+import { catmaidSourceFor } from '../../data/catmaid/registry'
 import {
   materializationsFor,
   peekDatastacks,
@@ -270,8 +271,15 @@ registerNode({
   type: 'dataset.cave',
   label: 'Custom CAVE',
   category: 'dataset',
-  // Measured in a browser on a cold session, as `DATASET_CARD_HEIGHTS` is for the families.
-  cardHeight: 231,
+  /*
+   * The family cards' width, which is the Description companion's — and this card was 232, the
+   * default, for as long as it drew no body: 16px narrower than the credit hanging directly
+   * under it. `DATASET_CARD_WIDTH` says why one constant rather than two equal numbers.
+   */
+  cardWidth: DATASET_CARD_WIDTH,
+  // Measured in a browser on a cold session, as `DATASET_CARD_HEIGHTS` is for the families. It
+  // was 231 while this node had no body of its own and drew the generic param band.
+  cardHeight: 371,
   description: 'Any CAVE datastack configured by hand.',
   guide:
     'For CAVE datastacks Coda ships no node for. Name the global server that lists the ' +
@@ -870,10 +878,10 @@ registerNode({
     if (projects && !projects.some((entry) => entry.id === project)) {
       return [
         projects.length
-          ? `No project "${project}" on ${catmaidServerLabel(ctx.params.server)} — it offers ${projects
+          ? `No project "${project}" on ${catmaidServerLabel(String(ctx.params.server ?? ''))} — it offers ${projects
               .map((entry) => `${entry.id} (${entry.label})`)
               .join(', ')}`
-          : `${catmaidServerLabel(ctx.params.server)} lists no projects`,
+          : `${catmaidServerLabel(String(ctx.params.server ?? ''))} lists no projects`,
       ]
     }
     return []
@@ -889,7 +897,7 @@ registerNode({
     const info = projects.find((entry) => entry.id === project)
     if (!info) {
       throw new Error(
-        `No project "${project}" on ${catmaidServerLabel(ctx.params.server)}. Available: ${projects
+        `No project "${project}" on ${catmaidServerLabel(String(ctx.params.server ?? ''))}. Available: ${projects
           .map((entry) => `${entry.id} (${entry.label})`)
           .join(', ')}`,
       )
@@ -904,14 +912,3 @@ registerNode({
     }
   },
 })
-
-/**
- * The instance's host, for a message about it.
- *
- * Not `serverLabel`, which is neuPrint's and normalises anything it cannot parse — an empty
- * field included — to `neuprint.janelia.org`. Naming the wrong server in a message about a
- * server is worse than naming none.
- */
-function catmaidServerLabel(raw: unknown): string {
-  return normaliseCatmaidServer(String(raw ?? '')).replace(/^https?:\/\//, '')
-}
