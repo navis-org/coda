@@ -38,6 +38,7 @@
  */
 
 import type { MeshGeometry } from '../../core/values'
+import { triangleArea } from '../../core/values'
 import type { XY } from '../raster'
 import { fillTriangle, simplifyClosed, traceOutlines } from '../raster'
 
@@ -986,19 +987,12 @@ export function meshSurfaceArea(positions: Float32Array, indices: Uint32Array): 
   let sum = 0
   const triangles = Math.floor(indices.length / 3)
   for (let t = 0; t < triangles; t++) {
-    const a = indices[t * 3]! * 3
-    const b = indices[t * 3 + 1]! * 3
-    const c = indices[t * 3 + 2]! * 3
-    const ux = positions[b]! - positions[a]!
-    const uy = positions[b + 1]! - positions[a + 1]!
-    const uz = positions[b + 2]! - positions[a + 2]!
-    const vx = positions[c]! - positions[a]!
-    const vy = positions[c + 1]! - positions[a + 1]!
-    const vz = positions[c + 2]! - positions[a + 2]!
-    const nx = uy * vz - uz * vy
-    const ny = uz * vx - ux * vz
-    const nz = ux * vy - uy * vx
-    sum += Math.hypot(nx, ny, nz) / 2
+    sum += triangleArea(
+      positions,
+      indices[t * 3]! * 3,
+      indices[t * 3 + 1]! * 3,
+      indices[t * 3 + 2]! * 3,
+    )
   }
   return sum
 }

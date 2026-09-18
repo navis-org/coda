@@ -10,6 +10,11 @@ import { clusterColor } from '../../../ui/encoding'
 import { pyList, pyStr, pyValue } from '../py'
 import { meshCleanParamsFrom, skeletonCleanParamsFrom } from '../../../nodes/lib/cleanOps'
 import { NM_PER_UM } from '../../../nodes/lib/nblastOps'
+import {
+  distanceKindOf,
+  distanceParamsFrom,
+  mixedQuantityRefusal,
+} from '../../../nodes/lib/geometryDistance'
 import { ID_COLUMN_NAME } from '../../../core/ids'
 import { rawFileNote } from '../../../data/rawFileUrl'
 import { portIdAt } from '../../../core/ports'
@@ -492,6 +497,16 @@ registerEmitter('neuron.paths', (ctx) => {
  * build. Written once here rather than three times below — `common.ts` is the home for the
  * cross-file version of this, but these two emitters are the only readers.
  */
+/**
+ * The three matrix emitters all index their frame by neuron id where Coda labelled the rows.
+ *
+ * `MICRON_NOTE`'s shape one note over: written out per emitter it was already byte-identical in
+ * two of them, which is how the third comes to say something slightly different.
+ */
+const labelNote = (label: string): string =>
+  `Coda labels the rows by "${label}"; this frame is indexed by neuron id, which is what every ` +
+  `other navis call takes.`
+
 const MICRON_NOTE =
   'NBLAST is calibrated in micrometres — navis: "Neurons should be in microns as NBLAST is ' +
   'optimized for that". This converts through the units navis carries on the neuron rather ' +
@@ -571,12 +586,7 @@ registerEmitter('neuron.nblast', (ctx) => {
 
   const label = ctx.column('labelColumn')
   if (label) {
-    lines.push(
-      ...ctx.note(
-        `Coda labels the rows by "${label}"; this frame is indexed by neuron id, which is what ` +
-          `every other navis call takes.`,
-      ),
-    )
+    lines.push(...ctx.note(labelNote(label)))
   }
   return lines
 })
@@ -1880,6 +1890,99 @@ registerEmitter('core.embed', (ctx) => {
     // wired — a column that appears with the wire would empty every picker downstream of a
     // graph reopened without it.
     lines.push(`${out}['annotation'] = None`)
+  }
+  return lines
+})
+
+/**
+ * Distance between: the node's own arithmetic, in `coda_neuron_distance`.
+ *
+ * **Not `navis.cable_overlap`**, although one of the three methods looks exactly like it. The
+ * two do not compute the same number — that function sums the length of every query node that
+ * came back as some target point's nearest neighbour, so a node picked twice counts twice and a
+ * node picked by nobody counts not at all — and the gap is small enough to be invisible and large
+ * enough to matter: 1378.68 against 1361.03 on two of navis's own example neurons at 2 µm. A cell
+ * that quietly answers one per cent away from the canvas is the failure the refusal policy exists
+ * for, so this emits the canvas's rules and says where navis differs.
+ *
+ * Nothing else here is a divergence, which is why there is one call and two notes.
+ */
+registerEmitter('neuron.distance', (ctx) => {
+  const query = ctx.wired('query')
+  const target = ctx.input('target')
+  const out = ctx.output('matrix')
+  const method = String(ctx.params.method)
+  const kinds = [ctx.inputType('query')?.kind, ctx.inputType('target')?.kind]
+
+  /*
+   * **The fourth renderer of one sentence**, beside `validate`, `evaluate` and — by accident —
+   * the R emitter, whose mesh TODO happens to swallow the same graphs. `coda_neuron_distance`
+   * averages the two directions with no guard of its own, so without this the one comparison the
+   * canvas refuses is the one the notebook computes silently. `synapseEdges`' rule.
+   */
+  const mixed = mixedQuantityRefusal({
+    params: distanceParamsFrom(ctx.params),
+    queryKind: distanceKindOf(kinds[0]),
+    targetKind: distanceKindOf(kinds[1]),
+  })
+  if (mixed !== undefined) return ctx.todo(mixed)
+
+  ctx.require('navis')
+  ctx.helper('coda_neuron_distance')
+
+  const lines: string[] = [
+    /*
+     * `convert_units` rather than a division by 1000, which is `neuron.nblast`'s call and its
+     * reason: navis carries the unit on the neuron, so this is right for a dataset whose voxels
+     * are not 8 nm and it *raises* where the unit is unknown rather than silently scaling. Coda
+     * has to use the factor, its own geometry being nanometres by construction.
+     */
+    ...ctx.note(
+      'Coda reports micrometres — and square micrometres where this measures surface. This ' +
+        'converts through the units navis carries on the neuron rather than assuming a factor.',
+    ),
+  ]
+
+  if (kinds.includes('meshes')) {
+    lines.push(
+      ...ctx.note(
+        'Distances to a mesh are to its surface, not to its nearest vertex, which is what makes ' +
+          'them independent of how finely it was tessellated. trimesh needs **rtree** for that ' +
+          '(`pip install rtree`); without it every point is scanned against every triangle, ' +
+          'measured at 131 points a second on a 71,424-face neuron.',
+      ),
+    )
+  }
+  if (method === 'within') {
+    lines.push(
+      ...ctx.note(
+        'navis.cable_overlap answers a near neighbour of this and not the same number: it sums ' +
+          'each query node once per target point that picks it, so a node two points pick ' +
+          'counts twice and one no point picks counts not at all. On two example neurons at ' +
+          '2 µm that is 1378.68 against 1361.03.',
+      ),
+    )
+  }
+
+  lines.push(
+    `${out} = coda_neuron_distance(`,
+    `    ${query}.convert_units('um'),`,
+    ...(target ? [`    ${target}.convert_units('um'),`] : [`    None,`]),
+    `    method=${pyStr(method)},`,
+    ...(method === 'nearest' ? [`    statistic=${pyStr(String(ctx.params.statistic))},`] : []),
+    ...(method === 'within'
+      ? [
+          `    within=${Number(ctx.params.within)},`,
+          `    report=${pyStr(String(ctx.params.report))},`,
+        ]
+      : []),
+    ...(method !== 'centroid' ? [`    symmetry=${pyStr(String(ctx.params.symmetry))},`] : []),
+    `)`,
+  )
+
+  const label = ctx.column('labelColumn')
+  if (label) {
+    lines.push(...ctx.note(labelNote(label)))
   }
   return lines
 })

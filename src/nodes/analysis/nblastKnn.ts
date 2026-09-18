@@ -30,11 +30,11 @@ import {
   knnSchema,
   knnTable,
   nblastIssues,
-  nblastLabels,
   nblastSidesFrom,
 } from '../lib/nblastOps'
+import { geometryLabels } from '../lib/geometryLabels'
 // The Skeletons node's ceiling, imported rather than restated — see `nblast.ts`.
-import { warnAboveParam } from '../lib/limitParams'
+import { labelColumnParam, warnAboveParam } from '../lib/limitParams'
 import { MAX_NEURONS } from '../query/morphology'
 
 registerNode({
@@ -76,15 +76,9 @@ registerNode({
       options: SYMMETRY_OPTIONS,
       help: 'Applied before the top-k cut: once only k neighbours survive there is no transpose left to symmetrise against.',
     },
-    {
-      id: 'labelColumn',
-      kind: 'column',
-      label: 'Label by',
-      from: 'query',
-      default: '',
-      optional: true,
-      help: 'Adds a name for each side of a match. Neuron ids where this is empty or unset.',
-    },
+    labelColumnParam(
+      'Adds a name for each side of a match. Neuron ids where this is empty or unset.',
+    ),
     {
       id: 'resample',
       kind: 'number',
@@ -197,10 +191,10 @@ registerNode({
         neighbours,
         label
           ? {
-              query: nblastLabels(query, label),
+              query: geometryLabels(query, label),
               // Resolved against the far side's own attributes, falling back to neuron ids for a
-              // column it does not carry — the same rule `nblastLabels` applies per neuron.
-              target: nblastLabels(neighbours, label),
+              // column it does not carry — the same rule `geometryLabels` applies per neuron.
+              target: geometryLabels(neighbours, label),
             }
           : undefined,
       ),

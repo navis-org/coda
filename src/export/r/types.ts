@@ -44,6 +44,7 @@ export type RPackage =
   | 'igraph'
   | 'Matrix'
   | 'uwot'
+  | 'nabor'
 
 export interface PackageSpec {
   /** Where it comes from, for the install comment. CRAN unless stated. */
@@ -84,6 +85,13 @@ export const PACKAGES: Record<RPackage, PackageSpec> = {
    * so rather than leaving a reader comparing two plots to conclude one is broken.
    */
   uwot: { minimum: { version: '0.1.15', for: '`umap()`’s `seed` argument' } },
+  /*
+   * The k-d tree, for `Distance between`. On CRAN, and already in a natverse reader's library — nat.nblast
+   * depends on it, so this asks nothing new of anyone who has NBLAST working. It is also the same
+   * structure the canvas builds and scipy builds on the Python side, so all three agree on how the
+   * nearest point is found rather than on the answer alone.
+   */
+  nabor: {},
 }
 
 export interface EmitContext<P extends ParamValues = ParamValues> {

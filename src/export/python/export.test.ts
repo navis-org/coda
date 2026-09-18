@@ -622,3 +622,80 @@ describe('Table from URL', () => {
     expect(text).not.toContain('GitHub')
   })
 })
+
+/**
+ * The one comparison `Distance between` refuses, arriving at the fourth surface that renders it.
+ *
+ * `mixedQuantityRefusal` takes kinds rather than values precisely so every layer can ask it, and
+ * for a while only two did. `coda_neuron_distance` averages the two directions with no guard of
+ * its own, so without the emitter's call the graph the canvas refuses is the one the notebook
+ * computes — silently, into a plausible heatmap of µm averaged against µm².
+ */
+describe('Distance between, on two kinds of geometry', () => {
+  const graph = (params: ParamValues) => {
+    let g = emptyGraph('distance-mixed')
+    g = addNode(g, {
+      id: 'ds',
+      type: 'neuron.dataset',
+      position: { x: 0, y: 0 },
+      params: { dataset: 'hemibrain:v1.2.1' },
+    })
+    g = addNode(g, {
+      id: 'find',
+      type: 'neuron.findNeurons',
+      position: { x: 260, y: 0 },
+      params: searchFor({ type: 'LC4' }),
+    })
+    g = addNode(g, {
+      id: 'skel',
+      type: 'neuron.skeletons',
+      position: { x: 520, y: 0 },
+      params: {},
+    })
+    g = addNode(g, {
+      id: 'mesh',
+      type: 'neuron.meshes',
+      position: { x: 520, y: 200 },
+      params: {},
+    })
+    g = addNode(g, { id: 'dist', type: 'neuron.distance', position: { x: 780, y: 0 }, params })
+    return {
+      ...g,
+      edges: [
+        ['e1', 'ds', 'dataset', 'find', 'dataset'],
+        ['e2', 'ds', 'dataset', 'skel', 'dataset'],
+        ['e3', 'ds', 'dataset', 'mesh', 'dataset'],
+        ['e4', 'find', 'neurons', 'skel', 'neurons'],
+        ['e5', 'find', 'neurons', 'mesh', 'neurons'],
+        ['e6', 'skel', 'skeletons', 'dist', 'query'],
+        ['e7', 'mesh', 'meshes', 'dist', 'target'],
+      ].map(([id, source, sourceHandle, target, targetHandle]) => ({
+        id: id!,
+        source: source!,
+        sourceHandle: sourceHandle!,
+        target: target!,
+        targetHandle: targetHandle!,
+      })),
+    }
+  }
+
+  it('refuses to average cable against surface, as the canvas does', () => {
+    const text = notebookText(graph({ method: 'within', symmetry: 'mean' }))
+    expect(text).toContain('TODO')
+    expect(text).toContain('µm²')
+    expect(text).toContain('query against target only')
+    expect(text).not.toContain('coda_neuron_distance(')
+  })
+
+  it('emits the same pair once only one direction is taken', () => {
+    const text = notebookText(graph({ method: 'within', symmetry: 'query' }))
+    expect(text).toContain('coda_neuron_distance(')
+    expect(text).toContain("symmetry='query'")
+  })
+
+  it('emits a distance, which is µm whichever kind it was measured on', () => {
+    expect(notebookText(graph({ method: 'nearest', symmetry: 'mean' }))).toContain(
+      'coda_neuron_distance(',
+    )
+  })
+})

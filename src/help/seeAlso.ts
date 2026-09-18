@@ -124,6 +124,12 @@ const RELATED: readonly (readonly string[])[] = [
   ],
   // All-by-all, and the same measure asked for one neuron's nearest matches.
   ['neuron.nblast', 'neuron.nblastKnn', 'neuron.skeletons'],
+  // Two sockets and a matrix, twice over: how alike two neurons are in shape, and how far apart
+  // they are. The pair people reach for one of while meaning the other.
+  ['neuron.distance', 'neuron.nblast', 'neuron.meshes', 'neuron.skeletons'],
+  // The Heatmap is where a distance matrix is first read, and Points in Volumes is the other
+  // spatial question asked of geometry — where something is, rather than how far from what.
+  ['neuron.distance', 'out.heatmap', 'neuron.pointsInVolumes'],
   // A square matrix's structure as a tree, and the same structure as somewhere to put a point.
   ['cluster.linkage', 'core.embed', 'out.scatter'],
   // The three things an Embedding will take, one at a time.

@@ -28,13 +28,13 @@ import {
   checkNblastSize,
   dotpropSetFrom,
   nblastIssues,
-  nblastLabels,
   nblastMatrix,
   nblastSidesFrom,
 } from '../lib/nblastOps'
+import { matrixAxisLabels } from '../lib/geometryLabels'
 // The ceiling is the *fetch's*, not this node's: nothing can reach here that the Skeletons
 // node would not hand over. Imported rather than restated, or "parity" is a comment.
-import { warnAboveParam } from '../lib/limitParams'
+import { labelColumnParam, warnAboveParam } from '../lib/limitParams'
 import { MAX_NEURONS } from '../query/morphology'
 
 registerNode({
@@ -78,15 +78,9 @@ registerNode({
       options: SYMMETRY_OPTIONS,
       help: 'A small neuron can lie entirely inside a large one, so the two directions of a pair disagree. The mean is the usual choice and makes an all-by-all matrix symmetric.',
     },
-    {
-      id: 'labelColumn',
-      kind: 'column',
-      label: 'Label by',
-      from: 'query',
-      default: '',
-      optional: true,
-      help: 'Which attribute names each row. Neuron ids where this is empty or unset.',
-    },
+    labelColumnParam(
+      'Which attribute names each row. Neuron ids where this is empty or unset.',
+    ),
     {
       id: 'k',
       kind: 'int',
@@ -156,16 +150,11 @@ registerNode({
       { onProgress: ctx.progress, signal: ctx.signal },
     )
 
-    const label = ctx.column('labelColumn')
-    return {
-      scores: nblastMatrix(
-        result,
-        nblastLabels(query, label),
-        // The target's rows are its own, and a column picked on the Query port names a column
-        // the Target may not even have — so the far side falls back to neuron ids rather than
-        // silently labelling one set with another's idea of a name.
-        targetValue ? nblastLabels(targetValue, undefined) : nblastLabels(query, label),
-      ),
-    }
+    const [rowLabels, colLabels] = matrixAxisLabels(
+      query,
+      targetValue,
+      ctx.column('labelColumn'),
+    )
+    return { scores: nblastMatrix(result, rowLabels, colLabels) }
   },
 })

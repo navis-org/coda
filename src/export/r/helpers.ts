@@ -1423,3 +1423,178 @@ registerHelper({
     '}',
   ],
 })
+
+/**
+ * Every sample of one nat neuron, and how much cable each one stands for.
+ *
+ * `Distance between`'s whole arithmetic rests on this: a skeleton node stands for half the length of each
+ * edge at it, so a mean separation is a mean over the neuron's *cable* rather than over however
+ * finely somebody traced it. Unweighted, resampling upstream moves every number — 4.61 against
+ * 4.21 µm on two of nat's own `Cell07PNs`, and a median of 4.05 against 3.35.
+ *
+ * **`tapply` rather than `weights[child] <- weights[child] + half`**, which is the R trap and the
+ * one a reader writing this by hand walks into: a vector subscript that repeats does not
+ * accumulate — R evaluates the right-hand side once and assigns, so a branch point with three
+ * edges at it keeps **one** of them. The weights would then not sum to the cable length, and
+ * nothing else about the answer would look wrong. `pnpm probe:r-helpers` checks the sum against
+ * `summary(n)$cable.length` exactly, which is what catches it.
+ */
+registerHelper({
+  name: 'coda_geom_samples',
+  source: [
+    'coda_geom_samples <- function(n) {',
+    '  d <- n$d',
+    '  pts <- as.matrix(d[, c("X", "Y", "Z")])',
+    '  # WKNND refuses anything but a double matrix, and a hand-built neuronlist can carry',
+    '  # integer coordinates — so this is coerced here rather than at each of the two callers.',
+    '  storage.mode(pts) <- "double"',
+    '  weights <- numeric(nrow(pts))',
+    '  # Parent is a PointNo, not a row number, so it is matched through the index. A root is -1',
+    '  # and matches to NA, which is what `child` filters on — one edge per non-root node.',
+    '  parent <- match(d$Parent, d$PointNo)',
+    '  child <- which(!is.na(parent))',
+    '  if (length(child)) {',
+    '    p <- parent[child]',
+    '    len <- sqrt(rowSums((pts[child, , drop = FALSE] - pts[p, , drop = FALSE])^2))',
+    '    half <- len / 2',
+    '    add <- tapply(c(half, half), c(child, p), sum)',
+    '    weights[as.integer(names(add))] <- as.numeric(add)',
+    '  }',
+    '  list(points = pts, weights = weights)',
+    '}',
+  ],
+})
+
+/**
+ * The weighted median — the one statistic base R cannot supply.
+ *
+ * `median()` weights every sample equally, which is exactly what this node's arithmetic does not
+ * do. Landing **exactly** on the half takes the midpoint of the two samples either side, as a
+ * plain median takes the mean of the two middle values; without that arm the canvas and the
+ * document disagree by one sample's distance on every evenly-weighted neuron.
+ */
+registerHelper({
+  name: 'coda_weighted_median',
+  source: [
+    'coda_weighted_median <- function(values, weights) {',
+    '  o <- order(values)',
+    '  v <- values[o]; w <- weights[o]',
+    '  total <- sum(w)',
+    '  if (total <= 0) return(stats::median(v))',
+    '  half <- total / 2',
+    '  cum <- cumsum(w)',
+    '  i <- min(which(cum >= half)[1], length(v))',
+    '  if (i + 1 <= length(v) && cum[i] == half) return((v[i] + v[i + 1]) / 2)',
+    '  v[i]',
+    '}',
+  ],
+})
+
+/**
+ * The matrix: every Query neuron against every Target neuron. Coda's `Distance between` node.
+ *
+ * A helper rather than lines in the chunk for `coda_in_volumes`' reason — the rules are the
+ * *node's* — and four of them are the ones a reader gets wrong in a way the result cannot show.
+ * See `nodes/lib/geometryDistance.ts`.
+ *
+ * - **Nearest-point, never all-pairs.** Each statistic reduces the distances from the Query's
+ *   samples to the *nearest* part of the Target. An all-pairs mean measures how big each neuron
+ *   is rather than how near the two are — and `min` is the same number either way, so the
+ *   distinction is invisible on the statistic people check first.
+ * - **Weighted**, per `coda_geom_samples`. `min` and `max` are not averages and ignore it.
+ * - **An unmeasured direction propagates**: the smaller of a measured 4 µm and a pair half of
+ *   which says nothing is not 4 µm.
+ * - **The upper triangle is mirrored** on an all-by-all combining both directions, `mean`, `min`
+ *   and `max` all being symmetric in their two arguments.
+ *
+ * `nabor::knn` rather than a distance matrix: it is the k-d tree the canvas builds and scipy
+ * builds, so all three agree on the structure as well as on the answer. Checked against a brute
+ * force scan by `pnpm probe:r-helpers`.
+ */
+registerHelper({
+  name: 'coda_neuron_distance',
+  requires: ['nat', 'nabor'],
+  needs: ['coda_geom_samples', 'coda_weighted_median'],
+  source: [
+    'coda_neuron_distance <- function(query, target = NULL, method = "nearest",',
+    '                                 statistic = "min", within = 2, report = "absolute",',
+    '                                 symmetry = "mean") {',
+    '  all_by_all <- is.null(target)',
+    '  if (all_by_all) target <- query',
+    '  rows <- names(query); cols <- names(target)',
+    '  out <- matrix(NA_real_, length(rows), length(cols), dimnames = list(rows, cols))',
+    '  qs <- lapply(query, coda_geom_samples)',
+    '  ts <- if (all_by_all) qs else lapply(target, coda_geom_samples)',
+    '',
+    '  if (method == "centroid") {',
+    '    centre <- function(s) {',
+    '      total <- sum(s$weights)',
+    '      if (total > 0) colSums(s$points * s$weights) / total else colMeans(s$points)',
+    '    }',
+    '    a <- t(vapply(qs, centre, numeric(3)))',
+    '    b <- if (all_by_all) a else t(vapply(ts, centre, numeric(3)))',
+    '    # Vectorised per axis, not a cell-by-cell loop: three outer differences where the loop',
+    '    # was a million interpreted iterations at a thousand neurons. Deliberately *not* the',
+    '    # |a|^2 + |b|^2 - 2 a.b identity, which is one matrix product but cancels catastrophically',
+    '    # on the diagonal — a neuron against itself came back 3e-5 um instead of 0, and a zero',
+    '    # diagonal is what Linkage and the Heatmap read. A difference of a number with itself is',
+    '    # exactly zero. Into out[], not over it: the matrix already carries the names.',
+    '    out[] <- sqrt(outer(a[, 1], b[, 1], "-")^2 + outer(a[, 2], b[, 2], "-")^2 +',
+    '                  outer(a[, 3], b[, 3], "-")^2)',
+    '    return(out)',
+    '  }',
+    '',
+    '  both <- symmetry != "query"',
+    '  # One tree per neuron, built once. `nabor::knn` builds a tree over `data` on every call and',
+    '  # throws it away, so inside the loop a 500-neuron all-by-all would build a quarter of a',
+    '  # million of them rather than five hundred. WKNND rather than WKNNF: the F variant keeps',
+    '  # floats internally and differs from knn in the sixth decimal, where D is bit-identical.',
+    '  tree <- function(s) if (nrow(s$points) == 0) NULL else nabor::WKNND(s$points)',
+    '  # Only where something reads them: with two inputs and one direction every one of these',
+    '  # would be built and discarded, which is the guard the Python helper already had.',
+    '  qt <- if (all_by_all || both) lapply(qs, tree) else NULL',
+    '  tt <- if (all_by_all) qt else lapply(ts, tree)',
+    '  directed <- function(s, to) {',
+    '    if (nrow(s$points) == 0 || is.null(to)) return(NA_real_)',
+    '    d <- to$query(s$points, k = 1, eps = 0, radius = 0)$nn.dists[, 1]',
+    '    if (method == "within") {',
+    '      inside <- sum(s$weights[d <= within])',
+    '      if (report == "fraction") {',
+    '        total <- sum(s$weights)',
+    '        return(if (total > 0) inside / total else NA_real_)',
+    '      }',
+    '      return(inside)',
+    '    }',
+    '    if (statistic == "min") return(min(d))',
+    '    if (statistic == "max") return(max(d))',
+    "    # Reduced where it is read and nowhere else: the neuron's whole cable is fixed for the",
+    '    # matrix, and sum() over 20k doubles per *cell* is ~20 us that min, max and an absolute',
+    '    # within never look at.',
+    '    total <- sum(s$weights)',
+    '    if (total <= 0)',
+    '      return(if (statistic == "mean") mean(d) else stats::median(d))',
+    '    if (statistic == "mean") return(stats::weighted.mean(d, s$weights))',
+    '    coda_weighted_median(d, s$weights)',
+    '  }',
+    '  combine <- function(forward, reverse) {',
+    '    if (!both) return(forward)',
+    '    if (is.na(forward) || is.na(reverse)) return(NA_real_)',
+    '    if (symmetry == "min") return(min(forward, reverse))',
+    '    if (symmetry == "max") return(max(forward, reverse))',
+    '    (forward + reverse) / 2',
+    '  }',
+    '',
+    '  mirrored <- all_by_all && both',
+    '  for (i in seq_along(rows)) {',
+    '    for (j in seq_along(cols)) {',
+    '      if (mirrored && j < i) next',
+    '      forward <- directed(qs[[i]], tt[[j]])',
+    '      reverse <- if (both) directed(ts[[j]], qt[[i]]) else NA_real_',
+    '      out[i, j] <- combine(forward, reverse)',
+    '      if (mirrored && j != i) out[j, i] <- out[i, j]',
+    '    }',
+    '  }',
+    '  out',
+    '}',
+  ],
+})

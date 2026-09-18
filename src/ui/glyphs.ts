@@ -549,6 +549,18 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M18 19.6V15l2.6-2.8M18 14.6l-2.6-2.2M15.4 12.4l.5-2.8' }],
     ['path', { d: 'M9.6 6.6h4.8M11 5.2 9.6 6.6 11 8M13 5.2l1.4 1.4L13 8' }],
   ],
+  /*
+   * NBLAST's two arbours with a **dimension line** across the gap instead of a double arrow —
+   * end bars rather than arrowheads, which is a draughtsman's "this far" rather than "these two
+   * against each other". Deliberately the same two arbours: read beside NBLAST the pair says
+   * that both take the same thing and ask different questions of it, which is the one confusion
+   * worth drawing away.
+   */
+  'neuron.distance': [
+    ['path', { d: 'M6 19.6V15l-2.6-2.8M6 14.6l2.6-2.2M8.6 12.4l-.5-2.8' }],
+    ['path', { d: 'M18 19.6V15l2.6-2.8M18 14.6l-2.6-2.2M15.4 12.4l.5-2.8' }],
+    ['path', { d: 'M9.6 6.6h4.8M9.6 4.8v3.6M14.4 4.8v3.6' }],
+  ],
   // The same double arrow over two synapse clouds instead of two arbours. Read side by side,
   // the pair tells you exactly what each node compares.
   'neuron.synblast': [

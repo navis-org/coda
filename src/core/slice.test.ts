@@ -12,7 +12,7 @@
  * **reject** rather than resolve short.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { SLICE_MS, sliced } from './slice'
 
@@ -108,5 +108,85 @@ describe('sliced', () => {
     ).rejects.toMatchObject({ name: 'AbortError' })
     // Stopped at the first boundary; the whole walk would have been ITEMS.
     expect(ran).toBeLessThan(ITEMS)
+  })
+
+  /**
+   * A body that is itself expensive, which is the case the fixed stride could not serve.
+   *
+   * `Distance between` computes one neuron **pair** per body — twenty thousand nearest-point searches,
+   * tens of milliseconds on skeletons and hundreds on meshes. Read every 64th item, the clock is
+   * consulted once per 64 *pairs*, so Cancel did nothing for up to twenty-five seconds; below 64
+   * items it was never consulted at all and the walk could not be interrupted, which is what a
+   * five-by-five comparison of meshes is.
+   */
+  const EXPENSIVE_MS = SLICE_MS * 1.5
+  const expensive = () => {
+    const until = performance.now() + EXPENSIVE_MS
+    while (performance.now() < until) {
+      /* burn */
+    }
+  }
+
+  it.each([
+    // A long walk: the abort must land within a body or two, not sixty-four.
+    ['a long walk', 1_000, 2],
+    // Fewer items than the old fixed stride, where the clock was never read at all — which is
+    // what a five-by-five comparison of meshes is, and why it could not be stopped.
+    ['a walk shorter than the old stride', 25, 24],
+  ])('is interruptible in %s of expensive bodies', async (_name, total, atMost) => {
+    let ran = 0
+    const controller = new AbortController()
+    await expect(
+      sliced(total, { signal: controller.signal }, () => {
+        ran++
+        expensive()
+        controller.abort()
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(ran).toBeLessThanOrEqual(atMost)
+  })
+
+  it('still reads the clock rarely when the bodies are cheap', async () => {
+    // The optimisation the stride exists for: `performance.now()` is 52% of a do-nothing body.
+    // Widening has to survive, or every cheap caller pays for this fix.
+    let reads = 0
+    const now = performance.now.bind(performance)
+    const spy = vi.spyOn(performance, 'now').mockImplementation(() => {
+      reads++
+      return now()
+    })
+    await sliced(4096, {}, () => {})
+    spy.mockRestore()
+    // Climbing 1 → 64 costs a handful per slice; a read per item would be 4,096.
+    expect(reads).toBeLessThan(200)
+  })
+
+  /**
+   * An abort arriving from the **event loop**, which is where a real one comes from.
+   *
+   * Every other abort test here fires from inside the body, and that is a weaker claim than it
+   * looks: it proves the signal is *read*, not that the loop ever gives the browser the turn in
+   * which the click could be dispatched at all. A walk that yielded with `await Promise.resolve()`
+   * passes those and hangs a tab, because a microtask runs before the browser gets to dispatch
+   * anything — which is the failure `yieldToBrowser` exists for and the one a user reports as
+   * "the Cancel button does nothing".
+   */
+  it('stops when the signal is set from a timer while the walk is running', async () => {
+    const controller = new AbortController()
+    let ran = 0
+    // Fires after the walk has started and cannot be seen by the body itself.
+    const timer = setTimeout(() => controller.abort(), 20)
+    const started = performance.now()
+    await expect(
+      sliced(100_000, { signal: controller.signal }, () => {
+        ran++
+        slow()
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    clearTimeout(timer)
+    // A body is SLICE_MS/32, so the whole walk would be about a minute and a half. Stopping
+    // anywhere near the abort is the property; the generous bound is for a loaded CI box.
+    expect(performance.now() - started).toBeLessThan(2_000)
+    expect(ran).toBeLessThan(100_000)
   })
 })

@@ -357,8 +357,7 @@ export function checkPointFrame(
           units:
             'Tested against each other at that scale every point falls outside every volume, ' +
             'so the result would be an empty Inside port rather than an error.',
-          space:
-            'Nothing would be found inside anything. Put both through Transform Neurons first.',
+          space: 'Nothing would be found inside anything.',
         },
       )
     : undefined

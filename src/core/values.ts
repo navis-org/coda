@@ -720,6 +720,92 @@ export function cableLength(skeleton: SkeletonGeometry): number {
   return total
 }
 
+/**
+ * One triangle's area, from three vertex offsets into an xyz-interleaved buffer.
+ *
+ * Here rather than beside either caller because there are two of them in two layers —
+ * `ui/viewers/roiProjection.ts` sums it for a region's surface area, and `nodes/lib` distributes
+ * it across a mesh's vertices so `Distance between` can weight them — and `src/nodes` may not import
+ * `src/ui`. The same move `quantileSorted` made into `core/stats.ts`, for the same reason: two
+ * copies of one formula is what makes a reported surface area and a computed weight disagree
+ * with nothing to say which is right.
+ *
+ * Half the magnitude of the cross product of two edges. Offsets rather than indices, because
+ * every caller has already multiplied by three.
+ *
+ * **`Math.sqrt` of the sum rather than `Math.hypot`**, which is worth a line because the two are
+ * not interchangeable in cost: V8 does not inline `hypot`, it being a builtin doing overflow-safe
+ * scaling that no caller here needs — measured **13.6 ns a call against 6.2**, agreeing to 4e-16
+ * relative on nanometre coordinates. This is called once per triangle, so a thousand neuron
+ * meshes is a hundred and forty million of them.
+ */
+export function triangleArea(positions: Float32Array, a: number, b: number, c: number): number {
+  const ux = positions[b]! - positions[a]!
+  const uy = positions[b + 1]! - positions[a + 1]!
+  const uz = positions[b + 2]! - positions[a + 2]!
+  const vx = positions[c]! - positions[a]!
+  const vy = positions[c + 1]! - positions[a + 1]!
+  const vz = positions[c + 2]! - positions[a + 2]!
+  const cx = uy * vz - uz * vy
+  const cy = uz * vx - ux * vz
+  const cz = ux * vy - uy * vx
+  return Math.sqrt(cx * cx + cy * cy + cz * cz) / 2
+}
+
+/** Per-item axis-aligned box, six entries each: min xyz then max xyz. */
+export type Boxes = Float64Array
+
+/**
+ * Each mesh's own bounding box, which is what makes the whole thing affordable.
+ *
+ * A dataset's primary set tiles the volume, so a point is in one region and its box is in two
+ * or three. Without the prefilter every point costs a ray per region — sixty-three on
+ * hemibrain, a hundred and forty-four on male-CNS — and every one of them misses.
+ *
+ * `boundsOf` rather than a sweep of our own, which is not merely the same twenty lines: it
+ * **memoises each buffer's box** in a `WeakMap`, and every `MeshesValue` on the wire was
+ * constructed by calling it (`iterables.ts`, `transformOps.ts`, every source), so in the
+ * ordinary case the answer is already computed and this is a lookup. Written out here it was a
+ * second full pass over every vertex of every volume — ~4.3 ms per million vertices, and 100%
+ * of a second Run's cost, since the trees the `WeakMap` below holds are free by then.
+ *
+ * `Float64Array` rather than `Float32Array`: a box grown from float32 vertex coordinates and
+ * then rounded *down* at the maximum would exclude the vertex it was built from, and the points
+ * this is asked about sit on the same grid as those vertices. `Bounds3` holds plain doubles
+ * widened from the same float32 reads, so nothing is lost on the way through.
+ *
+ * **Here rather than in `meshInside.ts`, where it began**, for the reason its own paragraphs give:
+ * everything above is about *buffers*, not about surfaces, and it is a memo-reader over
+ * `boundsOf` two lines up. It moved when `Distance between` became a second caller wanting the
+ * same array for a different question — whether two neurons come near each other at all — which
+ * a skeleton answers as readily as a mesh. `triangleArea` made the same move for a weaker
+ * version of the same argument. `meshInside.ts` keeps `volumeBoxes`, which is about its
+ * prefilter.
+ *
+ * Not `MeshBVH.getBoundingBox()`, for three reasons: it allocates a `Box3` per call, it needs
+ * the tree — which is exactly what the prefilter runs *before* — and `computeBoundsUtils.js`
+ * pads triangle bounds by `FLOAT32_EPSILON`, so the root box is conservatively larger and would
+ * hand back strictly more ray candidates.
+ */
+export function boxesOf(items: readonly { positions: Float32Array }[]): Boxes {
+  const boxes = new Float64Array(items.length * 6)
+  items.forEach((item, i) => {
+    if (item.positions.length === 0) {
+      /*
+       * An inverted box, which no point is in. `boundsOf` answers `EMPTY_BOUNDS` — a zero box at
+       * the origin — for a buffer with no vertices, and taken literally that would make an empty
+       * volume claim the one point at (0, 0, 0). It is the right answer for a *scene's* extent
+       * and the wrong one for a containment prefilter.
+       */
+      boxes.set([Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], i * 6)
+      return
+    }
+    const box = boundsOf([item.positions])
+    boxes.set([...box.min, ...box.max], i * 6)
+  })
+  return boxes
+}
+
 export function boundsCenter(b: Bounds3): [number, number, number] {
   return [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2]
 }

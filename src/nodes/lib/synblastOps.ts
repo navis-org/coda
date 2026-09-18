@@ -27,7 +27,7 @@
  */
 
 import type { Warner } from '../../core/limits'
-import { warnOverThreshold } from '../../core/limits'
+import { warnSideCount } from './limitParams'
 import { idText } from '../../core/ids'
 import type { PointsValue, TableValue } from '../../core/values'
 import { getColumn, isPointsValue } from '../../core/values'
@@ -215,19 +215,16 @@ export function synblastSidesFrom(
   // The matrix is the same shape and costs the same to hold, so the same allocation floor and
   // the same neuron-count sentence apply — reused rather than restated.
   checkNblastSize(ctx, rows, cols)
-  // Through `warnOverThreshold` for the reason `nblastSidesFrom`'s own `saySo` is: the house
-  // sentence's closing clause says there will still be a result, and these messages were
-  // refusals for most of Coda's life. Two sibling nodes phrasing it two ways is how that
-  // clause gets dropped from one of them.
-  if (rows > limit || cols > limit) {
-    warnOverThreshold(ctx, {
-      count: Math.max(rows, cols),
-      threshold: limit,
-      unit: 'neurons',
-      control: "this node's Warn above",
-      cost: 'The matrix grows with the product of the two sides.',
-    })
-  }
+  /*
+   * `warnSideCount`, which is `warnOverThreshold` with this family's `unit` and `control` — and
+   * the point of that helper existing. Written out here it had already drifted from its three
+   * siblings in the way the helper's own comment predicts: one message off `Math.max(rows, cols)`
+   * saying `neurons`, where the others name the side that is large (`neurons on Query`), which is
+   * the half a reader acts on when only one of the two is.
+   */
+  const cost = 'The matrix grows with the product of the two sides.'
+  warnSideCount(ctx, 'Query', rows, limit, cost)
+  if (targetGroups) warnSideCount(ctx, 'Target', cols, limit, cost)
   checkSynblastSize(
     ctx,
     queryValue.attributes.length,

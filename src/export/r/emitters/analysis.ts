@@ -761,6 +761,18 @@ registerHelper({
  * normalisation and symmetry into one `normalisation` argument with three values, so `min` and
  * `max` have nowhere to go and say so.
  */
+/**
+ * The factor warning both matrix emitters carry, which differs only in why micrometres matter.
+ *
+ * The doc on the `VOXEL_UM` *assignment* argues correctly that it must be restated per chunk — a
+ * reader deletes chunks, and a document whose NBLAST cell is gone would fail on a name that is
+ * not there. That argument is about the R code, not about the prose, and the prose was already
+ * byte-identical past its first clause. `labelNote` in the Python emitter is the same shape.
+ */
+const voxelNote = (lead: string): string =>
+  `${lead} and neuprintr returns raw voxels — 8 nm on the hemibrain. Check this factor against ` +
+  `your dataset: nothing in the graph records it.`
+
 registerEmitter('neuron.nblast', (ctx) => {
   const query = ctx.wired('query')
   const target = ctx.input('target')
@@ -784,10 +796,7 @@ registerEmitter('neuron.nblast', (ctx) => {
   ]
 
   const lines: string[] = [
-    ...ctx.note(
-      'NBLAST is calibrated in micrometres and neuprintr returns raw voxels — 8 nm on the ' +
-        'hemibrain. Check this factor against your dataset: nothing in the graph records it.',
-    ),
+    ...ctx.note(voxelNote('NBLAST is calibrated in micrometres')),
     `VOXEL_UM <- 8 / 1000`,
     ``,
     ...dotprops(query, dots),
@@ -1687,5 +1696,74 @@ registerEmitter('core.embed', (ctx) => {
     // notebook emitter for why that is invariant 3 rather than tidiness.
     lines.push(`${out}$annotation <- NA_character_`)
   }
+  return lines
+})
+
+/**
+ * Distance between: the node's own arithmetic, in `coda_neuron_distance`.
+ *
+ * The natverse has no counterpart to fall back on — `nat` measures a neuron and `nat.nblast`
+ * compares two shapes, and neither answers how far apart two neurons are — so unlike the NBLAST
+ * chunk beside it this is not a translation of a library call. What it does borrow is `nabor`'s
+ * k-d tree, which is the structure the canvas and scipy both use, and which a reader with
+ * `nat.nblast` installed already has.
+ *
+ * Meshes stop here rather than degrading, and it costs nothing today: `neuron.meshes` is already
+ * a TODO in R, so a mesh never reaches this port. The guard is for when it does.
+ */
+registerEmitter('neuron.distance', (ctx) => {
+  const kinds = [ctx.inputType('query')?.kind, ctx.inputType('target')?.kind]
+  if (kinds.includes('meshes')) {
+    return ctx.todo(
+      'Distances to a mesh surface need Rvcg::vcgClostKD, which nat only suggests, and nat has ' +
+        'no neuronlist of meshes to hang them off — neuprintr cannot fetch neuron meshes at ' +
+        'all. Use the Skeletons node, which reads the same neurons as a nat neuronlist.',
+    )
+  }
+
+  const query = ctx.wired('query')
+  const target = ctx.input('target')
+  const out = ctx.output('matrix')
+  const method = String(ctx.params.method)
+  ctx.library('nat')
+  ctx.library('nabor')
+  ctx.helper('coda_neuron_distance')
+
+  const args = [
+    `  ${query} * VOXEL_UM,`,
+    ...(target ? [`  ${target} * VOXEL_UM,`] : [`  NULL,`]),
+    `  method = ${rStr(method)},`,
+    ...(method === 'nearest' ? [`  statistic = ${rStr(String(ctx.params.statistic))},`] : []),
+    ...(method === 'within'
+      ? [
+          `  within = ${Number(ctx.params.within)},`,
+          `  report = ${rStr(String(ctx.params.report))},`,
+        ]
+      : []),
+    ...(method !== 'centroid' ? [`  symmetry = ${rStr(String(ctx.params.symmetry))},`] : []),
+  ]
+
+  const lines: string[] = [
+    /*
+     * The same factor and the same warning as the NBLAST chunk, restated rather than shared: it
+     * is a `VOXEL_UM <- 8 / 1000` in whichever chunk comes first and a reader deletes or edits
+     * chunks, so a document where the NBLAST cell has been removed would otherwise fail here on
+     * a name that is not there.
+     */
+    ...ctx.note(voxelNote('Coda reports micrometres')),
+    `VOXEL_UM <- 8 / 1000`,
+    ``,
+  ]
+  if (method === 'within') {
+    lines.push(
+      ...ctx.note(
+        'This counts each node of the Query once, which is what bounds the answer by the ' +
+          'neuron’s own cable. navis’ cable_overlap — the nearest thing to this in either ' +
+          'language — instead sums a node once per Target point that picks it, and differs by ' +
+          'a little over one per cent on two example neurons at 2 µm.',
+      ),
+    )
+  }
+  lines.push(`${out} <- coda_neuron_distance(`, ...args, `)`)
   return lines
 })

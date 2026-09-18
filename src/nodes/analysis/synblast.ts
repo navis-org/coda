@@ -36,7 +36,7 @@ import {
   synapseSetFrom,
   synblastSidesFrom,
 } from '../lib/synblastOps'
-import { warnAboveParam } from '../lib/limitParams'
+import { labelColumnParam, warnAboveParam } from '../lib/limitParams'
 import { MAX_NEURONS } from '../query/morphology'
 
 registerNode({
@@ -74,15 +74,9 @@ registerNode({
       optional: true,
       help: 'Which column says whether a synapse is an input or an output. Set, a presynapse is only compared against presynapses, which is the standard way to run this. Cleared, every connector is one pool.',
     },
-    {
-      id: 'labelColumn',
-      kind: 'column',
-      label: 'Label by',
-      from: 'query',
-      default: '',
-      optional: true,
-      help: 'Which attribute names each row. Read at each neuron’s first synapse, so a column that varies within a neuron gives whichever value came back first. Neuron ids when empty.',
-    },
+    labelColumnParam(
+      'Which attribute names each row. Read at each neuron’s first synapse, so a column that varies within a neuron gives whichever value came back first. Neuron ids when empty.',
+    ),
     {
       id: 'normalize',
       kind: 'boolean',
@@ -126,7 +120,7 @@ registerNode({
     const polarity = ctx.column('polarityColumn')
     // Resolved against the *query's* attributes, which is where the picker reads from. A
     // Target that does not carry the column falls back to one pool on its own side rather
-    // than refusing — the same rule `nblastLabels` applies to a label column per neuron.
+    // than refusing — the same rule `geometryLabels` applies to a label column per neuron.
     const byType = hasPolarity(query.attributes, polarity)
 
     ctx.progress(0.01, `${queryGroups.length} neurons`)

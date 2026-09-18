@@ -1379,3 +1379,238 @@ registerHelper({
     '    return edges[order + list(by)], dropped, unoriented',
   ],
 })
+
+/**
+ * The weighted median, which is the one statistic `Distance between` cannot get from numpy.
+ *
+ * `np.median` weights every sample equally, and the whole point of the node's arithmetic is that
+ * samples are not equal — a skeleton node stands for however much cable happens to be at it. So
+ * this is the distance at which half the neuron's cable or surface is nearer and half further.
+ *
+ * `searchsorted` on the cumulative weight rather than a loop, and the tie arm matters: landing
+ * **exactly** on the half takes the midpoint of the two samples either side, as a plain median
+ * takes the mean of the two middle values. Without it the canvas and the notebook disagree by one
+ * sample's distance on every evenly-weighted neuron, which is most of them after a resample.
+ */
+registerHelper({
+  name: 'coda_weighted_median',
+  requires: [['numpy']],
+  source: [
+    'def coda_weighted_median(values, weights):',
+    '    """Half the weight is nearer than this. Coda\'s Distance between node."""',
+    "    order = np.argsort(values, kind='stable')",
+    '    v, w = np.asarray(values)[order], np.asarray(weights)[order]',
+    '    total = w.sum()',
+    '    # No cable and no area anywhere — a one-node skeleton, a mesh of loose vertices. The',
+    '    # plain median is the honest fallback; NaN would read as "this pair was not measured".',
+    '    if total <= 0:',
+    '        return float(np.median(v)) if len(v) else float("nan")',
+    '    half = total / 2',
+    '    cum = np.cumsum(w)',
+    '    i = min(int(np.searchsorted(cum, half)), len(v) - 1)',
+    '    if i + 1 < len(v) and cum[i] == half:',
+    '        return float((v[i] + v[i + 1]) / 2)',
+    '    return float(v[i])',
+  ],
+})
+
+/**
+ * Every sample of one neuron, and how much neuron each one stands for.
+ *
+ * This is the whole of what makes `Distance between` agree with itself across reconstructions, and it is
+ * the part a reader writing the cell by hand would leave out: **half the length of each edge at a
+ * skeleton node, a third of the area of each triangle at a mesh vertex**. Unweighted, a mean
+ * separation measures how finely the neuron was traced as much as how far away the other one is,
+ * and `navis.resample_skeleton` upstream moves it.
+ *
+ * `np.add.at` rather than `+=` on a fancy index, which is the trap: `w[faces[:, 0]] += a`
+ * evaluates the right-hand side once and assigns, so a vertex shared by twenty triangles — every
+ * vertex — gets **one** triangle's share rather than twenty. The weights would then not sum to
+ * the surface area, and nothing else about the answer would look wrong.
+ *
+ * The weights are checked against the libraries' own totals by `pnpm probe:helpers`: a skeleton's
+ * sum to `navis` `cable_length` and a mesh's to `trimesh.area`, exactly.
+ */
+registerHelper({
+  name: 'coda_geom_samples',
+  requires: [['pandas'], ['numpy'], ['navis']],
+  source: [
+    'def coda_geom_samples(n):',
+    '    """Sample points and the cable or surface area each stands for. Coda\'s Distance between node."""',
+    '    if isinstance(n, navis.MeshNeuron):',
+    "        pts = np.asarray(n.vertices, dtype='float64')",
+    '        weights = np.zeros(len(pts))',
+    '        faces = np.asarray(n.faces)',
+    '        if len(faces):',
+    '            a, b, c = pts[faces[:, 0]], pts[faces[:, 1]], pts[faces[:, 2]]',
+    '            area = 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)',
+    '            for k in range(3):',
+    '                np.add.at(weights, faces[:, k], area / 3)',
+    '        return pts, weights',
+    '    nodes = n.nodes',
+    "    pts = nodes[['x', 'y', 'z']].to_numpy(dtype='float64')",
+    '    weights = np.zeros(len(pts))',
+    '    # navis node ids are not row numbers, so the parent column is mapped through the index',
+    "    # rather than used directly. A root's parent is -1 and reindexes to NaN, which is what",
+    '    # `child` filters on — an edge per non-root node, exactly as the canvas walks it.',
+    '    row = pd.Series(np.arange(len(nodes)), index=nodes.node_id.to_numpy())',
+    "    parent = row.reindex(nodes.parent_id.to_numpy()).to_numpy(dtype='float64')",
+    '    child = np.flatnonzero(~np.isnan(parent))',
+    "    parent = parent[child].astype('int64')",
+    '    length = np.linalg.norm(pts[child] - pts[parent], axis=1)',
+    '    np.add.at(weights, child, length / 2)',
+    '    np.add.at(weights, parent, length / 2)',
+    '    return pts, weights',
+  ],
+})
+
+/**
+ * What one neuron answers about a set of points: the distance to the nearest part of it.
+ *
+ * **The two kinds are indexed differently and it is not an implementation detail.** A skeleton is
+ * a set of points and a distance to it is a distance to the nearest of them. A mesh is a
+ * *surface*, and the nearest point on it is almost never a vertex — so this asks trimesh for the
+ * closest point on a triangle, which is what the canvas's bounding-volume hierarchy answers.
+ * Taking the nearest vertex instead would make every number depend on how finely the neuron
+ * happened to be tessellated.
+ *
+ * The mesh path needs **rtree**, which trimesh uses to find candidate faces and which navis does
+ * not depend on. Without it `trimesh` falls back to a scan of every triangle, measured here at
+ * **131 points a second** against a 71,424-face neuron — one pair of mesh neurons would be five
+ * minutes. The helper says so rather than running it: an unusably slow cell that looks like a
+ * working one is worse than a line naming the `pip install`.
+ */
+registerHelper({
+  name: 'coda_geom_nearest',
+  requires: [['numpy'], ['navis'], ['scipySpatial', 'cKDTree']],
+  source: [
+    'def coda_geom_nearest(n, points):',
+    '    """Distances from arbitrary points to the nearest part of one neuron. Coda\'s Distance between node."""',
+    '    if isinstance(n, navis.MeshNeuron):',
+    '        try:',
+    '            import rtree  # noqa: F401',
+    '        except ImportError as exc:',
+    '            raise ImportError(',
+    '                "Distances to a mesh need rtree (pip install rtree). Without it trimesh "',
+    '                "scans every triangle for every point, which is minutes per pair of "',
+    '                "neurons rather than milliseconds."',
+    '            ) from exc',
+    '        query = n.trimesh.nearest',
+    '        # `on_surface` returns (closest point, distance, triangle id) — the distance is [1].',
+    "        return lambda pts: np.asarray(query.on_surface(pts)[1], dtype='float64')",
+    '    tree = cKDTree(points)',
+    '    return lambda pts: tree.query(pts, k=1, workers=-1)[0]',
+  ],
+})
+
+/**
+ * The matrix: every Query neuron against every Target neuron. Coda's `Distance between` node.
+ *
+ * A helper rather than lines in the cell for `coda_in_volumes`' reason — the rules are the
+ * *node's* — and here there are five of them, every one of which a reader writing this by hand
+ * gets wrong in a way the result cannot show. See `nodes/lib/geometryDistance.ts`.
+ *
+ * - **Nearest-point, never all-pairs.** Each statistic reduces the set of distances from the
+ *   Query's samples to the *nearest* part of the Target. An all-pairs mean measures how big each
+ *   neuron is rather than how near the two are, and `min` is the same number either way — so the
+ *   distinction is invisible on the one statistic people check first.
+ * - **Weighted.** `mean` and `median` are over the neuron's cable or surface, not over its
+ *   samples. `min` and `max` are not averages of anything and ignore the weights.
+ * - **Within counts each sample once**, which is where this parts company with
+ *   `navis.cable_overlap`: that queries the *target's* points against the query's tree and sums
+ *   the length of every query node that came back as somebody's nearest neighbour, so a node two
+ *   target points both pick is counted twice and one no target point happens to pick is not
+ *   counted at all. Measured on two of navis's own example neurons at 2 µm: 1378.68 against
+ *   1361.03, a little over one per cent, in a number reported to five figures.
+ * - **An unmeasured direction propagates.** The smaller of a measured 4 µm and a pair half of
+ *   which says nothing is not 4 µm.
+ * - **The upper triangle is mirrored** on an all-by-all whose symmetry combines both directions,
+ *   because `mean`, `min` and `max` are symmetric in their two arguments. Half the work.
+ */
+registerHelper({
+  name: 'coda_neuron_distance',
+  requires: [['pandas'], ['numpy'], ['scipyDistance', 'cdist']],
+  needs: ['coda_geom_samples', 'coda_geom_nearest', 'coda_weighted_median'],
+  source: [
+    'def coda_neuron_distance(query, target=None, method="nearest", statistic="min",',
+    '                         within=2.0, report="absolute", symmetry="mean"):',
+    '    """Distance between every pair of neurons, in the neurons\' own units. Coda\'s Distance between node."""',
+    '    all_by_all = target is None',
+    '    target = query if all_by_all else target',
+    '    rows = [str(n.id) for n in query]',
+    '    cols = [str(n.id) for n in target]',
+    '    out = np.full((len(rows), len(cols)), np.nan)',
+    '    # Sampled once per neuron, not once per pair: `coda_geom_samples` is a reindex and two',
+    '    # scatter-adds over the whole neuron, so inside the loop a 500-neuron all-by-all would',
+    '    # run it a quarter of a million times rather than five hundred.',
+    '    qs = [coda_geom_samples(n) for n in query]',
+    '    ts = qs if all_by_all else [coda_geom_samples(n) for n in target]',
+    '',
+    '    if method == "centroid":',
+    '        def centre(sample):',
+    '            pts, w = sample',
+    '            if len(pts) == 0:',
+    '                return np.zeros(3)',
+    '            return np.average(pts, axis=0, weights=w) if w.sum() > 0 else pts.mean(axis=0)',
+    '        a = np.vstack([centre(s) for s in qs])',
+    '        b = a if all_by_all else np.vstack([centre(s) for s in ts])',
+    '        # cdist, not a broadcast difference: `a[:, None, :] - b[None, :, :]` materialises an',
+    '        # N x M x 3 float64 before reducing it — 24 GB at a thousand neurons, where the',
+    '        # matrix it reduces to is 8 MB.',
+    '        return pd.DataFrame(cdist(a, b), index=rows, columns=cols)',
+    '',
+    '    both = symmetry != "query"',
+    '    target_index = [coda_geom_nearest(n, s[0]) for n, s in zip(target, ts)]',
+    '    query_index = target_index if all_by_all else (',
+    '        [coda_geom_nearest(n, s[0]) for n, s in zip(query, qs)] if both else None',
+    '    )',
+    '',
+    '    def directed(sample, index):',
+    '        pts, w = sample',
+    '        if len(pts) == 0:',
+    '            return float("nan")',
+    '        d = np.asarray(index(pts), dtype="float64")',
+    '        if method == "within":',
+    '            inside = w[d <= within].sum()',
+    '            if report == "fraction":',
+    '                total = w.sum()',
+    '                return float(inside / total) if total > 0 else float("nan")',
+    '            return float(inside)',
+    '        if statistic == "min":',
+    '            return float(d.min())',
+    '        if statistic == "max":',
+    '            return float(d.max())',
+    "        # Reduced where it is read and nowhere else: the neuron's whole cable or surface is",
+    '        # fixed for the matrix, and doing it per *cell* is ~20 us a neuron over 125k cells in',
+    '        # a 500-neuron all-by-all — for a number min, max and an absolute within never see.',
+    '        total = w.sum()',
+    '        if total <= 0:',
+    '            return float(d.mean()) if statistic == "mean" else float(np.median(d))',
+    '        if statistic == "mean":',
+    '            return float(np.average(d, weights=w))',
+    '        return coda_weighted_median(d, w)',
+    '',
+    '    def combine(forward, reverse):',
+    '        if symmetry == "query":',
+    '            return forward',
+    '        if np.isnan(forward) or np.isnan(reverse):',
+    '            return float("nan")',
+    '        if symmetry == "min":',
+    '            return min(forward, reverse)',
+    '        if symmetry == "max":',
+    '            return max(forward, reverse)',
+    '        return (forward + reverse) / 2',
+    '',
+    '    mirrored = all_by_all and both',
+    '    for i in range(len(rows)):',
+    '        for j in range(len(cols)):',
+    '            if mirrored and j < i:',
+    '                continue',
+    '            forward = directed(qs[i], target_index[j])',
+    '            reverse = directed(ts[j], query_index[i]) if both else float("nan")',
+    '            out[i, j] = combine(forward, reverse)',
+    '            if mirrored and j != i:',
+    '                out[j, i] = out[i, j]',
+    '    return pd.DataFrame(out, index=rows, columns=cols)',
+  ],
+})

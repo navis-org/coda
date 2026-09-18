@@ -343,6 +343,35 @@ export function everythingGraph(): CodaGraph {
     },
 
     /*
+     * Three Distance between nodes, one per branch of its emitter, which is the same argument the two
+     * NBLAST nodes make. The methods reach genuinely different calls — `within` adds the
+     * cable-overlap note that says where navis parts company, `centroid` drops `symmetry`
+     * entirely — and the mesh one is the only node in this graph that makes the rtree note
+     * appear, which is the one a reader has to act on before the cell will run at a usable speed.
+     */
+    {
+      id: 'distance',
+      type: 'neuron.distance',
+      col: 3,
+      row: 13,
+      params: { method: 'nearest', statistic: 'mean', labelColumn: 'type' },
+    },
+    {
+      id: 'distanceWithin',
+      type: 'neuron.distance',
+      col: 3,
+      row: 14,
+      params: { method: 'within', within: 2, report: 'fraction', symmetry: 'min' },
+    },
+    {
+      id: 'distanceMesh',
+      type: 'neuron.distance',
+      col: 3,
+      row: 15,
+      params: { method: 'centroid' },
+    },
+
+    /*
      * One k-NN node, with a label column picked: that is the branch where the emitted frame
      * gains columns the notebook does not carry, so it is the one whose note has to appear.
      */
@@ -1653,6 +1682,10 @@ export function everythingGraph(): CodaGraph {
     ['skel', 'skeletons', 'nblast', 'query'],
     ['skel', 'skeletons', 'nblastPair', 'query'],
     ['skel', 'skeletons', 'nblastPair', 'target'],
+    ['skel', 'skeletons', 'distance', 'query'],
+    ['skel', 'skeletons', 'distanceWithin', 'query'],
+    ['skel', 'skeletons', 'distanceWithin', 'target'],
+    ['mesh', 'meshes', 'distanceMesh', 'query'],
     ['nblast', 'scores', 'linkage', 'in'],
     ['nblast', 'scores', 'embed', 'matrix'],
     // Wired, so the golden shows the join rather than the `annotation = None` branch — which is

@@ -1325,6 +1325,97 @@ else:
     check('in_volumes: an empty cloud keeps the column',
           'roi' in _empty.columns and len(_empty) == 0 and _none == 0, str(list(_empty.columns)))
 
+# ---- Distance ---------------------------------------------------------------
+# Run against real navis neurons rather than a synthetic frame, because the two properties worth
+# checking are both about a *library's* idea of a neuron: that the sample weights sum to navis'
+# own `cable_length`, and that the k-d tree agrees with an exhaustive scan. Neither is visible in
+# a golden file and neither would fail loudly if it were wrong — the weights would simply be a
+# little off, in a matrix nobody can check by eye.
+try:
+    import navis
+    from scipy.spatial import cKDTree
+except ImportError:
+    print()
+    print('skipped: Distance (navis or scipy not installed)')
+else:
+    print()
+    dist_ns = load_cell(
+        FIXTURES / 'everything.ipynb',
+        'def coda_neuron_distance(',
+        {'pd': pd, 'np': np, 'navis': navis, 'cKDTree': cKDTree},
+    )
+    # `near`'s absolute 1e-9 is the wrong tolerance here rather than a bug being papered over:
+    # navis holds node coordinates as **float32**, whose epsilon is 1.2e-7, and a cable length is
+    # ~2,000 µm — so summing the same edges in a different order lands 5.8e-5 away, which is
+    # 2.7e-8 relative, at the precision of the inputs. Relative is what the assertion means.
+    def close(a, b):
+        return bool(np.isclose(a, b, rtol=1e-6, atol=0))
+
+    _nl = navis.example_neurons(3).convert_units('um')
+    _a, _b = _nl[0], _nl[1]
+    _pts, _w = dist_ns['coda_geom_samples'](_a)
+
+    check('distance: node weights sum to the cable length navis reports',
+          close(float(_w.sum()), float(_a.cable_length)),
+          f'{_w.sum():.6f} vs {float(_a.cable_length):.6f}')
+    check('distance: one sample per node', len(_pts) == len(_a.nodes), str(len(_pts)))
+
+    _bpts = dist_ns['coda_geom_samples'](_b)[0]
+    # The points explicitly, as the emitted cell passes them: the helper's one caller always has
+    # the samples in hand, so re-deriving them behind a default was a second way to be called.
+    _near = dist_ns['coda_geom_nearest'](_b, _bpts)
+    _d = _near(_pts[:150])
+    _brute = np.min(
+        np.linalg.norm(_pts[:150, None, :] - _bpts[None, :, :], axis=2), axis=1
+    )
+    check('distance: the tree agrees with an exhaustive scan',
+          bool(np.allclose(_d, _brute)), f'max gap {np.abs(_d - _brute).max():.3e}')
+
+    # Equal weights must agree with np.median, or the canvas and the notebook part company on
+    # every resampled neuron — which is most of them.
+    _even = np.ones(len(_d))
+    check('distance: an evenly weighted median is the plain median',
+          near(dist_ns['coda_weighted_median'](_d, _even), float(np.median(_d))),
+          f"{dist_ns['coda_weighted_median'](_d, _even):.6f} vs {float(np.median(_d)):.6f}")
+
+    _m = dist_ns['coda_neuron_distance'](_nl, method='nearest', statistic='min')
+    check('distance: an all-by-all has a zero diagonal',
+          bool(np.allclose(np.diag(_m.to_numpy()), 0)), str(np.diag(_m.to_numpy())))
+    check('distance: mean symmetry makes it symmetric',
+          bool(np.allclose(_m.to_numpy(), _m.to_numpy().T)))
+    check('distance: rows and columns are named by neuron id',
+          list(_m.index) == [str(n.id) for n in _nl], str(list(_m.index)))
+
+    # Mirroring against the walk it replaces: `symmetry='query'` computes every cell, so a
+    # mirrored half written into the wrong cell shows up here and nowhere else.
+    _q = dist_ns['coda_neuron_distance'](_nl, method='nearest', statistic='mean',
+                                         symmetry='query')
+    _both = dist_ns['coda_neuron_distance'](_nl, method='nearest', statistic='mean',
+                                            symmetry='mean')
+    check('distance: the mirrored half is the mean of the two one-way values',
+          bool(np.allclose(_both.to_numpy(), (_q.to_numpy() + _q.to_numpy().T) / 2)))
+
+    _within = dist_ns['coda_neuron_distance'](_nl[:2], method='within', within=2.0,
+                                              symmetry='query')
+    check('distance: a neuron overlaps itself entirely and no more',
+          close(float(_within.iloc[0, 0]), float(_a.cable_length)),
+          f'{float(_within.iloc[0, 0]):.3f} of {float(_a.cable_length):.3f}')
+
+    _frac = dist_ns['coda_neuron_distance'](_nl[:2], method='within', within=2.0,
+                                            report='fraction', symmetry='query')
+    check('distance: a fraction of one on the diagonal', near(float(_frac.iloc[0, 0]), 1.0),
+          f'{float(_frac.iloc[0, 0]):.6f}')
+
+    # navis' own near-neighbour, measured rather than asserted: the two answer within about one
+    # per cent, which is the gap the emitted note names.
+    _ol = float(navis.cable_overlap(navis.NeuronList([_a]), navis.NeuronList([_b]),
+                                    max_dist=2, method='forward').iloc[0, 0])
+    _ours = float(dist_ns['coda_neuron_distance'](navis.NeuronList([_a]),
+                                                  navis.NeuronList([_b]), method='within',
+                                                  within=2.0, symmetry='query').iloc[0, 0])
+    check('distance: navis cable_overlap is close but not equal, as the note says',
+          0 < abs(_ol - _ours) / _ol < 0.05, f'navis {_ol:.2f} vs ours {_ours:.2f}')
+
 print()
 print(f'{len(fails)} failed' if fails else 'all passed')
 sys.exit(1 if fails else 0)

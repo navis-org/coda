@@ -953,5 +953,67 @@ check("synapse_edges: an empty cloud keeps every column",
         identical(names(empty), c("preId", "preType", "postId", "postType", "weight", "roi")),
       paste(names(empty), collapse = " "))
 
+
+# ---- Distance ----------------------------------------------------------------------------
+# Run against nat's own example neurons rather than a synthetic skeleton, because both properties
+# worth checking are about *nat's* idea of a neuron: that the sample weights sum to the cable
+# length nat reports, and that `nabor`'s tree agrees with an exhaustive scan. Neither is visible
+# in a golden file, and the first is where R's vector-subscript trap bites — `w[i] <- w[i] + x`
+# on a repeated `i` keeps one write, so a branch point would carry one of its edges.
+if (!requireNamespace("nabor", quietly = TRUE)) {
+  cat("\nskipped: Distance (nabor not installed)\n")
+} else {
+  cat("\n")
+  nl <- nat::Cell07PNs[1:3]
+  a <- nl[[1]]
+  b <- nl[[2]]
+  s <- coda_geom_samples(a)
+
+  # Relative, not absolute: nat sums the same edges in a different order, so the two agree to the
+  # precision of the coordinates rather than to the last bit.
+  check("distance: node weights sum to the cable length nat reports",
+        isTRUE(all.equal(sum(s$weights), summary(a)$cable.length, tolerance = 1e-8)),
+        paste(sum(s$weights), "vs", summary(a)$cable.length))
+  check("distance: one sample per node", nrow(s$points) == nrow(a$d), nrow(s$points))
+
+  sb <- coda_geom_samples(b)
+  d <- nabor::knn(data = sb$points, query = s$points, k = 1)$nn.dists[, 1]
+  brute <- apply(s$points[1:100, , drop = FALSE], 1, function(p)
+    min(sqrt(colSums((t(sb$points) - p)^2))))
+  check("distance: the tree agrees with an exhaustive scan",
+        isTRUE(all.equal(unname(d[1:100]), unname(brute))))
+
+  # Equal weights must give the plain median, or the canvas and the document part company on
+  # every resampled neuron.
+  check("distance: an evenly weighted median is the plain median",
+        isTRUE(all.equal(coda_weighted_median(d, rep(1, length(d))), stats::median(d))))
+
+  m <- coda_neuron_distance(nl, method = "nearest", statistic = "min")
+  check("distance: an all-by-all has a zero diagonal", all(diag(m) == 0), paste(diag(m)))
+  check("distance: mean symmetry makes it symmetric", isTRUE(all.equal(m, t(m))))
+  check("distance: rows and columns are named by neuron",
+        identical(rownames(m), names(nl)), paste(rownames(m), collapse = " "))
+
+  # Mirroring against the walk it replaces: `symmetry = "query"` computes every cell, so a
+  # mirrored half written into the wrong cell shows up here and nowhere else.
+  q <- coda_neuron_distance(nl, method = "nearest", statistic = "mean", symmetry = "query")
+  both <- coda_neuron_distance(nl, method = "nearest", statistic = "mean", symmetry = "mean")
+  check("distance: the mirrored half is the mean of the two one-way values",
+        isTRUE(all.equal(both, (q + t(q)) / 2)))
+
+  own <- coda_neuron_distance(nl[1:2], method = "within", within = 2, symmetry = "query")
+  check("distance: a neuron overlaps itself entirely and no more",
+        isTRUE(all.equal(own[1, 1], summary(a)$cable.length, tolerance = 1e-8)),
+        paste(own[1, 1], "of", summary(a)$cable.length))
+  frac <- coda_neuron_distance(nl[1:2], method = "within", within = 2, report = "fraction",
+                               symmetry = "query")
+  check("distance: a fraction of one on the diagonal", isTRUE(all.equal(frac[1, 1], 1)),
+        frac[1, 1])
+
+  cen <- coda_neuron_distance(nl, method = "centroid")
+  check("distance: centroids give a symmetric matrix with a zero diagonal",
+        all(diag(cen) == 0) && isTRUE(all.equal(cen, t(cen))))
+}
+
 cat("\n", if (fails > 0L) paste(fails, "failed") else "all passed", "\n", sep = "")
 quit(status = if (fails > 0L) 1L else 0L)

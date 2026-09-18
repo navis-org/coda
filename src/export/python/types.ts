@@ -62,6 +62,7 @@ export type PyModule =
   | 'seaborn'
   | 'scipyCluster'
   | 'scipyDistance'
+  | 'scipySpatial'
   | 'scipySparse'
   | 'umap'
 
@@ -161,6 +162,12 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
    */
   scipyCluster: { from: 'scipy.cluster.hierarchy', pip: 'scipy' },
   scipyDistance: { from: 'scipy.spatial.distance', pip: 'scipy' },
+  /*
+   * `cKDTree`, for `Distance between`. By name rather than whole, unlike `scipySparse` below: the one
+   * thing taken out of it is the tree, and `scipy.spatial.cKDTree` written at three call sites
+   * inside a helper is longer than the import it saves.
+   */
+  scipySpatial: { from: 'scipy.spatial', pip: 'scipy' },
   /*
    * Imported whole rather than by name, because the helper that uses it names five things out
    * of it and a `from scipy.sparse import ...` line would be the longest in the setup cell for

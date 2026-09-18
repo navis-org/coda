@@ -34,6 +34,7 @@
  * that is one boolean wide.
  */
 
+import { toCommonFor } from '../../data/transforms/landmarks'
 import type { Warner } from '../../core/limits'
 import { describeDuration } from '../../core/limits'
 import type { CodaType, ColumnSchema, TableSchema } from '../../core/types'
@@ -47,6 +48,7 @@ import type {
   SkeletonGeometry,
   SkeletonsValue,
   TableValue,
+  TemplateSpaceId,
 } from '../../core/values'
 import { boundsOf, isPointsValue, isSkeletonsValue, makeTable } from '../../core/values'
 import type { MirrorSpec } from '../../data/transforms/spaces'
@@ -483,6 +485,48 @@ export function frameClash(
 }
 
 /**
+ * Refuse coordinates that are not nanometres, naming the side.
+ *
+ * A refusal rather than a warning, and that is forced rather than chosen: there is no run-time
+ * warning channel that survives a result being restored from cache instead of recomputed. Given
+ * the choice between silence and a stop, a comparison whose every number would be wrong should
+ * stop.
+ *
+ * **Absent units are allowed through.** Absent means unknown, and no source produces it today —
+ * every geometry value from either source says `nm` or `voxels`. Refusing on it would refuse on a
+ * fact nobody stated, which is the same distinction `columnSchemaFor` draws between a schema that
+ * is missing and one that is empty.
+ *
+ * Here rather than in `nblastOps.ts`, where it began, for `frameClashMessage`'s reason one line
+ * down: three nodes refuse on this and nothing about the diagnosis is NBLAST's. What each of them
+ * supplies is `consequence` — the one clause that genuinely differs, which for NBLAST is a
+ * mis-scaled score and for `Distance between` is a number labelled µm that is out by a voxel.
+ *
+ * Every parameter is **required**, which is the one thing about this signature worth arguing
+ * about. The type is structural — any geometry value satisfies it — so a defaulted noun means a
+ * caller that forgets these strings gets a grammatically perfect error about *skeletons* when it
+ * holds a set of meshes: silently wrong prose, in the one guard rail whose entire job is to name
+ * the cause. Required, that caller fails to compile instead.
+ */
+export function checkGeometryUnits(
+  side: string,
+  geometry: { units?: string },
+  /** What to call the geometry, and which node's footer to point at. */
+  noun: string,
+  sourceNode: string,
+  /** What goes wrong here, as a whole sentence. */
+  consequence: string,
+): void {
+  if (geometry.units === undefined || geometry.units === 'nm') return
+  throw new Error(
+    `${side} ${noun} are in ${geometry.units}, not nanometres, so ${consequence} This happens ` +
+      `when the dataset's Meta publishes no voxelSize or no unit this build recognises, so the ` +
+      `fetch had nothing to convert with — the ${sourceNode} node's footer says which units it ` +
+      `got.`,
+  )
+}
+
+/**
  * What to say about one, in the caller's own terms.
  *
  * `names` are what the two sides are called *on this card* — `Input 1` and `Input 4` for a stack,
@@ -502,9 +546,37 @@ export function frameClashMessage(
   consequence: { units: string; space: string },
 ): string {
   const where = `${names.left} is in ${clash.left} and ${names.right} is in ${clash.right}.`
-  return clash.axis === 'units'
-    ? `${where} ${consequence.units}`
-    : `${where} Two template spaces are hundreds of micrometres apart, so ${lowerFirst(consequence.space)}`
+  if (clash.axis === 'units') return `${where} ${consequence.units}`
+  return (
+    `${where} Two template spaces are hundreds of micrometres apart, so ` +
+    `${lowerFirst(consequence.space)} ${spaceRemedy(clash)}`
+  )
+}
+
+/**
+ * What to do about two template spaces — **and the check that it can be done**.
+ *
+ * Every caller used to end its own `consequence.space` with some spelling of "Put both sides
+ * through Transform Neurons first", and `checkNblastSpaces` in `nblastOps.ts` was the only one
+ * that asked first whether such a route exists — and then kept its own copy for a round, which
+ * had already drifted to a second wording ("both sides" against "them") before it was converted.
+ * Exported for that caller, whose sentence is built around a noun this one does not take. It does not always: `AEDES` is a mosquito, and
+ * there is no registration between it and a fly template in any language. Telling somebody to do
+ * the one thing that cannot work is the failure `missing_tos` records on the CAVE side, and
+ * `Distance between` inherited the gap the moment it was written through this function instead of
+ * that one.
+ *
+ * So the remedy is here rather than in each caller's sentence, which is the same move
+ * `checkGeometryUnits` made one function up: what genuinely differs per card is the
+ * *consequence*, and what does not is what to do about it.
+ */
+export function spaceRemedy(clash: FrameClash): string {
+  return toCommonFor(clash.left as TemplateSpaceId) &&
+    toCommonFor(clash.right as TemplateSpaceId)
+    ? 'Put them through Transform Neurons first.'
+    : 'Coda ships no route from one of these into a shared frame — where the two spaces are ' +
+        'different animals there is no such registration to ship — so there is no step that ' +
+        'would make this comparison mean anything.'
 }
 
 function lowerFirst(text: string): string {
@@ -589,9 +661,7 @@ export function checkStackable(inputs: readonly GeometryValue[]): StackedFrame {
             units:
               'Stacked, part of the collection would be drawn at the wrong scale with nothing ' +
               'to say so.',
-            space:
-              'This would draw two clouds in opposite corners of an empty scene. Put every ' +
-              'input through Transform Neurons first.',
+            space: 'This would draw two clouds in opposite corners of an empty scene.',
           },
         ),
       )

@@ -3575,6 +3575,504 @@ only CAVE's `Synapses` produces — and both `neuron.synapses` emitters are writ
 the fixture carries the fixed orientation on the chain the node exists for, and the flip is run
 rather than emitted, in both probes.
 
+## Distance between: how far apart, and how much of one is near the other
+
+`neuron.distance`. NBLAST's layout — a `Query` port, an optional `Target`, a matrix out — asking
+the question NBLAST cannot. An NBLAST score says how alike two arbours are in *shape* and nothing
+about where they are, so two identically-shaped cells in opposite hemispheres score highly. This
+answers the other half, in micrometres.
+
+It is also the first node in Coda that hands `Linkage` a real distance. Every other matrix on the
+canvas is a similarity or a count, which `transformFor` inverts with `1 - x`; `measure: 'distance'`
+means the cells are clustered as they stand.
+
+### Three methods on one node, because they are one question
+
+`Measure` is an enum with `visibleIf` params, which is `cluster.cut`'s shape. The three share
+every input, every refusal and every unit, and the whole of what differs between them is two
+controls:
+
+| `Measure` | shows | cells |
+| --- | --- | --- |
+| `nearest-point distance` | `Statistic`, `Symmetry` | µm, `measure: 'distance'` |
+| `centroid distance` | — | µm, `measure: 'distance'` |
+| `cable or area within a distance` | `Within`, `Report`, `Symmetry` | µm or µm², or a fraction |
+
+`within` has the strongest claim to a node of its own, reporting a *quantity* rather than a
+distance — but that is a fact about a cell rather than about a port, so it is a method.
+
+`Symmetry` is hidden for `centroid`, which has one direction by construction. Hidden params are
+out of the provenance key, so switching to centroid and back cannot leave a stale one in it.
+
+For a **closest approach between two skeletons** it is drawn *dead* rather than hidden, and the
+difference is the whole reason `EnumParam.empty` exists. The quantity is symmetric there, so every
+setting is the identity — but that depends on the two sockets' **kinds**, which `visibleIf` cannot
+see: with a mesh on either port the directions are a point set against a surface and a surface
+against a point set, which genuinely differ, so hiding it on `min` alone would be wrong exactly
+where it decides the answer. An empty options list keeps the stored value where a hidden param
+loses it to the provenance key, so wiring a mesh in finds the setting as it was left. The Meshes
+node's `Detail` is the same control drawn dead for the same reason. `symmetryOptionsFor` reads
+`closestPairApplies`, so it is not a second statement of when the descent applies.
+
+### Every measurement is weighted by the material
+
+**The load-bearing decision, and the obvious implementation is wrong in a way no result can
+show.** Treat a skeleton as its nodes and a mesh as its vertices and neither sampling is even: a
+neuPrint SWC has nodes where a tracer put them, the same neuron through CAVE's level-2 chunk
+decomposition has tens of them instead of tens of thousands, `Clean Skeletons` will resample
+either, and a mesh is tessellated finely where it curves — which `Downsample` moves by two orders
+of magnitude. An unweighted mean therefore measures *how the neuron was reconstructed* mixed in
+with how far away the other one is, and the two are not separable afterwards.
+
+So every sample carries the amount of neuron it stands for — **half the length of each edge at a
+skeleton node, a third of the area of each triangle at a mesh vertex** — and the statistics are
+weighted by it. `mean` and `median` become a mean and a median over the *cable or surface*;
+`centroid` becomes a centre of mass; `within` sums µm of cable or µm² of surface. `min` and `max`
+ignore the weights, not being averages of anything: the closest approach is the closest approach
+whatever stands where.
+
+Measured on two of navis's own example neurons: a weighted mean separation of 4.61 µm against an
+unweighted 4.21, and a median of 4.05 against 3.35. On one arbour traced at 200 nm and 10 nm
+spacing the weighted answer is the same number and the unweighted one is 250 against 209.5.
+
+What this buys is that **`Resample` is not a control on this node** — `Clean Skeletons` is one
+card up and does it properly, and with the weighting it is no longer needed to make a mean mean
+something. It is the same call `Synapses to Edges` makes about `Min weight`.
+
+### The target side is never sampled at all
+
+A distance is to the nearest point **of** a skeleton and to the nearest point **on** a mesh —
+`three-mesh-bvh`'s `closestPointToPoint`, not the nearest vertex — so the target's tessellation is
+out of the answer entirely and only the query side has a sampling. That asymmetry is why
+`Symmetry` matters here even more than it does on NBLAST.
+
+Two things about that call are silent when wrong, and both shipped wrong first:
+
+- **`maxThreshold` prunes but does not bound.** It skips subtrees whose *box* is past the
+  threshold, so a hit returned from a box that was near enough may still be further than the
+  threshold. `!== null` therefore answers "within 2 µm" for points that are not, which is how
+  `hasWithin` was written first.
+- **Both of its comparisons are strict**, so a triangle exactly `dist` away sits behind a box that
+  is skipped. Measure-zero on real coordinates and the ordinary case on the axis-aligned surfaces
+  a region mesh is made of, hence `BOUND_SLACK`. A two-triangle fixture cannot show it — the BVH
+  puts up to ten triangles in a leaf, so the query walks it unconditionally and the test passes
+  vacuously; `distance.test.ts` tessellates to 128 triangles, and the slack is pinned by mutation.
+
+### The statistics are over nearest-point distances, never over all pairs
+
+An all-pairs mean is dominated by how large each neuron is rather than by how near the two are:
+two arbours 50 µm apart and 200 µm across average about 150 µm whether or not they touch. `min` is
+the same number either way, which is what makes the distinction invisible on the one statistic
+people check first. `max` under this reading is the directed Hausdorff distance.
+
+### One refusal the type system cannot make
+
+`within` measures the *query's* material in one direction and the *target's* in the other, so a
+skeleton on one port and a mesh on the other makes the two directions µm of cable and µm² of
+surface. Averaging them is not a number of anything and draws a perfectly ordinary heatmap, so it
+refuses — `mixedQuantityRefusal`, **taking kinds rather than values** so every layer renders one
+function (`kindClashMessage`'s rule). The fraction is refused too, although two fractions are both
+dimensionless: they are fractions of *different materials*, and one rule with one sentence beats a
+second narrower one nobody would find.
+
+**Four surfaces render it**, which is `synapseEdges`' rule and was three for a round: `validate`,
+`evaluate`, the Python emitter — and R only by accident, its mesh `ctx.todo` swallowing the same
+graphs. `coda_neuron_distance` averages the two directions with no guard of its own, so without
+the emitter's call the one comparison the canvas refuses is the one the notebook computes, into a
+perfectly ordinary heatmap of µm averaged against µm². `export.test.ts` pins it, checked by
+mutation.
+
+The **wrong-kind** refusal is the same shape one step over (`wrongDistanceKindReason`): it
+branches per refused kind rather than listing what is accepted, because `points` is declined for a
+reason — a cloud has no items to put on an axis — that "this node measures skeletons or meshes"
+does not say.
+
+### The index is a k-d tree and deliberately not the grid already in the tree
+
+`topologyOps.ts` hashes a skeleton's nodes into cells the size of the gap between them and
+searches outward shell by shell, which is exactly right for its own question — a synapse sits *on*
+the arbour it is being assigned to, so the first shell almost always answers. Every question here
+is the opposite shape: two neurons that do not touch are tens of micrometres apart, which at that
+cell size is hundreds of shells, and that ring loop stops at 64 and reports *nothing found*.
+
+So `kdTree.ts`, which is also what `scipy.spatial.cKDTree` and R's `nabor::knn` are — the canvas
+and both exports agree on the structure as well as on the answer. **Pruning is on each node's
+bounding box rather than on its split plane**, and that is the one real performance bug the probe
+found: a plane is a correct lower bound and a weak one, and it collapses precisely for a query
+*outside* the target's extent, which is every pair of neurons that do not touch. Uniform noise ran
+at 0.3 µs a search at every size while a branching arbour went 2.1 → 15.2 → **62.3 µs** at 1k, 10k
+and 100k nodes; boxes take the 100k case to **0.70 µs**.
+
+**What a tree costs to hold is the other half of that, and no search rate answers it.** Every
+target's index is built up front and kept for the whole run — and past it, `treeFor` holding it
+against the geometry — so the bill is the whole wire at once, and nothing refuses it:
+`checkDistanceSize` guards the *matrix*, which is 8 MB at 1,000 x 1,000 and never the constraint.
+Measured at 4 M points (`pnpm probe:distance`, which needs `NODE_OPTIONS=--expose-gc` for the heap
+column): **12.2 bytes a point** on 20,000-node arbours and 10.5 on 2,000-node ones, the difference
+being where the point count falls between two powers of two — a node holds eight to sixteen
+points, so the node count runs `count / 8` to `count / 5` and only `order` is flatly four bytes a
+point.
+
+It was **29**, and the round it took to find that is the part worth keeping. `addNode` was an
+arrow function beside `nearest` and `hasWithin`, and V8 context-allocates every variable an inner
+function reads and gives **one context to every closure in the scope** — so the five growable
+`number[]`s a build grows its nodes into stayed reachable from the returned tree for as long as
+the tree lived, although everything in them is copied into typed arrays the moment the build ends.
+At 500 skeletons of 20,000 nodes that is **heap +168 MB against +0**, an index costing 1.45x the
+geometry it indexes rather than 0.61x, and 580 MB rather than 258 for a thousand full skeletons in
+a tab that is also holding a WebGL context. Releasing them by hand after the copy fixes the same
+number and leaves the *sixth* array somebody adds to be forgotten, in a failure whose only symptom
+is a tab that dies one comparison sooner; passed in as a `Build`, nothing in the scope can capture
+them. The probe prints the heap column for that reason — anything but zero there is the symptom.
+
+Two measurement traps sit under that table and both published a confident wrong number first.
+A row built its geometry inside the loop, so its baseline was read while the *previous* row's
+arbours were still counted and its total while they were being released — a third of the truth on
+one ordering and **minus nine bytes a point** on another. And a `const held` in the loop body is
+dead when the iteration ends and is *not* collected by the next one's `gc()`: it lived until the
+next build allocated over it, so row two published its own 49 MB minus row one's 38 and read 11.
+Both are why the geometry is built up front and the trees are held in a binding the loop clears
+by hand.
+
+### The weighted median's sort, and the allocation a comment claimed was not there
+
+`min`, `max` and `mean` each stream — there is nothing to keep — and the median is the one
+statistic that has to see every distance before it can answer. `MedianScratch` is what stops it
+growing a `Float64Array` per cell (a quarter of a million allocations of 160 kB on a 500-neuron
+all-by-all of 20,000-node skeletons, about 40 GB, every one zero-filled first), and its own note
+said what that buys: *a walk that allocates nothing per cell is one whose cost does not depend on
+what else the page is doing*.
+
+**The claim was false, and the field that made it false looked like the careful half.** The order
+was sorted with `order.subarray(0, n).sort(compare)` — a view allocated per cell, and a V8 sort
+that, given a comparator, copies the elements into a work array and calls back into JS for every
+comparison. At 2,000 samples that is **239.5 µs a sort against 27.6** for the same partition
+written out with the key read inline, and 757 minor collections over 20,000 sorts where the
+written-out version causes none. End to end on a 120-neuron all-by-all of 2,000-node arbours:
+**9.01 s against 7.22**, or 1,240 µs a pair against 995, with `mean` unmoved at 818 either way.
+
+Two things fall out of the same measurement. **A quickselect is not worth taking**: the median's
+whole overhead over a mean is now 177 µs a cell and the sort is 28 of it, so the ceiling is under
+three per cent — against a second definition of the median, which is what moving `quantileSorted`
+into `core/stats.ts` exists to prevent. And `matrixReduce.ts` is **not** the same case although
+its line median also sorts: `window.sort()` with no comparator is the native path, and what that
+file leaves on the table is the sort where a selection would do, which is the argument its own
+comment already makes and declines.
+
+`sortByDistance` is Hoare's partition with a deterministic median-of-three pivot, which is
+`selectNth`'s rule in `kdTree.ts` and carries its argument — invariant 4 asks `evaluate` to be
+deterministic, and pivots chosen by `Math.random()` put a different last digit in a cache entry
+provenance says is unchanged. It also settles ties without a case: the scan's strict comparisons
+walk equal keys inward from both ends, so a run of them splits evenly, and the permutation among
+them is fixed rather than resting on whether a runtime's sort happens to be stable. `INSERTION_RUN`
+is swept rather than taken from the conventional dozen, for `LEAF_SIZE`'s reason.
+
+**Removing the `subarray` moved a bound that had been a shape.** `order[k + 1] === undefined` was
+the end-of-run test, and it was only ever true because the view stopped at `n`; over the whole
+scratch that slot holds an index the *previous* pair left there. It is `k + 1 >= n` now — and
+unreachable, since `after` at the last sample is the whole weight and `half` is half of it, which
+mutation testing confirms by not failing when it is removed. Written anyway, because the next edit
+to the walk would otherwise have to re-derive whether the shape it deleted was load-bearing.
+
+The sort is not exported, so its tests reach it through the statistic and check **properties**
+rather than a second implementation: a weighted median against `quantileSorted` where every sample
+weighs the same (an independent oracle, since that sorts values where this sorts indices), and
+otherwise against its defining property — no more than half the weight strictly below the answer
+and no more than half strictly above — over distinct keys, four repeated values, ordered, reversed
+and constant runs, at sizes either side of `INSERTION_RUN`. Three of four mutations fail those;
+the fourth, relaxing a partition scan to `>=`, **hangs** rather than failing, which is what a
+Hoare partition does when it stops being able to make progress on equal keys.
+
+### What a cleanup pass found
+
+Four review angles over the finished change; what each turned up that was worth doing.
+
+**The boxes reject a pair before the trees do, and that half serves every kind.** `within`'s exact
+pre-rejection needs two k-d trees, so a mesh on either port fell through to a `hasWithin` per
+sample — each rejected at the BVH root, but a root test plus a `Vector3.set` is still ~400 ns, and
+at 70,000 vertices that is about **30 ms a pair to prove the answer is zero**. `boxGap` is a lower
+bound on the distance between any two points of the two neurons, so `gap > Within` is exact, and
+it costs five nanoseconds. Measured on 24 meshes of 8,192 triangles: **1,331 → 335 µs a pair**,
+identical values; on the probe's own smaller blobs, 265 → 108. The boxes are `meshInside.ts`'
+`boxesOf`, now structural in its parameter — `boundsOf` memoises each buffer's box and every
+geometry value on a wire was built by calling it, so this is a lookup rather than a second sweep.
+
+**`Samples.weights` is built on the first read.** `min` and `max` are not averages of anything and
+never touch it — and on *meshes* they are also the path that cannot use `closestPair`, so a
+closest approach, which is what the node opens on, walked every sample of every pair through
+`samplesOf` and built a weight per vertex on the way. A thousand meshes at 70,000 vertices is
+**560 MB** of `Float64Array` nobody reads, held for as long as the value is cached rather than for
+the run. Every loop that wants them now reads them through a local, a getter per sample being the
+cost this exists to avoid.
+
+**Two closures were still allocated per cell**, in the walk whose own note claimed none were:
+`at(i)` wrapping `index.nearest`, created *before* the `min` branch that never called it, and
+`weightOf(i)` inside `weightedMedian`. Both inlined; the three statistics that walk samples also
+stop paying an indirect call each.
+
+**`Math.hypot` is not `Math.sqrt` of the sum.** V8 does not inline it, it being a builtin doing
+overflow-safe scaling nothing here needs — **13.6 ns a call against 6.2**, agreeing to 4e-16
+relative on nanometre coordinates. `triangleArea` is called once per triangle, so a thousand
+neuron meshes is a hundred and forty million of them.
+
+**The three facts are a record.** Ten functions took `(params, queryKind, targetKind)`
+positionally, two of the three having the same type, so a swapped pair compiled — and
+`mixedQuantityRefusal` already spelled them in a different order from the other nine. `DistanceShape`
+is the record and `ResolvedShape` narrows it where the Query's value has arrived; `DistanceWalk`
+extends that, so `symmetricCells(walk)` is the same call the node makes before anything is built.
+
+**And a remedy that names a step has to check the step exists.** `checkNblastSpaces` asked
+`toCommonFor` before saying "Put both sides through Transform Neurons first"; `frameClashMessage`
+— which `Distance between`, `Stack` and `Points in Volumes` all render through — took that
+sentence from each caller as prose and never asked. So this node told somebody comparing a
+mosquito against a fly to do the one thing that cannot work, which is the failure `missing_tos`
+records on the CAVE side. The remedy moved into `frameClashMessage`, which is `checkGeometryUnits`'
+move one function up: what differs per card is the *consequence*, and what does not is what to do
+about it. The other two callers get the correct sentence for free.
+
+### Five smaller corrections, and the one that is still open
+
+**A mesh rate is a rate at a size.** `pnpm probe:distance` measures 235,000 / 98,000 / 49,000 /
+**24,000** searches a second at 2,048 / 18,432 / 73,728 / 294,912 triangles, and
+`SEARCHES_PER_SECOND.meshes` had been the 73,728 row — about half the wait a neuron-sized surface
+costs. The probe grew the fourth row because the three before it are all smaller than a neuron,
+and the constants are halved to match. It is the worst *measured* size and still not the worst
+there is: `Meshes` spends a 1.5 M-triangle budget and a graphene body can carry ten times that.
+(An earlier reading of this said `within` on meshes was priced nine to twenty times too dear. It
+was measured on 1,152-triangle blobs, where a search costs a tenth of what it costs on a neuron —
+two effects read as one. Corrected for size, the `bounded` constant is about right, and it stays
+twice `exhaustive` as it is on skeletons.)
+
+**Index build time is deliberately not in the estimate.** A tree is built once per neuron and a
+search runs once per sample per *pair*, so the build is bounded by the two sides where the wait is
+bounded by their product — it can only be the larger half where the product is small, which is
+where nothing warns. 1,000 neuron-sized meshes build in about 58 s against a search cost in the
+thousands of hours; even a two-by-two is 232 ms of building against 37 s of searching, a mesh
+carrying so many samples. The bar reports the build as its own stretch (0.01 to 0.25) because it
+is a wait worth *showing* and never the one worth warning about — and adding it would be wrong on
+a second Run, where every tree is already held against its geometry.
+
+**`Samples` counts itself.** A skeleton's sample count is `parents.length`, which is what
+`treeFor` builds its tree over; `weights` was allocated at that count while `directedNearest`,
+`directedWithin` and `computeCentroid` all walked `positions.length / 3`. Where the two disagree —
+which `kdTree.ts` contemplates in as many words, and defends against — `weights[i]` is `undefined`
+past the end and a `mean`, a `median` or a `within` becomes `NaN` for the whole pair with nothing
+to say why. `sampleCount` is the one rule and is askable **without building the samples**, because
+`countLookups` prices a run before any index exists and `cellFor` sizes the median scratch from
+the largest neuron either side carries; both read `positions.length / 3` before, and a scratch one
+short is a `Float64Array` write past the end, which a typed array discards in silence.
+
+**The `within` shortcut's zero was a literal, and the walk it stands in for disagrees with it.**
+`directed` answers a fraction by dividing by the neuron's own total, so a neuron with no cable and
+no area comes back `NaN` — while the pre-rejection returned 0. Which one a reader saw depended on
+how far away the *other* neuron was: one weightless neuron read "not measured" against everything
+near it and "none of it" against everything else, in one row. The absolute arm is 0 either way and
+is decided once for the walk rather than per cell.
+
+**An empty Target is refused**, where it used to give an R x 0 matrix and a blank Heatmap with no
+message anywhere. The sentence names the remedy, because an empty Target and no Target are
+different graphs and unwiring it is very often what was meant.
+
+**Still open: one pair is one `sliced` body, and for meshes that body is long.** The adaptive
+stride fixed the case where a *short* walk never read the clock at all, and the remaining bound is
+the body itself: at 24,000 searches a second a 300,000-triangle query mesh is about six seconds
+against one target, and `Meshes` will hand over larger. Cancel is noticed between pairs, so that
+is the latency. Fixing it means slicing *inside* the directed walk, which means the walk becoming
+resumable — one accumulator per matrix with `block(from, to)` and `value()`, so a partition's
+locals stay locals and only the per-block write-back touches shared state — plus `sliced` taking a
+body that may return a promise and `cellFor` returning `number | Promise<number>` so the common
+path pays nothing. An awaited cell measures **29 ns**, so the outer half is affordable; the inner
+half is a restructure of the hottest arithmetic in the file and wants its own round.
+
+### Cancel reaches it through `sliced`, and only through `sliced`
+
+`evaluate` runs on the main thread, so the Stop button can only be noticed between the bodies of a
+sliced loop. Three stretches are long enough to matter and all three are inside one: the index
+build, the pair walk, and — because they are memoised on the geometry — the centroids, computed
+lazily inside the walk rather than in a pass in front of it.
+
+That was not enough on its own. `sliced` read its clock every 64th item, which assumes a body is
+microseconds; a body here is one neuron *pair*, tens of milliseconds on skeletons and hundreds on
+meshes. So the signal was seen up to twenty-five seconds after Cancel was pressed, and **a walk of
+fewer than 64 items never read the clock at all** — a five-by-five comparison of meshes could not
+be interrupted, which is how it was reported. The stride adapts now, starting at one; see
+`core/slice.ts`.
+
+**Aborting from inside the body is a weaker test than it looks**, and every test here did that at
+first: it proves the signal is *read*, not that the loop ever hands the browser the turn in which a
+click could be dispatched at all — a walk that yielded on a microtask passes those and still hangs
+the tab. Both suites now abort from a timer instead, which is where a real one comes from.
+
+### A closest approach is not n nearest-neighbour queries
+
+The default statistic is `min`, and for most of this node's life it was computed by asking every
+sample of the query for its nearest neighbour in the target and keeping the smallest. That answers
+correctly and is the wrong algorithm: the closest approach is a property of the two **sets**, not
+of any point in them. `closestPair` (`kdTree.ts`) walks both trees at once and drops any pair of
+boxes already further apart than the best distance found, so two neurons in different neuropils are
+rejected at their roots for a handful of box tests rather than two thousand queries.
+
+Measured at 2,600 x 2,600 — the size it was reported at — a closest approach went from **8.2
+minutes to about 1**, and the estimate in front of it from **twenty hours to about four**. It is
+also **symmetric by construction**, so `Symmetry` is the identity over two equal numbers and the
+reverse walk, which was always wasted, is not done.
+
+**Whether a pair can descend is one predicate, `closestPairApplies`, and making it one is a fix
+rather than tidying.** Three places were deciding it: the node, choosing which index sets to
+build; `cellFor`, choosing a cell function; and the cost model, which re-derived it from kinds
+alone. Under `Symmetry: query against target only` with two ports they disagreed —
+`needsBothDirections` is false there, so no query-side index was built, so the descent could not
+happen, and the estimate quoted its price anyway. Five times slower than advertised, in the
+direction that had already been reported once. `needsQueryIndexes` is now what the node asks,
+because a descent reads both trees however few directions it reports.
+
+**The same disagreement had a second half one layer up, and it survived that fix.** An all-by-all
+mirrors its upper triangle rather than recomputing it, and what decided that was
+`symmetry !== 'query'` — which reads as though combining two directions were the only way a pair
+comes out the same both ways round. Two of the *quantities* are symmetric on one direction alone:
+a centroid distance is `|c_i - c_j|`, and a closest approach between two point sets is what
+`closestPair` answers in a single descent. So an all-by-all in either configuration walked the
+whole grid — **0.053 s against 0.030 at 80 neurons on the default statistic** — while the node's
+`pairs` halved on every all-by-all whatever the symmetry, so the run was priced at half of what it
+did. `countLookups` is documented as counting the pairs actually *computed*; it was being handed a
+number that counted something else.
+
+`symmetricCells` is the one statement of it and `pairsWalked` is that statement counted, so the
+estimate and the walk cannot disagree again — the node's `pairs` is a call rather than an
+expression, because the expression was the bug. It is reachable with the control drawn dead, which
+is the part that makes it more than theoretical: an empty `EnumParam.options` deliberately **keeps**
+the stored value, so `Symmetry: query against target only` set under `within` survives a switch to
+a closest approach with no control offering to change it back.
+
+**A missing mirror is invisible in the values**, which is why the test counts instead of comparing:
+an unmirrored walk computes every cell and arrives at the identical matrix, just twice as slowly,
+so the test that compares a mirrored run against `allByAll: false` passes either way — it catches a
+mirror written into the *wrong* cell and nothing else. `TargetIndex.points` is the seam `cellFor`
+asks once per side per evaluated pair, so a getter over it counts the cells the walk actually did:
+six of nine on three neurons. Both halves were checked by mutation, and the counting one is the
+only test that failed when the mirror condition was put back.
+
+`DistanceWalk` carries the two **kinds** for this, where it used to carry the `Quantity` derived
+from one of them — so a caller cannot hand over a unit that disagrees with the geometry it is
+walking, and the walk has the two facts `symmetricCells` asks for.
+
+**The win is arrangement-dependent and the descent runs unconditionally, which is a choice.**
+Swept against the bounded per-point walk it replaces, µs a pair at 2,000 / 10,000 / 40,000 nodes:
+
+| arrangement | dual-tree | per-point bounded |
+| --- | --- | --- |
+| scattered through a brain | 9.1 / 8.9 / 11.5 | 64.7 / 276.3 / 911.3 |
+| sharing a neuropil, 40 µm | 12.9 / 32.8 / 97.9 | 69.6 / 305.4 / 1081.8 |
+| co-located, fully interpenetrating | 86.9 / 403.0 / 1725.1 | **20.9 / 107.6 / 405.4** |
+
+Flat in the neuron's size wherever the two sets are apart — which is the whole point, and is the
+arrangement the 8.2 minutes to about one was measured on — and linear and **four times slower**
+where every box pair overlaps, because nothing prunes and the descent visits leaf pairs the
+bounded walk skips outright. That third row is also where `CLOSEST_PAIR_MICROS` is calibrated, so
+the constant describes the case the descent is worst at. There is no switch because there is no
+cheap discriminator: a test on whether the two root boxes overlap picks the walk for the second
+row too, where the descent is still five to eleven times better. A real population sits between
+the first two rows; the third is a fixture with every neuron rooted at one point.
+
+Two things were tried here and removed, both worth not retrying. **Seeding the descent** with a
+real pair first — one ordinary query, a valid upper bound — made no difference at any size, because
+pushing the nearer child last already walks straight to a close leaf pair. And
+**`closestPointToGeometry`**, which is the surface-to-surface counterpart for two meshes and would
+be both faster and *better* (neither side sampled), measured **163 ms a pair** against the ordinary
+walk's 0.2 ms, with or without a `boundsTree` on the geometry it is handed. Three orders of
+magnitude the wrong way, so a mesh pair keeps the per-point walk and `closestTo` answers only
+between two point sets.
+
+`within` gets the same question as an **exact pre-rejection**: if the nearest parts of two neurons
+are further apart than the distance being asked about, no sample of either can be within it and the
+answer is zero without a point being tested.
+
+**It was switched off for one wiring, which is `closestPairApplies`' defect a second time in the
+same function.** The pre-rejection reads the *query* side's tree as well as the target's, exactly
+as the descent that answers a closest approach does — and `needsQueryIndexes` asked
+`closestPairApplies`, which is about a `min`. So two ports under `Symmetry: query against target
+only`, where `needsBothDirections` is false too, built no query trees and never descended. Never a
+missing feature, which is what settles whether it is worth having: an all-by-all hands its target
+indexes over as its query indexes, so one port always had it, and two ports had it under every
+symmetry but that one. `descentApplies` is the predicate `needsQueryIndexes` asks now — whether a
+descent happens **at all**, to answer a cell or to reject one — beside `closestPairApplies`, which
+stays "the descent *is* the answer".
+
+**And the pre-rejection asked for more than it needed.** `closestPair` refines an exact minimum,
+where the question is a yes or a no, and the difference is not free in the one case the shortcut
+cannot help: two neurons that genuinely overlap paid a full descent and then walked their samples
+anyway. `anyPairWithin` is `hasWithin`'s relationship to `nearest` one level up — a constant bound
+instead of a shrinking one, and a return from the middle of the leaf scan — so the walk stops at
+the first pair inside the limit. A second loop rather than an option on `closestPair`, for
+`min`/`max`'s reason: both differences would be branches in the innermost loop of the hottest
+function in `kdTree.ts`, taken millions of times per matrix to serve one of the two methods.
+
+Measured on 60 two-port skeletons of 2,000 nodes, `within` at 2 µm with one direction:
+
+| arrangement | no query trees (before) | `closestPair` | `anyPairWithin` |
+| --- | --- | --- | --- |
+| scattered through a brain | 41.1 µs a pair | 13.0 | **4.2** |
+| sharing a neuropil, 40 µm | 54.5 | — | **21.9** |
+| co-located | 257.0 | 326.6 | **258.1** |
+
+The middle column is why the yes-or-no version matters rather than being a tidy-up: with the exact
+descent the fix was a 3.5x saving where neurons are apart and a **1.3x cost** where they
+interpenetrate, which is a trade a node has no way to make. Asked as a yes or a no there is no
+trade — the overlapping row is back where it started and the scattered one is three times better
+again. The all-by-all path, which already had the pre-rejection, gets that second half for free.
+
+**`min` hands its running best back as the search's bound**, which is what `KdTree.nearest` takes
+one for: after the first sample the bound is about the pair's closest approach, so for two neurons
+that do not touch the root's children both fail it and the search ends in two box tests. Measured
+on a pair of 20,000-node arbours, byte-identical answers: **3.3 ms → 0.5 ms apart (6.7×) and
+9.6 ms → 0.2 ms overlapping (48×)** — on the node's *default* statistic. `max` has no such bound,
+its running best being the wrong end, which is why the two are separate loops. See
+`docs/limits.md`.
+
+### What is deliberately absent
+
+**A soma.** `SkeletonGeometry` is positions, radii and parents, with no soma and no node labels —
+`data/swc.ts` says outright that the SWC label column "is read and discarded", and neuPrint's
+`somaLocation` is a Neo4j point `neuprint/schema.ts` suppresses. A root is usually the soma on a
+reconstruction that has one and is not on a chunk decomposition or a fragment, so an anchor that
+silently meant two things depending on the route would be worse than one that is missing.
+`centroid` is here because it is not a soma standing in for one.
+
+**A point cloud.** `DISTANCE_KINDS` is a **fifth** kind list beside `SPLIT_KINDS`, which holds the
+same two members for a different reason: `Split Neurons` declines `points` because a cloud's
+attribute rows are connectors, and this declines it because a cloud has *no items in it*. Every
+axis here is one neuron, and a `PointsValue` is one value carrying N points with no notion of which
+neuron each belongs to — so it would need a grouping column, which is a second question bolted onto
+a node with three methods already.
+
+### The exporters, and where navis differs
+
+Both emit `coda_neuron_distance`, a generated helper rather than a library call, and **not**
+`navis.cable_overlap` — which looks like the `within` method and does not compute the same number.
+navis queries the *target's* points against the query's tree and sums the length of every query
+node that came back as somebody's nearest neighbour, so a node two target points both pick counts
+twice and one no target point happens to pick counts not at all. Measured on two example neurons at
+2 µm: **1378.68 against 1361.03**, a little over one per cent, in a number reported to five
+figures. Here each query sample is asked its own question once, so the answer is bounded by the
+neuron's own cable.
+
+Both helpers are checked by **running** them (`pnpm probe:helpers`, `pnpm probe:r-helpers`): the
+sample weights against navis's `cable_length` and nat's `summary()$cable.length` exactly, and the
+tree against an exhaustive scan. Two traps the probes caught rather than the code review:
+
+- **R's vector subscript does not accumulate.** `w[child] <- w[child] + half` on a repeated index
+  evaluates the right-hand side once and assigns, so a branch point with three edges keeps one of
+  them — `tapply` instead, and the exact cable-length check is what catches it.
+- **The tolerance was the wrong kind.** navis holds node coordinates as float32, so summing the
+  same edges in a different order lands 5.8e-5 from its own total on a ~2,000 µm neuron. An
+  absolute 1e-9 fails; relative at the precision of the inputs is what the assertion means.
+
+Python's mesh arm needs **rtree**, which trimesh uses to find candidate faces and navis does not
+depend on. Without it `trimesh` scans every triangle for every point, measured at **131 points a
+second** on a 71,424-face neuron — one pair would be five minutes — so the helper raises with the
+`pip install` named rather than running it. R stops at meshes outright: `Rvcg::vcgClostKD` is only
+suggested by nat, and `neuron.meshes` is already a TODO there, so a mesh never reaches the port.
+
 ## Connectivity: hops and direction
 
 `Direction` offers `both`, and `Hops` traverses further than one synapse. Both changed what the

@@ -5,30 +5,12 @@
  * affordable rather than about what the answer means — that argument lives in
  * `pointsInMeshes.ts`, which owns the schema, the column and the partition.
  *
- * ## Why the library is dynamically imported
+ * ## The tree is `meshTrees.ts`', not this file's
  *
- * `three` and `three-mesh-bvh` are already in the tree — `ui/viewers/meshPicking.ts` builds the
- * same trees so a click on a neuron does not cost a frame — but they are in the tree *for the
- * UI*. A static import from here would put three in `nodes.html`'s bundle, which is a static
- * page with no React and no renderer in it, for a node guide entry that draws a glyph. So the
- * import is inside the function, which is `src/umap/run.ts`' shape and its reason: the node
- * statically imports a thin module, the thin module reaches for the library only when somebody
- * presses Run.
- *
- * **The MCP bundle needed a second move**, and the numbers are why it is worth knowing about:
- * `vite.mcp.config.ts` sets `inlineDynamicImports: true`, so a dynamic import in the node pack
- * is *inlined* into the one file the MCP server downloads — measured at **2,482 kB → 4,345 kB**,
- * 75% more for a library that bundle can never reach. `three` is external there now, with the
- * argument beside the option: nothing `src/mcp/index.ts` exports runs a node. That took the
- * cost to **+12 kB**.
- *
- * ## `indirect: true`, for `meshPicking.ts`' reason
- *
- * `MeshBVH` builds by **reordering the geometry's index array in place**, and the array handed
- * to it here is `MeshGeometry.indices` — the `Uint32Array` that belongs to the `MeshesValue` on
- * the wire, which the 3D viewer, the OBJ export and every other reader of that value hold too.
- * A reordered index draws the identical surface, which is exactly why it would go unnoticed.
- * `pointsInMeshes.test.ts` pins the array untouched, as `meshPicking.test.ts` does.
+ * The dynamic import, the `indirect: true` option and the `WeakMap` that holds a tree against
+ * its mesh all moved there when `Distance between` became a second caller — one wire feeding both nodes
+ * would otherwise build every tree twice. The arguments behind all three are recorded there, and
+ * `pointsInMeshes.test.ts` still pins the index array untouched, as `meshPicking.test.ts` does.
  *
  * ## The ray is deliberately not axis-aligned
  *
@@ -42,11 +24,10 @@
  * surface is parallel to it.
  */
 
-import type { MeshBVHOptions } from 'three-mesh-bvh'
 import type { Slicer } from '../../core/slice'
-import { sliced } from '../../core/slice'
-import type { MeshGeometry } from '../../core/values'
-import { boundsOf } from '../../core/values'
+import type { Boxes, MeshGeometry } from '../../core/values'
+import { boxesOf } from '../../core/values'
+import { buildMeshTrees } from './meshTrees'
 
 /**
  * Which meshes of a set enclose a point.
@@ -88,23 +69,6 @@ export interface VolumeBoxes {
   candidateCount(x: number, y: number, z: number): number
 }
 
-/** Per-mesh axis-aligned box, six entries each: min xyz then max xyz. */
-type Boxes = Float64Array
-
-/**
- * The trees, held weakly against the mesh items they describe.
- *
- * Keyed on `MeshGeometry` identity, which is sound for `groupIndexes`' reason in
- * `iterables.ts`: geometry buffers here are immutable by convention — every node builds new
- * arrays rather than writing into one — so an item that is the same object is the same surface.
- * What it buys is the second Run: a tree over a dataset's primary set is the better part of a
- * second to build, and a graph re-run after an edit downstream would otherwise pay it again.
- *
- * `unknown` rather than `MeshBVH` because the type comes from a module this one only imports
- * dynamically; the cast is confined to `treeFor` below.
- */
-const trees = new WeakMap<MeshGeometry, unknown>()
-
 /**
  * A fixed oblique probe direction. Normalised at build, never at use.
  *
@@ -113,18 +77,6 @@ const trees = new WeakMap<MeshGeometry, unknown>()
  * any of them.
  */
 const PROBE = [0.113, 0.271, 0.956] as const
-
-/**
- * The build options, typed wider than the package declares them.
- *
- * `meshPicking.ts`' workaround at a second call site, and the same note: 0.8.3's `MeshBVHOptions`
- * omits `indirect` although its own runtime defaults carry it, so a bare literal fails the
- * excess-property check. Not a version bump — drei asks for `^0.8.3`, so 0.9 would put a second
- * copy of the package in the tree. The type import is erased at build, so naming it here costs
- * `nodes.html` and the MCP bundle nothing, which is why this is a typed constant rather than the
- * `ConstructorParameters<typeof MeshBVH>[1]` cast it was written as.
- */
-const TREE_OPTIONS: MeshBVHOptions & { indirect: boolean } = { indirect: true }
 
 /** The prefilter, with no library behind it. Hand the same boxes to `buildInsideTests`. */
 export function volumeBoxes(items: readonly MeshGeometry[]): VolumeBoxes & { boxes: Boxes } {
@@ -139,43 +91,16 @@ export function volumeBoxes(items: readonly MeshGeometry[]): VolumeBoxes & { box
   }
 }
 
-/**
- * The trees, built one at a time with a turn for the browser between them.
- *
- * **Sliced for the reason the walk below it is**, and this is the stretch that was left out of
- * the first version while a comment one file over called it "the one stretch of this run with no
- * abort check in it". At the probe's measured 192 ms per million triangles a dataset's primary
- * set is a fifth of a second of frozen tab and a `Meshes` wire of full-resolution neuron surfaces
- * is seconds of it, with no way to cancel and nothing on the bar. `three-mesh-bvh` ships a worker
- * builder that would move it off-thread entirely; that is a real option and it costs worker
- * bundling in `vite.mcp.config.ts`' already careful externalisation, so the yield is the trade
- * taken here.
- */
+/** The containment tests, over trees `meshTrees.ts` builds and caches. */
 export async function buildInsideTests(
   items: readonly MeshGeometry[],
   prefilter: { boxes: Boxes } = volumeBoxes(items),
   hooks: Slicer = {},
 ): Promise<InsideTests> {
-  const [three, bvh] = await Promise.all([import('three'), import('three-mesh-bvh')])
-  const { BufferAttribute, BufferGeometry, DoubleSide, Ray, Vector3 } = three
-  const { MeshBVH } = bvh
+  const { three, trees: built } = await buildMeshTrees(items, hooks)
+  const { DoubleSide, Ray, Vector3 } = three
 
   const { boxes } = prefilter
-  const built: InstanceType<typeof MeshBVH>[] = []
-  await sliced(items.length, hooks, (i) => {
-    const item = items[i]!
-    const held = trees.get(item)
-    if (held) {
-      built.push(held as InstanceType<typeof MeshBVH>)
-      return
-    }
-    const geometry = new BufferGeometry()
-    geometry.setAttribute('position', new BufferAttribute(item.positions, 3))
-    geometry.setIndex(new BufferAttribute(item.indices, 1))
-    const tree = new MeshBVH(geometry, TREE_OPTIONS)
-    trees.set(item, tree)
-    built.push(tree)
-  })
 
   // One ray and one direction for the whole run: `raycastFirst` reads them and keeps nothing.
   const direction = new Vector3(PROBE[0], PROBE[1], PROBE[2]).normalize()
@@ -200,49 +125,6 @@ export async function buildInsideTests(
       }
     },
   }
-}
-
-/**
- * Each mesh's own bounding box, which is what makes the whole thing affordable.
- *
- * A dataset's primary set tiles the volume, so a point is in one region and its box is in two
- * or three. Without the prefilter every point costs a ray per region — sixty-three on
- * hemibrain, a hundred and forty-four on male-CNS — and every one of them misses.
- *
- * `boundsOf` rather than a sweep of our own, which is not merely the same twenty lines: it
- * **memoises each buffer's box** in a `WeakMap`, and every `MeshesValue` on the wire was
- * constructed by calling it (`iterables.ts`, `transformOps.ts`, every source), so in the
- * ordinary case the answer is already computed and this is a lookup. Written out here it was a
- * second full pass over every vertex of every volume — ~4.3 ms per million vertices, and 100%
- * of a second Run's cost, since the trees the `WeakMap` below holds are free by then.
- *
- * `Float64Array` rather than `Float32Array`: a box grown from float32 vertex coordinates and
- * then rounded *down* at the maximum would exclude the vertex it was built from, and the points
- * this is asked about sit on the same grid as those vertices. `Bounds3` holds plain doubles
- * widened from the same float32 reads, so nothing is lost on the way through.
- *
- * Not `MeshBVH.getBoundingBox()`, for three reasons: it allocates a `Box3` per call, it needs
- * the tree — which is exactly what the prefilter runs *before* — and `computeBoundsUtils.js`
- * pads triangle bounds by `FLOAT32_EPSILON`, so the root box is conservatively larger and would
- * hand back strictly more ray candidates.
- */
-function boxesOf(items: readonly MeshGeometry[]): Boxes {
-  const boxes = new Float64Array(items.length * 6)
-  items.forEach((item, i) => {
-    if (item.positions.length === 0) {
-      /*
-       * An inverted box, which no point is in. `boundsOf` answers `EMPTY_BOUNDS` — a zero box at
-       * the origin — for a buffer with no vertices, and taken literally that would make an empty
-       * volume claim the one point at (0, 0, 0). It is the right answer for a *scene's* extent
-       * and the wrong one for a containment prefilter.
-       */
-      boxes.set([Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], i * 6)
-      return
-    }
-    const box = boundsOf([item.positions])
-    boxes.set([...box.min, ...box.max], i * 6)
-  })
-  return boxes
 }
 
 function inBox(boxes: Boxes, i: number, x: number, y: number, z: number): boolean {

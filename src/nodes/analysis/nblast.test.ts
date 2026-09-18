@@ -31,9 +31,9 @@ import {
   checkNblastSpaces,
   checkNblastUnits,
   dotpropSetFrom,
-  nblastLabels,
   NM_PER_UM,
 } from '../lib/nblastOps'
+import { geometryLabels } from '../lib/geometryLabels'
 import '../index'
 import { searchFor } from '../../test/findNeurons'
 import { node } from '../../test/graph'
@@ -156,8 +156,8 @@ describe('nblastOps — the flattening', () => {
 
   it('labels by neuron id, by a column, and by neuron id again where that column is empty', () => {
     const skeletons = skeletonsFixture()
-    expect(nblastLabels(skeletons, undefined)).toEqual(['11', '22'])
-    expect(nblastLabels(skeletons, 'type')).toEqual(['LC4', '22'])
+    expect(geometryLabels(skeletons, undefined)).toEqual(['11', '22'])
+    expect(geometryLabels(skeletons, 'type')).toEqual(['LC4', '22'])
   })
 
   it('refuses coordinates that are not nanometres, naming the side', () => {
@@ -199,7 +199,7 @@ describe('nblastOps — the flattening', () => {
     const spaced = (space: string) => ({ ...skeletonsFixture(), space })
     expect(() =>
       checkNblastSpaces(spaced('JRCFIB2018F'), spaced('FLYWIRE'), 'skeletons'),
-    ).toThrow(/Put both sides through Transform Neurons first/)
+    ).toThrow(/Put them through Transform Neurons first/)
     expect(() => checkNblastSpaces(spaced('AEDES'), spaced('FLYWIRE'), 'skeletons')).toThrow(
       /no route from one of these into a shared frame/,
     )

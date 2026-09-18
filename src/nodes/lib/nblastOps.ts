@@ -32,7 +32,8 @@ import {
   tableFromRows,
 } from '../../core/values'
 import type { Value } from '../../core/values'
-import { toCommonFor } from '../../data/transforms/landmarks'
+import { warnSideCount } from './limitParams'
+import { checkGeometryUnits, spaceRemedy } from './transformOps'
 import type { NblastKnnResult, NblastResult, PointSet } from '../../pyodide/nblast'
 
 /**
@@ -120,59 +121,25 @@ export function dotpropSetFrom(skeletons: SkeletonsValue): PointSet {
 }
 
 /**
- * What to call each row.
+ * The units refusal in NBLAST's words.
  *
- * Neuron ids unless a column was picked, and neuron ids again wherever that column is empty — a
- * neuron with no type is still a neuron, and a blank row label in a heatmap is a row nobody
- * can identify rather than a row with nothing to say.
- */
-export function nblastLabels(skeletons: SkeletonsValue, column: string | undefined): string[] {
-  const values = column ? getColumn(skeletons.attributes, column) : undefined
-  return skeletons.items.map((item, i) => {
-    const cell = values?.[i]
-    return cell === null || cell === undefined || cell === '' ? item.id : String(cell)
-  })
-}
-
-/**
- * Refuse coordinates that are not nanometres, naming the side.
- *
- * A refusal rather than a warning, and that is forced rather than chosen: there is no run-time
- * warning channel here that survives a result being restored from cache instead of recomputed
- * (see `unmatchedLabels` for the same gap worked around a different way). Given the choice
- * between silence and a stop, a comparison whose every number would be wrong should stop.
- *
- * **Absent units are allowed through.** Absent means unknown, and no source produces it today —
- * every geometry value from either source says `nm` or `voxels`. Refusing on it would refuse on
- * a fact nobody stated, which is the same distinction `columnSchemaFor` draws between a schema
- * that is missing and one that is empty.
+ * `checkGeometryUnits` is the guard — three nodes share it — and this supplies the one clause
+ * that is NBLAST's: a scoring matrix calibrated in micrometres, handed nanometres, scores every
+ * pair as a stranger. `synblastOps` calls it with its own noun, which is why that half stays a
+ * parameter here rather than being folded in.
  */
 export function checkNblastUnits(
   side: string,
   geometry: { units?: GeometryUnits },
-  /*
-   * What to call the geometry, and which node's footer to point at.
-   *
-   * **Required, not defaulted**, which is the one thing about this signature worth arguing
-   * about. The parameter it replaced was `skeletons`, and the type is now structural — any
-   * geometry value satisfies it — so a defaulted noun means a fourth caller that forgets these
-   * two strings gets a grammatically perfect error saying "Query skeletons are in voxels — the
-   * Skeletons node's footer says which units it got" *about a set of meshes*. Silently wrong
-   * prose, in the one guard rail whose entire job is to name the cause. Required, that caller
-   * fails to compile instead.
-   *
-   * Two words rather than one because they are not derivable from each other: syNBLAST's
-   * inputs are *synapses* and come off the **Synapses** node.
-   */
   noun: string,
   sourceNode: string,
 ): void {
-  if (geometry.units === undefined || geometry.units === 'nm') return
-  throw new Error(
-    `${side} ${noun} are in ${geometry.units}, not nanometres, so NBLAST would compare them ` +
-      `at the wrong scale and say nothing about it. This happens when the dataset's Meta ` +
-      `publishes no voxelSize or no unit this build recognises, so the fetch had nothing to ` +
-      `convert with — the ${sourceNode} node's footer says which units it got.`,
+  checkGeometryUnits(
+    side,
+    geometry,
+    noun,
+    sourceNode,
+    'NBLAST would compare them at the wrong scale and say nothing about it.',
   )
 }
 
@@ -200,7 +167,8 @@ export function checkNblastUnits(
  * and a fly template in any language, let alone one that runs in a browser. Sending that pair
  * to `Transform Neurons` is telling somebody to do the one thing that cannot work, which is the
  * failure `missing_tos` records on the CAVE side. So the sentence branches on `toCommonFor`,
- * the same lookup the node itself would consult.
+ * the same lookup the node itself would consult — through `spaceRemedy`, which is where that
+ * branch lives now that `frameClashMessage`'s three callers need it too.
  */
 export function checkNblastSpaces(
   query: { space?: TemplateSpaceId },
@@ -209,16 +177,13 @@ export function checkNblastSpaces(
   noun: string,
 ): void {
   if (!query.space || !target.space || query.space === target.space) return
-  const bridgeable = toCommonFor(query.space) && toCommonFor(target.space)
   throw new Error(
     `Query ${noun} are in ${query.space} and Target ${noun} are in ${target.space}. NBLAST ` +
       'scores how well two arbors lie along each other, so across two coordinate systems it ' +
       'would score every pair as a stranger and say nothing about it. ' +
-      (bridgeable
-        ? 'Put both sides through Transform Neurons first.'
-        : 'Coda ships no route from one of these into a shared frame — where the two spaces ' +
-          'are different animals there is no such registration to ship — so there is no ' +
-          'step that would make this comparison mean anything.'),
+      // The remedy and its bridge check are `transformOps.ts`' — this function is where they were
+      // learned, and keeping a copy is how the two came to say "both sides" and "them".
+      spaceRemedy({ axis: 'space', left: query.space, right: target.space }),
   )
 }
 
@@ -271,17 +236,10 @@ export function nblastSidesFrom(
   }
   if (queryValue.items.length === 0) throw new Error('No skeletons on the Query input')
 
-  const saySo = (side: string, count: number): void => {
-    warnOverThreshold(ctx, {
-      count,
-      threshold: limit,
-      unit: `neurons on ${side}`,
-      control: "this node's Warn above",
-      cost: 'Scoring is single-threaded in the browser and grows with the product of the two sides.',
-    })
-  }
-  if (queryValue.items.length > limit) saySo('Query', queryValue.items.length)
-  if (targetValue && targetValue.items.length > limit) saySo('Target', targetValue.items.length)
+  const cost =
+    'Scoring is single-threaded in the browser and grows with the product of the two sides.'
+  warnSideCount(ctx, 'Query', queryValue.items.length, limit, cost)
+  if (targetValue) warnSideCount(ctx, 'Target', targetValue.items.length, limit, cost)
 
   checkNblastUnits('Query', queryValue, 'skeletons', 'Skeletons')
   if (targetValue) {

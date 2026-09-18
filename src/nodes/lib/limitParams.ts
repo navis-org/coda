@@ -17,6 +17,8 @@
  * reason.
  */
 
+import type { Warner } from '../../core/limits'
+import { warnOverThreshold } from '../../core/limits'
 import type { ParamDef } from '../../core/node'
 
 export interface WarnAboveOptions {
@@ -45,5 +47,66 @@ export function warnAboveParam(options: WarnAboveOptions): ParamDef {
     max: options.threshold,
     step: 10,
     advanced: true,
+  }
+}
+
+/**
+ * The warning the `Warn above` control actually produces, for a node that counts each side
+ * of a comparison separately.
+ *
+ * Here beside the control rather than in each node, for `warnAboveParam`'s reason: four
+ * comparison nodes — both NBLASTs, syNBLAST and Distance between — carried the same closure with
+ * the same `unit`, the same `control` and a `cost` differing by one verb, so the next edit to how
+ * this reads was four edits and the fourth would be the one somebody missed. What stays with the
+ * caller is `cost`, which is the only part that is about the node.
+ *
+ * **The fourth was missed on the way in**, which is the argument holding still: syNBLAST kept its
+ * own `warnOverThreshold` for a round and had already drifted — one message off
+ * `Math.max(rows, cols)` reading `neurons`, where the other three name the side that is large.
+ *
+ * Silent at or below the limit, so a caller passes every count rather than guarding first — the
+ * guard and the threshold in one condition is what `SILENT` records going wrong.
+ */
+export function warnSideCount(
+  ctx: Warner,
+  side: string,
+  count: number,
+  limit: number,
+  cost: string,
+): void {
+  if (count <= limit) return
+  warnOverThreshold(ctx, {
+    count,
+    threshold: limit,
+    unit: `neurons on ${side}`,
+    control: "this node's Warn above",
+    cost,
+  })
+}
+
+/**
+ * The `Label by` picker the four comparison nodes carry.
+ *
+ * **Not `displayLabels.ts`' `labelParams`**, which is the other builder of a control with this
+ * name and is a different control: that one mints a `matchColumn`/`labelColumn` *pair* reading an
+ * Annotations port, where this is one optional picker on the Query port. Named here so the next
+ * node copies whichever it means rather than whichever it lands beside.
+ *
+ * `warnAboveParam`'s argument at a second control: the four were byte-identical apart from
+ * `help`, so the shared half — that it is an optional column picker on the Query port, defaulting
+ * to empty — is stated once and each node supplies the sentence that is its own. `optional` is
+ * the load-bearing flag: `resolveColumn`'s rule 3 hands a *required* picker whose stored default
+ * the schema lacks the first compatible column, which here would name every row after whatever
+ * happens to come first.
+ */
+export function labelColumnParam(help: string): ParamDef {
+  return {
+    id: 'labelColumn',
+    kind: 'column',
+    label: 'Label by',
+    from: 'query',
+    default: '',
+    optional: true,
+    help,
   }
 }

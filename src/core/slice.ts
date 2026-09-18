@@ -67,11 +67,21 @@ export interface Slicer {
 /**
  * Walk `total` items, handing the browser a turn whenever a slice has run long enough.
  *
- * **The clock is read every `CLOCK_EVERY` items, not every item.** `performance.now()` measured
- * 23.7 ns inside a realistic loop here — 3% on a body that casts a ray, but 16% on one that only
- * sweeps bounding boxes and **52%** on a body that does nothing, which is exactly the shape of
- * the cheap cases. Masking it to every 64th iteration amortises it to 0.4 ns and still bounds a
- * slice at 64 worst-case bodies, which at any body worth slicing is far under a frame.
+ * **The clock is read on a stride that adapts, and the stride starts at one.** `performance.now()`
+ * measured 23.7 ns inside a realistic loop here — 3% on a body that casts a ray, but 16% on one
+ * that only sweeps bounding boxes and **52%** on a body that does nothing, which is exactly the
+ * shape of the cheap cases. So the stride doubles up to `MAX_STRIDE` while slices come in under
+ * budget, which costs a cheap walk about seven reads per slice and then amortises to nothing.
+ *
+ * **It was a fixed 64 and that made the loop uninterruptible for an expensive body**, which is
+ * the failure this shape exists to prevent rather than a tuning question. The assumption was that
+ * a body is microseconds — true of a ray or a box sweep, and not of `Distance between`, whose body is one
+ * neuron *pair*: twenty thousand nearest-point searches, tens of milliseconds on skeletons and
+ * hundreds on meshes. At 64 bodies between clock reads the signal was seen up to twenty-five
+ * seconds after Cancel was pressed, and **a walk shorter than 64 items never read the clock at
+ * all** — so a five-by-five comparison of meshes could not be stopped, which is how it was
+ * reported. Starting at one, a body that has already outrun the slice yields immediately, and the
+ * worst-case latency is one body rather than sixty-four.
  *
  * Progress is the items **done** — `i + 1`, not `i`. Reported the other way the bar sits one
  * item behind and every run opens at a flat zero, which is how it was written first.
@@ -82,21 +92,38 @@ export async function sliced(
   body: (index: number) => void,
 ): Promise<void> {
   let sliceStart = performance.now()
+  let stride = 1
+  let sinceRead = 0
   for (let i = 0; i < total; i++) {
     body(i)
-    if ((i & CLOCK_MASK) !== CLOCK_MASK) continue
-    if (performance.now() - sliceStart < SLICE_MS) continue
+    if (++sinceRead < stride) continue
+    sinceRead = 0
+    if (performance.now() - sliceStart < SLICE_MS) {
+      // Under budget, so the clock is the expensive part here: look at it half as often, up to
+      // the cap. A body costing a whole slice never gets past a stride of one.
+      if (stride < MAX_STRIDE) stride *= 2
+      continue
+    }
     throwIfAborted(ctx.signal)
     ctx.progress?.((i + 1) / total)
     await yieldToBrowser()
     sliceStart = performance.now()
+    // Re-learn per slice rather than keeping the widest stride reached: a walk whose bodies get
+    // dearer part way through — a set of neurons sorted by size, which is the ordinary case —
+    // would otherwise carry a stride chosen when they were cheap.
+    stride = 1
   }
   throwIfAborted(ctx.signal)
   ctx.progress?.(1)
 }
 
-/** How often the clock is read, as a mask: every 64th item. See `sliced`. */
-const CLOCK_MASK = 63
+/**
+ * The widest the clock stride grows: 64 items, which is where the old fixed mask sat.
+ *
+ * A ceiling rather than a setting — it bounds how stale the elapsed-time reading can be for a
+ * *cheap* body, where 64 of them are still far under a frame. Expensive bodies never reach it.
+ */
+const MAX_STRIDE = 64
 
 /**
  * `AbortError`, not a plain `Error`: an aborted run must **reject**, and the scheduler tells a
