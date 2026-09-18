@@ -231,7 +231,7 @@ MB wheel, which is what makes the second through seventh nearly free. A capabili
 scipy would not be, and the row after it would inherit the cost.
 
 So the second compute backend is `src/umap/`, in the same eslint boundary group as this one and
-for the same reason. What it costs in *fidelity* is recorded in [nodes.md](nodes.md): nothing
+for the same reason. What it costs in *fidelity* is recorded in [nodes-tables.md](nodes-tables.md): nothing
 there can make the claim the next section makes about fastcore and SciPy.
 
 ## Clustering: Linkage, Cut Tree, Dendrogram
@@ -673,7 +673,7 @@ first probe that needs no Pyodide, so it is a `.py` beside the `.mjs` ones) and 
 `pdist` to 1e-9 and `leaves_list(linkage(pdist(x)))` for identity, both axes, five methods,
 three metrics.
 
-Two deliberate departures, both recorded in [nodes.md](nodes.md): a non-finite cell is read as
+Two deliberate departures, both recorded in [nodes-tables.md](nodes-tables.md): a non-finite cell is read as
 zero, and a constant or zero vector — no correlation, no cosine — goes to distance 1 from
 everything rather than the `NaN` that makes scipy's `linkage` refuse the whole matrix.
 

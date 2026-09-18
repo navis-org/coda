@@ -9,7 +9,7 @@
  *
  * ## Why a node rather than Group By
  *
- * `docs/nodes.md` carries the argument; the half this file has to state is the flip, because it
+ * `docs/nodes-morphology.md` carries the argument; the half this file has to state is the flip, because it
  * is what `EdgePlan.orientation` exists for. **`polarity` means two opposite things under one
  * name.** In `SYNAPSES_BETWEEN_SCHEMA` it is *the end the point was drawn at* — constant down the
  * column, set by that node's `Location` control — and `neuronId` is the presynaptic body in every
@@ -23,7 +23,7 @@
  * `post` in every row of the column that would drive the flip. The control is also the *second*
  * instance of one missing field rather than a fact about this node — the producer knows in both
  * cases and throws it away, and `data/synapseUnits.ts` records that a `PointsValue` carries no
- * unit either; `docs/nodes.md` says what a provenance block on the value would cost.
+ * unit either; `docs/nodes-morphology.md` says what a provenance block on the value would cost.
  *
  * ## The columns are `neuron.connectivity`'s
  *

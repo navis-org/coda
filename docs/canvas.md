@@ -1548,7 +1548,7 @@ that reason — it is where a reader who meets the ring on a Mirror card goes to
 attribute rows are synapses rather than neurons, and it still says *Geometries* — a fifth
 silhouette for a set differing by one member buys nothing, and what the socket declines it still
 declines: `socketAccepts` reads the declared list, never this label. That asymmetry is also why
-`Geometries` is a **label rather than a `CodaType` kind**; see [nodes.md](nodes.md) for the whole
+`Geometries` is a **label rather than a `CodaType` kind**; see [adding-a-node.md](adding-a-node.md) for the whole
 argument, of which the short form is that a real union type would have to *admit* points on that
 port and refuse them one layer later, which is a looser filter than the one that shipped.
 

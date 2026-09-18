@@ -282,7 +282,7 @@ Left alone deliberately, so a sweep like this one does not come back for them:
   nothing to raise. What it does do is what the tiers exist for: it says so, through the same
   `ctx.warn` channel, because an empty table is otherwise indistinguishable from a dataset that
   genuinely holds no match. It also removes the hazard the neuPrint notes were written around,
-  since an unconfigured card now sends no query. See [nodes.md](nodes.md).
+  since an unconfigured card now sends no query. See [nodes-connectivity.md](nodes-connectivity.md).
 
 ## The shape of a check
 

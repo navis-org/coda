@@ -674,7 +674,7 @@ interface StackedInputs {
  * leaves the other pointing at columns that do not exist.
  *
  * A long table already *is* the matrix, in the coordinate form every sparse library starts
- * from — see `docs/nodes.md`.
+ * from — see `docs/nodes-connectivity.md`.
  */
 const VECTOR_SIMILARITY = {
   layout: 'long',

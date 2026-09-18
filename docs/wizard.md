@@ -426,7 +426,7 @@ button has always been.
 
 ## The seeded filter row, and why only the synthetic dataset gets one
 
-A `Find Neurons` with no filters returns **no neurons** ([nodes.md](nodes.md)), and the Structured
+A `Find Neurons` with no filters returns **no neurons** ([nodes-connectivity.md](nodes-connectivity.md)), and the Structured
 Search start builds exactly that card. So `buildWorkflow` seeds one row — `neuronId is not empty`,
 which every neuron satisfies — and seeds it **only where the dataset is the synthetic one**.
 

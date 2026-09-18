@@ -61,9 +61,9 @@ Partner Vectors(B) ─┘
 
 is exactly `Clustering.compile`'s `vect_`, with `join="outer"` for free from the sparse long
 form, and cocoa's `("downstream", label)` / `("upstream", label)` MultiIndex already spelled as
-Partner Vectors' unconditional `out:` / `in:` feature prefix. Three things are genuinely
-missing and each is small: `cn_frac_`, homogeneity-aware cutting, and a stated scale ceiling.
-See [What L2b still needs](#what-l2b-still-needs).
+Partner Vectors' unconditional `out:` / `in:` feature prefix. Three things were genuinely
+missing and each was small: `cn_frac_`, homogeneity-aware cutting, and a stated scale ceiling.
+All three are now built — see [L2b](#l2b--built), items 3 to 5.
 
 ## Decisions
 

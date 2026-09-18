@@ -8,7 +8,7 @@
  * CATMAID cannot answer at all.
  *
  * `nodes/lib/synapseEdges.ts` carries the flip, which is the rule with a control on this card;
- * `docs/nodes.md` carries the rest — why this is a node rather than a `core.groupBy`, the column
+ * `docs/nodes-morphology.md` carries the rest — why this is a node rather than a `core.groupBy`, the column
  * order, the `cheap` reasoning and why there is no `Min weight`.
  */
 

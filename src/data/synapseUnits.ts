@@ -62,7 +62,7 @@ export type SynapseUnitId = (typeof SYNAPSE_UNITS)[keyof typeof SYNAPSE_UNITS]
  * as two units — which is exactly what happened while the node and the source built their own
  * refusal sentences, one naming `sites` and the other `one row per site`. There is deliberately no
  * third reader: a `PointsValue` carries no unit, so nothing prints this after a run. See
- * `docs/nodes.md` on what that costs a syNBLAST fed two clouds counted differently.
+ * `docs/nodes-morphology.md` on what that costs a syNBLAST fed two clouds counted differently.
  */
 const UNIT_LABELS: Readonly<Record<SynapseUnitId, string>> = {
   links: 'one row per connection',

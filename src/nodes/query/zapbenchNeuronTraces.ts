@@ -44,7 +44,7 @@
  * computes a correlation**; `Normalize` and `Embed` take a matrix, and `Linkage` takes one but
  * reads it as *distances*, which a trace matrix is not. That is a matrix layout on
  * `core.similarity`, which for dense feature vectors is cheaper than either of its existing
- * layouts rather than a relocation of this cost. See docs/nodes.md.
+ * layouts rather than a relocation of this cost. See docs/nodes-io.md.
  *
  * ## Why `Condition` is not a convenience
  *

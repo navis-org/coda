@@ -282,7 +282,7 @@ Six findings, each of which was a wrong answer before it was checked:
   leaves it alone where it does not — so one spelling is correct in one case and silently
   destroys the left table's own column in the other. Measured against pandas 2.3. The Join
   emitter renames the right key to a scratch name before merging, which makes the drop knowable
-  without the schema. See *Join* in `docs/nodes.md` for what Coda's own shape is, and note the
+  without the schema. See *Join* in `docs/nodes-tables.md` for what Coda's own shape is, and note the
   pre-existing bug this exposed: the emitter never dropped that column at all, so every join
   with differently-named keys produced a notebook column the canvas did not have.
 - **`left_on` and `right_on` naming the *same* column already yield one coalesced key column**,
@@ -400,7 +400,7 @@ lines of chained pandas per notebook is a chance per notebook to get one wrong.
 Two new module entries came with them: `scipy.sparse` on the Python side and `Matrix` on the R
 side. Both exist for the same reason the TypeScript never builds a feature matrix — a neuron ×
 partner-id array is almost entirely zeroes, and neither pandas nor base R has a type to hold one
-in. See [nodes.md](nodes.md).
+in. See [nodes-connectivity.md](nodes-connectivity.md).
 
 **The probes earned their place immediately, on both sides.** `probe-py-helpers.py` and
 `probe-r-helpers.R` run the *generated* helpers out of the goldens against the same fixture — the

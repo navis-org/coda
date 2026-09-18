@@ -118,7 +118,7 @@ rule belongs to one area, its record is in that area's doc.
   `ParamBase.formerId` (singular), both read at load and both **only after the live id has
   missed**. The param half also carries `absentMeans`. `registerNode` refuses the ambiguous
   cases. Deliberately **not** a per-type migration table in the loader.
-  See [docs/nodes.md](docs/nodes.md).
+  See [docs/nodes-tables.md](docs/nodes-tables.md).
 - **A param added to an existing node type has three states, and a card can only draw two.**
   `defaultParams` writes a default at *creation* and never runs over `deserializeGraph`, so a
   stored node without the key was written by a build that had no such control — not the same as
@@ -272,7 +272,7 @@ rule belongs to one area, its record is in that area's doc.
 - **Two wires between the same pair of nodes are not a cycle.** `topoSort` derives indegree
   from the same index that decrements it, so the two cannot disagree again.
 
-### Ports, params and node semantics — [docs/nodes.md](docs/nodes.md)
+### Ports, params and node semantics — [docs/nodes.md](docs/nodes.md) and its family files
 
 - **A port typed `T.any()` is usually not `any`.** `CodaType` has no union, so a socket meaning
   *skeletons, meshes or points* says `any` and its node refuses the rest in `validate` — which was
@@ -689,7 +689,7 @@ rule belongs to one area, its record is in that area's doc.
   that **generates on demand** is asked `exists` before any download, and `automatic` takes it only
   when it covers *every* neuron, a scene mixing a reconstruction with a chunk decomposition being
   one where a number means two things; and neuPrint's published route resolves the **volume**, not
-  the mesh directory. See also [docs/nodes.md](docs/nodes.md).
+  the mesh directory. See also [docs/nodes-morphology.md](docs/nodes-morphology.md).
 - **Two ways a mesh source resolves to somewhere with no meshes in it**, both reported as neurons
   that have none. `@type` is optional on a precomputed volume, so `isVolumeInfo` — not a `switch` —
   is the one predicate. And a graphene fragment **name is an instruction, not a path**:
@@ -780,7 +780,7 @@ rule belongs to one area, its record is in that area's doc.
   traps: `resolveColumn`'s **rule 3** hands a required picker the first compatible column, so
   `excludeIds`, a `validate` warning and a run-time range refusal are three answers because none
   alone is enough; and the node emits a **matrix and nothing else**, a long form being four times
-  the memory and built whether anything read it. See also [docs/nodes.md](docs/nodes.md).
+  the memory and built whether anything read it. See also [docs/nodes-io.md](docs/nodes-io.md).
 - **The ZapBench release holds the same numbers twice, transposed, and neither copy wins — so the
   reader costs both per request.** One copy is row-major, the other carries a `transpose` codec that
   makes a *neuron's* timesteps contiguous. The crossover is real and is why both are kept:
@@ -1147,8 +1147,12 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   encodings, tooltips, table filtering, number formatting, the styling sidebar, the 3D path.
 - [docs/widgets.md](docs/widgets.md) — Explore Dataset, Neuron Profile, Dataset Summary, ROI
   Viewer: the surfaces that fetch for themselves rather than reading a wire.
-- [docs/nodes.md](docs/nodes.md) — per-node semantics, one section per node whose behaviour cost
-  a decision.
+- [docs/nodes.md](docs/nodes.md) — the per-node index, one section per node whose behaviour cost
+  a decision, split by family: [nodes-tables.md](docs/nodes-tables.md) (reshaping, aggregating,
+  joining, editing, Heatmap, Embedding), [nodes-morphology.md](docs/nodes-morphology.md)
+  (skeletons, meshes, synapses, distances), [nodes-connectivity.md](docs/nodes-connectivity.md)
+  (traversal, paths, influence, similarity, graph metrics, Find Neurons) and
+  [nodes-io.md](docs/nodes-io.md) (import, export, ids, ZapBench).
 - [docs/datasets.md](docs/datasets.md) — the family table, Custom backend nodes, the
   Description companion, auto-wiring, starter graphs. Also **datasource vs dataset**: a
   Neuroglancer Source emits a `Dataset` so the geometry nodes take it, and

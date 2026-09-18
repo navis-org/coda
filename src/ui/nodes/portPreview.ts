@@ -17,7 +17,7 @@
  * separate tables with separate schemas, and a preview that showed one of them would show the
  * wrong one about half the time. Geometry is the same shape one level down: a skeleton set's
  * attribute table is the collection's *own* table, which after a `Carry fields` join is not the
- * table that named the neurons — see `docs/nodes.md`.
+ * table that named the neurons — see `docs/nodes-morphology.md`.
  *
  * **Nothing here reads the graph, the store or the scheduler.** The value is handed in, already
  * cached; a preview never causes a fetch and never causes a run.

@@ -165,7 +165,7 @@ helper was swallowing every failure — it now rethrows when all items fail.
 a shared production Neo4j, so an unbounded `MATCH (n:Neuron)` on male-cns is a real hazard —
 which is why the one thing that *is* refused there is not a rail at all but a semantic: a node
 with no filters returns no neurons rather than the dataset, so an unconfigured card never sends
-that query in the first place (see [nodes.md](nodes.md)). A
+that query in the first place (see [nodes-connectivity.md](nodes-connectivity.md)). A
 neuPrint `:Neuron` is any body above a synapse threshold or carrying a name, not a proofread one —
 hemibrain has 186,061 of them — which is what the **population checkboxes** on the dataset node
 narrow. `populationCypher` compiles them to one parenthesised `OR` group ANDed onto the rest of
@@ -213,7 +213,7 @@ Two facts about neuPrint's data that the Connectivity node's region and normalis
 are built on. Both were probed live against `neuprint.janelia.org` and both are pinned in
 `live.test.ts`, because a fixture proves the decoder works and proves nothing about whether the
 server's own arithmetic still holds. The design record is in
-[nodes.md](nodes.md#normalizing-a-weight-two-ends-two-denominators-and-both-said-out-loud); what
+[nodes-connectivity.md](nodes-connectivity.md#normalizing-a-weight-two-ends-two-denominators-and-both-said-out-loud); what
 belongs here is what the database does.
 
 **`ConnectsTo` carries `roiInfo`.** A JSON blob per relationship — `{"LAL(L)": {"post": 112}, …}`
@@ -255,7 +255,7 @@ outgoing one.
 
 `ConnectsTo` carries more than `weight` and `roiInfo` on every dataset looked at — `weightHP`
 everywhere, `weightHR` on most, and on fish2 the count split by the compartment at each end; the
-table is in [nodes.md](nodes.md#edge-properties-what-a-connection-carries-beside-its-weight).
+table is in [nodes-connectivity.md](nodes-connectivity.md#edge-properties-what-a-connection-carries-beside-its-weight).
 `Meta` declares none of it — it has `neuronProperties` and no relationship equivalent — so
 `discoverEdges` samples it, on a promise of its own: `discover` starts it and does not wait, so
 no neuron query is held behind it, and only a query that asked for a property does.
@@ -322,7 +322,7 @@ comment. Deduplicated, body 10001 returns 1,015 pre and 18,582 post, which is ex
 **Both forms are offered** rather than one being tidied away, because the row count of the
 undeduplicated form is the connection count and `n.synweight` (23,073 on this neuron) is the sum of
 the two. Which one a `PointsValue` holds is `SynapseRequest.unit`; neuPrint is the only source in
-the tree that can answer either. See [nodes.md](nodes.md) for the control and
+the tree that can answer either. See [nodes-morphology.md](nodes-morphology.md) for the control and
 `data/synapseUnits.ts` for why `sites` is what Automatic takes.
 
 **`s.confidence` is a fraction, 0..1, and the dataset has usually already cut on it.**
@@ -846,7 +846,7 @@ A CAVE synapse table is a list of predicted clefts, one row per pre→post link 
 coordinate. Nothing in it identifies a presynaptic *site*: `pre_pt_supervoxel_id` names a
 supervoxel, which is a chunk of segmentation and not a T-bar. So this source declares
 `synapseUnits = ['links']`, and a pinned `sites` is refused rather than answered with its links
-under that name — see [nodes.md](nodes.md), where the same rule is why the Skeletons node refuses
+under that name — see [nodes-morphology.md](nodes-morphology.md), where the same rule is why the Skeletons node refuses
 a route a dataset lacks. The refusal is at the **node**, not here: `SynapseRequest.unit` is
 required, so the single caller resolves it before asking and this method is handed a decision
 rather than re-deriving one.
@@ -960,7 +960,7 @@ FlyWire's `valid_synapses_nt_v2_view` with `cleft_score`, on a datastack that de
 `synapse_table: null`. That one is a **view** (`SynapseTableSpec.kind`), chosen so a synapse cloud
 counts what `valid_connection_v2`'s weights count: the raw `synapses_nt_v1` held about 1.5× the
 weight on a neuron's top partners, and 1.3× even at `cleft_score >= 50`. The view matched `n_syn`
-on every one of 4,818 output and 1,072 input partners. See [nodes.md](nodes.md), Synapses Between. Otherwise the datastack's **own declaration**, which is what makes a
+on every one of 4,818 output and 1,072 input partners. See [nodes-morphology.md](nodes-morphology.md), Synapses Between. Otherwise the datastack's **own declaration**, which is what makes a
 hand-named datastack work with no configuration at all: 7 of the 13 the info service lists set
 it, `wclee_aedes_brain` among them. Its columns are `STANDARD_SYNAPSE_COLUMNS`, which is a
 definition rather than a guess — a table whose registered schema is `synapse` has
