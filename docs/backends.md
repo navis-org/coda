@@ -2,6 +2,9 @@
 
 Everything under `src/data` that talks to somebody else's server.
 
+Not one of the five: NeuronBridge's public bucket (`src/data/neuronbridge`) is read by a node rather
+than served through `DataSource`, as ZapBench's is. See [neuronbridge.md](neuronbridge.md).
+
 **Every _neuron_ skeleton and mesh fetch goes through `geometryCache.ts` first.** All three
 backends compose their own key and hand it the ids they were asked for; it answers the ones it
 holds and calls back with only the remainder, so a node re-running on a changed neuron set

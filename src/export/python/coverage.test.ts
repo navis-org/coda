@@ -25,6 +25,14 @@ import { getEmitter, registeredEmitterTypes } from './registry'
  * of a long list is that the exporter is unfinished.
  */
 const NO_EMITTER: Record<string, string> = {
+  'out.neuronbridge':
+    'NeuronBridge matches, and a viewer whose picture is a gallery of images read from Janelia\u2019s ' +
+    'bucket for the neuron on screen. The faithful route is `neuronbridge-python`, which reads the ' +
+    'same bucket, but it is a fourth dependency beside neuprint-python, pandas and navis, and the ' +
+    'card has no single computation to translate: what it shows is chosen by paging. The one ' +
+    'output that is data, `Pinned`, is written wholly into the node\u2019s params and could be ' +
+    'emitted as a literal frame \u2014 the obvious first emitter, left until one is checked by ' +
+    '*running* it against the node, `out.topology`\u2019s rule.',
   'out.sankey':
     'A flow diagram, and this is a dependency refusal rather than a gap. Neither library draws one: matplotlib has `matplotlib.sankey`, which is built for a different figure entirely \u2014 a single balance of inflows and outflows, not a layered flow \u2014 and the routes that would work are plotly or holoviews, each a fourth package in an exporter that is neuprint-python, pandas and navis. The R side is the same story with ggalluvial. The arithmetic is not the obstacle and would be about fifteen lines; what stops this is the same rule `out.topology` and `zapbench.traces` record \u2014 an emitter has to be checked by *running* it, and a flow diagram whose widths silently stopped conserving would look entirely plausible. The table itself exports perfectly well: the Transfers port is four ordinary columns, so a reader has everything they need to draw this in whichever package they already have.',
   'out.topology':

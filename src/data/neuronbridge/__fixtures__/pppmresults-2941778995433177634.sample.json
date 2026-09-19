@@ -1,0 +1,396 @@
+{
+  "inputImage": {
+    "libraryName": "FlyEM_Hemibrain_v1.2.1",
+    "alignmentSpace": "JRC2018_Unisex_20x_HR",
+    "anatomicalArea": "Brain",
+    "gender": "f",
+    "neuronType": "DA1_lPN",
+    "neuronInstance": "DA1_lPN_R",
+    "id": "2945073143147307019",
+    "publishedName": "hemibrain:v1.2.1:1734350788",
+    "files": {
+      "store": "fl:open_data:brain",
+      "CDM": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/1734350788-JRC2018_Unisex_20x_HR-CDM.png",
+      "PPPMResults": "2941778995433177634.json",
+      "CDMThumbnail": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/1734350788-JRC2018_Unisex_20x_HR-CDM.jpg",
+      "CDSResults": "2945073143147307019.json",
+      "AlignedBodySWC": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/SWC/1734350788.swc",
+      "AlignedBodyOBJ": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/OBJ/1734350788.obj"
+    },
+    "type": "EMImage"
+  },
+  "results": [
+    {
+      "mirrored": true,
+      "image": {
+        "libraryName": "FlyLight Gen1 MCFO",
+        "alignmentSpace": "JRC2018_Unisex_20x_HR",
+        "anatomicalArea": "Brain",
+        "gender": "f",
+        "slideCode": "20190115_64_C6",
+        "objective": "40x",
+        "mountingProtocol": "DPX PBS Mounting",
+        "publishedName": "R22D03",
+        "files": {
+          "store": "fl:open_data:brain",
+          "VisuallyLosslessStack": "Gen1+MCFO/R22D03/R22D03-20190115_64_C6-f-40x-central-GAL4-JRC2018_Unisex_20x_HR-aligned_stack.h5j"
+        },
+        "id": "2629818896655319138",
+        "type": "LMImage"
+      },
+      "files": {
+        "SignalMip": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R22D03-20190115_64_C6-40x-JRC2018_Unisex_20x_HR-raw.png",
+        "store": "fl:open_data:brain",
+        "CDMBest": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R22D03-20190115_64_C6-40x-JRC2018_Unisex_20x_HR-ch.png",
+        "SignalMipMaskedSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R22D03-20190115_64_C6-40x-JRC2018_Unisex_20x_HR-skel.png",
+        "SignalMipMasked": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R22D03-20190115_64_C6-40x-JRC2018_Unisex_20x_HR-masked_raw.png",
+        "CDMBestThumbnail": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R22D03-20190115_64_C6-40x-JRC2018_Unisex_20x_HR-ch.jpg",
+        "CDMSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R22D03-20190115_64_C6-40x-JRC2018_Unisex_20x_HR-ch_skel.png"
+      },
+      "pppmRank": 0.0,
+      "pppmScore": 128,
+      "type": "PPPMatch"
+    },
+    {
+      "mirrored": false,
+      "image": {
+        "libraryName": "FlyLight Gen1 MCFO",
+        "alignmentSpace": "JRC2018_Unisex_20x_HR",
+        "anatomicalArea": "Brain",
+        "gender": "f",
+        "slideCode": "20191008_61_K9",
+        "objective": "40x",
+        "mountingProtocol": "DPX PBS Mounting",
+        "publishedName": "R41C01",
+        "files": {
+          "store": "fl:open_data:brain",
+          "VisuallyLosslessStack": "Gen1+MCFO/R41C01/R41C01-20191008_61_K9-f-40x-central-GAL4-JRC2018_Unisex_20x_HR-aligned_stack.h5j"
+        },
+        "id": "2731351339907940450",
+        "type": "LMImage"
+      },
+      "files": {
+        "SignalMip": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R41C01-20191008_61_K9-40x-JRC2018_Unisex_20x_HR-raw.png",
+        "store": "fl:open_data:brain",
+        "CDMBest": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R41C01-20191008_61_K9-40x-JRC2018_Unisex_20x_HR-ch.png",
+        "SignalMipMaskedSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R41C01-20191008_61_K9-40x-JRC2018_Unisex_20x_HR-skel.png",
+        "SignalMipMasked": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R41C01-20191008_61_K9-40x-JRC2018_Unisex_20x_HR-masked_raw.png",
+        "CDMBestThumbnail": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R41C01-20191008_61_K9-40x-JRC2018_Unisex_20x_HR-ch.jpg",
+        "CDMSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R41C01-20191008_61_K9-40x-JRC2018_Unisex_20x_HR-ch_skel.png"
+      },
+      "pppmRank": 1.0,
+      "pppmScore": 128,
+      "type": "PPPMatch"
+    },
+    {
+      "mirrored": true,
+      "image": {
+        "libraryName": "FlyLight Gen1 MCFO",
+        "alignmentSpace": "JRC2018_Unisex_20x_HR",
+        "anatomicalArea": "Brain",
+        "gender": "f",
+        "slideCode": "20180330_63_F3",
+        "objective": "40x",
+        "mountingProtocol": "DPX PBS Mounting",
+        "publishedName": "VT010572",
+        "files": {
+          "store": "fl:open_data:brain",
+          "VisuallyLosslessStack": "Gen1+MCFO/VT010572/VT010572-20180330_63_F3-f-40x-central-GAL4-JRC2018_Unisex_20x_HR-aligned_stack.h5j"
+        },
+        "id": "2525841098950049890",
+        "type": "LMImage"
+      },
+      "files": {
+        "SignalMip": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT010572-20180330_63_F3-40x-JRC2018_Unisex_20x_HR-raw.png",
+        "store": "fl:open_data:brain",
+        "CDMBest": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT010572-20180330_63_F3-40x-JRC2018_Unisex_20x_HR-ch.png",
+        "SignalMipMaskedSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT010572-20180330_63_F3-40x-JRC2018_Unisex_20x_HR-skel.png",
+        "SignalMipMasked": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT010572-20180330_63_F3-40x-JRC2018_Unisex_20x_HR-masked_raw.png",
+        "CDMBestThumbnail": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT010572-20180330_63_F3-40x-JRC2018_Unisex_20x_HR-ch.jpg",
+        "CDMSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT010572-20180330_63_F3-40x-JRC2018_Unisex_20x_HR-ch_skel.png"
+      },
+      "pppmRank": 2.0,
+      "pppmScore": 127,
+      "type": "PPPMatch"
+    },
+    {
+      "mirrored": false,
+      "image": {
+        "libraryName": "FlyLight Gen1 MCFO",
+        "alignmentSpace": "JRC2018_Unisex_20x_HR",
+        "anatomicalArea": "Brain",
+        "gender": "f",
+        "slideCode": "20180306_61_F1",
+        "objective": "40x",
+        "mountingProtocol": "DPX PBS Mounting",
+        "publishedName": "VT044175",
+        "files": {
+          "store": "fl:open_data:brain",
+          "VisuallyLosslessStack": "Gen1+MCFO/VT044175/VT044175-20180306_61_F1-f-40x-central-GAL4-JRC2018_Unisex_20x_HR-aligned_stack.h5j"
+        },
+        "id": "2516767260891152482",
+        "type": "LMImage"
+      },
+      "files": {
+        "SignalMip": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT044175-20180306_61_F1-40x-JRC2018_Unisex_20x_HR-raw.png",
+        "store": "fl:open_data:brain",
+        "CDMBest": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT044175-20180306_61_F1-40x-JRC2018_Unisex_20x_HR-ch.png",
+        "SignalMipMaskedSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT044175-20180306_61_F1-40x-JRC2018_Unisex_20x_HR-skel.png",
+        "SignalMipMasked": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT044175-20180306_61_F1-40x-JRC2018_Unisex_20x_HR-masked_raw.png",
+        "CDMBestThumbnail": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT044175-20180306_61_F1-40x-JRC2018_Unisex_20x_HR-ch.jpg",
+        "CDMSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT044175-20180306_61_F1-40x-JRC2018_Unisex_20x_HR-ch_skel.png"
+      },
+      "pppmRank": 3.0,
+      "pppmScore": 127,
+      "type": "PPPMatch"
+    },
+    {
+      "mirrored": true,
+      "image": {
+        "libraryName": "FlyLight Gen1 MCFO",
+        "alignmentSpace": "JRC2018_Unisex_20x_HR",
+        "anatomicalArea": "Brain",
+        "gender": "f",
+        "slideCode": "20181211_64_D6",
+        "objective": "40x",
+        "mountingProtocol": "DPX PBS Mounting",
+        "publishedName": "R24A10",
+        "files": {
+          "store": "fl:open_data:brain",
+          "VisuallyLosslessStack": "Gen1+MCFO/R24A10/R24A10-20181211_64_D6-f-40x-central-GAL4-JRC2018_Unisex_20x_HR-aligned_stack.h5j"
+        },
+        "id": "2625818087152156726",
+        "type": "LMImage"
+      },
+      "files": {
+        "SignalMip": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R24A10-20181211_64_D6-40x-JRC2018_Unisex_20x_HR-raw.png",
+        "store": "fl:open_data:brain",
+        "CDMBest": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R24A10-20181211_64_D6-40x-JRC2018_Unisex_20x_HR-ch.png",
+        "SignalMipMaskedSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R24A10-20181211_64_D6-40x-JRC2018_Unisex_20x_HR-skel.png",
+        "SignalMipMasked": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R24A10-20181211_64_D6-40x-JRC2018_Unisex_20x_HR-masked_raw.png",
+        "CDMBestThumbnail": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R24A10-20181211_64_D6-40x-JRC2018_Unisex_20x_HR-ch.jpg",
+        "CDMSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R24A10-20181211_64_D6-40x-JRC2018_Unisex_20x_HR-ch_skel.png"
+      },
+      "pppmRank": 4.0,
+      "pppmScore": 127,
+      "type": "PPPMatch"
+    },
+    {
+      "mirrored": false,
+      "image": {
+        "libraryName": "FlyLight Gen1 MCFO",
+        "alignmentSpace": "JRC2018_Unisex_20x_HR",
+        "anatomicalArea": "Brain",
+        "gender": "f",
+        "slideCode": "20171122_63_C3",
+        "objective": "40x",
+        "mountingProtocol": "DPX PBS Mounting",
+        "publishedName": "VT014567",
+        "files": {
+          "store": "fl:open_data:brain",
+          "VisuallyLosslessStack": "Gen1+MCFO/VT014567/VT014567-20171122_63_C3-f-40x-central-GAL4-JRC2018_Unisex_20x_HR-aligned_stack.h5j"
+        },
+        "id": "2483883097116901474",
+        "type": "LMImage"
+      },
+      "files": {
+        "SignalMip": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT014567-20171122_63_C3-40x-JRC2018_Unisex_20x_HR-raw.png",
+        "store": "fl:open_data:brain",
+        "CDMBest": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT014567-20171122_63_C3-40x-JRC2018_Unisex_20x_HR-ch.png",
+        "SignalMipMaskedSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT014567-20171122_63_C3-40x-JRC2018_Unisex_20x_HR-skel.png",
+        "SignalMipMasked": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT014567-20171122_63_C3-40x-JRC2018_Unisex_20x_HR-masked_raw.png",
+        "CDMBestThumbnail": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT014567-20171122_63_C3-40x-JRC2018_Unisex_20x_HR-ch.jpg",
+        "CDMSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT014567-20171122_63_C3-40x-JRC2018_Unisex_20x_HR-ch_skel.png"
+      },
+      "pppmRank": 5.0,
+      "pppmScore": 126,
+      "type": "PPPMatch"
+    },
+    {
+      "mirrored": false,
+      "image": {
+        "libraryName": "FlyLight Gen1 MCFO",
+        "alignmentSpace": "JRC2018_Unisex_20x_HR",
+        "anatomicalArea": "Brain",
+        "gender": "m",
+        "slideCode": "20191115_65_C6",
+        "objective": "40x",
+        "mountingProtocol": "DPX PBS Mounting",
+        "publishedName": "VT028607",
+        "files": {
+          "store": "fl:open_data:brain",
+          "VisuallyLosslessStack": "Gen1+MCFO/VT028607/VT028607-20191115_65_C6-m-40x-central-GAL4-JRC2018_Unisex_20x_HR-aligned_stack.h5j"
+        },
+        "id": "2742261927567687778",
+        "type": "LMImage"
+      },
+      "files": {
+        "SignalMip": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT028607-20191115_65_C6-40x-JRC2018_Unisex_20x_HR-raw.png",
+        "store": "fl:open_data:brain",
+        "CDMBest": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT028607-20191115_65_C6-40x-JRC2018_Unisex_20x_HR-ch.png",
+        "SignalMipMaskedSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT028607-20191115_65_C6-40x-JRC2018_Unisex_20x_HR-skel.png",
+        "SignalMipMasked": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT028607-20191115_65_C6-40x-JRC2018_Unisex_20x_HR-masked_raw.png",
+        "CDMBestThumbnail": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT028607-20191115_65_C6-40x-JRC2018_Unisex_20x_HR-ch.jpg",
+        "CDMSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT028607-20191115_65_C6-40x-JRC2018_Unisex_20x_HR-ch_skel.png"
+      },
+      "pppmRank": 6.0,
+      "pppmScore": 126,
+      "type": "PPPMatch"
+    },
+    {
+      "mirrored": false,
+      "image": {
+        "libraryName": "FlyLight Gen1 MCFO",
+        "alignmentSpace": "JRC2018_Unisex_20x_HR",
+        "anatomicalArea": "Brain",
+        "gender": "f",
+        "slideCode": "20171222_61_E2",
+        "objective": "40x",
+        "mountingProtocol": "DPX PBS Mounting",
+        "publishedName": "VT006205",
+        "files": {
+          "store": "fl:open_data:brain",
+          "VisuallyLosslessStack": "Gen1+MCFO/VT006205/VT006205-20171222_61_E2-f-40x-central-GAL4-JRC2018_Unisex_20x_HR-aligned_stack.h5j"
+        },
+        "id": "2491505404580724834",
+        "type": "LMImage"
+      },
+      "files": {
+        "SignalMip": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT006205-20171222_61_E2-40x-JRC2018_Unisex_20x_HR-raw.png",
+        "store": "fl:open_data:brain",
+        "CDMBest": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT006205-20171222_61_E2-40x-JRC2018_Unisex_20x_HR-ch.png",
+        "SignalMipMaskedSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT006205-20171222_61_E2-40x-JRC2018_Unisex_20x_HR-skel.png",
+        "SignalMipMasked": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT006205-20171222_61_E2-40x-JRC2018_Unisex_20x_HR-masked_raw.png",
+        "CDMBestThumbnail": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT006205-20171222_61_E2-40x-JRC2018_Unisex_20x_HR-ch.jpg",
+        "CDMSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT006205-20171222_61_E2-40x-JRC2018_Unisex_20x_HR-ch_skel.png"
+      },
+      "pppmRank": 7.0,
+      "pppmScore": 125,
+      "type": "PPPMatch"
+    },
+    {
+      "mirrored": false,
+      "image": {
+        "libraryName": "FlyLight Gen1 MCFO",
+        "alignmentSpace": "JRC2018_Unisex_20x_HR",
+        "anatomicalArea": "Brain",
+        "gender": "f",
+        "slideCode": "20171212_62_C4",
+        "objective": "40x",
+        "mountingProtocol": "DPX PBS Mounting",
+        "publishedName": "VT009668",
+        "files": {
+          "store": "fl:open_data:brain",
+          "VisuallyLosslessStack": "Gen1+MCFO/VT009668/VT009668-20171212_62_C4-f-40x-central-GAL4-JRC2018_Unisex_20x_HR-aligned_stack.h5j"
+        },
+        "id": "2491497081722634338",
+        "type": "LMImage"
+      },
+      "files": {
+        "SignalMip": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT009668-20171212_62_C4-40x-JRC2018_Unisex_20x_HR-raw.png",
+        "store": "fl:open_data:brain",
+        "CDMBest": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT009668-20171212_62_C4-40x-JRC2018_Unisex_20x_HR-ch.png",
+        "SignalMipMaskedSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT009668-20171212_62_C4-40x-JRC2018_Unisex_20x_HR-skel.png",
+        "SignalMipMasked": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT009668-20171212_62_C4-40x-JRC2018_Unisex_20x_HR-masked_raw.png",
+        "CDMBestThumbnail": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT009668-20171212_62_C4-40x-JRC2018_Unisex_20x_HR-ch.jpg",
+        "CDMSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT009668-20171212_62_C4-40x-JRC2018_Unisex_20x_HR-ch_skel.png"
+      },
+      "pppmRank": 8.0,
+      "pppmScore": 124,
+      "type": "PPPMatch"
+    },
+    {
+      "mirrored": true,
+      "image": {
+        "libraryName": "FlyLight Gen1 MCFO",
+        "alignmentSpace": "JRC2018_Unisex_20x_HR",
+        "anatomicalArea": "Brain",
+        "gender": "m",
+        "slideCode": "20180626_63_F6",
+        "objective": "40x",
+        "mountingProtocol": "DPX PBS Mounting",
+        "publishedName": "VT001595",
+        "files": {
+          "store": "fl:open_data:brain",
+          "VisuallyLosslessStack": "Gen1+MCFO/VT001595/VT001595-20180626_63_F6-m-40x-central-GAL4-JRC2018_Unisex_20x_HR-aligned_stack.h5j"
+        },
+        "id": "2556285849960448098",
+        "type": "LMImage"
+      },
+      "files": {
+        "SignalMip": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT001595-20180626_63_F6-40x-JRC2018_Unisex_20x_HR-raw.png",
+        "store": "fl:open_data:brain",
+        "CDMBest": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT001595-20180626_63_F6-40x-JRC2018_Unisex_20x_HR-ch.png",
+        "SignalMipMaskedSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT001595-20180626_63_F6-40x-JRC2018_Unisex_20x_HR-skel.png",
+        "SignalMipMasked": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT001595-20180626_63_F6-40x-JRC2018_Unisex_20x_HR-masked_raw.png",
+        "CDMBestThumbnail": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT001595-20180626_63_F6-40x-JRC2018_Unisex_20x_HR-ch.jpg",
+        "CDMSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-VT001595-20180626_63_F6-40x-JRC2018_Unisex_20x_HR-ch_skel.png"
+      },
+      "pppmRank": 9.0,
+      "pppmScore": 124,
+      "type": "PPPMatch"
+    },
+    {
+      "mirrored": false,
+      "image": {
+        "libraryName": "FlyLight Gen1 MCFO",
+        "alignmentSpace": "JRC2018_Unisex_20x_HR",
+        "anatomicalArea": "Brain",
+        "gender": "f",
+        "slideCode": "20171117_63_F2",
+        "objective": "40x",
+        "mountingProtocol": "DPX PBS Mounting",
+        "publishedName": "R72C11",
+        "files": {
+          "store": "fl:open_data:brain",
+          "VisuallyLosslessStack": "Gen1+MCFO/R72C11/R72C11-20171117_63_F2-f-40x-central-GAL4-JRC2018_Unisex_20x_HR-aligned_stack.h5j"
+        },
+        "id": "2478426071511335010",
+        "type": "LMImage"
+      },
+      "files": {
+        "SignalMip": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R72C11-20171117_63_F2-40x-JRC2018_Unisex_20x_HR-raw.png",
+        "store": "fl:open_data:brain",
+        "CDMBest": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R72C11-20171117_63_F2-40x-JRC2018_Unisex_20x_HR-ch.png",
+        "SignalMipMaskedSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R72C11-20171117_63_F2-40x-JRC2018_Unisex_20x_HR-skel.png",
+        "SignalMipMasked": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R72C11-20171117_63_F2-40x-JRC2018_Unisex_20x_HR-masked_raw.png",
+        "CDMBestThumbnail": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R72C11-20171117_63_F2-40x-JRC2018_Unisex_20x_HR-ch.jpg",
+        "CDMSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R72C11-20171117_63_F2-40x-JRC2018_Unisex_20x_HR-ch_skel.png"
+      },
+      "pppmRank": 10.0,
+      "pppmScore": 123,
+      "type": "PPPMatch"
+    },
+    {
+      "mirrored": true,
+      "image": {
+        "libraryName": "FlyLight Gen1 MCFO",
+        "alignmentSpace": "JRC2018_Unisex_20x_HR",
+        "anatomicalArea": "Brain",
+        "gender": "f",
+        "slideCode": "20190920_64_H8",
+        "objective": "40x",
+        "mountingProtocol": "DPX PBS Mounting",
+        "publishedName": "R66B02",
+        "files": {
+          "store": "fl:open_data:brain",
+          "VisuallyLosslessStack": "Gen1+MCFO/R66B02/R66B02-20190920_64_H8-f-40x-central-GAL4-JRC2018_Unisex_20x_HR-aligned_stack.h5j"
+        },
+        "id": "2719363777647607906",
+        "type": "LMImage"
+      },
+      "files": {
+        "SignalMip": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R66B02-20190920_64_H8-40x-JRC2018_Unisex_20x_HR-raw.png",
+        "store": "fl:open_data:brain",
+        "CDMBest": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R66B02-20190920_64_H8-40x-JRC2018_Unisex_20x_HR-ch.png",
+        "SignalMipMaskedSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R66B02-20190920_64_H8-40x-JRC2018_Unisex_20x_HR-skel.png",
+        "SignalMipMasked": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R66B02-20190920_64_H8-40x-JRC2018_Unisex_20x_HR-masked_raw.png",
+        "CDMBestThumbnail": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R66B02-20190920_64_H8-40x-JRC2018_Unisex_20x_HR-ch.jpg",
+        "CDMSkel": "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/17/1734350788/1734350788-R66B02-20190920_64_H8-40x-JRC2018_Unisex_20x_HR-ch_skel.png"
+      },
+      "pppmRank": 11.0,
+      "pppmScore": 123,
+      "type": "PPPMatch"
+    }
+  ]
+}

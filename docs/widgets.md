@@ -2,6 +2,9 @@
 
 Explore Dataset, Neuron Profile, Dataset Summary and ROI Viewer — the surfaces that fetch for themselves.
 
+A fifth, **NeuronBridge**, is Neuron Profile's shape over Janelia's LM–EM match index rather than
+over a connectome, and has its own record: [neuronbridge.md](neuronbridge.md).
+
 ## Explore Dataset: the browsing widget
 
 The entry point for someone who does not yet know what to ask for. `Find Neurons` is

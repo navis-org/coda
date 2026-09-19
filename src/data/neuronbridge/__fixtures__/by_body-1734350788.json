@@ -1,0 +1,22 @@
+{
+  "results" : [ {
+    "libraryName" : "FlyEM_Hemibrain_v1.2.1",
+    "alignmentSpace" : "JRC2018_Unisex_20x_HR",
+    "anatomicalArea" : "Brain",
+    "gender" : "f",
+    "neuronType" : "DA1_lPN",
+    "neuronInstance" : "DA1_lPN_R",
+    "id" : "2945073143147307019",
+    "publishedName" : "hemibrain:v1.2.1:1734350788",
+    "files" : {
+      "AlignedBodySWC" : "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/SWC/1734350788.swc",
+      "store" : "fl:open_data:brain",
+      "CDSResults" : "2945073143147307019.json",
+      "PPPMResults" : "2941778995433177634.json",
+      "CDMThumbnail" : "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/1734350788-JRC2018_Unisex_20x_HR-CDM.jpg",
+      "AlignedBodyOBJ" : "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/OBJ/1734350788.obj",
+      "CDM" : "JRC2018_Unisex_20x_HR/FlyEM_Hemibrain_v1.2.1/1734350788-JRC2018_Unisex_20x_HR-CDM.png"
+    },
+    "type" : "EMImage"
+  } ]
+}

@@ -41,10 +41,16 @@
  *   pnpm probe:viewer3d-switch -- --neuroglancer --limit 10   # the Neuroglancer frame, kept rather than reloaded
  */
 
-import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import { launchChrome, probeArgs, probeReport } from './lib/browserProbe.mjs'
+import {
+  deleteProfileOnExit,
+  handNeuprintToken,
+  launchChrome,
+  probeArgs,
+  probeReport,
+  readNeuprintToken,
+} from './lib/browserProbe.mjs'
 
 const args = probeArgs()
 const url = args.value('--url') ?? 'http://localhost:5191/'
@@ -82,24 +88,7 @@ const COMPILE_CALLS = [
   'getShaderInfoLog',
 ]
 
-/** The token, from the variable or from a file it names. Never printed. */
-function readToken() {
-  const raw = process.env.NEUPRINT_APPLICATION_CREDENTIALS
-  if (!raw) {
-    console.error('NEUPRINT_APPLICATION_CREDENTIALS is not set.')
-    process.exit(2)
-  }
-  if (!existsSync(raw)) return raw.trim()
-  const text = readFileSync(raw, 'utf8').trim()
-  try {
-    const parsed = JSON.parse(text)
-    return String(parsed.token ?? parsed.access_token ?? text)
-  } catch {
-    return text
-  }
-}
-
-const token = readToken()
+const token = readNeuprintToken()
 
 const { send, evaluate, waitFor, screenshot, click, doubleClick, drag, rect, close } =
   await launchChrome({
@@ -111,23 +100,8 @@ const { send, evaluate, waitFor, screenshot, click, doubleClick, drag, rect, clo
   })
 const { check, finish } = probeReport()
 
-/*
- * The profile holds the token in `localStorage`, so it must not outlive the run — on the failing
- * paths above all, which are the ones nobody is watching.
- *
- * Registered *after* the launch and closing Chrome itself, because `exit` handlers run in
- * registration order: registered first, the delete ran while the browser was still alive and
- * writing, and the profile survived an error exit. Retried, because a killed Chrome still flushes
- * for a moment and a single `rmSync` then fails with ENOTEMPTY.
- */
-process.on('exit', () => {
-  close()
-  try {
-    rmSync(PROFILE, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
-  } catch {
-    console.error(`Could not delete ${PROFILE}, which holds the token. Delete it by hand.`)
-  }
-})
+// The profile holds the token, so it goes on every exit — see `deleteProfileOnExit`.
+deleteProfileOnExit(PROFILE, close)
 
 /** Run `body` in the page with the store bound to `S`, and hand back what it returns. */
 const inStore = (body) => evaluate(`(async () => { const S = ${STORE}; ${body} })()`)
@@ -152,26 +126,7 @@ async function clearLaunch() {
 }
 await clearLaunch()
 
-{
-  const global = await send('Runtime.evaluate', { expression: 'globalThis' })
-  const reply = await send('Runtime.callFunctionOn', {
-    objectId: global.result.result.objectId,
-    functionDeclaration: `async function (t) {
-      const m = await import('/src/data/neuprint/credentials.ts')
-      m.setToken(t)
-      return !!m.getToken()
-    }`,
-    arguments: [{ value: token }],
-    awaitPromise: true,
-    returnByValue: true,
-  })
-  // The reply is checked, never printed: it carries a boolean, but an exception detail is not
-  // somewhere to take chances.
-  if (reply.result?.exceptionDetails || reply.result?.result?.value !== true) {
-    console.error('Could not hand the token to the page.')
-    process.exit(1)
-  }
-}
+await handNeuprintToken(send, token)
 
 const renderer = await evaluate(`(() => {
   const gl = document.createElement('canvas').getContext('webgl2')

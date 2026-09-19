@@ -14,6 +14,14 @@ import './exporter'
 import { getEmitter, registeredEmitterTypes } from './registry'
 
 const NO_EMITTER: Record<string, string> = {
+  'out.neuronbridge':
+    'NeuronBridge matches, and a viewer whose picture is a gallery of images read from Janelia\u2019s ' +
+    'bucket for the neuron on screen. The faithful route is `neuronbridger`, which reads the ' +
+    'same bucket, but it is a fourth dependency beside the natverse packages this exporter builds on, and the ' +
+    'card has no single computation to translate: what it shows is chosen by paging. The one ' +
+    'output that is data, `Pinned`, is written wholly into the node\u2019s params and could be ' +
+    'emitted as a literal frame \u2014 the obvious first emitter, left until one is checked by ' +
+    '*running* it against the node, `out.topology`\u2019s rule.',
   'zapbench.neuronTraces':
     'ZapBench traces, and the reason is the language rather than the effort: there is no ' +
     'tensorstore binding for R, so reading a zarr v3 array means `pizzarr`/`Rarr` \u2014 ' +

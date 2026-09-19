@@ -24,8 +24,8 @@
  * transform would otherwise be the fixed-position containing block. It renders into the document
  * — the fullscreen element when there is one, as the hover panels do, or it opens invisibly under
  * a fullscreen viewer — and stops React events at its root: they still bubble through a portal to
- * the card, whose double-click expands it. Escape is left alone; `useOverlayEscape` takes it on the
- * window, in the capture phase.
+ * the card, whose double-click expands it and whose right-click opens the node's menu. Escape is
+ * left alone; `useOverlayEscape` takes it on the window, in the capture phase.
  */
 
 import type { CSSProperties, ReactNode, Ref, SyntheticEvent } from 'react'
@@ -85,6 +85,7 @@ export function Modal({
       }}
       onClick={portal ? stopHere : undefined}
       onDoubleClick={portal ? stopHere : undefined}
+      onContextMenu={portal ? stopHere : undefined}
       onKeyDown={portal ? stopHere : undefined}
     >
       <div

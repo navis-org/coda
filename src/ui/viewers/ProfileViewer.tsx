@@ -60,6 +60,7 @@ import { NeuronThumbnail } from '../explore/NeuronThumbnail'
 import { tableToCsvParts } from '../export'
 import { formatCell, formatCompact, formatNumber, plural } from '../format'
 import { NeuroglancerProfileFrame } from './NeuroglancerProfileFrame'
+import { Pager } from './Pager'
 import { Bars, Facts, Loadable, Tile } from './Tiles'
 import { useNeuronProfile } from './useNeuronProfile'
 import type { ExportSource } from './ViewerActions'
@@ -275,29 +276,7 @@ export function ProfileViewer({
   return (
     <div className="viewer profile nodrag">
       <div className="profile__pager">
-        <button
-          type="button"
-          className="profile__page-btn"
-          aria-label={`Previous ${unit}`}
-          title={`Previous ${unit}`}
-          disabled={index <= 0}
-          onClick={() => onPage(index - 1)}
-        >
-          ‹
-        </button>
-        <button
-          type="button"
-          className="profile__page-btn"
-          aria-label={`Next ${unit}`}
-          title={`Next ${unit}`}
-          disabled={index >= total - 1}
-          onClick={() => onPage(index + 1)}
-        >
-          ›
-        </button>
-        <span className="profile__position">
-          {formatNumber(index + 1)} / {formatNumber(total)}
-        </span>
+        <Pager index={index} total={total} onStep={(d) => onPage(index + d)} unit={unit} />
         <span className="profile__name" title={name}>
           {name}
         </span>

@@ -1,0 +1,54 @@
+{
+  "results" : [ {
+    "libraryName" : "FlyEM_VNC_v0.5",
+    "alignmentSpace" : "JRC2018_VNC_Unisex_40x_DS",
+    "anatomicalArea" : "VNC",
+    "gender" : "m",
+    "neuronType" : "pct_11442",
+    "neuronInstance" : "11442_R",
+    "id" : "2972571956537843723",
+    "publishedName" : "vnc:v0.5:11442",
+    "files" : {
+      "CDM" : "JRC2018_VNC_Unisex_40x_DS/FlyEM_VNC_v0.5/11442-JRC2018_VNC_Unisex_40x_DS-CDM.png",
+      "AlignedBodySWC" : "JRC2018_VNC_Unisex_40x_DS/FlyEM_VNC_v0.5/SWC/11442.swc",
+      "store" : "fl:open_data:vnc",
+      "CDMThumbnail" : "JRC2018_VNC_Unisex_40x_DS/FlyEM_VNC_v0.5/11442-JRC2018_VNC_Unisex_40x_DS-CDM.jpg",
+      "PPPMResults" : "2970434029737738786.json"
+    },
+    "type" : "EMImage"
+  }, {
+    "libraryName" : "FlyEM_MANC_v1.2.1",
+    "alignmentSpace" : "JRC2018_VNC_Unisex_40x_DS",
+    "anatomicalArea" : "VNC",
+    "gender" : "m",
+    "neuronType" : "IN12B010",
+    "neuronInstance" : "IN12B010_T3_R",
+    "id" : "3333196962815742083",
+    "publishedName" : "manc:v1.2.1:11442",
+    "files" : {
+      "CDM" : "JRC2018_VNC_Unisex_40x_DS/FlyEM_MANC_v1.2.1/11442-JRC2018_VNC_Unisex_40x_DS-CDM.png",
+      "CDSResults" : "3333196962815742083.json",
+      "AlignedBodySWC" : "JRC2018_VNC_Unisex_40x_DS/FlyEM_MANC_v1.2.1/SWC/11442.swc",
+      "store" : "fl:open_data:vnc",
+      "CDMThumbnail" : "JRC2018_VNC_Unisex_40x_DS/FlyEM_MANC_v1.2.1/11442-JRC2018_VNC_Unisex_40x_DS-CDM.jpg"
+    },
+    "type" : "EMImage"
+  }, {
+    "libraryName" : "FlyEM_Male_CNS_Brain_v0.9",
+    "alignmentSpace" : "JRC2018_Unisex_20x_HR",
+    "anatomicalArea" : "Brain",
+    "gender" : "m",
+    "neuronType" : "DNg28",
+    "neuronInstance" : "DNg28_R",
+    "id" : "3513029271029022851",
+    "publishedName" : "male-cns:v0.9:11442",
+    "files" : {
+      "CDM" : "JRC2018_Unisex_20x_HR/FlyEM_Male_CNS_Brain_v0.9/11442-JRC2018_Unisex_20x_HR-CDM.png",
+      "CDSResults" : "3513029271029022851.json",
+      "AlignedBodySWC" : "JRC2018_Unisex_20x_HR/FlyEM_Male_CNS_Brain_v0.9/SWC/11442.swc",
+      "store" : "fl:open_data:brain",
+      "CDMThumbnail" : "JRC2018_Unisex_20x_HR/FlyEM_Male_CNS_Brain_v0.9/11442-JRC2018_Unisex_20x_HR-CDM.jpg"
+    },
+    "type" : "EMImage"
+  } ]
+}

@@ -232,6 +232,7 @@ describe('NodeBrowser filtering', () => {
       'Neuroglancer',
       'Neuron Profile',
       'Neuron Topology',
+      'NeuronBridge',
       'Pie Chart',
       'ROI Viewer',
       'Rank Plot',
@@ -239,7 +240,7 @@ describe('NodeBrowser filtering', () => {
       'Scatter Plot',
       'Table',
     ])
-    expect(screen.getByText('20 nodes')).toBeTruthy()
+    expect(screen.getByText('21 nodes')).toBeTruthy()
   })
 
   it('fuzzy-searches across every category, best match first', () => {

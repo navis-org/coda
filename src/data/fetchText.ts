@@ -18,6 +18,18 @@
  * comment warns about real, two directories apart, in the codebase that wrote the warning.
  */
 
+/**
+ * A 404, as a type rather than a sentence.
+ *
+ * For a caller to whom *absent* is an answer rather than a failure: NeuronBridge's bucket is keyed
+ * by body id, so a neuron it has no matches for is a missing object, and the only other way to
+ * tell that from a dead host would be matching on the message. The message is unchanged, so every
+ * caller that only reads it sees exactly what it did before.
+ */
+export class NotFoundError extends Error {
+  override readonly name = 'NotFoundError'
+}
+
 /** Extra sentences for the two failures a caller may know something about. */
 export interface FetchTextMessages {
   /** Appended to the unreachable/cross-origin message: what the caller knows about this host. */
@@ -52,8 +64,12 @@ export async function fetchText(
         `reads — a browser gives no reason.${messages.hint ? ` ${messages.hint}` : ''}`,
     )
   }
-  if (response.status === 404 && messages.notFound) {
-    throw new Error(`${url} returned 404. ${messages.notFound}`)
+  if (response.status === 404) {
+    throw new NotFoundError(
+      messages.notFound
+        ? `${url} returned 404. ${messages.notFound}`
+        : `${url} returned 404 ${response.statusText}`.trim(),
+    )
   }
   if (!response.ok) {
     throw new Error(`${url} returned ${response.status} ${response.statusText}`.trim())

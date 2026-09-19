@@ -8381,6 +8381,525 @@ p.sources__hint {
 }
 
 /*
+ * NeuronBridge (`out.neuronbridge`). Borrows Profile's pager row whole — the same control — and
+ * owns everything under it.
+ *
+ * Colour-depth projections are black-ground images whose *hue is depth*, so the frame around one
+ * is black in both themes: a light surface behind a CDM changes how its colours read, and the
+ * image is the data here. Brain CDMs are ~2.1:1 and nerve-cord ones ~1:2, so a thumbnail is
+ * `contain`ed in a fixed-height frame rather than given an aspect ratio of either.
+ */
+.nbridge {
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.nbridge__out {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.nbridge__out:hover {
+  text-decoration: underline;
+}
+
+.nbridge__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/*
+ * The part that stays put — status, the neuron, the chips and, frozen, the opened match — above the
+ * part that scrolls. The top may shrink and scroll inside itself, and the tiles are guaranteed a
+ * strip of their own: a frozen comparison on a small card must not leave the grid no room at all.
+ */
+.nbridge__top {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.nbridge__scroll {
+  flex: 1 1 0;
+  min-height: 96px;
+  overflow-y: auto;
+}
+
+.nbridge__status {
+  padding: 6px 9px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  border-bottom: 1px solid var(--border);
+}
+
+.nbridge__meta {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--border);
+}
+
+.nbridge__em {
+  flex: 0 0 auto;
+  width: 92px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  background: #000;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9.5px;
+}
+.nbridge__em img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.nbridge__facts {
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.nbridge__muted {
+  color: var(--text-muted);
+  font-size: 10.5px;
+}
+
+/* A version mismatch is a caveat on everything below it, so it reads as one without alarming. */
+.nbridge__note {
+  margin-top: 2px;
+  color: var(--status-warn);
+  font-size: 10.5px;
+}
+
+.nbridge__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--border);
+}
+
+.nbridge__chip,
+.nbridge__switch button {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.nbridge__chip:hover,
+.nbridge__switch button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.nbridge__chip[aria-pressed='true'],
+.nbridge__switch button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.nbridge__count {
+  margin-left: 5px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+.nbridge__switch {
+  display: inline-flex;
+}
+.nbridge__switch button + button {
+  margin-left: -1px;
+}
+
+.nbridge__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 6px;
+  padding: 8px 9px;
+  align-content: start;
+}
+
+.nbridge__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.nbridge__tile[data-secondary] {
+  border-style: dashed;
+  background: var(--surface-3);
+}
+.nbridge__tile[data-selected] {
+  border-color: var(--accent);
+}
+
+.nbridge__thumb {
+  display: grid;
+  place-items: center;
+  height: 64px;
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 1px);
+  background: #000;
+  overflow: hidden;
+  cursor: zoom-in;
+}
+.nbridge__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.nbridge__tile-foot {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.nbridge__line {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+  /* A line name is what somebody copies to order it, so it has to be selectable on a card. */
+  user-select: text;
+}
+
+.nbridge__score {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.nbridge__badge {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.nbridge__mirror {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.nbridge__others,
+.nbridge__star,
+.nbridge__close {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.nbridge__others:hover,
+.nbridge__star:hover,
+.nbridge__close:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+.nbridge__others {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+}
+/* Pinned is the state with consequences downstream, so it is the one that gets the accent. */
+.nbridge__star[aria-pressed='true'] {
+  color: var(--accent);
+}
+
+.nbridge__empty {
+  padding: 18px 9px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.nbridge__more {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 2px 9px 10px;
+}
+.nbridge__more .tile__link {
+  margin-top: 0;
+}
+
+.nbridge__detail {
+  margin: 8px 9px;
+  padding: 7px 8px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  /* How tall a figure may be. The card is small; expanded, the overlay has room to spend. */
+  --nb-figure-height: 170px;
+}
+.nbridge:not([data-compact]) .nbridge__detail {
+  --nb-figure-height: 300px;
+}
+
+.nbridge__detail-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.nbridge__detail-line {
+  user-select: text;
+}
+/* Focused so ← and → reach it; the accent border already says it is the live one. */
+.nbridge__detail:focus {
+  outline: none;
+}
+
+.nbridge__stepper {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.nbridge__freeze {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.nbridge__compare {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  margin-bottom: 7px;
+}
+.nbridge__switch button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nbridge__slider {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+.nbridge__slider input {
+  width: 90px;
+}
+
+.nbridge__pair {
+  display: grid;
+  grid-template-columns: repeat(var(--nb-figures, 2), minmax(0, 1fr));
+  gap: 6px;
+}
+
+.nbridge__figure {
+  margin: 0;
+  min-width: 0;
+}
+.nbridge__figure figcaption {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nbridge__open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
+/*
+ * A stack of same-sized images, sized to their own aspect ratio so every layer fills it exactly —
+ * `object-fit: contain` would letterbox each one and put a percentage clip-path on the letterbox.
+ * Bounded by the figure height, or by the column where that is narrower. `isolation` keeps the
+ * `lighten` blend inside the stack rather than against the card behind it.
+ */
+.nbridge__stack {
+  position: relative;
+  display: block;
+  margin: 0 auto;
+  aspect-ratio: var(--nb-ratio);
+  width: min(100%, calc(var(--nb-figure-height) * var(--nb-ratio)));
+  max-width: 100%;
+  background: #000;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  isolation: isolate;
+}
+.nbridge__stack--empty {
+  display: grid;
+  place-items: center;
+  aspect-ratio: auto;
+  width: 100%;
+  height: var(--nb-figure-height);
+  color: var(--text-muted);
+  font-size: 10.5px;
+}
+
+.nbridge__layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.nbridge__layer[data-flip] {
+  transform: scaleX(-1);
+}
+/* The whole sample as context under a hit: greys, dimmed, so the hit's colour is the only colour. */
+.nbridge__layer[data-grey] {
+  filter: grayscale(1) brightness(0.55);
+}
+/*
+ * The EM of an overlay in white. Not `grayscale()` alone: that weights by luminance, and a pure
+ * blue — the deepest end of the depth ramp — is 7% luminance, so the deep half of the neuron would
+ * vanish. Pushed this bright, every lit pixel reads near-white and black stays black.
+ */
+.nbridge__layer[data-tint='white'] {
+  filter: grayscale(1) brightness(14);
+}
+/* Black ground leaves what is under it alone; where both have signal, the brighter one shows. */
+.nbridge__layer[data-lighten] {
+  mix-blend-mode: lighten;
+}
+
+.nbridge__facts-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  margin-top: 6px;
+}
+.nbridge__facts-row a {
+  font-size: 10.5px;
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.nbridge__facts-row a:hover {
+  text-decoration: underline;
+}
+
+/*
+ * Full screen. Portalled to the body, so it is fixed to the window rather than to a card that
+ * transforms. The ground is black in both themes, the image being the data; the chrome keeps the
+ * app's surfaces so its controls read as the card's own.
+ */
+.nbridge-full {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  /* Opaque: at 94% the card behind showed through the image's own black ground. */
+  background: #000;
+}
+
+/* `Modal`'s panel, and the focusable element inside it that owns ← and →: each fills the window. */
+.nbridge-full__panel,
+.nbridge-full__inner {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.nbridge-full__inner {
+  outline: none;
+}
+
+.nbridge-full__head,
+.nbridge-full__foot {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.nbridge-full__head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.nbridge-full__foot {
+  border-top: 1px solid var(--border);
+}
+.nbridge-full__foot .nbridge__compare {
+  margin-bottom: 4px;
+}
+
+.nbridge-full__stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  /* The stack's height bound: the window, less the chrome above and below it. */
+  --nb-figure-height: calc(100vh - 190px);
+}
+.nbridge-full__stage .nbridge__stack {
+  width: min(100%, calc(var(--nb-figure-height) * var(--nb-ratio)));
+}
+
+.nbridge__dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 6px 0 0;
+}
+.nbridge__dl div {
+  display: flex;
+  gap: 5px;
+}
+.nbridge__dl dt {
+  color: var(--text-muted);
+}
+.nbridge__dl dd {
+  margin: 0;
+  color: var(--text-primary);
+  user-select: text;
+}
+
+/*
  * The tile grid.
  *
  * `auto-fit` with a 190px floor rather than a fixed two columns: the card is resizable, and a

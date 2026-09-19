@@ -63,6 +63,24 @@ export interface ExportSource {
    * a finished string rather than a canvas somebody else might read a frame too late.
    */
   png?: (options?: { transparent?: boolean }) => string | null
+  /**
+   * Further tables a viewer can hand over as CSV, each a row of its own in the download menu.
+   *
+   * For a card holding more than one table worth taking away — NeuronBridge's lines on screen
+   * *and* the matches pinned across every neuron. Card-only: not relayed to the Download node, whose
+   * "could this node give me a CSV" question is about the one `csv` above.
+   */
+  tables?: readonly ExportTable[]
+}
+
+/** One extra table in a viewer's download menu. */
+export interface ExportTable {
+  /** Stable key, and the filename suffix: `<baseName>-<id>.csv`. */
+  id: string
+  /** Menu row text, e.g. `Pinned matches (CSV)`. */
+  label: string
+  /** Built lazily, like `csv`; throw to say why there is nothing (the notice channel shows it). */
+  csv: () => string[]
 }
 
 export interface ViewerActionsProps {
@@ -76,25 +94,104 @@ export interface ViewerActionsProps {
   onError?: (message: string) => void
 }
 
-type Format = 'csv' | 'graphml' | 'cx2' | 'svg' | 'png' | 'pngAlpha'
-
-const FORMAT_LABEL: Record<Format, string> = {
-  csv: EXPORT_LABEL.csv,
-  graphml: EXPORT_LABEL.graphml,
-  cx2: EXPORT_LABEL.cx2,
-  svg: 'SVG vector',
-  png: 'PNG image',
-  pngAlpha: 'PNG, no background',
+/**
+ * One row of the download menu: what it says, the extension it names, and what it writes.
+ *
+ * Built once per render as a map, so every callback `DownloadButton` asks — label, short name,
+ * extension, the download itself — is one lookup. A row's key is only a key: the extension is its
+ * own field, which is what used to be read off the key and printed `.pngAlpha` and `.table:pinned`.
+ */
+interface ExportRow {
+  label: string
+  /** What the single-format button prints beside the arrow. */
+  short: string
+  extension: string
+  run: () => void | Promise<void>
 }
 
-/** What the single-format button prints beside the arrow. */
-const FORMAT_SHORT: Record<Format, string> = {
-  csv: 'CSV',
-  graphml: 'GraphML',
-  cx2: 'CX2',
-  svg: 'SVG',
-  png: 'PNG',
-  pngAlpha: 'PNG',
+/** The rows a source offers, in menu order. Throws from `run`, never here: see `DownloadButton`. */
+function exportRows(source: ExportSource, baseName: string): Map<string, ExportRow> {
+  const rows = new Map<string, ExportRow>()
+  const { csv, graphml, cx2, svg, png } = source
+  if (csv) {
+    rows.set('csv', {
+      label: EXPORT_LABEL.csv,
+      short: 'CSV',
+      extension: 'csv',
+      run: () => downloadCsv(csv(), `${baseName}.csv`),
+    })
+  }
+  if (graphml) {
+    rows.set('graphml', {
+      label: EXPORT_LABEL.graphml,
+      short: 'GraphML',
+      extension: 'graphml',
+      run: () => downloadText(graphml(), `${baseName}.graphml`, GRAPHML_MIME),
+    })
+  }
+  if (cx2) {
+    rows.set('cx2', {
+      label: EXPORT_LABEL.cx2,
+      short: 'CX2',
+      extension: 'cx2',
+      run: () => downloadFiles(cx2(baseName)),
+    })
+  }
+  if (svg) {
+    // Throws rather than reports: `DownloadButton` owns the busy state and the notice channel,
+    // so a viewer whose chart is not rendered yet says so through the same path a failed
+    // rasterisation does.
+    const rendered = () => {
+      const element = svg()
+      if (!element) throw new Error('Chart is not rendered yet')
+      return element
+    }
+    rows.set('svg', {
+      label: 'SVG vector',
+      short: 'SVG',
+      extension: 'svg',
+      run: () => downloadSvg(rendered(), `${baseName}.svg`),
+    })
+    rows.set('png', {
+      label: 'PNG image',
+      short: 'PNG',
+      extension: 'png',
+      run: () => downloadPng(rendered(), `${baseName}.png`),
+    })
+  } else if (png) {
+    /*
+     * The cut-out is offered only by the read-back path, and that is not an omission. A viewer
+     * that rasterises its own SVG has no background painted into it in the first place — what it
+     * writes is already only the marks. A WebGL frame is a *cleared* buffer, so "no background"
+     * there is a real second thing to ask for.
+     */
+    const frame = (transparent: boolean, name: string) => {
+      const dataUrl = png({ transparent })
+      if (!dataUrl) throw new Error('Scene is not rendered yet')
+      downloadDataUrl(dataUrl, name)
+    }
+    rows.set('png', {
+      label: 'PNG image',
+      short: 'PNG',
+      extension: 'png',
+      run: () => frame(false, `${baseName}.png`),
+    })
+    rows.set('pngAlpha', {
+      label: 'PNG, no background',
+      short: 'PNG',
+      extension: 'png',
+      run: () => frame(true, `${baseName}-cutout.png`),
+    })
+  }
+  for (const table of source.tables ?? []) {
+    rows.set(`table:${table.id}`, {
+      label: table.label,
+      short: 'CSV',
+      extension: 'csv',
+      run: () => downloadCsv(table.csv(), `${baseName}-${table.id}.csv`),
+    })
+  }
+  return rows
 }
 
 export function ViewerActions({
@@ -132,67 +229,16 @@ export function ViewerActions({
     return registerExportSource(nodeId, relay)
   }, [nodeId])
 
-  const formats: Format[] = []
-  if (source.csv) formats.push('csv')
-  if (source.graphml) formats.push('graphml')
-  if (source.cx2) formats.push('cx2')
-  if (source.svg) formats.push('svg', 'png')
-  /*
-   * The cut-out is offered only by the read-back path, and that is not an omission. A viewer
-   * that rasterises its own SVG has no background painted into it in the first place — what it
-   * writes is already only the marks. A WebGL frame is a *cleared* buffer, so "no background"
-   * there is a real second thing to ask for.
-   */
-  else if (source.png) formats.push('png', 'pngAlpha')
-
-  // Throws rather than reports: `DownloadButton` owns the busy state and the notice channel,
-  // so a viewer whose chart is not rendered yet says so through the same path a failed
-  // rasterisation does.
-  const run = async (format: Format) => {
-    if (format === 'csv') {
-      const parts = source.csv?.()
-      if (!parts) throw new Error('Nothing to export')
-      downloadCsv(parts, `${baseName}.csv`)
-      return
-    }
-    if (format === 'graphml') {
-      const parts = source.graphml?.()
-      if (!parts) throw new Error('Nothing to export')
-      downloadText(parts, `${baseName}.graphml`, GRAPHML_MIME)
-      return
-    }
-    if (format === 'cx2') {
-      const files = source.cx2?.(baseName)
-      if (!files) throw new Error('Nothing to export')
-      downloadFiles(files)
-      return
-    }
-    // A viewer with no vector form takes its own read-back path; one with both never reaches
-    // here for PNG through `png`, because `svg` already claimed the format above.
-    if (!source.svg && source.png) {
-      const transparent = format === 'pngAlpha'
-      const dataUrl = source.png({ transparent })
-      if (!dataUrl) throw new Error('Scene is not rendered yet')
-      downloadDataUrl(dataUrl, `${baseName}${transparent ? '-cutout' : ''}.png`)
-      return
-    }
-
-    const svg = source.svg?.()
-    if (!svg) throw new Error('Chart is not rendered yet')
-    if (format === 'svg') {
-      downloadSvg(svg, `${baseName}.svg`)
-      return
-    }
-    await downloadPng(svg, `${baseName}.png`)
-  }
+  const rows = exportRows(source, baseName)
 
   return (
     <div className="viewer-actions">
       <DownloadButton
-        formats={formats}
-        label={(format) => FORMAT_LABEL[format]}
-        short={(format) => FORMAT_SHORT[format]}
-        onPick={run}
+        formats={[...rows.keys()]}
+        label={(format) => rows.get(format)!.label}
+        short={(format) => rows.get(format)!.short}
+        onPick={(format) => rows.get(format)!.run()}
+        extension={(format) => rows.get(format)!.extension}
         compact={compact}
         {...(onError ? { onError } : {})}
       />

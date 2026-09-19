@@ -592,6 +592,15 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
   // *one* — and ‹ › is the control its own card carries. The arbour is `neuron.skeletons`'
   // scaled 0.74 about the centre to leave the chevrons their margins; scaled by hand into
   // literals rather than by a group transform, which would take the stroke weight with it.
+  // An EM arbour and an LM image with a bridge between them, which is the whole of what the card
+  // does. The arbour is `out.profile`'s, so the two per-neuron viewers read as a pair; the frame
+  // is a picture, since what this card shows that no other does is *images*.
+  'out.neuronbridge': [
+    ['path', { d: 'M6.8 19.6v-5.2L4 11.4M6.8 14.4l2.8-2.4M9.6 12l-.6-2.8' }],
+    ['rect', { x: '13', y: '10.4', width: '7.4', height: '9.2', rx: '1' }],
+    ['path', { d: 'M15 17.4l1.7-2.4 1.1 1.3.9-1' }],
+    ['path', { d: 'M5.4 7.6c3.4-4.2 10-4.2 13.2 0M8.2 5.6v2M12 4.4v3.2M15.8 5.6v2' }],
+  ],
   'out.topology': [
     ['circle', { cx: '7.9', cy: '16.7', r: '1.5' }],
     ['path', { d: 'M8.9 15.7 12 12.3M12 12.3l3.1-3.4M12 12.3l1 3.7M15.1 8.9l2.5-1.3M15.1 8.9l-.4-2.5M13 16l2.7 1.2' }],

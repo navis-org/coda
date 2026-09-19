@@ -21,7 +21,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -355,5 +355,70 @@ export function probeReport() {
       console.error(`\n${failures} propert${failures === 1 ? 'y' : 'ies'} failed.${note ? ` ${note}` : ''}`)
       process.exit(1)
     },
+  }
+}
+
+// ── A neuPrint token, for a probe whose graph reads a neuPrint dataset ──────────────────────────
+//
+// Shared because this is the code that keeps a credential out of logs and off disk, and it had
+// been copied verbatim into a second probe — where a fix to one copy (the never-print rule, the
+// delete's ordering) would silently miss the other.
+
+/** The token, from `NEUPRINT_APPLICATION_CREDENTIALS` or from a file it names. Never printed. */
+export function readNeuprintToken() {
+  const raw = process.env.NEUPRINT_APPLICATION_CREDENTIALS
+  if (!raw) {
+    console.error('NEUPRINT_APPLICATION_CREDENTIALS is not set.')
+    process.exit(2)
+  }
+  if (!existsSync(raw)) return raw.trim()
+  const text = readFileSync(raw, 'utf8').trim()
+  try {
+    const parsed = JSON.parse(text)
+    return String(parsed.token ?? parsed.access_token ?? text)
+  } catch {
+    return text
+  }
+}
+
+/**
+ * Delete a browser profile holding the token when the process exits, whichever way it exits.
+ *
+ * The profile holds the token in `localStorage`, so it must not outlive the run — on the failing
+ * paths above all, which are the ones nobody is watching. Call it *after* the launch, since `exit`
+ * handlers run in registration order: registered first, the delete ran while the browser was still
+ * alive and writing, and the profile survived an error exit. Retried, because a killed Chrome
+ * still flushes for a moment and a single `rmSync` then fails with ENOTEMPTY.
+ */
+export function deleteProfileOnExit(profile, close) {
+  process.on('exit', () => {
+    close()
+    try {
+      rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
+    } catch {
+      console.error(`Could not delete ${profile}, which holds the token. Delete it by hand.`)
+    }
+  })
+}
+
+/** Hand the token to the page's neuPrint credentials. Exits 1 if the page did not take it. */
+export async function handNeuprintToken(send, token) {
+  const global = await send('Runtime.evaluate', { expression: 'globalThis' })
+  const reply = await send('Runtime.callFunctionOn', {
+    objectId: global.result.result.objectId,
+    functionDeclaration: `async function (t) {
+      const m = await import('/src/data/neuprint/credentials.ts')
+      m.setToken(t)
+      return !!m.getToken()
+    }`,
+    arguments: [{ value: token }],
+    awaitPromise: true,
+    returnByValue: true,
+  })
+  // The reply is checked, never printed: it carries a boolean, but an exception detail is not
+  // somewhere to take chances.
+  if (reply.result?.exceptionDetails || reply.result?.result?.value !== true) {
+    console.error('Could not hand the token to the page.')
+    process.exit(1)
   }
 }

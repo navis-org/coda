@@ -31,6 +31,12 @@ export interface DownloadButtonProps<F extends string> {
    * rasterises through an `Image`, which is not instant on a large chart.
    */
   onPick: (format: F) => Promise<void> | void
+  /**
+   * The file extension a row names, where it is not the format's own id — a `pngAlpha` writes a
+   * `.png`, and a viewer's extra table writes a `.csv`. Defaults to the id, which is right for
+   * every other format.
+   */
+  extension?: (format: F) => string
   /** Drop the word beside the arrow, for an in-node preview. */
   compact?: boolean
   onError?: (message: string) => void
@@ -41,6 +47,7 @@ export function DownloadButton<F extends string>({
   label,
   short,
   onPick,
+  extension = (format) => format,
   compact = false,
   onError,
 }: DownloadButtonProps<F>) {
@@ -106,7 +113,7 @@ export function DownloadButton<F extends string>({
                   onClick={() => void run(format)}
                 >
                   {label(format)}
-                  <span>.{format}</span>
+                  <span>.{extension(format)}</span>
                 </button>
               ))}
             </div>

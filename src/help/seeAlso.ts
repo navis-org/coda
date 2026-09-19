@@ -180,6 +180,9 @@ const RELATED: readonly (readonly string[])[] = [
   ['neuron.roiCounts', 'neuron.roiCompleteness', 'neuron.roiConnectivity', 'out.rois'],
   // A neuron's own summary, and the two queries it folds up.
   ['out.profile', 'neuron.connectivity', 'neuron.roiCounts'],
+  // The per-neuron pagers: what the dataset says about a cell, what its arbour measures, and which
+  // driver lines label it.
+  ['out.profile', 'out.topology', 'out.neuronbridge'],
 
   // Where the synapses are, and the connectivity you get by counting them somewhere. Three of
   // the four have no document yet, so this group relates nothing today — which is what the

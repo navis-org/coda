@@ -1314,6 +1314,9 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   assertion that *is* allowed is a **separate pass over what the matcher left empty**, never a
   relaxed `coversAll` — exempting a component there lets one named label carry a whole component
   of unnamed ones past every gate.
+- [docs/neuronbridge.md](docs/neuronbridge.md) — the NeuronBridge card: Janelia's LM–EM match index read
+  straight from its public bucket, why it is not a `DataSource`, and the four rules the bucket's
+  layout imposes.
 - [docs/annotations.md](docs/annotations.md) — labels that do not come from the connectome:
   the Annotations socket, SeaTable, Google Sheets, root-id drift.
 - [docs/export.md](docs/export.md) — the notebook and R Markdown exporters, the refusal

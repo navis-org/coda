@@ -52,6 +52,7 @@ import type { RoiColorMode, RoiLabelMode } from './RoisViewer'
 import type { RoiView } from './roiProjection'
 import { ProfileViewer } from './ProfileViewer'
 import { TopologyViewer } from './TopologyViewer'
+import { NeuronBridgeViewer } from './NeuronBridgeViewer'
 import { ExportNodeContext } from './exportRegistry'
 import { scopedKey, WorkflowScope } from './workflowScope'
 import { ScatterViewer } from './ScatterViewer'
@@ -688,6 +689,41 @@ const VIEWERS: Record<string, ViewerEntry> = {
           countBy={readWeightProperty(params.countBy)}
           topN={Number(params.topN)}
           chips={ctx.columns('chips')}
+          {...shared}
+        />
+      )
+    },
+  },
+  'out.neuronbridge': {
+    readsInputs: true,
+    render: ({ params, choice, shared, inputValues, onParamChange }) => {
+      // Drawn from the *input*, like Profile: this node's `out` port is a pass-through.
+      const neurons = inputValues?.neurons
+      const dataset = isDatasetValue(inputValues?.dataset) ? inputValues.dataset : undefined
+      return (
+        <NeuronBridgeViewer
+          neurons={isTableValue(neurons) ? neurons : undefined}
+          sourceId={dataset?.sourceId}
+          datasetId={dataset?.datasetId}
+          page={Number(params.page)}
+          onPage={(next) => onParamChange?.('page', next)}
+          method={choice<'cds' | 'pppm'>('method')}
+          onMethod={(next) => onParamChange?.('method', next)}
+          collections={idList(params.collections)}
+          onCollections={(next) => onParamChange?.('collections', next)}
+          tiles={Number(params.tiles)}
+          version={String(params.version)}
+          pins={idList(params.pins)}
+          onPins={(next) => onParamChange?.('pins', next)}
+          // Each key is its param's id, so the setter is `onParamChange` itself.
+          view={{
+            compare: choice('compare'),
+            lmView: choice('lmView'),
+            emOpacity: Number(params.emOpacity),
+            emTint: choice('emTint'),
+            freeze: params.freeze === true,
+          }}
+          onView={(key, value) => onParamChange?.(key, value)}
           {...shared}
         />
       )
