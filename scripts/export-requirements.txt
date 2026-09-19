@@ -36,3 +36,7 @@ umap-learn
 # SeaTable, for the annotation sources. The distribution is `sea-serpent` and the module
 # `seaserpent`, which is the mismatch `MODULES` exists to record.
 sea-serpent
+# rtree, for the Distance between node's mesh path. trimesh uses it to find candidate faces and
+# navis does not depend on it, so `coda_geom_nearest` imports it explicitly — which is the import
+# `--strict` has to resolve.
+rtree
