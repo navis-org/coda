@@ -23,7 +23,7 @@ import type { ParamValue } from '../core/node'
  * because a schema is a constraint on one model's output and not on what a saved plan or a
  * hand-written test fixture may contain.
  */
-export function planJsonSchema(): object {
+export function planJsonSchema(options: { question?: boolean } = {}): object {
   const portRef = {
     type: 'object',
     additionalProperties: false,
@@ -62,71 +62,92 @@ export function planJsonSchema(): object {
     },
   }
 
+  /*
+   * Opt-in, and off by default, because the default is what `src/mcp` publishes: every field
+   * here is `required`, so a new one is a breaking change for a client of the server. The in-app
+   * assistant asks for it; see `AssistantPlan.question`.
+   */
+  const question = options.question
+    ? {
+        question: {
+          type: 'string',
+          description:
+            'One short question for the user, or "" for none — most requests need none. Only ' +
+            'for a request that reads two ways that would build different graphs.',
+        },
+      }
+    : {}
+
+  const properties = {
+    summary: {
+      type: 'string',
+      description:
+        "One sentence describing the edit, in the user's terms. Describe only what this " +
+        'plan actually contains: this sentence is the account the user is shown, so naming ' +
+        'a node the plan does not add is a false report of what happened.',
+    },
+    ...question,
+    add: {
+      type: 'array',
+      description: 'Nodes to create.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['ref', 'type', 'params', 'title'],
+        properties: {
+          ref: {
+            type: 'string',
+            description: 'Short handle, unique within this plan, used by `connect`.',
+          },
+          type: { type: 'string', description: 'A node type from the catalogue.' },
+          params: paramList,
+          title: { type: 'string', description: 'Header override, or "" for the default.' },
+        },
+      },
+    },
+    remove: {
+      type: 'array',
+      description: 'Existing node ids to delete.',
+      items: { type: 'string' },
+    },
+    setParams: {
+      type: 'array',
+      description: 'Param changes on existing nodes, or on nodes added by this plan.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['node', 'param', 'value'],
+        properties: {
+          node: { type: 'string' },
+          param: { type: 'string' },
+          value: paramValue,
+        },
+      },
+    },
+    connect: {
+      type: 'array',
+      description: 'Wires to make, source output to target input.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['from', 'to'],
+        properties: { from: portRef, to: portRef },
+      },
+    },
+    disconnect: {
+      type: 'array',
+      description: 'Wires to cut, named by the input end.',
+      items: portRef,
+    },
+  }
+
+  // Every property is `required` — strict mode's rule, and a choice besides (see above) — so the
+  // list is the keys, and an opt-in field cannot be declared in one and forgotten in the other.
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['summary', 'add', 'remove', 'setParams', 'connect', 'disconnect'],
-    properties: {
-      summary: {
-        type: 'string',
-        description:
-          "One sentence describing the edit, in the user's terms. Describe only what this " +
-          'plan actually contains: this sentence is the account the user is shown, so naming ' +
-          'a node the plan does not add is a false report of what happened.',
-      },
-      add: {
-        type: 'array',
-        description: 'Nodes to create.',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['ref', 'type', 'params', 'title'],
-          properties: {
-            ref: {
-              type: 'string',
-              description: 'Short handle, unique within this plan, used by `connect`.',
-            },
-            type: { type: 'string', description: 'A node type from the catalogue.' },
-            params: paramList,
-            title: { type: 'string', description: 'Header override, or "" for the default.' },
-          },
-        },
-      },
-      remove: {
-        type: 'array',
-        description: 'Existing node ids to delete.',
-        items: { type: 'string' },
-      },
-      setParams: {
-        type: 'array',
-        description: 'Param changes on existing nodes, or on nodes added by this plan.',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['node', 'param', 'value'],
-          properties: {
-            node: { type: 'string' },
-            param: { type: 'string' },
-            value: paramValue,
-          },
-        },
-      },
-      connect: {
-        type: 'array',
-        description: 'Wires to make, source output to target input.',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['from', 'to'],
-          properties: { from: portRef, to: portRef },
-        },
-      },
-      disconnect: {
-        type: 'array',
-        description: 'Wires to cut, named by the input end.',
-        items: portRef,
-      },
-    },
+    required: Object.keys(properties),
+    properties,
   }
 }
 
@@ -140,9 +161,13 @@ export function planJsonSchema(): object {
  * edit succeeded.
  */
 /** The plan's own top-level fields — the shape a reply has to be in to mean anything. */
-const PLAN_KEYS = Object.keys(emptyPlan())
-/** The fields that actually ask for an edit. `summary` alone is a decline, which is valid. */
-const ACTION_KEYS = PLAN_KEYS.filter((key) => key !== 'summary')
+const PLAN_KEYS = [...Object.keys(emptyPlan()), 'question']
+/**
+ * The fields that actually ask for an edit. `summary` alone is a decline, which is valid, and so
+ * is a `question` alone — it is how a request too ambiguous to build arrives. (`emptyPlan` holds
+ * no `question`, the field being optional, so reading its keys is what leaves it out.)
+ */
+const ACTION_KEYS = Object.keys(emptyPlan()).filter((key) => key !== 'summary')
 
 /**
  * Dig a JSON object out of a reply that has something else wrapped around it.
@@ -291,6 +316,10 @@ export function parsePlan(
   }
   const summary = typeof source.summary === 'string' ? source.summary : ''
   const plan: AssistantPlan = { ...emptyPlan(), summary }
+  // Blank is none, so a schema-bound `""` and an omitted field read the same.
+  if (typeof source.question === 'string' && source.question.trim()) {
+    plan.question = source.question.trim()
+  }
 
   const problems: string[] = []
   const arrayOf = (field: string): unknown[] => {

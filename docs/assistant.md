@@ -308,6 +308,104 @@ becomes `type`. It fires **only where the schema is known** and **only while bot
 on their declared defaults**, since a name somebody chose is a decision. `defaultParams` writes those
 defaults at creation, so "untouched" is the value *equal* to the default rather than an absent one.
 
+## Earlier turns are replayed, and not as plans
+
+Until this was added, **every question started from nothing.** `runTurn` sent the current request
+alone, so the panel's transcript was for the reader only. The graph listing carried every fact
+about *state*, which is why this went unnoticed, but it cannot carry what somebody *meant*: "no, the
+other dataset" arrived with no dataset to be other than, and the answer to a question the assistant
+had asked would arrive without the question.
+
+`historyTurns` replays the last `HISTORY_EXCHANGES` (6) exchanges, each as the bare request plus an
+account of what landed. Four rules:
+
+- **The account names graph ids, never plan refs.** The repair round replays the plan JSON, and
+  within one turn that is right. Across turns it is not: `find` in the last plan is `n3_k91f` on the
+  canvas now, and a model shown its old plan writes `find` into the new one, which is refused as a
+  node that does not exist. So the account says `Added: n3_k91f (neuron.findNeurons)`, which is what
+  "the filter you just added" needs.
+- **The graph goes with the current turn only.** A replayed listing would describe a canvas that no
+  longer exists in exactly the current one's words. That is the digest's freshness rule one layer
+  up. When there is history, the current turn's header says the listing is authoritative, since the
+  user may have undone or deleted anything a past account names. That sentence is in the user turn
+  rather than the rules, because it is only true when there is a history and the rules are the
+  cached prefix.
+- **Every exchange is one user turn and one assistant turn**, so the list alternates by construction.
+  A request with no answer after it (the one in flight) is not paired. A refusal and a Stop are
+  replayed as *nothing was changed*, since "try again, but…" leans on them.
+- **Clear starts the conversation over.** The transcript is the history, so there is one thing to
+  reset rather than two.
+
+The account is in parentheses so it reads as a record rather than as prose to imitate. A model
+shown its own turns written as sentences is being shown a format other than a plan. That matters
+most where the schema is described in the prompt rather than enforced (Gemini, and Ollama models
+whose `format` is ignored).
+
+It adds no line to the cached prefix, and the cache still hits: the replayed turns sit after it.
+The bound of 6 is chosen, not measured.
+
+**Measured, and the first case measured nothing.** Five runs per side against `gemma4:31b-cloud`:
+
+| what the second request leans on | with history | without |
+| --- | --- | --- |
+| a decline: *"build the closest thing you suggested"* after a t-test | 4/5 | 5/5 |
+| something said, never built: *"now do the second one"*, LC10 named only in the first request | **5/5** | **0/5** |
+
+The first row measured nothing. It assumed a declined request leaves the canvas empty, and the
+model never declined: it built a comparison on every run where it produced a plan, per the rules'
+*attempt it*. So both sides answered "already done" from the graph, and the one failure was a wire
+in the first request. A case for history has to lean on something the graph cannot carry. The
+second row does: every control answered an empty plan calling the request ambiguous, and every run
+with history named LC10. It is the live case now.
+
+Two further observations from the same runs. **The format risk did not show**: nine second-turn
+plans parsed with the prose history in front of them. And **the reading of "the same for LC10" was
+split**: three runs added a second pipeline beside LC4, two re-pointed the LC4 search. Both are
+defensible, and the split is exactly what a question to the user would settle. One control run
+also asked *"please specify what you would like me to build"* through an empty plan's `summary`,
+which is a model reaching for a question channel that did not exist yet. It does now; see below.
+
+## The assistant can ask — beside an edit, rather than instead of one
+
+A plan carries an optional `question`: one sentence the drawer shows as its own line, with the ask
+box's placeholder turning to *Answer, or ask for something else…* until the next request. The
+question is replayed with its exchange, so the answer arrives beside it. Three rules.
+
+- **Build first, ask beside it.** "Attempt it" is what gets a pipeline built, and a wrong build
+  costs one ⌘Z where a question costs a round trip. So the rule is to build the likelier reading
+  and ask about the other in the same reply, which makes the answer a small edit. An empty plan
+  with a question is kept for a request where either build would mostly be waste.
+- **Written against over-asking**, the likelier failure: ask only about what the user *meant*,
+  never about how to build something, and never about anything under *What is fine* (which lists
+  exactly what a model would otherwise ask about).
+- **The app's alone.** `planJsonSchema({ question: true })` is opt-in because the default is what
+  `src/mcp` publishes, and every field there is `required`: adding one would refuse every server
+  client that sends a plan without it. A model on the server already talks to its user in prose.
+  The paragraph is in `APP_CLOSING` for the same reason, so the MCP guide is unchanged. `parsePlan`
+  reads the field whenever it is present. It is **not an action key**, or a weak model's own
+  `steps` envelope with a schema-bound `"question": ""` beside it would stop the unwrap and parse
+  as a plan that silently builds nothing.
+
+**Measured**, five runs per side against `gemma4:31b-cloud`:
+
+| | with the field | without |
+| --- | --- | --- |
+| full suite | 9/10 every run | 9/10 every run |
+| the eight cases with clear requests | all pass, **0 questions** | all pass |
+| *"Run a t-test between two groups of neurons"* | nearest pipeline built, asked which groups **3/5** | never asked |
+| *"compare the connectivity of two cell types"* (no types named) | **5/5 asked**, every one beside a build | **0/5** |
+
+No regression and no over-asking. The first asking case measured nothing, the same trap as the
+first history case: *"Now the same for LC10"* beside an LC4 chart looked like two readings (a
+second pipeline, or a re-pointed search), and the model saw one. It re-pointed the search 10 times
+in 10 on both sides and never asked. **A model asks about ambiguity it sees, not ambiguity the
+case's author sees**, so a case for asking has to be built from a request the model itself treats
+as incomplete. The one place it asked unprompted was a request that named no groups, and the case
+that replaced it is that shape.
+
+Unmeasured: whether an answer to the question is then acted on well. The replay puts it beside its
+question, and the history measurement suggests that is enough, but no case covers it yet.
+
 ## Three levers, and where they live
 
 Apart from the model: **Full node help** (the catalogue's `lean`/`full` split), **Send run values**
@@ -343,7 +441,7 @@ prose should matter most for producing the identical graph on all six runs.
 
 `src/assistant/live.test.ts`, gated on `ASSISTANT_LIVE=1` — **separately from the key**, because
 `ANTHROPIC_API_KEY` is the standard name and an un-gated suite spends a developer's money without
-mentioning it. Seven cases. Any provider through `CODA_ASSISTANT_PROVIDER` / `_MODEL` / `_CATALOGUE`.
+mentioning it. Ten cases. Any provider through `CODA_ASSISTANT_PROVIDER` / `_MODEL` / `_CATALOGUE`.
 
 **Read what it prints, not the pass/fail** — and take one run for what it is. Measured on
 `gemma4:31b-cloud`, single cases sat at 5/10 and 9/10 while the suite reported 5/7 twice with a

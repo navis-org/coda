@@ -676,10 +676,28 @@ Two things to be careful about:
   their dataset input.
 `.trim()
 
+/*
+ * The `question` paragraph is app-only because the field is: `planJsonSchema` offers it only when
+ * asked, the MCP schema being a published interface, and a model on the server talks to its user
+ * in prose anyway (`MCP_CLOSING`).
+ *
+ * It is written against over-asking, which is the likelier failure: "attempt it" was measured to
+ * be what gets a pipeline built, a question costs the user a round trip that ⌘Z would not, and
+ * everything under *What is fine* is exactly what a model would otherwise ask about. Hence build
+ * first and ask beside it, with the ask-only form kept for a request where either build is waste.
+ */
 const APP_CLOSING = `
 Answer with a plan and nothing else. If the request needs no edit — a question about the graph,
 or something no node in the catalogue does — return an empty plan whose \`summary\` says so in one
 sentence. Being unsure how to build something is not one of those cases: attempt it.
+
+Asking the user — \`question\`, one sentence they can answer in a few words, or "" for none:
+- Ask only about what the user *meant*, when the request reads two ways that would build different
+  graphs and neither the graph nor the earlier turns settle it. Never about how to build something,
+  and never about anything under *What is fine*. Most requests need no question.
+- Build the likelier reading and ask about the other in the same reply, so that answering is a
+  small edit. Send an empty plan with a question only when building either reading would mostly be
+  wasted.
 `.trim()
 
 const MCP_CLOSING = `

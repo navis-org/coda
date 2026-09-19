@@ -20,6 +20,7 @@
  */
 
 import type { ApplyWarning } from '../assistant/apply'
+import type { AppliedOutcome, PastExchange } from '../assistant/converse'
 import type { CodaGraph } from '../core/graph'
 import { channel } from '../data/channel'
 
@@ -30,10 +31,14 @@ export type ChatEntry =
   | {
       kind: 'done'
       summary: string
-      added: number
       wired: number
       settings: number
-      removed: number
+      /**
+       * The edit as the next turn will be told about it — `appliedOutcome`'s, stored as is, so
+       * the transcript and the replay cannot describe one edit two ways. It also carries what
+       * the tally counts of nodes added and removed, and the question if one was asked.
+       */
+      account: AppliedOutcome
       warnings: ApplyWarning[]
       /**
        * The model that answered, as the *provider* named it — not as it was asked for.
@@ -104,6 +109,46 @@ export function chatBusy(): boolean {
 /** When the current wait started, as a `Date.now()` stamp. 0 while nothing is running. */
 export function chatBusySince(): number {
   return busySince
+}
+
+/**
+ * The transcript as exchanges for the next turn: each request paired with what came of it.
+ *
+ * A request with no answer after it — the one in flight, or one a Clear cut short — has nothing
+ * to pair with and is left out, which keeps the replayed turns alternating. Not memoised: it is
+ * read once per question, never by a selector.
+ */
+export function chatHistory(): PastExchange[] {
+  const past: PastExchange[] = []
+  for (let i = 0; i < entries.length - 1; i++) {
+    const asked = entries[i]!
+    const answer = entries[i + 1]!
+    if (asked.kind !== 'you' || answer.kind === 'you') continue
+    past.push({ request: asked.text, outcome: outcomeOf(answer) })
+  }
+  return past
+}
+
+function outcomeOf(entry: Exclude<ChatEntry, { kind: 'you' }>): PastExchange['outcome'] {
+  switch (entry.kind) {
+    case 'done':
+      return entry.account
+    case 'failed':
+      return { kind: 'failed', error: entry.text }
+    case 'stopped':
+      return { kind: 'stopped' }
+  }
+}
+
+/**
+ * Whether the transcript ends on a question still waiting for its answer.
+ *
+ * A primitive, for `useSyncExternalStore` (invariant 7). Only the *last* entry counts: once
+ * anything follows a question, the conversation has moved past it.
+ */
+export function chatAwaitsAnswer(): boolean {
+  const last = entries.at(-1)
+  return last?.kind === 'done' && Boolean(last.account.question)
 }
 
 export function appendChat(entry: ChatEntry): void {

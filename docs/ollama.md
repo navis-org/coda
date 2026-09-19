@@ -162,7 +162,7 @@ goes.
 
 > [!IMPORTANT]
 > A `-cloud` model is **not local**, and the guarantee at the top of this page does not cover it.
-> Your question, the node catalogue and **the graph on your canvas** go to ollama.com under your
+> Your questions, the node catalogue and **the graph on your canvas** go to ollama.com under your
 > account. If the reason you are here is that the data must not leave the machine, pull a real
 > local model instead.
 

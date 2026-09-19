@@ -27,16 +27,18 @@ import type { NodeDefinition } from '../core/node'
 import { T } from '../core/types'
 import type { CodaType } from '../core/types'
 import { pivotGraph, pivotObserved } from './fixture'
-import { messagesReply, stubFetch } from '../data/ai/fixture'
+import { messagesReply, sentMessages, stubFetch } from '../data/ai/fixture'
 import {
+  HISTORY_EXCHANGES,
   concernPrompt,
   concernsFrom,
   describeGraph,
+  historyTurns,
   repairPrompt,
   requestPlan,
   runTurn,
 } from './converse'
-import type { GraphContext } from './converse'
+import type { GraphContext, PastExchange } from './converse'
 import type { Value } from '../core/values'
 import { makeTable } from '../core/values'
 import { column, tableSchema } from '../core/types'
@@ -602,6 +604,39 @@ describe('the plan format', () => {
     expect(parsed.ok).toBe(false)
   })
 
+  it('reads a question, and takes a blank one as none', () => {
+    expect(parsedPlan('{"summary":"x","question":"  Which dataset?  "}').question).toBe(
+      'Which dataset?',
+    )
+    expect(parsedPlan('{"summary":"x","question":""}').question).toBeUndefined()
+    expect(parsedPlan('{"summary":"x"}').question).toBeUndefined()
+  })
+
+  it('takes a question with nothing to build as a plan, not as a foreign shape', () => {
+    // How a request too ambiguous to build arrives. `summary` alone is already valid; a
+    // `question` beside it must not trip the check for somebody else's envelope.
+    const parsed = parsedPlan('{"summary":"Nothing built yet.","question":"Which dataset?"}')
+    expect(isEmptyPlan(parsed)).toBe(true)
+    expect(parsed.question).toBe('Which dataset?')
+  })
+
+  it('still unwraps an envelope that carries a question beside it', () => {
+    /*
+     * Why `question` is not an action key. A model that ignores the schema's shape still copies
+     * its field names, so the likely reply is its own `steps` envelope with a schema-bound
+     * `"question": ""` beside it. Counted as an action, that field would stop the unwrap and the
+     * reply would parse as an empty plan — a turn that silently builds nothing.
+     */
+    const parsed = parsedPlan(
+      JSON.stringify({
+        summary: 'Add a note.',
+        question: '',
+        steps: [{ add: { ref: 'n', type: 'note.text' } }],
+      }),
+    )
+    expect(parsed.add.map((node) => node.type)).toEqual(['note.text'])
+  })
+
   it('recognises a plan that asks for nothing', () => {
     const parsed = parsedPlan('{"summary":"I cannot do that."}')
     expect(isEmptyPlan(parsed)).toBe(true)
@@ -611,50 +646,56 @@ describe('the plan format', () => {
     expect(result.graph).toEqual(graph)
   })
 
-  it('describes itself in a schema the structured-output compiler accepts', () => {
-    const schema = planJsonSchema() as Record<string, unknown>
-    expect(schema.additionalProperties).toBe(false)
-    expect(schema.required).toEqual(
-      expect.arrayContaining([
-        'summary',
-        'add',
-        'remove',
-        'setParams',
-        'connect',
-        'disconnect',
-      ]),
-    )
+  it.each([
+    ['as the MCP server publishes it', {}],
+    ['with the question the app asks for', { question: true }],
+  ])(
+    'describes itself in a schema the structured-output compiler accepts, %s',
+    (_, options) => {
+      const schema = planJsonSchema(options) as Record<string, unknown>
+      expect(schema.additionalProperties).toBe(false)
+      expect(schema.required).toEqual(
+        expect.arrayContaining([
+          'summary',
+          'add',
+          'remove',
+          'setParams',
+          'connect',
+          'disconnect',
+        ]),
+      )
 
-    /*
-     * Walked rather than spot-checked, because the failure is a 400 at the far end of a
-     * request the user already paid for. Two rules, and the second is the one that bit: every
-     * object must carry `additionalProperties`, and it may only ever be `false` — so the
-     * obvious shape for `params`, a map from param id to value, cannot be expressed at all.
-     */
-    const banned = ['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'multipleOf']
-    const walk = (node: unknown, path: string): void => {
-      if (!node || typeof node !== 'object') return
-      const record = node as Record<string, unknown>
-      for (const key of banned) expect(record[key], `${path}.${key}`).toBeUndefined()
-      if ('additionalProperties' in record) {
-        expect(record.additionalProperties, `${path}.additionalProperties`).toBe(false)
-      } else if (record.type === 'object') {
-        expect.fail(`${path} is an object with no additionalProperties`)
-      }
       /*
-       * Strict mode has *two* rules and this used to check one. Every property of every object
-       * must be `required` — add an optional field to a nested object and OpenAI returns a 400
-       * at request time, on a request the user paid for, while the suite stays green.
+       * Walked rather than spot-checked, because the failure is a 400 at the far end of a
+       * request the user already paid for. Two rules, and the second is the one that bit: every
+       * object must carry `additionalProperties`, and it may only ever be `false` — so the
+       * obvious shape for `params`, a map from param id to value, cannot be expressed at all.
        */
-      if (record.type === 'object' && record.properties) {
-        expect(record.required ?? [], `${path}.required`).toEqual(
-          expect.arrayContaining(Object.keys(record.properties as object)),
-        )
+      const banned = ['minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'multipleOf']
+      const walk = (node: unknown, path: string): void => {
+        if (!node || typeof node !== 'object') return
+        const record = node as Record<string, unknown>
+        for (const key of banned) expect(record[key], `${path}.${key}`).toBeUndefined()
+        if ('additionalProperties' in record) {
+          expect(record.additionalProperties, `${path}.additionalProperties`).toBe(false)
+        } else if (record.type === 'object') {
+          expect.fail(`${path} is an object with no additionalProperties`)
+        }
+        /*
+         * Strict mode has *two* rules and this used to check one. Every property of every object
+         * must be `required` — add an optional field to a nested object and OpenAI returns a 400
+         * at request time, on a request the user paid for, while the suite stays green.
+         */
+        if (record.type === 'object' && record.properties) {
+          expect(record.required ?? [], `${path}.required`).toEqual(
+            expect.arrayContaining(Object.keys(record.properties as object)),
+          )
+        }
+        for (const [key, value] of Object.entries(record)) walk(value, `${path}.${key}`)
       }
-      for (const [key, value] of Object.entries(record)) walk(value, `${path}.${key}`)
-    }
-    walk(schema, 'schema')
-  })
+      walk(schema, 'schema')
+    },
+  )
 
   it('takes params as the wire sends them — a list of pairs — and as a map', () => {
     // The schema cannot express a map, so the model sends pairs; a plan written by hand is far
@@ -940,6 +981,20 @@ describe('the catalogue', () => {
      */
     expect(catalogueText()).toBe(catalogueText())
     expect(buildSystemPrompt()).toContain(catalogueText())
+  })
+
+  it('offers the question to the app alone, in the prompt and the schema both', () => {
+    /*
+     * `src/mcp` publishes the default schema, whose every field is `required` — so a `question`
+     * there would refuse every client that sends a plan without one. The prompt has to agree
+     * with the schema it goes out beside, or a model is told to fill a field it cannot write.
+     */
+    const properties = (options: { question?: boolean }) =>
+      Object.keys((planJsonSchema(options) as { properties: object }).properties)
+    expect(properties({})).not.toContain('question')
+    expect(properties({ question: true })).toContain('question')
+    expect(buildSystemPrompt()).toContain('Asking the user')
+    expect(buildSystemPrompt('lean', 'mcp')).not.toContain('Asking the user')
   })
 
   it('keeps the in-app framing, and gives the MCP build a framing of its own', () => {
@@ -2047,6 +2102,23 @@ describe('a plan that is legal and still wrong', () => {
     expect(types()).toContain('compare.connectivity')
   })
 
+  it('keeps a question that came with an empty answer to the advisory round', async () => {
+    /*
+     * "These are fine, but which dataset did you mean?" is a whole answer: the empty plan
+     * resolves to the held one, and the question is the only new thing in the reply.
+     */
+    const declined = JSON.stringify({
+      ...emptyPlan(),
+      summary: 'All fine.',
+      question: 'Which two datasets?',
+    })
+    const { outcome, types } = await turnWith([MIS_WIRED_REPLY, declined])
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    expect(outcome.plan.question).toBe('Which two datasets?')
+    expect(types()).toContain('compare.connectivity')
+  })
+
   it('takes an empty answer as “these are all fine” and applies what it held', async () => {
     const declined = JSON.stringify({ ...emptyPlan(), summary: 'All fine.' })
     const { outcome, types } = await turnWith([MIS_WIRED_REPLY, declined])
@@ -2297,5 +2369,124 @@ describe('recovering a plan a weak model wrapped in an envelope of its own', () 
     const result = parsePlan(JSON.stringify({ summary: 'x', steps: [{ frobnicate: {} }] }))
     if (result.ok) expect.fail('expected a refusal')
     expect(result.error).toContain('did not follow the requested format')
+  })
+})
+
+describe('replaying the conversation', () => {
+  /*
+   * Without this every question started from nothing: `runTurn` sent the current request alone,
+   * so "no, the other dataset" arrived with no dataset to be other than, and an answer to a
+   * question the assistant had asked would arrive without the question.
+   */
+  const built: PastExchange = {
+    request: 'chart the LC4 neurons',
+    outcome: {
+      kind: 'applied',
+      summary: 'Charted the LC4 neurons.',
+      added: [
+        { id: 'n3_k91f', type: 'neuron.findNeurons' },
+        { id: 'n4_x82p', type: 'out.table' },
+      ],
+      removed: [],
+    },
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('names what an earlier edit made by graph id, never by the plan ref', () => {
+    /*
+     * The refs in a past plan mean nothing to the next one — `find` is `n3_k91f` on the canvas
+     * now — and a model shown its old plan writes `find` into the new one, which is refused.
+     */
+    const [asked, answered] = historyTurns([built])
+    expect(asked).toEqual({ role: 'user', content: 'chart the LC4 neurons' })
+    expect(answered!.role).toBe('assistant')
+    expect(answered!.content).toContain('Charted the LC4 neurons.')
+    expect(answered!.content).toContain('n3_k91f (neuron.findNeurons)')
+  })
+
+  it('says plainly when an earlier turn changed nothing', () => {
+    const turns = historyTurns([
+      { request: 'a', outcome: { kind: 'failed', error: 'That did not fit the graph.' } },
+      { request: 'b', outcome: { kind: 'stopped' } },
+      {
+        request: 'c',
+        outcome: { kind: 'applied', summary: 'Nothing to do.', added: [], removed: [] },
+      },
+    ])
+    const answers = turns.filter((t) => t.role === 'assistant').map((t) => t.content)
+    expect(answers[0]).toContain('Nothing was changed: That did not fit the graph.')
+    expect(answers[1]).toContain('nothing was changed')
+    expect(answers[2]).toContain('No change to the graph.')
+  })
+
+  it('replays a question the assistant asked, since the next request is likely its answer', () => {
+    const [, answered] = historyTurns([
+      {
+        request: 'the same for LC10',
+        outcome: {
+          kind: 'applied',
+          summary: 'Added an LC10 chart beside the LC4 one.',
+          added: [],
+          removed: [],
+          question: 'Should the LC10 chart replace the LC4 one?',
+        },
+      },
+    ])
+    expect(answered!.content).toContain(
+      'Asked the user: Should the LC10 chart replace the LC4 one?',
+    )
+  })
+
+  it('keeps the newest exchanges, alternating', () => {
+    const past = Array.from({ length: HISTORY_EXCHANGES + 3 }, (_, i) => ({
+      ...built,
+      request: `request ${i}`,
+    }))
+    const turns = historyTurns(past)
+    expect(turns).toHaveLength(HISTORY_EXCHANGES * 2)
+    expect(turns.map((t) => t.role)).toEqual(
+      Array.from({ length: HISTORY_EXCHANGES * 2 }, (_, i) => (i % 2 ? 'assistant' : 'user')),
+    )
+    expect(turns[0]!.content).toBe('request 3')
+    expect(turns.at(-2)!.content).toBe(`request ${HISTORY_EXCHANGES + 2}`)
+  })
+
+  it('sends the history ahead of the request, and the graph with the request alone', async () => {
+    const calls = stubFetch(
+      (name, value) => vi.stubGlobal(name, vi.fn(value as never)),
+      messagesReply(JSON.stringify({ ...emptyPlan(), summary: 'Nothing to do.' })),
+    )
+    setKey('anthropic', 'sk-ant-test')
+    const graph = emptyGraph()
+    await runTurn({
+      request: 'now only the ones on the left',
+      history: [built],
+      graph: () => graph,
+      apply: (p) => applyPlan(graph, p),
+    })
+
+    const sent = sentMessages(calls[0]!)
+    expect(sent.map((m) => m.role)).toEqual(['user', 'assistant', 'user'])
+    // A replayed listing would describe a canvas that no longer exists, in the current one's words.
+    expect(sent[0]!.content[0]!.text).toBe('chart the LC4 neurons')
+    expect(sent[2]!.content[0]!.text).toContain('Current graph (authoritative')
+    expect(sent[2]!.content[0]!.text).toContain('now only the ones on the left')
+  })
+
+  it('keeps the plain header when there is nothing earlier to overrule', async () => {
+    const calls = stubFetch(
+      (name, value) => vi.stubGlobal(name, vi.fn(value as never)),
+      messagesReply(JSON.stringify({ ...emptyPlan(), summary: 'Nothing to do.' })),
+    )
+    setKey('anthropic', 'sk-ant-test')
+    const graph = emptyGraph()
+    await runTurn({ request: 'hi', graph: () => graph, apply: (p) => applyPlan(graph, p) })
+
+    const sent = sentMessages(calls[0]!)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.content[0]!.text).toMatch(/^Current graph:\n/)
   })
 })

@@ -62,7 +62,8 @@ import { emptyGraph } from '../core/graph'
 import { applyPlan } from './apply'
 import type { CatalogueDetail } from './catalogue'
 import { buildSystemPrompt } from './catalogue'
-import { describeGraph, requestPlan, runTurn } from './converse'
+import { appliedOutcome, describeGraph, requestPlan, runTurn } from './converse'
+import type { PastExchange } from './converse'
 import type { AssistantPlan } from './planShape'
 import { countPlanParams } from './planShape'
 
@@ -144,10 +145,12 @@ async function ask(
   graph: CodaGraph,
   request: string,
   results?: ResultReader,
-): Promise<{ graph: CodaGraph; plan: AssistantPlan }> {
+  history?: readonly PastExchange[],
+): Promise<{ graph: CodaGraph; plan: AssistantPlan; exchange: PastExchange }> {
   let next = graph
   const outcome = await runTurn({
     request,
+    ...(history ? { history } : {}),
     detail: CATALOGUE,
     graph: () => next,
     inference: () => inferGraph(next),
@@ -173,10 +176,15 @@ async function ask(
       `${countPlanParams(plan)} set, ${plan.remove.length} removed\n` +
       `  tokens: ${cost} in (${usage.cacheReadTokens} cached) / ${usage.outputTokens} out`,
   )
+  // On every case, not only the one that wants it: over-asking is the likelier failure, and a
+  // question on a request that reads one way is what these lines are for counting.
+  if (plan.question) console.log(`  ASKED: ${plan.question}`)
   for (const warning of applied.warnings) {
     console.log(`  left for the user — ${warning.label}: ${warning.message}`)
   }
-  return { graph: next, plan }
+  // What the panel records, through the same function, so a follow-up replays what the app sends.
+  const exchange: PastExchange = { request, outcome: appliedOutcome(plan, applied) }
+  return { graph: next, plan, exchange }
 }
 
 /**
@@ -404,6 +412,62 @@ describe.skipIf(!RUNNABLE)('against the real API', () => {
   )
 
   it(
+    'picks up from what was said last turn, which the graph cannot tell it',
+    async () => {
+      /*
+       * The history replay's discriminating case: the fact the second request needs was *said*
+       * and never built, so the canvas cannot supply it. LC10 appears only in the first request,
+       * and "the second one" means nothing without it.
+       *
+       * A first version asked for a t-test and then for "the closest thing you suggested", on the
+       * premise that a declined request leaves the canvas empty. `gemma4:31b-cloud` never declined
+       * — it built a comparison 9 times in 10, per `RULES`' "attempt it" — so both sides answered
+       * "already done" from the graph and the case measured nothing (4/5 with, 5/5 without).
+       *
+       * This one, five runs a side on the same model: **5/5 with the history, 0/5 without**,
+       * every control answering an empty plan that called the request ambiguous.
+       */
+      const { graph, exchange } = await ask(
+        emptyGraph(),
+        'On the mini hemibrain, chart the strongest partner types of the LC4 neurons. ' +
+          'Afterwards I will want the same chart for LC10.',
+      )
+      const { graph: after, plan } = await ask(graph, 'Now do the second one.', undefined, [
+        exchange,
+      ])
+      console.log(`\n  built: ${after.nodes.map((n) => n.type).join(', ')}\n`)
+      expect(JSON.stringify(planValues(plan))).toContain('LC10')
+    },
+    PER_QUESTION_MS,
+  )
+
+  it(
+    'asks what it was not told, and builds the rest',
+    async () => {
+      /*
+       * The request leaves out the one thing the graph turns on — which two cell types — and
+       * neither the canvas nor an earlier turn can supply it. A pass is a question, beside a
+       * partial build or instead of one.
+       *
+       * A first version asked "Now the same for LC10." beside an LC4 chart, on the premise that
+       * a second pipeline and a re-pointed search are two readings. `gemma4:31b-cloud` saw one:
+       * it re-pointed the search 10 times in 10, with and without the question field, and never
+       * asked. A model has to *see* two readings to ask about them, so the case has to be one it
+       * does — and the one place it asked unprompted was a request that named no groups.
+       *
+       * This one, five runs a side: **5/5 with the question field, 0/5 without**, every pass
+       * building the comparison and asking which two types beside it.
+       */
+      const { plan } = await ask(
+        emptyGraph(),
+        'On the mini hemibrain, compare the connectivity of two cell types.',
+      )
+      expect(plan.question ?? '').not.toBe('')
+    },
+    PER_QUESTION_MS,
+  )
+
+  it(
     'declines rather than inventing, when asked for something Coda cannot do',
     async () => {
       // The interesting failure is a plan full of plausible node types that do not exist. An
@@ -414,6 +478,7 @@ describe.skipIf(!RUNNABLE)('against the real API', () => {
       })
       if (!outcome.ok) expect.fail(outcome.error)
       console.log(`\n  “${outcome.plan.summary}”`)
+      if (outcome.plan.question) console.log(`  ASKED: ${outcome.plan.question}`)
 
       const result = applyPlan(emptyGraph(), outcome.plan)
       // Whatever it proposes must at least be applicable — inventing a node type is the failure.

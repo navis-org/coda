@@ -117,10 +117,11 @@ function Dialog({ onClose }: { onClose: () => void }) {
             <div className="privacy__row">
               <dt>AI assistant</dt>
               <dd>
-                Off unless you configure it. Your question and the graph on your canvas go
-                straight to the provider you pick, with no server of ours in between — as does a
-                summary of what its nodes last produced (row counts, value ranges, the commonest
-                values in a column), which you can switch off in the assistant drawer.
+                Off unless you configure it. Your questions in the current conversation and the
+                graph on your canvas go straight to the provider you pick, with no server of
+                ours in between — as does a summary of what its nodes last produced (row counts,
+                value ranges, the commonest values in a column), which you can switch off in the
+                assistant drawer.
               </dd>
             </div>
             <div className="privacy__row">

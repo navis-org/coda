@@ -18,8 +18,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { emptyGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import type { StubbedCall } from '../../data/ai/fixture'
-import { messagesReply, stubFetch } from '../../data/ai/fixture'
+import { messagesReply, sentMessages, stubFetch } from '../../data/ai/fixture'
 import { pivotGraph, pivotObserved } from '../../assistant/fixture'
+import { emptyPlan } from '../../assistant/planShape'
 import {
   getFullCatalogue,
   getSendRunValues,
@@ -560,6 +561,57 @@ describe('the conversation', () => {
     act(() => useGraphStore.getState().togglePanel('assistant'))
     rerender(<AssistantPanel />)
     expect(screen.getByText('chart the LC4 neurons')).not.toBeNull()
+  })
+
+  it('sends the earlier exchange with the next question, by the ids it made', async () => {
+    const stub = stubReplies(PIPELINE, JSON.stringify({ ...emptyPlan(), summary: 'Fine.' }))
+    render(<AssistantPanel />)
+    await ask('chart the LC4 neurons')
+    await ask('now only the ones on the left')
+
+    const second = sentMessages(stub.sent[1]!)
+    expect(second.map((m) => m.role)).toEqual(['user', 'assistant', 'user'])
+    expect(second[0]!.content[0]!.text).toBe('chart the LC4 neurons')
+    // The account names the canvas's ids, which is what a follow-up about "the table" needs.
+    const tableId = graph().nodes.find((n) => n.type === 'out.table')!.id
+    expect(second[1]!.content[0]!.text).toContain(`${tableId} (out.table)`)
+  })
+
+  it('shows a question as its own line, and the box invites the answer', async () => {
+    const asking = JSON.stringify({
+      ...JSON.parse(PIPELINE),
+      question: 'Should this cover LC10 as well?',
+    })
+    const stub = stubReplies(asking, JSON.stringify({ ...emptyPlan(), summary: 'Fine.' }))
+    render(<AssistantPanel />)
+    await ask('chart the LC4 neurons')
+
+    // The edit landed as usual — a question beside a plan does not hold the plan back.
+    expect(graph().nodes).toHaveLength(3)
+    expect(screen.getByText('Should this cover LC10 as well?')).not.toBeNull()
+    expect(screen.getByRole('textbox').getAttribute('placeholder')).toMatch(/^Answer/)
+    // Asked for on the wire, where the MCP schema leaves it out.
+    const format = (stub.sent[0]!.body.output_config as { format: { schema: object } }).format
+    expect(Object.keys((format.schema as { properties: object }).properties)).toContain(
+      'question',
+    )
+
+    await ask('no, just LC4')
+    // Answered, so the box goes back to asking — and the answer went out beside its question.
+    expect(screen.getByRole('textbox').getAttribute('placeholder')).toMatch(/^Ask/)
+    expect(asked(stub.sent[1]!)).toContain('Asked the user: Should this cover LC10 as well?')
+  })
+
+  it('starts the conversation over once cleared', async () => {
+    const stub = stubReplies(PIPELINE, JSON.stringify({ ...emptyPlan(), summary: 'Fine.' }))
+    render(<AssistantPanel />)
+    await ask('chart the LC4 neurons')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
+    })
+    await ask('now only the ones on the left')
+
+    expect(stub.sent[1]!.body.messages as unknown[]).toHaveLength(1)
   })
 
   it('clears on request without touching the graph', async () => {

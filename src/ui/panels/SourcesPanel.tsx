@@ -380,9 +380,9 @@ const SECTIONS: readonly [Section, ...Section[]] = [
         {/* A block, not a `<br />`: these are two statements, and at 11px a bare break ran the
             second into the first. The class is what carries the gap. */}
         <span className="sources__privacy-next">
-          <strong>A key here is your account and your bill.</strong> Your question, the graph on
-          your canvas and — unless you switch it off in the drawer — a summary of what it last
-          produced go to the provider you pick.{' '}
+          <strong>A key here is your account and your bill.</strong> Your questions in the
+          current conversation, the graph on your canvas and — unless you switch it off in the
+          drawer — a summary of what it last produced go to the provider you pick.{' '}
           {/* Inside the block, or the `?` drops onto a line of its own under it. */}
           <Why>
             {"Keys are held in this browser's local storage on this machine only, are never " +

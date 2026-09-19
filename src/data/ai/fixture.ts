@@ -18,6 +18,13 @@ export interface StubbedCall {
   body: Record<string, unknown>
 }
 
+/** The conversation a stubbed Anthropic call carried, oldest turn first. */
+export function sentMessages(
+  call: StubbedCall,
+): Array<{ role: string; content: Array<{ text: string }> }> {
+  return call.body.messages as Array<{ role: string; content: Array<{ text: string }> }>
+}
+
 /** A successful Anthropic reply carrying `text`. */
 export function messagesReply(text: string): unknown {
   return {

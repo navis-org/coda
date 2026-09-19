@@ -170,9 +170,134 @@ export function describeGraph(graph: CodaGraph, ctx: GraphContext = {}): string 
   return lines.join('\n')
 }
 
-/** The user turn: the graph, then the request. */
-function userContent(graph: CodaGraph, request: string, ctx: GraphContext): string {
-  return `Current graph:\n${describeGraph(graph, ctx)}\n\nRequest:\n${request}`
+/**
+ * The user turn: the graph, then the request.
+ *
+ * With earlier turns in front of it, the header says which account wins. Those turns describe
+ * edits as they were made, and the user may have undone, moved or deleted anything since — so a
+ * past `Added: n3` beside a listing with no `n3` in it is a conflict the model has to be told how
+ * to settle. Here rather than in the rules because it is only true when there *is* a history,
+ * and the rules are the cached prefix.
+ */
+function userContent(
+  graph: CodaGraph,
+  request: string,
+  ctx: GraphContext,
+  replayed: boolean,
+): string {
+  const header = replayed
+    ? 'Current graph (authoritative: earlier turns describe the graph as it was then):'
+    : 'Current graph:'
+  return `${header}\n${describeGraph(graph, ctx)}\n\nRequest:\n${request}`
+}
+
+/**
+ * One earlier question and what came of it — the headless half of the transcript.
+ *
+ * A shape of its own rather than the panel's `ChatEntry`, for the boundary's reason: this module
+ * may not reach `src/ui`, and what the model is told about an earlier turn is assistant policy
+ * rather than a rendering choice.
+ */
+export interface PastExchange {
+  request: string
+  outcome:
+    | AppliedOutcome
+    /** Refused, or no plan came back. Nothing was applied. */
+    | { kind: 'failed'; error: string }
+    | { kind: 'stopped' }
+}
+
+/** A plan that landed, as the next turn is told about it. */
+export interface AppliedOutcome {
+  kind: 'applied'
+  summary: string
+  /** The graph ids the plan's nodes were given — see `accountOf` for why ids and not refs. */
+  added: ReadonlyArray<{ id: string; type: string }>
+  removed: readonly string[]
+  /** What the assistant asked, which the next request is very likely answering. */
+  question?: string | undefined
+}
+
+/**
+ * A committed plan as history will replay it — the one place a turn's outcome becomes an account.
+ *
+ * Here rather than in the panel because it is assistant policy, and so that `live.test.ts`
+ * replays what the app sends by construction rather than by a copy that has to be kept in step.
+ * Every added ref is in `created`: `applyPlan` turns a ref it cannot create into an error, so an
+ * `ApplyOk` has an id for each.
+ */
+export function appliedOutcome(plan: AssistantPlan, applied: ApplyOk): AppliedOutcome {
+  return {
+    kind: 'applied',
+    summary: plan.summary,
+    added: plan.add.map((node) => ({ id: applied.created[node.ref]!, type: node.type })),
+    removed: plan.remove,
+    question: plan.question,
+  }
+}
+
+/**
+ * How many earlier exchanges are replayed.
+ *
+ * Chosen, not measured. What a follow-up leans on is almost always the last turn or two ("now
+ * colour it by type", "no, the other dataset"), and the graph listing carries every fact about
+ * state, so an old exchange buys little. Each costs a hundred-odd characters, so the bound is
+ * about keeping the turn list readable rather than about the budget.
+ */
+export const HISTORY_EXCHANGES = 6
+
+/**
+ * An earlier exchange as the model's own turn: its summary, then an account of what landed.
+ *
+ * **Not the plan JSON it sent.** That is what the repair round replays, and it is right there —
+ * the refs in it are still the plan's own. Across turns they are not: `find` in last turn's plan
+ * is `n3_k91f` on the canvas now, and a model shown its old plan writes `find` into the next one,
+ * which `applyPlan` refuses as a node that does not exist. So the account names the graph ids,
+ * which is what a follow-up about "the filter you just added" actually needs.
+ *
+ * In parentheses so it reads as a record rather than as prose to imitate: the reply format is a
+ * plan, and a model shown its own turns written as sentences is being shown a different format.
+ */
+function accountOf(outcome: PastExchange['outcome']): string {
+  switch (outcome.kind) {
+    case 'applied': {
+      const parts: string[] = []
+      if (outcome.added.length) {
+        parts.push(`Added: ${outcome.added.map((n) => `${n.id} (${n.type})`).join(', ')}.`)
+      }
+      if (outcome.removed.length) parts.push(`Removed: ${outcome.removed.join(', ')}.`)
+      const record = parts.length
+        ? `(Applied. ${parts.join(' ')})`
+        : '(No change to the graph.)'
+      /*
+       * The question is replayed in full, since the next request is very likely the answer to
+       * it — and an answer arriving without its question is the case this replay exists for.
+       */
+      const asked = outcome.question ? `\n(Asked the user: ${outcome.question})` : ''
+      return `${outcome.summary ? `${outcome.summary}\n` : ''}${record}${asked}`
+    }
+    case 'failed':
+      return `(Nothing was changed: ${outcome.error})`
+    case 'stopped':
+      return '(The user stopped this request before it was answered; nothing was changed.)'
+  }
+}
+
+/**
+ * The earlier exchanges as turns, oldest first, bounded to `HISTORY_EXCHANGES`.
+ *
+ * Every exchange contributes one user turn and one assistant turn, so the list alternates by
+ * construction — two of the four providers refuse or merge a conversation that does not.
+ *
+ * The user turns are the bare requests. The graph listing rides only on the *current* turn
+ * (`requestPlan`): a replayed listing would describe a canvas that no longer exists, in exactly
+ * the words the current one uses, which is the digest's freshness rule one layer up.
+ */
+export function historyTurns(past: readonly PastExchange[]): AssistantTurn[] {
+  return past.slice(-HISTORY_EXCHANGES).flatMap((exchange): AssistantTurn[] => [
+    { role: 'user', content: exchange.request },
+    { role: 'assistant', content: accountOf(exchange.outcome) },
+  ])
 }
 
 /**
@@ -193,10 +318,15 @@ export async function requestPlan(request: PlanRequest): Promise<PlanOutcome> {
     ...turns.map((t) => ({ role: t.role, content: t.content })),
     {
       role: 'user' as const,
-      content: userContent(request.graph, last.content, {
-        ...(request.inference ? { inference: request.inference } : {}),
-        ...(request.results ? { results: request.results } : {}),
-      }),
+      content: userContent(
+        request.graph,
+        last.content,
+        {
+          ...(request.inference ? { inference: request.inference } : {}),
+          ...(request.results ? { results: request.results } : {}),
+        },
+        turns.length > 0,
+      ),
     },
   ]
 
@@ -205,7 +335,7 @@ export async function requestPlan(request: PlanRequest): Promise<PlanOutcome> {
     result = await complete({
       system: buildSystemPrompt(request.detail),
       messages,
-      schema: planJsonSchema(),
+      schema: planJsonSchema({ question: true }),
       ...(request.signal ? { signal: request.signal } : {}),
       ...(request.apiKey ? { apiKey: request.apiKey } : {}),
       ...(request.model ? { model: request.model } : {}),
@@ -342,6 +472,11 @@ export interface TurnRequest {
   /** Applies a plan, or refuses it. The store's `applyAssistantPlan`, or a bare `applyPlan`. */
   apply: (plan: AssistantPlan) => ApplyResult
   request: string
+  /**
+   * The earlier exchanges in this conversation, oldest first. Without them every question starts
+   * from nothing, and "no, the other dataset" arrives with no dataset to be other than.
+   */
+  history?: readonly PastExchange[] | undefined
   signal?: AbortSignal | undefined
 }
 
@@ -353,12 +488,16 @@ export interface TurnRequest {
  * `repairPrompt`, a function this module exported for something else to feed back to it — so
  * the loop it belongs to lived in a `useCallback` and could only be tested by mounting a panel.
  *
- * Only what was *said* is replayed. The transcript's own summaries are not: the graph goes with
- * every turn anyway (`describeGraph`), so state is carried by the thing that is authoritative
- * about it rather than by a paraphrase of an earlier edit.
+ * Earlier exchanges are replayed as what was asked and what landed (`historyTurns`), never as a
+ * graph: the listing goes with the current turn only, so state is carried by the thing that is
+ * authoritative about it and the history carries only what the listing cannot — what the user
+ * *meant*, and which nodes a past edit made.
  */
 export async function runTurn(turn: TurnRequest): Promise<TurnOutcome> {
-  const messages: AssistantTurn[] = [{ role: 'user', content: turn.request }]
+  const messages: AssistantTurn[] = [
+    ...historyTurns(turn.history ?? []),
+    { role: 'user', content: turn.request },
+  ]
   /*
    * A plan that previewed clean and was sent back for a second look anyway — see
    * `concernPrompt`. Held rather than applied, so the whole turn is still one commit and one
@@ -409,7 +548,15 @@ export async function runTurn(turn: TurnRequest): Promise<TurnOutcome> {
      * An empty plan answering the advisory round means "they are all fine" — `concernPrompt`
      * offers exactly that, so it is an answer rather than a failure to produce one.
      */
-    const plan = held && isEmptyPlan(outcome.plan) ? held.plan : outcome.plan
+    /*
+     * An empty answer resolves to the held plan, carrying a question if it asked one. "These
+     * warnings are fine, but which dataset did you mean?" is a whole answer to this round, and
+     * dropping the second half for the first would lose the only new thing in it.
+     */
+    let plan = outcome.plan
+    if (held && isEmptyPlan(plan)) {
+      plan = plan.question ? { ...held.plan, question: plan.question } : held.plan
+    }
 
     /*
      * Preview before committing. `applyPlan` is pure and is what the store's applier calls, so

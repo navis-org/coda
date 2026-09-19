@@ -10619,6 +10619,18 @@ details[open] > summary.tile__label {
   font-size: 12px;
   line-height: 1.45;
 }
+/*
+ * What the assistant asked. Set in the primary text colour and marked with the accent rule the
+ * entry already carries, rather than a new hue: it is the one line in the transcript that is
+ * waiting on the reader, and the reply box's placeholder is the other half of saying so.
+ */
+.assistant__question {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 600;
+  color: var(--text-primary);
+}
 .assistant__meta {
   display: flex;
   align-items: center;

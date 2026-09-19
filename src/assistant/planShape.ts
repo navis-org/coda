@@ -68,6 +68,15 @@ export interface PlannedParam {
 export interface AssistantPlan {
   /** One sentence in the user's terms. Becomes the undo label and the panel's summary. */
   summary: string
+  /**
+   * Something to ask the user, beside the edit or instead of one. Absent or empty for none.
+   *
+   * Optional, and not in `emptyPlan`, because only the in-app assistant is offered it: the MCP
+   * schema is a published interface whose every field is `required`, so adding it there would
+   * refuse every client that sends a plan without it — and a model working through the server
+   * already talks to its user in prose. See `planJsonSchema`'s `question` option.
+   */
+  question?: string | undefined
   add: PlannedNode[]
   /** Existing node ids to delete. Their wires go with them. */
   remove: string[]

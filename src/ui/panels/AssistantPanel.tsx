@@ -42,7 +42,9 @@ import {
   appendChat,
   chatBusy,
   chatBusySince,
+  chatAwaitsAnswer,
   chatEntries,
+  chatHistory,
   clearChat,
   setChatBusy,
   stopChat,
@@ -195,6 +197,7 @@ function clock(ms: number): string {
 function Drawer({ takeFocus }: { takeFocus: boolean }) {
   const entries = useSyncExternalStore(subscribeChat, chatEntries)
   const busy = useSyncExternalStore(subscribeChat, chatBusy)
+  const awaiting = useSyncExternalStore(subscribeChat, chatAwaitsAnswer)
   const elapsed = useElapsed(busy)
   const [draft, setDraft] = useState('')
   const togglePanel = useGraphStore((s) => s.togglePanel)
@@ -209,6 +212,8 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
     if (!text || chatBusy()) return
 
     setDraft('')
+    // Read before this request joins the transcript, which would otherwise pair it with nothing.
+    const history = chatHistory()
     appendChat({ kind: 'you', text })
     const controller = new AbortController()
     setChatBusy(true, controller)
@@ -216,11 +221,12 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
     try {
       // Loaded here, not imported at the top: this is the module that carries the catalogue,
       // and nothing should pay for it before a question is asked.
-      const { runTurn } = await import('../../assistant/converse')
+      const { appliedOutcome, runTurn } = await import('../../assistant/converse')
       const store = useGraphStore.getState
 
       const outcome = await runTurn({
         request: text,
+        history,
         /*
          * Read here rather than closed over, so a switch flipped while the composer already held
          * text still applies to the question it is flipped before — and so this callback's deps
@@ -265,10 +271,9 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
         appendChat({
           kind: 'done',
           summary: outcome.plan.summary || 'Done.',
-          added: outcome.plan.add.length,
           wired: outcome.plan.connect.length,
           settings: countPlanParams(outcome.plan),
-          removed: outcome.plan.remove.length,
+          account: appliedOutcome(outcome.plan, outcome.applied),
           warnings: outcome.applied.warnings,
           graph: outcome.applied.graph,
           model: outcome.model,
@@ -326,6 +331,13 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
    * provider configured — same control, same explanation in the placeholder.
    */
   const locked = useGraphStore((s) => s.locked)
+  const placeholder = locked
+    ? 'The canvas is locked — unlock it to ask for a change'
+    : !ready
+      ? 'Pick a provider under Connections first'
+      : awaiting
+        ? 'Answer, or ask for something else…'
+        : 'Ask for a change…'
 
   return (
     <aside className="assistant" aria-label="Assistant">
@@ -477,13 +489,7 @@ function Drawer({ takeFocus }: { takeFocus: boolean }) {
           ref={askRef}
           className="field"
           value={draft}
-          placeholder={
-            locked
-              ? 'The canvas is locked — unlock it to ask for a change'
-              : ready
-                ? 'Ask for a change…'
-                : 'Pick a provider under Connections first'
-          }
+          placeholder={placeholder}
           disabled={!ready || locked}
           spellCheck={false}
           onChange={(event) => setDraft(event.target.value)}
@@ -542,16 +548,25 @@ function Applied({ entry }: { entry: Extract<ChatEntry, { kind: 'done' }> }) {
    */
   const undoable = useGraphStore((s) => s.graph === entry.graph)
 
+  const added = entry.account.added.length
+  const removed = entry.account.removed.length
   const tally = [
-    entry.added && `${entry.added} node${entry.added === 1 ? '' : 's'}`,
+    added && `${added} node${added === 1 ? '' : 's'}`,
     entry.wired && `${entry.wired} wire${entry.wired === 1 ? '' : 's'}`,
     entry.settings && `${entry.settings} setting${entry.settings === 1 ? '' : 's'}`,
-    entry.removed && `${entry.removed} removed`,
+    removed && `${removed} removed`,
   ].filter(Boolean) as string[]
 
   return (
     <div className="assistant__entry">
       <p className="assistant__summary">{entry.summary}</p>
+      {/*
+       * Its own line rather than folded into the summary: the summary is an account of what
+       * happened, this is something waiting on the reader, and the reply box below says so too.
+       */}
+      {entry.account.question && (
+        <p className="assistant__question">{entry.account.question}</p>
+      )}
       <div className="assistant__meta">
         {tally.length > 0 && <span className="assistant__tally">{tally.join(' · ')}</span>}
         {/*
