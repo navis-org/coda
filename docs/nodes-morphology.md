@@ -419,6 +419,16 @@ table keyed on `label` or `bodyId` resolves perfectly well, runs perfectly well,
 empty scene. Edit time cannot see it — `validateColumnParams` already says *using "label"* for the
 substitution itself, and whether that column holds ids is a fact about the data.
 
+**An empty table is silent, and it is checked before either report.** A table with no rows names no
+neurons, so an empty result there is the arithmetic — an upstream `Filter Table` that matched
+nothing, a loop pass with an empty share, a search that found none — and the sentence above accuses
+the one part of the card that is set correctly. It shipped the other way and was reported as a bug:
+a workflow whose filter legitimately kept nothing carried a warning telling its author to go and
+check a picker that was right. The question is asked of the **table's row count**, not of the id
+list, which is what keeps the pair apart: a table that has rows and still yields no ids — a column
+of nulls, a float column nothing survives `idText` — is the picker again and keeps its sentence, the
+` It holds no ids.` branch.
+
 The selection itself is `keepElements`, which this node added to `iterables.ts` — where everything
 about taking a subset of a collection already lives: the index-aligned attribute rows, bounds
 recomputed, `units`/`space`/`provenance`/`detail` carried, and the identity fast path that hands the

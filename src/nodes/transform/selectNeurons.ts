@@ -44,7 +44,8 @@
  * somebody fetched is the ordinary state, not an error, so the shortfall is a `ctx.warn` with a
  * number in it. The one thing that gets its own sentence is *nothing* matching, because that is
  * what a mis-picked ID column looks like from the outside: a perfectly plausible run that hands
- * back an empty scene.
+ * back an empty scene — unless the table is *empty*, which names no neurons and is therefore an
+ * empty result nobody needs telling about.
  *
  * Cheap: item references and one pass over a column, no geometry copied and nothing fetched, so
  * the scene re-selects as the table above it changes.
@@ -148,6 +149,16 @@ registerNode({
     const column = readSelection(ctx)
     const wanted = wantedIds(table, column)
     const { kept, missing } = selectByIds(value, wanted)
+
+    /*
+     * **A table with no rows is not a mis-picked column**, and it is checked before either
+     * report rather than folded into them. An empty result there is the arithmetic — a `Filter
+     * Table` that matched nothing, a loop pass with an empty share, a search that found none —
+     * so the only thing a warning adds is an accusation against the one part of the card that
+     * is set correctly. Asked of the *table* rather than of `wanted`: a table that has rows and
+     * no ids in that column is the picker again, and keeps its sentence.
+     */
+    if (table.length === 0) return { out: kept }
 
     /*
      * Exclusive by construction — nothing kept means everything wanted is missing — and the

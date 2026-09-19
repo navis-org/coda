@@ -23,7 +23,8 @@
  * fetched — so the shortfall is counted and said (`ctx.warn`), never raised. The one case worth a
  * sentence of its own is *nothing* matching, because that is what a mis-picked ID column looks
  * like from the outside: a picker sitting on a column of cell types resolves perfectly well, runs
- * perfectly well, and hands back an empty scene.
+ * perfectly well, and hands back an empty scene. **An empty table is the exception and is silent**
+ * — it names no neurons, so nothing was expected; see `nothingSelectedReason`.
  */
 
 import { ID_COLUMN_NAME } from '../../core/ids'
@@ -174,6 +175,12 @@ export function unselectableKindReason(kind: CodaType['kind'] | undefined): stri
 
 /**
  * Why an empty result is the picker rather than the data.
+ *
+ * **Reached only where the table had rows**, which the node checks before calling this: a table
+ * with none names no neurons, so its empty result is the arithmetic and saying anything about the
+ * picker there accuses the one part of the card that is set correctly. What survives is the pair
+ * this sentence is for — a column of cell types, which holds plenty that are not ids, and a column
+ * holding nothing an id can be read out of, which is the ` no ids` branch below.
  *
  * Two surfaces — `validate` says nothing about the picker, so this is `evaluate`'s warning and the
  * test's assertion. A function rather than a literal for the test's sake: asserting against the

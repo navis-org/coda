@@ -243,6 +243,28 @@ describe('the node around it', () => {
   })
 
   /*
+   * The half of that rule that has to be asked first: a table with no rows names no neurons, so
+   * the empty result is the arithmetic and the sentence above would accuse the one part of the
+   * card that is set correctly. An upstream `Filter Table` matching nothing is the ordinary way
+   * in. Both empties are asserted, since a silent run that also dropped the geometry would pass
+   * a warning-only check.
+   */
+  it('says nothing when the table it was handed is empty', () => {
+    const { out, warnings } = run(neuronTable([]))
+    expect(out.items).toHaveLength(0)
+    expect(warnings).toEqual([])
+  })
+
+  /*
+   * And the case that survives it: rows, but nothing in the picked column an id can be read out
+   * of. That is the picker again, so it keeps the sentence — the ` no ids` branch of it.
+   */
+  it('still names the column when its rows hold no ids at all', () => {
+    const { warnings } = run(neuronTable([null, '']))
+    expect(warnings).toEqual([nothingSelectedReason('bodyId', [])])
+  })
+
+  /*
    * The two kinds this node refuses, each with its own remedy — "wire skeletons or meshes" tells
    * somebody holding a neuron table nothing they can act on. The point cloud's reason is its own:
    * it carries no id, where Split Neurons refuses one because its rows are connectors.
