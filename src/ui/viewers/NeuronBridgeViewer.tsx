@@ -548,13 +548,20 @@ function NeuronBridgePage(props: PageProps) {
           )}
         </div>
       </div>
-      <ViewerActions
-        baseName={baseName ?? 'neuronbridge'}
-        source={exportSource}
-        compact={compact}
-        {...(onExpand ? { onExpand } : {})}
-        {...(onError ? { onError } : {})}
-      />
+      {/* The caption bar every viewer ends on: it right-aligns ⤓, whose menu opens leftwards from
+          the button's right edge — bare at the card's foot it sat left and the menu was clipped. */}
+      <div className="viewer__caption">
+        <span>
+          {pinnedKeys.size > 0 ? `${plural(pinnedKeys.size, 'match', 'matches')} pinned` : ''}
+        </span>
+        <ViewerActions
+          baseName={baseName ?? 'neuronbridge'}
+          source={exportSource}
+          compact={compact}
+          {...(onExpand ? { onExpand } : {})}
+          {...(onError ? { onError } : {})}
+        />
+      </div>
     </div>
   )
 }

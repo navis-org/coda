@@ -368,6 +368,13 @@ await waitFor(tilesReady(OVERLAY), 'tiles in the overlay', 30_000)
     await sleep(300)
     const rows = await evaluate(`[...document.querySelectorAll('${OVERLAY} .viewer-actions [role="menuitem"], ${OVERLAY} .viewer-actions li, ${OVERLAY} .viewer-actions button')].map((b) => b.textContent.trim())`)
     check(rows.includes('Pinned matches (CSV).csv'), `the card's download menu offers "Pinned matches (CSV)", naming a .csv (${rows.join(' | ')})`)
+    // The viewer clips (`overflow: hidden`), so a menu hanging off either side is cut off.
+    const fit = await evaluate(`(() => {
+      const card = document.querySelector('${OVERLAY} .nbridge').getBoundingClientRect()
+      const menu = document.querySelector('${OVERLAY} .viewer-actions__menu')?.getBoundingClientRect()
+      return menu && { left: menu.left - card.left, right: card.right - menu.right, top: menu.top - card.top }
+    })()`)
+    check(!!fit && fit.left >= 0 && fit.right >= 0 && fit.top >= 0, `the download menu opens inside the card, not clipped at its edge (${JSON.stringify(fit)})`)
     await evaluate(`document.querySelector('${OVERLAY} .viewer-actions button[aria-label="Download"]')?.click()`)
     await sleep(200)
   }
