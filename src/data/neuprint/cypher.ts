@@ -671,6 +671,10 @@ export function groupTotalsCypher(req: GroupTotalsRequest): string {
  * runs between two populations, and cutting each synapse group first would discard the many
  * weak connections that are exactly what adds up to a strong pathway. At neuron level the two
  * are the same thing, because each group is its own row.
+ *
+ * **The distinct counts are over the body id, not the node.** `count(DISTINCT b)` would work
+ * and makes the planner hold a node per row; the id is already projected for the grouping keys,
+ * and counting it is the same answer off a value the query is carrying anyway.
  */
 export function pathStepCypher(req: PathStepRequest): string {
   const outward = req.direction === 'outputs'
@@ -703,12 +707,15 @@ export function pathStepCypher(req: PathStepRequest): string {
   return [
     pattern,
     `WHERE ${clauses.join(' OR ')}`,
-    `WITH ${key(pre)} AS src, ${pre}.type AS srcType, ${id(pre)} AS srcId,`,
-    `     ${key(post)} AS dst, ${post}.type AS dstType, ${id(post)} AS dstId,`,
+    `WITH ${key(pre)} AS src, ${pre}.type AS srcType, ${id(pre)} AS srcId, ${pre}.bodyId AS srcBody,`,
+    `     ${key(post)} AS dst, ${post}.type AS dstType, ${id(post)} AS dstId, ${post}.bodyId AS dstBody,`,
     '     c.weight AS w',
-    'WITH src, srcType, srcId, dst, dstType, dstId, sum(w) AS weight, count(*) AS pairs',
+    // `srcBody`/`dstBody` are consumed by the two counts, so the grouping keys are the six
+    // projected above them — the same grouping `pairs` and `sum(w)` already had.
+    'WITH src, srcType, srcId, dst, dstType, dstId, sum(w) AS weight, count(*) AS pairs,',
+    '     count(DISTINCT srcBody) AS srcNeurons, count(DISTINCT dstBody) AS dstNeurons',
     `WHERE weight >= ${min}`,
-    'RETURN src, srcType, srcId, dst, dstType, dstId, weight, pairs',
+    'RETURN src, srcType, srcId, dst, dstType, dstId, weight, pairs, srcNeurons, dstNeurons',
     'ORDER BY weight DESC',
   ].join('\n')
 }

@@ -35,8 +35,14 @@ import {
   type RankBy,
 } from './pathOps'
 
-/** A directed edge in the fake connectome: source key, target key, weight. */
-type Edge = [string, string, number]
+/**
+ * A directed edge in the fake connectome: source key, target key, weight, and optionally how
+ * many distinct neurons stood behind each end.
+ *
+ * The two counts are optional because almost every fixture here is about the search rather than
+ * about what was collapsed, and a source that does not fill them answers 1 — `readStep`'s rule.
+ */
+type Edge = [string, string, number, number?, number?]
 
 function node(key: string): PathNode {
   // Every key in these fixtures is a type name, i.e. the collapsed case. The neuron-level
@@ -66,7 +72,7 @@ function fakeSource(edges: Edge[], minWeight = 0) {
         ([source, target, weight]) =>
           weight >= minWeight && wanted.has(direction === 'outputs' ? source : target),
       )
-      .map(([source, target, weight]) => ({
+      .map(([source, target, weight, sourceNeurons, targetNeurons]) => ({
         source,
         sourceType: source,
         sourceId: null,
@@ -75,6 +81,8 @@ function fakeSource(edges: Edge[], minWeight = 0) {
         targetId: null,
         weight,
         pairs: 1,
+        sourceNeurons: sourceNeurons ?? 1,
+        targetNeurons: targetNeurons ?? 1,
       }))
     return tableFromRows(PATH_STEP_SCHEMA, rows)
   }
@@ -611,6 +619,56 @@ describe('pathsToNetwork', () => {
     const targets = [...getColumn(network.edges, 'target')]
     const shared = sources.findIndex((s, i) => s === 'A' && targets[i] === 'HUB')
     expect(edgePaths[shared]).toBe(2)
+  })
+
+  /*
+   * How many neurons a collapsed node stands for.
+   *
+   * The failure this is guarding is a plausible number rather than a crash: a node's count is
+   * assembled from per-connection counts, and every way of assembling them except the maximum
+   * reports a population that does not exist. Summing is the one somebody writes first.
+   */
+  it('takes the largest count any of a node\u2019s edges reported, never their sum', async () => {
+    const edges: Edge[] = [
+      ['A', 'B', 10, 60, 8],
+      ['A', 'C', 10, 50, 5],
+      ['B', 'T', 10, 7, 3],
+      ['C', 'T', 10, 5, 4],
+    ]
+    const { pruned, ranked } = await findPaths(edges, ['A'], ['T'], 2)
+    const network = pathsToNetwork(pruned, ranked.paths, ['A'], ['T'])
+    const neurons = new Map(
+      [...getColumn(network.nodes, 'id')].map((id, i) => [
+        String(id),
+        Number(getColumn(network.nodes, 'neurons')[i]),
+      ]),
+    )
+
+    // 60 and 50 are the same LC4s seen twice, not 110 of them.
+    expect(neurons.get('A')).toBe(60)
+    // B is the receiving end of one edge (8) and the sending end of another (7).
+    expect(neurons.get('B')).toBe(8)
+    expect(neurons.get('T')).toBe(4)
+  })
+
+  it('reads each end\u2019s own side, so the two counts cannot be swapped', async () => {
+    // Deliberately lopsided: a swap puts the target's 2 on the source and reads as plausible.
+    const edges: Edge[] = [['A', 'T', 10, 40, 2]]
+    const { pruned, ranked } = await findPaths(edges, ['A'], ['T'], 1)
+    const network = pathsToNetwork(pruned, ranked.paths, ['A'], ['T'])
+
+    expect([...getColumn(network.nodes, 'neurons')]).toEqual([40, 2])
+  })
+
+  it('says one neuron where the source counted none, which is the neuron-level answer', async () => {
+    const edges: Edge[] = [
+      ['A', 'M', 10],
+      ['M', 'T', 10],
+    ]
+    const { pruned, ranked } = await findPaths(edges, ['A'], ['T'], 2)
+    const network = pathsToNetwork(pruned, ranked.paths, ['A'], ['T'])
+
+    expect([...getColumn(network.nodes, 'neurons')]).toEqual([1, 1, 1])
   })
 
   it('carries the aggregate weight through, not a re-derived one', async () => {

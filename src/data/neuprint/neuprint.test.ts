@@ -17,6 +17,7 @@ import { cableLength, getColumn } from '../../core/values'
 import type { FilterRow } from '../filterRows'
 
 import { NeuPrintSource } from './NeuPrintSource'
+import { PATH_STEP_SCHEMA } from '../source'
 import { SYNAPSE_UNITS } from '../synapseUnits'
 import { THUMBNAIL_MAX_BYTES, THUMBNAIL_MAX_FLAT_BYTES } from '../precomputed'
 import {
@@ -147,6 +148,32 @@ describe('pathStepCypher', () => {
     // `a` is the frontier either way, but it is the *source* only when travelling downstream.
     expect(out).toContain('coalesce(a.type, toString(a.bodyId)) AS src')
     expect(inn).toContain('coalesce(b.type, toString(b.bodyId)) AS src')
+  })
+
+  it('counts the distinct neurons behind each end, which is not the pair count', () => {
+    // `pairs` is connections and these are cells: 60 LC4s onto 8 PLP1s is 60, 8 and up to 480.
+    // Counted over the body id already projected for the grouping keys, not over the node.
+    const query = pathStepCypher({ ...base, types: ['LC4'] })
+    expect(query).toContain('count(DISTINCT srcBody) AS srcNeurons')
+    expect(query).toContain('count(DISTINCT dstBody) AS dstNeurons')
+    // Aggregated in the same WITH as the sum, so the grouping keys are the six the row is
+    // identified by — a count in a WITH of its own would group by something else.
+    expect(query.indexOf('sum(w) AS weight')).toBeLessThan(
+      query.indexOf('count(DISTINCT srcBody)'),
+    )
+    expect(query.indexOf('count(DISTINCT dstBody)')).toBeLessThan(
+      query.indexOf('WHERE weight >='),
+    )
+  })
+
+  it('returns the columns in PATH_STEP_SCHEMA order, since the decoder maps by index', () => {
+    const query = pathStepCypher({ ...base, types: ['LC4'] })
+    const returned = query
+      .split('\n')
+      .find((line) => line.startsWith('RETURN'))!
+      .slice('RETURN '.length)
+      .split(', ')
+    expect(returned).toHaveLength(PATH_STEP_SCHEMA.columns.length)
   })
 
   it('requires both ends to be Neurons, unlike a connectivity fetch', () => {

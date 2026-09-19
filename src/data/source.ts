@@ -1194,6 +1194,19 @@ export interface DataSource {
  * neuron→neuron connections were merged into the row — the honest denominator for a
  * type-level weight, and 1 at neuron level.
  *
+ * `sourceNeurons`/`targetNeurons` are how many *distinct* neurons stood behind each end of the
+ * row, which is a different number from `pairs` the moment a population is not fully connected:
+ * 60 LC4s onto 8 PLP1s is 60, 8 and up to 480 pairs. Both are 1 at neuron level. They are here
+ * rather than derived because the aggregation that could count them has already happened by the
+ * time the row arrives — `PathStepRequest`'s whole reason — and a client with only the row
+ * cannot recover a distinct count from a sum.
+ *
+ * **They are exact per row and a lower bound per group key.** A group's neurons are counted
+ * within one connection, and distinct counts from two connections cannot be unioned, so a
+ * caller wanting "neurons behind this node" takes the maximum over the node's rows and knows it
+ * may be under. Exactness there would mean a second grouping per hop, or shipping the member
+ * ids this seam exists to avoid shipping.
+ *
  * One constant, not a builder taking an id dtype. It *was* a builder, on the reasoning that the
  * dtype is a fact about the source: neuPrint's ids are exact as doubles where a CAVE root id is
  * not, so each named its own. That is no longer a thing a source varies — every id column here
@@ -1209,6 +1222,10 @@ export const PATH_STEP_SCHEMA: TableSchema = tableSchema(
   column('targetId', 'str'),
   column('weight', 'f64', 'synapses'),
   column('pairs', 'i64'),
+  // Appended, not inserted: `tableFromCypher` maps by index, so the position of every column a
+  // decoder already addresses has to survive — the rule stated above `CONNECTIVITY_ROI_COLUMN`.
+  column('sourceNeurons', 'i64'),
+  column('targetNeurons', 'i64'),
 )
 
 /**

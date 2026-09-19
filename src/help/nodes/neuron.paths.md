@@ -19,6 +19,14 @@ With `Collapse types` on (the default), the search runs on the **type-level grap
 
 `Min synapses` filters after type-level summing, so it thresholds total traffic between cell types. With `Collapse types` off, it filters individual neuron-to-neuron connections.
 
+Each node of the Network output carries `neurons`, how many cells it stands for: 1 at neuron level, and collapsed, how many distinct neurons of that type were seen on the connections that reached the network. It reads well as a size encoding, and it is the reminder that a type node is a population rather than a cell.
+
+> [!NOTE] `neurons` is a floor, not the size of the cell type
+> A node's count is the largest number of distinct cells any *one* of its connections reported,
+> because counts from two connections cannot be added — the same neurons appear on both. Where a
+> type reaches different partners through different members, the real population is larger than
+> any single connection saw. Read it as "at least this many".
+
 ### Normalising: a share of a population, not a synapse count
 
 `Normalize` divides each connection by one end's total synapse count, adding `weightNorm` and the denominator `weightTotal` beside the raw `weight`. With `Collapse types` on the denominator is the **whole population's** total — `LC4 → PLP1` over everything every PLP1 neuron receives — because that is the population the weight was summed over.
@@ -39,7 +47,7 @@ The search does not find every route, but the strongest ones. `N strongest` cont
 
 ### Outputs
 
-- **Network**: the pruned graph of routes found.
+- **Network**: the pruned graph of routes found, each node carrying `role`, `hop`, `paths` and `neurons`.
 - **Layout**: a fixed ELK-layered arrangement, not user-configurable — any knob would take part in the provenance key and invalidate downstream work. Wire it into a [Network Viewer](#out.network)'s Layout input; when connected it overrides that viewer's own Layout picker.
 - **Paths**: one row per route, ranked by bottleneck. Normalised, it also carries `bottleneckNorm` — but no denominator column, because a route's two bottlenecks are routinely different steps and one number could name the denominator of neither. The Network output is where each fraction sits beside its own total.
 

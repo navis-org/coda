@@ -488,6 +488,9 @@ export class MockSource implements DataSource {
 
     type Merged = Record<string, CellValue> & { weight: number; pairs: number }
     const merged = new Map<string, Merged>()
+    // Distinct neurons behind each end of a row, which `pairs` does not answer: the sets are
+    // `pathStepFrom`'s, for its reason, and are read off into the row once the hop is folded.
+    const members = new Map<string, { pre: Set<number>; post: Set<number> }>()
 
     for (const [neuronId, neuron] of connectome.byId) {
       throwIfAborted(req.signal)
@@ -504,6 +507,15 @@ export class MockSource implements DataSource {
         const pre = outward ? near : far
         const post = outward ? far : near
         const mapKey = `${pre.key}\u0000${post.key}`
+        const preId = outward ? neuronId : farId
+        const postId = outward ? farId : neuronId
+        const held = members.get(mapKey)
+        if (held) {
+          held.pre.add(preId)
+          held.post.add(postId)
+        } else {
+          members.set(mapKey, { pre: new Set([preId]), post: new Set([postId]) })
+        }
         const existing = merged.get(mapKey)
         if (existing) {
           existing.weight += edge.weight
@@ -518,9 +530,17 @@ export class MockSource implements DataSource {
             targetId: idText(post.id),
             weight: edge.weight,
             pairs: 1,
+            sourceNeurons: 1,
+            targetNeurons: 1,
           })
         }
       }
+    }
+
+    for (const [mapKey, row] of merged) {
+      const held = members.get(mapKey)
+      row.sourceNeurons = held?.pre.size ?? 1
+      row.targetNeurons = held?.post.size ?? 1
     }
 
     // After the sum, not before — see `PathStepRequest.minWeight`.

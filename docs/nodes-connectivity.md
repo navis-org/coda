@@ -820,6 +820,41 @@ would silently mean "N routes listed, everything drawn". `paths` on each node an
 how many kept routes run through it, which is the nearest thing to a betweenness available for
 free and reads well as a size encoding.
 
+**A collapsed node says how many neurons it stands for, and the number is a bound rather than a
+population.** `neurons` on the node table is 1 at neuron level and at type level the distinct
+cells of that type seen on the connections that reached the network. Four decisions in it.
+
+**It is counted, not looked up.** The population of a type is a fact the dataset holds, and
+fetching it would be a new query per hop or a `neuronIndex` load this node does not otherwise
+make — 7 MB and ~5 s on male-CNS for a column. What the hop already aggregates is free:
+`pathStepCypher` gains `count(DISTINCT srcBody)`/`count(DISTINCT dstBody)` in the `WITH` that
+already computes `sum(w)` and `count(*)`, so the grouping keys are unchanged and the query costs
+nothing extra. `pathStepFrom` and `MockSource.fetchPathStep` count the same thing the same way,
+`pathStepFrom`'s fidelity rule.
+
+**It is not `pairs`.** 60 LC4s onto 8 PLP1s is `sourceNeurons` 60, `targetNeurons` 8 and up to
+480 `pairs` — connections against cells. A count that tracked `pairs` passes every end-to-end
+assertion downstream, which is why the seam is asserted directly in `paths.test.ts`.
+
+**It is exact per connection and a lower bound per node, and the bound is real rather than
+theoretical.** Distinct counts from two connections cannot be unioned, so `pathsToNetwork` takes
+the **maximum** over a node's kept edges. Summing is the version somebody writes first and it
+reports an LC4 as thousands of cells, since the same population is seen again on every
+connection it makes. The mock's own optic lobe demonstrates the gap: one LC4 population sends
+several rows of a single hop and the counts *differ between them*, because not every LC4 drives
+every partner type — so no row names the population and the largest is merely the closest any
+per-connection count gets. Exactness would need a second grouping per hop, or shipping the member
+ids `PathStepRequest` exists to avoid shipping. Both are a real cost for a number nobody reads
+against the picture: `paths` and `hop` beside it are facts about the kept routes too, not about
+the connectome.
+
+**It is present unconditionally, which is `PathEdge.pairs`' rule and not the normalisation
+columns'.** Those are absent because the question was not asked; this one is always asked and
+answers 1, and a node that is one neuron standing for one neuron is a measurement rather than a
+filler. It also keeps `pathNetworkType` keyed on the one boolean that does change the shape,
+where gating on `Collapse types` would make it a 2x2. Neither exporter is affected: both already
+refuse a collapsed Paths node outright.
+
 **No route is an answer, not an error.** "These two are not connected within N hops at this
 threshold" is a real finding; throwing would block everything downstream from ever drawing the
 empty result that says so.

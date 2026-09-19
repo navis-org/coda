@@ -137,6 +137,28 @@ describe('pathStepFrom', () => {
     ])
   })
 
+  it('counts distinct neurons behind each end, which is not the number of pairs', () => {
+    // 1->2, 1->3 and 4->2 are three connections between two LC4s and two PLP1s. A count that
+    // reported 3 on either end would be `pairs` wearing a second name.
+    const rows = step({
+      datasetId: 'd',
+      types: ['LC4'],
+      direction: 'outputs',
+      collapseTypes: true,
+    })
+    expect(rows[0]).toMatchObject({ pairs: 3, sourceNeurons: 2, targetNeurons: 2 })
+  })
+
+  it('answers one on each end when not collapsing, since a group is then a neuron', () => {
+    const rows = step({
+      datasetId: 'd',
+      neuronIds: ['1'],
+      direction: 'outputs',
+      collapseTypes: false,
+    })
+    expect(rows.every((row) => row.sourceNeurons === 1 && row.targetNeurons === 1)).toBe(true)
+  })
+
   it('applies the weight cut after the sum, not per pair', () => {
     // This is the rule the whole collapsed mode exists for: at type level the threshold is a
     // statement about traffic between two populations. Cut per pair first and 2 and 5 both go,

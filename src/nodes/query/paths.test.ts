@@ -91,7 +91,7 @@ describe('Paths output shape', () => {
       declared?.network?.kind === 'network'
         ? declared.network.edgeSchema?.columns.map((c) => c.name)
         : undefined
-    expect(nodeColumns).toEqual(['id', 'type', 'neuronId', 'role', 'hop', 'paths'])
+    expect(nodeColumns).toEqual(['id', 'type', 'neuronId', 'role', 'hop', 'paths', 'neurons'])
     expect(edgeColumns).toEqual(['source', 'target', 'weight', 'pairs', 'paths', 'hop'])
 
     const { network, table } = await run()
@@ -441,6 +441,48 @@ describe('the source seam', () => {
       })
       .reduce<number>((sum, w) => sum + Number(w), 0)
     expect(weights[0]).toBe(expected)
+  })
+
+  /*
+   * The counts the `neurons` column is assembled from, asserted at the seam for the same reason
+   * the aggregation is: by the time the traversal has a row, the neurons are gone. A count that
+   * merely tracked `pairs` would satisfy every end-to-end assertion downstream.
+   */
+  it('counts the distinct neurons behind each end of an aggregated row', async () => {
+    const source = new MockSource({ latencyMs: 0 })
+    const request = {
+      datasetId: DATASET,
+      types: ['LC4'],
+      direction: 'outputs' as const,
+      collapseTypes: true,
+    }
+    const collapsed = await source.fetchPathStep(request)
+    const pairs = getColumn(collapsed, 'pairs').map(Number)
+    const sourceNeurons = getColumn(collapsed, 'sourceNeurons').map(Number)
+    const targetNeurons = getColumn(collapsed, 'targetNeurons').map(Number)
+
+    // A population is not a connection count: distinct cells can never exceed the pairs they
+    // are joined by, and on a real frontier they are strictly fewer somewhere.
+    expect(sourceNeurons.every((n, i) => n >= 1 && n <= pairs[i]!)).toBe(true)
+    expect(targetNeurons.every((n, i) => n >= 1 && n <= pairs[i]!)).toBe(true)
+    expect(sourceNeurons.some((n, i) => n < pairs[i]!)).toBe(true)
+
+    const perNeuron = await source.fetchPathStep({ ...request, collapseTypes: false })
+    expect(getColumn(perNeuron, 'sourceNeurons').every((n) => Number(n) === 1)).toBe(true)
+    expect(getColumn(perNeuron, 'targetNeurons').every((n) => Number(n) === 1)).toBe(true)
+
+    /*
+     * And this is the whole of why a node's count is a maximum and is documented as a bound.
+     *
+     * The same LC4 population sends every one of these rows, yet the counts *differ between
+     * them*, because not every LC4 drives every partner type. So no single row names the
+     * population: the largest is the closest any per-connection count gets, and it is still at
+     * or below the number of distinct LC4s the neuron-level hop saw.
+     */
+    const population = new Set(getColumn(perNeuron, 'source').map(String)).size
+    expect(new Set(sourceNeurons).size).toBeGreaterThan(1)
+    expect(Math.max(...sourceNeurons)).toBeLessThanOrEqual(population)
+    expect(Math.max(...sourceNeurons)).toBeGreaterThan(Math.min(...sourceNeurons))
   })
 
   it('applies the threshold after the sum, not before', async () => {

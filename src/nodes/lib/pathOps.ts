@@ -55,6 +55,16 @@ export interface PathEdge {
   /** How many neuron-to-neuron connections were merged. 1 at neuron level. */
   pairs: number
   /**
+   * How many *distinct* neurons stood behind each end of this connection. 1 at neuron level.
+   *
+   * Not `pairs` by another name: 60 LC4s onto 8 PLP1s is `sourceNeurons` 60, `targetNeurons` 8
+   * and up to 480 `pairs`. Exact for this connection and, per `PATH_STEP_SCHEMA`, a **lower
+   * bound** for a node — two connections' distinct counts cannot be unioned, so
+   * `pathsToNetwork` takes the maximum over a node's edges and the column says so.
+   */
+  sourceNeurons: number
+  targetNeurons: number
+  /**
    * `weight` as a fraction of one end's synapse total, when the traversal was normalising.
    *
    * **Three states, and the middle one is why this is not just a number.** Absent means nobody
@@ -202,6 +212,8 @@ function readStep(table: TableValue, graph: PathGraph): PathEdge[] {
   const targetId = table.data['targetId'] ?? []
   const weight = table.data['weight'] ?? []
   const pairs = table.data['pairs'] ?? []
+  const sourceNeurons = table.data['sourceNeurons'] ?? []
+  const targetNeurons = table.data['targetNeurons'] ?? []
 
   const stringOrNull = (cell: CellValue | undefined): string | null =>
     cell === null || cell === undefined || cell === '' ? null : String(cell)
@@ -234,6 +246,11 @@ function readStep(table: TableValue, graph: PathGraph): PathEdge[] {
       target: to,
       weight: Number(weight[i] ?? 0) || 0,
       pairs: Number(pairs[i] ?? 1) || 1,
+      // `|| 1` is `pairs`' fallback and means the same thing here: a source that does not fill
+      // the column is one whose rows each stand for a single neuron as far as anything can tell,
+      // and 1 is the neuron-level answer rather than a filler.
+      sourceNeurons: Number(sourceNeurons[i] ?? 1) || 1,
+      targetNeurons: Number(targetNeurons[i] ?? 1) || 1,
     })
   }
   return found
@@ -857,6 +874,23 @@ export const PATH_NODE_SCHEMA: TableSchema = tableSchema(
   // Fewest hops from a source *along a kept route*, which is what the layout layers by.
   column('hop', 'i64'),
   column('paths', 'i64'),
+  /*
+   * How many neurons this node stands for — 1 at neuron level, and at type level how many
+   * distinct neurons of the type were seen on the connections that reached the network.
+   *
+   * Present unconditionally rather than appearing with `Collapse types`, which is `PathEdge.pairs`'
+   * rule and not the normalisation columns'. Those are absent because the question was not asked;
+   * this one is always asked and answered 1, which is a measurement — a node that is one neuron
+   * stands for one neuron. It also keeps `pathNetworkType` keyed on the one boolean that does
+   * change the shape.
+   *
+   * **A lower bound, and the column is named for the honest half.** Distinct counts arrive per
+   * connection and two of them cannot be unioned, so this is the largest count any one of the
+   * node's kept edges reported — see `PATH_STEP_SCHEMA`. Exactness would cost a second grouping
+   * per hop, and what it would buy is a number nobody reads against the picture: `paths` and
+   * `hop` beside it are facts about the kept routes too.
+   */
+  column('neurons', 'i64'),
 )
 
 /**
@@ -969,6 +1003,19 @@ export function pathsToNetwork(
   const nodePaths = new Map<string, number>()
   const edgeHop = new Map<string, number>()
   const edgePaths = new Map<string, number>()
+  /**
+   * How many neurons each node stands for, accumulated as a maximum over its kept edges.
+   *
+   * A maximum rather than a sum, which is the trap: each kept edge reports the distinct neurons
+   * of this group it saw, and the same neurons are seen again on the next edge — summing counts
+   * a population once per connection it makes and reports an LC4 as thousands of cells. A
+   * maximum is the tightest bound the per-connection counts support. See `PATH_NODE_SCHEMA`.
+   */
+  const nodeNeurons = new Map<string, number>()
+  const sawNeurons = (key: string, count: number): void => {
+    const held = nodeNeurons.get(key)
+    if (held === undefined || count > held) nodeNeurons.set(key, count)
+  }
   // Insertion order is the row order of the attribute table, so it is seeded from the
   // ranking: the strongest route's nodes come first.
   const order: string[] = []
@@ -986,6 +1033,13 @@ export function pathsToNetwork(
       edgePaths.set(pair, (edgePaths.get(pair) ?? 0) + 1)
       const at = edgeHop.get(pair)
       if (at === undefined || i - 1 < at) edgeHop.set(pair, i - 1)
+      // Read off the edge here rather than in the edge loop below, which runs after the node
+      // rows are built — and each end takes its own side's count, never the other's.
+      const edge = graph.edges.get(pair)
+      if (edge) {
+        sawNeurons(previous, edge.sourceNeurons)
+        sawNeurons(key, edge.targetNeurons)
+      }
     })
   }
 
@@ -996,6 +1050,7 @@ export function pathsToNetwork(
     role: [],
     hop: [],
     paths: [],
+    neurons: [],
   }
   const push = (data: Record<string, CellValue[]>, name: string, value: CellValue): void => {
     const columnData = data[name]
@@ -1013,6 +1068,9 @@ export function pathsToNetwork(
     )
     push(nodeData, 'hop', nodeHop.get(key) ?? 0)
     push(nodeData, 'paths', nodePaths.get(key) ?? 0)
+    // `?? 1` and never 0: every node here is on a kept route and so has a kept edge, but a node
+    // that somehow reached the table without one still stands for at least itself.
+    push(nodeData, 'neurons', nodeNeurons.get(key) ?? 1)
   }
 
   const edgeData: Record<string, CellValue[]> = {

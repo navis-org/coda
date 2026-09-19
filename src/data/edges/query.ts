@@ -144,6 +144,21 @@ type StepGroup = {
   targetId: NeuronId | null
   weight: number
   pairs: number
+  sourceNeurons: number
+  targetNeurons: number
+}
+
+/**
+ * One group mid-aggregation: the row, and the two sets a row cannot hold.
+ *
+ * Sets rather than counters because distinctness is the whole question — `pairs` already counts
+ * connections, and 60 LC4s onto 8 PLP1s is the case where the two numbers come apart. They are
+ * dropped the moment the row is written, so nothing past this function holds a member list.
+ */
+interface StepAccumulator {
+  row: StepGroup
+  pre: Set<NeuronId>
+  post: Set<NeuronId>
 }
 
 /**
@@ -189,32 +204,46 @@ export function pathStepFrom(
   const idOf = (id: NeuronId): NeuronId | null =>
     collapse ? (types.get(id) === undefined ? id : null) : id
 
-  const groups = new Map<string, StepGroup>()
+  const groups = new Map<string, StepAccumulator>()
   for (const edge of edgesFrom(set, frontier, req.direction)) {
     const source = keyOf(edge.pre)
     const target = keyOf(edge.post)
     const at = `${source}${KEY_SEPARATOR}${target}`
     const held = groups.get(at)
     if (held) {
-      held.weight += edge.weight
-      held.pairs++
+      held.row.weight += edge.weight
+      held.row.pairs++
+      held.pre.add(edge.pre)
+      held.post.add(edge.post)
       continue
     }
     groups.set(at, {
-      source,
-      sourceType: types.get(edge.pre) ?? null,
-      sourceId: idOf(edge.pre),
-      target,
-      targetType: types.get(edge.post) ?? null,
-      targetId: idOf(edge.post),
-      weight: edge.weight,
-      pairs: 1,
+      row: {
+        source,
+        sourceType: types.get(edge.pre) ?? null,
+        sourceId: idOf(edge.pre),
+        target,
+        targetType: types.get(edge.post) ?? null,
+        targetId: idOf(edge.post),
+        weight: edge.weight,
+        pairs: 1,
+        // Filled from the sets below — written here only so the row is never a partial shape.
+        sourceNeurons: 1,
+        targetNeurons: 1,
+      },
+      pre: new Set([edge.pre]),
+      post: new Set([edge.post]),
     })
   }
 
   const min = Math.max(1, Math.floor(req.minWeight ?? 1))
   const rows = [...groups.values()]
-    .filter((group) => group.weight >= min)
+    .map((group) => {
+      group.row.sourceNeurons = group.pre.size
+      group.row.targetNeurons = group.post.size
+      return group.row
+    })
+    .filter((row) => row.weight >= min)
     .sort((a, b) => b.weight - a.weight)
   return tableFromRows(schema, rows)
 }
