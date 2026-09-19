@@ -627,6 +627,79 @@ describe('evaluate', () => {
     expect(out.colLabels).toEqual(out.rowLabels)
   })
 
+  /*
+   * The Labels tab and the Order tab together, which is where the follow used to come apart.
+   *
+   * Two neurons of each type, so the drawn names repeat — what naming rows by cell type is for —
+   * and a cluster order that puts the two LC4s on either side of an LC6, which is what a
+   * clustering does and what no name can express. Matched on the drawn names the columns came
+   * back grouped by type while the rows stayed interleaved: the labels down the two axes no
+   * longer named the same neuron, the diagonal was gone, and every cell was plausible.
+   */
+  describe('a clustered order under the Labels tab', () => {
+    const IDS = ['n1', 'n2', 'n3', 'n4']
+    /** Cell (r, c) is `r * 4 + c`, so a misaligned follower shows in the cells, not just the names. */
+    function paired(): MatrixValue {
+      return makeMatrix(
+        [...IDS],
+        [...IDS],
+        Float64Array.from(IDS.flatMap((_, r) => IDS.map((__, c) => r * 4 + c))),
+        'synapses',
+      )
+    }
+    /** Two neurons per type, interleaved — `n1`/`n3` are LC4, `n2`/`n4` are LC6. */
+    const PAIRED: Wiring = {
+      annotations: tableFromRows(
+        tableSchema(column('neuronId', 'str'), column('type', 'str')),
+        [
+          { neuronId: 'n1', type: 'LC4' },
+          { neuronId: 'n2', type: 'LC6' },
+          { neuronId: 'n3', type: 'LC4' },
+          { neuronId: 'n4', type: 'LC6' },
+        ],
+        'neurons',
+      ),
+      columns: { matchColumn: 'neuronId', labelColumn: 'type' },
+    }
+    /** Swaps the two LC4s past one another, which is the case a name cannot describe. */
+    const ORDER = [2, 1, 0, 3]
+    const diagonal = (m: MatrixValue): number[] =>
+      m.rowLabels.map((_, i) => m.values[i * m.colLabels.length + i]!)
+
+    it('puts the columns in the leader’s order, not in blocks of one name', async () => {
+      runClusterOrder.mockResolvedValue(Int32Array.from(ORDER))
+      const { out } = await run(paired(), { sortBy: 'cluster' }, PAIRED)
+      expect(out.rowLabels).toEqual(['LC4', 'LC6', 'LC4', 'LC6'])
+      expect(out.colLabels).toEqual(out.rowLabels)
+      // The sharp one: every label reads the same either way, so it is the cells that say
+      // whether row i and column i are still the same neuron.
+      expect(diagonal(out)).toEqual(ORDER.map((i) => i * 4 + i))
+    })
+
+    it('follows onto an axis the Labels tab left alone', async () => {
+      // `Apply to: rows`: the columns keep their ids, so the two axes share no drawn name at
+      // all and a follow matched on those names did nothing whatever.
+      runClusterOrder.mockResolvedValue(Int32Array.from(ORDER))
+      const { out } = await run(paired(), { sortBy: 'cluster', labelAxis: 'rows' }, PAIRED)
+      expect(out.rowLabels).toEqual(['LC4', 'LC6', 'LC4', 'LC6'])
+      expect(out.colLabels).toEqual(ORDER.map((i) => IDS[i]!))
+      expect(diagonal(out)).toEqual(ORDER.map((i) => i * 4 + i))
+    })
+
+    it('keeps the arrival names aligned with the lines they name', async () => {
+      runClusterOrder.mockResolvedValue(Int32Array.from(ORDER))
+      const c = ctx(paired(), { sortBy: 'cluster', selection: ['r:0', 'c:0'] }, PAIRED)
+      const out = await def().evaluate(c)
+      for (const port of ['rows', 'columns'] as const) {
+        const table = out[port]
+        if (!isTableValue(table)) throw new Error('not a table')
+        // Position 0 is `n3` after the order, whichever axis is asked.
+        expect(cells(table, 'label')).toEqual(['n3'])
+        expect(cells(table, 'relabel')).toEqual(['LC4'])
+      }
+    })
+  })
+
   it('says which cells the clustering reads as zero', async () => {
     runClusterOrder.mockResolvedValue(Int32Array.from([0, 1, 2]))
     const m = makeMatrix(['a', 'b', 'c'], ['x'], Float64Array.from([1, Number.NaN, 3]))

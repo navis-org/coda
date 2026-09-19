@@ -48,6 +48,13 @@
  * (types down, regions across) following is a no-op, which is the honest answer rather than a
  * refusal.
  *
+ * **The label it matches on is the arrival name, not the drawn one**, which only matters once
+ * the Labels tab exists: it renames the axes ahead of the sort, one name standing for many
+ * lines by design, and a follow matched on *those* answers "every line called LC4" where the
+ * question was "the line this one is". `orderIndices` takes the arrival names the Heatmap
+ * already carries beside the matrix and hands them to `followOrder`; the drawn names are the
+ * fallback and are the same list wherever nothing renamed anything.
+ *
  * ## What each criterion means
  *
  * - `total` — the sum of the finite cells in that row or column, largest first. Puts the
@@ -383,7 +390,7 @@ export const CLUSTER_METRIC_OPTIONS: Array<{ value: ClusterMetric; label: string
 export interface MatrixOrderOptions {
   by: MatrixSortBy
   axis: MatrixSortAxis
-  /** The other axis takes the leading axis's order, matched by label. */
+  /** The other axis takes the leading axis's order, matched on the arrival labels. */
   follow: boolean
   reverse: boolean
   /** For `value`: the column (ordering rows) or row (ordering columns) whose values decide. */
@@ -676,11 +683,24 @@ function isWholeAxis(indices: Int32Array | undefined, length: number): boolean {
  * and computing the follower twice is how the two would come to disagree. `takeMatrix` is the
  * other half, one call away at the caller. A leading axis with no order (a key that was not found) is left as it is, and
  * so, then, is anything that was to follow it.
+ *
+ * **`identities` is which names the follow matches on, and it is not the drawn ones.** A
+ * `MatrixValue` has one set of axis labels and the Labels tab overwrites them, so on a card that
+ * names its rows by cell type the labels stop being identities — which is exactly what
+ * `followOrder` matches on. Left to the drawn names, a clustered axis whose order *interleaves*
+ * two lines of one name (which is what clustering does, since it does not sort by name) hands
+ * the follower a run of that name and gets back every line of it in a block: rows in cluster
+ * order, columns in blocks, and the diagonal gone. `Apply to: rows` is the same fault the other
+ * way, the two axes sharing no name at all and the follow silently doing nothing. So the caller
+ * hands in the *arrival* names it is already tracking beside the matrix, and the answer is a
+ * neuron matched to itself. Absent means the matrix's own labels, which is the same list
+ * wherever nothing renamed anything.
  */
 export function orderIndices(
   matrix: MatrixValue,
   plan: OrderPlan,
   orders: Partial<Record<MatrixAxis, Int32Array>>,
+  identities?: Record<MatrixAxis, string[]>,
 ): Partial<Record<MatrixAxis, Int32Array>> {
   const rowOrder = orders.rows
   const colOrder = orders.columns
@@ -692,8 +712,10 @@ export function orderIndices(
     const leader = plan.lead[0]!
     const leadOrder = orders[leader]
     if (leadOrder) {
-      const leadLabels = Array.from(leadOrder, (i) => labelsOf(matrix, leader)[i]!)
-      chosen[plan.follower] = followOrder(leadLabels, labelsOf(matrix, plan.follower))
+      const names = (axis: MatrixAxis): string[] => identities?.[axis] ?? labelsOf(matrix, axis)
+      const leadNames = names(leader)
+      const leadLabels = Array.from(leadOrder, (i) => leadNames[i]!)
+      chosen[plan.follower] = followOrder(leadLabels, names(plan.follower))
     }
   }
   return chosen

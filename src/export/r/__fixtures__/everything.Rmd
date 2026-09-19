@@ -2852,7 +2852,7 @@ keepRows_ <- grepl("^LC", rownames(heatmap_out), ignore.case = TRUE)
 rowSrc_ <- rowSrc_[keepRows_]
 heatmap_out <- heatmap_out[keepRows_, , drop = FALSE]
 rows_ <- coda_natural_order(rownames(heatmap_out))
-cols_ <- coda_follow_order(rownames(heatmap_out)[rows_], colnames(heatmap_out))
+cols_ <- coda_follow_order(rowSrc_[rows_], colSrc_)
 rowSrc_ <- rowSrc_[rows_]
 colSrc_ <- colSrc_[cols_]
 heatmap_out <- heatmap_out[rows_, cols_, drop = FALSE]

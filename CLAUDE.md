@@ -531,7 +531,10 @@ rule belongs to one area, its record is in that area's doc.
 - **The Heatmap's Order tab is data and its Colour tab is not, and the split is the node.** The
   sort reorders the matrix the node *outputs*, so a Table beside the heatmap, the CSV and the
   notebook show what the card shows; those params are in the key. Palette and scale are
-  presentational and never re-fold the cells. **The other axis follows by label, never by index.**
+  presentational and never re-fold the cells. **The other axis follows by the *arrival* label,
+  never by index and never by the drawn one** — the Labels tab makes one name stand for many
+  lines, and a clustering interleaves them, so matching on what the card shows returns a block
+  per name with the diagonal gone and every cell plausible.
   **The clustering is seaborn's clustermap, not Linkage's** — rows as vectors, distances between
   vectors — where Linkage reads the matrix *as* the distances, and each is wrong for the other's
   input; it is a Pyodide call inside a **`cheap`** node, on purpose. A constant vector goes to

@@ -140,6 +140,62 @@ describe('following', () => {
   it('takes every copy of a repeated label, once', () => {
     expect([...followOrder(['a'], ['a', 'b', 'a'])]).toEqual([0, 2, 1])
   })
+
+  /*
+   * The Labels tab's doing, and the reason `orderIndices` takes an identity list at all: a
+   * clustering does not sort by name, so it hands the follower a run of one name interleaved
+   * with another — and matching on those names answers with a block per name. Rows in cluster
+   * order, columns in blocks, and a diagonal that is a picture of nothing.
+   */
+  it('blocks a repeated name the leader had interleaved, which is why the follow is not given them', () => {
+    const drawn = ['LC4', 'LC4', 'LC4', 'LC6', 'LC6']
+    const order = [3, 0, 4, 1, 2]
+    const lead = order.map((i) => drawn[i]!)
+    expect([...followOrder(lead, drawn)]).toEqual([3, 4, 0, 1, 2])
+  })
+
+  it('reproduces the leader exactly when it is given the identities instead', () => {
+    const ids = ['n1', 'n2', 'n3', 'n4', 'n5']
+    const order = [3, 0, 4, 1, 2]
+    const lead = order.map((i) => ids[i]!)
+    expect([...followOrder(lead, ids)]).toEqual(order)
+  })
+})
+
+/**
+ * `orderIndices`' fourth argument: which names the follow matches on.
+ *
+ * The matrix carries the *drawn* names once the Labels tab has run, and those are one-to-many by
+ * design. The caller hands in the arrival names it is tracking beside the matrix, so "the same
+ * order" is a neuron matched to itself rather than to everything sharing its type.
+ */
+describe('following on the arrival names', () => {
+  const drawn = makeMatrix(
+    ['LC4', 'LC6', 'LC4', 'LC6'],
+    ['LC4', 'LC6', 'LC4', 'LC6'],
+    new Float64Array(16),
+  )
+  const ids = { rows: ['n1', 'n2', 'n3', 'n4'], columns: ['n1', 'n2', 'n3', 'n4'] }
+  const plan = orderPlan({ axis: 'rows', follow: true })
+  // Interleaved on purpose: it swaps the two LC4s past one another, which is what a clustering
+  // does and what no name can express.
+  const order = { rows: Int32Array.from([2, 1, 0, 3]) }
+
+  it('gives the follower the leader’s own permutation', () => {
+    expect([...orderIndices(drawn, plan, order, ids).columns!]).toEqual([2, 1, 0, 3])
+  })
+
+  it('answers with blocks when it is left to read the drawn names', () => {
+    expect([...orderIndices(drawn, plan, order).columns!]).toEqual([0, 2, 1, 3])
+  })
+
+  it('follows across an axis the Labels tab renamed and one it did not', () => {
+    // `Apply to: rows` — the columns keep their ids, so the two axes share no drawn name at all
+    // and following on them is a silent no-op.
+    const half = makeMatrix(['LC4', 'LC6', 'LC4', 'LC6'], ids.columns, new Float64Array(16))
+    expect([...(orderIndices(half, plan, order).columns ?? [])]).toEqual([0, 1, 2, 3])
+    expect([...orderIndices(half, plan, order, ids).columns!]).toEqual([2, 1, 0, 3])
+  })
 })
 
 describe('taking rows and columns', () => {

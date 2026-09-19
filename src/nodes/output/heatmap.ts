@@ -320,7 +320,7 @@ registerNode({
       advanced: true,
       group: 'order',
       visibleIf: (p) => ordering(p) && p.sortAxis !== 'both',
-      help: 'The other axis takes the same order, matched by label. Labels the sorted axis does not have keep their place after them.',
+      help: 'The other axis takes the same order, matched line for line on the label each arrived with — so it still pairs neuron with neuron once the Labels tab has named several of them the same. Lines the sorted axis does not have keep their place after them.',
     },
     {
       id: 'sortReverse',
@@ -526,7 +526,14 @@ async function shapeOnce(ctx: EvalContext, input: MatrixValue): Promise<Shaped> 
     }
     // The index lists rather than a reshaped matrix, so the follower's derived list reaches the
     // arrival names too — computing it twice is how the two come to disagree.
-    const indices = orderIndices(matrix, plan, orders)
+    //
+    // `source` is also what the follow *matches on*, and that is the Labels tab's doing: the
+    // drawn names are one-to-many by design, so following on them puts every line of a name in
+    // one block where the leader had them interleaved — rows in cluster order, columns in
+    // blocks, and a diagonal that is a picture of nothing. The arrival names are identities and
+    // are aligned with the matrix here, the relabel moving no line and the filter having gone
+    // through both.
+    const indices = orderIndices(matrix, plan, orders, source)
     matrix = takeMatrix(matrix, indices.rows, indices.columns)
     source = takeAxisLabels(source, indices)
   }

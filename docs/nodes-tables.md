@@ -431,7 +431,7 @@ including the one that comes back from Python, goes through the same three steps
   against `pdist` and `leaves_list(linkage(pdist(x)))` by `scripts/probe-heatmap-order.py`:
   distances to 1e-9, leaf order identical, both axes, all five methods, three metrics.
 
-### "The other axis follows", and why by label
+### "The other axis follows", and which label it follows on
 
 An Adjacency is square over one population and usually **not symmetric**, so the request that
 motivated the tab was "sort the columns and put the rows in the same order" — otherwise the
@@ -442,6 +442,42 @@ everything the leader did not name in the order it already had. **By label and n
 do something else on any matrix whose axes are not the identical list. On a matrix whose axes
 share no labels — types down, regions across — following is a no-op, which is the honest answer
 and why the switch defaults to on.
+
+**The label it matches on is the arrival name, and that is the Labels tab's bill arriving late.**
+This section was written before that tab existed, when an axis label *was* the identity and the
+two readings could not come apart. They come apart the moment naming rows by cell type is the
+point: one name stands for many lines by design, so a follow matched on the drawn names answers
+"every line called `LC4`" where the question was "the line this one is". What made it a bug rather
+than a rounding of it is that `followOrder`'s repeated-name rule takes **every untaken line of a
+name at once** — right where the leader is genuinely coarser than the follower, and a block where
+it is not. So a leader whose order *interleaves* two lines of one name hands the follower a run,
+and gets back all of them together: rows in cluster order, columns in blocks of one type, and the
+diagonal gone. **Clustering is where this always shows**, because clustering is the one criterion
+that does not sort by name — `label` never interleaves, and `total` only does when two lines of a
+name straddle a third. Reported as "ordering by cluster with Annotations wired messes the heatmap
+up", and every cell of it was plausible: the labels down the two axes read the same either way, so
+nothing on screen says the row and the column at position *i* stopped being the same neuron.
+
+`orderIndices` therefore takes the identities as a fourth argument and the node hands it
+`Shaped.source` — the arrival names it is **already tracking** beside the matrix for
+`Selected Rows`, aligned with it because the relabel moves no line and the filter goes through
+both. `labelsOf` is the fallback, and is the same list wherever nothing renamed anything. Two
+things fall out. `Apply to: rows` was broken the other way and is fixed by the same argument — the
+axes then shared no drawn name at all, so the follow silently did nothing; on the arrival names
+they share ids and it works. And `followOrder`'s block rule is left exactly as it is, because with
+identities in hand a lead label standing for several follower lines is no longer a repeated name
+mid-axis but a genuinely coarser leader, which is the case that rule was written for.
+
+The exporters had to come along or the notebook and the card would disagree, which is the one
+thing the shared plan exists to prevent. `HeatmapSections.tracked` used to mean "renamed *and*
+selected on"; it now means "renamed and somebody reads the arrival names", the follow being the
+second reader — so `_rowsrc`/`rowSrc_` are captured for a follow even where nobody dragged a
+rectangle, and `followerLine` passes them instead of the frame's own index. The ordering was
+already right by luck: both documents permute the arrival names *after* the follower is derived,
+which is the alignment the follow needs. Pinned at three levels — `followOrder` on its own in
+`matrixShape.test.ts`, `orderIndices` with and without the identities beside it, and the whole
+node in `heatmap.test.ts` on a four-neuron square with two of each type, asserting the
+**diagonal** rather than the labels, since the labels read the same either way.
 
 ### A cheap node with a Pyodide call in it
 

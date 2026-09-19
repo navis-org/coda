@@ -156,8 +156,10 @@ export interface HeatmapSections {
    * renames them, put through the filter's mask, permuted with the order, and handed to the
    * selection helper — every section asks this one set rather than carrying its own flag.
    *
-   * Only an axis the Labels tab renames *and* somebody selected on. `labelledAxes` is the shared
-   * half; the `size > 0` gate is local, because the canvas tracks unconditionally where an index
+   * Only an axis the Labels tab renames, and then only where something reads the arrival names:
+   * a selection on that axis, or a follow, which matches leader against follower on the names
+   * that are *identities* rather than on the drawn ones (`orderIndices`). `labelledAxes` is the
+   * shared half; both gates are local, because the canvas tracks unconditionally where an index
    * list costs nothing, and here every tracked axis is lines in somebody's document.
    */
   tracked: ReadonlySet<MatrixAxis>
@@ -177,11 +179,17 @@ export function heatmapExportPlan(ctx: HeatmapContext): HeatmapExportPlan {
   const annotations = ctx.input('annotations')
   const labelOptions = readLabelOptions(ctx)
   const named = labelledAxes(labelOptions, Boolean(annotations))
+  const order = orderSection(ctx)
+  // The follow reads both its axes' arrival names — see `tracked` — so a renamed one has to be
+  // captured even where nobody has dragged a rectangle on it.
+  const follows: MatrixAxis[] = order?.follower
+    ? [order.follower.leader, order.follower.axis]
+    : []
   return {
-    tracked: new Set(named.filter((axis) => picked[axis].size > 0)),
+    tracked: new Set(named.filter((axis) => picked[axis].size > 0 || follows.includes(axis))),
     labels: labelPlan(annotations, labelOptions),
     filter: filterSteps(ctx),
-    order: orderSection(ctx),
+    order,
     selection: AXES.map((axis) => ({ axis, positions: matrixSelectionOrder(picked[axis]) })),
     colour: colourPlan(ctx),
   }

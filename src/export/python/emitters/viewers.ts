@@ -687,7 +687,7 @@ function heatmapOrderLines(
         // Whether a line carries the key is a fact about the data, so it is asked at run time:
         // the card warns and leaves this axis — and the one following it — as they arrived.
         const follower = order.follower?.leader === axis ? order.follower.axis : undefined
-        if (follower) found.push(followerLine(ctx, out, follower, axis))
+        if (follower) found.push(followerLine(ctx, out, follower, axis, tracked))
         lines.push(
           `if ${pyStr(order.key)} in list(${other}):`,
           ...found.map((line) => `    ${line}`),
@@ -737,7 +737,7 @@ function heatmapOrderLines(
 
   // A `value` sort's follower was written inside its run-time check, above.
   if (order.follower && order.by !== 'value') {
-    lines.push(followerLine(ctx, out, order.follower.axis, order.follower.leader))
+    lines.push(followerLine(ctx, out, order.follower.axis, order.follower.leader, tracked))
   }
 
   // The arrival names take the same positions, both axes, after the follower is derived.
@@ -766,20 +766,35 @@ function axisLabels(out: string, axis: MatrixAxis): string {
 }
 
 /**
- * The follower's permutation: the leader's labels in the leader's *new* order, matched onto the
+ * The follower's permutation: the leader's names in the leader's *new* order, matched onto the
  * follower — the first unclaimed line of a repeated name winning, which is `followOrder` and is
  * the rule a list comprehension cannot state. See `coda_follow_order`.
+ *
+ * **The names are the arrival ones wherever the Labels tab renamed that axis**, which is
+ * `orderIndices`' rule and the same reason: renaming is one-to-many by design, so a follow
+ * matched on the drawn names answers "every line called LC4" where the question was "the line
+ * this one is" — and a leader whose order interleaves two lines of a name (any clustering) then
+ * hands the follower a block. `tracked` is what says an axis has arrival names to read; where it
+ * does not, nothing renamed it and its own labels *are* the arrival ones.
  */
 function followerLine(
   ctx: Parameters<Emitter>[0],
   out: string,
   axis: MatrixAxis,
   leader: MatrixAxis,
+  tracked: ReadonlySet<MatrixAxis>,
 ): string {
   ctx.helper('coda_follow_order')
+  // Two spellings of one choice: the leader's is indexed per position, where an `Index` is as
+  // good as a list, and the follower's is passed whole, where the helper wants a list. Wrapping
+  // the leader's in `list(...)` inside the comprehension rebuilds it once per line.
+  const indexable = (a: MatrixAxis): string =>
+    tracked.has(a) ? sourceName(a) : axisLabels(out, a)
+  const whole = (a: MatrixAxis): string =>
+    tracked.has(a) ? sourceName(a) : `list(${axisLabels(out, a)})`
   return (
     `${orderName(axis)} = coda_follow_order(` +
-    `[${axisLabels(out, leader)}[i] for i in ${orderName(leader)}], list(${axisLabels(out, axis)}))`
+    `[${indexable(leader)}[i] for i in ${orderName(leader)}], ${whole(axis)})`
   )
 }
 

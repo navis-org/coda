@@ -393,7 +393,7 @@ function heatmapOrderLines(
         // Whether a line carries the key is a fact about the data, so it is asked at run time:
         // the card warns and leaves this axis — and the one following it — as they arrived.
         const follower = order.follower?.leader === axis ? order.follower.axis : undefined
-        if (follower) found.push(followerLine(ctx, out, follower, axis))
+        if (follower) found.push(followerLine(ctx, out, follower, axis, tracked))
         lines.push(
           `if (${rStr(order.key)} %in% ${other}) {`,
           ...found.map((line) => `  ${line}`),
@@ -445,7 +445,7 @@ function heatmapOrderLines(
 
   // A `value` sort's follower was written inside its run-time check, above.
   if (order.follower && order.by !== 'value') {
-    lines.push(followerLine(ctx, out, order.follower.axis, order.follower.leader))
+    lines.push(followerLine(ctx, out, order.follower.axis, order.follower.leader, tracked))
   }
 
   // The arrival names take the same positions, both axes, after the follower is derived.
@@ -477,20 +477,28 @@ function identity(out: string, axis: MatrixAxis): string {
 }
 
 /**
- * The follower's permutation: the leader's labels in the leader's *new* order, matched onto the
+ * The follower's permutation: the leader's names in the leader's *new* order, matched onto the
  * follower — the first unclaimed line of a repeated name winning. `intersect`/`setdiff` cannot
  * say that: both de-duplicate, so a follower with two lines of one name came back with one.
+ *
+ * **The names are the arrival ones wherever the Labels tab renamed that axis** — `orderIndices`'
+ * rule, and the Python emitter's line for line: the drawn names are one-to-many by design, so
+ * following on them puts every line of a name in one block where the leader had them
+ * interleaved, which is every clustering. `tracked` says an axis has arrival names to read;
+ * where it does not, nothing renamed it and its own labels are the arrival ones.
  */
 function followerLine(
   ctx: Parameters<Emitter>[0],
   out: string,
   axis: MatrixAxis,
   leader: MatrixAxis,
+  tracked: ReadonlySet<MatrixAxis>,
 ): string {
   ctx.helper('coda_follow_order')
+  const names = (a: MatrixAxis): string => (tracked.has(a) ? sourceName(a) : axisLabels(out, a))
   return (
     `${orderName(axis)} <- ` +
-    `coda_follow_order(${axisLabels(out, leader)}[${orderName(leader)}], ${axisLabels(out, axis)})`
+    `coda_follow_order(${names(leader)}[${orderName(leader)}], ${names(axis)})`
   )
 }
 

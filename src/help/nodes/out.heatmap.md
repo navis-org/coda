@@ -82,7 +82,7 @@ out.heatmap: sortBy, sortAxis, sortFollow, sortReverse
 - **Clustering** — seaborn's `clustermap`: each row is a vector across the columns, rows are clustered by the distance between those vectors, and the leaf order is the order. The first use boots Python in the tab.
 
 > [!TIP] Other axis follows
-> A matrix from Adjacency is square over one population and usually not symmetric. With this on, the other axis takes the same order, matched by label, so the diagonal stays the diagonal. Labels the sorted axis does not have keep their place after them.
+> A matrix from Adjacency is square over one population and usually not symmetric. With this on, the other axis takes the same order, line for line, so the diagonal stays the diagonal. Lines the sorted axis does not have keep their place after them. The match is on the label each line *arrived* with, so it still pairs neuron with neuron after the Labels tab has named several of them the same thing.
 
 > [!NOTE] Clustering here is not Linkage's
 > [Linkage](#cluster.linkage) reads the matrix *as* the distances, which is right for a score matrix; this reads each row as a profile and compares profiles, which is right for a connectivity matrix. For a score matrix, wire `Linkage → Ordered` instead.
