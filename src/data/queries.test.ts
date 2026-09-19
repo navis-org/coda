@@ -16,7 +16,13 @@ import type { TableValue } from '../core/values'
 import { makeMatrix, tableFromRows } from '../core/values'
 import { EdgeSetBuilder } from './edges/encode'
 import { resetEdgeSets, saveEdgeSet } from './edges/store'
-import { adjacencyFor, connectivityFor, pathStepFor, synapseTotalsFor } from './queries'
+import {
+  adjacencyFor,
+  connectivityFor,
+  groupTotalsFor,
+  pathStepFor,
+  synapseTotalsFor,
+} from './queries'
 import type { DataSource, SourceSchemas } from './source'
 import { CANONICAL_SCHEMAS } from './source'
 
@@ -246,6 +252,115 @@ describe('with an edge set attached', () => {
     expect(grouped.rowLabels).toEqual(['LC4'])
     expect([...grouped.values]).toEqual([15])
     expect(source.fetchAdjacency).not.toHaveBeenCalled()
+  })
+
+  /*
+   * The denominator, which used to be the one question an attached set *refused*.
+   *
+   * The refusal's reason was about the wrong pairing — a file's weights over the backend's
+   * published totals — and it overshot onto the right one. `ROWS` is what makes that checkable:
+   * neuron 2 receives 10 from 1 and 5 from 4, so its input total is 15 in this file and nothing
+   * at all in a backend that never saw it. A fraction of 10/15 is a statement about the file;
+   * 10 over whatever hemibrain publishes for body 2 is a statement about nothing.
+   */
+  it('totals a neuron from the file rather than refusing', async () => {
+    const edges = await attach()
+    const source = stubSource({
+      capabilities: { neuronIndex: true, synapseTotals: true } as DataSource['capabilities'],
+      fetchSynapseTotals: vi.fn(async () => tableFromRows(CANONICAL_SCHEMAS.connectivity, [])),
+    })
+    const table = await synapseTotalsFor(source, {
+      datasetId: 'd',
+      neuronIds: ['2', '1'],
+      side: 'inputs',
+      basis: 'all',
+      edges,
+    })
+    expect(rowsOf(table)).toEqual([
+      { neuronId: '2', total: 15 },
+      // In the file, with nothing arriving: a measured zero, not an absence.
+      { neuronId: '1', total: 0 },
+    ])
+    expect(source.fetchSynapseTotals).not.toHaveBeenCalled()
+  })
+
+  it('totals a source that publishes none of its own, over the whole run', async () => {
+    // The unlock, and the whole of the user-visible bug: a CAVE-shaped source has no
+    // `fetchSynapseTotals` and `synapseTotals: false`, and an edge set gives it one anyway.
+    //
+    // 12 is neuron 1's whole outgoing traffic, 10 + 2. Deliberately unlike `connectivityFor`,
+    // which cuts on weight: neither totals request carries a threshold, so drive below a node's
+    // own cut stays in the denominator and is lost rather than redistributed.
+    const edges = await attach()
+    const source = stubSource()
+    expect(source.fetchSynapseTotals).toBeUndefined()
+    const table = await synapseTotalsFor(source, {
+      datasetId: 'd',
+      neuronIds: ['1'],
+      side: 'outputs',
+      basis: 'connected',
+      edges,
+    })
+    expect(rowsOf(table)).toEqual([{ neuronId: '1', total: 12 }])
+  })
+
+  it('answers both bases identically, since a file knows of no other partners', async () => {
+    const edges = await attach()
+    const req = { datasetId: 'd', neuronIds: ['2'], side: 'inputs' as const, edges }
+    const all = await synapseTotalsFor(stubSource(), { ...req, basis: 'all' })
+    const connected = await synapseTotalsFor(stubSource(), { ...req, basis: 'connected' })
+    expect(rowsOf(all)).toEqual(rowsOf(connected))
+  })
+
+  it('leaves a neuron the file has never mentioned out, rather than totalling it to zero', async () => {
+    // The schema's rule: read as a lookup, an absence says "not known" where a 0 would be
+    // consumed by arithmetic as a denominator and produce an infinity.
+    const edges = await attach()
+    const table = await synapseTotalsFor(stubSource(), {
+      datasetId: 'd',
+      neuronIds: ['999'],
+      side: 'inputs',
+      basis: 'all',
+      edges,
+    })
+    expect(table.length).toBe(0)
+  })
+
+  it('totals a group as its members summed, membership from the dataset', async () => {
+    // LC4 is 1 and 4; outgoing, 12 + 5. The file names neither end, so the two ids come from
+    // the neuron index — the same lookup a path step already makes.
+    const edges = await attach()
+    const source = stubSource()
+    const table = await groupTotalsFor(source, {
+      datasetId: 'd',
+      types: ['LC4'],
+      neuronIds: ['5'],
+      side: 'outputs',
+      basis: 'all',
+      edges,
+    })
+    expect(rowsOf(table)).toEqual([
+      { key: 'LC4', total: 17 },
+      // A lone neuron is its own group, keyed by its id as text — `PathNode.key`'s union.
+      { key: '5', total: 0 },
+    ])
+  })
+
+  it('leaves a group with no member in the file out', async () => {
+    const edges = await attach([['1', '2', 10]])
+    const table = await groupTotalsFor(stubSource(), {
+      datasetId: 'd',
+      types: ['PLP1', 'LC4'],
+      side: 'outputs',
+      basis: 'all',
+      edges,
+    })
+    // PLP1 is 2 and 3; 2 is in the file with no outgoing edge, 3 is not in it at all. So PLP1
+    // totals a measured 0 and is a row, where a type with nobody in the file is not.
+    expect(rowsOf(table)).toEqual([
+      { key: 'PLP1', total: 0 },
+      { key: 'LC4', total: 10 },
+    ])
   })
 
   it('traces a hop on a source that declares it cannot', async () => {

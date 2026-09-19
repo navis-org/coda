@@ -31,7 +31,7 @@ With `Collapse types` on (the default), the search runs on the **type-level grap
 > A connection whose denominator the dataset does not publish is never dropped by the floor, and
 > such a route ranks below every route that could be scored, with an empty `bottleneckNorm`.
 
-Normalising needs a backend that publishes per-neuron synapse totals: neuPrint does, CAVE and CATMAID do not, and a dataset answering from an attached edge set refuses, since a file's weights over a server's totals is one connectome divided by another.
+Normalising needs per-neuron synapse totals: neuPrint publishes them, CAVE and CATMAID do not. A dataset answering from an attached edge set supplies them from the file itself, summing each neuron's own weights — the two halves of the fraction then count the same connectome. An edge list cannot tell a reconstructed partner from any other, so Basis makes no difference there.
 
 ### N strongest: bounded, not infinite
 

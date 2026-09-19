@@ -1791,11 +1791,19 @@ export function canSplitConnectivityByRoi(
 /**
  * Whether this dataset can supply the denominators that turn a weight into a fraction.
  *
- * The same three arms as `canSplitConnectivityByRoi`, and the edge-set one refuses for a sharper
- * reason: an edge set could perfectly well total its own weights, but its numerator and the
- * backend's denominator are counts of different things. A file holding one lab's curated subset
- * of hemibrain, normalised against hemibrain's published synapse totals, produces fractions that
- * are individually plausible and collectively meaningless.
+ * `canTracePaths`' arms rather than `canSplitConnectivityByRoi`'s: an attached edge set **adds**
+ * this, and the inversion is a correction rather than a change of mind. The recorded reason for
+ * refusing was that a file's weights over the backend's published totals is one connectome
+ * divided by another — which is true, and is an argument about *whose* denominator, not about
+ * whether there is one. An edge set totals its own weights perfectly well, and a weight out of
+ * the file over a total out of the file is the one pairing that counts the same population twice.
+ * Refusing it took normalisation away from Connectivity, Influence and Paths the moment somebody
+ * attached a file, with nothing wrong to fix.
+ *
+ * What the set genuinely cannot answer is `SynapseTotalsBasis` — an edge list has no notion of a
+ * partner being reconstructed, so `all` and `connected` are one number. That is said on the
+ * control rather than here: `basisOptions` puts it on the two options as an `EnumOption.note`,
+ * because a `validate` string is a *warning* at every reader and this graph is correct.
  */
 export function canTotalSynapses(
   source: DataSource | undefined,
@@ -1810,8 +1818,8 @@ export function canTotalSynapses(
  *
  * The two questions stay two exported names — that is what the three-layer funnel needs, and a
  * caller passing a method name would be spelling the seam at every call site — but the rule
- * itself is one sentence: an edge set refuses, an unresolved source refuses nothing, and the
- * capability and the method must both be there.
+ * itself is one sentence: an edge set answers for itself, an unresolved source refuses nothing,
+ * and otherwise the capability and the method must both be there.
  */
 function canTotal(
   source: DataSource | undefined,
@@ -1819,7 +1827,9 @@ function canTotal(
   hasEdgeSet: boolean,
   method: 'fetchSynapseTotals' | 'fetchGroupTotals',
 ): boolean {
-  if (hasEdgeSet) return false
+  // `canTracePaths`' arm, and for its reason: the set answers the question itself, so what the
+  // backend behind it publishes decides nothing. `synapseTotalsFrom` is the walk.
+  if (hasEdgeSet) return true
   // An unresolved source refuses nothing — `capabilityOf`'s rule, applied before the method
   // check for `canTracePaths`' reason: a cold Dataset socket is invariant 2's ordinary state.
   if (!source) return true

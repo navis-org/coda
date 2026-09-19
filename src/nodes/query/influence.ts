@@ -49,7 +49,7 @@ import {
   sourceLabel,
   sourceSupports,
 } from '../lib/datasetParam'
-import { totalsLookup } from '../lib/connectivityOps'
+import { basisOptions, totalsLookup } from '../lib/connectivityOps'
 import type { DenominatorLookup, PropagateResult } from '../lib/influenceOps'
 import {
   FRONTIER_BATCH,
@@ -253,12 +253,20 @@ registerNode({
        * the moment a CAVE user created it. The cost of that choice is that the two things it
        * cannot do have to say so, which `validate` does, naming the fix.
        */
-      help: 'How each connection’s share of a neuron’s input is worked out. "Summed within the traversal" reuses what the walk fetched but rules out downstream. "Published totals" costs a query per hop and allows both.',
+      help: 'How each connection’s share of a neuron’s input is worked out. "Summed within the traversal" reuses what the walk fetched but rules out downstream. "Published totals" costs a query per hop and allows both — or, on a dataset answering from an attached edge set, sums that file’s own weights, which it cannot split by partner.',
       default: 'traversal',
-      options: [
+      optionsWithoutPeek: true,
+      /*
+       * The two published arms are `basisOptions`' rather than spelled here, so the edge-set
+       * qualifier reaches this card without a third copy — `readBasis`' reason, which this node
+       * already obeys by storing `connected`/`all` as the two published values.
+       */
+      options: (ctx) => [
         { value: 'traversal', label: 'summed within the traversal' },
-        { value: 'connected', label: 'published totals, reconstructed partners only' },
-        { value: 'all', label: 'published totals, all synapses' },
+        ...basisOptions(ctx.inputs.dataset, {
+          all: 'published totals, all synapses',
+          connected: 'published totals, reconstructed partners only',
+        }).reverse(),
       ],
     },
     {
@@ -393,7 +401,8 @@ registerNode({
       )
     }
     // The capability, asked only when the control is actually used. `sourceSupports` folds in
-    // the edge-set arm: a dataset answering from an imported file has no totals either.
+    // the edge-set arm, which *adds* this rather than removing it: a dataset answering from an
+    // imported file totals that file's own weights. See `canTotalSynapses`.
     if (published && !sourceSupports(ctx.inputs.dataset, 'synapseTotals')) {
       issues.push(
         `${label} does not publish the per-neuron synapse totals this denominator divides by. Use "summed within the traversal", which needs no second query.`,
@@ -486,6 +495,10 @@ registerNode({
      * fix — `pathStepFor`'s rule about one predicate rather than a second spelling. The funnel's
      * own message is correct and says nothing about the control that would make this work, and
      * a refusal arriving from two hops down the stack reads as a broken dataset.
+     *
+     * An attached edge set passes: it answers the totals itself, out of the same file the
+     * numerators came from. That it cannot then tell `all` from `connected` is said on the
+     * control — see `basisOptions` — rather than as an issue on a graph that is correct.
      */
     if (
       denominator !== 'traversal' &&
@@ -516,9 +529,9 @@ registerNode({
     /*
      * The denominator lookup, or nothing.
      *
-     * `synapseTotalsFor` chunks internally and refuses a dataset answering from an attached edge
-     * file, which is the same refusal `validate` made above — one predicate, asked twice, rather
-     * than a second spelling of it. `side: 'inputs'` always: W's divisor is what the
+     * `synapseTotalsFor` chunks internally, and totals a dataset answering from an attached edge
+     * file out of that file rather than asking a backend — `canTotalSynapses`' arm, which the
+     * refusal above has already passed. `side: 'inputs'` always: W's divisor is what the
      * *postsynaptic* neuron receives, whichever way the walk is travelling, and writing it out
      * here is what stops the flip.
      */

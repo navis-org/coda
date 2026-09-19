@@ -608,13 +608,45 @@ present".** Each has a control of its own, so a picker clearing when Split by re
 that switch doing what it says — not the silent schema churn that rule is about. A `roi` column
 of nulls on an unsplit result, or a `weightNorm` of nulls a chart plots as zeroes, is worse.
 
-**An attached edge set removes both capabilities rather than adding one.** This inverts
-`canTracePaths`, where a local edge list *unlocks* a hop CAVE cannot answer. A file of
-`pre, post, weight` says nothing about regions, and its weights count a different population from
-the backend's published totals — so normalising one against the other produces fractions that are
-individually plausible and collectively meaningless. `canSplitConnectivityByRoi` and
-`canTotalSynapses` refuse; `connectivityFor` and `synapseTotalsFor` refuse again at run time, for
-the graph whose dataset gained an edge set after the node was set up.
+**An attached edge set removes the region half and *adds* the denominator half, and the second
+of those is a correction.** Regions go for the reason that never changed: a file of
+`pre, post, weight` says nothing about where along either neuron the synapses are, so
+`canSplitConnectivityByRoi` refuses and `connectivityFor` refuses again at run time, for the graph
+whose dataset gained an edge set after the node was set up.
+
+Totals were refused alongside them, on this argument: the file's weights count a different
+population from the backend's published totals, so normalising one against the other is one
+connectome divided by another. That argument is sound and it is about *whose* denominator, not
+about whether there is one. The file can total its own weights — summing each neuron's CSR run is
+the walk — and a weight out of the file over a total out of the file is the only pairing that
+counts the same population twice. **Refusing it cost Connectivity, Influence and Paths their
+`Normalize` the moment somebody attached a file, with nothing wrong to fix**, which is how it was
+reported. `canTotal`'s edge-set arm now returns `true`, `canTracePaths`' shape; `synapseTotalsFrom`
+and `groupTotalsFrom` in `data/edges/query.ts` are the walks, and the two funnels answer from the
+set exactly as `pathStepFor` does. Group totals need the type map where per-neuron totals do not,
+for `pathStepFrom`'s reason — an edge list names neither end of an edge.
+
+What the set genuinely cannot answer is **`SynapseTotalsBasis`**: `all` and `connected` are two
+published totals a backend keeps, and an edge list has no notion of a partner being reconstructed,
+so the control still moves and the number does not. Answering `connected` off the neuron index
+instead was considered and refused — that makes the denominator a fact about the backend's listing
+while the numerator stays a fact about the file, which is the discarded mixture wearing a different
+hat.
+
+**So it is a note, and it goes on the control rather than into `validate`** — which was the second
+thing this got wrong. A `validate` string is a *warning* at every reader: the card, and
+`collectWarnings` on through the MCP `check()`. A note there flags a graph that is entirely
+correct and hands an assistant a defect whose obvious repair is to turn normalising off, which is
+the reported bug arriving one door along. `EnumOption.note` is the channel for a qualifier that
+changes what a choice means, and it is read at the moment the choice is made. `basisOptions` in
+`nodes/lib/connectivityOps.ts` builds the pair — beside `readBasis` for its stated reason, a
+vocabulary written per caller being how two cards come to mean different things by one stored
+value — and `Influence` composes them into its own three-option `Denominator`.
+
+Two further rules the walks carry: **no weight threshold reaches a total** (neither totals request
+has one, where `ConnectivityRequest` does), or the drive below a node's cut would be redistributed
+over the survivors rather than lost; and a neuron the file has never mentioned contributes **no
+row**, where one the file holds with nothing on the asked side totals a measured **0**.
 
 **Exported asymmetrically, and for a checkable reason.** The notebook translates the region half
 onto three arguments of the `fetch_adjacencies` call the cell was already making — it answers
@@ -1005,7 +1037,8 @@ what the node can do:
 - *summed within the traversal* — free, every backend, bit-for-bit the reference implementation
   (which computes `norm` after its `count_thresh`). Computable only from the postsynaptic end, so
   **upstream single-pass only**.
-- *published totals* (`connected` or `all`) — one query per hop, `synapseTotals` only, and both
+- *published totals* (`connected` or `all`) — one query per hop, `synapseTotals` **or an attached
+  edge set** (which totals its own weights, and collapses the two into one number), and both
   `Downstream` and the meet-in-the-middle become available.
 
 **The default is `traversal`**, because `synapseTotals` is true on neuPrint and the mock and false

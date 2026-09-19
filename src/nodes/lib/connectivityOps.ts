@@ -20,11 +20,12 @@
  * per-hop fetch as a callback, which is what makes the BFS testable without a network.
  */
 
-import type { ColumnSchema, TableSchema } from '../../core/types'
-import type { ParamValues } from '../../core/node'
+import type { CodaType, ColumnSchema, TableSchema } from '../../core/types'
+import type { EnumOption, ParamValues } from '../../core/node'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { makeTable, tableFromRows } from '../../core/values'
+import { datasetHasEdges } from './datasetParam'
 import { idColumn } from './tableOps'
 import { ID_COLUMN_NAME, compareIds, idText } from '../../core/ids'
 import type { NeuronId } from '../../core/ids'
@@ -617,6 +618,46 @@ export function readNormalizeBy(raw: unknown): NormalizeBy {
 export function readBasis(raw: unknown): SynapseTotalsBasis {
   return raw === 'connected' ? 'connected' : 'all'
 }
+
+/**
+ * The two basis options, noting where the dataset cannot tell them apart.
+ *
+ * `readBasis`' arrangement one layer out, and it exists because a dataset answering from an
+ * attached edge set makes these two labels **wrong**: "all synapses" and "reconstructed partners
+ * only" are two totals a *backend* publishes, and an edge list has no notion of a partner being
+ * reconstructed, so the control moves and the number does not.
+ *
+ * Said on the option rather than as a `validate` issue, and that is the decision worth recording.
+ * A `validate` string is a **warning** at every reader — the card, and `collectWarnings` on
+ * through the MCP `check()` — so a note there flags a graph that is entirely correct, and hands
+ * an assistant a defect whose obvious repair is to turn normalising off. Which is the bug this
+ * whole change fixes, arriving one door along. `EnumOption.note` is the channel for a qualifier
+ * that changes what a choice means, and it is read at the moment the choice is made.
+ *
+ * One builder for all three cards — `Connectivity` and `Paths` spell these two options and
+ * `Influence` composes them into its own three — for `readBasis`' stated reason: a vocabulary
+ * written per caller is how two cards come to mean different things by the same stored value.
+ */
+export function basisOptions(
+  type: CodaType | undefined,
+  words: { all: string; connected: string },
+): EnumOption[] {
+  const note = datasetHasEdges(type) ? EDGE_SET_BASIS_NOTE : undefined
+  return [
+    { value: 'all', label: words.all, ...(note ? { note } : {}) },
+    { value: 'connected', label: words.connected, ...(note ? { note } : {}) },
+  ]
+}
+
+/**
+ * The qualifier both basis options carry under an edge set.
+ *
+ * Short because it is drawn in brackets after a label — `optionText`'s shape. The longer story
+ * belongs to the param's `help`, and the fact that the denominator is the file's at all is
+ * already on the dataset card, which is the only thing on the canvas saying the connectivity
+ * came from a file.
+ */
+const EDGE_SET_BASIS_NOTE = 'same number from an edge set'
 
 /** The side of a neuron a denominator counts, given which end it belongs to. */
 export function normalizeSide(by: NormalizeBy): ConnectionDirection {

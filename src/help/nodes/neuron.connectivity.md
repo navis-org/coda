@@ -90,6 +90,10 @@ neuron.connectivity: neuronRows
 **`weightTotal`**, the denominator it was divided by. The same `0.04` means different things
 depending on the two controls below, so the denominator travels beside the fraction.
 
+On a dataset answering from an attached edge set the denominator is that file's own weights
+summed per neuron, rather than anything the backend publishes — and since an edge list cannot tell
+a reconstructed partner from any other, the two `Denominator` options give the same number.
+
 `Normalize by` chooses **which end of the connection** the denominator belongs to:
 
 - **the target's total input** — how much of the receiving neuron's input this connection supplies.

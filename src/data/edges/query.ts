@@ -13,11 +13,17 @@
  */
 
 import type { NeuronId } from '../../core/ids'
-import type { TableValue } from '../../core/values'
-import { tableFromRows } from '../../core/values'
+import { ID_COLUMN_NAME } from '../../core/ids'
+import type { CellValue, TableValue } from '../../core/values'
+import { makeTable, tableFromRows } from '../../core/values'
 import type { Edge } from '../connectivity'
-import type { ConnectionDirection, PathStepRequest } from '../source'
-import { PATH_STEP_SCHEMA } from '../source'
+import type {
+  ConnectionDirection,
+  GroupTotalsRequest,
+  PathStepRequest,
+  SynapseTotalsRequest,
+} from '../source'
+import { GROUP_TOTALS_SCHEMA, PATH_STEP_SCHEMA, SYNAPSE_TOTALS_SCHEMA } from '../source'
 import type { EdgeCsr } from './encode'
 import type { LoadedEdgeSet } from './store'
 
@@ -62,7 +68,7 @@ export function edgesFrom(
   minWeight?: number,
 ): Edge[] {
   const outward = direction === 'outputs'
-  const csr = outward ? set.out : set.in
+  const csr = sideOf(set, direction)
   // Filtered only where a threshold was actually asked for. Defaulting to 0 dropped every
   // *negative* weight — which `narrowWeights` deliberately preserves, because a user's edge list
   // may carry a signed score rather than a synapse count.
@@ -211,4 +217,111 @@ export function pathStepFrom(
     .filter((group) => group.weight >= min)
     .sort((a, b) => b.weight - a.weight)
   return tableFromRows(schema, rows)
+}
+
+/** One neuron's whole weight in one direction — `walk`'s run, summed. */
+function totalAt(csr: EdgeCsr, at: number): number {
+  let sum = 0
+  walk(csr, at, (_target, weight) => {
+    sum += weight
+  })
+  return sum
+}
+
+/** Which CSR a `side` or a `direction` reads. One spelling, for `edgesFrom` and both totals. */
+function sideOf(set: LoadedEdgeSet, side: ConnectionDirection): EdgeCsr {
+  return side === 'outputs' ? set.out : set.in
+}
+
+/**
+ * Per-neuron synapse totals, summed from the file rather than fetched — `SYNAPSE_TOTALS_SCHEMA`.
+ *
+ * **The point is that the denominator comes from the same place the numerator did.** A weight out
+ * of this set divided by a total out of this set is one connectome throughout, which is the
+ * property the funnel's old refusal existed to protect and was throwing the baby out with: it
+ * refused the file's *own* sum because a file over the *backend's* published totals would have
+ * been two connectomes in one fraction. Only the second of those is a mixture.
+ *
+ * Two departures from what a backend answers, both forced and neither hidden:
+ *
+ *  - **`basis` cannot be honoured, because an edge list has no notion of a partner being
+ *    reconstructed.** `all` and `connected` are the same number here — the file's — and
+ *    `basisOptions` says so on the control itself. Answering `connected` off the neuron index
+ *    instead was considered and refused: that would make the denominator a fact about the
+ *    backend's listing while the numerator stayed a fact about the file, which is the mixture
+ *    again wearing a different hat.
+ *  - **No weight threshold reaches here**, deliberately: neither totals request carries one
+ *    where `ConnectivityRequest` does, so a total is the neuron's whole traffic whichever way
+ *    the node that asked was cutting its own rows. That is what makes the drive below a
+ *    threshold *lost* rather than quietly redistributed over the partners that survived.
+ *
+ * A neuron the file has never mentioned contributes **no row**, the schema's stated rule — read
+ * as a lookup, an absence is "not known" without a sentinel that arithmetic would consume. A
+ * neuron the file *does* hold with nothing on the asked side totals **0**, which is a measurement,
+ * and every normaliser already turns a zero denominator into a null and counts it.
+ *
+ * Straight into two column arrays rather than through `tableFromRows`, whose own note says it is
+ * not for hot paths — `NeuPrintSource.fetchSynapseTotals`' arrangement, for its reason: one hop
+ * from a hundred neurons is tens of thousands of partners, and the row-object form allocates a
+ * throwaway object each and then walks them all again.
+ */
+export function synapseTotalsFrom(set: LoadedEdgeSet, req: SynapseTotalsRequest): TableValue {
+  const csr = sideOf(set, req.side)
+  const ids: CellValue[] = []
+  const totals: CellValue[] = []
+  for (const at of indicesOf(set, req.neuronIds)) {
+    ids.push(set.ids[at]!)
+    totals.push(totalAt(csr, at))
+  }
+  return makeTable(SYNAPSE_TOTALS_SCHEMA, { [ID_COLUMN_NAME]: ids, total: totals })
+}
+
+/**
+ * The same totals per group key — `GROUP_TOTALS_SCHEMA`, and `pathStepFrom`'s vocabulary.
+ *
+ * A type's total is every member's total added up, so it is the denominator the Paths node's
+ * collapsed weights actually want: `LC4 -> PLP1` over everything every PLP1 neuron receives *in
+ * this file*. Membership is the dataset's — `membersOf`, the map `pathStepFrom` already walks —
+ * because an edge list names neither end; a member the file never mentions contributes nothing,
+ * which is the file saying that neuron receives nothing rather than an omission.
+ *
+ * A group with no member in the file at all contributes **no row**, `synapseTotalsFrom`'s rule and
+ * the seam's: the Paths node reads this as a lookup and leaves such a weight unnormalised rather
+ * than dividing by a number nobody measured.
+ *
+ * The type arm walks `membersOf`'s list directly rather than through `indicesOf`, which the
+ * neuron arm does use. The two lists differ in kind: a frontier of ids arrives from a caller and
+ * may repeat, where a type's membership is built one entry per id out of a `Map` and cannot — so
+ * `indicesOf` there would allocate a `Set` and an array per type, once per hop, to dedupe
+ * something already unique.
+ */
+export function groupTotalsFrom(
+  set: LoadedEdgeSet,
+  req: GroupTotalsRequest,
+  types: Map<NeuronId, string>,
+): TableValue {
+  const csr = sideOf(set, req.side)
+  const keys: CellValue[] = []
+  const totals: CellValue[] = []
+  if (req.types?.length) {
+    const members = membersOf(types)
+    for (const type of req.types) {
+      let sum = 0
+      let held = false
+      for (const id of members.get(type) ?? []) {
+        const at = set.index.get(id)
+        if (at === undefined) continue
+        held = true
+        sum += totalAt(csr, at)
+      }
+      if (!held) continue
+      keys.push(type)
+      totals.push(sum)
+    }
+  }
+  for (const at of indicesOf(set, req.neuronIds ?? [])) {
+    keys.push(set.ids[at]!)
+    totals.push(totalAt(csr, at))
+  }
+  return makeTable(GROUP_TOTALS_SCHEMA, { key: keys, total: totals })
 }

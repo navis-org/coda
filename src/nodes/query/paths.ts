@@ -46,7 +46,7 @@ import {
   scoredEnd,
   traversePaths,
 } from '../lib/pathOps'
-import { normalizeSide, readBasis, readNormalizeBy } from '../lib/connectivityOps'
+import { basisOptions, normalizeSide, readBasis, readNormalizeBy } from '../lib/connectivityOps'
 import {
   connectivityRequest,
   requireDataset,
@@ -183,12 +183,14 @@ registerNode({
       id: 'normalizeBasis',
       kind: 'enum',
       label: 'Denominator',
-      help: '"All synapses" counts everything the group makes, fragments included. "Reconstructed partners only" counts synapses onto named neurons, which is the denominator for comparing routes across connectomes.',
+      help: '"All synapses" counts everything the group makes, fragments included. "Reconstructed partners only" counts synapses onto named neurons, which is the denominator for comparing routes across connectomes. A dataset answering from an attached edge set sums that file’s own weights instead, and cannot tell the two apart.',
       default: 'all',
-      options: [
-        { value: 'all', label: 'all synapses' },
-        { value: 'connected', label: 'reconstructed partners only' },
-      ],
+      optionsWithoutPeek: true,
+      options: (ctx) =>
+        basisOptions(ctx.inputs.dataset, {
+          all: 'all synapses',
+          connected: 'reconstructed partners only',
+        }),
       visibleIf: (params) => params.normalize === true,
     },
     {
@@ -275,11 +277,11 @@ registerNode({
       )
     }
     /*
-     * Said at edit time for the `paths` refusal's reason, and it is the same shape: a dataset
-     * answering from an attached edge set reaches here too, because `canTotalGroups`
-     * refuses one — a file's weights over the server's totals is one connectome divided by
-     * another. The fix is named, since `Normalize` is a switch on this card rather than
-     * something about the dataset the reader has to go and change.
+     * Said at edit time for the `paths` refusal's reason, and it is the same shape. An attached
+     * edge set passes now where it used to be refused here: it totals its own weights, so both
+     * halves of the fraction count the population the file describes — which is what the old
+     * refusal was protecting and was overshooting. What it cannot answer is `Basis`, and that is
+     * the second branch: a note rather than a refusal, since nothing is wrong.
      */
     if (
       ctx.params.normalize === true &&
@@ -360,7 +362,8 @@ registerNode({
        * followed.
        *
        * `connectivityRequest` rather than `datasetRequest`, so the edge set travels with it and
-       * `groupTotalsFor` can refuse a dataset answering from a file.
+       * `groupTotalsFor` answers a dataset holding one from the file rather than the backend —
+       * the same file the weights above it came from.
        */
       normalize: normalize
         ? {

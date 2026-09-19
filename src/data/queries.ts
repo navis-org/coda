@@ -33,7 +33,13 @@ import { tableFromRows } from '../core/values'
 import type { NeuronId } from '../core/ids'
 import type { Edge } from './connectivity'
 import { matrixFromEdges, typesOf } from './connectivity'
-import { edgesBetween, edgesFrom, pathStepFrom } from './edges/query'
+import {
+  edgesBetween,
+  edgesFrom,
+  groupTotalsFrom,
+  pathStepFrom,
+  synapseTotalsFrom,
+} from './edges/query'
 import type { LoadedEdgeSet } from './edges/store'
 import { loadEdgeSet } from './edges/store'
 import type {
@@ -185,12 +191,15 @@ export async function connectivityFor(
 }
 
 /**
- * Per-neuron synapse totals, or a refusal naming why there are none.
+ * Per-neuron synapse totals, from the attached set where there is one and the backend where
+ * there is not.
  *
- * A funnel like the three above, though this one has nothing to answer from: an edge set is the
- * *reason* the answer is unavailable rather than an alternative source for it. See
- * `canTotalSynapses` — a file's weights and a backend's published totals count different
- * populations, and a fraction built from one over the other is plausible and meaningless.
+ * A funnel like the three above, and it used to be the one exception — an edge set *refused*
+ * here rather than answering. The reason recorded for that was a real one about the wrong
+ * pairing: a file's weights over the backend's published totals divides one connectome by
+ * another. But the set's own row sums are not that pairing; they are the only denominator that
+ * counts exactly the population the numerator came from, which is what the refusal was after.
+ * See `synapseTotalsFrom`, and `basisOptions` for the one thing the file cannot say.
  *
  * Nodes call this rather than `source.fetchSynapseTotals` for `connectivityFor`'s reason: a
  * reader that skips the funnel skips the gate, and both halves would type-check.
@@ -199,7 +208,7 @@ export async function synapseTotalsFor(
   source: DataSource,
   req: SynapseTotalsRequest,
 ): Promise<TableValue> {
-  if (req.edges) throw edgeSetDenominator(req.edges.name)
+  if (req.edges) return synapseTotalsFrom(await attached(req.edges), req)
   // The same predicate the node asks, rather than a third spelling — `pathStepFor`'s rule, and
   // it is that function's recorded incident: a funnel checking only that a method existed
   // accepted a source the node had already refused.
@@ -210,38 +219,31 @@ export async function synapseTotalsFor(
 }
 
 /**
- * The same totals per group key, or a refusal naming why there are none.
+ * The same totals per group key.
  *
  * `synapseTotalsFor` with `canTotalGroups` in place of `canTotalSynapses`, and the second funnel
  * is the point rather than an oversight: written as one funnel that picked a method, a source
  * with the flag and no `fetchGroupTotals` would pass the gate the Paths node asks and then fail
- * on a `!`. Both refusals are shared, since the reason is the same either way.
+ * on a `!`.
+ *
+ * The edge-set arm needs the type map where the one above does not, `pathStepFor`'s reason: a
+ * group key is a cell type, and an edge list names neither end of an edge.
  */
 export async function groupTotalsFor(
   source: DataSource,
   req: GroupTotalsRequest,
 ): Promise<TableValue> {
-  if (req.edges) throw edgeSetDenominator(req.edges.name)
+  if (req.edges) {
+    const [set, types] = await Promise.all([
+      attached(req.edges),
+      typeLookup(source, req.datasetId, req),
+    ])
+    return groupTotalsFrom(set, req, types)
+  }
   if (!canTotalGroups(source, req.datasetId, false)) {
     throw new Error(groupTotalsRefusal(source.label))
   }
   return source.fetchGroupTotals!(req)
-}
-
-/**
- * Why an attached edge set cannot supply a denominator, said once for both funnels.
- *
- * A file's weights over a server's published totals is one connectome divided by another — see
- * `canTotalSynapses`, which is where the rule lives. The sentence names a control on the dataset
- * card, which is the half a second copy silently leaves pointing at nothing when it is renamed.
- */
-function edgeSetDenominator(name: string): Error {
-  return new Error(
-    `This dataset's connectivity comes from the edge set "${name}", so its weights are the ` +
-      `file's rather than the server's — normalising them against the backend's published ` +
-      `synapse totals would divide one connectome by another. Turn off Normalize, or detach ` +
-      `the edge set under Edge data on the dataset card.`,
-  )
 }
 
 /**

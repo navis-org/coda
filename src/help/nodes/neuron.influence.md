@@ -164,7 +164,10 @@ honest; they differ by the input sitting below `Min synapses`.
 The default is the first: no extra query, works on every backend, but it can only be worked out
 from the receiving end, so it cannot do `Downstream` and cannot meet in the middle. Published
 totals need a dataset that publishes per-neuron synapse totals — today the neuPrint datasets and
-the Demo Data, but not CAVE, CATMAID or a precomputed source.
+the Demo Data, but not CAVE, CATMAID or a precomputed source. Any dataset with an edge set
+attached under **Edge data** has them too: it sums that file's own weights, which is what keeps
+both halves of the fraction counting the same connectome. It cannot tell a reconstructed partner
+from any other, so the two published options give the same number there.
 
 **`Include fragments`** — whether unproofread bodies pass the signal on. Off by default: a synaptic
 partner is very often a fragment the segmentation never promoted to a neuron, and following those

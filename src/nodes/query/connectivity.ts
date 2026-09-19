@@ -22,6 +22,7 @@ import {
 import {
   RESERVED_EDGE_COLUMNS,
   readTraversalDirection,
+  basisOptions,
   connectivityOutputSchema,
   endpointNeurons,
   endpointSchema,
@@ -244,12 +245,14 @@ registerNode({
        * neuron's outgoing synapses — the difference is the 14,091 that land on fragments the
        * segmentation never promoted to a neuron.
        */
-      help: '"All synapses" counts everything the neuron makes, matching the dataset’s published total. "Reconstructed partners only" counts synapses onto named neurons, which is the denominator for comparing across connectomes.',
+      help: '"All synapses" counts everything the neuron makes, matching the dataset’s published total. "Reconstructed partners only" counts synapses onto named neurons, which is the denominator for comparing across connectomes. A dataset answering from an attached edge set sums that file’s own weights instead, and cannot tell the two apart.',
       default: 'all',
-      options: [
-        { value: 'all', label: 'all synapses' },
-        { value: 'connected', label: 'reconstructed partners only' },
-      ],
+      optionsWithoutPeek: true,
+      options: (ctx) =>
+        basisOptions(ctx.inputs.dataset, {
+          all: 'all synapses',
+          connected: 'reconstructed partners only',
+        }),
       visibleIf: (params) => params.normalize === true,
     },
     /*
@@ -376,9 +379,10 @@ registerNode({
 
     /*
      * The two capability refusals, each gated on the control being *used* rather than on the
-     * node's type. Both read `sourceSupports`, which folds in the edge-set arm — a dataset
-     * answering from an imported file has no regions and no comparable totals, whatever the
-     * backend behind it could do. See `canSplitConnectivityByRoi` and `canTotalSynapses`.
+     * node's type. Both read `sourceSupports`, which folds in the edge-set arm — and the two
+     * arms point opposite ways, which is the part worth reading twice. A dataset answering from
+     * an imported file has no regions, whatever its backend could do; it *does* have totals,
+     * because it totals its own weights. See `canSplitConnectivityByRoi` and `canTotalSynapses`.
      */
     const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
     if (usesRegions(ctx.params) && !sourceSupports(ctx.inputs.dataset, 'connectivityRois')) {
@@ -552,7 +556,7 @@ registerNode({
       const totals = await synapseTotalsFor(source, {
         // The same projection the traversal spreads. `connectivityRequest` carries the edge set
         // as well as the id and the annotation chain, which is what lets `synapseTotalsFor`
-        // refuse a dataset answering from a file — see its own note.
+        // total a dataset answering from a file out of that same file — see its own note.
         ...connectivityRequest(dataset),
         neuronIds: targets,
         side: normalizeSide(by),

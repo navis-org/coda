@@ -51,6 +51,18 @@ export function sourceFromType(type: CodaType | undefined): DataSource | undefin
 }
 
 /**
+ * Whether a Dataset socket's type says an edge set is attached.
+ *
+ * One reading of the flag, because it is now asked in five places — `sourceSupports`,
+ * `edgePropertyIssues`, and the three nodes that have to say where their denominator came from.
+ * Written out per site it is the sort of thing that acquires a second spelling (`!!type.edges`)
+ * that agrees until somebody widens the field.
+ */
+export function datasetHasEdges(type: CodaType | undefined): boolean {
+  return type?.kind === 'dataset' && type.edges === true
+}
+
+/**
  * What `sourceSupports` can be asked.
  *
  * Every `SourceCapabilities` key, plus the questions whose answer is not a flag of their own:
@@ -86,23 +98,24 @@ export function sourceSupports(
 ): boolean {
   const source = sourceFromType(type)
   const datasetId = datasetRef(type)?.datasetId
-  // `paths` is the one capability an attached edge set can *add*, so it has its own resolver —
-  // shared with the two run-time readers, which had drifted apart. Connectivity and adjacency
-  // are required methods rather than capabilities, so there is nothing there to unlock.
-  const edges = type?.kind === 'dataset' && type.edges === true
+  // The capabilities an attached edge set *adds*, each with its own resolver — shared with the
+  // run-time readers, which had drifted apart. Connectivity and adjacency are required methods
+  // rather than capabilities, so there is nothing there to unlock. The line worth reading twice
+  // is `synapseTotals`: a set answers that one from its own weights, which is the only pairing
+  // whose numerator and denominator count the same population.
+  const edges = datasetHasEdges(type)
   if (capability === 'paths') return canTracePaths(source, datasetId, edges)
-  // The two an edge set *removes*, for the reasons written at each predicate: a file of
-  // `pre, post, weight` carries no regions, and its weights are not the population the backend's
-  // synapse totals count.
+  if (capability === 'synapseTotals') return canTotalSynapses(source, datasetId, edges)
+  // The two it *removes*, for the reasons written at each predicate: a file of
+  // `pre, post, weight` carries no regions, and it carries nothing else about a connection.
   if (capability === 'connectivityRois')
     return canSplitConnectivityByRoi(source, datasetId, edges)
-  if (capability === 'synapseTotals') return canTotalSynapses(source, datasetId, edges)
-  // Removed by an edge set for the same reason: a file of `pre, post, weight` has nothing else.
   if (capability === 'edgeProperties') return canFetchEdgeProperties(source, datasetId, edges)
   // The one question that is not a flag at all: what decides it is whether the source implements
-  // `fetchGroupTotals`, and there is nothing per-dataset to publish. It is answered here rather
-  // than by a helper beside this one so that every node keeps asking edit-time capability
-  // questions one way — and so the `edges` reading above stays written once.
+  // `fetchGroupTotals`, and there is nothing per-dataset to publish. Added by an edge set too,
+  // `synapseTotals`' reason one aggregation along. It is answered here rather than by a helper
+  // beside this one so that every node keeps asking edit-time capability questions one way —
+  // and so the `edges` reading above stays written once.
   if (capability === 'groupTotals') return canTotalGroups(source, datasetId, edges)
   // `groupTotals`' kind of question: a method as well as the `synapses` flag, and nothing an edge
   // set could add or remove, since a file of `pre, post, weight` carries no coordinates.
@@ -312,7 +325,7 @@ export function edgePropertyIssues(
   if (asked.length === 0) return []
   if (!sourceSupports(type, 'edgeProperties')) {
     return [
-      type?.kind === 'dataset' && type.edges === true
+      datasetHasEdges(type)
         ? edgeSetPropertiesRefusal()
         : `${edgePropertiesRefusal(sourceLabel(type) ?? 'This source')}.`,
     ]
