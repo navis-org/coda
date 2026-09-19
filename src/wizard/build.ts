@@ -1454,8 +1454,9 @@ function bodyOf(
     }
 
     case 'neurons':
+    case 'lmMatches':
     default: {
-      // No analysis: the neuron table straight into whatever was ticked, except the viewers that
+      // No analysis node (`lmMatches`' NeuronBridge card is a viewer that fetches for itself): the neuron table straight into whatever was ticked, except the viewers that
       // fetch for themselves — those take the dataset too. Asked of the node rather than listed
       // by id; see `selfFetching`.
       const tail = views(0, (visualisation, id) =>

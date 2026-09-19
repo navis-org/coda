@@ -732,6 +732,47 @@ describe('the Neuron Topology viewer', () => {
   })
 })
 
+describe('the NeuronBridge answer', () => {
+  const offers = (key: string) => analysisOptions([key]).some((o) => o.id === 'lmMatches')
+
+  it('is offered for exactly the datasets NeuronBridge indexes', () => {
+    // Both directions, and on two backends: neuPrint serves covered and uncovered connectomes
+    // alike, so the gate has to be the dataset and not the source.
+    for (const key of ['hemibrain', 'malecns', 'manc', 'flywire', 'banc']) {
+      expect(offers(key), key).toBe(true)
+    }
+    for (const key of [DEMO_DATASET, 'opticlobe', 'fib19', 'mushroombody', 'minnie65']) {
+      expect(offers(key), key).toBe(false)
+    }
+  })
+
+  it('builds the card on the dataset and the neuron table, with nothing in between', () => {
+    const graph = buildWorkflow({
+      datasets: ['hemibrain'],
+      start: 'search',
+      analysis: 'lmMatches',
+      visualisations: ['neuronbridge'],
+      notes: false,
+      dashboard: false,
+    })
+    const card = graph.nodes.find((n) => n.type === 'out.neuronbridge')
+    expect(card).toBeDefined()
+    expect(
+      graph.edges
+        .filter((e) => e.target === card?.id)
+        .map((e) => e.targetHandle)
+        .sort(),
+    ).toEqual(['dataset', 'neurons'])
+    expect(
+      errorsIn({
+        ...everyCombination(['hemibrain'])[0]!,
+        analysis: 'lmMatches',
+        visualisations: ['neuronbridge'],
+      }),
+    ).toEqual([])
+  })
+})
+
 describe('opening as a dashboard', () => {
   const built = (analysis: AnalysisId, visualisations: VisualisationId[], dashboard: boolean) =>
     buildWorkflow({

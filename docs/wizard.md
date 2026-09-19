@@ -114,6 +114,16 @@ The canvas notes did not change: those are read after the choice, beside the nod
 One consequence: the analysis label is no longer lowercased into the graph's name and description,
 because "NBLAST clustering" would arrive as "nblast clustering".
 
+**Light-microscopy matches is gated on the connectome, not the source.** The answer builds the
+NeuronBridge card and nothing else — like `Neuron table only` with Neuron Topology, the card takes the
+dataset and the neuron table and fetches for itself — so the only question is whether NeuronBridge
+indexes the dataset at all. That is not a `SourceCapabilities` key: one neuPrint source serves the
+hemibrain, which it indexes, and the optic lobe, which it does not. So `requiresNeuronBridge` is a
+third gate beside `requiresTemplateSpace`, answered by `familyInNeuronBridge` through the card's own
+`isCoveredDataset`, so the wizard cannot offer the card for a dataset the card then warns about. It
+sits on the analysis rather than the viewer, the viewer being the whole of the answer.
+`wizard.test.ts` asserts both directions across both backends.
+
 ## The fourth question takes a set
 
 A reader who wants a table *and* a bar chart of the same ranked partners wants two viewers on one

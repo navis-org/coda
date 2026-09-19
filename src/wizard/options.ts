@@ -37,6 +37,7 @@ import { capabilityAnywhere, getSource } from '../data/source'
 import { compareDatasetName } from '../nodes/analysis/compareConnectivity'
 import { findParam } from '../core/node'
 import { getNodeDef } from '../core/registry'
+import { isCoveredDataset } from '../data/neuronbridge/libraries'
 import { spaceForDataset } from '../data/transforms/spaces'
 import type { DatasetFamily } from '../nodes/lib/datasetFamilies'
 import { datasetFamily, starterFamilies } from '../nodes/lib/datasetFamilies'
@@ -60,7 +61,7 @@ export type StartId = 'search' | 'browse' | 'ids'
  * What the workflow works out about them.
  *
  * Two disjoint sets, and which one the third question offers is decided by the *first* answer:
- * the nine single-dataset techniques, and the four that only mean anything with more than one
+ * the ten single-dataset techniques, and the four that only mean anything with more than one
  * connectome in the graph. They are one type because everything downstream of the question —
  * `VIEWS`, `bodyOf`, the graph's own name — reads an analysis without caring which list it came
  * off, and a second union would be a second `VIEWS`.
@@ -75,6 +76,7 @@ export type AnalysisId =
   | 'morphology'
   | 'nblast'
   | 'neurons'
+  | 'lmMatches'
   // Cross-dataset. See `CROSS_ANALYSES`.
   | 'compare'
   | 'coclust'
@@ -97,6 +99,7 @@ export type VisualisationId =
   | 'topology'
   | 'neuroglancer'
   | 'scatter'
+  | 'neuronbridge'
 
 /**
  * One complete set of answers — everything `buildWorkflow` needs.
@@ -214,6 +217,14 @@ export interface WizardOption<Id extends string> {
    * — which is the refusal that node was built to make, and not one a wizard should walk into.
    */
   requiresTemplateSpace?: boolean
+  /**
+   * Whether this answer needs NeuronBridge to index the dataset — a third gate, and a sibling of
+   * `requiresTemplateSpace` for the same reason: coverage is a fact about *which connectome*
+   * (`CORRESPONDENCES` in `data/neuronbridge/libraries.ts`), not about what its source can do. A
+   * neuPrint source serves the hemibrain, which NeuronBridge indexes, and the optic lobe, which it
+   * does not.
+   */
+  requiresNeuronBridge?: boolean
 }
 
 /**
@@ -233,7 +244,8 @@ function available<Id extends string>(
     const capability = option.requires
     return (
       (!capability || datasets.every((key) => familyCan(key, capability))) &&
-      (!option.requiresTemplateSpace || datasets.every(familyBridges))
+      (!option.requiresTemplateSpace || datasets.every(familyBridges)) &&
+      (!option.requiresNeuronBridge || datasets.every(familyInNeuronBridge))
     )
   })
 }
@@ -287,6 +299,19 @@ export function familyBridges(key: string): boolean {
   const family = familyOf(key)
   if (!family) return true
   return Boolean(spaceForDataset(family.sourceId, family.family))
+}
+
+/**
+ * Whether NeuronBridge holds LM matches for a family's connectome.
+ *
+ * `familyBridges`' sibling, asking the card's own predicate (`isCoveredDataset`) so the wizard
+ * cannot offer the card for a dataset it would then warn about. Keyed on the family half, which is
+ * what the correspondence names. An unknown family reads as "yes", `familyCan`'s rule.
+ */
+export function familyInNeuronBridge(key: string): boolean {
+  const family = familyOf(key)
+  if (!family) return true
+  return isCoveredDataset(family.sourceId, family.family)
 }
 
 // ---------------------------------------------------------------------------
@@ -543,6 +568,17 @@ const ANALYSES: WizardOption<AnalysisId>[] = [
     },
   },
   {
+    id: 'lmMatches',
+    requiresNeuronBridge: true,
+    label: 'Light-microscopy matches',
+    blurb:
+      'NeuronBridge: the GAL4/split-GAL4 lines whose expression matches each neuron, from Janelia’s precomputed CDS and PPPM searches.',
+    glyph: 'out.neuronbridge',
+    hint: {
+      text: 'Page through the neurons with ‹ ›; ← and → step through the matching lines. ☆ pins a match to the `Pinned` port. Matches are precomputed by NeuronBridge, so nothing here is searched live.',
+    },
+  },
+  {
     id: 'neurons',
     label: 'Neuron table only',
     blurb: 'No analysis, just the data. Build on it with your own queries and viewers.',
@@ -625,7 +661,7 @@ const CROSS_ANALYSES: WizardOption<AnalysisId>[] = [
 
 /**
  * The third question's answers: the cross-dataset four where more than one dataset was chosen,
- * the nine single-dataset techniques otherwise.
+ * the ten single-dataset techniques otherwise.
  *
  * The list is decided by the first answer and then narrowed by `available` against **every**
  * dataset in it — so a comparison between one connectome with skeletons and one without offers
@@ -756,6 +792,14 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     blurb: 'One point per type pair, each dataset’s count on an axis.',
     hint: {
       text: 'A pair on the diagonal is wired the same in both; one far off it is the asymmetry. Both axes are log, because synapse counts span orders of magnitude — a pair absent from one dataset has no logarithm and the caption says how many were dropped.',
+    },
+  },
+  {
+    id: 'neuronbridge',
+    label: 'NeuronBridge',
+    blurb: 'One neuron per page, its matching lines as thumbnails beside the EM rendering.',
+    hint: {
+      text: 'Click a line to compare it with the neuron; click either image for full screen.',
     },
   },
   {
@@ -970,6 +1014,14 @@ export const VIEWS: Record<AnalysisId, Partial<Record<VisualisationId, ViewSpec>
   xnblast: {
     dendrogram: { type: 'out.dendrogram' },
     heatmap: { type: 'out.heatmap', params: { scale: 'sequential' } },
+  },
+  /*
+   * No analysis node: the card takes the neuron table and the dataset and fetches for itself,
+   * like Neuron Topology under `neurons`. The gate is on the analysis rather than the viewer
+   * because the viewer is the whole of the answer.
+   */
+  lmMatches: {
+    neuronbridge: { type: 'out.neuronbridge' },
   },
   neurons: {
     table: { type: 'out.table' },
