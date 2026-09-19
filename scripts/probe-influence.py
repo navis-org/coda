@@ -244,6 +244,41 @@ def check_emitted_helper(rows, index, probe):
             f"({len(into_last)} targets in layer {last})",
         )
 
+        # And the same numbering once `Transfer floor` has emptied a hop, which is the case every
+        # check above is blind to because they all run at a floor of 0.
+        #
+        # This is not a corner. An upstream walk conserves mass, so every hop's ribbons sum to the
+        # same total and a deeper hop merely spreads it over more cell-type pairs — the floor
+        # therefore takes whole *trailing* hops (layer 0 first, the furthest from the seed) long
+        # before it thins a shallow one. Numbered from the deepest hop *walked* rather than the
+        # deepest one still in the table, the survivors come back as 1..n; the canvas renumbers
+        # densely when it draws, so the diagram is identical to a shorter run and nothing says the
+        # budget stopped mattering. That is what was reported, and both sides now count from a hop
+        # that is actually in the table.
+        floor = max(
+            float(v) for lay, v in zip(flow["layer"], flow["value"]) if int(lay) == 0
+        )
+        _, floored = ns["coda_influence"](
+            seeds,
+            direction="inputs",
+            hops=hops,
+            min_weight=1,
+            gain=probe["gain"],
+            denominator=denominator,
+            all_segments=True,
+            frontier_limit=0,
+            seed_mass=1.0,
+            client=None,
+            flow_floor=floor,
+        )
+        left = sorted({int(lay) for lay in floored["layer"]})
+        check(
+            len(left) > 0 and len(left) < len(keys) and left == list(range(len(left))),
+            f"denominator={denominator!r}: a floor that empties the deepest hop still numbers "
+            f"the columns from one that is left ({len(keys)} columns to {len(left)}, "
+            f"running {left[0]}..{left[-1]})",
+        )
+
 
     # The two denominators agree here *because* min_weight is 1: the fetched input list is then
     # the whole input list. They part company as soon as it is not, which is the difference the

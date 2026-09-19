@@ -1067,8 +1067,14 @@ searches give `[a, b, a, b, c, d]` against a unique `[a, b, c, d]`, which is the
 
 The fix is one dedupe at the point a table becomes a list rather than a guard in each reader, and
 it fixes `seedMass` on the way: `1 / seeds.length` over the raw column started a `share` run with
-less than one whole unit of drive in it. `combineHalves` now also throws when the two lists differ
-in length, because that is the only way a second route to the same mistake can announce itself.
+less than one whole unit of drive in it. `combineHalves` also throws when `scored` is not as long
+as the channelled half is wide, because that is the only way a second route to the same mistake can
+announce itself — and it was the half of this fix that the notes claimed and the code did not have.
+Both failure shapes are silent: too short and one neuron's influencers are filed under another's
+name; too long and `channels[c]` reads off the end of the `Float64Array` into `undefined`, scores
+`NaN`, and `influenceTable`'s `score > floor` drops the row, so the neuron simply is not in the
+ranking. Nothing types the correspondence between a list and a channel index, which is why it has
+to be asserted.
 
 ### The Transfers port costs no fetch at all, and it replaced a Network port
 
@@ -1150,10 +1156,29 @@ the same column. The diagram's columns would then be two different measurements 
 invisible in the widths. Unlike the `hops` column, though, an empty *port* reads as a broken node,
 so this one gets a `ctx.warn` naming the two controls that bring it back.
 
-**The columns are numbered from the depth the walk reached**, not from the budget it was given. A
-four-hop budget that runs out of graph after two would otherwise number its layers 2 and 3, leaving
-an empty column in front of them that a reader of the table cannot tell from a filter. The drawing
-renumbers densely either way, so this is about the table reading correctly on its own.
+**The columns are numbered from a hop that is in the table** — not from the budget the walk was
+given, and not from the depth it reached either. A four-hop budget that runs out of graph after two
+would otherwise number its layers 2 and 3, leaving an empty column in front of them that a reader
+of the table cannot tell from a filter. The drawing renumbers densely either way, so this is about
+the table reading correctly on its own.
+
+Counting from the depth *reached* was the first answer and it was half of one, for a reason that is
+a property of the metric rather than an oversight: **an upstream walk conserves mass**, so every
+hop's ribbons sum to the same total and a deeper hop merely spreads it over more cell-type pairs.
+`Transfer floor` therefore takes whole *trailing* hops long before it thins a shallow one — on a
+male-CNS ball the largest single ribbon fell from 9.3e-3 at hop 3 to 2.5e-4 at hop 6 against a
+default floor of 2e-3 — and a hop whose every ribbon was floored away is exactly as absent from the
+table as a hop the walk never took. Numbered from the deepest hop *walked*, a six-hop run whose
+last two hops were floored came back as layers 2..5, and the dense renumbering made it invisible:
+the identical diagram to a four-hop run, from a table whose `layer` counted from a column that is
+not there. So `deepest` and `shallowest` are taken over the **kept** ribbons, and the mirror case
+matters too — travelling `outputs` the layer is the hop count itself, so there the gap opens at the
+shallow end. `flowLayerOf` and the notebook helper carry the same two lines, and both are tested in
+both directions.
+
+The reporting half of the same finding: the run *did* warn, and the warning was true and not
+actionable — "Transfer floor left 57% of the drive out of the Transfers table" says nothing about
+having removed the last two columns whole, which is the part somebody would have acted on.
 
 `Transfer floor` is a **share** of the mass the walk started with rather than an absolute one, because
 the total depends on `Seed weighting`: `each` starts one unit per seed, so an absolute floor would

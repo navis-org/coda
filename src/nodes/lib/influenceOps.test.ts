@@ -423,6 +423,42 @@ describe('combineHalves', () => {
     }
   })
 
+  it('refuses a scored list the channels cannot index, rather than answering NaN', async () => {
+    /*
+     * The channels are positional and nothing types the correspondence, so a `scored` list of
+     * the wrong length is a wrong answer wearing the right shape: too long and the read runs off
+     * the `Float64Array` into `undefined`, scoring `NaN` that `influenceTable`'s `score > floor`
+     * then drops in silence; too short and one neuron's influencers are filed under another's
+     * name. The node deduplicates both lists at the one point a table becomes a list — this is
+     * what speaks if a second route to that mistake ever appears.
+     */
+    const { fetch } = fakeSource()
+    const channelled = await propagate({
+      seeds: ['A', 'D'],
+      perSeedChannels: true,
+      direction: 'outputs',
+      hops: 1,
+      gain: 0.5,
+      fetch,
+      denominators: totalsOf(),
+    })
+    const pooled = await propagate({
+      seeds: ['C'],
+      direction: 'inputs',
+      hops: 1,
+      gain: 0.5,
+      fetch,
+    })
+    expect(() => combineHalves(channelled, pooled, ['A', 'D', 'B'])).toThrow(
+      /3 neurons.*2 per-seed channels/,
+    )
+    expect(() => combineHalves(channelled, pooled, ['A'])).toThrow(
+      /1 neurons.*2 per-seed channels/,
+    )
+    // The matching pair is still the ordinary case and still answers.
+    expect(combineHalves(channelled, pooled, ['A', 'D']).size).toBeGreaterThan(0)
+  })
+
   it('keeps the seeds apart, so the answer is per source rather than per set', async () => {
     const { fetch } = fakeSource()
     const forward = await propagate({
@@ -661,6 +697,80 @@ describe('influenceFlow', () => {
     expect([...new Set(rows.map((r) => r.layer))].sort()).toEqual([0, 1])
     expect(atLayer(1)).toBeCloseTo(1, 10)
     expect(atLayer(0)).toBeCloseTo(1, 10)
+  })
+
+  it('numbers the columns from a hop the floor kept, travelling upstream', async () => {
+    /*
+     * The half that shipped wrong. An upstream walk conserves mass, so every hop's ribbons sum
+     * to the same total and a deeper hop merely spreads it over more cell-type pairs — which
+     * means `Transfer floor` takes whole *trailing* hops long before it thins a shallow one.
+     * Numbered from the deepest hop the walk took rather than the deepest one still in the
+     * table, the survivors came back as layers 1..n with nothing at 0; the drawing renumbers
+     * densely, so a six-hop run whose last two hops were floored away drew the identical
+     * diagram to a four-hop run from a table whose `layer` counted from a column that is not
+     * there.
+     *
+     * `a1` is a dead end, so hop 2 carries only what went to `a2` — a quarter of the drive,
+     * against the whole of it at hop 1.
+     */
+    const edges: Record<string, Array<[string, number]>> = {
+      s: [
+        ['a1', 30],
+        ['a2', 10],
+      ],
+      a2: [['b', 5]],
+    }
+    const half = await propagate({
+      seeds: ['s' as NeuronId],
+      direction: 'inputs',
+      hops: 2,
+      gain: 0.5,
+      ribbonsByType: true,
+      fetch: source(edges, TYPES),
+    })
+    const layersAt = (floor: number) => {
+      const flow = influenceFlow({ half, direction: 'inputs', floor })
+      return {
+        layers: [...new Set(rowsOf(flow.table).map((r) => r.layer))].sort((a, b) => a - b),
+        rows: rowsOf(flow.table),
+      }
+    }
+    // Both hops kept: the seed is in the last column, its influencers' influencers in the first.
+    expect(layersAt(0).layers).toEqual([0, 1])
+    // The floor removes hop 2 whole. What is left is one column, and it is column 0.
+    const trimmed = layersAt(0.5)
+    expect(trimmed.rows.map((r) => `${r.source}>${r.target}`)).toEqual(['A>S'])
+    expect(trimmed.layers).toEqual([0])
+  })
+
+  it('numbers the columns from a hop the floor kept, travelling downstream', async () => {
+    /*
+     * The mirror, and the reason the fix is not one-sided: travelling `outputs` the layer is the
+     * hop count itself, so the gap opens at the *shallow* end when the floor empties hop 1.
+     * Nothing bounds the mass in this direction — a partner whose published input total is
+     * smaller than the edge into it carries more drive onwards than it received — which is what
+     * lets a deeper hop outweigh a shallower one here and never upstream.
+     */
+    const edges: Record<string, Array<[string, number]>> = { s: [['x', 1]], x: [['y', 10]] }
+    const types = { s: 'S', x: 'X', y: 'Y' }
+    const half = await propagate({
+      seeds: ['s' as NeuronId],
+      direction: 'outputs',
+      hops: 2,
+      gain: 0.5,
+      ribbonsByType: true,
+      fetch: source(edges, types),
+      denominators: async (ids) =>
+        new Map(ids.map((id) => [id, id === ('x' as NeuronId) ? 100 : 1])),
+    })
+    const layersOf = (floor: number) =>
+      rowsOf(influenceFlow({ half, direction: 'outputs', floor }).table)
+    // S→X carries 0.01 and X→Y ten times that, so the floor takes the hop nearest the seed.
+    expect(layersOf(0).map((r) => `${r.layer}:${r.source}>${r.target}`)).toEqual([
+      '0:S>X',
+      '1:X>Y',
+    ])
+    expect(layersOf(0.05).map((r) => `${r.layer}:${r.source}>${r.target}`)).toEqual(['0:X>Y'])
   })
 
   it('answers empty where there is no single walk to lay out', () => {

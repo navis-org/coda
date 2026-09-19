@@ -785,6 +785,17 @@ export function splitHops(
 }
 
 /**
+ * How many per-seed channels a walk is carrying, or `undefined` where it carried nothing.
+ *
+ * Read off the first entry rather than recorded on the result: every `Float64Array` in a
+ * `Spread` already states the count, which is why `Spread` deliberately does not carry it.
+ */
+function channelWidth(result: PropagateResult): number | undefined {
+  for (const term of result.terms) for (const values of term.values()) return values.length
+  return undefined
+}
+
+/**
  * Combine the two halves into a score per neuron of the scored set.
  *
  * For any `a + b = k`, `z_0' W^k s = z_b' W^a s`, so one decomposition per `k` is enough and
@@ -813,6 +824,27 @@ export function combineHalves(
   const channelledDepth = channelled.terms.length - 1
   const pooledDepth = pooled.terms.length - 1
   if (channelledDepth < 0 || pooledDepth < 0) return scores
+
+  /*
+   * The channels are positional, so a `scored` list of the wrong length is not an error anywhere
+   * — it is a wrong answer that looks like a right one.
+   *
+   * Short, and every channel past the end of `scored` is dropped: one neuron's influencers come
+   * back filed under another's name. Long, and `channels[c]` reads off the end of the
+   * `Float64Array`, yields `undefined`, turns the total into `NaN`, and `influenceTable`'s
+   * `score > floor` then drops the row — so the neuron vanishes from the ranking with nothing
+   * said. That is the failure the node's own dedupe of both lists exists to prevent; this is the
+   * guard that speaks if a second route to it ever appears, since neither half can be checked
+   * against the other by the type system.
+   */
+  const channels = channelWidth(channelled)
+  if (channels !== undefined && channels !== scored.length) {
+    throw new Error(
+      `combineHalves: ${scored.length} neurons to score against ${channels} per-seed channels. ` +
+        `The channelled half must have been seeded with exactly the neurons being scored, in ` +
+        `the same order — deduplicate both at the point a table becomes a list.`,
+    )
+  }
 
   // Accumulated densely and written out once. The key set is fixed and index-addressable by
   // channel, where a `Map` get/set pair per contribution is two hashes per (overlap × candidate).
@@ -1190,14 +1222,28 @@ export interface InfluenceFlowOptions {
  * inverted arrows.
  *
  * So travelling `inputs` the layer is the hop count reversed, and travelling `outputs` it is the
- * hop count itself. `deepest` is **the hop the walk actually reached** rather than the budget it
- * was given: a four-hop budget that runs out of graph after two would otherwise number its layers
+ * hop count itself. Both are counted from **a hop that is in the table**: `deepest` and
+ * `shallowest` are the extremes over the ribbons the floor *kept*, not over every ribbon the walk
+ * produced. A four-hop budget that runs out of graph after two would otherwise number its layers
  * 2 and 3, leaving an empty column 0 in front of them that a reader of the table cannot tell from
  * a filter. The drawing renumbers densely either way, so this is about the table reading correctly
  * on its own.
+ *
+ * **A hop whose every ribbon fell under `Transfer floor` is as absent from the table as a hop the
+ * walk never took**, which is the half that shipped wrong. Because an upstream walk conserves
+ * mass, every hop's ribbons sum to the same total and a deeper hop simply spreads it over more
+ * cell-type pairs — so the floor takes whole trailing hops long before it thins a shallow one. A
+ * six-hop run whose last two hops were floored away numbered its surviving layers 2..5, and the
+ * drawing's dense renumbering made that invisible: the same diagram as a four-hop run, from a
+ * table whose `layer` no longer counted from anything.
  */
-function flowLayerOf(hop: number, deepest: number, outward: boolean): number {
-  return outward ? hop - 1 : deepest - hop
+function flowLayerOf(
+  hop: number,
+  deepest: number,
+  shallowest: number,
+  outward: boolean,
+): number {
+  return outward ? hop - shallowest : deepest - hop
 }
 
 /**
@@ -1231,14 +1277,23 @@ export function influenceFlow(opts: InfluenceFlowOptions): InfluenceFlowResult {
   if (!half) return { table: tableFromRows(schema, []), floored: 0 }
 
   const outward = opts.direction === 'outputs'
-  /** The deepest hop the walk reached, which is what the columns are counted from. */
+  /**
+   * The hops the columns are counted from — over the **kept** ribbons, which is the whole of the
+   * rule. See `flowLayerOf`: a hop the floor emptied is not a column, so numbering from it leaves
+   * a gap at one end that only the drawing's dense renumbering hides.
+   */
   let deepest = 0
+  let shallowest = Infinity
   let carried = 0
   let floored = 0
   for (const ribbon of half.ribbons.values()) {
-    if (ribbon.hop > deepest) deepest = ribbon.hop
     carried += ribbon.mass
-    if (!(ribbon.mass > opts.floor)) floored += ribbon.mass
+    if (!(ribbon.mass > opts.floor)) {
+      floored += ribbon.mass
+      continue
+    }
+    if (ribbon.hop > deepest) deepest = ribbon.hop
+    if (ribbon.hop < shallowest) shallowest = ribbon.hop
   }
 
   /*
@@ -1252,7 +1307,7 @@ export function influenceFlow(opts: InfluenceFlowOptions): InfluenceFlowResult {
   const rows = [...half.ribbons.values()]
     .filter((ribbon) => ribbon.mass > opts.floor)
     .map((ribbon) => ({
-      [LAYER_COLUMN]: flowLayerOf(ribbon.hop, deepest, outward),
+      [LAYER_COLUMN]: flowLayerOf(ribbon.hop, deepest, shallowest, outward),
       source: ribbon.from,
       target: ribbon.to,
       value: ribbon.mass,
