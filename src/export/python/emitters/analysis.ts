@@ -470,7 +470,21 @@ registerEmitter('neuron.paths', (ctx) => {
   }
 
   ctx.require('neuprint', 'fetch_paths')
+  ctx.require('networkx')
+  ctx.helper('coda_paths_network')
   const out = ctx.output('paths')
+  /*
+   * Bound, and it has to be: `emit.ts` binds every output port of a node whose emitter produced
+   * code, so a port the cell never assigns is a name a downstream cell refers to and nothing
+   * creates. That went unnoticed while nothing downstream read it — `out.network` ignores its
+   * `Layout` socket and the fixture fed it from `net.build` — and `out.flowChart` reads it, which
+   * is how `check-export.py` came to report `undefined name 'paths_network'`.
+   *
+   * `Layout` is left unbound, which is the honest half: an ELK arrangement has no equivalent
+   * here, and no emitter reads that port. Binding it to something invented would be worse than
+   * a name nothing asks for.
+   */
+  const network = ctx.output('network')
 
   return [
     ...ctx.note(
@@ -485,6 +499,9 @@ registerEmitter('neuron.paths', (ctx) => {
     `    max_path_length=${maxHops},`,
     `    client=${c},`,
     `)`,
+    ``,
+    // The graph the routes span, which is what Coda's Network port carries.
+    `${network} = coda_paths_network(${out})`,
   ]
 })
 

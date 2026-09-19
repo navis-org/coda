@@ -89,6 +89,9 @@ export type VisualisationId =
   | 'pie'
   | 'heatmap'
   | 'network'
+  | 'flowChart'
+  | 'sankey'
+  | 'rank'
   | 'metrics'
   | 'viewer3d'
   | 'topology'
@@ -691,6 +694,30 @@ const VISUALISATIONS: WizardOption<VisualisationId>[] = [
     },
   },
   {
+    id: 'flowChart',
+    label: 'A flow chart',
+    blurb: 'The circuit diagram: labelled boxes in columns, arrows as thick as the connection.',
+    hint: {
+      text: 'The figure a connectome paper prints, and what a dozen-node path result wants — the Network Viewer’s force layout has nothing to arrange at this size. Feedback connections are drawn dashed rather than hidden.',
+    },
+  },
+  {
+    id: 'sankey',
+    label: 'A Sankey diagram',
+    blurb: 'The drive itself, hop by hop: bands as wide as the influence that crossed.',
+    hint: {
+      text: 'Every band is drive that crossed, so a column’s total is the whole of what reached that depth. The caption measures how much stops short instead of assuming the flow conserves — the card above says why it does.',
+    },
+  },
+  {
+    id: 'rank',
+    label: 'A rank plot',
+    blurb: 'One dot per neuron, largest score first, with the running share underneath.',
+    hint: {
+      text: 'Both axes are logarithmic, because influence scores span decades and a linear axis draws all but the largest as one flat line. Seeds are ringed and left out of the share below, since they carry most of it.',
+    },
+  },
+  {
     id: 'metrics',
     label: 'Graph metrics',
     blurb: 'Density, components, degree distribution — the numbers rather than the picture.',
@@ -800,7 +827,32 @@ export const VIEWS: Record<AnalysisId, Partial<Record<VisualisationId, ViewSpec>
    */
   influence: {
     table: { type: 'out.table' },
+    /*
+     * `value` is `influence` on both of the shapes this can be wired to, which is the whole of
+     * what the rename in `bodyOf`'s influence arm buys: the regrouped ranking reads exactly like
+     * the one the node emits, so a viewer with column params does not have to know which other
+     * viewer was ticked. `flagColumn` is what keeps the share panel honest — the seeds carry most
+     * of the total and a curve that includes them says nothing about the rest.
+     */
+    rank: {
+      type: 'out.rank',
+      params: { value: 'influence', labelColumn: 'type', flagColumn: 'isSeed' },
+    },
     heatmap: { type: 'out.heatmap', params: { scale: 'sequential' } },
+    /*
+     * Off the `Transfers` port, which is the drive the walk already carried and so costs no
+     * second fetch. The four pickers are named rather than left to resolve: they are `optional`,
+     * so empty is a decision and an unset one draws nothing at all.
+     */
+    sankey: {
+      type: 'out.sankey',
+      params: {
+        layerColumn: 'layer',
+        sourceColumn: 'source',
+        targetColumn: 'target',
+        valueColumn: 'value',
+      },
+    },
   },
   /*
    * A paths query answers with a network *and a layout for it* — the one place a viewer is handed
@@ -816,6 +868,21 @@ export const VIEWS: Record<AnalysisId, Partial<Record<VisualisationId, ViewSpec>
         edgeSizeBy: 'weight',
         showLabels: true,
       },
+    },
+    /*
+     * The same network, drawn as the circuit diagram — and the one viewer here that is handed no
+     * layout. `out.flowChart` sizes its boxes to their own text and lays itself out from that,
+     * where the Paths layout is centres computed against a 120x36 placeholder; honoured, those
+     * positions overlap every box whose label is wider than the placeholder.
+     *
+     * `layerColumn` is left empty on purpose, which means longest path — and a Paths network's
+     * `hop` column *is* longest-path layering, so naming it would be a second spelling of the
+     * same arrangement. `role` is `source`/`target`/`via` here, the one encoding a route picture
+     * wants.
+     */
+    flowChart: {
+      type: 'out.flowChart',
+      params: { labelColumn: 'type', nodeColorMode: 'categorical', nodeColorBy: 'role' },
     },
     table: { type: 'out.table' },
   },

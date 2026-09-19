@@ -28,6 +28,17 @@ const NO_EMITTER: Record<string, string> = {
     'ZapBench cells to fish2 neurons. `neuprint_fetch_custom` would take the same `IN` lookup, ' +
     'but its cells come from a ZapBench Traces selection, which R cannot read (see ' +
     '`zapbench.traces`), so the chunk would read a variable nothing binds.',
+  'out.sankey':
+    'A flow diagram. `ggalluvial` is the faithful route and is a good one \u2014 `geom_alluvium` ' +
+    'plus `geom_stratum` over a table of exactly this shape \u2014 but it is a **fourth package** ' +
+    'in a document whose libraries are neuprintr, dplyr, ggplot2 and navis, added for one node. ' +
+    'Base ggplot2 has no equivalent: a band is a filled quadrilateral between two stacked ' +
+    'columns, and `geom_ribbon` gives no stacking or ordering, so the honest alternative is a ' +
+    'page of hand-built polygons. What settles it is the rule `out.topology` records \u2014 an ' +
+    'emitter has to be checked by *running* it, and a flow diagram whose widths silently stopped ' +
+    'conserving would look entirely plausible, which is the one failure this viewer measures its ' +
+    'own caption against. The Transfers table itself exports perfectly well: four ordinary ' +
+    'columns, so a reader has everything they need to draw this in whichever package they have.',
   'out.topology':
     'Neuron Topology \u2014 see the Python note. The natverse has the pieces (`nat::strahler_order`, `nat::seglengths`), but the axon/dendrite split is navis\u2019s synapse flow centrality with a branch-point correction and a fragment-stitching pass, and R has no counterpart that agrees with it node for node. Emitting an R split that quietly differs from the card is the failure this entry exists to avoid.',
   'compare.matchTypes':

@@ -2677,6 +2677,486 @@ any other table, so offering them here as well would be two routes to one file. 
 export because the card is a grid of tiles, several drawing their own picture, and an SVG would
 have to invent a composite nothing renders — `DatasetSummaryViewer`'s call, for its reason.
 
+## Flow Chart: the same material as the Network Viewer, at the other end of the size range
+
+`out.network` draws a WebGL disc per node with the label beside it, which is the right trade at
+thirty-six thousand nodes and the wrong one at twelve, where the label *is* the node and the
+weight on the arrow is the point. `out.flowChart` is the other end: SVG, boxes sized to their
+text, arrows routed around what is in the way, a number on each.
+
+**They draw the same material and the choice between them is about size**, which is exactly the
+fact no category or socket type could relate them by — hence the See Also group naming the pair
+explicitly. Below about twenty nodes a force layout has nothing to arrange; above a few hundred
+a layered drawing has too much. `FLOW_NODES_WARN` (120) and `MAX_BOXES_DRAWN` (600) are the two
+points on that line, and [limits.md](limits.md) carries the row.
+
+### SVG rather than WebGL, and the layout inside the render
+
+Three things follow from the boxes being text, and the first is what decides the rest.
+
+**The layout cannot run until the labels are measured.** A box is as wide as the string in it,
+so nothing upstream of a renderer can place one — which is why this node has **no `Layout`
+socket**, departing from `out.network` deliberately. `Paths` computes its arrangement against
+`NETWORK_NODE_SIZE`, a 120 × 36 placeholder standing in for a disc; honoured here those positions
+overlap every box whose text is wider and waste the gap beside every box that is narrower. The
+canvas's own rule one level down: only the thing that knows the font can say how big the box is.
+
+**Measurement is a shared offscreen canvas**, not a DOM pass: `measureText` is synchronous and
+needs no layout, which is what lets the whole arrangement stay inside the render. jsdom's stub
+answers `text.length * 6`, the same estimate `truncateLabel` uses, so the layout genuinely runs
+under test rather than being skipped — and a wrong answer there is a wrong *size*, never a crash.
+
+**So the layout is synchronous.** Every other layout in the app is async and each pays for it in
+a settle-on-mount effect and a frame of the wrong picture; at this size the pass is microseconds
+and can just be part of the render.
+
+### Why the layout is not ELK
+
+`layout/network.ts` already runs ELK layered over a `NetworkValue` and `Paths` emits the result
+of one, so not using it wants an argument. Four, each about this drawing rather than about ELK:
+
+- **The layering is already decided.** `flowChartOps.flowGraph` assigns it, from a column where
+  one is picked — and there is no way to hand ELK a layer assignment. `elk.partitioning`
+  *ignores* one fed back to it, which [canvas.md](canvas.md) records from a sweep. Two layerers
+  on one picture is one of them being silently overruled.
+- **Back edges have to keep their direction.** ELK breaks cycles by reversing edges internally
+  and returns a route for the reversed one, so a recurrent connection comes back
+  indistinguishable from a feed-forward one. Telling feedback apart is most of what makes this
+  node usable on a `Connectivity` fan rather than only on a `Paths` result.
+- **The box sizes are text**, so the layout runs in the viewer, where ELK's worker round trip
+  buys nothing.
+- **Synchronous is worth a lot here**, per above.
+
+What is *not* re-derived is the algorithm. `flowChartLayout.ts` is ordinary Sugiyama with the
+layering step removed: dummy nodes for edges spanning more than one layer, barycentre sweeps to
+order within a layer, then coordinates.
+
+**The dummies are the load-bearing part** and the thing a hand-rolled layered drawing usually
+leaves out. Without them a skip-layer arrow runs straight through whatever boxes lie between its
+ends, which is the single most obvious defect in drawing a connectome this way. With them the
+arrow gets a corridor that the ordering step keeps clear, because the corridor *is* a node as far
+as the ordering is concerned. `flowChartLayout.test.ts` asserts it directly: on `a→b→c→d` plus
+`a→d`, no interior point of the long arrow falls inside `b`'s or `c`'s box.
+
+Two smaller decisions in the same pass. The barycentre is **weighted by the edge's weight**,
+unlike `networkLayout.ts`' version — the strongest connection is the one a reader traces, so it
+is the one worth drawing straight; a null weight counts as 1 rather than 0, since at 0 it would
+exert no pull and let its endpoints drift to opposite ends of their layers. And several arrows at
+one box are **fanned along its face**, sorted by where they are heading, or ten connections at a
+hub overlap into one thick line with the arrowheads piled on each other.
+
+### A layer is not a hop, and that is the whole of the layering control
+
+Longest-path layering is a fact about the graph handed in: a node sits one column right of the
+furthest-back thing that reaches it. That is exactly right for a `Paths` network, which is
+assembled from routes and whose `hop` column is longest-path layering by construction.
+
+It is wrong for an `Influence` network, and wrong in a way that looks fine. `hops` there is the
+*fewest* synapses from the seed, and the induced subgraph of the top scorers is full of long
+chains — so a neuron one synapse from the seed lands five columns out because something else
+reaches it the long way round. Both pictures are internally consistent and only one answers the
+question somebody asked.
+
+So the layer source is a **column picker, `optional`, empty meaning longest path**, and the
+caption says which ran. Deliberately *not* "automatic, preferring a column called `hop` or
+`hops`": that is a substitution nobody asked for, and a network carrying a column of that name
+meaning something else would be silently layered by it — the failure `resolveColumn`'s rule 3
+already has a record of on `zapbench.traces` and `out.scatter`. Values read off a column are
+**renumbered densely**, because the numbers are a measurement and the layers are positions: 0, 2
+and 5 hops draw as three adjacent columns, not six with gaps. An unmeasured row lands in one
+layer after every measured one rather than in layer 0 — null is not zero, `numeric()`'s trap.
+
+### Four edge kinds, told apart by shape rather than by colour
+
+A layering makes every edge one of four things, and a drawing that does not tell them apart is
+the main thing wrong with drawing a connectome as a flow chart. `forward` is the ordinary case.
+`back` is a recurrent connection, and drawn like a forward edge it is an arrow pointing right
+through the boxes between its ends — which reads as a data error rather than as feedback.
+`within` joins two nodes in one column and has no length to be drawn along. `self` is an autapse,
+which has no two ends at all.
+
+So `back` is **dashed**, `within` bulges off the flow axis so it cannot be mistaken for a
+connection to the next layer, and `self` is a loop on the box. All four take the same colour: the
+kinds differ in *shape*, because colour is already spent on the data. That classification is
+`flowChartOps`', next to the layering that defines it, rather than inferred from coordinates
+after a layout has run — which is also what lets both exporters reproduce it.
+
+### The fold is presentational, and states what that costs
+
+`Fold past` keeps the busiest N boxes in each layer and folds the rest into one `+N others`,
+ranked by total incident weight rather than by degree — a box wired to twenty things by one
+synapse each is exactly what somebody folding a layer wants folded away. Survivors come back in
+**table order**: the ranking decides which boxes stay, never where they sit.
+
+It changes which boxes exist, so it looks like it should reach the output port. It does not, and
+the cost is stated where it is paid — a folded network is not available downstream — because the
+alternative is that nudging a figure's density re-runs a connectome query. Clicking a folded box
+selects its *members*, since `Selected` carries neuron ids and `+7 others` is not one.
+
+Merged edges carry a **summed weight and nothing else**, which is `net.build`'s rule for parallel
+links and its stated reason: `weight` is the one additive channel, and a folded edge standing for
+eleven connections across four regions has no single region.
+
+### What was checked in a real browser
+
+`pnpm probe:flowchart-draw` (Chrome over CDP, the node's own demo link, no credential). Each of
+its properties is one jsdom cannot reach: **every box is at least as wide as the text in it**,
+**no two boxes overlap**, **no arrow passes through a box**, **the drawing fits the card**,
+**clicking a box selects it**, **the wheel zooms in toward the reader and holds the point under
+the cursor**, **an arrowhead points along the stroke it ends**, and **hovering an arrow
+highlights that arrow and no other**.
+
+**The count is deliberately not written down here.** It was, in three files, and by the time
+anyone compared them they said five, six and eight against a script that checked eleven — a
+number restated in four places drifts in four directions. `probeReport()` prints the real tally
+at the end of a run, and the enumeration lives in the script's own header; what belongs in prose
+is which properties earned their place.
+
+The first is the one that earns the probe. A box is sized by a canvas `measureText` and drawn by
+`.chart text`, which takes `--font-ui` — two code paths reading two font strings unless something
+makes them one. They agree wherever `system-ui` resolves, which is every machine anybody would
+test on, and part company exactly where it does not. So the measurer reads the variable rather
+than spelling the family out, and the truncated string is stored beside the width it was measured
+for: two independent truncations is the same failure one step later.
+
+The label's own colour is `colors.ts`' `inkOn`, not a second luminance rule — two viewers filling
+marks from one palette picking different inks for the same slot is exactly the drift that function
+exists to prevent.
+
+**Three more were reported from use, and all three are about the drawn stroke rather than the
+layout** — which is why the probe grew the zoom and arrowhead checks. **The wheel ran
+backwards and did not hold the pointer**: `useWheelZoom`'s `factor` is above 1 for a scroll
+*away* from the reader, i.e. zoom out (`zoomRoiWindow` reads it the same way), and this
+multiplied by it; and the pan is stored on top of a centring term that is a function of the zoom,
+so re-centring had to be measured at the **new** zoom — measured at the old one the drawing slid
+away from the cursor as it magnified. **An arrowhead read the waypoints, not the stroke**:
+orthogonal draws `orthogonalCorners(points)`, whose last leg is axis-aligned, where the raw
+polyline's last leg is the diagonal that leg replaced, so heads sat at an angle to the line they
+end — 61.7° off at worst, confirmed by putting the old reading back under the new check. And
+**`curved` drew straight lines**: the Catmull-Rom pass put its control points exactly on the line
+for a two-point route, which is every arrow between adjacent layers, so the option did nothing on
+most of a chart. It is a cubic per segment with tangents along the segment's dominant axis now —
+the same axis `orthogonalCorners` turns on, so the two routings bend in the same places and
+differ only in how sharply, and a segment whose ends share the cross axis stays straight because
+a horizontal arrow is a horizontal arrow.
+
+**Hovering an arrow highlights it, and the highlight is one extra path drawn over the arrow
+layer** — `DendrogramLinks`' arrangement and its measured reason, which matters more here because
+`FlowArrows` is memoised: a `hover` prop would defeat that memo outright and put every *other*
+arrow back through reconciliation on each pointer move. It is drawn between the arrows and the
+boxes, where the arrows themselves are, and traces the same `ArrowMark` the arrow does so the two
+cannot end up on different geometry. A highlighted feedback arrow keeps its dash: the kinds are
+told apart by shape, not by colour. The width is `+2` rather than a multiplier, because a factor
+is invisible on the thinnest arrow of a weighted chart and a slab on the thickest.
+
+**The router turns on the flow axis, not on whichever axis is longer.** That is the fix for a
+defect the browser probe caught once its coordinates were right: a steep connection turned early,
+running its long leg down the *source box's own face* — which in a layered chart is where the rest
+of that column sits, so it grazed its neighbours, measured at 3.4px into `T5d`. The free space is
+between the layers, and only the flow axis says where that is, so `orthogonalCorners` and
+`curveControls` both take it. What it costs is that arrows between one pair of layers now share a
+channel and overlap along it; per-edge channel assignment is the real answer and is not here.
+
+One note for the next person to add a browser check: **a regex written inside an `evaluate`
+template literal has its backslashes eaten before the page sees it** — `\d` becomes `d` — so the
+pattern matches nothing and a check over "every arrow" silently passes over an empty list. It did
+exactly that here, and `0 checked` in the output is what gave it away. Raw strings come back and
+the parsing happens in Node; eslint's `no-useless-escape` flags the mistake if it is made again.
+
+And the sharper one, from the same probe: **take a path's screen coordinates from the path's own
+`getScreenCTM()`, never the `<svg>`'s.** The arrows live inside two nested transforms — the plot's
+padding and the fit/zoom — and the svg's matrix carries neither, so a polyline built from it is
+off by the pad and wrong by the scale. "No arrow passes through a box" had been comparing that
+mis-placed polyline against real box rects and passing because nothing landed anywhere near them.
+Corrected, it failed immediately on a real defect, which is the second time a check here has been
+green for the wrong reason.
+
+**Two earlier defects were found by looking at the screenshot, and neither is reachable by any
+property above.** That is the part worth keeping: both make the picture *more* comfortably
+correct by every check the probe asks.
+
+**The fit would not magnify.** It was `Math.min(1, …)`, on the argument that a two-box chart blown
+up to fill a card reads as a different node and that the text grows with it. At eighteen boxes in
+a 1250 × 850 panel that drew about 340px across and left three quarters of the surface empty —
+which is the one thing expanding a card is for. `MAX_FIT` is 2 now, which keeps the argument's
+useful half: a chain of three boxes filling a wide panel would be 40px text beside a 12px
+interface.
+
+**Arrows ended at their layer band's edge rather than at the box's own face.** A band is as deep
+as the deepest box in its layer and every box is centred in it, so a box narrower than its widest
+neighbour sits inset from both edges and the arrowhead floats in the gap — about 40px on the demo
+graph, where `AOTU008` sets its layer's depth and `Mi1` shares it. Invisible in every unit fixture,
+which gives each box the same size and so makes band and box coincide; `flowChartLayout.test.ts`
+now has one with a 40px box beside a 200px one. The corridor points stay on their band edges,
+which is right — a corridor has no extent along the flow and *is* the layer as far as a route is
+concerned.
+
+### What the exporters do, and what running them found
+
+Neither library draws this, so both emit Coda's layering through a generated helper
+(`coda_flow_layers`) and then the nearest layered layout each has. **Both helpers agreed with the
+canvas on all six probe graphs on the first run; every bug was in the dozen lines that draw** —
+which is why `pnpm probe:flowchart` lifts the emitted *cell* out of each golden and executes it
+rather than stopping at the helper.
+
+Python gets `nx.multipartite_layout`, and **not** `nx_agraph.graphviz_layout(prog='dot')`, which
+lays out properly and needs pygraphviz — a system package a notebook has no business requiring.
+`topological_generations` is not a substitute: it is *earliest*-possible layering, so `a→c`
+beside `a→b→c` draws `c` in column 1 with the route through `b` running backwards out of it. Two
+divergences are stated in the cell: networkx does no crossing minimisation, and it draws every
+edge straight, so a skip-layer arrow crosses what is in the way.
+
+R gets `igraph::layout_with_sugiyama`, which is **the one library call in either document that
+does what the canvas does** — handed the layers it minimises crossings and inserts dummy vertices,
+exposed as `extd_graph`, so the arrow really is routed. Four things about that graph were measured
+rather than assumed, and the emitted cell got two of them wrong first:
+
+- **`extd_graph` carries only `orig` and `arrow.mode`.** Every attribute of the original edges is
+  gone, so `E(.g)$weight` was `NULL` and the widths and arrow labels were silently absent. `orig`
+  is the 1-based original edge index; reading through it gives each piece of a split edge the
+  original's value.
+- **A split edge is three edges there**, so labelling `E(.g)$label` printed the number three times
+  along one arrow.
+- **`sugi$layout` has a row per *real* vertex**, so plotting `extd_graph` with it is
+  `The layout has 4 rows, but the graph has 6 vertices`. The extended graph's coordinates are
+  `.g$layout`.
+- **Sugiyama's layer axis runs downwards**, so left-to-right needs the axes exchanged *and* the
+  layer axis negated. Exchanging them alone drew the circuit right to left — a figure that looks
+  perfectly plausible and is backwards.
+
+The gift in the same measurement: `arrow.mode` is already 0 on every piece of a split edge but the
+last, so a routed arrow draws one head at its real target and the emitter must not touch it.
+
+### A chart's name is an `aria-label` on screen and a `<title>` in the file
+
+Reported on the Sankey and true of **nine viewers**, which is why it is here rather than in one
+of their sections. A `<title>` that is a direct child of `<svg>` is the element's accessible name
+*and* a native browser tooltip over the whole drawing — so every chart here was opening a tooltip
+saying `Flow diagram of 8 boxes in 3 layers` on top of the hover card that says what the pointer is
+actually on. The bigger the chart, the longer it covers the useful one.
+
+So the live `<svg>` carries `role="img"` and `aria-label`, which is the same accessible name with
+no tooltip, and `serializeSvg` turns that label into a real `<title>` when it clones for export —
+where there is no pointer to interfere with and nothing else in the file can name the drawing. A
+builder that synthesises its own root (`scatterToSvg`, `networkToSvg`, `heatmapToSvg`) may set a
+`<title>` itself, so an existing one is left alone: two titles in one document is one of them being
+silently ignored.
+
+**A per-mark `<title>` is a different thing and stays.** `DendrogramViewer` puts one on a renamed
+leaf — deliberately, and its own comment argues why it beats a `chart-tooltip` there — and `Tiles`
+puts one on a pie slice. Those describe *one mark* and appear only over it, which is a tooltip
+somebody wants. What was wrong was the one over everything.
+
+The guard that caught the half-finished version is worth knowing about: `dendrogram.test.tsx` asks
+for the chart by `getByRole('img', { name: /Dendrogram of 4 leaves/ })`, so an accessible name that
+stops resolving fails a test rather than going quiet.
+
+## Rank Plot: a heavy-tailed measure, and the denominator every other view lacks
+
+A connectome is full of measures that span decades over a long tail — influence scores, degree,
+centrality, cluster sizes, NBLAST scores, synapse counts — and until this node the only way to
+draw one was a bar chart, which is the wrong mark for every one of them. Linear, the largest bar
+is full and the rest are slivers. Logged, a thousandfold difference draws as a **1.7x difference
+in length**: `influenceLog` is `log(max(x, e^-24)) + 24`, so a bar chart of it is a plausible
+figure saying the measure is flat when it is not. Length encodes ratio and these ratios do not
+fit in a length, so the mark is a dot on a log axis.
+
+### The share is the half that is not otherwise reachable
+
+The ordering alone is not the question people have. What makes this answer *is this driven by a
+handful of things or diffusely?* is the running share of the total beside it, and nothing in the
+app could draw one. `out.histogram` has a `cumulative` control and it answers a **different
+question**: its curve is over **rows** — "90% of neurons score below 1e-4" — where this one is
+over **values** — "the top twenty carry 60%". Only the second is what a concentration question
+asks, and no amount of configuring the first produces it.
+
+Two panels sharing the rank axis, **never two y-scales**. A Pareto chart with the cumulative on
+a twin axis is the one chart construction with no honest reading, and the split buys something
+besides: the share panel has room for its own annotation, which is where `half by rank 71` goes.
+
+### Where it refuses, and why that is the share and not the ranking
+
+`rankSeries.ts` holds everything a reader could be misled by, headless for the standing reason —
+jsdom performs no layout, so arithmetic left in a `.tsx` is covered by roughly nothing.
+
+**A share of a total means nothing over a signed column.** Ranked descending, a column that can
+go negative has a running sum that climbs past the total and comes back down: a curve that looks
+exactly like a Lorenz curve, reaches 1.4, and is not one. So the panel is withheld with
+`shareRefusal` naming the reason, the caption says `no share`, and **the ranking above is
+untouched** — the ordering is still a real answer, and refusing the whole picture would claim
+otherwise. The second refusal is an all-zero column, where there is no total to take a share of.
+
+**A flagged row is ranked and not counted.** `Flag column` is a picker rather than a boolean
+because nothing here knows about influence — but an Influence result is what it was built for.
+Seeds are kept in that table deliberately (a seed's score is its own seed mass plus whatever came
+back round a loop, which is a real measurement about recurrence), and left in the share they
+carry most of it and the curve says nothing. So a flagged row is plotted, ringed, ranked, and
+excluded from **both** halves of the share. On the demo graph that is visible as a share curve
+flat across the first 44 ranks and rising after them.
+
+Which gives the third refusal, and it has to be asked **before** the all-zero one or it answers in
+that one's words: a table where *everything* is flagged has a total of zero for a reason that has
+nothing to do with the values. Not a contrived shape — an Influence walk seeded with every neuron
+in a small connectome flags all of them, which is exactly what the wizard's synthetic demo does —
+and "every value is zero" there names a column that is full of scores.
+
+**What is dropped is counted by reason**, because the fix differs: a missing or non-numeric value
+is a column that is not what the picker thinks it is, where a value at or below zero is a *scale
+the reader chose* and is included again the moment Log value comes off.
+
+### The one thing `validate` catches that the resolver cannot
+
+An Influence table carries both `influence` and `influenceLog`, and pointing Value at the second
+with Log value on takes the log of a log — which on a heavy tail is very nearly a straight line
+whatever the data does. A clean-looking power law for reasons that have nothing to do with the
+connectome, which is the worst kind of wrong figure. `validate` names it; `resolveColumn` cannot,
+because both columns are numeric and both are real.
+
+### What was checked in a real browser
+
+Driven through the app on the synthetic dataset (`dataset.mock.opticlobe` → Find Neurons →
+Influence → Rank Plot), which needs no credential and reaches no server. Three things came out of
+looking at it, and none is reachable from jsdom:
+
+- **The caption printed the row count twice.** `plural(n, noun)` already formats the number, and
+  the call had one in front of it.
+- **The value axis drew a single tick label.** `logTicks` spends its budget on *decades* and then
+  strides, so asked for three over a four-decade span it strides by two and lands on 0.001 / 0.1
+  / 10 with only 0.1 inside the data. The count is the number of decades worth showing rather
+  than the number of labels wanted, so it is now derived from the panel height with a floor.
+- **The direct labels overlapped into a band.** On a log rank axis the leading five ranks sit
+  inside the first fifth of the width, so labels on one line collide — five of them all reading
+  `LC4`. Staggered over three rows.
+
+The gesture was checked the same way: a horizontal drag brushes a range of the ranking and a
+press that does not travel clears, which is `CLICK_SLOP` deciding between the two. There is
+**no zoom**, and that is what frees the drag — a log rank axis already fits the whole table,
+which is the reason it is the default.
+
+### What the exporters do
+
+Both draw it. The ordering, the stable tie break, the share of the values and the refusal are a
+generated helper (`coda_rank`) in each language rather than lines in the cell, because two of
+those rules are ones a reader would not write by hand and cannot see the absence of.
+
+Python gets `plt.subplots(2, 1, sharex=True)`, which is the card's own arrangement. **R gets two
+figures rather than two panels**, and that is stated in the cell: a scale *transform* in ggplot
+belongs to the scale and not to the facet, so a log value panel and a linear share panel cannot
+be two facets of one plot, and the libraries that would stack them — patchwork, cowplot,
+gridExtra — are each a dependency this document does not have.
+
+One trap the goldens found, and it is about the fixture rather than about either emitter:
+**`neuron.influence` is refused in R**, so nothing binds its output there and every node
+downstream of it is skipped. A single Rank Plot fed from Influence therefore left the R emitter
+written and never once executed by a golden, with every coverage test passing — the walk checks
+that the node *type* is in the graph, not that its cell reached the document. Hence two fixture
+nodes, and the plain one is fed from Connectivity.
+
+## Sankey: layered flow, where the width is the quantity
+
+The picture `Influence` needed and the one a node-link diagram could not be. The retired `Network`
+port drew the induced subgraph of the top scorers, which invited a reader to trace a route through
+a ball whose other routes were not on the page; a flow diagram's bands *are* the drive, so a
+column's total is the whole of what reached that depth. [nodes-connectivity.md](nodes-connectivity.md)
+carries why that port went and what the `Transfers` port replaced it with.
+
+**General over a table, not built around influence.** Four pickers — layer, from, to, value.
+`Influence ▸ Transfers` fills them with no configuration and so does anything else shaped like layered
+flow. Nothing in `sankeyFlow.ts` or `sankeyLayout.ts` knows what a neuron is.
+
+### Conservation is measured, not assumed
+
+A Sankey's grammar is that inflow equals outflow at every node: that contract is why the mark reads
+as it does, and it is why most connectome Sankeys are quietly wrong — drawn on synapse counts,
+which conserve nowhere, because a neuron's incoming synapse count has nothing to do with its
+outgoing one.
+
+The node cannot refuse such a table. Flow between categories is a legitimate thing to draw and this
+is the conventional mark for it. So instead **the caption prints how far off conservation the
+drawing is** — `conserves`, or `18% stops` — which turns the claim the mark makes into one a reader
+can check. Warn, never refuse. On an Influence flow under the traversal denominator it reads
+`conserves` exactly, because a neuron's outgoing shares sum to one.
+
+### The shortfall belongs to the node, not to the column
+
+This shipped wrong and a layout test caught it, which is worth keeping because the wrong version is
+the one that looks obviously right.
+
+A node is drawn as tall as **the larger of what it received and what it sent**, which is the
+standard rule and the one that keeps a sink from vanishing. But it means a node that passes on less
+than it took **already absorbs its own shortfall**, as unused bar. Drawing a notch for the same
+quantity at the foot of the column adds it a second time, and the column comes out taller than the
+one feeding it — a diagram that invents drive. So the mark is the dimmed tail of the box itself,
+which is also better information: it says *which* box the drive stopped at.
+
+Two cases it must not fire on, and both were found by asserting them. A node in the **last** column
+has no outflow because it is the end of the diagram, not because anything was lost — counted, every
+conserving flow reports losing the whole of its final column. And **layer 0 has no inflow** by
+construction; drawn as a shortfall the whole first column reads as missing, where what it is is
+where the picture was cut off. That one gets a feathered edge instead.
+
+### A node is a (layer, label) pair
+
+Which is what lets a label repeat down the diagram. An influence walk is not a breadth-first search
+— a neuron is propagated from at every later hop — so a cell type carries drive at several depths
+and appears in several columns. Keyed on the label alone those merge into one node and the flow
+acquires cycles, which is a different picture and not a drawable one.
+
+### Folding is safe here in a way it is not on a flow chart
+
+`Fold past` keeps the largest N boxes per column and merges the rest, and **summing merged bands
+preserves every column total exactly** — so the picture stays conserving and the caption keeps
+reporting the same number. `out.flowChart`'s fold had to be presentational-and-lossy because its
+boxes carry no additive quantity; here the quantity *is* the mark. Ranked by what a node carries
+rather than by how many bands touch it, for `foldFlowGraph`'s reason, and survivors come back in
+the data's own order: the ranking decides which boxes stay, never where they sit.
+
+### What is shared with the flow chart, and what is not
+
+The within-column ordering is **`barycentre.ts`**, extracted from `flowChartLayout.ts` when this
+node needed the same sweep — an ordering rule written twice is an ordering rule that drifts, and
+the two viewers would still be expected to put the same graph in the same order. The dense layer
+renumbering is `columnLayers`, shared for the same reason: 0, 2 and 5 draw as three adjacent
+columns in both.
+
+What is *not* shared is the routing, and there is nothing to share: a flow chart's arrows need
+corridors because they are lines between boxes that other boxes are in the way of, where a band
+runs between two faces at a fixed pair of columns and has nowhere else to be.
+
+### Colour is off by default
+
+Width is already the quantity, and on a diagram of thirty labels a categorical palette cycles and
+stops meaning anything. Pointing `Band colour` at the from or to column is one click for somebody
+tracing a stream, and then it earns its place. The bands take their colour from the row they came
+from, through `resolveColor` on the input table — so the palette, the frequency ranking, the
+cycling and the legend are all `ui/encoding.ts`' and none of it is re-derived here.
+
+### What was checked in a real browser
+
+Driven through the app on the synthetic dataset (`dataset.mock.opticlobe` → Find Neurons →
+Influence → Sankey), which needs no credential. Three findings, none reachable from jsdom:
+
+- **A 96px gutter reserved beside the last column was dead space.** That column's labels are drawn
+  *before* its bar rather than after — it has nowhere further to go — so the reservation squeezed
+  the drawing by a tenth of its width for nothing.
+- **The bands were mud.** At `fillOpacity` 0.38 a muted band over `#1a1a19` lands about two and a
+  half steps off the ground, which reads as an uneven background rather than as a mark. 0.55 is
+  where they separate while still sitting under the node bars, which are drawn opaque so the two
+  never read as the same thing.
+- **Several bands meeting one node face drew as a single mass.** They are stacked fills, so they
+  want the surface gap the bar chart already gives stacked segments; a 0.75px surface hairline
+  round each band is what separates them.
+
+### The exporters refuse, and the reason is a dependency
+
+Neither library draws one. `matplotlib.sankey` is built for a different figure entirely — a single
+balance of inflows and outflows, not layered flow — and the routes that work are plotly or
+holoviews, each a fourth package in an exporter that is neuprint-python, pandas and navis. R is the
+same story with ggalluvial. The arithmetic is about fifteen lines and is not the obstacle; what
+stops it is the rule `out.topology` and `zapbench.traces` already record — an emitter has to be
+checked by *running* it, and a flow diagram whose widths silently stopped conserving would look
+entirely plausible. The Transfers table itself exports perfectly well, being four ordinary columns.
+
 ## Dendrogram: naming leaves without renaming the tree
 
 A `LinkageValue` knows its leaves by one `string[]`, taken straight off the matrix's row labels

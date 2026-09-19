@@ -133,8 +133,14 @@ export function HistogramViewer({
     <div className="viewer">
       <div ref={ref} className="viewer__scroll nowheel" style={{ position: 'relative' }}>
         {size.width > 60 && (
-          <svg ref={svgRef} className="chart" width={size.width} height={height} role="img">
-            <title>{`Distribution of ${valueColumn}${seriesColumn ? `, split by ${seriesColumn}` : ''}`}</title>
+          <svg
+            ref={svgRef}
+            className="chart"
+            width={size.width}
+            height={height}
+            role="img"
+            aria-label={`Distribution of ${valueColumn}${seriesColumn ? `, split by ${seriesColumn}` : ''}`}
+          >
             <rect width={size.width} height={height} fill={surface} />
 
             {/* Gridlines: hairline, solid, one step off surface, behind the data. */}

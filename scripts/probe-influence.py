@@ -91,8 +91,13 @@ def _stub_neuprint(edges, totals):
 
     def merge_neuron_properties(neurons, conn, props):
         out = conn.copy()
-        out["type_pre"] = None
-        out["type_post"] = None
+        # Each neuron typed as itself, which is what makes the Flow assertions below sharp.
+        # `coda_influence` groups ribbons by *type*, so with every type None the whole diagram
+        # collapses into one box per layer and the orientation check has nothing to compare.
+        # C. elegans neurons have no cell type here, and naming each one after itself makes the
+        # emitted flow a per-neuron-pair table the edge list can be checked against directly.
+        out["type_pre"] = [str(i) for i in out["bodyId_pre"]]
+        out["type_post"] = [str(i) for i in out["bodyId_post"]]
         return out
 
     def fetch_neurons(criteria, client=None):
@@ -145,7 +150,7 @@ def check_emitted_helper(rows, index, probe):
     seeds = [index[s] for s in probe["seeds"]]
     for denominator in ("traversal", "all"):
         hops = 4
-        frame = ns["coda_influence"](
+        frame, flow = ns["coda_influence"](
             seeds,
             direction="inputs",
             hops=hops,
@@ -169,6 +174,77 @@ def check_emitted_helper(rows, index, probe):
             f"{len(coda)} neurons (worst relative difference {worst:.2e})",
         )
 
+        # The Transfers port, which replaced the Network one. Three things about it can be wrong
+        # while the figure still looks entirely plausible, and each gets its own check.
+        #
+        # Orientation first: a ribbon runs presynaptic -> postsynaptic, which flips with the
+        # direction. An `inputs` walk caches each neuron's *presynaptic* partners, so read the
+        # wrong way round every band in the diagram points backwards. Checked against the edge
+        # list itself rather than against the canvas, because it is a fact about the synapses.
+        pairs = {(str(p), str(q)) for p, q, _ in edges}
+        bands = [
+            (str(a), str(b))
+            for a, b in zip(flow["source"], flow["target"])
+        ]
+        wrong = [pair for pair in bands if pair not in pairs]
+        check(
+            not wrong and len(bands) > 0,
+            f"denominator={denominator!r}: every band runs presynaptic -> postsynaptic "
+            f"({len(wrong)} the wrong way of {len(bands)})",
+        )
+
+        # Conservation, which is the property a Sankey's widths mean anything under — and the
+        # shape of it here is the finding. Under the traversal denominator a neuron's outgoing
+        # shares sum to exactly one, so the layer nearest the seed carries the whole seed mass.
+        # It is *not* exact all the way down: C. elegans sensory neurons have no inputs, so drive
+        # reaching one stops there. That is a dead end rather than a loss, and it is exactly what
+        # the drawing shows as the diagram narrowing away from the seed. So the property is
+        # monotonic rather than equal, plus the seed layer being whole.
+        by_layer = {}
+        for layer, value in zip(flow["layer"], flow["value"]):
+            by_layer[int(layer)] = by_layer.get(int(layer), 0.0) + float(value)
+        totals = [by_layer[k] for k in sorted(by_layer)]
+        monotonic = all(a <= b + 1e-9 for a, b in zip(totals, totals[1:]))
+        check(
+            len(totals) > 1 and monotonic,
+            f"denominator={denominator!r}: no layer carries more than the one nearer the seed, "
+            f"so nothing is invented ({len(totals)} layers, "
+            f"{totals[0]:.4f} deepest to {totals[-1]:.4f} at the seed)",
+        )
+        check(
+            abs(totals[-1] - float(len(seeds))) < 1e-9,
+            f"denominator={denominator!r}: the layer meeting the seeds carries the whole seed "
+            f"mass ({totals[-1]:.6f} of {len(seeds)})",
+        )
+
+        # The columns start at 0 and are contiguous. This is the assertion that would have
+        # caught the helper numbering its layers from the hop *budget* while the canvas numbered
+        # them from the depth the walk reached — a uniform offset, invisible to every check above
+        # because ordering, orientation and monotonicity all survive it.
+        keys = sorted(by_layer)
+        check(
+            keys == list(range(len(keys))),
+            f"denominator={denominator!r}: the layers run 0..n with no gap in front "
+            f"({keys[0]} to {keys[-1]} over {len(keys)} columns)",
+        )
+
+        # And the direction of the columns. `layer` is a drawing position, not the hop count:
+        # travelling inputs the signal runs *into* the seed, so a diagram laid out by hops puts
+        # the seed in the first column and draws every band as feedback. The seeds must be the
+        # targets of the last layer's bands.
+        last = max(by_layer)
+        into_last = {
+            str(b)
+            for lay, b in zip(flow["layer"], flow["target"])
+            if int(lay) == last
+        }
+        check(
+            into_last == {str(s) for s in seeds},
+            f"denominator={denominator!r}: the seeds are the last column, not the first "
+            f"({len(into_last)} targets in layer {last})",
+        )
+
+
     # The two denominators agree here *because* min_weight is 1: the fetched input list is then
     # the whole input list. They part company as soon as it is not, which is the difference the
     # node's Denominator control exists to make visible.
@@ -181,7 +257,10 @@ def check_emitted_helper(rows, index, probe):
     # read at another still produces a full, plausible matrix, so this is checked pair by pair
     # against the canvas rather than by its shape.
     pq = probe["perQuery"]
-    frame = ns["coda_influence"](
+    # The flow comes back here too, and is deliberately the *same* flow: `Per query neuron`
+    # splits the score, not the drive the score was computed over. A ribbon is summed over the
+    # channels for exactly that reason.
+    frame, pq_flow = ns["coda_influence"](
         [index[s] for s in pq["seeds"]],
         direction="inputs",
         hops=pq["hops"],
@@ -193,6 +272,10 @@ def check_emitted_helper(rows, index, probe):
         seed_mass=1.0,
         client=None,
         per_query=True,
+    )
+    check(
+        len(pq_flow) > 0,
+        f"per_query still emits the flow ({len(pq_flow)} bands)",
     )
     emitted = {
         (int(q), int(n)): float(v)
@@ -216,7 +299,7 @@ def check_emitted_helper(rows, index, probe):
     summed: dict[int, float] = {}
     for (_, n), v in emitted.items():
         summed[n] = summed.get(n, 0.0) + v
-    flat = ns["coda_influence"](
+    flat, flat_flow = ns["coda_influence"](
         [index[s] for s in pq["seeds"]],
         direction="inputs",
         hops=pq["hops"],
@@ -229,6 +312,23 @@ def check_emitted_helper(rows, index, probe):
         client=None,
     )
     plain = dict(zip(flat["neuronId"].astype(int), flat["influence"].astype(float)))
+    # The same walk with the channels pooled, so the flow must be identical to the per-query
+    # one: `Per query neuron` is a statement about the score's shape and about nothing else.
+    # A ribbon is summed over the channels for exactly this reason, and a band that read one
+    # channel instead would still draw a full and plausible diagram.
+    def bands_of(frame):
+        return {
+            (int(lay), str(a), str(b)): round(float(v), 9)
+            for lay, a, b, v in zip(
+                frame["layer"], frame["source"], frame["target"], frame["value"]
+            )
+        }
+
+    check(
+        bands_of(flat_flow) == bands_of(pq_flow),
+        f"the flow is the same whether or not the score is split per query neuron "
+        f"({len(pq_flow)} bands)",
+    )
     worst_group = max(
         (abs(summed.get(i, 0.0) - v) / max(abs(v), 1e-12) for i, v in plain.items()),
         default=0.0,

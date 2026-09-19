@@ -18,6 +18,7 @@ import { pyStr } from '../py'
 import { registerEmitter, registerHelper } from '../registry'
 import type { EmitContext } from '../types'
 import { neuronIds } from './common'
+import { MISSING_LABEL } from '../../../nodes/lib/chartSelection'
 import { influenceParamsFrom, needsPublishedTotals } from '../../../nodes/lib/influenceOps'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 
@@ -49,6 +50,14 @@ registerEmitter('neuron.influence', (ctx) => {
   const neurons = ctx.wired('neurons')
 
   const out = ctx.output('influence')
+  /*
+   * Bound even where nothing is wired to it, which is not optional: `emit.ts` binds *every*
+   * output port of a node whose emitter produced code, so a port the cell never assigns becomes
+   * a name a downstream Sankey refers to and nothing creates. Hence the tuple return on
+   * `coda_influence` — the transfers are the drive the walk had to compute in order to propagate
+   * at all, so binding them costs no query and no second traversal.
+   */
+  const transfers = ctx.output('transfers')
   /*
    * `influenceParamsFrom`, not a second reading of the same eight params. `regionOptions`' rule
    * and its recorded incident: written per caller, a node and an emitter drift on a default and
@@ -84,9 +93,16 @@ registerEmitter('neuron.influence', (ctx) => {
   ctx.helper('coda_influence')
 
   const seeds = neuronIds(neurons)
+  /*
+   * `Transfer floor`, read off `ctx.params` rather than `influenceParamsFrom` — which decodes the
+   * eight settings the *traversal* takes, where this one shapes an output port and changes no
+   * score. A share of the mass the walk starts with, so the absolute floor the helper takes has
+   * to be scaled by the seed count the same way the node scales it.
+   */
+  const flowFloor = Math.max(0, Number(ctx.params.flowFloor))
   const lines = [
     ...populationNote(ctx, settings.includeFragments),
-    `${out} = coda_influence(`,
+    `${out}, ${transfers} = coda_influence(`,
     `    ${seeds},`,
     `    direction=${pyStr(settings.direction)},`,
     `    hops=${settings.maxHops},`,
@@ -97,6 +113,7 @@ registerEmitter('neuron.influence', (ctx) => {
     `    frontier_limit=${settings.frontierLimit},`,
     `    seed_mass=${settings.shareSeedMass ? `1.0 / max(1, len(${seeds}))` : '1.0'},`,
     `    per_query=${settings.perQuery ? 'True' : 'False'},`,
+    `    flow_floor=${flowFloor} * ${settings.shareSeedMass ? '1.0' : `len(${seeds})`},`,
     `    client=${client},`,
     `)`,
   ]
@@ -131,7 +148,7 @@ registerHelper({
   source: [
     'def coda_influence(seed_ids, direction, hops, min_weight, gain, denominator,',
     '                   all_segments, frontier_limit, seed_mass, client,',
-    '                   per_query=False):',
+    '                   per_query=False, flow_floor=0.0):',
     '    """Coda\'s Influence node: the bounded influence score of Bates et al. (2026).',
     '',
     '    The exact score solves r = (I - gW)^-1 s over the whole connectome, where W[post, pre]',
@@ -157,6 +174,10 @@ registerHelper({
     '      "all"       -- the neuron\'s published total input (fetch_neurons\' `upstream`).',
     '      "connected" -- input from bodies labelled :Neuron only, summed with a second',
     '          fetch_adjacencies. No min_weight is applied to it.',
+    '',
+    '    Returns (frame, transfers). The second is the Transfers port: one row per (layer,',
+    '    presynaptic type, postsynaptic type) with the drive that crossed, which the walk',
+    '    computes anyway in order to propagate. `flow_floor` drops one carrying less than that.',
     '',
     '    per_query=False returns neuronId, type, influence, influenceLog, hops, isSeed --',
     '    ranked, strongest first. per_query=True keeps the seeds in separate channels and',
@@ -253,6 +274,11 @@ registerHelper({
     '    total = {i: v.copy() for i, v in current.items()}',
     '    first_hop = {i: 0 for i in current}',
     '',
+    '    # (hop, presynaptic type, postsynaptic type) -> drive that crossed. Grouped by type',
+    '    # inside the walk rather than after it: per neuron pair a four-hop ball is millions of',
+    '    # entries and a diagram of a few dozen. An untyped body joins one bucket, or a run with',
+    '    # fragments in it fills the diagram with 18-digit ids, one box each.',
+    '    ribbons = {}',
     '    for hop in range(1, int(hops) + 1):',
     '        if not current:',
     '            break',
@@ -271,16 +297,32 @@ registerHelper({
     '            if not partners:',
     '                continue',
     '            near = 0.0 if not inward else denoms.get(i, tot) if denominator != "traversal" else tot',
+    '            # Hoisted for the reason the canvas records: `mass.sum()` is a loop over the',
+    '            # per-seed channels, so inside the partner loop a hundred-seed run over a few',
+    '            # million edges spends ~10^8 float adds recomputing one number. One end of every',
+    '            # ribbon is the carrying neuron itself, so its type is per-neuron work too.',
+    `            carried = float(mass.sum())`,
+    `            self_type = types.get(i) or ${JSON.stringify(MISSING_LABEL)}`,
     '            if inward and near <= 0:',
     '                continue',
     '            for b, w in zip(partners, weights):',
     '                div = denoms.get(b, 0.0) if not inward else near',
     '                if div <= 0:',
     '                    continue',
+    '                crossed = carried * w / div',
     '                if b in nxt:',
     '                    nxt[b] += mass * w / div',
     '                else:',
     '                    nxt[b] = mass * w / div',
+    '                # Kept rather than discarded: the Transfers port is this number, and the',
+    '                # walk has to compute it in order to propagate at all. Written presynaptic',
+    '                # to postsynaptic, which flips with the direction -- travelling inputs the',
+    '                # partner is the presynaptic end.',
+    '                if crossed > 0:',
+    `                    other = types.get(b) or ${JSON.stringify(MISSING_LABEL)}`,
+    '                    key = ((hop, self_type, other) if not inward',
+    '                           else (hop, other, self_type))',
+    '                    ribbons[key] = ribbons.get(key, 0.0) + crossed',
     '',
     '        survivors = keep(list(nxt))',
     '        nxt = {b: m for b, m in nxt.items() if b in survivors}',
@@ -305,6 +347,34 @@ registerHelper({
     '    def adjust(v):',
     '        return float(np.sign(v) * (np.log(max(abs(v), np.exp(-24.0))) + 24.0)) if v else 0.0',
     '',
+    '    # The Transfers port: the drive that crossed each group of edges, per hop. Nothing',
+    '    # is fetched for it. `layer` is a drawing position rather than a measurement -- 0 is',
+    '    # the furthest from the seed, so the columns run the way the signal does. Laid out by',
+    '    # the hop count instead, an upstream diagram runs backwards and every band reads as',
+    '    # feedback.',
+    '    # Counted from the hop the walk *reached*, not the budget it was given: a four-hop',
+    '    # budget that runs out of graph after two would otherwise number its layers 2 and 3,',
+    '    # leaving an empty column in front of them that a reader cannot tell from a filter.',
+    '    # Same rule as `flowLayerOf` on the canvas, which is what this has to agree with.',
+    '    deepest = max((h for (h, _a, _b) in ribbons), default=0)',
+    '    flow_rows = [',
+    '        {',
+    '            "layer": (h - 1) if direction == "outputs" else deepest - h,',
+    '            "source": a,',
+    '            "target": b,',
+    '            "value": v,',
+    '        }',
+    '        for (h, a, b), v in ribbons.items()',
+    '        if v > flow_floor',
+    '    ]',
+    '    flow = (',
+    '        pd.DataFrame(flow_rows).sort_values(',
+    '            ["layer", "value"], ascending=[True, False]',
+    '        ).reset_index(drop=True)',
+    '        if flow_rows',
+    '        else pd.DataFrame(columns=["layer", "source", "target", "value"])',
+    '    )',
+    '',
     '    if per_query:',
     '        rows = [',
     '            {',
@@ -324,12 +394,12 @@ registerHelper({
     '        columns = ["queryId", "queryType", "neuronId", "type",',
     '                   "influence", "influenceLog", "hops", "isSeed"]',
     '        if not rows:',
-    '            return pd.DataFrame(columns=columns)',
+    '            return pd.DataFrame(columns=columns), flow',
     '        return (',
     '            pd.DataFrame(rows)',
     '            .sort_values(["queryId", "influence"], ascending=[True, False])',
     '            .reset_index(drop=True)',
-    '        )',
+    '        ), flow',
     '',
     '    rows = [',
     '        {',
@@ -346,11 +416,11 @@ registerHelper({
     '    if not rows:',
     '        return pd.DataFrame(',
     '            columns=["neuronId", "type", "influence", "influenceLog", "hops", "isSeed"]',
-    '        )',
+    '        ), flow',
     '    return (',
     '        pd.DataFrame(rows)',
     '        .sort_values("influence", ascending=False)',
     '        .reset_index(drop=True)',
-    '    )',
+    '    ), flow',
   ],
 })

@@ -938,6 +938,27 @@ again.
 Applies to more than the mapper: any tier-3 node whose computation has no library twin is a
 candidate. Nothing here is scheduled.
 
+### A coverage test can pass over an emitter nothing ever runs
+
+Found adding the Rank Plot, and it generalises to every node whose input comes from a node one
+language refuses.
+
+`neuron.influence` has a Python emitter and is refused in R. Nothing binds its output in the R
+document, so **every node downstream of it is skipped** — which meant a single `out.rank` fed
+from Influence produced a written, typechecked, lint-clean R emitter that no golden had ever
+executed. Every guard stayed green: `coverage.test.ts` asks whether the type has an emitter or an
+excuse, and `export.test.ts`'s "reaches every emitting node type" asks whether the type is *in
+the fixture graph* — neither asks whether the emitter's output is in the document.
+
+The fix is at the fixture: a node whose emitter is worth checking needs a path to it in **both**
+languages, which for a viewer means feeding one instance from something both emit. `out.rank` has
+two for that reason, and the comment on each says which half it covers. Worth knowing before
+adding a viewer downstream of Influence, Neuron Topology, `compare.matchTypes` or either CATMAID
+dataset — the refusal list in `NO_EMITTER` is the list of places this can happen.
+
+A sharper guard would compare the emitted source against the node's own variable prefix, which is
+cheap and is not written: the fixture comment is doing that job today.
+
 ### Known gaps, all of them stated in the notebook
 
 - **`Paths` with `Collapse types` on has no equivalent, and this one is not laziness.** Coda

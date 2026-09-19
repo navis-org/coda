@@ -1415,6 +1415,86 @@ export function everythingGraph(): CodaGraph {
       row: 2,
       params: { minLinkWeight: 10, hideIsolated: true },
     },
+    /*
+     * Fed from `Influence`, which is the table this node exists for: `influence` is the ranked
+     * measure and `isSeed` the flag, so the golden covers the two arms that are otherwise never
+     * reached — the ring, and the share that leaves those rows out of both halves.
+     *
+     * Every branch of the cell is switched on for the same reason the Flow Chart's fixture is:
+     * the flag, the labels, the share panel and a selection are four separate `if`s in both
+     * emitters.
+     *
+     * **This one reaches the notebook and not the R document**, and the second node below is
+     * why there are two. `neuron.influence` is refused in R — see docs/nodes-connectivity.md —
+     * so nothing binds its output there and every node downstream of it is skipped, which would
+     * leave the R emitter written and never once executed by a golden.
+     */
+    {
+      id: 'rankview',
+      type: 'out.rank',
+      col: 3,
+      row: 10,
+      params: {
+        value: 'influence',
+        flagColumn: 'isSeed',
+        labelColumn: 'type',
+        idColumn: 'neuronId',
+        labelTop: 5,
+        valueLog: true,
+        rankLog: true,
+        showShare: true,
+        selection: ['720575940628857210'],
+      },
+    },
+    /*
+     * The same node on a table both languages emit, which is what puts the R cell in the golden
+     * at all — see the note on `rankview`. Deliberately the *plain* arm: no flag column and no
+     * labels, so the two fixtures between them cover both sides of every `if` in the emitters
+     * rather than the same side twice.
+     */
+    {
+      id: 'rankweights',
+      type: 'out.rank',
+      col: 3,
+      row: 11,
+      params: {
+        value: 'weight',
+        idColumn: 'postId',
+        labelTop: 0,
+        valueLog: true,
+        rankLog: true,
+        showShare: true,
+      },
+    },
+    /*
+     * Fed from `Paths`, not from `net.build`, because its network is the one whose node schema
+     * has something to layer *by*: `hop` and `role` are `PATH_NODE_SCHEMA`'s, so the golden
+     * covers the `layer_attr` arm rather than the longest-path fallback — and that arm is the
+     * one where the emitted layering and the canvas's can disagree.
+     *
+     * Every branch of the cell is switched on here for the same reason each NBLAST node is
+     * doubled: a weighted arrow, a named label column, an edge label from a column rather than
+     * from the weight, and a selection, are four separate `if`s in both emitters. The fold is
+     * on as well, which emits no code at all — it is the divergence note, and a note nothing
+     * exercises is a note that rots.
+     */
+    {
+      id: 'flowview',
+      type: 'out.flowChart',
+      col: 3,
+      row: 4,
+      params: {
+        layerColumn: 'hop',
+        labelColumn: 'role',
+        edgeLabelColumn: 'pairs',
+        edgeLabels: 'on',
+        direction: 'lr',
+        routing: 'orthogonal',
+        weightedArrows: true,
+        foldPerLayer: 4,
+        selection: ['720575940628857210'],
+      },
+    },
     {
       // Named regions rather than the empty picker, so the golden shows the branch that puts a
       // literal list in the cell — the primary-set branch is the one `out.rois` already covers.
@@ -1663,6 +1743,9 @@ export function everythingGraph(): CodaGraph {
     ['group', 'out', 'describe', 'in'],
     ['group', 'out', 'net', 'edges'],
     ['net', 'network', 'netview', 'in'],
+    ['infl', 'influence', 'rankview', 'in'],
+    ['conn', 'connections', 'rankweights', 'in'],
+    ['paths', 'network', 'flowview', 'in'],
     ['net', 'network', 'netfilter', 'in'],
     ['net', 'network', 'netregex', 'in'],
     ['net', 'network', 'central', 'in'],

@@ -979,6 +979,39 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['circle', { cx: '14.8', cy: '10', r: '1.4', fill: 'currentColor', stroke: 'none' }],
     ['circle', { cx: '5.4', cy: '6.2', r: '1.4', fill: 'currentColor', stroke: 'none' }],
   ],
+  /*
+   * A decaying curve with its head picked out as dots, over a rising share.
+   *
+   * The two marks are the node: `out.barChart`'s glyph is bars of decreasing length, which is
+   * exactly the picture this one exists to replace, so the thing that separates them has to be
+   * the *curve* and the second line beneath it. Nothing else here draws two stacked plots.
+   */
+  'out.rank': [
+    ['line', { x1: '5', y1: '4', x2: '5', y2: '13' }],
+    ['path', { d: 'M6 5.2C9 5.2 10.5 11 19 12.2' }],
+    ['circle', { cx: '6.4', cy: '5.4', r: '1.3', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '8.6', cy: '6.6', r: '1.3', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '10.6', cy: '9.4', r: '1.3', fill: 'currentColor', stroke: 'none' }],
+    ['line', { x1: '5', y1: '16', x2: '5', y2: '20' }],
+    ['line', { x1: '5', y1: '20', x2: '19', y2: '20' }],
+    ['path', { d: 'M5.6 19.4C9 19.4 11 16.6 19 16.4' }],
+  ],
+  /*
+   * Three bands of different width narrowing left to right, between two node bars.
+   *
+   * The mark that separates it from `out.flowChart`, which is boxes joined by *lines*: here the
+   * connection has a thickness and the thickness is the quantity, so the drawing has to be filled
+   * shapes of unequal width rather than strokes of equal one. The narrowing is the second half of
+   * what this node says.
+   */
+  'out.sankey': [
+    ['rect', { x: '3.5', y: '4', width: '2.6', height: '7', fill: 'currentColor', stroke: 'none' }],
+    ['rect', { x: '3.5', y: '13', width: '2.6', height: '7', fill: 'currentColor', stroke: 'none' }],
+    ['rect', { x: '17.9', y: '5', width: '2.6', height: '6', fill: 'currentColor', stroke: 'none' }],
+    ['rect', { x: '17.9', y: '14', width: '2.6', height: '4', fill: 'currentColor', stroke: 'none' }],
+    ['path', { d: 'M6.1 4.4C11 4.4 13 5.4 17.9 5.4L17.9 10.6C13 10.6 11 10.6 6.1 10.6Z', fill: 'currentColor', stroke: 'none', opacity: '0.42' }],
+    ['path', { d: 'M6.1 13.4C11 13.4 13 14.4 17.9 14.4L17.9 17.6C13 17.6 11 19.4 6.1 19.4Z', fill: 'currentColor', stroke: 'none', opacity: '0.42' }],
+  ],
   'out.scatter': [
     ['line', { x1: '5', y1: '5', x2: '5', y2: '19' }],
     ['line', { x1: '5', y1: '19', x2: '19', y2: '19' }],
@@ -995,6 +1028,22 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['circle', { cx: '6', cy: '19', r: '2.2' }],
     ['circle', { cx: '18', cy: '18', r: '2.2' }],
     ['path', { d: 'M8 8l2.3 3.3M16 7.4l-2.4 3.9M10.2 14.4L7.6 17.4M13.9 14.5l2.6 2.4' }],
+  ],
+  /*
+   * Two columns of boxes joined by right-angled runs.
+   *
+   * `out.network`'s drawing is discs joined by straight lines, and these two nodes draw the same
+   * material — so the mark that separates them has to be the *operation*: boxes rather than
+   * discs because the label is the node here, and elbowed routes rather than straight ones
+   * because routing round what is in the way is the whole of what this adds.
+   */
+  'out.flowChart': [
+    ['rect', { x: '3', y: '9.5', width: '6', height: '5', rx: '1' }],
+    ['rect', { x: '15', y: '4', width: '6', height: '5', rx: '1' }],
+    ['rect', { x: '15', y: '15', width: '6', height: '5', rx: '1' }],
+    ['path', { d: 'M9 12h2.6V6.5h1.6M9 12h2.6V17.5h1.6' }],
+    ['path', { d: 'M13.2 5.4l1.8 1.1-1.8 1.1z', fill: 'currentColor', stroke: 'none' }],
+    ['path', { d: 'M13.2 16.4l1.8 1.1-1.8 1.1z', fill: 'currentColor', stroke: 'none' }],
   ],
   'out.viewer3d': [
     ['path', { d: 'M12 21V9' }],

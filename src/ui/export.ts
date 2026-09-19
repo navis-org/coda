@@ -262,6 +262,36 @@ export function serializeSvg(svg: SVGSVGElement): string {
   // `svgRoot` is the other half: a synthesised root has no way to express `xmlns`, so a fourth
   // builder cannot reintroduce the duplicate by copying a third.
 
+  /*
+   * The chart's name, moved from the live DOM into the file.
+   *
+   * A `<title>` that is a direct child of `<svg>` is the element's accessible name **and** a
+   * native tooltip over the whole drawing — so every chart here was opening a browser tooltip
+   * saying "Flow diagram of 8 boxes in 3 layers" on top of the hover card that says what the
+   * pointer is actually on. Reported on the Sankey; it was true of nine viewers.
+   *
+   * So the live `<svg>` carries `aria-label`, which is the same accessible name with no tooltip,
+   * and the **exported** file gets the `<title>` — where it has no pointer to interfere with and
+   * is the only thing that can name the drawing at all. A builder that synthesises its own root
+   * (`scatterToSvg`, `networkToSvg`, `heatmapToSvg`) may set a `<title>` itself, so an existing
+   * one is left alone.
+   */
+  /*
+   * `:scope > title`, never `querySelector('title')`.
+   *
+   * The whole distinction this rests on is root versus descendant: a direct child of `<svg>` names
+   * the drawing, where a `<title>` deeper in is one mark's own tooltip and is wanted —
+   * `DendrogramViewer` puts one on every renamed leaf and `Tiles` on every slice. A subtree query
+   * finds those, concludes the file is already named, and exports a chart with no accessible name
+   * at all. Exactly the charts that carry per-mark titles are the ones it would silently skip.
+   */
+  const label = svg.getAttribute('aria-label')
+  if (label && !clone.querySelector(':scope > title')) {
+    const title = document.createElementNS(SVG_NS, 'title')
+    title.textContent = label
+    clone.insertBefore(title, clone.firstChild)
+  }
+
   const width = svg.getAttribute('width') ?? String(svg.clientWidth || 800)
   const height = svg.getAttribute('height') ?? String(svg.clientHeight || 400)
   clone.setAttribute('width', width)

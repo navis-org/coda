@@ -113,8 +113,14 @@ export function BarChartViewer({
     <div className="viewer">
       <div ref={ref} className="viewer__scroll nowheel" style={{ position: 'relative' }}>
         {size.width > 60 && (
-          <svg ref={svgRef} className="chart" width={size.width} height={height} role="img">
-            <title>{`${valueColumn} by ${categoryColumn}${seriesColumn ? `, stacked by ${seriesColumn}` : ''}`}</title>
+          <svg
+            ref={svgRef}
+            className="chart"
+            width={size.width}
+            height={height}
+            role="img"
+            aria-label={`${valueColumn} by ${categoryColumn}${seriesColumn ? `, stacked by ${seriesColumn}` : ''}`}
+          >
             <rect width={size.width} height={height} fill={surface} />
 
             {/* Gridlines: hairline, solid, one step off surface, behind the data. */}

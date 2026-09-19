@@ -123,6 +123,42 @@ describe('serializeSvg', () => {
     return svg
   }
 
+  /**
+   * The chart's name, which lives in two different places on screen and in the file.
+   *
+   * A `<title>` that is a direct child of `<svg>` is both the accessible name and a **native
+   * tooltip over the whole drawing**, so every chart here was opening a browser tooltip naming
+   * the chart on top of the hover card that says what the pointer is on. The live element
+   * carries `aria-label` now; the exported file still needs a real `<title>`, because there is
+   * nothing else in an SVG that can name it.
+   */
+  it('turns the chart’s aria-label into a title in the exported file', () => {
+    const svg = makeSvg()
+    svg.setAttribute('aria-label', 'Flow diagram of 8 boxes in 3 layers, 7 bands')
+    const output = serializeSvg(svg)
+    expect(output).toContain('<title>Flow diagram of 8 boxes in 3 layers, 7 bands</title>')
+  })
+
+  it('leaves a builder’s own title alone rather than adding a second', () => {
+    // `scatterToSvg`, `networkToSvg` and `heatmapToSvg` synthesise their own root, and two
+    // titles in one document is one of them being silently ignored.
+    const svg = makeSvg()
+    svg.setAttribute('aria-label', 'from the label')
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title')
+    title.textContent = 'from the builder'
+    svg.insertBefore(title, svg.firstChild)
+    const output = serializeSvg(svg)
+    expect(output).toContain('<title>from the builder</title>')
+    // One title, and it is the builder's. The `aria-label` rides along as an attribute, which
+    // is right — it is still the element's accessible name once the file is opened.
+    expect(output.match(/<title>/g)).toHaveLength(1)
+    expect(output).toContain('aria-label="from the label"')
+  })
+
+  it('adds no title where the chart has no name', () => {
+    expect(serializeSvg(makeSvg())).not.toContain('<title>')
+  })
+
   it('produces a standalone document with namespace and explicit size', () => {
     const output = serializeSvg(makeSvg())
     expect(output).toContain('xmlns="http://www.w3.org/2000/svg"')

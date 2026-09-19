@@ -1598,3 +1598,138 @@ registerHelper({
     '}',
   ],
 })
+
+/**
+ * Coda's flow-chart layering, as a vector igraph's Sugiyama layout takes directly.
+ *
+ * `layout_with_sugiyama(g, layers = ...)` is the one library call in either document that does
+ * what the canvas does — layers you hand it, crossing minimisation, and dummy vertices in
+ * `extd_graph` so an edge spanning several layers is routed rather than drawn through whatever
+ * is between its ends. What it will not do is *assign* the layers, which is what this is for.
+ *
+ * The cycle pass is why this is a helper rather than a call: `topo_sort` warns and returns a
+ * partial order on a graph with a cycle in it, and a connectome subgraph holds reciprocal pairs
+ * as a matter of course. Roots first, so the marked edge of a reciprocal pair is the one running
+ * back towards the sources — `longestPathLayers` in `nodes/lib/flowChartOps.ts`, whose answer
+ * this has to match or the figure has different columns from the card.
+ *
+ * **1-based, because igraph's `layers` argument is** — the JS and Python sides are 0-based and
+ * the offset is real rather than cosmetic: `layout_with_sugiyama` reads the numbers as positions.
+ */
+registerHelper({
+  name: 'coda_flow_layers',
+  requires: ['igraph'],
+  source: [
+    "# Coda's flow-chart layering: a 1-based column index per vertex, as the card drew it.",
+    'coda_flow_layers <- function(g, layer_attr = NULL) {',
+    '  n <- igraph::vcount(g)',
+    '  if (n == 0) return(integer(0))',
+    '  if (!is.null(layer_attr)) {',
+    '    # Read off a column, renumbered densely: the numbers are a measurement and the layers',
+    '    # are positions, so 0/2/5 hops draw as three adjacent columns. Anything unmeasured',
+    '    # lands in one layer after every measured one, never in the first.',
+    '    raw <- suppressWarnings(as.numeric(igraph::vertex_attr(g, layer_attr)))',
+    '    known <- sort(unique(raw[is.finite(raw)]))',
+    '    out <- match(raw, known)',
+    '    out[is.na(out)] <- length(known) + 1L',
+    '    return(as.integer(out))',
+    '  }',
+    '',
+    '  adj <- igraph::as_adj_list(g, mode = "out")',
+    '  adj <- lapply(seq_len(n), function(v) setdiff(as.integer(adj[[v]]), v))',
+    '  indeg <- integer(n)',
+    '  for (v in seq_len(n)) for (w in adj[[v]]) indeg[w] <- indeg[w] + 1L',
+    '',
+    '  # Depth-first, roots first, marking the edges that close a cycle.',
+    '  state <- integer(n)',
+    '  back <- new.env(hash = TRUE, parent = emptyenv())',
+    '  order <- c(which(indeg == 0L), which(indeg != 0L))',
+    '  for (root in order) {',
+    '    if (state[root] != 0L) next',
+    '    state[root] <- 1L',
+    '    stack <- c(root)',
+    '    at <- c(1L)',
+    '    while (length(stack)) {',
+    '      v <- stack[length(stack)]',
+    '      i <- at[length(at)]',
+    '      if (i > length(adj[[v]])) {',
+    '        state[v] <- 2L',
+    '        stack <- stack[-length(stack)]',
+    '        at <- at[-length(at)]',
+    '        next',
+    '      }',
+    '      at[length(at)] <- i + 1L',
+    '      w <- adj[[v]][i]',
+    '      if (state[w] == 1L) {',
+    '        assign(paste0(v, "-", w), TRUE, envir = back)',
+    '      } else if (state[w] == 0L) {',
+    '        state[w] <- 1L',
+    '        stack <- c(stack, w)',
+    '        at <- c(at, 1L)',
+    '      }',
+    '    }',
+    '  }',
+    '',
+    '  # Longest path over what is left, in Kahn order.',
+    '  kept <- lapply(seq_len(n), function(v) {',
+    '    adj[[v]][!vapply(adj[[v]], function(w) exists(paste0(v, "-", w), envir = back,',
+    '      inherits = FALSE), logical(1))]',
+    '  })',
+    '  pending <- integer(n)',
+    '  for (v in seq_len(n)) for (w in kept[[v]]) pending[w] <- pending[w] + 1L',
+    '  layers <- integer(n)',
+    '  queue <- which(pending == 0L)',
+    '  head <- 1L',
+    '  while (head <= length(queue)) {',
+    '    v <- queue[head]',
+    '    head <- head + 1L',
+    '    for (w in kept[[v]]) {',
+    '      layers[w] <- max(layers[w], layers[v] + 1L)',
+    '      pending[w] <- pending[w] - 1L',
+    '      if (pending[w] == 0L) queue <- c(queue, w)',
+    '    }',
+    '  }',
+    '  as.integer(layers + 1L)',
+    '}',
+  ],
+})
+
+/**
+ * Coda's Rank Plot ordering and its cumulative share.
+ *
+ * The twin of the Python helper, and here for the same two rules a reader would not put in by
+ * hand: the share is of the **values** rather than of the rows, and a column that can go
+ * negative gets no share at all — ranked descending its running sum climbs past the total and
+ * comes back down, which draws as a Lorenz curve and is not one. `NA` rather than a number, so
+ * ggplot leaves a gap instead of a line.
+ *
+ * `order` on a numeric vector is radix and therefore stable, which is what makes ties break on
+ * the frame's own order — the same requirement `rankSeries.ts`' comparator has on the canvas.
+ */
+registerHelper({
+  name: 'coda_rank',
+  source: [
+    'coda_rank <- function(frame, value, flag = NULL, descending = TRUE,',
+    '                      drop_non_positive = FALSE) {',
+    "  # Coda's Rank Plot ordering and cumulative share, as the card computes them.",
+    '  out <- frame',
+    '  out[[value]] <- suppressWarnings(as.numeric(out[[value]]))',
+    '  out <- out[!is.na(out[[value]]), , drop = FALSE]',
+    '  # A log axis has no room for a value at or below zero.',
+    '  if (drop_non_positive) out <- out[out[[value]] > 0, , drop = FALSE]',
+    '  out <- out[order(out[[value]], decreasing = descending), , drop = FALSE]',
+    '  out$coda_rank <- seq_len(nrow(out))',
+    '  # Of the values, never of the rows. Flagged rows are out of both halves: on an Influence',
+    '  # result they are the seeds, which carry most of the total and say nothing about the rest.',
+    '  counted <- out[[value]]',
+    '  if (!is.null(flag)) counted[as.logical(out[[flag]])] <- 0',
+    '  total <- sum(counted)',
+    '  out$coda_share <- if (any(counted < 0) || total <= 0) {',
+    '    NA_real_',
+    '  } else {',
+    '    cumsum(counted) / total',
+    '  }',
+    '  out',
+    '}',
+  ],
+})

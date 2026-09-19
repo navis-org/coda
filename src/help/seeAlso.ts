@@ -108,6 +108,16 @@ const RELATED: readonly (readonly string[])[] = [
   ['neuron.connectivity', 'neuron.paths', 'neuron.influence', 'neuron.partnerVectors'],
   // An edge list, the graph it becomes, and the two things worth asking that graph.
   ['net.build', 'net.centrality', 'net.metrics', 'out.network'],
+  // The two ways to draw a network, and the two nodes whose result is small enough for the
+  // second one. The pair a reader most needs is the first: they draw the same material and the
+  // choice between them is about how many nodes there are, which is exactly the fact no
+  // category or socket type could relate them by.
+  ['out.flowChart', 'out.network', 'neuron.paths'],
+  // A ball and the mark that draws one. `Influence` emits layered flow rather than a network,
+  // which is what puts it here and not in the group above — a node-link diagram of a ball
+  // invites tracing a route through paths that are not on the page, and a Sankey's widths
+  // account for all of them.
+  ['out.sankey', 'neuron.influence', 'out.flowChart'],
   // A matrix and the two ways to make one comparable before drawing it.
   ['core.pivot', 'core.normalize', 'out.heatmap', 'core.similarity'],
 

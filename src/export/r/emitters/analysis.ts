@@ -287,11 +287,30 @@ registerEmitter('neuron.paths', (ctx) => {
   ctx.library('neuprintr')
   // `neuprint_get_paths` takes a hop budget directly, which `fetch_shortest_paths` does not —
   // one of the few places R gives up less than Python here.
+  /*
+   * **The `Network` port is not bound here, and Python's is.** `emit.ts` binds every output port
+   * of a node whose emitter produced code, so an unbound one is a name a downstream cell refers
+   * to and nothing creates — which `out.flowChart` does, where `out.network` never did. Python
+   * closes it with `coda_paths_network`, built on `fetch_paths`' documented frame: one row per
+   * step, `path` naming the route and `weight` the strength from the previous body, so
+   * consecutive rows of a group are an edge.
+   *
+   * The same cannot be written here yet because **neuprintr's return shape has not been
+   * checked**, and `check-export.R` skips its resolution pass without the package installed — so
+   * a builder written against a guessed shape would emit confidently and be verified by nothing.
+   * That is precisely how the four igraph defects in `out.flowChart`'s own R cell were
+   * introduced, and `probe-flowchart.R` is what caught them. The note below says so in the
+   * document rather than leaving a reader to find out by running it.
+   */
   return [
     ...ctx.note(
       'neuprintr returns every route within the hop budget. Coda additionally ranks them by ' +
         'their weakest link and keeps the strongest — that ranking is not reproduced, so this ' +
         'is the unranked set.',
+    ),
+    ...ctx.note(
+      'This node’s Network output is not reproduced here — only the routes table is. A cell ' +
+        'below that reads the Network port will not find it.',
     ),
     `${ctx.output('paths')} <- neuprint_get_paths(`,
     `  ${neuronIds(sources)},`,

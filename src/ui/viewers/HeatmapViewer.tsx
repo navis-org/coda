@@ -594,7 +594,6 @@ export function HeatmapViewer({
             role="img"
             aria-label={title}
           >
-            <title>{title}</title>
             {/* The three regions `heatmapToSvg` clips to as well: zoomed, a line half off the
                 plot keeps its cells and its ring clipped, and a gutter's labels stay in it. */}
             <defs>

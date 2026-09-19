@@ -453,14 +453,12 @@ export function DendrogramViewer({
             width={size.width}
             height={size.height}
             role="img"
+            aria-label={`Dendrogram of ${leafCount} leaves${linkage.method ? `, ${linkage.method} linkage` : ''}`}
             onClick={(event) => {
               // Only a click that reached the background, i.e. missed every bracket.
               if (event.target === event.currentTarget) onSelectionChange?.([])
             }}
           >
-            <title>
-              {`Dendrogram of ${leafCount} leaves${linkage.method ? `, ${linkage.method} linkage` : ''}`}
-            </title>
             <rect width={size.width} height={size.height} fill={surface} />
 
             <defs>

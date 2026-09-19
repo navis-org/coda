@@ -16,6 +16,7 @@ import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { copyIdsSettings } from '../../../nodes/lib/copyIds'
 import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
 import { pyList, pyStr } from '../py'
+import { CHART_INK } from '../../../ui/colors'
 import { registerEmitter } from '../registry'
 import type { Emitter } from '../types'
 import { codaNeurons, isCaveDataset, neuronIds, pySelection } from './common'
@@ -35,6 +36,8 @@ import {
   distributionPlan,
   histogramPlan,
   piePlan,
+  flowChartPlan,
+  rankPlan,
   scatterPlan,
   tableViewerPlan,
   valueScaleNote,
@@ -44,6 +47,14 @@ import {
 // ---------------------------------------------------------------------------
 // Table — the one viewer with nothing to draw
 // ---------------------------------------------------------------------------
+
+/*
+ * The muted ink, read off the real palette rather than typed out — `analysis.ts` records the rule
+ * ("an emitter may reach `src/ui`, which is half of why the registry is separate from the node
+ * definitions"). Mode-independent, so no `EMITTED_MODE` decision is needed. The goldens compare
+ * emitted *text*, so a retuned ink would otherwise leave stale hexes here with nothing failing.
+ */
+const MUTED_INK = CHART_INK.dark.muted
 
 registerEmitter('out.table', (ctx) => {
   const src = ctx.wired('in')
@@ -894,6 +905,255 @@ registerEmitter('out.network', (ctx) => {
     `# )`,
   )
   return lines
+})
+
+// ---------------------------------------------------------------------------
+// Rank plot
+// ---------------------------------------------------------------------------
+
+/**
+ * The ranking and its share, as two stacked axes sharing the rank axis.
+ *
+ * `plt.subplots(2, 1, sharex=True)` rather than a twin y on one axes, which is the construction
+ * this node exists partly to avoid: two measures of different scale on one drawing have no
+ * honest reading, and the card's own answer is two panels. What the document reproduces exactly
+ * is the arithmetic, which is `coda_rank`'s — the ordering, the stable tie break, the share of
+ * the values, and the NaN a signed column comes back as.
+ *
+ * The one thing it does *not* reproduce is the sampling: the card draws a few hundred points
+ * and runs the curve through the rest, where matplotlib is handed every row. That makes the
+ * notebook's figure denser rather than different, so it is not worth a note.
+ */
+registerEmitter('out.rank', (ctx) => {
+  const src = ctx.wired('in')
+
+  ctx.require('pandas')
+  ctx.require('matplotlib')
+  ctx.helper('coda_rank')
+
+  const out = ctx.output('out')
+  const selected = ctx.output('selected')
+  const plan = rankPlan(ctx)
+
+  // By identity: this node changes nothing about the value, which is what makes its drawing
+  // controls presentational.
+  const lines: string[] = [`${out} = ${src}`]
+
+  if (plan.selected.note === undefined) {
+    const { column, ids } = plan.selected
+    lines.push(`${selected} = ${out}[${out}[${pyStr(column)}].isin(${pySelection(ids)})]`)
+  } else {
+    lines.push(...ctx.note(plan.selected.note), `${selected} = ${out}.iloc[0:0]`)
+  }
+
+  if (plan.drawn.note !== undefined) return [...lines, ...ctx.note(plan.drawn.note)]
+  const { value } = plan.drawn
+
+  const args = [
+    out,
+    pyStr(value),
+    ...(plan.flagColumn ? [`flag=${pyStr(plan.flagColumn)}`] : []),
+    `descending=${plan.descending ? 'True' : 'False'}`,
+    `drop_non_positive=${plan.valueLog ? 'True' : 'False'}`,
+  ]
+
+  lines.push(``, `_ranked = coda_rank(${args.join(', ')})`)
+
+  if (plan.showShare) {
+    lines.push(
+      // Shared x, so the two panels are read against one ranking. `gridspec_kw` rather than
+      // `height_ratios=`, which matplotlib only grew as a keyword in 3.6.
+      `_fig, (_top, _bottom) = plt.subplots(`,
+      `    2, 1, sharex=True, figsize=(8, 6), gridspec_kw={'height_ratios': [2, 1]}`,
+      `)`,
+    )
+  } else {
+    lines.push(`_fig, _top = plt.subplots(figsize=(8, 5))`)
+  }
+
+  lines.push(
+    `_top.scatter(_ranked['coda_rank'], _ranked[${pyStr(value)}], s=14, zorder=3)`,
+    `_top.set_ylabel(${pyStr(value)})`,
+  )
+  if (plan.valueLog) lines.push(`_top.set_yscale('log')`)
+  if (plan.rankLog) lines.push(`_top.set_xscale('log')`)
+
+  if (plan.flagColumn) {
+    // Ringed rather than recoloured, as on the card: the flag says "kept out of the share",
+    // which is a fact about the reading rather than a category in the data.
+    lines.push(
+      `_flagged = _ranked[_ranked[${pyStr(plan.flagColumn)}].astype(bool)]`,
+      `_top.scatter(`,
+      `    _flagged['coda_rank'], _flagged[${pyStr(value)}],`,
+      `    s=90, facecolors='none', edgecolors='${MUTED_INK}', zorder=4,`,
+      `)`,
+    )
+  }
+
+  // Labelled only where a label column resolves. The card falls back to the id column; here the
+  // fallback would be an 18-digit root id annotated onto five points, which is not a label.
+  const labelColumn = plan.labelColumn
+  if (plan.labelTop > 0 && labelColumn) {
+    lines.push(
+      `for _, _row in _ranked.head(${plan.labelTop}).iterrows():`,
+      `    _top.annotate(`,
+      `        str(_row[${pyStr(labelColumn)}]), (_row['coda_rank'], _row[${pyStr(value)}]),`,
+      `        textcoords='offset points', xytext=(6, 3), fontsize=7,`,
+      `    )`,
+    )
+  }
+
+  if (plan.showShare) {
+    lines.push(
+      // Empty on a signed column, where `coda_share` is NaN — the same refusal the card makes,
+      // in the idiom of the thing doing the drawing.
+      `_bottom.plot(_ranked['coda_rank'], _ranked['coda_share'])`,
+      `_bottom.set_ylim(0, 1)`,
+      `_bottom.set_ylabel('share of total')`,
+      `_bottom.set_xlabel('rank')`,
+    )
+  } else {
+    lines.push(`_top.set_xlabel('rank')`)
+  }
+
+  lines.push(`plt.tight_layout()`, `plt.show()`)
+  return lines
+})
+
+// ---------------------------------------------------------------------------
+// Flow chart
+// ---------------------------------------------------------------------------
+
+/**
+ * The layered diagram, drawn with `multipartite_layout` over Coda's own layering.
+ *
+ * **The layering is a generated helper and not a networkx call**, because networkx has neither:
+ * `topological_generations` is *earliest*-possible layering rather than longest-path, and
+ * `graphviz_layout(prog='dot')` needs pygraphviz. `coda_flow_layers` records that argument and
+ * has to answer what the canvas answers, or the figure has different columns from the card.
+ *
+ * Three things the figure will not reproduce, and all three are said in the cell rather than
+ * approximated. networkx does no crossing minimisation, so the order *within* a layer is
+ * whatever the node order gives; it draws a fixed-size marker where the card draws a box sized
+ * to its label; and it routes every edge as a straight line, so an arrow skipping a layer
+ * crosses whatever is in the way rather than going round it. The last is the one the canvas
+ * spends a Sugiyama pass on, and stating it beats a figure that quietly looks wrong.
+ *
+ * What *is* reproduced is the part that carries meaning: feedback edges are drawn dashed, off
+ * the same layering, because "there is a recurrent connection here" is a fact about the circuit.
+ */
+registerEmitter('out.flowChart', (ctx) => {
+  const src = ctx.wired('in')
+
+  ctx.require('networkx')
+  ctx.require('pandas')
+  ctx.require('matplotlib')
+  ctx.helper('coda_flow_layers')
+
+  const out = ctx.output('out')
+  const selected = ctx.output('selected')
+  const plan = flowChartPlan(ctx)
+
+  // By identity, not `.copy()`: this node changes nothing about the value, which is what makes
+  // every one of its controls presentational. `out.network`'s copy is there because its three
+  // filters really do reshape the graph.
+  const lines: string[] = [`${out} = ${src}`]
+
+  if (plan.selected.note === undefined) {
+    lines.push(
+      `${selected} = pd.DataFrame(`,
+      `    [`,
+      `        {'neuronId': str(_n), **_d}`,
+      `        for _n, _d in ${out}.nodes(data=True)`,
+      `        if str(_n) in ${pySelection(plan.selected.ids)}`,
+      `    ],`,
+      `    columns=['neuronId'],`,
+      `)`,
+    )
+  } else {
+    lines.push(
+      ...ctx.note(plan.selected.note),
+      `${selected} = pd.DataFrame(columns=['neuronId'])`,
+    )
+  }
+
+  const layerArg = plan.layerColumn ? `layer_attr=${pyStr(plan.layerColumn)}` : ''
+  lines.push(
+    ``,
+    // Laid out on a copy, so the `coda_layer` attribute the layout needs is not written onto
+    // the graph everything downstream reads — the canvas adds nothing to the value either.
+    `_figure = ${out}.copy()`,
+    `_layers = coda_flow_layers(_figure${layerArg ? `, ${layerArg}` : ''})`,
+    `nx.set_node_attributes(_figure, _layers, 'coda_layer')`,
+    `_pos = nx.multipartite_layout(`,
+    // networkx spells left-to-right as layers on *vertical* lines.
+    `    _figure, subset_key='coda_layer', align=${pyStr(plan.direction === 'lr' ? 'vertical' : 'horizontal')}`,
+    `)`,
+    ``,
+    `_back = [(u, v) for u, v in _figure.edges() if _layers[v] < _layers[u]]`,
+    // The complement by the same test the line above uses, rather than a `set(_back)` the
+    // comprehension rebuilds once per edge — and one predicate instead of two spellings of it.
+    `_forward = [(u, v) for u, v in _figure.edges() if _layers[v] >= _layers[u]]`,
+  )
+
+  if (plan.weighted) {
+    lines.push(
+      `_weights = {`,
+      `    (u, v): abs(d.get('weight') or 0) for u, v, d in _figure.edges(data=True)`,
+      `}`,
+      `_high = max(_weights.values(), default=0)`,
+      `_width = lambda e: 1 + (4 * _weights.get(e, 0) / _high if _high else 0.4)`,
+    )
+  } else {
+    lines.push(`_width = lambda e: 1.4`)
+  }
+
+  const labelExpr = plan.labelColumn
+    ? `{_n: _d.get(${pyStr(plan.labelColumn)}, _n) for _n, _d in _figure.nodes(data=True)}`
+    : `{_n: _n for _n in _figure.nodes()}`
+
+  lines.push(
+    ``,
+    `plt.figure(figsize=(10, 6))`,
+    // A square marker is the closest networkx offers to a box; it does not grow with its label.
+    `nx.draw_networkx_nodes(_figure, _pos, node_shape='s', node_size=1400, node_color='#dfe3e8')`,
+    `nx.draw_networkx_labels(_figure, _pos, labels=${labelExpr}, font_size=7)`,
+    `nx.draw_networkx_edges(`,
+    `    _figure, _pos, edgelist=_forward, width=[_width(e) for e in _forward],`,
+    `    edge_color='${MUTED_INK}', node_shape='s', arrowsize=9,`,
+    `)`,
+    // Dashed, as on the canvas: feedback drawn like feed-forward reads as a data error.
+    `nx.draw_networkx_edges(`,
+    `    _figure, _pos, edgelist=_back, width=[_width(e) for e in _back],`,
+    `    edge_color='${MUTED_INK}', node_shape='s', arrowsize=9, style='dashed',`,
+    `)`,
+  )
+
+  if (plan.edgeLabels) {
+    const cell = `_d.get(${pyStr(plan.edgeLabelColumn)})`
+    lines.push(
+      `nx.draw_networkx_edge_labels(`,
+      `    _figure, _pos,`,
+      `    edge_labels={`,
+      `        (u, v): ${cell}`,
+      `        for u, v, _d in _figure.edges(data=True)`,
+      `        if ${cell} is not None`,
+      `    },`,
+      `    font_size=6,`,
+      `)`,
+    )
+  }
+
+  lines.push(`plt.axis('off')`, `plt.tight_layout()`, `plt.show()`)
+
+  const notes = [
+    ...plan.divergences,
+    'networkx does no crossing minimisation, so the order of boxes within a layer is the ' +
+      "graph's node order rather than the arrangement on the card.",
+    'A marker here is a fixed size and every edge is a straight line, where Coda sizes each ' +
+      'box to its label and routes an arrow that skips a layer around the boxes in between.',
+  ]
+  return [...notes.flatMap((note) => ctx.note(note)), ...lines]
 })
 
 // ---------------------------------------------------------------------------

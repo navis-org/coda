@@ -224,6 +224,7 @@ describe('NodeBrowser filtering', () => {
       'Dataset Summary',
       'Dendrogram',
       'Describe Table',
+      'Flow Chart',
       'Heatmap',
       'Histogram',
       'Network Metrics',
@@ -233,10 +234,12 @@ describe('NodeBrowser filtering', () => {
       'Neuron Topology',
       'Pie Chart',
       'ROI Viewer',
+      'Rank Plot',
+      'Sankey',
       'Scatter Plot',
       'Table',
     ])
-    expect(screen.getByText('17 nodes')).toBeTruthy()
+    expect(screen.getByText('20 nodes')).toBeTruthy()
   })
 
   it('fuzzy-searches across every category, best match first', () => {

@@ -11,6 +11,7 @@ import { readColorSpec, readShapeSpec, readSizeSpec } from '../../../nodes/lib/e
 import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { copyIdsSettings } from '../../../nodes/lib/copyIds'
 import type { MatrixAxis } from '../../../nodes/lib/matrixShape'
+import { CHART_INK } from '../../../ui/colors'
 import { rCol as col, rStr, rVector } from '../r'
 import { hclustMethod } from './analysis'
 import { registerEmitter } from '../registry'
@@ -30,6 +31,8 @@ import {
   NEUROGLANCER_REFUSAL,
   barChartPlan,
   distributionPlan,
+  flowChartPlan,
+  rankPlan,
   histogramPlan,
   piePlan,
   scatterPlan,
@@ -37,6 +40,14 @@ import {
   valueScaleNote,
   viewer3dPlan,
 } from '../../plans/viewers'
+
+/*
+ * The muted ink, read off the real palette rather than typed out — `analysis.ts` records the rule
+ * ("an emitter may reach `src/ui`, which is half of why the registry is separate from the node
+ * definitions"). Mode-independent, so no `EMITTED_MODE` decision is needed. The goldens compare
+ * emitted *text*, so a retuned ink would otherwise leave stale hexes here with nothing failing.
+ */
+const MUTED_INK = CHART_INK.dark.muted
 
 registerEmitter('out.table', (ctx) => {
   const src = ctx.wired('in')
@@ -575,6 +586,106 @@ registerEmitter('out.scatter', (ctx) => {
 })
 
 /**
+ * The ranking and its share.
+ *
+ * **Two figures rather than two panels, and that is a stated divergence rather than a
+ * shortcut.** The card stacks the value and the share on one drawing sharing the rank axis,
+ * which `facet_grid(scales = "free_y")` looks like it should reproduce — but a scale
+ * *transform* in ggplot belongs to the scale and not to the facet, so a log value panel and a
+ * linear share panel cannot be two facets of one plot. The libraries that do stack them —
+ * patchwork, cowplot, gridExtra — are each a dependency this document does not have, and the
+ * export doctrine puts a note above a fourth package. So: two plots, and a sentence saying why.
+ *
+ * The arithmetic is `coda_rank`'s and is the canvas's exactly, which is the half that matters:
+ * the ordering, the stable tie break, the share of the values, and the `NA` a signed column
+ * comes back as.
+ */
+registerEmitter('out.rank', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.library('ggplot2')
+  ctx.library('dplyr')
+  ctx.helper('coda_rank')
+
+  const out = ctx.output('out')
+  const selected = ctx.output('selected')
+  const plan = rankPlan(ctx)
+
+  // By identity: this node changes nothing about the value.
+  const lines: string[] = [`${out} <- ${src}`]
+  if (plan.selected.note === undefined) {
+    const { column, ids } = plan.selected
+    lines.push(`${selected} <- ${out} |> filter(${col(column)} %in% ${rVector(ids)})`)
+  } else {
+    lines.push(...ctx.note(plan.selected.note), `${selected} <- ${out} |> slice(0)`)
+  }
+
+  if (plan.drawn.note !== undefined) return [...lines, ...ctx.note(plan.drawn.note)]
+  const { value } = plan.drawn
+
+  const args = [
+    out,
+    rStr(value),
+    ...(plan.flagColumn ? [`flag = ${rStr(plan.flagColumn)}`] : []),
+    `descending = ${plan.descending ? 'TRUE' : 'FALSE'}`,
+    `drop_non_positive = ${plan.valueLog ? 'TRUE' : 'FALSE'}`,
+  ]
+
+  lines.push(``, `.ranked <- coda_rank(${args.join(', ')})`, ``)
+
+  const top = [
+    `ggplot(.ranked, aes(x = coda_rank, y = ${col(value)})) +`,
+    `  geom_point(size = 1.4) +`,
+  ]
+  if (plan.flagColumn) {
+    // Ringed rather than recoloured, as on the card: the flag says "kept out of the share",
+    // which is a fact about the reading rather than a category in the data.
+    top.push(
+      `  geom_point(`,
+      `    data = filter(.ranked, as.logical(${col(plan.flagColumn)})),`,
+      `    shape = 21, size = 4, colour = "${MUTED_INK}", fill = NA`,
+      `  ) +`,
+    )
+  }
+  if (plan.labelTop > 0 && plan.labelColumn) {
+    top.push(
+      `  geom_text(`,
+      `    data = head(.ranked, ${plan.labelTop}),`,
+      `    aes(label = ${col(plan.labelColumn)}), hjust = -0.2, size = 2.6`,
+      `  ) +`,
+    )
+  }
+  if (plan.valueLog) top.push(`  scale_y_log10() +`)
+  if (plan.rankLog) top.push(`  scale_x_log10() +`)
+  top.push(`  labs(x = "rank", y = ${rStr(value)}) +`, `  theme_minimal()`)
+  lines.push(`print(`, ...top.map((line) => `  ${line}`), `)`)
+
+  if (plan.showShare) {
+    lines.push(
+      ...ctx.note(
+        'The card draws the share as a second panel under the ranking, sharing its axis. ' +
+          'ggplot2 alone cannot stack two panels with different y transforms — a transform ' +
+          'belongs to the scale rather than to the facet — so this is a second figure over the ' +
+          'same ranking. It is empty where the share was withheld; see coda_rank.',
+      ),
+      ``,
+      `print(`,
+      `  ggplot(.ranked, aes(x = coda_rank, y = coda_share)) +`,
+      `    geom_line() +`,
+      // Plain 0..1 rather than `scales::percent`: scales is ggplot2's own dependency and
+      // would work, but naming a package this document does not declare is how a fourth one
+      // arrives without anybody deciding to add it.
+      `    scale_y_continuous(limits = c(0, 1)) +`,
+      ...(plan.rankLog ? [`    scale_x_log10() +`] : []),
+      `    labs(x = "rank", y = "share of total") +`,
+      `    theme_minimal()`,
+      `)`,
+    )
+  }
+
+  return lines
+})
+
+/**
  * A categorical selection, as a dplyr predicate.
  *
  * `as.character()` rather than a bare `%in%`, for the same reason the notebook casts: Coda's
@@ -855,6 +966,156 @@ registerEmitter('out.network', (ctx) => {
     `# plot(${out}, layout = layout_as_tree(${out}))`,
   )
   return lines
+})
+
+/**
+ * The layered diagram, drawn with igraph's Sugiyama layout over Coda's own layering.
+ *
+ * **This is the one figure in either document that is close to what the card draws**, and the
+ * reason is `layout_with_sugiyama`: handed the layers it does crossing minimisation and inserts
+ * dummy vertices, exposed as `extd_graph`, so an edge spanning several layers is routed around
+ * the vertices in between rather than drawn through them. That is the pass
+ * `ui/viewers/flowChartLayout.ts` hand-rolls, and networkx has no equivalent — which is why the
+ * Python cell carries two divergence notes that this one does not.
+ *
+ * What it still will not do is size a box to its label; igraph's vertex is a fixed marker.
+ *
+ * `coda_flow_layers` is what assigns the layers, and its answer has to match the canvas's — see
+ * the helper, whose cycle pass is the half a `topo_sort` cannot stand in for.
+ */
+registerEmitter('out.flowChart', (ctx) => {
+  const src = ctx.wired('in')
+  ctx.library('igraph')
+  ctx.library('dplyr')
+  ctx.helper('coda_flow_layers')
+
+  const out = ctx.output('out')
+  const selected = ctx.output('selected')
+  const plan = flowChartPlan(ctx)
+
+  // By identity: this node changes nothing about the value, which is what makes every one of
+  // its controls presentational. `out.network` copies because its three filters really reshape.
+  const lines: string[] = [`${out} <- ${src}`]
+
+  if (plan.selected.note === undefined) {
+    lines.push(
+      `.picked <- ${rVector(plan.selected.ids)}`,
+      // `as_data_frame(what = "vertices")` keeps every attribute the network carried, which is
+      // what the canvas's Selected port does; `name` is igraph's own id column.
+      `${selected} <- igraph::as_data_frame(${out}, what = "vertices") |>`,
+      `  mutate(neuronId = as.character(name)) |>`,
+      `  filter(neuronId %in% .picked) |>`,
+      `  relocate(neuronId)`,
+    )
+  } else {
+    lines.push(
+      ...ctx.note(plan.selected.note),
+      // `character(0)`, not `numeric(0)`: the node's fallback schema is `str`, and an empty
+      // double column is what makes a later `bind_rows` against a real one error outright.
+      `${selected} <- tibble(neuronId = character(0))`,
+    )
+  }
+
+  const layerArg = plan.layerColumn ? `, layer_attr = ${rStr(plan.layerColumn)}` : ''
+  lines.push(
+    ``,
+    `.layers <- coda_flow_layers(${out}${layerArg})`,
+    `.sugi <- layout_with_sugiyama(${out}, layers = .layers)`,
+  )
+
+  const labelExpr = plan.labelColumn
+    ? `vertex_attr(${out}, ${rStr(plan.labelColumn)})`
+    : `V(${out})$name`
+
+  /*
+   * Drawn on `extd_graph`, which is the whole reason this emitter reaches for Sugiyama: it is
+   * the graph *with* the routing vertices, so the bends are in the picture rather than an arrow
+   * cutting through the boxes between its ends.
+   *
+   * Three things about that graph were measured rather than assumed, by `probe-flowchart.R`,
+   * and the first version of this cell got two of them wrong.
+   *
+   * **It carries only `orig` and `arrow.mode`** — every attribute of the original edges is gone,
+   * so `E(.g)$weight` is `NULL` and the widths and labels were silently absent. `orig` is the
+   * 1-based index of the edge each piece came from, so everything is read through it; the three
+   * pieces of one split edge all answer the same index, which is exactly what draws a routed
+   * arrow at one width.
+   *
+   * **`arrow.mode` is already 0 on every piece but the last**, so a routed edge draws one
+   * arrowhead at its real target. That is a gift and the reason nothing here sets it.
+   *
+   * **The real vertices come first**, indices `1 .. vcount`, with the dummies after — which is
+   * what makes `.real` a `seq_len` rather than a lookup. `extd_graph` has no vertex names at all.
+   */
+  lines.push(
+    `.g <- .sugi$extd_graph`,
+    `.real <- seq_len(vcount(${out}))`,
+    `.orig <- E(.g)$orig`,
+    `V(.g)$label <- NA`,
+    `V(.g)$label[.real] <- ${labelExpr}`,
+    // A dummy is a bend, so it is drawn as nothing at all; otherwise every corner is a box.
+    `V(.g)$shape <- "none"`,
+    `V(.g)$shape[.real] <- "rectangle"`,
+    `V(.g)$size <- 0`,
+    `V(.g)$size[.real] <- 26`,
+    `V(.g)$size2 <- 0`,
+    `V(.g)$size2[.real] <- 10`,
+  )
+
+  if (plan.weighted) {
+    lines.push(
+      `.w <- abs(edge_attr(${out}, "weight"))`,
+      `.w[!is.finite(.w)] <- 0`,
+      `E(.g)$width <- if (max(.w, 0) > 0) 1 + 4 * .w[.orig] / max(.w) else 1.4`,
+    )
+  } else {
+    lines.push(`E(.g)$width <- 1.4`)
+  }
+
+  if (plan.edgeLabels) {
+    const cell = `edge_attr(${out}, ${rStr(plan.edgeLabelColumn)})`
+    lines.push(
+      // Once per original edge, not once per piece: a split edge is three edges here and
+      // labelling each of them prints the number three times along one arrow.
+      `.label <- ${cell}`,
+      `E(.g)$label <- NA`,
+      `E(.g)$label[!duplicated(.orig)] <- .label[.orig[!duplicated(.orig)]]`,
+      `E(.g)$label.cex <- 0.55`,
+    )
+  }
+
+  /*
+   * The coordinates, and both halves of this were wrong first — `probe-flowchart.R` runs the
+   * emitted cell, which is the only thing that could have said so.
+   *
+   * **`sugi$layout` has a row per *real* vertex**, so handing it to a plot of `extd_graph` is
+   * `The layout has 4 rows, but the graph has 6 vertices`. The extended graph's own coordinates
+   * are a graph attribute on it, `.g$layout`, with the dummies included — which is the whole
+   * point, they are the bends.
+   *
+   * **Sugiyama's y axis is the layering and it runs downwards**: layer 1 sits at the largest y,
+   * which plots at the top since igraph's y increases upward. So top-to-bottom is the layout
+   * unchanged, and left-to-right is the axes exchanged *and the layer axis negated*. Exchanging
+   * them alone — `[, 2:1]`, which is what this emitted first — draws the circuit right to left.
+   */
+  const layout =
+    plan.direction === 'lr' ? `cbind(-.g$layout[, 2], .g$layout[, 1])` : `.g$layout`
+  lines.push(
+    ``,
+    `plot(`,
+    `  .g, layout = ${layout},`,
+    `  vertex.color = "#dfe3e8", vertex.frame.color = "${MUTED_INK}",`,
+    `  vertex.label.cex = 0.6, vertex.label.color = "#111418",`,
+    `  edge.color = "${MUTED_INK}", edge.arrow.size = 0.4, asp = 0,`,
+    `)`,
+  )
+
+  const notes = [
+    ...plan.divergences,
+    'A vertex here is a fixed-size rectangle, where Coda sizes each box to its label. Feedback ' +
+      'edges are not dashed as they are on the canvas — igraph styles edges one way per plot.',
+  ]
+  return [...notes.flatMap((note) => ctx.note(note)), ...lines]
 })
 
 registerEmitter('out.viewer3d', (ctx) => {

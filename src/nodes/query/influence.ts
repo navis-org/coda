@@ -55,6 +55,8 @@ import {
   FRONTIER_BATCH,
   batched,
   combineHalves,
+  influenceFlow,
+  influenceFlowSchema,
   influencePairs,
   influencePairsSchema,
   influenceParamsFrom,
@@ -146,7 +148,28 @@ registerNode({
    * a plain table and a wire into a Neurons-only input goes red until a `Group By` sits between
    * them. Louder than a picker clearing, and it is the switch doing what it says.
    */
-  outputs: [{ id: 'influence', label: 'Influence', type: T.neurons() }],
+  /*
+   * Two ports, and the second costs no fetch at all.
+   *
+   * `propagate` already computes every edge's contribution in order to propagate at all, so the
+   * transfers are what it *keeps* rather than a second question to a server. What that buys is a
+   * Sankey of the run: where the drive came from, through what, and how much of it the walk
+   * could not follow.
+   *
+   * **Named for what it carries rather than for the diagram it feeds.** `Flow` was the obvious
+   * label and is the one word this palette cannot spare: `out.flowChart` is already called Flow
+   * Chart and takes a `Network`, so a `Flow` port that wants a Sankey and refuses the Flow Chart
+   * would be three inconsistent uses of one word on one canvas. `Transfers` says what a row is —
+   * drive that crossed, at one depth — and sits beside `Connectivity`'s `Connections`.
+   *
+   * The header's own argument against a second port — "there is no information in one that is not
+   * in the other", written about the per-query table — does not reach here. Which groups fed
+   * which, and how much, is information the score table does not carry.
+   */
+  outputs: [
+    { id: 'influence', label: 'Influence', type: T.neurons() },
+    { id: 'transfers', label: 'Transfers', type: T.table(influenceFlowSchema()) },
+  ],
 
   params: [
     {
@@ -290,6 +313,26 @@ registerNode({
       ],
       advanced: true,
     },
+    {
+      id: 'flowFloor',
+      kind: 'number',
+      label: 'Transfer floor',
+      help: 'Leave a connection out of the Transfers table when it carried less than this share of the drive. 0 keeps every one, which on a wide ball is a diagram of a few thousand bands.',
+      default: 0.002,
+      min: 0,
+      max: 0.1,
+      step: 0.001,
+      /*
+       * A *share* rather than a count, because what bounds a flow diagram is how much drive a
+       * band carries and not how many there are — and a share rather than an absolute mass
+       * because the total depends on `Seed weighting`: `each` starts one unit per seed, so an
+       * absolute floor would mean ten times less on a ten-neuron set than on a one-neuron one.
+       *
+       * No `absentMeans`: this port has never shipped, so a stored graph without the key is a
+       * graph that never had transfers, and the declared default is the honest reading.
+       */
+      advanced: true,
+    },
   ],
 
   /*
@@ -308,6 +351,16 @@ registerNode({
       influence: influenceParamsFrom(ctx.params).perQuery
         ? T.table(influencePairsSchema(connectivity))
         : T.neurons(influenceSchema(connectivity)),
+      /*
+       * Fixed, and unchanged by `Per query neuron` — which is the honest half: that control
+       * splits the *score* per query neuron, and the drive the scores were computed over crossed
+       * the same edges either way. So no picker on this port clears when the control moves.
+       *
+       * It does not read `connectivity` at all, and that is the departure worth noting: the score
+       * table carries the dataset's own id column whole, where a transfer's two ends are **cell
+       * type names** and are `str` on every backend.
+       */
+      transfers: T.table(influenceFlowSchema()),
     }
   },
 
@@ -550,6 +603,17 @@ registerNode({
         gain,
         frontierLimit,
         fetch,
+        /*
+         * Folded to cell type inside the walk rather than after it: a per-neuron-pair ribbon set
+         * on a four-hop ball is millions of entries and the diagram it feeds is a few dozen boxes.
+         *
+         * On whenever the port can be filled, which is not the same as "whenever something is
+         * wired to it" — `evaluate` cannot ask who is downstream. But it *can* ask whether the
+         * answer would be thrown away: a split has no single layer axis, so `influenceFlow` hands
+         * back nothing, and both halves would otherwise accumulate at full cost over the widest
+         * walks the node does.
+         */
+        ribbonsByType: split.forward === 0,
         ...(denominators ? { denominators } : {}),
         ...(published ? { published } : {}),
         signal: ctx.signal,
@@ -639,6 +703,15 @@ registerNode({
      * dataset. Each is compared against the signal it came out of rather than reported as a bare
      * number, because "0.004 of mass" means nothing to a reader and "3% of the signal" does.
      */
+    /*
+     * "Is there a single walk?", bound once.
+     *
+     * Four things read it — the truncation bound below, the `hops` column, the Transfers table
+     * and the sentence explaining an empty one. Spelled `halves.length === 1` at each, a third
+     * reason for there being no single walk would leave the explanation describing the other two.
+     */
+    const single = halves.length === 1 ? halves[0] : undefined
+
     for (const half of halves) {
       /*
        * Every loss is reported as a share of the signal that half started with, because a bare
@@ -658,7 +731,7 @@ registerNode({
        * it is a lower bound, in the guide and in the help; what it declines to do is put a
        * number on it that is not the number.
        */
-      if (halves.length === 1) {
+      if (single) {
         const bound = truncation(half)
         if (bound !== null && bound / seedTotal > LOSS_WARN) {
           ctx.warn(
@@ -701,12 +774,62 @@ registerNode({
      * than filled with the nearer of the two, which would read as a distance and be one only half
      * the time. `Per query neuron` never splits, so it always has one.
      */
-    const firstHop = halves.length === 1 ? halves[0]!.firstHop : new Map<NeuronId, number>()
+    const firstHop = single ? single.firstHop : new Map<NeuronId, number>()
 
     const route =
       denominator === 'traversal'
         ? 'denominator summed within the traversal'
         : `denominator from published totals (${denominator === 'all' ? 'all synapses' : 'reconstructed partners only'})`
+
+    /*
+     * The Transfers port, built before the branch so both shapes of the score table carry the
+     * same transfers — the scores are what `Per query neuron` splits, and the drive they were
+     * computed over crossed the same edges either way.
+     *
+     * Built unconditionally rather than only when something is wired to it: `evaluate` cannot ask
+     * who is downstream, and the ribbons are already in memory — `propagate` kept them as it went
+     * rather than computing anything extra.
+     *
+     * The floor is a share of the mass the walk started with, which is `seeds.length * seedMass`
+     * — one unit per seed under `each` and one unit in total under `share`.
+     */
+    const flow = influenceFlow({
+      half: single,
+      direction,
+      floor: Math.max(0, Number(ctx.params.flowFloor)) * seeds.length * seedMass,
+    })
+    const transfers = flow.table
+    /*
+     * The floor's own share, in the same idiom as the three losses above it.
+     *
+     * Without it the Sankey attributes this to the connectome: that viewer derives "what stopped
+     * here" as a node's inflow minus its outflow, so every band the floor cut lands in the number
+     * its caption prints — under a tooltip saying the card above explains why. On a wide ball,
+     * where most ribbons are small, this is plausibly the largest single contributor to it. A
+     * control's effect has to be named by the card that owns the control.
+     */
+    if (flow.floored > LOSS_WARN) {
+      ctx.warn(
+        `Transfer floor left ${percent(flow.floored)} of the drive out of the Transfers table, ` +
+          `so a flow diagram of it will show that much stopping short. Lower Transfer floor to ` +
+          `draw the weak connections too — it changes the picture, not the scores.`,
+      )
+    }
+    /*
+     * Said rather than left as an empty port. Under a split the two halves count hops from
+     * opposite ends, so one layer axis cannot hold both — the same reason the `hops` column is
+     * empty here, and the same reason *that* one says nothing: a column of two measurements is
+     * worse than a column of none. The difference is that an empty *port* reads as a broken node,
+     * so this one gets a sentence naming the controls that bring it back.
+     */
+    if (!single) {
+      ctx.warn(
+        `Transfers is empty because this run met in the middle: its two halves count hops from ` +
+          `opposite ends, so their columns are not the same columns and a diagram of both would ` +
+          `be laid out by two different measurements. Unwire Candidates, or set Denominator to ` +
+          `"summed within the traversal", to walk one pass and get them.`,
+      )
+    }
 
     if (settings.perQuery) {
       /*
@@ -745,7 +868,7 @@ registerNode({
         1,
         `${pairs.length.toLocaleString()} pairs · ${seeds.length.toLocaleString()} queries · ${walked} · ${route}`,
       )
-      return { influence: pairs }
+      return { influence: pairs, transfers }
     }
 
     const table = influenceTable({
@@ -757,6 +880,6 @@ registerNode({
       seeds,
     })
     ctx.progress(1, `${table.length.toLocaleString()} neurons · ${walked} · ${route}`)
-    return { influence: table }
+    return { influence: table, transfers }
   },
 })

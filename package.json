@@ -56,7 +56,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b --noEmit && tsc -p tsconfig.scripts.json --noEmit",
     "zoo:index": "vite-node scripts/zoo-index.ts --",
-    "probe:distance": "vite-node scripts/probe-distance.ts"
+    "probe:distance": "vite-node scripts/probe-distance.ts",
+    "probe:flowchart": "vite-node scripts/probe-flowchart.ts && python3 scripts/probe-flowchart.py && Rscript scripts/probe-flowchart.R",
+    "probe:flowchart-draw": "node scripts/probe-flowchart-draw.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

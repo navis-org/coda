@@ -18,15 +18,18 @@
 import { describe, expect, it } from 'vitest'
 
 import { column, tableSchema } from '../../core/types'
-import type { TableValue } from '../../core/values'
+import type { CellValue, TableValue } from '../../core/values'
 import { getColumn, tableFromRows } from '../../core/values'
 import type { NeuronId } from '../../core/ids'
 import type { ConnectionDirection } from '../../data/source'
+import { MISSING_LABEL } from './chartSelection'
 import {
   adjustInfluence,
   summedVector,
   batched,
   combineHalves,
+  influenceFlow,
+  influenceFlowSchema,
   influenceSchema,
   influenceTable,
   propagate,
@@ -518,5 +521,214 @@ describe('influenceTable', () => {
     // id as text (invariant 8), so an `i64` here advertised a dtype no run can produce and the
     // column changed under every downstream picker the moment anything was wired.
     expect(influenceSchema(undefined).columns[0]).toEqual({ name: 'neuronId', dtype: 'str' })
+  })
+})
+
+/**
+ * The Transfers port.
+ *
+ * Four things are asserted rather than trusted, and every one of them is invisible in a diagram
+ * that looks right:
+ *
+ *  - a ribbon runs **presynaptic to postsynaptic** whichever way the walk was travelling, which
+ *    is the failure that draws a plausible picture with every arrow reversed;
+ *  - the layer runs in the direction the signal does, not in the direction the hop count does —
+ *    the trap the retired `layer` column on the old Network port existed for;
+ *  - the widths **conserve**, which is the property a Sankey's grammar claims and the reason
+ *    this is drawable at all; and
+ *  - the losses arrive as rows with no source, so the conservation above holds with them in.
+ */
+describe('influenceFlow', () => {
+  /** A walk over a chain: seed ← a ← b, with a second `a`-typed neuron to fold. */
+  const source =
+    (edges: Record<string, Array<[string, number]>>, types: Record<string, string>) =>
+    async (ids: NeuronId[], direction: ConnectionDirection): Promise<TableValue> => {
+      const rows: Array<Record<string, CellValue>> = []
+      for (const id of ids) {
+        for (const [partner, weight] of edges[id] ?? []) {
+          rows.push({
+            neuronId: id,
+            neuronType: types[id] ?? null,
+            partnerId: partner,
+            partnerType: types[partner] ?? null,
+            weight,
+          })
+        }
+      }
+      void direction
+      return tableFromRows(
+        tableSchema(
+          column('neuronId', 'str'),
+          column('neuronType', 'str'),
+          column('partnerId', 'str'),
+          column('partnerType', 'str'),
+          column('weight', 'f64'),
+        ),
+        rows,
+      )
+    }
+
+  // Upstream: asking `s` for its inputs returns a1 and a2; asking those returns b.
+  const EDGES: Record<string, Array<[string, number]>> = {
+    s: [
+      ['a1', 30],
+      ['a2', 10],
+    ],
+    a1: [['b', 5]],
+    a2: [['b', 5]],
+  }
+  const TYPES: Record<string, string> = { s: 'S', a1: 'A', a2: 'A', b: 'B' }
+
+  const walk = (direction: ConnectionDirection, hops = 2) =>
+    propagate({
+      seeds: ['s' as NeuronId],
+      direction,
+      hops,
+      gain: 0.5,
+      ribbonsByType: true,
+      fetch: source(EDGES, TYPES),
+      ...(direction === 'outputs'
+        ? { denominators: async () => new Map([['a1' as NeuronId, 40]]) }
+        : {}),
+    })
+
+  const rowsOf = (table: TableValue) =>
+    Array.from({ length: table.length }, (_, i) => ({
+      layer: Number(getColumn(table, 'layer')[i]),
+      source: getColumn(table, 'source')[i],
+      target: getColumn(table, 'target')[i],
+      value: Number(getColumn(table, 'value')[i]),
+    }))
+
+  it('folds a walk to cell types, so two A neurons are one ribbon', async () => {
+    const half = await walk('inputs')
+    const flow = influenceFlow({ half: half, direction: 'inputs', floor: 0 }).table
+    const rows = rowsOf(flow).filter((r) => r.source !== null)
+    // A→S once, not twice: a1 and a2 both carry the type `A`.
+    expect(rows.filter((r) => r.source === 'A' && r.target === 'S')).toHaveLength(1)
+  })
+
+  it('runs presynaptic to postsynaptic travelling upstream', async () => {
+    const half = await walk('inputs')
+    const rows = rowsOf(
+      influenceFlow({ half: half, direction: 'inputs', floor: 0 }).table,
+    ).filter((r) => r.source !== null)
+    // The walk goes S → A → B; the signal goes B → A → S, and the table says the second.
+    expect(rows.map((r) => `${r.source}>${r.target}`).sort()).toEqual(['A>S', 'B>A'])
+  })
+
+  it('puts the seed in the last column travelling upstream', async () => {
+    const half = await walk('inputs')
+    const rows = rowsOf(
+      influenceFlow({ half: half, direction: 'inputs', floor: 0 }).table,
+    ).filter((r) => r.source !== null)
+    // Layer 0 is the furthest hop, so B→A is column 0 and A→S is column 1: the drive runs left
+    // to right into the seed. Laid out by the hop count it would run the other way, and every
+    // connection would draw as feedback — the defect the old `layer` column existed for.
+    expect(rows.find((r) => r.source === 'B')?.layer).toBe(0)
+    expect(rows.find((r) => r.source === 'A')?.layer).toBe(1)
+  })
+
+  it('conserves: what leaves a layer arrives at the next one, losses included', async () => {
+    const half = await walk('inputs')
+    const flow = influenceFlow({ half: half, direction: 'inputs', floor: 0 }).table
+    const rows = rowsOf(flow)
+    // Under the traversal denominator a neuron's outgoing shares sum to exactly one, so the
+    // whole of the seed's unit arrives at layer 1 and the whole of layer 1's mass at layer 0.
+    const atLayer = (layer: number) =>
+      rows.filter((r) => r.layer === layer).reduce((sum, r) => sum + r.value, 0)
+    expect(atLayer(1)).toBeCloseTo(1, 10)
+    expect(atLayer(0)).toBeCloseTo(1, 10)
+  })
+
+  it('records the ribbon into a dropped body, and narrows at the next column', async () => {
+    // `published` drops `b`, so the drive that reached it stops there. The synapse into it was
+    // still crossed and is still a ribbon — what is missing is anything past it. The budget was
+    // three hops and the walk found two, so the columns are numbered from the depth it *reached*:
+    // there is no empty column in front, which a reader of the table could not tell from a filter.
+    const half = await propagate({
+      seeds: ['s' as NeuronId],
+      direction: 'inputs',
+      hops: 3,
+      gain: 0.5,
+      ribbonsByType: true,
+      fetch: source(EDGES, TYPES),
+      published: async (ids) => new Set(ids.filter((id) => id !== ('b' as NeuronId))),
+    })
+    const rows = rowsOf(influenceFlow({ half: half, direction: 'inputs', floor: 0 }).table)
+    const atLayer = (layer: number) =>
+      rows.filter((r) => r.layer === layer).reduce((sum, r) => sum + r.value, 0)
+    expect([...new Set(rows.map((r) => r.layer))].sort()).toEqual([0, 1])
+    expect(atLayer(1)).toBeCloseTo(1, 10)
+    expect(atLayer(0)).toBeCloseTo(1, 10)
+  })
+
+  it('answers empty where there is no single walk to lay out', () => {
+    // The halves count hops from opposite ends, so a forward hop 1 sits beside the candidates and
+    // a backward hop 1 beside the seeds. Folded through one layer formula they land in the same
+    // column and the diagram's columns become two different measurements — `firstHop`'s rule one
+    // column over, and invisible in the widths.
+    // The node is what decides there is no single half; this is the shape it hands over.
+    expect(influenceFlow({ half: undefined, direction: 'inputs', floor: 0 }).table.length).toBe(
+      0,
+    )
+  })
+
+  it('folds an untyped body into one bucket rather than into its own id', async () => {
+    // Otherwise a run with fragments in it fills the diagram with 18-digit root ids, one box
+    // each. The bucket may be the biggest thing in the picture, which is true and worth seeing.
+    const half = await propagate({
+      seeds: ['s' as NeuronId],
+      direction: 'inputs',
+      hops: 1,
+      gain: 0.5,
+      ribbonsByType: true,
+      fetch: source(EDGES, { s: 'S' }),
+    })
+    const rows = rowsOf(influenceFlow({ half: half, direction: 'inputs', floor: 0 }).table)
+    expect(rows.map((r) => r.source)).toEqual([MISSING_LABEL])
+  })
+
+  it('drops a ribbon under the floor, and keeps every one at a floor of zero', async () => {
+    // A weak third input, so the two ribbons into the seed carry different masses — with equal
+    // ones a floor either keeps both or drops both and the test passes for the wrong reason.
+    const edges = { ...EDGES, s: [...EDGES['s']!, ['c', 1] as [string, number]] }
+    const half = await propagate({
+      seeds: ['s' as NeuronId],
+      direction: 'inputs',
+      hops: 2,
+      gain: 0.5,
+      ribbonsByType: true,
+      fetch: source(edges, { ...TYPES, c: 'C' }),
+    })
+    const all = influenceFlow({ half: half, direction: 'inputs', floor: 0 }).table
+    const trimmed = influenceFlow({ half: half, direction: 'inputs', floor: 0.05 }).table
+    // C→S is 1 of 41 synapses, so about 2.4% of the drive.
+    expect(rowsOf(all).map((r) => r.source)).toContain('C')
+    expect(rowsOf(trimmed).map((r) => r.source)).not.toContain('C')
+    expect(all.length).toBeGreaterThan(trimmed.length)
+  })
+
+  it('agrees with its schema, so no picker downstream empties after a run', async () => {
+    const half = await walk('inputs')
+    const flow = influenceFlow({ half: half, direction: 'inputs', floor: 0 }).table
+    // Invariant 3: the schema half and the value half, asserted rather than assumed.
+    expect(flow.schema).toEqual(influenceFlowSchema())
+    for (const col of influenceFlowSchema().columns) {
+      expect(flow.data[col.name]).toHaveLength(flow.length)
+    }
+  })
+
+  it('accumulates nothing when no grouping is asked for', async () => {
+    const quiet = await propagate({
+      seeds: ['s' as NeuronId],
+      direction: 'inputs',
+      hops: 2,
+      gain: 0.5,
+      fetch: source(EDGES, TYPES),
+    })
+    // The cost is a Map get and set per edge per hop; every caller that does not want a diagram
+    // must not pay it.
+    expect(quiet.ribbons.size).toBe(0)
   })
 })

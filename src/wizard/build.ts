@@ -52,6 +52,7 @@ import type { DatasetFamily } from '../nodes/lib/datasetFamilies'
 import { datasetFamily } from '../nodes/lib/datasetFamilies'
 import { ID_COLUMN_NAME } from '../core/ids'
 import { encodeRows } from '../data/filterRows'
+import { encodeRenames } from '../nodes/lib/renames'
 import { inputPorts, portIdAt } from '../core/ports'
 import { repeatParamId } from '../nodes/lib/repeatParams'
 import { stackLabelParamId } from '../nodes/lib/stackParams'
@@ -931,19 +932,31 @@ function bodyOf(
        * the neurons somebody wired in, and a reader who only ticked the table has no use for one
        * row per pair. So the control follows the viewer rather than the analysis.
        *
-       * Which makes the table's own upstream conditional on the *other* viewer, and that is the
-       * one thing here worth reading twice. Ticked alone, the table reads the ranking straight
-       * off the node. Ticked beside a heatmap, the node is emitting pairs, so a `Group By` puts
-       * it back — the round trip the port is designed for, and the reason the totals are not a
-       * second output.
+       * Which makes the ranking's own upstream conditional on the *other* viewer, and that is the
+       * one thing here worth reading twice. Ticked alone, a ranking viewer reads straight off the
+       * node. Ticked beside a heatmap, the node is emitting pairs, so a `Group By` puts it back —
+       * the round trip the port is designed for, and the reason the totals are not a second
+       * output.
+       *
+       * **And the regroup restores the column names**, which is a `Rename` card and not tidiness.
+       * `groupBySchema` writes `n` and `sum_influence`, so a viewer carrying column params — the
+       * rank plot names `influence`, `type` and `isSeed` — would need one set of params on one
+       * route and another set on the other, and `VIEWS` has one. Worse, `n` is the *first* numeric
+       * column there, so a picker left to `resolveColumn` rule 3 lands on the group size and draws
+       * a plausible ranking of how many rows each neuron had. Renaming the aggregate back makes
+       * the two routes one shape, which is what lets the pairing in `VIEWS` stay a single claim.
+       * `isSeed` rides in the key for the same reason: it is a fact about the neuron, so grouping
+       * on it splits nothing, and without it the flag column is gone on half the routes.
        */
       const perQuery = chosen.includes('heatmap')
-      const regroup = perQuery && chosen.includes('table')
-      const tail = views(0, (visualisation, id) =>
-        visualisation === 'heatmap'
-          ? [['piv', 'matrix', id, 'in']]
-          : [regroup ? ['sort', 'out', id, 'in'] : ['inf', 'influence', id, 'in']],
-      )
+      const regroup = perQuery && (chosen.includes('table') || chosen.includes('rank'))
+      const tail = views(0, (visualisation, id) => {
+        if (visualisation === 'heatmap') return [['piv', 'matrix', id, 'in']]
+        // The drive the walk already carried, straight off the port that keeps it — no second
+        // node and no second fetch, whatever the rest of the arm is doing.
+        if (visualisation === 'sankey') return [['inf', 'transfers', id, 'in']]
+        return [regroup ? ['sort', 'out', id, 'in'] : ['inf', 'influence', id, 'in']]
+      })
       return {
         nodes: [
           {
@@ -974,13 +987,25 @@ function bodyOf(
                   id: 'group',
                   type: 'core.groupBy',
                   row: 1,
-                  params: { by: ['neuronId', 'type'], agg: 'sum', value: ['influence'] },
+                  params: {
+                    by: ['neuronId', 'type', 'isSeed'],
+                    agg: 'sum',
+                    value: ['influence'],
+                  },
+                },
+                {
+                  id: 'name',
+                  type: 'core.rename',
+                  row: 1,
+                  params: {
+                    renames: encodeRenames([{ from: 'sum_influence', to: 'influence' }]),
+                  },
                 },
                 {
                   id: 'sort',
                   type: 'core.sort',
                   row: 1,
-                  params: { column: 'sum_influence', descending: true, limit: 0 },
+                  params: { column: 'influence', descending: true, limit: 0 },
                 },
               ]
             : []),
@@ -993,7 +1018,8 @@ function bodyOf(
           ...(regroup
             ? ([
                 ['inf', 'influence', 'group', 'in'],
-                ['group', 'out', 'sort', 'in'],
+                ['group', 'out', 'name', 'in'],
+                ['name', 'out', 'sort', 'in'],
               ] as Wire[])
             : []),
           ...tail.links,
@@ -1009,14 +1035,23 @@ function bodyOf(
        * count is the whole point, so the geometry the query already knows is handed over rather
        * than recomputed. The table viewer takes the `paths` port, which is one row per path.
        */
-      const tail = views(0, (visualisation, id) =>
-        visualisation === 'network'
-          ? [
-              ['paths', 'network', id, 'in'],
-              ['paths', 'layout', id, 'layout'],
-            ]
-          : [['paths', 'paths', id, 'in']],
-      )
+      const tail = views(0, (visualisation, id) => {
+        if (visualisation === 'network') {
+          return [
+            ['paths', 'network', id, 'in'],
+            ['paths', 'layout', id, 'layout'],
+          ]
+        }
+        /*
+         * The same network and **no layout**, which is the one difference worth stating. A Flow
+         * Chart sizes each box to its own text and lays itself out from that; the Paths layout is
+         * centres computed against a 120x36 placeholder, so honouring it would overlap every box
+         * whose label is wider than the placeholder. There is no socket to wire it to for exactly
+         * that reason — see `out.flowChart`.
+         */
+        if (visualisation === 'flowChart') return [['paths', 'network', id, 'in']]
+        return [['paths', 'paths', id, 'in']]
+      })
       return {
         nodes: [{ id: 'paths', type: 'neuron.paths', row: 1 }, ...tail.nodes],
         links: [

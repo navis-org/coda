@@ -138,8 +138,14 @@ export function PieViewer({
     <div className="viewer">
       <div ref={ref} className="viewer__scroll nowheel" style={{ position: 'relative' }}>
         {width > 60 && (
-          <svg ref={svgRef} className="chart" width={width} height={height} role="img">
-            <title>{`${valueColumn ?? 'Rows'} by ${categoryColumn}`}</title>
+          <svg
+            ref={svgRef}
+            className="chart"
+            width={width}
+            height={height}
+            role="img"
+            aria-label={`${valueColumn ?? 'Rows'} by ${categoryColumn}`}
+          >
             <rect width={width} height={height} fill={surface} />
 
             {slices.map((slice, index) => {

@@ -10,27 +10,14 @@
  * invalidates the pipeline.
  */
 
+import { idText, isNeuronId } from '../../core/ids'
 import { registerNode } from '../../core/registry'
-import type { TableSchema } from '../../core/types'
-import { T, attributeSchema, column, tableSchema } from '../../core/types'
+import { T, attributeSchema } from '../../core/types'
 import type { ColumnData } from '../../core/values'
 import { getColumn, isNetworkValue, makeTable } from '../../core/values'
 import { colorParams, shapeParams, sizeParams } from '../lib/encodingParams'
+import { networkSelectionSchema } from '../lib/networkSelection'
 import { filterNetwork } from '../lib/networkOps'
-
-/**
- * Selection output schema: a `neuronId` column in front of the network's own node attributes.
- *
- * The output is typed `Neurons`, which promises `neuronId`, but network node ids are strings
- * — they may be neuron ids at neuron level or type names at type level. So neuronId is derived
- * by parsing the id, and is null when it isn't numeric. A type-level selection therefore
- * flows downstream as nulls and fails loudly at the next query rather than silently
- * pretending to be neurons.
- */
-function selectionSchema(nodeSchema: TableSchema | undefined): TableSchema {
-  const extra = (nodeSchema?.columns ?? []).filter((c) => c.name !== 'neuronId')
-  return tableSchema(column('neuronId', 'str'), ...extra)
-}
 
 registerNode({
   type: 'out.network',
@@ -570,7 +557,7 @@ registerNode({
       out: input?.kind === 'network' ? input : T.network(),
       // The selection carries the network's own node attributes, so a downstream Filter
       // sees the same columns the viewer coloured by.
-      selected: T.neurons(selectionSchema(nodeSchema)),
+      selected: T.neurons(networkSelectionSchema(nodeSchema)),
     }
   },
 
@@ -597,11 +584,27 @@ registerNode({
     }
 
     // Emit a neurons-shaped table so the selection plugs straight into Connectivity et al.
-    const schema = selectionSchema(network.nodes.schema)
+    const schema = networkSelectionSchema(network.nodes.schema)
     const data: Record<string, ColumnData> = {}
+    /*
+     * **Text where the id is one, null where it is not** — which keeps this node's decision and
+     * drops the arithmetic it was making it with.
+     *
+     * The null is deliberate and tested: a network node id is a neuron id at neuron level and a
+     * cell type name at type level, and `LC4` emitted as a `neuronId` would fail silently three
+     * nodes downstream. What was wrong was the *test* for it: `Number(id)` rounds an 18-digit
+     * CAVE root id to a **different neuron** before deciding, which is invariant 8's stated
+     * failure — `core/ids.ts` names this exact shape ("handing back a nearby integer is the one
+     * thing nobody wants, and it is what every ad-hoc `Number(id)` does"). `isNeuronId` is the
+     * grammar that answers the question the `Number()` was standing in for, exactly.
+     *
+     * `out.flowChart` writes the name through instead, on the opposite argument — a name that
+     * fails loudly beats a null that passes quietly. Both are defensible and both are tested;
+     * what neither may do is round.
+     */
     data['neuronId'] = keep.map((index) => {
-      const parsed = Number(ids[index])
-      return Number.isFinite(parsed) ? parsed : null
+      const text = idText(ids[index])
+      return text !== null && isNeuronId(text) ? text : null
     })
     for (const col of schema.columns) {
       if (col.name === 'neuronId') continue

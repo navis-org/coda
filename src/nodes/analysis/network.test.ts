@@ -33,7 +33,7 @@ import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import type { CodaType } from '../../core/types'
 import { T, attributeSchema, column, tableSchema } from '../../core/types'
-import type { TableValue, Value } from '../../core/values'
+import type { NetworkValue, TableValue, Value } from '../../core/values'
 import { getColumn, isNetworkValue, isTableValue, tableFromRows } from '../../core/values'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource, requireSource } from '../../data/source'
@@ -247,6 +247,39 @@ describe('network viewer selection', () => {
     // "LC4" is not a neuron id. Emitting null is honest; a fabricated id would fail silently
     // three nodes downstream.
     expect(selected.data.neuronId?.[0]).toBeNull()
+  })
+
+  /**
+   * The other half of the same rule, and the one `Number(id)` got wrong.
+   *
+   * Deciding "is this a neuron id?" by parsing it rounds an 18-digit CAVE root id to a
+   * *different* neuron before the question is even answered — invariant 8's stated failure. The
+   * null above and this are one decision: text where the id is one, null where it is not.
+   */
+  it('keeps a wide root id exact rather than rounding it to a nearby integer', () => {
+    const wide = '720575940628857210'
+    const network: NetworkValue = {
+      kind: 'network',
+      directed: true,
+      nodes: tableFromRows(tableSchema(column('id', 'str'), column('weightOut', 'f64')), [
+        { id: wide, weightOut: 1 },
+        { id: 'LC4', weightOut: 2 },
+      ]),
+      edges: tableFromRows(tableSchema(column('source', 'str'), column('target', 'str')), [
+        { source: wide, target: 'LC4' },
+      ]),
+    }
+    const def = requireNodeDef('out.network')
+    // A minimal context: this evaluate reads its input and three params and nothing else, so the
+    // file's `evalContext` — shaped for `net.build`'s `edges` port — does not fit.
+    const out = def.evaluate?.({
+      params: { selection: [wide, 'LC4'], minLinkWeight: 0, topNodes: 0, hideIsolated: false },
+      input: (portId: string) => (portId === 'in' ? network : undefined),
+    } as unknown as EvalContext) as Record<string, Value> | undefined
+    const selected = out?.['selected']
+    if (!isTableValue(selected)) throw new Error('expected a table')
+    // Exact, not 720575940628857344 — and the cell type name still nulls.
+    expect(selected.data.neuronId).toEqual([wide, null])
   })
 
   it('is NOT presentational — a selection change invalidates the node', async () => {

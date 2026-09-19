@@ -31,6 +31,7 @@ import { findParam } from '../core/node'
 import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
 import { ROW_TRACKS } from '../core/dashboard'
 import { Scheduler } from '../core/scheduler'
+import { attributeSchema, columnNames, tableSchema } from '../core/types'
 import { isMatrixValue, isTableValue } from '../core/values'
 import { registerBuiltinSources } from '../data/builtins'
 import { requireSource } from '../data/source'
@@ -562,11 +563,72 @@ describe('several viewers', () => {
     expect(bothViews.edges.find((e) => e.target === 'view2')?.source).toBe('sort')
   })
 
+  /*
+   * The half of the regroup that the assertion above cannot see, and the reason it is a `Rename`
+   * rather than two Group By columns.
+   *
+   * A viewer with no column params does not care what the ranking's columns are called; the rank
+   * plot names three of them. `VIEWS` carries one set of params per pair, so the regrouped route
+   * has to hand it the same shape the node emits — `influence`, `type`, `isSeed` — or the pairing
+   * is true on one route and false on the other, with `groupBySchema`'s `n` sitting first in line
+   * for any picker left to resolve itself.
+   */
+  it('regroups for the rank plot too, and gives it back the names it was configured for', () => {
+    const rankOnly = both('influence', ['rank'])
+    expect(rankOnly.nodes.map((n) => n.id)).not.toContain('group')
+    expect(rankOnly.edges.find((e) => e.target === 'view')?.source).toBe('inf')
+
+    const withHeatmap = both('influence', ['heatmap', 'rank'])
+    expect(withHeatmap.nodes.find((n) => n.id === 'inf')?.params.perQuery).toBe(true)
+    expect(withHeatmap.edges.find((e) => e.target === 'view2')?.source).toBe('sort')
+
+    // The same column names on both routes, which is what makes one set of params legal.
+    const columnsAt = (graph: typeof withHeatmap, node: string, port: string) =>
+      columnNames(attributeSchema(inferGraph(graph).nodes[node]?.inputs[port]) ?? tableSchema())
+    for (const [graph, node] of [
+      [rankOnly, 'view'],
+      [withHeatmap, 'view2'],
+    ] as const) {
+      expect(columnsAt(graph, node, 'in')).toEqual(
+        expect.arrayContaining(['influence', 'type', 'isSeed']),
+      )
+    }
+  })
+
+  /*
+   * The Sankey reads the port the walk already filled, whatever else is ticked — no second node
+   * between it and `Transfers`, and no second walk.
+   */
+  it('takes the Sankey straight off Transfers', () => {
+    for (const views of [['sankey'], ['sankey', 'table'], ['heatmap', 'sankey']] as const) {
+      const graph = both('influence', [...views])
+      const id = views.indexOf('sankey') === 0 ? 'view' : `view${views.indexOf('sankey') + 1}`
+      const edge = graph.edges.find((e) => e.target === id)
+      expect(edge?.source, views.join('+')).toBe('inf')
+      expect(edge?.sourceHandle, views.join('+')).toBe('transfers')
+    }
+  })
+
+  /*
+   * And the Flow Chart takes the network and **not** the layout beside it: the positions Paths
+   * computes are against a 120x36 placeholder, where this viewer's boxes are the width of their
+   * own text. There is no socket to wire it to, so the failure would be an unmade wire.
+   */
+  it('hands the Flow Chart the network alone, where the Network Viewer takes the layout too', () => {
+    const graph = both('paths', ['network', 'flowChart'])
+    const ports = (target: string) =>
+      graph.edges.filter((e) => e.target === target).map((e) => e.targetHandle)
+    expect(ports('view').sort()).toEqual(['in', 'layout'])
+    expect(ports('view2')).toEqual(['in'])
+  })
+
   it('is still inference-clean with two viewers on the end', () => {
     for (const [analysis, views] of [
       ['partners', ['table', 'bar', 'pie']],
       ['matrix', ['heatmap', 'table']],
       ['influence', ['heatmap', 'table']],
+      ['influence', ['table', 'rank', 'heatmap', 'sankey']],
+      ['paths', ['network', 'flowChart', 'table']],
       ['network', ['network', 'metrics']],
       ['morphology', ['viewer3d', 'neuroglancer']],
       ['neurons', ['table', 'neuroglancer']],

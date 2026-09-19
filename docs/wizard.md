@@ -143,13 +143,13 @@ everything a third offers, so that case opens whole rather than empty. And switc
 needs **no repair at all**: there is no ticked-set of ours to keep in step with a list that changes
 under it, which is what the old `offered.length ? offered : …` line was doing.
 
-The default is also what most generated graphs now *are* — three viewer cards on one row rather
-than one — so `placeGuards.test.ts` walks every analysis with every viewer it offers, which
+The default is also what most generated graphs now *are* — three and four viewer cards on one row
+rather than one — so `placeGuards.test.ts` walks every analysis with every viewer it offers, which
 `everyCombination`'s singletons never exercise. Two arms are worth knowing about: `influence` goes
-from five nodes to nine, because ticking the heatmap turns `Per query neuron` on and the table
-beside it then needs its Group By and Sort back (the round trip below); and `morphology`'s search
-is now capped at `GEOMETRY_LIMIT` by default rather than `SEARCH_LIMIT`, since the 3D scene is
-ticked and `searchLimit` reads that.
+from five nodes to eleven, because ticking the heatmap turns `Per query neuron` on and the two
+ranking viewers beside it then need the Group By, Rename and Sort back (the round trip below); and
+`morphology`'s search is now capped at `GEOMETRY_LIMIT` by default rather than `SEARCH_LIMIT`,
+since the 3D scene is ticked and `searchLimit` reads that.
 
 **The viewers sit side by side, stepped by each card's own width.** Stacking was wrong the moment the
 graph ran: a viewer's *height* is its content, so an unrun Table card is short and a run one is 387px
@@ -185,6 +185,15 @@ also answers with a **layout** beside its network, and the network viewer takes 
 laid out by force is a hairball where the hop count is the whole point, so the geometry the query
 already knows is handed over rather than recomputed.
 
+The **Flow Chart** ends the same arm off the same port and takes the layout *not at all*, which is
+the one thing to know about wiring it: those centres are computed against a 120 x 36 placeholder
+standing in for a disc, and this viewer's boxes are the width of their own text, so honouring them
+would overlap every box with a wider label and waste the gap beside every narrower one. There is no
+socket to wire it to for exactly that reason, so the mistake shows up as an unmade wire rather than
+a bad drawing. Its `layerColumn` is left **empty**, which means longest path — and a Paths network's
+`hop` column *is* longest-path layering, so naming it would be a second spelling of one arrangement
+and a chance for the two to disagree.
+
 **The two clusterings are one arm.** By the time they reach Linkage they are the same thing — a
 square matrix of how alike every pair is — so only the heads differ: partner vectors and a similarity
 metric for the wiring, an all-by-all NBLAST over skeletons for the shape. `Similarity Matrix →
@@ -204,6 +213,21 @@ which is why they are not a second output, and one Influence node feeds both hal
 be two walks over the same connectome. Since `everyCombination` walks one viewer at a time, this shape
 is pinned directly in `wizard.test.ts` and `placeGuards.test.ts`, the second because the Group By and
 the Sort land on a row neither singleton has.
+
+**And the regroup gives the columns their names back**, which is a third card in that chain rather
+than tidiness. The table could ignore what the ranking's columns were called; the **rank plot**
+cannot — it names `influence`, `type` and `isSeed`, and `VIEWS` carries one set of params per pair,
+so a route where the score is `sum_influence` makes the pairing true on one wiring and false on the
+other. Worse is what a picker left to resolve itself would land on: `groupBySchema` writes the group
+size as `n` *before* the aggregate, so it is the first numeric column, and a rank plot of how many
+rows each neuron had is a perfectly plausible picture of nothing. So the Group By keeps `isSeed` in
+its key — a fact about the neuron, so grouping on it splits no group, and without it the flag column
+is simply gone on half the routes — and a `Rename` puts `sum_influence` back to `influence` before
+the Sort. The two routes are then one shape, which is what lets `VIEWS` stay a single claim.
+
+**The Sankey ignores all of that**, reading the `Transfers` port directly whatever else is ticked:
+the drive is already in memory from the same walk, so it costs no second node and no second fetch.
+That makes it the one influence viewer whose upstream is unconditional.
 
 **Neither clustering can be run outside a browser**, a fact about the runner: both `neuron.nblast` and
 `cluster.linkage` do their arithmetic in Pyodide, loaded into a module worker. `wizard.test.ts` checks

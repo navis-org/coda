@@ -33,6 +33,15 @@ export function isAdditive(event: {
 export interface MarkSelection {
   /** How many names are selected — for the caption's readout. */
   size: number
+  /**
+   * Whether **any** of these names is selected, where `has` asks whether *all* of them are.
+   *
+   * Both questions are real and a compound mark has to pick one: a pie slice standing for the
+   * folded tail is selected when the tail is, where a flow chart's `+7 others` box is worth
+   * lighting when one of its seven is — it being those seven's only mark. Asked here rather than
+   * by handing the Set out, so the rule stays in the one place that owns it for every viewer.
+   */
+  hasAny(names: readonly string[]): boolean
   /** Whether a mark standing for these names is selected. */
   has(names: readonly string[]): boolean
   /** Click a mark standing for these names. */
@@ -51,6 +60,11 @@ export function useMarkSelection(
 
   const has = useCallback(
     (names: readonly string[]) => names.length > 0 && names.every((n) => selected.has(n)),
+    [selected],
+  )
+
+  const hasAny = useCallback(
+    (names: readonly string[]) => names.some((n) => selected.has(n)),
     [selected],
   )
 
@@ -74,5 +88,24 @@ export function useMarkSelection(
 
   const clear = useCallback(() => onSelectionChange?.([]), [onSelectionChange])
 
-  return { size: selected.size, has, toggle, clear, writable: !!onSelectionChange }
+  /*
+   * Memoised, because the *container* is what a consumer's `memo` compares.
+   *
+   * Every member here is already stable — `selected` is a `useMemo` over a `useStable`d list and
+   * the three functions are `useCallback`s — but returned as a fresh literal the object is new on
+   * every render, so a `memo`'d child taking this as a prop re-renders unconditionally and the
+   * extraction that put it behind one buys nothing. `FlowChartViewer` is the first caller to pass
+   * it into a memoised child; the other four read it directly and are unaffected either way.
+   */
+  return useMemo(
+    () => ({
+      size: selected.size,
+      has,
+      hasAny,
+      toggle,
+      clear,
+      writable: !!onSelectionChange,
+    }),
+    [selected, has, hasAny, toggle, clear, onSelectionChange],
+  )
 }

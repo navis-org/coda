@@ -58,10 +58,11 @@ import type { ParamValues } from '../../core/node'
 import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
-import { makeTable } from '../../core/values'
+import { makeTable, tableFromRows } from '../../core/values'
 import { ID_COLUMN_NAME, compareIds, idText } from '../../core/ids'
 import type { NeuronId } from '../../core/ids'
 import type { ConnectionDirection } from '../../data/source'
+import { MISSING_LABEL, markLabel } from './chartSelection'
 import { endpointSchema } from './connectivityOps'
 import { concatBatches } from './tableOps'
 
@@ -78,6 +79,7 @@ const WEIGHT = 'weight'
 const INFLUENCE_COLUMN = 'influence'
 const INFLUENCE_LOG_COLUMN = 'influenceLog'
 const HOPS_COLUMN = 'hops'
+const LAYER_COLUMN = 'layer'
 const SEED_COLUMN = 'isSeed'
 const QUERY_ID_COLUMN = 'queryId'
 const QUERY_TYPE_COLUMN = 'queryType'
@@ -168,6 +170,28 @@ export function needsPublishedTotals(params: InfluenceParams): boolean {
  */
 export type Spread = Map<NeuronId, Float64Array>
 
+/**
+ * The drive that crossed one group of edges at one hop.
+ *
+ * **Oriented presynaptic to postsynaptic**, which is a fact about the synapse rather than about
+ * the walk — `adjacency`'s rule, one layer up. Travelling `inputs` the propagation runs from
+ * `to` towards `from` and the ribbon still reads the way the signal does, so a reader of this
+ * never has to know which direction the walk was going.
+ *
+ * `from` and `to` are carried beside the key rather than parsed back out of it: a cell type may
+ * contain any character, so the key is a delimiter nothing can collide with and is never read.
+ */
+export interface Ribbon {
+  /** 1-based hop at which the transfer happened. */
+  hop: number
+  /** Presynaptic group. */
+  from: string
+  /** Postsynaptic group. */
+  to: string
+  /** Raw propagating mass, before the per-hop gain. See `ribbons` on the result. */
+  mass: number
+}
+
 /** One hop's worth of fetching, query-relative. Injected so this module never sees a source. */
 export type InfluenceFetch = (
   neuronIds: NeuronId[],
@@ -225,6 +249,13 @@ export interface PropagateOptions {
    */
   published?: (ids: NeuronId[]) => Promise<Set<NeuronId>>
   /**
+   * Accumulate the drive crossing each edge, folded to cell type. Off accumulates nothing.
+   *
+   * Off by default because it is a `Map` get and set per edge per hop on top of the propagation's
+   * own, which every caller that does not want a flow diagram would be paying for nothing.
+   */
+  ribbonsByType?: boolean
+  /**
    * Keep at most this many neurons carrying mass into the next hop, strongest first. 0 is no
    * limit. This is the only thing bounding the fetch, and what it costs is reported.
    */
@@ -255,6 +286,45 @@ export interface PropagateResult {
   missingDenominator: Set<NeuronId>
   /** Distinct neurons whose partners were fetched — what the run actually cost. */
   fetched: number
+  /**
+   * The drive that crossed each group of edges, per hop — empty unless `ribbons` asked for it.
+   *
+   * **This is what makes a flow diagram of an influence run cost no second query.** The walk
+   * already has to compute each edge's contribution in order to propagate at all; what this adds
+   * is keeping the total rather than discarding it. The alternative — reconstructing the flow
+   * afterwards from the adjacency the walk held — cannot be done at all, because the *mass* that
+   * crossed an edge depends on what the carrying neuron held at that hop and nothing downstream
+   * of the walk knows that.
+   *
+   * Raw, before the per-hop gain, so it conserves: travelling `inputs` under the traversal
+   * denominator a neuron's outgoing shares sum to exactly one, which is the property a Sankey's
+   * widths mean something under. See `docs/viewers.md`.
+   *
+   * Keyed by hop and both ends. The key is an implementation detail and is never parsed — every
+   * part of it is on the `Ribbon` as well.
+   */
+  ribbons: ReadonlyMap<string, Ribbon>
+}
+
+/**
+ * The nested accumulator as the flat map `PropagateResult` publishes.
+ *
+ * The key is built once per distinct ribbon here rather than once per edge in the walk. NUL as
+ * the delimiter: a cell type may contain any printable character, and a key built with one of
+ * those merges two groups whose names happen to straddle it.
+ */
+function flattenRibbons(
+  tree: ReadonlyMap<number, ReadonlyMap<string, ReadonlyMap<string, Ribbon>>>,
+): Map<string, Ribbon> {
+  const out = new Map<string, Ribbon>()
+  for (const byHop of tree.values()) {
+    for (const bucket of byHop.values()) {
+      for (const ribbon of bucket.values()) {
+        out.set(`${ribbon.hop}\u0000${ribbon.from}\u0000${ribbon.to}`, ribbon)
+      }
+    }
+  }
+  return out
 }
 
 /** The magnitude of one neuron's entry, summed over channels. Every channel is non-negative. */
@@ -412,6 +482,62 @@ export async function propagate(opts: PropagateOptions): Promise<PropagateResult
   const droppedMass: number[] = []
   const fragmentMass: number[] = []
 
+  /*
+   * Ribbon bookkeeping, inert unless a caller asked for it.
+   *
+   * `groupOf` reads the walk's own `types` map, which is why the grouping is an enum here rather
+   * than a key function handed in: that map is filled *during* the walk, so a caller's closure
+   * over it would be reading something that does not exist yet.
+   *
+   * **An untyped body joins one bucket rather than becoming its own group.** Falling back to the
+   * id is what `readAdjacency` does for a *table*, where a row per neuron is the point; here it
+   * would put an 18-digit root id in a diagram whose other boxes say `LC4`, once per body — and
+   * with `Include fragments` on, that is most of them. `MISSING_LABEL` is the app's own name for
+   * a null category, so a reader meets the same mark here as in every other chart. What it costs
+   * is that the bucket can be the largest thing in the picture, which is true and worth seeing.
+   *
+   * A ribbon into a body the walk goes on to drop is still recorded, because the drive really
+   * did cross that synapse. What stops is anything *past* it, so the diagram narrows at the next
+   * column — which is the honest place for it.
+   */
+  const keepRibbons = opts.ribbonsByType === true
+  /**
+   * Ribbons, nested so nothing is built per edge.
+   *
+   * Keyed flat on `` `${hop}\0${from}\0${to}` `` this allocated a fresh ~30-character string for
+   * every edge of every hop — millions of them on a real ball, each hashed in full because a
+   * freshly built string carries no cached hash — to reach one of only hops x types² distinct
+   * entries. Nested, both outer levels are already constant where the loops bind them: `hop` for
+   * the whole pass, and the carrying neuron's own group for the whole partner loop. What is left
+   * per edge is one `Map.get` on a string that came straight out of `types`, so its hash is
+   * cached and nothing is allocated.
+   *
+   * Flattened into the public `Map<string, Ribbon>` once at the end, where the key is built once
+   * per distinct ribbon rather than once per edge.
+   */
+  const ribbonTree = new Map<number, Map<string, Map<string, Ribbon>>>()
+  const groupOf = (id: NeuronId): string => {
+    // `markLabel`'s rule for a null category, rather than a second spelling of it — the one thing
+    // added is that an *empty* type is absent too, which on a connectome is the same case and on
+    // a pie slice is a legitimately empty label.
+    const type = types.get(id)
+    return type === '' ? MISSING_LABEL : markLabel(type)
+  }
+  /** The bucket a carrying neuron writes into for one hop, resolved once per neuron per hop. */
+  const bucketFor = (hop: number, fixed: string): Map<string, Ribbon> => {
+    let byHop = ribbonTree.get(hop)
+    if (!byHop) {
+      byHop = new Map()
+      ribbonTree.set(hop, byHop)
+    }
+    let bucket = byHop.get(fixed)
+    if (!bucket) {
+      bucket = new Map()
+      byHop.set(fixed, bucket)
+    }
+    return bucket
+  }
+
   /** Seeds, plus everything `published` has said yes to. Unread when there is no filter. */
   const kept = new Set<NeuronId>(seeds)
   const asked = new Set<NeuronId>(seeds)
@@ -502,11 +628,53 @@ export async function propagate(opts: PropagateOptions): Promise<PropagateResult
       // to each partner and is read in the loop.
       const near = outward ? 0 : (denominators.get(id) ?? adjacency.total)
       if (!outward && near <= 0) continue
+      /*
+       * Both of these are properties of the *carrying* neuron, so they are read once out here
+       * rather than per edge.
+       *
+       * `magnitude` is a loop over the channels, which under `Per query neuron` is the seed
+       * count — so inside the partner loop a hundred-seed run over a few million edges spends
+       * ~10^8 float adds recomputing one number. And one end of every ribbon this neuron writes
+       * is always the neuron itself, so half the `types` lookups were per-edge work too.
+       */
+      const carried = keepRibbons ? magnitude(mass) : 0
+      const selfGroup = keepRibbons ? groupOf(id) : ''
+      // Resolved once per carrying neuron: `hop` and this neuron's own group fix both outer
+      // levels for the whole partner loop below.
+      const bucket = keepRibbons ? bucketFor(hop, selfGroup) : undefined
       for (let i = 0; i < adjacency.partners.length; i++) {
         const partner = adjacency.partners[i]!
         const divisor = outward ? (denominators.get(partner) ?? 0) : near
         if (divisor <= 0) continue
-        add(partner, mass, adjacency.weights[i]! / divisor)
+        const share = adjacency.weights[i]! / divisor
+        add(partner, mass, share)
+        /*
+         * The same number, kept rather than discarded — see `ribbons` on the result.
+         *
+         * Summed over channels, because a ribbon is a quantity of drive and not a per-seed
+         * vector: under `Per query neuron` the channels are the query neurons, and a flow
+         * diagram of one run is one diagram however the score is split.
+         *
+         * Written presynaptic to postsynaptic, which flips with the direction: travelling
+         * `inputs` the partner is the presynaptic end. Getting this backwards is invisible in
+         * the widths and produces a perfectly plausible diagram with every arrow reversed.
+         */
+        if (bucket !== undefined) {
+          const crossed = carried * share
+          if (crossed > 0) {
+            const partnerGroup = groupOf(partner)
+            const held = bucket.get(partnerGroup)
+            if (held) held.mass += crossed
+            else {
+              bucket.set(partnerGroup, {
+                hop,
+                from: outward ? selfGroup : partnerGroup,
+                to: outward ? partnerGroup : selfGroup,
+                mass: crossed,
+              })
+            }
+          }
+        }
       }
     }
 
@@ -565,6 +733,7 @@ export async function propagate(opts: PropagateOptions): Promise<PropagateResult
     fragmentMass,
     missingDenominator,
     fetched: cache.size,
+    ribbons: flattenRibbons(ribbonTree),
   }
 }
 
@@ -921,13 +1090,26 @@ export function influenceTable(opts: InfluenceTableOptions): TableValue {
   const rows = [...opts.scores.entries()].filter(([, score]) => score > floor)
   rows.sort(([idA, a], [idB, b]) => b - a || compareIds(idA, idB))
 
-  const ids: ColumnData = []
-  const types: ColumnData = []
-  const scores: ColumnData = []
-  const adjusted: ColumnData = []
-  const hops: ColumnData = []
-  const isSeed: ColumnData = []
-
+  const columns: Record<string, ColumnData> = {}
+  for (const col of opts.schema.columns) columns[col.name] = []
+  /*
+   * The id and type column names are the caller's because they are the *dataset's* — the source
+   * connectivity schema carries them over whole, so a CAVE root id stays `str`. The other four
+   * are this module's own constants.
+   */
+  const [idColumn, typeColumn] = opts.schema.columns
+  /*
+   * One alias per column, hoisted — `influencePairs` above does the same and for the same reason.
+   * Read inside the loop these are six lookups on a runtime-keyed (dictionary-mode) object plus
+   * six `.name` reads per row, where the keys cannot change; on a 165k-row score table that is a
+   * million megamorphic lookups standing in for a million array pushes.
+   */
+  const ids = columns[idColumn!.name]!
+  const types = columns[typeColumn!.name]!
+  const scores = columns[INFLUENCE_COLUMN]!
+  const logs = columns[INFLUENCE_LOG_COLUMN]!
+  const hops = columns[HOPS_COLUMN]!
+  const isSeed = columns[SEED_COLUMN]!
   for (const [id, score] of rows) {
     // The cell as it arrived, never rebuilt from the key — invariant 8. A seed that was never
     // reached by an edge has no fetched cell, and its key is the text it was asked about, which
@@ -935,23 +1117,154 @@ export function influenceTable(opts: InfluenceTableOptions): TableValue {
     ids.push(opts.cells.get(id) ?? id)
     types.push(opts.types.get(id) ?? null)
     scores.push(score)
-    adjusted.push(adjustInfluence(score))
+    logs.push(adjustInfluence(score))
     hops.push(opts.firstHop.get(id) ?? null)
     isSeed.push(seeds.has(id))
   }
 
-  const idName = opts.schema.columns[0]!.name
-  const typeName = opts.schema.columns[1]!.name
-  return makeTable(
-    opts.schema,
-    {
-      [idName]: ids,
-      [typeName]: types,
-      [INFLUENCE_COLUMN]: scores,
-      [INFLUENCE_LOG_COLUMN]: adjusted,
-      [HOPS_COLUMN]: hops,
-      [SEED_COLUMN]: isSeed,
-    },
-    'neurons',
+  return makeTable(opts.schema, columns, 'neurons')
+}
+// ---------------------------------------------------------------------------
+// The flow the scores were computed over
+// ---------------------------------------------------------------------------
+
+/**
+ * The layered flow table: one row per group of edges the walk propagated over, per hop.
+ *
+ * **This replaced a `Network` port**, and the swap is the point rather than a tidy-up. That port
+ * emitted the induced subgraph of the top scorers, which a node-link diagram then invited a
+ * reader to trace — and the tracing is wrong, because most of a neuron's score arrives along
+ * paths that leave the top set and come back. The flow has no such hole: every ribbon is the
+ * drive that actually crossed those edges, so a column's total is the whole of what reached that
+ * depth. Widths mean something; positions in a node-link picture of a ball did not.
+ *
+ * Four columns and no more. `layer` is a *drawing* position rather than a measurement — 0 is the
+ * furthest from the seed, so the columns run in the direction the signal does — and `source` and
+ * `target` are the groups at layers `layer` and `layer + 1`. See `flowLayerOf`.
+ *
+ * **Nothing says where the drive went missing, and that is deliberate.** An earlier version
+ * emitted the fragment and frontier losses as extra rows so the drawing could label them, and it
+ * was wrong in a way the fixture found: those are two of *four* reasons a column carries less
+ * than the one before it. The others are a neuron whose partners all fall below the weight
+ * threshold — a dead end, not a loss — and the hop budget running out. Labelling two of four
+ * accounts for part of a narrowing and reads as though it accounted for all of it.
+ *
+ * So the shortfall is left to the geometry: a column's outflow minus the inflow it received is
+ * the whole of what did not carry on, whatever the cause, and it is exact by construction rather
+ * than by a sum that has to be kept in step. The *reasons* are on the card, where `ctx.warn`
+ * already gives each its own sentence and its own number. The upshot for `out.sankey` is that it
+ * needs no concept from here at all: four columns of ordinary layered flow.
+ */
+export function influenceFlowSchema(): TableSchema {
+  return tableSchema(
+    column(LAYER_COLUMN, 'i64'),
+    column('source', 'str'),
+    column('target', 'str'),
+    column('value', 'f64'),
   )
+}
+
+export interface InfluenceFlowOptions {
+  /**
+   * The walk, or `undefined` where there is no single one — which is what a meet-in-the-middle
+   * split leaves.
+   *
+   * One half rather than the array, because the "a split has no single layer axis" rule then has
+   * one home instead of two: the caller already branches on it to raise the warning, and an
+   * array here made the same decision a second time, silently.
+   */
+  half: PropagateResult | undefined
+  /** `inputs` puts the seed in the last column; `outputs` puts it in the first. */
+  direction: ConnectionDirection
+  /** Drop a ribbon carrying less than this share of the seed mass. 0 keeps everything. */
+  floor: number
+}
+
+/**
+ * Where a hop sits in the drawing, which is not the hop.
+ *
+ * `hop` counts synapses from the seed, so travelling upstream it runs **against** the signal —
+ * the seed is 0 and its influencers are 1, 2, 3, while the drive flows from the influencers into
+ * the seed. A diagram laid out by the hop count therefore runs backwards, which is the same trap
+ * the retired `layer` column on the old Network port existed for and which was reported there as
+ * inverted arrows.
+ *
+ * So travelling `inputs` the layer is the hop count reversed, and travelling `outputs` it is the
+ * hop count itself. `deepest` is **the hop the walk actually reached** rather than the budget it
+ * was given: a four-hop budget that runs out of graph after two would otherwise number its layers
+ * 2 and 3, leaving an empty column 0 in front of them that a reader of the table cannot tell from
+ * a filter. The drawing renumbers densely either way, so this is about the table reading correctly
+ * on its own.
+ */
+function flowLayerOf(hop: number, deepest: number, outward: boolean): number {
+  return outward ? hop - 1 : deepest - hop
+}
+
+/**
+ * The walk's ribbons as a table.
+ *
+ * **Empty under a meet-in-the-middle split**, which is `firstHop`'s rule one column over and the
+ * same reason. The two halves count hops from *opposite ends* — a forward hop 1 is adjacent to the
+ * candidates and a backward hop 1 is adjacent to the seeds — so folded through one layer formula
+ * they land in the same column, and the diagram's columns become two different measurements.
+ * Plausible, and wrong in a way no width could show. The caller passes `undefined` there and says
+ * so, rather than leaving an unexplained empty port.
+ *
+ */
+export interface InfluenceFlowResult {
+  table: TableValue
+  /**
+   * Drive the floor removed, as a share of what the walk carried.
+   *
+   * Reported rather than discarded, because the drawing cannot tell it apart from the data. A
+   * Sankey derives "what stopped here" as a node's inflow minus its outflow, so every band the
+   * floor cut lands in that number — and on a wide ball, where most ribbons are small, the floor
+   * is plausibly the largest contributor to it. Leaving it unstated has the viewer attributing a
+   * control's effect to the connectome, under a tooltip that says the card explains why.
+   */
+  floored: number
+}
+
+export function influenceFlow(opts: InfluenceFlowOptions): InfluenceFlowResult {
+  const schema = influenceFlowSchema()
+  const half = opts.half
+  if (!half) return { table: tableFromRows(schema, []), floored: 0 }
+
+  const outward = opts.direction === 'outputs'
+  /** The deepest hop the walk reached, which is what the columns are counted from. */
+  let deepest = 0
+  let carried = 0
+  let floored = 0
+  for (const ribbon of half.ribbons.values()) {
+    if (ribbon.hop > deepest) deepest = ribbon.hop
+    carried += ribbon.mass
+    if (!(ribbon.mass > opts.floor)) floored += ribbon.mass
+  }
+
+  /*
+   * One pass and one row object each: `propagate` already keyed its ribbons on `(hop, from, to)`
+   * and `flowLayerOf` is injective in `hop`, so a second map on `(layer, from, to)` could never
+   * merge two of them.
+   *
+   * Ordered, because a table that reshuffles between runs makes every downstream diff unreadable
+   * — `influenceTable`'s rule, and the drawing reads the order as within-column order.
+   */
+  const rows = [...half.ribbons.values()]
+    .filter((ribbon) => ribbon.mass > opts.floor)
+    .map((ribbon) => ({
+      [LAYER_COLUMN]: flowLayerOf(ribbon.hop, deepest, outward),
+      source: ribbon.from,
+      target: ribbon.to,
+      value: ribbon.mass,
+    }))
+    .sort(
+      (a, b) =>
+        a[LAYER_COLUMN] - b[LAYER_COLUMN] ||
+        b.value - a.value ||
+        a.source.localeCompare(b.source),
+    )
+
+  // `tableFromRows` is the packer these row objects already exist for — four parallel arrays and
+  // a closure to share them between two exits was this loop written by hand.
+  return { table: tableFromRows(schema, rows), floored: carried > 0 ? floored / carried : 0 }
 }

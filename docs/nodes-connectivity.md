@@ -1070,6 +1070,95 @@ it fixes `seedMass` on the way: `1 / seeds.length` over the raw column started a
 less than one whole unit of drive in it. `combineHalves` now also throws when the two lists differ
 in length, because that is the only way a second route to the same mistake can announce itself.
 
+### The Transfers port costs no fetch at all, and it replaced a Network port
+
+`propagate` has to compute each edge's contribution in order to propagate at all. What the `Transfers`
+port adds is keeping that number rather than discarding it — one `Map` get and set per edge per
+hop, behind an option that is off for every other caller. Nothing is fetched and nothing is walked
+twice, which is the same claim the retired `Network` port made and is true here for a better
+reason.
+
+**Why the Network port went.** It emitted the induced subgraph of the top scorers, which drew well
+and read wrongly, in three ways that compounded:
+
+- **The drawn edges were a biased sample of the paths that made the numbers.** A node-link diagram
+  invites a reader to trace a route and multiply. Most of a neuron's score arrives along paths that
+  leave the top set and come back, so the tracing was wrong and nothing on the picture said so.
+- **The arrow weights were not the quantity.** `influenceEdgeSchema` carried raw synapse counts,
+  so thickness was synapses while colour was influence — two quantities in one drawing, and the
+  thickest arrow routinely not the influential one.
+- **The top scorers are mutually connected**, which is *why* they all score highly, so the induced
+  subgraph is dense and recurrent and the layering filled with `back` and `within` edges. The
+  `layer` column fixed the inverted arrows; it could not make a recurrent ball feed-forward.
+
+A flow has none of those. Every ribbon is drive that actually crossed, so a column's total is the
+whole of what reached that depth; the width *is* the quantity; and there is no layering to violate
+because a hop is a column by construction. Removing it also retired `influenceNetwork`,
+`influenceNetworkSchema`, `influenceEdgeSchema`, `flowLayer`, `NetworkHalf`, the `adjacency` field
+on `PropagateResult` and the `Network nodes` param — about 200 lines, and a `networkx` dependency
+in the notebook emitter.
+
+The cost is that a saved graph wired to `Network` loses that edge on load, with the warning
+`deserializeGraph` gives. **Deliberately not `formerIds`**: the port is a different *kind* of thing
+now, so reconnecting the wire would hand a Table to whatever expected a Network and turn the next
+card red. A dropped edge says what happened; a re-pointed one says something false.
+
+Five rules, each of which the obvious version gets wrong.
+
+**The grouping is chosen inside the walk.** Per neuron pair a four-hop ball is millions of entries
+and the diagram it feeds is a few dozen boxes, so folding afterwards means materialising the thing
+the fold exists to avoid. `PropagateOptions.ribbons` takes `'type'` or `'neuron'` and `propagate`
+answers it from its own `types` map — an enum rather than a key function, because that map is
+filled *during* the walk and a caller's closure over it would read something that does not exist
+yet.
+
+**An untyped body joins one bucket** (`MISSING_LABEL`) rather than becoming its own group. Falling
+back to the id is right for a *table*, where a row per neuron is the point; here it puts an
+18-digit root id in a diagram whose other boxes say `LC4`, once per body — and with
+`Include fragments` on, that is most of them. What it costs is that the bucket can be the largest
+thing in the picture, which is true and worth seeing.
+
+**A ribbon runs presynaptic to postsynaptic**, which is a fact about the synapse rather than about
+the walk, so it flips with `Direction`. Travelling `inputs` the propagation runs from `to` towards
+`from` and the ribbon still reads the way the signal does. Getting this backwards is invisible in
+the widths and produces a perfectly plausible diagram with every arrow reversed.
+
+**`layer` is a drawing position and not the hop count.** Travelling upstream a hop count runs
+*against* the signal — the seed is 0 and its influencers are 1, 2, 3 — so a diagram laid out by it
+puts the seed in the first column and reports every connection as feedback. That is the same defect
+the old `layer` column on the Network port existed for and which was reported there as inverted
+arrows; `flowLayerOf` reverses it travelling `inputs` and leaves it alone travelling `outputs`.
+
+**Nothing says where the drive went missing.** An earlier version emitted the fragment and frontier
+losses as rows with no source, so the drawing could label them. It was wrong, and the flow tests
+found it: those are two of *four* reasons a column carries less than the one before it — the others
+being a neuron whose partners all fall below the weight threshold, which is a dead end rather than
+a loss, and the hop budget running out. Labelling two of four accounts for part of a narrowing and
+reads as though it accounted for all of it. So the shortfall is left to the geometry, where a
+column's outflow minus its inflow is the whole of it, exact by construction; the *reasons* stay on
+the card, where `ctx.warn` already gives each its own sentence and its own number. The upshot is
+that `out.sankey` needs no concept from here at all: four columns of ordinary layered flow.
+
+A ribbon into a body the walk goes on to drop **is** recorded, because the drive really did cross
+that synapse. What stops is anything past it, so the diagram narrows at the next column, which is
+the honest place for it.
+
+**The port is empty under a meet-in-the-middle split**, which is `firstHop`'s rule one column over
+and the same reason: the halves count hops from *opposite ends*, so a forward hop 1 sits beside the
+candidates and a backward hop 1 beside the seeds, and folded through one layer formula they land in
+the same column. The diagram's columns would then be two different measurements — plausible, and
+invisible in the widths. Unlike the `hops` column, though, an empty *port* reads as a broken node,
+so this one gets a `ctx.warn` naming the two controls that bring it back.
+
+**The columns are numbered from the depth the walk reached**, not from the budget it was given. A
+four-hop budget that runs out of graph after two would otherwise number its layers 2 and 3, leaving
+an empty column in front of them that a reader of the table cannot tell from a filter. The drawing
+renumbers densely either way, so this is about the table reading correctly on its own.
+
+`Transfer floor` is a **share** of the mass the walk started with rather than an absolute one, because
+the total depends on `Seed weighting`: `each` starts one unit per seed, so an absolute floor would
+mean ten times less on a ten-neuron set than on a one-neuron one.
+
 ### One port whose shape follows its control
 
 `Per query neuron` turns one row per influencer into one row per (query neuron, influencer),
@@ -1111,7 +1200,13 @@ dependency and the problem the node exists to avoid.
 
 It is checked by **running it**. `probe-influence.py` execs the helper out of the golden notebook
 against a stubbed neuprint over the same C. elegans graph and compares with the canvas: 277
-neurons, worst relative difference 3.8e-16, under both denominators. The one thing the cell does
+neurons, worst relative difference 3.8e-16, under both denominators. The `Transfers` port is checked
+there too, and the sharp one is **orientation** — 8,019 bands, none reversed — because a diagram
+with every band the wrong way round is entirely plausible and invisible in the widths. Beside it:
+that no layer carries more than the one nearer the seed, that the layer meeting the seeds carries
+the whole seed mass, and that the flow is identical with `Per query neuron` on. That last one
+needed the stub to type each neuron as itself: with every type null the whole diagram folds into
+one box per layer and the orientation check has nothing left to compare. The one thing the cell does
 not reproduce is *how* a `Candidates` run got there — it walks the full depth and filters, which is
 the same number by the identity above, written into the cell as a `NOTE`.
 

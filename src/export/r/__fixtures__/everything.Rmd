@@ -279,6 +279,79 @@ coda_endpoint_neurons <- function(connections, seed_ids = NULL) {
 }
 
 
+# Coda's flow-chart layering: a 1-based column index per vertex, as the card drew it.
+coda_flow_layers <- function(g, layer_attr = NULL) {
+  n <- igraph::vcount(g)
+  if (n == 0) return(integer(0))
+  if (!is.null(layer_attr)) {
+    # Read off a column, renumbered densely: the numbers are a measurement and the layers
+    # are positions, so 0/2/5 hops draw as three adjacent columns. Anything unmeasured
+    # lands in one layer after every measured one, never in the first.
+    raw <- suppressWarnings(as.numeric(igraph::vertex_attr(g, layer_attr)))
+    known <- sort(unique(raw[is.finite(raw)]))
+    out <- match(raw, known)
+    out[is.na(out)] <- length(known) + 1L
+    return(as.integer(out))
+  }
+
+  adj <- igraph::as_adj_list(g, mode = "out")
+  adj <- lapply(seq_len(n), function(v) setdiff(as.integer(adj[[v]]), v))
+  indeg <- integer(n)
+  for (v in seq_len(n)) for (w in adj[[v]]) indeg[w] <- indeg[w] + 1L
+
+  # Depth-first, roots first, marking the edges that close a cycle.
+  state <- integer(n)
+  back <- new.env(hash = TRUE, parent = emptyenv())
+  order <- c(which(indeg == 0L), which(indeg != 0L))
+  for (root in order) {
+    if (state[root] != 0L) next
+    state[root] <- 1L
+    stack <- c(root)
+    at <- c(1L)
+    while (length(stack)) {
+      v <- stack[length(stack)]
+      i <- at[length(at)]
+      if (i > length(adj[[v]])) {
+        state[v] <- 2L
+        stack <- stack[-length(stack)]
+        at <- at[-length(at)]
+        next
+      }
+      at[length(at)] <- i + 1L
+      w <- adj[[v]][i]
+      if (state[w] == 1L) {
+        assign(paste0(v, "-", w), TRUE, envir = back)
+      } else if (state[w] == 0L) {
+        state[w] <- 1L
+        stack <- c(stack, w)
+        at <- c(at, 1L)
+      }
+    }
+  }
+
+  # Longest path over what is left, in Kahn order.
+  kept <- lapply(seq_len(n), function(v) {
+    adj[[v]][!vapply(adj[[v]], function(w) exists(paste0(v, "-", w), envir = back,
+      inherits = FALSE), logical(1))]
+  })
+  pending <- integer(n)
+  for (v in seq_len(n)) for (w in kept[[v]]) pending[w] <- pending[w] + 1L
+  layers <- integer(n)
+  queue <- which(pending == 0L)
+  head <- 1L
+  while (head <= length(queue)) {
+    v <- queue[head]
+    head <- head + 1L
+    for (w in kept[[v]]) {
+      layers[w] <- max(layers[w], layers[v] + 1L)
+      pending[w] <- pending[w] - 1L
+      if (pending[w] == 0L) queue <- c(queue, w)
+    }
+  }
+  as.integer(layers + 1L)
+}
+
+
 coda_follow_order <- function(lead, follower) {
   # Positions putting `follower` in `lead`'s order, matched by label. Coda's rule.
   taken <- rep(FALSE, length(follower))
@@ -1046,6 +1119,30 @@ coda_qualify_ids <- function(df, column, direction = "add", prefix = "", into = 
     df[[into]] <- ifelse(had, sub(":.*$", "", text), NA_character_)
   }
   df
+}
+
+
+coda_rank <- function(frame, value, flag = NULL, descending = TRUE,
+                      drop_non_positive = FALSE) {
+  # Coda's Rank Plot ordering and cumulative share, as the card computes them.
+  out <- frame
+  out[[value]] <- suppressWarnings(as.numeric(out[[value]]))
+  out <- out[!is.na(out[[value]]), , drop = FALSE]
+  # A log axis has no room for a value at or below zero.
+  if (drop_non_positive) out <- out[out[[value]] > 0, , drop = FALSE]
+  out <- out[order(out[[value]], decreasing = descending), , drop = FALSE]
+  out$coda_rank <- seq_len(nrow(out))
+  # Of the values, never of the rows. Flagged rows are out of both halves: on an Influence
+  # result they are the seeds, which carry most of the total and say nothing about the rest.
+  counted <- out[[value]]
+  if (!is.null(flag)) counted[as.logical(out[[flag]])] <- 0
+  total <- sum(counted)
+  out$coda_share <- if (any(counted < 0) || total <= 0) {
+    NA_real_
+  } else {
+    cumsum(counted) / total
+  }
+  out
 }
 
 
@@ -2114,6 +2211,8 @@ adjacency_links <- adjacency_links[adjacency_links$weight != 0, ]
 # NOTE: neuprintr returns every route within the hop budget. Coda
 # additionally ranks them by their weakest link and keeps the strongest —
 # that ranking is not reproduced, so this is the unranked set.
+# NOTE: This node’s Network output is not reproduced here — only the routes
+# table is. A cell below that reads the Network port will not find it.
 paths_paths <- neuprint_get_paths(
   find_neurons$neuronId,
   ids_from_label$neuronId,
@@ -2178,6 +2277,38 @@ partner_vectors <- coda_partner_vectors(
 )
 ```
 
+```{r rank-plot}
+# ── Rank Plot ──
+rank_plot_out <- connectivity_connections
+# NOTE: No point is selected on the canvas, so Selected is empty.
+rank_plot_selected <- rank_plot_out |> slice(0)
+
+.ranked <- coda_rank(rank_plot_out, "weight", descending = TRUE, drop_non_positive = TRUE)
+
+print(
+  ggplot(.ranked, aes(x = coda_rank, y = `weight`)) +
+    geom_point(size = 1.4) +
+    scale_y_log10() +
+    scale_x_log10() +
+    labs(x = "rank", y = "weight") +
+    theme_minimal()
+)
+# NOTE: The card draws the share as a second panel under the ranking,
+# sharing its axis. ggplot2 alone cannot stack two panels with different y
+# transforms — a transform belongs to the scale rather than to the facet —
+# so this is a second figure over the same ranking. It is empty where the
+# share was withheld; see coda_rank.
+
+print(
+  ggplot(.ranked, aes(x = coda_rank, y = coda_share)) +
+    geom_line() +
+    scale_y_continuous(limits = c(0, 1)) +
+    scale_x_log10() +
+    labs(x = "rank", y = "share of total") +
+    theme_minimal()
+)
+```
+
 ```{r partner-vectors-2}
 # ── Partner Vectors ──
 partner_vectors_2 <- coda_partner_vectors(
@@ -2197,6 +2328,11 @@ similarity_matrix <- coda_similarity_wide(
   metric = "euclidean",
   output = "distance"
 )
+```
+
+```{r rank-plot-2}
+# ── Rank Plot ──
+# TODO: nothing upstream produced a value — "Influence" was not translated.
 ```
 
 ```{r split-neurons}
@@ -2434,6 +2570,50 @@ partner_vectors_3 <- coda_partner_vectors(
 ```{r qualify-ids-2}
 # ── Qualify Ids ──
 qualify_ids_2 <- coda_qualify_ids(qualify_ids, "neuronId", direction = "remove", into = "dataset")
+```
+
+```{r flow-chart}
+# ── Flow Chart ──
+# NOTE: The canvas folds each layer past 4 boxes into one "+N others". That
+# is a drawing control, so this figure shows every box — filter upstream to
+# match it.
+# NOTE: A vertex here is a fixed-size rectangle, where Coda sizes each box
+# to its label. Feedback edges are not dashed as they are on the canvas —
+# igraph styles edges one way per plot.
+flow_chart_out <- paths_network
+.picked <- c("720575940628857210")
+flow_chart_selected <- igraph::as_data_frame(flow_chart_out, what = "vertices") |>
+  mutate(neuronId = as.character(name)) |>
+  filter(neuronId %in% .picked) |>
+  relocate(neuronId)
+
+.layers <- coda_flow_layers(flow_chart_out, layer_attr = "hop")
+.sugi <- layout_with_sugiyama(flow_chart_out, layers = .layers)
+.g <- .sugi$extd_graph
+.real <- seq_len(vcount(flow_chart_out))
+.orig <- E(.g)$orig
+V(.g)$label <- NA
+V(.g)$label[.real] <- vertex_attr(flow_chart_out, "role")
+V(.g)$shape <- "none"
+V(.g)$shape[.real] <- "rectangle"
+V(.g)$size <- 0
+V(.g)$size[.real] <- 26
+V(.g)$size2 <- 0
+V(.g)$size2[.real] <- 10
+.w <- abs(edge_attr(flow_chart_out, "weight"))
+.w[!is.finite(.w)] <- 0
+E(.g)$width <- if (max(.w, 0) > 0) 1 + 4 * .w[.orig] / max(.w) else 1.4
+.label <- edge_attr(flow_chart_out, "pairs")
+E(.g)$label <- NA
+E(.g)$label[!duplicated(.orig)] <- .label[.orig[!duplicated(.orig)]]
+E(.g)$label.cex <- 0.55
+
+plot(
+  .g, layout = cbind(-.g$layout[, 2], .g$layout[, 1]),
+  vertex.color = "#dfe3e8", vertex.frame.color = "#898781",
+  vertex.label.cex = 0.6, vertex.label.color = "#111418",
+  edge.color = "#898781", edge.arrow.size = 0.4, asp = 0,
+)
 ```
 
 ```{r points-in-volumes}

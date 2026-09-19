@@ -56,6 +56,11 @@ import { ExportNodeContext } from './exportRegistry'
 import { scopedKey, WorkflowScope } from './workflowScope'
 import { ScatterViewer } from './ScatterViewer'
 import { DendrogramViewer } from './DendrogramViewer'
+import { RankViewer } from './RankViewer'
+import { SankeyViewer } from './SankeyViewer'
+import type { SankeyDirection } from './sankeyLayout'
+import { FlowChartViewer } from './FlowChartViewer'
+import type { FlowDirection, FlowRouting } from './flowChartLayout'
 import type { WhiskerRule } from './boxStats'
 import type { Normalize } from './histogramBins'
 import type { LayoutName } from './networkLayout'
@@ -626,6 +631,36 @@ const VIEWERS: Record<string, ViewerEntry> = {
       )
     },
   },
+  /*
+   * Not behind `LazyViewers`, which every other network drawing here is.
+   *
+   * That split is about weight: sigma and three each pull a WebGL renderer into the chunk, and
+   * a card that is not on screen should not pay for one. This viewer is SVG and its whole
+   * dependency is `flowChartLayout.ts` — a few hundred lines of arithmetic — so a lazy boundary
+   * would buy a loading state and nothing else.
+   */
+  'out.flowChart': {
+    render: ({ value, ctx, params, choice, shared, onSelectionChange, selection }) => {
+      if (!isNetworkValue(value)) return undefined
+      return (
+        <FlowChartViewer
+          network={value}
+          direction={choice<FlowDirection>('direction')}
+          routing={choice<FlowRouting>('routing')}
+          labelColumn={ctx.column('labelColumn')}
+          layerColumn={ctx.column('layerColumn')}
+          edgeLabelColumn={ctx.column('edgeLabelColumn')}
+          edgeLabels={choice<'auto' | 'on' | 'off'>('edgeLabels')}
+          foldPerLayer={Number(params.foldPerLayer)}
+          weightedArrows={params.weightedArrows !== false}
+          nodeColor={readColorSpec('node', params, ctx.column)}
+          selection={selection}
+          onSelectionChange={onSelectionChange}
+          {...shared}
+        />
+      )
+    },
+  },
   'out.profile': {
     readsInputs: true,
     render: ({ ctx, params, shared, inputValues, onParamChange, selection }) => {
@@ -841,6 +876,81 @@ const VIEWERS: Record<string, ViewerEntry> = {
           maxPoints={Number(params.maxPoints)}
           trend={choice<'linear' | 'none'>('trend')}
           trendPerGroup={params.trendPerGroup !== false}
+          selection={selection}
+          {...(onSelectionChange ? { onSelectionChange } : {})}
+          {...shared}
+        />
+      )
+    },
+  },
+  /*
+   * Not behind `LazyViewers`, which the heavy viewers here are.
+   *
+   * That split is about weight: sigma and three each pull a WebGL renderer into the chunk. This
+   * one is SVG and its whole dependency is `rankSeries.ts` plus the scale helpers `ScatterViewer`
+   * already loads, so a lazy boundary would buy a loading state and nothing else.
+   */
+  'out.rank': {
+    render: ({ value, ctx, params, shared, onSelectionChange, selection }) => {
+      if (!isTableValue(value)) return undefined
+      const valueColumn = ctx.column('value')
+      // "Not known yet" and "nothing to pick" are different states and want different words —
+      // `NoColumns` is where that distinction lives for every chart here.
+      if (!valueColumn) {
+        return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="a numeric column" />
+      }
+      const label = ctx.column('labelColumn')
+      const flag = ctx.column('flagColumn')
+      const id = ctx.column('idColumn')
+      return (
+        <RankViewer
+          table={value}
+          valueColumn={valueColumn}
+          {...(label ? { labelColumn: label } : {})}
+          {...(flag ? { flagColumn: flag } : {})}
+          {...(id ? { idColumn: id } : {})}
+          pointColor={readColorSpec('point', params, ctx.column)}
+          descending={params.descending !== false}
+          valueLog={params.valueLog !== false}
+          rankLog={params.rankLog !== false}
+          showShare={params.showShare !== false}
+          labelTop={Number(params.labelTop)}
+          selection={selection}
+          {...(onSelectionChange ? { onSelectionChange } : {})}
+          {...shared}
+        />
+      )
+    },
+  },
+  /*
+   * SVG and a few hundred marks, so not behind `LazyViewers` — the same call `out.rank` makes,
+   * and for the same reason: a lazy boundary here would buy a loading state and nothing else.
+   */
+  'out.sankey': {
+    render: ({ value, ctx, params, choice, shared, onSelectionChange, selection }) => {
+      if (!isTableValue(value)) return undefined
+      const layer = ctx.column('layerColumn')
+      const from = ctx.column('sourceColumn')
+      const to = ctx.column('targetColumn')
+      if (!layer || !from || !to) {
+        return (
+          <NoColumns known={!!schemaOf(ctx.inputs.in)} what="a layer, a from and a to column" />
+        )
+      }
+      const value_ = ctx.column('valueColumn')
+      const id = ctx.column('idColumn')
+      return (
+        <SankeyViewer
+          table={value}
+          layerColumn={layer}
+          sourceColumn={from}
+          targetColumn={to}
+          {...(value_ ? { valueColumn: value_ } : {})}
+          {...(id ? { idColumn: id } : {})}
+          direction={choice<SankeyDirection>('direction')}
+          foldPerLayer={Number(params.foldPerLayer)}
+          labelValues={params.labelValues !== false}
+          bandColor={readColorSpec('band', params, ctx.column)}
           selection={selection}
           {...(onSelectionChange ? { onSelectionChange } : {})}
           {...shared}

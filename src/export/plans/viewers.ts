@@ -23,6 +23,7 @@ import {
 } from '../../nodes/lib/chartSelection'
 import { decodeClauses, resolveFilters } from '../../nodes/lib/tableFilter'
 import type { NeutralContext, Noted, Refusable } from '../neutral'
+import { showsEdgeLabels } from '../../nodes/lib/flowChartOps'
 import { selectionIds } from '../selection'
 
 /** What the chart plans read: params and the column pickers. */
@@ -36,6 +37,8 @@ type SelectingNode =
   | 'out.scatter'
   | 'out.viewer3d'
   | 'out.dendrogram'
+  | 'out.rank'
+  | 'out.flowChart'
   | 'out.profile'
   | 'neuron.explore'
 
@@ -47,6 +50,8 @@ const NOTHING_SELECTED: Record<SelectingNode, { gesture: string; port: string }>
   'out.scatter': { gesture: 'Nothing is lassoed on the canvas', port: 'Selected' },
   'out.viewer3d': { gesture: 'Nothing is picked in the viewer', port: 'Selected' },
   'out.dendrogram': { gesture: 'No branch is selected on the canvas', port: 'Selected' },
+  'out.rank': { gesture: 'No point is selected on the canvas', port: 'Selected' },
+  'out.flowChart': { gesture: 'No box is selected on the canvas', port: 'Selected' },
   'out.profile': { gesture: 'No neuron is pinned on the canvas', port: 'Current' },
   'neuron.explore': { gesture: 'Nothing is ticked on the canvas', port: 'Selected' },
 }
@@ -241,6 +246,133 @@ export function scatterPlan(ctx: ChartContext): ScatterPlan {
         ? { column: idColumn, ids }
         : { note: nothingSelected('out.scatter') },
     drawn: x && y ? { x, y } : { note: nothingDrawn('x or y') },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rank Plot
+// ---------------------------------------------------------------------------
+
+export interface RankPlan {
+  selected: Noted<{ column: string; ids: string[] }>
+  /** The ranked measure, or why there is nothing to draw. */
+  drawn: Noted<{ value: string }>
+  /** Column naming a point, where one is picked. */
+  labelColumn: string | undefined
+  /** Column whose truthy rows are ringed and kept out of the share. */
+  flagColumn: string | undefined
+  descending: boolean
+  valueLog: boolean
+  rankLog: boolean
+  /** Whether the second panel is drawn at all. */
+  showShare: boolean
+  labelTop: number
+}
+
+/**
+ * What both documents need to draw a ranking.
+ *
+ * Here rather than in either emitter for `scatterPlan`'s reason: an emitter that spelled the
+ * defaults out would be a second copy of them, and the one that matters most is `valueLog` —
+ * on by default here where every other log control in the app is off, so an emitter reading
+ * `params.valueLog === true` would quietly export a linear plot of a card that is logarithmic.
+ */
+export function rankPlan(ctx: ChartContext): RankPlan {
+  const value = ctx.column('value')
+  const ids = selectionIds(ctx)
+  const idColumn = ctx.column('idColumn')
+  return {
+    selected:
+      ids.length > 0 && idColumn
+        ? { column: idColumn, ids }
+        : { note: nothingSelected('out.rank') },
+    drawn: value ? { value } : { note: nothingDrawn('a value column') },
+    labelColumn: ctx.column('labelColumn'),
+    flagColumn: ctx.column('flagColumn'),
+    descending: ctx.params.descending !== false,
+    valueLog: ctx.params.valueLog !== false,
+    rankLog: ctx.params.rankLog !== false,
+    showShare: ctx.params.showShare !== false,
+    labelTop: Math.max(0, Math.floor(Number(ctx.params.labelTop))),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Flow Chart
+// ---------------------------------------------------------------------------
+
+export interface FlowChartPlan {
+  /** Node column the layering is read from; absent means longest path. */
+  layerColumn: string | undefined
+  /** Node column naming each box; absent means the node's own id. */
+  labelColumn: string | undefined
+  /**
+   * Edge column printed on the arrows, already resolved — `weight` where the picker is empty.
+   *
+   * Resolved here rather than left as `undefined` for the same reason `edgeLabels` is a boolean
+   * rather than the `auto` enum: unresolved, each emitter writes the same two-branch ternary and
+   * "empty means the weight" is a decision made in three places.
+   */
+  edgeLabelColumn: string
+  /** Which way the layers run. Each emitter maps this to its own library's spelling. */
+  direction: 'lr' | 'tb'
+  /** Whether the arrows carry a number, with the `auto` setting already resolved. */
+  edgeLabels: boolean
+  /** Arrow thickness follows the weight. */
+  weighted: boolean
+  selected: Noted<{ ids: string[] }>
+  /**
+   * What the document's figure will not reproduce, one sentence each.
+   *
+   * Both libraries lay a layered graph out and neither draws what the card draws, so the notes
+   * are the honest half of this emitter rather than a disclaimer. Computed here because the two
+   * documents diverge on *which* of them apply — igraph does crossing minimisation and dummy-node
+   * routing where networkx does neither — so each emitter appends its own and both start from
+   * these.
+   */
+  divergences: string[]
+}
+
+/**
+ * What both documents need to draw the diagram, and what each of them cannot.
+ *
+ * Here rather than in either emitter for `scatterPlan`'s reason: the resolved layer column and
+ * the resolved `auto` label setting are decisions, and two copies of a decision drift. The
+ * `auto` one especially — it depends on the node count, so an emitter that guessed would print
+ * numbers on a figure whose card has none.
+ */
+export function flowChartPlan(ctx: ChartContext): FlowChartPlan {
+  const ids = selectionIds(ctx)
+  const fold = Number(ctx.params.foldPerLayer)
+  const divergences: string[] = []
+  if (Number.isFinite(fold) && fold > 0) {
+    // The fold is presentational, so the *value* passed on is the same either way — but the
+    // card's picture has folded boxes in it and this one will not. Said rather than
+    // reimplemented: `foldFlowGraph`'s ranking and edge merging is a page of code to reproduce
+    // for a figure whose author can filter upstream instead.
+    divergences.push(
+      `The canvas folds each layer past ${fold} boxes into one "+N others". That is a drawing ` +
+        `control, so this figure shows every box — filter upstream to match it.`,
+    )
+  }
+  return {
+    layerColumn: ctx.column('layerColumn'),
+    labelColumn: ctx.column('labelColumn'),
+    edgeLabelColumn: ctx.column('edgeLabelColumn') || 'weight',
+    direction: String(ctx.params.direction) === 'tb' ? 'tb' : 'lr',
+    /*
+     * `showsEdgeLabels`, actually called — the rule exists in one place precisely so the card
+     * and the notebook cannot answer it differently, and a comparison here against
+     * `EDGE_LABEL_AUTO_MAX` is that rule written a second time.
+     *
+     * A count of 0 because an emitter sees a schema and never a value, so it cannot count boxes.
+     * `auto` therefore resolves the way it does on a small graph, which is the card's own answer
+     * for the graphs this node is for.
+     */
+    edgeLabels: showsEdgeLabels(String(ctx.params.edgeLabels) as 'auto' | 'on' | 'off', 0),
+    weighted: ctx.params.weightedArrows !== false,
+    selected: ids.length > 0 ? { ids } : { note: nothingSelected('out.flowChart') },
+    divergences,
   }
 }
 

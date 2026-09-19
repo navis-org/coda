@@ -234,8 +234,14 @@ export function DistributionViewer({
     <div className="viewer">
       <div ref={ref} className="viewer__scroll nowheel" style={{ position: 'relative' }}>
         {size.width > 60 && (
-          <svg ref={svgRef} className="chart" width={width} height={height} role="img">
-            <title>{`Distribution of ${valueColumn}${groupColumn ? ` by ${groupColumn}` : ''}`}</title>
+          <svg
+            ref={svgRef}
+            className="chart"
+            width={width}
+            height={height}
+            role="img"
+            aria-label={`Distribution of ${valueColumn}${groupColumn ? ` by ${groupColumn}` : ''}`}
+          >
             <rect width={width} height={height} fill={surface} />
 
             {ticks.map((tick) => (

@@ -17,6 +17,7 @@ import type Graph from 'graphology'
 
 import type { CellValue, NetworkValue } from '../../core/values'
 import { getColumn } from '../../core/values'
+import { columnLayers } from '../../nodes/lib/flowChartOps'
 import { componentsOfEdges } from '../../nodes/lib/networkOps'
 import { groupByComponent, shelfPack } from './componentPack'
 import { PREFUSE_DEFAULTS, prefuseLayout, prefuseRun } from './prefuseForce'
@@ -168,21 +169,10 @@ export function assignLayers(topology: NetworkTopology): number[] {
  * final layer of their own rather than silently joining layer zero.
  */
 export function layersFromValues(values: Array<CellValue | undefined>): number[] {
-  const seen: string[] = []
-  const keys = values.map((cell) => {
-    if (cell === null || cell === undefined || cell === '') return null
-    const key = String(cell)
-    if (!seen.includes(key)) seen.push(key)
-    return key
-  })
-
-  const numeric = seen.every((key) => Number.isFinite(Number(key)))
-  const ordered = [...seen].sort((a, b) =>
-    numeric ? Number(a) - Number(b) : a.localeCompare(b),
-  )
-  const rank = new Map(ordered.map((key, index) => [key, index]))
-  // Unlabelled nodes go last, where they read as "not placed" rather than as the first stage.
-  return keys.map((key) => (key === null ? ordered.length : (rank.get(key) ?? ordered.length)))
+  // `columnLayers` is this rule, and the Flow Chart lays the same networks out by the same
+  // column — so two copies is one drawing quietly disagreeing with the other about which
+  // column a node is in. Headless, which is why the import runs this way round.
+  return [...columnLayers(values, values.length)]
 }
 
 /** Barycentre ordering: place each node near the mean position of its neighbours. */

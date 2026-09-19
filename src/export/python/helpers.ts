@@ -1614,3 +1614,178 @@ registerHelper({
     '    return pd.DataFrame(out, index=rows, columns=cols)',
   ],
 })
+
+/**
+ * Coda's flow-chart layering, so a notebook's figure has the columns the card had.
+ *
+ * A generated helper rather than a networkx call, because networkx has no longest-path layering
+ * and the two things it does have are each the wrong answer. `topological_generations` is
+ * *earliest*-possible layering, which puts a node one column right of its nearest predecessor
+ * rather than its furthest — so `a -> c` beside `a -> b -> c` draws `c` in column 1 with the
+ * route through `b` running backwards out of it. And `nx_agraph.graphviz_layout(prog='dot')`
+ * does layer properly but needs pygraphviz, a system package a notebook has no business
+ * requiring.
+ *
+ * The cycle pass is the half that has to be here rather than approximated: a connectome subgraph
+ * holds reciprocal pairs as a matter of course, and longest-path layering over a graph with a
+ * cycle in it does not terminate. Roots first, so the marked edge of a reciprocal pair is the one
+ * pointing back towards the sources — `longestPathLayers` in `nodes/lib/flowChartOps.ts`, whose
+ * answer this has to match or the notebook's figure is a different picture from the card's.
+ */
+registerHelper({
+  name: 'coda_flow_layers',
+  source: [
+    'def coda_flow_layers(graph, layer_attr=None):',
+    '    """Coda\'s flow-chart layering: a column index per node, as the card drew it."""',
+    '    nodes = list(graph.nodes())',
+    '    if layer_attr is not None:',
+    '        # Read off a column, renumbered densely: the numbers are a measurement and the',
+    '        # layers are positions, so 0/2/5 hops draw as three adjacent columns. Anything',
+    '        # unmeasured lands in one layer after every measured one, never in layer 0.',
+    '        raw = {}',
+    '        for node in nodes:',
+    '            value = graph.nodes[node].get(layer_attr)',
+    '            try:',
+    '                raw[node] = None if value is None or value == "" else float(value)',
+    '            except (TypeError, ValueError):',
+    '                raw[node] = None',
+    '        ranks = {',
+    '            value: rank',
+    '            for rank, value in enumerate(sorted({v for v in raw.values() if v is not None}))',
+    '        }',
+    '        return {n: ranks.get(raw[n], len(ranks)) for n in nodes}',
+    '',
+    '    out = {n: [v for v in graph.successors(n) if v != n] for n in nodes}',
+    '    indegree = {n: 0 for n in nodes}',
+    '    for node in nodes:',
+    '        for nxt in out[node]:',
+    '            indegree[nxt] += 1',
+    '',
+    '    # Depth-first, roots first, marking the edges that close a cycle.',
+    '    back, state = set(), {n: 0 for n in nodes}',
+    '    order = [n for n in nodes if indegree[n] == 0] + [n for n in nodes if indegree[n]]',
+    '    for root in order:',
+    '        if state[root]:',
+    '            continue',
+    '        state[root] = 1',
+    '        stack = [(root, iter(out[root]))]',
+    '        while stack:',
+    '            node, pending = stack[-1]',
+    '            nxt = next(pending, None)',
+    '            if nxt is None:',
+    '                state[node] = 2',
+    '                stack.pop()',
+    '            elif state[nxt] == 1:',
+    '                back.add((node, nxt))',
+    '            elif state[nxt] == 0:',
+    '                state[nxt] = 1',
+    '                stack.append((nxt, iter(out[nxt])))',
+    '',
+    '    # Longest path over what is left, in Kahn order.',
+    '    layers = {n: 0 for n in nodes}',
+    '    kept = {n: [v for v in out[n] if (n, v) not in back] for n in nodes}',
+    '    pending = {n: 0 for n in nodes}',
+    '    for node in nodes:',
+    '        for nxt in kept[node]:',
+    '            pending[nxt] += 1',
+    '    queue = [n for n in nodes if pending[n] == 0]',
+    '    for node in queue:',
+    '        for nxt in kept[node]:',
+    '            layers[nxt] = max(layers[nxt], layers[node] + 1)',
+    '            pending[nxt] -= 1',
+    '            if pending[nxt] == 0:',
+    '                queue.append(nxt)',
+    '    return layers',
+  ],
+})
+
+/**
+ * The graph a set of routes spans — `neuron.paths`' `Network` port.
+ *
+ * `fetch_paths` returns one row per *step*: `path` says which route the row belongs to, `bodyId`
+ * the neuron reached, and `weight` the strength of the connection **from the previous body in
+ * the same path** (0 on a route's first row, which has no previous body). So consecutive rows of
+ * one `path` group are an edge, which is `pathsToNetwork`'s rule exactly.
+ *
+ * A helper rather than eight lines in the cell because of the one thing a comprehension cannot
+ * state: the shift is **within a path**, not down the frame. Applied to the frame whole it joins
+ * the last body of one route to the first body of the next — a connection that does not exist,
+ * carrying the next route's first weight, and it looks like an ordinary edge.
+ *
+ * Parallel steps are deduplicated: the same connection appearing on forty routes is one edge,
+ * and its weight is the same number on each, so `first` rather than a sum — summing would
+ * multiply a connection by how many routes happen to run through it.
+ */
+registerHelper({
+  name: 'coda_paths_network',
+  requires: [['pandas'], ['networkx']],
+  source: [
+    'def coda_paths_network(paths):',
+    '    """The graph a fetch_paths result spans, as Coda\'s Paths node emits it."""',
+    '    graph = nx.DiGraph()',
+    '    if len(paths) == 0:',
+    '        return graph',
+    '    for _, row in paths.iterrows():',
+    '        graph.add_node(str(row["bodyId"]), neuronId=str(row["bodyId"]),',
+    '                       type=row.get("type"))',
+    '    # Shifted *within* each path: down the whole frame it would join the last body of one',
+    '    # route to the first body of the next, which is an edge that does not exist.',
+    '    steps = paths.copy()',
+    '    steps["_from"] = steps.groupby("path")["bodyId"].shift()',
+    '    steps = steps.dropna(subset=["_from"])',
+    '    for (a, b), group in steps.groupby(["_from", "bodyId"]):',
+    '        # One edge however many routes run through it; every row carries the same weight',
+    '        # for a given connection, so the first is the value rather than the sum.',
+    '        graph.add_edge(str(int(a)), str(int(b)), weight=float(group["weight"].iloc[0]))',
+    '    return graph',
+  ],
+})
+
+/**
+ * Coda's Rank Plot ordering and its cumulative share.
+ *
+ * A generated helper rather than three lines in the cell, because two of the rules are ones a
+ * reader would not put in by hand and cannot see the absence of.
+ *
+ * **The share is of the values, never of the rows.** `cumcount() / len(frame)` is the obvious
+ * thing to write and answers a different question — "90% of neurons score below 1e-4" rather
+ * than "the top twenty carry 60%". Only the second is what a concentration question asks.
+ *
+ * **A share of a total means nothing over a signed column.** Ranked descending, a column that
+ * can go negative has a running sum that climbs past the total and comes back down: a curve
+ * that looks exactly like a Lorenz curve, reaches 1.4, and is not one. The canvas withholds the
+ * panel and says why; here the column comes back as NaN, which matplotlib draws as a gap rather
+ * than as a line — the same refusal, in the idiom of the thing doing the drawing.
+ *
+ * `mergesort` because it is the stable one: ties have to break on the frame's own order or two
+ * runs of one query rank the same neurons differently, which is invariant 4's requirement of
+ * anything reaching a drawing and `rankSeries.ts`' comparator on the canvas.
+ */
+registerHelper({
+  name: 'coda_rank',
+  requires: [['pandas']],
+  source: [
+    'def coda_rank(frame, value, flag=None, descending=True, drop_non_positive=False):',
+    '    """Coda\'s Rank Plot ordering and cumulative share, as the card computes them."""',
+    '    out = frame.copy()',
+    '    out[value] = pd.to_numeric(out[value], errors="coerce")',
+    '    out = out[out[value].notna()]',
+    '    if drop_non_positive:',
+    '        # A log axis has no room for a value at or below zero.',
+    '        out = out[out[value] > 0]',
+    "    # Stable, so ties break on the frame's own order rather than on whichever the sort left.",
+    '    out = out.sort_values(value, ascending=not descending, kind="mergesort")',
+    '    out["coda_rank"] = range(1, len(out) + 1)',
+    '    # Of the values, never of the rows. Flagged rows are out of both halves: on an Influence',
+    '    # result they are the seeds, which carry most of the total and say nothing about the rest.',
+    '    counted = out[value] if flag is None else out[value].where(~out[flag].astype(bool), 0.0)',
+    '    total = counted.sum()',
+    '    if (counted < 0).any() or total <= 0:',
+    '        # A share of a total means nothing over a signed column: ranked descending the',
+    '        # running sum climbs past the total and comes back down.',
+    '        out["coda_share"] = float("nan")',
+    '    else:',
+    '        out["coda_share"] = counted.cumsum() / total',
+    '    return out',
+  ],
+})

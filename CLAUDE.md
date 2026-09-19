@@ -445,6 +445,33 @@ rule belongs to one area, its record is in that area's doc.
   function, or a search bounded by one number and ranked by another prunes away its own answer.
   **An unmeasured connection is never dropped and never scored.** The Paths table carries
   `bottleneckNorm` with **no denominator column**, inverting `weightTotal`'s rule on purpose.
+- **The drive an Influence walk propagated is already in memory, so its `Transfers` port costs no
+  fetch — and it replaced a `Network` port that drew well and read wrongly.** That port emitted the
+  induced subgraph of the top scorers, which invites tracing a route and multiplying; most of a
+  neuron's score arrives along paths that leave the top set and come back, so the tracing was wrong
+  with nothing on the picture to say so. Its arrows also carried raw **synapse counts** while its
+  colour carried influence, and the top scorers are mutually connected — that being *why* they
+  score — so the layering filled with `back` edges whatever `layer` did. A flow has none of that:
+  every band is drive that crossed, so a column's total is the whole of what reached that depth.
+  What `propagate` adds is **keeping** each edge's contribution rather than discarding it, behind
+  an option that is off for every other caller. Six rules. The grouping is chosen **inside** the
+  walk (per neuron pair a four-hop ball is millions of entries), so `ribbons` is an enum answered
+  from the walk's own `types` map rather than a key function — that map is filled *during* the
+  walk. An **untyped body joins one bucket**, or a run with fragments in it fills the diagram with
+  18-digit ids. A band runs **presynaptic to postsynaptic**, which flips with `Direction` and is
+  invisible in the widths when wrong — the probe checks 8,019 of them. **`layer` is a drawing
+  position, not the hop count**, which travelling upstream runs *against* the signal. **Nothing
+  says where the drive went missing**: an earlier version emitted the fragment and frontier losses
+  as rows and it was wrong, those being two of *four* reasons a column narrows (the others a dead
+  end below the weight threshold, and the budget running out) — so the shortfall is left to the
+  geometry, exact by construction, and the reasons stay on the card where `ctx.warn` gives each its
+  own number. And a ribbon **into** a body the walk then drops is still recorded, because the drive
+  crossed; what stops is anything past it. `Transfer floor` is a **share** of the starting mass, since
+  `Seed weighting` moves the total. Removing the port retired `influenceNetwork`, `flowLayer`,
+  `NetworkHalf`, the `adjacency` field and a `networkx` dependency; a saved graph wired to
+  `Network` loses that edge, and **deliberately not through `formerIds`** — the port is a different
+  kind of thing now, so re-pointing the wire would hand a Table to something expecting a Network.
+  See [docs/nodes-connectivity.md](docs/nodes-connectivity.md).
 - **A bounded influence score is the published one truncated, not an approximation of it.**
   `r = (I - gW)^-1 s` is a series, so walking *H* hops and adding the terms *is* the published
   score stopped early; every term is non-negative, which makes the answer a strict lower bound and
@@ -528,6 +555,45 @@ rule belongs to one area, its record is in that area's doc.
 
 ### Viewers — [docs/viewers.md](docs/viewers.md)
 
+- **A heavy-tailed measure is a rank plot, and the half that is not otherwise reachable is the
+  share.** Length encodes ratio and a connectome's ratios do not fit in one: linear, the largest
+  bar is full and the rest are slivers; on `influenceLog` — already `log(max(x, e^-24)) + 24` — a
+  thousandfold difference draws as **1.7x**, a plausible figure saying the measure is flat. So
+  dots on a log axis, and underneath the running **share of the total**, which `out.histogram`'s
+  `cumulative` cannot be: its curve is over **rows** where this one is over **values**. Two panels
+  sharing the rank axis, **never two y-scales**. Four refusals and a warning, all in
+  `rankSeries.ts`: a share of a total means nothing over a **signed** column (ranked descending the
+  running sum climbs past the total and comes back down — a curve that looks exactly like a Lorenz
+  curve and reaches 1.4), so the panel is withheld with a reason **and the ranking above is
+  untouched**; an all-zero column has no total; a **flagged** row is plotted, ringed, ranked and
+  excluded from **both** halves of the share (seeds carry most of it and the curve says nothing),
+  which makes *everything* flagged a refusal of its own that has to be asked before the all-zero
+  one or it answers in that one's words about a column full of scores; and what is dropped is
+  counted **by reason**, a missing value being a wrong column where a
+  non-positive one is a scale the reader chose. `validate` catches the one pairing the resolver
+  cannot — a column that is already a logarithm, logged again. Three things only a browser said:
+  `plural(n, noun)` already formats the number; `logTicks` spends its budget on **decades** and
+  then strides, so a count of three over four decades lands on 0.001/0.1/10 and labels the axis
+  once; and on a log rank axis the leading five ranks sit inside the first fifth of the width, so
+  labels on one line collide. See [docs/viewers.md](docs/viewers.md).
+- **A Sankey's grammar is conservation, so the caption measures it rather than assuming it.** Most
+  connectome Sankeys are drawn on synapse counts, which conserve nowhere — a neuron's incoming
+  count has nothing to do with its outgoing one. `out.sankey` cannot refuse such a table, so it
+  prints how far off the drawing is (`conserves`, or `18% stops`) and turns the mark's claim into
+  one a reader can check. **The shortfall belongs to the node, not the column**, which shipped
+  wrong: a node is drawn as tall as the larger of what it took and what it sent, so it *already*
+  absorbs its own shortfall as unused bar, and a notch at the column's foot counts the same
+  quantity twice and invents drive. Two cases it must not fire on — the **last** column, whose
+  outflow is zero because it is the end, and **layer 0**, which has no inflow by construction and
+  gets a feathered edge. **A node is a (layer, label) pair**, or a label that repeats down the
+  diagram merges into one node and the flow acquires cycles. **Folding is safe here** where
+  `out.flowChart`'s is not — summing merged bands preserves every column total exactly. The
+  within-column sweep is **`barycentre.ts`**, shared with the flow chart. Three browser findings: a
+  gutter reserved past the last column is dead space (its labels draw *before* its bar), a muted
+  band at 0.38 over `#1a1a19` reads as an uneven background, and bands meeting one node face are
+  **stacked fills** and want the surface gap the bar chart already gives its segments.
+  See [docs/viewers.md](docs/viewers.md).
+
 - **A 3D renderer is handed between surfaces, not rebuilt — and what is kept is the root, never the
   viewer component.** `PersistentCanvas` replaces React Three Fiber's `<Canvas>`: the root, its
   canvas and the element events bind to are held under `scopedKey(workflowId, nodeId)`, parked off
@@ -570,6 +636,49 @@ rule belongs to one area, its record is in that area's doc.
   `p.y`**. The proportions live in `markGeometry.ts` and the **GLSL is generated from them**. The
   program module is **dynamically imported**, `sigma/rendering` touching WebGL globals at module
   scope.
+- **A flow chart and the Network Viewer draw the same material, and the choice between them is
+  size — which is why the layout is Sugiyama by hand rather than ELK.** `out.flowChart` is SVG,
+  boxes sized to their own text, arrows routed round what is in the way, a number on each; the
+  Network Viewer is WebGL discs with the label beside them, right at 36k nodes and wrong at twelve.
+  `FLOW_NODES_WARN` (120) says *crowded*, `MAX_BOXES_DRAWN` (600) declines and names the other
+  node. Four reasons it is not ELK, each about this drawing: **the layering is already decided**
+  (`elk.partitioning` *ignores* one handed back, which `docs/canvas.md` records from a sweep, so
+  two layerers is one being silently overruled); **back edges must keep their direction**, where
+  ELK reverses them internally and returns the reversed route, leaving feedback indistinguishable
+  from feed-forward; **box sizes are text**, so the layout runs in the viewer and a worker round
+  trip buys nothing — and there is therefore **no `Layout` socket**, `Paths` computing its
+  positions against a 120x36 placeholder that overlaps every wider box; and synchronous means no
+  settle effect and no frame of the wrong picture. The algorithm is not re-derived: **the dummy
+  nodes are the load-bearing part**, without which a skip-layer arrow runs through the boxes
+  between its ends, and with which the ordering step keeps a corridor clear because a corridor *is*
+  a node to it. **A layer is not a hop**, which is the whole of the layering control: longest path
+  is right for `Paths`, whose `hop` column it reproduces, and wrong for any network assembled from
+  a ball rather than from routes, where longest path puts a one-hop neuron five columns out because
+  something reaches it the long way — so the picker is `optional`, empty means longest path, the
+  caption says which ran, and it is deliberately **not** "automatic, preferring a column
+  called `hop`", which is `resolveColumn` rule 3's recorded substitution wearing a name. Four edge
+  kinds told apart **by shape, never colour** (colour is spent on the data): `back` dashed, since
+  drawn as forward it is an arrow through the boxes between its ends and reads as a data error;
+  `within` bulged off the flow axis; `self` a loop. The fold is presentational and says what that
+  costs — a folded network is not available downstream, because the alternative is that nudging a
+  figure's density re-runs a connectome query. **Both helpers agreed with the canvas on the first
+  run and every bug was in the dozen lines that draw**, which is why `pnpm probe:flowchart`
+  executes the emitted *cell* out of each golden: igraph's `extd_graph` carries **only `orig` and
+  `arrow.mode`** so `E(.g)$weight` was `NULL`, a split edge is three edges there so a label printed
+  three times, `sugi$layout` has a row per *real* vertex so plotting the extended graph with it
+  throws, and Sugiyama's layer axis runs **downwards** so exchanging the axes alone drew the
+  circuit right to left — plausible, and backwards. The gift from the same measurement:
+  `arrow.mode` is already 0 on every piece but the last, so the emitter must not touch it.
+  **`pnpm probe:flowchart-draw` covers what jsdom cannot reach** — boxes hold their
+  text (the font one: a canvas `measureText` sizes the box and `.chart text` draws it, so the
+  measurer reads `--font-ui` rather than spelling a family that agrees only where `system-ui`
+  resolves), nothing overlaps, no arrow crosses a box, it fits, a click selects — **and the two
+  real defects came from looking at the screenshot**, both of which make every one of those
+  properties *more* comfortably true: the fit would not magnify (`Math.min(1, …)` drew 18 boxes
+  340px wide in a 1250px panel; `MAX_FIT` is 2), and arrows ended at their layer *band's* edge
+  rather than the box's face, leaving the head floating ~40px short wherever one layer holds
+  boxes of different widths — invisible in every uniform-size fixture.
+  See [docs/viewers.md](docs/viewers.md) and [docs/limits.md](docs/limits.md).
 - **A force simulation cannot lay out a graph that is mostly not connected, and the force law is
   not what fixes it.** Two components share no edge, so nothing in a simulation decides where one
   sits relative to the other; ForceAtlas2 answers by accident and gets **worse the longer it runs**.
