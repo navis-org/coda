@@ -163,6 +163,14 @@ rule belongs to one area, its record is in that area's doc.
 - **React Flow needs measurements.** In jsdom, unmeasured nodes are `visibility: hidden`, so
   component tests pass `{ hidden: true }`. `installJsdomStubs()` supplies ResizeObserver,
   `getBoundingClientRect`, `matchMedia` and a 2D canvas context. WebGL stays absent on purpose.
+- **jsdom has no `PointerEvent` and no pointer capture, and both fail as "the handler did not
+  run".** Without the first, `fireEvent.pointerDown(el, { shiftKey: true })` falls back to a bare
+  `Event` and every modifier, button and coordinate arrives `undefined`, so the handler takes the
+  branch for a gesture nobody made; without the second, the `setPointerCapture` every drag here
+  takes on the press throws *inside* the handler before the gesture is recorded. No error
+  surfaces either way — the spy is simply never called, which reads as a broken component.
+  `installJsdomStubs()` supplies both, which is what makes a gesture's *wiring* testable at all;
+  its **geometry** stays the browser probes', jsdom laying nothing out.
 - **`erasableSyntaxOnly` is on**, so no TS parameter properties (`constructor(private x)`).
 - **Prettier owns `src/**/*.{ts,tsx,css}` and nothing else.** `pnpm format` is the one
   declaration of that scope, so `prettier --write .` is the wrong reflex: 111 files nobody asked
@@ -713,6 +721,17 @@ rule belongs to one area, its record is in that area's doc.
   is **node order** on the result, because it lands in an `ids` param that reaches a provenance key.
   Sigma routes a right-click to exactly one of node/edge/stage, so the browser's menu is cancelled
   on the *container*, and the menu is on `useOverlayEscape`'s stack above the overlay.
+- **The heatmap's circles encode the value a second time, and read the *bucket* to do it.** Area
+  not radius (`resolveSize`'s rule), and the bucket rather than the value — a bucket is already
+  the value's position on the ramp, so the log, the manual ends and the clamping reach the radius
+  for free and `colorDomain` stays the one mapping. Size is distance from `neutral`, the hue
+  keeping the sign; `RAMP_STEPS` being **even** put the diverging centre between two buckets, so
+  the neutral point is continuous or the two arms draw different circles. **A cell at the neutral
+  end draws nothing**, which is the point on a sparse matrix and costs telling a recorded zero
+  from an unmeasured one. `circlesFit` is a **size test on the spec** with the param `&&`-ed in at
+  render (`Show values`' rule), too dense falls back to squares, and the card **says so even under
+  `compact`** — it is a note about a *control*, not about the picture. Neither exporter draws
+  circles and both carry `shapeNote`, seaborn's `heatmap` being a tile renderer.
 - **The heatmap's colour ends are manual-or-automatic and its log is on the colour alone.** One
   `colorDomain` decides a value's ramp position, so `normalize`, the per-cell `bucketScale`, the hit
   test and the SVG export cannot disagree. A limit is a **`string` param** because a `number` has no
@@ -737,10 +756,25 @@ rule belongs to one area, its record is in that area's doc.
   assumes the mark *has* a unique meaning, and a viewer whose job is renaming is where that stops
   holding. **One param, both axes** (two params are two commits, and an undo would take back the
   columns and leave the rows), while the two *outputs* stay separate. Adding is a **union, never a
-  toggle**. The drawing is **bands, outlined never tinted**, colour being the data. **`label` and
+  toggle**. The drawing is **bands, outlined never tinted**, colour being the data — and **no
+  colour at all, because a ramp leaves none**: a white dashed core over a black casing, every
+  single hue tried measuring between 1.00 and 1.96 against some cell of some palette (yellow
+  among them, blind exactly on viridis/inferno/magma) where the pair measures 4.59. The **dash**
+  is a separate finding and not a contrast question: the band's other neighbour is the inter-cell
+  separator, which is the *surface* showing through, so on each theme one of the two tones is
+  already the grid. **`label` and
   `relabel` are two columns**, and `evaluate` carries the arrival names through the filter and the
   sort on the identical index lists. **A selection in the provenance key means the reshaping has to
-  be memoised**, or a drag re-crosses the Pyodide bridge once per gesture.
+  be memoised**, or a drag re-crosses the Pyodide bridge once per gesture. **Three chords and a
+  click**: `isAdditive` asks whether a press is a selection *at all*, so the adding chord has to be
+  something neither Shift nor ⌘ alone already means — Shift+⌘, beside the Alt that `ScatterViewer`
+  uses for the same act and that is kept rather than retired. A press with **no drag in it** is one
+  cell through **`cellAt`, never a zero-width `linesInRect`** — `pointToMatrix` has no bounds of
+  its own, so a gutter press comes back *clamped* onto line 0 and a press on a line boundary spans
+  nothing. **The `!compact` gate was never about cards**: React Flow's pane claims a shift-press
+  *anywhere* inside it and stops propagation in the capture phase, so `nokey` on the container is
+  the whole of what selecting on a card needed — and the click still has to be stopped separately,
+  `nodrag` filtering only the drag while a node's selection rides on the `click`.
 - **The heatmap's zoom is a window in matrix units, and the window is what gets folded.** Not a
   scaled canvas: scaling keeps the fitted fold's blocks, enlarges them, and scales the labels, which
   is the one thing they must not do. So zooming in folds *fewer* cells and past 1:1 real cells

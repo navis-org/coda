@@ -62,7 +62,7 @@ import type { MatrixValue } from '../../core/values'
 import { formatCompact, labelStep, truncateLabel } from '../format'
 import { inkOn } from '../colors'
 import type { ColorDomain } from '../encoding'
-import { RAMP_STEPS, rampDomain } from '../encoding'
+import { RAMP_STEPS, normalize, rampDomain } from '../encoding'
 import type { ColorLimits } from '../../nodes/lib/heatmapParams'
 
 /**
@@ -217,6 +217,19 @@ export interface HeatmapSpec {
   colLabelsThinned: number
   /** True when the cells are big enough to carry their own printed value. */
   labelsFit: boolean
+  /**
+   * True when a cell is big enough for a circle to be a circle.
+   *
+   * A **size** test and not the user's choice, `labelsFit`'s rule and for its recorded reason:
+   * folding the param in here put a boolean in the dependency list of a pass that walks every
+   * cell, so toggling it re-scanned four million of them to compute `false`. The caller `&&`s
+   * its own param in beside this.
+   *
+   * `!folded` is the load-bearing half. Past one cell per pixel a grid cell stands for many
+   * cells and is drawn as the strongest of them, so a circle there would be sized by a value
+   * that is not the block's — and it would be a circle in one pixel, which is a pixel.
+   */
+  circlesFit: boolean
 }
 
 /**
@@ -551,6 +564,62 @@ export function buildHeatmapSpec(options: HeatmapSpecOptions): HeatmapSpec {
      */
     labelsFit:
       !folded && cellHeight >= 14 && cellWidth >= 26 && rowMap.visible * colMap.visible <= 400,
+    circlesFit: !folded && cellWidth >= CIRCLE_MIN_CELL && cellHeight >= CIRCLE_MIN_CELL,
+  }
+}
+
+/**
+ * The smallest cell a circle is still a circle in.
+ *
+ * Below this the mark is a blob two or three pixels across whose *area* is meant to be read,
+ * which it cannot be — and the picture is better served by the squares, which tile the plot and
+ * lose nothing to the gaps between marks. Measured by eye in a browser at several sizes rather
+ * than derived: it is a legibility threshold, and the only instrument for one is a screen.
+ */
+export const CIRCLE_MIN_CELL = 5
+
+/**
+ * Bucket to radius, for a spec — one function for the canvas, the SVG export and the tests.
+ *
+ * **Area is proportional to value, so the radius takes a square root** — `resolveSize`'s rule,
+ * one encoding over, and the only one readers actually compare: a circle of twice the radius
+ * reads as four times the quantity, not two.
+ *
+ * It reads the **bucket** rather than the cell's value, which is what keeps the two encodings
+ * from disagreeing: a bucket is already the value's position on the ramp, so a log colour, a
+ * manual `Min`/`Max` and the clamping at both ends all reach the radius for free and by
+ * construction. `colorDomain` stays the one place a value's position is decided.
+ *
+ * Size is distance from the domain's **neutral** point, which is the low end of a sequential
+ * ramp and the centre of a diverging one. A radius cannot be negative, and on a diverging scale
+ * the sign is what the colour is already carrying — so the circle says *how much* and the hue
+ * says which way, which is `corrplot`'s division and the only one that leaves both readable.
+ *
+ * A value at the neutral point therefore has **radius 0 and is not drawn at all**. That is the
+ * point of the mark on a connectome: an empty pair is an empty cell and a sparse matrix reads
+ * as sparse. What it costs is that a recorded zero and a cell nobody measured look alike, where
+ * the squares tell them apart — the caption's `values clipped` says the related half, that a
+ * manual `Min` above the data's floor hides those cells here rather than flattening them.
+ */
+export function circleScale(spec: HeatmapSpec): (bucket: number) => number {
+  const { width, height } = drawnCellSize(spec)
+  const maxRadius = Math.min(width, height) / 2
+  const last = RAMP_STEPS - 1
+  /*
+   * The neutral point in **continuous** bucket space, not `bucketOf`'s rounded one.
+   *
+   * `RAMP_STEPS` is even, so a diverging centre lands exactly between buckets 255 and 256 and
+   * rounding it picks a side: the two arms then reach 256 and 255 buckets and the same magnitude
+   * either side of zero draws two different circles. It is 0.2% and invisible, and it is also a
+   * claim the mark should not be making — symmetry about the centre is the whole of what "the
+   * circle says how much and the hue says which way" means. Caught by a test asking for it to
+   * six places, which is the only way anyone was going to see it.
+   */
+  const neutral = normalize(spec.domain.neutral, spec.domain) * last
+  const reach = Math.max(neutral, last - neutral) || 1
+  return (bucket: number) => {
+    if (bucket < 0) return 0
+    return maxRadius * Math.sqrt(Math.abs(bucket - neutral) / reach)
   }
 }
 
@@ -885,14 +954,25 @@ export function axisMarks(spec: HeatmapSpec, ink: string): TextMark[] {
  * Zero is skipped rather than printed: a "0" in every empty pair is chart noise. `labelsFit`
  * already implies an unfolded grid — it caps at 400 visible cells of at least 26x14 px — so
  * the grid's stride indexes the buckets and the maps say which matrix cell each one is.
+ *
+ * **On circles the ink is asked per mark**, because the thing under the text is no longer the
+ * cell. A square fills its box, so `inkOn(fill)` is always the right question; a circle sized by
+ * value covers the text only near the top of the scale, and below that the text sits on the
+ * surface — where ink chosen to contrast with the *fill* is ink chosen against a colour that is
+ * not there. So the radius is compared with the text's own box and the loser takes
+ * `inkOn(background)`. Cheap, and always right, where a flat "circles means surface ink" would
+ * be wrong for exactly the marks that are easiest to read.
  */
 export function valueMarks(
   spec: HeatmapSpec,
   values: Float64Array,
   ramp: string[],
+  options: { circles?: boolean; background?: string } = {},
 ): TextMark[] {
   if (!spec.labelsFit) return []
   const marks: TextMark[] = []
+  const radiusOf = options.circles ? circleScale(spec) : undefined
+  const surfaceInk = options.background ? inkOn(options.background) : undefined
   for (let gy = 0; gy < spec.rowMap.visible; gy++) {
     const r = spec.rowMap.first + gy
     for (let gx = 0; gx < spec.colMap.visible; gx++) {
@@ -901,13 +981,24 @@ export function valueMarks(
       if (value === undefined || !Number.isFinite(value) || value === 0) continue
       const bucket = spec.buckets[gy * spec.gridCols + gx] ?? 0
       const box = cellRect(spec, r, c)
+      const text = formatCompact(value)
+      // Does the mark under the text actually reach it? Always, for a square; for a circle,
+      // only once its radius clears the half-diagonal of the text's own box. 0.3em per
+      // character is `measureText`-free and errs wide, which is the safe direction: it takes
+      // the surface ink in the doubtful case, where the text is over a gap.
+      const covered =
+        !radiusOf ||
+        radiusOf(bucket) >= Math.hypot((text.length * VALUE_FONT * 0.3) / 2, VALUE_FONT / 2)
       marks.push({
         key: `v-${r}-${c}`,
-        text: formatCompact(value),
+        text,
         x: box.x + box.width / 2,
         y: box.y + box.height / 2,
         // The one place text takes the fill it sits on, so it has to be resolved once.
-        fill: inkOn(ramp[Math.max(0, bucket)] ?? ramp[0] ?? '#000000'),
+        fill:
+          covered || !surfaceInk
+            ? inkOn(ramp[Math.max(0, bucket)] ?? ramp[0] ?? '#000000')
+            : surfaceInk,
         size: VALUE_FONT,
         anchor: 'middle',
         baseline: 'central',

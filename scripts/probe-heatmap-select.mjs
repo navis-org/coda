@@ -11,7 +11,7 @@
  * can say the box a hand drew names the lines under it. `heatmapPlot.test.ts` pins the
  * arithmetic; this pins that the arithmetic is reached with the numbers a browser produces.
  *
- * Seven properties, each a way this could be broken with the whole suite green:
+ * Eleven properties, each a way this could be broken with the whole suite green:
  *
  * 1. **A shift-drag selects what it covered**, and **only** what it covered. The second half is
  *    the bug this was rewritten for: the selection was stored as the labels under the box, and
@@ -27,7 +27,19 @@
  *    canvas repaint, so it can be positioned wrongly or left behind with nothing failing.
  * 5. **A shift-click with no drag clears.** The click/drag split, where the slop lives.
  * 6. **Alt-shift-drag adds rather than replacing**, and the two blocks stay two bands.
- * 7. **The ⌫ button clears**, and is disabled with nothing selected.
+ * 7. **Shift+⌘-drag adds too**, the chord that replaced ⌫ as the way to build a selection up.
+ * 8. **Shift+⌘-click takes exactly one cell**, with no drag in it — the gesture that cannot be
+ *    performed at all if a press is only read as the start of a box.
+ * 9. **The strip carries the fit button and nothing else.** ⌫ was removed; ⤢ resets the zoom and
+ *    is the only thing there.
+ * 10. **A card can be selected on**, which is the gate that moved. React Flow's pane claims a
+ *    shift-press anywhere inside it and stops propagation in the *capture* phase, so this is
+ *    testable nowhere else at all — in jsdom there is no pane, and the class that opts out of it
+ *    (`nokey`) is a string until a real React Flow reads it.
+ * 11. **and does not move the canvas's own node selection while doing it.** `nodrag` filters the
+ *    drag; the node's selection rides on the `click`, which fires anyway — so before the guard
+ *    one shift+⌘-click took a cell *and* selected the card, and cell-by-cell selecting piled up
+ *    cards the next Delete would have removed. Measured 0 → 1, then 0 → 0.
  *
  * It runs on `mock.opticlobe`, the synthetic connectome the demo links use, so it needs no
  * credential and reaches no server.
@@ -41,8 +53,13 @@ const args = probeArgs()
 const url = args.value('--url') ?? 'http://localhost:5177/'
 const keep = args.keep
 
-/** CDP's modifier bitmask. */
+/**
+ * CDP's modifier bitmask. `META` is bit 4 whatever the host OS is, and it is what `⌘` sends —
+ * `CTRL` (2) would do as well for `addsToSelection`, which takes either, but on macOS Chrome
+ * turns a ctrl-press into a context menu before our handler sees a left button.
+ */
 const ALT = 1
+const META = 4
 const SHIFT = 8
 
 const { send, evaluate, waitFor, screenshot, drag, dragHold, close } = await launchChrome({
@@ -68,7 +85,9 @@ const READ = `(() => {
   const rowTicks = [...(svg?.querySelectorAll('text') ?? [])]
     .filter((t) => t.getAttribute('text-anchor') === 'end')
     .map((t) => ({ label: t.textContent, y: box.top + Number(t.getAttribute('y')) }))
-  const bands = [...plot.querySelectorAll('.heatmap-band rect')].map((r) => ({
+  // The **core** layer alone: a band is drawn twice, a light core over a dark casing, so
+  // '.heatmap-band rect' counts every band twice and every count below would double.
+  const bands = [...plot.querySelectorAll('.heatmap-band__core rect')].map((r) => ({
     axis: r.getAttribute('data-axis'),
     x: box.left + Number(r.getAttribute('x')),
     y: box.top + Number(r.getAttribute('y')),
@@ -78,9 +97,13 @@ const READ = `(() => {
   const note = [...document.querySelectorAll('.viewer__caption .viewer__note')]
     .map((n) => n.textContent ?? '')
     .find((t) => t.includes('selected'))
-  const clearBtn = document.querySelector('.network-strip--bottom [aria-label="Clear selection"]')
+  const strip = document.querySelector('.network-strip--bottom')
   return {
-    clear: clearBtn ? { present: true, disabled: clearBtn.disabled } : { present: false },
+    strip: {
+      clear: !!strip?.querySelector('[aria-label="Clear selection"]'),
+      fit: !!strip?.querySelector('[aria-label="Fit to view"]'),
+      buttons: strip ? strip.querySelectorAll('button').length : 0,
+    },
     box: { left: box.left, top: box.top, width: box.width, height: box.height },
     rowTicks,
     bands,
@@ -90,6 +113,8 @@ const READ = `(() => {
       (n.textContent ?? '').includes('thinned'),
     ),
     marquee: !!plot.querySelector('.chart-gesture rect'),
+    // React Flow's own node selection, which a gesture the card consumed must not also move.
+    nodesSelected: document.querySelectorAll('.react-flow__node.selected').length,
   }
 })()`
 
@@ -252,21 +277,96 @@ check(
   `and the two blocks stay two bands — ${two.bands.filter((b) => b.axis === 'rows').length}`,
 )
 
-// --- 7. the ⌫ button ----------------------------------------------------------
-check(
-  two.clear.present && two.clear.disabled === false,
-  `the clear button is live with a selection — ${JSON.stringify(two.clear)}`,
-)
-await evaluate(
-  `document.querySelector('.network-strip--bottom [aria-label="Clear selection"]').click()`,
-)
+// --- 7. shift+⌘-drag adds as well ---------------------------------------------
+// The chord the ⌫ button's removal leans on: `addsToSelection` takes Alt *or* Shift+⌘/Ctrl, and
+// a third block clear of the other two is the only way to see "added" rather than "replaced".
+const third = {
+  from: { x: base.box.left + base.box.width * 0.4, y: base.box.top + base.box.height * 0.4 },
+  to: { x: base.box.left + base.box.width * 0.6, y: base.box.top + base.box.height * 0.5 },
+}
+await drag(third.from, third.to, SHIFT | META)
 await sleep(400)
-const done = await evaluate(READ)
+const three = await evaluate(READ)
+const threeCount = Number(/(\d+) × \d+ selected/.exec(three.note ?? '')?.[1] ?? 0)
 check(
-  done.note === null && done.bands.length === 0 && done.clear.disabled === true,
-  `and clears everything, then goes dim — ${done.note}, ${done.bands.length} bands, disabled ${done.clear.disabled}`,
+  threeCount > twoCount,
+  `shift+⌘-drag adds rather than replacing — ${twoCount} then ${threeCount} rows`,
+)
+check(
+  three.bands.filter((b) => b.axis === 'rows').length === 3,
+  `and the three blocks stay three bands — ${three.bands.filter((b) => b.axis === 'rows').length}`,
 )
 
-if (keep) await screenshot('/tmp/coda-heatmap-select.png')
+// --- 8. shift+⌘-click takes one cell ------------------------------------------
+// Cleared first, so "1 × 1" is unambiguous: a press with no drag in it is a rectangle covering
+// one cell, and the count is the whole assertion. Against an empty selection, because adding one
+// cell to three blocks is a number nothing on screen would let a reader check.
+const spot2 = {
+  x: base.box.left + base.box.width * 0.55,
+  y: base.box.top + base.box.height * 0.45,
+}
+await drag(spot2, spot2, SHIFT)
+await sleep(300)
+await drag(spot2, spot2, SHIFT | META)
+await sleep(400)
+const oneCell = await evaluate(READ)
+check(
+  oneCell.note === '1 × 1 selected',
+  `shift+⌘-click with no drag takes exactly the cell under it — ${oneCell.note}`,
+)
+
+// --- 9. the strip is the fit button and nothing else --------------------------
+check(
+  oneCell.strip.fit && !oneCell.strip.clear && oneCell.strip.buttons === 1,
+  `the strip carries ⤢ alone — ${JSON.stringify(oneCell.strip)}`,
+)
+
+// --- 10. and all of it works on the card --------------------------------------
+/*
+ * The gate that moved, and the one thing here that is *only* observable in a browser running the
+ * real React Flow: with `selectionKeyCode="Shift"` its pane claims a shift-press anywhere inside
+ * it, takes the pointer capture and stops propagation in the capture phase — before the card's
+ * own handler. `nokey` on the plot is the library's opt-out, and it is a string in a className
+ * until something reads it. jsdom has no pane to be wrong about.
+ */
+// Escape, which is how the expanded view closes — its header carries guides, style and help
+// and no close button at all, so there is nothing to click.
+for (const type of ['keyDown', 'keyUp']) {
+  await send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 })
+}
+await waitFor(`!document.querySelector('.overlay')`, 'the expanded view to close')
+await sleep(500)
+const card = await evaluate(READ)
+const cardSpot = {
+  x: card.box.left + card.box.width * 0.5,
+  y: card.box.top + card.box.height * 0.5,
+}
+await drag(cardSpot, cardSpot, SHIFT)
+await sleep(300)
+await drag(cardSpot, cardSpot, SHIFT | META)
+await sleep(400)
+const onCard = await evaluate(READ)
+check(
+  onCard.note === '1 × 1 selected',
+  `a card takes the gesture React Flow's pane used to swallow — ${onCard.note}`,
+)
+check(
+  onCard.bands.filter((b) => b.axis === 'rows').length === 1,
+  `and draws the band for it — ${onCard.bands.filter((b) => b.axis === 'rows').length} row bands`,
+)
+/*
+ * And does not *also* move the canvas's own node selection, which is the half the gate change
+ * introduced and nothing in jsdom has a React Flow to see: `nodrag` filters the drag, where the
+ * node's selection rides on the `click` — so one shift+⌘-click took a cell and left the card
+ * selected, and building a selection cell by cell piled up cards the next Delete would remove.
+ * Measured 0 → 1 before the `onClick` guard, 0 → 0 after.
+ */
+check(
+  card.nodesSelected === 0 && onCard.nodesSelected === 0,
+  `and leaves the canvas's node selection alone — ${card.nodesSelected} → ${onCard.nodesSelected}`,
+)
+
+// A bare name: `screenshot` writes `${name}.png` into the temp dir and never the repo root.
+if (keep) console.log(await screenshot('coda-heatmap-select'))
 close()
 finish()

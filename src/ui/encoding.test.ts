@@ -9,6 +9,10 @@
 
 import { describe, expect, it } from 'vitest'
 
+import {
+  DIVERGING_PALETTE_OPTIONS,
+  SEQUENTIAL_PALETTE_OPTIONS,
+} from '../nodes/lib/heatmapParams'
 import { column, tableSchema } from '../core/types'
 import { makeTable, tableFromRows } from '../core/values'
 import {
@@ -997,5 +1001,86 @@ describe('resolveShape', () => {
     expect(resolveShape(table(['a', 'b']), spec({ column: 'nope' })).at(0)).toBe('circle')
     expect(resolveShape(table(['a', 'b']), spec({ mode: 'constant' })).legend).toBeUndefined()
     expect(resolveShape(undefined, spec()).at(0)).toBe('circle')
+  })
+})
+
+/**
+ * The Heatmap's selection band, as a number rather than as an opinion.
+ *
+ * It was a 1.5px `--accent` line — blue, on a viewer whose default palette is Coda blue — and
+ * the report was simply that it could not be seen. The measurement below is what turned that
+ * into a design: **no single colour can sit on top of a ramp**, because a ramp crosses the whole
+ * hue circle and every lightness, so for any colour there is a cell on some palette it matches.
+ * Blue measured 1.07:1 at its worst, yellow 1.04, white 1.45, black 1.96 — all of them "somewhere
+ * invisible", and yellow's worst cases are the tops of viridis, inferno and magma, which are the
+ * most-used ramps here.
+ *
+ * A light-and-dark *pair* can, since any cell is lighter or darker than mid grey and the other
+ * tone then reads. This pins that the pair the CSS draws still clears the 4.5:1 text floor
+ * against **every** cell of **every** palette — which is the thing a thirteenth palette, or a
+ * tweak to Coda's own ramp, would quietly break.
+ *
+ * What it deliberately does not pin is the dash, which is the other half and is not a contrast
+ * question at all: the band's other neighbour is the inter-cell separator, and that is the
+ * *surface* showing through rather than a painted colour. See `editor.css`, and the screenshots
+ * that found it, in `docs/viewers.md`.
+ */
+describe('the heatmap selection band', () => {
+  const BAND = { core: '#ffffff', casing: '#000000' }
+
+  const luminance = (hex: string): number => {
+    const h = hex.replace('#', '')
+    const channel = (i: number) => {
+      const v = parseInt(h.slice(i, i + 2), 16) / 255
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+    }
+    return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4)
+  }
+  const contrast = (a: string, b: string): number => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number]
+    return (hi + 0.05) / (lo + 0.05)
+  }
+
+  /** Every cell colour the viewer can paint: both scales, every palette, both themes. */
+  const everyCell = (): Array<{ where: string; hex: string }> => {
+    const out: Array<{ where: string; hex: string }> = []
+    for (const mode of ['dark', 'light'] as const) {
+      for (const { value } of SEQUENTIAL_PALETTE_OPTIONS) {
+        for (const hex of rampColors('sequential', mode, 64, value)) {
+          out.push({ where: `${mode} sequential ${value}`, hex })
+        }
+      }
+      for (const { value } of DIVERGING_PALETTE_OPTIONS) {
+        for (const hex of rampColors('diverging', mode, 64, value)) {
+          out.push({ where: `${mode} diverging ${value}`, hex })
+        }
+      }
+    }
+    return out
+  }
+
+  it('is legible against every cell of every palette, on both themes', () => {
+    let worst = { ratio: Infinity, where: '', hex: '' }
+    for (const cell of everyCell()) {
+      // The pair, not each tone: the band is legible where *either* tone is, which is the whole
+      // reason there are two of them.
+      const best = Math.max(contrast(BAND.core, cell.hex), contrast(BAND.casing, cell.hex))
+      if (best < worst.ratio) worst = { ratio: best, ...cell }
+    }
+    expect(worst.ratio).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('is a pair because no single tone clears the floor — nor would a yellow one', () => {
+    // The measurement that ruled out picking a colour, kept so the conclusion stays checkable.
+    const alone = (band: string) =>
+      Math.min(...everyCell().map((cell) => contrast(band, cell.hex)))
+    for (const [, hex] of Object.entries({
+      accent: '#3987e5',
+      yellow: '#ffd400',
+      white: BAND.core,
+      black: BAND.casing,
+    })) {
+      expect(alone(hex)).toBeLessThan(2)
+    }
   })
 })

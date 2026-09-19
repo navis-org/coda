@@ -146,6 +146,23 @@ export interface HeatmapColourPlan {
   showValues: boolean
   /** Why the typed limits are ignored, as the note both documents write. */
   limitsNote?: string
+  /**
+   * What the card drew the cells as, when it is not what the document will.
+   *
+   * The Heatmap's `Cell shape` can ask for circles sized by value, and **neither exporter draws
+   * them**: seaborn's `heatmap` is a tile renderer, so the notebook would have to leave it for a
+   * melted scatter and rebuild the colourbar, the ticks and the annotations by hand, and the two
+   * documents would then be drawn by two different mechanisms. The cost is not symmetric —
+   * ggplot is a one-geom swap — and taking only the cheap half would leave the `.Rmd` and the
+   * `.ipynb` from one card showing two different marks, which is the sort of split nobody
+   * remembers a year later.
+   *
+   * So both draw tiles and both say so. **Saying so is the whole point**: the alternative is a
+   * document that quietly disagrees with the picture it was exported from, and the palette, the
+   * limits and the log are all presentational too and all followed — a reader has every reason
+   * to assume this one was.
+   */
+  shapeNote?: string
 }
 
 export type HeatmapExportPlan = Refusable<HeatmapSections>
@@ -297,5 +314,11 @@ function colourPlan(ctx: HeatmapContext): HeatmapColourPlan {
       ? `Coda is ignoring the colour limits because ${limits.problem}, so neither this nor ` +
         `the card is using them.`
       : undefined,
+    shapeNote:
+      ctx.params.cellShape === 'circle'
+        ? `The card draws this with circles sized by value, which is a drawing rather than a ` +
+          `change to the matrix — the numbers below are the same either way. This draws it as ` +
+          `tiles.`
+        : undefined,
   }
 }

@@ -3386,6 +3386,9 @@ heatmap_5_rows <- coda_matrix_selection(rownames(heatmap_5_out), integer(0))
 heatmap_5_columns <- coda_matrix_selection(colnames(heatmap_5_out), integer(0))
 # NOTE: Coda draws this in its own blue ramp, which has no name here; Blues
 # is the nearest published one.
+# NOTE: The card draws this with circles sized by value, which is a drawing
+# rather than a change to the matrix — the numbers below are the same either
+# way. This draws it as tiles.
 
 heatmap_5_out |>
   as.data.frame() |>

@@ -5381,10 +5381,71 @@ a.dropdown__item {
  * would change what every cell inside the selection appears to say. `--accent` is the same ink
  * the marquee is drawn in, so the band reads as what the drag left behind.
  */
+/*
+ * The heatmap's selection bands: a light core over a dark casing, drawn as two layers of the
+ * same rects.
+ *
+ * **Deliberately not `--accent`, and deliberately not a hue at all.** It was a 1.5px `--accent`
+ * line — blue, on a viewer whose default palette is Coda blue. Measured against every cell of
+ * all twelve palettes in both themes, the worst case was 1.00:1: somewhere on every ramp the
+ * band was exactly invisible. Every single colour measures the same way (blue 1.07, yellow 1.04,
+ * white 1.45, black 1.96 at best), because a ramp crosses the whole hue circle and every
+ * lightness, so there is no colour to put on top of one. A *pair* works: any cell is lighter or
+ * darker than mid grey, so one of the two tones always reads. White over black is 4.59:1 at its
+ * worst cell of any palette — the 4.5 floor for text, against a picture that is nothing but
+ * colour.
+ *
+ * Hence also **not theme-flipped**: both tones are present at once and that is the mechanism.
+ * The literals are here rather than in `colors.ts` because this is chrome over a chart, not a
+ * colour any encoding can return — the module's own rule for `CHART_INK`.
+ *
+ * The widths are a pair too. 4 under 2 leaves exactly 1px of casing either side of a 2px core,
+ * so the line reads as a 2px white one with a dark edge rather than as a fat grey one; equal
+ * widths would hide the casing entirely, and a casing thinner than 2px more than the core
+ * anti-aliases into grey at 1x.
+ *
+ * **The dash is the half the arithmetic could not see, and it came from a screenshot.** The
+ * contrast above is measured against the *cells*, and the band's other neighbour is the 1px
+ * separator between them — which is not painted at all, it is the surface showing through. So on
+ * each theme one of the two tones the casing relies on is *already the grid*: light theme plus a
+ * palette with a black low end (inferno, magma, rocket) draws a black field ruled in white, and a
+ * solid white band in it is a slightly brighter white line among white lines. Measured 4.59:1 and
+ * invisible at a glance. Dashing the core fixes it by changing the *kind* of mark rather than its
+ * colour: the grid is solid and continuous, so an interrupted line cannot be mistaken for one at
+ * any palette or either theme. It is also what every image editor draws a selection as, which is
+ * the second reason to want it and not the first.
+ */
 .heatmap-band rect {
   fill: none;
-  stroke: var(--accent);
-  stroke-width: 1.5;
+}
+.heatmap-band__case rect {
+  stroke: #000;
+  stroke-width: 4;
+}
+.heatmap-band__core rect {
+  stroke: #fff;
+  stroke-width: 2;
+  stroke-dasharray: 7 5;
+}
+
+/*
+ * Thinner on a card, where the same 4px band is a different fraction of the picture: a preview
+ * plot is a couple of hundred pixels across with cells two or three wide, so a band sized for
+ * the expanded view covers several rows of what it is pointing at.
+ *
+ * **The casing stays exactly 2px wider than the core**, which is the rule above rather than a
+ * ratio — 1px of casing either side is what keeps the edge crisp, and scaling both by the same
+ * factor would have put it at 0.75 and anti-aliased the whole band into grey. So the core loses
+ * half its width and the casing loses the same absolute amount, not the same proportion. The
+ * dash shortens with it: a 7/5 pattern on a band a few dozen pixels long shows two dashes, which
+ * reads as a broken line rather than as a deliberate one.
+ */
+.heatmap-plot--compact .heatmap-band__case rect {
+  stroke-width: 3;
+}
+.heatmap-plot--compact .heatmap-band__core rect {
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
 }
 
 /*

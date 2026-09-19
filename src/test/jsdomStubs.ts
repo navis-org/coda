@@ -113,6 +113,58 @@ export function installJsdomStubs(options: JsdomStubOptions = {}): void {
     })
   }
 
+  /*
+   * `PointerEvent`, which jsdom does not have — so `fireEvent.pointerDown(el, { shiftKey: true })`
+   * fell back to a bare `Event` and **every modifier, button and coordinate arrived `undefined`**.
+   * That is the quiet half: the handler runs, reads `event.shiftKey` as falsy, and takes the
+   * branch for a gesture nobody made. A test asserting the *other* branch then fails saying a
+   * spy was not called, which points at the component rather than at the event.
+   *
+   * A `MouseEvent` subclass, because that is what the interface extends: the modifiers, the
+   * button and the client coordinates are all its, and what has to be added is only the three
+   * fields the pointer layer reads.
+   */
+  if (typeof window !== 'undefined' && !window.PointerEvent) {
+    class PointerEventStub extends MouseEvent {
+      pointerId: number
+      pointerType: string
+      isPrimary: boolean
+      constructor(type: string, init: PointerEventInit = {}) {
+        super(type, init)
+        this.pointerId = init.pointerId ?? 0
+        this.pointerType = init.pointerType ?? 'mouse'
+        this.isPrimary = init.isPrimary ?? true
+      }
+    }
+    window.PointerEvent = PointerEventStub as unknown as typeof PointerEvent
+  }
+
+  /*
+   * Pointer capture, which jsdom does not implement **at all** — not as a no-op, as an absent
+   * property. Every drag in this app takes it on the press (`ScatterViewer`, `HeatmapViewer`,
+   * `RankViewer`, `usePanGesture`, `ViewerDock`, `DashboardCellView`, `ParamField`,
+   * `groupDrag`), so `fireEvent.pointerDown` threw a `TypeError` inside the handler *before* the
+   * gesture was ever recorded — which is why the gesture wiring in all of them had been probe-only
+   * and untested here. It reads as the handler simply not having run: no error surfaces, the spy
+   * is just never called.
+   *
+   * No-ops rather than a real implementation. What capture *does* — route later events to one
+   * element — is only observable with real event routing, which jsdom does not have either; the
+   * tests that need that are the browser probes. What this buys is that the line does not throw,
+   * so everything after it runs.
+   */
+  for (const name of ['setPointerCapture', 'releasePointerCapture'] as const) {
+    if (!Element.prototype[name]) {
+      Object.defineProperty(Element.prototype, name, { configurable: true, value: () => {} })
+    }
+  }
+  if (!Element.prototype.hasPointerCapture) {
+    Object.defineProperty(Element.prototype, 'hasPointerCapture', {
+      configurable: true,
+      value: () => false,
+    })
+  }
+
   Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', {
     configurable: true,
     value(this: HTMLElement) {

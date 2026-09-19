@@ -1274,8 +1274,15 @@ export function everythingGraph(): CodaGraph {
       col: 13,
       row: 4,
       // A regex down one axis and a negated literal across the other, so both spellings of the
-      // filter and the `~`/`!` arm reach the goldens.
-      params: { rowFilter: '/^LC[0-9]+$', colFilter: '!DN', sortBy: 'total' },
+      // filter and the `~`/`!` arm reach the goldens. `cellShape` rides here rather than on a
+      // node of its own: neither document draws circles, so what it contributes is one note, and
+      // the golden's job is to show that note standing beside a tile plot in both languages.
+      params: {
+        rowFilter: '/^LC[0-9]+$',
+        colFilter: '!DN',
+        sortBy: 'total',
+        cellShape: 'circle',
+      },
     },
     {
       id: 'heatLog',

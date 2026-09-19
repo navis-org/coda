@@ -357,6 +357,234 @@ describe('HeatmapViewer', () => {
     render(<HeatmapViewer matrix={makeMatrix([], [], new Float64Array(0))} />)
     expect(screen.getByText(/Matrix is empty/)).toBeTruthy()
   })
+
+  /*
+   * The circle mark. The geometry is pinned headlessly in `heatmapPlot.test.ts`; what is here is
+   * that the choice reaches both renderers and that the refusal is *said* rather than silent.
+   */
+  describe('circles sized by value', () => {
+    /** Four rows of four, values 0..15, so the ramp is exercised and cell 0 is neutral. */
+    const ramped = () =>
+      makeMatrix(
+        ['a', 'b', 'c', 'd'],
+        ['w', 'x', 'y', 'z'],
+        Float64Array.from({ length: 16 }, (_, i) => i),
+      )
+    // The SVG export is the one handle on the drawing without a browser: jsdom's canvas stub
+    // accepts every call and records nothing, so the cells are observable nowhere else.
+    let capture: ReturnType<typeof installDownloadCapture>
+    beforeEach(() => {
+      capture = installDownloadCapture()
+    })
+    afterEach(() => capture.restore())
+
+    const exported = async (): Promise<string> => {
+      fireEvent.click(screen.getByLabelText('Download'))
+      fireEvent.click(screen.getByText('SVG vector'))
+      return capture.downloads[capture.downloads.length - 1]!.text()
+    }
+
+    it('exports arcs where squares export corners', async () => {
+      render(<HeatmapViewer matrix={ramped()} cellShape="circle" baseName="m" />)
+      const text = await exported()
+      // `a` is the arc command; two half turns, since SVG has no full-turn arc.
+      expect(text).toMatch(/d="M[^"]*a[\d.]+,[\d.]+ 0 1,0/)
+      expect(text).not.toContain('h-')
+    })
+
+    it('still exports corners for squares, so the choice actually reaches the file', async () => {
+      render(<HeatmapViewer matrix={ramped()} baseName="m" />)
+      const text = await exported()
+      expect(text).toContain('h-')
+      expect(text).not.toMatch(/ 0 1,0 /)
+    })
+
+    it('draws nothing for a cell at the neutral end', async () => {
+      /*
+       * The decision this mark rests on: radius runs to zero, so an empty pair is an empty cell
+       * and a sparse matrix reads as sparse. 16 cells, one of them 0 — so 15 arcs.
+       */
+      render(<HeatmapViewer matrix={ramped()} cellShape="circle" baseName="m" />)
+      const text = await exported()
+      const doc = new DOMParser().parseFromString(text, 'image/svg+xml')
+      const arcs = [...doc.querySelectorAll('path')]
+        .map((path) => (path.getAttribute('d') ?? '').split('M').length - 1)
+        .reduce((a, b) => a + b, 0)
+      expect(arcs).toBe(15)
+    })
+
+    it('says so when the cells are too small, on a card as well as expanded', () => {
+      /*
+       * Not stood down under `compact`, which every other note here is: this one is about a
+       * *control* rather than about the picture, and the card is where it will nearly always
+       * fire — a preview plot is a couple of hundred pixels for however many rows.
+       */
+      const dense = makeMatrix(
+        Array.from({ length: 120 }, (_, i) => `r${i}`),
+        Array.from({ length: 120 }, (_, i) => `c${i}`),
+        Float64Array.from({ length: 14_400 }, (_, i) => i % 9),
+      )
+      const { container } = render(<HeatmapViewer matrix={dense} cellShape="circle" compact />)
+      const notes = [...container.querySelectorAll('.viewer__note')].map((n) => n.textContent)
+      expect(notes).toContain('too dense for circles')
+    })
+
+    it('says nothing when the circles were drawn', () => {
+      const { container } = render(<HeatmapViewer matrix={ramped()} cellShape="circle" />)
+      const notes = [...container.querySelectorAll('.viewer__note')].map((n) => n.textContent)
+      expect(notes).not.toContain('too dense for circles')
+    })
+  })
+
+  /*
+   * The gestures themselves need a browser — jsdom lays nothing out, so `pnpm
+   * probe:heatmap-select` is what says a dragged box names the lines under it. What is pinned
+   * here is the *wiring* underneath: which chord reaches which branch, and that the surface
+   * offers the gesture at all. Both are things a refactor can break with the probe not run.
+   */
+  describe('the selection chords', () => {
+    /** The press and release of one click, at a point the stub's 800x400 box puts in the plot. */
+    const clickAt = (box: Element, modifiers: Partial<PointerEventInit> = {}) => {
+      const at = { clientX: 400, clientY: 200, button: 0, pointerId: 1, ...modifiers }
+      fireEvent.pointerDown(box.querySelector('canvas')!, at)
+      fireEvent.pointerUp(box.querySelector('canvas')!, at)
+    }
+    const plot = (container: HTMLElement) => container.querySelector('.heatmap-plot')!
+
+    it('adds the cell under a shift+⌘ click, without a drag', () => {
+      const onSelectionChange = vi.fn()
+      const { container } = render(
+        <HeatmapViewer matrix={matrix()} onSelectionChange={onSelectionChange} />,
+      )
+      clickAt(plot(container), { shiftKey: true, metaKey: true })
+      // One row and one column: a cell, which is what the two independent axis lists make of
+      // one. Which line it is depends on the stub's geometry and is the probe's question.
+      const ids = onSelectionChange.mock.calls.at(-1)?.[0] as string[]
+      expect(ids.filter((id) => id.startsWith('r:'))).toHaveLength(1)
+      expect(ids.filter((id) => id.startsWith('c:'))).toHaveLength(1)
+    })
+
+    it('adds to what is already there rather than replacing it', () => {
+      const onSelectionChange = vi.fn()
+      const { container } = render(
+        <HeatmapViewer
+          matrix={matrix()}
+          selection={['r:0', 'c:0']}
+          onSelectionChange={onSelectionChange}
+        />,
+      )
+      clickAt(plot(container), { shiftKey: true, ctrlKey: true })
+      const ids = onSelectionChange.mock.calls.at(-1)?.[0] as string[]
+      // What was there survives, and the click's own cell — the centre of a 2 x 3, which is
+      // neither row 0 nor column 0 — is beside it. A replace would have left two entries.
+      expect(ids).toContain('r:0')
+      expect(ids).toContain('c:0')
+      expect(ids.length).toBeGreaterThan(2)
+    })
+
+    it('still clears on a bare shift click, which is now the only way the plot clears', () => {
+      const onSelectionChange = vi.fn()
+      const { container } = render(
+        <HeatmapViewer
+          matrix={matrix()}
+          selection={['r:0', 'c:0']}
+          onSelectionChange={onSelectionChange}
+        />,
+      )
+      clickAt(plot(container), { shiftKey: true })
+      expect(onSelectionChange).toHaveBeenLastCalledWith([])
+    })
+
+    it('leaves a bare click alone — it is the start of a pan, not a request to lose a selection', () => {
+      const onSelectionChange = vi.fn()
+      const { container } = render(
+        <HeatmapViewer
+          matrix={matrix()}
+          selection={['r:0', 'c:0']}
+          onSelectionChange={onSelectionChange}
+        />,
+      )
+      clickAt(plot(container))
+      expect(onSelectionChange).not.toHaveBeenCalled()
+    })
+
+    it('selects on the compact card, where only the expanded view used to', () => {
+      const onSelectionChange = vi.fn()
+      const { container } = render(
+        <HeatmapViewer matrix={matrix()} compact onSelectionChange={onSelectionChange} />,
+      )
+      clickAt(plot(container), { shiftKey: true, metaKey: true })
+      expect(onSelectionChange).toHaveBeenCalled()
+      // Zoom and pan stay expanded-only: it is selecting that moved, not the whole surface.
+      expect(screen.queryByLabelText('Fit to view')).toBeNull()
+    })
+
+    it('carries nokey, or React Flow’s pane takes the press before the card sees it', () => {
+      // `selectionKeyCode="Shift"` makes the pane claim a shift-press anywhere inside it,
+      // capture the pointer and stop propagation in the capture phase. `.nokey` is the
+      // library's own opt-out and is the whole of why selecting on a card works.
+      const { container } = render(<HeatmapViewer matrix={matrix()} compact />)
+      expect(plot(container).classList.contains('nokey')).toBe(true)
+    })
+
+    it('says how much is selected on a card, where the bands cannot', () => {
+      const { container } = render(
+        <HeatmapViewer matrix={matrix()} compact selection={['r:0', 'c:1', 'c:2']} />,
+      )
+      const notes = [...container.querySelectorAll('.viewer__note')].map((n) => n.textContent)
+      expect(notes).toContain('1 × 2 selected')
+    })
+
+    it('draws each band twice — a core over a casing, and the casing underneath all of them', () => {
+      /*
+       * Two layers rather than two rects per band, so one band's casing cannot overdraw its
+       * neighbour's core. The contrast that makes the pair necessary is measured in
+       * `encoding.test.ts`; what is pinned here is that both layers exist, carry the same
+       * geometry, and keep `data-axis` — `pnpm probe:heatmap-select` counts bands off the core
+       * layer alone and would double every count if this collapsed back to one.
+       */
+      const { container } = render(
+        <HeatmapViewer matrix={matrix()} selection={['r:0', 'c:1']} />,
+      )
+      const rects = (cls: string) => [...container.querySelectorAll(`${cls} rect`)]
+      const core = rects('.heatmap-band__core')
+      const casing = rects('.heatmap-band__case')
+      expect(core.length).toBe(2)
+      expect(casing.length).toBe(core.length)
+      expect(core.map((r) => r.getAttribute('data-axis'))).toEqual(['rows', 'columns'])
+      expect(casing.map((r) => r.getAttribute('x'))).toEqual(
+        core.map((r) => r.getAttribute('x')),
+      )
+      // The casing is painted first, so every core sits above every casing.
+      const band = container.querySelector('.heatmap-band')!
+      expect(band.firstElementChild?.getAttribute('class')).toBe('heatmap-band__case')
+    })
+
+    it('marks a card compact, which is what thins the band', () => {
+      /*
+       * The widths themselves are CSS and jsdom resolves no stylesheet, so what is checkable
+       * here is the hook they hang off: a preview plot is a couple of hundred pixels across with
+       * cells two or three wide, and a band sized for the expanded view covers several rows of
+       * what it points at. Measured in a browser — card 3px casing under a 1px core, expanded
+       * 4 under 2, the casing staying exactly 2px wider either way so its edge stays crisp.
+       */
+      const { container: card } = render(<HeatmapViewer matrix={matrix()} compact />)
+      expect(plot(card).classList.contains('heatmap-plot--compact')).toBe(true)
+      cleanup()
+      const { container: big } = render(<HeatmapViewer matrix={matrix()} />)
+      expect(plot(big).classList.contains('heatmap-plot--compact')).toBe(false)
+    })
+
+    it('has no clear button left in the strip', () => {
+      // Three better spellings already: a shift-click on the plot, the Selection tab's field,
+      // and — for a rectangle — drawing a new one. The ⤢ beside it stays; it resets the zoom.
+      render(
+        <HeatmapViewer matrix={matrix()} selection={['r:0']} onSelectionChange={vi.fn()} />,
+      )
+      expect(screen.queryByLabelText('Clear selection')).toBeNull()
+      expect(screen.getByLabelText('Fit to view')).toBeTruthy()
+    })
+  })
 })
 
 describe('TableViewer', () => {

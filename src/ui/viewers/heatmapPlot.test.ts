@@ -18,9 +18,11 @@ import {
 } from '../../nodes/lib/heatmapParams'
 import {
   HEATMAP_CELLS_WARN,
+  CIRCLE_MIN_CELL,
   axisMarks,
   axisMap,
   buildHeatmapSpec,
+  circleScale,
   cellAt,
   cellRect,
   colorDomain,
@@ -655,5 +657,85 @@ describe('the published palettes', () => {
     expect(rampColors('diverging', 'dark', 9, 'viridis')).toEqual(
       rampColors('diverging', 'dark', 9),
     )
+  })
+})
+
+/**
+ * Circles: the second encoding of the same number.
+ *
+ * All of it is arithmetic over a spec, which is why it is here rather than in a probe — what a
+ * browser was needed for was the *threshold*, `CIRCLE_MIN_CELL`, which is a legibility question
+ * and has no other instrument.
+ */
+describe('circles sized by value', () => {
+  const ramped = (n: number) => Float64Array.from({ length: n * n }, (_, i) => i)
+
+  it('scales the area with the value, so the radius takes a square root', () => {
+    const s = spec(4, 4, ramped(4))
+    const radius = circleScale(s)
+    const top = radius(RAMP_STEPS - 1)
+    // A cell at a quarter of the scale is half the radius, which is a quarter of the area —
+    // the only relation readers actually compare, and `resolveSize`'s rule one encoding over.
+    expect(radius(Math.round((RAMP_STEPS - 1) * 0.25))).toBeCloseTo(top / 2, 1)
+    expect(radius(Math.round((RAMP_STEPS - 1) * 0.5))).toBeCloseTo(top / Math.SQRT2, 1)
+  })
+
+  it('draws nothing at the neutral end, and nothing where nothing was recorded', () => {
+    const radius = circleScale(spec(4, 4, ramped(4)))
+    // The bottom of a sequential ramp *is* the neutral point, so an empty pair is an empty
+    // cell — which is most of why the mark is worth having on connectivity data.
+    expect(radius(0)).toBe(0)
+    // -1 is a block nothing finite landed in.
+    expect(radius(-1)).toBe(0)
+  })
+
+  it('measures from the centre on a diverging scale, where the colour carries the sign', () => {
+    const values = Float64Array.from([-8, -4, 0, 2, 4, 8, -2, 1, 0])
+    const s = spec(3, 3, values, { scale: 'diverging' })
+    const radius = circleScale(s)
+    const last = RAMP_STEPS - 1
+    // Symmetric about the middle: a radius cannot be negative, so equal magnitudes either side
+    // of zero are the same circle and the hue is what tells them apart.
+    expect(radius(0)).toBeCloseTo(radius(last), 6)
+    expect(radius(Math.round(last / 4))).toBeCloseTo(radius(Math.round((last * 3) / 4)), 1)
+    /*
+     * And a zero is nothing at all — asked of the bucket a zero actually lands in rather than
+     * of `last / 2`, because `RAMP_STEPS` is even and **no integer bucket sits on the centre**:
+     * the middle falls between 255 and 256, so the nearest bucket is half a step out and its
+     * radius is `maxRadius * sqrt(0.5 / 255.5)`, which is 2px of the 45 here rather than 0. Half
+     * a bucket is the quantisation the lookup table already has everywhere; what matters is that
+     * it is under a pixel of the drawn radius.
+     */
+    expect(radius(bucketOf(0, s.domain))).toBeLessThan(0.05 * radius(0))
+  })
+
+  it('follows a log colour, because it reads the bucket rather than the value', () => {
+    // Not a separate scale: the bucket is already the value's position on the ramp, so the log
+    // mapping, the manual limits and the clamping at both ends reach the radius for free.
+    const values = Float64Array.from([0, 1, 10, 100])
+    const plain = circleScale(spec(2, 2, values))
+    const logged = circleScale(spec(2, 2, values, { log: true }))
+    const s = spec(2, 2, values, { log: true })
+    const bucket = bucketOf(1, s.domain)
+    expect(logged(bucket)).toBeGreaterThan(plain(bucketOf(1, spec(2, 2, values).domain)))
+  })
+
+  it('never fits a folded grid, whatever the cells measure', () => {
+    // Past one cell per pixel a block stands for many cells and is drawn as the strongest of
+    // them, so a circle there would be sized by a value that is not the block's.
+    const dense = spec(600, 600, new Float64Array(600 * 600))
+    expect(dense.folded).toBe(true)
+    expect(dense.circlesFit).toBe(false)
+  })
+
+  it('fits exactly while a cell clears the legibility floor', () => {
+    const roomy = spec(4, 4, ramped(4))
+    expect(roomy.cellWidth).toBeGreaterThanOrEqual(CIRCLE_MIN_CELL)
+    expect(roomy.circlesFit).toBe(true)
+    // A plot too small for the floor, unfolded — the card's ordinary state.
+    const tight = spec(60, 60, new Float64Array(3600), { width: 200, height: 160 })
+    expect(tight.folded).toBe(false)
+    expect(tight.cellHeight).toBeLessThan(CIRCLE_MIN_CELL)
+    expect(tight.circlesFit).toBe(false)
   })
 })

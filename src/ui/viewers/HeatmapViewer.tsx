@@ -51,6 +51,15 @@ export interface HeatmapViewerProps {
   /** Map the colour through a log, leaving every number on screen as it is. */
   logColor?: boolean
   showValues?: boolean
+  /**
+   * `square` fills each cell; `circle` draws a disc whose **area** is the value, so magnitude is
+   * carried twice — by the colour and by the size.
+   *
+   * Asked for, not granted: a circle needs a cell several pixels across, and past one cell per
+   * pixel the grid is folded and a block stands for many cells. `spec.circlesFit` is the other
+   * half, and the caption says so when it is the one that wins.
+   */
+  cellShape?: 'square' | 'circle'
   compact?: boolean
   /** Filename stem for CSV/SVG/PNG export. */
   baseName?: string
@@ -88,6 +97,9 @@ const EMPTY_LIMITS: ColorLimits = {}
  * pans, Shift- or ⌘/Ctrl-drag selects — the same assignment React Flow's `panOnDrag` and
  * `selectionKeyCode` give the canvas underneath, so the hand does not change modes when the
  * pointer crosses into a card. Bare drag is the frequent one and keeps the bare gesture.
+ *
+ * A box with no drag in it is not nothing: on an adding chord it is the **one cell under the
+ * press**, and on a bare selection chord it clears. See `onPointerUp`.
  */
 type Gesture =
   | { kind: 'pan'; lastX: number; lastY: number; moved: boolean }
@@ -98,9 +110,32 @@ type Gesture =
       x1: number
       y1: number
       moved: boolean
-      /** Alt held at the press: add to the standing selection rather than replacing it. */
+      /** An adding chord held at the press — see `addsToSelection`. */
       additive: boolean
     }
+
+/**
+ * Whether the press *adds* to the standing selection rather than replacing it.
+ *
+ * A second question from `isAdditive`, which asks whether the press is a selection at all
+ * (Shift **or** ⌘/Ctrl, the canvas's own chord) — so the adding chord has to be something
+ * neither of those alone already means. **Shift+⌘/Ctrl** is that, and it reads as the thing it
+ * is: the selection chord, with more of it.
+ *
+ * **Alt is kept**, where retiring it would have been tidier. It is `ScatterViewer`'s modifier
+ * for the same act one viewer over, and that vocabulary is shared on purpose — a heatmap that
+ * answered a hand's Alt+Shift by *replacing* the selection it had just added to would be the
+ * kind of silent wrong this codebase spends its comments on. Two chords for one act is the
+ * price, and it is paid in the help text rather than in a gesture.
+ */
+function addsToSelection(event: {
+  altKey: boolean
+  shiftKey: boolean
+  metaKey: boolean
+  ctrlKey: boolean
+}): boolean {
+  return event.altKey || (event.shiftKey && (event.metaKey || event.ctrlKey))
+}
 
 /**
  * Matrix heatmap.
@@ -167,6 +202,7 @@ export function HeatmapViewer({
   limits: rawLimits = EMPTY_LIMITS,
   logColor = false,
   showValues = false,
+  cellShape = 'square',
   compact = false,
   baseName,
   selection = [],
@@ -217,7 +253,20 @@ export function HeatmapViewer({
    */
   const stableSelection = useStable(selection)
   const picked = useMemo(() => decodeMatrixSelection(stableSelection), [stableSelection])
-  const selectable = !compact && drawable && Boolean(onSelectionChange)
+  /*
+   * **On the card as well as expanded**, which is the one gesture here that is not gated on
+   * `compact`. It was, and the recorded reason was React Flow's: shift-drag belongs to the
+   * pane's own selection box. That turned out to be a fact about *where the press lands* rather
+   * than about cards — the pane claims a shift-press anywhere inside it, our canvas included,
+   * takes the pointer capture and stops propagation before our handler runs. `nokey` on the
+   * container below is React Flow's own way of saying "not this subtree", so the press reaches
+   * the heatmap and the pane rubber band starts from empty canvas as it always did.
+   *
+   * Zoom and pan stay expanded-only: those are `zoomable`, and a preview React Flow already
+   * zooms has no business having a second zoom inside it. Selecting is the opposite case — it
+   * writes a param, and asking somebody to expand a card to do it was a step in the way.
+   */
+  const selectable = drawable && Boolean(onSelectionChange)
 
   const extent = useMemo(() => matrixExtent(matrix.values), [matrix])
   const domain = useMemo(
@@ -250,6 +299,15 @@ export function HeatmapViewer({
     [drawable, matrix, scale, size.width, size.height, compact, domain, view],
   )
 
+  /*
+   * The param `&&` the size test — `Show values`' arrangement and its recorded reason: folding
+   * the choice into `buildHeatmapSpec` would put it in the dependency list of a pass that walks
+   * every cell, so toggling the mark would re-fold the matrix to change a drawing.
+   */
+  const circles = cellShape === 'circle' && spec !== null && spec.circlesFit
+  // Asked for and refused, which is the only state worth a caption line.
+  const circlesTooSmall = cellShape === 'circle' && spec !== null && !spec.circlesFit
+
   const ramp = useMemo(
     () => rampColors(scale, mode, RAMP_STEPS, palette),
     [scale, mode, palette],
@@ -277,8 +335,9 @@ export function HeatmapViewer({
       background: surface,
       width: size.width,
       height: size.height,
+      circles,
     })
-  }, [spec, ramp, surface, size.width, size.height])
+  }, [spec, ramp, surface, size.width, size.height, circles])
 
   // --- zoom --------------------------------------------------------------
   /*
@@ -313,8 +372,7 @@ export function HeatmapViewer({
         x1: point.x,
         y1: point.y,
         moved: false,
-        // Alt adds, which is `ScatterViewer`'s modifier for the same thing one gesture over.
-        additive: event.altKey,
+        additive: addsToSelection(event),
       })
       setHover(null)
       return
@@ -381,6 +439,30 @@ export function HeatmapViewer({
     onSelectionChange(encodeMatrixSelection(rows, cols))
   }
 
+  /**
+   * One cell added, which is what a press with no drag in it means on an adding chord.
+   *
+   * **`cellAt`, not a zero-width `linesInRect`.** The degenerate rectangle is the obvious reuse
+   * and it is wrong twice: `pointToMatrix` is a bare linear map with no bounds of its own, so a
+   * press in a label gutter comes back clamped to line 0 and silently selects the first row or
+   * column; and a press landing exactly on a line boundary spans `[k, k - 1]`, which is empty.
+   * `cellAt` is the function the hover ring and the tooltip already ask, so what a click takes
+   * is what the card was pointing at when it was clicked — including on a folded block, where
+   * the cell named is the strongest one the block is drawn as rather than the hundred behind it.
+   *
+   * Always a union: the chord that gets here is the adding one, and its whole meaning is more.
+   */
+  const commitCell = (x: number, y: number) => {
+    if (!spec || !onSelectionChange) return
+    const hit = cellAt(spec, x, y)
+    if (!hit) return
+    const rows = new Set(picked.rows)
+    const cols = new Set(picked.columns)
+    rows.add(hit.row)
+    cols.add(hit.col)
+    onSelectionChange(encodeMatrixSelection(rows, cols))
+  }
+
   const clear = () => onSelectionChange?.([])
 
   const onPointerUp = () => {
@@ -392,12 +474,19 @@ export function HeatmapViewer({
       return
     }
     /*
-     * A modifier-click with no drag clears, which is `ScatterViewer`'s rule — except while Alt
-     * is held, where the gesture in progress was "add", and adding nothing is nothing rather
-     * than a request to lose what is there. A *bare* click deliberately clears nothing either:
+     * No drag. On an adding chord that is the cell under the press — a rectangle covering one
+     * cell is a rectangle, and refusing it would make "select these two cells" a gesture nobody
+     * can perform without dragging a box narrower than the slop.
+     *
+     * On a bare selection chord it clears, which is `ScatterViewer`'s rule and now the only way
+     * the plot itself clears — the ⌫ button is gone. A *bare* click deliberately clears nothing:
      * it is the start of a pan, and reading a cell's tooltip is not asking to lose a selection.
      */
-    if (!current.additive) clear()
+    if (current.additive) {
+      commitCell(current.x0, current.y0)
+      return
+    }
+    clear()
   }
 
   /*
@@ -409,11 +498,13 @@ export function HeatmapViewer({
     () =>
       spec
         ? [
-            ...(showValues ? valueMarks(spec, matrix.values, ramp) : []),
+            ...(showValues
+              ? valueMarks(spec, matrix.values, ramp, { circles, background: surface })
+              : []),
             ...axisMarks(spec, ink.secondary),
           ]
         : [],
-    [spec, matrix.values, ramp, ink.secondary, showValues],
+    [spec, matrix.values, ramp, ink.secondary, showValues, circles, surface],
   )
 
   /*
@@ -450,10 +541,26 @@ export function HeatmapViewer({
    * rectangle that was dragged — and that is the honest picture, since the two axes leave this
    * node as two independent lists.
    *
+   * **Two layers, a light core over a dark casing, and no hue at all** — the same rects drawn
+   * twice, all the casings beneath all the cores so one band's casing cannot overdraw its
+   * neighbour's core. This was a 1.5px `--accent` line, which is blue, on a heatmap whose
+   * default palette is *Coda blue*; measured against all twelve palettes in both themes its
+   * worst-case contrast against a cell was **1.00:1**, i.e. somewhere on every ramp it is
+   * exactly invisible. And that is not a fact about blue: every single colour tried came back
+   * between 1.00 and 1.96, yellow included — worst of all on viridis, inferno and magma, whose
+   * top *is* yellow. A ramp spans the hue circle and every lightness, so no one colour can sit
+   * on top of one. A light-and-dark pair can, because any cell is either lighter or darker than
+   * mid grey and the other tone then reads: white over black measures **4.59:1** at its worst
+   * cell of any palette, above the 4.5 floor for text. The core is **dashed**, which is the half
+   * that number could not see — the band's other neighbour is the inter-cell separator, and that
+   * is the *surface* showing through rather than a painted colour, so on each theme one of the
+   * casing's two tones is already the grid. An interrupted line cannot be mistaken for a
+   * continuous one whatever colour either is. See `docs/viewers.md`.
+   *
    * `data-axis` because the two are indistinguishable by shape once a selection is wide: a
    * column band spans the plot's whole height, so every row tick's y falls inside one.
-   * `pnpm probe:heatmap-select` reads it, and read it wrongly first — the check passed against
-   * the column band.
+   * `pnpm probe:heatmap-select` reads it — off the **core** layer alone, or every band counts
+   * twice — and read it wrongly first, the check passing against the column band.
    */
   const bandRects = useMemo(() => {
     if (!spec) return null
@@ -462,30 +569,44 @@ export function HeatmapViewer({
       rows: selectionBands(spec.rowMap, picked.rows),
       columns: selectionBands(spec.colMap, picked.columns),
     }
+    const shapes = [
+      ...bands.rows.map((band) => ({
+        key: `r${band.from}`,
+        axis: 'rows',
+        x: plot.x,
+        y: band.from,
+        width: plot.width,
+        height: Math.max(1, band.to - band.from),
+      })),
+      ...bands.columns.map((band) => ({
+        key: `c${band.from}`,
+        axis: 'columns',
+        x: band.from,
+        y: plot.y,
+        width: Math.max(1, band.to - band.from),
+        height: plot.height,
+      })),
+    ]
+    const layer = (className: string) => (
+      <g className={className}>
+        {shapes.map((shape) => (
+          <rect
+            key={shape.key}
+            data-axis={shape.axis}
+            x={shape.x}
+            y={shape.y}
+            width={shape.width}
+            height={shape.height}
+          />
+        ))}
+      </g>
+    )
     return (
       // The clip id spelled out rather than through `clip()`, which is declared below the early
       // returns — a hook may not close over it.
       <g clipPath={`url(#${clipId}-plot)`} className="heatmap-band">
-        {bands.rows.map((band) => (
-          <rect
-            key={`r${band.from}`}
-            data-axis="rows"
-            x={plot.x}
-            y={band.from}
-            width={plot.width}
-            height={Math.max(1, band.to - band.from)}
-          />
-        ))}
-        {bands.columns.map((band) => (
-          <rect
-            key={`c${band.from}`}
-            data-axis="columns"
-            x={band.from}
-            y={plot.y}
-            width={Math.max(1, band.to - band.from)}
-            height={plot.height}
-          />
-        ))}
+        {layer('heatmap-band__case')}
+        {layer('heatmap-band__core')}
       </g>
     )
   }, [spec, picked, clipId])
@@ -508,6 +629,7 @@ export function HeatmapViewer({
               : 'sans-serif',
           values: matrix.values,
           showValues,
+          circles,
           title,
           ...(matrix.valueLabel ? { valueLabel: matrix.valueLabel } : {}),
           barLow: formatCompact(spec.domain.lo),
@@ -515,7 +637,19 @@ export function HeatmapViewer({
         })
       },
     }),
-    [spec, matrix, title, ramp, ink, surface, size.width, size.height, showValues, ref],
+    [
+      spec,
+      matrix,
+      title,
+      ramp,
+      ink,
+      surface,
+      size.width,
+      size.height,
+      showValues,
+      circles,
+      ref,
+    ],
   )
 
   if (rows === 0 || cols === 0) {
@@ -554,7 +688,16 @@ export function HeatmapViewer({
   return (
     <div className="viewer">
       <div
-        className="heatmap-plot nowheel nodrag"
+        /*
+         * `nokey` is React Flow's, and it is what makes selecting on a card possible at all:
+         * with `selectionKeyCode="Shift"` held its pane starts a rubber band on a press
+         * *anywhere* inside it, takes the pointer capture and stops propagation in the capture
+         * phase — before this element's own handler. The class is the library's documented way
+         * to say "leave this subtree alone", checked with `closest`, so it belongs on the
+         * container rather than on the canvas. `nowheel` and `nodrag` are the same bargain for
+         * the wheel and the node drag.
+         */
+        className={`heatmap-plot nowheel nodrag nokey${compact ? ' heatmap-plot--compact' : ''}`}
         ref={ref}
         style={{
           background: surface,
@@ -579,6 +722,23 @@ export function HeatmapViewer({
       >
         <canvas
           ref={canvasRef}
+          /*
+           * A modified click over the plot belongs to the heatmap, and must not *also* reach
+           * React Flow's node handler underneath — which selects the card, and with Shift held
+           * **adds** it to the canvas selection. Measured on a card: one shift+⌘-click took a
+           * cell and left the node selected, so building a selection cell by cell quietly
+           * accumulated cards that the next ⌫ or Delete would have removed.
+           *
+           * `nodrag` does not cover this: it filters the d3 *drag*, where the node's selection
+           * rides on the `click`, which fires even after a drag whose press and release are on
+           * the same element. `isAdditive` rather than a flag set at pointer-up, because it is
+           * the same question the press already asked and a second source of truth is how the
+           * two come to disagree. A **bare** click passes through on purpose: clicking a card to
+           * select it is what a card does.
+           */
+          onClick={(event) => {
+            if (selectable && isAdditive(event)) event.stopPropagation()
+          }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -654,30 +814,18 @@ export function HeatmapViewer({
         {zoomable && (
           // Bottom right rather than the strip's usual top right, which here is the column
           // gutter: at ×15 the button sat on the last column's name. Seen in a browser.
+          /*
+           * One button, and it is the zoom's. The ⌫ beside it was removed as a control with two
+           * better spellings already on the card — a shift-click on the plot, and the Selection
+           * tab's own field — and a third that could only be reached by expanding. What it cost
+           * is that the *gestures* lived in its `title`, so they moved to this one, which is the
+           * control that is always here whenever they apply.
+           */
           <div className="network-strip network-strip--bottom nodrag">
-            {/*
-              Only where a selection can be made at all, which is `selectable` and not
-              `zoomable`: on a surface with no `onSelectionChange` — a dashboard cell reading a
-              node it cannot write to — a clear button would be a control that does nothing.
-              `disabled` says the rest, so the button does not appear and vanish under the
-              pointer as a selection comes and goes. `ScatterViewer`'s button, one viewer over.
-            */}
-            {selectable && (
-              <button
-                type="button"
-                className="network-strip__btn"
-                title="Clear the selection (or shift-click the plot)"
-                aria-label="Clear selection"
-                disabled={picked.rows.size === 0 && picked.columns.size === 0}
-                onClick={clear}
-              >
-                ⌫
-              </button>
-            )}
             <button
               type="button"
               className="network-strip__btn"
-              title="Show the whole matrix (or double-click). Scroll to zoom, drag to pan; shift-drag to select, alt-shift-drag to add."
+              title="Show the whole matrix (or double-click). Scroll to zoom, drag to pan. Shift-drag selects a rectangle, shift+⌘-drag or shift+⌘-click adds to it, shift-click clears."
               aria-label="Fit to view"
               disabled={!view}
               onClick={fit}
@@ -718,6 +866,29 @@ export function HeatmapViewer({
             cells merged
           </span>
         )}
+        {circlesTooSmall && (
+          /*
+           * Asked for circles and got squares. A guard rail warns rather than refusing
+           * (`docs/limits.md`), and the alternative — greying the control out as a card is
+           * resized — is the one recorded against the Meshes node's `Detail`. The fallback is
+           * also not permanent: the fold is per *window*, so zooming in reaches a density where
+           * the circles come back, which is what the title says to do.
+           *
+           * **The second note that is not stood down under `compact`**, and for a different
+           * reason from the selection count's. Every other note is a remark about the picture
+           * and is dropped for room; this one is about a *control* — somebody set `Cell shape`
+           * to circles in the inspector and the card is drawing squares. And the card is where
+           * it will nearly always happen: a preview plot is a couple of hundred pixels for
+           * however many rows, so 34 of them are already under four pixels each. Silent, that
+           * is a control that looks broken.
+           */
+          <span
+            className="viewer__note"
+            title="Circles are drawn where a cell is at least a few pixels across. Here the cells are smaller than that, so the matrix is drawn as squares — zoom in, enlarge the card, or aggregate upstream to see circles."
+          >
+            too dense for circles
+          </span>
+        )}
         {cells > HEATMAP_CELLS_WARN && !compact && (
           // A matrix this size lays out in a few hundred milliseconds and repaints in half
           // that, on a resize and never on a hover. Worth saying once, next to the shape.
@@ -754,13 +925,21 @@ export function HeatmapViewer({
               {note.text}
             </span>
           ))}
-        {(selectedCount.rows > 0 || selectedCount.columns > 0) && !compact && (
-          // The count is the caption's, where the scatter puts its own: the inspector's field
-          // says how many *lines* are stored, and only this knows how many of them the matrix
-          // on screen still has.
+        {(selectedCount.rows > 0 || selectedCount.columns > 0) && (
+          /*
+           * The count is the caption's, where the scatter puts its own: the inspector's field
+           * says how many *lines* are stored, and only this knows how many of them the matrix
+           * on screen still has.
+           *
+           * **The one note here that is not stood down under `compact`**, now that a card can be
+           * selected on. Every other note is a thing worth saying about a picture and is dropped
+           * for room; this one is the only acknowledgement a card gives that a gesture landed —
+           * the bands say *where*, and on a preview that has folded a thousand lines onto two
+           * hundred pixels they cannot say how much.
+           */
           <span
             className="viewer__note"
-            title="Shift-drag to select a rectangle, alt-shift-drag to add another; ⌫ or shift-click to clear. Rows and columns leave the node on their own ports."
+            title="Shift-drag to select a rectangle; shift+⌘-drag or shift+⌘-click adds to it; shift-click clears. Rows and columns leave the node on their own ports."
           >
             {formatNumber(selectedCount.rows)} × {formatNumber(selectedCount.columns)} selected
           </span>

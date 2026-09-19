@@ -28,7 +28,7 @@
  * an SVG would be a raster in a vector file, which is the one thing the export exists not to be.
  */
 
-import { axisMarks, clipZones, drawnCellSize, valueMarks } from './heatmapPlot'
+import { axisMarks, circleScale, clipZones, drawnCellSize, valueMarks } from './heatmapPlot'
 import type { HeatmapSpec, TextMark } from './heatmapPlot'
 import { parseHex } from '../colors'
 import type { PlotInk } from './scatterDraw'
@@ -69,6 +69,49 @@ function cornersByBucket(spec: HeatmapSpec): Map<number, number[]> {
       const x = spec.colMap.origin + gx * spec.cellWidth
       if (corners) corners.push(x, y)
       else buckets.set(bucket, [x, y])
+    }
+  }
+  return buckets
+}
+
+/**
+ * The circle centres per ramp bucket, and the radius that goes with each.
+ *
+ * `cornersByBucket`'s shape and its reasons — flat numbers, one entry per drawn cell, memoised
+ * against the spec in a `WeakMap` so it is collected with it. What is different is why the
+ * batching is *free* here: a radius is a function of the bucket alone (`circleScale`), so every
+ * cell in a bucket is the same circle and one `fill()` covers all of them. A per-cell radius
+ * would have made this one path per cell.
+ *
+ * Bounded by the plot, like everything else that draws: circles are only reached unfolded and
+ * at `CIRCLE_MIN_CELL` or more per cell, so a 1400x700 plot holds at most ~39,000 of them
+ * however large the matrix is.
+ */
+const CIRCLES = new WeakMap<HeatmapSpec, Map<number, { radius: number; centres: number[] }>>()
+
+function circlesByBucket(
+  spec: HeatmapSpec,
+): Map<number, { radius: number; centres: number[] }> {
+  const cached = CIRCLES.get(spec)
+  if (cached) return cached
+  const buckets = new Map<number, { radius: number; centres: number[] }>()
+  CIRCLES.set(spec, buckets)
+  const radiusOf = circleScale(spec)
+  for (let gy = 0; gy < spec.gridRows; gy++) {
+    const cy = spec.rowMap.origin + (gy + 0.5) * spec.cellHeight
+    const rowStart = gy * spec.gridCols
+    for (let gx = 0; gx < spec.gridCols; gx++) {
+      const bucket = spec.buckets[rowStart + gx]!
+      if (bucket < 0) continue
+      const radius = radiusOf(bucket)
+      // Sub-pixel circles are not drawn at all: at the neutral end the radius is 0 by design,
+      // and anything under a quarter pixel anti-aliases to a smear that reads as dirt on the
+      // plot rather than as a quantity.
+      if (radius < 0.25) continue
+      const entry = buckets.get(bucket)
+      const cx = spec.colMap.origin + (gx + 0.5) * spec.cellWidth
+      if (entry) entry.centres.push(cx, cy)
+      else buckets.set(bucket, { radius, centres: [cx, cy] })
     }
   }
   return buckets
@@ -158,6 +201,13 @@ export interface HeatmapCanvasOptions {
   /** The canvas box in CSS pixels; the plot rect is inset within it. */
   width: number
   height: number
+  /**
+   * Draw each cell as a circle whose *area* is its value, rather than as a filled square.
+   *
+   * The caller's `Cell shape` param **and** `spec.circlesFit` — the param alone would ask for
+   * circles on a folded grid, where a cell is a pixel and stands for many cells besides.
+   */
+  circles?: boolean
 }
 
 /**
@@ -188,6 +238,32 @@ export function drawHeatmap(
   context.beginPath()
   context.rect(spec.plot.x, spec.plot.y, spec.plot.width, spec.plot.height)
   context.clip()
+
+  if (options.circles) {
+    /*
+     * One arc per drawn cell, batched into one path and one `fill()` per bucket — the shape
+     * `cornersByBucket` takes for the SVG, and affordable here for the reason the *squares* are
+     * not: circles are reached only unfolded and at `CIRCLE_MIN_CELL` per cell, so the count is
+     * bounded by the plot at a few tens of thousands rather than by the matrix at millions.
+     *
+     * No `gridImage`, no separator pass: the ground between circles is the surface, which the
+     * fill above already painted, and a grid ruled over circles would be chrome competing with
+     * the mark it is meant to space.
+     */
+    const last = ramp.length - 1
+    for (const [bucket, { radius, centres }] of circlesByBucket(spec)) {
+      context.fillStyle = ramp[Math.min(last, bucket)]!
+      context.beginPath()
+      for (let i = 0; i < centres.length; i += 2) {
+        // `moveTo` before each arc, or every circle is joined to the last by a chord.
+        context.moveTo(centres[i]! + radius, centres[i + 1]!)
+        context.arc(centres[i]!, centres[i + 1]!, radius, 0, Math.PI * 2)
+      }
+      context.fill()
+    }
+    context.restore()
+    return
+  }
 
   const image = gridImage(spec, ramp)
   const source = scratchContext(spec.gridCols, spec.gridRows)
@@ -302,18 +378,41 @@ export function heatmapToSvg(options: HeatmapSvgOptions): SVGSVGElement {
   svg.append(defs)
 
   // --- cells --------------------------------------------------------------
-  const cell = drawnCellSize(spec)
-  const cellW = round(cell.width)
-  const cellH = round(cell.height)
   const cells = element('g', { 'clip-path': 'url(#clip-plot)' })
-  for (const [bucket, corners] of cornersByBucket(spec)) {
-    const parts: string[] = []
-    for (let i = 0; i < corners.length; i += 2) {
-      parts.push(
-        `M${round(corners[i]!)},${round(corners[i + 1]!)}h${cellW}v${cellH}h-${cellW}Z`,
-      )
+  if (options.circles) {
+    /*
+     * Two arcs per circle, which is how a circle is spelled as a path: SVG has no full-turn arc
+     * (a single one whose ends coincide draws nothing), so it is two half turns. Batched per
+     * bucket exactly as the squares are, and for the extra reason that the radius is constant
+     * within a bucket — so the file carries one `<path>` per bucket rather than one `<circle>`
+     * per cell, which at the tens of thousands a plot can hold is the difference between a file
+     * that opens and one that does not.
+     */
+    for (const [bucket, { radius, centres }] of circlesByBucket(spec)) {
+      const r = round(radius)
+      const parts: string[] = []
+      for (let i = 0; i < centres.length; i += 2) {
+        const cx = round(centres[i]! - radius)
+        const cy = round(centres[i + 1]!)
+        parts.push(
+          `M${cx},${cy}a${r},${r} 0 1,0 ${round(radius * 2)},0a${r},${r} 0 1,0 -${round(radius * 2)},0`,
+        )
+      }
+      cells.append(element('path', { d: parts.join(''), fill: ramp[bucket] ?? '#000000' }))
     }
-    cells.append(element('path', { d: parts.join(''), fill: ramp[bucket] ?? '#000000' }))
+  } else {
+    const cell = drawnCellSize(spec)
+    const cellW = round(cell.width)
+    const cellH = round(cell.height)
+    for (const [bucket, corners] of cornersByBucket(spec)) {
+      const parts: string[] = []
+      for (let i = 0; i < corners.length; i += 2) {
+        parts.push(
+          `M${round(corners[i]!)},${round(corners[i + 1]!)}h${cellW}v${cellH}h-${cellW}Z`,
+        )
+      }
+      cells.append(element('path', { d: parts.join(''), fill: ramp[bucket] ?? '#000000' }))
+    }
   }
   svg.append(cells)
 

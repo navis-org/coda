@@ -14,7 +14,7 @@ link:ordered -> hm
 ## Colour
 
 ```coda-params
-out.heatmap: scale, palette, showValues
+out.heatmap: scale, palette, cellShape, showValues
 ```
 
 Sequential for counts and fractions; diverging when zero is a meaningful middle, as after a log ratio. `Coda blue` and `Coda blue–red` reverse with the theme, so an empty cell always recedes into the surface. The rest — viridis, magma, inferno, plasma, cividis, rocket, mako for sequential; RdBu, PuOr, BrBG for diverging — are matplotlib's and seaborn's, drawn as published on both themes and named the same way in the exported notebook.
@@ -29,6 +29,19 @@ out.heatmap: colorMin, colorMax, logColor
 
 > [!NOTE] Put a [Normalize](#core.normalize) in front if one row dominates
 > A heatmap of raw synapse counts is usually a picture of which cell type is numerous.
+
+**Cell shape** draws each cell as a disc whose **area** is the value, so magnitude is carried twice — by the colour and by the size. A connectivity matrix is mostly empty, and circles are what make that legible: an unconnected pair is an empty cell rather than a cell painted the bottom of the ramp.
+
+Two consequences worth knowing before you pick it:
+
+| | what happens |
+| --- | --- |
+| a cell at the bottom of the scale | draws **nothing** — so a recorded zero and a pair nobody measured look alike, where squares tell them apart |
+| a diverging scale | the *size* is the distance from the centre and the *colour* keeps the direction, since a radius cannot be negative |
+| cells smaller than a few pixels | drawn as squares instead, and the card says `too dense for circles` — zoom in, enlarge the card, or aggregate upstream |
+
+> [!NOTE] The notebook and the R document draw tiles
+> Circles are a drawing rather than a change to the matrix, and neither exporter follows: seaborn's `heatmap` is a tile renderer. Both documents carry a note saying the card used circles, so nothing disagrees silently. The numbers are the same either way.
 
 ## Labels
 
@@ -89,14 +102,18 @@ out.heatmap: sortBy, sortAxis, sortFollow, sortReverse
 
 ## Selecting rows and columns
 
-Expand the card and **shift-drag a rectangle** (⌘- or Ctrl-drag does the same). The rows and columns it covers leave the node on their own two ports, `Selected Rows` and `Selected Columns`, ready for [Selected to Neurons](#cluster.selectedToNeurons) or a filter.
+**Shift-drag a rectangle** (⌘- or Ctrl-drag does the same), on the card or in the expanded view. The rows and columns it covers leave the node on their own two ports, `Selected Rows` and `Selected Columns`, ready for [Selected to Neurons](#cluster.selectedToNeurons) or a filter.
 
 | gesture | what it does |
 | --- | --- |
 | shift-drag | select the rows and columns the box covers |
-| alt-shift-drag | add another block to the selection |
-| shift-click, or ⌫ | clear it |
+| shift+⌘-drag | add another block to the selection |
+| shift+⌘-click | add the single cell under the pointer |
+| alt-shift-drag | adds too — the same thing, and what the Scatter uses |
+| shift-click | clear it |
 | drag | pan, as before — selection needs the modifier |
+
+The caption counts what is selected, on the card as well as expanded, and the `Selection` tab holds the same list as a field you can edit or empty.
 
 Each table carries three columns:
 
@@ -113,6 +130,9 @@ Each table carries three columns:
 > the moment it happens — select after you have arranged the matrix, not before.
 
 The picture is **bands rather than the box you drew**, because an added block is a second run and a matrix folded to fit puts many lines on one block. The two ports are independent lists rather than the block where they cross, which is why a wide drag reads as a cross. To take whole rows, drag the full width of the plot.
+
+> [!NOTE] A single cell is still a row and a column
+> The two ports are independent lists, so shift+⌘-clicking one cell adds its row to `Selected Rows` and its column to `Selected Columns` — it does not name the pair. Clicking a second cell elsewhere gives you two rows and two columns, which is four cells' worth of cross rather than the two you pointed at.
 
 ## More cells than pixels
 

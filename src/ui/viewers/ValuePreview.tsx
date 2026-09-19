@@ -829,6 +829,7 @@ const VIEWERS: Record<string, ViewerEntry> = {
           limits={readColorLimits(params)}
           logColor={heatmapLogColor(params)}
           showValues={params.showValues === true}
+          cellShape={choice<'square' | 'circle'>('cellShape')}
           // The param verbatim: both axes live in one `ids` param, so a rectangle is one commit
           // and an undo takes back the whole of it. `chartSelection.ts` owns the grammar.
           selection={selection}

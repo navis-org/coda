@@ -3539,6 +3539,78 @@ logarithm of them; ggplot gets a `fill_` column clamped and transformed beside t
 `scales::oob_squish`. Both were run: the annotations come back as the raw values, `-3` and `200`
 included, and nothing goes NA at a limit.
 
+### Circles: the same number twice, and three decisions that are not the drawing
+
+`Cell shape` draws each cell as a disc whose **area** is its value. A connectivity matrix is
+mostly empty and the squares paint that emptiness as the bottom of the ramp, which on Coda blue
+is very nearly the surface — so the picture is a dark field with a few highlights. Circles make
+the sparsity the *shape* of the plot: on the 34x34 demo the T4/T5 → LPLC block and the Mi1
+column read at a glance where the squares needed the colour bar.
+
+**Area, not radius** — `resolveSize`'s rule one encoding over, so the radius takes a square root.
+A circle of twice the radius reads as four times the quantity, and that is the relation readers
+actually compare.
+
+**It reads the bucket, not the value**, which is the decision that keeps the two encodings from
+ever disagreeing. A bucket is already the value's position on the ramp, so a log colour, a manual
+`Min`/`Max` and the clamping at both ends all reach the radius for free — `colorDomain` stays the
+one place a value's position is decided, exactly as it is for `normalize`, the hit test and the
+export. The alternative, a second scale over the raw values, is two mappings that agree until
+somebody ticks Log colour.
+
+**Size is distance from the domain's `neutral`**, which is the low end of a sequential ramp and
+the centre of a diverging one: a radius cannot be negative, and on a diverging scale the sign is
+what the colour is already carrying. So the circle says *how much* and the hue says which way,
+which is `corrplot`'s division. One trap there, and a test found it rather than an eye:
+`RAMP_STEPS` is **even**, so a diverging centre falls exactly between buckets 255 and 256 and
+`bucketOf` rounds it to one side — the two arms then reach 256 and 255 buckets and equal
+magnitudes either side of zero drew *different* circles. 0.2%, invisible, and a claim the mark
+must not make, since symmetry about the centre is the whole of what "the hue says which way"
+means. The neutral point is taken in continuous bucket space now.
+
+Three things were decided rather than derived, and each had a live alternative.
+
+**A cell at the neutral end draws nothing.** That is most of why the mark is worth having — an
+unconnected pair is an empty cell. What it costs is that a recorded zero and a cell nobody
+measured look alike, where the squares tell them apart (`-1` shows the surface, 0 takes the
+ramp's bottom colour); and a manual `Min` above the data's floor hides those cells here rather
+than flattening them, which the caption's `values clipped` says the related half of. The
+alternative was a ~1.5px floor so every recorded cell keeps a dot, which preserves that
+distinction and makes a sparse matrix look like a full grid of dots — i.e. gives up the thing
+the mark was reached for.
+
+**Too dense means squares, and the card says so.** Circles need a cell several pixels across, and
+past one cell per pixel the grid is folded and a block stands for many cells drawn as the
+strongest of them — a circle there would be sized by a value that is not the block's, in a
+space one pixel wide. So `circlesFit` is a **size test on the spec** and the param is `&&`-ed in
+at render, which is `Show values`' recorded arrangement: folding the choice into
+`buildHeatmapSpec` would put it in the dependency list of a pass that walks every cell. The
+fallback is not permanent — the fold is per *window*, so zooming in brings the circles back.
+`too dense for circles` is the **second caption note not stood down under `compact`**, and for a
+different reason from the selection count's: that one is about the picture, this one is about a
+*control* somebody set that is not in effect, and the card is where it nearly always fires, a
+preview plot being a couple of hundred pixels for however many rows. `CIRCLE_MIN_CELL` is 5,
+measured by eye in a browser at several sizes — it is a legibility threshold and a screen is the
+only instrument for one.
+
+**Neither exporter follows, and both say so.** seaborn's `heatmap` is a tile renderer, so the
+notebook would have to leave it for a melted scatter and rebuild the colourbar, the ticks and the
+annotations by hand, while ggplot is a one-geom swap — and taking only the cheap half would leave
+the `.Rmd` and the `.ipynb` from one card showing two different marks. So both draw tiles and
+carry `HeatmapColourPlan.shapeNote`. Saying so is the point rather than a hedge: the palette, the
+limits and the log are all presentational too and all followed, so a reader has every reason to
+assume this one was.
+
+Two implementation notes. The batching is **free** here in a way the squares' is not — a radius
+is a function of the bucket alone, so every cell in a bucket is the same circle and one `fill()`
+covers all of them; and circles are only reached unfolded at `CIRCLE_MIN_CELL` per cell, so a
+1400x700 plot holds at most ~39,000 of them however large the matrix is. And the printed values
+ask their ink **per mark**: a square fills its box so `inkOn(fill)` is always right, where a
+circle covers the text only near the top of the scale and below that the text sits on the
+surface — so the radius is compared with the text's own half-diagonal and the loser takes
+`inkOn(background)`. A flat "circles means surface ink" would be wrong for exactly the marks that
+are easiest to read.
+
 ### Zoom is a window, and the window is the fold's input
 
 Wheel zooms about the pointer, a drag pans, double-click or ⤢ fits — the scatter's gestures,
@@ -3644,6 +3716,53 @@ folded axis puts hundreds of lines on one grid cell. Rows span the plot's width 
 height, which draws a **cross** rather than the box that was dragged — honest, since the two axes
 leave as two independent lists, and the same picture a spreadsheet draws.
 
+#### No colour can sit on top of a ramp, so the band is a pair and a dash
+
+The band was a 1.5px `--accent` line — blue, on a viewer whose **default palette is Coda blue** —
+and the report was simply that it could not be seen. The fix looks like a colour choice and is
+not one. Worst-case contrast against any cell of any of the twelve palettes, both themes:
+
+| band | worst | where |
+| --- | --- | --- |
+| `--accent` (what it was) | **1.07** | every ramp has a cell it matches |
+| yellow `#ffd400` | **1.04** | viridis, inferno and magma — their top _is_ yellow |
+| white | 1.45 | |
+| black | 1.96 | |
+| **white over black** | **4.59** | PuOr's mid purple |
+
+So the answer is not a better hue: **a ramp crosses the whole hue circle and every lightness**, so
+for any single colour there is a cell it vanishes against. Yellow is a reasonable instinct and
+measures no better than the blue it would replace — worse, in that its blind spots are the tops of
+the three most-used published ramps. A light-and-dark _pair_ works because any cell is lighter or
+darker than mid grey and the other tone then reads; white over black clears the **4.5:1 floor for
+text** against every cell there is. `encoding.test.ts` pins that, so a thirteenth palette cannot
+quietly break it. Drawn as **two layers of the same rects**, every casing beneath every core, or
+one band's casing overdraws its neighbour's core. Widths 4 under 2, which leaves exactly 1px of
+casing either side: equal widths hide the casing, and less than 2px of difference anti-aliases the
+edge into grey at 1x.
+
+**And the core is dashed, which the contrast number could not have told anyone.** Found in a
+screenshot: the band's other neighbour is not a cell, it is the 1px separator _between_ cells — and
+that separator is not painted at all, it is the surface showing through. So on each theme one of
+the casing's two tones is already the grid. Light theme plus a palette whose low end is black
+(inferno, magma, rocket) draws a black field ruled in white, and a solid white band in it measures
+4.59:1 and still reads as a slightly brighter white line among white lines. Dashing the core fixes
+it by changing the **kind** of mark rather than its colour: the grid is solid and continuous, so an
+interrupted line cannot be mistaken for one at any palette or on either theme. That it is also how
+every image editor draws a selection is the second reason to want it, not the first.
+
+**Thinner on a card**, where the same band is a different fraction of the picture: a preview plot
+is a couple of hundred pixels across with cells two or three wide, so 4px covers several rows of
+what it is pointing at. 3 under 1 there against 4 under 2 expanded — and the casing stays exactly
+2px wider rather than scaling by the same factor, which would have put it at 0.75 and
+anti-aliased the whole band into grey. The dash shortens with it (4/3 against 7/5), a long
+pattern on a short band showing two dashes and reading as a broken line rather than a deliberate
+one. `heatmap-plot--compact` is the hook; jsdom resolves no stylesheet, so the tests pin the class
+and the browser pinned the widths.
+
+The hover ring is the same `stroke` against the same cells and has not had this treatment — it is
+transient and the pointer is already on it, so the eye knows where to look.
+
 **`label` and `relabel` are two columns because the Labels tab spends the identity.** `label` is
 what the line was called on the way in (the id), `relabel` what the card showed; where nothing
 renamed anything they are the same string. Keeping them aligned is the whole of why `evaluate`
@@ -3652,11 +3771,78 @@ which is what `orderIndices` exists for — it hands back the index lists and th
 them, so the follower's derived list reaches both. Deriving `label` at the end
 from the drawn name is impossible by construction: naming by type is one-to-many.
 
-**Seven properties only a browser could check**, which is `pnpm probe:heatmap-select`: that a
+**Eleven properties only a browser could check**, which is `pnpm probe:heatmap-select`: that a
 shift-drag selects what it covered *and only that*, that a bare drag does not select, that the
 bands land on the rows they cover, that the marquee appears and goes, that a shift-click clears,
-that alt-shift-drag adds and leaves two bands, and that ⌫ clears and then goes dim. jsdom performs
-no layout, so the spec there is degenerate and `linesInRect` has no geometry to convert.
+that alt-shift-drag and shift+⌘-drag each add and leave the blocks as separate bands, that a
+shift+⌘-click with no drag takes exactly one cell, that the strip is the fit button alone, and
+that a card takes the gesture without moving the canvas's node selection. jsdom performs no
+layout, so the spec there is degenerate and `linesInRect` has no geometry to convert.
+
+### Three chords, a click, and the card
+
+The gesture grew in four ways at once and each one turned out to be about something other than
+the heatmap.
+
+**Shift+⌘/Ctrl adds**, beside the Alt that already did. `isAdditive` asks whether a press is a
+selection at all (Shift **or** ⌘/Ctrl, the canvas's own chord), so the *adding* chord has to be
+something neither alone already means — Shift+⌘ is that, and it reads as the selection chord with
+more of it. Alt is **kept** rather than retired: it is `ScatterViewer`'s modifier for the same act
+one viewer over, and a heatmap that answered a hand's Alt+Shift by *replacing* what it had just
+added to would be the quiet kind of wrong. Two chords for one act is the price and it is paid in
+the help table.
+
+**A press with no drag in it is a rectangle covering one cell**, on an adding chord — and it is
+`cellAt`, not a zero-width `linesInRect`. The degenerate rectangle is the obvious reuse and it is
+wrong twice: `pointToMatrix` is a bare linear map with no bounds of its own, so a press in a label
+gutter comes back *clamped* and silently takes line 0; and a press landing exactly on a line
+boundary spans `[k, k − 1]`, which is empty. `cellAt` is what the hover ring and the tooltip
+already ask, so a click takes what the card was pointing at — on a folded block, the strongest
+cell it is drawn as rather than the hundred behind it. What it costs is inherent and the help says
+it: the two ports are independent lists, so one cell is a row *and* a column, and two clicked
+cells are a cross rather than a pair.
+
+**The ⌫ button is gone and ⤢ stays.** It was a control with two better spellings already — a
+shift-click on the plot, and the Selection tab's own field — and a third that could only be
+reached by expanding. ⤢ is *fit to view*, which reads as inert because it is `disabled` until
+something has been zoomed; it stays because it is the only discoverable reset, because
+double-click is not a thing anybody guesses, and because the Scatter, Dendrogram and ROI viewers
+all carry the same strip. The gestures lived in ⌫'s `title` and moved to ⤢'s, which is the control
+that is there whenever they apply.
+
+**Selecting moved onto the card, and the gate was never about cards.** It was `!compact`, recorded
+as "shift-drag belongs to the pane's own selection box" — which is true, and is a fact about *where
+a press lands*: with `selectionKeyCode="Shift"` React Flow's pane claims a shift-press **anywhere
+inside it**, our canvas included, takes the pointer capture and stops propagation in the *capture*
+phase, so the card's own handler never ran. `nokey` on the plot container is the library's own
+opt-out (one guard, `event.target.closest('.nokey')`, and nothing else in React Flow reads it), and
+with it the press reaches the heatmap while a pane rubber band still starts from empty canvas.
+Zoom and pan stay expanded-only — those are `zoomable`, and a preview React Flow already zooms has
+no business carrying a second zoom — but selecting writes a param, and making somebody expand a
+card to do it was a step in the way.
+
+Two things the browser said and nothing else could. **The gesture was also moving the canvas's node
+selection**: `nodrag` filters the d3 drag, where a node's selection rides on the `click`, which
+fires anyway — so one shift+⌘-click took a cell *and* selected the card, and building a selection
+cell by cell piled up cards that the next Delete would have removed. Measured 0 → 1, and 0 → 0
+after an `onClick` that stops a *modified* click at the canvas; a bare one still passes through,
+because clicking a card to select it is what a card does. And **the selection count is the one
+caption note not stood down under `compact`** — every other note is a thing worth saying about a
+picture and is dropped for room, where this is the only acknowledgement a card gives that the
+gesture landed, the bands saying *where* but not, on a preview that has folded a thousand lines
+onto two hundred pixels, how much.
+
+The jsdom side needed two stubs before any of it could be tested at all, and they were load-bearing
+for every pointer gesture in the app rather than for this one. jsdom implements **no
+`PointerEvent`**, so `fireEvent.pointerDown(el, { shiftKey: true })` fell back to a bare `Event` and
+every modifier, button and coordinate arrived `undefined` — the handler runs, reads a falsy
+`shiftKey`, and takes the branch for a gesture nobody made. And it implements **no pointer capture
+at all**, not as a no-op but as an absent property, so the `setPointerCapture` every drag here takes
+on the press threw a `TypeError` *inside* the handler before the gesture was recorded. Both read as
+the handler simply not having run: no error surfaces, the spy is just never called. `installJsdomStubs`
+now supplies a `MouseEvent` subclass and three no-ops, which is why `ScatterViewer`, `RankViewer`,
+`usePanGesture`, `ViewerDock`, `DashboardCellView`, `ParamField` and `groupDrag` are all newly
+testable for the *wiring* of their gestures — the geometry stays the probes'.
 
 **Two of them were wrong before they were right, and both wrongnesses were the probe's.** The
 band check, read by *shape*, passed against the column band — which spans the plot's whole height

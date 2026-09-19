@@ -428,6 +428,9 @@ registerEmitter('out.heatmap', (ctx) => {
     )
   }
   lines.push(...ctx.note(plan.colour.limitsNote))
+  // Circles are the card's alone — see `HeatmapColourPlan.shapeNote` for why neither document
+  // follows, and why saying so is the point rather than a hedge.
+  lines.push(...ctx.note(plan.colour.shapeNote))
 
   // The ends wherever they are not the data's — `colorDomain`'s on a diverging scale — as in R.
   let drawn = out

@@ -191,6 +191,9 @@ registerEmitter('out.heatmap', (ctx) => {
     )
   }
   lines.push(...ctx.note(plan.colour.limitsNote))
+  // Circles are the card's alone — see `HeatmapColourPlan.shapeNote` for why neither document
+  // follows, and why saying so is the point rather than a hedge.
+  lines.push(...ctx.note(plan.colour.shapeNote))
   if (diverging) {
     // Symmetric about zero, which is what Coda's diverging scale does and ggplot's does not.
     lines.push(

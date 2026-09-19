@@ -217,6 +217,30 @@ registerNode({
       visibleIf: (p) => p.scale !== 'diverging',
       help: 'Spread the colour over a log scale — the mapping only; the printed cells, the tooltip and the colour bar keep the values. Not offered on a diverging scale.',
     },
+    /*
+     * The mark, and it is `presentational` like everything else on this tab: it changes how a
+     * cell is drawn and never what the node outputs, so a Table beside the card and the CSV are
+     * untouched and restyling is a repaint rather than a re-run.
+     *
+     * Circles carry the magnitude **twice**, as colour and as area, which is what makes a sparse
+     * connectivity matrix readable: an empty pair is an empty cell rather than a cell painted the
+     * bottom of the ramp. The price is in the help — a radius cannot be negative, so on a
+     * diverging scale the size is the distance from the centre and the hue is the direction; and
+     * a value at the bottom of the scale draws nothing at all, which a square would have shown.
+     */
+    {
+      id: 'cellShape',
+      kind: 'enum',
+      label: 'Cell shape',
+      default: 'square',
+      presentational: true,
+      group: 'colour',
+      options: [
+        { value: 'square', label: 'squares' },
+        { value: 'circle', label: 'circles sized by value' },
+      ],
+      help: 'Circles carry the value twice — as colour and as area — so a sparse matrix reads as sparse. A cell at the bottom of the scale draws nothing, and on a diverging scale the size is the distance from the centre while the colour keeps the direction. Squares are drawn instead where the cells are too small for a circle to be one; the card says so.',
+    },
     {
       id: 'showValues',
       kind: 'boolean',
