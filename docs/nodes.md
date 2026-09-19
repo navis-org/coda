@@ -29,6 +29,7 @@ what a port's declaration means.
 - [Carry fields: getting a column onto the geometry](nodes-morphology.md#carry-fields-getting-a-column-onto-the-geometry)
 - [Attach Attributes: the general form of Carry fields](nodes-morphology.md#attach-attributes-the-general-form-of-carry-fields)
 - [Split Neurons: both halves of a filter, on a collection](nodes-morphology.md#split-neurons-both-halves-of-a-filter-on-a-collection)
+- [Select Neurons: the geometry a table names](nodes-morphology.md#select-neurons-the-geometry-a-table-names)
 - [Points in Volumes: the region a synapse is in](nodes-morphology.md#points-in-volumes-the-region-a-synapse-is-in)
 - [Skeletons: which copy, and saying which one answered](nodes-morphology.md#skeletons-which-copy-and-saying-which-one-answered)
 - [Synapses: what one point counts, and the confidence that was called a weight](nodes-morphology.md#synapses-what-one-point-counts-and-the-confidence-that-was-called-a-weight)

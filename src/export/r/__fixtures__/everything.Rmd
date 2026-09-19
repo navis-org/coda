@@ -2825,6 +2825,15 @@ sample_df <- sort_df |> slice(coda_sample_rows(nrow(sort_df), 200, 7))
 select_one_2 <- sort_df |> slice(4)
 ```
 
+```{r select-neurons}
+# ── Select Neurons ──
+# NOTE: R has no 64-bit integer, so an 18-digit root id read as a number was
+# already rounded before this line — read that column as character at the
+# source if these are CAVE ids.
+select_neurons_ids <- format(sort_df[["postId"]], scientific = FALSE, trim = TRUE)
+select_neurons <- skeletons[names(skeletons) %in% select_neurons_ids]
+```
+
 ```{r heatmap}
 # ── Heatmap ──
 heatmap_out <- as.matrix(similarity_matrix_2)

@@ -151,7 +151,17 @@ const RELATED: readonly (readonly string[])[] = [
   // The three things a dataset will hand you in space, and taking a collection of them apart.
   ['neuron.skeletons', 'neuron.meshes', 'neuron.roiMeshes', 'neuron.splitNeurons'],
   // Columns onto geometry after the fetch, and the two things that read them.
-  ['neuron.attachAttributes', 'neuron.skeletons', 'neuron.splitNeurons'],
+  [
+    'neuron.attachAttributes',
+    'neuron.skeletons',
+    'neuron.splitNeurons',
+    'neuron.selectNeurons',
+  ],
+  // The three ways to end up with fewer neurons than were fetched: a question asked of the
+  // attributes, a list of ids from somewhere else, and one element at a time. Attach Attributes
+  // is not a fourth — it changes no counts — and is related on the line above instead, since a
+  // group claims every member is worth reading beside every other.
+  ['neuron.selectNeurons', 'neuron.splitNeurons', 'core.selectOne'],
   // Both move geometry through a registration; Mirror is Transform with the sides swapped.
   ['neuron.mirror', 'neuron.xform'],
   // The two ways to look at neurons in space: Coda's own scene, and the viewer the field uses.

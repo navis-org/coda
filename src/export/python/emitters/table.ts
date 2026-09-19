@@ -27,6 +27,7 @@ import { unpivotPlan } from '../../../nodes/lib/tableOps'
 import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
 import { readAttach } from '../../../nodes/transform/attachAttributes'
+import { readSelection } from '../../../nodes/lib/selectNeurons'
 import { volumeColumnName } from '../../../nodes/lib/pointsInMeshes'
 import { edgePlanRefusal, groupColumns, readPlan } from '../../../nodes/lib/synapseEdges'
 import { carryable } from '../../../nodes/lib/carryParams'
@@ -37,6 +38,7 @@ import { readReduceOptions, reduceColumnName } from '../../../nodes/lib/matrixRe
 import type { AggFn } from '../../../nodes/lib/tableOps'
 import type { CellValue } from '../../../core/values'
 import type { DType } from '../../../core/types'
+import { NUMERIC_DTYPES } from '../../../core/types'
 import { decodeSetters, disabledEditNote, editPlan } from '../../../nodes/lib/tableEdits'
 import { usesRegex } from '../../../nodes/lib/tableFilter'
 import { filterMasks } from './tableFilters'
@@ -271,6 +273,51 @@ registerEmitter('neuron.splitNeurons', (ctx) => {
       `\`${ctx.output('matched')} = ${src}[mask.to_numpy()]\`, ` +
       `\`${ctx.output('rest')} = ${src}[~mask.to_numpy()]\`.`,
   )
+})
+
+// ---------------------------------------------------------------------------
+// Select Neurons
+// ---------------------------------------------------------------------------
+
+/**
+ * `Select Neurons`: the geometry whose ids a frame names, as a boolean index over the list.
+ *
+ * The opposite outcome from its `Split Neurons` neighbour above, and for one reason: that node
+ * filters the *attribute table* a collection carries, which a navis `NeuronList` does not have,
+ * where this one matches on `Neuron.id` — which every navis neuron has and which is the same
+ * thing the canvas matches on (`nodes/lib/selectNeurons.ts`, and invariant 8). So the cell needs
+ * nothing that was not fetched, and `nl[mask]` is the indexing the node itself would use.
+ *
+ * **`str` on both sides is load-bearing**, and the cast is `coda_ids`' rule rather than
+ * `astype(str)`. That helper's own docstring names the failure: a column pandas widened to
+ * `float64` for one null prints as `'10001.0'`, and `'nan'` arrives as a four-letter string —
+ * so an integer column goes through `Int64` first, which is exact to eighteen digits. The helper
+ * itself is not called here because every one of its call sites applies it to the emitter's *own*
+ * output; this frame belongs to an upstream cell, and retyping somebody else's binding in place
+ * would reach every other cell that reads it.
+ *
+ * The dtype is known at emit time, so the branch costs nothing and removes the need for a note:
+ * a `str` column is already exact, and a numeric one is made exact rather than warned about.
+ */
+registerEmitter('neuron.selectNeurons', (ctx) => {
+  const src = ctx.wired('in')
+  const frame = ctx.wired('neurons')
+  const out = ctx.output('out')
+  const column = readSelection(ctx)
+  const ids = `${ctx.name}_ids`
+  /*
+   * `Int64` before `string` only where the column really is a number. On a column of text it
+   * would raise, and on an unknown dtype — a Raw Cypher result — the honest assumption is that
+   * whatever it holds is already the text the canvas held.
+   */
+  const dtype = dtypeOf(ctx, 'neurons', column)
+  const exact = dtype && NUMERIC_DTYPES.includes(dtype) ? `.astype('Int64')` : ''
+  return [
+    `${ids} = set(${col(frame, column)}.dropna()${exact}.astype('string'))`,
+    /* A neuron named by the frame with nothing in the list is simply absent, which is the
+       canvas' rule — it counts them and warns rather than refusing. Nothing to emit for that. */
+    `${out} = ${src}[[str(n.id) in ${ids} for n in ${src}]]`,
+  ]
 })
 
 /**

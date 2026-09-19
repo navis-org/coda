@@ -77,8 +77,8 @@ set, and `core/sockets.test.ts` sweeps the registry for an `any` that declares n
 nor `anyKind`. If your port really does take anything, say `anyKind: true` — absence otherwise
 means two things, "takes everything" and "nobody has looked at this yet", and only one of them
 should ship. `out.download` is the sole holder today.
-[The section below](#portdefkinds-what-an-any-port-actually-means) has the five sets and why they
-are five.
+[The section below](#portdefkinds-what-an-any-port-actually-means) has the six sets and why they
+are six.
 
 ## Prose
 
@@ -355,16 +355,24 @@ The bill came due on the drop palette — dropping a `Linkage` opened on `Mirror
 more `… Neurons` nodes above `Cut Tree` — and [canvas.md](canvas.md#dropping-a-wire-on-empty-canvas)
 has the numbers. What belongs here is the shape of the declaration.
 
-**It takes the array the predicate already reads, never a copy of it.** Five kind sets exist and
+**It takes the array the predicate already reads, never a copy of it.** Six kind sets exist and
 each has one array:
 
 | set | where | who takes it |
 | --- | --- | --- |
-| `GEOMETRY_KINDS` | `core/types.ts` | Mirror, Transform, Stack Neurons |
+| `GEOMETRY_KINDS` | `core/types.ts` | Mirror, Transform, Stack Neurons, Attach Attributes |
 | `SPLIT_KINDS` | `nodes/lib/splitRows.ts` | Split Neurons |
 | `ITERABLE_KINDS` | `nodes/lib/iterables.ts` | Select One, For Each |
 | `COLLECTABLE_KINDS` | `nodes/flow/collect.ts` | Collect |
+| `DISTANCE_KINDS` | `nodes/lib/geometryDistance.ts` | Distance between |
+| `SELECT_KINDS` | `nodes/lib/selectNeurons.ts` | Select Neurons |
 | — (`anyKind: true`) | — | Download, the one port that means `any` literally |
+
+The last three hold the same two members and are still three lists. `SPLIT_KINDS` excludes points
+because a cloud's rows are connectors (a judgement about the operation); the other two exclude them
+because a cloud has no `items` and therefore no id of its own (a fact about the value). Two refusals
+resting on one array come apart the moment either node changes its mind, which is the thing a shared
+list cannot express — so keep adding one per judgement, and keep this table in step.
 
 `GEOMETRY_KINDS` moved into `core/types.ts` from `transformOps.ts` because which kinds are
 geometry is a fact about `CodaType` and three modules outside `nodes/` need it. The other three

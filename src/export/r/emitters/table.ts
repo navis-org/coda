@@ -34,6 +34,7 @@ import { unpivotPlan } from '../../../nodes/lib/tableOps'
 import { readUnpivotSpec } from '../../../nodes/table/unpivot'
 import { decodeRenames } from '../../../nodes/lib/renames'
 import { readAttach } from '../../../nodes/transform/attachAttributes'
+import { readSelection } from '../../../nodes/lib/selectNeurons'
 import type { ReduceStat } from '../../../nodes/lib/matrixReduce'
 import { readReduceOptions, reduceColumnName } from '../../../nodes/lib/matrixReduce'
 import { volumeColumnName } from '../../../nodes/lib/pointsInMeshes'
@@ -240,6 +241,47 @@ registerEmitter('neuron.splitNeurons', (ctx) => {
     `    pull(.coda_match)`,
     `${matched} <- ${src}[${mask}]`,
     `${rest} <- ${src}[!${mask}]`,
+  ]
+})
+
+/**
+ * `Select Neurons`: the neuronlist indexed by the ids a frame names.
+ *
+ * `names(nl)` *is* the id vector for a nat neuronlist — the same read `Attach Attributes` above
+ * uses for its join key — so this is one `%in%` and the subset carries its metadata rows with it.
+ * The canvas matches on the geometry's own id rather than on its `neuronId` attribute column
+ * (`nodes/lib/selectNeurons.ts`), and `names()` is exactly that id, so the two agree without
+ * either of them saying so.
+ *
+ * **`format`, never `as.character`**, which is `coda_ids`' documented rule and not a preference:
+ * R switches to scientific notation when printing a wide numeric, so `as.character(7.2e17)` is
+ * `"7.20575940628857e+17"` — not an id, and no longer a key anything can match. `trim = TRUE` is
+ * the other half, since `format` pads a vector to a common width and space-padded ids join
+ * against nothing. The helper itself is not called here because every one of its call sites
+ * applies it to the emitter's *own* output; this frame belongs to an upstream cell, and retyping
+ * somebody else's binding in place would reach every other cell that reads it.
+ *
+ * The note that remains is the half `format` cannot fix and the Python side does not have: R has
+ * no 64-bit integer, so an 18-digit id that arrived as a `numeric` was already a different neuron
+ * before this line ran. The fix is at the read, which is why neuprintr's own `neuprint_ids()`
+ * returns character.
+ *
+ * Nothing is emitted for the ids a frame names that the list has no neuron for: they are simply
+ * absent, which is the node's rule — it counts them and warns rather than refusing.
+ */
+registerEmitter('neuron.selectNeurons', (ctx) => {
+  const src = ctx.wired('in')
+  const frame = ctx.wired('neurons')
+  const out = ctx.output('out')
+  const column = readSelection(ctx)
+  const ids = `${ctx.name}_ids`
+  return [
+    ...ctx.note(
+      'R has no 64-bit integer, so an 18-digit root id read as a number was already rounded ' +
+        'before this line — read that column as character at the source if these are CAVE ids.',
+    ),
+    `${ids} <- format(${frame}[[${rStr(column)}]], scientific = FALSE, trim = TRUE)`,
+    `${out} <- ${src}[names(${src}) %in% ${ids}]`,
   ]
 })
 

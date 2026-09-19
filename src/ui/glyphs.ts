@@ -512,6 +512,17 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['path', { d: 'M11.4 8.6 8.6 11M12.6 8.6 15.4 11' }],
   ],
   /*
+   * The funnel again, its spout continuing *as* one arbour's stem — Split Neurons' two marks with
+   * one arm instead of two, which is the difference between the nodes said in the drawing. The
+   * list the ids come from is deliberately not in here: at 24px a third element crowds the two
+   * that carry the meaning, and the material and the verb are what a glyph names.
+   */
+  'neuron.selectNeurons': [
+    ['path', { d: 'M9 3.8 11.2 6.4V8.2L12.8 7.4V6.4L15 3.8Z' }],
+    ['path', { d: 'M12 20.4V8.8' }],
+    ['path', { d: 'M12 17l-2.6-2.8M12 15l2.6-2.2M14.6 12.8l-.4-2.6' }],
+  ],
+  /*
    * An arbour with two filled cells arriving on it. The arbour says the material is a neuron
    * rather than a row (the family mark), the filled blocks are values — `core.normalize`'s and
    * `core.reduceMatrix`'s fill — and the arrow points *at* the neuron, which is the whole

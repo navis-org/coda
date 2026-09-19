@@ -588,6 +588,20 @@ export function everythingGraph(): CodaGraph {
         ]),
       },
     },
+    /*
+     * Fed by `skel` and by the *connection* table below it, on a column that is deliberately not
+     * this node's default: the emitted cells read the picker rather than the literal `neuronId`,
+     * and a fixture sitting on the default records a cell that would look identical if they did
+     * not. It is also the gesture the node exists for — draw the partners the filter kept — where
+     * the skeletons are already fetched and there is no table left in front of them.
+     */
+    {
+      id: 'pickneurons',
+      type: 'neuron.selectNeurons',
+      col: 5,
+      row: 5,
+      params: { idColumn: 'postId' },
+    },
     {
       id: 'sample',
       type: 'core.sample',
@@ -1753,6 +1767,8 @@ export function everythingGraph(): CodaGraph {
     ['syn', 'points', 'synblast', 'query'],
     ['skel', 'skeletons', 'cleanskel', 'in'],
     ['skel', 'skeletons', 'attach', 'in'],
+    ['skel', 'skeletons', 'pickneurons', 'in'],
+    ['sort', 'out', 'pickneurons', 'neurons'],
     ['reduce', 'out', 'attach', 'table'],
     ['syn', 'points', 'attachPoints', 'in'],
     ['find', 'neurons', 'attachPoints', 'table'],

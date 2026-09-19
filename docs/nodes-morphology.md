@@ -357,6 +357,87 @@ with both partitions summing and `Matching`'s bounding box recomputed to its own
 fixture carries two rows, one of them a regex, because a single-row node exercises neither the R
 predicate join nor the regex note.
 
+## Select Neurons: the geometry a table names
+
+`neuron.selectNeurons` takes a collection of skeletons or meshes on one socket and a neuron table
+on the other, and keeps the geometry whose ids the table names. One param, an `ID column` picker on
+the table; one output, the subset.
+
+It exists because **every route from a computed table back to already-fetched geometry was
+missing**. A `Cut Tree` cluster, an NBLAST shortlist, a `Distance between` result, a `Connectivity`
+table, an uploaded CSV — all of them are neuron tables, and until this node the only way to draw
+the subset they name was to go back above the fetch and filter the table there. That works and is
+usually cheaper, which is why the card's own guide says so; what it cannot do is the three cases
+this node is for. The geometry may be downstream of a `Stack Neurons`, a `Mirror` or a `Transform`
+with no table left in front of it. The table naming the subset may itself be computed *from* the
+geometry, which makes filtering upstream a cycle. And the fetch is `expensive`, so *which twelve of
+these hundred should I look at* is a question somebody asks six times in a row and should not pay
+for six times.
+
+**The match is on the geometry's own `item.id`, never on its `neuronId` attribute column.** The two
+agree when a source builds a collection and can stop agreeing afterwards: `Attach Attributes` writes
+over columns by name, and only the attribute table can be rewritten or re-ordered by something
+upstream. This is `elementIdentity`'s recorded rule and invariant 8's — the id is the identity, the
+column is a label beside it — and it is the one thing a plausible implementation gets wrong with
+nothing visible to say so, which is why `selectNeurons.test.ts` pins it with a collection whose
+`neuronId` column has been relabelled out from under its items.
+
+**The wanted ids go through `idText`, not `String(cell)`.** A `CellValue` is a float64, so an
+eighteen-digit CAVE root id read as a number is a different neuron — invariant 8 again, one level
+down. `idText` also answers null for a cell that is not an id at all, which is what an empty row and
+a mis-picked `type` column both look like from here.
+
+**Skeletons and meshes, and the exclusion is a sixth kind list rather than `SPLIT_KINDS`.** The
+member set happens to be identical, and the reason is not. Split Neurons refuses a point cloud
+because its attribute rows are *connectors*, so asking them a question and answering in items
+divides synapses under a name about neurons. That argument does not reach here at all — keeping the
+synapses of the neurons a table names is a sensible thing to want. What stops it is structural: a
+`PointsValue` has no `items`, so it carries no id of its own, and the match would have to run
+against an attribute column, which on a synapse cloud is *two* columns with nothing to say which end
+was meant. That is `DISTANCE_KINDS`' reason word for word, and it is still not shared with it, on
+that list's own argument: two refusals resting on one list come apart the moment either node changes
+its mind, which is the thing a shared list cannot express.
+
+**One output, where Split Neurons has two.** That node's `Rest` port exists because the negation of
+several ANDed filter rows is not one condition, so the complement has to be computed rather than
+asked for again. A list of ids has no such problem — the complement is an anti-join away on the
+table — and the gestures people reach for here (*show me the cluster*, *show me the top matches*)
+want one collection to wire into a viewer. A second socket on every card to serve the rarer half is
+the trade, and it was declined.
+
+**The subset keeps the collection's order, not the table's.** A subset is still the scene it came
+from, so anything already keyed on position — a stacked `source` column, a `Select One` index, a
+viewer's legend order — keeps meaning what it meant. Re-ordering to match the table would make this
+a sort as well as a filter, which is `core.sort`'s job one node up.
+
+**Nothing is refused for not matching**, and the two reports are different sentences on purpose. A
+table naming 400 partners wired to the 12 skeletons somebody fetched is the ordinary state, so the
+shortfall is a `ctx.warn` with a count and up to five ids in it. *Nothing* matching gets its own
+sentence naming the column, because that is what `resolveColumn`'s rule 3 looks like from the
+outside: a required picker whose stored column has gone is handed the first compatible one, so a
+table keyed on `label` or `bodyId` resolves perfectly well, runs perfectly well, and hands back an
+empty scene. Edit time cannot see it — `validateColumnParams` already says *using "label"* for the
+substitution itself, and whether that column holds ids is a fact about the data.
+
+The selection itself is `keepElements`, which this node added to `iterables.ts` — where everything
+about taking a subset of a collection already lives: the index-aligned attribute rows, bounds
+recomputed, `units`/`space`/`provenance`/`detail` carried, and the identity fast path that hands the
+whole collection back untouched when every neuron is wanted. **It is a one-sided `partitionElements`
+and that is the point**, because the complement is not free: `sliceElements` copies every attribute
+column of the discarded rows and calls `boundsOf` over their coordinate buffers, so keeping twelve of
+a hundred fetched meshes walked the vertices of the eighty-eight being thrown away, on a `cheap`
+node. Split Neurons pays that because it publishes both halves; a caller that discards one should
+not.
+
+**Both emitters emit, which is the opposite of its Split Neurons neighbour, and for one reason.**
+That node filters the attribute table a collection carries, which a navis `NeuronList` does not
+have; this one matches on `Neuron.id` in Python and `names(nl)` in R, which both libraries always
+have and which is the same id the canvas matches on. So the cells need nothing that was not fetched:
+`nl[[str(n.id) in ids for n in nl]]` and `nl[names(nl) %in% ids]`. Each carries one note, and it is
+the same failure in two dialects — a column read as a **float** stringifies as `1234.0` in pandas
+and in scientific notation in R, and matches nothing in silence. That is this cell's version of the
+mis-picked column the canvas warns about, and neither language can see it from the code.
+
 ## Points in Volumes: the region a synapse is in
 
 `neuron.pointsInVolumes` takes a point cloud on one socket and meshes on the other, and hands back

@@ -239,6 +239,33 @@ export function groupOf<V extends IterableValue>(v: V, column: string, key: stri
  * caller can instantiate `V` in a way the branches falsify.
  */
 /**
+ * The elements a predicate names, as a collection of the same kind.
+ *
+ * `partitionElements` with only the half most callers want, and it is here rather than at a call
+ * site because this file owns *everything* about taking a subset of a collection — the
+ * index-aligned attribute rows, the bounds recomputed, the frame carried. `groupOf` is the same
+ * question asked with a key; this is it asked with a predicate.
+ *
+ * **Not `partitionElements(...).matched`, which is what it replaced.** The complement is not free:
+ * `sliceElements` copies every attribute column of the discarded rows and calls `boundsOf` over
+ * their coordinate buffers, so keeping twelve of a hundred meshes walked the vertices of the
+ * eighty-eight being thrown away. That cost is one `Split Neurons` accepts because it publishes
+ * both halves; a caller that discards one should not pay it.
+ *
+ * The identity fast path is `partitionElements`' and for its reason: columns and geometry buffers
+ * are immutable by contract, so a collection nothing was dropped from *is* the same collection.
+ */
+export function keepElements<V extends IterableValue>(
+  v: V,
+  keep: (index: number) => boolean,
+): V {
+  const total = elementCount(v)
+  const matched: number[] = []
+  for (let i = 0; i < total; i++) if (keep(i)) matched.push(i)
+  return matched.length === total ? v : sliceElements(v, matched)
+}
+
+/**
  * Both halves of a predicate over a collection's elements: the ones it keeps, and the rest.
  *
  * `groupOf` widened from one group to two, and it belongs here for that reason — the question is
