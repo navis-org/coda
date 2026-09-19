@@ -180,14 +180,13 @@ registerNode({
       if (!spec.prefix) issues.push('No dataset name — the ids pass through untagged.')
       if (spec.prefix.includes(QUALIFIED_SEPARATOR)) {
         issues.push(
-          `"${spec.prefix}" contains "${QUALIFIED_SEPARATOR}", which is the separator — the ` +
-            `dataset read back will be "${spec.prefix.split(QUALIFIED_SEPARATOR)[0]}".`,
+          `"${spec.prefix}" contains the separator "${QUALIFIED_SEPARATOR}", so the ` +
+            `dataset will read back as "${spec.prefix.split(QUALIFIED_SEPARATOR)[0]}".`,
         )
       }
       issues.push(
-        'A tagged id is deliberately not a valid neuron id: anything downstream that queries ' +
-          'the dataset will refuse it rather than fetch the wrong neuron. Strip it again before ' +
-          'fetching geometry.',
+        'A tagged id is not a valid neuron id, so anything downstream that queries the ' +
+          'dataset will refuse it. Strip it again before fetching geometry.',
       )
     }
     return issues

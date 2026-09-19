@@ -346,7 +346,7 @@ describe('guard rails', () => {
     const said: string[] = []
     const { scene } = await sceneFrom({ limit: 5 }, many, stubSource(), said)
     expect(said.join(' ')).toMatch(/6 neurons is past this node's Warn above \(5\)/)
-    expect(said.join(' ')).toMatch(/Nothing is downloaded here/)
+    expect(said.join(' ')).toMatch(/Nothing is downloaded/)
     expect(layersOf(scene)[1]!['segments']).toHaveLength(6)
   })
 

@@ -493,7 +493,8 @@ registerNode({
       return ['This data source has no synapse locations']
     if (!sourceSupports(dataset, 'synapsesBetween')) {
       return [
-        `${sourceLabel(dataset) ?? 'This data source'} cannot fetch the synapses between two neuron sets`,
+        `${sourceLabel(dataset) ?? 'This data source'} cannot fetch the synapses between ` +
+          `two neuron sets.`,
       ]
     }
     return []

@@ -167,9 +167,9 @@ function datasetCell(
   if (!spec?.neurons) {
     return [
       ...ctx.note(
-        `Coda has no table spec for "${parsed.datastack}", so this client can be queried by ` +
-          'root id but cannot enumerate neurons. Pass `neuron_table=` and `id_column=` below, ' +
-          'or wire an Annotations source on the canvas.',
+        `Coda has no table spec for "${parsed.datastack}", so this client can be queried ` +
+          `by root id but cannot enumerate neurons. Pass \`neuron_table=\` and \`id_column=\` ` +
+          `below, or wire an Annotations source.`,
       ),
       `${out} = CodaCaveDataset(${client})`,
     ]
@@ -424,9 +424,9 @@ function seaTableCell(ctx: EmitContext, defaultHost: string): string[] {
   if (workspace) {
     lines.push(
       ...ctx.note(
-        `The node names workspace "${workspace}"; sea-serpent finds the base by enumerating the ` +
-          'account\u2019s workspaces, so there is nothing to pass it. If two workspaces hold a ' +
-          `base called "${base}" it will say so.`,
+        `sea-serpent finds workspace "${workspace}" by enumerating the account's ` +
+          `workspaces, so there is nothing to pass it. If two workspaces hold a base ` +
+          `called "${base}" it will say so.`,
       ),
     )
   }

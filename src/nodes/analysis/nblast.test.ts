@@ -221,7 +221,7 @@ describe('nblastOps — the flattening', () => {
     expect(said.join(' ')).toMatch(/pairs a second/)
     // The house closing clause, from `warnOverThreshold` rather than hand-written here — which
     // is the point: `core/limits.ts` records why that half must survive being copied.
-    expect(said.join(' ')).toMatch(/Going ahead anyway/)
+    expect(said.join(' ')).toMatch(/Running anyway/)
 
     said.length = 0
     checkNblastSize(ctx, 100, 100)

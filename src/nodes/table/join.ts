@@ -89,7 +89,8 @@ registerNode({
         // dtype under every picker downstream is not something to discover after a run.
         const key = joinKeyDType(left, right, spec)
         issues.push(
-          `Key dtypes differ (${spec.leftKey}: ${l.dtype} vs ${spec.rightKey}: ${r.dtype}) — matches are compared as text` +
+          `Key dtypes differ (${spec.leftKey}: ${l.dtype}, ${spec.rightKey}: ${r.dtype}) — ` +
+            `matched as text.` +
             (key ? `, and "${spec.leftKey}" comes out as ${key}` : ''),
         )
       }

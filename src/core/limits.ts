@@ -100,8 +100,8 @@ export interface ThresholdWarning {
 export function warnOverThreshold(ctx: Warner, w: ThresholdWarning): void {
   ctx.warn(
     `${w.count.toLocaleString()} ${w.unit} is past ${w.control} ` +
-      `(${w.threshold.toLocaleString()}). ${w.cost} Going ahead anyway — cancel and filter ` +
-      `upstream if that is not what you meant.`,
+      `(${w.threshold.toLocaleString()}). ${w.cost} Running anyway — cancel if that is ` +
+      `not what you wanted.`,
   )
 }
 
@@ -145,10 +145,8 @@ export function crashFloorIssue(
 ): string | undefined {
   if (bytes <= CRASH_FLOOR_BYTES) return undefined
   return (
-    `${what} would allocate ${formatBytes(bytes)} in one go, past the ${formatBytes(
-      CRASH_FLOOR_BYTES,
-    )} a browser tab can be expected to survive. This is the one limit Coda still refuses ` +
-    `rather than warns about: there is no result on the other side of it. ${remedy}`
+    `Refused: ${what} would allocate ${formatBytes(bytes)} at once, past the ` +
+    `${formatBytes(CRASH_FLOOR_BYTES)} a browser tab survives. ${remedy}`
   )
 }
 

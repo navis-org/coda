@@ -288,9 +288,8 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
     } else if (!emitter) {
       warnings.push(`${def.label} has no R equivalent yet.`)
       body = ctx.todo(
-        `"${def.label}" has no R Markdown equivalent yet, so this step is missing from ` +
-          'the translation. Everything downstream of it refers to variables that were ' +
-          'never bound.',
+        `"${def.label}" has no R Markdown equivalent yet, so this step is missing. ` +
+          `Everything downstream of it refers to variables that were never bound.`,
       )
     } else {
       try {

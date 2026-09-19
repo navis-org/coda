@@ -1273,7 +1273,7 @@ describe('unpivot', () => {
     expect(out.length).toBe(80_000)
     expect(100 * 800 * 32).toBeGreaterThan(PIVOT_CELLS_WARN)
     expect(said.join(' ')).toContain('cells')
-    expect(said.join(' ')).toContain('Going ahead anyway')
+    expect(said.join(' ')).toContain('Running anyway')
   })
 
   it('refuses the fold that has no table on the other side of it, before allocating', () => {

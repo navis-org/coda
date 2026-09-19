@@ -294,8 +294,9 @@ function notShared(detail: string): GoogleSheetError {
 function refusal(status: number, config: GoogleSheetConfig, url: string): GoogleSheetError {
   if (status === 400 && config.gid) {
     return new GoogleSheetError(
-      `That sheet has no tab with gid ${config.gid}. The gid is the number after "#gid=" in ` +
-        `the address bar when that tab is open; clear the field for the first tab.`,
+      `That sheet has no tab with gid ${config.gid}. The gid is the number after ` +
+        `"#gid=" in the address bar with that tab open; clear the field for the first ` +
+        `tab.`,
       status,
     )
   }

@@ -404,10 +404,10 @@ export function checkWarpSize(ctx: Warner, points: number, landmarks: number): v
   const product = points * landmarks
   if (product <= WARP_PRODUCT_WARN) return
   ctx.warn(
-    `Warping ${points.toLocaleString()} points through ${landmarks.toLocaleString()} landmarks ` +
-      `is ${describeDuration(product / WARP_PRODUCTS_PER_SECOND)} in the browser, ` +
-      `single-threaded. Warping anyway — cancel and fetch fewer neurons, take meshes at a ` +
-      `coarser level of detail, or turn Warp off for a plain flip.`,
+    `Warping ${points.toLocaleString()} points through ${landmarks.toLocaleString()} ` +
+      `landmarks is ${describeDuration(product / WARP_PRODUCTS_PER_SECOND)}, ` +
+      `single-threaded. Warping anyway — cancel and fetch fewer neurons, take a ` +
+      `coarser Detail, or turn Warp off for a plain flip.`,
   )
 }
 
@@ -830,8 +830,8 @@ export function landmarkTriple(
       if (typeof cell !== 'number' || !Number.isFinite(cell)) {
         throw new Error(
           `Row ${row + 1} of "${name}" is not a finite number. A spline interpolates its ` +
-            'landmarks exactly, so one missing coordinate pins a control point at the origin ' +
-            'and pulls every neuron near it.',
+            `landmarks exactly, so one missing coordinate drags every neuron near it to the ` +
+            `origin.`,
         )
       }
       out[row * 3 + axis] = cell * scale

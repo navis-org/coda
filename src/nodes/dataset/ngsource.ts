@@ -187,8 +187,8 @@ registerNode({
        */
       return [
         ref.scheme === 'graphene'
-          ? `That is a graphene:// segmentation, which is a CAVE datastack — use a CAVE dataset ` +
-            `node for it. This node reads precomputed sources.`
+          ? 'That is a graphene:// segmentation — a CAVE datastack. Use a CAVE dataset node; ' +
+            'this node reads precomputed sources.'
           : `Coda reads precomputed sources; this one is ${ref.scheme}.`,
       ]
     }
@@ -215,8 +215,8 @@ registerNode({
        * **layer**, which is the other thing this node emits.
        */
       return [
-        `${ref.location} is ${probe.source.summary} — there is no geometry here for a Meshes ` +
-          `node, though it still works as a Neuroglancer layer.`,
+        `${ref.location} is ${probe.source.summary}: no geometry for a Meshes node, ` +
+          `though it still works as a Neuroglancer layer.`,
       ]
     }
     return []

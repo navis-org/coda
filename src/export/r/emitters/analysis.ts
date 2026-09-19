@@ -137,10 +137,9 @@ registerEmitter('net.centrality', (ctx) => {
   return [
     ...(options.samples > 0 && (options.betweenness || options.closeness)
       ? ctx.note(
-          `The canvas sampled ${options.samples} source nodes for the shortest-path sweep. ` +
-            'igraph has no pivot sampling — its `cutoff` bounds path length instead — so this ' +
-            'runs the exact sweep: a more precise answer, and a considerably slower one on a ' +
-            'large graph.',
+          `The canvas sampled ${options.samples} source nodes. igraph has no pivot ` +
+            `sampling, so this runs the exact sweep: more precise, and considerably slower ` +
+            `on a large graph.`,
         )
       : []),
     ...(options.communities
@@ -277,10 +276,10 @@ registerEmitter('neuron.paths', (ctx) => {
   // neuprintr equivalent, and `Min fraction` changes which connections the search follows.
   if (ctx.params.normalize === true) {
     return ctx.todo(
-      'Paths with Normalize on has no neuprintr equivalent. The denominator is a whole ' +
-        "group's synapse total and Min fraction prunes the search as it grows, so an export " +
-        'without them would follow different connections and return different routes. Turn ' +
-        'Normalize off to export this node.',
+      'Paths with Normalize on has no neuprintr equivalent: the denominator is a whole ' +
+        "group's synapse total and Min fraction prunes the search as it grows, so an " +
+        'export without them would return different routes. Turn Normalize off to export ' +
+        'this node.',
     )
   }
 
@@ -304,9 +303,9 @@ registerEmitter('neuron.paths', (ctx) => {
    */
   return [
     ...ctx.note(
-      'neuprintr returns every route within the hop budget. Coda additionally ranks them by ' +
-        'their weakest link and keeps the strongest — that ranking is not reproduced, so this ' +
-        'is the unranked set.',
+      'neuprintr returns every route within the hop budget. Coda also ranks them by ' +
+        'their weakest link and keeps the strongest; that ranking is not reproduced, so ' +
+        'this is the unranked set.',
     ),
     ...ctx.note(
       'This node’s Network output is not reproduced here — only the routes table is. A cell ' +
@@ -831,8 +830,8 @@ registerEmitter('neuron.nblast', (ctx) => {
       lines.push(
         ...ctx.note(
           `nat.nblast's nblast() scores query against target only. Coda's "${symmetry}" ` +
-            `symmetry would need the reverse call as well — mind the orientation of the two ` +
-            `matrices before combining them.`,
+            `symmetry needs the reverse call too — mind the orientation of the two matrices ` +
+            `before combining them.`,
         ),
       )
     }
@@ -960,9 +959,9 @@ registerEmitter('cluster.linkage', (ctx) => {
 
   return [
     ...ctx.note(
-      `Coda runs navis-fastcore, whose linkage is SciPy's, and "${plan.method}" ` +
-        `is hclust's "${method}". Checked through both on one matrix: same merge heights, same ` +
-        `leaf order. Note that "ward.D" is a different criterion and would not agree.`,
+      `Coda's linkage is SciPy's via navis-fastcore, and "${plan.method}" is hclust's "` +
+        `${method}". Checked on one matrix: same merge heights, same leaf order. ` +
+        `"ward.D" is a different criterion and would not agree.`,
     ),
     `m_ <- as.matrix(${src})`,
     `d_ <- as.dist(${plan.invert ? `1 - (${combined})` : combined})`,
@@ -994,9 +993,8 @@ registerEmitter('cluster.cut', (ctx) => {
     ...ctx.note(plan.note),
     `cl_ <- ${cut}`,
     ...ctx.note(
-      'Coda numbers clusters left to right as the dendrogram draws them, so the column reads ' +
-        'against the picture. `cutree` numbers by observation order; the grouping is the same ' +
-        'either way, and this renumbers so the two agree.',
+      'Coda numbers clusters left to right as the dendrogram draws them; `cutree` ' +
+        'numbers by observation order. Same grouping — this renumbers so the two agree.',
     ),
     `cl_ <- match(cl_, unique(cl_[${src}$order]))`,
     ``,
@@ -1144,9 +1142,9 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
   if (!neurons) {
     return [
       ...ctx.note(
-        'No neuron table is wired on the canvas, so the labels are read as neuron ids. Rows that ' +
-          'are not usable ids are dropped, as they are in Coda, and what survives is kept as ' +
-          'character — every Coda id column is text, and an R `numeric` is a double.',
+        'No neuron table is wired on the canvas, so the labels are read as neuron ids. ' +
+          'Unusable ids are dropped, as in Coda, and the rest kept as character — every ' +
+          'Coda id column is text.',
       ),
       /*
        * `as.numeric` is the *filter* — how a label that is not an id is found — and `coda_ids`
@@ -1166,9 +1164,8 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
   const matchColumn = ctx.column('matchColumn') ?? 'neuronId'
   return [
     ...ctx.note(
-      'Coda matches labels as text, so both sides go through a character key — a tree labelled ' +
-        'by neuron id carries "722817260" against a numeric column, and joining those directly ' +
-        'matches nothing.',
+      'Coda matches labels as text, so both sides go through a character key: ' +
+        '"722817260" against a numeric column joins to nothing.',
     ),
     `${out} <- ${neurons} |>`,
     `  mutate(key_ = as.character(${col(matchColumn)})) |>`,
@@ -1411,9 +1408,9 @@ registerEmitter('neuron.nblastMatches', (ctx) => {
   if (cutoff === 'percentage') {
     lines.push(
       ...ctx.note(
-        'The band is around each row’s own best score, not the matrix’s — 0.05 keeps ' +
-          'everything within 5% of that neuron’s top match. Note this multiplies, so it ' +
-          'behaves as intended only for positive scores, which normalised NBLAST gives.',
+        "The band is around each row's own best score, not the matrix's: 0.05 keeps " +
+          "everything within 5% of that neuron's top match. It multiplies, so it behaves " +
+          'as intended only for positive scores.',
       ),
     )
   }
@@ -1776,10 +1773,10 @@ registerEmitter('neuron.distance', (ctx) => {
   if (method === 'within') {
     lines.push(
       ...ctx.note(
-        'This counts each node of the Query once, which is what bounds the answer by the ' +
-          'neuron’s own cable. navis’ cable_overlap — the nearest thing to this in either ' +
-          'language — instead sums a node once per Target point that picks it, and differs by ' +
-          'a little over one per cent on two example neurons at 2 µm.',
+        'This counts each Query node once, which is what bounds the answer by the ' +
+          "neuron's own cable. navis' cable_overlap instead sums a node once per Target " +
+          'point that picks it — a little over one per cent apart on two example neurons ' +
+          'at 2 µm.',
       ),
     )
   }

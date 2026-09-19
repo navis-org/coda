@@ -179,7 +179,8 @@ export function parseShareFragment(hash: string): ShareRef {
       // http, file, javascript, data — anything that is a scheme but not one of ours. Named,
       // because the fix differs completely between them and a shared refusal helps with none.
       throw new ShareLinkError(
-        `Coda cannot open "${scheme}://" workflow links. Links can carry the workflow itself, or point at a gist (gh://), a storage object (gs://) or an https URL.`,
+        `Coda cannot open "${scheme}://" workflow links. A link can carry the workflow ` +
+          `itself, or point at a gist (gh://), a storage object (gs://) or an https URL.`,
       )
   }
 }

@@ -150,16 +150,17 @@ export function embedRoute(isWired: (port: string) => boolean): EmbedRouteResult
   if (wired.length === 0) {
     return {
       ok: false,
-      refusal: `Wire one of ${EMBED_ROUTES.map((r) => r.label).join(', ')} in — a score matrix, a table of feature vectors, or a table of nearest neighbours.`,
+      refusal:
+        `Wire one of ${EMBED_ROUTES.map((r) => r.label).join(', ')}: a score matrix, a ` +
+        `table of feature vectors, or a table of nearest neighbours.`,
     }
   }
   if (wired.length > 1) {
     return {
       ok: false,
       refusal:
-        `${wired.map((route) => route.label).join(' and ')} are wired at once, and they are ` +
-        `alternatives — disconnect all but one. Which neighbours a point has would otherwise ` +
-        `depend on a rule this node does not have.`,
+        `${wired.map((route) => route.label).join(' and ')} are wired at once and they ` +
+        `are alternatives — disconnect all but one.`,
     }
   }
   return { ok: true, route: wired[0]!.port }
@@ -217,7 +218,7 @@ export function checkEmbedCount(ctx: Warner, n: number): void {
   if (n < MIN_EMBED_OBSERVATIONS) {
     throw new Error(
       `An embedding needs at least ${MIN_EMBED_OBSERVATIONS} observations, got ${n}. ` +
-        `Fewer than that have no neighbourhood structure to preserve.`,
+        `Fewer have no neighbourhood structure to preserve.`,
     )
   }
   if (n > EMBED_OBSERVATIONS_WARN) {
@@ -227,8 +228,8 @@ export function checkEmbedCount(ctx: Warner, n: number): void {
       unit: 'observations',
       control: 'the size this stays interactive at',
       cost:
-        'UMAP runs on the main thread in slices, so the tab keeps painting — but the run is ' +
-        'single-threaded and the fuzzy-set construction allocates per neighbour pair.',
+        'UMAP runs single-threaded in slices, and the fuzzy-set construction allocates ' +
+        'per neighbour pair.',
     })
   }
 }
@@ -245,9 +246,8 @@ export function clampNeighbours(ctx: Warner, requested: number, n: number): numb
   const capped = Math.max(2, Math.min(requested, n - 1))
   if (capped !== requested) {
     ctx.warn(
-      `Neighbours was ${requested}, which is more than ${n} observations can offer; used ` +
-        `${capped}. UMAP reads that number as how local the structure is, so on a set this ` +
-        `small it is describing nearly the whole of it.`,
+      `Neighbours was ${requested}, more than ${n} observations can offer; used ` +
+        `${capped}. On a set this small the neighbourhood is nearly the whole of it.`,
     )
   }
   return capped
@@ -497,9 +497,10 @@ export function checkNeighbourDistances(rows: readonly number[][], scoreIs: stri
   if (!Number.isFinite(lowest) || lowest >= 0) return
   throw new Error(
     scoreIs === 'similarity'
-      ? `Treating these scores as similarities gives distances as low as ${lowest.toFixed(3)}, ` +
-          `and a distance cannot be negative. NBLAST scores above 1 mean Normalise is off at the ` +
-          `NBLAST node; if the column already holds distances, say so with "Scores are".`
+      ? `Read as similarities, these scores give distances as low as ${lowest.toFixed(3)}` +
+          `, and a distance cannot be negative. Scores above 1 mean Normalise is off at ` +
+          `the NBLAST node. If the column holds distances already, say so with "Scores ` +
+          `are".`
       : `These scores go as low as ${lowest.toFixed(3)}, and a distance cannot be negative. Set ` +
           `"Scores are" back to similarities if a bigger number means more alike.`,
   )

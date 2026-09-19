@@ -170,8 +170,8 @@ export function labelPickerIssues(
   const label = ctx.column('labelColumn')
   if (!match || !label) {
     return [
-      `Annotations is wired but Match on and Label by are not both set, so the ${noun.plural} ` +
-        `keep the labels the matrix arrived with`,
+      `Annotations is wired but Match on and Label by are not both set, so the ` +
+        `${noun.plural} keep the labels they arrived with.`,
     ]
   }
 
@@ -187,9 +187,8 @@ export function labelPickerIssues(
      * having wired no annotations at all: hence a line here rather than silence.
      */
     issues.push(
-      `"${match}" is ${key.dtype} — a wide neuron id read as a number has already lost the ` +
-        `digits that identified it, so those ${noun.plural} keep their own labels ` +
-        `(see invariant 8)`,
+      `"${match}" is ${key.dtype}: a wide neuron id read as a number has already lost ` +
+        `digits, so those ${noun.plural} keep their own labels.`,
     )
   }
   if (match === label) {

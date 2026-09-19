@@ -222,9 +222,8 @@ registerNode({
         unit: 'source-link steps',
         control: 'the size an exact shortest-path sweep is usually run over',
         cost:
-          'Betweenness walks every link once per source node, so the cost is nodes \u00d7 ' +
-          'links. Set Sample to a few hundred pivots for an estimate that is minutes rather ' +
-          'than hours.',
+          'Betweenness walks every link once per source node, so the cost is nodes × ' +
+          'links. Set Sample to a few hundred pivots for an estimate.',
       })
     }
 

@@ -147,7 +147,8 @@ registerNode({
       if (!observations || !features) return ['Pick an Observations and a Features column']
       if (observations === features) {
         return [
-          'Observations and Features point at the same column, which compares every observation only with itself',
+          'Observations and Features are the same column, so every observation is compared ' +
+            'only with itself.',
         ]
       }
       return []
@@ -183,9 +184,9 @@ registerNode({
 
     if (features.labels.length < 2) {
       throw new Error(
-        `A similarity matrix needs at least 2 observations; this one has ` +
-          `${features.labels.length}. Check that the Observations column is the neurons rather ` +
-          `than the features.`,
+        `A similarity matrix needs at least 2 observations; this has ` +
+          `${features.labels.length}. Check Observations names the neurons rather than the ` +
+          `features.`,
       )
     }
     return { matrix: similarityMatrix(features, metric, output, ctx) }

@@ -260,9 +260,9 @@ export function edgePlanRefusal(plan: EdgePlan): string | undefined {
   if (!plan.source || !plan.target) return MISSING_ENDS
   if (plan.source !== plan.target) return undefined
   return (
-    `Presynaptic and postsynaptic both read "${plan.source}", so every edge would be a ` +
-    'self-loop. A Synapses cloud from neuPrint or CATMAID carries no partner column at all; ' +
-    'Synapses Between binds both ends at the server and does.'
+    `Presynaptic and postsynaptic both read "${plan.source}", so every edge would be ` +
+    `a self-loop. A Synapses cloud carries no partner column; use Synapses Between, ` +
+    `which binds both ends at the server.`
   )
 }
 

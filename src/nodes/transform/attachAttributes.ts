@@ -194,8 +194,8 @@ registerNode({
     const kind = ctx.inputs.in?.kind
     if (kind && !isGeometryKind(kind)) {
       return [
-        `Attach Attributes takes skeletons, meshes or points, not ${kind}. For a table, Join ` +
-          `matches two tables on a column.`,
+        `Attach Attributes takes skeletons, meshes or points, not ${kind}. For a table, ` +
+          `use Join.`,
       ]
     }
     /*

@@ -311,9 +311,8 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
     } else if (!emitter) {
       warnings.push(`${def.label} has no Python equivalent yet.`)
       body = ctx.todo(
-        `"${def.label}" has no notebook equivalent yet, so this step is missing from ` +
-          'the translation. Everything downstream of it refers to variables that were ' +
-          'never bound.',
+        `"${def.label}" has no notebook equivalent yet, so this step is missing. ` +
+          `Everything downstream of it refers to variables that were never bound.`,
       )
     } else if (foreign !== undefined) {
       /*
@@ -325,9 +324,9 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
       const named = backendName(foreign)
       warnings.push(`${def.label} has no ${named} equivalent yet.`)
       body = ctx.todo(
-        `"${def.label}" is wired to a ${named} dataset, and its notebook cell has only been ` +
-          `written for neuPrint. The dataset itself is a real client, so this is the step to ` +
-          `fill in by hand.`,
+        `"${def.label}" is wired to a ${named} dataset, but its notebook cell has only ` +
+          `been written for neuPrint. The dataset itself is a real client, so fill this ` +
+          `step in by hand.`,
       )
     } else {
       try {

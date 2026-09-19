@@ -207,10 +207,9 @@ registerEmitter('out.heatmap', (ctx) => {
   if (log) {
     lines.push(
       ...ctx.note(
-        'The colour runs on a log scale and the values do not: the fill is ' +
-          'log10(1 + value - low) and the label, where one is drawn, is the value itself. A ' +
-          'cell past either end is clipped to it, as on the card — note that this leaves the ' +
-          'legend labelled in the transformed units.',
+        'The colour runs on a log scale and the values do not: the fill is log10(1 + ' +
+          'value - low) and the label is the raw value. Cells past either end are clipped, ' +
+          'as on the card, and the legend stays in transformed units.',
       ),
     )
   }
@@ -411,10 +410,9 @@ function heatmapOrderLines(
         if (i === 0) {
           lines.push(
             ...ctx.note(
-              'The clustering is seaborn’s clustermap: each row a vector across the columns, ' +
-                'clustered by the distance between vectors. Coda reads an empty cell as 0 for ' +
-                'this, and puts a constant vector — no correlation, no cosine — at distance 1 ' +
-                'from everything rather than letting `cor`’s NA stop `hclust`.',
+              "The clustering is seaborn's clustermap: each row a vector across the columns. " +
+                'Coda reads an empty cell as 0 and puts a constant vector at distance 1 from ' +
+                "everything, rather than letting `cor`'s NA stop `hclust`.",
             ),
             `x_ <- ${out}`,
             `x_[!is.finite(x_)] <- 0`,
@@ -662,10 +660,9 @@ registerEmitter('out.rank', (ctx) => {
   if (plan.showShare) {
     lines.push(
       ...ctx.note(
-        'The card draws the share as a second panel under the ranking, sharing its axis. ' +
-          'ggplot2 alone cannot stack two panels with different y transforms — a transform ' +
-          'belongs to the scale rather than to the facet — so this is a second figure over the ' +
-          'same ranking. It is empty where the share was withheld; see coda_rank.',
+        "The card draws the share as a second panel sharing the ranking's axis. ggplot2 " +
+          'cannot stack two panels with different y transforms, so this is a second figure ' +
+          'over the same ranking — empty where the share was withheld; see coda_rank.',
       ),
       ``,
       `print(`,
@@ -924,8 +921,8 @@ registerEmitter('out.distribution', (ctx) => {
     lines.push(
       ...ctx.note(
         'Coda packs a swarm so no two marks overlap and thins it to 300 per group. ' +
-          '`geom_jitter` scatters them at random instead; `ggbeeswarm::geom_quasirandom` is ' +
-          'the faithful mark if you want to add the dependency.',
+          '`geom_jitter` scatters at random; `ggbeeswarm::geom_quasirandom` is the ' +
+          'faithful mark if you want the dependency.',
       ),
     )
   }

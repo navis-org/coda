@@ -64,10 +64,9 @@ export function checkCleanUnits(value: { units?: GeometryUnits }, usesDistance: 
   if (!usesDistance) return
   if (value.units === undefined || value.units === 'nm') return
   throw new Error(
-    `These coordinates are in ${value.units}, not nanometres, so a distance in micrometres ` +
-      'means nothing here — the result would be smoothed or resampled at whatever scale a ' +
-      'voxel happens to be, uniformly and with nothing to say so. Either leave the distance ' +
-      'controls at zero, or fetch from a dataset whose Meta publishes a voxel size.',
+    `These coordinates are in ${value.units}, not nanometres, so a distance in ` +
+      `micrometres means nothing here. Leave the distance controls at zero, or fetch ` +
+      `from a dataset whose Meta publishes a voxel size.`,
   )
 }
 
@@ -252,10 +251,9 @@ export function checkResampleSize(
     unit: 'nodes after resampling',
     control: 'what this node resamples to without comment',
     cost:
-      `${skeletonPointCount(skeletons).toLocaleString()} nodes went in and about ` +
-      `${nodes.toLocaleString()} would come out at a Spacing of ` +
-      `${(spacingNm / NM_PER_UM).toLocaleString()} µm, which is ` +
-      `${formatBytes(nodes * BYTES_PER_NODE)} of geometry before anything draws it.`,
+      `${skeletonPointCount(skeletons).toLocaleString()} nodes in, about ` +
+      `${nodes.toLocaleString()} out at ${(spacingNm / NM_PER_UM).toLocaleString()} µm ` +
+      `Spacing — ${formatBytes(nodes * BYTES_PER_NODE)} of geometry.`,
   })
 }
 
@@ -434,8 +432,8 @@ export function checkDropInternalsSize(
     unit: 'ray casts',
     control: 'what this node strips without comment',
     cost:
-      `That is ${triangles.toLocaleString()} triangles at ${params.rays} rays and ` +
-      `${params.passes} passes, single-threaded in the browser. Lower Rays or Passes, or ` +
-      'take the meshes at a coarser Detail on the Meshes node, which moves this most.',
+      `${triangles.toLocaleString()} triangles at ${params.rays} rays and ` +
+      `${params.passes} passes, single-threaded. Lower Rays or Passes, or take a ` +
+      `coarser Detail on the Meshes node.`,
   })
 }

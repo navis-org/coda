@@ -251,7 +251,8 @@ registerNode({
     if (!value || ctx.params.valueLog === false) return []
     return /log$/i.test(value)
       ? [
-          `"${value}" is already a logarithm, and Log value would take it again. Point Value at the raw measure, or turn Log value off.`,
+          `"${value}" is already a logarithm and Log value would take it again. Point ` +
+            `Value at the raw measure, or turn Log value off.`,
         ]
       : []
   },

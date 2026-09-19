@@ -149,7 +149,7 @@ describe('neuron.xform', () => {
      * state a Custom dataset node produces, and the override is the only way through.
      */
     const error = (await run(pipeline())).info('xf').error ?? ''
-    expect(error).toMatch(/do not say which template space/)
+    expect(error).toMatch(/name no template space/)
     expect(mockedWarp).not.toHaveBeenCalled()
   })
 

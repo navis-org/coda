@@ -105,9 +105,8 @@ export async function requireInstance(
   const base = instanceUrl(ref, instance)
   if (!(await readInstanceInfo(base, options))) {
     throw new Error(
-      `${serverOf(base)} has no ${instance} instance on this node, so this segmentation ` +
-        `publishes no ${kind}. Neuroglancer looks for exactly that name and would show none ` +
-        `either.`,
+      `${serverOf(base)} has no ${instance} instance on this node, so this ` +
+        `segmentation publishes no ${kind}. Neuroglancer would show none either.`,
     )
   }
   return base

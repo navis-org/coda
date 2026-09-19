@@ -133,9 +133,9 @@ registerNode({
      * had not run.
      */
     throw new Error(
-      `Pass ${(ctx.iteration?.index ?? 0) + 1} produced ${value.kind} where the passes before ` +
-        `it produced ${previous.kind}. Every pass of a loop has to produce the same kind for ` +
-        `Collect to stack them.`,
+      `Pass ${(ctx.iteration?.index ?? 0) + 1} produced ${value.kind}, earlier passes ` +
+        `produced ${previous.kind}. Collect stacks passes, so every pass must produce ` +
+        `the same kind.`,
     )
   },
 })

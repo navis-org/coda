@@ -387,17 +387,22 @@ registerNode({
      */
     if (needsPublishedTotals(settings)) {
       issues.push(
-        'Downstream needs a denominator belonging to the far end of each connection, which cannot be summed from an outputs query. Set Denominator to published totals, or use Upstream.',
+        "Downstream needs the far end's denominator, which an outputs query cannot sum. " +
+          'Set Denominator to published totals, or use Upstream.',
       )
     }
     if (settings.perQuery && hasCandidates) {
       issues.push(
-        'Per query neuron uses the channels to keep the query neurons apart, so there are none left to index the candidates and this cannot meet in the middle. Candidates still restrict which rows come back — the scores are the same, the walk is just the full depth from the Neurons end.',
+        'Per query neuron spends the channels on the query neurons, so none are left to ' +
+          'index the candidates and this cannot meet in the middle. Candidates still ' +
+          'restrict the rows: same scores, full-depth walk.',
       )
     }
     if (hasCandidates && !published && !downstream && !settings.perQuery) {
       issues.push(
-        'Candidates are wired, but meeting in the middle needs published totals — this will run as a single full-depth walk and filter the result, which gives the same scores for more queries. Set Denominator to published totals to halve the depth.',
+        'Meeting in the middle needs published totals, so this runs as one full-depth ' +
+          'walk and filters the result — same scores, more queries. Set Denominator to ' +
+          'published totals to halve the depth.',
       )
     }
     // The capability, asked only when the control is actually used. `sourceSupports` folds in
@@ -405,14 +410,16 @@ registerNode({
     // imported file totals that file's own weights. See `canTotalSynapses`.
     if (published && !sourceSupports(ctx.inputs.dataset, 'synapseTotals')) {
       issues.push(
-        `${label} does not publish the per-neuron synapse totals this denominator divides by. Use "summed within the traversal", which needs no second query.`,
+        `${label} publishes no per-neuron synapse totals. Use "summed within the ` +
+          `traversal", which needs no second query.`,
       )
     }
 
     const { maxHops: hops, minWeight, gain } = settings
     if (hops >= NOISY_HOPS && minWeight <= 1) {
       issues.push(
-        `${hops} hops at Min synapses ${minWeight} expands almost every partner of every partner. Raise Min synapses, or lower the Frontier limit — which bounds the cost and reports what it cost you.`,
+        `${hops} hops at Min synapses ${minWeight} expands almost every partner of every ` +
+          `partner. Raise Min synapses, or lower the Frontier limit.`,
       )
     }
 
@@ -425,7 +432,8 @@ registerNode({
       const covered = 1 - Math.pow(gain, hops + 1)
       if (covered < 0.5) {
         issues.push(
-          `At gain ${gain}, ${hops} hops covers ${percent(covered)} of the score — the rest is in paths longer than this walk. Lower the gain or raise Max hops.`,
+          `At gain ${gain}, ${hops} hops covers ${percent(covered)} of the score; the rest ` +
+            `is in longer paths. Lower the gain or raise Max hops.`,
         )
       }
     }
@@ -470,9 +478,9 @@ registerNode({
       seedColumn.length - seeds.length + (candidateColumn.length - candidates.length)
     if (repeated > 0) {
       ctx.warn(
-        `${repeated.toLocaleString()} repeated ${repeated === 1 ? 'id was' : 'ids were'} folded ` +
-          `away — an influence score is per neuron, so listing one twice cannot mean anything ` +
-          `here. Check the Neurons wire if you expected them to be distinct.`,
+        `${repeated.toLocaleString()} repeated ${repeated === 1 ? 'id was' : 'ids were'} ` +
+          `folded away — an influence score is per neuron. Check the Neurons wire if you ` +
+          `expected them to be distinct.`,
       )
     }
 
@@ -485,9 +493,9 @@ registerNode({
 
     if (needsPublishedTotals(settings)) {
       throw new Error(
-        'Downstream influence divides each connection by the *receiving* neuron’s total ' +
-          'input, which an outputs query never returns. Set Denominator to one of the published ' +
-          'totals options, or switch Direction to Upstream.',
+        "Downstream influence divides by the receiving neuron's total input, which an " +
+          'outputs query never returns. Set Denominator to published totals, or Direction ' +
+          'to Upstream.',
       )
     }
     /*
@@ -505,9 +513,9 @@ registerNode({
       !canTotalSynapses(source, dataset.datasetId, dataset.edges !== undefined)
     ) {
       throw new Error(
-        `${source.label} does not publish the per-neuron synapse totals this denominator ` +
-          `divides by. Set Denominator to "summed within the traversal", which divides by the ` +
-          `input list the walk already has.`,
+        `${source.label} publishes no per-neuron synapse totals. Set Denominator to ` +
+          `"summed within the traversal", which divides by the input list the walk already ` +
+          `has.`,
       )
     }
 
@@ -666,10 +674,9 @@ registerNode({
         }
         if (denominators === undefined) {
           ctx.warn(
-            `Candidates are wired but the denominator is summed within the traversal, so this ` +
-              `walked the full ${hops} hops from the Neurons end and filtered the result. The ` +
-              `scores are the same either way — switching Denominator to published totals ` +
-              `would split the budget and fetch far fewer neurons.`,
+            `Candidates are wired, but with the denominator summed within the traversal this ` +
+              `walked the full ${hops} hops and filtered the result. Same scores — published ` +
+              `totals would fetch far fewer neurons.`,
           )
         }
       }
@@ -748,8 +755,9 @@ registerNode({
         const bound = truncation(half)
         if (bound !== null && bound / seedTotal > LOSS_WARN) {
           ctx.warn(
-            `These scores are a lower bound: paths longer than the hop budget could add up to ` +
-              `${percent(bound / seedTotal)} more. Raising Max hops or lowering Gain closes the gap.`,
+            `These scores are a lower bound: paths longer than the hop budget could add up ` +
+              `to ${percent(bound / seedTotal)} more. Raise Max hops or lower Gain to close ` +
+              `the gap.`,
           )
         }
       }
@@ -757,24 +765,24 @@ registerNode({
       const droppedTotal = half.droppedMass.reduce((sum, value) => sum + value, 0)
       if (droppedTotal / seedTotal > LOSS_WARN) {
         ctx.warn(
-          `The frontier limit discarded ${percent(droppedTotal / seedTotal)} of the propagating ` +
+          `The frontier limit discarded ${percent(droppedTotal / seedTotal)} of the ` +
             `signal, so weakly-connected neurons are missing or under-scored. Raise Frontier ` +
-            `limit, or raise Min synapses so fewer neurons compete for the slots.`,
+            `limit, or raise Min synapses.`,
         )
       }
       const fragmentTotal = half.fragmentMass.reduce((sum, value) => sum + value, 0)
       if (fragmentTotal / seedTotal > LOSS_WARN) {
         ctx.warn(
-          `${percent(fragmentTotal / seedTotal)} of the signal went to bodies the dataset does ` +
-            `not publish as neurons and stopped there. That share is left out rather than ` +
-            `shared among the rest; tick "Include fragments" to follow it.`,
+          `${percent(fragmentTotal / seedTotal)} of the signal went to bodies the dataset ` +
+            `does not publish as neurons and stopped there. Tick "Include fragments" to ` +
+            `follow it.`,
         )
       }
       if (half.missingDenominator.size > 0) {
         ctx.warn(
-          `${half.missingDenominator.size.toLocaleString()} neurons have no published input ` +
-            `total, so nothing was propagated through them. They are a break in the paths ` +
-            `running through them rather than rows missing from the result.`,
+          `${half.missingDenominator.size.toLocaleString()} neurons have no published ` +
+            `input total, so nothing propagated through them — a break in the paths running ` +
+            `through them, not missing rows.`,
         )
       }
     }
@@ -823,9 +831,9 @@ registerNode({
      */
     if (flow.floored > LOSS_WARN) {
       ctx.warn(
-        `Transfer floor left ${percent(flow.floored)} of the drive out of the Transfers table, ` +
-          `so a flow diagram of it will show that much stopping short. Lower Transfer floor to ` +
-          `draw the weak connections too — it changes the picture, not the scores.`,
+        `Transfer floor left ${percent(flow.floored)} of the drive out of the Transfers ` +
+          `table, so a flow diagram will show that much stopping short. Lower it to draw ` +
+          `the weak connections — it changes the picture, not the scores.`,
       )
     }
     /*
@@ -837,10 +845,9 @@ registerNode({
      */
     if (!single) {
       ctx.warn(
-        `Transfers is empty because this run met in the middle: its two halves count hops from ` +
-          `opposite ends, so their columns are not the same columns and a diagram of both would ` +
-          `be laid out by two different measurements. Unwire Candidates, or set Denominator to ` +
-          `"summed within the traversal", to walk one pass and get them.`,
+        'Transfers is empty because this run met in the middle: its two halves count ' +
+          'hops from opposite ends, so they cannot share a diagram. Unwire Candidates, or ' +
+          'set Denominator to "summed within the traversal".',
       )
     }
 

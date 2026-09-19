@@ -114,7 +114,8 @@ export function shareAdvisories(
       id: 'uploads',
       text:
         files.length === 1
-          ? `${files[0]} is stored in this browser, not in the workflow — send the file separately, and whoever opens the link can pick it up again on the card that names it.`
+          ? `${files[0]} is stored in this browser, not in the workflow. Send the file ` +
+            `separately; whoever opens the link can pick it up on the card that names it.`
           : // "the Upload Table cards" until an Upload Mesh node could be among them, at which
             // point it names a card half the set is not on. The cards name their own files.
             `${files.join(', ')} are stored in this browser, not in the workflow — send the files separately, and whoever opens the link can pick them up again on the cards that name them.`,
@@ -134,7 +135,9 @@ export function shareAdvisories(
   if (linkChars !== undefined && linkChars > LONG_LINK_CHARS) {
     out.push({
       id: 'long',
-      text: `This link is ${Math.round(linkChars / 1000)} kB long, which mail and chat clients often cut short. A gist keeps it to about forty characters however large the workflow is.`,
+      text:
+        `This link is ${Math.round(linkChars / 1000)} kB, which mail and chat clients ` +
+        `often cut short. A gist keeps it to about forty characters at any size.`,
     })
   }
 

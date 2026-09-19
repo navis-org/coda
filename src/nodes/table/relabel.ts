@@ -149,7 +149,8 @@ registerNode({
        */
       const ids = spec.column === ID_COLUMN_NAME || spec.keyColumn === ID_COLUMN_NAME
       issues.push(
-        `"${spec.column}" is ${source.dtype} and "${spec.keyColumn}" is ${key.dtype} — matched as text` +
+        `"${spec.column}" is ${source.dtype} and "${spec.keyColumn}" is ${key.dtype} — ` +
+          `matched as text.` +
           (ids && source.dtype === 'i64'
             ? `, and a wide neuron id read as a number is already a different id (see invariant 8)`
             : ''),

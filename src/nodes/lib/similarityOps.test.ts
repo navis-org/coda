@@ -317,7 +317,7 @@ describe('what it refuses and what it merely says', () => {
     const table = longTable(labels.map((l) => [l, 'f1', 1] as [string, string, number]))
     const features = featuresFromLong(table, 'obs', 'feat', 'w')
     expect(() => similarityMatrix(features, 'cosine', 'similarity', SILENT)).toThrow(
-      /one limit Coda still refuses/,
+      /^Refused:/,
     )
   })
 })

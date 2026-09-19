@@ -439,9 +439,7 @@ describe('what it does at run time that the card cannot', () => {
       inputs: { dataset1: dataset('a'), dataset2: dataset('b') },
       source: { label: 'CATMAID' },
     })
-    await expect(def.evaluate(context)).rejects.toThrow(
-      /CATMAID does not publish a neuron index/,
-    )
+    await expect(def.evaluate(context)).rejects.toThrow(/CATMAID publishes no neuron index/)
   })
 
   it('refuses before it fetches anything', async () => {

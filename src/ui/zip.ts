@@ -97,9 +97,9 @@ async function bytesOf(parts: BlobPart[]): Promise<Uint8Array> {
 export async function zipFiles(entries: ZipEntry[], now: Date = new Date()): Promise<Blob> {
   if (entries.length > ZIP_MAX_ENTRIES) {
     throw new Error(
-      `A zip holds at most ${ZIP_MAX_ENTRIES.toLocaleString('en-US')} files and this run made ` +
-        `${entries.length.toLocaleString('en-US')}. Split the loop with “First N”, or write to a ` +
-        `folder instead — that route has no limit.`,
+      `A zip holds at most ${ZIP_MAX_ENTRIES.toLocaleString('en-US')} files and this ` +
+        `run made ${entries.length.toLocaleString('en-US')}. Narrow the loop with "First ` +
+        `N", or write to a folder, which has no limit.`,
     )
   }
 
@@ -117,8 +117,8 @@ export async function zipFiles(entries: ZipEntry[], now: Date = new Date()): Pro
 
     if (offset + data.length > ZIP_MAX_BYTES) {
       throw new Error(
-        `A zip holds at most 4 GB and this run passed it. Write to a folder instead — that ` +
-          `route streams to disk and has no limit — or narrow the loop with “First N”.`,
+        'A zip holds at most 4 GB and this run passed it. Write to a folder instead — it ' +
+          'streams to disk and has no limit — or narrow the loop with "First N".',
       )
     }
 

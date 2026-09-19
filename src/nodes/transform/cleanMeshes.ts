@@ -205,9 +205,9 @@ registerNode({
     const empty = emptiedItems(result.faceOffsets)
     if (empty > 0) {
       ctx.warn(
-        `${empty} of ${value.items.length} meshes came back with no faces. They are still in ` +
-          'the collection, so the attribute table still lines up. A mesh wound inward reads ' +
-          'as entirely internal to Drop internal membrane, which is the usual cause.',
+        `${empty} of ${value.items.length} meshes came back with no faces; they stay in ` +
+          `the collection so the attribute table lines up. An inward-wound mesh is the ` +
+          `usual cause — Drop internal membrane reads it as entirely internal.`,
       )
     }
     return { out: meshesFromResult(value, result, !changesFaces(params)) }

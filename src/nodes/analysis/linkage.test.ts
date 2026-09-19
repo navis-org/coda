@@ -169,7 +169,7 @@ describe('the Linkage node', () => {
         progress: () => {},
         signal: undefined,
       } as never),
-    ).rejects.toThrow(/different things/)
+    ).rejects.toThrow(/rows and columns are different/)
     expect(mockedRun).not.toHaveBeenCalled()
   })
 

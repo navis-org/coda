@@ -1159,9 +1159,9 @@ export class NeuPrintSource implements DataSource {
       const source = await this.publishedSkeletonsFor(req.datasetId, req.signal)
       if (!source) {
         throw new Error(
-          `${req.datasetId} publishes no precomputed skeleton layer beside its segmentation, ` +
-            `so "published skeletons" is not available here. Leave the Skeletons node's Source ` +
-            `on Automatic for neuPrint's own.`,
+          `${req.datasetId} publishes no precomputed skeleton layer, so "published ` +
+            `skeletons" is unavailable. Leave the Skeletons node's Source on Automatic for ` +
+            `neuPrint's own.`,
         )
       }
       return this.publishedSkeletons(req, source)
@@ -1574,8 +1574,8 @@ export class NeuPrintSource implements DataSource {
     const source = await this.meshSourceFor(req.datasetId, req.signal)
     if (!source) {
       throw new Error(
-        `${req.datasetId} does not publish a mesh source. Only some neuPrint datasets do — ` +
-          `hemibrain, MANC, optic-lobe and male-CNS work.`,
+        `${req.datasetId} publishes no mesh source. Only some neuPrint datasets do — ` +
+          `hemibrain, MANC, optic-lobe and male-CNS.`,
       )
     }
 

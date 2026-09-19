@@ -248,7 +248,7 @@ describe('validate', () => {
       [`${BASE}/info`]: volumeInfo({ type: 'image' }),
     })
     await probePrecomputed(BASE)
-    expect(issues({ url: SPEC })[0]).toMatch(/there is no geometry here/)
+    expect(issues({ url: SPEC })[0]).toMatch(/no geometry for a Meshes node/)
   })
 
   it('reports an unreadable URL with the reason the transport gave', async () => {

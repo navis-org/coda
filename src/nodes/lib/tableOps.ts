@@ -2204,11 +2204,10 @@ export function pivotTable(
 
   if (colLabels.length > MAX_PIVOT_COLUMNS) {
     throw new Error(
-      `"${columnsColumn}" has ${colLabels.length.toLocaleString()} distinct values, so this ` +
-        `pivot would be that many columns wide. Past ` +
-        `${MAX_PIVOT_COLUMNS.toLocaleString()} columns the wide table is that many separate ` +
-        `arrays and there is no result on the other side of it. Columns should be the small ` +
-        `field — a side, a status, an ROI. Group or filter first.`,
+      `"${columnsColumn}" has ${colLabels.length.toLocaleString()} distinct values, so ` +
+        `this pivot would be that many columns wide; past ` +
+        `${MAX_PIVOT_COLUMNS.toLocaleString()} there is no result. Columns should be the ` +
+        `small field — a side, a status, an ROI. Group or filter first.`,
     )
   }
   refuseIfOverCrashFloor(
@@ -2606,8 +2605,7 @@ export function unpivotTable(
       control: 'the size a reshape is usually meant to have',
       cost:
         `Unfolding ${width.toLocaleString()} columns repeats every kept column ` +
-        `${width.toLocaleString()} times. Folding fewer columns, or filtering first, costs ` +
-        `proportionally less.`,
+        `${width.toLocaleString()} times. Fold fewer columns, or filter first.`,
     })
   }
 

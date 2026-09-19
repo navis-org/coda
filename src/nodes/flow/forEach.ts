@@ -172,7 +172,7 @@ registerNode({
     const issues: string[] = []
     if (!isIterableKind(input.kind)) {
       issues.push(
-        `For Each iterates a Table, Skeletons or Meshes. A ${input.kind} has no elements to iterate.`,
+        `For Each iterates a Table, Skeletons or Meshes. A ${input.kind} has no elements.`,
       )
     }
     if (isGroupMode(ctx.params) && !ctx.column('groupBy')) {
@@ -211,7 +211,8 @@ registerNode({
     }
     if (isGroupMode(ctx.params) && !ctx.column('groupBy')) {
       throw new Error(
-        `No column to group by. Pick one from the input, or switch “For each” back to ${elementNoun(value)}.`,
+        `No column to group by. Pick one, or set "For each" back to ${elementNoun(value)}` +
+          `.`,
       )
     }
 

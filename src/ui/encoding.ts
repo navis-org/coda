@@ -847,7 +847,9 @@ export function rampNotes(ramp: {
     notes.push({
       kind: 'clipped',
       text: 'values clipped',
-      title: `The colour scale stops at ${formatCompact(lo)} and ${formatCompact(hi)}${runs}. Values outside are drawn in the end colour they passed, not dropped.`,
+      title:
+        `The colour scale stops at ${formatCompact(lo)} and ${formatCompact(hi)}${runs}. ` +
+        `Values outside are drawn in the end colour, not dropped.`,
     })
   }
   if (ramp.log) {
@@ -855,15 +857,17 @@ export function rampNotes(ramp: {
       kind: 'log',
       text: 'log colour',
       title:
-        'The colour runs on a log scale, so equal steps of colour are not equal steps of value. ' +
-        'The numbers — on the colour bar and wherever a value is printed — are the values themselves.',
+        'The colour runs on a log scale, so equal steps of colour are not equal steps of ' +
+        'value. The numbers printed are the values themselves.',
     })
   }
   if (ramp.problem) {
     notes.push({
       kind: 'ignored',
       text: 'limits ignored',
-      title: `The colour limits are being ignored because ${ramp.problem}. The scale is the one the data gives.`,
+      title:
+        `The colour limits are ignored because ${ramp.problem}. The scale is the one the ` +
+        `data gives.`,
     })
   }
   return notes

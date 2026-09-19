@@ -594,9 +594,8 @@ registerNode({
       const names = columnNames(input.schema)
       if (!names.includes('neuronId')) {
         problems.push(
-          `Neuron Topology needs a "neuronId" column to identify a neuron. This table has: ${
-            names.length ? names.join(', ') : '(no columns)'
-          }`,
+          `Neuron Topology needs a "neuronId" column. This table has: ` +
+            `${names.length ? names.join(', ') : '(no columns)'}`,
         )
       }
     }
@@ -783,8 +782,8 @@ registerNode({
       ctx.warn(
         `${unsplit} of ${neuronCount} neurons could not be split — see the splitStatus column.` +
           (fragmented > 0
-            ? ` ${fragmented} of them arrived in several pieces; tick Heal fragmented skeletons ` +
-              'on the Compartments tab to join them first.'
+            ? `${fragmented} of them arrived in several pieces. Tick Heal fragmented skeletons ` +
+              `on the Compartments tab to join them first.`
             : ''),
       )
     }

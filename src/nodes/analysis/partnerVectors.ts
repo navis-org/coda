@@ -149,8 +149,8 @@ registerNode({
      */
     if (ctx.inputs.labels) {
       issues.push(
-        'Labels is wired, so partners are named by their shared label — Partners by and ' +
-          'Untyped partners do not apply, and a partner the mapping does not cover is dropped.',
+        'Labels is wired, so partners are named by their shared label: Partners by and ' +
+          'Untyped partners do not apply, and partners the mapping misses are dropped.',
       )
     }
     return issues

@@ -74,9 +74,9 @@ async function attached(edges: DatasetEdges): Promise<LoadedEdgeSet> {
   const set = await loadEdgeSet(edges.id)
   if (set) return set
   throw new Error(
-    `This dataset's connectivity comes from the edge set "${edges.name}", which is not in ` +
-      `this browser. Import the same file under Edge data on the dataset node — an edge set is ` +
-      `identified by its contents, so the same file will match.`,
+    `This dataset's connectivity comes from the edge set "${edges.name}", which is ` +
+      `not in this browser. Import the same file under Edge data on the dataset node; ` +
+      `a set is identified by its contents, so the same file will match.`,
   )
 }
 
@@ -142,9 +142,9 @@ export async function connectivityFor(
   if (req.rois?.length || req.splitByRoi) {
     if (req.edges) {
       throw new Error(
-        `This dataset's connectivity comes from the edge set "${req.edges.name}", which records ` +
-          `pre, post and weight and nothing about regions. Turn off the region options on this ` +
-          `node, or detach the edge set under Edge data on the dataset card.`,
+        `This dataset's connectivity comes from the edge set "${req.edges.name}", which ` +
+          `records pre, post and weight only. Turn the region options off, or detach the ` +
+          `edge set under Edge data.`,
       )
     }
     if (!canSplitConnectivityByRoi(source, req.datasetId, false)) {

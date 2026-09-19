@@ -171,11 +171,9 @@ registerEmitter('net.centrality', (ctx) => {
   return [
     ...(options.samples > 0 && (options.betweenness || options.closeness)
       ? ctx.note(
-          'Betweenness is sampled from ' +
-            `${options.samples} source nodes, as on the canvas. The summary's mean path ` +
-            'length and diameter are left empty here: networkx does not hand back the ' +
-            'distances its pivots visited, and sweeping every pair to get them is the cost ' +
-            'sampling was chosen to avoid.',
+          `Betweenness is sampled from ${options.samples} source nodes, as on the canvas. ` +
+            `Mean path length and diameter are left empty: networkx does not return the ` +
+            `distances its pivots visited, and sweeping every pair is what sampling avoids.`,
         )
       : []),
     ...(options.communities
@@ -488,9 +486,9 @@ registerEmitter('neuron.paths', (ctx) => {
 
   return [
     ...ctx.note(
-      "neuprint's `fetch_paths` returns every route within the hop budget. Coda additionally " +
-        'ranks them by their weakest link and keeps the strongest — that ranking is not ' +
-        'reproduced here, so this is the unranked set.',
+      "neuprint's `fetch_paths` returns every route within the hop budget. Coda also " +
+        'ranks them by their weakest link and keeps the strongest; that ranking is not ' +
+        'reproduced, so this is the unranked set.',
     ),
     `${out} = fetch_paths(`,
     `    ${sources}['neuronId'].tolist(),`,
@@ -726,9 +724,9 @@ registerEmitter('cluster.linkage', (ctx) => {
 
   return [
     ...ctx.note(
-      'Coda runs navis-fastcore, whose linkage matrix is SciPy’s: checked against ' +
-        'scipy.cluster.hierarchy.linkage on NBLAST-shaped matrices, merge order identical and ' +
-        'heights agreeing to 1e-15. The fused pass fastcore uses saves memory, not accuracy.',
+      "Coda runs navis-fastcore, whose linkage matrix is SciPy's — checked against " +
+        'scipy.cluster.hierarchy.linkage on NBLAST-shaped matrices: identical merge ' +
+        'order, heights agreeing to 1e-15.',
     ),
     `_m = np.asarray(${src}, dtype=float)`,
     ...note('symmetryOff'),
@@ -779,9 +777,8 @@ registerEmitter('cluster.cut', (ctx) => {
     ...ctx.note(plan.note),
     `_raw = np.asarray(${cut})`,
     ...ctx.note(
-      'Coda numbers clusters left to right as the dendrogram draws them, so the column reads ' +
-        'against the picture. SciPy numbers them by its own bookkeeping — the grouping is ' +
-        'identical either way; this renumbers so the two agree.',
+      'Coda numbers clusters left to right as the dendrogram draws them; SciPy numbers ' +
+        'them by its own bookkeeping. Same grouping — this renumbers so the two agree.',
     ),
     `_renumber = {c: i + 1 for i, c in enumerate(dict.fromkeys(_raw[${order}]))}`,
     `_cluster = [_renumber[c] for c in _raw]`,
@@ -963,9 +960,8 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
     ctx.require('numpy')
     return [
       ...ctx.note(
-        'No neuron table is wired on the canvas, so the labels are read as neuron ids — which ' +
-          'is what they are unless NBLAST was told to label by something else. Rows that are ' +
-          'not usable ids are dropped, as they are in Coda.',
+        'No neuron table is wired on the canvas, so the labels are read as neuron ids. ' +
+          'Rows that are not usable ids are dropped, as in Coda.',
       ),
       /*
        * Ends in `coda_ids`, like every other seam that mints a Coda id column. It used to end
@@ -990,9 +986,8 @@ function labelsToNeuronsEmitter(ctx: EmitContext): string[] {
   const matchColumn = ctx.column('matchColumn') ?? 'neuronId'
   return [
     ...ctx.note(
-      'Coda matches labels as text, so both sides go through a string key: an NBLAST labelled ' +
-        'by neuron id gives "722817260" against an int64 column, and merging those directly ' +
-        'returns nothing at all.',
+      'Coda matches labels as text, so both sides go through a string key: "722817260" ' +
+        'against an int64 column merges to nothing.',
     ),
     `_left = ${neurons}.assign(_key=${neurons}[${pyStr(matchColumn)}].astype(str))`,
     `_right = ${labels}.assign(_key=${labels}[${pyStr(labelColumn)}].astype(str))`,
@@ -1287,9 +1282,9 @@ registerEmitter('neuron.synblast', (ctx) => {
   if (label) {
     lines.push(
       ...ctx.note(
-        `Coda labels the rows by "${label}". neuprint-python's synapse frame carries fewer ` +
-          `columns than Coda's does — notably not the cell type — so this falls back to the ` +
-          `neuron id where the column is absent. Join it on from a neuron table to match.`,
+        `Coda labels the rows by "${label}". neuprint-python's synapse frame carries ` +
+          `fewer columns — notably no cell type — so this falls back to the neuron id. ` +
+          `Join it on from a neuron table to match.`,
       ),
     )
   }
@@ -1620,10 +1615,9 @@ registerEmitter('neuron.cleanMeshes', (ctx) => {
   return [
     ...(dropInternals
       ? ctx.note(
-          'Faces must be wound outward for Drop internal membrane: rays are fired into the ' +
-            'hemisphere each normal points into, so an inward-wound mesh reads as entirely ' +
-            'buried and comes back empty, and an inconsistently wound one loses healthy ' +
-            'membrane without saying so.',
+          'Faces must be wound outward for Drop internal membrane: rays fire into the ' +
+            'hemisphere each normal points into, so an inward-wound mesh comes back empty ' +
+            'and an inconsistently wound one loses healthy membrane silently.',
         )
       : []),
     `_cleaned = []`,
@@ -1963,20 +1957,19 @@ registerEmitter('neuron.distance', (ctx) => {
   if (kinds.includes('meshes')) {
     lines.push(
       ...ctx.note(
-        'Distances to a mesh are to its surface, not to its nearest vertex, which is what makes ' +
-          'them independent of how finely it was tessellated. trimesh needs **rtree** for that ' +
-          '(`pip install rtree`); without it every point is scanned against every triangle, ' +
-          'measured at 131 points a second on a 71,424-face neuron.',
+        "Distances are to a mesh's surface, not its nearest vertex, which is what makes " +
+          'them independent of tessellation. trimesh needs **rtree** for that (`pip ' +
+          'install rtree`); without it every point is scanned against every triangle — 131 ' +
+          'points a second on a 71,424-face neuron.',
       ),
     )
   }
   if (method === 'within') {
     lines.push(
       ...ctx.note(
-        'navis.cable_overlap answers a near neighbour of this and not the same number: it sums ' +
-          'each query node once per target point that picks it, so a node two points pick ' +
-          'counts twice and one no point picks counts not at all. On two example neurons at ' +
-          '2 µm that is 1378.68 against 1361.03.',
+        'navis.cable_overlap answers a near neighbour of this, not the same number: it ' +
+          'sums each query node once per target point that picks it. On two example ' +
+          'neurons at 2 µm, 1378.68 against 1361.03.',
       ),
     )
   }

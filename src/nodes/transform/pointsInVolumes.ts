@@ -176,10 +176,9 @@ registerNode({
 
     if (ambiguous > 0) {
       ctx.warn(
-        `${ambiguous.toLocaleString()} of ${points.attributes.length.toLocaleString()} points ` +
-          `are inside more than one volume; each was named for the first one on the wire. ` +
-          `A dataset's primary regions tile and do not overlap, so this usually means the ` +
-          `Volumes wire carries nested regions or neuron meshes.`,
+        `${ambiguous.toLocaleString()} of ${points.attributes.length.toLocaleString()} ` +
+          `points are inside more than one volume and were named for the first on the ` +
+          `wire. Primary regions do not overlap, so this usually means nested meshes.`,
       )
     }
     return { inside, outside }

@@ -113,9 +113,8 @@ registerNode({
      */
     if (String(ctx.params.mode) === 'mixed') {
       return [
-        'Reads each neuron’s dataset from its qualified id (dataset:id) — put a Qualify Ids ' +
-          'before the Stack Tables that combined them, or every neuron looks like one dataset ' +
-          'and every group comes back a singleton.',
+        "Reads each neuron's dataset from its qualified id (dataset:id). Without one " +
+          'every group comes back a singleton — put a Qualify Ids before the Stack Tables.',
       ]
     }
     return []
@@ -139,15 +138,14 @@ registerNode({
        */
       if (datasets < 2) {
         ctx.warn(
-          'Every neuron carries the same dataset, so no group can draw from two — put a ' +
-            'Qualify Ids before the Stack Tables that combined them. Ids look like ' +
-            '"flywire:720575940623374218" once they are qualified.',
+          'Inputs seemingly carry only one dataset, so no group can draw from two. Put a ' +
+            'Qualify Ids before the Stack Tables that combined them.',
         )
       } else if (singletons > 0) {
         ctx.warn(
-          `${singletons.toLocaleString()} neurons ended up alone, which is what a neuron with ` +
-            `no counterpart in the other dataset looks like. Read that count as a result rather ` +
-            `than as a setting to tune away.`,
+          `${singletons.toLocaleString()} neurons ended up alone — what a neuron with no ` +
+            `counterpart in the other dataset looks like. That is a result, not a setting to ` +
+            `tune.`,
         )
       }
       return { clusters: clusterTable(tree, clusters), tree: withClusters(tree, clusters) }

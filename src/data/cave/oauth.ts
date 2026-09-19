@@ -110,8 +110,8 @@ export async function discoverLoginService(
   const loginUrl = absoluteUrl(info.login_url)
   if (!loginUrl) {
     throw new Error(
-      `${url} named no login service, so this deployment cannot be signed in to. Paste a token ` +
-        `instead.`,
+      `${url} names no login service, so this deployment cannot be signed in to. Paste ` +
+        `a token instead.`,
     )
   }
 

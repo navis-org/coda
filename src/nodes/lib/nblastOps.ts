@@ -178,9 +178,8 @@ export function checkNblastSpaces(
 ): void {
   if (!query.space || !target.space || query.space === target.space) return
   throw new Error(
-    `Query ${noun} are in ${query.space} and Target ${noun} are in ${target.space}. NBLAST ` +
-      'scores how well two arbors lie along each other, so across two coordinate systems it ' +
-      'would score every pair as a stranger and say nothing about it. ' +
+    `Query ${noun} are in ${query.space} and Target ${noun} are in ${target.space}. ` +
+      `Across two coordinate systems NBLAST would score every pair as a stranger.` +
       // The remedy and its bridge check are `transformOps.ts`' — this function is where they were
       // learned, and keeping a copy is how the two came to say "both sides" and "them".
       spaceRemedy({ axis: 'space', left: query.space, right: target.space }),
@@ -204,9 +203,9 @@ export function checkNblastSize(ctx: Warner, rows: number, cols: number): void {
     unit: `pairs (${rows.toLocaleString()} x ${cols.toLocaleString()})`,
     control: 'what this node scores without comment',
     cost:
-      `That is ${describeDuration(pairs / NBLAST_PAIRS_PER_SECOND)} of scoring — it runs ` +
-      `single-threaded in the browser at roughly ${NBLAST_PAIRS_PER_SECOND.toLocaleString()} ` +
-      `pairs a second — and the matrix comes to ${formatBytes(pairs * 8)}.`,
+      `${describeDuration(pairs / NBLAST_PAIRS_PER_SECOND)} of scoring, ` +
+      `single-threaded at about ${NBLAST_PAIRS_PER_SECOND.toLocaleString()} pairs a ` +
+      `second, and ${formatBytes(pairs * 8)} of matrix.`,
   })
 }
 

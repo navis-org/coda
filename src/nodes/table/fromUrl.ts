@@ -167,10 +167,8 @@ registerNode({
        */
       if (ctx.signal.aborted) throw err
       throw new Error(
-        `Could not fetch ${url}. The host may be unreachable, or it may not allow ` +
-          `cross-origin reads — a browser refuses those without saying so. A file served ` +
-          `from the same origin as this app, or from a host sending ` +
-          `Access-Control-Allow-Origin, will work.`,
+        `Could not fetch ${url}. The host may be unreachable or refuses cross-origin ` +
+          `reads.`,
       )
     }
 

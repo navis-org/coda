@@ -254,9 +254,8 @@ registerNode({
     if (names.includes('neuronId')) return issues
     return [
       ...issues,
-      `Neuron Profile needs a "neuronId" column to identify a neuron. This table has: ${
-        names.length ? names.join(', ') : '(no columns)'
-      }`,
+      `Neuron Profile needs a "neuronId" column. This table has: ` +
+        `${names.length ? names.join(', ') : '(no columns)'}`,
     ]
   },
 

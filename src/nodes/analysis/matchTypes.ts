@@ -273,8 +273,8 @@ registerNode({
        */
       if (!sourceSupports(type, 'neuronIndex')) {
         issues.push(
-          `Dataset ${index}: ${sourceLabel(type) ?? 'This source'} cannot list a whole dataset, ` +
-            `which is what matching types needs.`,
+          `Dataset ${index}: ${sourceLabel(type) ?? 'this source'} cannot list a whole ` +
+            `dataset, which matching types needs.`,
         )
       }
       if (ctx.columns(repeatParamId('types', index)).length === 0) {
@@ -307,9 +307,9 @@ registerNode({
       const source = ctx.resolveSource(dataset.sourceId)
       if (!source.neuronIndex) {
         throw new Error(
-          `${source.label} does not publish a neuron index, so ${dataset.datasetId} cannot be ` +
-            `matched on cell types. Matching reads every neuron's types, not just the ones wired ` +
-            `in — see the node's guide.`,
+          `${source.label} publishes no neuron index, so ${dataset.datasetId} cannot be ` +
+            `matched on cell types — matching reads every neuron's types, not only the ones ` +
+            `wired in.`,
         )
       }
       return {
@@ -367,8 +367,9 @@ registerNode({
       const total = datasets[i]!.length
       if (!total || count / total < UNMATCHED_WARN_FRACTION) return
       ctx.warn(
-        `${names[i]}: ${count.toLocaleString()} of ${total.toLocaleString()} neurons matched ` +
-          `nothing in the other datasets. Anything built on this mapping describes only the rest.`,
+        `${names[i]}: ${count.toLocaleString()} of ${total.toLocaleString()} neurons ` +
+          `matched nothing in the other datasets. Anything built on this mapping covers ` +
+          `only the rest.`,
       )
     })
 
@@ -387,9 +388,8 @@ registerNode({
         unit: 'nodes on the Network port',
         control: 'what a node-link drawing stays readable at',
         cost:
-          `The mapping itself is unaffected — this is only the inspection port. Put a Filter ` +
-          `Network between it and the viewer: pick one label and expand to its connected ` +
-          `component, which is the unit the algorithm actually decides on.`,
+          'This is the inspection port only; the mapping is unaffected. Put a Filter ' +
+          'Network in front of the viewer and expand one label to its connected component.',
       })
     }
 

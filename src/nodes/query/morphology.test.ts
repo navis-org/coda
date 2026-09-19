@@ -305,7 +305,7 @@ describe('an oversized set', () => {
     // everything downstream was blocked by a wait somebody had not been asked about.
     expect(info.error ?? info.state).toBe('ok')
     expect(sched.warning('geo')).toMatch(/neurons is past this node's Warn above \(1\)/)
-    expect(sched.warning('geo')).toMatch(/cancel and filter upstream/)
+    expect(sched.warning('geo')).toMatch(/cancel if that is not what you wanted/)
     // The message used to say this, and both halves of it were wrong.
     expect(sched.warning('geo')).not.toMatch(/this viewer can draw/)
   })

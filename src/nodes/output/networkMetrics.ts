@@ -257,16 +257,15 @@ registerNode({
         unit: 'neighbour comparisons',
         control: 'the size a clustering coefficient is usually taken over',
         cost:
-          'Closing triangles means walking one node\u2019s neighbours for every neighbour of ' +
-          'every other, which a graph with a few very high-degree hubs makes expensive out of ' +
-          'proportion to its size.',
+          "Closing triangles walks each node's neighbours for every neighbour of every " +
+          'other, which a few high-degree hubs make very expensive.',
       })
     }
     if (result.dangling > 0) {
       ctx.warn(
-        `${result.dangling.toLocaleString()} of ${network.edges.length.toLocaleString()} links ` +
-          'name a node this network does not hold, and are not counted in anything here. That ' +
-          'is ordinary after a filter, and a surprise straight out of Build Network.',
+        `${result.dangling.toLocaleString()} of ${network.edges.length.toLocaleString()} ` +
+          `links name a node this network does not hold and are not counted here. Ordinary ` +
+          `after a filter; a surprise straight out of Build Network.`,
       )
     }
 
@@ -285,10 +284,10 @@ registerNode({
       .filter((name) => !(ROLLUPS as readonly string[]).includes(name))
     if (overwritten.length > 0) {
       ctx.warn(
-        `The node table already had ${overwritten.join(', ')}; the metric${
-          overwritten.length > 1 ? 's are' : ' is'
-        } written over ${overwritten.length > 1 ? 'them' : 'it'} rather than beside, so a picker ` +
-          'downstream cannot end up with two answers to one question.',
+        `The node table already had ${overwritten.join(', ')}; the new metric` +
+          `${overwritten.length > 1 ? 's were' : ' was'} written over ` +
+          `${overwritten.length > 1 ? 'them' : 'it'} rather than beside, so a picker ` +
+          `downstream sees one answer.`,
       )
     }
 

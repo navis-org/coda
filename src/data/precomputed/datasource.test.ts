@@ -602,7 +602,7 @@ describe('segment properties', () => {
     serve({ [`${base}/info`]: { '@type': 'neuroglancer_legacy_mesh' } })
     const source = sourceFor('gs://nameless-rois/seg')
     await expect(source.fetchRoiMeshes({ datasetId: source.datasetId })).rejects.toThrow(
-      /Input IDs node into a Meshes node, wired to the 3D View/,
+      /Input IDs into Meshes, wired to the 3D View/,
     )
   })
 

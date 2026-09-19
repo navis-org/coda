@@ -314,10 +314,10 @@ registerEmitter(
     if (!pushable && population.length > 0) {
       lines.push(
         ...ctx.note(
-          'The Dataset node narrows this graph to a population NeuronCriteria cannot express — ' +
-            'it ANDs its arguments and has no "is not empty" test, where these combine with OR. ' +
-            'The same neurons therefore arrive as a filter on the result, which means a larger ' +
-            'response than the canvas asks the server for.',
+          'The Dataset node narrows this graph to a population NeuronCriteria cannot ' +
+            'express: it ANDs its arguments and has no "is not empty" test, where these ' +
+            'combine with OR. So the same neurons arrive as a filter on the result — a ' +
+            'larger response than the canvas asks for.',
         ),
         ...pyPopulationMask(out, population, schema),
       )
@@ -363,8 +363,9 @@ function caveFindNeurons(
     return [
       ...lines,
       ...ctx.note(
-        `This node filters on region "${roi}", and a CAVE datastack publishes no regions — so ` +
-          'Coda answers it empty rather than ignoring it. Drop the region to get neurons back.',
+        `This node filters on region "${roi}", and a CAVE datastack publishes no ` +
+          `regions, so Coda answers it empty rather than ignoring it. Drop the region to ` +
+          `get neurons back.`,
       ),
       `${out} = ${out}.iloc[0:0]`,
     ]
@@ -607,8 +608,8 @@ registerEmitter('neuron.roiCounts', (ctx) => {
     // The second half of `fetch_neurons`' pair is the per-ROI breakdown, which is the whole
     // of what this node returns — one row per neuron per ROI.
     ...ctx.note(
-      'These counts nest: a synapse in LO(R) is counted again in its parent OL(R). Filter ' +
-        'to `fetch_primary_rois(client=...)` before summing, or the totals roughly double.',
+      'These counts nest: a synapse in LO(R) is counted again in OL(R). Filter to ' +
+        '`fetch_primary_rois(client=...)` before summing, or the totals roughly double.',
     ),
     `_, ${out} = fetch_neurons(`,
     `    NeuronCriteria(bodyId=${neuronIdInts(neurons)}, client=${c}),`,
@@ -692,8 +693,8 @@ registerEmitter('neuron.meshes', (ctx) => {
     // Coda's `Detail` is a triangle budget it spends across the batch, choosing the finest
     // level that fits; navis takes the level directly. `lod=1` is the usual middle ground.
     ...ctx.note(
-      'Coda picks the level of detail from a triangle budget across the whole batch. navis ' +
-        'takes a level, so this is a fixed one — raise `lod` for coarser, lower for finer.',
+      'Coda picks the level of detail from a triangle budget over the whole batch; ' +
+        'navis takes a fixed level. Raise `lod` for coarser, lower for finer.',
     ),
     `${out} = neu.fetch_mesh_neuron(`,
     `    ${ids},`,
@@ -733,9 +734,9 @@ registerEmitter('neuron.roiMeshes', (ctx) => {
   ctx.require('navisNeuprint')
   return [
     ...ctx.note(
-      'Region meshes are one request each, and neuPrint publishes them for visualization ' +
-        'only — decimated display surfaces, so a volume measured off one is an approximation ' +
-        'rather than a figure to quote.',
+      'Region meshes are one request each, and neuPrint publishes them for ' +
+        'visualization only — decimated surfaces, so a volume measured off one is an ' +
+        'approximation.',
     ),
     ...(chosen.length > 0
       ? []
@@ -846,8 +847,9 @@ registerEmitter(
     const { location, minConfidence, includeFragments, open } = plan
     const out = ctx.output('points')
     const typeNote = ctx.note(
-      'This frame names the two bodies of each synapse but not their cell types, which the ' +
-        'canvas fills from the dataset — join them from a neuron table if you need them.',
+      'This frame names the two bodies of each synapse but not their cell types, which ' +
+        'the canvas fills from the dataset. Join them from a neuron table if you need ' +
+        'them.',
     )
 
     if (isCaveDataset(ctx)) {

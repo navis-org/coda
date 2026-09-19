@@ -382,9 +382,9 @@ function segmentColors(
    */
   if (unreadable > 0) {
     ctx.warn(
-      `${unreadable} of ${neurons.length} rows have an id neuroglancer cannot use, so they ` +
-        `are left out of the scene. It takes plain whole numbers only, and one it cannot read ` +
-        `costs the whole layer rather than the one neuron.`,
+      `${unreadable} of ${neurons.length} rows have an id neuroglancer cannot use and ` +
+        `were left out. It takes plain whole numbers only, and one bad id costs the ` +
+        `whole layer.`,
     )
   }
 
@@ -400,8 +400,8 @@ function segmentColors(
       unit: 'neurons',
       control: "this node's Warn above",
       cost:
-        'Nothing is downloaded here, but neuroglancer has to draw every one and they all ' +
-        'travel in the link, which some deployments and some browsers will cut off.',
+        'Nothing is downloaded, but neuroglancer draws every one and they all travel in ' +
+        'the link, which some deployments and browsers cut off.',
     })
   }
   return { segments, colors }

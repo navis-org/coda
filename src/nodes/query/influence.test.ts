@@ -266,7 +266,7 @@ describe('Influence per query neuron', () => {
       { candidates: 'L1' },
     ).join(' ')
     expect(said).toMatch(/meet in the middle/)
-    expect(said).toMatch(/scores are the same/)
+    expect(said).toMatch(/same scores/)
   })
 })
 

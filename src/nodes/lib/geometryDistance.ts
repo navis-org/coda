@@ -1328,9 +1328,9 @@ export function checkDistanceSize(
     : ' A coarser Resample on Clean Skeletons moves that proportionally, and these statistics are' +
       ' weighted by cable, so it does not change the answer.'
   ctx.warn(
-    `A ${rows.toLocaleString()} x ${cols.toLocaleString()} comparison is ` +
-      `${describeDuration(seconds)} of searching.${lever} Running anyway; cancel if that is not ` +
-      `what you meant.`,
+    `A ${rows.toLocaleString()} × ${cols.toLocaleString()} comparison is ` +
+      `${describeDuration(seconds)} of searching.${lever} Running anyway; cancel if ` +
+      `that is not what you wanted.`,
   )
 }
 

@@ -125,8 +125,8 @@ registerNode({
     if (outside.length > 0) throw new Error(cellsOutsideRelease(outside))
     if (unparsed > 0 && ids.length === 0) {
       throw new Error(
-        `"${columnName}" holds no ZapBench cell ids. Pick the column holding them — the label ` +
-          `of a ZapBench Traces selection, or a zapbenchId.`,
+        `"${columnName}" holds no ZapBench cell ids. Pick the column that does — a ` +
+          `ZapBench Traces selection label, or a zapbenchId.`,
       )
     }
 

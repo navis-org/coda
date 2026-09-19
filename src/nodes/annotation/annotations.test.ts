@@ -614,7 +614,7 @@ describe('annotation nodes — refusals', () => {
     })
     const message = issues(g, 'cave')
     expect(message).toContain('neuPrint')
-    expect(message).toContain('wire a CAVE Dataset')
+    expect(message).toContain('Wire a CAVE Dataset')
     // The other way out is the field this wire makes inert, and it has to be said: unwiring is
     // not an obvious repair for a node whose own datastack param is ignored while a wire exists.
     expect(message).toContain('unwire')

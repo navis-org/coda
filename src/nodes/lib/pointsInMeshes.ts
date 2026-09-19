@@ -327,11 +327,10 @@ export function warnRayCount(ctx: Warner, rays: number, volumes: number): void {
     unit: 'ray casts',
     control: 'the work this node is usually asked for',
     cost:
-      `Each is one descent of a volume's triangle tree, so this is ` +
-      `${describeDuration(rays / RAYS_PER_SECOND)}, single-threaded. That is every point ` +
-      `against the ${volumes.toLocaleString()} volumes whose bounding box contains it; ` +
-      `filtering the Volumes wire down to the regions you are asking about moves it most, and ` +
-      `filtering the points upstream moves it proportionally.`,
+      `Each ray is one descent of a volume's triangle tree: ` +
+      `${describeDuration(rays / RAYS_PER_SECOND)}, single-threaded, against the ` +
+      `${volumes.toLocaleString()} volumes whose bounding box contains the point. ` +
+      `Filtering the Volumes wire moves this most.`,
   })
 }
 

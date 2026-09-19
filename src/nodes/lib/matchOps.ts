@@ -166,9 +166,9 @@ export function checkSkipSelf(matrix: MatrixValue, skipSelf: boolean): void {
   if (!skipSelf) return
   if (matrix.rowLabels.length === matrix.colLabels.length) return
   throw new Error(
-    `"Skip self-matches" means the diagonal, and this matrix is ` +
-      `${matrix.rowLabels.length} x ${matrix.colLabels.length} — it has no diagonal to skip. ` +
-      'Turn it off, or wire in an all-by-all.',
+    `"Skip self-matches" means the diagonal, and a ${matrix.rowLabels.length} × ` +
+      `${matrix.colLabels.length} matrix has none. Turn it off, or wire in an ` +
+      `all-by-all.`,
   )
 }
 
@@ -353,9 +353,9 @@ export function checkMatchSize(ctx: Warner, matrix: MatrixValue, params: MatchPa
   refuseIfOverCrashFloor(`${groups.toLocaleString()} × ${n} matches`, groups * n * 4 * 8)
   if (n < params.n) {
     ctx.warn(
-      `Asked for the top ${params.n} but this matrix offers only ${candidates.toLocaleString()} ` +
-        `per group${params.skipSelf ? ' before the self-match is skipped' : ''}, so it ` +
-        `returned ${n}.`,
+      `Asked for the top ${params.n}, but this matrix offers ` +
+        `${candidates.toLocaleString()} per group` +
+        `${params.skipSelf ? ' before the self-match is skipped' : ''}; returned ${n}.`,
     )
   }
 }

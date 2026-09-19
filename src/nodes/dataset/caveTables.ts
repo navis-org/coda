@@ -229,10 +229,8 @@ registerNode({
      */
     if (kind === 'view') {
       ctx.warn(
-        `${name} is a view, and CAVE does not push a row limit into one: if it aggregates, the ` +
-          `server builds the whole result before handing back the single row this reads its ` +
-          `columns off. Two of flywire_fafb_public’s ten had not answered after 45 seconds. ` +
-          `Cancel if this is one.`,
+        `${name} is a view which build their whole result first before applying row ` +
+          `limits. This can make for a very slow response.`,
       )
     }
 
@@ -247,8 +245,8 @@ registerNode({
     ])
     if (columns.length === 0) {
       ctx.warn(
-        `${name} answered no rows, so there is nothing to read its columns off. ` +
-          `CAVE publishes a column set only in a result, so an empty table describes itself as empty.`,
+        `${name} answered no rows, so there are no columns to read. CAVE publishes a ` +
+          `column set only in a result.`,
       )
     }
     return { columns: columnsTable(columns) }

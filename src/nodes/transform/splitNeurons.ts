@@ -161,8 +161,8 @@ registerNode({
 
     if (matchesNothing(rows)) {
       ctx.warn(
-        `${nothingMatchesReason()} Add a filter row — or filter the neuron table upstream if ` +
-          'you only want one half.',
+        `${nothingMatchesReason()} Add a filter row, or filter the neuron table upstream ` +
+          `if you only want one half.`,
       )
     }
 

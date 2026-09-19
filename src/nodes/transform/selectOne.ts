@@ -127,7 +127,8 @@ registerNode({
     // scheduler already reports as `blocked`.
     if (!input || isIterableKind(input.kind)) return []
     return [
-      `Select One steps through a Table, Skeletons or Meshes. A ${input.kind} has no elements to step through.`,
+      `Select One steps through a Table, Skeletons or Meshes. A ${input.kind} has no ` +
+        `elements.`,
     ]
   },
 

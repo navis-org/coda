@@ -276,10 +276,9 @@ registerNode({
      */
     if (input.nodes.length > FLOW_NODES_WARN) {
       ctx.warn(
-        `${input.nodes.length.toLocaleString()} nodes is past what a flow chart separates ` +
-          `well (${FLOW_NODES_WARN.toLocaleString()}). Raise Fold past to group each layer's ` +
-          `tail, filter upstream, or use the Network Viewer, whose force layout is built for ` +
-          `a graph this size.`,
+        `${input.nodes.length.toLocaleString()} nodes is past what a flow chart ` +
+          `separates well (${FLOW_NODES_WARN.toLocaleString()}). Raise Fold past, filter ` +
+          `upstream, or use the Network Viewer, which is built for a graph this size.`,
       )
     }
 

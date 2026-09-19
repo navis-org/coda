@@ -732,7 +732,8 @@ function dropTitle(series: RankSeries): string {
   }
   if (series.nonPositive > 0) {
     parts.push(
-      `${series.nonPositive.toLocaleString()} are at or below zero, which has no logarithm — turn Log value off to include them`,
+      `${series.nonPositive.toLocaleString()} are at or below zero, which has no ` +
+        `logarithm — turn Log value off to include them.`,
     )
   }
   return parts.join('; ')

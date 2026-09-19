@@ -100,7 +100,8 @@ async function refuse(response: Response, what: string): Promise<never> {
   }
   if (response.status === 403 || response.status === 429) {
     throw new Error(
-      `GitHub refused the request${detail}. Without a token, gist reads are rate-limited by IP; adding one in Connections ▸ Sharing raises the limit.`,
+      `GitHub refused the request${detail}. Without a token, gist reads are ` +
+        `rate-limited by IP; add one in Connections ▸ Sharing.`,
     )
   }
   if (response.status === 404) {

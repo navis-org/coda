@@ -366,9 +366,7 @@ registerNode({
      * that merely looks wrong. Said at edit time, where the number is still on screen.
      */
     if (Number(ctx.params.minDist) > Number(ctx.params.spread)) {
-      return [
-        'Min distance cannot exceed Spread — the first is how tightly points may pack within the second',
-      ]
+      return ['Min distance cannot exceed Spread: it is how tightly points may pack within it.']
     }
     return []
   },
@@ -399,17 +397,15 @@ registerNode({
       checkNeighbourDistances(built.graph.distances, scoreIs)
       if (built.losses.unknownTargets > 0) {
         ctx.warn(
-          `${built.losses.unknownTargets.toLocaleString()} rows name a neighbour that never ` +
-            `appears in "${query}", so it has no point of its own and was dropped. An NBLAST ` +
-            `k-NN with a Target wired compares two different populations, which is what a large ` +
-            `number here means.`,
+          `${built.losses.unknownTargets.toLocaleString()} rows name a neighbour that is ` +
+            `not in "${query}" and were dropped. A large number means the NBLAST compared ` +
+            `two different populations.`,
         )
       }
       if (built.losses.isolated > 0) {
         ctx.warn(
-          `${built.losses.isolated.toLocaleString()} neurons ended up with no neighbours at all. ` +
-            `UMAP has nothing to place them by, so they land wherever the initialisation put them ` +
-            `— read them as unplaced rather than as outliers.`,
+          `${built.losses.isolated.toLocaleString()} neurons have no neighbours at all, so ` +
+            `UMAP left them where the initialisation put them - unplaced, not outliers.`,
         )
       }
       graph = built.graph
@@ -448,9 +444,9 @@ registerNode({
       const matched = countAnnotated(graph.labels, annotations)
       if (matched === 0) {
         ctx.warn(
-          `Nothing in the Annotations table matched — "${ctx.column('matchOn') ?? 'neuronId'}" ` +
-            `holds none of the names this embedding's points carry, so the annotation column is ` +
-            `empty. Check it is the column holding the same ids.`,
+          `Nothing in the Annotations table matched: "` +
+            `${ctx.column('matchOn') ?? 'neuronId'}" holds none of this embedding's ids, so ` +
+            `the annotation column is empty. Check the column.`,
         )
       } else if (matched < graph.labels.length) {
         ctx.progress(

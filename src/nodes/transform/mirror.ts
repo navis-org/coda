@@ -191,10 +191,9 @@ registerNode({
     if (conflict) {
       const [carried, override] = conflict
       throw new Error(
-        `These coordinates are in ${spaceName(carried)} (${carried}), but Space is set to ` +
-          `${spaceName(override)} (${override}). Mirroring about the wrong template’s midline ` +
-          'moves neurons hundreds of micrometres and looks perfectly normal, so this refuses ' +
-          'rather than picking one. Set Space back to “From the data”.',
+        `These coordinates are in ${spaceName(carried)} (${carried}) but Space is set to ` +
+          `${spaceName(override)} (${override}). Mirroring about the wrong midline ` +
+          `produces garbage.`,
       )
     }
     if (!spaceId) {
@@ -204,9 +203,9 @@ registerNode({
        * synthetic connectome, a Custom node — not a bug upstream.
        */
       throw new Error(
-        'These coordinates do not say which template space they are in, so there is no ' +
-          'midline to mirror about. Fetch them from a dataset Coda has a registration for, ' +
-          'or name the space on this node if you know it.',
+        'These coordinates name no template space, so there is no midline to mirror ' +
+          'about. Fetch them from a dataset Coda has a registration for, or name the space ' +
+          'here.',
       )
     }
     /*
@@ -220,10 +219,10 @@ registerNode({
      */
     if (value.units && value.units !== 'nm') {
       throw new Error(
-        `These coordinates are in ${value.units} of a size Coda could not read, and ` +
-          `${spaceName(spaceId)}’s midline is in nanometres, so mirroring them would put every ` +
-          'neuron somewhere plausible and wrong. The dataset did not say its voxel size; fetch ' +
-          'from a deployment that publishes it.',
+        `These coordinates are in ${value.units} of an unknown size and ` +
+          `${spaceName(spaceId)}'s midline is in nanometres, so mirroring would put every ` +
+          `neuron somewhere plausible and wrong. Fetch from a deployment that publishes a ` +
+          `voxel size.`,
       )
     }
 
@@ -239,9 +238,9 @@ registerNode({
     if (!spec) {
       throw new Error(
         isTransformValue(supplied)
-          ? `A supplied Warp replaces the correction, not the flip — and Coda has no midline ` +
-              `for ${spaceName(spaceId)} (${spaceId}) to flip about. Transform Neurons is the ` +
-              'node for a space this build does not know.'
+          ? `A supplied Warp replaces the correction, not the flip, and Coda has no midline ` +
+              `for ${spaceName(spaceId)} (${spaceId}) to flip about. Use Transform Neurons for ` +
+              `a space this build does not know.`
           : `Coda ships no mirror landmarks for ${spaceName(spaceId)} (${spaceId}), and there ` +
               'is no route to one that works in a browser.',
       )

@@ -368,7 +368,8 @@ registerNode({
      */
     if (hops >= NOISY_HOPS && minWeight <= 1) {
       issues.push(
-        `${hops} hops at Min weight ${minWeight} expands every partner of every partner — this can reach a large fraction of the dataset. Raise Min weight.`,
+        `${hops} hops at Min weight ${minWeight} expands every partner of every partner ` +
+          `and can reach much of the dataset. Raise Min weight.`,
       )
     }
     if (hops >= NOISY_HOPS && ctx.params.direction === 'both') {
@@ -402,7 +403,8 @@ registerNode({
      */
     if (regionOptions(ctx.params).mayNest) {
       issues.push(
-        'Regions nest, so a split over the whole published list counts a synapse once per region containing it — the rows will sum to more than the connection weight.',
+        'Regions nest, so a split over the whole published list counts a synapse once ' +
+          'per containing region — the rows will sum to more than the connection weight.',
       )
     }
     /*
@@ -456,7 +458,10 @@ registerNode({
     if (splitByRoi && !chosen.length) {
       if (!primaryOnly) {
         ctx.warn(
-          'Split by region is covering every region each connection mentions, and regions nest — a synapse in LAL(L) is counted again in LX(L) and in CentralBrain, so the rows sum to several times what the connection has. Turn on "Primary regions only" for a split that takes the connection apart rather than repeating it.',
+          'Split by region covers every region a connection mentions, and region can nest ' +
+            '— a synapse in LAL(L) is counted again in CentralBrain so the rows sum to ' +
+            'several times the connection weight. Turn on "Primary regions only" to avoid ' +
+            'this.',
         )
       } else {
         // `listDatasets` is cached and deduplicated, so this is a lookup rather than a fetch on
@@ -472,7 +477,9 @@ registerNode({
            * a reader would otherwise take from it is a total that is too large.
            */
           ctx.warn(
-            `${source.label} has not published which of this dataset's regions tile the volume, so the split covers every region a connection mentions. Regions nest, so the rows can sum to more than the connection weight.`,
+            `${source.label} has not published which regions tile this dataset, so the split ` +
+              `covers every region a connection mentions. Regions nest, so the rows can sum to ` +
+              `more than the connection weight.`,
           )
         }
       }
@@ -583,7 +590,11 @@ registerNode({
        */
       if (normalized.missingRows > 0) {
         ctx.warn(
-          `${normalized.missingRows.toLocaleString()} of ${traversed.length.toLocaleString()} rows have no denominator (${normalized.missingNeurons.toLocaleString()} neurons the dataset publishes no ${by === 'postsynaptic' ? 'input' : 'output'} total for), so weightNorm is empty for them.`,
+          `${normalized.missingRows.toLocaleString()} of ` +
+            `${traversed.length.toLocaleString()} rows have no denominator (` +
+            `${normalized.missingNeurons.toLocaleString()} neurons with no published ` +
+            `${by === 'postsynaptic' ? 'input' : 'output'} total), so weightNorm is empty ` +
+            `for them.`,
         )
       }
 
@@ -630,11 +641,10 @@ registerNode({
     const missing = unmatchedIds(endpointIds, rows).length
     if (missing > 0) {
       ctx.warn(
-        `${missing.toLocaleString()} of the ${derived.length.toLocaleString()} neurons in this ` +
-          `result have no row in ${source.label}'s neuron table, so their columns are empty — a ` +
-          `synaptic partner can be a fragment the dataset does not publish as a neuron, which ` +
-          `the edge list still counts. Their IDs and types are kept. Untick "Include ` +
-          `fragments" to leave them out of the result altogether.`,
+        `${missing.toLocaleString()} of ${derived.length.toLocaleString()} neurons have ` +
+          `no row in ${source.label}'s neuron table, so their columns are empty — a ` +
+          `partner can be a fragment the dataset does not publish as a neuron. Their ids ` +
+          `and types are kept; untick "Include fragments" to drop them.`,
       )
     }
     ctx.progress(1)

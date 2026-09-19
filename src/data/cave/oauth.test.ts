@@ -55,7 +55,7 @@ describe('discoverLoginService', () => {
     // relative URL a popup would resolve against *Coda's* origin.
     installRouteFetch({ '/auth_info': { body: JSON.stringify({ login_url: '/sticky_auth' }) } })
 
-    await expect(discoverLoginService('https://a.example')).rejects.toThrow(/named no login/)
+    await expect(discoverLoginService('https://a.example')).rejects.toThrow(/names no login/)
   })
 
   /*
@@ -71,7 +71,7 @@ describe('discoverLoginService', () => {
 
     vi.stubGlobal('fetch', () => Promise.reject(new TypeError('Failed to fetch')))
     await expect(discoverLoginService('https://a.example')).rejects.toThrow(
-      /unreachable, or it may not allow cross-origin reads/,
+      /unreachable, or may refuse cross-origin reads/,
     )
   })
 

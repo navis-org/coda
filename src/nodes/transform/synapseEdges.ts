@@ -177,9 +177,9 @@ registerNode({
     }
     if (unoriented > 0) {
       ctx.warn(
-        `${unoriented.toLocaleString()} synapses have a "${plan.polarity}" that reads neither ` +
-          'pre nor post; those rows were counted the way the pickers name them. Check that ' +
-          'Polarity points at the right column.',
+        `${unoriented.toLocaleString()} synapses have a "${plan.polarity}" that reads ` +
+          `neither pre nor post; those rows were counted as the pickers name them. Check ` +
+          `Polarity points at the right column.`,
       )
     }
     return { out: table }

@@ -124,7 +124,7 @@ describe('Collect', () => {
    * trace back to its cause.
    */
   it('refuses two passes that produced different kinds, naming the pass', () => {
-    expect(() => fold([rows('1'), skeletons('2')])).toThrow(/produced skeletons where/)
+    expect(() => fold([rows('1'), skeletons('2')])).toThrow(/Pass 2 produced skeletons/)
   })
 
   it('refuses an unwired input rather than returning undefined downstream', () => {

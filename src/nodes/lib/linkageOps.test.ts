@@ -82,7 +82,7 @@ describe('checkLinkageInput', () => {
     // is perfectly square, and clustering it would treat row 3 and column 3 as one observation
     // because they happen to share an index — a confident wrong tree with nothing to say so.
     const crossed = makeMatrix(['a', 'b'], ['x', 'y'], new Float64Array(4))
-    expect(() => checkLinkageInput(NO_WARN, crossed)).toThrow(/different things/)
+    expect(() => checkLinkageInput(NO_WARN, crossed)).toThrow(/rows and columns are different/)
   })
 
   it('refuses fewer than two observations, which is what fastcore itself says', () => {
@@ -110,7 +110,7 @@ describe('checkLinkageInput', () => {
     expect(said.join(' ')).toMatch(/square of that number/)
     expect(said.join(' ')).not.toMatch(/labels/)
     // A guard rail warns; it does not refuse. See `docs/limits.md`.
-    expect(said.join(' ')).toMatch(/Going ahead anyway/)
+    expect(said.join(' ')).toMatch(/Running anyway/)
   })
 
   it('refuses only the size whose condensed vector cannot be allocated', () => {

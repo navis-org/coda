@@ -268,7 +268,8 @@ registerNode({
      */
     if (hops >= NOISY_HOPS && minWeight <= 1) {
       issues.push(
-        `${hops} hops at Min synapses ${minWeight} expands almost every partner of every partner — this can reach a large fraction of the dataset. Raise Min synapses.`,
+        `${hops} hops at Min synapses ${minWeight} expands almost every partner of every ` +
+          `partner and can reach much of the dataset. Raise Min synapses.`,
       )
     }
     if (hops >= NOISY_HOPS && ctx.params.collapseTypes === false) {
@@ -422,9 +423,9 @@ registerNode({
       }
       if (unmeasured.size > 0) {
         ctx.warn(
-          `${unmeasured.size.toLocaleString()} ${collapseTypes ? 'groups' : 'neurons'} on the ` +
-            `${by === 'postsynaptic' ? 'receiving' : 'sending'} end of a connection have no ` +
-            `published total, so weightNorm is empty there` +
+          `${unmeasured.size.toLocaleString()} ${collapseTypes ? 'groups' : 'neurons'} on ` +
+            `the ${by === 'postsynaptic' ? 'receiving' : 'sending'} end have no published ` +
+            `total, so weightNorm is empty there.` +
             (rankBy === 'norm'
               ? ' — and any route through one of them ranks below every route that could be scored.'
               : '.'),
@@ -440,9 +441,9 @@ registerNode({
      */
     if (ranked.truncated) {
       ctx.warn(
-        `The route search hit its step budget (${MAX_PATH_STEPS.toLocaleString()} steps), so ` +
-          `these are the strongest routes *found* rather than the strongest routes. Raising ` +
-          `Min synapses or lowering Max hops thins the graph the search walks.`,
+        `The route search hit its step budget (${MAX_PATH_STEPS.toLocaleString()} ` +
+          `steps), so these are the strongest routes found rather than the strongest ` +
+          `routes. Raise Min synapses or lower Max hops to thin the graph.`,
       )
     }
 

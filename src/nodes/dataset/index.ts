@@ -434,8 +434,8 @@ registerNode({
      */
     if (shippedSpecFor(deployment, datastack)) {
       return [
-        `Coda ships a node for "${datastack}" — use it instead; this card's table and column ` +
-          `settings are ignored for a datastack that already has a spec.`,
+        `Coda ships a node for "${datastack}" — use that instead. This card's table and ` +
+          `column settings are ignored for a datastack that has a spec.`,
       ]
     }
     const version = String(ctx.params.version).trim()
@@ -450,8 +450,8 @@ registerNode({
      */
     if (!String(ctx.params.neuronTable).trim() && !ctx.inputs.annotations) {
       return [
-        'Name a table listing this datastack\u2019s neurons (e.g. proofread_neurons), or wire ' +
-          'an Annotations source to supply the neuron list',
+        "Name a table listing this datastack's neurons (e.g. proofread_neurons), or wire " +
+          'an Annotations source to supply the list.',
       ]
     }
     /*
@@ -493,9 +493,9 @@ registerNode({
       : (await materializationsFor(datastack, { deployment, signal: ctx.signal }))[0]
     if (version === undefined || !Number.isInteger(version)) {
       throw new Error(
-        `${datastack} reports no usable materializations on ${caveServerLabel(deployment)}. ` +
-          `Check the datastack name and the global server, or that your token for that ` +
-          `deployment can see it.`,
+        `${datastack} reports no usable materializations on ` +
+          `${caveServerLabel(deployment)}. Check the datastack name, the global server, ` +
+          `and that your token can see it.`,
       )
     }
     const datasetId = datasetIdFor(datastack, version)
@@ -578,9 +578,8 @@ function rootDriftIssues(sourceId: string, datasetId: string | undefined): strin
    */
   return [
     `${check.stale.toLocaleString()}${part} annotation ids are not current at this ` +
-      `materialization (e.g. ${some}) — those rows will not match a neuron. Use "Update root ` +
-      `IDs" to bring them forward from their supervoxel ids, or pin a materialization from ` +
-      `after the base was updated.`,
+      `materialization (e.g. ${some}), so those rows will not match a neuron. Use ` +
+      `"Update root IDs", or pin a matching materialization.`,
   ]
 }
 

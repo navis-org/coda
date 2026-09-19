@@ -128,16 +128,16 @@ export function checkSquarePopulation(
   const n = matrix.rowLabels.length
   if (n !== matrix.colLabels.length) {
     throw new Error(
-      `${subject} needs a square matrix; this one is ${n} x ${matrix.colLabels.length}. ` +
-        `An NBLAST with a Target wired compares two different sets, which has no ${lacks}.`,
+      `${subject} needs a square matrix; this one is ${n} × ${matrix.colLabels.length}` +
+        `. An NBLAST with a Target wired compares two different sets, which has no ` +
+        `${lacks}.`,
     )
   }
   if (!labelsAgree(matrix)) {
     throw new Error(
-      `This matrix is square but its rows and columns are different things, so reading it as ` +
-        `one population would pair unrelated things. ${subject} needs one population compared ` +
-        `with itself — an NBLAST with nothing wired to Target, a Similarity Matrix, or an ` +
-        `Adjacency of a set against itself.`,
+      `This matrix is square, but its rows and columns are different. ${subject} needs ` +
+        `one population compared with itself: an NBLAST with no Target, a Similarity ` +
+        `Matrix, or an Adjacency of a set against itself.`,
     )
   }
 }
@@ -260,11 +260,10 @@ export function checkLinkageDistances(
   const range = `${formatCell(min)} to ${formatCell(max)}`
   throw new Error(
     transform === 'one_minus'
-      ? `These cells run ${range}, so treating them as similarities gives distances as low as ` +
-          `${formatCell(lowest)} — and a distance cannot be negative. A matrix of synapse counts ` +
-          `needs a Normalize in front of it to bring the cells into 0–1; un-normalised NBLAST ` +
-          `scores need Normalise turned back on at the NBLAST node. If the cells already are ` +
-          `distances, say so with the Distance setting.`
+      ? `These cells run ${range}, so read as similarities they give distances as low as ` +
+          `${formatCell(lowest)}, and a distance cannot be negative. Synapse counts need a ` +
+          `Normalize in front; un-normalised NBLAST scores need Normalise back on. If the ` +
+          `cells are already distances, say so with the Distance setting.`
       : `These cells run ${range}, and a distance cannot be negative. Set Distance back to ` +
           `auto if they are similarities rather than distances.`,
   )
@@ -641,8 +640,8 @@ export function checkClusterInput(ctx: Warner, matrix: MatrixValue, axis: Matrix
       unit: axis,
       control: 'the clustering warn-above',
       cost:
-        'Clustering is single-threaded and grows with the square of that; the distances ' +
-        'between the vectors are computed first and grow with the other axis too.',
+        'Clustering is single-threaded and grows with the square of that number, and the ' +
+        'distances between vectors are computed first.',
     })
   }
 }
@@ -664,8 +663,7 @@ export function warnUnrecordedCells(
   const { unrecorded } = stats
   if (unrecorded === 0) return
   ctx.warn(
-    `${unrecorded.toLocaleString()} cells are empty or not a number and are read as 0 for ` +
-      `the clustering — a cell nobody recorded is not a partner. The cells themselves are ` +
-      `left as they are.`,
+    `${unrecorded.toLocaleString()} cells are empty or not a number and were read as ` +
+      `0 for the clustering. The cells themselves are unchanged.`,
   )
 }

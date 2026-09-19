@@ -230,9 +230,9 @@ registerEmitter('neuron.splitNeurons', (ctx) => {
   const mask = `${ctx.name}_mask`
   return [
     ...ctx.note(
-      'The filter reads the metadata frame attached to the neuronlist (`nl[, ]`), which is ' +
-        'nat’s equivalent of the attribute table Coda splits on. It holds whatever read the ' +
-        'neurons, so a column the canvas has may need adding here first.',
+      'The filter reads the metadata frame attached to the neuronlist (`nl[, ]`), ' +
+        "nat's equivalent of the attribute table Coda splits on. It holds whatever read " +
+        'the neurons, so a column the canvas has may need adding here first.',
     ),
     ...(usesRegex(terms) ? ctx.note(REGEX_FLAVOUR_NOTE) : []),
     `${mask} <- ${src}[, ] |>`,
@@ -275,9 +275,10 @@ registerEmitter('neuron.pointsInVolumes', (ctx) => {
   ctx.helper('coda_in_volumes')
   return [
     ...ctx.note(
-      'nat::pointsinside needs the Rvcg package, which nat suggests rather than depends on — ' +
-        'install.packages("Rvcg") if this errors. It casts its own rays where Coda descends a ' +
-        'bounding volume hierarchy, so the two agree on any closed mesh except at its surface.',
+      'nat::pointsinside needs Rvcg, which nat only suggests — ' +
+        'install.packages("Rvcg") if this errors. It casts its own rays where Coda ' +
+        'descends a bounding volume hierarchy, so the two agree on any closed mesh ' +
+        'except at its surface.',
     ),
     `${split} <- coda_in_volumes(${points}, ${volumes}, ${rStr(name)})`,
     `${inside} <- ${split}$points[!is.na(${split}$points[[${rStr(name)}]]), ]`,
@@ -313,9 +314,9 @@ registerEmitter('neuron.synapseEdges', (ctx) => {
   return [
     ...(plan.polarity
       ? ctx.note(
-          'These column names are the canvas\u2019s. A cloud from the Synapses cell above is in ' +
-            'neuprintr\u2019s vocabulary instead \u2014 bodyid and a 0/1 prepost \u2014 so rename it first, or ' +
-            'read this cell as the shape rather than as the spelling.',
+          "These column names are the canvas's. A cloud from the Synapses cell above uses " +
+            "neuprintr's — bodyid and a 0/1 prepost — so rename it first, or read this cell " +
+            'as the shape rather than the spelling.',
         )
       : []),
     `${fold} <- coda_synapse_edges(`,
@@ -645,9 +646,9 @@ registerEmitter('core.join', (ctx) => {
 
   return [
     ...ctx.note(
-      'Coda keeps the first matching row from the other table, so a duplicated key annotates ' +
-        'rather than multiplies. `distinct` is what reproduces that — without it the join ' +
-        'returns every matching pair.',
+      'Coda keeps the first matching row, so a duplicated key annotates rather than ' +
+        'multiplies. `distinct` reproduces that; without it the join returns every ' +
+        'matching pair.',
     ),
     /*
      * The one place R is the closer of the two languages, so it is worth saying which way
@@ -954,10 +955,9 @@ registerEmitter('core.uploadMesh', (ctx) => {
   return [
     ...ctx.note(
       fileName
-        ? `Coda stores uploaded meshes in the browser, not in the graph, so the geometry is ` +
-            `not in this document. Point this at your copy of "${fileName}". OBJ and STL go ` +
-            `through rgl, which comes with nat; PLY needs Rvcg, which nat only suggests — ` +
-            `install.packages("Rvcg").`
+        ? `Coda stores uploaded meshes in the browser, not in the graph, so point this at ` +
+            `your copy of "${fileName}". OBJ and STL go through rgl (with nat); PLY needs ` +
+            `Rvcg — install.packages("Rvcg").`
         : 'This Upload Mesh node has no files. Point the paths below at your OBJ, STL or PLY.',
     ),
     `${out}_paths <- c(${rStr(fileName || 'your-region.obj')})`,

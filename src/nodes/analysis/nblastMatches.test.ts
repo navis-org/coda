@@ -111,7 +111,7 @@ describe('matchOps — clamping, which is the alternative to a stack trace', () 
 
 describe('matchOps — the self-skip', () => {
   it('refuses a rectangular matrix, which has no diagonal to skip', () => {
-    expect(() => checkSkipSelf(matrix(5, 9), true)).toThrow(/no diagonal/)
+    expect(() => checkSkipSelf(matrix(5, 9), true)).toThrow(/means the diagonal/)
   })
 
   it('allows it on a square one, and allows it off on any', () => {

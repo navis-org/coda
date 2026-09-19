@@ -241,8 +241,9 @@ registerNode({
 
     if (seeds.size > 0 && kept.size === 0) {
       ctx.warn(
-        'Nothing selected: no node matched the condition, and no seed id is in this network. ' +
-          'Ids are exact — Match Cell Types prefixes its own with "label/" and "neurons/".',
+        'Nothing selected: no node matched the condition and no seed id is in this ' +
+          'network. Ids are exact — Match Cell Types prefixes its own with "label/" and ' +
+          '"neurons/".',
       )
     }
 

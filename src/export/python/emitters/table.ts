@@ -125,8 +125,8 @@ registerEmitter('neuron.attachAttributes', (ctx) => {
 
   return [
     ...ctx.note(
-      'navis keeps attributes on the neuron objects themselves and a `NeuronList` shares them, ' +
-        'so these columns appear on the input list too. On the canvas this node leaves its ' +
+      'navis keeps attributes on the neuron objects and a `NeuronList` shares them, so ' +
+        'these columns appear on the input list too. On the canvas this node leaves its ' +
         'input untouched.',
     ),
     `${out} = ${geometry}`,
@@ -308,10 +308,10 @@ registerEmitter('neuron.pointsInVolumes', (ctx) => {
   ctx.helper('coda_in_volumes')
   return [
     ...ctx.note(
-      'navis tests containment with ncollpyde where Coda casts a ray through a bounding ' +
-        'volume hierarchy. The two agree on any closed mesh except at its surface, so a ' +
-        'point exactly on a face — and every point at all in a mesh that is not watertight — ' +
-        'is each library’s own answer.',
+      'navis tests containment with ncollpyde, Coda with a ray through a bounding ' +
+        'volume hierarchy. They agree on any closed mesh except at its surface — a point ' +
+        "exactly on a face, or any point in a non-watertight mesh, is each library's own " +
+        'answer.',
     ),
     `${labelled}, ${overlapping} = coda_in_volumes(${points}, ${volumes}, ${pyStr(name)})`,
     `${inside} = ${labelled}[${labelled}[${pyStr(name)}].notna()].reset_index(drop=True)`,
@@ -653,9 +653,9 @@ registerEmitter('core.join', (ctx) => {
 
   return [
     ...ctx.note(
-      'Coda keeps the first matching row from the other table, so a duplicated key ' +
-        'annotates rather than multiplies. `drop_duplicates` is what reproduces that — ' +
-        'without it `merge` returns the cross product of every matching pair.',
+      'Coda keeps the first matching row, so a duplicated key annotates rather than ' +
+        'multiplies. `drop_duplicates` reproduces that; without it `merge` returns every ' +
+        'matching pair.',
     ),
     ...(sameKey
       ? []

@@ -161,10 +161,10 @@ export function checkSynblastSize(ctx: Warner, query: number, target: number): v
   const total = query + target
   if (total <= SYNAPSE_WARN) return
   ctx.warn(
-    `Comparing ${query.toLocaleString()} synapses against ${target.toLocaleString()} is a ` +
-      `nearest-neighbour search per connector, single-threaded in the browser. Scoring ` +
-      `anyway — cancel and filter the synapses down (by polarity, by weight, or to a region) ` +
-      `if that is not what you meant.`,
+    `Comparing ${query.toLocaleString()} synapses against ${target.toLocaleString()} ` +
+      `is a nearest-neighbour search per connector, single-threaded. Scoring anyway — ` +
+      `cancel and filter the synapses down (polarity, weight, region) if that is not ` +
+      `what you wanted.`,
   )
 }
 

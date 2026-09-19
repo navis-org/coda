@@ -539,8 +539,7 @@ registerEmitter('neuron.roiMeshes', (ctx) => {
   return [
     ...ctx.note(
       'One request per region, and neuPrint publishes these for visualization only — ' +
-        'decimated display surfaces, so a volume measured off one is an approximation rather ' +
-        'than a figure to quote.',
+        'decimated surfaces, so a volume measured off one is an approximation.',
     ),
     chosen.length > 0
       ? `${names} <- c(${chosen.map((roi) => JSON.stringify(roi)).join(', ')})`
@@ -627,9 +626,9 @@ registerEmitter('neuron.synapses', (ctx) => {
    */
   return [
     ...ctx.note(
-      'neuprintr returns bodyid and prepost (0/1) where Coda carries neuronId and polarity ' +
-        '("pre"/"post"). Any cell below that names a synapse column will need one or the ' +
-        'other spelling — the notebook export normalises these, this one does not yet.',
+      'neuprintr returns bodyid and prepost (0/1) where Coda carries neuronId and ' +
+        'polarity ("pre"/"post"). Any cell below naming a synapse column needs one ' +
+        'spelling or the other; this exporter does not normalise them yet.',
     ),
     /*
      * **Two of the node's controls have no neuprintr spelling**, and each is a TODO with the gap
@@ -690,8 +689,9 @@ registerEmitter('neuron.synapsesBetween', (ctx) => {
   return [
     ...(labelled
       ? ctx.note(
-          'The open side is neuPrint’s :Neuron label, where the canvas counts the neurons the ' +
-            'Dataset node’s population selects — the same set unless that population narrows further.',
+          "The open side is neuPrint's :Neuron label; the canvas counts the neurons the " +
+            "Dataset node's population selects — the same set unless that population narrows " +
+            'further.',
         )
       : []),
     ...(sources ? [`.sources <- ${cypherIdList(sources)}`] : []),

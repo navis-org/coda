@@ -1339,9 +1339,10 @@ export function edgePropertiesRefusal(label: string): string {
  */
 export function edgeSetPropertiesRefusal(name?: string): string {
   return (
-    `This dataset's connectivity comes from ${name ? `the edge set "${name}"` : 'an attached edge set'}, ` +
-    `which records pre, post and weight and nothing else about a connection. Go back to the ` +
-    `plain weight on this node, or detach the edge set under Edge data on the dataset card.`
+    `This dataset's connectivity comes from ` +
+    `${name ? `the edge set "${name}"` : 'an attached edge set'}, which records pre, ` +
+    `post and weight only. Use the plain weight here, or detach the edge set under ` +
+    `Edge data.`
   )
 }
 
@@ -1747,8 +1748,8 @@ export function requireSkeletonRoute(
   if (!requested || served.some((route) => route.id === requested)) return
   throw new Error(
     `${label} has no "${requested}" skeletons — it offers ` +
-      `${served.map((route) => route.label).join(', ')}. Set the Skeletons node's Source back ` +
-      `to Automatic, which picks whichever route this dataset does have.`,
+      `${served.map((route) => route.label).join(', ')}. Set the Skeletons node's ` +
+      `Source back to Automatic.`,
   )
 }
 
@@ -1863,8 +1864,8 @@ function canTotal(
  */
 export function groupTotalsRefusal(label: string): string {
   return (
-    `${label} does not publish the synapse totals Normalize divides by. Turn Normalize off, ` +
-    `or point this at a dataset that does.`
+    `${label} publishes no synapse totals for Normalize to divide by. Turn Normalize ` +
+    `off, or use a dataset that does.`
   )
 }
 

@@ -661,9 +661,9 @@ export function similarityMatrix(
 
   if (!METRICS[metric].signed && features.negatives > 0) {
     throw new Error(
-      `A Jaccard index is not defined over negative values, and ${features.negatives.toLocaleString()} ` +
-        `of these are below zero. Cosine, Euclidean and Pearson all take them; so does a Jaccard ` +
-        `once the values are non-negative.`,
+      `A Jaccard index is not defined over negative values, and ` +
+        `${features.negatives.toLocaleString()} of these are below zero. Cosine, ` +
+        `Euclidean and Pearson all take them.`,
     )
   }
 
@@ -680,17 +680,15 @@ export function similarityMatrix(
       unit: 'pair comparisons',
       control: 'the size this stays interactive at',
       cost:
-        `That is ${describeDuration(work / CONTRIBUTIONS_PER_SECOND)} of single-threaded work, ` +
-        `and the tab does not repaint while it runs. What drives it is how many observations ` +
-        `share their busiest feature, so filtering the common partners out upstream cuts it ` +
-        `faster than dropping observations does.`,
+        `${describeDuration(work / CONTRIBUTIONS_PER_SECOND)} of single-threaded work, ` +
+        `with no repaint. Filter out common partners upstream to reduce the workload.`,
     })
   }
   if (features.duplicates > 0) {
     ctx.warn(
-      `${features.duplicates.toLocaleString()} rows repeated an observation/feature pair and ` +
-        `were summed, exactly as a Pivot set to sum would. If they were meant to be separate ` +
-        `features, they need something to tell them apart before they get here.`,
+      `${features.duplicates.toLocaleString()} rows repeated an observation/feature ` +
+        `pair and were summed, as a Pivot set to sum would. Tell them apart upstream if ` +
+        `they were meant to be separate features.`,
     )
   }
 
@@ -722,10 +720,10 @@ export function similarityMatrix(
   }
   if (empty > 0) {
     ctx.warn(
-      `${empty.toLocaleString()} of ${n.toLocaleString()} observations have no features at all, ` +
-        `so they are ${distance ? 'at the far end of' : 'at zero to'} everything. They come from ` +
-        `rows whose value was zero, empty or missing — filter them upstream if they are not ` +
-        `meant to be compared.`,
+      `${empty.toLocaleString()} of ${n.toLocaleString()} observations have no ` +
+        `features at all, so they are ${distance ? 'at the far end of' : 'at zero to'} ` +
+        `everything. Their rows were zero, empty or missing — filter them upstream if ` +
+        `they should not be compared.`,
     )
   }
 

@@ -183,8 +183,8 @@ registerNode({
      */
     if (new Set(chosen).size !== chosen.length) {
       return [
-        'Each of the six columns must be different — a repeat collapses an axis, and six ' +
-          'identical ones mean the pickers have not been set.',
+        'All six columns must be different: a repeat collapses an axis, and six ' +
+          'identical ones mean the pickers are unset.',
       ]
     }
     return []

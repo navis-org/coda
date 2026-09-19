@@ -161,7 +161,7 @@ describe('untyped partners', () => {
     const said: string[] = []
     const ctx: Warner = { warn: (m) => said.push(m) }
     expect(vector(vectors({}, ctx), 1)['out:11']).toBe(2)
-    expect(said.join(' ')).toMatch(/has not typed/)
+    expect(said.join(' ')).toMatch(/untyped partners/)
   })
 
   it('drops it instead when asked, and says the vectors are then short', () => {

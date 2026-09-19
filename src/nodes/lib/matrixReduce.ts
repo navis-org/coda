@@ -294,8 +294,8 @@ function reduce(matrix: MatrixValue, options: ReduceOptions): Reduction {
   const skipDiagonal = options.excludeDiagonal && isSquarePopulation(matrix)
   if (options.excludeDiagonal && !skipDiagonal) {
     warnings.push(
-      `Exclude diagonal was ignored: a ${rows} × ${cols} matrix whose row and column labels ` +
-        `are not the same list has no self-comparison on its diagonal.`,
+      `Exclude diagonal ignored: this ${rows} × ${cols} matrix has different row and ` +
+        `column labels, so there is no self-comparison on its diagonal.`,
     )
   }
 

@@ -48,7 +48,8 @@ export async function fetchText(
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new Error(
-      `Could not fetch ${url}. The host may be unreachable, or it may not allow cross-origin reads — a browser refuses those without saying so.${messages.hint ? ` ${messages.hint}` : ''}`,
+      `Could not fetch ${url}. The host may be unreachable, or may refuse cross-origin ` +
+        `reads — a browser gives no reason.${messages.hint ? ` ${messages.hint}` : ''}`,
     )
   }
   if (response.status === 404 && messages.notFound) {

@@ -341,11 +341,11 @@ describe('core.tableFromUrl — refusals', () => {
   it('names both causes of an opaque fetch failure', async () => {
     // A browser reports a cross-origin refusal as a bare TypeError with no detail, so a
     // network failure and a CORS failure are indistinguishable from here. Naming only one
-    // would send somebody to check their wifi over a header their server never sent.
+    // would send somebody to check their wifi over a refusal their server chose.
     serve(new TypeError('Failed to fetch'))
     const message = await errorFrom(pipeline())
+    expect(message).toContain('unreachable')
     expect(message).toContain('cross-origin')
-    expect(message).toContain('Access-Control-Allow-Origin')
   })
 
   it('reports the status a server actually sent', async () => {

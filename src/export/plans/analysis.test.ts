@@ -79,7 +79,7 @@ describe('embedPlan', () => {
 
   it('refuses no route and several routes before anything else', () => {
     expect(embed(settings).refusal).toMatch(
-      /^This Embedding cannot be translated: Wire one of Matrix, Features, Neighbours in/,
+      /^This Embedding cannot be translated: Wire one of Matrix, Features, Neighbours:/,
     )
     const both = embed(settings, { matrix: 'm', features: 'f' })
     expect(both.refusal).toMatch(/^This Embedding cannot be translated: Matrix and Features/)

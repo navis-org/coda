@@ -195,8 +195,8 @@ registerNode({
     const empty = emptiedItems(result.offsets)
     if (empty > 0) {
       ctx.warn(
-        `${empty} of ${value.items.length} neurons came back with no nodes. They are still in ` +
-          'the collection, so the attribute table still lines up — they simply draw nothing.',
+        `${empty} of ${value.items.length} neurons came back with no nodes. They stay in ` +
+          `the collection so the attribute table lines up, and draw nothing.`,
       )
     }
     return { out: skeletonsFromResult(value, result) }

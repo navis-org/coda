@@ -270,7 +270,8 @@ registerNode({
     const source = ctx.resolveSource(dataset.sourceId)
     if (!source.neuronIndex) {
       throw new Error(
-        `${source.label} does not provide a neuron index, so it cannot be explored. Use Find Neurons.`,
+        `${source.label} publishes no neuron index, so it cannot be explored. Use Find ` +
+          `Neurons.`,
       )
     }
 

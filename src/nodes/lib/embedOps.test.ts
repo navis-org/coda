@@ -242,7 +242,7 @@ describe('the guards', () => {
     const rows = ['a', 'b', 'c', 'd']
     const cols = ['w', 'x', 'y', 'z']
     const matrix = makeMatrix(rows, cols, new Float64Array(16), 's', 'similarity')
-    expect(() => checkEmbedMatrix(NO_WARN, matrix)).toThrow(/different things/)
+    expect(() => checkEmbedMatrix(NO_WARN, matrix)).toThrow(/rows and columns are different/)
   })
 
   it('refuses too few observations, naming the floor', () => {

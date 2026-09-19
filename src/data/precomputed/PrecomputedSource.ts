@@ -523,9 +523,9 @@ export class PrecomputedSource implements DataSource {
     const described = await this.describe(req.signal ? { signal: req.signal } : {})
     if (!described.segmentPropertiesUrl) {
       throw new Error(
-        `${this.ref.canonical} publishes no segment properties, so its meshes have no region ` +
-          `names and nothing can list them — it is ${described.summary}. Fetch them by id ` +
-          `instead: an Input IDs node into a Meshes node, wired to the 3D View’s Volumes socket.`,
+        `${this.ref.canonical} publishes no segment properties — it is ` +
+          `${described.summary} — so nothing can list its meshes. Fetch by id instead: ` +
+          `Input IDs into Meshes, wired to the 3D View's Volumes socket.`,
       )
     }
 
@@ -602,9 +602,9 @@ export class PrecomputedSource implements DataSource {
     const source = await this.describe(signal ? { signal } : {})
     if (!source.segmentPropertiesUrl) {
       throw new Error(
-        `${this.ref.canonical} publishes no segment properties, so its segments have no names ` +
-          `and nothing can list them — it is ${source.summary}. Supply the ids with an Input IDs ` +
-          `node instead.`,
+        `${this.ref.canonical} publishes no segment properties — it is ${source.summary} ` +
+          `— so its segments have no names and nothing can list them. Supply the ids with ` +
+          `an Input IDs node.`,
       )
     }
     return source.segmentPropertiesUrl
@@ -792,7 +792,7 @@ export class PrecomputedSource implements DataSource {
     const source = await this.describe(signal ? { signal } : {})
     if (!source.meshUrl) {
       throw new Error(
-        `${this.ref.canonical} publishes no meshes — it is ${source.summary}. Point this node ` +
+        `${this.ref.canonical} publishes no meshes — it is ${source.summary}. Point this ` +
           `at a segmentation that names a mesh directory, or at the mesh directory itself.`,
       )
     }

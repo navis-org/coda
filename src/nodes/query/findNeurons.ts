@@ -218,10 +218,7 @@ registerNode({
      */
     const rows = rowsFromParams(ctx.params)
     if (asksNothing(ctx.params, rows)) {
-      ctx.warn(
-        `${noFiltersReason()} Add a filter row — or use Explore Dataset to browse without ` +
-          'asking anything.',
-      )
+      ctx.warn(`${noFiltersReason()} Add a filter row, or use Explore Dataset to browse.`)
       return { neurons: emptyTable(schemasForDataset(source, dataset).neurons, 'neurons') }
     }
 
@@ -248,8 +245,8 @@ registerNode({
         unit: 'neurons matched',
         control: 'the size a selection usually has',
         cost:
-          'Every one of those ids travels into the provenance key of everything downstream, and ' +
-          'a morphology node below this is over its own Warn above before it starts.',
+          'Every one of those ids goes into the provenance key of everything downstream, ' +
+          'and a morphology node below this starts over its own Warn above.',
       })
     }
     return { neurons }

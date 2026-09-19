@@ -232,8 +232,9 @@ registerEmitter('out.histogram', (ctx) => {
     // difference that shows up as a differently shaped picture and gets blamed on the data.
     lines.push(
       ...ctx.note(
-        'Coda picks bins by Freedman–Diaconis capped at 80; seaborn’s `bins="auto"` takes the ' +
-          'larger of Freedman–Diaconis and Sturges and has no cap, so the bar count can differ.',
+        'Coda bins by Freedman–Diaconis capped at 80; seaborn\'s `bins="auto"` takes the ' +
+          'larger of Freedman–Diaconis and Sturges with no cap, so the bar count can ' +
+          'differ.',
       ),
     )
   }
@@ -451,8 +452,8 @@ registerEmitter('out.heatmap', (ctx) => {
     lines.push(
       ...ctx.note(
         'The colour runs on a log scale and the values do not: Coda maps a cell through ' +
-          'log10(1 + value - low) and prints the value itself, so the annotations below come ' +
-          'from the untransformed frame. A cell past either end is clipped to it, as on the card.',
+          'log10(1 + value - low) and prints the raw value, so the annotations come from ' +
+          'the untransformed frame. Cells past either end are clipped, as on the card.',
       ),
       `_plot = np.log10(1 + (${out}.clip(_lo, _hi) - _lo))`,
     )
@@ -707,11 +708,10 @@ function heatmapOrderLines(
         if (i === 0) {
           lines.push(
             ...ctx.note(
-              'The clustering is seaborn’s clustermap: each row a vector across the columns, ' +
-                'clustered by the distance between vectors. Coda reads an empty or infinite ' +
-                'cell as 0 for this, hence the nan_to_num, and puts a constant vector — no ' +
-                'correlation, no cosine — at distance 1 from everything rather than letting ' +
-                'pdist’s NaN stop linkage.',
+              "The clustering is seaborn's clustermap: each row a vector across the columns. " +
+                'Coda reads an empty or infinite cell as 0 (hence nan_to_num) and puts a ' +
+                "constant vector at distance 1 from everything, rather than letting pdist's NaN " +
+                'stop linkage.',
             ),
             // Every non-finite cell to 0, which is `coda_cluster_order`'s `nan_to_num` — `fillna`
             // alone would hand `pdist` an infinity and every distance from that vector with it.
@@ -1425,8 +1425,8 @@ registerEmitter('out.rois', (ctx) => {
   return [
     ...ctx.note(
       'Region meshes are OBJ bytes, one request each. neuPrint publishes them for ' +
-        'visualization only — they are decimated display surfaces, so a volume measured off ' +
-        'one is an approximation rather than a figure to quote.',
+        'visualization only — decimated surfaces, so a volume measured off one is an ' +
+        'approximation.',
     ),
     ...(primaryOnly
       ? [

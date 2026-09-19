@@ -192,8 +192,8 @@ describe('neuron.mirror — what it refuses, and when', () => {
      * a bug upstream, it is a dataset nobody registered.
      */
     const error = (await run(pipeline())).info('mirror').error ?? ''
-    expect(error).toMatch(/do not say which template space/)
-    expect(error).toMatch(/name the space on this node/)
+    expect(error).toMatch(/name no template space/)
+    expect(error).toMatch(/name the space here/)
   })
 })
 
@@ -271,7 +271,7 @@ describe('neuron.mirror — the override, which is the only way through here', (
     } as unknown as EvalContext
 
     await expect(requireNodeDef('neuron.mirror').evaluate(context)).rejects.toThrow(
-      /in voxels of a size Coda could not read, and Fish2 \(zebrafish\)’s midline/,
+      /in voxels of an unknown size and Fish2 \(zebrafish\)'s midline/,
     )
   })
 
@@ -308,7 +308,7 @@ describe('neuron.mirror — the override, which is the only way through here', (
     const error = scheduler.info('mirror2').error ?? ''
     expect(error).toMatch(/are in MANC/)
     expect(error).toMatch(/Space is set to .*FLYWIRE/)
-    expect(error).toMatch(/From the data/)
+    expect(error).toMatch(/wrong midline/)
   })
 
   it('stamps the space it mirrored in, not the one the data arrived with', async () => {

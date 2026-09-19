@@ -133,8 +133,8 @@ export function refuseUnfilterableRoi(
 ): void {
   if (req.roi) {
     throw new Error(
-      `${backend} cannot filter neurons by region, so "In ROI" cannot narrow this query. ` +
-        `Set it back to Any to search this dataset.`,
+      `${backend} cannot filter neurons by region, so "In ROI" cannot narrow this ` +
+        `query. Set it back to Any.`,
     )
   }
 }

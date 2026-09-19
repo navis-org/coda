@@ -264,7 +264,7 @@ describe('the annotations port', () => {
     const { out, warnings } = await run(square(), { labelAxis: 'rows' }, NAMED)
     expect(out.rowLabels[2]).toBe('DNp02')
     expect(warnings).toEqual([
-      '1 of 3 rows are not named by the annotation table and keep their own labels.',
+      '1 of 3 rows are not in the annotation table and keep their own labels.',
     ])
   })
 
@@ -273,7 +273,7 @@ describe('the annotations port', () => {
     const { out, warnings } = await run(rois, {}, NAMED)
     expect(out.colLabels).toEqual(['ME(R)', 'LO(R)'])
     expect(warnings).toEqual([
-      'No columns are named by "type", so they keep the labels the matrix arrived with. ' +
+      'No columns are named by "type", so they keep the labels they arrived with. ' +
         'Check Match on, or narrow Apply to.',
     ])
   })
@@ -517,7 +517,7 @@ describe('what validate can see at edit time', () => {
    */
   it('flags a numeric id column, which silently names nothing wide', () => {
     const table = T.table(tableSchema(column('neuronId', 'i64'), column('type', 'str')))
-    expect(issues({}, table).join(' ')).toMatch(/has already lost the digits/)
+    expect(issues({}, table).join(' ')).toMatch(/has already lost digits/)
   })
 
   it('flags a table asked to name every line after itself', () => {

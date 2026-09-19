@@ -588,7 +588,7 @@ describe('the guard rail', () => {
     // `warnOverThreshold`'s phrasing rather than a bespoke sentence: what went past, what it
     // went past, what it costs, and that there is a result on the other side of it.
     expect(warnings.join(' ')).toMatch(/is past the size a component can still be trimmed/)
-    expect(warnings.join(' ')).toMatch(/ignored labels.*Going ahead anyway/s)
+    expect(warnings.join(' ')).toMatch(/ignored labels.*Running anyway/s)
     // Every neuron matched, all under the one label the generic bridge produced.
     expect(mapping.unmatched).toEqual([0, 0])
     expect(mapping.report).toHaveLength(1)

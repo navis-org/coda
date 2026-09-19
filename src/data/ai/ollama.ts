@@ -471,9 +471,9 @@ export const ollama: AiProvider = {
     // say so, where nothing has made up for it and the caveat is still true.
     if (chosen && !chosen.structured && !ignoresSchemaField(id)) {
       warnings.push(
-        `${id} is not a GGUF build, so it runs on an engine that accepts the JSON schema ` +
-          `and ignores it — plans may come back in the wrong shape. A GGUF build of the same ` +
-          `model honours it.`,
+        `${id} is not a GGUF build, so its engine accepts the JSON schema and ignores it ` +
+          `— plans may come back in the wrong shape. A GGUF build of the same model ` +
+          `honours it.`,
       )
     }
     /*
@@ -484,11 +484,9 @@ export const ollama: AiProvider = {
      */
     if (chosen && contextNote(chosen.context)) {
       warnings.push(
-        `${id} was trained with a ${Math.round(chosen.context / 1024)}k context window and ` +
-          `Coda's prompt is ~10k tokens before the canvas is described, so Ollama will clamp ` +
-          `the request and the prompt will ` +
-          `not fit. Asking will fail rather than answer badly. Pull a model with at least ` +
-          `${NUM_CTX / 1024}k.`,
+        `${id} has a ${Math.round(chosen.context / 1024)}k context window and Coda's ` +
+          `prompt is ~10k tokens before the canvas, so Ollama will clamp the request and ` +
+          `asking will fail. Pull a model with at least ${NUM_CTX / 1024}k.`,
       )
     }
 

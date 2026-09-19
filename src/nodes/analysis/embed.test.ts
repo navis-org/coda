@@ -215,7 +215,7 @@ describe('the Embedding node', () => {
         scoreColumn: 'score',
       },
     })
-    expect(warnings.join(' ')).toMatch(/never appears in "queryId"/)
+    expect(warnings.join(' ')).toMatch(/is not in "queryId"/)
   })
 
   it('joins an Annotations table onto the label, leaving misses null', async () => {

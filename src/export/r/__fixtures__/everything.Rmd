@@ -1672,10 +1672,9 @@ upload_table <- upload_table |> mutate(across(all_of(c("cluster")), as.character
 
 ```{r upload-mesh}
 # ── Upload Mesh ──
-# NOTE: Coda stores uploaded meshes in the browser, not in the graph, so the
-# geometry is not in this document. Point this at your copy of
-# "glomeruli.obj". OBJ and STL go through rgl, which comes with nat; PLY
-# needs Rvcg, which nat only suggests — install.packages("Rvcg").
+# NOTE: Coda stores uploaded meshes in the browser, not in the graph, so
+# point this at your copy of "glomeruli.obj". OBJ and STL go through rgl
+# (with nat); PLY needs Rvcg — install.packages("Rvcg").
 upload_mesh_paths <- c("glomeruli.obj")
 upload_mesh <- lapply(upload_mesh_paths, coda_read_mesh)
 names(upload_mesh) <- tools::file_path_sans_ext(basename(upload_mesh_paths))
@@ -1817,8 +1816,8 @@ roi_viewer_rois
 ```{r roi-meshes}
 # ── ROI Meshes ──
 # NOTE: One request per region, and neuPrint publishes these for
-# visualization only — decimated display surfaces, so a volume measured off
-# one is an approximation rather than a figure to quote.
+# visualization only — decimated surfaces, so a volume measured off one is
+# an approximation.
 roi_meshes_rois <- c("EB", "FB")
 roi_meshes <- lapply(roi_meshes_rois, neuprint_ROI_mesh, conn = hemibrain_neuprint)
 names(roi_meshes) <- roi_meshes_rois
@@ -1924,15 +1923,15 @@ roi_counts <- neuprint_get_roiInfo(find_neurons$neuronId, conn = hemibrain_neupr
 ```{r influence}
 # ── Influence ──
 # TODO: "Influence" has no R Markdown equivalent yet, so this step is
-# missing from the translation. Everything downstream of it refers to
-# variables that were never bound.
+# missing. Everything downstream of it refers to variables that were never
+# bound.
 ```
 
 ```{r influence-2}
 # ── Influence ──
 # TODO: "Influence" has no R Markdown equivalent yet, so this step is
-# missing from the translation. Everything downstream of it refers to
-# variables that were never bound.
+# missing. Everything downstream of it refers to variables that were never
+# bound.
 ```
 
 ```{r skeletons}
@@ -1953,9 +1952,9 @@ skeletons[, "type"] <- find_neurons[["type"]][idx_]
 ```{r synapses}
 # ── Synapses ──
 # NOTE: neuprintr returns bodyid and prepost (0/1) where Coda carries
-# neuronId and polarity ("pre"/"post"). Any cell below that names a synapse
-# column will need one or the other spelling — the notebook export
-# normalises these, this one does not yet.
+# neuronId and polarity ("pre"/"post"). Any cell below naming a synapse
+# column needs one spelling or the other; this exporter does not normalise
+# them yet.
 # NOTE: neuprint_get_synapses returns a presynaptic site once per partner it
 # drives, where the Synapses node is set to one row per site — so this frame
 # has more rows than the canvas. De-duplicate on the location columns to
@@ -1966,9 +1965,9 @@ synapses <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn =
 ```{r synapses-2}
 # ── Synapses ──
 # NOTE: neuprintr returns bodyid and prepost (0/1) where Coda carries
-# neuronId and polarity ("pre"/"post"). Any cell below that names a synapse
-# column will need one or the other spelling — the notebook export
-# normalises these, this one does not yet.
+# neuronId and polarity ("pre"/"post"). Any cell below naming a synapse
+# column needs one spelling or the other; this exporter does not normalise
+# them yet.
 # NOTE: neuprintr has no confidence argument — filter this frame yourself,
 # e.g. subset(<points>, confidence >= 0.8).
 synapses_2 <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn = hemibrain_neuprint)
@@ -1976,9 +1975,9 @@ synapses_2 <- neuprint_get_synapses(find_neurons$neuronId, prepost = "PRE", conn
 
 ```{r synapses-between}
 # ── Synapses Between ──
-# NOTE: The open side is neuPrint’s :Neuron label, where the canvas counts
-# the neurons the Dataset node’s population selects — the same set unless
-# that population narrows further.
+# NOTE: The open side is neuPrint's :Neuron label; the canvas counts the
+# neurons the Dataset node's population selects — the same set unless that
+# population narrows further.
 .sources <- paste0("[", paste(find_neurons$neuronId, collapse = ","), "]")
 synapses_between <- neuprint_fetch_custom(
   sub("{sources}", .sources, "MATCH (n:Segment)\nWHERE n.bodyId IN {sources}\nMATCH (n)-[:Contains]->(nss:SynapseSet)-[:ConnectsTo]->(mss:SynapseSet)<-[:Contains]-(m:Neuron)\nMATCH (nss)-[:Contains]->(ns:Synapse)-[:SynapsesTo]->(ms:Synapse)<-[:Contains]-(mss)\nRETURN n.bodyId, n.type, m.bodyId, m.type, ns.location.x, ns.location.y,\n       ns.location.z, ns.confidence", fixed = TRUE),
@@ -2150,9 +2149,8 @@ ggplot(box_plot_2_data, aes(y = `pre`, x = `type`)) +
   geom_jitter(width = 0.15, height = 0, size = 0.8, alpha = 0.7) +
   theme_minimal()
 # NOTE: Coda packs a swarm so no two marks overlap and thins it to 300 per
-# group. `geom_jitter` scatters them at random instead;
-# `ggbeeswarm::geom_quasirandom` is the faithful mark if you want to add the
-# dependency.
+# group. `geom_jitter` scatters at random; `ggbeeswarm::geom_quasirandom` is
+# the faithful mark if you want the dependency.
 ```
 
 ```{r edit-table}
@@ -2202,15 +2200,15 @@ adjacency_links <- adjacency_links[adjacency_links$weight != 0, ]
 ```{r influence-3}
 # ── Influence ──
 # TODO: "Influence" has no R Markdown equivalent yet, so this step is
-# missing from the translation. Everything downstream of it refers to
-# variables that were never bound.
+# missing. Everything downstream of it refers to variables that were never
+# bound.
 ```
 
 ```{r paths}
 # ── Paths ──
-# NOTE: neuprintr returns every route within the hop budget. Coda
-# additionally ranks them by their weakest link and keeps the strongest —
-# that ranking is not reproduced, so this is the unranked set.
+# NOTE: neuprintr returns every route within the hop budget. Coda also ranks
+# them by their weakest link and keeps the strongest; that ranking is not
+# reproduced, so this is the unranked set.
 # NOTE: This node’s Network output is not reproduced here — only the routes
 # table is. A cell below that reads the Network port will not find it.
 paths_paths <- neuprint_get_paths(
@@ -2293,11 +2291,10 @@ print(
     labs(x = "rank", y = "weight") +
     theme_minimal()
 )
-# NOTE: The card draws the share as a second panel under the ranking,
-# sharing its axis. ggplot2 alone cannot stack two panels with different y
-# transforms — a transform belongs to the scale rather than to the facet —
-# so this is a second figure over the same ranking. It is empty where the
-# share was withheld; see coda_rank.
+# NOTE: The card draws the share as a second panel sharing the ranking's
+# axis. ggplot2 cannot stack two panels with different y transforms, so this
+# is a second figure over the same ranking — empty where the share was
+# withheld; see coda_rank.
 
 print(
   ggplot(.ranked, aes(x = coda_rank, y = coda_share)) +
@@ -2338,9 +2335,9 @@ similarity_matrix <- coda_similarity_wide(
 ```{r split-neurons}
 # ── Split Neurons ──
 # NOTE: The filter reads the metadata frame attached to the neuronlist
-# (`nl[, ]`), which is nat’s equivalent of the attribute table Coda splits
-# on. It holds whatever read the neurons, so a column the canvas has may
-# need adding here first.
+# (`nl[, ]`), nat's equivalent of the attribute table Coda splits on. It
+# holds whatever read the neurons, so a column the canvas has may need
+# adding here first.
 # NOTE: Coda matches these regexes with JavaScript semantics. `perl = TRUE`
 # is the closest of R’s engines; the two differ on lookbehind and named
 # groups.
@@ -2359,8 +2356,8 @@ select_one <- skeletons |> slice(1)
 ```{r mirror-neurons}
 # ── Mirror Neurons ──
 # TODO: "Mirror Neurons" has no R Markdown equivalent yet, so this step is
-# missing from the translation. Everything downstream of it refers to
-# variables that were never bound.
+# missing. Everything downstream of it refers to variables that were never
+# bound.
 ```
 
 ```{r transform-neurons}
@@ -2474,11 +2471,10 @@ distance_between <- coda_neuron_distance(
 # graph records it.
 VOXEL_UM <- 8 / 1000
 
-# NOTE: This counts each node of the Query once, which is what bounds the
-# answer by the neuron’s own cable. navis’ cable_overlap — the nearest thing
-# to this in either language — instead sums a node once per Target point
-# that picks it, and differs by a little over one per cent on two example
-# neurons at 2 µm.
+# NOTE: This counts each Query node once, which is what bounds the answer by
+# the neuron's own cable. navis' cable_overlap instead sums a node once per
+# Target point that picks it — a little over one per cent apart on two
+# example neurons at 2 µm.
 distance_between_2 <- coda_neuron_distance(
   skeletons * VOXEL_UM,
   skeletons * VOXEL_UM,
@@ -2618,10 +2614,10 @@ plot(
 
 ```{r points-in-volumes}
 # ── Points in Volumes ──
-# NOTE: nat::pointsinside needs the Rvcg package, which nat suggests rather
-# than depends on — install.packages("Rvcg") if this errors. It casts its
-# own rays where Coda descends a bounding volume hierarchy, so the two agree
-# on any closed mesh except at its surface.
+# NOTE: nat::pointsinside needs Rvcg, which nat only suggests —
+# install.packages("Rvcg") if this errors. It casts its own rays where Coda
+# descends a bounding volume hierarchy, so the two agree on any closed mesh
+# except at its surface.
 points_in_volumes_split <- coda_in_volumes(synapses_between_2, roi_meshes, "roi")
 points_in_volumes_inside <- points_in_volumes_split$points[!is.na(points_in_volumes_split$points[["roi"]]), ]
 points_in_volumes_outside <- points_in_volumes_split$points[is.na(points_in_volumes_split$points[["roi"]]), ]
@@ -2716,10 +2712,9 @@ diag(m_) <- -Inf
 # what the matrix says its cells are. A plain matrix has nowhere to carry
 # that, so this assumes higher is better.
 cut_ <- apply(m_, 1, function(r) max(r[is.finite(r)], -Inf)) * (1 - 0.05)
-# NOTE: The band is around each row’s own best score, not the matrix’s —
-# 0.05 keeps everything within 5% of that neuron’s top match. Note this
-# multiplies, so it behaves as intended only for positive scores, which
-# normalised NBLAST gives.
+# NOTE: The band is around each row's own best score, not the matrix's: 0.05
+# keeps everything within 5% of that neuron's top match. It multiplies, so
+# it behaves as intended only for positive scores.
 nblast_matches_2 <- do.call(rbind, lapply(seq_len(nrow(m_)), function(i) {
   hit <- which(is.finite(m_[i, ]) & m_[i, ] >= cut_[i])
   if (!length(hit)) return(NULL)
@@ -2750,10 +2745,9 @@ nblast_matches_3 <- data.frame(
 
 ```{r linkage}
 # ── Linkage ──
-# NOTE: Coda runs navis-fastcore, whose linkage is SciPy's, and "average" is
-# hclust's "average". Checked through both on one matrix: same merge
-# heights, same leaf order. Note that "ward.D" is a different criterion and
-# would not agree.
+# NOTE: Coda's linkage is SciPy's via navis-fastcore, and "average" is
+# hclust's "average". Checked on one matrix: same merge heights, same leaf
+# order. "ward.D" is a different criterion and would not agree.
 m_ <- as.matrix(nblast_df)
 d_ <- as.dist(1 - ((m_ + t(m_)) / 2))
 
@@ -2908,10 +2902,9 @@ reduce_matrix[["sim_n"]] <- rowSums(!is.na(m_))
 ```{r cut-tree-2}
 # ── Cut Tree ──
 cl_ <- cutree(linkage_tree, k = 4)
-# NOTE: Coda numbers clusters left to right as the dendrogram draws them, so
-# the column reads against the picture. `cutree` numbers by observation
-# order; the grouping is the same either way, and this renumbers so the two
-# agree.
+# NOTE: Coda numbers clusters left to right as the dendrogram draws them;
+# `cutree` numbers by observation order. Same grouping — this renumbers so
+# the two agree.
 cl_ <- match(cl_, unique(cl_[linkage_tree$order]))
 
 cut_tree_2_clusters <- tibble(
@@ -2932,10 +2925,9 @@ cut_tree_2_tree_clusters <- cl_
 # NOTE: Cutting at a height gives however many groups fall out below it,
 # which may be one if the height is above the top of the tree.
 cl_ <- cutree(linkage_tree, h = 0.6)
-# NOTE: Coda numbers clusters left to right as the dendrogram draws them, so
-# the column reads against the picture. `cutree` numbers by observation
-# order; the grouping is the same either way, and this renumbers so the two
-# agree.
+# NOTE: Coda numbers clusters left to right as the dendrogram draws them;
+# `cutree` numbers by observation order. Same grouping — this renumbers so
+# the two agree.
 cl_ <- match(cl_, unique(cl_[linkage_tree$order]))
 
 cut_tree_3_clusters <- tibble(
@@ -3002,8 +2994,7 @@ dendrogram_selected <- tibble(
 ```{r clusters-to-neurons}
 # ── Clusters to Neurons ──
 # NOTE: Coda matches labels as text, so both sides go through a character
-# key — a tree labelled by neuron id carries "722817260" against a numeric
-# column, and joining those directly matches nothing.
+# key: "722817260" against a numeric column joins to nothing.
 clusters_to_neurons <- find_neurons |>
   mutate(key_ = as.character(`type`)) |>
   inner_join(
@@ -3032,9 +3023,8 @@ relabel_2 <- coda_relabel(deduplicate, "preType", combine_columns, "type", "labe
 ```{r selected-to-neurons}
 # ── Selected to Neurons ──
 # NOTE: No neuron table is wired on the canvas, so the labels are read as
-# neuron ids. Rows that are not usable ids are dropped, as they are in Coda,
-# and what survives is kept as character — every Coda id column is text, and
-# an R `numeric` is a double.
+# neuron ids. Unusable ids are dropped, as in Coda, and the rest kept as
+# character — every Coda id column is text.
 selected_to_neurons <- dendrogram_selected |>
   mutate(neuronId = suppressWarnings(as.numeric(`label`))) |>
   filter(!is.na(neuronId)) |>
@@ -3117,9 +3107,9 @@ build_network <- graph_from_data_frame(
 
 ```{r join}
 # ── Join ──
-# NOTE: Coda keeps the first matching row from the other table, so a
-# duplicated key annotates rather than multiplies. `distinct` is what
-# reproduces that — without it the join returns every matching pair.
+# NOTE: Coda keeps the first matching row, so a duplicated key annotates
+# rather than multiplies. `distinct` reproduces that; without it the join
+# returns every matching pair.
 join <- select_columns |>
   left_join(
     group_by_df_3 |> distinct(`preType`, .keep_all = TRUE),
@@ -3130,9 +3120,9 @@ join <- select_columns |>
 
 ```{r join-2}
 # ── Join ──
-# NOTE: Coda keeps the first matching row from the other table, so a
-# duplicated key annotates rather than multiplies. `distinct` is what
-# reproduces that — without it the join returns every matching pair.
+# NOTE: Coda keeps the first matching row, so a duplicated key annotates
+# rather than multiplies. `distinct` reproduces that; without it the join
+# returns every matching pair.
 join_2 <- select_columns |>
   full_join(
     group_by_df_3 |> distinct(`postType`, .keep_all = TRUE),
@@ -3143,9 +3133,9 @@ join_2 <- select_columns |>
 
 ```{r join-3}
 # ── Join ──
-# NOTE: Coda keeps the first matching row from the other table, so a
-# duplicated key annotates rather than multiplies. `distinct` is what
-# reproduces that — without it the join returns every matching pair.
+# NOTE: Coda keeps the first matching row, so a duplicated key annotates
+# rather than multiplies. `distinct` reproduces that; without it the join
+# returns every matching pair.
 # NOTE: Row **order** differs here, and only here. Coda emits one row per
 # right-table row in the right table's order; dplyr 1.2 puts the matched
 # rows in the left table's order and the unmatched right rows after them.
@@ -3201,10 +3191,9 @@ filter_network_2 <- induced_subgraph(build_network, keep)
 
 ```{r network-centrality}
 # ── Network Centrality ──
-# NOTE: The canvas sampled 200 source nodes for the shortest-path sweep.
-# igraph has no pivot sampling — its `cutoff` bounds path length instead —
-# so this runs the exact sweep: a more precise answer, and a considerably
-# slower one on a large graph.
+# NOTE: The canvas sampled 200 source nodes. igraph has no pivot sampling,
+# so this runs the exact sweep: more precise, and considerably slower on a
+# large graph.
 # NOTE: igraph’s Louvain is undirected only, so the community pass runs on
 # the collapsed graph. The partition and the modularity are the undirected
 # ones.
@@ -3283,11 +3272,9 @@ normalize[empty_, ] <- 0
 ```{r heatmap-2}
 # ── Heatmap ──
 heatmap_2_out <- as.matrix(pivot_matrix_df)
-# NOTE: The clustering is seaborn’s clustermap: each row a vector across the
-# columns, clustered by the distance between vectors. Coda reads an empty
-# cell as 0 for this, and puts a constant vector — no correlation, no cosine
-# — at distance 1 from everything rather than letting `cor`’s NA stop
-# `hclust`.
+# NOTE: The clustering is seaborn's clustermap: each row a vector across the
+# columns. Coda reads an empty cell as 0 and puts a constant vector at
+# distance 1 from everything, rather than letting `cor`'s NA stop `hclust`.
 x_ <- heatmap_2_out
 x_[!is.finite(x_)] <- 0
 d_ <- 1 - cor(t(x_))
@@ -3417,9 +3404,9 @@ heatmap_6_columns <- coda_matrix_selection(colnames(heatmap_6_out), integer(0))
 hi_ <- 50
 lo_ <- 0
 # NOTE: The colour runs on a log scale and the values do not: the fill is
-# log10(1 + value - low) and the label, where one is drawn, is the value
-# itself. A cell past either end is clipped to it, as on the card — note
-# that this leaves the legend labelled in the transformed units.
+# log10(1 + value - low) and the label is the raw value. Cells past either
+# end are clipped, as on the card, and the legend stays in transformed
+# units.
 
 heatmap_6_out |>
   as.data.frame() |>

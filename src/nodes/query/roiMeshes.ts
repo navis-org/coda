@@ -110,8 +110,8 @@ registerNode({
       // An edit-time warning, which is where this one belongs: the picker is right there, and
       // `NodeIssue`'s 'warning' severity has said "this is fine, but" since before `ctx.warn`.
       issues.push(
-        `${chosen.length} regions is a lot to ask for one shell at a time; leaving the picker ` +
-          `empty asks the source for its primary set instead`,
+        `${chosen.length} regions is a lot to fetch one shell at a time; leaving the ` +
+          `picker empty asks for the source's primary set.`,
       )
     }
     return issues

@@ -218,8 +218,8 @@ registerNode({
       if (from.size > 0 && to.size > 0 && shared.length === 0) {
         return [
           `${spaceName(override)} covers ${[...from].join(' and ')} where ` +
-            `${spaceName(target)} covers ${[...to].join(' and ')}. There is no shared ` +
-            'territory, so every point would be extrapolated rather than transformed.',
+            `${spaceName(target)} covers ${[...to].join(' and ')}. With no shared territory ` +
+            `every point would be extrapolated rather than transformed.`,
         ]
       }
       // Beyond that there is nothing to say in advance: the placement below is a fact about
@@ -243,9 +243,9 @@ registerNode({
     }
     if (vnc.any) {
       return [
-        `${COMMON_SPACE.id} is a brain template, so the nerve cord half of this dataset is ` +
-          'placed rather than registered. The two halves reach the frame by different routes ' +
-          'and disagree slightly where they meet, around the neck.',
+        `${COMMON_SPACE.id} is a brain template, so the nerve cord half is placed rather ` +
+          `than registered. The two halves reach the frame by different routes and ` +
+          `disagree slightly around the neck.`,
       ]
     }
     return []
@@ -282,17 +282,16 @@ registerNode({
     if (conflict) {
       const [carried, override] = conflict
       throw new Error(
-        `These coordinates are in ${spaceName(carried)} (${carried}), but Space is set to ` +
-          `${spaceName(override)} (${override}). Transforming from the wrong space produces ` +
-          'neurons that look reasonable and are in the wrong place, so this refuses rather ' +
-          'than picking one. Set Space back to “From the data”.',
+        `These coordinates are in ${spaceName(carried)} (${carried}) but Space is set to ` +
+          `${spaceName(override)} (${override}). Transforming from the wrong space puts ` +
+          `neurons somewhere plausible and wrong. Set Space back to "From the data".`,
       )
     }
     if (!spaceId) {
       throw new Error(
-        'These coordinates do not say which template space they are in, so there is nothing ' +
-          `to transform them from. Fetch them from a dataset Coda has a registration for, or ` +
-          'name the space on this node if you know it.',
+        'These coordinates name no template space, so there is nothing to transform them ' +
+          'from. Fetch them from a dataset Coda has a registration for, or name the space ' +
+          'here.',
       )
     }
 
@@ -321,9 +320,9 @@ registerNode({
        * looking for a workaround there is none of.
        */
       throw new Error(
-        `Coda ships no route from ${spaceName(spaceId)} (${spaceId}) into ${COMMON_SPACE.id} — ` +
-          'either none exists, or the registrations that would build one are native libraries ' +
-          'that cannot run in a browser.',
+        `Coda ships no route from ${spaceName(spaceId)} (${spaceId}) into ` +
+          `${COMMON_SPACE.id} — either none exists, or building one needs native libraries ` +
+          `that cannot run in a browser.`,
       )
     }
     /*

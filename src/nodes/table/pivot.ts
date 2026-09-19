@@ -96,9 +96,8 @@ registerNode({
      */
     if (rows === cols) {
       throw new Error(
-        `Rows and Columns are both "${rows}", which pivots the field against itself and can ` +
-          'only produce a diagonal. Pick a different Columns field — if the one you chose is ' +
-          'missing, the node says so above.',
+        `Rows and Columns are both "${rows}", which pivots the field against itself and ` +
+          `can only give a diagonal. Pick a different Columns field.`,
       )
     }
     const agg = String(ctx.params.agg) as AggFn

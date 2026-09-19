@@ -330,11 +330,10 @@ registerNode({
           hi = Math.max(hi, value)
         }
         throw new Error(
-          `"${idColumnName}" holds values from ${lo.toLocaleString()} to ` +
-            `${hi.toLocaleString()}, which are not ZapBench cell ids — this release has ` +
-            `${TRACE_COLUMNS.toLocaleString()} cells, numbered 1 to ` +
-            `${TRACE_COLUMNS.toLocaleString()}. On fish2 the column is "zapbenchId"; a bodyId ` +
-            `will not do.`,
+          `"${idColumnName}" holds ${lo.toLocaleString()}–${hi.toLocaleString()}, which ` +
+            `are not ZapBench cell ids — this release has ${TRACE_COLUMNS.toLocaleString()} ` +
+            `cells, numbered 1 to ${TRACE_COLUMNS.toLocaleString()}. On fish2 the column is ` +
+            `"zapbenchId"; a bodyId will not do.`,
         )
       }
       // A blank label would collide with every other blank on an axis the Heatmap filters, so

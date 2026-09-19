@@ -142,8 +142,8 @@ export function caveDatastackIssues(
   const foreign = foreignBackend(inputType, 'cave')
   if (foreign) {
     return [
-      `A ${foreign} dataset names no CAVE datastack — wire a CAVE Dataset here, or unwire ` +
-        `this input and name the datastack instead`,
+      `A ${foreign} dataset names no CAVE datastack. Wire a CAVE Dataset here, or ` +
+        `unwire this input and name the datastack.`,
     ]
   }
   const datastack = String(params.datastack ?? '').trim()

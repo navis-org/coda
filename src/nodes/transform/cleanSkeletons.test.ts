@@ -262,7 +262,7 @@ describe('cleanOps — the resample ceiling', () => {
     const said: string[] = []
     checkResampleSize({ warn: (m) => said.push(m) }, cable(), 0.1 * NM_PER_UM)
     expect(said.join(' ')).toMatch(/nodes after resampling/)
-    expect(said.join(' ')).toMatch(/Spacing of 0.1 µm/)
+    expect(said.join(' ')).toMatch(/0.1 µm Spacing/)
   })
 
   it('still refuses the one spacing that has no geometry on the other side of it', () => {

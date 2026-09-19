@@ -597,14 +597,15 @@ function nameAxes(
     if (!count || count.total === 0 || count.named === count.total) continue
     if (count.named === 0) {
       ctx.warn(
-        `No ${axis} are named by "${options.label}", so they keep the labels the matrix ` +
+        `No ${axis} are named by "${options.label}", so they keep the labels they ` +
           `arrived with. Check Match on, or narrow Apply to.`,
       )
       continue
     }
     ctx.warn(
-      `${(count.total - count.named).toLocaleString()} of ${count.total.toLocaleString()} ` +
-        `${axis} are not named by the annotation table and keep their own labels.`,
+      `${(count.total - count.named).toLocaleString()} of ` +
+        `${count.total.toLocaleString()} ${axis} are not in the annotation table and ` +
+        `keep their own labels.`,
     )
   }
   return renamed
@@ -632,7 +633,7 @@ function filterMatrix(
     if (error) {
       ctx.warn(
         `The ${axis} filter is not a valid regular expression (${error}), so every ` +
-          `${axis === 'rows' ? 'row is' : 'column is'} kept.`,
+          `${axis === 'rows' ? 'row' : 'column'} was kept.`,
       )
       continue
     }

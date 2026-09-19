@@ -328,8 +328,8 @@ registerNode({
       const typed = String(ctx.params[repeatParamId('name', index)] ?? '').trim()
       if (typed && typed !== name) {
         issues.push(
-          `Dataset ${index}: another dataset is already called "${typed}", so its columns are ` +
-            `named after "${name}" instead.`,
+          `Dataset ${index}: another dataset is already called "${typed}", so its columns ` +
+            `are named after "${name}".`,
         )
       }
     })
