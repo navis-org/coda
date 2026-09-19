@@ -92,6 +92,7 @@ export function ViewerSurface({
   actions,
   leading,
   controls = 'auto',
+  guides = true,
 }: {
   nodeId: string
   /** Buttons for the right-hand end of the header — close, fullscreen, unpin, remove. */
@@ -127,6 +128,12 @@ export function ViewerSurface({
    * the same information without the corner that could not happen.
    */
   controls?: 'auto' | 'rail' | 'hidden'
+  /**
+   * Whether the header offers the body's screen map. Off in a dashboard cell: a cell is a
+   * fraction of a window and hides the rail, so the parts a map points at are mostly not where
+   * it says, or not drawn at all. The full-size viewer, one ⤢ away, still offers it.
+   */
+  guides?: boolean
 }) {
   const inference = useGraphStore((s) => s.inference)
   const setParam = useGraphStore((s) => s.setParam)
@@ -209,7 +216,7 @@ export function ViewerSurface({
   if (!node || !def || !ctx) return null
 
   const body = nodeBody(node.type)
-  const spots = body?.screenMap
+  const spots = guides ? body?.screenMap : undefined
   // `railParams` in `paramGroups.ts`, which is where this policy is stated and tested. Note it
   // answers empty for a node with `ownControls`, which takes the tabbed sidebar with it below —
   // both are built from the same params, and a body that already carries them needs neither.
@@ -240,8 +247,8 @@ export function ViewerSurface({
         {spots && (
           /*
            * The Guides entry's own drawing, so the two ways into a screen map look like one
-           * thing. Wherever `?` is — the overlay, the dock, a dashboard cell — since all three
-           * draw the same body and a map is a question about the body, not about the frame.
+           * thing. In the overlay and the dock, which draw the body at full size; a dashboard cell
+           * opts out through `guides`.
            */
           <button
             type="button"

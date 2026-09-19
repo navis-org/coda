@@ -2394,6 +2394,27 @@ select.field {
   flex: 0 0 auto;
 }
 
+/*
+ * Header plus list. Only the aligned view scrolls sideways: its children take the grid's
+ * min-content width (the fixed tracks plus the name block's floor), which the frame then scrolls.
+ * The card's flex rows keep their width, so this is a plain column there.
+ */
+.explore__table {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.explore__table[data-aligned] {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.explore__table[data-aligned] > .explore-head,
+.explore__table[data-aligned] > .explore__list {
+  min-width: min-content;
+}
+
 .explore__list {
   flex: 1 1 auto;
   min-height: 0;

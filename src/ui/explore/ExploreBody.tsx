@@ -704,125 +704,135 @@ export function ExploreBody({
             `+` in the last track opens the field menu — drawn even over no columns at all, since it is
             then the only way to get one.
           */}
-          {rowLayout && (
-            <div className="explore-head" style={rowLayout.style}>
-              {/* The checkbox, tile and name-block tracks, named by nothing. */}
-              <span />
-              <span />
-              <span />
-              {rowLayout.columns.map((column, at) => (
+          {/*
+            The header and the list scroll sideways together, and only in the aligned view: a row's
+            tracks have a floor (`rowTemplate`), so a frame narrower than the columns scrolls
+            rather than squeezing the name block to nothing. Scrolling each alone would leave the
+            header over the wrong values.
+          */}
+          <div className="explore__table" data-aligned={rowLayout ? '' : undefined}>
+            {rowLayout && (
+              <div className="explore-head" style={rowLayout.style}>
+                {/* The checkbox, tile and name-block tracks, named by nothing. */}
+                <span />
+                <span />
+                <span />
+                {rowLayout.columns.map((column, at) => (
+                  <button
+                    type="button"
+                    // Position is the key: a header cell holds no state of its own.
+                    key={at}
+                    className={
+                      'explore-head__cell' +
+                      (column.render === 'number' ? ' explore-head__cell--stat' : '') +
+                      (isMark(column) ? ' explore-head__cell--mark' : '')
+                    }
+                    title={columnTitle(column, table.schema)}
+                    aria-haspopup="dialog"
+                    onClick={(event) => openEditor(at, event)}
+                  >
+                    {columnLabel(column)}
+                  </button>
+                ))}
                 <button
                   type="button"
-                  // Position is the key: a header cell holds no state of its own.
-                  key={at}
-                  className={
-                    'explore-head__cell' +
-                    (column.render === 'number' ? ' explore-head__cell--stat' : '') +
-                    (isMark(column) ? ' explore-head__cell--mark' : '')
-                  }
-                  title={columnTitle(column, table.schema)}
+                  className="explore-head__add"
+                  title="Add a field, as a column or a chip — or combine several into one column"
+                  aria-label="Add a field"
                   aria-haspopup="dialog"
-                  onClick={(event) => openEditor(at, event)}
+                  onClick={(event) => setAdding(anchorOf(event))}
                 >
-                  {columnLabel(column)}
+                  +
                 </button>
-              ))}
-              <button
-                type="button"
-                className="explore-head__add"
-                title="Add a field, as a column or a chip — or combine several into one column"
-                aria-label="Add a field"
-                aria-haspopup="dialog"
-                onClick={(event) => setAdding(anchorOf(event))}
-              >
-                +
-              </button>
-            </div>
-          )}
-          {columns && editing && (
-            <ColumnEditor
-              // Keyed on the column, so opening a second one starts from that column's own state.
-              key={editing.index ?? 'add'}
-              anchor={editing.anchor}
-              column={editing.index === null ? undefined : columns[editing.index]}
-              schema={table.schema}
-              offered={offered}
-              numeric={numericFields}
-              canMoveLeft={editing.index !== null && editing.index > 0}
-              canMoveRight={editing.index !== null && editing.index < columns.length - 1}
-              canRemove={
-                editing.index !== null && allowed(removeColumn(current, editing.index))
-              }
-              explicit={explicit}
-              onApply={(column) => commit(setColumn(current, editing.index, column))}
-              onMove={(delta) =>
-                editing.index !== null && commit(moveColumn(current, editing.index, delta))
-              }
-              {...(editedField
-                ? {
-                    onShowAsChip: () => commit(placeAsChip(current, editedField)),
-                  }
-                : {})}
-              onRemove={() =>
-                editing.index !== null && commit(removeColumn(current, editing.index))
-              }
-              onReset={() => setParam('layout', [])}
-              onClose={() => setEditing(null)}
-            />
-          )}
-
-          {columns && adding && (
-            <AddFieldMenu
-              anchor={adding}
-              fields={offered.map((name) => ({
-                name,
-                numeric: numericFields.has(name),
-                place: placeOf(current, name),
-              }))}
-              canHide={(name) => allowed(hideField(current, name))}
-              onColumn={(name) => commit(placeAsColumn(current, name, numericFields.has(name)))}
-              onChip={(name) => commit(placeAsChip(current, name))}
-              onHide={(name) => commit(hideField(current, name))}
-              onCombine={() => {
-                setAdding(null)
-                setEditing({ index: null, anchor: adding })
-              }}
-              onClose={() => setAdding(null)}
-            />
-          )}
-
-          {/* `nowheel` lets the list scroll instead of zooming the canvas under it. */}
-          <div className="explore__list nowheel">
-            {visible.length === 0 ? (
-              <div className="explore__empty">
-                Nothing matches. {applied ? 'Try fewer terms.' : ''}
               </div>
-            ) : (
-              visible.map((row) => {
-                const neuronId = neuronIdAt(row) ?? ''
-                return (
-                  <NeuronRow
-                    key={neuronId || row}
-                    table={table}
-                    row={row}
-                    fields={rowSpec}
-                    sourceId={ref?.sourceId}
-                    datasetId={ref?.datasetId}
-                    selected={selection.has(neuronId)}
-                    onToggle={toggle}
-                    compact={compact}
-                    // The menu is the overlay's, and it is now the only thing that is: the hover
-                    // preview used to be gated the same way and runs on a card too. What still
-                    // divides them is that a menu wants a pointer the canvas has already claimed
-                    // for panning and selection, where a preview only wants somewhere to draw.
-                    onContextMenu={compact ? undefined : openMenu}
-                    mode={mode}
-                    {...(rowLayout ? { layout: rowLayout } : {})}
-                    {...(regions.size ? { regions } : {})}
-                  />
-                )
-              })
             )}
+            {columns && editing && (
+              <ColumnEditor
+                // Keyed on the column, so opening a second one starts from that column's own state.
+                key={editing.index ?? 'add'}
+                anchor={editing.anchor}
+                column={editing.index === null ? undefined : columns[editing.index]}
+                schema={table.schema}
+                offered={offered}
+                numeric={numericFields}
+                canMoveLeft={editing.index !== null && editing.index > 0}
+                canMoveRight={editing.index !== null && editing.index < columns.length - 1}
+                canRemove={
+                  editing.index !== null && allowed(removeColumn(current, editing.index))
+                }
+                explicit={explicit}
+                onApply={(column) => commit(setColumn(current, editing.index, column))}
+                onMove={(delta) =>
+                  editing.index !== null && commit(moveColumn(current, editing.index, delta))
+                }
+                {...(editedField
+                  ? {
+                      onShowAsChip: () => commit(placeAsChip(current, editedField)),
+                    }
+                  : {})}
+                onRemove={() =>
+                  editing.index !== null && commit(removeColumn(current, editing.index))
+                }
+                onReset={() => setParam('layout', [])}
+                onClose={() => setEditing(null)}
+              />
+            )}
+
+            {columns && adding && (
+              <AddFieldMenu
+                anchor={adding}
+                fields={offered.map((name) => ({
+                  name,
+                  numeric: numericFields.has(name),
+                  place: placeOf(current, name),
+                }))}
+                canHide={(name) => allowed(hideField(current, name))}
+                onColumn={(name) =>
+                  commit(placeAsColumn(current, name, numericFields.has(name)))
+                }
+                onChip={(name) => commit(placeAsChip(current, name))}
+                onHide={(name) => commit(hideField(current, name))}
+                onCombine={() => {
+                  setAdding(null)
+                  setEditing({ index: null, anchor: adding })
+                }}
+                onClose={() => setAdding(null)}
+              />
+            )}
+
+            {/* `nowheel` lets the list scroll instead of zooming the canvas under it. */}
+            <div className="explore__list nowheel">
+              {visible.length === 0 ? (
+                <div className="explore__empty">
+                  Nothing matches. {applied ? 'Try fewer terms.' : ''}
+                </div>
+              ) : (
+                visible.map((row) => {
+                  const neuronId = neuronIdAt(row) ?? ''
+                  return (
+                    <NeuronRow
+                      key={neuronId || row}
+                      table={table}
+                      row={row}
+                      fields={rowSpec}
+                      sourceId={ref?.sourceId}
+                      datasetId={ref?.datasetId}
+                      selected={selection.has(neuronId)}
+                      onToggle={toggle}
+                      compact={compact}
+                      // The menu is the overlay's, and it is now the only thing that is: the hover
+                      // preview used to be gated the same way and runs on a card too. What still
+                      // divides them is that a menu wants a pointer the canvas has already claimed
+                      // for panning and selection, where a preview only wants somewhere to draw.
+                      onContextMenu={compact ? undefined : openMenu}
+                      mode={mode}
+                      {...(rowLayout ? { layout: rowLayout } : {})}
+                      {...(regions.size ? { regions } : {})}
+                    />
+                  )
+                })
+              )}
+            </div>
           </div>
 
           {menu && menuRow && (

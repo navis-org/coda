@@ -180,6 +180,20 @@ describe('Explore Dataset’s screen map', () => {
     expect(useGraphStore.getState().expandedNodeId).toBe(exploreId)
   })
 
+  /*
+   * A cell is a fraction of a window with its rail folded away, so the parts a map points at are
+   * mostly elsewhere or not drawn. The full-size viewer, one ⤢ away, still offers it.
+   */
+  it('is not offered in a dashboard cell', async () => {
+    act(() => {
+      useGraphStore.getState().addToDashboard([exploreId])
+      useGraphStore.getState().setDashboardOpen(true)
+    })
+    render(<App />)
+    await waitFor(() => expect(document.querySelector('.dash-cell .explore-row')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /^Screen map of/ })).toBeNull()
+  })
+
   it('is offered only by a body that declares one', async () => {
     const table = useGraphStore.getState().graph.nodes.find((node) => node.type === 'out.table')
     render(<App />)

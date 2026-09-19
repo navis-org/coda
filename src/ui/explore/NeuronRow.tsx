@@ -121,14 +121,22 @@ export function rowTemplate(columns: readonly ColumnSpec[]): React.CSSProperties
    * different amount per row. Fixed, so it cannot — and a mark's track is fixed from what the
    * *column* draws rather than from what this row has a value for, so a neuron missing `pre` keeps
    * its figures under their labels. The last track is the header's `+`, empty on every row.
+   *
+   * The name block has a floor, `NAME_MIN`. At `minmax(0, 1fr)` a frame narrower than the fixed
+   * tracks — a dashboard cell, a dock — squeezed it to zero, and its id, type and chips spilled
+   * across the first named column. With the floor the grid outgrows the frame instead, and
+   * `.explore__table` scrolls it sideways, header and rows together.
    */
   return {
     gridTemplateColumns:
-      `1.25rem ${TILE_PX}px minmax(0, 1fr)` +
+      `1.25rem ${TILE_PX}px minmax(${NAME_MIN}, 1fr)` +
       columns.map((column) => ` ${columnWidth(column)}`).join('') +
       ` ${ADD_TRACK}`,
   }
 }
+
+/** The narrowest the name block may get before the row scrolls sideways instead. */
+const NAME_MIN = '10rem'
 
 /** The header's trailing `+`, a track of its own so adding a column never shifts the others. */
 const ADD_TRACK = '1.25rem'

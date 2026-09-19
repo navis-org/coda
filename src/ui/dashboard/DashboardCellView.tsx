@@ -179,6 +179,7 @@ function DashboardCellViewInner({
           <ViewerSurface
             nodeId={nodeId}
             controls={railOpen ? 'rail' : 'hidden'}
+            guides={false}
             leading={
               <div
                 className="dash-cell__grip"
