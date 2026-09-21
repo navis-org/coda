@@ -20,11 +20,12 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
  * cross-document message, and neither exists here. What is under test is not that flow — it has
  * its own suite — but what the *panel* does when it lands, so the flow is stood in for.
  */
-const signIn = vi.hoisted(() => ({ toCave: vi.fn() }))
+const signIn = vi.hoisted(() => ({ toCave: vi.fn(), toNeuPrint: vi.fn() }))
 vi.mock('./caveSignIn', async (importOriginal) => ({
   ...(await importOriginal<typeof CaveSignIn>()),
   signInToCave: signIn.toCave,
 }))
+vi.mock('./neuprintSignIn', () => ({ signInToNeuPrint: signIn.toNeuPrint }))
 
 import {
   reportAuthFailure as reportAiAuthFailure,
@@ -44,7 +45,12 @@ import {
   resetCredentials as resetCatmaidCredentials,
   setInstances as setCatmaidInstances,
 } from '../../data/catmaid/credentials'
-import { reportAuthFailure, resetCredentials } from '../../data/neuprint/credentials'
+import {
+  getSession,
+  getToken,
+  reportAuthFailure,
+  resetCredentials,
+} from '../../data/neuprint/credentials'
 import { registerSource } from '../../data/source'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { useGraphStore } from '../../store/graphStore'
@@ -225,6 +231,34 @@ describe('source tabs', () => {
 
     expect(screen.queryByText(/No CAVE token/)).toBeNull()
     expect(screen.getByRole('tabpanel').textContent).toMatch(/Signed in as a@example.org/)
+  })
+
+  /*
+   * The neuPrint half of the same promise. A sign-in commits, the account is on screen, the alert
+   * about a missing token goes — and a token typed over it afterwards is not the signed-in
+   * account's, so the label must not survive a Save.
+   */
+  it('signs in to neuPrint, commits it, and drops the label once a token is pasted over it', async () => {
+    signIn.toNeuPrint.mockResolvedValue({ token: 'dsg-key', email: 'n@janelia.org' })
+    vi.stubGlobal('fetch', () => Promise.reject(new Error('offline')))
+    render(<SourcesPanel />)
+
+    act(() => reportAuthFailure('No neuPrint token.'))
+    expect(tab('neuPrint').getAttribute('aria-selected')).toBe('true')
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in with Google' }))
+    })
+
+    expect(screen.queryByText(/No neuPrint token/)).toBeNull()
+    expect(screen.getByRole('tabpanel').textContent).toMatch(/Signed in as n@janelia.org/)
+    expect(getToken()).toBe('dsg-key')
+    expect(getSession()?.email).toBe('n@janelia.org')
+
+    fireEvent.change(tokenField()!, { target: { value: 'pasted' } })
+    expect(screen.getByRole('tabpanel').textContent).not.toMatch(/Signed in as/)
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(getToken()).toBe('pasted')
+    expect(getSession()).toBeUndefined()
   })
 
   it('leaves an alert about another source standing', async () => {

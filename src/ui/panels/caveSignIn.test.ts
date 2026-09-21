@@ -14,6 +14,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import type { FakePopup } from '../../test/popupStubs'
+import { fakePopup, opener, post as deliver } from '../../test/popupStubs'
+
 import { installRouteFetch } from '../../test/caveStubs'
 import { signInToCave } from './caveSignIn'
 
@@ -25,41 +28,20 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-interface FakePopup {
-  closed: boolean
-  location: { href: string }
-  close: () => void
-}
-
-function fakePopup(): FakePopup {
-  const popup: FakePopup = {
-    closed: false,
-    location: { href: 'about:blank' },
-    close: () => {
-      popup.closed = true
-    },
-  }
-  return popup
-}
-
 /** The two documents a sign-in reads: where to log in, and whose token came back. */
 const ROUTES = {
   '/auth_info': { body: JSON.stringify({ login_url: `${SERVER}/sticky_auth` }) },
   '/user/me': { body: JSON.stringify({ email: 'a@example.org' }) },
 }
 
-/** What middle_auth's callback page does, as far as this window can tell. */
 function post(source: FakePopup, data: unknown, origin = AUTH_ORIGIN): void {
-  const event = new MessageEvent('message', { data, origin })
-  // `source` takes a real `Window` through the constructor, and a stand-in is the whole point.
-  Object.defineProperty(event, 'source', { value: source })
-  window.dispatchEvent(event)
+  deliver(source, data, origin)
 }
 
 function start(popup: FakePopup | null, signal?: AbortSignal) {
   return signInToCave({
     server: SERVER,
-    openWindow: () => popup as unknown as Window | null,
+    openWindow: opener(popup),
     pollMs: 2,
     ...(signal ? { signal } : {}),
   })

@@ -108,7 +108,7 @@ async function request<T>(
   const token = options.token ?? getToken()
   if (!token) {
     const message =
-      'No neuPrint token. Add one in Connections — the branch icon in the toolbar.'
+      'No neuPrint token. Sign in, or paste one, in Connections — the branch icon in the toolbar.'
     reportAuthFailure(message)
     throw new NeuPrintError(message, 401)
   }
@@ -145,7 +145,7 @@ async function request<T>(
       continue
     }
     if (response.ok) memory.remember(server, route.kind)
-    return await readResponse<T>(response, route, mode)
+    return await readResponse<T>(response, route, mode, server)
   }
 
   /*
@@ -170,11 +170,16 @@ async function request<T>(
 }
 
 /** Status handling, shared by every route so a failure reads the same whichever one produced it. */
-async function readResponse<T>(response: Response, route: Route, mode: BodyMode): Promise<T> {
+async function readResponse<T>(
+  response: Response,
+  route: Route,
+  mode: BodyMode,
+  server: string,
+): Promise<T> {
   if (response.status === 401 || response.status === 403) {
-    const message = `neuPrint rejected the token (${response.status}). It may have expired — get a new one from neuprint.janelia.org/account.`
-    reportAuthFailure(message)
-    throw new NeuPrintError(message, response.status)
+    const refusal = authRefusal(response.status, await response.text(), server)
+    if (refusal.credential) reportAuthFailure(refusal.message)
+    throw new NeuPrintError(refusal.message, response.status)
   }
   if (!response.ok) {
     const body = await response.text()
@@ -206,6 +211,41 @@ async function readResponse<T>(response: Response, route: Route, mode: BodyMode)
     )
   }
   return (mode === 'text' ? await response.text() : await response.json()) as T
+}
+
+/**
+ * What a 401 or 403 means, and whether it is about the credential at all.
+ *
+ * A 403 whose body carries `tos_required` is a terms gate on one dataset, not a bad token — the
+ * account may read it once it has agreed to that dataset's terms, which only the neuPrint site can
+ * record. So it names the site and is **not** a credential failure: raising that alarm opens
+ * Connections, which sends somebody to sign in again, and signing in cannot lift a terms gate.
+ */
+function authRefusal(
+  status: number,
+  body: string,
+  server: string,
+): { message: string; credential: boolean } {
+  let parsed: { tos_required?: unknown } | undefined
+  try {
+    parsed = JSON.parse(body) as { tos_required?: unknown }
+  } catch {
+    parsed = undefined
+  }
+  if (status === 403 && parsed?.tos_required === true) {
+    return {
+      message:
+        `You have not yet accepted this dataset's terms of use. Open ${server}, choose the ` +
+        `dataset and accept its terms there, then run again.`,
+      credential: false,
+    }
+  }
+  return {
+    message:
+      `neuPrint rejected the token (${status}). It may have expired — a sign-in lasts about a ` +
+      `week. Sign in again in Connections, or paste a new token from neuprint.janelia.org/account.`,
+    credential: true,
+  }
 }
 
 export function get<T>(path: string, options?: RequestOptions): Promise<T> {

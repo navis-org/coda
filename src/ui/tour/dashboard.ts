@@ -202,12 +202,12 @@ function cell(type: string): Element | null {
  */
 const TOKEN_STEP: TourStep = {
   id: 'token',
-  title: 'This one needs a neuPrint token',
+  title: 'This one needs a neuPrint sign-in',
   body:
-    'MaleCNS lives on Janelia’s neuPrint, and this browser has no token for it. Get one from ' +
-    'neuprint.janelia.org/account — sign in with Google, copy the auth token — then paste it in ' +
-    'here and press Save; the tour carries on by itself. No token is fine too: press Next and ' +
-    'every step still works, the three cells simply stay empty.',
+    'MaleCNS lives on Janelia’s neuPrint, and this browser has no token for it. Press Sign in ' +
+    'with Google here — or paste a token from neuprint.janelia.org/account and press Save — and ' +
+    'the tour carries on by itself. No token is fine too: press Next and every step still works, ' +
+    'the three cells simply stay empty.',
   when: () => !getToken(),
   before: () => useGraphStore.getState().openSources(),
   after: () => useGraphStore.getState().closeSources(),

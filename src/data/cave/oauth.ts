@@ -38,6 +38,7 @@
  */
 
 import { fetchText } from '../fetchText'
+import { fetchSignedInEmail } from '../signIn'
 import { parseCaveJson } from './json'
 
 /** Where a deployment logs in: one document's worth of discovery, in the shapes callers need. */
@@ -123,50 +124,13 @@ export async function discoverLoginService(
 }
 
 /**
- * The token in a `message` from the auth server, or undefined for anything that is not one.
- *
- * Deliberately a *reader* rather than a guard returning a boolean: the caller has one thing to
- * do with this event and it is take the token out, so a shape check that hands back nothing
- * would be checked once and then indexed again anyway.
- *
- * It has real work to do, because the login window posts more than one kind of message. The
- * terms-of-service arm of middle_auth posts the bare string `"success"`, which is not a token
- * and would otherwise be stored as one; and `"*"` means anything at all may post here, so the
- * shape check is the second half of a test whose first half is the origin.
+ * Which account a token belongs to, from middle_auth's `/user/me` — see `fetchSignedInEmail`. A
+ * plain cross-origin GET, since every auth endpoint reflects an arbitrary `Origin`.
  */
-export function readAuthMessage(data: unknown): string | undefined {
-  if (!data || typeof data !== 'object') return undefined
-  const token = (data as { token?: unknown }).token
-  if (typeof token !== 'string') return undefined
-  const trimmed = token.trim()
-  return trimmed || undefined
-}
-
-/**
- * Which account a token belongs to, or undefined if the server would not say.
- *
- * Worth a request of its own for a reason that is the whole shape of this feature: a user may
- * hold one Google account for CAVE and another for neuPrint, and a token is otherwise 32
- * characters that look like every other token. Showing the email back is how somebody sees they
- * signed in as the wrong person.
- *
- * **Degrades to silence rather than failing the sign-in.** The token is already in hand and
- * already works; not being able to put a name on it is a worse label, not a failure.
- */
-export async function fetchIdentity(
+export function fetchIdentity(
   apiBase: string,
   token: string,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal | undefined } = {},
 ): Promise<string | undefined> {
-  try {
-    const response = await fetch(`${apiBase}/user/me`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-      ...(options.signal ? { signal: options.signal } : {}),
-    })
-    if (!response.ok) return undefined
-    const info = parseCaveJson<{ email?: unknown }>(await response.text())
-    return typeof info.email === 'string' && info.email.trim() ? info.email.trim() : undefined
-  } catch {
-    return undefined
-  }
+  return fetchSignedInEmail(`${apiBase}/user/me`, token, 'email', options)
 }

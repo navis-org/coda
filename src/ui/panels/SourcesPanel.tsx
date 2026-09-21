@@ -66,9 +66,9 @@ import {
   subscribeAuthFailure as subscribeCatmaidAuthFailure,
 } from '../../data/catmaid/credentials'
 import { listDatastacks } from '../../data/cave/api'
-import type { CaveSession } from '../../data/cave/credentials'
+import type { SignInSession } from '../../data/signIn'
+import { cleanToken, sessionNow } from '../../data/signIn'
 import {
-  cleanToken as cleanCaveToken,
   listCredentials as listCaveCredentials,
   setToken as setCaveToken,
   subscribeAuthFailure as subscribeCaveAuthFailure,
@@ -81,17 +81,22 @@ import {
 } from '../../data/cave/deployments'
 import { caveSourceFor } from '../../data/cave/registry'
 import { specDeployments, specsOn } from '../../data/cave/spec'
-import { CaveSignInError, signInToCave } from './caveSignIn'
+import { signInToCave } from './caveSignIn'
+import { signInToNeuPrint } from './neuprintSignIn'
+import type { SignIn } from './popupSignIn'
+import { SignInError } from './popupSignIn'
 import { fetchDatasets, forgetRoutes } from '../../data/neuprint/client'
 import {
   forgetToken,
   getBaseUrlOverride,
+  getSession,
   getToken,
   setBaseUrl,
   setToken,
   subscribeAuthFailure,
 } from '../../data/neuprint/credentials'
 import { DEFAULT_PROXY_PATH } from '../../data/neuprint/servers'
+import { DSG_ACCOUNT_URL } from '../../data/neuprint/signIn'
 import {
   forgetKey,
   getBaseUrl as getAiBaseUrl,
@@ -142,9 +147,14 @@ type Probe<Ok = { datasets: number; names: string[] }> =
  */
 interface SourceTabProps {
   token: string
+  /** Present while `token` is the one a sign-in produced and nobody has typed over it. */
+  session: SignInSession | undefined
   server: string
   probe: Probe
+  /** A typed token: not known to be the signed-in account's, so it drops the session. */
   onToken: (value: string) => void
+  /** A token a sign-in produced, committed at once — see `CaveTab`'s `signIn` for why. */
+  onSignedIn: (token: string, session: SignInSession) => void
   onServer: (value: string) => void
   onTest: () => void
   onSave: () => void
@@ -448,6 +458,7 @@ export function SourcesPanel() {
   const openPanel = useGraphStore((s) => s.openSources)
   const closePanel = useGraphStore((s) => s.closeSources)
   const [token, setTokenField] = useState(() => getToken() ?? '')
+  const [session, setSession] = useState(() => getSession())
   const [server, setServerField] = useState(() => getBaseUrlOverride() ?? '')
   const [probe, setProbe] = useState<Probe>({ state: 'idle' })
   const [reason, setReason] = useState<
@@ -478,35 +489,51 @@ export function SourcesPanel() {
   useEffect(() => {
     if (!open) return
     setTokenField(getToken() ?? '')
+    setSession(getSession())
     setServerField(getBaseUrlOverride() ?? '')
   }, [open])
 
-  const test = useCallback(async () => {
-    setProbe({ state: 'testing' })
-    try {
-      // Tested with the values in the fields, not the stored ones — otherwise you cannot
-      // check a token before committing to it. An empty field is the real "work it out"
-      // case rather than a stand-in for the proxy path, so it is tested by *doing* that,
-      // from a clean slate: Test means re-probe, and a remembered route is exactly what
-      // somebody pressing it may be trying to get out of.
-      const base = server.trim().replace(/\/+$/, '')
-      forgetRoutes()
-      const raw = await fetchDatasets({
-        token: token.trim().replace(/^Bearer\s+/i, ''),
-        ...(base ? { baseUrl: base } : {}),
-      })
-      const names = Object.keys(raw).sort()
-      setProbe({ state: 'ok', datasets: names.length, names: names.slice(0, 6) })
-    } catch (error) {
-      setProbe({
-        state: 'failed',
-        message: errorMessage(error),
-      })
-    }
-  }, [token, server])
+  // With the token it is handed rather than the field's, so a sign-in can check the token it has
+  // just produced before that token has reached this component's state.
+  const test = useCallback(
+    async (candidate: string) => {
+      setProbe({ state: 'testing' })
+      try {
+        // Tested with the values in the fields, not the stored ones — otherwise you cannot
+        // check a token before committing to it. An empty field is the real "work it out"
+        // case rather than a stand-in for the proxy path, so it is tested by *doing* that,
+        // from a clean slate: Test means re-probe, and a remembered route is exactly what
+        // somebody pressing it may be trying to get out of.
+        const base = server.trim().replace(/\/+$/, '')
+        forgetRoutes()
+        const raw = await fetchDatasets({
+          token: cleanToken(candidate),
+          ...(base ? { baseUrl: base } : {}),
+        })
+        const names = Object.keys(raw).sort()
+        setProbe({ state: 'ok', datasets: names.length, names: names.slice(0, 6) })
+      } catch (error) {
+        setProbe({
+          state: 'failed',
+          message: errorMessage(error),
+        })
+      }
+    },
+    [server],
+  )
+
+  const signedIn = useCallback(
+    (granted: string, signedInAs: SignInSession) => {
+      setToken(granted, signedInAs)
+      setTokenField(granted)
+      setSession(signedInAs)
+      void test(granted)
+    },
+    [test],
+  )
 
   const save = useCallback(() => {
-    setToken(token)
+    setToken(token, session)
     setBaseUrl(server)
     setReason(undefined)
     // Re-list so the dataset picker and the ROI/status enums populate without a reload.
@@ -515,7 +542,7 @@ export function SourcesPanel() {
       .then((datasets) => notify(`neuPrint connected — ${datasets.length} datasets`))
       .catch(() => undefined)
     closePanel()
-  }, [token, server, notify, closePanel])
+  }, [token, session, server, notify, closePanel])
 
   /*
    * The dialog and nothing else. The button that opens it is a `ToolbarAction` in `Toolbar`,
@@ -531,15 +558,21 @@ export function SourcesPanel() {
           onClose={closePanel}
           reason={reason}
           token={token}
+          session={session}
           server={server}
           probe={probe}
-          onToken={setTokenField}
+          onToken={(value) => {
+            setTokenField(value)
+            setSession(undefined)
+          }}
+          onSignedIn={signedIn}
           onServer={setServerField}
-          onTest={() => void test()}
+          onTest={() => void test(token)}
           onSave={save}
           onForget={() => {
             forgetToken()
             setTokenField('')
+            setSession(undefined)
             setProbe({ state: 'idle' })
           }}
         />
@@ -691,41 +724,155 @@ function renderSection(section: Section, props: SectionProps): ReactNode {
   )
 }
 
+/**
+ * A popup sign-in run from a tab: which one is in flight, and the rules every tab needs.
+ *
+ * A sign-in outlives the click that started it, and can outlive the dialog: closing the panel
+ * unmounts the tab while the popup is still open, and the poll and the `message` listener inside
+ * `signInWithPopup` would then run until that window happened to be closed — which for an
+ * abandoned sign-in is never. Aborting on unmount is what ends them, and aborting *first* in `run`
+ * is what stops a second click running a second flow beside the first. A cancellation is this
+ * component's own doing, so there is either nobody to tell or a fresh attempt already saying what
+ * it is doing — it is never reported.
+ *
+ * `key` names what is signing in, for a tab with several rows; one with a single credential
+ * passes any constant.
+ */
+function useSignIn() {
+  const [pending, setPending] = useState<string | undefined>(undefined)
+  const attempt = useRef<AbortController | undefined>(undefined)
+  useEffect(() => () => attempt.current?.abort(), [])
+
+  const run = useCallback(
+    (
+      key: string,
+      start: (signal: AbortSignal) => Promise<SignIn>,
+      onSignedIn: (token: string, session: SignInSession) => void | Promise<void>,
+      onFailed: (message: string) => void,
+    ) => {
+      setPending(key)
+      attempt.current?.abort()
+      const cancel = (attempt.current = new AbortController())
+      // Not awaited before the call: `start` opens its window as its first act, and an `await`
+      // between the click and that is exactly what a pop-up blocker looks for.
+      start(cancel.signal)
+        .then(({ token, email }) => onSignedIn(token, sessionNow(email)))
+        .catch((error: unknown) => {
+          if (error instanceof SignInError && error.kind === 'cancelled') return
+          onFailed(errorMessage(error))
+        })
+        .finally(() => {
+          if (attempt.current === cancel) setPending(undefined)
+        })
+    },
+    [],
+  )
+
+  return { pending, run }
+}
+
+/** "Signed in as …" beside a sign-in button, with the date and the week behind the `?`. */
+function SignedInAs({ session, service }: { session: SignInSession; service: string }) {
+  return (
+    <span className="sources__hint">
+      Signed in{session.email ? ` as ${session.email}` : ''}
+      <Why>
+        {`Signed in on ${new Date(session.at).toLocaleDateString()}. A ${service} sign-in ` +
+          'lasts about a week; when it stops being accepted, sign in again.'}
+      </Why>
+    </span>
+  )
+}
+
 function NeuPrintTab({
   token,
+  session,
   server,
   probe,
   onToken,
+  onSignedIn,
   onServer,
   onTest,
   onSave,
   onForget,
-}: SourceTabProps) {
-  const fieldRef = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => fieldRef.current?.focus(), [])
+  onResolved,
+}: SourceTabProps & { onResolved: () => void }) {
+  const { pending, run } = useSignIn()
+  const [signInError, setSignInError] = useState<string | undefined>(undefined)
+  // Open where somebody is already using a pasted token, so their field is where they left it.
+  const [pasting] = useState(() => Boolean(token) && !session)
+
+  const signIn = () => {
+    setSignInError(undefined)
+    run(
+      'neuprint',
+      (signal) => signInToNeuPrint({ signal }),
+      (granted, signedIn) => {
+        onSignedIn(granted, signedIn)
+        onResolved()
+      },
+      setSignInError,
+    )
+  }
 
   return (
     <section className="sources__source">
       <p className="sources__note">
-        Janelia&rsquo;s connectome server (hemibrain, MANC, maleCNS, etc). Get a token from{' '}
-        <a href="https://neuprint.janelia.org/account" target="_blank" rel="noreferrer">
-          neuprint.janelia.org/account
-        </a>{' '}
-        and paste it below.
+        Janelia&rsquo;s connectome server (hemibrain, MANC, maleCNS, etc). Sign in with the
+        Google account you use for neuPrint.
+        <Why>
+          {"The window that opens belongs to Janelia's sign-in service, so Coda never sees your " +
+            'password — what comes back is a neuPrint token, good for about a week, which works ' +
+            'on every neuPrint server. If you tick "Don\'t ask again", later sign-ins finish on ' +
+            `their own; you can withdraw that at ${DSG_ACCOUNT_URL}. Some datasets also ask you ` +
+            'to accept their terms of use on the neuPrint site before they will answer.'}
+        </Why>
       </p>
 
-      <label className="sources__field">
-        <span>Token</span>
-        <textarea
-          ref={fieldRef}
-          className="field field--area field--mono"
-          rows={3}
-          value={token}
-          spellCheck={false}
-          placeholder="eyJhbGciOi…"
-          onChange={(e) => onToken(e.target.value)}
-        />
-      </label>
+      <div className="sources__actions">
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={signIn}
+          disabled={pending !== undefined}
+        >
+          {pending ? 'Signing in…' : 'Sign in with Google'}
+        </button>
+        {session && <SignedInAs session={session} service="neuPrint" />}
+      </div>
+
+      {signInError && (
+        <p className="sources__result" data-tone="error">
+          <IssueText message={signInError} />
+        </p>
+      )}
+
+      {/* Behind a disclosure, as on the CAVE tab: the second way in, not the only one. */}
+      <details className="sources__more" open={pasting}>
+        <summary>… or paste a token manually</summary>
+        <label className="sources__field">
+          <span>Token</span>
+          <textarea
+            className="field field--area field--mono"
+            rows={3}
+            value={token}
+            spellCheck={false}
+            placeholder="eyJhbGciOi…"
+            onChange={(e) => onToken(e.target.value)}
+          />
+        </label>
+        <p className="sources__hint">
+          From{' '}
+          <a href="https://neuprint.janelia.org/account" target="_blank" rel="noreferrer">
+            neuprint.janelia.org/account
+          </a>
+          <Why>
+            {'The same token neuprint-python reads from NEUPRINT_APPLICATION_CREDENTIALS. ' +
+              'Pasting is also the way through if your browser blocks the sign-in window, or if ' +
+              'this copy of Coda is served from a site the sign-in service does not accept.'}
+          </Why>
+        </p>
+      </details>
 
       <label className="sources__field">
         <span>Base URL</span>
@@ -1183,7 +1330,7 @@ interface CaveRow {
   /** The draft token. Saved by Save, or at once by a sign-in. */
   token: string
   /** Present while the token is the one a sign-in produced and nobody has typed over it. */
-  session?: CaveSession | undefined
+  session?: SignInSession | undefined
   /** Opened with rather than added: its server is fixed, and Forget empties it rather than removing it. */
   known: boolean
   /** The last Test of this row. Any edit clears it: a stale tick beside a changed token is the one thing a Test button must never show. */
@@ -1227,19 +1374,9 @@ function hostedOn(server: string): string {
 
 function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () => void }) {
   const [rows, setRows] = useState<CaveRow[]>(initialCaveRows)
-  /** The row a sign-in is running for. One at a time: a second click aborts the first. */
-  const [signingIn, setSigningIn] = useState<string | undefined>(undefined)
+  /** `pending` is the row a sign-in is running for. One at a time: a second click aborts the first. */
+  const { pending: signingIn, run } = useSignIn()
   const notify = useGraphStore((s) => s.setNotice)
-
-  /*
-   * A sign-in outlives the click that started it, and can outlive the dialog: closing the panel
-   * unmounts this tab while the popup is still open, and the poll and the `message` listener
-   * inside `signInToCave` would then run until that window happened to be closed — which for an
-   * abandoned sign-in is never. Aborting on unmount is what ends them, and aborting *first* in
-   * `signIn` is what stops a second click running a second flow beside the first.
-   */
-  const attempt = useRef<AbortController | undefined>(undefined)
-  useEffect(() => () => attempt.current?.abort(), [])
 
   /** Merge a change into one row. */
   const update = useCallback((key: string, change: Partial<CaveRow>) => {
@@ -1262,7 +1399,7 @@ function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () 
       try {
         const names = await listDatastacks({
           deployment: normaliseCaveServer(server),
-          token: cleanCaveToken(candidate),
+          token: cleanToken(candidate),
         })
         update(key, {
           probe: { state: 'ok', datasets: names.length, names: names.sort().slice(0, 6) },
@@ -1283,30 +1420,21 @@ function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () 
       const deployment = parseCaveServer(row.server)
       if (!deployment) return
       update(row.key, { signInError: undefined })
-      setSigningIn(row.key)
-      attempt.current?.abort()
-      const cancel = (attempt.current = new AbortController())
-      // Not awaited before the call: `signInToCave` opens its window as its first act, and an
-      // `await` between the click and that is exactly what a pop-up blocker looks for.
-      signInToCave({ server: deployment, signal: cancel.signal })
-        .then(async ({ token: granted, email }) => {
-          const signedIn = { at: Date.now(), email }
+      run(
+        row.key,
+        (signal) => signInToCave({ server: deployment, signal }),
+        async (granted, signedIn) => {
           setCaveToken(deployment, granted, signedIn)
           patch(row.key, { server: deployment, token: granted, session: signedIn })
           // The panel may have opened *because* there was no token. There is one now, so the
           // banner saying there is not stops being true at this line rather than at a reload.
           onResolved()
           await probeWith(row.key, granted, deployment)
-        })
-        .catch((error: unknown) => {
-          // A cancellation is this component's own doing — an unmount, or a second click — so
-          // there is either nobody to tell or a fresh attempt already saying what it is doing.
-          if (error instanceof CaveSignInError && error.kind === 'cancelled') return
-          update(row.key, { signInError: errorMessage(error) })
-        })
-        .finally(() => setSigningIn((current) => (current === row.key ? undefined : current)))
+        },
+        (message) => update(row.key, { signInError: message }),
+      )
     },
-    [probeWith, onResolved, patch, update],
+    [probeWith, onResolved, patch, update, run],
   )
 
   /**
@@ -1335,14 +1463,14 @@ function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () 
       const deployment = parseCaveServer(row.server)
       if (!deployment) continue
       const held = byServer.get(deployment)
-      if (!held || (!cleanCaveToken(held.token) && cleanCaveToken(row.token))) {
+      if (!held || (!cleanToken(held.token) && cleanToken(row.token))) {
         byServer.set(deployment, row)
       }
     }
     for (const [deployment, row] of byServer) setCaveToken(deployment, row.token, row.session)
 
     const connected = [...byServer]
-      .filter(([, row]) => cleanCaveToken(row.token))
+      .filter(([, row]) => cleanToken(row.token))
       .map(([server]) => server)
     if (connected.length > 0) onResolved()
     // Re-list so the dataset pickers fill in without a reload, exactly as saving a neuPrint token
@@ -1412,20 +1540,12 @@ function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () 
                 >
                   {signingIn === row.key ? 'Signing in…' : 'Sign in with Google'}
                 </button>
-                {row.session && (
-                  <span className="sources__hint">
-                    Signed in{row.session.email ? ` as ${row.session.email}` : ''}
-                    <Why>
-                      {`Signed in on ${new Date(row.session.at).toLocaleDateString()}. A CAVE ` +
-                        'sign-in lasts about a week; when it stops being accepted, sign in again.'}
-                    </Why>
-                  </span>
-                )}
+                {row.session && <SignedInAs session={row.session} service="CAVE" />}
               </div>
 
               {row.signInError && (
                 <p className="sources__result" data-tone="error">
-                  {row.signInError}
+                  <IssueText message={row.signInError} />
                 </p>
               )}
 
@@ -1476,9 +1596,7 @@ function CaveTab({ onSaved, onResolved }: { onSaved: () => void; onResolved: () 
                   type="button"
                   className="btn btn--ghost"
                   onClick={() => void probeWith(row.key, row.token, row.server)}
-                  disabled={
-                    !cleanCaveToken(row.token) || !deployment || probe.state === 'testing'
-                  }
+                  disabled={!cleanToken(row.token) || !deployment || probe.state === 'testing'}
                 >
                   {probe.state === 'testing' ? 'Testing…' : 'Test'}
                 </button>

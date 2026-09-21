@@ -26,6 +26,7 @@
 
 import { channel } from '../channel'
 import { readStorage, writeStorage } from '../localStore'
+import { cleanToken } from '../signIn'
 
 const TOKEN_KEY = 'coda.github.token'
 const LOGIN_KEY = 'coda.github.login'
@@ -70,8 +71,7 @@ export function getGithubToken(): string | undefined {
  */
 export function setGithubToken(raw: string | undefined): void {
   load()
-  const cleaned = raw?.trim().replace(/^Bearer\s+/i, '')
-  const next = cleaned || undefined
+  const next = cleanToken(raw)
   if (next !== token) setGithubLogin(undefined)
   token = next
   writeStorage(TOKEN_KEY, token)

@@ -74,11 +74,13 @@ the response itself carries ACAO. All seven endpoints this app calls were verifi
 prefix preflighted separately (nginx CORS config is per-location), and a 4 MB Explore-Dataset-shaped
 index came back gzipped to 957 kB in 1.4 s.
 
-**Every Janelia deployment has it now.** Re-probed 2026-09-10 against all five hosts the code
+**Every Janelia deployment has it now** — production since 2026-08-31, per Janelia. Re-probed
+2026-09-10 against all five hosts the code
 names — `neuprint`, `neuprint-test`, `neuprint-cns`, `neuprint-pre`, `neuprint-fish2` — from
 `Origin: https://coda.science`: preflight 204 with the same allow-list and a one-hour max-age,
 and ACAO `*` on a 401 (a tokenless `POST /api/custom/custom`) and on a 404 alike. So a static
-deploy reaches every public neuPrint direct, with no proxy anywhere on the path.
+deploy reaches every public neuPrint direct, with no proxy anywhere on the path. Production's
+preflight re-checked 2026-09-21, unchanged.
 
 `routesForServer` still offers two routes — the deployment itself, then the proxy path — and
 `client.ts` still _tries_ them, because a neuPrint is software rather than a service: a lab's own
@@ -202,7 +204,8 @@ an absence rather than a failure — so `publishedSkeletons` warns with a count,
 answer is a scene quietly three quarters short. See *Three routes to a skeleton* under CAVE for
 the seam both backends share.
 
-**The token** lives in `localStorage` via `credentials.ts`, never in a saved graph. A 401
+**The token** lives in `localStorage` via `credentials.ts`, never in a saved graph — signed in
+for (see "Signing in through DatasetGateway", below) or pasted. A 401
 goes out on a separate channel (`reportAuthFailure`) rather than as an error message,
 because errors cross the scheduler as strings and matching on message text rots silently;
 `SourcesPanel` subscribes and opens itself.
@@ -334,34 +337,60 @@ below 0.5004 — and why presynaptic scores top out at 0.98 there, 0.99 on MANC,
 A `>= 1` threshold therefore returns no presynaptic site at all on three of the four datasets,
 which is what the Synapses node's old `Min weight` default did.
 
-### Why there is no neuPrint sign-in, where CAVE has one
+### Signing in through DatasetGateway
 
-Both services log their users in with Google, and only one of them can hand a token to a page
-nobody registered. Recorded here because the obvious reading — "we did CAVE, do the same for
-neuPrint" — costs a day before it hits the wall.
+`data/neuprint/signIn.ts` plus `ui/panels/neuprintSignIn.ts`, on the window machinery CAVE's
+sign-in now shares (`ui/panels/popupSignIn.ts`). neuPrint moved its accounts to Janelia's
+**DatasetGateway** (DSG) in August 2026, and every deployment — production, `-test`, `-cns`,
+`-fish2` — validates against the one DSG at `dsg.janelia.org`. One token for all of them, which is
+what `credentials.ts` already held.
 
-neuPrint moved to Janelia's **DatasetGateway** in August 2026 (`neuprint.janelia.org/login` now
-redirects to `dataset-gateway.janelia.org/api/v1/authorize`, and `/api/serverinfo` carries an
-announcement saying every token issued before it stopped working). DSG's browser auth is
-modelled on middle_auth's and keeps its endpoint names, but not the part that matters:
+**This used to be impossible, and the record of why is worth keeping.** DSG's browser auth was
+middle_auth's shape without the part that matters: `REDIRECT_ALLOWED_DOMAIN = "janelia.org"`
+silently rewrote any other return URL to `/`; there was no `postMessage` delivery, the token
+arriving only as an `HttpOnly` `dsg_token` cookie on janelia.org; and neuPrint's `ACAO: *` with no
+`Allow-Credentials` meant nothing could read that cookie cross-origin. Three independent closures,
+so there was nothing to work around from the client. What opened it (September 2026) is the change
+this section recorded as the only one that would: an **origin-allowlisted** `postMessage` delivery
+on DSG itself, tightened rather than copied from middle_auth's `"*"`.
 
-  - `REDIRECT_ALLOWED_DOMAIN = "janelia.org"` in `dsg/cave_api/oauth_views.py`, and
-    `validate_redirect_url` silently rewrites anything else to `/`. So a return URL on Coda's
-    origin is not refused, it is *ignored*.
-  - There is no `postMessage` delivery at all. The token is never in the redirect either — the
-    callback sets it as an `HttpOnly`, `SameSite=Lax` `dsg_token` cookie on the janelia.org
-    origin and redirects with nothing in the URL.
-  - `neuprint.janelia.org` answers `Access-Control-Allow-Origin: *` with no
-    `Access-Control-Allow-Credentials`, so its `/token` endpoint — which would read that cookie
-    — cannot be called with credentials cross-origin even if the cookie were `SameSite=None`.
+The contract, agreed with Janelia and checked against the live service:
 
-Three independent closures, so this is not a gap to work around from the client. What would open
-it is a change to DatasetGateway itself, which is public: an origin-allowlisted `postMessage`
-delivery on the authorize flow, tightened rather than copied — `dsg/core/origins.py` already
-holds the origin validation such a thing would use. Widening the redirect domain alone does
-**not** work, because DSG puts no token in the redirect.
+  - **No discovery step.** The popup goes to
+    `https://dsg.janelia.org/login?origin=<this page's origin>&token=api`, a constant. `token=api`
+    asks for an API key rather than a browser session.
+  - **The delivery page posts to the registered origin, not `"*"`**, and only to a registered one.
+    Three are registered: `https://coda.science`, `https://navis-org.github.io` and
+    `http://localhost:5173`. **The comparison is exact, and it bit once**: Janelia first registered
+    `navis-org.github.io` alone, but the Pages site 301s to the `coda.science` custom domain, so that
+    is the origin the deployed app actually runs on, and DSG answered it with `"badorigin"` until it
+    was added (confirmed registered 2026-09-21). `127.0.0.1` is still a different origin from
+    `localhost`, so a dev server opened that way cannot sign in.
+  - **A message is taken only from `https://dsg.janelia.org` exactly.** `dataset-gateway.janelia.org`
+    serves the same application from a different origin.
+  - **`"badorigin"` is its own answer.** It is a bare string from a page that then closes itself;
+    read as "not a token" it would reach the closed-window poll and tell somebody they had closed a
+    window they never touched. `readDsgMessage` returns it, and `popupSignIn` settles as
+    `refused` with a sentence naming the site.
+  - **What comes back is a seven-day DSG API key.** It is refused by DSG's own token management,
+    account page and SCIM, and never carries admin. Stored like the CAVE token, with a **label,
+    not an expiry** (`SignInSession`, now in `data/signIn.ts` and shared); signed in again on a 401.
+  - **Cancelling the consent page posts nothing** — the closed-window case. **"Don't ask again for
+    this site"** makes later sign-ins deliver silently; the window opens and closes by itself,
+    which is why the listener is installed before the popup is pointed anywhere even though there
+    is no lookup to wait for. Grants are revoked at `dsg.janelia.org/web/my-account`.
+  - **Who the token belongs to comes from neuPrint's `/profile`**, not DSG's `whoami`, which has no
+    CORS. `ACAO: *` there on every deployment; the body is `{"Email", "AuthLevel", "ImageURL"}` —
+    **capital `E`**, unlike CAVE's `/user/me`.
+  - **A 403 with `tos_required: true` is a terms gate, not a bad token.** `client.ts` names the
+    neuPrint site and does **not** fire `reportAuthFailure`: opening Connections would send
+    somebody to sign in again, which cannot lift a terms gate — the lesson CAVE's `missing_tos`
+    already taught (see "A refusal about a datastack nobody asked for", below).
 
-Until then neuPrint stays paste, and the paste field's help says where to get one.
+The panel follows the CAVE tab: sign-in first, and it **commits** (the account and date shown
+beside it); the paste field behind a disclosure, open by default only for somebody already using a
+pasted token. A paste drops the label, so a Save cannot put the last sign-in's email under a token
+that is not that account's.
 
 ## CAVE
 
@@ -426,7 +455,8 @@ as exact 18-digit text through `findNeurons`.
 
 ### Signing in, and why a static page can
 
-`data/cave/oauth.ts` plus `ui/panels/caveSignIn.ts`. CAVE's auth is seung-lab's `middle_auth`,
+`data/cave/oauth.ts` plus `ui/panels/caveSignIn.ts`, on the window machinery in
+`ui/panels/popupSignIn.ts` that neuPrint's sign-in shares. CAVE's auth is seung-lab's `middle_auth`,
 and it answers the question a page with no server has to ask: **how do you get a token without a
 client secret and without an origin somebody had to approve?** The answer is that middle_auth is
 itself the OAuth client — it holds Google's secret, it owns the redirect URI — and its callback
@@ -459,7 +489,7 @@ Measured live, September 2026, and each one decides a line of code:
     Coda would then own. Nothing is created on their account by signing in here.
 
 **The failure modes are the feature.** The happy path is nine lines; the rest of
-`caveSignIn.ts` is that a login window has four ways to end and three are silent.
+`popupSignIn.ts` is that a login window has four ways to end and three are silent.
 
   1. **The browser refuses to open it.** `window.open` answers `null`, which is not an error
      anywhere. Hence also the ordering: the popup is opened on `about:blank` *first* and
@@ -514,8 +544,9 @@ dialog contradicting itself. `Dialog` holds the reason in state and `onResolved`
 warning about CAVE — a new failure re-states it either way.
 
 The split follows invariant 1. `data/cave/oauth.ts` is what is true about CAVE — where a
-deployment logs in, what counts as a token arriving, whose it is — and holds no reference to a
-window; `ui/panels/caveSignIn.ts` is what is true about a browser. Nothing in the second is
+deployment logs in, whose a token is — and holds no reference to a window; `ui/panels/popupSignIn.ts`
+is what is true about a browser, with `caveSignIn.ts` the few lines joining the two. What counts as
+a token arriving is `data/signIn.ts`, shared with neuPrint. Nothing in the window half is
 reachable from jsdom, so `openWindow` is a seam and the gesture itself was walked in a real
 browser against `global.daf-apis.com`.
 
@@ -2475,7 +2506,7 @@ path's four-fifths.
 **Meshes need no token and usually no proxy.** They come from public object stores, not from
 neuPrintHTTP. `neuroglancer-janelia-flyem-hemibrain`, `manc-seg-v1p2` and `flyem-optic-lobe`
 all send `Access-Control-Allow-Origin: *`, so they are fetched directly and work in a static
-deploy even where the Cypher API cannot reach. `flyem-male-cns` sends no CORS headers at all. A
+deploy with no proxy — which, since neuPrint gained CORS, is true of the Cypher API as well. `flyem-male-cns` sends no CORS headers at all. A
 browser reports a CORS refusal as an opaque `TypeError`, so trying is the only way to find out —
 which is why the answer is cached rather than probed each time.
 

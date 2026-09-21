@@ -898,7 +898,11 @@ rule belongs to one area, its record is in that area's doc.
   the service discovered before opening it — `"*"` cuts both ways. And **the paste field stays**,
   for the exits that hand nothing back. A **first login is not one of them**, so the first-run
   failure to expect is a 403 on a datastack after a sign-in that worked. What is stored is the login
-  token plus a **label, not an expiry**.
+  token plus a **label, not an expiry**. **neuPrint's sign-in (DatasetGateway) is the same window
+  machinery, `popupSignIn.ts`, with the opposite registration rule**: DSG posts only to an
+  allowlisted origin, compared exactly — `127.0.0.1` is not `localhost:5173`, and registering
+  `navis-org.github.io` alone missed the `coda.science` custom domain the site actually runs on — and
+  answers any other with `"badorigin"`, which is a refusal of its own rather than a closed window.
 - **CAVE's row cap is a per-deployment number, and a reference table has no root id.**
   `CAVE_MAX_ROWS` is one server's limit, so truncation is tested against the server's own `COUNT`,
   never the constant and never with `>=`. A reference table carries `target_id` and no root id:

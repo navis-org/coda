@@ -151,7 +151,7 @@ and there are two places (`ui/cytoscapeWeb.ts`):
 Three toggles rather than a column checklist, by choice. They strip columns off the *network*
 (`selectTable`) rather than asking the writer to skip them, so `networkToCx2` stays one path. The
 gist route **opens its tab on the click and points it after the upload** — a tab opened after an
-`await` is outside the gesture and blocked, `caveSignIn.ts`'s trap — severing `opener` before
+`await` is outside the gesture and blocked, `popupSignIn.ts`'s trap — severing `opener` before
 navigating, and closing the tab if the upload fails. The dialog is `Modal`'s **`portal`** case: rendered
 into the document — the fullscreen element when there is one, or it opens invisibly under a ⛶
 viewer — because a card clips and React Flow's transform would be the fixed-position containing

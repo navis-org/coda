@@ -4,10 +4,12 @@
  * Headless on purpose — `src/data` must not import the store or React — so this is a small
  * observable that the UI subscribes to rather than a hook. It holds two things:
  *
- *  - the token, persisted to `localStorage` because the alternative is re-pasting a JWT
- *    every reload. That is a deliberate trade: a year-long credential sits in storage where
- *    any script running in the page can read it. It is never written into a saved graph,
- *    never sent anywhere but the configured neuPrint host, and `forget()` clears it.
+ *  - the token, persisted to `localStorage` because the alternative is signing in (or
+ *    re-pasting) every reload. That is a deliberate trade: a credential sits in storage where
+ *    any script running in the page can read it. A signed-in one is a seven-day DatasetGateway
+ *    key (see `signIn.ts`); a pasted one lives as long as its issuer says. It is never written
+ *    into a saved graph, never sent anywhere but a neuPrint host, and `forget()` clears it.
+ *    Beside it, for a signed-in token only, the account it was issued to — see `SignInSession`.
  *  - an auth-failure signal, so a 401 from any query can open the connection panel. It is a
  *    separate channel rather than an error type because errors cross the scheduler as
  *    messages, and matching on message text is how that stops working quietly.
@@ -15,11 +17,15 @@
 
 import { channel } from '../channel'
 import { readStorage, writeStorage } from '../localStore'
+import type { SignInSession } from '../signIn'
+import { cleanToken, parseStoredSession } from '../signIn'
 
 const TOKEN_KEY = 'coda.neuprint.token'
 const SERVER_KEY = 'coda.neuprint.server'
+const SESSION_KEY = 'coda.neuprint.session'
 
 let token: string | undefined
+let session: SignInSession | undefined
 let baseUrlOverride: string | undefined
 let loaded = false
 
@@ -30,6 +36,7 @@ function load(): void {
   if (loaded) return
   loaded = true
   token = readStorage(TOKEN_KEY)
+  session = token ? parseStoredSession(readStorage(SESSION_KEY)) : undefined
   baseUrlOverride = readStorage(SERVER_KEY) || undefined
 }
 
@@ -39,15 +46,25 @@ export function getToken(): string | undefined {
 }
 
 /**
- * Store a token. Whitespace is stripped and a `Bearer ` prefix tolerated, because the
- * obvious thing to do with a token from a web page is paste whatever was on the clipboard.
+ * Store a token, cleaned by `cleanToken`.
+ *
+ * The second argument is what a sign-in knows and a paste cannot: which account this came from.
+ * **Omitting it clears the stored session** — CAVE's rule, for CAVE's reason: a pasted token that
+ * inherited the last sign-in's email would put somebody else's address under it.
  */
-export function setToken(raw: string | undefined): void {
+export function setToken(raw: string | undefined, signedIn?: SignInSession): void {
   load()
-  const cleaned = raw?.trim().replace(/^Bearer\s+/i, '')
-  token = cleaned || undefined
+  token = cleanToken(raw)
+  session = token ? signedIn : undefined
   writeStorage(TOKEN_KEY, token)
+  writeStorage(SESSION_KEY, session ? JSON.stringify(session) : undefined)
   changed.notify()
+}
+
+/** The sign-in behind the token, or undefined where it was pasted or there is none. */
+export function getSession(): SignInSession | undefined {
+  load()
+  return session
 }
 
 export function forgetToken(): void {
@@ -88,7 +105,9 @@ export const subscribeAuthFailure = authFailure.subscribe
 export function resetCredentials(): void {
   loaded = false
   token = undefined
+  session = undefined
   baseUrlOverride = undefined
   writeStorage(TOKEN_KEY, undefined)
+  writeStorage(SESSION_KEY, undefined)
   writeStorage(SERVER_KEY, undefined)
 }

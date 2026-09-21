@@ -1409,6 +1409,25 @@ describe('failure diagnosis', () => {
     unsubscribe()
   })
 
+  it('names the terms on a tos_required 403, and leaves the credential alarm alone', async () => {
+    // Signing in again cannot lift a terms gate, so opening Connections would send somebody to
+    // do the one thing that does not help.
+    const seen: string[] = []
+    const unsubscribe = subscribeAuthFailure((message) => seen.push(message))
+    stubFetch({ status: 403, text: '{"error":"terms","tos_required":true}' })
+    await expect(
+      get('/api/x', { token: 't', baseUrl: 'https://neuprint.janelia.org' }),
+    ).rejects.toThrow(/accepted this dataset's terms/)
+    expect(seen).toEqual([])
+
+    stubFetch({ status: 403, text: '{"error":"forbidden"}' })
+    await expect(
+      get('/api/x', { token: 't', baseUrl: 'https://neuprint.janelia.org' }),
+    ).rejects.toThrow(/rejected the token/)
+    expect(seen).toHaveLength(1)
+    unsubscribe()
+  })
+
   it('reports a missing token without a round trip', async () => {
     stubFetch({ status: 200, text: '{}' })
     await expect(get('/api/x', { token: '', baseUrl: '/neuprint' })).rejects.toThrow(

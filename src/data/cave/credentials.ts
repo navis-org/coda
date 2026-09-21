@@ -27,6 +27,8 @@
 
 import { channel } from '../channel'
 import { readStorage, writeStorage } from '../localStore'
+import type { SignInSession } from '../signIn'
+import { cleanToken, readSession } from '../signIn'
 import { normaliseCaveServer } from './deployments'
 
 const CREDENTIALS_KEY = 'coda.cave.credentials.v1'
@@ -46,34 +48,13 @@ function removeLegacy(): void {
   for (const key of LEGACY_KEYS) writeStorage(key, undefined)
 }
 
-/**
- * What is known about a token that was *signed in for* rather than pasted.
- *
- * Two facts, and both are about telling one credential from another rather than about using it. A
- * CAVE token is 32 characters that look like every other CAVE token, and one person routinely
- * holds a different Google account at each deployment — so the account it was issued to is the
- * label that makes a wrong one visible. The date is the other half: `middle_auth` issues a login
- * token with a seven-day life, so "signed in a fortnight ago" is the answer to why a run started
- * failing.
- *
- * Deliberately **not** an expiry. The seven days is a server-side default that no response
- * states, and a countdown Coda computed from a constant it copied would keep claiming a token was
- * good after the deployment shortened it — the 401 is the only thing that actually knows.
- */
-export interface CaveSession {
-  /** The Google account the token was issued to, where the auth server would say. */
-  email?: string
-  /** When the sign-in happened, ms since the epoch. */
-  at: number
-}
-
 /** One deployment's credential. */
 export interface CaveCredential {
   /** The global server, normalised to an origin — see `normaliseCaveServer`. */
   server: string
   token: string
   /** Present only where the token came from a sign-in. See `setToken`. */
-  session?: CaveSession
+  session?: SignInSession
 }
 
 let rows: CaveCredential[] | undefined
@@ -143,23 +124,6 @@ function parseJson(raw: string | undefined): unknown {
   }
 }
 
-/** A stored session, or undefined for absent, corrupt, or written by some older shape. */
-function readSession(value: unknown): CaveSession | undefined {
-  if (!value || typeof value !== 'object') return undefined
-  const { email, at } = value as { email?: unknown; at?: unknown }
-  if (typeof at !== 'number' || !Number.isFinite(at)) return undefined
-  return typeof email === 'string' && email ? { email, at } : { at }
-}
-
-/**
- * Whitespace stripped and a `Bearer ` prefix tolerated, for the reason the neuPrint field
- * tolerates one: the obvious thing to do with a token on a web page is paste whatever was on the
- * clipboard.
- */
-export function cleanToken(raw: string | undefined): string | undefined {
-  return raw?.trim().replace(/^Bearer\s+/i, '') || undefined
-}
-
 function persist(next: readonly CaveCredential[]): void {
   writeStorage(CREDENTIALS_KEY, next.length ? JSON.stringify(next) : undefined)
 }
@@ -189,7 +153,7 @@ export function getToken(server: string): string | undefined {
 export function setToken(
   server: string,
   raw: string | undefined,
-  signedIn?: CaveSession,
+  signedIn?: SignInSession,
 ): void {
   const deployment = normaliseCaveServer(server)
   const token = cleanToken(raw)
@@ -208,7 +172,7 @@ export function setToken(
 }
 
 /** The sign-in behind a deployment's token, or undefined where it was pasted or there is none. */
-export function getSession(server: string): CaveSession | undefined {
+export function getSession(server: string): SignInSession | undefined {
   return rowFor(server)?.session
 }
 

@@ -13,7 +13,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { installRouteFetch } from '../../test/caveStubs'
-import { discoverLoginService, fetchIdentity, readAuthMessage } from './oauth'
+import { readAuthMessage } from '../signIn'
+import { discoverLoginService, fetchIdentity } from './oauth'
 
 afterEach(() => {
   vi.unstubAllGlobals()
