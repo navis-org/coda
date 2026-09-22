@@ -23,7 +23,6 @@ import { addEdge, addNode, emptyGraph, topoSort } from '../../core/graph'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { checkConnection, inferGraph } from '../../core/inference'
 import { requireNodeDef } from '../../core/registry'
-import { Scheduler } from '../../core/scheduler'
 import { column, columnNames, tableSchema } from '../../core/types'
 import type { TableSchema } from '../../core/types'
 import type { TableValue } from '../../core/values'
@@ -37,6 +36,8 @@ import { SEATABLE_PROVIDER } from '../../data/annotations/seaTable'
 import { registerAnnotationProvider } from '../../data/annotations/registry'
 import '../index'
 import { node } from '../../test/graph'
+import type { Scheduler } from '../../core/scheduler'
+import { sourcelessScheduler } from '../../test/scheduler'
 
 // ---------------------------------------------------------------------------
 // A provider standing in for both real ones
@@ -274,12 +275,7 @@ describe('annotation nodes — what a chain publishes', () => {
 })
 
 describe('annotation nodes — what a chain returns', () => {
-  const scheduler = () =>
-    new Scheduler({
-      resolveSource: (id) => {
-        throw new Error(`an annotation node must not reach a data source (asked for ${id})`)
-      },
-    })
+  const scheduler = () => sourcelessScheduler()
 
   it('describes the table it builds — the two halves of one join', async () => {
     const g = chain({ table: 'info' })
@@ -659,7 +655,30 @@ describe('annotation nodes — refusals', () => {
         pivotOn: 'classification_system',
       }),
     )
-    expect(issues(pivoted, 'cave')).toContain('value')
+    expect(issues(pivoted, 'cave')).toContain('Value column')
+  })
+
+  /*
+   * `validate`'s messages are warnings, so the card saying so did not stop a run. The empty
+   * column went to CAVE as `select_column_map: { table: [""] }`, and the answer was `CAVE
+   * returned 500: 400 Bad Request: column  not found in hierarchical_neuron_annotations`. That
+   * names no column and points at no field.
+   */
+  it('refuses a pivot with no value column at Run, before asking CAVE anything', async () => {
+    let g = emptyGraph('x')
+    g = addNode(
+      g,
+      node('cave', 'annotation.caveTable', {
+        datastack: 'test_stack:1',
+        table: 'nuclei',
+        pivotOn: 'classification_system',
+      }),
+    )
+    const sched = sourcelessScheduler()
+    await sched.run(g, { mode: 'full' })
+    expect(sched.info('cave').state).toBe('error')
+    // The card's sentence, so the badge and the error read as one problem.
+    expect(String(sched.info('cave').error)).toContain(issues(g, 'cave'))
   })
 
   it('does not ask a SeaTable node for a workspace it can work out', () => {
@@ -736,12 +755,7 @@ function sheetGraph(params: Record<string, unknown> = {}): CodaGraph {
 
 describe('the Google Sheet node', () => {
   const issues = (g: CodaGraph, id: string) => issuesOf(inferGraph(g), id)
-  const scheduler = () =>
-    new Scheduler({
-      resolveSource: (id) => {
-        throw new Error(`an annotation node must not reach a data source (asked for ${id})`)
-      },
-    })
+  const scheduler = () => sourcelessScheduler()
 
   beforeEach(() => {
     sheetRefs = []

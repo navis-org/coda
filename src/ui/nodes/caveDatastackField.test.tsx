@@ -77,20 +77,30 @@ async function customCaveCard(): Promise<HTMLElement> {
 const rows = (card: HTMLElement) =>
   [...card.querySelectorAll('.dataset-body__field .param__label')].map((l) => l.textContent)
 
-/** The Datastack field, and the options of whatever list it points at. */
+/**
+ * The Datastack field, and the options its list offers once opened.
+ *
+ * Opened by focusing it, which is what somebody clicking into the field does. The list is
+ * portalled to the body, so it is found through `aria-controls` rather than inside the card.
+ */
 function datastackField(card: HTMLElement): {
   input: HTMLInputElement
   completions: string[]
 } {
   const input = card.querySelector<HTMLInputElement>('input[aria-label="Datastack"]')
   if (!input) throw new Error(`no Datastack field; card asks ${rows(card).join(', ')}`)
-  const list = input.getAttribute('list')
+  act(() => {
+    fireEvent.focus(input)
+  })
+  const list = input.getAttribute('aria-controls')
   // Found by id rather than by selector: `useId` spells one `:r3:`, which is a valid id and not
   // a valid selector without escaping.
-  const options = list ? [...(document.getElementById(list)?.children ?? [])] : []
+  const options = list
+    ? [...(document.getElementById(list)?.querySelectorAll('[role="option"]') ?? [])]
+    : []
   return {
     input,
-    completions: options.map((o) => o.getAttribute('value') ?? ''),
+    completions: options.map((o) => o.textContent ?? ''),
   }
 }
 
@@ -147,13 +157,15 @@ describe('the Custom CAVE card', () => {
     const card = await customCaveCard()
 
     /*
-     * A `datalist` with no options renders as a field with an arrow onto nothing, which claims
-     * the set is empty where the truth is that nobody has signed in. And the request itself is
-     * withheld: `client.ts` reports an auth failure for a tokenless call, which would put "No
-     * CAVE token" in the status bar at somebody who has only dragged a node onto the canvas.
+     * A list with no options would be a field with an arrow onto nothing, which claims the set
+     * is empty where the truth is that nobody has signed in. And the request itself is withheld:
+     * `client.ts` reports an auth failure for a tokenless call, which would put "No CAVE token"
+     * in the status bar at somebody who has only dragged a node onto the canvas.
      */
-    expect(datastackField(card).input.getAttribute('list')).toBeNull()
-    expect(card.querySelector('datalist')).toBeNull()
+    const { input } = datastackField(card)
+    expect(input.getAttribute('aria-expanded')).toBe('false')
+    expect(input.classList.contains('field--combo')).toBe(false)
+    expect(document.querySelector('[role="listbox"]')).toBeNull()
     expect(calls.filter((c) => c.url.endsWith('/datastacks'))).toEqual([])
   })
 })

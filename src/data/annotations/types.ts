@@ -21,6 +21,7 @@
  */
 
 import { ID_COLUMN_NAME } from '../../core/ids'
+import { listEntries } from '../../core/node'
 import type { TableSchema } from '../../core/types'
 import { uniqueName } from '../../core/types'
 import type { TableValue } from '../../core/values'
@@ -160,8 +161,5 @@ export function annotationColumns(names: readonly string[]): string[] {
  * That difference is the only part worth writing twice.
  */
 export function namedColumns(columns: string, idColumn: string): string[] {
-  return columns
-    .split(',')
-    .map((c) => c.trim())
-    .filter((c) => c && c !== idColumn)
+  return listEntries(columns).filter((c) => c !== idColumn)
 }

@@ -48,7 +48,7 @@ import {
   caveSourceId,
 } from '../../data/cave/deployments'
 import { publishedCaveSourceId } from '../../data/cave/registry'
-import { customCaveServer } from '../lib/caveParams'
+import { DEFAULT_CAVE_ID_COLUMN, caveIdColumn, customCaveServer } from '../lib/caveParams'
 import { DEFAULT_CATMAID_SERVER } from '../../data/catmaid/credentials'
 import { catmaidSourceFor } from '../../data/catmaid/registry'
 import {
@@ -319,7 +319,7 @@ registerNode({
       help: 'Datastack name exactly as the CAVE info service lists it. Once a token is saved for this deployment, the field completes from the datastacks that token can see.',
       default: '',
       /*
-       * A `datalist` rather than the `enum` its neighbour above is, and the difference is the
+       * Free text with a list (`ComboField`) rather than the `enum` its neighbour above is, and the difference is the
        * node: this one exists for the datastack Coda ships nothing for, and a private one need
        * not be in any listing at all — `evaluate` says so where it declines to check the name.
        * So the listing is a spelling aid over a field that still takes anything, which is also
@@ -388,7 +388,7 @@ registerNode({
       label: 'ID column',
       placeholder: 'pt_root_id',
       help: 'Column holding the root id. "pt_root_id" on every CAVE table Coda has seen.',
-      default: 'pt_root_id',
+      default: DEFAULT_CAVE_ID_COLUMN,
     },
     {
       id: 'connectionView',
@@ -622,7 +622,7 @@ function registerCustomCaveSpec(params: Record<string, unknown>): void {
       ? {
           neurons: {
             table,
-            idColumn: String(params.idColumn).trim() || 'pt_root_id',
+            idColumn: caveIdColumn(params),
           },
         }
       : {}),

@@ -355,7 +355,7 @@ describe('Custom CAVE', () => {
       } as Response),
     )
 
-    // Invariant 2's state again, and the reason this is a `datalist` and not a `select`: on the
+    // Invariant 2's state again, and the reason this is free text with a list and not a `select`: on the
     // first render of every session there is nothing to offer, and a control that empties reads
     // as one that has forgotten what the graph says.
     expect(datastackSuggestions()).toEqual([])

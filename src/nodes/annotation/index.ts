@@ -29,7 +29,7 @@
  * `cheap` would fire a download per keystroke. Invariant 6 in its plainest form.
  */
 
-import type { EvalContext } from '../../core/node'
+import type { EvalContext, InferContext } from '../../core/node'
 import { registerNode } from '../../core/registry'
 import type { CodaType, TableSchema } from '../../core/types'
 import { T, columnNames } from '../../core/types'
@@ -52,10 +52,15 @@ import { joinAnnotations, joinedSchema } from '../lib/annotationOps'
 import type { DatasetIdentity } from '../lib/caveParams'
 import {
   CAVE_DATASET_INPUT,
+  DEFAULT_CAVE_ID_COLUMN,
+  caveIdColumn,
   caveDatastackIssues,
   caveDatastackParam,
   caveTarget,
+  caveTableSuggestions,
+  caveTargetOfType,
 } from '../lib/caveParams'
+import { peekReferenceTable, peekTableColumns } from '../../data/cave/tables'
 import { ANNOTATIONS_INPUT, annotationSchemaFrom } from '../lib/annotationParams'
 import { datasetRef } from '../../core/types'
 import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
@@ -135,24 +140,36 @@ registerNode({
       kind: 'string',
       label: 'Table',
       placeholder: 'nuclei_v1',
-      help: 'Annotation table in this datastack.',
+      help: 'Annotation table in this datastack. The list is the datastack’s tables once it has been read, which needs a CAVE token; any name can still be typed.',
       default: '',
+      // Tables only: this reads through the table query route, where a view is a 404.
+      suggestions: (ctx) => caveTableSuggestions(ctx, { views: false }),
     },
     {
       id: 'columns',
       kind: 'string',
       label: 'Columns',
-      placeholder: 'cell_type, side',
-      help: 'Comma-separated columns to keep. Empty keeps everything but the id.',
+      placeholder: 'add a column',
+      help: 'Columns to keep, for a table that is one row per neuron. None keeps everything but the id.',
       default: '',
+      chips: true,
+      /*
+       * The table's own columns, which is what a wide read names (`wideColumns`), less the id
+       * column, which the read adds itself and `namedColumns` drops if it is named.
+       */
+      suggestions: (ctx) => {
+        const id = caveIdColumn(ctx.params)
+        return caveColumnSuggestions(ctx, 'own').filter((name) => name !== id)
+      },
     },
     {
       id: 'idColumn',
       kind: 'string',
       label: 'ID column',
-      default: 'pt_root_id',
-      help: 'Column holding the root id.',
+      default: DEFAULT_CAVE_ID_COLUMN,
+      help: 'Column holding the root id. On a table that references another, a column of the referenced table, which is where the root id is.',
       advanced: true,
+      suggestions: (ctx) => caveColumnSuggestions(ctx, 'id'),
     },
     {
       id: 'pivotOn',
@@ -162,6 +179,7 @@ registerNode({
       help: 'For a long table: the column naming the kind of annotation. Its distinct values become columns. Empty means one row per neuron already.',
       default: '',
       advanced: true,
+      suggestions: (ctx) => caveColumnSuggestions(ctx, 'own'),
     },
     {
       id: 'valueColumn',
@@ -172,6 +190,7 @@ registerNode({
       default: '',
       advanced: true,
       visibleIf: (params) => Boolean(String(params.pivotOn)),
+      suggestions: (ctx) => caveColumnSuggestions(ctx, 'own'),
     },
   ],
 
@@ -191,19 +210,57 @@ registerNode({
     const datastack = caveDatastackIssues(ctx.inputs.dataset, ctx.params)
     if (datastack.length > 0) return datastack
     if (!String(ctx.params.table).trim()) return ['Name an annotation table']
-    if (String(ctx.params.pivotOn) && !String(ctx.params.valueColumn)) {
-      return ['With Pivot on set, name the column holding the value']
-    }
+    if (pivotWithoutValue(ctx.params)) return [NO_VALUE_COLUMN]
     return []
   },
 
   evaluate: async (ctx) => {
     const dataset = ctx.input('dataset')
+    /*
+     * Refused here, before any request. `validate` says the same thing, but its messages are
+     * warnings and a run goes ahead regardless. The empty value column then reached CAVE as
+     * `select_column_map: { table: [""] }`, and what came back was `CAVE returned 500: 400 Bad
+     * Request: column  not found in hierarchical_neuron_annotations`. That names no column, and
+     * nothing in it points at the Value column field.
+     */
+    if (pivotWithoutValue(ctx.params)) throw new Error(NO_VALUE_COLUMN)
     const ref = caveRef(dataset?.kind === 'dataset' ? dataset : undefined, ctx.params)
     if (!ref) throw new Error('Name a datastack and a table, or wire a Dataset')
     return { annotations: await resolve(ctx, ref) }
   },
 })
+
+/** One sentence for the card and the run, so a badge and an error read as one problem. */
+const NO_VALUE_COLUMN =
+  'Pivot on is set but Value column is empty. Name the column holding each annotation, e.g. cell_type'
+
+function pivotWithoutValue(params: Record<string, unknown>): boolean {
+  return Boolean(String(params.pivotOn).trim()) && !String(params.valueColumn).trim()
+}
+
+/**
+ * The columns a column field on `CAVE table` can offer, once the table has been sampled.
+ *
+ * `own` is the table's own columns, which is where `Pivot on` lives. `id` follows the join the
+ * provider makes: on a table that references another, the root id is a column of the
+ * *referenced* table (`CaveTableConfig.idColumn`), so offering this table's columns there would
+ * list only `target_id` and the like, none of which the read can use.
+ *
+ * Empty until everything it depends on has landed, which the widget draws as a plain text field.
+ */
+function caveColumnSuggestions(ctx: InferContext, which: 'own' | 'id'): string[] {
+  const where = caveTargetOfType(ctx.inputs.dataset, ctx.params)
+  const table = String(ctx.params.table).trim()
+  if (!where || !table) return []
+  const { deployment, datastack, version } = where
+  const reference =
+    which === 'id' ? peekReferenceTable(deployment, datastack, version, table) : null
+  if (reference === undefined) return []
+  return (
+    peekTableColumns(deployment, datastack, version, reference ?? table)?.map((c) => c.name) ??
+    []
+  )
+}
 
 /**
  * The ref this node stands for.
@@ -236,7 +293,7 @@ function caveRef(
     config: {
       dataset,
       table,
-      idColumn: String(params.idColumn).trim() || 'pt_root_id',
+      idColumn: caveIdColumn(params),
       pivotOn: String(params.pivotOn).trim(),
       valueColumn: String(params.valueColumn).trim(),
       columns: String(params.columns).trim(),

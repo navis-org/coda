@@ -40,6 +40,7 @@ import {
   CAVE_DATASET_INPUT,
   caveDatastackIssues,
   caveDatastackParam,
+  caveTableSuggestions,
   caveTargetOfType,
   caveTargetOfValue,
 } from '../lib/caveParams'
@@ -165,8 +166,10 @@ registerNode({
       kind: 'string',
       label: 'Table',
       placeholder: 'nuclei_v1',
-      help: 'A table or a view in this datastack. List CAVE tables is where the names come from.',
+      help: 'A table or a view in this datastack. The list is the datastack’s tables and then its views, once it has been read, which needs a CAVE token; any name can still be typed.',
       default: '',
+      // Views too, unlike `CAVE table`: this node samples either kind, and warns before a view.
+      suggestions: (ctx) => caveTableSuggestions(ctx, { views: true }),
     },
   ],
 

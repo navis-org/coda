@@ -33,8 +33,10 @@
  * That is why the facts and the column sample are **two memos rather than one record**. The card
  * peeks the facts, which are metadata and counts and never a query — so an edit-time look at a
  * view cannot start a request that runs for minutes at a shared production server. Only
- * `evaluate` samples columns, where there is a `ctx.signal` to cancel with and a `ctx.warn` to
- * say what is about to be waited on.
+ * `evaluate` samples a *view's* columns, where there is a `ctx.signal` to cancel with and a
+ * `ctx.warn` to say what is about to be waited on. A plain *table* is sampled at edit time too, by
+ * `peekTableColumns`, because a one-row query against one answers in under a second, and the
+ * `CAVE table` card's column fields have nothing else to offer.
  *
  * ## Two row counts, and both are true
  *
@@ -62,6 +64,7 @@ import type { CaveRequestOptions, CaveRow } from './client'
 import type { DType } from '../../core/types'
 import { caveDType } from './json'
 import { caveSourceId, deploymentKey } from './deployments'
+import { getToken } from './credentials'
 import { caveServerFor, datastackRecord, resetDatastackRecords } from './datastack'
 import { resetFlatSources } from './flat'
 import { resetSkeletonServices } from './skeletonService'
@@ -171,6 +174,10 @@ const factsAsked = new Set<string>()
 
 const columnsLoading = new Map<string, Promise<CaveColumnSample[]>>()
 const referencesLoading = new Map<string, Promise<string | undefined>>()
+/** What the two edit-time peeks below have landed, and which they have started. */
+const columnsPeek = peekMemo<CaveColumnSample[]>()
+/** `null` is a table that references nothing, which is an answer, where absent is "not yet". */
+const referencesPeek = peekMemo<string | null>()
 
 /**
  * Drop everything learned. **A test seam, and only that today.**
@@ -192,6 +199,8 @@ export function resetCaveTables(): void {
   factsAsked.clear()
   columnsLoading.clear()
   referencesLoading.clear()
+  columnsPeek.clear()
+  referencesPeek.clear()
 }
 
 /**
@@ -325,10 +334,18 @@ export function peekTableList(
   const key = `${keyFor(deployment, datastack, version)}|v`
   const known = listed.get(key)
   if (known || !datastack || listingAsked.has(key)) return known
+  /*
+   * Gated on a credential, and not marked asked without one, so a token pasted later re-arms it.
+   * The `Table` field on `CAVE table` peeks this on every render, so ungated it put an auth
+   * failure in front of somebody who had only dropped the card on the canvas (`peekDatastacks`'
+   * rule).
+   */
+  if (!getToken(deployment)) return undefined
   listingAsked.add(key)
-  // Swallowed: a peek has no caller to report to, and a 401 already travels on its own channel
-  // to the Connections panel. `peekMaterializations`' trade.
-  void tableListFor(datastack, version, { deployment }).catch(() => undefined)
+  // Swallowed and `quiet`, `peekMaterializations`' trade: a peek has no caller to report to, and
+  // a refusal raised from a render opens the Connections panel at somebody who asked nothing. A
+  // rejection is not memoised, so a later Run asks again and refuses loudly.
+  void tableListFor(datastack, version, { deployment, quiet: true }).catch(() => undefined)
   return undefined
 }
 
@@ -562,7 +579,8 @@ async function loadReferenceTable(
 /**
  * One sampled row, read as a column listing.
  *
- * Never a request the peek makes — see the module header on views and `limit`.
+ * `peekTableColumns` asks this of a table only, never a view: see the module header on views and
+ * `limit`.
  */
 export function tableColumnsFor(
   datastack: string,
@@ -599,6 +617,88 @@ async function loadColumns(
       ? await queryView(server, datastack, version, { ...query, view: name }, options)
       : await queryTable(server, datastack, version, { ...query, table: name }, options)
   return sampleColumns(rows)
+}
+
+/**
+ * One edit-time peek over a promise memo: the landed value, and whether it has been started.
+ *
+ * Shared by the two peeks below, which differ only in what they fetch. Both are asked only for a
+ * name the listing confirms is a *table*, and both are `quiet` and announce a landing through
+ * `reportSourceLearned`. `has` rather than truthiness, because `null` is a landed answer.
+ */
+function peekMemo<T>() {
+  const known = new Map<string, T>()
+  const asked = new Set<string>()
+  return {
+    peek(
+      where: { deployment: string; datastack: string; version: number; name: string },
+      start: (options: CaveRequestOptions) => Promise<T>,
+    ): T | undefined {
+      const { deployment, datastack, version, name } = where
+      if (!datastack || !name) return undefined
+      const key = `${keyFor(deployment, datastack, version)}|${name}`
+      if (known.has(key)) return known.get(key)
+      if (asked.has(key)) return undefined
+      if (kindOf(peekTableList(deployment, datastack, version), name) !== 'table')
+        return undefined
+      asked.add(key)
+      void start({ deployment, quiet: true })
+        .then((value) => {
+          known.set(key, value)
+          reportSourceLearned(caveSourceId(deployment))
+        })
+        .catch(() => undefined)
+      return undefined
+    },
+    clear() {
+      known.clear()
+      asked.clear()
+    },
+  }
+}
+
+/**
+ * A table's sampled columns if they have landed, starting the sample if nobody has.
+ *
+ * **Tables only, and only a name the listing confirms is one.** That is the module header's rule
+ * about views and `limit`, kept: this is read at edit time, and a one-row query against an
+ * aggregating view can run for minutes. A plain table answers one row in under a second. The
+ * listing check also keeps a half-typed name from issuing a query per keystroke, since only a
+ * name that really is a table gets this far.
+ *
+ * Gated on a credential through `peekTableList`, and `quiet`, for that peek's reasons. Same
+ * contract otherwise: `undefined` is "not yet", started once per key.
+ */
+export function peekTableColumns(
+  deployment: string,
+  datastack: string,
+  version: number,
+  name: string,
+): CaveColumnSample[] | undefined {
+  return columnsPeek.peek({ deployment, datastack, version, name }, (options) =>
+    tableColumnsFor(datastack, version, name, 'table', options),
+  )
+}
+
+/**
+ * The table a table references, if that has landed: a name, `null` for one that references
+ * nothing, `undefined` for "not yet".
+ *
+ * The edit-time half of `referenceTableFor`. It reads the metadata document alone, never
+ * `peekTableFacts`' two row counts, but takes the facts' answer where a CAVE table info card has
+ * already fetched them.
+ */
+export function peekReferenceTable(
+  deployment: string,
+  datastack: string,
+  version: number,
+  name: string,
+): string | null | undefined {
+  const facts = factsKnown.get(`${keyFor(deployment, datastack, version)}|${name}`)
+  if (facts) return facts.referenceTable ?? null
+  return referencesPeek.peek({ deployment, datastack, version, name }, (options) =>
+    referenceTableFor(datastack, version, name, options).then((table) => table ?? null),
+  )
 }
 
 /**

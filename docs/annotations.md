@@ -187,6 +187,38 @@ names a different datastack to read the table out of, which is the cross-datasta
 only one the wire was ever needed for. Found by writing the node's first test, which is exactly
 the gap invariant 5's corollary records about `out.barChart`.
 
+**A wire that answers for the field has to say so on the field.** The field stayed editable
+beside a wire and showed its own text while the node read the wire's, so it was a control that did
+nothing and gave no sign of it. `StringParam.supplied` now puts the wired datastack in a disabled
+field with a tooltip naming the wire. It is set once, in `caveDatastackParam`, so all three CAVE
+nodes get it. It changes the **drawing only** and never the stored value, for `EnumParam.empty`'s
+reason: unwiring has to leave the field as it was left, and writing the wire's answer into the param
+would make wiring an edit, an undo step and a change to the provenance key. Only a wire that has
+*resolved* answers, because `caveTarget` itself reads the typed name until then.
+
+**`Table` lists the datastack's tables, and stays a text field.** It is `StringParam.suggestions`
+over `peekTableList`, **tables only** because the provider reads through the table query route and
+a view there is a 404. The widget is `ComboField`, which replaced the `datalist` those suggestions
+used to draw, for two reasons. A datastack holds hundreds of tables, and a `datalist` filters on
+what the field already holds, so a field showing a chosen table offered only that table. Free text
+stays because the listing needs a token and may not have landed, and a name missing from it may
+still be meant. The peek is now **gated on a token and `quiet`**, because the field reads it on
+every render and an ungated one would report an auth failure to somebody who had only dropped the
+card.
+
+`Pivot on` and `ID column` list columns the same way, from a one-row sample (`peekTableColumns`).
+The sample is taken only for a name the listing confirms is a **table**: a limit does not reach
+into an aggregating view, and checking the listing also stops a half-typed name from sending a
+query per keystroke. **`ID column` lists the referenced table's columns on a reference table**
+(`peekReferenceTable`), because that is where the provider's join reads the root id. The table's
+own columns there would be `target_id` and bookkeeping.
+
+`Columns` is a chip list over the same sample (`StringParam.chips`), and **it is still stored as
+the comma-separated string**. That string is what saved graphs hold, what the cache key hashes, and
+what `namedColumns` and both emitters split. A `columns` or `multiEnum` param would have stored an
+array and needed every saved graph migrated to say the same thing. The adder is the free-text
+`ComboField`, so a column can be named before the sample lands or without a token.
+
 **Both halves of that grammar are checked on the card, and both used to fail two layers below
 it.** The socket takes a `T.dataset()` and the port is a *reference* naming a datastack, so a
 Dataset from any other backend is accepted at the type level and handed straight through as one:

@@ -28,7 +28,7 @@ import { resetCredentials, setToken } from '../../data/cave/credentials'
 import { resetCaveState, tableListFor } from '../../data/cave/tables'
 import { installCaveFetch } from '../../test/caveStubs'
 import '../index'
-import { makeInferContext } from '../../core/node'
+import { defaultParams, findParam, makeInferContext } from '../../core/node'
 import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 
 const DATASET = 'flywire_fafb_public:783'
@@ -245,5 +245,90 @@ describe('which datastack, refused on the card', () => {
       /is not in flywire_fafb_public:783.*Available:/s,
     )
     expect(issues('cave.tableInfo', { datastack: DATASET, table: 'nuclei_v1' })).toEqual([])
+  })
+})
+
+/**
+ * What the CAVE nodes' free-text fields list (`StringParam.suggestions`). The widget drawing them
+ * is `ui/params/comboField.test.tsx`'s; this is what each node feeds it.
+ */
+describe('the CAVE fields’ lists', () => {
+  /** A field's list as the card would ask for it now. */
+  function listFor(type: string, param: string, table = ''): string[] {
+    const def = requireNodeDef(type)
+    const found = findParam(def, param)
+    const params = { ...defaultParams(def), datastack: DATASET, table }
+    return found?.kind === 'string'
+      ? (found.suggestions?.(makeInferContext(def, params, {})) ?? [])
+      : []
+  }
+
+  /*
+   * One lookup, two answers: `CAVE table info` samples a view as readily as a table, where
+   * `CAVE table` reads through the table query route and a view there is a 404.
+   */
+  it('offers views on CAVE table info, after the tables, and not on CAVE table', async () => {
+    installCaveFetch()
+    await tableListFor('flywire_fafb_public', 783, { deployment: DEFAULT_CAVE_SERVER })
+
+    const info = listFor('cave.tableInfo', 'table')
+    expect(info).toContain('nuclei_v1')
+    expect(info).toContain('valid_connection_v2')
+    expect(info.indexOf('nuclei_v1')).toBeLessThan(info.indexOf('valid_connection_v2'))
+
+    const tables = listFor('annotation.caveTable', 'table')
+    expect(tables).toContain('nuclei_v1')
+    expect(tables).not.toContain('valid_connection_v2')
+    expect([...tables]).toEqual([...tables].sort())
+  })
+
+  it("offers the table's own columns for Pivot on", async () => {
+    installCaveFetch()
+    // Each peek answers "not yet" and fills in when it lands: the listing, then the sample.
+    await vi.waitFor(() =>
+      expect(listFor('annotation.caveTable', 'pivotOn', 'nuclei_v1')).toContain('volume'),
+    )
+    expect(listFor('annotation.caveTable', 'pivotOn', 'nuclei_v1')).toContain('pt_root_id')
+  })
+
+  /*
+   * On a reference table the root id is a column of the referenced table, which is where the
+   * provider's join reads it from. So the sample the field lists has to be that table's.
+   */
+  it('offers the referenced table’s columns for the ID column of a reference table', async () => {
+    const calls = installCaveFetch({
+      overrides: {
+        '/table/hierarchical_neuron_annotations/metadata':
+          '{"table_name":"hierarchical_neuron_annotations","reference_table":"nuclei_v1"}',
+      },
+    })
+    // The listing, then the reference, then the referenced table's sample.
+    await vi.waitFor(() =>
+      expect(
+        listFor('annotation.caveTable', 'idColumn', 'hierarchical_neuron_annotations'),
+      ).toContain('pt_root_id'),
+    )
+    const queried = calls.filter((c) => c.url.includes('/query')).map((c) => c.url)
+    expect(queried.some((u) => u.includes('nuclei_v1'))).toBe(true)
+    expect(queried.some((u) => u.includes('hierarchical_neuron_annotations'))).toBe(false)
+  })
+
+  it('samples nothing for a name the listing does not hold', async () => {
+    const calls = installCaveFetch()
+    await tableListFor('flywire_fafb_public', 783, { deployment: DEFAULT_CAVE_SERVER })
+    // With the listing in hand, a name it lacks is answered at once and never sampled.
+    expect(listFor('annotation.caveTable', 'pivotOn', 'nuclei_v')).toEqual([])
+    expect(calls.filter((c) => c.url.includes('/query'))).toEqual([])
+  })
+
+  /*
+   * The field is read on every render of the card, so an ungated peek put an auth failure in
+   * the status bar at somebody who had only dropped the card on the canvas.
+   */
+  it('asks nothing without a token', async () => {
+    resetCredentials()
+    const calls = installCaveFetch()
+    expect(listFor('annotation.caveTable', 'table')).toEqual([])
+    expect(calls).toEqual([])
   })
 })

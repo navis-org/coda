@@ -473,8 +473,8 @@ export interface StringParam extends ParamBase {
   /**
    * Completions for a field that takes free text but usually takes one of a known set.
    *
-   * Drawn as the browser's own `datalist` popup rather than as a `select`, which is the whole
-   * distinction from `EnumParam`: the value is still anything you can type. That is what a name
+   * Drawn as a filterable list under a text field (`ComboField`) rather than as a `select`, which
+   * is the whole distinction from `EnumParam`: the value is still anything you can type. That is what a name
    * *not* on the list has to stay — Custom CAVE exists for the datastack Coda ships nothing for,
    * its listing needs a token that expires in a week, and the reply has not landed on the first
    * render of any session. A select would empty in all three cases, which reads as the card
@@ -486,8 +486,55 @@ export interface StringParam extends ParamBase {
    * `reportSourceLearned`, which is what fills the list a beat later.
    *
    * Empty and undefined mean the same thing to the widget: no popup, an ordinary text field.
+   *
+   * **No identity contract**: a fresh array per call is fine. The widget filters only while its
+   * list is open, over a few hundred names at most.
    */
   suggestions?: (ctx: InferContext) => string[]
+  /**
+   * The value a wire supplies in place of this field, when one does.
+   *
+   * For a field that a socket overrides, such as a CAVE node's `Datastack` beside its reference
+   * Dataset port. Without this the field stayed editable and showed its own stale text while the
+   * node read the wire. That is a control which does nothing and gives no sign of it. Answered,
+   * the widget draws `value` in a disabled field with `why` as its tooltip.
+   *
+   * **Drawing only, and the stored value is untouched.** The `EnumParam.empty` rule: a wire
+   * removed has to leave the field as it was left, and writing the wire's answer into the param
+   * would make wiring an edit, an undo step and a change to the provenance key.
+   *
+   * Same contract as `suggestions`: synchronous and network-free. Undefined means the field is
+   * the field's. While it answers it wins over `chips` and `suggestions` too, which draw nothing
+   * worth editing beside a value nobody can edit.
+   */
+  supplied?: (ctx: InferContext) => { value: string; why: string } | undefined
+  /**
+   * The value is a comma-separated list, drawn as removable chips with a field to add one.
+   *
+   * **Storage stays a string**, which is the point of this rather than a `columns` or `multiEnum`
+   * param. The string is what saved graphs already hold, what the cache key hashes, and what the
+   * node and its emitters split. An array would need a load-time migration for every stored graph
+   * to say the same thing.
+   *
+   * `suggestions` supplies the options, and the adder stays free text for `suggestions`' reasons.
+   * Not with `multiline`, which `registerNode` refuses: a textarea draws no chips.
+   * A chip whose name the list lacks is marked missing only once the list is non-empty, since an
+   * empty list is one that has not landed.
+   */
+  chips?: boolean
+}
+
+/**
+ * A `StringParam.chips` value as its entries: comma-separated, trimmed, blanks dropped.
+ *
+ * The one reader of that grammar, so the chips a card draws and the list a node reads cannot
+ * split one string two ways. `namedColumns` builds on it.
+ */
+export function listEntries(text: string): string[] {
+  return text
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
 }
 
 export interface BooleanParam extends ParamBase {

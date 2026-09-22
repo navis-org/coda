@@ -44,6 +44,7 @@ export function registerNode<P extends ParamValues>(def: NodeDefinition<P>): Nod
   checkPortGroups(def as unknown as NodeDefinition)
   checkFormerParamIds(def as unknown as NodeDefinition)
   checkPortKinds(def as unknown as NodeDefinition)
+  checkStringDrawing(def as unknown as NodeDefinition)
   definitions.set(def.type, def as unknown as NodeDefinition)
   referenceTypes = undefined
   loopTypes = undefined
@@ -184,6 +185,26 @@ function checkFormerParamIds(def: NodeDefinition): void {
       )
     }
     claimed.add(former)
+  }
+}
+
+/**
+ * A text param's drawing flags that the widget cannot honour together, thrown at registration.
+ *
+ * `ParamField` picks one widget per string param, and a textarea takes neither a list nor chips.
+ * So `multiline` beside `suggestions` or `chips` used to lose the other flag in silence: the list
+ * never appeared, or the chips drew as one text box, and nothing said why. (`supplied` is not in
+ * this: it is a *state*, not a drawing, and wins over every flag while a wire answers.)
+ */
+function checkStringDrawing(def: NodeDefinition): void {
+  for (const param of def.params ?? []) {
+    if (param.kind !== 'string' || !param.multiline) continue
+    const clash = param.chips ? 'chips' : param.suggestions ? 'suggestions' : undefined
+    if (clash) {
+      throw new Error(
+        `"${def.type}" param "${param.id}" declares \`multiline\` with \`${clash}\`. A textarea draws neither, so the second would be ignored.`,
+      )
+    }
   }
 }
 

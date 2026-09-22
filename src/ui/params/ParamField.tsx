@@ -7,10 +7,12 @@
  * without it these would be free-text fields.
  */
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { EnumOption, InferContext, ParamDef, ParamValue } from '../../core/node'
-import { availableColumns, columnsKnown, optionText } from '../../core/node'
+import { availableColumns, columnsKnown, listEntries, optionText } from '../../core/node'
+import { ComboField } from './ComboField'
+import { useDraftText } from './useDraftText'
 
 /**
  * What a column picker says when the port carries no schema at all.
@@ -72,22 +74,79 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
       )
     }
 
-    case 'string':
+    case 'string': {
+      // A wire answering for this field wins the drawing as it wins the read: the wire's value,
+      // not editable, saying where it came from. See `StringParam.supplied`.
+      const supplied = param.supplied?.(ctx)
+      if (supplied) {
+        return (
+          <TextField
+            label={label}
+            value={supplied.value}
+            title={supplied.why}
+            disabled
+            onChange={onChange}
+          />
+        )
+      }
+      const text = typeof value === 'string' ? value : param.default
+      const mono =
+        param.multiline === true ||
+        param.placeholder?.includes('regex') ||
+        param.id.includes('Pattern')
+      if (param.chips) {
+        const selected = listEntries(text)
+        const options = param.suggestions?.(ctx) ?? []
+        const write = (next: string[]) => onChange(next.join(', '))
+        return (
+          <ChipsField
+            label={label}
+            available={options.map((name) => ({ value: name, label: name }))}
+            known={options.length > 0}
+            selected={selected}
+            emptyChip="all"
+            onChange={write}
+            adder={(remaining) => (
+              <ComboField
+                label={`Add to ${label}`}
+                value=""
+                adder
+                placeholder={param.placeholder}
+                options={remaining.map((option) => option.value)}
+                onChange={(name) => {
+                  if (!selected.includes(name)) write([...selected, name])
+                }}
+              />
+            )}
+          />
+        )
+      }
+      // Decided by the *declaration*, never by whether the list has landed yet: the listing
+      // arrives a beat after the first render, and swapping the element then would take the
+      // caret and a pending commit with it. See `ComboField`.
+      if (param.suggestions && !param.multiline) {
+        return (
+          <ComboField
+            label={label}
+            value={text}
+            placeholder={param.placeholder}
+            mono={mono}
+            options={param.suggestions(ctx)}
+            onChange={onChange}
+          />
+        )
+      }
       return (
-        <SuggestField
+        <TextField
           label={label}
-          value={typeof value === 'string' ? value : param.default}
+          value={text}
           placeholder={param.placeholder}
           multiline={param.multiline === true}
-          mono={
-            param.multiline === true ||
-            param.placeholder?.includes('regex') ||
-            param.id.includes('Pattern')
-          }
-          suggestions={param.suggestions?.(ctx) ?? []}
+          mono={mono}
           onChange={onChange}
         />
       )
+    }
 
     case 'boolean':
       return (
@@ -387,13 +446,14 @@ export interface TextFieldProps {
    * columns by the number of rows on the card. Single-line only; a textarea takes no `list`.
    */
   list?: string
+  /** Drawn but not editable: a value somebody else supplies, such as a wire. */
+  disabled?: boolean
   onChange: (value: string) => void
 }
 
 /**
- * Local state while typing, committed on blur/Enter — but also on a debounce, so a cheap
- * downstream node updates as you type without every keystroke becoming an undo step
- * (the store coalesces those by param id).
+ * A free-text field. Commit rules are `useDraftText`'s: blur and Enter commit, and a debounce
+ * commits while typing.
  */
 export function TextField({
   label,
@@ -403,39 +463,23 @@ export function TextField({
   multiline,
   title,
   list,
+  disabled,
   onChange,
 }: TextFieldProps) {
-  const [text, setText] = useState(value)
-  const [focused, setFocused] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-
-  useEffect(() => {
-    if (!focused) setText(value)
-  }, [value, focused])
-
-  useEffect(() => () => clearTimeout(timer.current), [])
-
-  const commitLater = (next: string) => {
-    setText(next)
-    clearTimeout(timer.current)
-    // Multiline fields hold queries, which are expensive to run and half-written most of
-    // the time. Those commit on blur only; a debounce would fire a query mid-sentence.
-    if (!multiline) timer.current = setTimeout(() => onChange(next), 220)
-  }
+  // Multiline fields hold queries, which are expensive to run and half-written most of the time.
+  // Those commit on blur only; a debounce would fire a query mid-sentence.
+  const draft = useDraftText(value, onChange, { debounce: !multiline })
 
   const shared = {
     'aria-label': label,
     title,
-    value: text,
+    disabled,
+    value: draft.text,
     placeholder,
     spellCheck: false,
-    onFocus: () => setFocused(true),
-    onChange: (e: { target: { value: string } }) => commitLater(e.target.value),
-    onBlur: (e: { target: { value: string } }) => {
-      setFocused(false)
-      clearTimeout(timer.current)
-      onChange(e.target.value)
-    },
+    onFocus: draft.focus,
+    onChange: (e: { target: { value: string } }) => draft.edit(e.target.value),
+    onBlur: (e: { target: { value: string } }) => draft.blur(e.target.value),
   }
 
   if (multiline) {
@@ -448,7 +492,7 @@ export function TextField({
           // Enter is a newline here; ⌘/Ctrl+Enter is "done", matching every query editor.
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) e.currentTarget.blur()
           if (e.key === 'Escape') {
-            setText(value)
+            draft.setText(value)
             e.currentTarget.blur()
           }
           e.stopPropagation()
@@ -466,56 +510,11 @@ export function TextField({
       onKeyDown={(e) => {
         if (e.key === 'Enter') e.currentTarget.blur()
         if (e.key === 'Escape') {
-          setText(value)
+          draft.setText(value)
           e.currentTarget.blur()
         }
       }}
     />
-  )
-}
-
-// ---------------------------------------------------------------------------
-
-/**
- * A `TextField` that carries its own `<datalist>` — the widget behind `StringParam.suggestions`.
- *
- * `TextField.list` is deliberately the *caller's* list, for the reason recorded on it: `Edit
- * Table` draws several column fields over one set of options, and rendering the `<option>`
- * elements per field multiplies a wide pivot's few thousand columns by the number of rows on the
- * card. A declared `suggestions` is the other shape entirely — one field, one list — so this
- * pairs the two rather than teaching `TextField` a second way to be given the same thing.
- *
- * The `id` comes from `useId`, which is what keeps two cards of the same node type from both
- * pointing at the first one's list: a `datalist` is addressed by document-unique id, and a param
- * id is only unique within a node.
- *
- * A `datalist` is `display: none` in every UA stylesheet, so it is not a grid item and the field
- * stays in the single cell its row lays out for it.
- */
-function SuggestField({ suggestions, ...text }: TextFieldProps & { suggestions: string[] }) {
-  const id = useId()
-  /*
-   * **One element type either way**, which is why the empty case returns here rather than being a
-   * ternary at the call site. `peekDatastacks` answers `undefined` on the first render and the
-   * list a beat later, so a call site that swapped `TextField` for `SuggestField` changed the
-   * element *type* mid-session — React tears the input down and rebuilds it, taking the caret, the
-   * focus and `TextField`'s pending debounced commit with it. The only real difference between the
-   * two renders is one attribute.
-   *
-   * Empty is also not a shorter list, it is *no list*: a `datalist` with no options draws a field
-   * with a popup arrow that opens onto nothing, which claims the set is empty where the ordinary
-   * case is that it has not arrived.
-   */
-  if (suggestions.length === 0) return <TextField {...text} />
-  return (
-    <>
-      <TextField {...text} list={id} />
-      <datalist id={id}>
-        {suggestions.map((value) => (
-          <option key={value} value={value} />
-        ))}
-      </datalist>
-    </>
   )
 }
 
@@ -636,12 +635,18 @@ interface ChipsFieldProps {
   known: boolean
   selected: string[]
   onChange: (value: string[]) => void
-  /** What one entry is called, for the add control's labels. */
-  noun: string
+  /** What one entry is called, for the `+` select's labels. Unread beside an `adder`. */
+  noun?: string
   /** What an empty selection *means*, where the node says it means something. */
   emptyChip?: string
-  /** Shown when there is nothing to offer at all. */
-  emptyAvailable: string
+  /** Shown when there is nothing to offer at all. Unread beside an `adder`. */
+  emptyAvailable?: string
+  /**
+   * Replaces the `+` select, for a list that has to take a name nobody offered — see
+   * `StringParam.chips`. Handed the options not yet chosen, so there is one `remaining`. Always
+   * drawn, so nothing is ever "nothing to offer".
+   */
+  adder?: (remaining: EnumOption[]) => React.ReactNode
 }
 
 /**
@@ -662,6 +667,7 @@ function ChipsField({
   noun,
   emptyChip,
   emptyAvailable,
+  adder,
 }: ChipsFieldProps) {
   const values = available.map((option) => option.value)
   const remaining = available.filter((option) => !selected.includes(option.value))
@@ -677,7 +683,7 @@ function ChipsField({
 
   return (
     <div className="columns-field nodrag">
-      {selected.length === 0 && remaining.length > 0 && (
+      {selected.length === 0 && (remaining.length > 0 || adder) && (
         <span className="chip chip--empty">{emptyChip ?? 'none'}</span>
       )}
       {selected.map((name) => {
@@ -697,7 +703,8 @@ function ChipsField({
           </span>
         )
       })}
-      {remaining.length > 0 && (
+      {adder?.(remaining)}
+      {!adder && remaining.length > 0 && (
         <select
           className="columns-field__add"
           value=""
@@ -722,7 +729,7 @@ function ChipsField({
         lost it, and the absent `+` says the rest — and at worst it reads as a warning about the
         chips next to it.
       */}
-      {available.length === 0 && selected.length === 0 && (
+      {!adder && available.length === 0 && selected.length === 0 && (
         <span className="chip chip--empty" title={known ? undefined : UNKNOWN_HINT}>
           {known ? emptyAvailable : UNKNOWN_COLUMNS}
         </span>

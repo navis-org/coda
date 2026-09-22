@@ -266,7 +266,7 @@ because the obvious move is to make it a third dropdown. A CATMAID project id is
 materialization is a number CAVE mints, so for both of those the server's list is the whole option
 space. A datastack name is not: this node exists for the datastack Coda ships no spec for, a
 private one need not appear in any listing at all, and `evaluate` deliberately does not check the
-name it was given against one. So the field stays free text with a `<datalist>` on it — a spelling
+name it was given against one. So the field stays free text with a filterable list under it — a spelling
 aid over a control that still takes anything — which is also what makes its three empty states
 harmless rather than something to word around: no token, a login token whose seven days are up,
 and the first render of every session, all of which a `select` would draw as a card that had
@@ -290,8 +290,9 @@ node wired below it learns the deployment from the wire; see
 
 The mechanism is `StringParam.suggestions`, which is a general control rather than this node's:
 `EnumParam.options`' contract exactly — synchronous, network-free, asked on every render — drawn
-by `SuggestField`, which pairs a `TextField` with a `datalist` of its own. `TextField.list` stays
-what it was, the *caller's* list, because `Edit Table` draws several column fields over one set of
+by `ComboField`, a text field with a filterable list portalled under it. That replaced a
+`<datalist>`, which filters on what the field already holds, so a field showing a chosen name
+offered only that name. `TextField.list` stays what it was, the *caller's* `<datalist>`, because `Edit Table` draws several column fields over one set of
 options and a list per field multiplies a wide pivot's few thousand columns by the rows on the
 card.
 

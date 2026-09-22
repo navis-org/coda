@@ -19,7 +19,7 @@
  * going dark for a reason no test spanning two nodes would catch.
  */
 
-import type { ParamDef, PortDef } from '../../core/node'
+import type { InferContext, ParamDef, PortDef } from '../../core/node'
 import type { CodaType } from '../../core/types'
 import { T, datasetRef } from '../../core/types'
 import type { Value } from '../../core/values'
@@ -30,6 +30,7 @@ import {
   caveServerOfSource,
   normaliseCaveServer,
 } from '../../data/cave/deployments'
+import { peekTableList } from '../../data/cave/tables'
 import { foreignBackend } from './datasetParam'
 
 /** The reference Dataset port. See the header on why `reference` is not optional here. */
@@ -39,6 +40,17 @@ export const CAVE_DATASET_INPUT: PortDef = {
   type: T.dataset(),
   required: false,
   reference: true,
+}
+
+/** `pt_root_id` on every CAVE table Coda has seen. */
+export const DEFAULT_CAVE_ID_COLUMN = 'pt_root_id'
+
+/**
+ * The root-id column a CAVE node reads: its `idColumn` field, or the default where the field has
+ * been cleared. One rule for `CAVE table` and `Custom CAVE`, whose fields mean the same thing.
+ */
+export function caveIdColumn(params: Record<string, unknown>): string {
+  return String(params.idColumn ?? '').trim() || DEFAULT_CAVE_ID_COLUMN
 }
 
 /**
@@ -58,6 +70,18 @@ export function caveDatastackParam(help: string): ParamDef {
       `${help} A typed name is looked up on ${caveServerLabel(DEFAULT_CAVE_SERVER)}; wire a ` +
       `Dataset to read a datastack from another CAVE deployment.`,
     default: '',
+    /*
+     * The wire wins the read (`caveTarget`), so it wins the drawing too. The field was left
+     * editable beside a wire, showing a datastack the node was not reading. Only a wire that has
+     * *resolved* answers: an unresolved one falls back to the typed name in `caveTarget` as well,
+     * so the field is still the one being read.
+     */
+    supplied: (ctx) => {
+      const wired = datasetRef(ctx.inputs.dataset)?.datasetId
+      return wired
+        ? { value: wired, why: 'Set by the wired Dataset. Unwire it to type a datastack.' }
+        : undefined
+    },
   }
 }
 
@@ -162,4 +186,25 @@ export function caveDatastackIssues(
     ]
   }
   return []
+}
+
+/**
+ * The names a `Table` field can offer: the datastack's listing, once it has landed.
+ *
+ * Shared by `CAVE table` and `CAVE table info`, which differ in one thing. `CAVE table` reads
+ * through the table query route, where a view is a 404, so it takes `views: false`. `CAVE table
+ * info` accepts either. The listing already puts tables before views, each half sorted.
+ *
+ * Through `peekTableList`, which is gated on a credential and quiet, so an unsigned card asks
+ * nothing and the field is a plain text field until the list arrives.
+ */
+export function caveTableSuggestions(
+  ctx: InferContext,
+  { views }: { views: boolean },
+): string[] {
+  const where = caveTargetOfType(ctx.inputs.dataset, ctx.params)
+  const entries = where
+    ? peekTableList(where.deployment, where.datastack, where.version)
+    : undefined
+  return (entries ?? []).filter((e) => views || e.kind === 'table').map((e) => e.name)
 }
