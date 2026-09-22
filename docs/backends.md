@@ -1387,6 +1387,18 @@ The level-2 chunk graph is the way out, and it is already built: `readL2Skeleton
 two small requests, a few hundred chunks with a representative coordinate each. `l2SourceFor` is
 the same gate the Skeletons node uses, so a datastack with no cache still answers `undefined`.
 
+**Where the skeleton service already holds the neuron, it answers the thumbnail instead**, and on
+minnie65 that is the whole of the hover preview's wait. Its proofread neurons are big — 6k–21k
+level-2 chunks — so the chunk graph alone is 6–8 s and the route was 11–13 s a neuron, paid once
+for the tile and again for the preview. The service's cached skeleton is a 0.6 s `exists` and a
+~1 s download, draws the same thumbnail (it is generated from this same cache) with a radius on
+every vertex, and measured through `CaveSource` at 0.8–2.0 s for the tile and 0.7–0.9 s for the
+preview. Two rules keep it from costing anything elsewhere. The thumbnail's verdict on a service
+is **its own and one-sided** (`serviceThumbnail`): a service that misses before it has ever
+answered is not asked again this session, so BANC pays one `exists` rather than one a row; and it
+passes `learn: false`, because one uncached neuron is no evidence about a cache and must not set
+the `barren` flag that sends the Skeletons node's `automatic` to the chunk graph.
+
 So `CoarseGeometry` is a **union** — `{ kind: 'mesh' }` or `{ kind: 'skeleton' } & SkeletonGeometry`
 — rather than one shape both routes have to fit. Making a source fake the other one means meshing
 a skeleton or decimating a mesh into a tree, which is work done to satisfy a type rather than to
@@ -1721,6 +1733,12 @@ Two requests per neuron: the graph of which level-2 chunks touch which, then the
 `rep_coord_nm` and `max_dt_nm` per chunk. Measured on BANC: five neurons concurrently in 3.2 s —
 which is one neuron's latency, since they overlap — and trees of 739, 69 and 2 nodes with radii.
 
+**`attribute_names` is a query parameter, comma-joined**, as `caveclient.l2cache.get_l2data` sends
+it. It was in the JSON body for a long time, where the server ignores it without complaint and
+answers all eight attributes: on four minnie65 neurons of 8,643–21,693 chunks, 5.2–13.6 MB in
+8–19 s against 1.1–2.8 MB in 3–6 s, identical `rep_coord_nm` and `max_dt_nm` either way. Nothing
+failed, which is why it survived — the one symptom was every level-2 skeleton being slow.
+
 **The skeleton *service* several datastacks also publish is not used, and that is measured
 rather than assumed.** It generates from this same cache, so it covers no datastack the L2 route
 does not: `flywire_fafb_public` declares a service and has no cache, which is exactly why its
@@ -1846,7 +1864,11 @@ Four rules make that work, and three of them are silent when wrong.
   network. `exists` answers as a **POST** (`{skeleton_version, root_ids}`) — the GET form 502s —
   and it is one request for the whole set, about half a second at fifty ids. Its body is written
   as *text*, because `JSON.stringify` of an eighteen-digit root id as a number is a different
-  neuron (invariant 8) — the same splice `is_latest_roots` performs.
+  neuron (invariant 8) — the same splice `is_latest_roots` performs. **A request for one id is
+  answered with a bare `true`/`false`, not a one-entry map** (checked live on minnie65). Read as a
+  map it has no entries, so one neuron — or a set whose last batch of 500 held one — came back
+  "not cached" and marked the datastack `barren`; the fixture stub answered a map for one id too,
+  which is how it passed.
 - **Nothing here ever asks the service to generate.** The endpoints exist. Queueing a build would
   turn a Skeletons run into a wait of minutes with nothing to say so, and the honest answer is to
   fetch what is there and warn about the rest.

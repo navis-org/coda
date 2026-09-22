@@ -184,9 +184,28 @@ Re-checked on FAFB, since one constant now serves a ~1,300-node chunk-graph skel
 16,840-node traced one — **thirteen times denser** — and it behaves the same way: at 1 px
 skeleton 16's descending axon is the faintest ramp step again, at 3 px it is solid, and its
 terminal tuft saturates at every width tried, so what saturates there is the arbor being genuinely
-dense rather than the stroke being wide. It is deliberately *not* a radius from the data: the L2 cache publishes `max_dt_nm` and it is the right
-idea at the wrong scale, 22–55 nm against a neuron spanning tens of microns, so a faithful radius
-is a thousandth of the tile and every neuron draws as hairlines.
+dense rather than the stroke being wide.
+
+**Where a skeleton carries radii, 0.02 is the width of its p95 radius, not of every segment.**
+A uniform stroke was reported as coarse on minnie65 and Aedes, where mouse and mosquito arbors
+drawn at one width read as a tangle of equally thick rope. Two ways to use the radii were drawn
+side by side on real minnie65 and BANC L2 skeletons at the tile raster, and the obvious one lost.
+**At scale** — `max_dt_nm` as a width in the tile's own units — every segment but the soma lands
+under two raster pixels (p95 radii 317–428 nm against arbors hundreds of microns across), so
+the floor draws the whole neuron and the taper the radii carry is flattened out of it: hairlines,
+which is what this paragraph used to record as the reason not to use radii at all. **Normalised**
+— the 3D View's `radius` mode, widths proportional to radius with the p95 on `STROKE_FRACTION` —
+keeps the trunk and soma as bold as the uniform stroke drew them and thins the twigs, which is
+the picture. `strokeWidths` clamps to `STROKE_MIN_FRACTION` (2 raster pixels at 304, so a twig
+still lands on a pixel) and to twice the p95 width (a minnie65 soma chunk reaches 6.2 µm against a
+317 nm p95, and at scale that is a blot). A segment takes its endpoints' **mean** radius, a
+missing one counting as zero, so a chunk too small to have `max_dt_nm` draws thin rather than
+vanishing. Two properties `thumbnail.test.ts` pins: a skeleton of **one calibre draws
+byte-identically to the uniform stroke**, so a list mixing radii and none reads as one renderer;
+and **under half the drawn endpoints carrying a radius falls back to uniform**, which is
+CATMAID's shape — a radius on the soma and nowhere else would otherwise scale every other segment
+onto the floor. The change bumped `MASK_FORMAT`, since a stored mask does not say which rasteriser
+drew it.
 
 **`drawSegment` stamps along the major axis rather than filling a quad**, which is not the obvious
 choice — a segment of a given width *is* a rectangle, and `fillTriangle` would take two. The
@@ -890,14 +909,27 @@ rasterisers take an optional box rather than this module owning a second project
 fit is where the visual identity lives and two of them drift. `rotation.test.ts` pins it by
 measuring the drawn vertical extent across the sweep and asserting it takes exactly one value.
 
-**A bounded, order-independent ancestor walk, because `parents[i] < i` is not universal.**
+**An order-independent ancestor walk, because `parents[i] < i` is not universal.**
 Decimation reparents a kept node onto its nearest kept ancestor, which is the first thing in this
 area to walk a parent *chain* — `rasteriseSkeleton` only ever draws `i → parents[i]`, one hop, so
 it was immune. `spanningForest` guarantees a parent precedes its child for CAVE's L2 skeletons and
 the precomputed ones, but **CATMAID's `decodeCompactSkeleton` does not go through it** and maps the
 server's own node order straight across, so a parent may appear after its child — on exactly the
-route decimation exists for. The walk is capped at 64 steps, because a malformed skeleton with a
-cycle is the failure `data/skeletonTree.ts` exists to prevent and here it would hang the tab.
+route decimation exists for. A malformed skeleton with a cycle is the failure
+`data/skeletonTree.ts` exists to prevent and here it would hang the tab, so the walk
+(`resolveUp`) is memoised and detects a loop exactly.
+
+**It was capped at 64 steps instead, and the cap broke the drawing.** A long run of dropped nodes
+is legitimate, and past the cap a kept node became a root — a break in the neurite, on the hover
+preview only, since the tile is never decimated and neither is the 3D View. What made such runs
+happen was the second half of the bug: nodes were thinned by a running quota over the **index**,
+and a breadth-first node order puts one run's consecutive nodes a frontier apart in the array, so
+where the frontier width lines up with the stride the same run is skipped again and again. Found
+on minnie65 864691136108938168's service skeleton — 8,574 nodes, stride 3.0, six pieces. Thinning
+is now **along each run**, from its position counted off the structural node above it, which caps
+the gap at one stride and the total at the budget; the same skeleton comes back in one piece at
+2,872 nodes in 2.7 ms. `rotation.test.ts` builds the breadth-first case, which failed with 11
+pieces before.
 
 **Decimation bought 2.7×, and then the rasteriser stopped wasting the other 5×.** The cap was
 chosen against a measurement of 76.5 ms a frame undecimated and 28.0 decimated on a 16,840-node

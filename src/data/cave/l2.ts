@@ -11,7 +11,9 @@
  * declares one and has no L2 cache, which is exactly why its skeleton cache was found empty.
  * Measured against it on one BANC neuron: 1.6 s here against 10–45 s for an uncached generate,
  * and 146 nodes here against 74 from the service. It is also the only route that reaches
- * `wclee_aedes_brain`, which has a populated cache and publishes no service at all.
+ * `wclee_aedes_brain`, which has a populated cache and publishes no service at all. (A thumbnail
+ * is the exception: where the service already *holds* a neuron it is the faster read — see
+ * `CaveSource.serviceThumbnail`.)
  *
  * **The skeleton is coarse and says so.** One node per level-2 chunk is tens to a few hundred
  * nodes for a whole neuron, where a traced skeleton is thousands. It is the right shape for
@@ -188,12 +190,19 @@ async function readAttributes(
   for (let at = 0; at < ids.length; at += ATTRIBUTE_BATCH) {
     batches.push(ids.slice(at, at + ATTRIBUTE_BATCH))
   }
+  /*
+   * **`attribute_names` is a query parameter, comma-joined** — `caveclient.l2cache.get_l2data`'s
+   * spelling. In the body it is ignored without complaint and the server answers all eight
+   * attributes, which is the same two numbers wrapped in five times the bytes: measured on four
+   * minnie65 neurons of 8,643–21,693 chunks, 5.2–13.6 MB in 8–19 s against 1.1–2.8 MB in 3–6 s,
+   * with `rep_coord_nm` and `max_dt_nm` identical on every chunk. Nothing failed either way, which
+   * is why it survived: the only symptom was a Skeletons node and a thumbnail being slow.
+   */
+  const url =
+    `${source.server}/l2cache/api/v1/table/${source.table}/attributes` +
+    `?attribute_names=${encodeURIComponent(ATTRIBUTES.join(','))}`
   const answered = await mapWithConcurrency(batches, 4, (batch) =>
-    cavePost<Record<string, L2Entry>>(
-      `${source.server}/l2cache/api/v1/table/${source.table}/attributes`,
-      { l2_ids: batch, attribute_names: ATTRIBUTES },
-      options,
-    ),
+    cavePost<Record<string, L2Entry>>(url, { l2_ids: batch }, options),
   )
   return Object.assign({}, ...answered.filter(Boolean)) as Record<string, L2Entry>
 }

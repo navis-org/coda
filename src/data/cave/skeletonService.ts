@@ -239,6 +239,12 @@ export async function existingSkeletons(
   service: SkeletonService,
   neuronIds: readonly NeuronId[],
   options: CaveRequestOptions,
+  /**
+   * Whether an empty answer may mark the datastack `barren`. Off for a thumbnail, which asks about
+   * **one** neuron: one uncached body is no evidence about the cache, and learning from it would
+   * send every later Skeletons run on the datastack down the level-2 route for the session.
+   */
+  { learn = true }: { learn?: boolean } = {},
 ): Promise<Set<string>> {
   const batches: Array<readonly NeuronId[]> = []
   for (let at = 0; at < neuronIds.length; at += EXISTS_BATCH) {
@@ -251,14 +257,23 @@ export async function existingSkeletons(
   // is downloaded. Four is `mapWithConcurrency`'s job and is well inside what one deployment
   // answered comfortably at fifty ids in half a second.
   await mapWithConcurrency(batches, EXISTS_CONCURRENCY, async (batch) => {
-    const answer = await cavePostRaw<Record<string, boolean>>(
+    const answer = await cavePostRaw<Record<string, boolean> | boolean>(
       `${service.base}/exists`,
       `{"skeleton_version":${service.version},"root_ids":[${batch.join(',')}]}`,
       options,
     )
+    /*
+     * **One id is answered with a bare boolean**, not a one-entry map — checked live on minnie65.
+     * Read as a map it has no entries, so a request for one neuron, or a set whose last batch held
+     * one, came back "not cached" for a neuron that was, and marked the datastack `barren` too.
+     */
+    if (typeof answer === 'boolean') {
+      if (answer && batch.length === 1) held.add(batch[0]!)
+      return
+    }
     for (const [id, there] of Object.entries(answer ?? {})) if (there) held.add(id)
   })
-  if (neuronIds.length > 0 && held.size === 0) {
+  if (learn && neuronIds.length > 0 && held.size === 0) {
     barren.add(deploymentKey(options.deployment, service.datastack))
   }
   return held

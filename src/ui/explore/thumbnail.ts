@@ -49,6 +49,7 @@
 import type { Bounds3 } from '../../core/values'
 import { boundsOf } from '../../core/values'
 import { drawSegment, fillTriangle } from '../raster'
+import { radiusReference } from '../viewers/viewer3dScene'
 
 export interface Silhouette {
   /** Width and height in pixels. */
@@ -87,12 +88,39 @@ const DEPTH_FLOOR = 70
  * is solid, and its terminal tuft saturates at every width tried — so what saturates there is the
  * arbor being genuinely dense rather than the stroke being too wide, and no width recovers it.
  *
- * It is not a radius from the data. The L2 cache publishes `max_dt_nm` per chunk and it is the
- * right idea and the wrong scale — measured on BANC, 22 to 55 nm against a neuron spanning tens
- * of microns, so a faithful radius is a thousandth of the tile and every neuron draws as
- * hairlines. A morphologically honest width needs a tile far bigger than this one.
+ * **Where a skeleton carries radii, this is the width of its p95 radius** and everything else is
+ * drawn in proportion — see `strokeWidths`. It is not the radius *at scale*: measured on
+ * minnie65 and BANC level-2 skeletons (p95 radii 317–428 nm against neurons spanning hundreds of
+ * microns), a faithful width is under two raster pixels for nearly every segment, so the floor
+ * decides the whole picture and it draws as hairlines with the taper flattened out of it. Scaled
+ * to the p95, the trunk and soma keep the weight this constant always gave them and the twigs
+ * thin out, which is the taper the radii carry.
  */
 const STROKE_FRACTION = 0.02
+
+/**
+ * The thinnest and thickest a radius-scaled stroke may be, as fractions of the tile.
+ *
+ * The floor is 2 raster pixels at the 304px tile raster, half a CSS pixel after the downsample:
+ * a twig below it stops landing on a pixel at all, which is the failure `RASTER_SCALE` exists to
+ * prevent. The ceiling is twice the p95 width, because the tail above the p95 is somata and
+ * mis-sized chunks — `max_dt_nm` reaches 6.2 µm on a minnie65 soma against a 317 nm p95 — and
+ * one of those drawn at scale is a blot across the arbor. Both chosen by rendering real minnie65
+ * and BANC level-2 skeletons at the tile raster and looking at them.
+ */
+const STROKE_MIN_FRACTION = 0.007
+const STROKE_MAX_FRACTION = 2 * STROKE_FRACTION
+
+/**
+ * How many of the drawn endpoints must carry a radius before the widths follow the radii.
+ *
+ * A source may publish radii for only some nodes — CATMAID stores none unless a tracer set one,
+ * and typically sets it on the soma alone. Scaled against that one node, every other segment
+ * lands on the floor and the neuron draws as hairlines with a fat dot on it: worse than the
+ * uniform stroke, and indistinguishable from a broken renderer. So a taper is drawn only where
+ * the radii describe most of the arbor, and the uniform stroke otherwise.
+ */
+const RADII_MIN_SHARE = 0.5
 
 /**
  * How much of the tile stays clear around the drawing.
@@ -220,12 +248,16 @@ export function rasteriseSilhouette(
  * `fillTriangle` fills no pixels. A stroke has no such accident available to it — `drawSegment`
  * walks from a rounded endpoint — so the check is here rather than in `fitToTile`, where it
  * would cost a branch per vertex on the mesh path to restate an invariant that already holds.
+ *
+ * `widths` is `strokeWidths`' answer, one per child point, and the uniform stroke without it.
+ * Taken ready-made rather than as radii because it is a property of the tree and not of where the
+ * points are: a rotation draws seventeen frames of one skeleton and computes it once.
  */
 export function rasteriseSkeleton(
   positions: Float32Array,
   parents: Int32Array,
   size: number,
-  bounds?: Bounds3,
+  { bounds, widths }: { bounds?: Bounds3; widths?: Float32Array } = {},
 ): Silhouette {
   const result = emptySilhouette(size)
   const points = Math.floor(positions.length / 3)
@@ -236,17 +268,74 @@ export function rasteriseSkeleton(
 
   const coverage = result.coverage
   // Rounded and floored by `drawSegment`, which is what promises what a thickness means.
-  const thickness = size * STROKE_FRACTION
+  const uniform = size * STROKE_FRACTION
   for (let i = 0; i < parents.length && i < points; i++) {
     const parent = parents[i]!
     if (parent < 0 || parent >= points) continue
     const a = project(i)
     const b = project(parent)
     const shade = shadeFor((a[2] + b[2]) / 2)
+    const thickness = widths ? widths[i]! : uniform
+    // Order-independent: `markPixel` keeps the larger value, so a thin twig drawn after a thick
+    // trunk cannot punch through it.
     drawSegment(coverage, size, size, [a[0], a[1]], [b[0], b[1]], shade, thickness)
   }
 
   return result
+}
+
+/**
+ * Each segment's stroke width in raster pixels, indexed by its child point — or `undefined` where
+ * the radii cannot carry a taper and the uniform stroke should be drawn instead.
+ *
+ * The 3D View's `radius` mode, for the same reason and in the same shape: widths are proportional
+ * to radius and **normalised to the p95** — `radiusReference`, the same reference that mode
+ * takes — so one soma or one mis-sized chunk cannot decide how wide everything else is drawn,
+ * then clamped. The p95 lands on `STROKE_FRACTION`, which is what keeps a tapered thumbnail as
+ * bold as the uniform one where the neuron is thick.
+ *
+ * `undefined` for a skeleton with no radii at all, which is the same answer as one with too few.
+ *
+ * A segment takes its endpoints' **mean** radius, and a missing radius counts as zero in it. On a
+ * level-2 skeleton that is a chunk too small to have a `max_dt_nm`, and averaging it with its
+ * neighbour draws it thin rather than dropping it or letting it inherit a trunk's width.
+ */
+export function strokeWidths(
+  parents: Int32Array,
+  radii: Float32Array | undefined,
+  size: number,
+): Float32Array | undefined {
+  if (!radii) return undefined
+  const points = parents.length
+  const radius = (i: number) => Math.max(0, radii[i] ?? 0)
+  // Each drawn segment's mean radius, clamped below once the reference is known; and its two
+  // endpoints' radii — over the drawn segments rather than the points, so the reference describes
+  // what is on the tile and a node is counted once per segment it ends, as the 3D View counts it.
+  const widths = new Float32Array(points)
+  const endpoints = new Float32Array(2 * points)
+  let drawn = 0
+  let measured = 0
+  for (let i = 0; i < points; i++) {
+    const parent = parents[i]!
+    if (parent < 0 || parent >= points) continue
+    const near = radius(i)
+    const far = radius(parent)
+    endpoints[drawn++] = near
+    endpoints[drawn++] = far
+    if (near > 0) measured++
+    if (far > 0) measured++
+    widths[i] = (near + far) / 2
+  }
+  if (drawn === 0 || measured < RADII_MIN_SHARE * drawn) return undefined
+  const reference = radiusReference(endpoints.subarray(0, drawn))
+
+  const target = size * STROKE_FRACTION
+  const floor = size * STROKE_MIN_FRACTION
+  const ceiling = size * STROKE_MAX_FRACTION
+  for (let i = 0; i < points; i++) {
+    widths[i] = Math.min(ceiling, Math.max(floor, (target * widths[i]!) / reference))
+  }
+  return widths
 }
 
 /**

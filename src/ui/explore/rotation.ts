@@ -28,20 +28,21 @@
  *    the route with no finer level of detail to fetch, so rotation is the only way to add
  *    anything to it at all. Most of those segments are sub-pixel at a 640px raster, so
  *    `decimateSkeleton` keeps the shape and drops the nodes that were never separately visible.
- *  - **A bounded ancestor walk.** Decimation reparents a kept node onto its nearest kept
+ *  - **A loop-safe ancestor walk.** Decimation reparents a kept node onto its nearest kept
  *    ancestor, which is the first thing in this file's neighbourhood to walk a parent *chain*.
  *    `rasteriseSkeleton` only ever draws `i → parents[i]`, one hop, so it is immune to what this
  *    is not: **`parents[i] < i` does not hold on every route.** `spanningForest` guarantees it
  *    for CAVE's L2 skeletons and for the precomputed ones, but CATMAID's `decodeCompactSkeleton`
  *    maps the server's own node order straight through, so a parent may appear *after* its child.
- *    The walk is therefore order-independent, and it is capped, because a malformed skeleton with
- *    a cycle is the failure `data/skeletonTree.ts` exists to prevent and it hangs the tab.
+ *    The walk is therefore order-independent, and it detects a cycle exactly, because a malformed
+ *    skeleton with one is the failure `data/skeletonTree.ts` exists to prevent and it would hang
+ *    the tab. It is **not** capped by length: a cap cut long runs short and broke the drawing.
  */
 
 import type { Bounds3 } from '../../core/values'
 import { EMPTY_BOUNDS, boundsCenter, boundsOf } from '../../core/values'
 import type { Silhouette } from './thumbnail'
-import { rasteriseSilhouette, rasteriseSkeleton } from './thumbnail'
+import { rasteriseSilhouette, rasteriseSkeleton, strokeWidths } from './thumbnail'
 
 /** Half the sweep, in degrees: the neuron rocks from −45° to +45° and back. */
 const SWEEP_DEGREES = 45
@@ -89,9 +90,6 @@ export interface DecimatableSkeleton {
   parents: Int32Array
   radii?: Float32Array
 }
-
-/** How far the ancestor walk may climb before deciding the tree is malformed. */
-const MAX_ANCESTOR_STEPS = 64
 
 /** The angles drawn, in radians, from −sweep to +sweep inclusive. */
 export function frameAngles(frames = ROTATION_FRAMES, sweepDegrees = SWEEP_DEGREES): number[] {
@@ -257,18 +255,16 @@ export function sweptBounds(
  * to avoid exactly that. The cost still falls with the count, which is what the cap is for: 5.5×
  * fewer nodes on that skeleton, so ~13 ms a frame against the 74 ms measured on the full one.
  *
- * Radii are subset alongside the nodes when the caller has them. Nothing in the thumbnail path
- * reads them — neither rasteriser takes them — but a `SkeletonGeometry` carries them, and handing
- * back one whose `radii` is still the *original* length is a value that lies about itself. The
- * index map is already built here, so subsetting is four lines; deriving it at a call site would
- * not be.
+ * Radii are subset alongside the nodes when the caller has them, because `strokeWidths` sizes
+ * each stroke by them — and a `radii` still the *original* length would pair each kept node with some
+ * other node's radius, a taper drawn in the wrong places with nothing to say so. The index map is
+ * already built here, so subsetting is four lines; deriving it at a call site would not be.
  *
  * Reparenting is where the ordering trap is. A dropped node's children must attach to the nearest
  * *kept* ancestor, which is a walk up the parent chain — and `parents[i] < i` does not hold on
  * CATMAID (see this file's header), so the walk cannot be a single forward pass and cannot assume
- * it terminates. `MAX_ANCESTOR_STEPS` is what stops a malformed skeleton from hanging the tab; a
- * node whose ancestry cannot be resolved becomes a root, which draws as a gap rather than as a
- * spurious edge across the arbor.
+ * it terminates. `resolveUp` is that walk, exact and loop-safe; only a node on a genuine cycle
+ * becomes a root.
  */
 export function decimateSkeleton<T extends DecimatableSkeleton>(
   skeleton: T,
@@ -284,33 +280,51 @@ export function decimateSkeleton<T extends DecimatableSkeleton>(
     const parent = parents[i]!
     if (parent >= 0 && parent < count && parent !== i) children[parent] = children[parent]! + 1
   }
+  // A root, a leaf or a branch point — the nodes that say where the arbor goes. Decided once,
+  // since the count, the run positions and the keep pass all ask it of every node.
+  const structural = new Uint8Array(count)
+  let removable = 0
+  for (let i = 0; i < count; i++) {
+    const parent = parents[i]!
+    if (parent < 0 || parent >= count || children[i]! !== 1) structural[i] = 1
+    else removable++
+  }
 
   /*
    * Thin the *removable* nodes only. Branch points, leaves and roots are kept whatever happens,
    * so the thinning has to reach its target out of what is left — a stride computed against the
    * whole count overshoots on a bushy arbor and undershoots on a stringy one.
    *
-   * Selected by an exact running quota rather than `i % stride`, because a stride is
-   * `ceil(removable / budget)` and the rounding puts the result *over* the cap: measured on a
-   * 16,840-node arbor at a 3,000 cap it returned 3,063. A cap that is nearly honoured is a cap
-   * that has to be re-argued every time somebody reads it.
+   * **Selected along each run, never by index.** Each removable node's position in its unbranched
+   * run is counted from the structural node above it, and a node is kept where an exact quota of
+   * `budget / removable` ticks over. That caps the gap along any run at one stride, and it caps
+   * the total at the budget, since a run of length L keeps `floor(L · budget / removable)`.
+   *
+   * It was a running quota over the *index*, which is evenly spread in the array and not along a
+   * neurite: a breadth-first node order puts a run's consecutive nodes one frontier apart, and
+   * where the frontier width lines up with the stride the same run is skipped over and over.
+   * Measured on minnie65 864691136108938168's service skeleton, a stride of 3.0 dropped runs of
+   * more than 64 nodes on end, and the preview drew the axon in pieces.
    */
-  const removable = countRemovable(count, parents, children)
   const keepable = count - removable
   const budget = Math.max(0, maxNodes - keepable)
 
+  const runPosition = resolveUp(
+    parents,
+    count,
+    (i) => (structural[i] ? 0 : undefined),
+    (above) => above + 1,
+    0,
+  )
   const keep = new Uint8Array(count)
-  let seen = 0
-  let taken = 0
   for (let i = 0; i < count; i++) {
-    if (isStructural(i, parents, children, count)) {
+    if (structural[i]) {
       keep[i] = 1
       continue
     }
-    seen++
-    if (removable > 0 && Math.floor((seen * budget) / removable) > taken) {
+    const at = runPosition[i]!
+    if (Math.floor((at * budget) / removable) > Math.floor(((at - 1) * budget) / removable)) {
       keep[i] = 1
-      taken++
     }
   }
 
@@ -318,6 +332,16 @@ export function decimateSkeleton<T extends DecimatableSkeleton>(
   let next = 0
   for (let i = 0; i < count; i++) if (keep[i]) index[i] = next++
 
+  // The nearest kept node at or above each node, as its new index; a child's parent is its
+  // parent's entry. A dropped node thereby hands its children to its own nearest kept ancestor.
+  const keptAtOrAbove = resolveUp(
+    parents,
+    count,
+    // A dropped node is never structural, so its parent is always in range and the walk goes on.
+    (i) => (keep[i] ? index[i]! : undefined),
+    (above) => above,
+    -1,
+  )
   const outPositions = new Float32Array(next * 3)
   const outParents = new Int32Array(next)
   const outRadii = radii ? new Float32Array(next) : undefined
@@ -328,7 +352,8 @@ export function decimateSkeleton<T extends DecimatableSkeleton>(
     outPositions[at * 3 + 1] = positions[i * 3 + 1]!
     outPositions[at * 3 + 2] = positions[i * 3 + 2]!
     if (outRadii && radii) outRadii[at] = radii[i] ?? 0
-    outParents[at] = keptAncestor(i, parents, keep, index, count)
+    const parent = parents[i]!
+    outParents[at] = parent < 0 || parent >= count ? -1 : keptAtOrAbove[parent]!
   }
   // `radii` carried only when there was one. A zero-length array beside 3,000 positions lies
   // about itself exactly as much as an over-long one — which is the failure this subsets to avoid.
@@ -337,42 +362,64 @@ export function decimateSkeleton<T extends DecimatableSkeleton>(
     : { positions: outPositions, parents: outParents }
 }
 
-/** A root, a leaf or a branch point — the nodes that say where the arbor goes. */
-function isStructural(
-  i: number,
-  parents: Int32Array,
-  children: Int32Array,
-  count: number,
-): boolean {
-  const parent = parents[i]!
-  return parent < 0 || parent >= count || children[i]! !== 1
-}
-
-function countRemovable(count: number, parents: Int32Array, children: Int32Array): number {
-  let n = 0
-  for (let i = 0; i < count; i++) if (!isStructural(i, parents, children, count)) n++
-  return n
-}
-
 /**
- * The nearest kept ancestor's new index, or −1.
+ * A value each node takes from its parent chain, resolved for every node in O(n).
  *
- * Bounded rather than trusting the tree, and order-independent — see the header.
+ * `base(i)` answers for a node whose value does not depend on its parent; any other node's value
+ * is `step` of its parent's. Memoised walk rather than one forward pass, because `parents[i] < i`
+ * does not hold on every route (see this file's header), and **unbounded, with an exact cycle
+ * check**: a loop is seeded with `onCycle` in place of a base. It was a walk capped at 64 steps,
+ * and the cap was the bug — a long run of dropped nodes is legitimate, and cutting it off turned a
+ * kept node into a root, which draws as a break in the neurite.
  */
-function keptAncestor(
-  from: number,
+function resolveUp(
   parents: Int32Array,
-  keep: Uint8Array,
-  index: Int32Array,
   count: number,
-): number {
-  let at = parents[from]!
-  for (let step = 0; step < MAX_ANCESTOR_STEPS; step++) {
-    if (at < 0 || at >= count) return -1
-    if (keep[at]) return index[at]!
-    at = parents[at]!
+  base: (i: number) => number | undefined,
+  step: (above: number) => number,
+  onCycle: number,
+): Int32Array {
+  const value = new Int32Array(count)
+  // 0 unresolved, 1 on the walk in progress, 2 resolved.
+  const state = new Uint8Array(count)
+  const walk: number[] = []
+  for (let start = 0; start < count; start++) {
+    let at = start
+    let above: number
+    for (;;) {
+      if (state[at] === 2) {
+        above = value[at]!
+        break
+      }
+      /*
+       * A loop has no base to count from, so `onCycle` stands in for one and the walk steps from
+       * it as usual — positions along a looped run still count up rather than all being equal,
+       * which would leave the quota nothing to choose between.
+       */
+      if (state[at] === 1) {
+        above = onCycle
+        break
+      }
+      const own = base(at)
+      if (own !== undefined) {
+        value[at] = own
+        state[at] = 2
+        above = own
+        break
+      }
+      state[at] = 1
+      walk.push(at)
+      // `base` answers for a node with no valid parent, so this stays in range.
+      at = parents[at]!
+    }
+    while (walk.length > 0) {
+      const node = walk.pop()!
+      above = step(above)
+      value[node] = above
+      state[node] = 2
+    }
   }
-  return -1
+  return value
 }
 
 /** What the component flips through, plus the means to build one frame at a time. */
@@ -395,7 +442,7 @@ export interface Rotation {
 export function createRotation(
   geometry:
     | { kind: 'mesh'; positions: Float32Array; indices: Uint32Array }
-    | { kind: 'skeleton'; positions: Float32Array; parents: Int32Array },
+    | { kind: 'skeleton'; positions: Float32Array; parents: Int32Array; radii?: Float32Array },
   size: number,
   frames = ROTATION_FRAMES,
 ): Rotation {
@@ -415,6 +462,9 @@ export function createRotation(
 
   // One buffer for all 17 frames — see `rotateYInto`.
   const scratch = new Float32Array(source.positions.length)
+  // Once too: a stroke's width is a property of the tree, not of the angle it is drawn at.
+  const widths =
+    source.kind === 'skeleton' ? strokeWidths(source.parents, source.radii, size) : undefined
 
   return {
     frames: angles.length,
@@ -422,7 +472,7 @@ export function createRotation(
       const theta = angles[Math.min(Math.max(i, 0), angles.length - 1)] ?? 0
       const positions = rotateYInto(scratch, source.positions, theta, pivot)
       return source.kind === 'skeleton'
-        ? rasteriseSkeleton(positions, source.parents, size, box)
+        ? rasteriseSkeleton(positions, source.parents, size, { bounds: box, widths })
         : rasteriseSilhouette(positions, source.indices, size, box)
     },
   }

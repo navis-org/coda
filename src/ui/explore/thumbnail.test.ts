@@ -10,8 +10,9 @@
  * rasterising real hemibrain, MANC and male-CNS neurons and printing the mask as ASCII — an LC4
  * showed its lobula arbor, thin neurite and terminal tuft, and male-CNS body 10001 showed the
  * giant fibre's descending axon — and again for the skeleton path, on four BANC level-2
- * skeletons, which is where `STROKE_FRACTION` comes from. Both checks needed a token and a
- * network, so neither can live in the suite.
+ * skeletons, which is where `STROKE_FRACTION` comes from — and once more for the radius-scaled
+ * widths, on minnie65 and BANC level-2 skeletons rendered to PNG. All of it needed a token and a
+ * network, so none of it can live in the suite.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -25,6 +26,7 @@ import {
   hexToRgb,
   rasteriseSilhouette,
   rasteriseSkeleton,
+  strokeWidths,
   coverageInto,
   inkInto,
 } from './thumbnail'
@@ -246,6 +248,63 @@ describe('rasteriseSkeleton', () => {
     // One point is a tree with no edges in it, and no span to scale by either.
     const single = new Float32Array([5, 5, 5])
     expect(coverageFraction(rasteriseSkeleton(single, new Int32Array([-1]), 16))).toBe(0)
+  })
+
+  describe('stroked by radius', () => {
+    // The tile raster, so the widths are the ones a real thumbnail gets rather than all rounding
+    // to one pixel. The arms' mid-points in mask coordinates.
+    const SIZE = 304
+    const WEST = 85
+    const NORTH = 85
+    const CENTRE = 152
+
+    /** Painted pixels across an arm at its mid-point: its stroke width. */
+    function across(silhouette: Silhouette, arm: 'west' | 'north'): number {
+      let painted = 0
+      for (let t = 0; t < SIZE; t++) {
+        const value = arm === 'west' ? at(silhouette, WEST, t) : at(silhouette, t, NORTH)
+        if (value > 0) painted++
+      }
+      return painted
+    }
+
+    it('draws a thick neurite thicker than a thin one', () => {
+      // North and south at 100 nm, west and east at 10: the vertical bar is the trunk.
+      const radii = new Float32Array([100, 10, 10, 100, 100])
+      const result = rasteriseSkeleton(CROSS_POSITIONS, CROSS_PARENTS, SIZE, {
+        widths: strokeWidths(CROSS_PARENTS, radii, SIZE),
+      })
+      expect(across(result, 'north')).toBeGreaterThan(across(result, 'west'))
+      // Both are still drawn — the thin one is floored, not dropped.
+      expect(at(result, WEST, CENTRE)).toBeGreaterThan(0)
+    })
+
+    it('draws a neuron of one calibre exactly as the uniform stroke does', () => {
+      /*
+       * The p95 lands on `STROKE_FRACTION`, so where every radius is the same the taper is flat
+       * and the picture is the one a skeleton without radii gets. That is what keeps a list
+       * mixing the two from reading as two renderers.
+       */
+      const uniform = rasteriseSkeleton(CROSS_POSITIONS, CROSS_PARENTS, SIZE)
+      const constant = new Float32Array(5).fill(50)
+      const result = rasteriseSkeleton(CROSS_POSITIONS, CROSS_PARENTS, SIZE, {
+        widths: strokeWidths(CROSS_PARENTS, constant, SIZE),
+      })
+      expect(result.coverage).toEqual(uniform.coverage)
+    })
+
+    it('keeps the uniform stroke where only a few nodes carry a radius', () => {
+      /*
+       * CATMAID's shape: a radius on one node — here the west tip — and none elsewhere. Scaled
+       * against it every other segment would land on the floor, a neuron of hairlines.
+       */
+      const sparse = new Float32Array([0, 100, 0, 0, 0])
+      const uniform = rasteriseSkeleton(CROSS_POSITIONS, CROSS_PARENTS, SIZE)
+      const result = rasteriseSkeleton(CROSS_POSITIONS, CROSS_PARENTS, SIZE, {
+        widths: strokeWidths(CROSS_PARENTS, sparse, SIZE),
+      })
+      expect(result.coverage).toEqual(uniform.coverage)
+    })
   })
 
   it('skips a parent index that points outside the point list', () => {

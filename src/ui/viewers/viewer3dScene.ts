@@ -481,30 +481,38 @@ export const MAX_LINE_WIDTH = 24
  */
 const REFERENCE_RADIUS = new WeakMap<SkeletonSegments, number>()
 
+/**
+ * The p95 of the **positive** radii, or 0 where there are none — what a skeleton's widths are
+ * scaled against.
+ *
+ * One function for the two things that draw by radius, this viewer's `radius` mode and the Explore
+ * thumbnail (`strokeWidths`), so one neuron cannot get two references. Positive only, because a
+ * radius of 0 is "unmeasured" on every source (CATMAID's −1 is clamped to it, and a level-2 chunk
+ * too small for `max_dt_nm` has none).
+ *
+ * Nearest-rank, `ceil(p * n) - 1`, rather than the interpolating `floor(p * (n - 1))`. They agree
+ * on anything the size of a real skeleton and disagree badly on a small one: over two endpoints
+ * the second form picks the *smaller*, i.e. a p95 that is not even in the top half. Test fixtures
+ * are exactly where a small one shows up.
+ */
+export function radiusReference(radii: ArrayLike<number>): number {
+  let count = 0
+  for (let i = 0; i < radii.length; i++) if (radii[i]! > 0) count++
+  if (count === 0) return 0
+  const positive = new Float32Array(count)
+  let at = 0
+  for (let i = 0; i < radii.length; i++) if (radii[i]! > 0) positive[at++] = radii[i]!
+  // A `Float32Array` sorts numerically by default, where a plain `Array` would sort these
+  // as strings and put 100 before 9.
+  positive.sort()
+  return positive[Math.max(0, Math.ceil(0.95 * count) - 1)]!
+}
+
 export function referenceRadius(built: SkeletonSegments): number {
   const hit = REFERENCE_RADIUS.get(built)
   if (hit !== undefined) return hit
 
-  let count = 0
-  for (let i = 0; i < built.segmentRadii.length; i++) if (built.segmentRadii[i]! > 0) count++
-
-  let reference = 0
-  if (count > 0) {
-    const positive = new Float32Array(count)
-    let at = 0
-    for (let i = 0; i < built.segmentRadii.length; i++) {
-      const r = built.segmentRadii[i]!
-      if (r > 0) positive[at++] = r
-    }
-    // A `Float32Array` sorts numerically by default, where a plain `Array` would sort these
-    // as strings and put 100 before 9.
-    positive.sort()
-    // Nearest-rank, `ceil(p * n) - 1`, rather than the interpolating `floor(p * (n - 1))`.
-    // They agree on anything the size of a real skeleton and disagree badly on a small one:
-    // over two endpoints the second form picks the *smaller*, i.e. a p95 that is not even in
-    // the top half. Test fixtures are exactly where a small one shows up.
-    reference = positive[Math.max(0, Math.ceil(0.95 * count) - 1)]!
-  }
+  const reference = radiusReference(built.segmentRadii)
 
   REFERENCE_RADIUS.set(built, reference)
   return reference

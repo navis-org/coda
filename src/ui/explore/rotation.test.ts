@@ -275,6 +275,40 @@ describe('decimateSkeleton', () => {
     expect(roots).toBe(1)
   })
 
+  it('thins along each neurite, so a breadth-first node order cannot break one', () => {
+    /*
+     * minnie65 864691136108938168's failure, in miniature. A skeleton in breadth-first order puts
+     * one run's consecutive nodes a whole frontier apart in the array — three here, three chains
+     * growing off a root — and a quota spread over the *index* at a stride of ~3 lines up with
+     * that spacing, so two of the chains lose long stretches outright. Past the old 64-step walk
+     * a kept node became a root, and the preview drew the neurite in pieces.
+     */
+    const width = 3
+    const length = 2000
+    const n = 1 + width * length
+    const positions = new Float32Array(n * 3)
+    const parents = new Int32Array(n).fill(-1)
+    for (let level = 1; level <= length; level++) {
+      for (let chain = 0; chain < width; chain++) {
+        const i = 1 + (level - 1) * width + chain
+        positions[i * 3] = chain * 100
+        positions[i * 3 + 1] = level
+        parents[i] = level === 1 ? 0 : i - width
+      }
+    }
+    const out = decimateSkeleton({ positions, parents }, 2000)
+    expect(out.parents.length).toBeLessThanOrEqual(2000)
+    expect(Array.from(out.parents).filter((p) => p === -1)).toHaveLength(1)
+    // No edge in the thinned tree spans more than one stride of the run it came from.
+    let widest = 0
+    for (let i = 0; i < out.parents.length; i++) {
+      const p = out.parents[i]!
+      if (p < 0) continue
+      widest = Math.max(widest, Math.abs(out.positions[i * 3 + 1]! - out.positions[p * 3 + 1]!))
+    }
+    expect(widest).toBeLessThanOrEqual(Math.ceil((n - 4) / (2000 - 4)))
+  })
+
   it('terminates on a cycle rather than hanging', () => {
     const n = 4000
     const positions = new Float32Array(n * 3)

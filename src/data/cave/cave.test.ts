@@ -41,7 +41,7 @@ import { caveScene } from './scene'
 import { readL2Skeletons } from './l2'
 import { l2SourceFor, peekDatastacks } from './datastack'
 import { probeFlat } from './flat'
-import { skeletonServiceFor, skeletonServiceUrl } from './skeletonService'
+import { serviceLooksEmpty, skeletonServiceFor, skeletonServiceUrl } from './skeletonService'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import {
   MESH_WARN_NEURONS,
@@ -349,6 +349,9 @@ function installFetch(
       const ids = (String(init?.body ?? '').match(/\[(.*)\]/)?.[1] ?? '')
         .split(',')
         .filter(Boolean)
+      // One id is answered with a bare boolean, as the real service does — a stub answering a
+      // map for it is how `existingSkeletons` came to read every single neuron as uncached.
+      if (ids.length === 1) return answer(String(options.service === 'full'))
       return answer(
         JSON.stringify(Object.fromEntries(ids.map((id) => [id, options.service === 'full']))),
       )
@@ -2084,6 +2087,22 @@ describe('building a skeleton from the L2 graph', () => {
   const one = async () =>
     (await readL2Skeletons(SOURCE, ['1'], { deployment: DEFAULT_CAVE_SERVER }))[0]
 
+  it('names the two attributes it wants in the query string, where the server reads them', async () => {
+    /*
+     * `attribute_names` in the JSON body is ignored without complaint and the server answers all
+     * eight attributes — the same two numbers in five times the bytes, measured at 8–19 s against
+     * 3–6 s on minnie65. Nothing in the *answer* could catch it, so the request is what is pinned.
+     */
+    const captured = installFetch({ '/lvl2_graph': CHAIN, '/attributes': COORDS })
+    await one()
+    const attributes = captured.filter((c) => c.url.includes('/attributes'))
+    expect(attributes).toHaveLength(1)
+    expect(new URL(attributes[0]!.url).searchParams.get('attribute_names')).toBe(
+      'rep_coord_nm,max_dt_nm',
+    )
+    expect(attributes[0]!.body).not.toHaveProperty('attribute_names')
+  })
+
   it('turns the chunk graph into a tree with one root', async () => {
     installFetch({ '/lvl2_graph': CHAIN, '/attributes': COORDS })
     const sk = await one()
@@ -2321,6 +2340,68 @@ describe('where a CAVE skeleton comes from', () => {
     })
     expect(answered.provenance?.id).toBe('l2')
     expect(captured.some((c) => c.url.includes('/lvl2_graph'))).toBe(true)
+  })
+
+  it('draws a thumbnail from the service where it holds the neuron, and never reads the chunk graph', async () => {
+    /*
+     * minnie65's case, and the reason the route exists: there the chunk graph and its attributes
+     * are 9–13 s a neuron where the service's cached skeleton is ~1.7 s including `exists`.
+     */
+    const captured = installFetch(
+      {
+        '/l2cache/api/v1/table_mapping': L2_MAPPING,
+        '/lvl2_graph': CHAIN,
+        '/attributes': COORDS,
+      },
+      { service: 'full' },
+    )
+    const source = new CaveSource()
+    const tile = await source.fetchCoarseGeometry!({
+      datasetId: DATASET,
+      neuronId: '720575940628857210',
+    })
+    expect(tile?.kind).toBe('skeleton')
+    expect(captured.filter((c) => c.url.includes('/lvl2_graph'))).toEqual([])
+
+    // The hover preview asks again for `fine`; the service has no finer level, and it already
+    // said it holds this neuron, so the second ask is a download without a second `exists`.
+    await source.fetchCoarseGeometry!({
+      datasetId: DATASET,
+      neuronId: '720575940628857210',
+      detail: 'fine',
+    })
+    expect(captured.filter((c) => c.url.endsWith('/precomputed/skeleton/exists'))).toHaveLength(
+      1,
+    )
+  })
+
+  it('stops asking an empty service for thumbnails, without teaching the Skeletons node anything', async () => {
+    /*
+     * BANC's case: a declared service with nothing cached. One `exists` for the first row and
+     * none after, rather than half a second on every row. And the verdict is the thumbnail's own —
+     * one uncached neuron is no evidence about a cache, so it must not set the flag that sends
+     * every later Skeletons run on the datastack straight to the chunk graph.
+     */
+    const captured = installFetch(
+      {
+        '/l2cache/api/v1/table_mapping': L2_MAPPING,
+        '/lvl2_graph': CHAIN,
+        '/attributes': COORDS,
+      },
+      { service: 'empty' },
+    )
+    const source = new CaveSource()
+    const first = await source.fetchCoarseGeometry!({
+      datasetId: DATASET,
+      neuronId: '720575940628857210',
+    })
+    await source.fetchCoarseGeometry!({ datasetId: DATASET, neuronId: '720575940618002747' })
+    expect(first?.kind).toBe('skeleton')
+    expect(captured.filter((c) => c.url.endsWith('/precomputed/skeleton/exists'))).toHaveLength(
+      1,
+    )
+    expect(captured.filter((c) => c.url.includes('/lvl2_graph'))).toHaveLength(2)
+    expect(serviceLooksEmpty(DEFAULT_CAVE_SERVER, DATASTACK)).toBe(false)
   })
 
   it('refuses a pinned route the dataset does not have rather than substituting one', async () => {

@@ -736,9 +736,9 @@ export type CoarseGeometry =
     }
   /**
    * `SkeletonGeometry` exactly, so the L2 reader's and CATMAID's decoder both hand their output
-   * straight over — see `CaveSource.fetchCoarseGeometry`. `id` and `radii` ride along unused (on
-   * a 16,840-node FAFB skeleton the radii are ~67 kB), which is still cheaper than a second shape
-   * for the same thing. The mesh arm above is *not* `MeshGeometry` for the mirror-image reason:
+   * straight over — see `CaveSource.fetchCoarseGeometry`. `radii` is what the thumbnail strokes
+   * its widths by; `id` rides along unused, which is still cheaper than a second shape for the
+   * same thing. The mesh arm above is *not* `MeshGeometry` for the mirror-image reason:
    * `MeshResult` keys on `neuronId` and `MeshGeometry` on `id`, so reusing either would mean
    * renaming a field at the seam rather than passing a value through it.
    */

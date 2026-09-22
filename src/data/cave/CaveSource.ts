@@ -487,6 +487,12 @@ export class CaveSource implements DataSource {
   private readonly listing: DatasetListing
   /** Why each specced datastack is absent from the last listing. */
   private failures = new Map<string, string>()
+  /**
+   * What a datastack's skeleton service has said about thumbnails: the neurons it confirmed it
+   * holds once it has answered one, `false` once it missed before ever answering, absent while
+   * unknown. See `serviceThumbnail`.
+   */
+  private readonly thumbnailService = new Map<string, Set<NeuronId> | false>()
   private readonly states = new Map<string, DatastackState>()
 
   constructor(deployment?: string) {
@@ -2036,6 +2042,14 @@ export class CaveSource implements DataSource {
    * transport; `l2SourceFor` is the same gate, so a datastack with no cache still answers
    * `undefined` and draws the placeholder.
    *
+   * **Where the skeleton service already holds the neuron, it answers instead, and on minnie65
+   * that is the difference between a preview and a wait.** Measured there on proofread neurons,
+   * the level-2 route is a 6–8 s chunk graph and a 3–6 s attribute read; the service is a 0.6 s
+   * `exists` and a ~1.1 s download of a skeleton that draws the same thumbnail, radii included —
+   * it is generated from this same cache. Asked only after `exists` says yes, because a GET for an
+   * uncached id is a generation (see `readServiceSkeletons`). See `serviceThumbnail` for the
+   * gate that stops a datastack with an empty service paying the `exists` on every row.
+   *
    * **It costs one neuron's worth of batching, knowingly.** `readL2Skeletons` pools chunk ids
    * across a whole request and reads their coordinates in a handful of calls, which is what makes
    * a hundred skeletons a hundred graph reads plus about three attribute reads rather than two
@@ -2059,10 +2073,63 @@ export class CaveSource implements DataSource {
       return mesh && { kind: 'mesh', ...mesh }
     }
 
+    const cached = await this.serviceThumbnail(spec.datastack, req.neuronId, options)
+    if (cached) return { kind: 'skeleton', ...cached }
+
     const l2 = await l2SourceFor(spec.datastack, options)
     if (!l2) return undefined
     const [skeleton] = await readL2Skeletons(l2, [req.neuronId], options)
     return skeleton ? { kind: 'skeleton', ...skeleton } : undefined
+  }
+
+  /**
+   * One neuron from the skeleton service, if it already holds it — or `undefined`, and the caller
+   * falls through to the level-2 route.
+   *
+   * **The gate is this method's own and not `serviceLooksEmpty`'s**, which it reads but never
+   * writes: that flag is learnt from a whole set coming back empty, and one uncached neuron is no
+   * evidence about a cache. What a thumbnail learns instead is per datastack and one-sided — a
+   * service that has **never** answered a thumbnail and misses one is not asked again this
+   * session, which is BANC's case (declared, empty) costing one `exists` rather than one per row;
+   * a service that has answered once is asked for every row after, which is minnie65's, where a
+   * neuron the cache lacks is the exception.
+   *
+   * A neuron `exists` confirmed is remembered, so the hover preview's `detail: 'fine'` request —
+   * which this route answers identically, a generated skeleton having no level to trade — costs
+   * the download and not a second `exists`. Any failure is `undefined`: the level-2 route is
+   * always there behind it.
+   */
+  private async serviceThumbnail(
+    datastack: string,
+    neuronId: NeuronId,
+    options: CaveRequestOptions,
+  ): Promise<SkeletonGeometry | undefined> {
+    const known = this.thumbnailService.get(datastack)
+    if (known === false) return undefined
+    if (serviceLooksEmpty(this.deployment, datastack)) return undefined
+    try {
+      const service = await skeletonServiceFor(datastack, options)
+      if (!service) return undefined
+      if (!known?.has(neuronId)) {
+        const held = await existingSkeletons(service, [neuronId], options, { learn: false })
+        if (!held.has(neuronId)) {
+          if (!known) this.thumbnailService.set(datastack, false)
+          return undefined
+        }
+      }
+      let found: SkeletonGeometry | undefined
+      await readServiceSkeletons(service, [neuronId], options, (_, skeleton) => {
+        found = skeleton
+      })
+      if (found) {
+        // Re-read rather than `known`: other rows' calls may have filled the set across the awaits.
+        const confirmed = this.thumbnailService.get(datastack) || new Set<NeuronId>()
+        this.thumbnailService.set(datastack, confirmed.add(neuronId))
+      }
+      return found
+    } catch {
+      return undefined
+    }
   }
 
   /**

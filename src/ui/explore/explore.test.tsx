@@ -1857,7 +1857,7 @@ describe('thumbnail hover preview', () => {
     // to a dataset cheap.
     expect(
       await cacheGet<{ coverage: Uint8Array }>(`thumb:mock:${DATASET}:${BODY}:304`, {
-        fingerprint: 'coverage-8bit-1',
+        fingerprint: 'coverage-8bit-2',
       }),
     ).toBeDefined()
 
@@ -1868,7 +1868,7 @@ describe('thumbnail hover preview', () => {
      */
     expect(
       await cacheGet<{ coverage: Uint8Array }>(`thumb:mock:${DATASET}:${BODY}:640`, {
-        fingerprint: 'coverage-8bit-1',
+        fingerprint: 'coverage-8bit-2',
       }),
     ).toBeUndefined()
     // And nothing at the preview raster was written under any spelling. The preview's mask has
@@ -2136,7 +2136,7 @@ describe('thumbnail caching', () => {
     await waitFor(() => expect(document.querySelector('canvas.explore-thumb')).not.toBeNull())
 
     const stored = await cacheGet<{ coverage: Uint8Array }>(KEY, {
-      fingerprint: 'coverage-8bit-1',
+      fingerprint: 'coverage-8bit-2',
     })
     expect(stored?.coverage.length).toBeGreaterThan(0)
   })

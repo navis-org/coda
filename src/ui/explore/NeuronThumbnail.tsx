@@ -56,6 +56,7 @@ import {
   hexToRgb,
   rasteriseSilhouette,
   rasteriseSkeleton,
+  strokeWidths,
   coverageInto,
   inkInto,
 } from './thumbnail'
@@ -256,8 +257,8 @@ const MAX_CONCURRENT = 4
  *    not compute.
  *
  * It buys no detail, and nothing here should pretend otherwise: the geometry is coarse by
- * construction and `STROKE_FRACTION` is a fraction, so a skeleton's stroke stays 1.5 CSS pixels
- * wide. Antialiasing is the entire product.
+ * construction and `STROKE_FRACTION` is a fraction, so a skeleton's p95 stroke stays 1.5 CSS
+ * pixels wide. Antialiasing is the entire product.
  */
 const RASTER_SCALE = 4
 let active = 0
@@ -355,8 +356,12 @@ interface StoredMask {
  * by an earlier encoder — including, on the day this was introduced, every refusal the cache
  * had been holding on to. Bump it if the stored bytes ever mean something different; the raster
  * size does not need a bump, since it is already part of the key.
+ *
+ * `-2` is skeletons drawn by radius (`thumbnail.ts`' `strokeWidths`). The stored mask does not
+ * say which rasteriser made it, so the bump retires the mesh masks too — one refetch of a ~10 kB
+ * coarse level each, against a skeleton list that would otherwise keep its uniform strokes forever.
  */
-const MASK_FORMAT = 'coverage-8bit-1'
+const MASK_FORMAT = 'coverage-8bit-2'
 
 /**
  * Rasterise one body at `pixels`, or `null` for "nothing worth drawing".
@@ -374,7 +379,9 @@ function silhouetteOf(geometry: CoarseGeometry, pixels: number): Silhouette | nu
    */
   const silhouette =
     geometry.kind === 'skeleton'
-      ? rasteriseSkeleton(geometry.positions, geometry.parents, pixels)
+      ? rasteriseSkeleton(geometry.positions, geometry.parents, pixels, {
+          widths: strokeWidths(geometry.parents, geometry.radii, pixels),
+        })
       : rasteriseSilhouette(geometry.positions, geometry.indices, pixels)
   /*
    * Only a mask with **nothing** painted is refused, and that is the whole of what a floor here
