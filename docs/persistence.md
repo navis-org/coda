@@ -629,7 +629,7 @@ eviction wrong costs the newer half of the feature rather than the work.
 ## The workflow library
 
 The recipe shelf follows every rule below and is recorded in `recipes.md`; `store/shelf.ts` holds
-what the two share.
+what the two share, and `ShelfList`/`ShelfRow` (`ui/panels/ShelfRow.tsx`) how both are drawn.
 
 `Save ▸ Save in this browser` keeps a graph on the browser's own shelf; `store/library.ts` owns
 it, the Open and Save menus show it, and the start page grows a _Your workflows_ rail when

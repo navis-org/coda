@@ -90,6 +90,26 @@ describe('workflow library', () => {
     expect(within(menu('Open')).getByText(/Open a .coda.json file/)).toBeTruthy()
   })
 
+  it('filters a long shelf, and keeps the file picker outside the part that scrolls', async () => {
+    // Saved through the library directly: six saves through the menu is a slow way to say "long".
+    for (const name of ['LC4 sweep', 'LC6 sweep', 'Paths to DNa02', 'Types', 'Mesh', 'Scene'])
+      await saveWorkflow({ ...demoWorkflow('partners'), meta: { name } })
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Open ▾' }))
+    const filter = await screen.findByLabelText('Filter workflows')
+    // Not focused: a menu is opened to click a row, and on a phone a focused field is a keyboard.
+    expect(document.activeElement).not.toBe(filter)
+
+    // The one thing that scrolls is the shelf; the picker is a sibling of it, not inside it.
+    const panel = document.querySelector<HTMLElement>('.dropdown__panel')!
+    const picker = within(panel).getByText(/Open a .coda.json file/)
+    expect(panel.querySelector('.shelf-list')!.contains(picker)).toBe(false)
+
+    fireEvent.change(filter, { target: { value: 'sweep' } })
+    expect(within(panel).getByText('LC4 sweep')).toBeTruthy()
+    expect(within(panel).queryByText('Paths to DNa02')).toBeNull()
+  })
+
   it('says the shelf is empty rather than showing an empty menu', async () => {
     render(<App />)
     // The read is what `menu()` triggers, so wait for it *outside* `waitFor` — a `fireEvent`

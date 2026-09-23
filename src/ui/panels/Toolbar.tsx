@@ -22,7 +22,7 @@ import { pickGraphFile } from '../../store/persistence'
 import { graphName } from '../../core/graph'
 import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
 import { formatAgo, plural } from '../format'
-import { ShelfRow } from './ShelfRow'
+import { ShelfList, ShelfRow } from './ShelfRow'
 import { lockedTitle } from '../lockCopy'
 import { appElement, toggleFullscreen, useIsFullscreen } from '../fullscreen'
 import type { NotifyState } from '../notify'
@@ -289,7 +289,7 @@ export function Toolbar() {
        * file, and the browser's own shelf. Reading the shelf is deferred to the moment a menu
        * opens — someone who never uses it never touches IndexedDB.
        */}
-      <Dropdown label="Open" tour="open" onOpen={() => void refreshLibrary()}>
+      <Dropdown label="Open" tour="open" column onOpen={() => void refreshLibrary()}>
         {(close) => <OpenMenu close={close} />}
       </Dropdown>
       <Dropdown label="Save" tour="save" onOpen={() => void refreshLibrary()}>
@@ -1122,10 +1122,9 @@ function CustomDatasetItem({
  * The Open menu: what is on the browser shelf, then the file picker.
  *
  * The shelf comes first because it is the frequent case once anything is on it, and the file
- * entry stays last with its own separator. The whole panel scrolls, so a long enough shelf does
- * push it below the fold — Manage Recipes, the other `ShelfRow` list, scrolls its list alone.
- * Manage controls live on the rows rather than behind a separate dialog: the list is right here,
- * and a panel whose only job is to delete things is a panel most people will never find.
+ * entry stays last with its own separator, on screen: the shelf is a `ShelfList` that scrolls
+ * alone. Manage controls live on the rows rather than behind a separate dialog: the list is right
+ * here, and a panel whose only job is to delete things is a panel most people will never find.
  */
 function OpenMenu({ close }: { close: () => void }) {
   const library = useGraphStore((s) => s.library)
@@ -1146,19 +1145,20 @@ function OpenMenu({ close }: { close: () => void }) {
         </div>
       )}
 
-      {library.map((entry) => (
-        <ShelfRow
-          key={entry.id}
-          name={entry.name}
-          detail={`${formatAgo(entry.savedAt)} · ${plural(entry.nodeTypes.length, 'node')}`}
-          onOpen={() => {
-            void openFromLibrary(entry.id)
-            close()
-          }}
-          onRename={(name) => void renameInLibrary(entry.id, name)}
-          onDelete={() => void deleteFromLibrary(entry.id)}
-        />
-      ))}
+      <ShelfList entries={library} noun="workflow" autoFocus={false}>
+        {(entry) => (
+          <ShelfRow
+            name={entry.name}
+            detail={`${formatAgo(entry.savedAt)} · ${plural(entry.nodeTypes.length, 'node')}`}
+            onOpen={() => {
+              void openFromLibrary(entry.id)
+              close()
+            }}
+            onRename={(name) => void renameInLibrary(entry.id, name)}
+            onDelete={() => void deleteFromLibrary(entry.id)}
+          />
+        )}
+      </ShelfList>
 
       <div className="dropdown__group">
         <button

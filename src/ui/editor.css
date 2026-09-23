@@ -5099,6 +5099,31 @@ a.dropdown__item {
   overflow: visible;
 }
 
+/*
+ * The panel as a column, so its `ShelfList` shrinks and scrolls first. The panel's own scroll is
+ * kept as the last resort — hidden, a screen too short for the fixed rows would clip the picker.
+ */
+.dropdown__panel--column {
+  display: flex;
+  flex-direction: column;
+}
+
+/* `ShelfList`: `min-height: 0` is what lets it shrink below its content in a capped column. */
+.shelf-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.shelf-list__filter {
+  margin: 0 0 6px;
+}
+.shelf-list__none {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .dropdown__sub {
   position: relative;
 }
@@ -12948,15 +12973,7 @@ details[open] > summary.tile__label {
   display: flex;
   flex-direction: column;
 }
-.recipe-dialog__filter {
-  margin-bottom: 8px;
-}
-/* `min-height: 0` is what lets the list shrink below its content inside the capped panel. */
-.recipe-dialog__list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
+
 .recipe-save__slots {
   margin: 0 0 10px;
   padding-left: 18px;

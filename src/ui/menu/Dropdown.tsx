@@ -16,6 +16,7 @@ export function Dropdown({
   onOpen,
   tour,
   flyouts,
+  column,
   children,
 }: {
   label: string
@@ -36,6 +37,8 @@ export function Dropdown({
    * see what is in it until it is too late to style.
    */
   flyouts?: boolean
+  /** The panel is a flex column, so a `ShelfList` inside it scrolls before the panel does. */
+  column?: boolean
   children: (close: () => void) => React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -70,7 +73,9 @@ export function Dropdown({
       </button>
       {open && (
         <div
-          className={`dropdown__panel${flyouts ? ' dropdown__panel--flyouts' : ''}`}
+          className={`dropdown__panel${flyouts ? ' dropdown__panel--flyouts' : ''}${
+            column ? ' dropdown__panel--column' : ''
+          }`}
           /* Inline because it is a measurement, not a state: there is no class for "60px to the
              left of where you would have been". Absent whenever the panel already fits. */
           style={shift === 0 ? undefined : { left: shift }}
