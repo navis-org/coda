@@ -1122,9 +1122,10 @@ function CustomDatasetItem({
  * The Open menu: what is on the browser shelf, then the file picker.
  *
  * The shelf comes first because it is the frequent case once anything is on it, and the file
- * entry stays last with its own separator so it never moves as the list grows. Manage controls
- * live on the rows rather than behind a separate dialog: the list is right here, and a panel
- * whose only job is to delete things is a panel most people will never find.
+ * entry stays last with its own separator. The whole panel scrolls, so a long enough shelf does
+ * push it below the fold — Manage Recipes, the other `ShelfRow` list, scrolls its list alone.
+ * Manage controls live on the rows rather than behind a separate dialog: the list is right here,
+ * and a panel whose only job is to delete things is a panel most people will never find.
  */
 function OpenMenu({ close }: { close: () => void }) {
   const library = useGraphStore((s) => s.library)

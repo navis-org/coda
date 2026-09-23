@@ -212,6 +212,32 @@ describe('Manage Recipes', () => {
     expect(store().recipesOpen).toBe(false)
   })
 
+  it('offers a filter on a long shelf that narrows by name, and none on a short one', async () => {
+    await store().saveRecipe(['find', 'filter'], { name: 'Search' })
+    store().openRecipes(true)
+    const { unmount } = render(<RecipesDialog insertAt={() => ({ x: 0, y: 0 })} />)
+    await screen.findByText('Search')
+    expect(screen.queryByLabelText('Filter recipes')).toBeNull()
+    unmount()
+
+    for (const name of [
+      'FlyWire annotations',
+      'BANC annotations',
+      'Find LC',
+      'Paths',
+      'Sankey',
+    ])
+      await store().saveRecipe(['find', 'filter'], { name })
+    render(<RecipesDialog insertAt={() => ({ x: 0, y: 0 })} />)
+    const filter = await screen.findByLabelText('Filter recipes')
+    fireEvent.change(filter, { target: { value: '  ANNOT ' } })
+    expect(screen.getByText('FlyWire annotations')).toBeTruthy()
+    expect(screen.getByText('BANC annotations')).toBeTruthy()
+    expect(screen.queryByText('Search')).toBeNull()
+    fireEvent.change(filter, { target: { value: 'nothing like it' } })
+    expect(screen.getByText(/No recipe matches “nothing like it”/)).toBeTruthy()
+  })
+
   it('says so when the shelf is empty', async () => {
     store().openRecipes(true)
     render(<RecipesDialog insertAt={() => ({ x: 0, y: 0 })} />)

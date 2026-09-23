@@ -12939,6 +12939,24 @@ details[open] > summary.tile__label {
 .recipe-dialog__body {
   padding: 12px 14px 14px;
 }
+/* A long shelf holds its height, so the centred panel does not jump as the filter narrows it. */
+.recipe-dialog--long {
+  height: min(80vh, 640px);
+}
+/* Manage Recipes: `.sources__body` as a column, so only the list inside it scrolls. */
+.recipe-dialog__body--list {
+  display: flex;
+  flex-direction: column;
+}
+.recipe-dialog__filter {
+  margin-bottom: 8px;
+}
+/* `min-height: 0` is what lets the list shrink below its content inside the capped panel. */
+.recipe-dialog__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
 .recipe-save__slots {
   margin: 0 0 10px;
   padding-left: 18px;
