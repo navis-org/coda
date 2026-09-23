@@ -16,13 +16,13 @@ import { getNodeDef } from '../../core/registry'
 import { WIZARD_BLURB, WIZARD_LABEL } from '../../wizard/options'
 import type { StarterSpec } from '../../wizard/starters'
 import { starterFor } from '../../wizard/starters'
-import type { WorkflowSummary } from '../../store/library'
-import { findByName } from '../../store/library'
+import { findByName } from '../../store/shelf'
 import { useGraphStore, useNodeStateCount, useStaleCount } from '../../store/graphStore'
 import { pickGraphFile } from '../../store/persistence'
 import { graphName } from '../../core/graph'
 import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
 import { formatAgo, plural } from '../format'
+import { ShelfRow } from './ShelfRow'
 import { lockedTitle } from '../lockCopy'
 import { appElement, toggleFullscreen, useIsFullscreen } from '../fullscreen'
 import type { NotifyState } from '../notify'
@@ -1130,6 +1130,8 @@ function OpenMenu({ close }: { close: () => void }) {
   const library = useGraphStore((s) => s.library)
   const loaded = useGraphStore((s) => s.libraryLoaded)
   const openFromLibrary = useGraphStore((s) => s.openFromLibrary)
+  const renameInLibrary = useGraphStore((s) => s.renameInLibrary)
+  const deleteFromLibrary = useGraphStore((s) => s.deleteFromLibrary)
   const openDocument = useGraphStore((s) => s.openDocument)
 
   return (
@@ -1144,13 +1146,16 @@ function OpenMenu({ close }: { close: () => void }) {
       )}
 
       {library.map((entry) => (
-        <LibraryRow
+        <ShelfRow
           key={entry.id}
-          entry={entry}
+          name={entry.name}
+          detail={`${formatAgo(entry.savedAt)} · ${plural(entry.nodeTypes.length, 'node')}`}
           onOpen={() => {
             void openFromLibrary(entry.id)
             close()
           }}
+          onRename={(name) => void renameInLibrary(entry.id, name)}
+          onDelete={() => void deleteFromLibrary(entry.id)}
         />
       ))}
 
@@ -1169,102 +1174,6 @@ function OpenMenu({ close }: { close: () => void }) {
         </button>
       </div>
     </>
-  )
-}
-
-/**
- * One shelf row: open it, rename it, delete it.
- *
- * The three are siblings rather than nested buttons, and both destructive-ish actions ask in
- * place — a rename opens an input over the row, a delete swaps the row for a confirm. Neither
- * uses `window.confirm`: jsdom does not implement it, and browser chrome for "delete this
- * bookmark" is heavier than the action deserves.
- */
-function LibraryRow({ entry, onOpen }: { entry: WorkflowSummary; onOpen: () => void }) {
-  const renameInLibrary = useGraphStore((s) => s.renameInLibrary)
-  const deleteFromLibrary = useGraphStore((s) => s.deleteFromLibrary)
-  const [mode, setMode] = useState<'idle' | 'rename' | 'delete'>('idle')
-  const [draft, setDraft] = useState(entry.name)
-
-  if (mode === 'rename') {
-    const commit = () => {
-      if (draft.trim() && draft !== entry.name) void renameInLibrary(entry.id, draft)
-      setMode('idle')
-    }
-    return (
-      <div className="library-row library-row--editing">
-        <input
-          data-owns-escape
-          className="library-row__input"
-          value={draft}
-          autoFocus
-          aria-label={`Rename ${entry.name}`}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation()
-            if (e.key === 'Enter') commit()
-            if (e.key === 'Escape') {
-              setDraft(entry.name)
-              setMode('idle')
-            }
-          }}
-        />
-        <button type="button" className="btn btn--primary library-row__btn" onClick={commit}>
-          Rename
-        </button>
-      </div>
-    )
-  }
-
-  if (mode === 'delete') {
-    return (
-      <div className="library-row library-row--editing">
-        <span className="library-row__ask">Delete “{entry.name}”?</span>
-        <button
-          type="button"
-          className="btn library-row__btn"
-          data-tone="danger"
-          onClick={() => void deleteFromLibrary(entry.id)}
-        >
-          Delete
-        </button>
-        <button type="button" className="btn library-row__btn" onClick={() => setMode('idle')}>
-          Cancel
-        </button>
-      </div>
-    )
-  }
-
-  return (
-    <div className="library-row">
-      <button type="button" className="dropdown__item library-row__open" onClick={onOpen}>
-        <strong>{entry.name}</strong>
-        <span>
-          {formatAgo(entry.savedAt)} · {plural(entry.nodeTypes.length, 'node')}
-        </span>
-      </button>
-      <button
-        type="button"
-        className="library-row__act"
-        title={`Rename ${entry.name}`}
-        aria-label={`Rename ${entry.name}`}
-        onClick={() => {
-          setDraft(entry.name)
-          setMode('rename')
-        }}
-      >
-        ✎
-      </button>
-      <button
-        type="button"
-        className="library-row__act"
-        title={`Delete ${entry.name}`}
-        aria-label={`Delete ${entry.name}`}
-        onClick={() => setMode('delete')}
-      >
-        ✕
-      </button>
-    </div>
   )
 }
 

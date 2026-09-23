@@ -1,10 +1,11 @@
 /**
  * Opening an IndexedDB database, and running one transaction against it.
  *
- * Five modules keep something in IndexedDB — the data cache, uploads, edge sets, the workflow
- * library and the open-document session — and each had its own copy of the open, the upgrade,
- * the memo and the transaction wrapper. They stay **five databases** (`library.ts` and
- * `session.ts` both record why sharing one means racing on a version bump); what is shared is the
+ * Six modules keep something in IndexedDB — the data cache, uploads, edge sets, the workflow
+ * library, the recipe shelf and the open-document session — and each had its own copy of the
+ * open, the upgrade, the memo and the transaction wrapper. They stay **six databases**
+ * (`library.ts` and `session.ts` both record why sharing one means racing on a version bump, and
+ * `recipes.ts` was given its own for that reason); what is shared is the
  * plumbing, because the copies had drifted on the two parts that fail silently:
  *
  *  - **`onversionchange`.** An old tab holding a connection open blocks a later `DB_VERSION`
@@ -23,8 +24,9 @@
  * need it to go — `cache.ts`' `meta` sidecar arrived this way.
  *
  * What stays with each caller is the **failure policy**, which genuinely differs and must:
- * `library.ts`, `uploads.ts` and `edges/store.ts` *refuse* a write that did not commit (a save
- * that silently did not save is data loss), and each names the failure in its own words;
+ * `library.ts`, `recipes.ts`, `uploads.ts` and `edges/store.ts` *refuse* a write that did not
+ * commit (a save that silently did not save is data loss), and each names the failure in its own
+ * words;
  * `cache.ts` and `session.ts` *swallow* one (a failure to remember is not a failure to compute),
  * and every read everywhere degrades to "nothing stored". Hence two runners over one core:
  * `commit` for the first, `attempt` for the second.

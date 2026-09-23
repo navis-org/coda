@@ -73,9 +73,12 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
-import type { NodeCategory, NodeDefinition } from '../../core/node'
-import { nodeDefsByCategory } from '../../core/registry'
+import type { NodeCategory } from '../../core/node'
+import { getNodeDef, nodeDefsByCategory } from '../../core/registry'
+import type { AddMenuBand } from '../../store/graphStore'
 import { useGraphStore } from '../../store/graphStore'
+import type { RecipeSummary } from '../../store/recipes'
+import { recipeDetail } from '../format'
 import { CATEGORY_GLYPHS, GLYPH_STROKE_WIDTH, GLYPH_VIEWBOX } from '../glyphs'
 import type { GlyphShape } from '../glyphs'
 import { glyphElements } from '../glyphElements'
@@ -93,6 +96,8 @@ export interface AddMenuProps {
   onBrowse: () => void
   /** Insert a node. The caller decides where it lands; see `canvasAnchor` in `Editor.tsx`. */
   onAdd: (nodeType: string) => void
+  /** Insert a saved recipe, landing where `onAdd` would. */
+  onAddRecipe: (id: string) => void
 }
 
 /**
@@ -151,8 +156,24 @@ export function rowCapacity(width: number): number {
   return Math.max(1, Math.floor((width + BAND.gap) / (BAND.nodeWidth + BAND.gap)))
 }
 
-export interface BandRow {
-  defs: NodeDefinition[]
+/**
+ * One button in the band: a node, or a saved recipe. What the band draws, so the snake, the
+ * stagger and the alignment are written once for both.
+ */
+export interface BandItem {
+  /** A node inserts a node type; a recipe inserts a stored recipe. */
+  kind: 'node' | 'recipe'
+  /** The node type, or the recipe's id — what a click hands to `onAdd` or `onAddRecipe`. */
+  key: string
+  label: string
+  /** The hover text: a node's description, a recipe's contents. */
+  title: string
+  /** The node type whose glyph and tint are drawn — for a recipe, its first card's. */
+  glyphType: string
+}
+
+export interface BandRow<T> {
+  items: T[]
   /** Index of the row's first node in the whole list — its key, and its stagger offset. */
   from: number
   /** Drawn right-to-left. True for the bottom row, then alternating. */
@@ -171,11 +192,11 @@ export interface BandRow {
  * DOM order stays alphabetical whatever the drawing does: the tab order, a screen reader and
  * every `getAllByRole` read the list rather than the shape.
  */
-export function snakeRows(defs: readonly NodeDefinition[], perRow: number): BandRow[] {
-  const rows: BandRow[] = []
-  for (let from = 0; from < defs.length; from += perRow)
+export function snakeRows<T>(items: readonly T[], perRow: number): BandRow<T>[] {
+  const rows: BandRow<T>[] = []
+  for (let from = 0; from < items.length; from += perRow)
     rows.push({
-      defs: defs.slice(from, from + perRow),
+      items: items.slice(from, from + perRow),
       from,
       reverse: (from / perRow) % 2 === 0,
     })
@@ -207,15 +228,21 @@ const stopPointer = (event: React.PointerEvent) => event.stopPropagation()
  * three props are stable — a primitive and two `useCallback`s — so the whole subtree, up to 25
  * buttons and their SVGs while a band is open, stays out of that hot path.
  */
-export const AddMenu = memo(function AddMenu({ locked, onBrowse, onAdd }: AddMenuProps) {
+export const AddMenu = memo(function AddMenu({
+  locked,
+  onBrowse,
+  onAdd,
+  onAddRecipe,
+}: AddMenuProps) {
   /*
    * The menu's state is the store's, not this component's — see `setAddMenu` there for the two
    * readers that put it there. Primitives, so the snapshot identity check is satisfied
    * (invariant 7).
    */
   const open = useGraphStore((s) => s.addMenuOpen)
-  const category = useGraphStore((s) => s.addMenuCategory)
+  const openBand = useGraphStore((s) => s.addMenuBand)
   const setAddMenu = useGraphStore((s) => s.setAddMenu)
+  const recipes = useGraphStore((s) => s.recipes)
   const rootRef = useRef<HTMLDivElement>(null)
 
   const close = useCallback(() => setAddMenu(false), [setAddMenu])
@@ -229,6 +256,11 @@ export const AddMenu = memo(function AddMenu({ locked, onBrowse, onAdd }: AddMen
   useEffect(() => {
     if (locked) close()
   }, [locked, close])
+
+  // The shelf is read lazily; opening the menu is when its Recipes button may need to appear.
+  useEffect(() => {
+    if (open) void useGraphStore.getState().refreshRecipes()
+  }, [open])
 
   /*
    * `nodeDefsByCategory` and not a module-level constant: the registry is filled by an import
@@ -245,8 +277,8 @@ export const AddMenu = memo(function AddMenu({ locked, onBrowse, onAdd }: AddMen
    * the category and not as the group, because then one hook covers both surfaces and the group
    * is a lookup: a second presence flag beside a remembered value is two facts that can drift.
    */
-  const held = useHeld(category, EXIT_MS)
-  const band = groups.find((group) => group.category === held)
+  const held = useHeld(openBand, EXIT_MS)
+  const band = useMemo(() => bandFor(held, groups, recipes), [held, groups, recipes])
   const railMounted = useHeld(open || null, EXIT_MS) !== null
 
   /*
@@ -272,13 +304,13 @@ export const AddMenu = memo(function AddMenu({ locked, onBrowse, onAdd }: AddMen
   const [perRow, setPerRow] = useState(1)
   useLayoutEffect(() => {
     const root = rootRef.current
-    if (!root || !category) return
+    if (!root || !openBand) return
     const measure = () => {
       // `.fab-menu__cat` and not `[data-cat]` alone: the band is written *before* the stack, so
       // a root-scoped attribute lookup returns whatever is first in document order. The band
       // carrying a category of its own once made this measure the band against itself — a wrong
       // number rather than an error, and the alignment silently went with it.
-      const button = root.querySelector(`.fab-menu__cat[data-cat="${category}"]`)
+      const button = root.querySelector(`.fab-menu__cat[data-cat="${openBand}"]`)
       const band = bandRef.current
       if (!button || !band) return
       const rect = button.getBoundingClientRect()
@@ -293,9 +325,9 @@ export const AddMenu = memo(function AddMenu({ locked, onBrowse, onAdd }: AddMen
     const observer = new ResizeObserver(measure)
     observer.observe(root)
     return () => observer.disconnect()
-  }, [category])
+  }, [openBand])
 
-  const rows = useMemo(() => snakeRows(band?.defs ?? [], perRow), [band, perRow])
+  const rows = useMemo(() => snakeRows(band?.items ?? [], perRow), [band, perRow])
 
   return (
     <div className="fab-menu" ref={rootRef} data-open={open} style={FAB_VARS}>
@@ -303,21 +335,22 @@ export const AddMenu = memo(function AddMenu({ locked, onBrowse, onAdd }: AddMen
         <div
           className="fab-menu__band"
           ref={bandRef}
-          data-band={band.category}
-          data-open={category !== null}
+          data-band={band.band}
+          data-open={openBand !== null}
           role="group"
-          aria-label={`${CATEGORY_LABELS[band.category]} nodes`}
+          aria-label={band.label}
         >
           {rows.map((row) => (
             // `from` and not the array index: a key has to survive the re-chunk a resize does.
             <div className="fab-menu__row" key={row.from} data-reverse={row.reverse}>
-              {row.defs.map((def, index) => (
-                <NodeButton
-                  key={def.type}
-                  def={def}
+              {row.items.map((item, index) => (
+                <BandButton
+                  key={item.key}
+                  item={item}
                   index={row.from + index}
                   onClick={() => {
-                    onAdd(def.type)
+                    if (item.kind === 'recipe') onAddRecipe(item.key)
+                    else onAdd(item.key)
                     close()
                   }}
                 />
@@ -369,13 +402,28 @@ export const AddMenu = memo(function AddMenu({ locked, onBrowse, onAdd }: AddMen
                 label={`${CATEGORY_LABELS[group.category]} nodes`}
                 shapes={CATEGORY_GLYPHS[group.category]}
                 tint={`var(--cat-${group.category})`}
-                category={group.category}
-                pressed={category === group.category}
+                band={group.category}
+                pressed={openBand === group.category}
                 onClick={() =>
-                  setAddMenu(true, category === group.category ? null : group.category)
+                  setAddMenu(true, openBand === group.category ? null : group.category)
                 }
               />
             ))}
+            {/*
+             * Last, so it sits at the top of the rail, and only once something is saved: a button
+             * opening an empty band would be a way to find out the feature exists by being told
+             * there is nothing in it. Manage Recipes (the palette) is the way in before that.
+             */}
+            {recipes.length > 0 && (
+              <RailButton
+                index={groups.length + 1}
+                label="Saved recipes"
+                shapes={RECIPE_GLYPH}
+                band="recipes"
+                pressed={openBand === 'recipes'}
+                onClick={() => setAddMenu(true, openBand === 'recipes' ? null : 'recipes')}
+              />
+            )}
           </div>
         )}
       </div>
@@ -389,7 +437,7 @@ function RailButton({
   label,
   shapes,
   tint,
-  category,
+  band,
   pressed,
   onClick,
 }: {
@@ -398,7 +446,7 @@ function RailButton({
   shapes: readonly GlyphShape[]
   tint?: string
   /** Absent on the browser button. It is what the band's alignment measures against. */
-  category?: NodeCategory
+  band?: AddMenuBand
   pressed?: boolean
   onClick: () => void
 }) {
@@ -409,7 +457,7 @@ function RailButton({
       style={{ '--i': index, '--tint': tint } as React.CSSProperties}
       title={label}
       aria-label={label}
-      data-cat={category}
+      data-cat={band}
       aria-pressed={pressed}
       onClick={onClick}
       onPointerDown={stopPointer}
@@ -419,16 +467,60 @@ function RailButton({
   )
 }
 
-/** A node in the band: the same circle, with the node's name in small muted text under it. */
-function NodeButton({
-  def,
+/**
+ * What the band shows for a held band value: a category's nodes, or the saved recipes.
+ *
+ * A node's tint is the same ladder the thumbnail two clicks away resolves, rather than the
+ * category token alone: a dataset node wears its *backend's* tint on its card, and the band
+ * colouring it generically would be the two surfaces disagreeing about one node. A recipe wears
+ * its first card's glyph and tint — the one drawing already in the table that says what it starts
+ * with — rather than a mark of its own that no node could resolve to.
+ */
+function bandFor(
+  held: AddMenuBand | null,
+  groups: ReturnType<typeof nodeDefsByCategory>,
+  recipes: readonly RecipeSummary[],
+): { band: AddMenuBand; label: string; items: BandItem[] } | undefined {
+  if (held === 'recipes') {
+    return {
+      band: 'recipes',
+      label: 'Saved recipes',
+      items: recipes.map((entry) => ({
+        kind: 'recipe',
+        key: entry.id,
+        label: entry.name,
+        title: recipeDetail(entry),
+        glyphType: entry.nodeTypes[0] ?? '',
+      })),
+    }
+  }
+  const group = groups.find((g) => g.category === held)
+  if (!group) return undefined
+  return {
+    band: group.category,
+    label: `${CATEGORY_LABELS[group.category]} nodes`,
+    items: group.defs.map((def) => ({
+      kind: 'node',
+      key: def.type,
+      label: def.label,
+      title: def.description ?? def.label,
+      glyphType: def.type,
+    })),
+  }
+}
+
+/** One button in the band: the same circle, with its name in small muted text under it. */
+function BandButton({
+  item,
   index,
   onClick,
 }: {
-  def: NodeDefinition
+  item: BandItem
   index: number
   onClick: () => void
 }) {
+  // A recipe whose first card this build no longer has draws the utility fallback.
+  const category = getNodeDef(item.glyphType)?.category ?? 'utility'
   return (
     <button
       type="button"
@@ -436,20 +528,17 @@ function NodeButton({
       style={
         {
           '--i': index,
-          // The same ladder the thumbnail two clicks away resolves, rather than the category
-          // token alone: a dataset node wears its *backend's* tint on its card, and the band
-          // colouring it generically would be the two surfaces disagreeing about one node.
-          '--tint': nodeTintVar(def.type, `var(--cat-${def.category})`),
+          '--tint': nodeTintVar(item.glyphType, `var(--cat-${category})`),
         } as React.CSSProperties
       }
-      title={def.description ?? def.label}
+      title={item.title}
       onClick={onClick}
       onPointerDown={stopPointer}
     >
       <span className="fab-menu__disc" aria-hidden="true">
-        <Glyph>{nodeGlyph(def.type, def.category)}</Glyph>
+        <Glyph>{nodeGlyph(item.glyphType, category)}</Glyph>
       </span>
-      <span className="fab-menu__name">{def.label}</span>
+      <span className="fab-menu__name">{item.label}</span>
     </button>
   )
 }
@@ -487,6 +576,13 @@ const BROWSE_GLYPH: readonly GlyphShape[] = [
   ['rect', { x: '13', y: '4', width: '7', height: '7', rx: '1.6' }],
   ['rect', { x: '4', y: '13', width: '7', height: '7', rx: '1.6' }],
   ['rect', { x: '13', y: '13', width: '7', height: '7', rx: '1.6' }],
+]
+
+/** The recipes button's mark — two cards and a wire — drawn here for `BROWSE_GLYPH`'s reason. */
+const RECIPE_GLYPH: readonly GlyphShape[] = [
+  ['rect', { x: '3.5', y: '4', width: '9', height: '6.5', rx: '1.6' }],
+  ['rect', { x: '11.5', y: '13.5', width: '9', height: '6.5', rx: '1.6' }],
+  ['path', { d: 'M12.5 7.25h2.5a1.5 1.5 0 0 1 1.5 1.5v4.75' }],
 ]
 
 /**

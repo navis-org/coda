@@ -33,7 +33,7 @@ import {
   HINT_TONES,
   sameHints,
 } from '../../core/graph'
-import { nodeLabel } from '../../export/canExport'
+import { nodeLabel } from '../../core/graph'
 import type { HintTarget } from '../../store/graphStore'
 import { useGraphStore } from '../../store/graphStore'
 import { cardElement } from '../cardSizes'

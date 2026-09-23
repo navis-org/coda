@@ -30,14 +30,13 @@ import { emptyGraph } from '../core/graph'
 import '../nodes'
 import {
   deleteWorkflow,
-  findByName,
   listWorkflows,
   loadWorkflow,
-  normalizeName,
   renameWorkflow,
   resetLibrary,
   saveWorkflow,
 } from './library'
+import { findByName, normalizeName } from './shelf'
 
 function graph(
   name: string,

@@ -162,6 +162,15 @@ export function GroupContextMenu({ screenPosition, groupId, onClose }: GroupCont
       >
         Select {group.nodeIds.length} nodes
       </button>
+      {/* The frame is the natural unit of a recipe, and its title the name the dialog offers. */}
+      <button
+        type="button"
+        className="context-menu__item"
+        title="Keep the cards in this frame, and the wires they cross, to put back in one step"
+        onClick={act(() => actions.openRecipeSave(group.nodeIds))}
+      >
+        Save as Recipe…
+      </button>
       {/*
        * Folding is live under the lock, like renaming and recolouring below and unlike Ungroup:
        * it hides cards where they are and puts them back where they were. The row says which way

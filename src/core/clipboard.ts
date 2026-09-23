@@ -89,10 +89,24 @@ export function subgraphOf(
  * all facts about the *file*, and none of them should follow four cards onto a clipboard.
  */
 export function fragmentFrom(graph: CodaGraph, nodeIds: readonly string[]): string | undefined {
+  const body = fragmentBody(graph, nodeIds)
+  if (!body) return undefined
+  return JSON.stringify({ coda: FRAGMENT_MARKER, ...body }, null, 2)
+}
+
+/**
+ * The selected nodes with the file-level fields taken off — what `fragmentFrom` writes, before
+ * the marker. `core/recipes.ts` writes the same body under a marker of its own, so "what a
+ * fragment leaves behind" is decided here once.
+ */
+export function fragmentBody(
+  graph: CodaGraph,
+  nodeIds: readonly string[],
+): CodaGraph | undefined {
   const sub = subgraphOf(graph, nodeIds)
   if (!sub) return undefined
   const { meta: _meta, dashboard: _dashboard, viewport: _viewport, ...rest } = sub
-  return JSON.stringify({ coda: FRAGMENT_MARKER, ...rest }, null, 2)
+  return rest
 }
 
 /**
@@ -134,6 +148,8 @@ export interface PasteResult {
   graph: CodaGraph
   /** The ids the pasted nodes were given, in document order — what the caller selects. */
   nodeIds: string[]
+  /** Fragment id → minted id, for a caller with ids of its own to remap (`core/recipes.ts`). */
+  idMap: ReadonlyMap<string, string>
 }
 
 /**
@@ -184,5 +200,6 @@ export function insertFragment(graph: CodaGraph, incoming: CodaGraph, at?: Point
       ...(groups.length ? { groups: [...(graph.groups ?? []), ...groups] } : {}),
     },
     nodeIds: nodes.map((n) => n.id),
+    idMap,
   }
 }

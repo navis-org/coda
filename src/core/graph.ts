@@ -690,6 +690,18 @@ export function newId(prefix = 'n'): string {
 }
 
 /**
+ * What a node is called, for a message about it.
+ *
+ * The user's own title first, because that is what they are looking at on the canvas. In core
+ * rather than beside the exporters that first needed it, so `core/recipes.ts` labels a slot with
+ * the same rule an export refusal names a card with.
+ */
+export function nodeLabel(node: GraphNode | undefined): string {
+  if (!node) return 'a node'
+  return node.title || getNodeDef(node.type)?.label || node.type
+}
+
+/**
  * A graph's name as every surface spells it, with the default filled in.
  *
  * One definition rather than five: the toolbar, the share dialog, the browser shelf, the workflow
@@ -1074,31 +1086,33 @@ export interface LoadResult {
 }
 
 /**
- * Parse and repair a graph file. Deliberately lenient: unknown node types are dropped
- * with a warning rather than failing the whole load, so a file made with a newer node
- * pack still opens.
+ * A recorded port id resolved against the ports a node actually has: kept where it matches, else
+ * rewritten from a port's **former** id (`PortGroupDef.formerIds`, for a fixed pair that has since
+ * become a repeat) — only after the live ids have all missed, so a former id that some *other*
+ * port now spells live can never shadow it. Undefined when neither names a port.
+ *
+ * The one place a rename is followed. Exported for `core/recipes.ts`, whose slot wires name ports
+ * the way an edge does; a second copy is where one of the two would stop following them.
  */
+export function resolvePort(ports: readonly ResolvedPort[], id: string): string | undefined {
+  if (ports.some((p) => p.id === id)) return id
+  return ports.find((p) => p.formerId === id)?.id
+}
+
 /**
  * One end of a stored edge resolved against the ports the node actually has.
  *
  * Returns the port id to use, or undefined when the edge names a socket that is not there. A
- * stored handle that matches is kept as-is; one that matches a port's **former** id is rewritten
- * to the live one (`PortGroupDef.formerIds`, for a fixed pair that has since become a repeat);
- * a **missing** one falls back to the node's sole port where it has exactly one, and only then to
- * the historical default — a file old enough to omit handles predates any node with two ports on
- * a side, so "the only port" is what it meant.
+ * stored handle goes through `resolvePort`; a **missing** one falls back to the node's sole port
+ * where it has exactly one, and only then to the historical default — a file old enough to omit
+ * handles predates any node with two ports on a side, so "the only port" is what it meant.
  */
 function healHandle(
   ports: readonly ResolvedPort[],
   stored: string | undefined,
   legacy: string,
 ): string | undefined {
-  if (typeof stored === 'string') {
-    if (ports.some((p) => p.id === stored)) return stored
-    // Only after the live ids have all missed, so a former id that some *other* port now spells
-    // live can never shadow it.
-    return ports.find((p) => p.formerId === stored)?.id
-  }
+  if (typeof stored === 'string') return resolvePort(ports, stored)
   if (ports.length === 1) return ports[0]!.id
   return ports.some((p) => p.id === legacy) ? legacy : undefined
 }
@@ -1166,6 +1180,11 @@ function storedParams(raw: unknown, type: string): ParamValues {
   return params
 }
 
+/**
+ * Parse and repair a graph file. Deliberately lenient: unknown node types are dropped
+ * with a warning rather than failing the whole load, so a file made with a newer node
+ * pack still opens.
+ */
 export function deserializeGraph(json: string): LoadResult {
   const warnings: string[] = []
   let raw: unknown

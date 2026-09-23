@@ -100,7 +100,7 @@ describe('the band snakes', () => {
 
   it('keeps the list in order, so the DOM order is never the drawing order', () => {
     const rows = snakeRows(defs(5), 2)
-    expect(rows.flatMap((r) => r.defs.map((d) => d.label))).toEqual([
+    expect(rows.flatMap((r) => r.items.map((d) => d.label))).toEqual([
       'n0',
       'n1',
       'n2',

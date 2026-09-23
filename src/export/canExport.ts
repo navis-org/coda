@@ -20,7 +20,7 @@
  */
 
 import type { CodaGraph, GraphNode } from '../core/graph'
-import { getNodeDef } from '../core/registry'
+import { nodeLabel } from '../core/graph'
 import type { ExportLanguage } from '../nodes/lib/datasetFamilies'
 import { familyForNodeType } from '../nodes/lib/datasetFamilies'
 
@@ -70,16 +70,6 @@ export interface ExportRefusal {
    * and drifting.
    */
   fix: string
-}
-
-/**
- * What a node is called, for a message about it.
- *
- * The user's own title first, because that is what they are looking at on the canvas.
- */
-export function nodeLabel(node: GraphNode | undefined): string {
-  if (!node) return 'a node'
-  return node.title || getNodeDef(node.type)?.label || node.type
 }
 
 /**

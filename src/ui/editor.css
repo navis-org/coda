@@ -12923,3 +12923,37 @@ details[open] > summary.tile__label {
   border: none;
   border-radius: 2px;
 }
+
+/* --------------------------------------------------------------------------
+ * Recipes: Save as Recipe, and Manage Recipes
+ *
+ * Both borrow `.sources`' body, fields, notes and result lines, as the share and feedback dialogs
+ * do; what is here is the size and the two lists. They hug their content for `.share`'s reason.
+ * -------------------------------------------------------------------------- */
+
+.recipe-dialog {
+  max-width: 520px;
+  height: auto;
+  max-height: min(80vh, 640px);
+}
+.recipe-dialog__body {
+  padding: 12px 14px 14px;
+}
+.recipe-save__slots {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.recipe-save__reset {
+  margin: 4px 0 10px;
+  font-size: 12px;
+}
+.recipe-save__reset summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+.recipe-save__actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}

@@ -1330,6 +1330,10 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   the finding rather than a coincidence.
 - [docs/persistence.md](docs/persistence.md) — share links, the autosave across tabs, the
   browser shelf.
+- [docs/recipes.md](docs/recipes.md) — saved sets of cards: why a recipe is a clipboard
+  fragment plus **slots** (one per outside node, not per wire), how one attaches (the selection,
+  never a search; reads first; all or nothing per slot; never steals an input), and why a rename
+  edits the stored text rather than a read recipe.
 - [docs/wizard.md](docs/wizard.md) — the Workflow Wizard: the option space, what removing the
   bundled examples cost, and the three numbers a generated graph carries. Read before changing
   what it can build.

@@ -43,6 +43,7 @@ import type { CodaGraph } from '../core/graph'
 import { deserializeGraph, graphName, newId, serializeGraph } from '../core/graph'
 import type { RefusalWords } from '../data/idb'
 import { attempt, commit, database } from '../data/idb'
+import { newestFirst } from './shelf'
 
 const DB_NAME = 'coda-library'
 const DB_VERSION = 1
@@ -61,7 +62,7 @@ const GRAPH_STORE = 'graphs'
  */
 export interface WorkflowSummary {
   id: string
-  /** As the user typed it. Identity for an overwrite is the normalised form — see `findByName`. */
+  /** As the user typed it. Identity for an overwrite is the normalised form — see `findByName` in `shelf.ts`. */
   name: string
   /** Epoch ms of the most recent save. */
   savedAt: number
@@ -122,35 +123,14 @@ function read<T>(
   )
 }
 
-/**
- * Everything on the shelf, newest first.
- *
- * Ties break on name so the order is stable — two graphs saved in the same millisecond is a
- * test, not a user, but a list that reshuffles between renders is a bug either way.
- */
+/** Everything on the shelf, in `newestFirst` order. */
 export async function listWorkflows(): Promise<WorkflowSummary[]> {
   const rows = await read<WorkflowSummary[]>(META_STORE, (s) => s.getAll(), [])
-  return [...rows].sort((a, b) => b.savedAt - a.savedAt || a.name.localeCompare(b.name))
+  return newestFirst([...rows])
 }
 
 export async function getWorkflow(id: string): Promise<WorkflowSummary | undefined> {
   return read<WorkflowSummary | undefined>(META_STORE, (s) => s.get(id), undefined)
-}
-
-/**
- * Normalised form of a name, for deciding whether two saves mean the same document.
- *
- * Case- and whitespace-insensitive: "LC4 sweep" and "lc4  sweep" as two separate entries is a
- * shelf nobody can keep tidy, and the typed form is kept for display either way.
- */
-export function normalizeName(name: string): string {
-  return name.trim().replace(/\s+/g, ' ').toLowerCase()
-}
-
-/** The entry a save under this name would overwrite, if any. */
-export function findByName(list: WorkflowSummary[], name: string): WorkflowSummary | undefined {
-  const key = normalizeName(name)
-  return list.find((entry) => normalizeName(entry.name) === key)
 }
 
 /**

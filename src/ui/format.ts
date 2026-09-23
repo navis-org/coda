@@ -1,6 +1,7 @@
 import { AGG_OPTIONS } from '../nodes/lib/tableOps'
 import { isIdentifierColumn } from '../core/ids'
 import type { CellValue } from '../core/values'
+import type { RecipeSummary } from '../store/recipes'
 
 /** Compact form for axis ticks and tips: 1,284 / 12.9K / 4.2M. */
 export function formatCompact(value: number): string {
@@ -334,4 +335,11 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} kB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
+
+/** What a stored recipe holds and what it attaches to — the palette row's hint and the shelf's line. */
+export function recipeDetail(entry: RecipeSummary): string {
+  const parts = [plural(entry.nodeTypes.length, 'card')]
+  if (entry.slots.length) parts.push(`attaches to ${entry.slots.join(' or ')}`)
+  return parts.join(' · ')
 }

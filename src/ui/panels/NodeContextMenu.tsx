@@ -302,6 +302,18 @@ export function NodeContextMenu({
           <kbd>{shortcutKeys('ungroup')}</kbd>
         </button>
       )}
+      {/*
+       * On `targets`, like Copy, and live under the lock for Copy's reason: saving a recipe takes
+       * nothing off the canvas. The dialog is where the name and the slots are decided.
+       */}
+      <button
+        type="button"
+        className="context-menu__item"
+        title="Keep these cards, and the wires they cross, to put back in one step"
+        onClick={act(() => actions.openRecipeSave(targets))}
+      >
+        Save as Recipe…
+      </button>
       <div className="context-menu__sep" />
       {/*
        * The alignment grid acts on `targets` like the rows above it — so a right-click on one

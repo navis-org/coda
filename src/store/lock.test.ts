@@ -227,6 +227,12 @@ describe('a locked canvas', () => {
     expect(graph().nodes).toHaveLength(2)
   })
 
+  it('refuses to insert a recipe, before it reads one', async () => {
+    // Refused ahead of the storage read, so no IndexedDB is needed to see it.
+    expect(await store().insertRecipe('any')).toBe(0)
+    expect(graph().nodes).toHaveLength(2)
+  })
+
   it('still opens another graph — a document load is not a canvas gesture', () => {
     store().loadGraph(emptyGraph('another'))
     expect(graph().meta?.name).toBe('another')
@@ -256,6 +262,8 @@ describe('every store action is on one side of the lock', () => {
     // above, which is where that split is argued.
     'cutSelection',
     'pasteFragment',
+    // A recipe is a paste with its wires attached; saving one is on the live side, as copy is.
+    'insertRecipe',
     'groupSelection',
     'ungroup',
     'deleteNodes',
@@ -363,6 +371,13 @@ describe('every store action is on one side of the lock', () => {
     'openFromLibrary',
     'renameInLibrary',
     'deleteFromLibrary',
+    'refreshRecipes',
+    'openRecipeSave',
+    'saveRecipe',
+    'importRecipe',
+    'renameRecipe',
+    'deleteRecipe',
+    'openRecipes',
     'setParam',
     'renameNode',
     'toggleDisabled',

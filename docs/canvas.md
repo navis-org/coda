@@ -1926,7 +1926,8 @@ button asks for it directly.
 
 `AddMenu` (`src/ui/panels/AddMenu.tsx`) is the button plus two surfaces it unfolds: a **rail**
 of seven round, wordless buttons going up the corner — the node browser, then Utility, Dataset,
-Query, Transform, Analysis, Visualisation — and, when one of those is pressed, a **band** of that
+Query, Transform, Analysis, Visualisation, and an eighth, Saved recipes, once any are saved
+(`recipes.md`) — and, when one of those is pressed, a **band** of that
 category's nodes across the canvas, each a circle with the node's name in small muted text under
 it. The band has no panel behind it: the discs carry their own fill, and the labels take a
 `text-shadow` in the canvas's own colour for the case a card is behind one.

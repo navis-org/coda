@@ -69,7 +69,9 @@ import { GroupContextMenu } from './panels/GroupContextMenu'
 import { HintEditor } from './panels/HintEditor'
 import { NodeContextMenu } from './panels/NodeContextMenu'
 import type { DragFilter, PaletteItem } from './panels/paletteItems'
-import { buildCommandItems, buildNodeItems } from './panels/paletteItems'
+import { buildCommandItems, buildNodeItems, buildRecipeItems } from './panels/paletteItems'
+import { RecipeSaveDialog } from './panels/RecipeSaveDialog'
+import { RecipesDialog } from './panels/RecipesDialog'
 import { requestExportWarnings, useExportWarnings } from './exportWarnings'
 import { FIT_VIEW_OPTIONS, useFitAll, useFitSelected, useFitSelectedRequests } from './fitView'
 import { isTourActive, refreshTour } from './tour/tourState'
@@ -795,6 +797,16 @@ function EditorCanvas() {
     [screenToFlowPosition, insertNodeAt],
   )
 
+  /** A recipe from the menu's band, landing where a node from it would. */
+  const addRecipeAtCanvasAnchor = useCallback(
+    (id: string) => {
+      void useGraphStore
+        .getState()
+        .insertRecipe(id, screenToFlowPosition(canvasAnchor(wrapperRef.current)))
+    },
+    [screenToFlowPosition],
+  )
+
   /** The rail's bottom button, for the same reason. */
   const browseAtCanvasAnchor = useCallback(() => {
     openBrowser(canvasAnchor(wrapperRef.current))
@@ -813,7 +825,10 @@ function EditorCanvas() {
    */
   const exportWarningsRevision = useExportWarnings()
   useEffect(() => {
-    if (menu) requestExportWarnings(useGraphStore.getState().graph)
+    if (!menu) return
+    requestExportWarnings(useGraphStore.getState().graph)
+    // The recipe rows are read from the shelf, which is read lazily — so here, as it opens.
+    void useGraphStore.getState().refreshRecipes()
   }, [menu])
 
   /**
@@ -839,15 +854,28 @@ function EditorCanvas() {
     // which answers differently once a walk has landed and is invisible to the lint rule.
     void exportWarningsRevision
     if (!menu) return []
-    if (menu.filter) return buildNodeItems(menu.filter, locked)
+    const ctx = {
+      store: liveStore ?? useGraphStore.getState(),
+      fitView: fitAll,
+      fitSelected,
+      pastePoint,
+      insertPoint: menu.flowPosition,
+    }
+    if (menu.filter) {
+      const from = menu.connectFrom
+      const recipes = from
+        ? buildRecipeItems(ctx, {
+            filter: menu.filter,
+            nodeId: from.nodeId,
+            portId: from.portId,
+          })
+        : []
+      return [...buildNodeItems(menu.filter, locked), ...recipes]
+    }
     return [
-      ...buildCommandItems({
-        store: liveStore ?? useGraphStore.getState(),
-        fitView: fitAll,
-        fitSelected,
-        pastePoint,
-      }),
+      ...buildCommandItems(ctx),
       ...buildNodeItems(undefined, locked),
+      ...buildRecipeItems(ctx),
     ]
     // `liveStore` is the whole state object while the palette is open, so this recomputes
     // whenever anything changes — which is what keeps `disabled` flags honest. The revision is
@@ -1383,7 +1411,12 @@ function EditorCanvas() {
        * Gone with the canvas while the dashboard is up, which the toolbar version was not — and
        * there it was a dead control, since `NodeBrowser` and the Tab binding both live here.
        */}
-      <AddMenu locked={locked} onBrowse={browseAtCanvasAnchor} onAdd={addAtCanvasAnchor} />
+      <AddMenu
+        locked={locked}
+        onBrowse={browseAtCanvasAnchor}
+        onAdd={addAtCanvasAnchor}
+        onAddRecipe={addRecipeAtCanvasAnchor}
+      />
 
       {menu && (
         <CommandPalette
@@ -1421,6 +1454,9 @@ function EditorCanvas() {
 
       {/* Reads `editingHint` itself: the node menu and a hint box inside a card both open it. */}
       <HintEditor />
+      {/* Both read the store: the node menu, the frame menu and the palette open them. */}
+      <RecipeSaveDialog />
+      <RecipesDialog insertAt={pastePoint} />
 
       {groupMenu && (
         <GroupContextMenu

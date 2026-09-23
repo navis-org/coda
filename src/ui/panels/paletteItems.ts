@@ -7,9 +7,10 @@
  * the user to know which kind of thing they want before they start typing.
  */
 
+import { nodeLabel } from '../../core/graph'
 import type { NodeDefinition, ResolvedPort } from '../../core/node'
 import type { Socket } from '../../core/sockets'
-import { socketAccepts, socketOriginates, socketTier } from '../../core/sockets'
+import { dragReaches, socketTier } from '../../core/sockets'
 import { placeableIds } from '../../core/dashboard'
 import { groupsTouching } from '../../core/groups'
 import { isAnnotation, nodeDefsByCategory } from '../../core/registry'
@@ -22,7 +23,8 @@ import { peekExportWarnings } from '../exportWarnings'
 import { appElement, toggleFullscreen } from '../fullscreen'
 import { TOURS, startTour } from '../tour/tourState'
 import { LOCKED_HINT } from '../lockCopy'
-import { plural } from '../format'
+import { plural, recipeDetail } from '../format'
+import { recipeTakesWire, selectionAttach } from '../../core/recipes'
 import { shortcutKeys } from '../shortcuts'
 import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
 import { WIZARD_BLURB, WIZARD_LABEL } from '../../wizard/options'
@@ -91,6 +93,12 @@ export interface CommandContext {
    * palette's tests do; a paste with no point falls back to the fragment's own coordinates.
    */
   pastePoint?: () => { x: number; y: number }
+  /**
+   * Where a row that puts something new on the canvas lands: where the palette was opened, which
+   * is where its node rows insert. Asked instead of `pastePoint` because by the time a row is
+   * picked the pointer is on the row.
+   */
+  insertPoint?: { x: number; y: number }
 }
 
 /**
@@ -208,10 +216,7 @@ function bestPort(
 
   let best: { port: ResolvedPort; rank: number } | undefined
   for (const port of ports) {
-    const takes = fromSource
-      ? socketAccepts(filter, port)
-      : socketOriginates(port) && socketAccepts(port, filter)
-    if (!takes) continue
+    if (!dragReaches(filter, port)) continue
     // Two keys packed into one number, `socketTier` being 0-3 and the optional flag 0-1. The
     // caller sorts on it, so it has to be one comparable value rather than a tuple compare
     // written out at a call site, which is where the second key quietly goes missing.
@@ -468,6 +473,22 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
       ...(locked ? { hint: LOCKED_HINT } : {}),
       disabled: locked || selection.length === 0,
       perform: () => store.deleteNodes(selection),
+    },
+    {
+      id: 'recipe:save',
+      label: 'Save Selection as Recipe…',
+      action: 'Edit',
+      hint: 'Keep these cards, and the wires they cross, to put back in one step',
+      // Live under the lock, like Copy: it takes nothing off the canvas.
+      disabled: selection.length === 0,
+      perform: () => store.openRecipeSave(selection),
+    },
+    {
+      id: 'recipe:manage',
+      label: 'Manage Recipes…',
+      action: 'Edit',
+      hint: 'Insert, rename, delete, download or import the recipes saved in this browser',
+      perform: () => store.openRecipes(true),
     },
 
     {
@@ -788,4 +809,47 @@ export function buildCommandItems(ctx: CommandContext): PaletteItem[] {
   })
 
   return items
+}
+
+/**
+ * One row per stored recipe, under `Add` — inserting one is an insertion, and the `Add:` palette a
+ * right-click opens is where somebody looks for one. (Saving and managing are `Edit` commands.)
+ *
+ * Built from `store.recipes`, which the palette refreshes as it opens (`Editor`), so a recipe saved
+ * in another tab is listed the next time rather than never. Disabled under the lock like a node
+ * row.
+ *
+ * With `wire` — the palette a dropped wire opened — only the recipes that could take it are listed
+ * (`recipeTakesWire`, over the sockets the summary recorded), and a pick attaches through the
+ * dragged port of the node the wire came from rather than to the selection: that is what the
+ * gesture pointed at, and what the recipe was listed for.
+ */
+export function buildRecipeItems(
+  ctx: CommandContext,
+  wire?: { filter: DragFilter; nodeId: string; portId: string },
+): PaletteItem[] {
+  const { store } = ctx
+  const attachId = wire?.nodeId ?? selectionAttach(store.selection)
+  const attach = attachId ? store.graph.nodes.find((n) => n.id === attachId) : undefined
+  const recipes = wire
+    ? store.recipes.filter((entry) => recipeTakesWire(entry, wire.filter))
+    : store.recipes
+  return recipes.map((entry) => ({
+    id: `recipe:${entry.id}`,
+    label: entry.name,
+    action: 'Add',
+    group: 'Recipe',
+    hint: store.locked
+      ? LOCKED_HINT
+      : attach && entry.slots.length
+        ? `${recipeDetail(entry)} — tries ${nodeLabel(attach)}`
+        : recipeDetail(entry),
+    disabled: store.locked,
+    perform: () =>
+      void store.insertRecipe(
+        entry.id,
+        ctx.insertPoint ?? ctx.pastePoint?.(),
+        wire && { node: wire.nodeId, via: { port: wire.portId, from: wire.filter.from } },
+      ),
+  }))
 }

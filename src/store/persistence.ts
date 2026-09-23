@@ -496,10 +496,30 @@ export function loadAutosave():
 export async function pickGraphFile(): Promise<
   { graph: CodaGraph; warnings: string[] } | undefined
 > {
+  const file = await pickTextFile('.json,.coda.json,application/json')
+  if (!file) return undefined
+  try {
+    return deserializeGraph(file.text)
+  } catch (err) {
+    return {
+      graph: { version: 1, nodes: [], edges: [] },
+      warnings: [`Could not open ${file.name}: ${(err as Error).message}`],
+    }
+  }
+}
+
+/**
+ * Ask for one file and read it as text; undefined when nothing was chosen. The half of opening a
+ * file that is not about graphs — `pickGraphFile` reads a workflow through it, the recipe shelf a
+ * recipe.
+ */
+export function pickTextFile(
+  accept: string,
+): Promise<{ name: string; text: string } | undefined> {
   return new Promise((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = '.json,.coda.json,application/json'
+    input.accept = accept
     input.addEventListener('change', () => {
       const file = input.files?.[0]
       if (!file) {
@@ -507,16 +527,9 @@ export async function pickGraphFile(): Promise<
         return
       }
       const reader = new FileReader()
-      reader.addEventListener('load', () => {
-        try {
-          resolve(deserializeGraph(String(reader.result)))
-        } catch (err) {
-          resolve({
-            graph: { version: 1, nodes: [], edges: [] },
-            warnings: [`Could not open ${file.name}: ${(err as Error).message}`],
-          })
-        }
-      })
+      reader.addEventListener('load', () =>
+        resolve({ name: file.name, text: String(reader.result) }),
+      )
       reader.readAsText(file)
     })
     input.click()

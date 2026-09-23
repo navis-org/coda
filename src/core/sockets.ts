@@ -173,3 +173,22 @@ export function resolvedSocket(socket: Socket | undefined, resolved?: CodaType):
 export function socketOriginates(socket: Socket): boolean {
   return socket.type.kind !== 'any'
 }
+
+/**
+ * Whether a port on something about to be added could answer a wire dragged out of `drag`: from
+ * an output, the port must take what the wire carries; from an input, it must fit it **and be able
+ * to originate it** (`socketOriginates`), since a passthrough answering a backwards drag needs the
+ * same question asked again behind it.
+ *
+ * One statement of the drag's direction for the two things that ask it — the palette's node rows
+ * (`bestPort`) and its recipe rows (`recipeTakesWire`) — which had each written the flip out and
+ * disagreed about the second clause.
+ */
+export function dragReaches(
+  drag: Socket & { from: 'source' | 'target' },
+  port: Socket,
+): boolean {
+  return drag.from === 'source'
+    ? socketAccepts(drag, port)
+    : socketOriginates(port) && socketAccepts(port, drag)
+}

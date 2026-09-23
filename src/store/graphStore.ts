@@ -59,6 +59,14 @@ import {
   subgraphOf,
 } from '../core/clipboard'
 import { autoWireDataset } from '../core/autowire'
+import type { InsertResult, Recipe, Via } from '../core/recipes'
+import {
+  insertRecipe as placeRecipe,
+  readRecipe,
+  recipeFrom,
+  renamedRecipeText,
+  selectionAttach,
+} from '../core/recipes'
 import { addNodeWithCompanion } from '../core/companion'
 import type { InferenceResult } from '../core/inference'
 import { checkConnection, inferGraph } from '../core/inference'
@@ -88,10 +96,19 @@ import { subscribeRootCheck } from '../data/cave/rootIds'
 import type { StarterSpec } from '../wizard/starters'
 import { buildStarter } from '../wizard/starters'
 import type { WorkflowSummary } from './library'
+import type { RecipeSummary } from './recipes'
+import {
+  deleteRecipe as deleteStoredRecipe,
+  listRecipes,
+  loadRecipe,
+  renameRecipe as renameStoredRecipe,
+  saveRecipe as storeRecipe,
+  saveRecipeText,
+} from './recipes'
 import { deleteSessionDoc, loadSession, saveSessionDoc, saveSessionMeta } from './session'
+import { findByName, freeName } from './shelf'
 import {
   deleteWorkflow,
-  findByName,
   listWorkflows,
   loadWorkflow,
   renameWorkflow,
@@ -148,7 +165,7 @@ import type { VisualisationId } from '../wizard/options'
 // graph, so the node pack must be registered first. Declaring the dependency here rather
 // than relying on import order in main.tsx keeps that from silently breaking.
 import '../nodes'
-import { nodePorts } from '../core/graph'
+import { nodeLabel, nodePorts } from '../core/graph'
 
 // Registered once, at module load. See `data/builtins.ts` for the set and the ordering.
 registerBuiltinSources()
@@ -194,6 +211,9 @@ interface HistoryEntry {
  * The canvas transform. Shaped like `CodaGraph.viewport` rather than imported from React Flow,
  * which `src/store` has no business depending on.
  */
+
+/** What the **+** menu's band can show: one category's nodes, or the saved recipes. */
+export type AddMenuBand = NodeCategory | 'recipes'
 export interface CanvasViewport {
   x: number
   y: number
@@ -269,6 +289,7 @@ interface DocStash {
   peekGroupId: string | undefined
   editingGroupId: string | undefined
   editingHint: HintTarget | undefined
+  savingRecipe: string[] | undefined
   autoLayout: boolean
 }
 
@@ -631,8 +652,9 @@ export interface GraphState {
    * Not persisted, and not a mode — nothing else reads it.
    */
   addMenuOpen: boolean
-  addMenuCategory: NodeCategory | null
-  setAddMenu(open: boolean, category?: NodeCategory | null): void
+  /** The band that is open: a node category, or the saved recipes. */
+  addMenuBand: AddMenuBand | null
+  setAddMenu(open: boolean, band?: AddMenuBand | null): void
   /**
    * Whether the Zoo browser is up.
    *
@@ -974,6 +996,47 @@ export interface GraphState {
   openFromLibrary(id: string): Promise<void>
   renameInLibrary(id: string, name: string): Promise<void>
   deleteFromLibrary(id: string): Promise<void>
+
+  // --- recipes -------------------------------------------------------------
+  /**
+   * Recipes saved in this browser, newest first — `store/recipes.ts`. Read lazily, like
+   * `library`, and `recipesLoaded` is apart from the length for the reason `libraryLoaded` is.
+   */
+  recipes: RecipeSummary[]
+  recipesLoaded: boolean
+  refreshRecipes(): Promise<void>
+  /**
+   * The cards the Save as Recipe dialog is saving, while it is open. Per document, like
+   * `editingHint`: node ids mean nothing in the next graph.
+   */
+  savingRecipe: string[] | undefined
+  openRecipeSave(nodeIds: readonly string[] | undefined): void
+  /**
+   * Save these cards as a recipe; `id` overwrites that entry, as `saveToLibrary`'s does. Live
+   * under the lock, like `copySelection`.
+   */
+  saveRecipe(
+    nodeIds: readonly string[],
+    options: { name: string; reset?: readonly string[]; id?: string },
+  ): Promise<{ ok: boolean; error?: string }>
+  /**
+   * Put a stored recipe on the canvas at `at`, attached to `attach` — by default the selection,
+   * when exactly one node is selected (`selectionAttach`); from the palette a dropped wire opens,
+   * the node it came from, through the port it came from (`via`) — and select what arrived. `core/recipes.ts` says which slot takes it. Resolves to how many
+   * cards landed; zero for a locked canvas or a recipe that could not be read, which says why in
+   * `notice`. One undo step. Refused by the lock, like a paste.
+   */
+  insertRecipe(id: string, at?: Point, attach?: { node: string; via?: Via }): Promise<number>
+  /**
+   * Put a recipe file on the shelf. Under a free name (`freeName`) rather than over an entry of
+   * the same name: nobody confirmed replacing one. Live under the lock — the canvas is untouched.
+   */
+  importRecipe(text: string): Promise<void>
+  renameRecipe(id: string, name: string): Promise<void>
+  deleteRecipe(id: string): Promise<void>
+  /** Whether the Manage Recipes dialog is open. Session state, not the document's. */
+  recipesOpen: boolean
+  openRecipes(open: boolean): void
 
   // --- editing -------------------------------------------------------------
   addNode(type: string, position: { x: number; y: number }): string
@@ -1525,10 +1588,22 @@ export const useGraphStore = create<GraphState>((set, get) => {
   let gestureStart: { tag: string; graph: CodaGraph } | undefined
 
   /**
-   * Where the last paste landed, so a repeat of it can step rather than stack. See
-   * `pasteFragment`, which is the only reader and the only writer.
+   * Where the last paste landed, so a repeat of it can step rather than stack. Read and written
+   * only by `steppedPoint`, below.
    */
   let lastPaste: { key: string; count: number } = { key: '', count: 0 }
+
+  /**
+   * `at`, stepped by `PASTE_OFFSET` once per repeat of the same thing at the same point — see
+   * `pasteFragment` for why a repeat must not land on top of itself. `what` names the thing
+   * pasted; the point is folded in here.
+   */
+  const steppedPoint = (what: string, at: Point): Point => {
+    const key = `${what}@${Math.round(at.x)},${Math.round(at.y)}`
+    const step = key === lastPaste.key ? lastPaste.count + 1 : 0
+    lastPaste = { key, count: step }
+    return { x: at.x + step * PASTE_OFFSET, y: at.y + step * PASTE_OFFSET }
+  }
 
   /**
    * Whether the canvas is locked, and therefore whether a structural or geometric edit may land.
@@ -1819,6 +1894,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       peekGroupId: s.peekGroupId,
       editingGroupId: s.editingGroupId,
       editingHint: s.editingHint,
+      savingRecipe: s.savingRecipe,
       autoLayout: s.autoLayout,
     }
   }
@@ -1862,6 +1938,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       peekGroupId: undefined,
       editingGroupId: undefined,
       editingHint: undefined,
+      savingRecipe: undefined,
     }
   }
 
@@ -2259,11 +2336,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
     // Closes the start page on the way in: both are full-screen modals, and the New menu
     // is reachable from behind one.
     addMenuOpen: false,
-    addMenuCategory: null,
+    addMenuBand: null,
     // A closed menu has no band, so the category is cleared rather than remembered: reopening
     // onto the last category would be a menu that answers a question nobody asked twice.
-    setAddMenu: (open, category = null) =>
-      set({ addMenuOpen: open, addMenuCategory: open ? category : null }),
+    setAddMenu: (open, band = null) =>
+      set({ addMenuOpen: open, addMenuBand: open ? band : null }),
     openZoo: () => set({ zooOpen: true, startPageOpen: false }),
     closeZoo: () => set({ zooOpen: false }),
 
@@ -2651,6 +2728,109 @@ export const useGraphStore = create<GraphState>((set, get) => {
       }
     },
 
+    // --- recipes -----------------------------------------------------------
+
+    recipes: [],
+    recipesLoaded: false,
+
+    refreshRecipes: async () => {
+      set({ recipes: await listRecipes(), recipesLoaded: true })
+    },
+
+    savingRecipe: undefined,
+    openRecipeSave: (nodeIds) => set({ savingRecipe: nodeIds ? [...nodeIds] : undefined }),
+
+    saveRecipe: async (nodeIds, { name, reset, id }) => {
+      const recipe = recipeFrom(get().graph, nodeIds, { name, reset })
+      if (!recipe) return { ok: false, error: 'None of those cards are on the canvas any more' }
+      try {
+        const summary = await storeRecipe(recipe, { id })
+        await get().refreshRecipes()
+        set({ notice: `Saved the recipe “${summary.name}” in this browser` })
+        return { ok: true }
+      } catch (err) {
+        // A save somebody asked for, so a failure is theirs to hear — `saveToLibrary`'s rule.
+        const error = (err as Error).message
+        set({ notice: `Could not save the recipe: ${error}` })
+        return { ok: false, error }
+      }
+    },
+
+    insertRecipe: async (id, at, attachTo) => {
+      if (frozen()) return 0
+      let read: { recipe: Recipe; warnings: string[] }
+      try {
+        read = await loadRecipe(id)
+      } catch (err) {
+        set({ notice: (err as Error).message })
+        await get().refreshRecipes()
+        return 0
+      }
+      // The lock may have come on while the recipe was being read.
+      if (frozen()) return 0
+      const { recipe, warnings } = read
+      const { selection, graph } = get()
+      const attach = attachTo?.node ?? selectionAttach(selection)
+      const target = at ? steppedPoint(`recipe:${id}`, at) : undefined
+      let placed: InsertResult | undefined
+      commit((g) => {
+        placed = placeRecipe(g, recipe, { at: target, attach, via: attachTo?.via })
+        return placed.graph
+      })
+      if (!placed) return 0
+      const said = [...warnings]
+      if (placed.attached) {
+        const to = nodeLabel(graph.nodes.find((n) => n.id === attach))
+        said.unshift(`Attached “${recipe.name}” to ${to}`)
+      } else if (placed.refusals.length) {
+        said.unshift(
+          `“${recipe.name}” could not attach to the selection — ${placed.refusals.join('; ')}`,
+        )
+      }
+      set({ selection: placed.nodeIds, ...(said.length ? { notice: said.join(' · ') } : {}) })
+      return placed.nodeIds.length
+    },
+
+    importRecipe: async (text) => {
+      const read = readRecipe(text)
+      if (!read) {
+        set({ notice: 'That file is not a Coda recipe' })
+        return
+      }
+      const name = freeName(await listRecipes(), read.recipe.name)
+      // The file's own text, renamed through `renamedRecipeText` where the name is taken — never a
+      // read recipe re-serialised, which would drop what this build could not read.
+      const stored = name === read.recipe.name ? text : renamedRecipeText(text, name)!.text
+      try {
+        await saveRecipeText(stored)
+        await get().refreshRecipes()
+        set({ notice: [`Added the recipe “${name}”`, ...read.warnings].join(' · ') })
+      } catch (err) {
+        set({ notice: `Could not add the recipe: ${(err as Error).message}` })
+      }
+    },
+
+    renameRecipe: async (id, name) => {
+      try {
+        await renameStoredRecipe(id, name)
+        await get().refreshRecipes()
+      } catch (err) {
+        set({ notice: `Could not rename: ${(err as Error).message}` })
+      }
+    },
+
+    deleteRecipe: async (id) => {
+      try {
+        await deleteStoredRecipe(id)
+        await get().refreshRecipes()
+      } catch (err) {
+        set({ notice: `Could not delete: ${(err as Error).message}` })
+      }
+    },
+
+    recipesOpen: false,
+    openRecipes: (open) => set({ recipesOpen: open }),
+
     // --- editing -----------------------------------------------------------
 
     addNode: (type, position) => {
@@ -2879,17 +3059,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
        * the cascade again. Deliberately not part of the document, and deliberately not history:
        * where the last paste went is a fact about this session's pointer.
        */
-      let target: Point | undefined
-      if (at) {
-        // Keyed on the payload's *length* rather than the payload: the counter outlives the
-        // paste, and a module-scoped string built from a 200 KB fragment is a copy of it held
-        // for the session. Two different fragments of exactly equal length at exactly one point
-        // continue each other's cascade, which steps a paste 28px — the harmless direction.
-        const key = `${payload.length}@${Math.round(at.x)},${Math.round(at.y)}`
-        const step = key === lastPaste.key ? lastPaste.count + 1 : 0
-        lastPaste = { key, count: step }
-        target = { x: at.x + step * PASTE_OFFSET, y: at.y + step * PASTE_OFFSET }
-      }
+      // Keyed on the payload's *length*: the key outlives the paste, and a 200 KB fragment held
+      // for the session is the cost of keying on the text. Equal lengths merely step 28px.
+      const target = at ? steppedPoint(`${payload.length}`, at) : undefined
 
       let pasted: string[] = []
       commit((g) => {
