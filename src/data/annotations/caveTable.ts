@@ -42,7 +42,7 @@ import { caveDType } from '../cave/json'
 import type { CaveRequestOptions, CaveRow } from '../cave/client'
 import type { CaveReference } from '../cave/api'
 import { queryTableChecked, uniqueStringValues } from '../cave/api'
-import { referenceTableFor, tableColumnsFor } from '../cave/tables'
+import { peekTableColumns, referenceTableFor, tableColumnsFor } from '../cave/tables'
 import { caveServerFor } from '../cave/datastack'
 import { deploymentKey, normaliseCaveServer } from '../cave/deployments'
 import { splitDatasetId } from '../cave/spec'
@@ -124,10 +124,10 @@ class CaveTableProvider implements AnnotationProvider {
    * The columns this ref would produce.
    *
    * A **wide** table answers immediately from the ref itself — the columns are the ones somebody
-   * named, and nothing has to be fetched to know that. A **long** one cannot: its columns are the
-   * distinct values of `pivotOn`, which is a question for the server. So this is the one branch
-   * that starts discovery, through `unique_string_values` — 52 kB, the same cheap call
-   * `CaveSource` uses for exactly this.
+   * named, and nothing has to be fetched to know that; one naming none waits on the table's
+   * one-row sample (`everyColumn`). A **long** one cannot: its columns are the distinct values of
+   * `pivotOn`, which is a question for the server, so it starts discovery through
+   * `unique_string_values` — 52 kB, the same cheap call `CaveSource` uses for exactly this.
    */
   peekColumns(ref: AnnotationRef): TableSchema | undefined {
     const config = ref.config as CaveTableConfig
@@ -135,23 +135,33 @@ class CaveTableProvider implements AnnotationProvider {
 
     if (!config.pivotOn) {
       const named = namedColumns(config.columns, config.idColumn)
-      // Empty means "everything", which for a wide table cannot be answered without reading it.
-      // Unknown rather than a guess: a schema this picker cannot see is not a schema without
-      // columns in it.
-      if (named.length === 0) return undefined
-      // Through the same `annotationColumns` the shapers use — invariant 3, and here the
-      // collision it resolves would otherwise offer a picker a column no table has.
-      return tableSchema(
-        column(ID_COLUMN_NAME, 'str'),
-        ...annotationColumns(named).map((n) => column(n, 'str')),
-      )
+      if (named.length === 0) return this.everyColumn(config)
+      return annotationSchema(named)
     }
 
     const kinds = this.kindsFor(config)
-    if (!kinds) return undefined
-    return tableSchema(
-      column(ID_COLUMN_NAME, 'str'),
-      ...annotationColumns(kinds).map((n) => column(n, 'str')),
+    return kinds && annotationSchema(kinds)
+  }
+
+  /**
+   * A wide ref naming no columns: everything but the id, off the table's one-row sample once it
+   * lands. The full read keeps the same keys — row zero of a plain table (`wideRows`), the sample
+   * itself for a reference one (`wideColumns`). A null in the one sampled row reads as `str`.
+   */
+  private everyColumn(config: CaveTableConfig): TableSchema | undefined {
+    const parsed = splitDatasetId(config.dataset)
+    if (!parsed) return undefined
+    const sampled = peekTableColumns(
+      normaliseCaveServer(config['deployment']),
+      parsed.datastack,
+      parsed.version,
+      config.table,
+    )?.filter((c) => c.name !== config.idColumn)
+    if (!sampled) return undefined
+    const dtypes = new Map(sampled.map((c) => [c.name, c.dtype]))
+    return annotationSchema(
+      sampled.map((c) => c.name),
+      (name) => dtypes.get(name),
     )
   }
 
@@ -324,6 +334,22 @@ async function wideColumns(
   return sampled.map((c) => c.name).filter((name) => name !== config.idColumn)
 }
 
+/**
+ * The id, then Coda's names for `columns` — deduplicated, so a table carrying both `cell_type`
+ * and `type` maps two of them onto one (`annotationColumns`). One builder for `peekColumns` and
+ * both shapers, invariant 3. A column `dtypeOf` cannot type is `str`.
+ */
+function annotationSchema(
+  columns: readonly string[],
+  dtypeOf: (name: string) => DType | undefined = () => undefined,
+): TableSchema {
+  const names = annotationColumns(columns)
+  return tableSchema(
+    column(ID_COLUMN_NAME, 'str'),
+    ...columns.map((name, i) => column(names[i]!, dtypeOf(name) ?? 'str')),
+  )
+}
+
 /** Long form to one row per neuron, a column per kind. */
 export function pivotRows(
   perKind: ReadonlyArray<readonly [string, CaveRow[]]>,
@@ -346,17 +372,11 @@ export function pivotRows(
   }
 
   const kinds = perKind.map(([kind]) => kind)
-  // Coda's names, deduplicated: a table carrying both a `cell_type` kind and a `type` one maps
-  // two of them onto a single column. See `annotationColumns`.
-  const codaNames = annotationColumns(kinds)
-  const schema = tableSchema(
-    column(ID_COLUMN_NAME, 'str'),
-    ...codaNames.map((name) => column(name, 'str')),
-  )
+  const schema = annotationSchema(kinds)
   const data: Record<string, ColumnData> = {}
   for (const col of schema.columns) data[col.name] = []
   const ids = data[ID_COLUMN_NAME]!
-  const targets = kinds.map((kind, i) => ({ kind, into: data[codaNames[i]!]! }))
+  const targets = kinds.map((kind, i) => ({ kind, into: data[schema.columns[i + 1]!.name]! }))
   // The Map's own insertion order *is* the order — an `order` array beside it was a second copy
   // of it, and re-looking-up each record by id recovered something the iteration already yields.
   for (const [id, record] of byId) {
@@ -388,18 +408,12 @@ export function wideRows(
   }
 
   const dtypes = dtypesOf(rows, columns)
-  // Coda's names, deduplicated: a table carrying both `cell_type` and `type` maps two of its
-  // columns onto one. See `annotationColumns`.
-  const codaNames = annotationColumns(columns)
-  const schema = tableSchema(
-    column(ID_COLUMN_NAME, 'str'),
-    ...columns.map((name, i) => column(codaNames[i]!, dtypes.get(name) ?? 'str')),
-  )
+  const schema = annotationSchema(columns, (name) => dtypes.get(name))
   const data: Record<string, ColumnData> = {}
   for (const col of schema.columns) data[col.name] = []
 
   const ids = data[ID_COLUMN_NAME]!
-  const targets = columns.map((name, i) => ({ name, into: data[codaNames[i]!]! }))
+  const targets = columns.map((name, i) => ({ name, into: data[schema.columns[i + 1]!.name]! }))
   for (const row of rows) {
     const raw = row[config.idColumn]
     if (raw === null || raw === undefined) continue

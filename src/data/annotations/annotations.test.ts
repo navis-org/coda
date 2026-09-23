@@ -35,6 +35,7 @@ import type { CaveTableConfig } from './caveTable'
 import { CAVE_TABLE_PROVIDER, pivotRows, resetCaveTableState, wideRows } from './caveTable'
 import { resetCaveState } from '../cave/tables'
 import type { CaveCall } from '../../test/caveStubs'
+import { installCaveFetch } from '../../test/caveStubs'
 import {
   setToken as setCaveToken,
   resetCredentials as resetCaveCredentials,
@@ -345,16 +346,19 @@ describe('shaping SeaTable rows', () => {
 
 // ---------------------------------------------------------------------------
 
+/** FlyWire's `nuclei_v1` as a wide ref — the table the recorded CAVE sample is of. */
+const nucleiConfig = (over: Partial<CaveTableConfig> = {}): CaveTableConfig => ({
+  dataset: 'flywire_fafb_public:783',
+  table: 'nuclei_v1',
+  idColumn: 'pt_root_id',
+  pivotOn: '',
+  valueColumn: '',
+  columns: '',
+  ...over,
+})
+
 describe('what the CAVE table provider shapes', () => {
-  const config = (over: Partial<CaveTableConfig> = {}): CaveTableConfig => ({
-    dataset: 'flywire_fafb_public:783',
-    table: 'nuclei_v1',
-    idColumn: 'pt_root_id',
-    pivotOn: '',
-    valueColumn: '',
-    columns: '',
-    ...over,
-  })
+  const config = nucleiConfig
 
   it('takes a wide table as it stands, keeping a root id the table carries twice', () => {
     const table = wideRows(
@@ -724,39 +728,25 @@ describe('the provider seam', () => {
 
   it('answers a wide CAVE ref from the ref alone, with no round trip', () => {
     installFetch()
-    const known = {
-      provider: 'caveTable',
-      config: {
-        dataset: 'flywire_fafb_public:783',
-        table: 'nuclei_v1',
-        idColumn: 'pt_root_id',
-        pivotOn: '',
-        valueColumn: '',
-        columns: 'volume',
-      },
-    }
+    const known = { provider: 'caveTable', config: nucleiConfig({ columns: 'volume' }) }
     // A wide table's columns are the ones somebody named, so nothing has to be fetched to know
     // them — which is what lets a picker populate the moment the node is configured.
     expect(peekRefColumns(known)?.columns.map((c) => c.name)).toEqual(['neuronId', 'volume'])
   })
 
-  it('answers unknown for a wide ref that names no columns', () => {
-    installFetch()
-    // Empty means "everything", which for a wide table cannot be answered without reading it.
-    // Unknown rather than a guess — the rule `columnSchemaFor` draws.
-    expect(
-      peekRefColumns({
-        provider: 'caveTable',
-        config: {
-          dataset: 'flywire_fafb_public:783',
-          table: 'nuclei_v1',
-          idColumn: 'pt_root_id',
-          pivotOn: '',
-          valueColumn: '',
-          columns: '',
-        },
-      }),
-    ).toBeUndefined()
+  it('answers a wide CAVE ref naming no columns from the table sample, once it lands', async () => {
+    installCaveFetch()
+    const ref = { provider: 'caveTable', config: nucleiConfig() }
+    // Unknown until the listing and then the one-row sample land; each peek starts the fetch it
+    // cannot answer.
+    expect(peekRefColumns(ref)).toBeUndefined()
+    await vi.waitFor(() => expect(peekRefColumns(ref)).toBeDefined())
+    const schema = peekRefColumns(ref)!
+    // The sample's keys less the id, which is what `wideRows` keeps off row zero of a full read.
+    expect(schema.columns[0]!.name).toBe('neuronId')
+    expect(columnNames(schema)).toContain('volume')
+    expect(columnNames(schema)).not.toContain('pt_root_id')
+    expect(schema.columns.find((c) => c.name === 'volume')?.dtype).toBe('f64')
   })
 })
 
