@@ -106,18 +106,7 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
             selected={selected}
             emptyChip="all"
             onChange={write}
-            adder={(remaining) => (
-              <ComboField
-                label={`Add to ${label}`}
-                value=""
-                adder
-                placeholder={param.placeholder}
-                options={remaining.map((option) => option.value)}
-                onChange={(name) => {
-                  if (!selected.includes(name)) write([...selected, name])
-                }}
-              />
-            )}
+            adder={chipAdder(label, param.placeholder, selected, write)}
           />
         )
       }
@@ -232,18 +221,26 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
 
     case 'multiEnum': {
       const options = typeof param.options === 'function' ? param.options(ctx) : param.options
+      const selected = Array.isArray(value) ? value.map(String) : []
+      // Nothing to list, so entries are typed into the adder — same chips, same `string[]`. See
+      // `MultiEnumParam.freeEntry`.
+      const free = param.freeEntry?.(ctx)
       return (
         <ChipsField
           label={label}
           available={options}
-          // The options come from the node, not from an upstream schema that may not have
-          // arrived — so a stored value that is not in the list is genuinely gone, never
-          // merely unseen. That is the whole difference from the `columns` case above.
-          known
-          selected={Array.isArray(value) ? value.map(String) : []}
+          /*
+           * The options come from the node, not from an upstream schema that may not have
+           * arrived — so a stored value that is not in the list is genuinely gone, never merely
+           * unseen. That is the whole difference from the `columns` case above. Free entry is the
+           * exception: nothing is offered, so nothing typed can be "missing" from it.
+           */
+          known={free === undefined || options.length > 0}
+          selected={selected}
           noun={param.noun ?? 'option'}
-          {...(param.emptyLabel ? { emptyChip: param.emptyLabel } : {})}
+          {...(free === undefined && param.emptyLabel ? { emptyChip: param.emptyLabel } : {})}
           emptyAvailable={`no ${param.noun ?? 'option'}s`}
+          {...(free !== undefined ? { adder: chipAdder(label, free, selected, onChange) } : {})}
           onChange={onChange}
         />
       )
@@ -260,6 +257,34 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
       return <span className="param-field__unknown">{(unreachable as ParamDef).kind}?</span>
     }
   }
+}
+
+/**
+ * The free-text `+` of a chip list, shared by `StringParam.chips` and `MultiEnumParam.freeEntry`.
+ *
+ * Splits what is entered on commas (`listEntries`), so a pasted `1, 2, 5` is three chips rather
+ * than one chip holding a list — which for a `chips` string is also what the stored text would
+ * have split it into on the next read.
+ */
+function chipAdder(
+  label: string,
+  placeholder: string | undefined,
+  selected: readonly string[],
+  write: (next: string[]) => void,
+): (remaining: EnumOption[]) => React.ReactNode {
+  return (remaining) => (
+    <ComboField
+      label={`Add to ${label}`}
+      value=""
+      adder
+      placeholder={placeholder}
+      options={remaining.map((option) => option.value)}
+      onChange={(text) => {
+        const added = listEntries(text).filter((entry) => !selected.includes(entry))
+        if (added.length > 0) write([...selected, ...new Set(added)])
+      }}
+    />
+  )
 }
 
 // ---------------------------------------------------------------------------

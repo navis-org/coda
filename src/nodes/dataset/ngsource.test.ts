@@ -146,18 +146,66 @@ describe('inference', () => {
     expect(options.map((o) => o.value)).toEqual(['EB', 'FB'])
   })
 
-  it('lets an ROI Meshes node refuse a source that publishes no names', async () => {
-    await probePrecomputed(BASE)
+  /** A Neuroglancer Source wired into an ROI Meshes node: its issues, and the picker's mode. */
+  function roiMeshesOn(params: ParamValues = {}) {
     let graph = addNode(emptyGraph('t'), node('src', TYPE, { url: SPEC }))
-    graph = addNode(graph, node('r', 'neuron.roiMeshes'))
+    graph = addNode(graph, node('r', 'neuron.roiMeshes', params))
     graph = addEdge(graph, {
       source: 'src',
       sourceHandle: 'dataset',
       target: 'r',
       targetHandle: 'dataset',
     })
-    expect(inferGraph(graph).nodes['r']?.issues.map((i) => i.message)).toContain(
-      'This dataset publishes no region meshes',
+    const result = inferGraph(graph)
+    const def = requireNodeDef('neuron.roiMeshes')
+    const param = (def.params ?? []).find((p) => p.id === 'rois')
+    if (param?.kind !== 'multiEnum') throw new Error('ROI Meshes has no multiEnum rois')
+    const ctx = makeInferContext(def, defaultParams(def), {
+      dataset: result.nodes['src']?.outputs['dataset'],
+    })
+    return {
+      issues: result.nodes['r']?.issues.map((i) => i.message),
+      typed: param.freeEntry?.(ctx),
+    }
+  }
+
+  it('turns the ROI Meshes region picker into typed ids on a source that publishes no names', async () => {
+    /*
+     * FlyWire's neuropil bucket, reported: meshes, no sidecar. This was a refusal naming an
+     * `Input IDs` wire, on a node whose only socket is the Dataset — so nothing could fetch them.
+     */
+    await probePrecomputed(BASE)
+    const empty = roiMeshesOn()
+    expect(empty.typed).toBeDefined()
+    // Empty cannot mean a default set when nothing lists the regions.
+    expect(empty.issues).toEqual([
+      'This source publishes its region meshes without names — type their segment ids into Regions',
+    ])
+    // A name left over from a source that had them is not an id, and says so before a Run.
+    expect(roiMeshesOn({ rois: ['7', 'EB'] }).issues).toEqual([
+      '"EB" is not a segment id. Ids are digits only, separated by spaces, commas or newlines.',
+    ])
+    // `Input IDs`' grammar: a pasted `[1 2]` is two ids, not a refusal.
+    expect(roiMeshesOn({ rois: ['[1 2]'] }).issues).toEqual([])
+  })
+
+  it('keeps the ROI Meshes chips on a source that publishes names', async () => {
+    // Decided by the stated fact, not by an empty list — which is also a sidecar still in flight.
+    serveSegmentation({
+      [`${BASE}/info`]: volumeInfo({ mesh: 'meshes', segmentProperties: 'props' }),
+    })
+    await probePrecomputed(BASE)
+    expect(roiMeshesOn().typed).toBeUndefined()
+  })
+
+  it('hands neuroglancer the #… options Coda itself ignores', async () => {
+    await probePrecomputed(BASE)
+    const scheduler = new Scheduler({ resolveSource: (id) => requireSource(id) })
+    const graph = addNode(emptyGraph('t'), node('src', TYPE, { url: `${SPEC}#type=mesh` }))
+    await scheduler.run(graph, { mode: 'full' })
+    const layers = scheduler.output('src', 'layers')
+    expect(layers?.kind === 'layers' ? layers.items[0]?.['source'] : undefined).toBe(
+      'precomputed://gs://flyem-male-cns/v1.0/segmentation#type=mesh',
     )
   })
 

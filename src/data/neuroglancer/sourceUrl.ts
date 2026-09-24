@@ -80,6 +80,12 @@ export interface NgSourceRef {
    * where guessing a host produced 404s that read as missing neurons.
    */
   url?: string
+  /**
+   * The `#…` options tail as pasted, `#type=mesh` say — kept for neuroglancer, which reads it,
+   * and out of every other field, since Coda reads the `info` instead. Not in `canonical`, so a
+   * source registered by one spelling serves the other; a layer re-attaches it from its own parse.
+   */
+  options?: string
 }
 
 /**
@@ -109,12 +115,27 @@ function parse(text: string): NgSourceRef | undefined {
   if (!trimmed) return undefined
 
   /*
+   * A `#…` tail is neuroglancer's own per-source options — `#type=mesh` tells its precomputed
+   * reader to treat the directory as meshes without asking the `info` — and never part of the
+   * address. Left on the location it lands *before* the `/info` appended to it, and the read
+   * becomes `…/v6#type=mesh/info`, i.e. `…/v6` itself, which a bucket answers with a 404. So it
+   * comes off every pipe segment (a format segment may carry one too) and rides in `options`,
+   * outside `canonical`, so every spelling with or without one is still one source.
+   */
+  let options: string | undefined
+  const parts = trimmed.split('|').map((part) => {
+    const at = part.indexOf('#')
+    if (at < 0) return part
+    // A bare `#` says nothing, so it is not an option to carry.
+    if (at + 1 < part.length) options ??= part.slice(at)
+    return part.slice(0, at)
+  })
+  /*
    * The pipe syntax, which is `location|format:options` and may carry more than one format
    * segment. The first segment naming a format this understands wins; an unrecognised one is
    * skipped rather than adopted, because the options half of a segment can itself contain a
    * colon and a bare `:` is not a format name.
    */
-  const parts = trimmed.split('|')
   let location = (parts[0] ?? '').trim()
   let scheme: string | undefined
   for (const part of parts.slice(1)) {
@@ -153,6 +174,7 @@ function parse(text: string): NgSourceRef | undefined {
     canonical: `${scheme}://${location}`,
     stated,
     ...(url ? { url } : {}),
+    ...(options ? { options } : {}),
   }
 }
 

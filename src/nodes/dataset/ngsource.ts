@@ -34,7 +34,7 @@
 import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { DatasetValue, LayersValue, Value } from '../../core/values'
-import { PRECOMPUTED } from '../../data/neuroglancer/sourceUrl'
+import { PRECOMPUTED, parseNgSource } from '../../data/neuroglancer/sourceUrl'
 import { peekPrecomputed } from '../../data/precomputed/probe'
 import { precomputedSourceFor } from '../../data/precomputed/registry'
 import { parseIdList } from '../lib/idList'
@@ -52,7 +52,7 @@ registerNode({
     'Datasource output is something the Meshes, Skeletons and ROI Meshes nodes can fetch from, so ' +
     'a bucket no connectome server knows about is still usable. A source that publishes segment ' +
     'properties can also be browsed and queried by name; one that does not takes its ids from an ' +
-    'Input IDs node. Its ' +
+    'Input IDs node, or for ROI Meshes typed into its Regions field. Its ' +
     'Layers output plugs into the Neuroglancer node’s Extra layers socket, which is how a brain ' +
     'shell, a second segmentation or somebody’s own annotations get into that scene — chain ' +
     'these nodes to add more than one. Paste any of the three spellings and the card says what ' +
@@ -87,7 +87,7 @@ registerNode({
       label: 'Source',
       default: '',
       placeholder: EXAMPLE,
-      help: 'A neuroglancer source URL. "gs://bucket/path", "precomputed://gs://bucket/path" and "gs://bucket/path|neuroglancer-precomputed:" all name the same directory. Point it at a segmentation or at the mesh directory itself.',
+      help: 'A neuroglancer source URL. "gs://bucket/path", "precomputed://gs://bucket/path" and "gs://bucket/path|neuroglancer-precomputed:" all name the same directory. Point it at a segmentation or at the mesh directory itself. Options after a # (such as #type=mesh) are passed on to neuroglancer and ignored by Coda.',
     },
     /*
      * Everything below is for the Layers output only, and all of it is `advanced` — the card's
@@ -268,7 +268,10 @@ registerNode({
       // The canonical spelling, which is why `parseNgSource` keeps the location in its own
       // scheme: neuroglancer wants `precomputed://gs://…` back, not the storage.googleapis.com
       // URL Coda fetches through.
-      source: source.ref.canonical,
+      // Plus any `#…` options, which neuroglancer reads (`#type=mesh` on a directory whose `info`
+      // does not say what it holds). From this node's own text rather than `source.ref`: the
+      // registry keys on `canonical`, so its ref is whichever spelling registered first.
+      source: source.ref.canonical + (parseNgSource(text)?.options ?? ''),
       // Absent rather than empty: the two are different to neuroglancer, and "show this layer
       // with nothing selected" is what a brain shell or an EM volume wants.
       ...(segments.length ? { segments } : {}),

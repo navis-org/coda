@@ -13,8 +13,8 @@
  * perfectly well. Both claims were false and both pointed at the user's configuration.
  */
 
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ColumnParam, ColumnsParam, MultiEnumParam, NodeDefinition } from '../../core/node'
 import { defaultParams, makeInferContext } from '../../core/node'
@@ -191,5 +191,65 @@ describe('a chip whose option carries a note', () => {
   it('notes a value the list has lost, so "missing" survives the cut too', () => {
     const { container } = draw(PROPS, undefined, { props: ['gone'] })
     expect(container.querySelector('.chip__note')?.textContent).toBe(' (missing)')
+  })
+})
+
+/**
+ * A `multiEnum` whose input says its entries cannot be listed — ROI Meshes on a neuroglancer
+ * source with meshes and no names. The `+` dropdown gives way to `StringParam.chips`' free-text
+ * adder; the chips and the `string[]` stay as they were.
+ */
+describe('a region picker with nothing to list', () => {
+  const REGIONS: MultiEnumParam = {
+    id: 'rois',
+    kind: 'multiEnum',
+    label: 'Regions',
+    noun: 'region',
+    default: [],
+    options: [],
+    freeEntry: (ctx) => (ctx.inputs['in'] ? 'segment ids' : undefined),
+  }
+
+  function drawFree(value: string[]) {
+    const d = def(REGIONS)
+    const ctx = makeInferContext(d, { rois: value }, { in: T.table() })
+    const onChange = vi.fn()
+    const view = render(
+      <ParamField param={REGIONS} value={value} ctx={ctx} onChange={onChange} />,
+    )
+    return {
+      ...view,
+      adder: screen.getByLabelText<HTMLInputElement>('Add to Regions'),
+      onChange,
+    }
+  }
+
+  it('keeps the entries as chips and takes new ones typed', () => {
+    const { container, adder, onChange } = drawFree(['7'])
+    expect(container.querySelector('.chip__text')?.textContent).toBe('7')
+    // Nothing is offered, so nothing typed is "missing" from it.
+    expect(container.querySelector('.chip__note')).toBeNull()
+    expect(adder.placeholder).toBe('segment ids')
+    act(() => {
+      fireEvent.focus(adder)
+      fireEvent.change(adder, { target: { value: '9' } })
+      fireEvent.keyDown(adder, { key: 'Enter' })
+    })
+    expect(onChange).toHaveBeenLastCalledWith(['7', '9'])
+  })
+
+  it('splits a pasted list into one chip per entry, skipping what is already there', () => {
+    const { adder, onChange } = drawFree(['7'])
+    act(() => {
+      fireEvent.focus(adder)
+      fireEvent.change(adder, { target: { value: '7, 9,12 ,9' } })
+      fireEvent.keyDown(adder, { key: 'Enter' })
+    })
+    expect(onChange).toHaveBeenLastCalledWith(['7', '9', '12'])
+  })
+
+  it('offers the ordinary dropdown where the declaration does not answer', () => {
+    draw(REGIONS, undefined, { rois: ['7'] })
+    expect(screen.queryByLabelText('Add to Regions')).toBeNull()
   })
 })

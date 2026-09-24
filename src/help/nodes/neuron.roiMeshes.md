@@ -30,6 +30,8 @@ The published region list **nests**. Hemibrain lists 229 regions of which 63 til
 
 An empty picker therefore means the **primary set**. Name regions explicitly when you want a few; the picker offers exactly what the connected dataset publishes.
 
+A `Neuroglancer Source` that publishes meshes but no names — FlyWire's neuropil bucket is one — has nothing to list. There the picker's `+` takes typed entries instead: type or paste the segment ids of the regions you want, and each shell arrives named by its id. Empty asks for nothing on such a source, since nothing can say what the whole set is.
+
 > [!WARNING] One request per region, and they are not small
 > A whole primary set runs to 29–62 MB — four to nine times a whole-dataset neuron index. That is
 > why this node is `expensive`: nothing is fetched until you press Run.

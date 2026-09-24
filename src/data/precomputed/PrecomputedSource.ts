@@ -299,6 +299,11 @@ export class PrecomputedSource implements DataSource {
            * same thing about `primary`.
            */
           rois: properties ? labelsOf(properties) : [],
+          // Meshes with no sidecar: the shells are there and nameless, so ROI Meshes asks for
+          // them by id. Off the probe alone, which says outright whether a sidecar exists.
+          ...(source.meshUrl && !source.segmentPropertiesUrl
+            ? { regionsById: true as const }
+            : {}),
           statuses: [],
         },
       ]
@@ -308,15 +313,17 @@ export class PrecomputedSource implements DataSource {
         datasets,
         /*
          * Built here rather than looked up in a table of every combination, because this is where
-         * the facts arrive and where the identity has to be stable. `roiMeshes` needs **both** a
-         * mesh directory and names: without the sidecar the region picker would offer
-         * eighteen-digit segment ids.
+         * the facts arrive and where the identity has to be stable. `roiMeshes` needs a mesh
+         * directory and nothing else. It used to need names too, on the grounds that a picker
+         * offering eighteen-digit ids helps nobody — which refused FlyWire's neuropil bucket
+         * outright, and sent its user to an `Input IDs` wire the node has no socket for. A
+         * nameless source now says `regionsById`, and the picker becomes a list of typed ids.
          */
         capabilities: Object.freeze({
           meshes: Boolean(source.meshUrl),
           skeletons: Boolean(source.skeletonUrl),
           neuronIndex: Boolean(source.segmentPropertiesUrl),
-          roiMeshes: Boolean(source.segmentPropertiesUrl && source.meshUrl),
+          roiMeshes: Boolean(source.meshUrl),
         }),
         schemas: properties
           ? { ...PRECOMPUTED_SCHEMAS, neurons: properties.schema }
@@ -499,7 +506,7 @@ export class PrecomputedSource implements DataSource {
   }
 
   /**
-   * Region shells, by name.
+   * Region shells, by name — or by segment id, where the source publishes no names.
    *
    * The one place the two halves of a sidecar-bearing source meet: the names come from the
    * segment properties and the geometry from the mesh directory, keyed by the ids the sidecar
@@ -511,47 +518,21 @@ export class PrecomputedSource implements DataSource {
    * precomputed sidecar says which of its labels nest. `primary` is `true` for every row for the
    * same reason: it is the licence to sum, and a source that cannot distinguish has no grounds to
    * withhold it from some rows and not others.
+   *
+   * Without a sidecar the request's `rois` are segment ids (`DatasetInfo.regionsById`) and each
+   * shell is named by its id — see `idsAsRegions`.
    */
   async fetchRoiMeshes(req: RoiMeshRequest): Promise<MeshesValue> {
-    /*
-     * Asked here rather than left to `neuronIndex`, because **a remedy has to be one the caller
-     * can take**. The sidecar refusal below names an `Input IDs` node, which is the answer for
-     * Explore and Find Neurons and is unreachable from this one: the ROI Meshes node's only
-     * input is a Dataset, so a reader following that sentence finds nowhere to plug the ids in.
-     * Costs no request — `describe` is the probe's memo, which `meshDir` reads a line later.
-     */
+    // Costs no request — `describe` is the probe's memo, which `meshDir` reads a line later.
     const described = await this.describe(req.signal ? { signal: req.signal } : {})
-    if (!described.segmentPropertiesUrl) {
-      throw new Error(
-        `${this.ref.canonical} publishes no segment properties — it is ` +
-          `${described.summary} — so nothing can list its meshes. Fetch by id instead: ` +
-          `Input IDs into Meshes, wired to the 3D View's Volumes socket.`,
-      )
-    }
-
-    /*
-     * Through `neuronIndex`, not around it. Reading the sidecar directly fetched half a megabyte
-     * a second time on hemibrain, ignored `refresh`, and handed `idsForLabels` a different table
-     * object each call — which defeats the `LABEL_INDEX` memo keyed on its identity.
-     */
-    const [properties, source] = await Promise.all([
-      this.neuronIndex({ datasetId: req.datasetId }),
+    // Answered before the mesh directory is opened, so a refusal costs no request.
+    const byId = described.segmentPropertiesUrl
+      ? undefined
+      : this.idsAsRegions(req, described.summary)
+    const [hits, source] = await Promise.all([
+      byId ?? this.regionsByLabel(req),
       this.meshDir(req.signal),
     ])
-
-    /*
-     * The stored list, not a fresh `labelsOf`: `remember` built exactly this from the same table
-     * when the sidecar landed, and re-deriving it means uniquing and collating 22,706 strings
-     * again per fetch.
-     */
-    const stored = this.cache?.datasets[0]?.rois
-    /*
-     * `.length`, not `??`. The stored list is `[]` until the sidecar has landed *and* a peek has
-     * rebuilt the cache from it — and `[] ?? labelsOf(...)` is `[]`, so an ROI Meshes node run
-     * with an empty picker on a cold source fetched nothing at all and said nothing about it.
-     */
-    const wanted = req.rois?.length ? req.rois : stored?.length ? stored : labelsOf(properties)
-    const hits = idsForLabels(properties, wanted)
     if (hits.length === 0) {
       return {
         kind: 'meshes',
@@ -595,6 +576,51 @@ export class PrecomputedSource implements DataSource {
       bounds: boundsOf(items.map((item) => item.positions)),
       ...this.frame(),
     }
+  }
+
+  /** The requested regions as sidecar ids, looked up by label. */
+  private async regionsByLabel(req: RoiMeshRequest): Promise<{ id: string; label: string }[]> {
+    /*
+     * Through `neuronIndex`, not around it. Reading the sidecar directly fetched half a megabyte
+     * a second time on hemibrain, ignored `refresh`, and handed `idsForLabels` a different table
+     * object each call — which defeats the `LABEL_INDEX` memo keyed on its identity.
+     */
+    const properties = await this.neuronIndex({ datasetId: req.datasetId })
+    /*
+     * The stored list, not a fresh `labelsOf`: `remember` built exactly this from the same table
+     * when the sidecar landed, and re-deriving it means uniquing and collating 22,706 strings
+     * again per fetch.
+     */
+    const stored = this.cache?.datasets[0]?.rois
+    /*
+     * `.length`, not `??`. The stored list is `[]` until the sidecar has landed *and* a peek has
+     * rebuilt the cache from it — and `[] ?? labelsOf(...)` is `[]`, so an ROI Meshes node run
+     * with an empty picker on a cold source fetched nothing at all and said nothing about it.
+     */
+    const wanted = req.rois?.length ? req.rois : stored?.length ? stored : labelsOf(properties)
+    return idsForLabels(properties, wanted)
+  }
+
+  /**
+   * The requested regions on a source with no sidecar, where `rois` carries **segment ids** —
+   * `DatasetInfo.regionsById`. A region's id is then also its name, which is what the legend
+   * draws: there is nothing better to call it.
+   *
+   * The ids arrive already read: the ROI Meshes node parses them with `parseIdList` and refuses
+   * on its own card, so the grammar and its sentences are written once, there. What is left here
+   * is the seam's own contract — an empty request cannot mean "every region" when nothing lists
+   * them. That is the refusal this used to make for *every* request, pointing at an `Input IDs`
+   * wire the node has no socket for.
+   */
+  private idsAsRegions(req: RoiMeshRequest, summary: string): { id: string; label: string }[] {
+    if (!req.rois?.length) {
+      throw new Error(
+        `${this.ref.canonical} publishes no segment properties — it is ${summary} — so ` +
+          `nothing can list its regions. Type the segment ids of the ones you want into ` +
+          `Regions, separated by commas.`,
+      )
+    }
+    return req.rois.map((id) => ({ id, label: id }))
   }
 
   /** The sidecar's URL, or the refusal that names what this source publishes instead. */

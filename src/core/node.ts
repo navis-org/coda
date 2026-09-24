@@ -684,6 +684,22 @@ export interface MultiEnumParam extends ParamBase {
   emptyLabel?: string
   /** Word for one entry, for the add control's labels. Defaults to "option". */
   noun?: string
+  /**
+   * Where the input says its entries **cannot be listed**, the placeholder for a free-text adder
+   * beside the chips, taking entries typed or pasted (comma-separated) rather than picked.
+   * Undefined means the ordinary `+` dropdown.
+   *
+   * For ROI Meshes on a neuroglancer source with meshes and no names: the shells exist, nothing
+   * lists them, and each is asked for by segment id. A `visibleIf` pair of params cannot say
+   * this — it sees params, never the input — and a second param shown always is a control that
+   * does nothing on every source but one. The adder is `StringParam.chips`' own.
+   *
+   * **Storage is unchanged**, the same `string[]`, and so is the drawing — chips either way, so a
+   * source swapped for one that names its entries keeps them where they were. Same contract as
+   * `options`: synchronous and network-free, and **decided by a stated fact rather than by an
+   * empty list**, which is also what a list that has not landed looks like.
+   */
+  freeEntry?: (ctx: InferContext) => string | undefined
 }
 
 /** Ordered multi-column reference (group-by keys, selected columns). */

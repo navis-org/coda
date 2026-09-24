@@ -62,8 +62,11 @@ const MAX_ID_DIGITS = 19
  * quietly dropping one is quietly answering a different question. The cost is real and is
  * accepted — pasting a spreadsheet column brings its header along, and that header now has to be
  * deleted — so the message says so when the first token is a word, which is exactly that case.
+ *
+ * `noun` is what the refusals call one entry: ROI Meshes reads *segment* ids with this grammar,
+ * and "not a neuron id" on a field of region shells names the wrong thing.
  */
-export function parseIdList(text: unknown): IdListResult {
+export function parseIdList(text: unknown, noun = 'neuron id'): IdListResult {
   const raw = typeof text === 'string' ? text.trim() : ''
   if (!raw) return { ids: [] }
 
@@ -81,7 +84,7 @@ export function parseIdList(text: unknown): IdListResult {
       return {
         ids: [],
         error:
-          `"${token}" is not a neuron id. Ids are digits only, separated by spaces, commas ` +
+          `"${token}" is not a ${noun}. Ids are digits only, separated by spaces, commas ` +
           `or newlines.${headerHint}`,
       }
     }
@@ -96,7 +99,7 @@ export function parseIdList(text: unknown): IdListResult {
       return {
         ids: [],
         error:
-          `"${token}" is too long to be a neuron id — ids are at most ${MAX_ID_DIGITS} digits, ` +
+          `"${token}" is too long to be a ${noun} — ids are at most ${MAX_ID_DIGITS} digits, ` +
           `which is what a 64-bit id holds.`,
       }
     }

@@ -36,6 +36,8 @@ import {
   roiOptions,
   sourceSupports,
 } from '../lib/datasetParam'
+import type { IdListResult } from '../lib/idList'
+import { parseIdList } from '../lib/idList'
 
 /**
  * Where an explicit region list starts being worth a sentence.
@@ -71,12 +73,20 @@ registerNode({
        * source knows which of its regions tile.
        */
       emptyLabel: 'the primary set',
-      help: 'Which neuropils to fetch. Empty means the set that tiles the volume — the regions that do not sit inside one another.',
+      help: 'Which neuropils to fetch. Empty means the set that tiles the volume — the regions that do not sit inside one another. On a neuroglancer source that publishes meshes but no names, type the segment ids of the regions instead, separated by commas.',
       default: [],
       // Shared with Connectivity's region picker, which is where the alphabetical rule and the
       // reason for it now live — see `roiOptions`.
       optionsWithoutPeek: true,
       options: (ctx) => roiOptions(ctx.inputs.dataset),
+      /*
+       * A source whose shells have no names — FlyWire's neuropil bucket, read through a
+       * Neuroglancer Source — has nothing to offer as chips, and its regions are asked for by
+       * segment id. This used to be a refusal naming an `Input IDs` wire, on a node whose only
+       * socket is the Dataset.
+       */
+      freeEntry: (ctx) =>
+        datasetInfoFromType(ctx.inputs.dataset)?.regionsById ? ID_PLACEHOLDER : undefined,
     },
   ],
 
@@ -98,10 +108,14 @@ registerNode({
      * rather than after one: the source answers a missing region with nothing, so the failure
      * is a shell quietly absent from a scene, which reads as a rendering problem.
      */
-    const known = datasetInfoFromType(ctx.inputs.dataset)?.rois
+    const info = datasetInfoFromType(ctx.inputs.dataset)
     const chosen = asNames(ctx.params.rois)
-    if (known?.length) {
-      const missing = chosen.filter((roi) => !known.includes(roi))
+    if (info?.regionsById) {
+      // `evaluate` throws the same sentence, so a Run changes nothing.
+      const { error } = typedRegionIds(chosen)
+      if (error) issues.push(error)
+    } else if (info?.rois.length) {
+      const missing = chosen.filter((roi) => !info.rois.includes(roi))
       if (missing.length > 0) {
         issues.push(`This dataset has no region called ${missing.join(', ')}`)
       }
@@ -109,9 +123,12 @@ registerNode({
     if (chosen.length > REGIONS_WARN) {
       // An edit-time warning, which is where this one belongs: the picker is right there, and
       // `NodeIssue`'s 'warning' severity has said "this is fine, but" since before `ctx.warn`.
+      // Without the second clause where ids are typed: there, empty asks for nothing.
       issues.push(
-        `${chosen.length} regions is a lot to fetch one shell at a time; leaving the ` +
-          `picker empty asks for the source's primary set.`,
+        `${chosen.length} regions is a lot to fetch one shell at a time` +
+          (info?.regionsById
+            ? '.'
+            : `; leaving the picker empty asks for the source's primary set.`),
       )
     }
     return issues
@@ -131,7 +148,20 @@ registerNode({
      * the moment somebody pressed Run. A threshold on a *param* belongs at edit time, where
      * the picker is.
      */
-    const rois = asNames(ctx.params.rois)
+    let rois = asNames(ctx.params.rois)
+    /*
+     * The peek, and the awaited listing where the peek has nothing yet — a cold source on the
+     * first Run after a reload would otherwise hand the source unparsed chips. The listing is
+     * the source's own memo on every backend that sets `regionsById`, so it costs no request.
+     */
+    const info =
+      source.peekDataset(dataset.datasetId) ??
+      (await source.listDatasets(ctx.signal)).find((d) => d.id === dataset.datasetId)
+    if (info?.regionsById) {
+      const typed = typedRegionIds(rois)
+      if (typed.error) throw new Error(typed.error)
+      rois = typed.ids
+    }
 
     ctx.progress(0.02, rois.length > 0 ? `${rois.length} regions` : 'the primary set')
     const meshes = await source.fetchRoiMeshes({
@@ -145,6 +175,28 @@ registerNode({
     return { meshes }
   },
 })
+
+/** What the Regions field shows where it takes ids. */
+const ID_PLACEHOLDER = 'segment ids, e.g. 1, 2, 5'
+
+/**
+ * The Regions entries as segment ids, or the one sentence saying why not — read by `validate`
+ * and `evaluate` both, so the badge and the error agree word for word.
+ *
+ * `parseIdList`, the grammar `Input IDs` and the Neuroglancer Source's own `Segments` field read,
+ * so a paste that works on the card beside this one works here: brackets, spaces, `007` as `7`.
+ * The widget splits only on commas, which is why the entries are joined back first. Empty is a
+ * refusal of its own, since nothing lists the regions for it to mean a default set.
+ */
+function typedRegionIds(entries: readonly string[]): IdListResult {
+  const parsed = parseIdList(entries.join(', '), 'segment id')
+  if (parsed.error || parsed.ids.length > 0) return parsed
+  return {
+    ids: [],
+    error:
+      'This source publishes its region meshes without names — type their segment ids into Regions',
+  }
+}
 
 function asNames(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : []

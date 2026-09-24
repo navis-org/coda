@@ -73,6 +73,22 @@ describe('parseNgSource', () => {
     expect(ref?.location).toBe('https://cave.example.org/segmentation/table/x')
   })
 
+  it('drops a #… options tail, which a read would otherwise put in front of /info', () => {
+    // Reported with `#type=mesh`: the location kept it, the probe asked for `…/v6#type=mesh/info`,
+    // and a bucket answers the directory a browser actually requests with a 404.
+    const plain = parseNgSource('precomputed://gs://flywire_neuropil_meshes/neuropils/v6')
+    for (const spelling of [
+      'precomputed://gs://flywire_neuropil_meshes/neuropils/v6#type=mesh',
+      'precomputed://gs://flywire_neuropil_meshes/neuropils/v6/#type=mesh',
+      'gs://flywire_neuropil_meshes/neuropils/v6|neuroglancer-precomputed:#type=mesh',
+      // Before the pipe, too — the format segment must survive it.
+      'gs://flywire_neuropil_meshes/neuropils/v6#type=mesh|neuroglancer-precomputed:',
+    ]) {
+      // Same address and format; the options ride beside them for neuroglancer.
+      expect(parseNgSource(spelling)).toEqual({ ...plain, options: '#type=mesh' })
+    }
+  })
+
   it('uses virtual-hosted style for S3', () => {
     // The path-style endpoint 301s, and fetch will not follow a redirect that drops CORS headers.
     expect(parseNgSource('precomputed://s3://bucket/a/b')?.url).toBe(

@@ -398,8 +398,10 @@ exactly the same wires be made.
 `roiMeshes` are gated from the same `info` — a segmentation names its mesh directory, its skeleton
 directory and its segment properties in one document, so the probe learns all four at once and
 each node refuses on its own card. Most segmentations name no skeleton directory at all, which is
-the ordinary answer rather than an edge case. `roiMeshes` needs **both** a mesh directory and a
-sidecar: without names the region picker would offer eighteen-digit segment ids.
+the ordinary answer rather than an edge case. `roiMeshes` needs only a mesh directory: it once
+needed a sidecar too, which left a nameless bucket of region shells unfetchable by anything, so a
+nameless one now says `regionsById` and the region picker takes typed segment ids instead — see
+[backends.md](backends.md#segment-properties-and-what-they-unlock).
 
 **A source with segment properties stops needing Input IDs.** The sidecar is a neuron index, so
 Explore can browse it and Find Neurons can query it — locally, through the same

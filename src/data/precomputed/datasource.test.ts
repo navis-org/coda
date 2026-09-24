@@ -513,7 +513,7 @@ describe('segment properties', () => {
     expect(found.data['neuronId']).toEqual(['1', '2'])
   })
 
-  it('gates browsing and region shells on the sidecar, together', async () => {
+  it('gates browsing on the sidecar, and region shells on the meshes alone', async () => {
     const withProps = 'https://storage.googleapis.com/gated/seg'
     serveRegions(withProps)
     await probePrecomputed(withProps)
@@ -524,18 +524,26 @@ describe('segment properties', () => {
       roiMeshes: true,
     })
 
-    // Meshes but no names: the picker would offer eighteen-digit ids, so ROI Meshes declines.
+    /*
+     * Meshes but no names — FlyWire's neuropil bucket. It used to decline outright, which left
+     * nothing able to fetch those shells; now it says `regionsById`, and ROI Meshes takes ids.
+     * The sidecar-bearing source above says no such thing.
+     */
     const bare = 'https://storage.googleapis.com/bare/seg'
     serve({
       [`${bare}/info`]: volumeInfo({ mesh: 'm' }),
       [`${bare}/m/info`]: DRACO_INFO,
     })
     await probePrecomputed(bare)
-    expect(sourceFor('gs://bare/seg').capabilitiesFor()).toMatchObject({
+    const source = sourceFor('gs://bare/seg')
+    expect(source.capabilitiesFor()).toMatchObject({
       meshes: true,
       neuronIndex: false,
-      roiMeshes: false,
+      roiMeshes: true,
     })
+    expect(source.peekDataset(source.datasetId)?.regionsById).toBe(true)
+    const named = sourceFor('gs://gated/seg')
+    expect(named.peekDataset(named.datasetId)?.regionsById).toBeUndefined()
   })
 
   /**
@@ -591,18 +599,28 @@ describe('segment properties', () => {
     )
   })
 
-  it('names a remedy ROI Meshes can take, rather than the one Explore can', async () => {
+  it('fetches region shells by segment id where the source publishes no names', async () => {
     /*
-     * The listing refusal above points at an `Input IDs` node, which is right for Explore and
-     * Find Neurons and unreachable from ROI Meshes — that node's only input is a Dataset, so
-     * somebody following the sentence finds nowhere to plug the ids in. Reported as "there is no
-     * apparent way to supply ids instead", which is the whole of what is wrong with it.
+     * The refusal this replaced named an `Input IDs` wire — the answer for Explore, and
+     * unreachable from ROI Meshes, whose only socket is the Dataset. The ids go in the request's
+     * `rois` instead, and each shell is named by its id.
      */
     const base = 'https://storage.googleapis.com/nameless-rois/seg'
-    serve({ [`${base}/info`]: { '@type': 'neuroglancer_legacy_mesh' } })
+    const served = serve({ [`${base}/info`]: { '@type': 'neuroglancer_legacy_mesh' } })
     const source = sourceFor('gs://nameless-rois/seg')
+    await source.fetchRoiMeshes({ datasetId: source.datasetId, rois: ['3', '5'] })
+    // Asked of the directory itself — no sidecar read attempted.
+    expect(served.urls.filter((u) => u.endsWith(':0'))).toEqual([`${base}/3:0`, `${base}/5:0`])
+  })
+
+  it('refuses an empty request on a nameless source, naming the field to type in', async () => {
+    // Empty cannot mean "every region" when nothing lists them. The id grammar is the node's
+    // (`parseIdList`, refused on the card) — see `ngsource.test.ts`.
+    const base = 'https://storage.googleapis.com/nameless-refuse/seg'
+    serve({ [`${base}/info`]: { '@type': 'neuroglancer_legacy_mesh' } })
+    const source = sourceFor('gs://nameless-refuse/seg')
     await expect(source.fetchRoiMeshes({ datasetId: source.datasetId })).rejects.toThrow(
-      /Input IDs into Meshes, wired to the 3D View/,
+      /Type the segment ids of the ones you want into Regions/,
     )
   })
 

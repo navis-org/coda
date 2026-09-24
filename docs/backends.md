@@ -1284,6 +1284,31 @@ for it — `describe` is the probe's memo, which the next line reads anyway, so 
 and names what a *region* fetch can do instead: an Input IDs node into a Meshes node, wired to the
 3D View's Volumes socket.
 
+**That remedy was still one step short, and the node now takes the ids itself.** Reported against
+FlyWire's neuropil bucket (`gs://flywire_neuropil_meshes/neuropils/neuropil_mesh_v141_v6`: meshes,
+no sidecar): the sentence was accurate and the person reading it was on an ROI Meshes card, which
+could not do what it said. So `roiMeshes` is gated on the **mesh directory alone**, a nameless one
+sets `DatasetInfo.regionsById`, and the region picker's `+` dropdown gives way to a free-text adder
+for segment ids (`MultiEnumParam.freeEntry`, the adder `StringParam.chips` already had; a pasted
+`1, 2, 5` is three chips). Chips and `string[]` either way, so swapping to a source that names its
+regions leaves the entries exactly where they were. Each shell is then named by its id,
+there being nothing better to call it. The switch is a **stated fact** from the probe, never an
+empty `rois`, because an empty list is also a sidecar that has not landed — and a picker turning
+into a free-text one for the first second of a session would take a half-typed entry with it. On such
+a source empty means nothing rather than a default set, and a non-id is refused rather than
+dropped. The grammar is **`parseIdList`**, the one `Input IDs` and the Neuroglancer Source's own
+`Segments` field read, so the same paste works on both cards; the node's `typedRegionIds` is the one
+sentence `validate` shows and `evaluate` throws, and the source keeps only its seam's empty guard.
+
+**A `#…` tail on a source URL is neuroglancer's options, never the address.** The same user first
+pasted `…/neuropil_mesh_v141_v6#type=mesh`, which is how neuroglancer is told a directory holds
+meshes. Kept on the location, the probe appended `/info` *after* the fragment, so the browser asked
+for the directory itself and the bucket answered 404. `parseNgSource` takes it off every pipe
+segment into `NgSourceRef.options`, outside `canonical`, so every spelling with or without one is
+the same source — Coda reads the `info` anyway. The Layers output re-attaches it from the node's
+own parse (not `source.ref`, which is whichever spelling registered first), since neuroglancer is
+the one reader that needs it: `#type=mesh` is for a directory whose `info` does not say.
+
 **Every route to it goes through `neuronIndex`**, i.e. through `loadCachedTable` like every other
 source's index — so it persists across sessions, honours Explore's refresh and the node menu's
 Clear Cache, and reports its age to the dataset card. It had a memo of its own, which got none of

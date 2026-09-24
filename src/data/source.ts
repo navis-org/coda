@@ -77,6 +77,16 @@ export interface DatasetInfo {
   /** ROI names available for per-ROI queries, in a sensible display order. */
   rois: string[]
   /**
+   * The dataset's region shells exist but have no names, so a region is asked for by its
+   * **segment id** — `RoiMeshRequest.rois` then carries ids, and `rois` above stays empty.
+   *
+   * A neuroglancer precomputed directory with meshes and no segment-properties sidecar: FlyWire's
+   * neuropil bucket is one. Stated rather than inferred from an empty `rois`, which is also what
+   * a sidecar that has not landed yet looks like — and a picker that turned into a text field for
+   * the first second of every session would take a half-typed entry with it.
+   */
+  regionsById?: true
+  /**
    * The non-overlapping subset of `rois`, when the source knows it.
    *
    * Per-ROI synapse counts nest — a synapse in `LO(R)` is also counted in its parent `OL(R)`
