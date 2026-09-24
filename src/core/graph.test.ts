@@ -15,6 +15,7 @@ import {
   wouldCreateCycle,
 } from './graph'
 import type { CodaGraph, GraphNode } from './graph'
+import { MISSING_TYPE } from './missing'
 import { defaultParams } from './node'
 import { requireNodeDef } from './registry'
 
@@ -294,7 +295,9 @@ describe('serialisation', () => {
     })
   })
 
-  it('drops unknown node types with a warning rather than failing', () => {
+  it('keeps an unknown node type as a placeholder, with its wire, rather than failing', () => {
+    // It used to be dropped, and saving then deleted it from the file. `core/missing.test.ts`
+    // has the rest: the round trip, the ports, and what the card says.
     const json = JSON.stringify({
       version: 1,
       nodes: [
@@ -306,8 +309,11 @@ describe('serialisation', () => {
       ],
     })
     const { graph, warnings } = deserializeGraph(json)
-    expect(graph.nodes.map((n) => n.id)).toEqual(['a'])
-    expect(graph.edges).toEqual([])
+    expect(graph.nodes.map((n) => [n.id, n.type])).toEqual([
+      ['a', 'neuron.dataset'],
+      ['ghost', MISSING_TYPE],
+    ])
+    expect(graph.edges.map((e) => e.id)).toEqual(['e1'])
     expect(warnings.join(' ')).toContain('future.node')
   })
 

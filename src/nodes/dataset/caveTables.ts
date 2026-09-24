@@ -23,7 +23,7 @@
  * a listing is shared by every node on the datastack, where the facts are per table.
  */
 
-import { registerNode } from '../../core/registry'
+import { packNode } from '../../core/registry'
 import { T, column, tableSchema } from '../../core/types'
 import type { DType, TableSchema } from '../../core/types'
 import type { ColumnData } from '../../core/values'
@@ -59,7 +59,7 @@ import {
  */
 const LISTING_SCHEMA: TableSchema = tableSchema(column('table', 'str'), column('kind', 'str'))
 
-registerNode({
+export const caveTablesNode = packNode({
   type: 'cave.tables',
   label: 'List CAVE tables',
   category: 'dataset',
@@ -136,7 +136,7 @@ const COLUMNS_SCHEMA: TableSchema = tableSchema(
   column('example', 'str'),
 )
 
-registerNode({
+export const caveTableInfoNode = packNode({
   type: 'cave.tableInfo',
   label: 'CAVE table info',
   category: 'dataset',

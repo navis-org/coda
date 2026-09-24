@@ -27,7 +27,11 @@ the failure when they do is a button that opens nothing.
 
 ## Writing one
 
-Markdown, in `src/help/nodes/<the exact node type>.md`. Beyond the subset the dataset blurbs
+Markdown, in `src/help/nodes/<the exact node type>.md` — or, for a pack's node, in
+`src/packs/<pack>/help/<name>.md`, since a filename cannot carry the colon: `typeOfPath` reads
+`packs/zapbench/help/traces.md` as `zapbench:traces`. A pack's document cannot hold images yet,
+the image glob covering `help/images` only. Connectome's nodes keep built-in ids, so their
+documents stay here. Beyond the subset the dataset blurbs
 use, a document may hold fenced figures, callouts, tables and images — see **The format** below.
 
 **Start at `##`.** The overlay draws the node's name in its own header, and `help.test.ts` fails

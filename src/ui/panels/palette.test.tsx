@@ -29,8 +29,15 @@ import {
 } from '../exportWarnings'
 import { CommandPalette, parsePaletteQuery } from './CommandPalette'
 import type { PaletteItem } from './paletteItems'
+import { nodeDefsByCategory } from '../../core/registry'
 import { buildCommandItems, buildNodeItems } from './paletteItems'
 import { searchFor } from '../../test/findNeurons'
+
+import type { DragFilter } from './paletteItems'
+
+/** The palette's node rows over the whole registry — no reader, so no pack is switched off. */
+const nodeItems = (filter?: DragFilter, locked = false) =>
+  buildNodeItems(nodeDefsByCategory(), filter, locked)
 
 beforeAll(() => {
   installJsdomStubs()
@@ -324,7 +331,7 @@ describe('buildCommandItems', () => {
 
 describe('buildNodeItems', () => {
   it('lists every addable node when unfiltered', () => {
-    const items = buildNodeItems()
+    const items = nodeItems()
     expect(items.length).toBeGreaterThanOrEqual(15)
     expect(items.map((i) => i.nodeType)).toContain('core.groupBy')
     expect(items.map((i) => i.nodeType)).toContain('dataset.malecns')
@@ -334,11 +341,11 @@ describe('buildNodeItems', () => {
     // `neuron.dataset` is `hidden`: deserialising a graph that uses it must keep working, but
     // nobody should be offered it for something new.
     expect(getNodeDef('neuron.dataset')).toBeDefined()
-    expect(buildNodeItems().map((i) => i.nodeType)).not.toContain('neuron.dataset')
+    expect(nodeItems().map((i) => i.nodeType)).not.toContain('neuron.dataset')
   })
 
   it('filters to nodes that accept a dragged output type, with the port to connect', () => {
-    const items = buildNodeItems({ type: T.matrix(), from: 'source' })
+    const items = nodeItems({ type: T.matrix(), from: 'source' })
     const types = items.map((i) => i.nodeType)
     // Normalize and Heatmap take a Matrix; Filter does not.
     expect(types).toContain('core.normalize')
@@ -348,7 +355,7 @@ describe('buildNodeItems', () => {
   })
 
   it('filters to nodes that can feed a dragged input type', () => {
-    const items = buildNodeItems({ type: T.dataset(), from: 'target' })
+    const items = nodeItems({ type: T.dataset(), from: 'target' })
     const types = items.map((i) => i.nodeType)
     // Every dataset node outputs a Dataset, and nothing else does.
     expect(types).toContain('dataset.malecns')
@@ -358,7 +365,7 @@ describe('buildNodeItems', () => {
   })
 
   it('accepts Neurons where a Table is wanted, since Neurons is a subtype', () => {
-    const items = buildNodeItems({ type: T.neurons(), from: 'source' })
+    const items = nodeItems({ type: T.neurons(), from: 'source' })
     expect(items.map((i) => i.nodeType)).toContain('core.filterTable')
   })
 
@@ -372,7 +379,7 @@ describe('buildNodeItems', () => {
    * nodes in the registry that take a linkage, sixth and seventh.
    */
   it('drops the passthroughs a Linkage cannot actually feed, and leads with the two that take one', () => {
-    const types = buildNodeItems({ type: T.linkage(), from: 'source' }).map((i) => i.nodeType)
+    const types = nodeItems({ type: T.linkage(), from: 'source' }).map((i) => i.nodeType)
     expect(types.slice(0, 2)).toEqual(['cluster.cut', 'out.dendrogram'])
     expect(types).not.toContain('neuron.mirror')
     expect(types).not.toContain('neuron.stack')
@@ -388,13 +395,11 @@ describe('buildNodeItems', () => {
    * Geometries — see `socketStyle.test.ts` — and it is still absent here.
    */
   it('honours a set narrower than the family it draws as', () => {
-    const points = buildNodeItems({ type: T.points(), from: 'source' }).map((i) => i.nodeType)
+    const points = nodeItems({ type: T.points(), from: 'source' }).map((i) => i.nodeType)
     expect(points).toContain('neuron.mirror')
     expect(points).not.toContain('neuron.splitNeurons')
 
-    const skeletons = buildNodeItems({ type: T.skeletons(), from: 'source' }).map(
-      (i) => i.nodeType,
-    )
+    const skeletons = nodeItems({ type: T.skeletons(), from: 'source' }).map((i) => i.nodeType)
     expect(skeletons).toContain('neuron.splitNeurons')
   })
 
@@ -404,7 +409,7 @@ describe('buildNodeItems', () => {
    * because the rows move whenever a node is registered and the *relation* is the rule.
    */
   it('ranks an exact port above a widened one, a union above a bare any', () => {
-    const types = buildNodeItems({ type: T.skeletons(), from: 'source' }).map((i) => i.nodeType)
+    const types = nodeItems({ type: T.skeletons(), from: 'source' }).map((i) => i.nodeType)
     const at = (type: string) => {
       const index = types.indexOf(type)
       expect(index, type).toBeGreaterThanOrEqual(0)
@@ -422,7 +427,7 @@ describe('buildNodeItems', () => {
    * offered — it is just not what somebody dragging a neuron table usually means.
    */
   it('puts a node built for the wire above one that merely has an optional socket for it', () => {
-    const types = buildNodeItems({ type: T.neurons(), from: 'source' }).map((i) => i.nodeType)
+    const types = nodeItems({ type: T.neurons(), from: 'source' }).map((i) => i.nodeType)
     expect(types.indexOf('core.filterTable')).toBeLessThan(types.indexOf('dataset.flywire'))
     expect(types).toContain('dataset.flywire')
   })
@@ -434,7 +439,7 @@ describe('buildNodeItems', () => {
    * registry — for a socket that takes three kinds.
    */
   it('reads a declared set on the dragged end too, not only on the candidate', () => {
-    const types = buildNodeItems({
+    const types = nodeItems({
       type: T.any(),
       kinds: GEOMETRY_KINDS,
       from: 'target',
@@ -450,7 +455,7 @@ describe('buildNodeItems', () => {
    * with an exact socket after a widened one was wired to the wrong half of itself.
    */
   it("picks the node's best port rather than its first", () => {
-    const items = buildNodeItems({ type: T.neurons(), from: 'source' })
+    const items = nodeItems({ type: T.neurons(), from: 'source' })
     // `Connectivity` has a Dataset, then `neurons`, then an optional `labels` table.
     expect(byId(items, 'node:neuron.connectivity').portId).toBe('neurons')
   })
@@ -656,7 +661,7 @@ describe('CommandPalette', () => {
   it('names the required type when opened from a link drag', () => {
     open({
       filterSocket: { type: T.matrix() },
-      items: buildNodeItems({ type: T.matrix(), from: 'source' }),
+      items: nodeItems({ type: T.matrix(), from: 'source' }),
     })
     expect(screen.getByPlaceholderText('Search nodes…')).toBeTruthy()
     expect(screen.getByText(/Nodes accepting/)).toBeTruthy()
@@ -676,7 +681,7 @@ describe('CommandPalette', () => {
   it('names the declared set, not the `any` a geometry port is typed as', () => {
     open({
       filterSocket: { type: T.any(), kinds: GEOMETRY_KINDS },
-      items: buildNodeItems({ type: T.any(), kinds: GEOMETRY_KINDS, from: 'target' }),
+      items: nodeItems({ type: T.any(), kinds: GEOMETRY_KINDS, from: 'target' }),
     })
     expect(screen.getByText('Geometries')).toBeTruthy()
   })
@@ -706,7 +711,7 @@ describe('breadcrumbs on the real item list', () => {
         fitView: () => {},
         fitSelected: () => {},
       }),
-      ...buildNodeItems(),
+      ...nodeItems(),
     ]
     render(
       <CommandPalette

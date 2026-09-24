@@ -3036,7 +3036,7 @@ non-HTTP URL so it cannot hide that again.
 
 ### The pyramid: a row is a bin
 
-`src/data/zapbench/recording.ts` reads every cell at once for `zapbench.traces`, and that is
+`src/data/zapbench/recording.ts` reads every cell at once for `zapbench:traces`, and that is
 what the pyramid is for. `s1` is `[3940, 35861]` and `s2` is `[1970, 17931]`, both
 `chunks [512, 512]`, both `transpose` then `bytes` with no compressor. Measured against the
 bucket rather than read off the metadata:

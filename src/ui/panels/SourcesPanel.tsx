@@ -129,6 +129,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { isTourActive } from '../tour/tourState'
 import { errorMessage } from '../../core/errors'
 import { Modal, ModalHeader } from '../Modal'
+import { useOfferedPack } from '../packSwitches'
 
 /**
  * A credential being checked. `Ok` is what a successful check found, which differs by what is
@@ -164,6 +165,8 @@ interface SourceTabProps {
 interface SourceTab {
   id: string
   label: string
+  /** The pack this tab's backend belongs to; the tab hides with it (see `TabBar`). */
+  pack?: string
   /**
    * The credential bundle plus `onClose`, and nothing about the tab bar itself.
    *
@@ -191,18 +194,21 @@ interface SourceTab {
 const SOURCE_TABS: readonly [SourceTab, ...SourceTab[]] = [
   {
     id: 'neuprint',
+    pack: 'neuprint',
     label: 'neuPrint',
     render: (props) => <NeuPrintTab {...props} />,
     subscribe: subscribeAuthFailure,
   },
   {
     id: 'cave',
+    pack: 'cave',
     label: 'CAVE',
     render: ({ onClose, onResolved }) => <CaveTab onSaved={onClose} onResolved={onResolved} />,
     subscribe: subscribeCaveAuthFailure,
   },
   {
     id: 'catmaid',
+    pack: 'catmaid',
     label: 'CATMAID',
     render: ({ onClose }) => <CatmaidTab onSaved={onClose} />,
     subscribe: subscribeCatmaidAuthFailure,
@@ -312,6 +318,8 @@ interface Section {
 interface SectionProps extends SourceTabProps {
   tabId: string
   setTabId: (id: string) => void
+  /** The tab a failure or the opener asked for, shown whatever its pack's switch says. */
+  askedTab: string | undefined
   onClose: () => void
   /** See `Dialog`: the alert that opened this panel, dismissed by the tab that answered it. */
   onResolved: (tab: string) => void
@@ -597,14 +605,26 @@ function TabBar({
   label,
   tabId,
   setTabId,
+  askedTab,
   onResolved,
   ...tabProps
 }: SectionProps & { tabs: readonly [SourceTab, ...SourceTab[]]; label: string }) {
-  const active = tabs.find((tab) => tab.id === tabId) ?? tabs[0]
+  /*
+   * A backend whose pack is switched off keeps its credentials but not its tab — unless the open
+   * workflow uses it, the same rule as its nodes, so somebody opening a hemibrain link with
+   * neuPrint off can still sign in. Only a tab that declares its `pack` can go. **A tab somebody
+   * asked for always shows** — an auth failure naming it, or the tour's sign-in step: a request
+   * with no way to answer it is worse than a tab the switches would have hidden.
+   */
+  const offered = useOfferedPack()
+  const shown = tabs.filter(
+    (tab) => tab.pack === undefined || offered(tab.pack) || tab.id === askedTab,
+  )
+  const active = shown.find((tab) => tab.id === tabId) ?? shown[0] ?? tabs[0]
   return (
     <>
       <div className="sources__tabs" role="tablist" aria-label={label}>
-        {tabs.map((tab) => (
+        {shown.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -634,7 +654,11 @@ function ConnectionsDialog({ onClose, reason, ...tabProps }: ConnectionsDialogPr
   // closed, so every opening starts on the connection you are most likely to have come for.
   const [sectionId, setSectionId] = useState<SectionId>(reason?.section ?? SECTIONS[0].id)
   const section = SECTIONS.find((s) => s.id === sectionId) ?? SECTIONS[0]
-  const [tabId, setTabId] = useState(reason?.tab ?? SOURCE_TABS[0].id)
+  // A tab somebody asked for — a failure naming one, or whoever opened the dialog — shows and
+  // opens first, whatever its pack's switch says.
+  const requestedTab = useGraphStore((s) => s.sourcesTab)
+  const askedTab = reason?.tab ?? requestedTab
+  const [tabId, setTabId] = useState(askedTab ?? SOURCE_TABS[0].id)
 
   /*
    * The alert is the *reason*, held locally so that it can stop being true.
@@ -703,7 +727,14 @@ function ConnectionsDialog({ onClose, reason, ...tabProps }: ConnectionsDialogPr
        */}
       <p className="sources__privacy">{section.privacy}</p>
 
-      {renderSection(section, { ...tabProps, tabId, setTabId, onClose, onResolved })}
+      {renderSection(section, {
+        ...tabProps,
+        tabId,
+        setTabId,
+        askedTab,
+        onClose,
+        onResolved,
+      })}
     </Modal>
   )
 }

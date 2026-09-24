@@ -23,6 +23,7 @@
 import type { CodaGraph } from '../../core/graph'
 import { deserializeGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
+import { missingTypeOf } from '../../core/missing'
 import { getNodeDef } from '../../core/registry'
 import {
   CUSTOM_DATASET_NODES,
@@ -66,7 +67,11 @@ export function layoutDigest(graph: CodaGraph): ZooLayout {
   const index = new Map<string, number>()
   const nodes: ZooLayout['nodes'] = graph.nodes.map((node, i) => {
     index.set(node.id, i)
-    return [Math.round(node.position.x), Math.round(node.position.y), node.type]
+    return [
+      Math.round(node.position.x),
+      Math.round(node.position.y),
+      missingTypeOf(node) ?? node.type,
+    ]
   })
 
   const edges: ZooLayout['edges'] = []

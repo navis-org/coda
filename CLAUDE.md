@@ -114,11 +114,12 @@ rule belongs to one area, its record is in that area's doc.
   Renaming a port or a param loses stored state in silence — an edge naming a port the node no
   longer has is dropped with a warning, and a param the definition no longer declares is
   *ignored* by `normalizeParams`, so a label somebody typed reverts with nothing said at all.
-  Hence **two declarations, one shape**: `PortGroupDef.formerIds` (positional) and
-  `ParamBase.formerId` (singular), both read at load and both **only after the live id has
-  missed**. The param half also carries `absentMeans`. `registerNode` refuses the ambiguous
-  cases. Deliberately **not** a per-type migration table in the loader.
-  See [docs/nodes-tables.md](docs/nodes-tables.md).
+  Hence **declarations of one shape**: `PortGroupDef.formerIds` (positional),
+  `ParamBase.formerId` (singular) and, for a renamed *type*, `NodeDefinition.formerTypes` — all
+  read at load and all **only after the live id has missed**. The param half also carries
+  `absentMeans`. `registerNode` refuses the ambiguous cases. Deliberately **not** a per-type
+  migration table in the loader. See [docs/nodes-tables.md](docs/nodes-tables.md) and, for types,
+  [docs/packs.md](docs/packs.md).
 - **A param added to an existing node type has three states, and a card can only draw two.**
   `defaultParams` writes a default at *creation* and never runs over `deserializeGraph`, so a
   stored node without the key was written by a build that had no such control — not the same as
@@ -126,6 +127,20 @@ rule belongs to one area, its record is in that area's doc.
   third state; deliberately not a general backfill. Other half of the trap: **a node with a body
   of its own draws no generic param rows**, and `compact` is always true for an on-canvas card,
   so gating on `!compact` means "inspector only". See [docs/datasets.md](docs/datasets.md).
+- **A node this build does not have loads as a `core.missing` placeholder and is written back as
+  itself.** Dropping it, the old behaviour, lost the card and its wires on the next save. It holds
+  everything in `params` (the original params as JSON text, its ports read off the file's edges);
+  `getNodeDef` answers for it and `allNodeDefs` never lists it; its error comes from *inference*,
+  a `validate` line blocking nothing. **A new writer of graph JSON goes through `serializeGraph` or
+  `fragmentBody`**, which spell it back via `documentNode`. Alongside: a registered definition is
+  **frozen**, and a type id follows `core/nodeType.ts` — `pack:name` for a pack's node.
+  See [docs/persistence.md](docs/persistence.md).
+- **A pack switched off hides, never unregisters, and only what reads the offered hooks hides.** A
+  surface offering nodes reads `useOfferedNodeDefsByCategory` (`useOfferedForNewWork` where it builds
+  a new workflow); calling the registry directly passes every test and ignores the switches.
+  Connectome's nodes keep built-in ids, so which pack a node is from is `packOfType`, never the id;
+  a *new* node in any pack is `pack:name`, and a pack id is permanent. See
+  [docs/packs.md](docs/packs.md).
 - **Module init order.** `graphStore.ts` imports `../nodes` for its side effect; a Node-side
   script needs `registerBuiltinSources()` too, or every dataset node reports "Data source is
   not registered". Both failures are total and both read as a data problem.
@@ -1354,6 +1369,9 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
   survive it.
 - [docs/deployment.md](docs/deployment.md) — where the hosted MCP server is installed and configured
   (`flyem1.lmb`), and the commands to run it.
+- [docs/packs.md](docs/packs.md) — node packs, the Plugins dialog, shortcuts, `requires` and parts,
+  Connectome and its backend parts. **Read before adding a pack, a shortcut, or moving nodes into
+  one.**
 - [docs/zoo.md](docs/zoo.md) — the Coda Zoo, and why its index is a committed file rather
   than an API listing. Read before changing `ZooIndex`.
 - [docs/analytics.md](docs/analytics.md) — the GoatCounter beacon: what it collects, the two

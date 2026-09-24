@@ -29,7 +29,7 @@
 
 import { useMemo } from 'react'
 
-import { getNodeDef, isAnnotation } from '../../core/registry'
+import { getNodeDef, isAnnotation, liveType } from '../../core/registry'
 import type { ZooLayout } from '../../data/zoo/format'
 import { filterLayout } from '../../data/zoo/format'
 import { CHART_INK } from '../colors'
@@ -77,7 +77,8 @@ export function ZooThumbnail({ layout, width = 208, height = 116 }: ZooThumbnail
      * Notes dropped through the same helper `parseZooIndex` uses, because dropping a node shifts
      * every index after it and an edge kept by its original index joins the wrong two boxes.
      */
-    const kept = filterLayout(layout, ([, , type]) => !isAnnotation(type))
+    // The index was written at deposit time, so a type renamed since is read as its live id.
+    const kept = filterLayout(layout, ([, , type]) => !isAnnotation(liveType(type)))
     if (kept.nodes.length === 0) return undefined
 
     /*
@@ -89,7 +90,8 @@ export function ZooThumbnail({ layout, width = 208, height = 116 }: ZooThumbnail
     let minY = Infinity
     let maxX = -Infinity
     let maxY = -Infinity
-    const boxes: Box[] = kept.nodes.map(([x, y, type]) => {
+    const boxes: Box[] = kept.nodes.map(([x, y, stored]) => {
+      const type = liveType(stored)
       if (x < minX) minX = x
       if (y < minY) minY = y
       if (x > maxX) maxX = x

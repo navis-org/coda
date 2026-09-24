@@ -600,7 +600,7 @@ describe('the guard rail', () => {
 /**
  * The two seams where a table crosses into the mapper, and the two where the result crosses out.
  *
- * These have a node on top of them (`nodes/analysis/matchTypes.test.ts`), which is where the
+ * These have a node on top of them (`packs/connectome/matchTypes.test.ts`), which is where the
  * ports and the fetching are tested. What is here is what that node cannot see: the per-cell
  * rules about which values count, and the exact column layout of what comes back — the halves
  * invariant 3 pairs, tested against each other rather than through a run.

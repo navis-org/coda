@@ -77,7 +77,7 @@ against graphene meshes, and the node cannot know that.
 
 ### Neuron counts
 
-`MAX_NEURONS` (`nodes/query/morphology.ts`) is **10,000**, and it is the default _and_ the
+`MAX_NEURONS` (`nodes/lib/limitParams.ts`) is **10,000**, and it is the default _and_ the
 maximum of every neuron-count control: Skeletons, Meshes, Synapses, NBLAST, NBLAST kNN. The
 control is called **Warn above** — it was called "Max neurons" while it refused, and kept the
 name for a while afterwards, which is the one way a control can lie about what it does.
@@ -181,11 +181,11 @@ the undo stack alongside it).
   the product of two independently-resolved column pickers. This is the shape of the 9 GB
   incident in [gotchas.md](gotchas.md), and note that the _fix_ for that was `resolveColumn`
   keeping a chosen column, not this check.
-- `zapbench.neuronTraces`' matrix — one flat `Float64Array` of `neurons × timesteps`. It was priced at
+- `zapbench:neuronTraces`' matrix — one flat `Float64Array` of `neurons × timesteps`. It was priced at
   four times this shape while the node also emitted a long table of four `CellValue[]` columns,
   which was always the binding constraint; removing that port moved the ceiling out by about 4×,
   from roughly 2,000 neurons over the whole recording to 8,000.
-- `zapbench.traces`'s matrix — every cell × the window's level steps, so its shape is a function
+- `zapbench:traces`'s matrix — every cell × the window's level steps, so its shape is a function
   of `Scale` and `Condition` alone and `validate` states the refusal on the card before a Run —
   `crashFloorIssue`, the non-throwing half of `refuseIfOverCrashFloor`, so both stages make one
   comparison in one wording. Full scale over the whole recording is 4.2 GB and half scale

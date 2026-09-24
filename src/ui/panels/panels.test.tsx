@@ -17,6 +17,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { resetPackSwitchesForTest, switchPack } from '../packSwitches'
 import { demoWorkflow } from '../../wizard/build'
 import { DEFAULT_PANELS, loadPanels, savePanels } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
@@ -90,6 +91,7 @@ describe('the icon cluster', () => {
   const NAMED = [
     'Share workflow',
     'Connections',
+    'Plugins',
     'Assistant',
     'Inspector',
     'Notify me when a run finishes',
@@ -516,5 +518,33 @@ describe('the New menu', () => {
     expect(useGraphStore.getState().wizardOpen).toBe(true)
     // Nothing was loaded: the wizard asks its four questions first.
     expect(useGraphStore.getState().graph.nodes.length).toBeGreaterThan(0)
+  })
+
+  /*
+   * A reader who switched Connectome off and forgot finds a New menu with no datasets in it, which
+   * reads as a broken build — so the menu says which plugin took them and opens the dialog.
+   */
+  it('says which plugin hid its datasets, and opens Plugins from there', () => {
+    act(() => switchPack('connectome', false))
+    try {
+      const panel = openNew()
+      expect(panel.querySelector('.dropdown__item--parent')).toBeNull()
+      const row = [...panel.querySelectorAll('.dropdown__item')].find((el) =>
+        el.textContent?.includes('Some datasets are hidden'),
+      )
+      expect(row?.textContent).toContain('Connectome is switched off')
+      fireEvent.click(row!)
+      expect(useGraphStore.getState().pluginsOpen).toBe(true)
+    } finally {
+      act(() => {
+        useGraphStore.getState().closePlugins()
+        clearStorage()
+        resetPackSwitchesForTest()
+      })
+    }
+  })
+
+  it('says nothing about hidden datasets while every plugin is on', () => {
+    expect(openNew().textContent).not.toContain('Some datasets are hidden')
   })
 })

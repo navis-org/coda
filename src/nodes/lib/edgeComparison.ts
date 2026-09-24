@@ -38,12 +38,13 @@
 
 import type { Warner } from '../../core/limits'
 import { SILENT } from '../../core/limits'
-import { column, tableSchema } from '../../core/types'
+import { column, tableSchema, uniqueName } from '../../core/types'
 import type { TableSchema } from '../../core/types'
 import type { CellValue, ColumnData, TableValue } from '../../core/values'
 import { getColumn, makeTable } from '../../core/values'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import type { NeuronId } from '../../core/ids'
+import { repeatParamId } from './repeatParams'
 import { labelsByNeuron } from './typeMapping'
 
 /**
@@ -459,4 +460,62 @@ export function compareConnectivity(
   }
 
   return { comparison: compared.comparison, counts: countsTable(datasets) }
+}
+
+// ---------------------------------------------------------------------------
+// Compare Connectivity's dataset names — here rather than on the node, which lives in the
+// Connectome pack, because the wizard and both exporters read them and the base may not import a pack.
+// ---------------------------------------------------------------------------
+
+/**
+ * How many connectomes one mapping or comparison may span — Match Cell Types and Compare
+ * Connectivity both read this, so the two cannot disagree about what is possible: a comparison is
+ * read off a mapping, and a fifth dataset there would be a fifth column of a table the mapper
+ * cannot produce.
+ *
+ * Four, and it is a statement about the science rather than about the machine: FlyWire's two
+ * hemispheres, the hemibrain and the maleCNS is the largest set anybody has actually asked to
+ * map, and cocoa's own worked examples stop at three. Raising it costs nothing structural —
+ * every port and picker is generated — but each input is a whole-brain annotation download, so
+ * the number should follow a real use rather than lead it.
+ */
+export const MAX_COMPARED_DATASETS = 4
+
+/**
+ * `A`, `B`, `C`, `D` — short, because these become column-name suffixes.
+ *
+ * Exported for `resolveDatasetNames`' reason one function down: these names *are* the output's
+ * column names, so anything that has to say `weight_A` before this node has run has to read them
+ * from here. The Workflow Wizard's cross-dataset arm is that caller — it writes the `name{n}`
+ * params and points a Scatter Plot at two of the columns they produce, and a second spelling of
+ * this rule would aim that viewer at a column the node does not emit.
+ */
+export function compareDatasetName(index: number): string {
+  return String.fromCharCode(64 + index)
+}
+
+/**
+ * The dataset names, deduplicated, in port order.
+ *
+ * One function behind `inferOutputs`, `validate` and `evaluate` — `join.ts`'s `specOf` idiom, and
+ * here it is load-bearing twice over. These names *are* the output schema (invariant 3), so a
+ * second derivation would publish columns the run does not produce. And two datasets sharing a
+ * name would collapse two `weight_` columns onto one key in `makeTable`, which is a table with a
+ * column silently missing rather than an error — hence `uniqueName`, the codebase's one
+ * collision rule.
+ *
+ * Exported for the node and both emitters: these names are the output's column names, and an
+ * exporter that re-derived the fallback-and-deduplicate rule would write a notebook naming a
+ * column the canvas does not have.
+ */
+export function resolveDatasetNames(ctx: {
+  params: Readonly<Record<string, unknown>>
+}): string[] {
+  const count = Math.max(2, Math.min(MAX_COMPARED_DATASETS, Number(ctx.params.datasetCount)))
+  const taken = new Set<string>()
+  return Array.from({ length: count }, (_, i) => {
+    const index = i + 1
+    const typed = String(ctx.params[repeatParamId('name', index)] ?? '').trim()
+    return uniqueName(taken, typed || compareDatasetName(index))
+  })
 }

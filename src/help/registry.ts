@@ -3,7 +3,7 @@
  *
  * A node gets a `?` button because a file exists, and for no other reason. Nothing in the node
  * definition says "I have a document", nothing lists the documents, and adding one is dropping
- * `src/help/nodes/<node type>.md` into place. The alternative — a flag on `NodeDefinition`, or a
+ * `src/help/nodes/<node type>.md` into place — or, for a pack's node, `src/packs/<pack>/help/<name>.md`. The alternative — a flag on `NodeDefinition`, or a
  * registry file naming each document — is two things to keep in step, and the failure when they
  * drift is a `?` button that opens nothing.
  *
@@ -36,7 +36,7 @@ import { parseMarkdown } from '../ui/markdown'
  * The glob pattern is a literal on purpose — Vite resolves it statically, and a pattern built
  * from a variable silently matches nothing.
  */
-const SOURCES = import.meta.glob('./nodes/*.md', {
+const SOURCES = import.meta.glob(['./nodes/*.md', '../packs/*/help/*.md'], {
   query: '?raw',
   import: 'default',
 }) as Record<string, () => Promise<string>>
@@ -55,7 +55,13 @@ const IMAGES = import.meta.glob('./images/*.{png,jpg,jpeg,svg,webp,avif}', {
   import: 'default',
 }) as Record<string, string>
 
+/**
+ * The node type a document's path names: its filename for a built-in node, and `<pack>:<name>`
+ * for `packs/<pack>/help/<name>.md` — a colon being no character to put in a filename.
+ */
 function typeOfPath(path: string): string {
+  const pack = /\/packs\/([^/]+)\/help\/([^/]+)\.md$/.exec(path)
+  if (pack) return `${pack[1]}:${pack[2]}`
   return path.replace(/^.*\//, '').replace(/\.md$/, '')
 }
 

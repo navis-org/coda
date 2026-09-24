@@ -109,6 +109,9 @@ describe('mcp contract v1', () => {
     expect(coda.nodeTypeIds()).toContain('core.filterTable')
     expect(coda.nodeEntry('core.filterTable')).toContain('## core.filterTable')
     expect(coda.nodeEntry('no.such')).toBeUndefined()
+    // A former id reads as its successor; the placeholder is not a node a plan can name.
+    expect(coda.nodeEntry('zapbench.traces')).toContain('## zapbench:traces')
+    expect(coda.nodeEntry('core.missing')).toBeUndefined()
     expect(await coda.nodeHelp('core.filterTable')).toBeTruthy()
     expect(Object.keys((coda.planSchema() as { properties: object }).properties)).toEqual(
       expect.arrayContaining(['add', 'connect', 'setParams']),

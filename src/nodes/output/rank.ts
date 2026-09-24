@@ -182,7 +182,7 @@ registerNode({
        * `optional`, which is load-bearing: `resolveColumn`'s rule 3 hands a *required* picker
        * still on its declared default the first compatible column, so an empty default here
        * would flag rows by whatever column happened to come first. Empty is a decision and
-       * stays one — the failure recorded on `zapbench.traces` and `out.scatter`.
+       * stays one — the failure recorded on `zapbench:traces` and `out.scatter`.
        */
       optional: true,
       presentational: true,

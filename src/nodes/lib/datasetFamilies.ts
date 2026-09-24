@@ -759,6 +759,32 @@ export const DATASET_FAMILIES: DatasetFamily[] = [
 /** Node types are `dataset.<family key>`. Never change it; it is in every saved file. */
 export const DATASET_NODE_PREFIX = 'dataset.'
 
+/** The node type a family's dataset node registers as. */
+export function familyNodeType(family: { key: string }): string {
+  return DATASET_NODE_PREFIX + family.key
+}
+
+/**
+ * The families a filter on node *types* keeps — how a switched-off pack reaches the dataset lists
+ * (New, the start page's cards, the wizard's first question), which read families rather than
+ * node lists. Undefined keeps every family, the filter's own "nothing is switched off".
+ */
+export function offeredFamilies<F extends { key: string }>(
+  families: readonly F[],
+  offered: ((type: string) => boolean) | undefined,
+): F[] {
+  return offeredByType(families, offered, familyNodeType)
+}
+
+/** `offeredFamilies` for anything that names its node type another way — the custom nodes. */
+export function offeredByType<T>(
+  items: readonly T[],
+  offered: ((type: string) => boolean) | undefined,
+  typeOf: (item: T) => string,
+): T[] {
+  return offered ? items.filter((item) => offered(typeOf(item))) : [...items]
+}
+
 /**
  * The families offered as a starting point, in table order. See `DatasetFamily.starter`.
  *

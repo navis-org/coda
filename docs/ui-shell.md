@@ -118,8 +118,9 @@ the Tab binding both live in `Editor`.
 
 ### The toolbar's icon cluster
 
-Four buttons carry an icon and no words — **Share** (a box with an arrow leaving it),
-**Connections** (a branch), **Assistant** (a robot head) and **Inspector** (a lens). They are in
+Five buttons carry an icon and no words — **Share** (a box with an arrow leaving it),
+**Connections** (a branch), **Plugins** (a puzzle piece), **Assistant** (a robot head) and
+**Inspector** (a lens). They are in
 `src/ui/Icons.tsx`, drawn on the usual 24-unit grid with a 2-unit stroke and painting in
 `currentColor`, so each takes the ink of the button it sits in and follows its hover and pressed
 states. Same rule as `CodaMark`, and for the same reason: an accent-coloured icon here would be
@@ -127,7 +128,7 @@ the same blue as a Table socket and read as a typed port rather than as chrome.
 
 **Every one keeps its name in `aria-label` and `title`.** An icon-only control with neither is a
 control only its author can use — and it is the one property nothing about the rendering would
-report, since the icon draws either way. `panels.test.tsx` asserts all four have a name, an
+report, since the icon draws either way. `panels.test.tsx` asserts all five have a name, an
 `<svg>` and no text.
 
 **`aria-pressed` now carries what the glyph used to.** The inspector toggle drew `▐` against `▕`,
@@ -139,7 +140,13 @@ at a button that no longer has the word "Connections" on it — so `client.ts`, 
 assistant drawer and the start page's dataset rail all name **the branch icon** now. The start
 page's line was additionally stale from before: it still said *Sources*, which that button has not
 been called for some time. This is the standing cost of an icon-only control, and the thing to
-check when adding a fifth.
+check when adding a sixth.
+
+**Plugins** (a puzzle piece) sits between Connections and the Assistant and opens the pack switches
+([packs.md](packs.md)); the store's flag is `pluginsOpen`. It folds into `⋯` with its neighbours
+below `NARROW_QUERY`, and the dialog is **portalled**, because it is also opened from inside the
+wizard and from the node browser's footer — mounted in the toolbar, it drew beneath the wizard that
+opened it.
 
 **Share leads the cluster and is the odd one out** — a verb, where the other three are toggles or a
 dialog. It sat under `Save ▸` first; the menu entry is gone rather than duplicated, because two

@@ -209,7 +209,9 @@ const TOKEN_STEP: TourStep = {
     'the tour carries on by itself. No token is fine too: press Next and every step still works, ' +
     'the three cells simply stay empty.',
   when: () => !getToken(),
-  before: () => useGraphStore.getState().openSources(),
+  // Asked for by name, so the tab shows even with neuPrint switched off — this step comes before
+  // the tour has built anything that would keep it offered.
+  before: () => useGraphStore.getState().openSources('neuprint'),
   after: () => useGraphStore.getState().closeSources(),
   anchor: () => byTour('connections-panel'),
   interactive: true,

@@ -28,7 +28,7 @@ import type { AssistantPlan } from '../assistant/planShape'
 import type { CodaGraph } from '../core/graph'
 import { emptyGraph, serializeGraph } from '../core/graph'
 import { inferGraph } from '../core/inference'
-import { getNodeDef, listableNodeDefs } from '../core/registry'
+import { authoredNodeDef, listableNodeDefs, liveType } from '../core/registry'
 import { encodeShareFragment, shareUrl } from '../data/share/fragment'
 import { setToken as setNeuprintToken } from '../data/neuprint/credentials'
 import { setToken as setCaveToken } from '../data/cave/credentials'
@@ -62,15 +62,19 @@ export function nodeTypeIds(): string[] {
   return listableNodeDefs().map((def) => def.type)
 }
 
-/** One node's catalogue entry, or undefined for a type this build does not have. */
+/**
+ * One node's catalogue entry, or undefined for a type this build does not have. A former id
+ * (`formerTypes`) answers as the node that took it over, as a plan naming one does. The placeholder
+ * is not a node a plan can name, so it answers nothing.
+ */
 export function nodeEntry(type: string, detail: CatalogueDetail = 'full'): string | undefined {
-  const def = getNodeDef(type)
+  const def = authoredNodeDef(type)
   return def ? renderNode(def, detail) : undefined
 }
 
-/** The node's `?` document as markdown, where it has one. */
+/** The node's `?` document as markdown, where it has one. A former id reads its successor's. */
 export async function nodeHelp(type: string): Promise<string | undefined> {
-  return (await loadHelpDoc(type))?.source
+  return (await loadHelpDoc(liveType(type)))?.source
 }
 
 /** The JSON Schema a plan is written against. */

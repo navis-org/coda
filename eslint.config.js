@@ -3,6 +3,19 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
+/*
+ * What a drawing table may not import: `ui/glyphs.ts` and every pack's `glyphs.ts` are drawn by
+ * `nodes.html`, which has no React and no editor. One list, since flat config's later
+ * `no-restricted-imports` replaces an earlier one rather than adding to it — two copies had
+ * already drifted.
+ */
+const DRAWING_TABLE_PATHS = [
+  { name: 'react', message: 'A drawing table is drawn by nodes.html, which has no React.' },
+  { name: 'react-dom', message: 'A drawing table is drawn by nodes.html, which has no React.' },
+  { name: '@xyflow/react', message: 'A drawing table must not know about the editor.' },
+  { name: 'zustand', message: 'A drawing table has no state.' },
+]
+
 export default tseslint.config(
   // `.vite` is vite's dependency pre-bundle. It is gitignored but can appear at the repo
   // root, and linting a few megabytes of transpiled vendor code buries every real finding.
@@ -127,25 +140,39 @@ export default tseslint.config(
       'no-restricted-imports': [
         'error',
         {
-          paths: [
-            {
-              name: 'react',
-              message: 'ui/glyphs.ts is drawn by nodes.html, which has no React.',
-            },
-            {
-              name: 'react-dom',
-              message: 'ui/glyphs.ts is drawn by nodes.html, which has no React.',
-            },
-            {
-              name: '@xyflow/react',
-              message: 'A drawing table must not know about the editor.',
-            },
-            { name: 'zustand', message: 'A drawing table has no state.' },
-          ],
+          paths: DRAWING_TABLE_PATHS,
           patterns: [
             {
               group: ['**/store/*', '@/store/*'],
               message: 'A drawing table has no state.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  {
+    /*
+     * A pack's drawings and See also groups are found by glob so that `nodes.html` and the help can
+     * read them without a pack's `index.ts` — and with it the nodes and their data layer — behind
+     * them. So these files import only *types* from anywhere, and nothing from their own pack: a
+     * value import of `./traces` to reuse a type string would pass every test and put the node in
+     * the static page's bundle. The drawings are merged into `ui/glyphs.ts`' table too, so they are
+     * held to its no-React rule as well.
+     */
+    files: ['src/packs/*/glyphs.ts', 'src/packs/*/seeAlso.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: DRAWING_TABLE_PATHS,
+          patterns: [
+            {
+              group: ['.', '..', './*', '../*', '../../**'],
+              allowTypeImports: true,
+              message:
+                'Found by glob so that no node module comes with it: import types only, and nothing from the pack.',
             },
           ],
         },

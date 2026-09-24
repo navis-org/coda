@@ -22,20 +22,20 @@ const NO_EMITTER: Record<string, string> = {
     'output that is data, `Pinned`, is written wholly into the node\u2019s params and could be ' +
     'emitted as a literal frame \u2014 the obvious first emitter, left until one is checked by ' +
     '*running* it against the node, `out.topology`\u2019s rule.',
-  'zapbench.neuronTraces':
+  'zapbench:neuronTraces':
     'ZapBench traces, and the reason is the language rather than the effort: there is no ' +
     'tensorstore binding for R, so reading a zarr v3 array means `pizzarr`/`Rarr` \u2014 ' +
     'which would have to be handed the release\u2019s uncompressed chunk layout by hand ' +
     'rather than simply opening it. Unlike the Python entry this is not waiting on a probe; ' +
     'nothing in R opens this array today.',
-  'zapbench.traces':
-    'Every ZapBench cell \u2014 see `zapbench.neuronTraces`: nothing in R opens this zarr v3 array ' +
+  'zapbench:traces':
+    'Every ZapBench cell \u2014 see `zapbench:neuronTraces`: nothing in R opens this zarr v3 array ' +
     'today, and a downsampled row is named through a permutation file a hand-written reader ' +
     'would also have to apply.',
-  'zapbench.neurons':
+  'zapbench:neurons':
     'ZapBench cells to fish2 neurons. `neuprint_fetch_custom` would take the same `IN` lookup, ' +
     'but its cells come from a ZapBench Traces selection, which R cannot read (see ' +
-    '`zapbench.traces`), so the chunk would read a variable nothing binds.',
+    '`zapbench:traces`), so the chunk would read a variable nothing binds.',
   'out.sankey':
     'A flow diagram. `ggalluvial` is the faithful route and is a good one \u2014 `geom_alluvium` ' +
     'plus `geom_stratum` over a table of exactly this shape \u2014 but it is a **fourth package** ' +

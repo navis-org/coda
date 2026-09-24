@@ -8,9 +8,10 @@
 
 import type { DashboardLayout } from './dashboard'
 import { pruneDashboard, validDashboard } from './dashboard'
+import { MISSING_TYPE, documentNode, placeholderParams } from './missing'
 import type { ParamValues, ResolvedPort } from './node'
 import { hasPortGroups, allInputPorts, inputPorts, outputPorts } from './ports'
-import { getNodeDef, typesWithLoops, typesWithReferenceInputs } from './registry'
+import { currentType, getNodeDef, typesWithLoops, typesWithReferenceInputs } from './registry'
 
 export const GRAPH_FORMAT_VERSION = 1
 
@@ -967,10 +968,16 @@ export function reconnectEdge(
  * the share link, where the indentation is dead weight — and where the obvious spelling,
  * `JSON.stringify(JSON.parse(serializeGraph(g)))`, walks the whole document three times and
  * holds a throwaway copy of it to undo work this function had just done.
+ *
+ * A placeholder for a node this build does not have is written back as **the node it stands
+ * in for** (`documentNode`), so a file passing through an older build comes out able to run
+ * again in the build that made it. One of two writers that must do so; the clipboard's
+ * `fragmentBody` is the other.
  */
 export function serializeGraph(graph: CodaGraph, options: { compact?: boolean } = {}): string {
   const out: CodaGraph = {
     ...graph,
+    nodes: graph.nodes.map(documentNode),
     version: GRAPH_FORMAT_VERSION,
     meta: { ...graph.meta, modifiedAt: new Date().toISOString() },
   }
@@ -1161,8 +1168,8 @@ function droppedHandle(
  * decided this param was absent. It is the param-side twin of `PortGroupDef.formerIds`, and the
  * pair is why neither half of a renamed node needs a migration table in here.
  *
- * Lenient like everything else here: an unknown type has already been dropped by the time this
- * runs, and a param the definition no longer declares survives untouched — a *renamed* one being
+ * Lenient like everything else here: an unknown type has already become a placeholder by the time
+ * this runs (and is never passed here), and a param the definition no longer declares survives untouched — a *renamed* one being
  * the exception, since a rename moves its value rather than leaving a second copy behind.
  */
 function storedParams(raw: unknown, type: string): ParamValues {
@@ -1181,9 +1188,47 @@ function storedParams(raw: unknown, type: string): ParamValues {
 }
 
 /**
- * Parse and repair a graph file. Deliberately lenient: unknown node types are dropped
- * with a warning rather than failing the whole load, so a file made with a newer node
- * pack still opens.
+ * The ports each stored node of an unknown type needs, keyed by node id: the handles the file's
+ * edges name on it, in the order they first appear. A handle an old file left out is recorded as
+ * the historical default, which is what `healHandle` will resolve that edge to.
+ *
+ * Only unknown types appear, so "is this node a placeholder?" is membership here.
+ */
+function unknownNodePorts(
+  nodes: readonly (Partial<GraphNode> | null | undefined)[],
+  edges: readonly (Partial<GraphEdge> | null | undefined)[],
+): Map<string, { inputs: Set<string>; outputs: Set<string> }> {
+  const ports = new Map<string, { inputs: Set<string>; outputs: Set<string> }>()
+  for (const n of nodes) {
+    if (!n || typeof n.id !== 'string' || typeof n.type !== 'string') continue
+    if (!getNodeDef(n.type)) ports.set(n.id, { inputs: new Set(), outputs: new Set() })
+  }
+  if (ports.size === 0) return ports
+  // A `Set` keeps first-seen order, which is the order the placeholder's sockets draw in.
+  for (const e of edges) {
+    if (!e || typeof e.source !== 'string' || typeof e.target !== 'string') continue
+    ports
+      .get(e.source)
+      ?.outputs.add(typeof e.sourceHandle === 'string' ? e.sourceHandle : 'out')
+    ports.get(e.target)?.inputs.add(typeof e.targetHandle === 'string' ? e.targetHandle : 'in')
+  }
+  return ports
+}
+
+/**
+ * Parse and repair a graph file. Deliberately lenient: nothing short of a file that is not a
+ * graph at all fails the whole load.
+ *
+ * **A node of a type this build does not have is kept, as a placeholder** (`core/missing.ts`),
+ * with a warning. It used to be dropped, which lost work in silence: open a file made by a newer
+ * build, save it, and those cards and every wire into them were gone from the file. The
+ * placeholder carries the stored type and params, and the ports its wires name — which is why
+ * the edges are read for its handles before any node is built — and the writers spell it back as
+ * the original.
+ *
+ * A stored `core.missing` node (one some writer failed to spell back) is restored to its original
+ * first, so a node whose type this build *does* have loads as that node whichever way it was
+ * written.
  */
 export function deserializeGraph(json: string): LoadResult {
   const warnings: string[] = []
@@ -1205,28 +1250,38 @@ export function deserializeGraph(json: string): LoadResult {
     )
   }
 
+  // A stored placeholder back to its original, then a renamed type to its live id — in that
+  // order, so a placeholder of a since-renamed type lands as the renamed node.
+  const stored = obj.nodes.map((n) => {
+    if (!n || typeof n !== 'object') return n
+    const node = documentNode(n)
+    const live = typeof node.type === 'string' ? currentType(node.type) : undefined
+    return live && live !== node.type ? { ...node, type: live } : node
+  })
+  const placeholderPorts = unknownNodePorts(stored, obj.edges)
+
   const nodes: GraphNode[] = []
-  for (const n of obj.nodes) {
+  for (const n of stored) {
     if (!n || typeof n.id !== 'string' || typeof n.type !== 'string') {
       warnings.push('Dropped a node with no id/type')
       continue
     }
-    if (!getNodeDef(n.type)) {
-      warnings.push(`Dropped unknown node type "${n.type}" (${n.id})`)
-      continue
-    }
+    const ports = placeholderPorts.get(n.id)
+    if (ports) warnings.push(`Kept unknown node type "${n.type}" (${n.id}) as a placeholder`)
     // Both hoisted: each validator allocates, and the `...(f(x) ? { k: f(x) } : {})` shape pays
     // for it twice per node on every load and every paste.
     const size = validSize(n.size)
     const hints = validHints(n.hints)
     nodes.push({
       id: n.id,
-      type: n.type,
+      type: ports ? MISSING_TYPE : n.type,
       position: {
         x: Number(n.position?.x) || 0,
         y: Number(n.position?.y) || 0,
       },
-      params: storedParams(n.params, n.type),
+      params: ports
+        ? placeholderParams(n, [...ports.inputs], [...ports.outputs])
+        : storedParams(n.params, n.type),
       ...(n.title ? { title: n.title } : {}),
       ...(n.collapsed ? { collapsed: true } : {}),
       ...(n.paramsCollapsed ? { paramsCollapsed: true } : {}),
@@ -1389,7 +1444,10 @@ function validExposed(
     if (!inGroup.has(node) || seen.has(`${node}\u0000${param}`)) continue
     const type = alive.get(node)?.type
     const def = type ? getNodeDef(type) : undefined
-    if (!def?.params?.some((p) => p.id === param)) continue
+    // A placeholder declares no params, but the build that has its type may — and one at its
+    // default is not in the stored params either. Kept unchecked; `exposedControls` draws nothing
+    // for it here, and the file keeps saying what it said.
+    if (type !== MISSING_TYPE && !def?.params?.some((p) => p.id === param)) continue
     seen.add(`${node}\u0000${param}`)
     kept.push({ node, param })
   }

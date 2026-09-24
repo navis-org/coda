@@ -437,6 +437,81 @@ policy**: `library.ts`, `uploads.ts` and `edges/store.ts` refuse a write that di
 their own words (`commit`), while `cache.ts` and `session.ts` swallow one and every read degrades
 to "nothing stored" (`attempt`).
 
+## A node this build does not have is kept, as a placeholder
+
+`deserializeGraph` used to **drop** a node of an unregistered type, with a warning. The warning
+showed once; the save that followed deleted the card and every wire into it, and the file that went
+back to its author — or to the Zoo — had lost them with nothing further said. Version skew made
+that rare. Node packs make it ordinary: a link from a deployment carrying a pack this one lacks is
+exactly this case. So an unknown node now loads as a `core.missing` card and is written back as the
+node it stands in for. The mechanism is `src/core/missing.ts`.
+
+**A registered placeholder, not the original type left in place.** Over a hundred call sites ask
+`getNodeDef(node.type)`, and a node answering `undefined` would have to be handled right at every
+one. A placeholder that *is* a definition needs none of them to know: inference, the scheduler, the
+card, the inspector, the layout and the dashboard see an ordinary node with ports and no params.
+`getNodeDef` answers for it while `allNodeDefs` does not list it, so the palette, the node guide,
+the assistant's catalogue and every registry sweep never meet it.
+
+**Everything it holds is in `params`**, because params are what every copy already carries —
+duplicate, paste, undo, a workflow switch. The original params are kept as **JSON text**: they were
+written by a build this one has never seen, so nothing may assume they are `ParamValues`, and a
+reserved key spread beside them is a key some future param could spell. The stored `captionOf`
+rides in the same text.
+
+**Its ports are its wires.** There is no declaration to read, so `deserializeGraph` reads the
+file's edges *before* building any node and records the handles each unknown node is named by, in
+first-seen order; a handle an old file omitted is recorded as the historical `out`/`in`, which is
+what `healHandle` resolves that edge to. `ports.ts` returns them from the params, `any` on both
+sides and never required, memoised on the id array so a node's port list keeps its identity
+(invariant 7). The other two readings (`defaultInputPorts`, `allInputPorts`) answer nothing for
+it, which is right — it is never offered, and none of its ports is a reference.
+
+**Its error comes from inference, not `validate`.** A `validate` line is a *warning* and blocks
+nothing, so the card would read "needs run" and fail only when somebody pressed Run. Inference
+raises it as an error, which blocks the run and holds everything downstream at "waiting upstream"
+before anybody asks. It names the pack where the type has one (`packOf`, `core/nodeType.ts`). The
+two exporters emit it as the comment an unknown type always got, under the type the *file* named.
+
+**Two writers, and the fallback when a third forgets.** `serializeGraph` and the clipboard's
+`fragmentBody` spell a placeholder back through `documentNode`, returning every other node by
+identity — `fragmentBody` and not `subgraphOf`, which duplicate and the group peek read in memory,
+where a placeholder must stay one. The Zoo's `layoutDigest` names types the same way. A new writer of graph JSON goes through one of them. One that does not saves a
+`core.missing` node — and `deserializeGraph` restores any stored placeholder to its original
+*first*, so the mistake costs an uglier file, never the node, and a type this build does have loads
+as that node. That same restore is what reviving placeholders will be once a pack can arrive after
+the document: `deserializeGraph(serializeGraph(graph))`.
+
+A dashboard cell for the node now survives too; it was dropped with the node, and `canHaveCell`
+refuses only annotations. So does a **group's promoted param** on it: `validExposed` refuses a param
+the definition does not declare, and a placeholder declares none — while the build that has the type
+may, and a param at its default is not in the stored params either — so for a placeholder the entry
+is kept unchecked, and `exposedControls` draws nothing for it. A stored placeholder that has lost its
+`type` is an inference error naming `core.missing`, rather than an ordinary node that throws about a
+type called "undefined" at run time.
+
+**Checked in a real browser** (`pnpm dev`, headless Chrome): a share link holding
+`neuron.dataset → light:reader.tiff → out.table` opened with the card titled from the file, both
+wires on the file's own port names, the message naming the light pack, and the table blocked. The
+autosave held `light:reader.tiff` and never `core.missing`, and a reload brought the same card
+back.
+
+What it deliberately does not do yet:
+
+- **No revival within a session.** A type registered after the document loaded leaves its
+  placeholders as they are until the document is next read.
+- **Its inputs are never references**, since nothing says which were. An unknown node that read its
+  dataset by reference *and* fed it (the annotation-chain shape in `docs/canvas.md`) is a two-edge
+  loop, and inference marks the loop's known nodes as cyclic too.
+- **A pasted placeholder's stored `captionOf` is not remapped** by `cloneCaptions`, being inside
+  the stored text; it names the id the original card captioned.
+- **A Run counts it as a failure** ("1 node failed"), which is true but repeats what the card says.
+- **A wire saved without a handle gets one.** A file old enough to omit `sourceHandle` reads it as
+  `out` (the historical default), and the placeholder saves it that way — so the build that has the
+  type, if its only port is called something else, drops the wire it would have healed. Only files
+  from before handles were written are affected, and a sentinel for "no handle" would be a new
+  spelling every reader of edges would have to learn.
+
 ## What comes back is a graph, not a session — freshness has to be re-derived
 
 An autosave restores the *document*. It restores no results, because none are stored: the

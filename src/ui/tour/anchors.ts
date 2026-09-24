@@ -45,6 +45,7 @@ export const TOUR_ANCHORS = [
   'connections-panel',
   'dashboard',
   'connections',
+  'plugins',
   'assistant',
   'share',
   'help',

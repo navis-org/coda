@@ -2761,7 +2761,7 @@ So the layer source is a **column picker, `optional`, empty meaning longest path
 caption says which ran. Deliberately *not* "automatic, preferring a column called `hop` or
 `hops`": that is a substitution nobody asked for, and a network carrying a column of that name
 meaning something else would be silently layered by it — the failure `resolveColumn`'s rule 3
-already has a record of on `zapbench.traces` and `out.scatter`. Values read off a column are
+already has a record of on `zapbench:traces` and `out.scatter`. Values read off a column are
 **renumbered densely**, because the numbers are a measurement and the layers are positions: 0, 2
 and 5 hops draw as three adjacent columns, not six with gaps. An unmeasured row lands in one
 layer after every measured one rather than in layer 0 — null is not zero, `numeric()`'s trap.
@@ -3153,7 +3153,7 @@ Neither library draws one. `matplotlib.sankey` is built for a different figure e
 balance of inflows and outflows, not layered flow — and the routes that work are plotly or
 holoviews, each a fourth package in an exporter that is neuprint-python, pandas and navis. R is the
 same story with ggalluvial. The arithmetic is about fifteen lines and is not the obstacle; what
-stops it is the rule `out.topology` and `zapbench.traces` already record — an emitter has to be
+stops it is the rule `out.topology` and `zapbench:traces` already record — an emitter has to be
 checked by *running* it, and a flow diagram whose widths silently stopped conserving would look
 entirely plausible. The Transfers table itself exports perfectly well, being four ordinary columns.
 

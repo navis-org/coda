@@ -30,7 +30,7 @@
  */
 
 import type { EvalContext, InferContext } from '../../core/node'
-import { registerNode } from '../../core/registry'
+import { packNode, registerNode } from '../../core/registry'
 import type { CodaType, TableSchema } from '../../core/types'
 import { T, columnNames } from '../../core/types'
 import type { TableValue } from '../../core/values'
@@ -96,7 +96,7 @@ function chainSchema(
 // CAVE table
 // ---------------------------------------------------------------------------
 
-registerNode({
+export const caveAnnotationNode = packNode({
   type: 'annotation.caveTable',
   label: 'CAVE table',
   category: 'dataset',

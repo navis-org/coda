@@ -100,6 +100,12 @@ const LAYOUT_KEY = 'coda.layout.v1'
  * and arrive pre-dismissed for the person being shown the workflow.
  */
 const HINTS_KEY = 'coda.hintsDismissed.v1'
+/**
+ * A reader's own node-pack switches — see `ui/packSwitches.ts`. Only the switches the reader (or a
+ * shortcut on their behalf) actually flipped, as `{ packId: on }`, so a pack a later build adds
+ * still arrives at its own default for somebody who never touched its switch.
+ */
+const PACK_CHOICES_KEY = 'coda.packChoices.v1'
 /** When the feedback nudge was last shown or dismissed, so it can wait a week before the next. */
 const FEEDBACK_NUDGE_KEY = 'coda.feedbackNudge.v1'
 
@@ -972,6 +978,39 @@ export function loadDismissedHints(): string[] {
 
 export function saveDismissedHints(keys: readonly string[]): void {
   writeStringArray(HINTS_KEY, keys)
+}
+
+/**
+ * The pack switches a reader flipped. Anything unreadable reads as none, which leaves every pack
+ * at its own default — the recoverable direction.
+ */
+export function loadPackChoices(): Record<string, boolean> {
+  const parsed = readJson(PACK_CHOICES_KEY)
+  const choices: Record<string, boolean> = {}
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    for (const [id, on] of Object.entries(parsed)) if (typeof on === 'boolean') choices[id] = on
+  }
+  return choices
+}
+
+export function savePackChoices(choices: Readonly<Record<string, boolean>>): void {
+  writeLocal(PACK_CHOICES_KEY, JSON.stringify(choices))
+}
+
+/**
+ * Call back when another tab writes the pack switches. The switches are one environment across
+ * tabs, so a tab that cached them at load must hear about a switch flipped elsewhere — or its next
+ * flip writes its stale copy back over the other tab's choice. Never unsubscribed, like
+ * `watchTabIdentity`.
+ */
+export function watchPackChoices(onChange: () => void): void {
+  try {
+    window.addEventListener('storage', (event) => {
+      if (event.key === PACK_CHOICES_KEY || event.key === null) onChange()
+    })
+  } catch {
+    // No `window`: a suite under plain Node, with no other tab to hear from.
+  }
 }
 
 /**

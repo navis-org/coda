@@ -676,8 +676,20 @@ export interface GraphState {
    * everything but the spotlit element inert, so a dialog left up mid-tour cannot be dismissed.
    */
   sourcesOpen: boolean
-  openSources(): void
+  /**
+   * The tab whoever opened the dialog asked for — the tour's neuPrint step. Shown whatever its
+   * pack's switch says, as a tab an auth failure names is (`SourcesPanel`'s `askedTab`).
+   */
+  sourcesTab: string | undefined
+  openSources(tab?: string): void
   closeSources(): void
+  /**
+   * Whether the Plugins dialog is up. In the store for `sourcesOpen`'s reason: the toolbar and the
+   * node browser both open it, and a trigger inside the `⋯` menu is unmounted by the click it takes.
+   */
+  pluginsOpen: boolean
+  openPlugins(): void
+  closePlugins(): void
   /**
    * Whether the Workflow Wizard is up.
    *
@@ -2345,8 +2357,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
     closeZoo: () => set({ zooOpen: false }),
 
     sourcesOpen: false,
-    openSources: () => set({ sourcesOpen: true }),
-    closeSources: () => set({ sourcesOpen: false }),
+    sourcesTab: undefined,
+    openSources: (tab) => set({ sourcesOpen: true, sourcesTab: tab }),
+    closeSources: () => set({ sourcesOpen: false, sourcesTab: undefined }),
+    pluginsOpen: false,
+    openPlugins: () => set({ pluginsOpen: true }),
+    closePlugins: () => set({ pluginsOpen: false }),
 
     // Closes the start page on the way in, for `openZoo`'s reason: two full-screen modals is one
     // too many, and the wizard is reached *from* that page.

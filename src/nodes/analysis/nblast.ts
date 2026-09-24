@@ -35,7 +35,7 @@ import { matrixAxisLabels } from '../lib/geometryLabels'
 // The ceiling is the *fetch's*, not this node's: nothing can reach here that the Skeletons
 // node would not hand over. Imported rather than restated, or "parity" is a comment.
 import { labelColumnParam, warnAboveParam } from '../lib/limitParams'
-import { MAX_NEURONS } from '../query/morphology'
+import { MAX_NEURONS } from '../lib/limitParams'
 
 registerNode({
   type: 'neuron.nblast',

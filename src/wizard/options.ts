@@ -34,7 +34,7 @@
 import type { NodeHint } from '../core/graph'
 import type { SourceCapabilities } from '../data/source'
 import { capabilityAnywhere, getSource } from '../data/source'
-import { compareDatasetName } from '../nodes/analysis/compareConnectivity'
+import { compareDatasetName } from '../nodes/lib/edgeComparison'
 import { findParam } from '../core/node'
 import { getNodeDef } from '../core/registry'
 import { isCoveredDataset } from '../data/neuronbridge/libraries'

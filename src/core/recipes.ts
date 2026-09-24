@@ -284,9 +284,10 @@ export function readRecipe(text: string): { recipe: Recipe; warnings: string[] }
  * carrying the old name is retitled, which includes a frame of the user's own that the recipe was
  * named after — the same box, by the same name, so the same rename.
  *
- * **Edits the stored text rather than a read recipe.** `readRecipe` heals what it reads, and a
- * card from a newer build is *dropped*; writing that back would make a rename in an older tab
- * delete the card for the build that knows it.
+ * **Edits the stored text rather than a read recipe.** `readRecipe` heals what it reads against
+ * *this* build — a wire to a port it lacks is dropped, a card of a type it lacks becomes a
+ * placeholder — and writing that back would make a rename in an older tab rewrite the recipe for
+ * the build that knows it.
  */
 export function renamedRecipeText(
   text: string,

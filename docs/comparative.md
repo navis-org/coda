@@ -310,7 +310,7 @@ therefore the ones that can drift between `inferOutputs` and `evaluate`.
 
 ### `Match Cell Types` — `compare.matchTypes`
 
-**Built** — [matchTypes.ts](../src/nodes/analysis/matchTypes.ts), around `matchCellTypes` in
+**Built** — [matchTypes.ts](../src/packs/connectome/matchTypes.ts), around `matchCellTypes` in
 [typeMapping.ts](../src/nodes/lib/typeMapping.ts). `category: 'analysis'`, `cost: 'expensive'`,
 `dataCache: true`, max four datasets.
 
@@ -526,7 +526,7 @@ and `probe:r-helpers` execute the generated source out of the goldens, thirteen 
 
 ### `Compare Connectivity` — `compare.connectivity` — **built**
 
-`nodes/analysis/compareConnectivity.ts` over `nodes/lib/edgeComparison.ts`. `category:
+`packs/connectome/compareConnectivity.ts` over `nodes/lib/edgeComparison.ts`. `category:
 'analysis'`, `cost: 'cheap'` — a relabel and a group-by over already-fetched edges.
 The expensive nodes are upstream, which is what makes re-asking the question free.
 

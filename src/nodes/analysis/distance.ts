@@ -60,7 +60,7 @@ import {
 import { buildTargetIndexes } from '../lib/geometryIndex'
 // The Skeletons node's ceiling, imported rather than restated — see `nblast.ts`.
 import { labelColumnParam, warnAboveParam } from '../lib/limitParams'
-import { MAX_NEURONS } from '../query/morphology'
+import { MAX_NEURONS } from '../lib/limitParams'
 
 registerNode({
   type: 'neuron.distance',

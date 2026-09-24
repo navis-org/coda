@@ -34,7 +34,7 @@ import type {
   SkeletonProvenance,
   SkeletonsValue,
 } from '../../core/values'
-import { MAX_NEURONS } from './morphology'
+import { MAX_NEURONS } from '../lib/limitParams'
 import { SYNAPSE_UNIT_PARAM } from '../lib/synapseParams'
 import { CARRY_PARAM_ID } from '../lib/carryParams'
 

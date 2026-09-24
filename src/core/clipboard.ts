@@ -22,6 +22,7 @@
 import type { CodaGraph } from './graph'
 import { GRAPH_FORMAT_VERSION, deserializeGraph, newId } from './graph'
 import { cloneCaptions, cloneGroups } from './groups'
+import { documentNode } from './missing'
 
 /**
  * What a copied fragment says it is.
@@ -106,7 +107,11 @@ export function fragmentBody(
   const sub = subgraphOf(graph, nodeIds)
   if (!sub) return undefined
   const { meta: _meta, dashboard: _dashboard, viewport: _viewport, ...rest } = sub
-  return rest
+  // Spelled as documents spell them, like `serializeGraph`: a placeholder copied from this tab
+  // must paste as the real node into a tab — or a build — that has it. Here and not in
+  // `subgraphOf`, which duplicate and the group peek read in memory, where a placeholder has to
+  // stay one.
+  return { ...rest, nodes: rest.nodes.map(documentNode) }
 }
 
 /**

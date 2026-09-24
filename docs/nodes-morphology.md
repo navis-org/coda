@@ -169,7 +169,7 @@ be a column of numbers and joins nothing while the card looks configured. A line
 written here first and then deleted: `validateColumnParams` runs for every node on every graph
 mutation and already emits exactly this case, `Column "neuronId" is gone — using "label"`, so the
 node's own sentence was the second badge for one fact that `out.scatter` and `out.barChart` have
-both recorded rules against — and `zapbench.neuronTraces`, which the first draft cited as precedent for
+both recorded rules against — and `zapbench:neuronTraces`, which the first draft cited as precedent for
 writing it, in fact declines it for that reason and adds only what the framework cannot say. The
 test asserts it through `validateColumnParams` instead, so the coverage survives the node not
 duplicating it.
@@ -178,7 +178,7 @@ Worth naming the generalisation that is actually missing, since three nodes now 
 `ColumnParam` flag meaning *this default is a decision, not a suggestion* — skip rule 3, keep the
 stored name, fail in `evaluate`. `resolveColumn`'s own doc frames rule 3 as being for a default
 that is "a suggestion rather than a decision", and `excludeIds` is the precedent for declaring
-that meaning at the param. The tell is `zapbench.neuronTraces` needing three separate answers for one
+that meaning at the param. The tell is `zapbench:neuronTraces` needing three separate answers for one
 trap.
 
 **The exporters diverge on the kind, through one shared predicate.** A synapse cloud is a frame

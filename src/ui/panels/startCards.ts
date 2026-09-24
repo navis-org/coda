@@ -23,7 +23,7 @@ import { getNodeDef } from '../../core/registry'
 import type { StarterSpec } from '../../wizard/starters'
 import { starterFor } from '../../wizard/starters'
 import type { DatasetGlyph } from '../../nodes/lib/datasetFamilies'
-import { starterFamilies } from '../../nodes/lib/datasetFamilies'
+import { offeredFamilies, starterFamilies } from '../../nodes/lib/datasetFamilies'
 import type { WorkflowSummary } from '../../store/library'
 import { formatAgo, plural } from '../format'
 import type { TourId } from '../tour/tourState'
@@ -127,8 +127,8 @@ function tileNode(types: string[]): { nodeType: string; category: NodeCategory }
  * in one and not the other is a split that would end up depending on which file was edited last.
  * See `DatasetFamily.starter` — the nodes it holds back are still in `Add ▸ Dataset`.
  */
-export function datasetCards(): DatasetCard[] {
-  return starterFamilies()
+export function datasetCards(offered?: (type: string) => boolean): DatasetCard[] {
+  return offeredFamilies(starterFamilies(), offered)
     .filter((family) => family.sourceId !== 'mock')
     .map((family) => ({
       kind: 'dataset',

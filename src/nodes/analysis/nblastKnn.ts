@@ -35,7 +35,7 @@ import {
 import { geometryLabels } from '../lib/geometryLabels'
 // The Skeletons node's ceiling, imported rather than restated — see `nblast.ts`.
 import { labelColumnParam, warnAboveParam } from '../lib/limitParams'
-import { MAX_NEURONS } from '../query/morphology'
+import { MAX_NEURONS } from '../lib/limitParams'
 
 registerNode({
   type: 'neuron.nblastKnn',

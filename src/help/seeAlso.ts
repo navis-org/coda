@@ -199,10 +199,6 @@ const RELATED: readonly (readonly string[])[] = [
   // A table, a chart of two of its columns, and a picture of the whole of it.
   ['out.table', 'out.scatter', 'out.heatmap'],
 
-  // --- activity -------------------------------------------------------------
-  // ZapBench both ways round, and the Heatmap a selection of cells is made on.
-  ['zapbench.traces', 'zapbench.neuronTraces', 'zapbench.neurons', 'out.heatmap'],
-
   // --- running it several times ---------------------------------------------
   // The pair: nothing else uses either.
   ['flow.forEach', 'flow.collect'],
@@ -221,7 +217,7 @@ function related(): ReadonlyMap<string, ReadonlySet<string>> {
   if (relation) return relation
   const documented = new Set(helpTypes())
   const built = new Map<string, Set<string>>([...documented].map((type) => [type, new Set()]))
-  for (const group of RELATED) {
+  for (const group of SEE_ALSO_GROUPS) {
     for (const a of group) {
       for (const b of group) {
         if (a !== b && documented.has(a) && documented.has(b)) built.get(a)?.add(b)
@@ -242,5 +238,17 @@ export function seeAlsoFor(type: string, order: (type: string) => string = (t) =
   return [...(related().get(type) ?? [])].sort((a, b) => order(a).localeCompare(order(b)))
 }
 
-/** The groups themselves, for the test that keeps them honest. */
-export const SEE_ALSO_GROUPS = RELATED
+/*
+ * A node pack's groups, from `src/packs/<id>/seeAlso.ts` — by file, like the pack's documents,
+ * since the relation is a fact about documents rather than about node definitions.
+ */
+const PACK_GROUPS = import.meta.glob('../packs/*/seeAlso.ts', {
+  eager: true,
+  import: 'default',
+}) as Record<string, readonly (readonly string[])[]>
+
+/** The groups themselves, built in and from packs, for the relation and the test that keeps them honest. */
+export const SEE_ALSO_GROUPS: readonly (readonly string[])[] = [
+  ...RELATED,
+  ...Object.values(PACK_GROUPS).flat(),
+]

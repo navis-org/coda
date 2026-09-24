@@ -22,7 +22,7 @@
  * that being a cycle. See `PortDef.reference`.
  */
 
-import { registerNode } from '../../core/registry'
+import { packNode } from '../../core/registry'
 import { T, findColumn, isNumericDType, isTabular, schemaOf } from '../../core/types'
 import { idText } from '../../core/ids'
 import type { CellValue, ColumnData } from '../../core/values'
@@ -31,7 +31,7 @@ import { rootsForSupervoxels, staleRoots } from '../../data/cave/rootIds'
 import { caveTargetOfValue } from '../lib/caveParams'
 import { foreignBackend } from '../lib/datasetParam'
 
-registerNode({
+export const updateRootIdsNode = packNode({
   type: 'cave.updateRootIds',
   label: 'Update root IDs',
   category: 'transform',

@@ -188,6 +188,14 @@ describe('refusing a plan', () => {
     expect(message).toContain('core.doesNotExist')
   })
 
+  it('reads a renamed type as the node that took it over, rather than refusing it', () => {
+    // A model can carry an id from before a rename; it means the node, and says so no other way.
+    const result = expectOk(
+      applyPlan(emptyGraph(), plan({ add: [{ ref: 'z', type: 'zapbench.traces' }] })),
+    )
+    expect(nodeFor(result, 'z').type).toBe('zapbench:traces')
+  })
+
   it('refuses a superseded type, since the catalogue does not offer it', () => {
     // `neuron.dataset` is registered so old files keep loading, and `hidden` so nothing offers it.
     expect(getNodeDef('neuron.dataset')?.hidden).toBe(true)

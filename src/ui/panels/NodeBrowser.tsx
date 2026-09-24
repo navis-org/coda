@@ -16,7 +16,6 @@ import { useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import type { NodeCategory, NodeDefinition } from '../../core/node'
-import { listableNodeDefs, nodeDefsByCategory } from '../../core/registry'
 import type { Socket } from '../../core/sockets'
 import { socketLabel } from '../../core/sockets'
 import type { Rect } from '../hoverPlacement'
@@ -27,7 +26,9 @@ import { NodeThumbnail } from './NodeThumbnail'
 import { Highlight } from './Highlight'
 import { CATEGORY_LABELS } from './categoryLabels'
 import { defaultInputPorts, defaultOutputPorts } from '../../core/ports'
+import { useGraphStore } from '../../store/graphStore'
 import { Modal } from '../Modal'
+import { useOfferedNodeDefsByCategory } from '../packSwitches'
 
 export interface NodeBrowserProps {
   onPick: (nodeType: string) => void
@@ -37,15 +38,17 @@ export interface NodeBrowserProps {
 export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<NodeCategory | 'all'>('all')
+  const openPlugins = useGraphStore((s) => s.openPlugins)
 
   /** Registry order, grouped by category — the order rows appear in with no query. */
-  const ordered = useMemo(() => nodeDefsByCategory().flatMap((group) => group.defs), [])
+  const groups = useOfferedNodeDefsByCategory()
+  const ordered = useMemo(() => groups.flatMap((group) => group.defs), [groups])
 
   const counts = useMemo(() => {
-    const map = new Map<NodeCategory | 'all', number>([['all', listableNodeDefs().length]])
-    for (const { category: cat, defs } of nodeDefsByCategory()) map.set(cat, defs.length)
+    const map = new Map<NodeCategory | 'all', number>([['all', ordered.length]])
+    for (const { category: cat, defs } of groups) map.set(cat, defs.length)
     return map
-  }, [])
+  }, [groups, ordered])
 
   const ranked = useMemo(() => {
     const scoped = category === 'all' ? ordered : ordered.filter((d) => d.category === category)
@@ -105,26 +108,26 @@ export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
       </div>
 
       <div className="node-browser__chips" role="tablist" aria-label="Node categories">
-        {(
-          ['all', ...nodeDefsByCategory().map((g) => g.category)] as Array<NodeCategory | 'all'>
-        ).map((value) => (
-          <button
-            key={value}
-            type="button"
-            role="tab"
-            className="chip-filter"
-            aria-selected={category === value}
-            data-category={value === 'all' ? undefined : value}
-            onClick={() => {
-              setCategory(value)
-              // Picking a chip is the other half of the exclusivity rule.
-              setQuery('')
-            }}
-          >
-            {value === 'all' ? 'All' : CATEGORY_LABELS[value]}
-            <span className="chip-filter__count">{counts.get(value) ?? 0}</span>
-          </button>
-        ))}
+        {(['all', ...groups.map((g) => g.category)] as Array<NodeCategory | 'all'>).map(
+          (value) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              className="chip-filter"
+              aria-selected={category === value}
+              data-category={value === 'all' ? undefined : value}
+              onClick={() => {
+                setCategory(value)
+                // Picking a chip is the other half of the exclusivity rule.
+                setQuery('')
+              }}
+            >
+              {value === 'all' ? 'All' : CATEGORY_LABELS[value]}
+              <span className="chip-filter__count">{counts.get(value) ?? 0}</span>
+            </button>
+          ),
+        )}
       </div>
 
       <div className="node-browser__list" ref={nav.listRef} role="listbox" aria-label="Nodes">
@@ -148,6 +151,16 @@ export function NodeBrowser({ onPick, onClose }: NodeBrowserProps) {
         <span>esc close</span>
         <span>Space opens the command palette instead</span>
         <span className="toolbar__spacer" />
+        <button
+          type="button"
+          className="node-browser__guide node-browser__plugins"
+          onClick={() => {
+            onClose()
+            openPlugins()
+          }}
+        >
+          Plugins
+        </button>
         {/*
          * The one place somebody is already choosing a node and may not know what one does.
          * A new tab rather than a route: the browser is modal over a graph, and answering

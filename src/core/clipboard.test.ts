@@ -25,6 +25,7 @@ import {
 import type { CodaGraph, GraphNode } from './graph'
 import { addEdge, addNode, emptyGraph, serializeGraph } from './graph'
 import { createGroup } from './groups'
+import { MISSING_TYPE } from './missing'
 import { defaultParams } from './node'
 import { requireNodeDef } from './registry'
 
@@ -112,10 +113,24 @@ describe('what a paste is willing to read', () => {
      */
     const foreign = JSON.stringify({
       version: 1,
-      nodes: [{ id: 'x', type: 'from.the.future', position: { x: 0, y: 0 }, params: {} }],
+      nodes: [{ id: 'x', position: { x: 0, y: 0 }, params: {} }],
       edges: [],
     })
     expect(readFragment(foreign)).toBeUndefined()
+  })
+
+  it('pastes a node this build does not have as a placeholder, and copies it back as itself', () => {
+    // Copied out of a newer build's tab: the card lands as a placeholder, and copying *that*
+    // puts the original back on the clipboard for a tab that has the type.
+    const foreign = JSON.stringify({
+      version: 1,
+      nodes: [{ id: 'x', type: 'from.the.future', position: { x: 0, y: 0 }, params: { n: 3 } }],
+      edges: [],
+    })
+    const pasted = read(foreign).graph
+    expect(pasted.nodes.map((n) => n.type)).toEqual([MISSING_TYPE])
+    const again = JSON.parse(fragmentFrom(pasted, ['x'])!)
+    expect(again.nodes[0]).toMatchObject({ type: 'from.the.future', params: { n: 3 } })
   })
 
   it('reads a whole saved graph, not just a fragment this app wrote', () => {

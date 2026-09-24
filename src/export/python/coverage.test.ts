@@ -34,7 +34,7 @@ const NO_EMITTER: Record<string, string> = {
     'emitted as a literal frame \u2014 the obvious first emitter, left until one is checked by ' +
     '*running* it against the node, `out.topology`\u2019s rule.',
   'out.sankey':
-    'A flow diagram, and this is a dependency refusal rather than a gap. Neither library draws one: matplotlib has `matplotlib.sankey`, which is built for a different figure entirely \u2014 a single balance of inflows and outflows, not a layered flow \u2014 and the routes that would work are plotly or holoviews, each a fourth package in an exporter that is neuprint-python, pandas and navis. The R side is the same story with ggalluvial. The arithmetic is not the obstacle and would be about fifteen lines; what stops this is the same rule `out.topology` and `zapbench.traces` record \u2014 an emitter has to be checked by *running* it, and a flow diagram whose widths silently stopped conserving would look entirely plausible. The table itself exports perfectly well: the Transfers port is four ordinary columns, so a reader has everything they need to draw this in whichever package they already have.',
+    'A flow diagram, and this is a dependency refusal rather than a gap. Neither library draws one: matplotlib has `matplotlib.sankey`, which is built for a different figure entirely \u2014 a single balance of inflows and outflows, not a layered flow \u2014 and the routes that would work are plotly or holoviews, each a fourth package in an exporter that is neuprint-python, pandas and navis. The R side is the same story with ggalluvial. The arithmetic is not the obstacle and would be about fifteen lines; what stops this is the same rule `out.topology` and `zapbench:traces` record \u2014 an emitter has to be checked by *running* it, and a flow diagram whose widths silently stopped conserving would look entirely plausible. The table itself exports perfectly well: the Transfers port is four ordinary columns, so a reader has everything they need to draw this in whichever package they already have.',
   'out.topology':
     'Neuron Topology, and this is a prototype rather than an absence nobody noticed. Every number on the card has a navis counterpart \u2014 `navis.strahler_index`, `navis.split_axon_dendrite`, `cable_length` \u2014 so the emitter is writable and worth writing. What stops it being written *now* is that the split is the one thing here somebody will compare against a paper, and both exporters have silently disagreed with the canvas before (Connectivity\u2019s far-end match, Paths\u2019 missing floor). An emitter for this has to be checked by running it against the node, the way `pnpm probe:split` already checks the node against navis \u2014 and until it is, no emitter is a better answer than one that looks right.',
   'compare.matchTypes':
@@ -70,7 +70,7 @@ const NO_EMITTER: Record<string, string> = {
     'result yet: the morphology emitters are written against neuprint-python, so a cell binding ' +
     'a CloudVolume would sit above a Meshes cell that is itself a TODO for this backend. One ' +
     'emitter is worth writing when the pair is.',
-  'zapbench.neuronTraces':
+  'zapbench:neuronTraces':
     'ZapBench traces. The faithful route is short and obvious \u2014 `tensorstore.open` against ' +
     'the same `gs://zapbench-release/\u2026/traces/` zarr3 kvstore zapbench\u2019s own ' +
     '`constants.SPECS` names, then `ds[t0:t1, ids - 1]` \u2014 and the off-by-one it would have ' +
@@ -82,13 +82,13 @@ const NO_EMITTER: Record<string, string> = {
     '`out.topology` argues must be checked by *running* it against the node rather than read ' +
     'and believed \u2014 both exporters have silently disagreed with the canvas before. Until ' +
     'a probe runs the emitted cell, no emitter is a better answer than one that looks right.',
-  'zapbench.traces':
-    'Every ZapBench cell, or a listed set \u2014 see `zapbench.neuronTraces`, whose two reasons apply ' +
+  'zapbench:traces':
+    'Every ZapBench cell, or a listed set \u2014 see `zapbench:neuronTraces`, whose two reasons apply ' +
     'unchanged: tensorstore would be a fourth dependency, and a cell restating the condition ' +
     'bounds, the pyramid level and the permutation that names a downsampled row is exactly what ' +
     'has to be checked by running it. The permutation is the sharper half here: a notebook that ' +
     'labelled a row by the wrong cells would still draw a perfectly plausible heatmap.',
-  'zapbench.neurons':
+  'zapbench:neurons':
     'ZapBench cells to fish2 neurons. The lookup itself is one `neu.fetch_custom` with ' +
     '`n.zapbenchId IN [...]`, but its cells arrive from a selection on a ZapBench Traces ' +
     'heatmap, and that node has no emitter \u2014 so the cell would read a variable nothing ' +

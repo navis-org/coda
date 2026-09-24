@@ -1733,7 +1733,7 @@ registerEmitter('core.similarity', (ctx) => {
  * rules, and inlining them per node would put four copies of each into a notebook with two
  * comparisons in it.
  *
- * The dataset *names* come from `resolveDatasetNames`, the node's own function, rather than
+ * The dataset *names* come from `resolveDatasetNames`, the node's own function (`nodes/lib/edgeComparison.ts`), rather than
  * being re-read off the params here. They are the output's column names and they are
  * deduplicated (invariant 3): two datasets typed "A" become `weight_A` and `weight_A_2`, and an
  * emitter that re-derived that rule would name a column the canvas does not have.

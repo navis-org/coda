@@ -13,7 +13,8 @@ import type { Socket } from '../../core/sockets'
 import { dragReaches, socketTier } from '../../core/sockets'
 import { placeableIds } from '../../core/dashboard'
 import { groupsTouching } from '../../core/groups'
-import { isAnnotation, nodeDefsByCategory } from '../../core/registry'
+import { isAnnotation } from '../../core/registry'
+import type { nodeDefsByCategory } from '../../core/registry'
 import type { GraphState } from '../../store/graphStore'
 import { pickGraphFile } from '../../store/persistence'
 import { downloadGraph, downloadNotebook, downloadRmd } from '../export'
@@ -128,10 +129,16 @@ export interface DragFilter extends Socket {
  * with nothing at all reads as a broken search — a list of greyed rows saying why reads as the
  * lock, which is what it is.
  */
-export function buildNodeItems(filter?: DragFilter, locked = false): PaletteItem[] {
+export function buildNodeItems(
+  // What is offered, as `useOfferedNodeDefsByCategory` answers it. Required, so the palette cannot
+  // list switched-off packs by a caller forgetting to say what is offered.
+  groups: ReturnType<typeof nodeDefsByCategory>,
+  filter?: DragFilter,
+  locked = false,
+): PaletteItem[] {
   const items: Array<{ item: PaletteItem; rank: number }> = []
 
-  for (const { category, defs } of nodeDefsByCategory()) {
+  for (const { category, defs } of groups) {
     for (const def of defs) {
       let portId: string | undefined
       let rank = 0

@@ -11,6 +11,7 @@ import type { CodaGraph, GraphNode } from './graph'
 import { inboundIndex, nodePort, nodesById, portKey, topoSort, wouldCreateCycle } from './graph'
 import type { InferContext, NodeDefinition } from './node'
 import { makeInferContext, validateColumnParams } from './node'
+import { missingMessage, unknownTypeOf } from './missing'
 import { getNodeDef } from './registry'
 import { findInputPort, inputPorts, outputPorts } from './ports'
 import type { Socket } from './sockets'
@@ -129,11 +130,21 @@ export function inferGraph(graph: CodaGraph, options: InferOptions = {}): Infere
   for (const nodeId of order) {
     const node = nodes.get(nodeId)!
     const def = getNodeDef(node.type)
-    if (!def) {
+    /*
+     * A node this build does not have — a placeholder, or a type nothing registered. An *error*
+     * rather than a `validate` line, because only an error blocks the run: the card must say why
+     * it cannot run before anybody presses Run, and nothing downstream should wait on it. A
+     * placeholder's outputs are `any`, which reads downstream as unresolved rather than as absent
+     * — a picker keeps its column.
+     */
+    const unknown = unknownTypeOf(node, def)
+    if (!def || unknown !== undefined) {
       result[nodeId] = {
         inputs: {},
-        outputs: {},
-        issues: [{ severity: 'error', message: `Unknown node type "${node.type}"` }],
+        outputs: def
+          ? Object.fromEntries(outputPorts(def, node.params).map((p) => [p.id, p.type]))
+          : {},
+        issues: [{ severity: 'error', message: missingMessage(unknown ?? node.type) }],
       }
       continue
     }

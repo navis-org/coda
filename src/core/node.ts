@@ -1022,7 +1022,11 @@ export interface LoopPlan {
 }
 
 export interface NodeDefinition<P extends ParamValues = ParamValues> {
-  /** Stable id, namespaced: "core.filterTable", "neuron.findNeurons". Persisted in files. */
+  /**
+   * Stable id, persisted in files: "core.filterTable", "neuron.findNeurons", and for a pack's
+   * node "pack:name". `registerNode` refuses anything outside that grammar — see
+   * `core/nodeType.ts`.
+   */
   type: string
   label: string
   category: NodeCategory
@@ -1212,11 +1216,27 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
   /**
    * Keep the type working but out of the add-node surfaces.
    *
-   * For a node that has been superseded: a saved graph must keep loading — an unregistered type
-   * renders as "Unknown node" and drops its params — while nobody should be offered it for
-   * something new. Registration is what makes a file load; listing is a separate question.
+   * For a node that has been superseded: a saved graph must keep *working* — an unregistered type
+   * loads as a placeholder that keeps its params but cannot run (`core/missing.ts`) — while nobody
+   * should be offered it for something new. Registration is what makes a file run; listing is a
+   * separate question.
    */
   hidden?: boolean
+  /**
+   * Ids this type was saved under before it was renamed — `zapbench.traces` for what is now
+   * `zapbench:traces`, moved into a pack.
+   *
+   * The type-level twin of `PortGroupDef.formerIds` and `ParamBase.formerId`, and read the same
+   * way: by the loader, **only after the live id has missed** (`currentType`), so a stored node is
+   * renamed on load and saved under the new id from then on. `getNodeDef` answers for live ids
+   * alone, and a renamed type is not a second registration; the few readers of an id somebody
+   * *wrote* rather than loaded (a plan's `add`, the MCP lookups) go through `liveType` too.
+   * `registerNode` refuses a former id that is live, or claimed by another type.
+   *
+   * **List every id the type has ever had**, not the last one: a second rename A → B → C leaves no
+   * B registered to claim A, so a file saved under A opens only if C lists both.
+   */
+  formerTypes?: readonly string[]
   /**
    * Output types given input types and params. Omit for nodes whose outputs are fully
    * described by their static `outputs[].type`. Must not throw — return the static type

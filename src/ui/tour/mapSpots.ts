@@ -124,6 +124,13 @@ export const MAP_SPOTS: readonly MapSpot[] = [
     side: 'below',
   },
   {
+    id: 'plugins',
+    find: () => [byTour('plugins')],
+    label: 'Plugins',
+    note: 'Extra tools for particular kinds of data. Switch one off to keep its nodes out of the way.',
+    side: 'below',
+  },
+  {
     id: 'assistant',
     find: () => [byTour('assistant')],
     label: 'Assistant',

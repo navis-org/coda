@@ -22,6 +22,7 @@ import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
+import { resetPackSwitchesForTest, switchPack } from '../packSwitches'
 import { loadWizardArrange, loadWizardViewsOff } from '../../store/persistence'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
 import { DEMO_DATASET } from '../../wizard/build'
@@ -327,5 +328,40 @@ describe('the cross-dataset path', () => {
     fireEvent.click(screen.getByRole('button', { name: /Demo Data/ }))
     expect(progress()).toBe('Question 2 of 4')
     expect(screen.getByRole('heading', { name: /Which neurons\?/ })).toBeTruthy()
+  })
+})
+
+describe('datasets a switched-off plugin hides', () => {
+  afterEach(() => {
+    act(() => {
+      useGraphStore.getState().closePlugins()
+      clearStorage()
+      resetPackSwitchesForTest()
+    })
+  })
+
+  it('names the plugin under the first question, and opens Plugins over the wizard', () => {
+    act(() => switchPack('neuprint', false))
+    render(<WizardDialog />)
+    expect(screen.queryByRole('button', { name: /Hemibrain/ })).toBeNull()
+    expect(
+      screen.getByText(/Some datasets are hidden because neuPrint is switched off/),
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Plugins' }))
+    expect(useGraphStore.getState().pluginsOpen).toBe(true)
+    expect(useGraphStore.getState().wizardOpen).toBe(true)
+  })
+
+  it('says nothing while every plugin is on', () => {
+    render(<WizardDialog />)
+    expect(screen.queryByText(/Some datasets are hidden/)).toBeNull()
+  })
+
+  it('does not offer several datasets once fewer than two are left', () => {
+    // Connectome off leaves Demo Data alone, and Continue refuses a single ticked box.
+    act(() => switchPack('connectome', false))
+    render(<WizardDialog />)
+    expect(screen.getByRole('button', { name: /Demo Data/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: new RegExp(MULTI_DATASET.label) })).toBeNull()
   })
 })

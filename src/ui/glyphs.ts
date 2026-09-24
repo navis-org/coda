@@ -185,7 +185,7 @@ const DATASET_MARKS: Readonly<Record<string, readonly GlyphShape[]>> = {
  * require drawing one. Dataset nodes carrying a family fall through to their silhouette first.
  */
 // prettier-ignore
-export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
+const BUILT_IN_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
 
   // --- The table ---------------------------------------------------------------
   // A rounded box with a header rule. Everything that keeps a table a table and changes what is
@@ -392,36 +392,6 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['rect', { x: '4.6', y: '4.6', width: '4.2', height: '4.2', fill: 'currentColor', stroke: 'none' }],
     ['rect', { x: '9.9', y: '9.9', width: '4.2', height: '4.2', fill: 'currentColor', stroke: 'none' }],
     ['rect', { x: '15.2', y: '15.2', width: '4.2', height: '4.2', fill: 'currentColor', stroke: 'none' }],
-  ],
-  /*
-   * Three traces with one transient each, at three different times. The registry has no line
-   * chart, so a wave is an unspent silhouette — and it is the right one here: what this node
-   * hands on is a population's activity against time, which no matrix or table glyph says. The
-   * transients are offset rather than aligned, because a column of simultaneous spikes would
-   * read as a stimulus rather than as several neurons.
-   */
-  'zapbench.neuronTraces': [
-    ['path', { d: 'M3 6h4l1.5-3L11 6h10' }],
-    ['path', { d: 'M3 12h9l1.5-3.4L16 12h5' }],
-    ['path', { d: 'M3 18h5l1.5-2.6L11 18h10' }],
-  ],
-  /*
-   * The same three transients inside a frame: the whole population at once rather than a
-   * selection of it. The frame is the matrix's own outline, which is what makes this the
-   * overview a selection is drawn from.
-   */
-  'zapbench.traces': [
-    ['rect', { x: '3', y: '4', width: '18', height: '16', rx: '1.5' }],
-    ['path', { d: 'M5.5 9h3.5l1.3-2.6L12.6 9h5.9' }],
-    ['path', { d: 'M5.5 13h6.5l1.3-2.6L15.6 13h2.9' }],
-    ['path', { d: 'M5.5 17h2l1.3-2.6L11.1 17h7.4' }],
-  ],
-  // One transient, an arrow, an arbour: a cell's activity resolved to the neuron carrying it.
-  'zapbench.neurons': [
-    ['path', { d: 'M3 6h5l1.5-3L12 6h9' }],
-    ['path', { d: 'M6 9.4v4.8M4.2 12.4 6 14.2l1.8-1.8' }],
-    ['circle', { cx: '11.6', cy: '18.6', r: '1.8' }],
-    ['path', { d: 'M12.9 17.3l3.3-3.5M16.2 13.8l2.8-2.6M16.2 13.8l1.1 3.6' }],
   ],
   'neuron.nblastMatches': [
     ['rect', { x: '4', y: '4', width: '16', height: '16', rx: '1.5' }],
@@ -1080,6 +1050,32 @@ export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['line', { x1: '4', y1: '17', x2: '13', y2: '17' }],
   ],
 }
+
+/*
+ * A node pack's drawings, from `src/packs/<id>/glyphs.ts` — found by file rather than imported,
+ * because this table is drawn by `nodes.html`, which holds no node definitions for a pack's
+ * `index.ts` to drag in behind it. Eager, since each is a handful of short arrays.
+ */
+const PACK_GLYPHS = import.meta.glob('../packs/*/glyphs.ts', {
+  eager: true,
+  import: 'default',
+}) as Record<string, Readonly<Record<string, readonly GlyphShape[]>>>
+
+/*
+ * A pack that keeps built-in ids (Connectome) could otherwise redraw a built-in node from its own
+ * file, and whichever table was spread last would win in silence — so a second drawing of one type
+ * is refused outright.
+ */
+export const NODE_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = (() => {
+  const merged: Record<string, readonly GlyphShape[]> = { ...BUILT_IN_GLYPHS }
+  for (const [path, table] of Object.entries(PACK_GLYPHS)) {
+    for (const [type, shapes] of Object.entries(table)) {
+      if (type in merged) throw new Error(`${path} draws "${type}", which is already drawn`)
+      merged[type] = shapes
+    }
+  }
+  return merged
+})()
 
 // ---------------------------------------------------------------------------
 // Fallbacks and resolution

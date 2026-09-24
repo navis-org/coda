@@ -32,7 +32,13 @@ import { registerSource } from '../../data/source'
 import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
 import { demoWorkflow } from '../../wizard/build'
-import { clearStorage, installJsdomStubs, pointerEvent } from '../../test/jsdomStubs'
+import {
+  clearStorage,
+  installJsdomStubs,
+  installStorageStub,
+  pointerEvent,
+} from '../../test/jsdomStubs'
+import { resetPackSwitchesForTest, switchPack } from '../packSwitches'
 import { NodeBrowser } from './NodeBrowser'
 import { NodeThumbnail } from './NodeThumbnail'
 
@@ -43,6 +49,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   clearStorage()
+  resetPackSwitchesForTest()
   act(() => {
     useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })
@@ -481,5 +488,41 @@ describe('browser entry points', () => {
     })
 
     await waitFor(() => expect(screen.getByRole('dialog', { name: 'Add a node' })).toBeTruthy())
+  })
+})
+
+describe('node packs', () => {
+  // The switch is kept in `localStorage`, which Node 26 + jsdom leave undefined without a stub.
+  beforeAll(installStorageStub)
+
+  const zapbenchRows = () =>
+    within(screen.getByRole('listbox', { name: 'Nodes' }))
+      .queryAllByRole('option')
+      .filter((row) => /ZapBench/.test(row.textContent ?? ''))
+
+  it("hides a switched-off pack's nodes, and brings them back when it is switched on", () => {
+    open()
+    expect(zapbenchRows()).toHaveLength(3)
+    act(() => switchPack('zapbench', false))
+    expect(zapbenchRows()).toHaveLength(0)
+    act(() => switchPack('zapbench', true))
+    expect(zapbenchRows()).toHaveLength(3)
+  })
+
+  it('keeps a switched-off pack offered while the open workflow uses it', () => {
+    const base = demoWorkflow('partners')
+    const zt = { id: 'zt', type: 'zapbench:traces', position: { x: 0, y: 0 }, params: {} }
+    act(() => useGraphStore.getState().loadGraph({ ...base, nodes: [...base.nodes, zt] }))
+    act(() => switchPack('zapbench', false))
+    open()
+    expect(zapbenchRows()).toHaveLength(3)
+  })
+
+  it('opens the Plugins dialog from its footer, closing itself', () => {
+    const { onClose } = open()
+    fireEvent.click(screen.getByRole('button', { name: 'Plugins' }))
+    expect(onClose).toHaveBeenCalled()
+    expect(useGraphStore.getState().pluginsOpen).toBe(true)
+    act(() => useGraphStore.getState().closePlugins())
   })
 })

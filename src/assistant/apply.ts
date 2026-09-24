@@ -36,7 +36,7 @@ import type { InferenceResult, IssueSeverity } from '../core/inference'
 import { checkConnection, inferGraph, nodeTypes } from '../core/inference'
 import type { NodeDefinition, ParamDef, ParamValue, ParamValues } from '../core/node'
 import { configurableParams, defaultParams, findParam, validateParamValue } from '../core/node'
-import { getNodeDef } from '../core/registry'
+import { authoredNodeDef, getNodeDef } from '../core/registry'
 import { CARD_GAP, GRID_ORIGIN, placeInColumns } from '../layout/columns'
 import { boundsOf } from '../layout/place'
 import type { AssistantPlan, PortRef } from './planShape'
@@ -145,7 +145,8 @@ export function applyPlan(graph: CodaGraph, plan: AssistantPlan): ApplyResult {
       continue
     }
 
-    const def = getNodeDef(planned.type)
+    // A model carrying an id from before a rename (`zapbench.traces`) means the node it was.
+    const def = authoredNodeDef(planned.type)
     if (!def) {
       errors.push(`${where}: there is no node type "${planned.type}".`)
       failedRefs.add(planned.ref)
@@ -171,7 +172,7 @@ export function applyPlan(graph: CodaGraph, plan: AssistantPlan): ApplyResult {
 
     const node: GraphNode = {
       id: newId('n'),
-      type: planned.type,
+      type: def.type,
       // Replaced below, once the block's shape is known. See `positionsFor`.
       position: { ...GRID_ORIGIN },
       params,

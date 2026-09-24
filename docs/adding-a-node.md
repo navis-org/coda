@@ -10,7 +10,7 @@ import { NUMERIC_DTYPES, T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 
 export const myNode = registerNode({
-  type: 'core.myThing',        // namespaced, stable — it's persisted in graph files
+  type: 'core.myThing',        // family.name, stable — persisted in graph files (core/nodeType.ts)
   label: 'My Thing',
   category: 'table',           // input | query | table | analysis | output | utility
   description: 'One line, shown in the palette and as the header tooltip.',
@@ -281,11 +281,48 @@ Three properties to preserve if you add another:
 It lives on the `NodeDefinition` because "this node comes with that one" is a fact about the node
 pack rather than about React — the headless starter graphs go through the same function.
 
+## The type id, and what registration does to the definition
+
+The id is persisted in every file, share link and Zoo entry, so `registerNode` checks its spelling
+(`core/nodeType.ts`): `family.name`, optionally with further dotted parts, and for a node pack's
+node `pack:name` (`zapbench:traces`). The colon is what keeps a pack's types from colliding with a built-in one,
+and what lets a file that needs a missing pack say *which* pack. A pack's node is added to its
+pack rather than to `nodes/index.ts`, and renaming a type means declaring the old id in
+`formerTypes` — both in [packs.md](packs.md).
+
+A registered definition is **frozen, all the way down** — ports, params, their options and types.
+`ports.ts` memoises on it and `typesWithReferenceInputs`/`typesWithLoops` derive from it once, so a
+definition changed afterwards would keep every one of those answers while no longer meaning them.
+A test that needs a node to emit a fixture registers a `test.*` type of its own rather than
+swapping a real node's `evaluate` (`xform.test.ts` has the worked example).
+
+## Adding a node to a pack
+
+A node that belongs to a pack ([packs.md](packs.md)) is written the same way and registered
+differently — `registerNode` **throws** for a `pack:` id. Six places, and only the first two are
+new:
+
+- **`packNode(...)`, not `registerNode(...)`**, exported from a module under `src/packs/<id>/`. It
+  types the definition and registers nothing.
+- **Listed in the pack's `PackDefinition.nodes`** (`src/packs/<id>/index.ts`), which is what
+  registers it, under the pack, after the packs it needs.
+- The id is **`<id>:name`** — Connectome's too, for a new node: `keepsBuiltInIds` covers the twelve
+  that moved and nothing added since.
+- Its help is **`src/packs/<id>/help/<name>.md`**, its glyph a key in **`src/packs/<id>/glyphs.ts`**
+  and its See also groups in **`src/packs/<id>/seeAlso.ts`** — each found by glob, and each allowed
+  **type imports only** (a lint rule says why).
+- Its card body and emitters stay where every other node's are — `ui/nodes/nodeBodies.ts`,
+  `export/python`, `export/r` — keyed by the type.
+- A surface that *offers* nodes reads the switched-off set through `useOfferedNodeDefsByCategory`;
+  calling the registry directly passes every test and ignores the switches.
+
 ## Retiring a node
 
-Set `hidden: true` rather than deleting it. Registration is what makes an old file load — an
-unregistered type renders as "Unknown node" and drops its params — while `listableNodeDefs()`,
-which the palette and browser read, leaves it out. `neuron.dataset` is the worked example.
+Set `hidden: true` rather than deleting it. Registration is what makes an old file *run* — an
+unregistered type loads as a placeholder that keeps its params and wires but cannot run
+([persistence.md](persistence.md#a-node-this-build-does-not-have-is-kept-as-a-placeholder)) —
+while `listableNodeDefs()`, which the palette and browser read, leaves it out. `neuron.dataset` is
+the worked example.
 
 ## When the node needs its own UI
 

@@ -26,7 +26,7 @@
 
 import type { ParamValues } from '../../core/node'
 import { ID_COLUMN_NAME } from '../../core/ids'
-import { resolveDatasetNames } from '../../nodes/analysis/compareConnectivity'
+import { resolveDatasetNames } from '../../nodes/lib/edgeComparison'
 import type { CompareParams } from '../../nodes/lib/edgeComparison'
 import { compareParamsFrom } from '../../nodes/lib/edgeComparison'
 import type { EmbedRoute } from '../../nodes/lib/embedOps'

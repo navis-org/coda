@@ -216,7 +216,7 @@ export function checkNblastSize(ctx: Warner, rows: number, cols: number): void {
  * Both NBLAST nodes ask the same four questions of their inputs — is this a skeleton set, is
  * it empty, is it a big one, is it in nanometres — and asked at each node they were the same
  * twenty lines twice, including the messages. The precedent is `neuronIdsFrom` in
- * `query/morphology.ts`, which folds the identical three concerns for the three fetch nodes.
+ * `lib/limitParams.ts`, which folds the identical three concerns for the fetch nodes.
  *
  * The four are not the same *kind* of question, and that is the distinction the guard rails
  * lost for a while. Wrong units produce a confident wrong matrix, so that one refuses and

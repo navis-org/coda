@@ -34,6 +34,7 @@
 
 import type { CodaGraph } from '../../core/graph'
 import { serializeGraph } from '../../core/graph'
+import { nodeTypeProblem } from '../../core/nodeType'
 import { toBase64 } from '../base64'
 
 /** The prefix marking a Coda share link, matching neuroglancer's. */
@@ -201,7 +202,7 @@ export function parseShareFragment(hash: string): ShareRef {
  */
 function parseDemoRef(rest: string): ShareRef {
   const [type = '', ...plan] = rest.replace(/\/+$/, '').split('/')
-  if (!/^[a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9]+)+$/.test(type)) {
+  if (nodeTypeProblem(type) !== undefined) {
     throw new ShareLinkError(
       `"${rest}" does not name a node. A demo link looks like demo://core.filterTable.`,
     )

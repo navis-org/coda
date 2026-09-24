@@ -35,6 +35,7 @@
  */
 
 import type { NodeCategory, NodeDefinition, ParamDef, PortDef } from '../core/node'
+import { NODE_TYPE_PATTERN } from '../core/nodeType'
 import { getNodeDef } from '../core/registry'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 import { socketAccepts, socketLabel } from '../core/sockets'
@@ -241,7 +242,11 @@ interface FigureSource {
 }
 
 /** `type as alias "Title" { k: v, k2: v2 }` — everything after the type optional. */
-const NODE_LINE = /^([\w.]+)(?:\s+as\s+([\w-]+))?\s*(?:"([^"]*)")?\s*(?:\{(.*)\})?\s*$/
+const NODE_LINE = new RegExp(
+  `^(${NODE_TYPE_PATTERN})(?:\\s+as\\s+([\\w-]+))?\\s*(?:"([^"]*)")?\\s*(?:\\{(.*)\\})?\\s*$`,
+)
+/** A `coda-params` header: a type, a colon, and whatever setting ids follow it on the line. */
+const PARAMS_HEADER = new RegExp(`^(${NODE_TYPE_PATTERN})\\s*:(.*)$`)
 /** `a -> b`, `a:out -> b:in`. */
 const WIRE_LINE = /^([\w-]+)(?::([\w-]+))?\s*(?:->|→)\s*([\w-]+)(?::([\w-]+))?$/
 const DIRECTIVE = /^(caption|focus)\s*:\s*(.*)$/
@@ -285,9 +290,9 @@ export function parseFigureSource(text: string): FigureSource {
     }
 
     const node = NODE_LINE.exec(line)
-    // A type with no dot in it is almost always a mistyped wire, so it is worth saying which
-    // of the two the line failed to be rather than reporting "not a node".
-    if (node && node[1]!.includes('.')) {
+    // `NODE_LINE` only matches a well-formed type id, so a line that is neither this nor a wire is
+    // almost always a mistyped wire — which the message below says rather than "not a node".
+    if (node) {
       const alias = node[2] ?? node[1]!
       if (seen.has(alias)) src.problems.push(`Duplicate name "${alias}" in this figure`)
       seen.add(alias)
@@ -685,15 +690,11 @@ function buildParamsFigure(text: string, options: FigureOptions): FigureParams {
       if (directive[1] === 'caption') caption = directive[2]!.trim()
       continue
     }
-    const at = line.indexOf(':')
-    if (at !== -1 && type === '') {
-      type = line.slice(0, at).trim()
-      tokens.push(
-        ...line
-          .slice(at + 1)
-          .split(/[,\s]+/)
-          .filter(Boolean),
-      )
+    // The type is found by the grammar, since a pack's type has a colon of its own.
+    const header = type === '' ? PARAMS_HEADER.exec(line) : null
+    if (header) {
+      type = header[1]!
+      tokens.push(...header[2]!.split(/[,\s]+/).filter(Boolean))
       continue
     }
     if (type === '') {

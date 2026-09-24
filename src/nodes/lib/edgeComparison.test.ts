@@ -1,7 +1,7 @@
 /**
  * Type-level edge comparison, the algorithm.
  *
- * The node's own contract is in `analysis/compareConnectivity.test.ts`; what is pinned here is
+ * The node's own contract is in `packs/connectome/compareConnectivity.test.ts`; what is pinned here is
  * everything that produces a plausible wrong table rather than an error — which is most of it,
  * because every output of this module is a number somebody will read as biology.
  *

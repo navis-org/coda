@@ -186,7 +186,7 @@ registerNode({
    * Deliberately **nothing about the key picker**: `validateColumnParams` runs for every node on
    * every mutation and already says `Column "neuronId" is gone — using "label"` for exactly the
    * rule-3 substitution this node's one trap is. A line of its own would be the same fact twice,
-   * which is `out.scatter`'s and `out.barChart`'s recorded rule — and `zapbench.neuronTraces`, which
+   * which is `out.scatter`'s and `out.barChart`'s recorded rule — and `zapbench:neuronTraces`, which
    * this file once claimed as precedent for writing it, in fact declines it for that reason and
    * adds only what the framework cannot say.
    */
@@ -204,7 +204,7 @@ registerNode({
      * declared default the schema lacks, so a table keyed on `label` silently matches on
      * whatever comes first — a real answer, plausibly shaped, and empty. It cannot be an error
      * because a column of ids under another name is perfectly legitimate, and nothing at edit
-     * time tells that apart from the substitution. `zapbench.neuronTraces` carries the same line for
+     * time tells that apart from the substitution. `zapbench:neuronTraces` carries the same line for
      * the same rule.
      */
     return []

@@ -74,7 +74,8 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import type { ReactNode } from 'react'
 
 import type { NodeCategory } from '../../core/node'
-import { getNodeDef, nodeDefsByCategory } from '../../core/registry'
+import { getNodeDef } from '../../core/registry'
+import type { nodeDefsByCategory } from '../../core/registry'
 import type { AddMenuBand } from '../../store/graphStore'
 import { useGraphStore } from '../../store/graphStore'
 import type { RecipeSummary } from '../../store/recipes'
@@ -83,6 +84,7 @@ import { CATEGORY_GLYPHS, GLYPH_STROKE_WIDTH, GLYPH_VIEWBOX } from '../glyphs'
 import type { GlyphShape } from '../glyphs'
 import { glyphElements } from '../glyphElements'
 import { LOCKED_HINT } from '../lockCopy'
+import { useOfferedNodeDefsByCategory } from '../packSwitches'
 import { nodeTintVar } from '../socketStyle'
 import { useDismissOnOutside } from '../useDismiss'
 import { CATEGORY_LABELS } from './categoryLabels'
@@ -263,13 +265,15 @@ export const AddMenu = memo(function AddMenu({
   }, [open])
 
   /*
-   * `nodeDefsByCategory` and not a module-level constant: the registry is filled by an import
-   * side effect (`src/nodes`), and a table built at this module's own init time would be empty
-   * for whichever import order a future entry point happens to have.
+   * Read at render and not a module-level constant: the registry is filled by an import side
+   * effect (`src/nodes`), and a table built at this module's own init time would be empty for
+   * whichever import order a future entry point happens to have. Through the offered-groups hook,
+   * so a switched-off pack stays off this menu like every other add surface.
    */
+  const offeredGroups = useOfferedNodeDefsByCategory()
   const groups = useMemo(
-    () => nodeDefsByCategory().sort((a, b) => RAIL_ORDER[a.category] - RAIL_ORDER[b.category]),
-    [],
+    () => [...offeredGroups].sort((a, b) => RAIL_ORDER[a.category] - RAIL_ORDER[b.category]),
+    [offeredGroups],
   )
   /*
    * The category the band is *showing*, which outlives the one that is open by the length of the

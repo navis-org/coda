@@ -24,7 +24,14 @@ import '../../nodes'
 import { useGraphStore } from '../../store/graphStore'
 import { demoWorkflow } from '../../wizard/build'
 import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
+import { nodeDefsByCategory } from '../../core/registry'
 import { buildCommandItems, buildNodeItems } from './paletteItems'
+
+import type { DragFilter } from './paletteItems'
+
+/** The palette's node rows over the whole registry — no reader, so no pack is switched off. */
+const nodeItems = (filter?: DragFilter, locked = false) =>
+  buildNodeItems(nodeDefsByCategory(), filter, locked)
 
 beforeAll(() => {
   installJsdomStubs({ width: 900, height: 600 })
@@ -170,11 +177,11 @@ describe('the palette', () => {
    * a broken search; a greyed row saying why reads as the lock.
    */
   it('keeps every node row visible, greyed, with the reason', () => {
-    const rows = buildNodeItems(undefined, true)
+    const rows = nodeItems(undefined, true)
     expect(rows.length).toBeGreaterThan(0)
     expect(rows.every((row) => row.disabled === true)).toBe(true)
     expect(rows.every((row) => /locked/i.test(row.hint ?? ''))).toBe(true)
-    expect(buildNodeItems().every((row) => row.disabled !== true)).toBe(true)
+    expect(nodeItems().every((row) => row.disabled !== true)).toBe(true)
   })
 })
 

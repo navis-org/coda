@@ -20,6 +20,12 @@
  *   node in hand at all; expanding at `max` covers every id the node could ever have, and an id
  *   that is not in there cannot exist at any arity.
  *
+ * The first reading has one exception, and it is why `params` is enough: a placeholder for a node
+ * this build does not have (`core/missing.ts`) declares no ports, and carries the ones its wires
+ * named in its params instead. It has no default shape and no maximum, so the other two readings
+ * answer nothing for it — which is right, since it is never offered as a type and none of its
+ * ports is a reference.
+ *
  * `params` is **required** on the first pair, and the second pair has its own name rather than
  * being that call with the argument left off. An optional argument is how the first and second
  * readings quietly become one call: a caller holding a node omits `node.params`, type-checks,
@@ -48,6 +54,7 @@
  * the registry, hence `readonly` throughout.
  */
 
+import { MISSING_TYPE, missingPorts } from './missing'
 import type {
   NodeDefinition,
   ParamValues,
@@ -227,11 +234,13 @@ function resolve(
 
 /** A node's input ports at these params. */
 export function inputPorts(def: NodeDefinition, params: ParamValues): readonly ResolvedPort[] {
+  if (def.type === MISSING_TYPE) return missingPorts(params, 'inputs')
   return resolve(def, def.inputs, params)
 }
 
 /** A node's output ports at these params. */
 export function outputPorts(def: NodeDefinition, params: ParamValues): readonly ResolvedPort[] {
+  if (def.type === MISSING_TYPE) return missingPorts(params, 'outputs')
   return resolve(def, def.outputs, params)
 }
 
@@ -282,6 +291,7 @@ export function firstOutputPort(
   def: NodeDefinition,
   params: ParamValues,
 ): ResolvedPort | undefined {
+  if (def.type === MISSING_TYPE) return missingPorts(params, 'outputs')[0]
   const first = def.outputs?.[0]
   if (!first) return undefined
   return isPortGroup(first) ? outputPorts(def, params)[0] : first

@@ -1,0 +1,656 @@
+import { packNode } from '../../core/registry'
+import { connectivityRequest } from '../../nodes/lib/datasetParam'
+import { connectivityFor, synapseTotalsFor } from '../../data/queries'
+import { T } from '../../core/types'
+import { isTableValue } from '../../core/values'
+import { idColumn } from '../../nodes/lib/tableOps'
+import { unmatchedIds } from '../../nodes/lib/idList'
+import { edgePropertyColumns } from '../../data/source'
+import {
+  datasetRequest,
+  edgePropertiesFromType,
+  edgePropertyIssues,
+  edgePropertyOptions,
+  publishedNeurons,
+  requireDataset,
+  schemasForDataset,
+  roiOptions,
+  schemasFromType,
+  sourceLabel,
+  sourceSupports,
+} from '../../nodes/lib/datasetParam'
+import {
+  RESERVED_EDGE_COLUMNS,
+  readTraversalDirection,
+  basisOptions,
+  connectivityOutputSchema,
+  endpointNeurons,
+  endpointSchema,
+  neuronRowsFor,
+  normalizeConnectivity,
+  normalizeSide,
+  normalizeTargets,
+  readBasis,
+  readEdgeProperties,
+  readNormalizeBy,
+  regionOptions,
+  totalsLookup,
+  traverseConnectivity,
+  usesRegions,
+} from '../../nodes/lib/connectivityOps'
+
+/** Above this the fan-out is worth saying out loud. A warning, never a refusal. */
+const NOISY_HOPS = 3
+
+/**
+ * Synaptic partners of a set of neurons, one or more hops out.
+ *
+ * Takes the whole neuron collection and issues one batched request per hop and direction —
+ * the collection-level semantics Coda uses everywhere. A per-neuron variant would be a
+ * ForEach around this node, not a different node.
+ *
+ * The output is an **edge list**, not a partner list: `preId → postId`, always oriented the
+ * way the synapse points, with `hop` and `direction` saying how the traversal got there. See
+ * `lib/connectivityOps.ts` for why the source's query-relative shape is reoriented here
+ * rather than at the seam.
+ */
+export const connectivityNode = packNode({
+  type: 'neuron.connectivity',
+  /*
+   * `Connectivity`, not `Connectivity`. What it emits is an edge list — a table of
+   * `preId → postId` rows — and "Graph" invited the reading that this node is where a network
+   * comes from, which is `net.build` two nodes downstream. It also puts the name in the same
+   * shape as `Skeletons`, `Meshes` and `Synapses`: what you get, not what you might do with it.
+   * The node **type** is untouched, because that is what a saved graph carries.
+   */
+  label: 'Connectivity',
+  category: 'query',
+  // Wider than the default so the title reads in full beside five header buttons, and so the
+  // `Edge properties` picker has room for a chip and its add control on one line. The one entry
+  // here that draws ordinary param rows rather than a body of its own.
+  cardWidth: 280,
+  description:
+    'Fetch synaptic partners for the incoming neurons, one or more hops out. Rows are `preId`, `preType`, `postId`, `postType`, `weight`, `hop` and `direction`; a region split adds `roi`, and `Normalize` adds `weightNorm` and `weightTotal`.',
+  guide:
+    'Synaptic partners, one or more hops out. Connections is an edge list: every row is preId → postId oriented the way the synapse points, so Build Network works with nothing to think about. Neuron Set is the same result as neurons — seeds plus every partner reached — which is what Adjacency takes. Partners decides whether a fragment counts as one.',
+  cost: 'expensive',
+  inputs: [
+    { id: 'dataset', label: 'Dataset', type: T.dataset() },
+    { id: 'neurons', label: 'Neurons', type: T.neurons() },
+  ],
+  /*
+   * **Two outputs describing one traversal**, which is `neuron.adjacency`'s arrangement and
+   * `neuron.roiConnectivity`'s before it. `Connections` is the edge list and stays first, so a
+   * link dragged off the node starts there and every graph saved before this port existed keeps
+   * its wiring — `neuron.explore` appended `all` on the same rule.
+   *
+   * `Neuron Set` exists because an edge list is the wrong *type* for the node that most obviously
+   * comes next. `Adjacency` wants two `Neurons` sets and `isSubtype` allows `neurons → table`
+   * but not the reverse, so closing a partner set into its own induced subgraph meant Rename →
+   * Stack → Dedupe → Input IDs — four nodes to say "the neurons I just found". It is derived
+   * from the result rather than fetched again (the default, at least), so the two ports cannot
+   * disagree about which neurons are in play.
+   *
+   * **Not called `Neurons`, though that is what it holds.** The input port is already `Neurons`,
+   * and a node with one label on both sides reads as a pass-through everywhere else in the
+   * registry — `out.profile` is literally one (`out: table`), and so is `Labels to Neurons`. The
+   * id differs for the same reason, one step lower: `ctx.input('neurons')` beside
+   * `ctx.output('neurons')` in one `evaluate` is a typo waiting to happen, and the notebook
+   * exporter would bind it as `connectivity_neurons`.
+   */
+  outputs: [
+    { id: 'connections', label: 'Connections', type: T.table() },
+    { id: 'neuronSet', label: 'Neuron Set', type: T.neurons() },
+  ],
+  params: [
+    {
+      id: 'direction',
+      kind: 'enum',
+      label: 'Direction',
+      default: 'outputs',
+      options: [
+        { value: 'outputs', label: 'downstream (outputs)' },
+        { value: 'inputs', label: 'upstream (inputs)' },
+        { value: 'both', label: 'both (in + out)' },
+      ],
+    },
+    {
+      id: 'hops',
+      kind: 'int',
+      label: 'Hops',
+      help: 'How many synapses out to travel. 1 is direct partners. Every neuron reached by one hop is expanded by the next, so Min weight is what keeps this bounded.',
+      default: 1,
+      min: 1,
+      step: 1,
+    },
+    {
+      id: 'minWeight',
+      kind: 'int',
+      label: 'Min weight',
+      help: 'Discard connections below this synapse count. Applied to the connection before any region split, so splitting never changes which partners are found.',
+      default: 1,
+      min: 1,
+      step: 1,
+    },
+    /*
+     * What a connection carries beside its weight, as extra columns.
+     *
+     * **A picker of what discovery found, not a checkbox for "everything".** The first idea was
+     * the checkbox, because it was not clear a dataset's edge properties could be listed at all;
+     * they can, from a 0.4 s sample (`sampleEdgePropertiesCypher`). A picker puts the chosen
+     * *names* in the provenance key and in the schema, so a dataset that grows a property later
+     * does not change what an existing node returns, and a column picker downstream is configured
+     * against columns that are promised rather than whatever turned up.
+     *
+     * No `absentMeans`: a stored node without the key returned the weight alone, which is what
+     * the empty default says. Not `presentational`: it changes what `evaluate` returns.
+     *
+     * `optionsWithoutPeek` holds: `edgePropertyOptions` reads `peekDataset`, a map lookup.
+     */
+    {
+      id: 'edgeProperties',
+      kind: 'multiEnum',
+      label: 'Edge properties',
+      noun: 'property',
+      emptyLabel: 'weight only',
+      help: 'Properties of each connection to add as columns beside weight, from what the dataset publishes — on fish2, the synapse count split by compartment (weightAxonDendrite, …). With the region options on, each region’s row carries that region’s share; a property marked “not by region” is empty there.',
+      default: [],
+      optionsWithoutPeek: true,
+      options: (ctx) =>
+        edgePropertyOptions(ctx.inputs.dataset, {
+          exclude: RESERVED_EDGE_COLUMNS,
+          noteRegions: true,
+        }),
+    },
+    /*
+     * The four region and normalisation controls.
+     *
+     * **None of them carries `absentMeans`, and that is a claim rather than an oversight.** A
+     * stored node written before these existed queried whole-neuron weights and emitted no
+     * fraction, which is exactly what every default here says — so absence and the default
+     * already agree, and writing the third state in would only add a key nothing reads
+     * differently. See `ParamBase.absentMeans` for the case where they do not agree.
+     */
+    {
+      id: 'splitByRoi',
+      kind: 'boolean',
+      label: 'Split by region',
+      help: 'One row per connection per region, with a roi column naming it. The parts sum back to the connection’s weight, give or take synapses in no primary region.',
+      default: false,
+    },
+    {
+      id: 'rois',
+      kind: 'multiEnum',
+      label: 'Regions',
+      noun: 'region',
+      /*
+       * Empty is not "no regions" and it is not "every region" either — it is *no restriction*,
+       * which is the state every graph written before this control was here is in. Said in
+       * those words because "all regions" would read as a filter that happens to pass
+       * everything, and the two differ: a restriction to every primary region drops the
+       * synapses that fall outside all of them, where no restriction keeps the whole weight.
+       */
+      emptyLabel: 'the whole connection',
+      help: 'Restrict every weight to these regions. A row’s weight becomes the synapses inside them, and a connection with none is dropped.',
+      default: [],
+      optionsWithoutPeek: true,
+      options: (ctx) =>
+        sourceSupports(ctx.inputs.dataset, 'connectivityRois')
+          ? roiOptions(ctx.inputs.dataset, {
+              primaryOnly: regionOptions(ctx.params).primaryOnly,
+            })
+          : [],
+    },
+    {
+      id: 'primaryRoisOnly',
+      kind: 'boolean',
+      label: 'Primary regions only',
+      /*
+       * The vocabulary, not a post-filter. It decides which names the picker offers and what an
+       * empty picker means, and it deliberately does **not** narrow a selection somebody has
+       * already made — the column picker's rule, which keeps a chosen value rather than
+       * substituting. A region picked while this was off and left in place when it went back on
+       * is still honoured, and the warning below is what says so.
+       */
+      help: 'Regions nest — a synapse in LAL(L) is also counted in LX(L). On, only the set that tiles the volume is offered. Off, rows can sum to several times what the connection has.',
+      default: true,
+      visibleIf: usesRegions,
+    },
+    {
+      id: 'normalize',
+      kind: 'boolean',
+      label: 'Normalize',
+      help: 'Add weightNorm, the connection as a fraction of one neuron\u2019s total synapses, and weightTotal, the denominator it was divided by.',
+      default: false,
+    },
+    {
+      id: 'normalizeBy',
+      kind: 'enum',
+      label: 'Normalize by',
+      help: 'Which end of the connection the denominator belongs to. These are different questions, not two views of one number.',
+      default: 'postsynaptic',
+      options: [
+        { value: 'postsynaptic', label: 'the target\u2019s total input' },
+        { value: 'presynaptic', label: 'the source\u2019s total output' },
+      ],
+      visibleIf: (params) => params.normalize === true,
+    },
+    {
+      id: 'normalizeBasis',
+      kind: 'enum',
+      label: 'Denominator',
+      /*
+       * The transparency control, and the reason `weightTotal` rides in the table beside the
+       * fraction. On male-cns body 10005 these two answer 23,423 and 9,324 for the same
+       * neuron's outgoing synapses — the difference is the 14,091 that land on fragments the
+       * segmentation never promoted to a neuron.
+       */
+      help: '"All synapses" counts everything the neuron makes, matching the dataset’s published total. "Reconstructed partners only" counts synapses onto named neurons, which is the denominator for comparing across connectomes. A dataset answering from an attached edge set sums that file’s own weights instead, and cannot tell the two apart.',
+      default: 'all',
+      optionsWithoutPeek: true,
+      options: (ctx) =>
+        basisOptions(ctx.inputs.dataset, {
+          all: 'all synapses',
+          connected: 'reconstructed partners only',
+        }),
+      visibleIf: (params) => params.normalize === true,
+    },
+    /*
+     * Whether a body the dataset does not call a neuron counts as a partner.
+     *
+     * **A connectivity query matches its far end as a bare node**, which is deliberate and is
+     * why this is a control rather than a fix: a partner may be a fragment the segmentation
+     * never promoted to a neuron, and excluding those under-reports the total synapse weight —
+     * which is exactly what `Normalize`'s `connected` basis exists to measure. What was wrong was
+     * that it had no *other* setting. Measured on `male-cns:v1.0`, five `LC4` neurons downstream
+     * at weight 1:
+     *
+     *   bare far end   4,252 partners   4,889 edges   11,898 synapses
+     *   :Neuron          496 partners   1,043 edges    6,533 synapses
+     *   superclass       492 partners   1,032 edges    6,503 synapses
+     *
+     * So the old behaviour answered a question almost nobody asked: 88% of the partners were
+     * fragments, and the `Neuron Set` port could find a row for none of them.
+     *
+     * **A checkbox rather than a two-option enum**, because the two settings are not peers: one
+     * is what nearly everybody wants and the other is an addition to it. What "proofread" means
+     * is deliberately *not* restated here — it is whatever the Dataset card's own population says,
+     * which is the point of asking `findNeurons` rather than compiling a predicate of our own.
+     *
+     * **`absentMeans: true`, and here the third state really is a third state.** A stored node
+     * written before this control existed queried every partner — that is not the default, so
+     * absence has to be written in on load or every saved workflow silently returns different
+     * numbers after an update. Contrast the region params above, whose absence and default agree.
+     *
+     * **No warning when it is off**, deliberately. A badge on every Connectivity run is a badge
+     * nobody reads by the third one, and the unticked box is already on the card. The asymmetry
+     * runs the other way: ticking it is what leaves the `Neuron Set` port with empty columns, and
+     * that is warned about where it happens.
+     */
+    {
+      id: 'includeFragments',
+      kind: 'boolean',
+      label: 'Include fragments',
+      help: 'Off, only proofread neurons come back — set what counts on the Dataset node. On, fragments do too; they are most of what a query returns, and none has a row for the Neuron Set port.',
+      default: false,
+      absentMeans: true,
+    },
+    /*
+     * What the `Neuron Set` port carries.
+     *
+     * **No `absentMeans`, and that is a claim.** A stored node written before this port existed
+     * emitted no neuron table and issued no lookup for one, which is exactly what `derived` does
+     * — absence and the default already agree, so writing the third state in would only add a key
+     * nothing reads differently. The four region params above carry the same note for the same
+     * reason; see `ParamBase.absentMeans` for the case where they do not agree.
+     *
+     * Not `presentational`: it changes what `evaluate` returns, so it belongs in the provenance
+     * key (invariant 4). Flipping it re-runs the node, which is the point — `full` is a query.
+     *
+     * No `visibleIf` either, though it is tempting: a param is hidden on a *param* condition, and
+     * whether the port is wired is a fact about the graph that `visibleIf(params)` cannot see.
+     * Hiding it on anything else would drop it out of the provenance key while it was still
+     * deciding the output.
+     */
+    {
+      id: 'neuronRows',
+      kind: 'enum',
+      label: 'Neuron Set',
+      help: '"Minimal" reads ids and types off the edges and costs nothing. "Full metadata" looks every neuron up for status, size and instance — a second query, run whether or not the port is wired.',
+      default: 'derived',
+      options: [
+        { value: 'derived', label: 'minimal (IDs + types)' },
+        { value: 'full', label: 'full meta data' },
+      ],
+    },
+  ],
+
+  inferOutputs: (ctx) => {
+    const schemas = schemasFromType(ctx.inputs.dataset)
+    return {
+      connections: T.table(
+        connectivityOutputSchema(schemas.connectivity, {
+          splitByRoi: ctx.params.splitByRoi === true,
+          normalize: ctx.params.normalize === true,
+          // Typed off the same discovered list `evaluate` and the source type them by, so the
+          // advertised dtype is the built one (invariant 3). Advertised whether or not the
+          // dataset turns out to publish the name — `validate` says when it does not, and a
+          // column that came and went with discovery would clear the pickers pointing at it.
+          edgeProperties: edgePropertyColumns(
+            edgePropertiesFromType(ctx.inputs.dataset),
+            readEdgeProperties(ctx.params.edgeProperties),
+          ),
+        }),
+      ),
+      /*
+       * Both branches are what `evaluate` actually returns — invariant 3 by construction, and
+       * `Input IDs` makes the same split for the same reason. The schema changing with a control
+       * is the visible cost of the control existing, and it is the honest shape: advertising
+       * `status` over a table derived from an edge list would break every picker that believed
+       * it.
+       */
+      neuronSet: T.neurons(
+        ctx.params.neuronRows === 'full'
+          ? schemas.neurons
+          : endpointSchema(schemas.connectivity),
+      ),
+    }
+  },
+
+  validate: (ctx) => {
+    const issues: string[] = []
+    const hops = Number(ctx.params.hops)
+    const minWeight = Number(ctx.params.minWeight)
+    /*
+     * A warning rather than a cap, deliberately — the same call Find Neurons makes about
+     * `limit: 0`. What is worth saying is that the two params multiply: the frontier grows by
+     * the average partner count each hop, and Min weight is the only thing dividing it.
+     */
+    if (hops >= NOISY_HOPS && minWeight <= 1) {
+      issues.push(
+        `${hops} hops at Min weight ${minWeight} expands every partner of every partner ` +
+          `and can reach much of the dataset. Raise Min weight.`,
+      )
+    }
+    if (hops >= NOISY_HOPS && ctx.params.direction === 'both') {
+      issues.push(
+        `Direction "both" expands upstream and downstream at every hop, so ${hops} hops covers the undirected neighbourhood.`,
+      )
+    }
+
+    /*
+     * The two capability refusals, each gated on the control being *used* rather than on the
+     * node's type. Both read `sourceSupports`, which folds in the edge-set arm — and the two
+     * arms point opposite ways, which is the part worth reading twice. A dataset answering from
+     * an imported file has no regions, whatever its backend could do; it *does* have totals,
+     * because it totals its own weights. See `canSplitConnectivityByRoi` and `canTotalSynapses`.
+     */
+    const label = sourceLabel(ctx.inputs.dataset) ?? 'This source'
+    if (usesRegions(ctx.params) && !sourceSupports(ctx.inputs.dataset, 'connectivityRois')) {
+      issues.push(`${label} cannot break a connection down by region`)
+    }
+    if (ctx.params.normalize === true && !sourceSupports(ctx.inputs.dataset, 'synapseTotals')) {
+      issues.push(
+        `${label} does not publish the per-neuron synapse totals Normalize divides by`,
+      )
+    }
+
+    /*
+     * Not a refusal: a nesting region set is a real question — "how much of this connection is
+     * in the optic lobe" — that simply cannot also be a decomposition. Said at edit time as well
+     * as at run time because it changes what the numbers in front of somebody mean, and because
+     * `ctx.warn` is only seen by whoever presses Run.
+     */
+    if (regionOptions(ctx.params).mayNest) {
+      issues.push(
+        'Regions nest, so a split over the whole published list counts a synapse once ' +
+          'per containing region — the rows will sum to more than the connection weight.',
+      )
+    }
+    /*
+     * Edge properties: the refusals every "which property" control shares, then one of this
+     * node's own — a property the dataset does not break down by region, asked for with the
+     * region options on. That one is a note rather than a refusal because the query does not
+     * trust the sample either: such a column comes back empty, never as the whole connection's
+     * value repeated on every region's row.
+     */
+    const properties = readEdgeProperties(ctx.params.edgeProperties)
+    issues.push(...edgePropertyIssues(ctx.inputs.dataset, properties))
+    if (properties.length && usesRegions(ctx.params)) {
+      const known = edgePropertiesFromType(ctx.inputs.dataset)
+      const whole = properties.filter(
+        (name) => known?.find((p) => p.name === name)?.perRegion === false,
+      )
+      if (whole.length) {
+        issues.push(
+          `${whole.join(', ')} ${whole.length === 1 ? 'is' : 'are'} not broken down by region in this dataset, so with the region options on ${whole.length === 1 ? 'its column is' : 'their columns are'} empty.`,
+        )
+      }
+    }
+    return issues
+  },
+
+  evaluate: async (ctx) => {
+    const dataset = requireDataset(ctx.input('dataset'))
+    const source = ctx.resolveSource(dataset.sourceId)
+    const neurons = ctx.input('neurons')
+    if (!isTableValue(neurons)) throw new Error('Neurons input is not a table')
+
+    const neuronIds = idColumn(neurons, 'neuronId')
+    if (neuronIds.length === 0) throw new Error('No neuronIds in the incoming neuron table')
+
+    const direction = readTraversalDirection(ctx.params.direction)
+    const hops = Math.max(1, Math.floor(Number(ctx.params.hops)))
+    const minWeight = Number(ctx.params.minWeight)
+    const normalize = ctx.params.normalize === true
+    const includeFragments = ctx.params.includeFragments === true
+    const { rois: chosen, splitByRoi, primaryOnly } = regionOptions(ctx.params)
+
+    /*
+     * The region list that actually reaches the query, resolved once.
+     *
+     * An explicit selection is honoured verbatim — the picker's rule, which keeps what somebody
+     * chose rather than substituting. Only an empty one has anything to decide, which is why
+     * the whole resolution sits under one guard: either the primary set, or nothing at all and
+     * the source enumerates `roiInfo`'s own keys.
+     */
+    let rois: string[] | undefined = chosen.length ? chosen : undefined
+    if (splitByRoi && !chosen.length) {
+      if (!primaryOnly) {
+        ctx.warn(
+          'Split by region covers every region a connection mentions, and region can nest ' +
+            '— a synapse in LAL(L) is counted again in CentralBrain so the rows sum to ' +
+            'several times the connection weight. Turn on "Primary regions only" to avoid ' +
+            'this.',
+        )
+      } else {
+        // `listDatasets` is cached and deduplicated, so this is a lookup rather than a fetch on
+        // any run but the very first of a session.
+        await source.listDatasets(ctx.signal)
+        const primaryRois = source.peekDataset(dataset.datasetId)?.primaryRois
+        if (primaryRois?.length) rois = [...primaryRois]
+        else {
+          /*
+           * The toggle says restrict and there is nothing to restrict to. Warned rather than
+           * refused — a split over every region is still a true statement about where the
+           * synapses are, it just is not a decomposition — but said plainly, because the number
+           * a reader would otherwise take from it is a total that is too large.
+           */
+          ctx.warn(
+            `${source.label} has not published which regions tile this dataset, so the split ` +
+              `covers every region a connection mentions. Regions nest, so the rows can sum to ` +
+              `more than the connection weight.`,
+          )
+        }
+      }
+    }
+
+    // Resolved once and handed to both schema builders: the traversal's, and — if Normalize is
+    // on — the wider one the fractions are appended to.
+    const sourceSchema = schemasForDataset(source, dataset).connectivity
+
+    /*
+     * The edge properties, typed off the list `inferOutputs` read — `peekDataset` is where
+     * `edgePropertiesFromType` reads it too — so the advertised dtype is the built one.
+     */
+    const properties = readEdgeProperties(ctx.params.edgeProperties)
+    const propertyColumns = edgePropertyColumns(
+      source.peekDataset(dataset.datasetId)?.edgeProperties,
+      properties,
+    )
+
+    ctx.progress(0.15, `${neuronIds.length} neurons`)
+    const traversed = await traverseConnectivity({
+      seeds: neuronIds,
+      direction,
+      hops,
+      schema: connectivityOutputSchema(sourceSchema, {
+        splitByRoi,
+        edgeProperties: propertyColumns,
+      }),
+      signal: ctx.signal,
+      /*
+       * The `Include fragments` filter, asked of the source rather than compiled into the
+       * connectivity query — and that is the design rather than a shortcut. It is literally
+       * `findNeurons`, so "published" means exactly what `Find Neurons` means on the same dataset
+       * card, on every backend, with no `ConnectivityRequest` field for five sources to lower and
+       * one of them to lower differently. The alternative is two definitions of one set that have
+       * to be kept in step, and the `Neuron Set` port beside it is the thing that would silently
+       * disagree. `publishedNeurons` is where the request projection is chosen; see it for why
+       * that choice is the opposite of the row lookup's fifty lines below.
+       *
+       * The cost is a round trip per hop and a connectivity response that still carries every
+       * fragment before they are dropped. The saving is the hop after: a frontier of 496 rather
+       * than 4,252.
+       */
+      published: includeFragments ? undefined : publishedNeurons(source, dataset, ctx.signal),
+      // A hop's cost is unknown until its frontier is known, so progress is per round rather
+      // than per row: the fraction paces the hops and the note carries the frontier size.
+      onHop: (hop, total, frontier) =>
+        ctx.progress(
+          0.15 + (0.7 * (hop - 1)) / total,
+          total > 1 ? `hop ${hop}/${total} · ${frontier} neurons` : `${frontier} neurons`,
+        ),
+      fetch: (frontier, hopDirection) =>
+        connectivityFor(source, {
+          ...connectivityRequest(dataset),
+          neuronIds: frontier,
+          direction: hopDirection,
+          minWeight,
+          ...(rois ? { rois } : {}),
+          ...(splitByRoi ? { splitByRoi } : {}),
+          // Every hop, so a property rides on every edge the traversal keeps; the dedupe in
+          // `collect` copies it with the rest of the row.
+          ...(properties.length ? { edgeProperties: properties } : {}),
+          signal: ctx.signal,
+        }),
+    })
+
+    /*
+     * Normalisation is a second query, and it is asked about the ids in the *result* rather than
+     * about the seeds — past one hop the neuron whose total is wanted is generally not one
+     * anybody named. See `normalizeTargets`.
+     *
+     * A block rather than an early return, because the `Neurons` port is derived from whichever
+     * table this settles on and there is exactly one place that decision should be made.
+     */
+    let connections = traversed
+    if (normalize) {
+      const by = readNormalizeBy(ctx.params.normalizeBy)
+      const basis = readBasis(ctx.params.normalizeBasis)
+      const targets = normalizeTargets(traversed, by)
+      ctx.progress(0.88, `synapse totals for ${targets.length.toLocaleString()} neurons`)
+      const totals = await synapseTotalsFor(source, {
+        // The same projection the traversal spreads. `connectivityRequest` carries the edge set
+        // as well as the id and the annotation chain, which is what lets `synapseTotalsFor`
+        // total a dataset answering from a file out of that same file — see its own note.
+        ...connectivityRequest(dataset),
+        neuronIds: targets,
+        side: normalizeSide(by),
+        basis,
+        signal: ctx.signal,
+      })
+
+      const normalized = normalizeConnectivity(
+        traversed,
+        by,
+        totalsLookup(totals),
+        connectivityOutputSchema(sourceSchema, {
+          splitByRoi,
+          normalize: true,
+          edgeProperties: propertyColumns,
+        }),
+      )
+
+      /*
+       * Said out loud rather than left as blanks in a column. A null denominator is what a
+       * fragment on the far end of an edge gets under the `connected` basis — it is not a neuron,
+       * so nothing totalled it — and a chart reading `weightNorm` would simply drop those rows
+       * with no indication that it had.
+       */
+      if (normalized.missingRows > 0) {
+        ctx.warn(
+          `${normalized.missingRows.toLocaleString()} of ` +
+            `${traversed.length.toLocaleString()} rows have no denominator (` +
+            `${normalized.missingNeurons.toLocaleString()} neurons with no published ` +
+            `${by === 'postsynaptic' ? 'input' : 'output'} total), so weightNorm is empty ` +
+            `for them.`,
+        )
+      }
+
+      connections = normalized.table
+    }
+
+    /*
+     * The `Neuron Set` port.
+     *
+     * Derived first and unconditionally: it is a pass over two columns of a table already in
+     * hand, it is what the `full` lookup is keyed by, and it is the count the warning below
+     * compares against.
+     */
+    const derived = endpointNeurons(connections, endpointSchema(sourceSchema), neurons)
+    if (ctx.params.neuronRows !== 'full') {
+      ctx.progress(1)
+      return { connections, neuronSet: derived }
+    }
+
+    ctx.progress(0.93, `neuron rows for ${derived.length.toLocaleString()} neurons`)
+    /*
+     * `datasetRequest`, not `neuronSetRequest` — the same call `Input IDs` makes, and for its
+     * reason. These are neurons the traversal *found*; narrowing them by the dataset node's
+     * population checkboxes would delete rows the edge list still counts and report the deletion
+     * as neurons the dataset does not have. And not `connectivityRequest` either: a dataset
+     * answering from an attached edge file has no neuron table behind it to look anything up in.
+     */
+    const endpointIds = idColumn(derived)
+    const rows = await source.findNeurons({
+      ...datasetRequest(dataset),
+      neuronIds: endpointIds,
+      signal: ctx.signal,
+    })
+
+    /*
+     * **A left join, so the two ports stay the same set.** `findNeurons` answers only about
+     * bodies the dataset calls a neuron, and with `Partners` set to every partner a great many
+     * are not: on `male-cns:v1.0`, five LC4 neurons have 4,252 distinct downstream partners of
+     * which 496 carry the `:Neuron` label. Returning the lookup's own rows would make this port
+     * a different length from the edge list beside it — the one property it exists to have — so
+     * every endpoint survives and an unmatched one keeps its id and the type the edge carried,
+     * with the rest of the columns empty. See `neuronRowsFor`.
+     */
+    const missing = unmatchedIds(endpointIds, rows).length
+    if (missing > 0) {
+      ctx.warn(
+        `${missing.toLocaleString()} of ${derived.length.toLocaleString()} neurons have ` +
+          `no row in ${source.label}'s neuron table, so their columns are empty — a ` +
+          `partner can be a fragment the dataset does not publish as a neuron. Their ids ` +
+          `and types are kept; untick "Include fragments" to drop them.`,
+      )
+    }
+    ctx.progress(1)
+    return {
+      connections,
+      neuronSet: neuronRowsFor(derived, rows, schemasForDataset(source, dataset).neurons),
+    }
+  },
+})

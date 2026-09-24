@@ -25,7 +25,7 @@
  * one ran is said in the caption. Deliberately not "automatic, preferring a column called
  * `hop` or `hops`": that is a substitution nobody asked for, and a network carrying a column of
  * that name meaning something else would be silently layered by it — the failure
- * `resolveColumn`'s rule 3 already has a record of on `zapbench.traces` and `out.scatter`.
+ * `resolveColumn`'s rule 3 already has a record of on `zapbench:traces` and `out.scatter`.
  *
  * ## The four edge kinds, and why the classification is not the viewer's business
  *

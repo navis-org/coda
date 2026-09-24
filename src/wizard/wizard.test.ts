@@ -28,7 +28,8 @@ import type { CodaGraph } from '../core/graph'
 import { deserializeGraph, serializeGraph } from '../core/graph'
 import { inferGraph } from '../core/inference'
 import { findParam } from '../core/node'
-import { getNodeDef, isAnnotation, requireNodeDef } from '../core/registry'
+import { getNodeDef, isAnnotation, packOfType, requireNodeDef } from '../core/registry'
+import { effectiveOff, offeredType } from '../core/packs'
 import { ROW_TRACKS } from '../core/dashboard'
 import { Scheduler } from '../core/scheduler'
 import { attributeSchema, columnNames, tableSchema } from '../core/types'
@@ -41,7 +42,13 @@ import type { BuildOptions } from './build'
 import { CROSS_SETS, GROWING_CROSS_SETS } from '../test/crossSets'
 import { parseMarkdown } from '../ui/markdown'
 import '../nodes'
-import { DEMO_DATASET, buildWorkflow, demoWorkflow } from './build'
+import {
+  DEMO_DATASET,
+  buildWorkflow,
+  canReach,
+  demoWorkflow,
+  offeredCombinations,
+} from './build'
 import type { AnalysisId, VisualisationId, WizardAnswers, WizardOption } from './options'
 import {
   MULTI_DATASET,
@@ -1509,5 +1516,39 @@ describe('the demo workflows', () => {
     })
     expect(real.nodes.find((n) => n.id === 'find')?.params.limit).toBeGreaterThan(0)
     expect(demoWorkflow('neurons').nodes.find((n) => n.id === 'find')?.params.limit).toBe(0)
+  })
+})
+
+describe('switched-off packs', () => {
+  /*
+   * Connectome off, which is the real case: the connectivity analyses build its nodes, and the
+   * table-only ones do not. What is checked is the mechanism — build each combination, keep the
+   * ones whose every node is offered.
+   */
+  const datasets = ['mock.opticlobe']
+  const offered = offeredType(effectiveOff(new Set(['connectome'])))!
+  const builds = (answers: WizardAnswers) =>
+    buildWorkflow(answers).nodes.some((n) => packOfType(n.type) === 'connectome')
+
+  it('keeps exactly the combinations that build no switched-off node', () => {
+    const kept = offeredCombinations(datasets, offered)
+    const all = everyCombination(datasets)
+    expect(kept.length).toBeGreaterThan(0)
+    expect(kept.length).toBeLessThan(all.length)
+    expect(kept).toEqual(all.filter((answers) => !builds(answers)))
+  })
+
+  it('offers an answer while some kept combination agrees with it, and every answer with none off', () => {
+    const kept = offeredCombinations(datasets, offered)
+    const connected = everyCombination(datasets).find(builds)!
+    expect(
+      canReach(kept, {
+        start: connected.start,
+        analysis: connected.analysis,
+        visualisation: connected.visualisations[0],
+      }),
+    ).toBe(false)
+    expect(canReach(kept, { start: connected.start })).toBe(true)
+    expect(canReach(undefined, { visualisation: 'anything' })).toBe(true)
   })
 })

@@ -14,12 +14,12 @@
  * re-run — the same lifetime as the results it describes.
  */
 
-import { registerNode } from '../../core/registry'
+import { packNode } from '../../core/registry'
 import { T } from '../../core/types'
 import { isTableValue } from '../../core/values'
 import { requireDataset, sourceLabel, sourceSupports } from '../lib/datasetParam'
 
-registerNode({
+export const rawCypherNode = packNode({
   type: 'neuron.rawCypher',
   label: 'Cypher',
   category: 'query',

@@ -52,7 +52,8 @@ import {
   resetCredentials,
 } from '../../data/neuprint/credentials'
 import { registerSource } from '../../data/source'
-import { installJsdomStubs } from '../../test/jsdomStubs'
+import { clearStorage, installJsdomStubs, installStorageStub } from '../../test/jsdomStubs'
+import { resetPackSwitchesForTest, switchPack } from '../packSwitches'
 import { useGraphStore } from '../../store/graphStore'
 import { setTourHandle } from '../tour/tourState'
 import type * as CaveSignIn from './caveSignIn'
@@ -916,5 +917,60 @@ describe('the CATMAID tab', () => {
     act(() => reportCatmaidAuthFailure('CATMAID rejected the token.'))
     expect(tab('CATMAID').getAttribute('aria-selected')).toBe('true')
     expect(screen.getByText('CATMAID rejected the token.')).toBeTruthy()
+  })
+})
+
+describe('a switched-off backend', () => {
+  // The switch is kept in `localStorage`, which Node 26 + jsdom leave undefined without a stub.
+  beforeAll(installStorageStub)
+  afterEach(() => {
+    clearStorage()
+    resetPackSwitchesForTest()
+  })
+
+  // Every backend, so a tab whose `pack` is misspelt — which would keep it showing for good — fails.
+  it.each([
+    ['neuprint', 'neuPrint'],
+    ['cave', 'CAVE'],
+    ['catmaid', 'CATMAID'],
+  ])('hides its tab when %s is off, and keeps the others', (pack, name) => {
+    act(() => switchPack(pack, false))
+    render(<SourcesPanel />)
+    open()
+    expect(sourceTabs().queryByRole('tab', { name })).toBeNull()
+    for (const other of ['neuPrint', 'CAVE', 'CATMAID'].filter((n) => n !== name)) {
+      expect(tab(other)).toBeTruthy()
+    }
+  })
+
+  it('keeps its tab while the open workflow uses it, so a link can still be signed into', () => {
+    act(() => switchPack('cave', false))
+    act(() =>
+      useGraphStore.getState().loadGraph({
+        version: 1,
+        nodes: [{ id: 'fw', type: 'dataset.flywire', position: { x: 0, y: 0 }, params: {} }],
+        edges: [],
+      }),
+    )
+    render(<SourcesPanel />)
+    open()
+    expect(tab('CAVE')).toBeTruthy()
+  })
+
+  it('shows and opens on its tab when whoever opened the dialog asked for it — the tour', () => {
+    act(() => switchPack('neuprint', false))
+    render(<SourcesPanel />)
+    act(() => useGraphStore.getState().openSources('neuprint'))
+    expect(tab('neuPrint').getAttribute('aria-selected')).toBe('true')
+    act(() => useGraphStore.getState().closeSources())
+    expect(useGraphStore.getState().sourcesTab).toBeUndefined()
+  })
+
+  it('shows its tab when a failure asks for it, rather than an alert nobody can answer', () => {
+    act(() => switchPack('neuprint', false))
+    render(<SourcesPanel />)
+    act(() => reportAuthFailure('neuPrint rejected the token (401)'))
+    expect(tab('neuPrint').getAttribute('aria-selected')).toBe('true')
+    expect(tokenField()).not.toBeNull()
   })
 })

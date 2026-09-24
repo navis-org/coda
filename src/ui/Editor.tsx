@@ -70,6 +70,7 @@ import { HintEditor } from './panels/HintEditor'
 import { NodeContextMenu } from './panels/NodeContextMenu'
 import type { DragFilter, PaletteItem } from './panels/paletteItems'
 import { buildCommandItems, buildNodeItems, buildRecipeItems } from './panels/paletteItems'
+import { useOfferedNodeDefsByCategory } from './packSwitches'
 import { RecipeSaveDialog } from './panels/RecipeSaveDialog'
 import { RecipesDialog } from './panels/RecipesDialog'
 import { requestExportWarnings, useExportWarnings } from './exportWarnings'
@@ -849,6 +850,8 @@ function EditorCanvas() {
     [screenToFlowPosition],
   )
 
+  /** Switched-off packs stay out of the node rows, unless this workflow already uses them. */
+  const offeredGroups = useOfferedNodeDefsByCategory()
   const paletteItems = useMemo<PaletteItem[]>(() => {
     // Read so the dependency is a real one: `buildCommandItems` calls `peekExportWarnings`,
     // which answers differently once a walk has landed and is invisible to the lint rule.
@@ -870,18 +873,27 @@ function EditorCanvas() {
             portId: from.portId,
           })
         : []
-      return [...buildNodeItems(menu.filter, locked), ...recipes]
+      return [...buildNodeItems(offeredGroups, menu.filter, locked), ...recipes]
     }
     return [
       ...buildCommandItems(ctx),
-      ...buildNodeItems(undefined, locked),
+      ...buildNodeItems(offeredGroups, undefined, locked),
       ...buildRecipeItems(ctx),
     ]
     // `liveStore` is the whole state object while the palette is open, so this recomputes
     // whenever anything changes — which is what keeps `disabled` flags honest. The revision is
     // in the list for the same reason: an export warning that lands after the palette opened
     // has to reach the row it is about.
-  }, [menu, liveStore, locked, fitAll, fitSelected, pastePoint, exportWarningsRevision])
+  }, [
+    menu,
+    liveStore,
+    locked,
+    offeredGroups,
+    fitAll,
+    fitSelected,
+    pastePoint,
+    exportWarningsRevision,
+  ])
 
   /** Run a command, or insert a node and wire it to the drag origin. */
   const handlePick = useCallback(

@@ -16,7 +16,8 @@
  */
 
 import type { CompanionSpec } from '../../core/companion'
-import { registerNode } from '../../core/registry'
+import { packNode, registerNode } from '../../core/registry'
+import type { NodeDefinition } from '../../core/node'
 import { DATASET_CARD_WIDTH } from './description'
 import { T } from '../../core/types'
 import type { DatasetValue } from '../../core/values'
@@ -34,6 +35,7 @@ import type { DatasetFamily } from '../lib/datasetFamilies'
 import { datasetChainNote } from '../lib/annotationChain'
 import {
   BACKENDS,
+  CUSTOM_DATASET_NODES,
   DATASET_FAMILIES,
   catmaidServerLabel,
   familyLabel,
@@ -107,7 +109,7 @@ const DESCRIPTION_COMPANION: CompanionSpec = {
 const DATASET_CARD_HEIGHTS: Record<string, number> = { neuprint: 326, cave: 282, catmaid: 249 }
 
 function buildDatasetNode(family: DatasetFamily) {
-  return registerNode({
+  return packNode({
     type: `dataset.${family.key}`,
     // The backend is part of the name, because one dataset can be published on more than one and
     // they do not behave alike — see `familyLabel`. The *type id* is untouched: it is what a
@@ -267,7 +269,7 @@ function buildDatasetNode(family: DatasetFamily) {
  * configuration whose whole consequence is that Connectivity declines, said elsewhere, on the
  * node that declines.
  */
-registerNode({
+const customCaveNode = packNode({
   type: 'dataset.cave',
   label: 'Custom CAVE',
   category: 'dataset',
@@ -639,7 +641,28 @@ function registerCustomCaveSpec(params: Record<string, unknown>): void {
   })
 }
 
-for (const family of DATASET_FAMILIES) buildDatasetNode(family)
+/**
+ * Every family's node, built once. The synthetic families register here, built in — the tour, the
+ * default graph and offline use all need Demo Data — and the rest are listed by the pack of their
+ * backend (`packs/neuprint`, `packs/cave`, `packs/catmaid`), which registers them.
+ */
+const FAMILY_NODES = DATASET_FAMILIES.map((family) => ({
+  family,
+  def: buildDatasetNode(family),
+}))
+
+/**
+ * A backend's dataset nodes — its families in table order, then its custom node, read off
+ * `CUSTOM_DATASET_NODES` so a new backend's pack cannot forget it. What a backend pack lists.
+ */
+export function datasetNodesFor(backend: string): NodeDefinition[] {
+  const families = FAMILY_NODES.filter(({ family }) => family.backend === backend)
+  const custom = CUSTOM_DATASET_NODES.filter((entry) => entry.backend === backend)
+  return [
+    ...families.map(({ def }) => def),
+    ...custom.flatMap((entry) => CUSTOM_NODES.get(entry.type) ?? []),
+  ]
+}
 
 /**
  * Any neuPrint deployment, any dataset.
@@ -649,7 +672,7 @@ for (const family of DATASET_FAMILIES) buildDatasetNode(family)
  * *deployment* URL rather than a base path — `servers.ts` maps it to something a browser can
  * actually fetch, which is not the same string, because neuPrint sends no CORS headers.
  */
-registerNode({
+const customNeuprintNode = packNode({
   type: 'dataset.neuprint',
   label: 'Custom neuPrint',
   category: 'dataset',
@@ -777,7 +800,7 @@ registerNode({
  * company. CATMAID carries its labels as annotations *on* the neuron, so there is nothing for an
  * external table to replace; the edge set is a product judgement stated on the flag.
  */
-registerNode({
+const customCatmaidNode = packNode({
   type: 'dataset.catmaid',
   label: 'Custom CATMAID',
   category: 'dataset',
@@ -911,3 +934,11 @@ registerNode({
     }
   },
 })
+
+/** The custom nodes by type, for `datasetNodesFor`. */
+const CUSTOM_NODES: ReadonlyMap<string, NodeDefinition> = new Map(
+  [customNeuprintNode, customCaveNode, customCatmaidNode].map((def) => [def.type, def]),
+)
+
+// Last, so everything `datasetNodesFor` reads exists: the synthetic families, built in.
+for (const def of datasetNodesFor('mock')) registerNode(def)

@@ -1545,7 +1545,7 @@ registerEmitter('core.similarity', (ctx) => {
  * Type-level edge comparison across datasets. `coda_compare_connectivity` carries every rule —
  * see the helper for which two base R gets right on its own and which two it does not.
  *
- * The dataset names come from `resolveDatasetNames`, the node's own function: they are the
+ * The dataset names come from `resolveDatasetNames`, the node's own function (`nodes/lib/edgeComparison.ts`): they are the
  * output's column names and they are deduplicated, so an emitter re-deriving that rule would
  * name a column the canvas does not have.
  *

@@ -2,7 +2,7 @@ One table row per matrix row, or per column, carrying the statistics you tick. U
 
 ```coda-graph
 caption: Mean activity per neuron.
-zapbench.neuronTraces as zt
+zapbench:neuronTraces as zt
 core.reduceMatrix as red
 out.table as tbl
 zt -> red

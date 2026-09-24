@@ -25,7 +25,9 @@
  * — the fullscreen element when there is one, as the hover panels do, or it opens invisibly under
  * a fullscreen viewer — and stops React events at its root: they still bubble through a portal to
  * the card, whose double-click expands it and whose right-click opens the node's menu. Escape is
- * left alone; `useOverlayEscape` takes it on the window, in the capture phase.
+ * left alone; `useOverlayEscape` takes it on the window, in the capture phase. It is also how a
+ * dialog opened from inside another dialog draws above it (Plugins, from the wizard): overlays at
+ * one z-index stack in document order, and the portal puts this one last.
  */
 
 import type { CSSProperties, ReactNode, Ref, SyntheticEvent } from 'react'
@@ -49,7 +51,7 @@ export interface ModalProps {
   style?: CSSProperties
   /** `data-tour` name, for a dialog the Guided Tour spotlights. */
   tour?: string
-  /** Opened from inside a node card — see the note above. */
+  /** Opened from inside a node card, or from inside another dialog — see the note above. */
   portal?: boolean
   children: ReactNode
 }

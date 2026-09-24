@@ -115,7 +115,7 @@ registerNode({
        * `optional`, and that is load-bearing rather than tidy. `resolveColumn`'s rule 3 hands a
        * *required* picker on its declared default the first compatible column, so a default of
        * `hop` would silently layer by whatever came first on a network that has no such column
-       * — the failure recorded on `zapbench.traces` and `out.scatter`. Empty is a decision here
+       * — the failure recorded on `zapbench:traces` and `out.scatter`. Empty is a decision here
        * and stays one.
        */
       optional: true,

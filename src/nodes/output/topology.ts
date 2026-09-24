@@ -62,7 +62,7 @@ import {
   synapseUnitParam,
   synapseUnitProblem,
 } from '../lib/synapseParams'
-import { MAX_NEURONS, neuronIdsFrom } from '../query/morphology'
+import { MAX_NEURONS, neuronIdsFrom } from '../lib/limitParams'
 import { UNIDENTIFIED, groupSynapses } from '../lib/synblastOps'
 import { rowsWithIds } from '../lib/tableOps'
 import type { TopologyRow } from '../lib/topologyOps'

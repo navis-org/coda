@@ -5,11 +5,21 @@ import { canExportNotebook } from '../../export/canExport'
 import type { ExportLanguage } from '../../nodes/lib/datasetFamilies'
 import { CodaMark } from '../CodaMark'
 import { peekExportWarnings, requestExportWarnings, useExportWarnings } from '../exportWarnings'
-import { AssistantIcon, BellIcon, ConnectionsIcon, InspectorIcon, ShareIcon } from '../Icons'
+import {
+  AssistantIcon,
+  BellIcon,
+  ConnectionsIcon,
+  InspectorIcon,
+  PluginsIcon,
+  ShareIcon,
+} from '../Icons'
 import type { CustomDatasetNode } from '../../nodes/lib/datasetFamilies'
 import {
   BACKENDS,
   CUSTOM_DATASET_NODES,
+  offeredByType,
+  offeredFamilies,
+  familyNodeType,
   starterFamilies,
 } from '../../nodes/lib/datasetFamilies'
 import { getNodeDef } from '../../core/registry'
@@ -35,6 +45,9 @@ import {
 } from '../notify'
 import { EdgeSetPanel } from './EdgeSetPanel'
 import { SourcesPanel } from './SourcesPanel'
+import { PluginsDialog } from './PluginsDialog'
+import { useDatasetsHiddenBy, useOfferedForNewWork } from '../packSwitches'
+import { hiddenDatasetsBlurb } from './HiddenDatasetsNote'
 import type { TourAnchor } from '../tour/anchors'
 import { TOURS, startTour } from '../tour/tourState'
 import { restoreHints, useDismissedHints } from '../hints'
@@ -105,6 +118,7 @@ export function Toolbar() {
    */
   const narrow = useNarrowShell()
   const openSources = useGraphStore((s) => s.openSources)
+  const openPlugins = useGraphStore((s) => s.openPlugins)
 
   /*
    * The controls that fold, declared once and rendered twice.
@@ -160,7 +174,16 @@ export function Toolbar() {
       title: 'Connections — data sources, API keys and sharing',
       icon: true,
       tour: 'connections',
-      onClick: openSources,
+      onClick: () => openSources(),
+    },
+    plugins: {
+      label: 'Plugins',
+      blurb: 'Extra tools for particular kinds of data.',
+      face: <PluginsIcon />,
+      title: 'Plugins — extra tools for particular kinds of data',
+      icon: true,
+      tour: 'plugins',
+      onClick: openPlugins,
     },
     assistant: {
       label: 'Assistant',
@@ -271,6 +294,10 @@ export function Toolbar() {
             }}
             onDataset={(spec) => {
               loadStarter(spec)
+              close()
+            }}
+            onPlugins={() => {
+              openPlugins()
               close()
             }}
             onWizard={() => {
@@ -548,18 +575,19 @@ export function Toolbar() {
       )}
 
       {/*
-       * The icon cluster. Share is the odd one out — a verb, where the other three are toggles
-       * or a dialog — and it leads because it is about the document, which is what the left-hand
+       * The icon cluster. Share is the odd one out — a verb, where the others are toggles or
+       * dialogs — and it leads because it is about the document, which is what the left-hand
        * menus are about too. It was under `Save ▸` and moved here for the reason the whole
        * cluster lost its words: an action reached for by muscle memory does not need a sentence
        * two clicks deep.
        *
-       * All five fold into `⋯` on the narrow shell, in this order.
+       * All six fold into `⋯` on the narrow shell, in this order.
        */}
       {!narrow && (
         <>
           <ActionButton action={actions.share} />
           <ActionButton action={actions.connections} />
+          <ActionButton action={actions.plugins} />
           <ActionButton action={actions.assistant} />
           <ActionButton action={actions.inspector} />
           <ActionButton action={actions.dashboard} />
@@ -655,6 +683,7 @@ export function Toolbar() {
               <ActionItem action={actions.redo} close={close} />
               <ActionItem action={actions.share} close={close} />
               <ActionItem action={actions.connections} close={close} />
+              <ActionItem action={actions.plugins} close={close} />
               <ActionItem action={actions.assistant} close={close} />
               <ActionItem action={actions.inspector} close={close} />
               <ActionItem action={actions.dashboard} close={close} />
@@ -677,6 +706,7 @@ export function Toolbar() {
        * because a trigger inside the `⋯` menu would be unmounted by the click that used it.
        */}
       <SourcesPanel />
+      <PluginsDialog />
       <EdgeSetPanel />
     </div>
   )
@@ -988,14 +1018,28 @@ const noop = () => {}
 function NewMenu({
   onEmpty,
   onDataset,
+  onPlugins,
   onWizard,
   onZoo,
 }: {
   onEmpty: () => void
   onDataset: (spec: StarterSpec) => void
+  onPlugins: () => void
   onWizard: () => void
   onZoo: () => void
 }) {
+  const offered = useOfferedForNewWork()
+  // Every dataset node type this menu can list, for the note saying which plugin hid some of them.
+  const datasetTypes = useMemo(
+    () => [
+      ...starterFamilies()
+        .filter((f) => !f.synthetic)
+        .map(familyNodeType),
+      ...CUSTOM_DATASET_NODES.map((entry) => entry.type),
+    ],
+    [],
+  )
+  const hiddenBy = useDatasetsHiddenBy(datasetTypes)
   const groups = useMemo(() => {
     /*
      * Grouped by **backend**, not by source id, and the difference only shows on CATMAID.
@@ -1016,17 +1060,20 @@ function NewMenu({
      * datasets it is a custom version *of*. A backend with neither is dropped, which is what
      * removing the synthetic dataset does to the mock one.
      */
-    const families = starterFamilies().filter((family) => !family.synthetic)
-    const backends = [...new Set([...families, ...CUSTOM_DATASET_NODES].map((e) => e.backend))]
+    // A switched-off pack's datasets and custom node are left out, like its nodes everywhere new
+    // work starts.
+    const families = offeredFamilies(starterFamilies(), offered).filter((f) => !f.synthetic)
+    const custom = offeredByType(CUSTOM_DATASET_NODES, offered, (entry) => entry.type)
+    const backends = [...new Set([...families, ...custom].map((e) => e.backend))]
     return backends
       .map((backend) => ({
         backend,
         label: BACKENDS[backend]?.heading || BACKENDS[backend]?.label || backend,
         families: families.filter((family) => family.backend === backend),
-        custom: CUSTOM_DATASET_NODES.filter((entry) => entry.backend === backend),
+        custom: custom.filter((entry) => entry.backend === backend),
       }))
       .filter((group) => group.families.length + group.custom.length > 0)
-  }, [])
+  }, [offered])
 
   return (
     <>
@@ -1082,6 +1129,16 @@ function NewMenu({
           </Submenu>
         ))}
       </div>
+
+      {/* Why this list is shorter than it was, with the way back — see `HiddenDatasetsNote`. */}
+      {hiddenBy.length > 0 && (
+        <div className="dropdown__group">
+          <button type="button" className="dropdown__item" onClick={onPlugins}>
+            <strong>Some datasets are hidden</strong>
+            <span>{hiddenDatasetsBlurb(hiddenBy)}</span>
+          </button>
+        </div>
+      )}
     </>
   )
 }

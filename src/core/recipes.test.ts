@@ -160,7 +160,7 @@ describe('reading a recipe back', () => {
       coda: RECIPE_MARKER,
       recipe: { name: 'x', slots: [] },
       version: 1,
-      nodes: [{ id: 'a', type: 'from.the.future', position: { x: 0, y: 0 }, params: {} }],
+      nodes: [{ id: 'a', position: { x: 0, y: 0 }, params: {} }],
       edges: [],
     })
     expect(readRecipe(foreign)).toBeUndefined()

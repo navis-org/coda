@@ -38,6 +38,7 @@ import { useLaunchStage } from './launchStage'
 import { shortcutKeys } from '../shortcuts'
 import { startTour } from '../tour/tourState'
 import { Modal } from '../Modal'
+import { useOfferedForNewWork } from '../packSwitches'
 
 const REPO_URL = 'https://github.com/navis-org/coda'
 /** The group that develops Coda, named in the credits line. */
@@ -93,7 +94,8 @@ export function StartPage() {
 
   const closeRef = useRef<HTMLButtonElement>(null)
 
-  const datasets = useMemo(() => datasetCards(), [])
+  const offered = useOfferedForNewWork()
+  const datasets = useMemo(() => datasetCards(offered), [offered])
   const workflows = useMemo(() => workflowCards(library), [library])
 
   useEffect(() => {

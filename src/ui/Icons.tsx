@@ -84,6 +84,17 @@ export function ConnectionsIcon() {
 }
 
 /**
+ * Plugins — a puzzle piece: something that fits into the app from outside it.
+ */
+export function PluginsIcon() {
+  return (
+    <Icon>
+      <path d="M4.5 8.5h4a2.25 2.25 0 1 1 4.5 0h4.5v4.25a2.25 2.25 0 1 1 0 4.5v3.25H4.5Z" />
+    </Icon>
+  )
+}
+
+/**
  * Assistant — a robot head.
  *
  * The eyes are **filled dots, not circles**: at 15px a stroked 1.2-unit circle closes up into a

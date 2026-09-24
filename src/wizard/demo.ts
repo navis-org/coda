@@ -74,7 +74,8 @@ import { socketAccepts, socketOriginates } from '../core/sockets'
 import type { CodaType } from '../core/types'
 import { uniqueName } from '../core/types'
 import { inferGraph, nodeTypes } from '../core/inference'
-import { getNodeDef, listableNodeDefs } from '../core/registry'
+import { typeStem } from '../core/nodeType'
+import { getNodeDef, listableNodeDefs, liveType } from '../core/registry'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 import type { NodeDefinition, ResolvedPort } from '../core/node'
 import { familyForNodeType } from '../nodes/lib/datasetFamilies'
@@ -139,7 +140,9 @@ export const demoPlan = keyed((type: string): DemoPlan | undefined => search(typ
  * Three of the 64 documented nodes, against a `?` button that would otherwise fire listings at
  * three connectomes on being pressed.
  */
-export function demoGraph(type: string, plan?: DemoPlanRef): CodaGraph | undefined {
+export function demoGraph(stored: string, plan?: DemoPlanRef): CodaGraph | undefined {
+  // A link is a stored id like any other, so one written before a rename still opens.
+  const type = liveType(stored)
   const graph =
     (plan && replay(type, plan)) ?? search(type, demoDatasets(), [DEMO_DATASET])?.graph
   return graph && withSwapHint(graph)
@@ -793,7 +796,7 @@ function freshId(graph: CodaGraph, type: string): string {
   // a clash is suffixed rather than overwritten — and it is what every other namer in the
   // codebase goes through. It mutates the set it is handed, so the set is minted here.
   const taken = new Set(graph.nodes.map((node) => node.id))
-  return uniqueName(taken, type.slice(type.indexOf('.') + 1))
+  return uniqueName(taken, typeStem(type))
 }
 
 /**

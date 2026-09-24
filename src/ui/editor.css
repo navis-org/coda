@@ -4913,6 +4913,14 @@ input.field--combo {
   font-family: var(--font-mono);
   flex: none;
 }
+/* A button that reads as the footer's other link. */
+.node-browser__plugins {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
 /* The one link in a row of keyboard hints, so it has to read as a link rather than as
    another shortcut — hence the accent and the underline on hover. */
 .node-browser__guide {
@@ -6147,6 +6155,205 @@ p.sources__hint {
 }
 
 /* --------------------------------------------------------------------------
+ * Plugins dialog
+ *
+ * Hugs its content like `.share`: a few rows of switches, which at full overlay height would read
+ * as a list that failed to load. A row is text on the left and its switch on the right, the way a
+ * settings list reads; the explanation is a muted footer, read once and then out of the way.
+ * -------------------------------------------------------------------------- */
+
+/* Wide enough that every pack's one-line description is one line, parts' indent included, with
+   ~40px to spare for a font fallback — measured: at 560px each wrapped by a word, 620 was the
+   first width they all fit. A longer one still wraps; aim to keep a new pack's to one line. */
+.plugins {
+  max-width: 660px;
+  height: auto;
+  max-height: 640px;
+}
+.plugins__list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+.plugins__row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.plugins__row:hover {
+  background: var(--surface-hover);
+}
+/* A part of a pack sits under it, indented, with a smaller tile: the list reads as a tree. */
+.plugins__row[data-part='true'] {
+  margin-left: 28px;
+}
+.plugins__row[data-part='true'] .plugins__tile {
+  width: 32px;
+  height: 32px;
+}
+.plugins__row[data-part='true'] .plugins__glyph {
+  width: 20px;
+  height: 20px;
+}
+/* A switched-off pack reads as resting, not as broken: its name dims, its words stay readable. */
+.plugins__row[data-on='false'] .plugins__name {
+  color: var(--text-secondary);
+}
+.plugins__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+/* The pack's face: its chosen node's drawing on a recessed tile, dimmed with the name when off. */
+.plugins__tile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.plugins__row[data-on='false'] .plugins__tile {
+  color: var(--text-muted);
+}
+.plugins__glyph {
+  width: 24px;
+  height: 24px;
+}
+/* "used here": the open workflow uses this pack — the one fact that makes a switch seem inert. */
+.plugins__badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+/* What the pack needs, and what needs it — the second is why a switch will not move. */
+.plugins__deps {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+/* What switching the pack off hides: each of its nodes, as the palette names and draws it. */
+.plugins__nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 4px;
+}
+.plugins__node {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px 2px 5px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.plugins__node-glyph {
+  width: 14px;
+  height: 14px;
+}
+.plugins__empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.plugins__footer {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-3);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  flex: none;
+}
+
+/*
+ * A switch: an on/off setting that takes effect at once, where a checkbox is a choice confirmed
+ * later. A real checkbox underneath (`role="switch"`), so the keyboard, the focus ring, a form
+ * label and a screen reader all keep working; only its drawing changes. The knob is near-white on
+ * both themes — it has to read against the grey track and the accent alike.
+ */
+.switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 32px;
+  height: 18px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--border-strong);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fcfcfb;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease;
+}
+.switch:checked {
+  background: var(--accent);
+}
+.switch:checked::after {
+  transform: translateX(14px);
+}
+.switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .switch,
+  .switch::after {
+    transition: none;
+  }
+}
+
+/* Why a dataset list is shorter than it was — a muted line with a link-styled button. */
+.hidden-datasets {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.hidden-datasets__open {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+.hidden-datasets__open:hover {
+  text-decoration: underline;
+}
+
+/* --------------------------------------------------------------------------
  * Feedback dialog
  * -------------------------------------------------------------------------- */
 
@@ -6552,7 +6759,8 @@ p.sources__hint {
 }
 
 .wizard__text,
-.guides__text {
+.guides__text,
+.plugins__text {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -6561,7 +6769,8 @@ p.sources__hint {
 }
 
 .wizard__blurb,
-.guides__blurb {
+.guides__blurb,
+.plugins__blurb {
   font-size: 11px;
   line-height: 1.45;
   color: var(--text-secondary);

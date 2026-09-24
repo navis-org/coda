@@ -95,7 +95,7 @@ The costs of the chosen shape, stated so they are not rediscovered:
 | `shareLink(graph, siteUrl)` | a packed `#!c1.` link |
 | `setCredentials({ neuprint, cave })` | tokens held in memory, for the opt-in network mode |
 
-Four rules:
+Five rules:
 
 1. **Re-exports only.** Anything here that is not a one-line call into the app is a second
    implementation that will drift from the first. `check` is `collectWarnings` unscoped — the loop
@@ -110,7 +110,13 @@ Four rules:
    This is the half that catches a rename at the moment it is made. The other half is a scheduled
    smoke run in the server's repository against the *deployed* file, which catches this side moving
    under an installed server.
-4. **`src/mcp` is in the headless lint boundary.** The file runs in Node, so a UI import would build
+4. **A type id may carry a colon.** A pack's node is `pack:name` (`zapbench:traces`), so
+   `nodeTypeIds()` returns ids a check written against `family.name` refuses — the server must take
+   the app's ids as given. The three ZapBench types were renamed from `zapbench.*`; `nodeEntry`,
+   `nodeHelp` and a plan's `add` read a former id as its successor (`liveType`), and an open draft
+   never meets the rename, keeping the build it started on. `nodeEntry('core.missing')` answers
+   nothing: the placeholder is not a node a plan can name.
+5. **`src/mcp` is in the headless lint boundary.** The file runs in Node, so a UI import would build
    green and throw on load in somebody else's process.
 
 ## Offline by default, and why that is not optional

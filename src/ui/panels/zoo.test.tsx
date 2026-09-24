@@ -13,6 +13,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { emptyGraph, serializeGraph } from '../../core/graph'
+import { MISSING_TYPE } from '../../core/missing'
 import { defaultParams } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { registerBuiltinSources } from '../../data/builtins'
@@ -241,16 +242,19 @@ describe('opening one', () => {
     expect(useGraphStore.getState().graph.nodes).toHaveLength(0)
   })
 
-  it('loads a graph with an unknown node type, dropping it with a warning', async () => {
+  it('loads a graph with an unknown node type, keeping it as a placeholder with a warning', async () => {
     // The same lenient path a file gets. A zoo entry deposited against a node this build no
-    // longer has should open with a hole and a notice, not refuse.
+    // longer has should open with that card marked and a notice, not refuse.
     const drifted = JSON.parse(graphText('Drifted')) as { nodes: { type: string }[] }
     drifted.nodes[1]!.type = 'core.thisNeverExisted'
     zoo([entry()], { 'workflows/lc-network/graph.coda.json': JSON.stringify(drifted) })
     open()
     await listed('LC circuit network')
     fireEvent.click(screen.getByRole('button', { name: 'Open on the canvas' }))
-    await waitFor(() => expect(useGraphStore.getState().graph.nodes).toHaveLength(2))
+    await waitFor(() =>
+      expect(useGraphStore.getState().graph.nodes.map((n) => n.type)).toContain(MISSING_TYPE),
+    )
+    expect(useGraphStore.getState().graph.nodes).toHaveLength(3)
     expect(useGraphStore.getState().notice).toMatch(/core.thisNeverExisted/)
   })
 })

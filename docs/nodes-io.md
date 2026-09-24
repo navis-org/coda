@@ -907,7 +907,7 @@ own runtime, and a notebook claiming Coda's answer would describe a frame the re
 
 ## Neurons to ZapBench Traces: a join across two modalities of one specimen
 
-`zapbench.neuronTraces` reads the released ZapBench calcium-imaging traces for whichever neurons in a
+`zapbench:neuronTraces` reads the released ZapBench calcium-imaging traces for whichever neurons in a
 fish2 table carry a `zapbenchId`. The array facts, the cost model and the id measurement are in
 [backends.md](backends.md#zapbench-a-released-zarr-array-not-a-server); what belongs here is what
 the node decides.
@@ -1053,8 +1053,8 @@ that grows a selection and asserts which block was read.
 
 ## ZapBench Traces and ZapBench to Neurons: the way back from activity
 
-`Neurons to ZapBench Traces` starts from neurons. These two go the other way: `zapbench.traces` draws the
-recording, a Heatmap selection names a band of cells, and `zapbench.neurons` looks up the fish2
+`Neurons to ZapBench Traces` starts from neurons. These two go the other way: `zapbench:traces` draws the
+recording, a Heatmap selection names a band of cells, and `zapbench:neurons` looks up the fish2
 neurons carrying them — `ZapBench Traces → Heatmap ▸ Selected Rows → ZapBench to Neurons → Skeletons`,
 with nothing to set on the last three. The array facts behind both are in
 [backends.md](backends.md#the-pyramid-a-row-is-a-bin).
@@ -1067,7 +1067,7 @@ reads typed ids at full resolution through `fetchTraces`, the reader `Neurons to
 is hidden for a list on purpose: a listed cell is cheap at full scale by the transposed route, and
 at a reduced one it would come back averaged with neighbours nobody listed.
 
-**The label carries the members** — `40211+40212+40213+40214` — which is `nodes/lib/zapbenchCells.ts`'
+**The label carries the members** — `40211+40212+40213+40214` — which is `packs/zapbench/cells.ts`'
 grammar, `cellLabel` writing it beside `cellIdsOf` reading it. That is what keeps a selection exact
 without the second node knowing the scale that drew it. The rejected alternative was a `Scale` param
 on `ZapBench to Neurons` expanding a row index: a second copy of a fact the first card decided, and
@@ -1126,8 +1126,8 @@ Four more decisions on `ZapBench to Neurons`:
   joined by `concatBatches` (now in `tableOps.ts`) — the measured `IN`-list size, borrowed rather
   than re-measured for this query.
 
-Neither node has an exporter: `zapbench.traces` for `zapbench.neuronTraces`' reasons plus the
-permutation a notebook would have to apply, and `zapbench.neurons` because its cells arrive from a
+Neither node has an exporter: `zapbench:traces` for `zapbench:neuronTraces`' reasons plus the
+permutation a notebook would have to apply, and `zapbench:neurons` because its cells arrive from a
 node that has none.
 
 **Not verified against a live server:** the integer lookup against neuPrint fish2 (the Cypher is

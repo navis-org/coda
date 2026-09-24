@@ -3,16 +3,190 @@
  * registry to build the add-node palette and to resolve types when loading a file.
  */
 
+import { MISSING_TYPE, missingNodeDef } from './missing'
 import type { NodeCategory, NodeDefinition, ParamValues } from './node'
 import { findParam, withDefaults } from './node'
+import { nodeTypeProblem, packIdProblem, packOf, typeKey } from './nodeType'
 import { allInputPorts, allOutputPorts, isPortGroup } from './ports'
 
 const definitions = new Map<string, NodeDefinition>()
 
+/** Former type ids, each to the live type that now answers for it — see `NodeDefinition.formerTypes`. */
+const formerTypes = new Map<string, string>()
+
+/**
+ * A node pack: a directory under `src/packs/` whose nodes are registered together, under its id.
+ *
+ * Only the nodes are here. What else a pack brings is found where each surface already looks for
+ * it, by file — `glyphs.ts`, `seeAlso.ts` and `help/*.md` in the pack's directory (see
+ * `src/packs/index.ts`) — because two of those surfaces are drawn by a static page that must not
+ * import a single node definition.
+ */
+export interface PackDefinition {
+  /**
+   * The prefix its node types carry — `zapbench` for `zapbench:traces` — unless it keeps built-in
+   * ids, and the name every switch, shortcut and `requires` uses for it.
+   */
+  id: string
+  /** What the pack is called where somebody switches it on or off. */
+  label: string
+  /** One line saying what the pack adds, beside that switch. */
+  description: string
+  /**
+   * Whether the pack starts switched on for somebody who has never touched its switch. Absent
+   * means on. A pack most readers do not need says `false`, and a shortcut (`packs/shortcuts.ts`)
+   * is how the readers who do need it get it switched on.
+   */
+  defaultOn?: boolean
+  /**
+   * The packs this one needs switched on — Cortex building on CAVE, and so on Connectome, CAVE's
+   * parent. Following the switches'
+   * rule (`ui/packSwitches.ts`): a required pack is on whenever anything needing it is, switching
+   * this one on switches them on, and switching one off while this needs it is refused.
+   */
+  requires?: readonly string[]
+  /**
+   * The pack this one is part of — neuPrint within Connectome. **Not a requirement, the opposite
+   * direction**: switching the parent off takes every child with it (each child's own switch is
+   * remembered for when the parent comes back), where switching off a *required* pack is refused.
+   * A child is offered only while it and its parent are both on, nests under it in the Plugins
+   * dialog, and a shortcut naming a child switches the parent on too. One level only.
+   */
+  parent?: string
+  /**
+   * Its nodes keep the built-in ids they had before they moved into the pack
+   * (`neuron.connectivity`, not `connectome:connectivity`). A declared exception to the
+   * `pack:name` grammar, for nodes that existed first: renaming Connectome's twelve would have
+   * touched some four hundred references for no change in behaviour. The cost is that the id no
+   * longer says which pack a node is from, so that is asked of the registry (`packOfType`), and a
+   * placeholder for one cannot name its pack. A new pack's nodes never take this.
+   */
+  keepsBuiltInIds?: true
+  /**
+   * The node whose drawing stands for the pack in the Plugins dialog. Absent means the first of
+   * `nodes`. A node type rather than a drawing of its own, for the reason the wizard's `glyph` is:
+   * a pack is its nodes, and one of them already says what the pack is about.
+   */
+  glyph?: string
+  nodes: readonly NodeDefinition[]
+}
+
+const packs = new Map<string, PackDefinition>()
+
+/** Every registered pack node's pack, by type — the only answer for a pack that keeps built-in ids. */
+const packByType = new Map<string, string>()
+
+/**
+ * The pack a registered node type belongs to, or undefined for a built-in node. Asked of the
+ * registry rather than read off the id (`packOf`), because a pack keeping built-in ids has none.
+ */
+export function packOfType(type: string): string | undefined {
+  return packByType.get(type)
+}
+
+/** A registered pack by id, or undefined. */
+export function getPack(id: string): PackDefinition | undefined {
+  return packs.get(id)
+}
+
+/** Every registered pack, in registration order — for the surface that switches them. */
+export function registeredPacks(): PackDefinition[] {
+  return [...packs.values()]
+}
+
+/**
+ * Every live type by its `typeKey` — the id with its punctuation folded, which is what the node
+ * guide's anchors are made of. Former ids stay out, so a rename keeps its anchor.
+ */
+const keys = new Map<string, string>()
+
+/**
+ * A pack's node, typed exactly as `registerNode` would type it and left for `registerPack` to
+ * register — so the manifest decides when, and with what checks, rather than import order.
+ */
+export function packNode<P extends ParamValues>(def: NodeDefinition<P>): NodeDefinition {
+  return def as unknown as NodeDefinition
+}
+
+/**
+ * Register a pack's nodes. Every one must belong to the pack — carry its prefix, or be declared by
+ * a pack that keeps built-in ids — and a pack registers once, after the packs it requires.
+ *
+ * The ownership check is `register`'s own, so a pack cannot register another's type and nothing
+ * outside a pack can register one of its types — the line the pack switches
+ * (`ui/packSwitches.ts`) draw.
+ */
+export function registerPack(pack: PackDefinition): void {
+  if (packs.has(pack.id)) throw new Error(`Duplicate pack "${pack.id}"`)
+  // Stored in every reader's switches and named in every placeholder's message, so checked here.
+  const problem = packIdProblem(pack.id)
+  if (problem) throw new Error(`"${pack.id}" is not a pack id: ${problem}.`)
+  for (const id of pack.requires ?? []) {
+    if (!packs.has(id)) {
+      throw new Error(`Pack "${pack.id}" requires "${id}", which must be registered before it.`)
+    }
+  }
+  if (pack.parent !== undefined) {
+    const parent = packs.get(pack.parent)
+    if (!parent) {
+      throw new Error(
+        `Pack "${pack.id}" is part of "${pack.parent}", which must be registered before it.`,
+      )
+    }
+    if (parent.parent !== undefined) {
+      throw new Error(
+        `Pack "${pack.id}" is part of "${pack.parent}", itself part of a pack: one level only.`,
+      )
+    }
+  }
+  packs.set(pack.id, pack)
+  for (const def of pack.nodes) register(def, pack.id)
+}
+
 export function registerNode<P extends ParamValues>(def: NodeDefinition<P>): NodeDefinition<P> {
+  return register(def, undefined)
+}
+
+/** The one registration, for a built-in node (`pack` undefined) or a pack's. */
+function register<P extends ParamValues>(
+  def: NodeDefinition<P>,
+  pack: string | undefined,
+): NodeDefinition<P> {
   if (definitions.has(def.type)) {
     throw new Error(`Duplicate node type "${def.type}"`)
   }
+  // The id is in every saved file, so its spelling is checked where it is declared — see
+  // `core/nodeType.ts` for the grammar and why a pack's types carry a prefix.
+  const problem = nodeTypeProblem(def.type)
+  if (problem) throw new Error(`"${def.type}" is not a node type id: ${problem}.`)
+  const owner =
+    packOf(def.type) ?? (pack && packs.get(pack)?.keepsBuiltInIds ? pack : undefined)
+  if (owner !== pack) {
+    throw new Error(
+      owner
+        ? `"${def.type}" belongs to the ${owner} pack, and registers through \`registerPack\` with it.`
+        : `"${def.type}" is a built-in type, and the ${pack} pack cannot register it.`,
+    )
+  }
+  /*
+   * Two ids the registry tells apart can still be one key to everything that folds punctuation:
+   * `neuron:findNeurons` beside `neuron.findNeurons`, or a pack `dataset-catmaid:fafb` beside
+   * `dataset.catmaid.fafb`, share a node-guide anchor. The rule is on the key itself, so it holds
+   * whichever side registers first and whatever a pack is called.
+   */
+  const key = typeKey(def.type)
+  const clash = keys.get(key)
+  if (clash) {
+    throw new Error(
+      `"${def.type}" and "${clash}" fold to the same key "${key}", and would collide.`,
+    )
+  }
+  if (def.type === MISSING_TYPE) {
+    throw new Error(
+      `"${MISSING_TYPE}" is the placeholder for a node this build does not have, and is not registered.`,
+    )
+  }
+  checkFormerTypes(def as unknown as NodeDefinition)
   /*
    * The `loop: 'begin'` / `loopPlan` pairing, enforced rather than documented.
    *
@@ -45,11 +219,65 @@ export function registerNode<P extends ParamValues>(def: NodeDefinition<P>): Nod
   checkFormerParamIds(def as unknown as NodeDefinition)
   checkPortKinds(def as unknown as NodeDefinition)
   checkStringDrawing(def as unknown as NodeDefinition)
+  freezeDeep(def)
   definitions.set(def.type, def as unknown as NodeDefinition)
+  keys.set(key, def.type)
+  if (pack) packByType.set(def.type, pack)
+  for (const former of def.formerTypes ?? []) formerTypes.set(former, def.type)
   referenceTypes = undefined
   loopTypes = undefined
   return def
 }
+
+/**
+ * A rename is one-to-one or it is ambiguous, so the ambiguous cases are refused here: a former id
+ * that is some type's live id (a stored node would then mean whichever registered first), one
+ * already claimed by another type, and a live id that some earlier type claimed as its former
+ * one. Former ids are *not* held to the grammar — they are what files already say.
+ */
+function checkFormerTypes(def: NodeDefinition): void {
+  const claimed = formerTypes.get(def.type)
+  if (claimed) {
+    throw new Error(
+      `"${def.type}" is a former id of "${claimed}", and cannot be registered again.`,
+    )
+  }
+  for (const former of def.formerTypes ?? []) {
+    const other = formerTypes.get(former)
+    if (other) {
+      throw new Error(
+        `"${def.type}" cannot claim the former id "${former}": "${other}" already does.`,
+      )
+    }
+    if (!former || former === def.type || former === MISSING_TYPE || definitions.has(former)) {
+      throw new Error(`"${def.type}" cannot claim the former id "${former}": it is not free.`)
+    }
+  }
+}
+
+/**
+ * Freeze a definition and everything plain inside it — ports, params, options, types.
+ *
+ * A definition is read by identity everywhere after this: `ports.ts` memoises on it,
+ * `typesWithReferenceInputs` and `typesWithLoops` derive from it once, and every check above ran
+ * against it exactly as it stood. A definition changed afterwards would keep all of those
+ * answers while no longer meaning them, so a change is refused outright — loudly, at the line
+ * that tried, rather than as a stale memo somewhere else. With node packs it is also the line
+ * between *adding* to Coda and quietly changing what a built-in node computes.
+ *
+ * Only arrays and plain objects are walked. Functions are left alone, as is anything with a
+ * prototype of its own (a `Map`, a class instance), since freezing those
+ * would not stop them changing and would say it had.
+ */
+function freezeDeep(value: unknown): void {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return
+  const proto = Object.getPrototypeOf(value) as unknown
+  if (!Array.isArray(value) && proto !== Object.prototype && proto !== null) return
+  Object.freeze(value)
+  for (const child of Object.values(value)) freezeDeep(child)
+}
+
+freezeDeep(missingNodeDef)
 
 /**
  * Structural checks on a definition's port groups, thrown at registration.
@@ -307,13 +535,44 @@ export function typesWithLoops(): Set<string> {
   return loopTypes
 }
 
+/**
+ * A type's definition, or undefined when this build has no such type.
+ *
+ * Answers for the placeholder too (`core/missing.ts`), which is deliberately **not** in
+ * `definitions`: every lookup finds it, and nothing that lists the registry ever meets it.
+ */
 export function getNodeDef(type: string): NodeDefinition | undefined {
-  return definitions.get(type)
+  return definitions.get(type) ?? (type === MISSING_TYPE ? missingNodeDef : undefined)
+}
+
+/**
+ * The live type a stored type id answers to: itself if registered, else the type that claims it
+ * as a former id (`NodeDefinition.formerTypes`), else undefined. For the readers of *stored* ids —
+ * the loader, a `demo://` link, a Zoo digest — and nothing else; every lookup after load uses the
+ * live id.
+ */
+export function currentType(type: string): string | undefined {
+  return definitions.has(type) ? type : formerTypes.get(type)
+}
+
+/** `currentType`, keeping the stored id where nothing answers — for a reader that shows it anyway. */
+export function liveType(stored: string): string {
+  return currentType(stored) ?? stored
+}
+
+/**
+ * The definition for a type id somebody *wrote* — a plan's `add`, an MCP lookup — rather than one a
+ * file stored: a former id answers as its successor (`liveType`), and the placeholder answers
+ * nothing, not being a node anybody can name.
+ */
+export function authoredNodeDef(type: string): NodeDefinition | undefined {
+  const def = getNodeDef(liveType(type))
+  return def?.type === MISSING_TYPE ? undefined : def
 }
 
 /** Throwing variant for code paths where a missing type is a bug, not user input. */
 export function requireNodeDef(type: string): NodeDefinition {
-  const def = definitions.get(type)
+  const def = getNodeDef(type)
   if (!def) throw new Error(`Unknown node type "${type}"`)
   return def
 }
@@ -341,12 +600,16 @@ export function allNodeDefs(): NodeDefinition[] {
  * `allNodeDefs` stays complete because lookups and deserialisation need it; this is the list the
  * add-node surfaces show. Separating the two is what lets a retired node keep loading old files
  * without also being offered for new work.
+ *
+ * `offered` narrows it further for a surface that honours switched-off packs (`core/packs.ts`'
+ * `offeredType`). A predicate on the *type* rather than a list of packs, so the registry need not
+ * know where the switches are kept.
  */
-export function listableNodeDefs(): NodeDefinition[] {
-  return allNodeDefs().filter((d) => !d.hidden)
+export function listableNodeDefs(offered?: (type: string) => boolean): NodeDefinition[] {
+  return allNodeDefs().filter((d) => !d.hidden && (!offered || offered(d.type)))
 }
 
-export function nodeDefsByCategory(): Array<{
+export function nodeDefsByCategory(offered?: (type: string) => boolean): Array<{
   category: NodeCategory
   defs: NodeDefinition[]
 }> {
@@ -358,7 +621,7 @@ export function nodeDefsByCategory(): Array<{
     'visualisation',
     'utility',
   ]
-  const listable = listableNodeDefs()
+  const listable = listableNodeDefs(offered)
   return order
     .map((category) => ({
       category,

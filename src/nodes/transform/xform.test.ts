@@ -16,10 +16,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { requireNodeDef } from '../../core/registry'
+import { registerNode } from '../../core/registry'
 import type { Scheduler } from '../../core/scheduler'
 import { isSkeletonsValue } from '../../core/values'
 import type { TransformValue } from '../../core/values'
+import { T } from '../../core/types'
 import { MockSource } from '../../data/mock/MockSource'
 import type { DataSource } from '../../data/source'
 import { COMMON_SPACE, allSpaces, spaceById } from '../../data/transforms/spaces'
@@ -118,21 +119,29 @@ async function run(graph: CodaGraph): Promise<Scheduler> {
 }
 
 /**
- * Run a graph whose Landmark Transform stands in for a real one.
+ * A Landmark Transform's output, stood in for.
  *
- * The node itself reads six columns off a table, and building that table here would be testing
- * `landmarkTransform.test.ts`' subject rather than this one. So its params are set to produce
- * the fixture directly: the graph is real, the wire is real, and only the landmarks are stubbed.
+ * The real node reads six columns off a table, and building that table here would be testing
+ * `landmarkTransform.test.ts`' subject rather than this one. So a test node emits the fixture
+ * directly: the graph is real, the wire into `transform` is real, and only the card at the far
+ * end of it is not. A type of its own rather than the real node with its `evaluate` swapped,
+ * because a registered definition is frozen.
  */
+let seededTransform: TransformValue | undefined
+registerNode({
+  type: 'test.seededTransform',
+  label: 'Seeded Transform',
+  category: 'transform',
+  cost: 'cheap',
+  outputs: [{ id: 'transform', label: 'Transform', type: T.transform() }],
+  evaluate: () => ({ transform: seededTransform! }),
+})
+
+/** Run a graph whose transform comes from `test.seededTransform`, emitting this one. */
 async function runSeeded(graph: CodaGraph, transform: TransformValue): Promise<Scheduler> {
   const scheduler = makeScheduler()
-  const original = requireNodeDef('core.landmarkTransform').evaluate
-  requireNodeDef('core.landmarkTransform').evaluate = () => ({ transform })
-  try {
-    await scheduler.run(graph, { mode: 'full' })
-  } finally {
-    requireNodeDef('core.landmarkTransform').evaluate = original
-  }
+  seededTransform = transform
+  await scheduler.run(graph, { mode: 'full' })
   return scheduler
 }
 
@@ -324,15 +333,7 @@ describe('neuron.xform — a registration Coda does not ship', () => {
 
   function withCustom(params: Record<string, unknown>, transform = custom): CodaGraph {
     let g = pipeline(params)
-    g = addNode(g, node('lm', 'core.landmarkTransform'))
-    // Any table will do: `runSeeded` replaces what the node makes of it. What has to be real is
-    // the *wiring*, since an unconnected input is refused by the scheduler before evaluate runs.
-    g = addEdge(g, {
-      source: 'find',
-      sourceHandle: 'neurons',
-      target: 'lm',
-      targetHandle: 'in',
-    })
+    g = addNode(g, node('lm', 'test.seededTransform'))
     g = addEdge(g, {
       source: 'lm',
       sourceHandle: 'transform',

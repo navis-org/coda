@@ -17,9 +17,13 @@
  * reason.
  */
 
+import { ID_COLUMN_NAME } from '../../core/ids'
 import type { Warner } from '../../core/limits'
 import { warnOverThreshold } from '../../core/limits'
 import type { ParamDef } from '../../core/node'
+import type { Value } from '../../core/values'
+import { isTableValue } from '../../core/values'
+import { idColumn } from './tableOps'
 
 export interface WarnAboveOptions {
   /** The threshold, which is also the control's maximum: `MAX_NEURONS`, `SEGMENTS_WARN`. */
@@ -109,4 +113,56 @@ export function labelColumnParam(help: string): ParamDef {
     optional: true,
     help,
   }
+}
+
+/**
+ * Where every neuron-count control starts warning, so one number governs all of them.
+ *
+ * It governs more than the Skeletons and Meshes nodes — the Connectome pack's synapse nodes too, and
+ * nothing can reach the NBLAST nodes that these did not fetch, so their threshold is this one. Restating the literal there
+ * made "parity with the Skeletons node" a comment rather than a fact.
+ *
+ * It used to be a **refusal** at 500 — and 25 for meshes, and 100 for synapses, each picked
+ * before the thing that governs the cost existed. It is now the point at which the node says
+ * what it is about to do and then does it (see `core/limits.ts`), which is why the same number
+ * can be both the default and the maximum of the control: past ten thousand neurons every
+ * backend in the tree is into tens of minutes, and that is worth a sentence on the card
+ * whatever anybody set.
+ */
+export const MAX_NEURONS = 10000
+
+/**
+ * Read neuron ids off the incoming table, saying so when the set is a large one.
+ *
+ * `cost` names what actually gets expensive, because it differs per node and the number is
+ * otherwise unexplainable. Two earlier versions of this message were wrong in ways worth
+ * keeping in view: the first blamed "this viewer", which has no cap of its own and is not what
+ * was refusing, and the second refused at all — a fetch of four thousand skeletons is a long
+ * wait, not an impossibility, and the node's job is to say which.
+ *
+ * An empty input still throws. That is not a guard rail: there is nothing to fetch, so there
+ * is no result to warn about.
+ */
+// Shared by the Skeletons and Meshes nodes, `out.topology` and the Connectome pack's synapse nodes,
+// which fetch for the same reason and would otherwise each carry a copy of the ceiling, the message
+// and the empty-input rule.
+export function neuronIdsFrom(
+  ctx: Warner,
+  value: Value | undefined,
+  limit: number,
+  cost: string,
+): string[] {
+  if (!isTableValue(value)) throw new Error('Neurons input is not a table')
+  const ids = idColumn(value, ID_COLUMN_NAME)
+  if (ids.length === 0) throw new Error('No neuronIds in the incoming neuron table')
+  if (ids.length > limit) {
+    warnOverThreshold(ctx, {
+      count: ids.length,
+      threshold: limit,
+      unit: 'neurons',
+      control: "this node's Warn above",
+      cost,
+    })
+  }
+  return ids
 }

@@ -32,6 +32,7 @@
  * the failure this project keeps recording.
  */
 
+import { listed } from '../core/prose'
 import type { CodaGraph, GraphNode, NodeHint, Wire } from '../core/graph'
 import {
   DEFAULT_COLUMNS,
@@ -70,6 +71,7 @@ import {
   VIEWS,
   VIEWS_BY_ID,
   analysisOption,
+  everyCombination,
   familyCan,
   startOption,
   visualisationOption,
@@ -183,6 +185,42 @@ export interface BuildOptions {
   dataset?: { type: string; params?: Record<string, unknown>; sourceId?: string }
   /** `false` to leave off the overview note alone; absent, `answers.notes` decides all notes. */
   overview?: boolean
+}
+
+/**
+ * The wizard's combinations that build only offered nodes — its gate for switched-off packs.
+ *
+ * An answer here is a chain, not a node, and nothing declares which node types a chain holds: the
+ * analyses are branches of `bodyOf`'s switch. So the gate *builds* each combination and looks,
+ * which is exact where a declared list would be a second copy of the builder, and cheap — measured
+ * at 0.04 ms a build, so a dataset's 66 combinations cost under 3 ms — and the dialog asks only
+ * while some pack is switched off.
+ */
+export function offeredCombinations(
+  datasets: readonly string[],
+  offered: (type: string) => boolean,
+): WizardAnswers[] {
+  return everyCombination(datasets).filter((answers) =>
+    buildWorkflow(answers).nodes.every((n) => offered(n.type)),
+  )
+}
+
+/**
+ * Whether an answer is still reachable: some offered combination agrees with it on every question
+ * `match` names. Undefined `reachable` is "nothing switched off", and everything is. One question
+ * per question the dialog asks, so each keeps its options without writing the gate out again.
+ */
+export function canReach(
+  reachable: readonly WizardAnswers[] | undefined,
+  match: { start?: string; analysis?: string; visualisation?: string },
+): boolean {
+  if (!reachable) return true
+  return reachable.some(
+    (a) =>
+      (match.start === undefined || a.start === match.start) &&
+      (match.analysis === undefined || a.analysis === match.analysis) &&
+      (match.visualisation === undefined || a.visualisations[0] === match.visualisation),
+  )
 }
 
 export function buildWorkflow(answers: WizardAnswers, options: BuildOptions = {}): CodaGraph {
@@ -1478,12 +1516,6 @@ function bodyOf(
  * each composed the same sentence from the same three option lookups, so rewording one moved the
  * canvas and the saved file apart.
  */
-/** `a`, `a and b`, `a, b and c` — several viewers read as a sentence rather than a list. */
-function listed(items: string[]): string {
-  if (items.length < 2) return items[0] ?? ''
-  return `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
-}
-
 function answered(answers: WizardAnswers): {
   dataset: string
   start: string

@@ -356,10 +356,24 @@ describe('a stored layout', () => {
     })
   })
 
-  it('loses the cell for a node the load dropped, without a warning about it', () => {
+  it('keeps the cell for a node this build does not have, so the layout saves back whole', () => {
+    // The node loads as a placeholder rather than being dropped, and a placeholder is an
+    // ordinary card as far as a cell is concerned — its cell shows why it cannot run.
     const g = addCells(graphWith(['a', 'b']), ['a', 'b'])
     const json = JSON.parse(serializeGraph(g))
     json.nodes[0].type = 'nobody.registers.this'
+    const loaded = deserializeGraph(JSON.stringify(json))
+    expect(loaded.graph.dashboard?.cells).toEqual([{ nodeId: 'a' }, { nodeId: 'b' }])
+    expect(loaded.warnings.join(' ')).not.toMatch(/dashboard/i)
+    const saved = JSON.parse(serializeGraph(loaded.graph))
+    expect(saved.nodes[0].type).toBe('nobody.registers.this')
+    expect(saved.dashboard.cells).toEqual([{ nodeId: 'a' }, { nodeId: 'b' }])
+  })
+
+  it('loses the cell for a node the load dropped, without a warning about it', () => {
+    const g = addCells(graphWith(['a', 'b']), ['a', 'b'])
+    const json = JSON.parse(serializeGraph(g))
+    delete json.nodes[0].type
     const loaded = deserializeGraph(JSON.stringify(json))
     expect(loaded.graph.dashboard?.cells).toEqual([{ nodeId: 'b' }])
     expect(loaded.warnings.join(' ')).not.toMatch(/dashboard/i)

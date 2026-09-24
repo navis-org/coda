@@ -40,7 +40,8 @@ import { BACKENDS } from '../../nodes/lib/datasetFamilies'
 import { GLYPH_STROKE_WIDTH, GLYPH_VIEWBOX, SPECIMEN_VIEWBOX } from '../glyphs'
 import { GlyphSvg } from './startGlyphs'
 import { nodeGlyph } from './NodeThumbnail'
-import { buildWorkflow } from '../../wizard/build'
+import { buildWorkflow, canReach, offeredCombinations } from '../../wizard/build'
+import { familyNodeType, offeredFamilies } from '../../nodes/lib/datasetFamilies'
 import type { AnalysisId, StartId, VisualisationId } from '../../wizard/options'
 import {
   MULTI_DATASET,
@@ -59,6 +60,8 @@ import { getNodeDef, isAnnotation, requireNodeDef } from '../../core/registry'
 import { plural } from '../format'
 import type { CodaGraph } from '../../core/graph'
 import { Modal, ModalHeader } from '../Modal'
+import { useOfferedForNewWork } from '../packSwitches'
+import { HiddenDatasetsNote } from './HiddenDatasetsNote'
 
 export function WizardDialog() {
   const open = useGraphStore((s) => s.wizardOpen)
@@ -130,7 +133,14 @@ function Dialog() {
   const setArrange = useGraphStore((s) => s.setWizardArrange)
   const requestArrange = useGraphStore((s) => s.requestArrange)
 
-  const families = useMemo(() => datasetOptions(), [])
+  // A switched-off pack's datasets are not offered — and the note under the question says so.
+  const offered = useOfferedForNewWork()
+  const families = useMemo(() => offeredFamilies(datasetOptions(), offered), [offered])
+  // What the first question can list at either arity, for the note naming what hid some of it.
+  const datasetTypes = useMemo(
+    () => [...new Set([...datasetOptions(), ...multiDatasetOptions()].map(familyNodeType))],
+    [],
+  )
   const [dataset, setDataset] = useState(() => families[0]?.key ?? '')
   /*
    * The cross-dataset path: whether the reader took it, and which connectomes they ticked.
@@ -163,13 +173,27 @@ function Dialog() {
    * of the seam.
    */
   const datasets = useMemo(() => (multi ? ticked : [dataset]), [multi, ticked, dataset])
-  const multiFamilies = useMemo(() => multiDatasetOptions(), [])
+  const multiFamilies = useMemo(
+    () => offeredFamilies(multiDatasetOptions(), offered),
+    [offered],
+  )
   // Memoised like its two neighbours: the ceiling is a fact about the node definitions, and this
   // dialog re-renders on any of a dozen store subscriptions.
   const maxDatasets = useMemo(() => maxWizardDatasets(), [])
 
-  const starts = useMemo(() => startOptions(datasets), [datasets])
-  const analyses = useMemo(() => analysisOptions(datasets), [datasets])
+  /*
+   * Switched-off packs, applied by building: an answer stays if some combination using it builds
+   * only offered nodes (`offeredCombinations`). Undefined while nothing is off, which is the
+   * common case and skips every build.
+   */
+  const reachable = useMemo(
+    () => (offered ? offeredCombinations(datasets, offered) : undefined),
+    [datasets, offered],
+  )
+  const starts = useMemo(
+    () => startOptions(datasets).filter((o) => canReach(reachable, { start: o.id })),
+    [datasets, reachable],
+  )
 
   /*
    * The answers, **resolved rather than repaired**.
@@ -183,6 +207,12 @@ function Dialog() {
    * `resolveOption` is headless.
    */
   const start = resolveOption(starts, chosenStart, 'browse')
+  const analyses = useMemo(
+    () =>
+      analysisOptions(datasets).filter((o) => canReach(reachable, { start, analysis: o.id })),
+    [datasets, reachable, start],
+  )
+
   /*
    * The fallback follows the path, because the two option lists are disjoint: `neurons` is a
    * single-dataset answer and would build a chain reading one connectome out of a comparison of
@@ -191,7 +221,14 @@ function Dialog() {
    * fallback that is wrong the day the guard moves.
    */
   const analysis = resolveOption(analyses, chosenAnalysis, multi ? 'compare' : 'neurons')
-  const views = useMemo(() => visualisationOptions(datasets, analysis), [datasets, analysis])
+  const views = useMemo(
+    () =>
+      visualisationOptions(datasets, analysis).filter((o) =>
+        canReach(reachable, { start, analysis, visualisation: o.id }),
+      ),
+    [datasets, analysis, reachable, start],
+  )
+
   /*
    * A set, because a reader may want a table *and* a chart of the same thing — two viewers off
    * one chain rather than two workflows. **Everything this analysis offers, minus what has been
@@ -387,16 +424,21 @@ function Dialog() {
              * answer's, and it wears a node's drawing like every other answer — the mapper,
              * which is the card that could not exist in a single-dataset workflow at all.
              */}
-            <Option
-              key={MULTI_DATASET.id}
-              selected={multi}
-              label={MULTI_DATASET.label}
-              blurb={MULTI_DATASET.blurb}
-              glyph={<OptionGlyph option={MULTI_DATASET} />}
-              onPick={pick.multiple}
-            />
+            {/* Not offered while fewer than two datasets are — switching Connectome off leaves
+                one — since a comparison needs two and Continue would refuse every answer. */}
+            {multiFamilies.length >= 2 && (
+              <Option
+                key={MULTI_DATASET.id}
+                selected={multi}
+                label={MULTI_DATASET.label}
+                blurb={MULTI_DATASET.blurb}
+                glyph={<OptionGlyph option={MULTI_DATASET} />}
+                onPick={pick.multiple}
+              />
+            )}
           </Question>
         )}
+        {(at === 'dataset' || at === 'datasets') && <HiddenDatasetsNote types={datasetTypes} />}
 
         {at === 'datasets' && (
           <Question

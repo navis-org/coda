@@ -13,12 +13,14 @@
  * is only on GitHub.
  */
 
+import { listed } from '../../core/prose'
 import type { CodaGraph, GraphNode } from '../../core/graph'
 import { inboundIndex, nodesById, portKey } from '../../core/graph'
 import { exportOrder } from '../order'
 import { inferGraph } from '../../core/inference'
 import type { NodeDefinition, ParamValues } from '../../core/node'
 import { makeInferContext } from '../../core/node'
+import { unknownTypeOf } from '../../core/missing'
 import { getNodeDef, isAnnotation } from '../../core/registry'
 import { findInputPort, inputPorts, outputPorts } from '../../core/ports'
 import type { CodaType } from '../../core/types'
@@ -48,8 +50,7 @@ export type ExportResult =
 
 /** `"a"`, `"a" and "b"`, `"a", "b" and "c"` — for a message listing ports or nodes. */
 function quoted(names: readonly string[]): string {
-  const q = names.map((n) => `"${n}"`)
-  return q.length <= 2 ? q.join(' and ') : `${q.slice(0, -1).join(', ')} and ${q.at(-1)}`
+  return listed(names.map((n) => `"${n}"`))
 }
 
 // ---------------------------------------------------------------------------
@@ -145,15 +146,18 @@ export function exportRmd(graph: CodaGraph, options: ExportOptions = {}): Export
       continue
     }
 
-    if (!def) {
-      warnings.push(`Unknown node type "${node.type}" — emitted as a comment.`)
+    // A placeholder is named as the file named it, like a type nothing registered.
+    const unknown = unknownTypeOf(node, def)
+    if (!def || unknown !== undefined) {
+      const type = unknown ?? node.type
+      warnings.push(`Unknown node type "${type}" — emitted as a comment.`)
       // It binds nothing, so everything downstream is blocked — which is exactly what a TODO
       // step is, and a surface warning about them would otherwise miss the worst case there is.
-      todos.push({ nodeId, label: node.title || node.type })
+      todos.push({ nodeId, label: node.title || type })
       bodyCells.push({
         kind: 'code',
         label: `unknown-${bodyCells.length}`,
-        source: rComment(`Unknown node type "${node.type}". Skipped.`),
+        source: rComment(`Unknown node type "${type}". Skipped.`),
       })
       continue
     }
