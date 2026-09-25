@@ -78,6 +78,10 @@ function fixture() {
   const points = new Float32Array(total * 3)
   const parents = new Int32Array(total)
   const radii = new Float32Array(total).fill(50)
+  // Compartments: the chain is dendrite (3) for its first five nodes and axon (2) after, so a
+  // label that rides the wrong index map comes back mixed up; the rest are unlabelled.
+  const compartments = new Uint8Array(total)
+  for (let i = 0; i < 10; i++) compartments[i] = i < 5 ? 3 : 2
   const offsets = new Int32Array(shapes.length + 1)
 
   let at = 0
@@ -87,7 +91,14 @@ function fixture() {
     at += shape.parents.length
     offsets[index + 1] = at
   })
-  return { points, parents, radii, offsets, counts: shapes.map((s) => s.parents.length) }
+  return {
+    points,
+    parents,
+    radii,
+    compartments,
+    offsets,
+    counts: shapes.map((s) => s.parents.length),
+  }
 }
 
 const DEFAULTS = {
@@ -102,10 +113,10 @@ const DEFAULTS = {
 const run = py.globals.get('coda_clean_skeletons')
 
 function clean(label, overrides) {
-  const { points, parents, radii, offsets } = fixture()
+  const { points, parents, radii, compartments, offsets } = fixture()
   const notes = []
   const proxy = attempt(`${label}: the call itself`, () =>
-    run({ points, parents, radii, offsets, ...DEFAULTS, ...overrides }, (f, note) =>
+    run({ points, parents, radii, compartments, offsets, ...DEFAULTS, ...overrides }, (f, note) =>
       notes.push(`${f.toFixed(2)} ${note ?? ''}`),
     ),
   )
@@ -120,6 +131,25 @@ function clean(label, overrides) {
   check(`${label}: points are float32`, out.points instanceof Float32Array)
   check(`${label}: parents are int32, not int64`, out.parents instanceof Int32Array)
   check(`${label}: radii are float32`, out.radii instanceof Float32Array)
+  check(`${label}: compartments are uint8`, out.compartments instanceof Uint8Array)
+  check(
+    `${label}: one compartment per node`,
+    out.compartments.length === out.parents.length,
+  )
+  /*
+   * The chain's labels ride their points: dendrite (3) below x = 4 µm, axon (2) from 5 µm, whatever
+   * was done — asked by *position*, since resampling emits the root and then walks back from the
+   * tip. A new node midway between the two gets whichever end is nearer, so that band is not asked.
+   */
+  const chain = Array.from(out.compartments.slice(out.offsets[0], out.offsets[1])).map((c, i) => [
+    out.points[(out.offsets[0] + i) * 3] / UM,
+    c,
+  ])
+  check(
+    `${label}: the chain's labels stay with their points`,
+    chain.length > 0 &&
+      chain.every(([x, c]) => (x < 4.2 ? c === 3 : x > 4.8 ? c === 2 : c === 2 || c === 3)),
+  )
   check(`${label}: offsets still describe 4 neurons`, out.offsets.length === 5)
   check(
     `${label}: points, parents and radii describe one set of nodes`,

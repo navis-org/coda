@@ -706,10 +706,9 @@ comparison arrives with a red card.
 reason, and this is that decision written as a declaration rather than as a source capability. It
 is written into the node at creation and read back off the params from then on.
 
-**Absent means nobody has made this judgement**, which is a third thing from `['type']`: minnie65
-is a mouse volume with no cell typing at all, and BANC's arrive from a pivot whose column names are
-the datastack's own `classification_system` values rather than anything this build can know. Both
-leave the picker empty, and the card says which dataset needs columns picked — the honest answer,
+**Absent means nobody has made this judgement**, which is a third thing from `['type']`: BANC's
+arrive from a pivot whose column names are the datastack's own `classification_system` values
+rather than anything this build can know. That leaves the picker empty, and the card says which dataset needs columns picked — the honest answer,
 and better than a guessed name that is dropped for not existing and reads as a schema that has not
 arrived.
 
@@ -730,7 +729,7 @@ column rather than substituting, and it clears on the first peek.
 through one `buildStarter(spec)`. **A starter is a Workflow Wizard answer**: the dataset,
 *Interactive Search*, *Neuron table only*, and a Table — plus Neuroglancer where the source
 publishes a scene, asked through `sourceCan`, the same ceiling `familyCan` reads — and with it the
-Description companion and, for FlyWire and BANC, the dataset's annotation chain:
+Description companion and, for FlyWire, BANC and minnie65, the dataset's annotation chain:
 
 ```text
 Dataset ─┬─▸ Explore ──(Selected)─┬─▸ Table
@@ -775,6 +774,20 @@ which is also why the Description card on a plain BANC dataset says "Annotations
 configured". `Pivot on` is its whole configuration: `codex_annotations` is long-format — one row
 per (neuron, `classification_system`, `cell_type`) — so the kinds become the columns, 1,994,371
 rows across 32 kinds folding to 158,250 neurons, and `cell_type` arrives renamed to `type`.
+
+**minnie65's chain reads a *view*, and names its columns.** MICrONS types its cells across about
+nine tables — the volume-wide metamodel and its corrections, the column census, the m-type
+predictions, proofreading status — and the AIBS view `aibs_cell_info` already applies their
+precedence, one row per nucleus (144,120 at v1822, ~30 MB and ~6 s whole). So the chain is one
+`CAVE table` card, and two things were needed for it. `annotation.caveTable` now reads a view
+through the **view endpoint** — asked as a table it 404s, which reads as a missing table — and
+refuses `Pivot on` there, which only a table supports. And the **columns are named** (`broad_type,
+cell_type, mtype, visual_area, dendrite_cleaned, axon_cleaned, axon_strategy`), because a view is
+never sampled at edit time (`cave/tables.ts`: an aggregating one can take minutes to answer one row),
+so naming them is what gives the pickers a schema before the Run. The labels are the **EM names as
+published** (`23P`, `5P-ET`, `BC`, `MC`…) — never mapped onto transcriptomic subclasses, a claim no
+MICrONS table makes. The booleans arrive as `'t'`/`'f'` text. `typeColumns` is `type` and `mtype`.
+See [cortex.md](cortex.md).
 
 Each step answers a question somebody would otherwise have to discover, and every one is pinned
 by `wizard/starters.test.ts`:

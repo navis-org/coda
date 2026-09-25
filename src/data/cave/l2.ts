@@ -25,7 +25,7 @@ import type { SkeletonGeometry } from '../../core/values'
 import { mapWithConcurrency } from '../concurrency'
 import type { TreePoint } from '../skeletonTree'
 import { spanningForest } from '../skeletonTree'
-import { CaveError, caveGet, cavePost } from './client'
+import { caveGet, caveGetOr404, cavePost, sharedRequestOptions } from './client'
 import type { GrapheneSource } from './graphene'
 import type { CaveRequestOptions } from './client'
 import { memoPromise } from '../memoPromise'
@@ -88,23 +88,26 @@ export function l2TableMapping(
   options: CaveRequestOptions,
 ): Promise<Record<string, unknown>> {
   /*
-   * Only a 404 is the verdict "no L2 cache here", and a verdict is kept for the session like any
-   * answer. Anything else — a 5xx, a timeout, a dropped connection — still reads as no cache for
-   * *this* caller, as it always did, but is not kept (`memoPromise`): cached, one bad moment
-   * read as a missing L2 cache on that server until a reload.
+   * **Only a 404 is the verdict "no L2 cache here"**, kept for the session like any answer.
+   * Anything else — a 5xx, a timeout, a cancel — is thrown, and not kept (`memoPromise`). It used
+   * to be read as an empty mapping, and `l2SourceFor` above keeps *that* for the session: one
+   * cancelled request, which the Cortex gallery's wall makes whenever it moves on, switched the
+   * route off with "has no level-2 cache" until a reload, on a datastack that has one.
+   *
+   * **Asked with nobody's signal** (`sharedRequestOptions`): the request is shared by every caller
+   * asking in the same moment. It is one small JSON document per server.
    */
   return memoPromise(
     mappings,
     server,
     () =>
-      caveGet<Record<string, unknown>>(`${server}/l2cache/api/v1/table_mapping`, options).catch(
-        (err: unknown) => {
-          if (err instanceof CaveError && err.status === 404) return {}
-          throw err
-        },
+      caveGetOr404<Record<string, unknown>>(
+        `${server}/l2cache/api/v1/table_mapping`,
+        {},
+        sharedRequestOptions(options),
       ),
     { keep: 'resolved' },
-  ).catch(() => ({}))
+  )
 }
 
 /** Test seam. */

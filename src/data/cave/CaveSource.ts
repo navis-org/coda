@@ -61,6 +61,8 @@ import type {
   DatasetInfo,
   FindNeuronsRequest,
   GeometryRequest,
+  SkeletonPlanRequest,
+  SomaRequest,
   SourceCapabilities,
   SourceSchemas,
   SynapseRequest,
@@ -114,6 +116,7 @@ import {
   skeletonFetchOptions,
 } from '../precomputed/skeletons'
 import { FLAT_SKELETON_MB, FLAT_SKELETON_WARN, flatUrlFor, peekFlat, probeFlat } from './flat'
+import { somataFor } from './nuclei'
 import type { SkeletonService } from './skeletonService'
 import {
   existingSkeletons,
@@ -152,7 +155,7 @@ import {
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
 import { L2_SKELETON_WARN, readL2Skeletons } from './l2'
-import { byteLengthOf, cachedGeometry } from '../geometryCache'
+import { byteLengthOf, skeletonBytes, cachedGeometry } from '../geometryCache'
 import { caveScene } from './scene'
 import type { NgScene } from '../neuroglancer/scene'
 import type { DatastackSpec, NeuronTableSpec, SynapseTableSpec } from './spec'
@@ -488,11 +491,11 @@ export class CaveSource implements DataSource {
   /** Why each specced datastack is absent from the last listing. */
   private failures = new Map<string, string>()
   /**
-   * What a datastack's skeleton service has said about thumbnails: the neurons it confirmed it
-   * holds once it has answered one, `false` once it missed before ever answering, absent while
-   * unknown. See `serviceThumbnail`.
+   * Whether a datastack's skeleton service has answered a thumbnail: `true` once it has, `false`
+   * once it missed before ever answering, absent while unknown. Which neurons it holds is
+   * `existingSkeletons`' memo. See `serviceThumbnail`.
    */
-  private readonly thumbnailService = new Map<string, Set<NeuronId> | false>()
+  private readonly thumbnailService = new Map<string, boolean>()
   private readonly states = new Map<string, DatastackState>()
 
   constructor(deployment?: string) {
@@ -1565,23 +1568,61 @@ export class CaveSource implements DataSource {
      * alongside would be two requests nobody reads. The sequence only ever pays for the probes
      * it needs.
      */
-    const flat = await this.flatSkeletonDir(spec, version, req.signal)
+    const { flat, service } = await this.automaticStart(spec, version, req.signal)
     if (flat) return this.flatSkeletons(req, spec, flat)
-
-    // Asked once per session and remembered: a datastack whose cache came back empty for a whole
-    // set is not worth a round trip on every Run. An explicit choice always asks.
-    const service = serviceLooksEmpty(this.deployment, spec.datastack)
-      ? undefined
-      : await skeletonServiceFor(spec.datastack, options).catch(() => undefined)
     if (service) {
+      /*
+       * A failed check is not "not cached". Read as an empty set it sent every neuron down the
+       * level-2 route in silence — unlabelled, coarse — whenever the check was refused, and the
+       * service's `exists` is rate-limited (`skeletonService.ts`). So it fails the fetch, saying
+       * what failed, where the neurons would otherwise quietly become a different product.
+       */
       const held = await existingSkeletons(service, req.neuronIds, options).catch(
-        () => new Set<string>(),
+        (error: unknown) => {
+          if (error instanceof DOMException && error.name === 'AbortError') throw error
+          throw new CaveError(
+            `Could not ask ${spec.label}'s skeleton service which neurons it holds ` +
+              `(${errorMessage(error)}), so no route was chosen. Run again, or set the Skeletons ` +
+              'Source to the level-2 chunk graph.',
+          )
+        },
       )
       if (held.size === req.neuronIds.length && held.size > 0) {
         return this.serviceSkeletons(req, spec, service, held)
       }
     }
     return this.l2Skeletons(req, spec)
+  }
+
+  /**
+   * The start of Automatic's choice, before any neuron is asked about: the flat bucket where the
+   * materialization has one, else the service unless this session has written it off. One function
+   * for both of its walkers — `fetchSkeletons` and `planSkeletons` — so a plan cannot check a
+   * route the fetch would not take.
+   */
+  private async automaticStart(
+    spec: DatastackSpec,
+    version: number,
+    signal: AbortSignal | undefined,
+  ): Promise<{ flat?: SkeletonSource; service?: SkeletonService | undefined }> {
+    const flat = await this.flatSkeletonDir(spec, version, signal)
+    if (flat) return { flat }
+    // Asked once per session and remembered: a datastack whose cache came back empty for a whole
+    // set is not worth a round trip on every Run. An explicit choice always asks. Not caught:
+    // only a 404 means "no service" (`skeletonServiceFor`), and any other failure is the same
+    // silent downgrade Automatic's `exists` check refuses to make.
+    if (serviceLooksEmpty(this.deployment, spec.datastack)) return {}
+    return { service: await skeletonServiceFor(spec.datastack, this.options(signal)) }
+  }
+
+  /**
+   * The service's `exists`, asked once for a whole set about to be fetched a neuron at a time —
+   * remembered per id (`existingSkeletons`), so each Automatic fetch after it asks nothing.
+   */
+  async planSkeletons(req: SkeletonPlanRequest): Promise<void> {
+    const { spec, version } = this.require(req.datasetId)
+    const { service } = await this.automaticStart(spec, version, req.signal)
+    if (service) await existingSkeletons(service, req.neuronIds, this.options(req.signal))
   }
 
   /**
@@ -1738,7 +1779,7 @@ export class CaveSource implements DataSource {
     const skeletons = await cachedGeometry<SkeletonGeometry>({
       ids: available,
       key: (id) => `cave:${this.id}:${spec.datastack}:sksvc${service.version}:${id}`,
-      bytes: (s) => byteLengthOf(s.positions, s.radii, s.parents),
+      bytes: skeletonBytes,
       refresh: req.refresh,
       onFetched: req.onFetched,
       readyBefore: typesReady,
@@ -1754,6 +1795,20 @@ export class CaveSource implements DataSource {
     })
     await typesReady
     return assemble(skeletons.ordered.map(([, item]) => item))
+  }
+
+  /**
+   * Each neuron's soma, from the datastack's nucleus table (`cave/nuclei.ts`), in nanometres. A
+   * merge or a root with no nucleus is left out.
+   */
+  async somaPositions(
+    req: SomaRequest,
+  ): Promise<Map<NeuronId, readonly [number, number, number]>> {
+    const { spec, version } = this.require(req.datasetId)
+    if (!spec.nuclei) throw new CaveError(`${spec.label} declares no nucleus table.`)
+    const options = this.options(req.signal)
+    const server = await caveServerFor(spec.datastack, options)
+    return somataFor(server, spec.datastack, version, spec.nuclei.table, req.neuronIds, options)
   }
 
   /**
@@ -1808,7 +1863,7 @@ export class CaveSource implements DataSource {
     const skeletons = await cachedGeometry<SkeletonGeometry>({
       ids: req.neuronIds,
       key: (id) => `cave:${this.id}:${req.datasetId}:l2skel:${id}`,
-      bytes: (s) => byteLengthOf(s.positions, s.radii, s.parents),
+      bytes: skeletonBytes,
       refresh: req.refresh,
       onFetched: req.onFetched,
       /*
@@ -2087,8 +2142,8 @@ export class CaveSource implements DataSource {
    * falls through to the level-2 route.
    *
    * **The gate is this method's own and not `serviceLooksEmpty`'s**, which it reads but never
-   * writes: that flag is learnt from a whole set coming back empty, and one uncached neuron is no
-   * evidence about a cache. What a thumbnail learns instead is per datastack and one-sided — a
+   * writes — one neuron is below `BARREN_EVIDENCE`, one uncached neuron being no evidence about a
+   * cache. What a thumbnail learns instead is per datastack and one-sided — a
    * service that has **never** answered a thumbnail and misses one is not asked again this
    * session, which is BANC's case (declared, empty) costing one `exists` rather than one per row;
    * a service that has answered once is asked for every row after, which is minnie65's, where a
@@ -2104,28 +2159,24 @@ export class CaveSource implements DataSource {
     neuronId: NeuronId,
     options: CaveRequestOptions,
   ): Promise<SkeletonGeometry | undefined> {
-    const known = this.thumbnailService.get(datastack)
-    if (known === false) return undefined
+    const answered = this.thumbnailService.get(datastack)
+    if (answered === false) return undefined
     if (serviceLooksEmpty(this.deployment, datastack)) return undefined
     try {
       const service = await skeletonServiceFor(datastack, options)
       if (!service) return undefined
-      if (!known?.has(neuronId)) {
-        const held = await existingSkeletons(service, [neuronId], options, { learn: false })
-        if (!held.has(neuronId)) {
-          if (!known) this.thumbnailService.set(datastack, false)
-          return undefined
-        }
+      // Remembered per neuron by `existingSkeletons`, so a confirmed one asks nothing again.
+      const held = await existingSkeletons(service, [neuronId], options)
+      if (!held.has(neuronId)) {
+        // Re-read rather than `answered`: other rows' calls may have answered across the await.
+        if (!this.thumbnailService.get(datastack)) this.thumbnailService.set(datastack, false)
+        return undefined
       }
       let found: SkeletonGeometry | undefined
       await readServiceSkeletons(service, [neuronId], options, (_, skeleton) => {
         found = skeleton
       })
-      if (found) {
-        // Re-read rather than `known`: other rows' calls may have filled the set across the awaits.
-        const confirmed = this.thumbnailService.get(datastack) || new Set<NeuronId>()
-        this.thumbnailService.set(datastack, confirmed.add(neuronId))
-      }
+      if (found) this.thumbnailService.set(datastack, true)
       return found
     } catch {
       return undefined

@@ -23,11 +23,19 @@ import type { PackDefinition } from '../core/registry'
 import { catmaid } from './catmaid'
 import { cave } from './cave'
 import { connectome } from './connectome'
+import { cortex } from './cortex'
 import { neuprint } from './neuprint'
 import { zapbench } from './zapbench'
 
 // A pack is listed after the packs it `requires` and its `parent`: `registerPack` refuses one
 // arriving first.
-export const PACKS: readonly PackDefinition[] = [connectome, neuprint, cave, catmaid, zapbench]
+export const PACKS: readonly PackDefinition[] = [
+  connectome,
+  neuprint,
+  cave,
+  catmaid,
+  zapbench,
+  cortex,
+]
 
 for (const pack of PACKS) registerPack(pack)

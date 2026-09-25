@@ -29,9 +29,9 @@ let restore: RestoreFetch = () => {}
 function blob(
   positions: readonly number[][],
   edges: ReadonlyArray<readonly [number, number]>,
-  attributes: readonly Float32Array[] = [],
+  attributes: ReadonlyArray<Float32Array | Uint8Array> = [],
 ): ArrayBuffer {
-  const extra = attributes.reduce((n, a) => n + a.length * 4, 0)
+  const extra = attributes.reduce((n, a) => n + a.byteLength, 0)
   const bytes = new ArrayBuffer(8 + positions.length * 12 + edges.length * 8 + extra)
   const view = new DataView(bytes)
   view.setUint32(0, positions.length, true)
@@ -49,8 +49,11 @@ function blob(
   let at = edgesAt + edges.length * 8
   for (const attribute of attributes) {
     for (const value of attribute) {
-      view.setFloat32(at, value, true)
-      at += 4
+      if (attribute instanceof Uint8Array) view.setUint8(at++, value)
+      else {
+        view.setFloat32(at, value, true)
+        at += 4
+      }
     }
   }
   return bytes
@@ -202,6 +205,44 @@ describe('parsing one segment', () => {
       source,
     )!
     expect([...skeleton.radii]).toEqual([11, 22])
+  })
+
+  it("reads the service's compartment labels, and follows them into visit order", () => {
+    // CAVE's skeleton service declares `radius` then `compartment` — SWC codes in a `uint8`, as
+    // minnie65's version 4 actually sends them.
+    // The edges run 2→1→0, so the walk roots at 0 and the labels must move with their points.
+    const source: SkeletonSource = {
+      ...PLAIN,
+      vertexAttributes: [
+        { id: 'radius', data_type: 'float32', num_components: 1 },
+        { id: 'compartment', data_type: 'uint8', num_components: 1 },
+      ],
+    }
+    const skeleton = parseSkeleton(
+      blob(
+        [
+          [0, 0, 0],
+          [5, 0, 0],
+          [9, 0, 0],
+        ],
+        [
+          [2, 1],
+          [1, 0],
+        ],
+        [new Float32Array([4, 2, 1]), new Uint8Array([1, 3, 2])],
+      ),
+      source,
+    )!
+    const byX = [0, 1, 2].map((i) => [skeleton.positions[i * 3], skeleton.compartments![i]])
+    expect(byX.sort((a, b) => a[0]! - b[0]!)).toEqual([
+      [0, 1],
+      [5, 3],
+      [9, 2],
+    ])
+  })
+
+  it('carries no compartments where the source labels none', () => {
+    expect(parseSkeleton(blob([[0, 0, 0]], []), PLAIN)!.compartments).toBeUndefined()
   })
 
   it('answers zero radii when the source declares none', () => {

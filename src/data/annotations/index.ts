@@ -22,6 +22,11 @@ export {
   sheetExportUrl,
 } from './googleSheet'
 export { SEATABLE_PROVIDER, listBases } from './seaTable'
-export { annotationProvider, peekRefColumns, subscribeAnnotationsLearned } from './registry'
+export {
+  annotationProvider,
+  peekRefColumns,
+  requireAnnotationProvider,
+  subscribeAnnotationsLearned,
+} from './registry'
 export type { AnnotationRef } from './types'
 export { refKey } from './types'

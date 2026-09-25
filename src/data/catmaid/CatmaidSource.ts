@@ -53,7 +53,7 @@ import {
 } from '../neuronFilter'
 import { schemaFingerprint } from '../cache'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
-import { byteLengthOf, cachedGeometry } from '../geometryCache'
+import { skeletonBytes, cachedGeometry } from '../geometryCache'
 import type { NeuronIndexRequest } from '../neuronIndex'
 import type {
   AdjacencyRequest,
@@ -708,7 +708,7 @@ export class CatmaidSource implements DataSource {
     const skeletons = await cachedGeometry<SkeletonGeometry>({
       ids: ids.map(String),
       key: (id) => `catmaid:${this.id}:${projectId}:skel:${id}`,
-      bytes: (s) => byteLengthOf(s.positions, s.radii, s.parents),
+      bytes: skeletonBytes,
       refresh: req.refresh,
       onFetched: req.onFetched,
       /*

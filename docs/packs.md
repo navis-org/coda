@@ -337,11 +337,22 @@ dataset list and changes nothing a workflow means.
 - **A pack most readers do not need starts off** (`defaultOn: false`), and the shortcut is how the
   readers who do need it get it — which is the whole reason the two exist together.
 - **A module list, with a sweep.** `SHORTCUTS` is listed the way `PACKS` is, so `packs.test.ts`
-  refuses a shortcut naming an unregistered pack or an id a path cannot carry. None exists yet: the
-  first arrives with the cortex pack. **How `/cortex` is served is decided then**: a second HTML entry
-  brings its own sitemap page, canonical, noscript hero, meta description, analytics path and
-  manifest scope, and would be a main-chunk entry, which `docs/pages.md` says an extra entry must not
-  be; a path check in the main entry followed by `history.replaceState` to `/` avoids all of it.
+  refuses a shortcut naming an unregistered pack or an id a path cannot carry. The first is
+  `cortex`.
+- **How `/cortex` is served: a redirect page, then a query parameter.** A second HTML entry was
+  ruled out — it brings its own sitemap page, canonical, noscript hero, meta description, analytics
+  path and manifest scope, and would be a main-chunk entry, which `docs/pages.md` says an extra
+  entry must not be. The plan was a path check in the main entry, and **that alone cannot work on
+  this host**: GitHub Pages answers a path it has no file for with `public/404.html`, so the main
+  entry never runs at `/cortex`. So each shortcut has a tiny page at `<id>/index.html`, **emitted by the
+  build from `SHORTCUTS`** (`vite/shortcutPages.ts`, build only; no bundle, `noindex`) — a
+  hand-copied page in `public/` was a second list, a shortcut without one falling silently through
+  to the 404 — that `location.replace`s to `../?shortcut=<id>` — relative, so it works from a subpath, and **carrying the fragment**, so a
+  `#!` link sent through the shortcut still opens. The main entry follows the parameter before the
+  first render (`ui/shortcutRoute.ts`) and takes it back out with `replaceState`, keeping the rest
+  of the address. Checked on a static server over `dist/`, which resolves `/cortex` the way Pages
+  does (Vite's dev server has a fallback of its own, so it is not the test): `/cortex` lands on `/`
+  with "Switched on for you: Cortex", and `/cortex/#hello` on `/#hello`.
 - **A shortcut's switches outlive the pack that asked for them.** Following `/cortex` switches CAVE
   and Connectome on as the reader's own choices, so switching Cortex off later leaves them on.
 - **What this replaced.** The first version was *profiles*: per-entry-point curation of the datasets
@@ -349,6 +360,16 @@ dataset list and changes nothing a workflow means.
   profile that had to be set before anything read it. That made `/cortex` a second app, which is
   exactly what it should not be — so all of it went, and what a shortcut needs is one list and one
   function.
+
+## Cortex: the first pack off by default
+
+`packs/cortex` — the Cortex Gallery and the cortical frames it draws with ([cortex.md](cortex.md)).
+`defaultOn: false` and `requires: ['cave']`, so switching it on (or following `/cortex`) brings
+CAVE and, as CAVE's parent, Connectome. Being the first pack that starts off, it is
+what showed that **a reader's switched-off set starts from `packsOffByDefault()`**: three tests had
+built one by hand from nothing, and read Cortex as on. Its card body is registered in
+`ui/nodes/nodeBodies.ts` like any other, the pack directory being imported by the headless MCP
+build.
 
 ## What a pack does not do yet
 

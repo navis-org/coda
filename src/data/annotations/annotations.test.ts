@@ -613,6 +613,84 @@ describe('what a CAVE reference table needs', () => {
     })
   })
 
+  it('reads a view through the view endpoint, which a table query would 404', async () => {
+    // MICrONS publishes its cell typing as the view `aibs_cell_info`.
+    const calls: CaveCall[] = []
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      const text = String(url)
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined
+      calls.push({ url: text, ...(body ? { body } : {}) })
+      const answer = (payload: unknown) =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(JSON.stringify(payload)),
+        } as Response)
+      if (text.includes('/info/api/v2/datastack/full/'))
+        return answer({ local_server: SERVER, aligned_volume: { name: 'minnie65' } })
+      if (text.endsWith('/views')) return answer({ aibs_cell_info: { description: 'types' } })
+      if (text.endsWith('/tables')) return answer([])
+      const rows = [{ pt_root_id: '864691135292991414', cell_type: '23P' }]
+      if (text.includes('count=true')) return answer([{ count: rows.length }])
+      return answer(rows)
+    })
+    const table = await provider().fetch(
+      {
+        provider: CAVE_TABLE_PROVIDER,
+        config: config({ table: 'aibs_cell_info', columns: 'cell_type' }),
+      },
+      {},
+    )
+    const query = calls.find((c) => c.body?.select_columns)!
+    expect(query.url).toContain('/views/aibs_cell_info/query')
+    expect(query.body).toEqual({ select_columns: ['pt_root_id', 'cell_type'] })
+    expect(table.data.neuronId).toEqual(['864691135292991414'])
+    expect(table.data.type).toEqual(['23P'])
+  })
+
+  it('does not wait on a view whose count never answers, as an aggregating one does not', async () => {
+    vi.useFakeTimers()
+    // MICrONS publishes its cell typing as the view `aibs_cell_info`.
+    const calls: CaveCall[] = []
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      const text = String(url)
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined
+      calls.push({ url: text, ...(body ? { body } : {}) })
+      const answer = (payload: unknown) =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(JSON.stringify(payload)),
+        } as Response)
+      if (text.includes('/info/api/v2/datastack/full/'))
+        return answer({ local_server: SERVER, aligned_volume: { name: 'minnie65' } })
+      if (text.endsWith('/views')) return answer({ aibs_cell_info: { description: 'types' } })
+      if (text.endsWith('/tables')) return answer([])
+      const rows = [{ pt_root_id: '864691135292991414', cell_type: '23P' }]
+      if (text.includes('count=true')) return new Promise<Response>(() => undefined)
+      return answer(rows)
+    })
+    const pending = provider().fetch(
+      {
+        provider: CAVE_TABLE_PROVIDER,
+        config: config({ table: 'aibs_cell_info', columns: 'cell_type' }),
+      },
+      {},
+    )
+    await vi.advanceTimersByTimeAsync(5_000)
+    const table = await pending
+    vi.useRealTimers()
+    const query = calls.find((c) => c.body?.select_columns)!
+    expect(query.url).toContain('/views/aibs_cell_info/query')
+    expect(query.body).toEqual({ select_columns: ['pt_root_id', 'cell_type'] })
+    expect(table.data.neuronId).toEqual(['864691135292991414'])
+    expect(table.data.type).toEqual(['23P'])
+  })
+
   it('leaves a table that carries its own root id on the single-table path', async () => {
     // The other half of the same rule: `reference_table` absent is not a reference table, and
     // nothing about this read may change for one.

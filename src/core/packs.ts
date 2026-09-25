@@ -67,6 +67,14 @@ export function offeredType(
  */
 
 /**
+ * The packs whose own switch starts off (`PackDefinition.defaultOn: false`) — where every reader's
+ * switched-off set begins before anybody flips anything.
+ */
+export function packsOffByDefault(): Set<string> {
+  return new Set(registeredPacks().flatMap((p) => (p.defaultOn === false ? [p.id] : [])))
+}
+
+/**
  * What switching this pack on has to switch on with it: its parent and what it requires, and theirs
  * in turn — a requirement's parent's own requirements included. The one walk of both relations, so
  * nothing reading them stops a level short.

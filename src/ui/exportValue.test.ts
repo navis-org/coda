@@ -111,6 +111,16 @@ describe('SWC', () => {
     expect(rows.map((r) => Number(r.split(' ')[0]))).toEqual([1, 2, 3])
   })
 
+  it("writes the source's compartment as the type, where it labelled one", () => {
+    const labelled = { ...skeleton(), compartments: new Uint8Array([1, 3, 2]) }
+    const types = skeletonToSwc(labelled)
+      .trim()
+      .split('\n')
+      .filter((l) => !l.startsWith('#'))
+      .map((r) => Number(r.split(' ')[1]))
+    expect(types).toEqual([1, 3, 2])
+  })
+
   it('says what the numbers mean, since the format itself does not', () => {
     const header = skeletonToSwc(skeleton())
       .split('\n')

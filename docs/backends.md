@@ -836,6 +836,13 @@ valid_connection_v2 — an aggregating view                   > 300 s   (times o
 That last pair is the same finding `tables.ts` records for `limit` not pushing down into an
 aggregating view, arrived at from the other direction.
 
+**A view's count gets a grace, not a veto.** Nothing about a view says which kind it is, and the
+generic `CAVE table` card reads whatever view somebody picks — minnie65's `aibs_cell_info` among
+them. So `queryViewChecked` starts the count beside the query and, once the rows are in, waits
+`VIEW_COUNT_GRACE_MS` (5 s) and no more: a count that has not answered is treated as one that
+failed, and `refuseIfCapped` judges by the row cap. Without it, a card pointed at an aggregating
+view waited on a count that never returns.
+
 **`hierarchical_neuron_annotations` is over the cap**, which is why the index reads it **one
 `classification_system` at a time** — five queries of 17k to 139k rows instead of one that comes
 back quietly short. The kinds come from discovery, which has already run, so the split costs no
@@ -1731,8 +1738,8 @@ than one that says nothing. `capabilitiesFor`'s `skeletons` is derived from the 
 than asked separately, for the same reason: they are two halves of one fact and were one edit
 away from a node that refuses while its dropdown offers a route.
 
-CAVE's order is **published bucket → skeleton service → level-2 cache**, and no datastack has all
-three. A route the dataset does not have is an **error, never a substitution** — answering with a
+CAVE's order is **published release → published bucket → skeleton service → level-2 cache**, and
+no datastack has all four. The release is minnie65's alone (below). A route the dataset does not have is an **error, never a substitution** — answering with a
 chunk decomposition because the published bucket is absent would silently change every cable
 length downstream, under a card still saying "published skeletons".
 
@@ -2004,6 +2011,87 @@ that a mesh bbox must enclose its skeleton's.
 **The morphology schema is narrowed rather than canonical.** `neuronId`, `type` and `points`, and
 no `instance`, `status`, `size` or `cableLength` — a graphene mesh carries none of them, and a
 column that arrives null on every row breaks every picker that believed it.
+
+### A failed lookup is not an answer — three places that said "none" for the session
+
+Found together, from the Cortex gallery drawing half its wall from the level-2 route, unlabelled,
+on a datastack whose skeleton service held every cell. Each was the same shape: a lookup that
+**failed** was read as a lookup that answered **no**, and the no was kept for the session.
+
+- **`l2TableMapping`** turned any failure — a 5xx, a timeout, a *cancel* — into an empty mapping,
+  and `l2SourceFor` kept that as "has no level-2 cache". The gallery cancels whenever its wall
+  moves on, so one mode switch mid-load refused the route until a reload with "has no level-2
+  cache", on minnie65, which has one. Only a 404 is that verdict now; anything else is thrown and
+  not kept.
+- **`skeletonServiceFor`** did the same with the versions list: a failed read became "no versions",
+  so "no service", kept.
+- **Both shared one in-flight request among callers and carried the first caller's signal**, so
+  one caller's Cancel was everybody's. Both now ask with nobody's signal; each is one small JSON
+  document.
+- **`barren` was learnt from a set of one.** A whole set uncached marks a service empty for the
+  session, to spare FlyWire and BANC (0 of 5 cached) a wasted `exists`. The gallery asks one cell
+  per request, so its first uncached cell wrote minnie65's service off. `BARREN_EVIDENCE` is five,
+  the measured case; the thumbnail's `learn: false` became that rule.
+
+And the one underneath all of it: **the service's `exists` is rate-limited at 100 requests a
+minute** (`429: 100 per 1 minute`, measured from the browser), and the gallery asked it once per
+cell per wall, again on every reshuffle — two or three moves a minute were refused, and Automatic
+read the refusal as "not cached". Three changes:
+
+- **`existingSkeletons` remembers each id's answer for the session and gathers what is asked in
+  one task into one request**, with nobody's signal. Measured size: the endpoint took 50,000 ids
+  (0.9 MB, 23 s) in one request and refused 125,348 (2.3 MB) with `413` before reading it, so the
+  ceiling is the proxy's body size, not an id count; `EXISTS_BATCH` stays at 500.
+- **`DataSource.planSkeletons`**: a caller about to fetch neurons one at a time names them first,
+  and CAVE asks `exists` once for the set. A wall, a mode switch and four reshuffles measured
+  **one** `exists` request for 288 ids, where it had been one per cell per wall.
+- **A failed `exists`, or a failed service lookup, fails an Automatic fetch** with a sentence
+  saying so, rather than sending the neurons to the level-2 route unlabelled. Only a 404 is "none".
+
+### A geometry is the id asked for — why there is no SWC release route
+
+**A skeleton or mesh answered for an id is the morphology of exactly that id, at the
+materialization asked for. Never an id mapped to another timepoint and that timepoint's
+morphology drawn under it.** This was learned by shipping the opposite, briefly, and it is the
+rule the user stated when it was found.
+
+MICrONS publishes its v661 skeletons on BossDB — 76,980 SWC files named `{root id at 661}_{nucleus
+id}.swc`, soma, axon and dendrite labelled, the axon removed wherever it was not proofread at 661.
+It was added as a route that *led* Automatic on minnie65: today's root id was walked through its
+nucleus at the requested materialization, the supervoxel under that nucleus looked up at 661's
+instant, and the file for *that* root read and handed back under today's id. Every step was exact
+and the result was wrong: it was a different segment, the cell as it was two years and a great deal
+of proofreading earlier. Found from the gallery, where cells marked axon-proofread in
+`aibs_cell_info` kept drawing without an axon — `864691136314078013` came back as 2.9 mm of dendrite
+where the id's own segment is 22.9 mm with a proofread axon. Measured over 40 cells spread across
+the 2,220 doubly-proofread ones: **23 had no axon in the release, 36 held under 80% of the current
+cable, median 49%**. Nothing about the value said so; it looked like a smaller neuron.
+
+So the route is gone rather than demoted. A published product keyed by other ids is usable only
+where its ids *are* the requested ones — which for a proofread dataset is almost never, since
+proofreading is what changes a root id. `live.test.ts` holds the cell above to having its axon.
+
+What survived it, being correct on its own terms:
+
+**A nucleus is one read, shared** (`cave/nuclei.ts`, declared as `DatastackSpec.nuclei`): its id,
+the supervoxel under it and its position in nanometres, at the requested materialization,
+memoised for the session. `somaPositions` places a cell by it. A root holding two nuclei (a merge)
+or none has no soma. The position arrives as `pt_position_x`/`_y`/`_z` when `pt_position` is asked
+for; naming the split columns is a 500.
+
+**Root lookups at one instant are gathered** (inside `rootsForSupervoxels`, the root-id drift
+repair): held in memory for the session over the persisted copy, which is read once, and every
+supervoxel asked for within one task goes out in one `roots_binary` request, the store written
+once per flush. Per call, concurrent callers each read and rewrote the whole stored map and
+overwrote each other's additions.
+
+**The service's `compartment` is `uint8`, and the reader only read `float32`.** Its `info` on
+skeleton version 4 declares `radius` `float32` then `compartment` `uint8` — decoded live as one
+soma, 3,026 axon and 2,017 dendrite vertices — and a trailing, undeclared block of one byte per
+vertex follows, which the reader ignores. `readAttribute` reads `radius` only as `float32` (a
+quantised radius is a unit this has no scale for) and `compartment` at any integer width, being a
+code rather than a measurement. The service labels an axon on every cell by an automatic
+synapse-based split, so only an `axon_cleaned` cell's axon is a proofread one.
 
 ### Smaller decisions
 

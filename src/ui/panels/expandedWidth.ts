@@ -51,6 +51,8 @@ const EXPANDED_WIDTHS: Record<string, ExpandedWidth> = {
   'out.profile': MEASURED_WIDTH,
   'out.datasetSummary': MEASURED_WIDTH,
   'net.metrics': MEASURED_WIDTH,
+  // A body, but a picture: a wall of neurons wants every pixel across, not a reading measure.
+  'cortex:gallery': 'full',
 }
 
 export function expandedWidth(nodeType: string): ExpandedWidth {

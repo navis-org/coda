@@ -31,6 +31,8 @@ import {
   normaliseCaveServer,
 } from '../../data/cave/deployments'
 import { peekTableList } from '../../data/cave/tables'
+import { CAVE_TABLE_PROVIDER } from '../../data/annotations/caveTable'
+import type { AnnotationRef } from '../../data/annotations/types'
 import { foreignBackend } from './datasetParam'
 
 /** The reference Dataset port. See the header on why `reference` is not optional here. */
@@ -132,6 +134,39 @@ export function caveTarget(
   const parsed = id ? splitDatasetId(id) : undefined
   if (!parsed) return undefined
   return { deployment: caveServerOfSource(wired?.sourceId) ?? DEFAULT_CAVE_SERVER, ...parsed }
+}
+
+/**
+ * A CAVE table read as annotations: the ref `CAVE table` stands for, and what the Cortex gallery
+ * reads its cell types through. One builder, so the two cannot disagree on the deployment rule —
+ * the server rides on the Dataset's `sourceId` (`caveTarget`'s rule), and goes into the config only
+ * where it is *not* the default, `refKey` writing every key into the annotation cache key and every
+ * ref that existed before deployments did being on the default.
+ */
+export function caveTableRef(
+  dataset: string,
+  sourceId: string | undefined,
+  fields: {
+    table: string
+    columns: string
+    idColumn?: string
+    pivotOn?: string
+    valueColumn?: string
+  },
+): AnnotationRef {
+  const deployment = caveServerOfSource(sourceId) ?? DEFAULT_CAVE_SERVER
+  return {
+    provider: CAVE_TABLE_PROVIDER,
+    config: {
+      dataset,
+      table: fields.table,
+      idColumn: fields.idColumn || DEFAULT_CAVE_ID_COLUMN,
+      pivotOn: fields.pivotOn ?? '',
+      valueColumn: fields.valueColumn ?? '',
+      columns: fields.columns,
+      ...(deployment !== DEFAULT_CAVE_SERVER ? { deployment } : {}),
+    },
+  }
 }
 
 /** `caveTarget` from an edit-time context's port type. */

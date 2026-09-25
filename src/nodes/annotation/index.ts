@@ -37,11 +37,10 @@ import type { TableValue } from '../../core/values'
 import { isTableValue } from '../../core/values'
 import type { AnnotationRef } from '../../data/annotations'
 import {
-  CAVE_TABLE_PROVIDER,
   GOOGLE_SHEET_PROVIDER,
   SEATABLE_PROVIDER,
-  annotationProvider,
   peekRefColumns,
+  requireAnnotationProvider,
   sheetConfigFrom,
 } from '../../data/annotations'
 import { annotationColumn, namedColumns } from '../../data/annotations/types'
@@ -56,14 +55,13 @@ import {
   caveIdColumn,
   caveDatastackIssues,
   caveDatastackParam,
-  caveTarget,
+  caveTableRef,
   caveTableSuggestions,
   caveTargetOfType,
 } from '../lib/caveParams'
 import { peekReferenceTable, peekTableColumns } from '../../data/cave/tables'
 import { ANNOTATIONS_INPUT, annotationSchemaFrom } from '../lib/annotationParams'
 import { datasetRef } from '../../core/types'
-import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 
 /**
  * The columns this node publishes: whatever arrived, plus its own.
@@ -282,24 +280,13 @@ function caveRef(
   // it. Note this keeps the *unsplit* id, which is what `AnnotationRef.dataset` carries.
   const dataset = wired?.datasetId ?? String(params.datastack).trim()
   if (!dataset || !table) return undefined
-  /*
-   * The deployment rides on the wire, and a typed name is the default one's (`caveTarget`). It
-   * goes into the config only where it is *not* the default: `refKey` writes every key into the
-   * annotation cache key, and every ref that existed before deployments did is on the default.
-   */
-  const deployment = caveTarget(wired, params)?.deployment
-  return {
-    provider: CAVE_TABLE_PROVIDER,
-    config: {
-      dataset,
-      table,
-      idColumn: caveIdColumn(params),
-      pivotOn: String(params.pivotOn).trim(),
-      valueColumn: String(params.valueColumn).trim(),
-      columns: String(params.columns).trim(),
-      ...(deployment && deployment !== DEFAULT_CAVE_SERVER ? { deployment } : {}),
-    },
-  }
+  return caveTableRef(dataset, wired?.datasetId ? wired.sourceId : undefined, {
+    table,
+    idColumn: caveIdColumn(params),
+    pivotOn: String(params.pivotOn).trim(),
+    valueColumn: String(params.valueColumn).trim(),
+    columns: String(params.columns).trim(),
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -591,8 +578,7 @@ registerNode({
  * else was allowed to edit it.
  */
 async function resolve(ctx: EvalContext, ref: AnnotationRef): Promise<TableValue> {
-  const provider = annotationProvider(ref.provider)
-  if (!provider) throw new Error(`No annotation provider "${ref.provider}"`)
+  const provider = requireAnnotationProvider(ref.provider)
 
   ctx.progress(0.05, provider.label)
   /*

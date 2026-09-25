@@ -41,8 +41,14 @@ import { makeTable } from '../../core/values'
 import { caveDType } from '../cave/json'
 import type { CaveRequestOptions, CaveRow } from '../cave/client'
 import type { CaveReference } from '../cave/api'
-import { queryTableChecked, uniqueStringValues } from '../cave/api'
-import { peekTableColumns, referenceTableFor, tableColumnsFor } from '../cave/tables'
+import { queryTableChecked, queryViewChecked, uniqueStringValues } from '../cave/api'
+import {
+  kindOf,
+  peekTableColumns,
+  referenceTableFor,
+  tableColumnsFor,
+  tableListFor,
+} from '../cave/tables'
 import { caveServerFor } from '../cave/datastack'
 import { deploymentKey, normaliseCaveServer } from '../cave/deployments'
 import { splitDatasetId } from '../cave/spec'
@@ -200,8 +206,25 @@ class CaveTableProvider implements AnnotationProvider {
       )
     }
     const request = requestFor(config, options.signal)
-    const server = await caveServerFor(parsed.datastack, request)
     const { datastack, version } = parsed
+    /*
+     * A **view** is a different endpoint, and asking it as a table is a 404 that reads as a
+     * missing table. MICrONS publishes its cell typing as one (`aibs_cell_info`), already joining
+     * nine tables by precedence. The listing says which a name is — started beside the server
+     * lookup, neither needing the other, and almost always in hand, the card's picker having read
+     * it.
+     */
+    const [server, listing] = await Promise.all([
+      caveServerFor(datastack, request),
+      tableListFor(datastack, version, request),
+    ])
+    const isView = kindOf(listing, config.table) === 'view'
+    if (isView && config.pivotOn) {
+      throw new Error(
+        `${config.table} is a view, and Pivot on reads a table: clear Pivot on to read the ` +
+          'view as it stands.',
+      )
+    }
 
     if (config.pivotOn) {
       options.onProgress?.(0.1, 'reading annotation kinds')
@@ -250,21 +273,31 @@ class CaveTableProvider implements AnnotationProvider {
 
     options.onProgress?.(0.2, 'reading annotations')
     // Serial here and not above, and the reason is the one asymmetry between the two branches:
-    // a wide read cannot know which columns to name until it knows whether it is joining.
-    const reference = await referenceFor(datastack, version, config, request)
+    // a wide read cannot know which columns to name until it knows whether it is joining. A view
+    // never joins: it has no reference table to read.
+    const reference = isView
+      ? undefined
+      : await referenceFor(datastack, version, config, request)
     const named = await wideColumns(datastack, version, config, Boolean(reference), request)
-    const rows = await queryTableChecked(
-      server,
-      datastack,
-      version,
-      {
-        table: config.table,
-        ...(named.length > 0 ? { columns: idColumns(config, reference)(named) } : {}),
-        ...(reference ? { reference } : {}),
-      },
-      { consequence: INCOMPLETE },
-      request,
-    )
+    const columns = named.length > 0 ? { columns: idColumns(config, reference)(named) } : {}
+    const refusal = { consequence: INCOMPLETE }
+    const rows = isView
+      ? await queryViewChecked(
+          server,
+          datastack,
+          version,
+          { view: config.table, ...columns },
+          refusal,
+          request,
+        )
+      : await queryTableChecked(
+          server,
+          datastack,
+          version,
+          { table: config.table, ...columns, ...(reference ? { reference } : {}) },
+          refusal,
+          request,
+        )
     options.onProgress?.(1, `${rows.length} rows`)
     return wideRows(rows, config, named)
   }

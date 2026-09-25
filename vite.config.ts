@@ -9,6 +9,7 @@ import { datasetGuideData } from './vite/datasetGuideData'
 import { goatCounter } from './vite/goatcounter'
 import { nodeGuideData } from './vite/nodeGuideData'
 import { seo } from './vite/seo'
+import { shortcutPages } from './vite/shortcutPages'
 import { stripComments } from './vite/stripComments'
 
 /**
@@ -304,6 +305,7 @@ export default defineConfig({
     datasetGuideData(),
     goatCounter(),
     seo(),
+    shortcutPages(),
     stripComments(),
   ],
   // `__BUILD_ID__` belongs to the MCP build (`vite.mcp.config.ts`). Defined here too, so the app and

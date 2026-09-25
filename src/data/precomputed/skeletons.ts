@@ -26,8 +26,12 @@
  * `radius` is a *convention* in `vertex_attributes`, not a field. male-CNS publishes
  * `{"@type": "neuroglancer_skeletons"}` and nothing else — no transform, no attributes — so
  * every radius is 0, which is the same answer `cave/l2.ts` gives for a chunk with no
- * distance-transform value: 0 rather than a guess. Attributes that are not `radius` are skipped
+ * distance-transform value: 0 rather than a guess. Attributes this does not read are skipped
  * by *size* rather than ignored, because they sit between the ones that are.
+ *
+ * `compartment` is the other one read — CAVE's skeleton service declares it beside `radius`, as
+ * SWC structure codes in an integer type (`uint8` on minnie65) — and it becomes
+ * `SkeletonGeometry.compartments`.
  *
  * ## Units are whatever the source says, and usually already nanometres
  *
@@ -42,7 +46,7 @@
 
 import type { SkeletonGeometry } from '../../core/values'
 import { mapWithConcurrency } from '../concurrency'
-import { byteLengthOf, cachedGeometry } from '../geometryCache'
+import { skeletonBytes, cachedGeometry } from '../geometryCache'
 import type { TreePoint } from '../skeletonTree'
 import { spanningForest } from '../skeletonTree'
 import type { ShardingSpec } from './sharded'
@@ -75,15 +79,17 @@ export interface SkeletonSource {
   vertexAttributes: VertexAttribute[]
 }
 
-/** Bytes per value, for the attribute types the format allows. */
-const WIDTHS: Readonly<Record<string, number>> = {
-  int8: 1,
-  uint8: 1,
-  int16: 2,
-  uint16: 2,
-  int32: 4,
-  uint32: 4,
-  float32: 4,
+/** Width and reader for each attribute type the format allows. */
+const DTYPES: Readonly<
+  Record<string, { width: number; read: (v: DataView, at: number) => number }>
+> = {
+  int8: { width: 1, read: (v, o) => v.getInt8(o) },
+  uint8: { width: 1, read: (v, o) => v.getUint8(o) },
+  int16: { width: 2, read: (v, o) => v.getInt16(o, true) },
+  uint16: { width: 2, read: (v, o) => v.getUint16(o, true) },
+  int32: { width: 4, read: (v, o) => v.getInt32(o, true) },
+  uint32: { width: 4, read: (v, o) => v.getUint32(o, true) },
+  float32: { width: 4, read: (v, o) => v.getFloat32(o, true) },
 }
 
 /**
@@ -163,7 +169,8 @@ export function parseSkeleton(
   const attributesAt = edgesAt + edgeCount * 8
   if (bytes.byteLength < attributesAt) return undefined
 
-  const radii = readRadii(view, source, attributesAt, vertexCount)
+  const radii = readAttribute(view, source, attributesAt, vertexCount, 'radius')
+  const compartments = readAttribute(view, source, attributesAt, vertexCount, 'compartment')
   const points: TreePoint[] = []
   for (let i = 0; i < vertexCount; i++) {
     const x = view.getFloat32(8 + i * 12, true)
@@ -179,7 +186,7 @@ export function parseSkeleton(
       view.getUint32(edgesAt + i * 8 + 4, true),
     ])
   }
-  return spanningForest(points, edges)
+  return spanningForest(points, edges, compartments)
 }
 
 /** The row-major 3×4 affine, or the point unchanged when the source declares none. */
@@ -198,34 +205,35 @@ function apply(
 }
 
 /**
- * The `radius` attribute, if this source publishes one where this reader can find it.
+ * One named attribute, if this source publishes it where this reader can find it.
  *
- * Attributes are contiguous per-attribute arrays in declared order, so reaching `radius` means
- * stepping over whatever precedes it — hence walking the list rather than looking it up. Only a
- * single-component `float32` is read: `radius` is a convention rather than a typed field, and a
- * `uint8` one would be in some quantised unit this has no scale for, which is a plausible number
- * in the wrong units — worse than the honest 0.
+ * Attributes are contiguous per-attribute arrays in declared order, so reaching one means
+ * stepping over whatever precedes it — hence walking the list rather than looking it up. A
+ * `radius` is read only as a single-component `float32`: it is a convention rather than a typed
+ * field, and a `uint8` one would be in some quantised unit this has no scale for, which is a
+ * plausible number in the wrong units — worse than the honest 0. A `compartment` is a code, not a
+ * measurement, so any integer width reads too — and it has to: minnie65's service declares it
+ * `uint8` (checked live on skeleton version 4: 1 soma, 3,026 axon, 2,017 dendrite vertices).
  */
-function readRadii(
+function readAttribute(
   view: DataView,
   source: SkeletonSource,
   attributesAt: number,
   vertexCount: number,
+  id: 'radius' | 'compartment',
 ): Float32Array | undefined {
   let at = attributesAt
   for (const attribute of source.vertexAttributes) {
-    const width = WIDTHS[attribute.data_type]
-    if (width === undefined) return undefined // Unknown width: every later offset is a guess.
-    const bytes = vertexCount * attribute.num_components * width
-    if (
-      attribute.id === 'radius' &&
-      attribute.data_type === 'float32' &&
-      attribute.num_components === 1
-    ) {
+    const type = DTYPES[attribute.data_type]
+    if (type === undefined) return undefined // Unknown width: every later offset is a guess.
+    const bytes = vertexCount * attribute.num_components * type.width
+    // The policy, per attribute: a radius is a measurement, a compartment a code.
+    const wanted = id === 'compartment' || attribute.data_type === 'float32'
+    if (attribute.id === id && wanted && attribute.num_components === 1) {
       if (view.byteLength < at + bytes) return undefined
-      const radii = new Float32Array(vertexCount)
-      for (let i = 0; i < vertexCount; i++) radii[i] = view.getFloat32(at + i * 4, true)
-      return radii
+      const values = new Float32Array(vertexCount)
+      for (let i = 0; i < vertexCount; i++) values[i] = type.read(view, at + i * type.width)
+      return values
     }
     at += bytes
   }
@@ -337,7 +345,7 @@ export async function fetchSkeletons(
   const { ordered, missing } = await cachedGeometry<SkeletonBody>({
     ids: segmentIds,
     key: (id) => `skel:${source.base}:${id}`,
-    bytes: (s) => byteLengthOf(s.positions, s.radii, s.parents),
+    bytes: skeletonBytes,
     ...(options.refresh ? { refresh: true } : {}),
     ...(options.onFetched ? { onFetched: options.onFetched } : {}),
     ...(options.onPartial ? { onPartial: (pairs) => options.onPartial?.(named(pairs)) } : {}),

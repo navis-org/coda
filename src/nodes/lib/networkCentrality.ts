@@ -46,6 +46,7 @@
  * `rng` option is passed rather than left at the library's `Math.random`.
  */
 
+import { seededRandom } from './tableOps'
 import type { ColumnSchema, TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type { ColumnData, NetworkValue, TableValue } from '../../core/values'
@@ -248,18 +249,6 @@ function buildAdjacency(index: NetworkIndex, weighted: boolean): Adjacency {
 // ---------------------------------------------------------------------------
 // The sweep
 // ---------------------------------------------------------------------------
-
-/** mulberry32, seeded — the same generator the Sample node uses, for the same reason. */
-function seededRandom(seed: number): () => number {
-  let a = (Number.isFinite(seed) ? Math.floor(seed) : 0) >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0
-    let t = a
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
 
 /** `k` distinct node rows, drawn without replacement from a seeded shuffle. */
 function pivots(n: number, k: number, seed: number): Int32Array {

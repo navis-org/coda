@@ -365,9 +365,9 @@ declared on the family — maleCNS's four namespaces, FlyWire's `cell_type` and 
 `type` everywhere else — and the wizard writes them in. **A default a reader can see and change,
 never hidden behaviour**, which is decision 3 in [comparative.md](comparative.md) restated one
 layer up. **Absent means nobody has made this judgement**, which is a third thing from `['type']`:
-minnie65 is a mouse volume with no cell typing, and BANC's arrive from a pivot whose column names
-are the datastack's own `classification_system` values. Both leave the picker empty and the card
-says what to pick.
+BANC's arrive from a pivot whose column names are the datastack's own `classification_system`
+values. That leaves the picker empty and the card says what to pick. (minnie65 was the other
+example until its chain read `aibs_cell_info`; it now declares `type` and `mtype`.)
 
 One thing this does *not* fix, and it is the ordinary state rather than a bug: a neuPrint neuron's
 columns past the core set are **discovered**, so a freshly-built card warns `Missing column(s):

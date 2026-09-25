@@ -25,6 +25,7 @@ import {
   offeredPack,
   offeredType,
   packDependencies,
+  packsOffByDefault,
   packsHiding,
   packsIn,
   packsNeeding,
@@ -49,9 +50,7 @@ const changed = channel()
 function ownOff(): ReadonlySet<string> {
   if (!own) {
     choices ??= loadPackChoices()
-    const next = new Set(
-      registeredPacks().flatMap((p) => (p.defaultOn === false ? [p.id] : [])),
-    )
+    const next = packsOffByDefault()
     for (const [id, on] of Object.entries(choices)) {
       if (on) next.delete(id)
       else next.add(id)

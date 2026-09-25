@@ -95,6 +95,7 @@ function passThrough(request: CleanSkeletonsRequest): CleanSkeletonsResult {
     points: request.points.slice(),
     parents: request.parents.slice(),
     radii: request.radii.slice(),
+    compartments: request.compartments.slice(),
     offsets: request.offsets.slice(),
   }
 }
@@ -396,6 +397,7 @@ describe('neuron.cleanSkeletons — running', () => {
       const points: number[] = []
       const parents: number[] = []
       const radii: number[] = []
+      const compartments: number[] = []
       for (let n = 0; n + 1 < request.offsets.length; n++) {
         const from = request.offsets[n]!
         const to = request.offsets[n + 1]!
@@ -408,6 +410,7 @@ describe('neuron.cleanSkeletons — running', () => {
           )
           parents.push(kept === 0 ? -1 : kept - 1)
           radii.push(request.radii[i]!)
+          compartments.push(request.compartments[i]!)
           kept += 1
         }
         offsets[n + 1] = offsets[n]! + kept
@@ -416,6 +419,7 @@ describe('neuron.cleanSkeletons — running', () => {
         points: Float32Array.from(points),
         parents: Int32Array.from(parents),
         radii: Float32Array.from(radii),
+        compartments: Uint8Array.from(compartments),
         offsets,
       })
     })

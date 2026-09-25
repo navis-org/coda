@@ -12,8 +12,11 @@
  * A module list, like `packs/index.ts`, so `packs.test.ts` can refuse a shortcut naming a pack
  * nobody registered. Following one needs the packs registered first, which importing
  * `ui/packSwitches.ts` already ensures: it imports the graph store, which imports every node pack
- * for its side effect. None exists yet: the first arrives with the cortex pack, together with the
- * page entry (`cortex/index.html`) that calls `applyShortcut('cortex')`.
+ * for its side effect.
+ *
+ * **How a path reaches it**: the build emits a redirect page at `<id>/index.html` for each entry
+ * here (`vite/shortcutPages.ts`), which sends the reader to `?shortcut=<id>`, followed by
+ * `ui/shortcutRoute.ts`. Why it takes a page and a parameter is in `docs/packs.md`, "Shortcuts".
  */
 
 export interface ShortcutDefinition {
@@ -23,7 +26,10 @@ export interface ShortcutDefinition {
   packs: readonly string[]
 }
 
-export const SHORTCUTS: readonly ShortcutDefinition[] = []
+export const SHORTCUTS: readonly ShortcutDefinition[] = [
+  // The Cortex Gallery and its frames; CAVE and Connectome come with it, being what it needs.
+  { id: 'cortex', packs: ['cortex'] },
+]
 
 export function shortcut(id: string): ShortcutDefinition | undefined {
   return SHORTCUTS.find((s) => s.id === id)

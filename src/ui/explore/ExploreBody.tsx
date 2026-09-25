@@ -18,8 +18,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 
 import { idText } from '../../core/ids'
-import { datasetRef, isNumericDType } from '../../core/types'
-import { isDatasetValue } from '../../core/values'
+import { isNumericDType } from '../../core/types'
 import { narrowPopulation } from '../../data/neuronFilter'
 import { SELECT_ALL_WARN, excludedFromSearch } from '../../nodes/query/explore'
 import {
@@ -31,6 +30,7 @@ import {
   SEARCH_SYNTAX_HELP,
 } from '../../nodes/lib/neuronSearch'
 import type { NodeBodyProps } from '../nodes/nodeBodies'
+import { useDatasetInput } from '../useDatasetInput'
 import { formatCell, formatNumber } from '../format'
 import { copyText } from '../export'
 import { errorMessage } from '../../core/errors'
@@ -94,51 +94,12 @@ export function ExploreBody({
   setParam,
   onError,
 }: NodeBodyProps) {
-  /*
-   * The value's dataset id when there is one, the type's otherwise — never one paired with the
-   * other's chain. A dataset node on "Latest" publishes no id until its listing lands, so the
-   * type's can be absent or older than the value's, and an index fetched for one while carrying
-   * the other's labels would be cached under a key claiming a pairing that never existed. Same
-   * reasoning as `datasetRequest`, which exists so a call site cannot supply one without the
-   * other.
-   */
-  const value = inputValues?.dataset
-  const ref = isDatasetValue(value) ? value : datasetRef(ctx.inputs.dataset)
-  /*
-   * The chain comes off the *value*, not the type.
-   *
-   * A dataset **type** carries the annotation chain's schema; only the `DatasetValue` carries its
-   * table, because that table is a fetch somebody's Run paid for. On a datastack that publishes a
-   * neuron table this is a labelling improvement — the list shows the chain's names instead of
-   * the backend's. On one that publishes none it is the difference between working and not, since
-   * there the chain *is* the neuron list.
-   *
-   * That is a real departure from "this widget loads independently of any run", and it is bounded
-   * to what cannot be had otherwise: with nothing wired, or before a run, it behaves exactly as
-   * it always did.
-   */
-  const annotations = isDatasetValue(value) ? value.annotations : undefined
-
-  /*
-   * **A chain wired but not yet run means wait, not load.**
-   *
-   * The *type* says a chain is there the moment the wire is drawn; only the value carries its
-   * table. Loading anyway downloads the whole index under the unannotated key and then a second
-   * time under the annotated one the instant a Run lands — on FlyWire that is 139,255 rows and
-   * about seven seconds thrown away, and both tables are then retained for the life of the tab,
-   * since the shared entry map is never evicted. It is also the *wrong* list to show: the labels
-   * are the backend's, which is the gap the chain was wired to close.
-   *
-   * Read off the type rather than off the source's refusal. It used to match the text of
-   * `CaveSource`'s "publishes no table listing its neurons", which coupled this empty state to
-   * the wording of a sentence in `src/data` and recognised only CAVE's phrasing.
-   */
-  const type = ctx.inputs.dataset
-  const chainWired = type?.kind === 'dataset' && type.annotations !== undefined
-  const awaitingRun = chainWired && !annotations
+  // Which dataset, its chain, and whether to wait — `useDatasetInput`, where the rules are.
+  const dataset = useDatasetInput(ctx, inputValues)
+  const { awaitingRun, annotations } = dataset
   const { state, reload } = useNeuronIndex(
-    awaitingRun ? undefined : ref?.sourceId,
-    awaitingRun ? undefined : ref?.datasetId,
+    awaitingRun ? undefined : dataset.sourceId,
+    awaitingRun ? undefined : dataset.datasetId,
     annotations,
   )
 
@@ -201,7 +162,7 @@ export function ExploreBody({
   // No `useMemo`: `narrowPopulation` caches per (index, population) itself, so this is a Map
   // lookup after the first call and hands back the *same object* every render — which a memo
   // here could not do anyway, since inference rebuilds the type and with it the filter array.
-  const table = loaded ? narrowPopulation(loaded, datasetRef(type)?.population) : undefined
+  const table = loaded ? narrowPopulation(loaded, dataset.population) : undefined
 
   // Through `ctx.column`, like every picker: a tag column the current dataset does not have must
   // drop out rather than draw an empty row.
@@ -270,8 +231,8 @@ export function ExploreBody({
    */
   const roiSupported =
     !compact &&
-    !!ref?.sourceId &&
-    capabilityOf(getSource(ref.sourceId), ref.datasetId, 'roiCounts')
+    !!dataset.sourceId &&
+    capabilityOf(getSource(dataset.sourceId), dataset.datasetId, 'roiCounts')
 
   /**
    * The marks this dataset draws by default.
@@ -440,7 +401,7 @@ export function ExploreBody({
    * reader for the one query on this surface that reaches a server.
    */
   const wantsRegions = columns?.some((c) => c.render === 'regions') ?? false
-  const roiData = useRowRois(ref?.sourceId, ref?.datasetId, pageIds, wantsRegions)
+  const roiData = useRowRois(dataset.sourceId, dataset.datasetId, pageIds, wantsRegions)
   const regions = useMemo(() => regionShares(roiData?.rows, roiData?.primaryRois), [roiData])
 
   const selectRowsInto = useCallback(
@@ -815,8 +776,8 @@ export function ExploreBody({
                       table={table}
                       row={row}
                       fields={rowSpec}
-                      sourceId={ref?.sourceId}
-                      datasetId={ref?.datasetId}
+                      sourceId={dataset.sourceId}
+                      datasetId={dataset.datasetId}
                       selected={selection.has(neuronId)}
                       onToggle={toggle}
                       compact={compact}

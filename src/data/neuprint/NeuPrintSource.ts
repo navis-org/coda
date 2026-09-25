@@ -92,7 +92,7 @@ import {
   meshFormatHasLevels,
   openMeshSource,
 } from '../precomputed'
-import { byteLengthOf, cachedGeometry } from '../geometryCache'
+import { skeletonBytes, cachedGeometry } from '../geometryCache'
 import {
   fetchDatasets,
   fetchRoiCompleteness,
@@ -1216,7 +1216,7 @@ export class NeuPrintSource implements DataSource {
         // cached skeleton is already in nanometres, and a dataset whose `Meta` changed scale
         // would otherwise hand back the old one silently.
         key: (id) => `neuprint:${this.id}:${req.datasetId}:skel:${scale.join(',')}:${id}`,
-        bytes: (s) => byteLengthOf(s.positions, s.radii, s.parents),
+        bytes: skeletonBytes,
         refresh: req.refresh,
         onFetched: req.onFetched,
         readyBefore: attributesReady,

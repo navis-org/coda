@@ -1,5 +1,6 @@
 import { memo, useCallback, useId, useMemo, useRef, useState } from 'react'
 
+import { canvasFont } from './canvas2d'
 import type { NetworkValue } from '../../core/values'
 import type { FlowEdgeKind } from '../../nodes/lib/flowChartOps'
 import type { ColorSpec } from '../../nodes/lib/encodingParams'
@@ -624,7 +625,7 @@ function boxLabel(boxes: readonly FlowBox[], id: string): string {
  * store to answer a question about a string. Returns an estimate where there is no context at
  * all, which is what keeps this from being a hard dependency on the DOM.
  *
- * **The font string is read off `--font-ui` rather than written out**, because the box is sized
+ * **The font string is read off `--font-ui` rather than written out** (`canvasFont`), because the box is sized
  * by this measurement and drawn by `.chart text`, which takes that variable — and two spellings
  * of one font is a box that fits its label on the author's machine and clips it elsewhere. The
  * two agree wherever `system-ui` resolves, which is why a literal here would survive every check
@@ -632,23 +633,17 @@ function boxLabel(boxes: readonly FlowBox[], id: string): string {
  * `-apple-system` or `Segoe UI` answers instead, leaving the canvas on generic sans-serif and
  * the drawing on neither.
  *
- * Read once. A theme flip does not move it — `--font-ui` is declared outside both palettes — and
- * asking the DOM for a computed style per measurement pass would be paying for a value that
- * cannot change.
+ * Read once, in `canvasFont`. A theme flip does not move it — `--font-ui` is declared outside
+ * both palettes — and asking the DOM for a computed style per measurement pass would be paying for
+ * a value that cannot change.
  */
-const FALLBACK_FONT = 'system-ui, sans-serif'
 
 let measureContext: CanvasRenderingContext2D | null | undefined
 function textMeasurer(): (text: string) => number {
   if (measureContext === undefined) {
     measureContext =
       typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d')
-    if (measureContext) {
-      const family =
-        getComputedStyle(document.documentElement).getPropertyValue('--font-ui').trim() ||
-        FALLBACK_FONT
-      measureContext.font = `${FONT}px ${family}`
-    }
+    if (measureContext) measureContext.font = canvasFont(FONT)
   }
   const context = measureContext
   // `truncateLabel`'s own estimate, so the two agree where there is no canvas to ask.

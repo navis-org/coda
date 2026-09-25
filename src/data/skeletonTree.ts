@@ -37,6 +37,27 @@ export interface SkeletonTree {
   radii: Float32Array
   /** Parent index per point; -1 for a root. */
   parents: Int32Array
+  /** Present when the caller's labels label anything, reordered with everything else. */
+  compartments?: Uint8Array
+}
+
+/**
+ * A stored compartment value as an SWC structure code; anything that is not one reads as 0,
+ * unlabelled. The one rule for every reader, applied where the byte is written — a `Uint8Array`
+ * would otherwise wrap an out-of-range value without a word.
+ */
+export function compartmentCode(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return 0
+  const code = Math.round(value)
+  return code >= 0 && code <= 255 ? code : 0
+}
+
+/**
+ * The codes, or undefined where none labels anything: a source whose every code is 0 publishes
+ * no labels, and an array of zeros would tell a viewer there is something to colour by.
+ */
+export function labelledOrNone(codes: Uint8Array): Uint8Array | undefined {
+  return codes.some((code) => code > 0) ? codes : undefined
 }
 
 /**
@@ -51,6 +72,8 @@ export interface SkeletonTree {
 export function spanningForest(
   points: readonly TreePoint[],
   edges: Iterable<readonly [number, number]>,
+  /** One compartment value per point, in `points` order, where the source publishes them. */
+  labels?: ArrayLike<number>,
 ): SkeletonTree {
   const neighbours: number[][] = points.map(() => [])
   for (const [from, to] of edges) {
@@ -82,12 +105,16 @@ export function spanningForest(
 
   const positions = new Float32Array(points.length * 3)
   const radii = new Float32Array(points.length)
+  // Labels follow the points into visit order, or they would describe the wrong ones.
+  const compartments = labels ? new Uint8Array(points.length) : undefined
   for (let i = 0; i < visited.length; i++) {
     const point = points[visited[i]!]!
     positions[i * 3] = point.at[0]!
     positions[i * 3 + 1] = point.at[1]!
     positions[i * 3 + 2] = point.at[2]!
     radii[i] = point.radius
+    if (compartments) compartments[i] = compartmentCode(labels![visited[i]!])
   }
-  return { positions, radii, parents }
+  const labelled = compartments && labelledOrNone(compartments)
+  return { positions, radii, parents, ...(labelled ? { compartments: labelled } : {}) }
 }

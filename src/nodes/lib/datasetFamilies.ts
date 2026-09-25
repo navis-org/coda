@@ -274,11 +274,10 @@ export interface DatasetFamily {
    * off the params from then on.
    *
    * **Absent means nobody has made this judgement**, which is a third thing from `['type']`:
-   * minnie65 is a mouse volume with no cell typing at all, and BANC's arrive from a pivot whose
-   * column names are the datastack's `classification_system` values rather than anything this
-   * build can know. Both leave the pickers empty and the card says what to pick, which is the
-   * honest answer — a guessed column name that is absent is dropped by `resolveColumns` and
-   * reads as a schema that has not arrived.
+   * BANC's arrive from a pivot whose column names are the datastack's `classification_system`
+   * values rather than anything this build can know. That leaves the pickers empty and the card
+   * says what to pick, which is the honest answer — a guessed column name that is absent is
+   * dropped by `resolveColumns` and reads as a schema that has not arrived.
    *
    * Names are matched against the *annotated* neuron schema, so a family whose typing arrives
    * through `annotationChain` names the columns that chain publishes.
@@ -643,6 +642,48 @@ const BANC_CHAIN: AnnotationChain = {
     'kind, value) — so it has to be pivoted into a column per kind.',
 }
 
+/**
+ * What MICrONS minnie65 needs in front of it: one card, reading a **view**.
+ *
+ *   CAVE table (aibs_cell_info) ─▸ Dataset ▸ Annotations
+ *
+ * The datastack types its cells in about nine tables — the volume-wide metamodel, its
+ * corrections, the column census, the m-type predictions, the proofreading status — and the view
+ * `aibs_cell_info` (AIBS) is the one that already applies their precedence, one row per nucleus.
+ * Read as published: EM names (`23P`, `5P-ET`, `BC`, `MC`…), never mapped onto transcriptomic
+ * subclasses, which would be a claim no table here makes. The columns are named rather than left
+ * empty because a view is never sampled at edit time (`cave/tables.ts`), so naming them is what
+ * gives every picker downstream a schema before the Run. `cell_type` arrives as `type`.
+ */
+const MINNIE_CHAIN: AnnotationChain = {
+  nodes: [
+    {
+      id: 'annotations',
+      type: 'annotation.caveTable',
+      params: {
+        table: 'aibs_cell_info',
+        columns:
+          'broad_type, cell_type, mtype, visual_area, dendrite_cleaned, axon_cleaned, axon_strategy',
+      },
+    },
+  ],
+  links: [],
+  datasetRefs: ['annotations'],
+  output: { id: 'annotations', port: 'annotations' },
+  title: 'MICrONS cell types',
+  caption: {
+    text: `
+      Cell types from the AIBS view \`aibs_cell_info\`, which combines the volume-wide predictions, the column census and their corrections, one row per nucleus.
+
+      \`broad_type\` is excitatory or inhibitory, \`type\` the EM cell type (23P, 5P-ET, BC, MC…), \`mtype\` the morphological type.`,
+    height: 180,
+  },
+  why:
+    'This datastack keeps its cell typing in CAVE tables rather than on the neuron, so on its own ' +
+    'it answers with root ids and no names. One view, aibs_cell_info, already combines those ' +
+    'tables by precedence.',
+}
+
 const CAVE_FAMILIES: DatasetFamily[] = [
   {
     key: 'flywire',
@@ -689,6 +730,8 @@ const CAVE_FAMILIES: DatasetFamily[] = [
     guide:
       'The public MICrONS Minnie65 segmentation read through CAVE. Version is a materialization number, and the neuron table is the stack’s published cell list.',
     glyph: 'mouse_brain',
+    annotationChain: MINNIE_CHAIN,
+    typeColumns: ['type', 'mtype'],
     notebook: { python: 'caveclient' },
   },
 ]

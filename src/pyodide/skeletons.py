@@ -61,10 +61,13 @@ def _reindex(node_ids, parent_ids):
     return np.where(parent_ids >= 0, lookup[np.maximum(parent_ids, 0)], -1).astype(np.int32)
 
 
-def _clean_one(coords, parents, radii, opts):
-    """One neuron through the whole pipeline. Coordinates float64, radii float64.
+def _clean_one(coords, parents, radii, labels, opts):
+    """One neuron through the whole pipeline. Coordinates float64, radii float64, labels uint8.
 
-    Returns `(coords, parents, radii)` with parents already re-based onto row numbers.
+    Returns `(coords, parents, radii, labels)` with parents already re-based onto row numbers.
+    `labels` are SWC compartment codes and ride every step on the radii's index map — except
+    that a resampled node takes its *nearer* end's code rather than a blend, a code being a
+    category.
 
     **Nothing here guards a case fastcore handles**, on `coda_dotprops`' rule — but three
     genuinely have no answer rather than a cheap one, and those are guarded: a skeleton with
@@ -109,10 +112,12 @@ def _clean_one(coords, parents, radii, opts):
         # end, and `alpha` how far along it lies. A node carried over unchanged has its own
         # index in both columns and an alpha of 0, so this is the identity for those.
         new_radii = radii[source[:, 0]] * (1.0 - alpha) + radii[source[:, 1]] * alpha
+        new_labels = np.where(alpha < 0.5, labels[source[:, 0]], labels[source[:, 1]])
         return (
             np.ascontiguousarray(new_coords, dtype=np.float64),
             _reindex(new_ids, new_parents),
             np.ascontiguousarray(new_radii, dtype=np.float64),
+            np.ascontiguousarray(new_labels, dtype=np.uint8),
         )
 
     if method == "downsample" and opts["factor"] > 1 and n > 1:
@@ -125,13 +130,14 @@ def _clean_one(coords, parents, radii, opts):
             np.ascontiguousarray(coords[keep], dtype=np.float64),
             _reindex(keep, new_parents),
             np.ascontiguousarray(radii[keep], dtype=np.float64),
+            np.ascontiguousarray(labels[keep], dtype=np.uint8),
         )
 
     # No `_reindex` here, and that is provable rather than an oversight: `ids` is `arange(n)`
     # on every path that reaches this line — heal and smooth both return parents in the same
     # numbering they were given — so the lookup table would be the identity and the whole call
     # reduces to this cast. Only resampling and downsampling renumber, and both re-index above.
-    return coords, np.ascontiguousarray(parents, dtype=np.int32), radii
+    return coords, np.ascontiguousarray(parents, dtype=np.int32), radii, labels
 
 
 def coda_clean_skeletons(request, report=None):
@@ -153,6 +159,7 @@ def coda_clean_skeletons(request, report=None):
     xyz = np.frombuffer(req["points"], dtype=np.float32).reshape(-1, 3).astype(np.float64)
     par = np.frombuffer(req["parents"], dtype=np.int32)
     rad = np.frombuffer(req["radii"], dtype=np.float32).astype(np.float64)
+    lab = np.frombuffer(req["compartments"], dtype=np.uint8)
     off = np.frombuffer(req["offsets"], dtype=np.int32)
     count = len(off) - 1
 
@@ -168,18 +175,20 @@ def coda_clean_skeletons(request, report=None):
     out_coords = []
     out_parents = []
     out_radii = []
+    out_labels = []
     offsets = [0]
     at = 0
 
     for i in range(count):
         a, b = int(off[i]), int(off[i + 1])
         if b > a:
-            coords, parents, radii = _clean_one(
-                np.ascontiguousarray(xyz[a:b]), par[a:b], rad[a:b], opts
+            coords, parents, radii, labels = _clean_one(
+                np.ascontiguousarray(xyz[a:b]), par[a:b], rad[a:b], lab[a:b], opts
             )
             out_coords.append(coords)
             out_parents.append(parents)
             out_radii.append(radii)
+            out_labels.append(labels)
             at += len(coords)
         offsets.append(at)
         if report is not None and (i % 8 == 7 or i == count - 1):
@@ -202,5 +211,6 @@ def coda_clean_skeletons(request, report=None):
         "points": joined(out_coords, np.float32),
         "parents": joined(out_parents, np.int32),
         "radii": joined(out_radii, np.float32),
+        "compartments": joined(out_labels, np.uint8),
         "offsets": np.ascontiguousarray(offsets, dtype=np.int32),
     }

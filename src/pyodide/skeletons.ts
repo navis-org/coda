@@ -13,7 +13,7 @@
 
 import { callPython } from './engine'
 import type { CallOptions } from './engine'
-import { float32From, int32From } from './types'
+import { float32From, uint8From, int32From } from './types'
 
 /** Which of the two node-count operations to run. They are alternatives, not a sequence. */
 export type ThinMethod = 'none' | 'resample' | 'downsample'
@@ -37,6 +37,8 @@ export type CleanSkeletonsRequest = {
   parents: Int32Array
   /** One per point, in the same units as `points`. */
   radii: Float32Array
+  /** One SWC compartment code per point, 0 where the neuron carried no labels. */
+  compartments: Uint8Array
   /** Where each neuron starts, counted in points. Length is `count + 1`. */
   offsets: Int32Array
 
@@ -57,6 +59,8 @@ export interface CleanSkeletonsResult {
   points: Float32Array
   parents: Int32Array
   radii: Float32Array
+  /** Carried through each step by the same index map as the radii. */
+  compartments: Uint8Array
   /** Rebuilt: two of the four operations change the node count. */
   offsets: Int32Array
 }
@@ -74,6 +78,7 @@ export async function runCleanSkeletons(
   const points = float32From(result, 'points')
   const parents = int32From(result, 'parents')
   const radii = float32From(result, 'radii')
+  const compartments = uint8From(result, 'compartments')
   const offsets = int32From(result, 'offsets')
 
   /*
@@ -81,11 +86,16 @@ export async function runCleanSkeletons(
    * shorter than `points` does not fail downstream — it builds a neuron whose last branch is
    * missing and whose every other branch is still there, which draws.
    */
-  if (points.length !== parents.length * 3 || radii.length !== parents.length) {
+  if (
+    points.length !== parents.length * 3 ||
+    radii.length !== parents.length ||
+    compartments.length !== parents.length
+  ) {
     throw new Error(
-      `Clean Skeletons returned ${points.length / 3} points, ${parents.length} parents and ` +
-        `${radii.length} radii, which do not describe one set of nodes`,
+      `Clean Skeletons returned ${points.length / 3} points, ${parents.length} parents, ` +
+        `${radii.length} radii and ${compartments.length} compartments, which do not describe ` +
+        'one set of nodes',
     )
   }
-  return { points, parents, radii, offsets }
+  return { points, parents, radii, compartments, offsets }
 }

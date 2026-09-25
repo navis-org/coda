@@ -443,6 +443,19 @@ export interface RoiCountsRequest {
   signal?: AbortSignal
 }
 
+/** Which neurons' somata. */
+/** What `DataSource.planSkeletons` is told: the neurons about to be fetched one at a time. */
+export interface SkeletonPlanRequest {
+  datasetId: string
+  neuronIds: readonly NeuronId[]
+  signal?: AbortSignal
+}
+
+export interface SomaRequest extends DatasetRequest {
+  neuronIds: readonly NeuronId[]
+  signal?: AbortSignal
+}
+
 export interface GeometryRequest {
   datasetId: string
   /**
@@ -1057,8 +1070,27 @@ export interface DataSource {
    */
   fetchViewerScene?(req: ViewerSceneRequest): Promise<NgScene | undefined>
 
+  /**
+   * Where each neuron's soma is, in nanometres — for anything that places a cell by its body
+   * rather than its arbour: cortical depth and layer first (the Cortex gallery). A neuron with no
+   * single soma (none recorded, or a merge holding two) is simply absent from the map. Optional:
+   * only a source that publishes somata answers, and CAVE only for a datastack declaring a nucleus
+   * table.
+   */
+  somaPositions?(req: SomaRequest): Promise<Map<NeuronId, readonly [number, number, number]>>
+
   /** Morphology. Optional: a source may expose connectivity without geometry. */
   fetchSkeletons?(req: GeometryRequest): Promise<SkeletonsValue>
+  /**
+   * Say which neurons are about to be asked for one at a time, before asking.
+   *
+   * For a caller that fetches a neuron per request so each draws as it lands — the Cortex
+   * gallery's wall. Where choosing a route means a per-neuron lookup, a source answers it here for
+   * the whole set in one go, and the single-neuron fetches that follow ask nothing: CAVE's skeleton
+   * service checks `exists` per call otherwise, and that endpoint is rate-limited. Optional, and
+   * only ever an optimisation — a caller that skips it, or whose plan fails, gets the same skeletons.
+   */
+  planSkeletons?(req: SkeletonPlanRequest): Promise<void>
   /**
    * The skeleton routes *this dataset* has, best first.
    *

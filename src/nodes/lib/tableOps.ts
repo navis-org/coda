@@ -498,8 +498,11 @@ export interface SampleSpec {
  * pinned by a seed the user chose, saved in their graph, and a change to it would silently
  * resample every workflow that ever used this node. Nothing needs the two streams to agree,
  * and sharing one function is what would let the mock's concerns reach this one.
+ *
+ * Shared by everything else a user's seed pins — the centrality sweep's pivots, the Cortex
+ * gallery's sample — which is the reason it is exported rather than copied again.
  */
-function seededRandom(seed: number): () => number {
+export function seededRandom(seed: number): () => number {
   let a = (Number.isFinite(seed) ? Math.floor(seed) : 0) >>> 0
   return () => {
     a = (a + 0x6d2b79f5) >>> 0

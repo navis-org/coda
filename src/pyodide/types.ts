@@ -31,13 +31,15 @@ export type PyArg =
   | Float64Array
   | Int32Array
   /*
-   * Triangle indices, and the one member of this union that is not a coordinate or a count.
+   * Triangle indices, and a member that is not a coordinate or a count.
    * `MeshGeometry.indices` is a `Uint32Array` because a vertex index is unsigned and a
    * hemibrain neuron at the finest level of detail has more of them than an int16 can name —
    * and numpy's `uint32` is what every face argument in fastcore's mesh module asks for, so
    * narrowing to int32 on the way over would buy a cast on both sides for nothing.
    */
   | Uint32Array
+  // SWC compartment codes, one byte per skeleton node — a category, not a measurement.
+  | Uint8Array
   | PyArg[]
   | { [key: string]: PyArg }
 
@@ -112,6 +114,15 @@ export function float32From(result: PyResult, key: string): Float32Array {
       `Python returned no flat float32 array called "${key}" ` +
         `(got ${Array.isArray(value) ? 'a nested Array — ravel it' : typeof value})`,
     )
+  }
+  return value
+}
+
+/** A flat uint8 array by name — one byte per node, such as SWC compartment codes. */
+export function uint8From(result: PyResult, key: string): Uint8Array {
+  const value = result[key]
+  if (!(value instanceof Uint8Array)) {
+    throw new Error(`Python returned no flat uint8 array called "${key}" (got ${typeof value})`)
   }
   return value
 }

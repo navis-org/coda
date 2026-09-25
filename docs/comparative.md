@@ -674,7 +674,7 @@ wizard builds each dataset's annotation chain — a CAVE datastack's typing arri
 chain, so a FlyWire node without one has no type column to match on. And `DatasetFamily.typeColumns`
 pre-fills the per-dataset pickers, which is decision 3's "pre-filled params the user can see and
 override, never hidden behaviour" written as a declaration: absent means nobody has made the
-judgement (minnie65 has no cell typing; BANC's column names come from its own pivot), and the card
+judgement (BANC's column names come from its own pivot), and the card
 then says what to pick.
 
 ## Where the tests go

@@ -55,6 +55,7 @@ import { ParamRows } from '../params/ParamRows'
 import { panelTabs, railParams } from '../params/paramGroups'
 import { NodeMap } from '../tour/NodeMap'
 import { ValuePreview } from '../viewers/ValuePreview'
+import { ExportNodeContext } from '../viewers/exportRegistry'
 import { GlyphSvg, doorGlyph } from './startGlyphs'
 
 /**
@@ -333,14 +334,16 @@ export function ViewerSurface({
           {/* Same component as the card renders, with `compact` off: a node that draws its own
               body is expanded by giving that body room, not by showing a viewer of its output. */}
           {body ? (
-            <body.Component
-              node={node}
-              ctx={ctx}
-              compact={false}
-              inputValues={inputValues}
-              setParam={(paramId, next) => setParam(node.id, paramId, next)}
-              onError={setNotice}
-            />
+            <ExportNodeContext.Provider value={node.id}>
+              <body.Component
+                node={node}
+                ctx={ctx}
+                compact={false}
+                inputValues={inputValues}
+                setParam={(paramId, next) => setParam(node.id, paramId, next)}
+                onError={setNotice}
+              />
+            </ExportNodeContext.Provider>
           ) : (
             <ValuePreview
               node={node}

@@ -313,6 +313,30 @@ export function caveGet<T>(url: string, options: CaveRequestOptions): Promise<T>
   return request<T>(url, { method: 'GET' }, options)
 }
 
+/**
+ * `caveGet`, where a 404 is an answer — `none` — and every other failure is thrown.
+ *
+ * The rule for a lookup whose absence is a verdict (a deployment running no L2 cache, no skeleton
+ * cache): only the server saying "not here" is one. A 5xx, a timeout or a cancel read as "none"
+ * was kept for the session by the memo above it, and switched a route off on a datastack that has
+ * it (`docs/backends.md`, "A failed lookup is not an answer").
+ */
+export function caveGetOr404<T>(url: string, none: T, options: CaveRequestOptions): Promise<T> {
+  return caveGet<T>(url, options).catch((err: unknown) => {
+    if (err instanceof CaveError && err.status === 404) return none
+    throw err
+  })
+}
+
+/**
+ * What a request shared by every caller asking in the same moment is sent with: the deployment,
+ * and whether it is quiet — **never a caller's signal**, since the first caller's Cancel would
+ * otherwise be every caller's, and a memo above it may keep the failure.
+ */
+export function sharedRequestOptions(options: CaveRequestOptions): CaveRequestOptions {
+  return { deployment: options.deployment, ...(options.quiet ? { quiet: true } : {}) }
+}
+
 export function cavePost<T>(
   url: string,
   body: unknown,

@@ -39,6 +39,8 @@ import { bucketParams } from '../params/paramGroups'
 import { portStyle } from '../socketStyle'
 import { dragPortSocket, useDragOrigin } from '../dragOrigin'
 import { drawsFromInputs, ValuePreview } from '../viewers/ValuePreview'
+import { CardCanvasScale } from '../viewers/canvasScale'
+import { ExportNodeContext } from '../viewers/exportRegistry'
 import { CacheAge } from './CacheAge'
 import { DatasetCacheAge } from './DatasetCacheAge'
 import { nodeBody } from './nodeBodies'
@@ -318,10 +320,12 @@ function CodaNodeViewImpl({
     // here as well was one a new viewer could be missing from, and its card would never draw.
     (outputValue !== undefined || drawsFromInputs(node.type))
 
+  // A viewer's card, or a body that asks for the same (`NodeBodyEntry.resizable`).
+  const resizesCard = isViewer(def) || body?.resizable === true
   /*
-   * Only viewers resize, and only while they are showing one. A transform node's height is
-   * decided by its params, so a drag handle there would promise a control that does nothing,
-   * and a collapsed node is a title bar — stretching that means nothing either.
+   * Only viewers and resizable bodies resize, and only while they are showing one. A transform
+   * node's height is decided by its params, so a drag handle there would promise a control that
+   * does nothing, and a collapsed node is a title bar — stretching that means nothing either.
    *
    * A locked canvas has no handles at all rather than handles that refuse: `NodeResizer` runs
    * its own pointer gesture and never consults `nodesDraggable`, so the prop that stops a drag
@@ -329,7 +333,7 @@ function CodaNodeViewImpl({
    * the write as a backstop, which without this would draw a card being stretched and snap it
    * back on release.
    */
-  const resizable = isViewer(def) && !node.collapsed && draggable !== false
+  const resizable = resizesCard && !node.collapsed && draggable !== false
   /*
    * Whether this card offers the two full-size routes at all. One name for one question, so the
    * expand and pin buttons cannot drift apart — a third surface would otherwise add a third copy
@@ -345,7 +349,7 @@ function CodaNodeViewImpl({
    * would move every wire on it twice. Only the *height* half of filling the box is dropped,
    * which is what `[data-collapsed]` turns off in the stylesheet.
    */
-  const sized = isViewer(def) && (node.size !== undefined || def.defaultSize !== undefined)
+  const sized = resizesCard && (node.size !== undefined || def.defaultSize !== undefined)
 
   /*
    * Whether there is a param band to fold, and whether it currently is folded.
@@ -805,14 +809,20 @@ function CodaNodeViewImpl({
 
         {body && !node.collapsed && (
           <div className="coda-node__body">
-            <body.Component
-              node={node}
-              ctx={ctx}
-              compact
-              inputValues={nodeInputs(id)}
-              setParam={(paramId, value) => setParam(id, paramId, value)}
-              onError={setNotice}
-            />
+            {/* So a body carrying `ViewerActions` is reachable by the Download node, as a
+                viewer is through `ValuePreview`. */}
+            <ExportNodeContext.Provider value={id}>
+              <CardCanvasScale>
+                <body.Component
+                  node={node}
+                  ctx={ctx}
+                  compact
+                  inputValues={nodeInputs(id)}
+                  setParam={(paramId, value) => setParam(id, paramId, value)}
+                  onError={setNotice}
+                />
+              </CardCanvasScale>
+            </ExportNodeContext.Provider>
           </div>
         )}
 

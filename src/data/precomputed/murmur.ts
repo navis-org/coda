@@ -10,6 +10,8 @@
  * and a plain `*` on two 32-bit values silently loses the low bits it is supposed to keep.
  */
 
+import { fmix32 } from '../../core/hash'
+
 const C1 = 0x239b961b
 const C2 = 0xab0e9789
 const C3 = 0x38b34ae5
@@ -17,16 +19,6 @@ const C4 = 0xa1e38b93
 
 function rotl(x: number, r: number): number {
   return ((x << r) | (x >>> (32 - r))) >>> 0
-}
-
-function fmix(h: number): number {
-  let x = h
-  x ^= x >>> 16
-  x = Math.imul(x, 0x85ebca6b)
-  x ^= x >>> 13
-  x = Math.imul(x, 0xc2b2ae35)
-  x ^= x >>> 16
-  return x >>> 0
 }
 
 /**
@@ -131,10 +123,10 @@ export function murmurHash3x86_128(
   h3 = (h3 + h1) >>> 0
   h4 = (h4 + h1) >>> 0
 
-  h1 = fmix(h1)
-  h2 = fmix(h2)
-  h3 = fmix(h3)
-  h4 = fmix(h4)
+  h1 = fmix32(h1)
+  h2 = fmix32(h2)
+  h3 = fmix32(h3)
+  h4 = fmix32(h4)
 
   h1 = (h1 + h2) >>> 0
   h1 = (h1 + h3) >>> 0

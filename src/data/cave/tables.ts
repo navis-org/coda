@@ -68,6 +68,7 @@ import { getToken } from './credentials'
 import { caveServerFor, datastackRecord, resetDatastackRecords } from './datastack'
 import { resetFlatSources } from './flat'
 import { resetSkeletonServices } from './skeletonService'
+import { resetNuclei } from './nuclei'
 
 /**
  * Which of CAVE's two kinds of queryable object this is.
@@ -215,6 +216,7 @@ export function resetCaveState(): void {
   resetDatastackRecords()
   resetFlatSources()
   resetSkeletonServices()
+  resetNuclei()
 }
 
 /**

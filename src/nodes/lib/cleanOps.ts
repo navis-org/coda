@@ -30,6 +30,7 @@
  * being restored from cache rather than recomputed.
  */
 
+import { labelledOrNone } from '../../data/skeletonTree'
 import type { Warner } from '../../core/limits'
 import { formatBytes, refuseIfOverCrashFloor, warnOverThreshold } from '../../core/limits'
 import type { ParamValues } from '../../core/node'
@@ -142,16 +143,22 @@ export function cleanRequestFrom(
   const { parents, offsets, total } = packSkeletons(skeletons)
   const points = packPositions(skeletons, offsets)
   const radii = new Float32Array(total)
+  // Zeros for a neuron that carried no labels; `skeletonsFromResult` drops them again for it.
+  const compartments = new Uint8Array(total)
 
   for (let n = 0; n < skeletons.items.length; n++) {
     const item = skeletons.items[n]!
     radii.set(item.radii.subarray(0, item.parents.length), offsets[n]!)
+    if (item.compartments) {
+      compartments.set(item.compartments.subarray(0, item.parents.length), offsets[n]!)
+    }
   }
 
   return {
     points,
     parents,
     radii,
+    compartments,
     offsets,
     heal: params.heal,
     healMaxDist: params.healMaxDist * NM_PER_UM,
@@ -160,6 +167,12 @@ export function cleanRequestFrom(
     spacing: params.spacing * NM_PER_UM,
     factor: params.factor,
   }
+}
+
+/** A neuron's labels as a spread: none for one that arrived unlabelled, `labelledOrNone`'s rule. */
+function labelled(codes: Uint8Array | undefined): { compartments?: Uint8Array } {
+  const kept = codes && labelledOrNone(codes)
+  return kept ? { compartments: kept } : {}
 }
 
 /**
@@ -196,6 +209,7 @@ export function skeletonsFromResult(
       positions: result.points.slice(from * 3, to * 3),
       radii: result.radii.slice(from, to),
       parents: result.parents.slice(from, to),
+      ...labelled(item.compartments && result.compartments.slice(from, to)),
     }
   })
 

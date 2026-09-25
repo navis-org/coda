@@ -53,6 +53,22 @@ export function stableStringify(value: unknown): string {
 }
 
 /**
+ * murmur3's 32-bit finaliser: every input bit reaches every output bit. What turns a weak hash —
+ * a polynomial over a string, a seed added to one — into one whose differences are not
+ * structured. `data/precomputed/murmur.ts` is a transcription of the reference algorithm and
+ * calls this one.
+ */
+export function fmix32(h: number): number {
+  let x = h
+  x ^= x >>> 16
+  x = Math.imul(x, 0x85ebca6b)
+  x ^= x >>> 13
+  x = Math.imul(x, 0xc2b2ae35)
+  x ^= x >>> 16
+  return x >>> 0
+}
+
+/**
  * FNV-1a, 64-bit, as two 32-bit halves to stay in safe-integer land.
  * Not cryptographic — we only need low collision probability across one session's graph.
  */

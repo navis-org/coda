@@ -41,7 +41,12 @@ import { caveScene } from './scene'
 import { readL2Skeletons } from './l2'
 import { l2SourceFor, peekDatastacks } from './datastack'
 import { probeFlat } from './flat'
-import { serviceLooksEmpty, skeletonServiceFor, skeletonServiceUrl } from './skeletonService'
+import {
+  existingSkeletons,
+  serviceLooksEmpty,
+  skeletonServiceFor,
+  skeletonServiceUrl,
+} from './skeletonService'
 import { segmentationLayerIndex } from '../neuroglancer/scene'
 import {
   MESH_WARN_NEURONS,
@@ -210,6 +215,24 @@ const SERVICE_INFO = {
     { id: 'radius', data_type: 'float32', num_components: 1 },
     { id: 'compartment', data_type: 'float32', num_components: 1 },
   ],
+}
+
+/**
+ * Make the installed stub fail requests whose URL matches, `times` times, answering as before after
+ * that — for the failures a lookup must not read as "none".
+ */
+function failFetch(
+  match: (url: string) => boolean,
+  status: number,
+  { times = Infinity, body = '' }: { times?: number; body?: string } = {},
+): void {
+  const answer = globalThis.fetch
+  let left = times
+  vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
+    match(url) && left-- > 0
+      ? Promise.resolve({ ok: false, status, text: () => Promise.resolve(body) } as Response)
+      : answer(url, init),
+  )
 }
 
 function installFetch(
@@ -977,8 +1000,10 @@ describe('synapses', () => {
       polarity: 'pre',
     })
 
-    const query = captured.find((c) =>
-      c.url.includes('/views/valid_synapses_nt_v2_view/query'),
+    const query = captured.find(
+      (c) =>
+        c.url.includes('/views/valid_synapses_nt_v2_view/query') &&
+        !c.url.includes('count=true'),
     )!
     /*
      * The table stores 4x4x40 nm voxels — established by asking for both resolutions and
@@ -2302,6 +2327,29 @@ describe('where a CAVE skeleton comes from', () => {
     expect(source.capabilitiesFor!(DATASET)).toEqual({ skeletons: true })
   })
 
+  it('reads a failed or cancelled cache lookup as no answer, never as "no level-2 cache"', async () => {
+    /*
+     * Only a 404 says a server runs no L2 cache. A cancelled lookup was read as an empty mapping
+     * and kept for the session, so the Cortex gallery — which cancels whenever its wall moves on
+     * — switched minnie65's level-2 route off until a reload.
+     */
+    installFetch({ '/l2cache/api/v1/table_mapping': L2_MAPPING })
+    failFetch((url) => url.includes('table_mapping'), 503, { times: 1 })
+    await expect(l2SourceFor(DATASTACK, { deployment: DEFAULT_CAVE_SERVER })).rejects.toThrow()
+    expect(await l2SourceFor(DATASTACK, { deployment: DEFAULT_CAVE_SERVER })).toBeTruthy()
+
+    // And a caller's Cancel is not every caller's: the shared lookup carries no signal.
+    resetCaveState()
+    const cancelled = new AbortController()
+    cancelled.abort()
+    expect(
+      await l2SourceFor(DATASTACK, {
+        deployment: DEFAULT_CAVE_SERVER,
+        signal: cancelled.signal,
+      }),
+    ).toBeTruthy()
+  })
+
   it('takes the service only when it covers every neuron, and asks before fetching', async () => {
     /*
      * A GET for a root id the cache has never seen routes to a *generation* — 10–45 s a neuron
@@ -2340,6 +2388,117 @@ describe('where a CAVE skeleton comes from', () => {
     })
     expect(answered.provenance?.id).toBe('l2')
     expect(captured.some((c) => c.url.includes('/lvl2_graph'))).toBe(true)
+  })
+
+  it('reads a failed or cancelled service lookup as no answer, never as "no service"', async () => {
+    // The level-2 case's twin: a versions request that failed became "no versions", which
+    // `skeletonServiceFor` kept for the session — every later cell on the wall went to level-2.
+    installFetch({}, { service: 'full' })
+    failFetch((url) => url.endsWith('/skeletoncache/api/versions'), 503, { times: 1 })
+    const options = { deployment: DEFAULT_CAVE_SERVER }
+    await expect(skeletonServiceFor(DATASTACK, options)).rejects.toThrow()
+    expect(await skeletonServiceFor(DATASTACK, options)).toBeTruthy()
+
+    resetCaveState()
+    const cancelled = new AbortController()
+    cancelled.abort()
+    expect(
+      await skeletonServiceFor(DATASTACK, { ...options, signal: cancelled.signal }),
+    ).toBeTruthy()
+  })
+
+  it('asks the service about a neuron once a session, and gathers what is asked together', async () => {
+    /*
+     * The service's `exists` is rate-limited (100 a minute), and the Cortex gallery asked it once
+     * per cell per wall. Asked in one moment the checks share a request; asked again, none.
+     */
+    const captured = installFetch({}, { service: 'full' })
+    const options = { deployment: DEFAULT_CAVE_SERVER }
+    const service = (await skeletonServiceFor(DATASTACK, options))!
+    const ids = ['720575940628857210', '720575940618002747', '720575940628857211']
+    const answers = await Promise.all(
+      ids.map((id) => existingSkeletons(service, [id], options)),
+    )
+    expect(answers.map((held) => held.size)).toEqual([1, 1, 1])
+    await existingSkeletons(service, ids, options)
+    const exists = captured.filter((c) => c.url.endsWith('/precomputed/skeleton/exists'))
+    expect(exists).toHaveLength(1)
+    expect((exists[0]!.body as { root_ids: unknown[] }).root_ids).toHaveLength(3)
+  })
+
+  it('waits on a check already in flight rather than asking for the same neuron again', async () => {
+    // A reshuffled wall asks for cells the old wall's request is still out for.
+    const captured = installFetch({}, { service: 'full' })
+    const options = { deployment: DEFAULT_CAVE_SERVER }
+    const service = (await skeletonServiceFor(DATASTACK, options))!
+    const answer = globalThis.fetch
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/precomputed/skeleton/exists')) await held
+      return answer(url, init)
+    })
+    const id = '720575940628857210'
+    const first = existingSkeletons(service, [id], options)
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    const second = existingSkeletons(service, [id], options)
+    release()
+    expect((await first).has(id) && (await second).has(id)).toBe(true)
+    expect(captured.filter((c) => c.url.endsWith('/precomputed/skeleton/exists'))).toHaveLength(
+      1,
+    )
+  })
+
+  it('plans a set once, so the neuron-at-a-time fetches after it ask nothing', async () => {
+    const captured = installFetch({}, { service: 'full' })
+    const source = new CaveSource()
+    const ids = ['720575940628857210', '720575940618002747']
+    await source.planSkeletons({ datasetId: DATASET, neuronIds: ids })
+    for (const id of ids) {
+      const value = await source.fetchSkeletons!({ datasetId: DATASET, neuronIds: [id] })
+      expect(value.provenance?.id).toBe('service')
+    }
+    expect(captured.filter((c) => c.url.endsWith('/precomputed/skeleton/exists'))).toHaveLength(
+      1,
+    )
+  })
+
+  it('fails a fetch whose service check was refused, rather than drawing it from the chunk graph', async () => {
+    // A refused check read as "not cached" drew the neuron unlabelled from level-2, in silence.
+    installFetch({ '/l2cache/api/v1/table_mapping': L2_MAPPING }, { service: 'full' })
+    failFetch((url) => url.endsWith('/precomputed/skeleton/exists'), 429, {
+      body: '100 per 1 minute',
+    })
+    await expect(
+      new CaveSource().fetchSkeletons!({
+        datasetId: DATASET,
+        neuronIds: ['720575940628857210'],
+      }),
+    ).rejects.toThrow(/skeleton service which neurons it holds/)
+  })
+
+  it('learns a service is empty from a set of five, never from one uncached neuron', async () => {
+    /*
+     * The Cortex gallery asks one cell per request. Learnt from a set of one, the first uncached
+     * cell on minnie65 wrote its service off for the session and every later cell drew from the
+     * chunk graph, unlabelled. Five is what FlyWire and BANC were measured empty at.
+     */
+    installFetch(
+      {
+        '/l2cache/api/v1/table_mapping': L2_MAPPING,
+        '/lvl2_graph': CHAIN,
+        '/attributes': COORDS,
+      },
+      { service: 'empty' },
+    )
+    const source = new CaveSource()
+    await source.fetchSkeletons!({ datasetId: DATASET, neuronIds: ['720575940628857210'] })
+    expect(serviceLooksEmpty(DEFAULT_CAVE_SERVER, DATASTACK)).toBe(false)
+    await source.fetchSkeletons!({
+      datasetId: DATASET,
+      neuronIds: ['1', '2', '3', '4', '5'].map((n) => `72057594062885721${n}`),
+    })
+    expect(serviceLooksEmpty(DEFAULT_CAVE_SERVER, DATASTACK)).toBe(true)
   })
 
   it('draws a thumbnail from the service where it holds the neuron, and never reads the chunk graph', async () => {

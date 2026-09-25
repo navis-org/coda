@@ -25,6 +25,13 @@ export function annotationProvider(id: string): AnnotationProvider | undefined {
   return providers.get(id)
 }
 
+/** The provider a ref names, or the one sentence every reader throws when there is none. */
+export function requireAnnotationProvider(id: string): AnnotationProvider {
+  const provider = annotationProvider(id)
+  if (!provider) throw new Error(`No annotation provider "${id}"`)
+  return provider
+}
+
 /**
  * The columns one ref would produce, or undefined while it is still unknown.
  *

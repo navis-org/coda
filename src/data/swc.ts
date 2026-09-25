@@ -25,6 +25,7 @@
  * whoever knows the voxel size, which is the source; see `data/units.ts`.
  */
 
+import { compartmentCode, labelledOrNone } from './skeletonTree'
 import type { NeuronId } from '../core/ids'
 import type { SkeletonGeometry } from '../core/values'
 
@@ -42,6 +43,8 @@ export interface SwcRow {
   z: number
   radius: number
   link: number
+  /** The SWC structure code, where the file carries one. */
+  type?: number
 }
 
 /**
@@ -69,6 +72,7 @@ export function skeletonFromRows(id: NeuronId, rows: readonly SwcRow[]): Skeleto
   const positions = new Float32Array(count * 3)
   const radii = new Float32Array(count)
   const parents = new Int32Array(count)
+  const compartments = new Uint8Array(count)
 
   let emitted = 0
   // A visited flag, not a mapping: nothing ever reads which point a slot became. Dense keys
@@ -83,6 +87,7 @@ export function skeletonFromRows(id: NeuronId, rows: readonly SwcRow[]): Skeleto
     positions[point * 3 + 2] = row.z
     radii[point] = row.radius
     parents[point] = parentPoint
+    compartments[point] = compartmentCode(row.type)
     return point
   }
 
@@ -102,11 +107,14 @@ export function skeletonFromRows(id: NeuronId, rows: readonly SwcRow[]): Skeleto
     if (!visited[slot]) emit(slot, -1)
   }
 
+  // A file of all-zero types labels nothing (DVID's), and keeps no array — `labelledOrNone`.
+  const labelled = labelledOrNone(compartments.subarray(0, emitted))
   return {
     id,
     positions: positions.subarray(0, emitted * 3),
     radii: radii.subarray(0, emitted),
     parents: parents.subarray(0, emitted),
+    ...(labelled ? { compartments: labelled } : {}),
   }
 }
 
@@ -114,8 +122,8 @@ export function skeletonFromRows(id: NeuronId, rows: readonly SwcRow[]): Skeleto
  * Parse an SWC **file** — DVID's spelling, and the standard one.
  *
  * Columns are `id type x y z radius parent`, whitespace-separated, `#` comments. The `type`
- * column is read and discarded: Coda's `SkeletonGeometry` has nowhere to put a soma/axon label,
- * and inventing a field for it here would be a claim about data no viewer reads.
+ * column becomes `SkeletonGeometry.compartments` where any row labels something — DVID's files
+ * label nothing, and MICrONS' published SWCs split soma, axon, basal and apical dendrite.
  *
  * A line with fewer than seven fields is skipped rather than defaulted. The files this reads are
  * written by NeuTu and carry a `#<json>{…}</json>` header line among the comments, so tolerating
@@ -139,6 +147,7 @@ export function parseSwcText(id: NeuronId, text: string): SkeletonGeometry {
       z: numbers[4]!,
       radius: numbers[5]!,
       link: numbers[6]!,
+      type: numbers[1]!,
     })
   }
   return skeletonFromRows(id, rows)

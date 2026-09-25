@@ -50,6 +50,8 @@
  * The card's `cached 12m ago ⟳` badge is the other half: nothing here ages silently.
  */
 
+import type { SkeletonGeometry } from '../core/values'
+import { skeletonBuffers } from '../core/values'
 import type { NeuronId } from '../core/ids'
 
 /**
@@ -316,6 +318,11 @@ export function byteLengthOf(...arrays: Array<ArrayBufferView | undefined>): num
   let total = 0
   for (const array of arrays) total += array?.byteLength ?? 0
   return total
+}
+
+/** What one skeleton holds, for the cache's budget: `skeletonBuffers`, summed. */
+export function skeletonBytes(s: Omit<SkeletonGeometry, 'id'>): number {
+  return byteLengthOf(...skeletonBuffers(s))
 }
 
 /** What the cache is holding, for tests and for anything that wants to report it. */

@@ -25,12 +25,14 @@ import type { ExportSource } from './ViewerActions'
 /**
  * The node whose value the surrounding viewer is drawing.
  *
- * Undefined outside a `ValuePreview` — a legend or a thumbnail rendered on its own belongs to no
- * node, and registering it would put a chart under an id that does not name it.
+ * Undefined outside a surface drawing a node — a `ValuePreview`, or a node body on a card or full
+ * size. A legend or a thumbnail rendered on its own belongs to no node, and registering it would
+ * put a chart under an id that does not name it.
  */
 export const ExportNodeContext = createContext<string | undefined>(undefined)
 
-const sources = new Map<string, ExportSource>()
+/** Per node, every surface currently drawing it, newest last. */
+const sources = new Map<string, ExportSource[]>()
 
 /**
  * Publish a viewer's export source under its node id.
@@ -39,17 +41,21 @@ const sources = new Map<string, ExportSource>()
  * the inspector and the overlay at once, and the overlay — mounted last and largest — is the one
  * whose picture anybody asking for a PNG means.
  *
- * Returns an unregister that only clears the entry while it is still its own. Without that
- * check, a card unmounting after the overlay opened would remove the overlay's registration.
+ * Returns an unregister that removes only its own entry. A stack rather than one slot: with one,
+ * the overlay closing cleared the node while the card behind it was still drawing — the card
+ * registered first, the overlay replaced it, and closing the overlay left nothing to find until
+ * the card remounted. A card body and its full-size view both register now, so it matters.
  */
 export function registerExportSource(nodeId: string, source: ExportSource): () => void {
-  sources.set(nodeId, source)
+  sources.set(nodeId, [...(sources.get(nodeId) ?? []), source])
   return () => {
-    if (sources.get(nodeId) === source) sources.delete(nodeId)
+    const left = (sources.get(nodeId) ?? []).filter((held) => held !== source)
+    if (left.length > 0) sources.set(nodeId, left)
+    else sources.delete(nodeId)
   }
 }
 
 /** The export source for a node's *rendered* viewer, or undefined when nothing is drawing it. */
 export function exportSourceFor(nodeId: string | undefined): ExportSource | undefined {
-  return nodeId ? sources.get(nodeId) : undefined
+  return nodeId ? sources.get(nodeId)?.at(-1) : undefined
 }

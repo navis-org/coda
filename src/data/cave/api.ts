@@ -524,13 +524,21 @@ export function queryView(
 }
 
 /**
- * `queryTableChecked` for a view, and **only for one that joins rather than aggregates**.
+ * How long a view's count may keep a read that has its rows waiting. See `queryViewChecked`.
+ */
+const VIEW_COUNT_GRACE_MS = 5_000
+
+/**
+ * `queryTableChecked` for a view.
  *
  * The count runs over the view's own `count=true`, which answers in under a second on a filtered
  * join view (`valid_synapses_nt_v2_view`, 0.8 s for one root id) and does not return at all on an
  * aggregating one (`valid_connection_v2`, over 5 minutes). Nothing about a view says which kind it
- * is, so the caller decides; the connection roll-up is read through `queryView`, unchecked, because
- * one row per pair cannot approach a cap in the first place.
+ * is, and a card that reads whatever view somebody picked (`CAVE table`) cannot know — so once the
+ * rows are in, the count gets **a short grace and no more**, and a count that has not answered is
+ * the same "no count" `optionalCount` makes of one that failed: `refuseIfCapped` then judges by the
+ * row cap. The connection roll-up is still read through `queryView`, unchecked, because one row
+ * per pair cannot approach a cap in the first place.
  */
 export async function queryViewChecked(
   server: string,
@@ -540,12 +548,19 @@ export async function queryViewChecked(
   refusal: { of?: string; consequence: string },
   options: CaveRequestOptions,
 ): Promise<CaveRow[]> {
-  const [rows, total] = await Promise.all([
-    queryView(server, datastack, version, query, options),
-    optionalCount(
-      countRows(server, datastack, version, 'views', query.view, query.filters, options),
-    ),
-  ])
+  const counting = optionalCount(
+    countRows(server, datastack, version, 'views', query.view, query.filters, options),
+  )
+  // A cancellation landing after the grace has nobody left to hear it; observed, not unhandled.
+  void counting.catch(() => undefined)
+  const rows = await queryView(server, datastack, version, query, options)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const total = await Promise.race([
+    counting,
+    new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), VIEW_COUNT_GRACE_MS)
+    }),
+  ]).finally(() => clearTimeout(timer))
   refuseIfCapped(rows.length, total, refusal.of ?? query.view, refusal.consequence)
   return rows
 }

@@ -14,6 +14,7 @@ import {
   packDependencies,
   packsHiding,
   packsIn,
+  packsOffByDefault,
   packsNeeding,
 } from './packs'
 import { listableNodeDefs, nodeDefsByCategory, registerPack } from './registry'
@@ -30,6 +31,9 @@ function graphOf(...types: string[]): CodaGraph {
     })),
   }
 }
+
+/** A switched-off set as a reader's begins: the packs off by default, plus these. */
+const offByDefaultPlus = (...ids: string[]) => new Set([...packsOffByDefault(), ...ids])
 
 describe('packsIn', () => {
   it("names each pack a graph's nodes come from, once, and no built-in family", () => {
@@ -76,13 +80,16 @@ describe('offeredType', () => {
 
 describe('a pack and its parts', () => {
   it('takes every part off with its parent, and a part off alone', () => {
-    expect([...effectiveOff(new Set(['connectome']))].sort()).toEqual([
-      'catmaid',
-      'cave',
-      'connectome',
-      'neuprint',
-    ])
-    expect([...effectiveOff(new Set(['neuprint']))]).toEqual(['neuprint'])
+    expect(
+      [...effectiveOff(offByDefaultPlus('connectome'))].filter(
+        (id) => !packsOffByDefault().has(id),
+      ),
+    ).toEqual(['connectome', 'neuprint', 'cave', 'catmaid'])
+    expect(
+      [...effectiveOff(offByDefaultPlus('neuprint'))].filter(
+        (id) => !packsOffByDefault().has(id),
+      ),
+    ).toEqual(['neuprint'])
   })
 
   it("switches a part's parent on with it", () => {
@@ -101,7 +108,7 @@ describe('a pack and its parts', () => {
   it('names the switch that hid a dataset: the parent when it is off, else the part', () => {
     const types = ['dataset.hemibrain', 'dataset.flywire', 'dataset.mock.opticlobe']
     const hiding = (off: string[]) =>
-      packsHiding(types, effectiveOff(new Set(off))).map((p) => p.id)
+      packsHiding(types, effectiveOff(offByDefaultPlus(...off))).map((p) => p.id)
     expect(hiding(['connectome'])).toEqual(['connectome'])
     expect(hiding(['neuprint'])).toEqual(['neuprint'])
     expect(hiding(['neuprint', 'cave'])).toEqual(['neuprint', 'cave'])
@@ -118,7 +125,7 @@ describe('a pack that needs a part of another', () => {
       requires: ['cave'],
       nodes: [],
     })
-    const off = effectiveOff(new Set(['connectome']))
+    const off = effectiveOff(offByDefaultPlus('connectome'))
     expect(off.has('cave')).toBe(false)
     expect(off.has('connectome')).toBe(false)
     expect(packsNeeding('connectome', off)).toEqual(['needscave'])

@@ -50,6 +50,9 @@ beforeAll(() => {
 beforeEach(() => {
   clearStorage()
   resetPackSwitchesForTest()
+  // Every pack on, a pack off by default included: these cases are about the browser's layout,
+  // and count against the registry. The switches have their own block below.
+  act(() => switchPack('cortex', true))
   act(() => {
     useGraphStore.getState().loadGraph(demoWorkflow('partners'))
   })

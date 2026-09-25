@@ -18,6 +18,7 @@
  * broken in the other.
  */
 
+import { GalleryBody } from '../cortex/GalleryBody'
 import type { ComponentType } from 'react'
 
 import type { GraphNode } from '../../core/graph'
@@ -83,6 +84,12 @@ export interface NodeBodyEntry {
    */
   expandable?: boolean
   /**
+   * Whether the card can be resized, as a viewer's can — for a body that draws something a
+   * reader wants more or less of on the canvas. The body then fills the box it is given rather
+   * than stopping at its usual cap, so it must be able to use a height: scroll, or grow.
+   */
+  resizable?: boolean
+  /**
    * What this body's screen map labels, if it has one — a header button on every full-size
    * surface drawing it. See `NodeMap.tsx`. Only for a body with enough controls that "what is all
    * of this" is a real question; a map of two fields is a tooltip with a scrim.
@@ -96,6 +103,8 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
     expandable: true,
     screenMap: EXPLORE_MAP_SPOTS,
   },
+  // The Cortex pack's; a card body lives here, `src/packs/**` being imported by the headless MCP build.
+  'cortex:gallery': { Component: GalleryBody, expandable: true, resizable: true },
   /*
    * Not `expandable`: the readout is one line and the fields are three, so an overlay of it would
    * be whitespace, and its button would sit where a viewer's does.

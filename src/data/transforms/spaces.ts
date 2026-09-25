@@ -157,13 +157,21 @@ export function spaceName(id: string | undefined): string {
  * space is a fact about coordinates that the sources — which cannot see the node layer — are
  * the ones to stamp.
  */
-interface SpaceBinding {
+/**
+ * Which datasets a fact about coordinates holds for — a template space here, a cortical frame in
+ * the Cortex pack. Keyed on the *dataset id* rather than on `DatasetFamily`, for the reason below:
+ * coordinates arrive from a hand-named datastack exactly as they do from a shipped one.
+ */
+export interface DatasetBinding {
   /** A key of `BACKENDS`, matched against `backendOf(sourceId)`. */
   readonly scope: string
   /** Full source id, matched instead of `scope`. For backends whose dataset ids are positional. */
   readonly exactSource?: string
   /** Family half of the dataset id — `male-cns` for `male-cns:v1.0`. */
   readonly dataset: string
+}
+
+interface SpaceBinding extends DatasetBinding {
   /** A key of `SPACES`. */
   readonly space: string
 }
@@ -201,17 +209,28 @@ const BINDINGS: readonly SpaceBinding[] = [
  * not throw.
  */
 export function spaceForDataset(sourceId: string, datasetId: string): string | undefined {
+  return bindingFor(BINDINGS, sourceId, datasetId)?.space
+}
+
+/**
+ * The binding in a table that holds for a dataset, or undefined. The one match, so every table of
+ * coordinate facts reads a dataset id the same way.
+ */
+export function bindingFor<B extends DatasetBinding>(
+  bindings: readonly B[],
+  sourceId: string,
+  datasetId: string,
+): B | undefined {
   // Family half only: a version pins a reconstruction, not a coordinate frame. Split here
   // rather than through `splitDataset`, which lives in the node layer and imports this one.
   const at = datasetId.indexOf(':')
   const family = at === -1 ? datasetId : datasetId.slice(0, at)
   const backend = backendOf(sourceId)
-  const hit = BINDINGS.find(
+  return bindings.find(
     (b) =>
       b.dataset === family &&
       (b.exactSource ? b.exactSource === sourceId : b.scope === backend),
   )
-  return hit?.space
 }
 
 /**

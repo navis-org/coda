@@ -9,6 +9,10 @@ import './ui/editor.css'
 // so ordering here is belt-and-braces rather than load-bearing.
 import './nodes'
 import { App } from './App'
+import { followShortcutParam } from './ui/shortcutRoute'
+
+// Before the first render, so the packs a shortcut switches on are offered from the first frame.
+followShortcutParam()
 
 const container = document.getElementById('root')
 if (!container) throw new Error('#root not found')

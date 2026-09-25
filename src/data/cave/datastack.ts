@@ -298,6 +298,7 @@ export function resetDatastackRecords(): void {
   listings.clear()
   l2Sources.clear()
   l2Loading.clear()
+  l2Peeked.clear()
   resetL2Cache()
 }
 
@@ -316,6 +317,12 @@ export function resetDatastackRecords(): void {
  */
 const l2Sources = new Map<string, GrapheneSource | null>()
 const l2Loading = new Map<string, Promise<GrapheneSource | undefined>>()
+/**
+ * Datastacks a peek has started a lookup for. A failed lookup is not an answer and is not kept,
+ * so without this the peek — asked on every graph mutation — would re-ask a failing server on
+ * every edit. A fetch that needs the route asks again regardless.
+ */
+const l2Peeked = new Set<string>()
 
 /**
  * Whether skeletons can be built for this datastack — synchronously, if it is known.
@@ -328,7 +335,8 @@ const l2Loading = new Map<string, Promise<GrapheneSource | undefined>>()
 export function peekL2Cache(deployment: string, datastack: string): boolean | undefined {
   const key = deploymentKey(deployment, datastack)
   if (l2Sources.has(key)) return l2Sources.get(key) !== null
-  if (!datastack || l2Loading.has(key)) return undefined
+  if (!datastack || l2Peeked.has(key)) return undefined
+  l2Peeked.add(key)
   // Swallowed and `quiet`, for `peekMaterializations`' reason exactly: this asks the same
   // datastack record, from a card that renders on every graph mutation.
   void l2SourceFor(datastack, { deployment, quiet: true }).catch(() => undefined)

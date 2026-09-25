@@ -43,7 +43,14 @@ import { mapWithConcurrency } from '../concurrency'
 import { memoPromise } from '../memoPromise'
 import { reportSourceLearned } from '../source'
 import type { CaveRequestOptions } from './client'
-import { CaveError, caveGet, caveGetBytes, cavePostRaw } from './client'
+import {
+  CaveError,
+  caveGet,
+  caveGetBytes,
+  caveGetOr404,
+  cavePostRaw,
+  sharedRequestOptions,
+} from './client'
 import { datastackRecord } from './datastack'
 import { caveSourceId, deploymentKey } from './deployments'
 import type { RawSkeletonInfo, SkeletonSource } from '../precomputed/skeletons'
@@ -140,8 +147,19 @@ const asked = new Set<string>()
  */
 const barren = new Set<string>()
 
+/**
+ * The fewest ids whose all coming back uncached marks a datastack `barren`: the 0 of 5 that FlyWire
+ * and BANC were measured at. A smaller set is no evidence about a cache — one uncached neuron on
+ * minnie65, where proofreading mints root ids faster than anybody asks for their skeletons, is the
+ * ordinary case. Learnt from a set of one, it wrote minnie65's service off for the session the
+ * first time the Cortex gallery (one cell per request) met an uncached cell, and every cell after
+ * it drew from the level-2 route, unlabelled.
+ */
+const BARREN_EVIDENCE = 5
+
 /** Test seam. */
 export function resetSkeletonServices(): void {
+  existence.clear()
   services.clear()
   loading.clear()
   asked.clear()
@@ -183,11 +201,14 @@ export function skeletonServiceFor(
   const known = services.get(key)
   if (known !== undefined) return Promise.resolve(known ?? undefined)
 
+  // Shared by every caller asking in the same moment, so asked with nobody's signal: the first
+  // caller's Cancel was every caller's, and read as "no service" it was kept for the session.
+  const shared = sharedRequestOptions(options)
   return memoPromise(
     loading,
     key,
     () =>
-      resolve(datastack, options).then((service) => {
+      resolve(datastack, shared).then((service) => {
         const before = services.get(key)
         services.set(key, service ?? null)
         // Only when the answer *changed* — `l2SourceFor`'s rule, and for its reason: fired
@@ -212,10 +233,13 @@ async function resolve(
 
   // The versions endpoint sits above the datastack in the path — one list per deployment.
   const server = base.slice(0, base.indexOf('/skeletoncache/'))
-  const versions = await caveGet<number[]>(
+  // Only a 404 says the deployment runs no skeleton cache; anything else is thrown and not kept,
+  // where it used to become "no versions" — a verdict `skeletonServiceFor` keeps for the session.
+  const versions = await caveGetOr404<number[]>(
     `${server}/skeletoncache/api/versions`,
+    [],
     options,
-  ).catch(() => [] as number[])
+  )
   const version = chooseVersion(versions)
   if (version === undefined) return undefined
 
@@ -239,44 +263,108 @@ export async function existingSkeletons(
   service: SkeletonService,
   neuronIds: readonly NeuronId[],
   options: CaveRequestOptions,
-  /**
-   * Whether an empty answer may mark the datastack `barren`. Off for a thumbnail, which asks about
-   * **one** neuron: one uncached body is no evidence about the cache, and learning from it would
-   * send every later Skeletons run on the datastack down the level-2 route for the session.
-   */
-  { learn = true }: { learn?: boolean } = {},
 ): Promise<Set<string>> {
-  const batches: Array<readonly NeuronId[]> = []
-  for (let at = 0; at < neuronIds.length; at += EXISTS_BATCH) {
-    batches.push(neuronIds.slice(at, at + EXISTS_BATCH))
-  }
-
-  const held = new Set<string>()
-  // A few at a time rather than one after another: the Skeletons node's ceiling is ten thousand
-  // neurons, which is twenty batches, and every one of them lands before a single skeleton byte
-  // is downloaded. Four is `mapWithConcurrency`'s job and is well inside what one deployment
-  // answered comfortably at fifty ids in half a second.
-  await mapWithConcurrency(batches, EXISTS_CONCURRENCY, async (batch) => {
-    const answer = await cavePostRaw<Record<string, boolean> | boolean>(
-      `${service.base}/exists`,
-      `{"skeleton_version":${service.version},"root_ids":[${batch.join(',')}]}`,
-      options,
-    )
-    /*
-     * **One id is answered with a bare boolean**, not a one-entry map — checked live on minnie65.
-     * Read as a map it has no entries, so a request for one neuron, or a set whose last batch held
-     * one, came back "not cached" for a neuron that was, and marked the datastack `barren` too.
-     */
-    if (typeof answer === 'boolean') {
-      if (answer && batch.length === 1) held.add(batch[0]!)
-      return
-    }
-    for (const [id, there] of Object.entries(answer ?? {})) if (there) held.add(id)
-  })
-  if (learn && neuronIds.length > 0 && held.size === 0) {
+  const known = existenceFor(service, options)
+  await known.ask(neuronIds)
+  options.signal?.throwIfAborted()
+  const held = new Set(neuronIds.filter((id) => known.held.get(id) === true))
+  if (neuronIds.length >= BARREN_EVIDENCE && held.size === 0) {
     barren.add(deploymentKey(options.deployment, service.datastack))
   }
   return held
+}
+
+/**
+ * Which ids a service holds, as far as this session has asked — and the one place that asks.
+ *
+ * **Remembered per id**, both ways, for the session. `exists` is rate-limited at the deployment —
+ * `429: 100 per 1 minute`, measured from a browser — and the Cortex gallery's wall asked it once
+ * per cell, again on every reshuffle, so a few moves in a minute were refused and the refused
+ * cells fell to the level-2 route unlabelled. A cell's answer does not change within a session
+ * unless somebody generates it meanwhile, which a reload picks up.
+ *
+ * **Gathered**: every id asked for within one task goes out together, in `EXISTS_BATCH`es, so
+ * callers asking a neuron at a time — thumbnail rows, a wall's cells — share requests. And
+ * **asked with nobody's signal**, a shared request's cancel being every caller's; a caller that
+ * cancels stops waiting instead. A failed request is not an answer: its ids stay unknown and every
+ * caller waiting on it is handed the failure.
+ */
+interface Existence {
+  held: Map<NeuronId, boolean>
+  ask(ids: readonly NeuronId[]): Promise<void>
+}
+
+const existence = new Map<string, Existence>()
+
+function existenceFor(service: SkeletonService, options: CaveRequestOptions): Existence {
+  const key = deploymentKey(options.deployment, `${service.base}|${service.version}`)
+  const known = existence.get(key)
+  if (known) return known
+
+  const held = new Map<NeuronId, boolean>()
+  // The request an id is already in, so asking again while it is out waits on it rather than
+  // spending another of the rate-limited requests on the same answer.
+  const inFlight = new Map<NeuronId, Promise<void>>()
+  const shared = sharedRequestOptions(options)
+  let queued = new Set<NeuronId>()
+  let flush: Promise<void> | undefined
+
+  const run = async (asking: readonly NeuronId[]) => {
+    const batches: NeuronId[][] = []
+    for (let at = 0; at < asking.length; at += EXISTS_BATCH) {
+      batches.push(asking.slice(at, at + EXISTS_BATCH))
+    }
+    // A few at a time rather than one after another: the Skeletons node's ceiling is ten thousand
+    // neurons, which is twenty batches, and every one of them lands before a single skeleton byte
+    // is downloaded.
+    await mapWithConcurrency(batches, EXISTS_CONCURRENCY, async (batch) => {
+      const answer = await cavePostRaw<Record<string, boolean> | boolean>(
+        `${service.base}/exists`,
+        `{"skeleton_version":${service.version},"root_ids":[${batch.join(',')}]}`,
+        shared,
+      )
+      /*
+       * **One id is answered with a bare boolean**, not a one-entry map — checked live on
+       * minnie65. Read as a map it has no entries, so a request for one neuron came back "not
+       * cached" for a neuron that was.
+       */
+      if (typeof answer === 'boolean') {
+        if (batch.length === 1) held.set(batch[0]!, answer)
+        return
+      }
+      for (const id of batch) held.set(id, answer?.[id] === true)
+    })
+  }
+
+  const entry: Existence = {
+    held,
+    ask(ids) {
+      const waits = new Set<Promise<void>>()
+      for (const id of ids) {
+        if (held.has(id)) continue
+        const pending = inFlight.get(id)
+        if (pending) {
+          waits.add(pending)
+          continue
+        }
+        queued.add(id)
+        flush ??= new Promise<void>((resolve) => setTimeout(resolve, 0)).then(() => {
+          const asking = [...queued]
+          queued = new Set()
+          flush = undefined
+          // A failure leaves its ids unknown, to be asked again by whoever asks next.
+          return run(asking).finally(() => {
+            for (const asked of asking) inFlight.delete(asked)
+          })
+        })
+        inFlight.set(id, flush)
+        waits.add(flush)
+      }
+      return Promise.all(waits).then(() => undefined)
+    },
+  }
+  existence.set(key, entry)
+  return entry
 }
 
 /**

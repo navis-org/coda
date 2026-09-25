@@ -194,6 +194,11 @@ export interface DatastackSpec {
   connections?: ConnectionViewSpec
   synapses?: SynapseTableSpec
   /**
+   * The table of cell nuclei, one row per nucleus with its root id and position — what a soma
+   * position comes from (`somaPositions`).
+   */
+  nuclei?: { table: string }
+  /**
    * Flat published segmentations, one per materialization version.
    *
    * **A datastack's own `segmentation_source` is `graphene://`, and that is a chunkedgraph
@@ -313,6 +318,7 @@ export const DATASTACK_SPECS: readonly DatastackSpec[] = [
       'The public MICrONS Minnie65 segmentation of a mouse visual cortex volume.\n' +
       'This is the second alignment of the IARPA "minnie65" dataset, completed in the spring of 2020 that used the seamless approach.',
     neurons: { table: 'proofreading_status_and_strategy', idColumn: 'pt_root_id' },
+    nuclei: { table: 'nucleus_detection_v0' },
     synapses: {
       table: 'synapses_pni_2',
       preColumn: 'pre_pt_root_id',

@@ -1123,8 +1123,9 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    * How wide this card draws, in px, where that is wider than the 232 every card is by default.
    *
    * **Not `defaultSize`, and the difference is the whole reason this exists.** That one sizes
-   * React Flow's *wrapper*, and only a viewer's card fills its wrapper — declared on any other
-   * node it leaves the state bar hanging below the card (`nodeResize.test.tsx`). A body that
+   * React Flow's *wrapper*, and only a viewer's card or a resizable body (`NodeBodyEntry.resizable`)
+   * fills its wrapper — declared on any other node it leaves the state bar hanging below the card
+   * (`nodeResize.test.tsx`). A body that
    * holds a list of neurons, a row of three filter controls or a paste target only wants to be
    * wider, which `CodaNodeView` does through `--node-width` from this field.
    *

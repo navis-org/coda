@@ -137,7 +137,8 @@ function linkageToCsv(linkage: LinkageValue): string {
  * as "no parent". Coda stores parents as *array indices*, so every one has to be shifted; a file
  * written with 0-based ids parses without complaint and hangs the first point off nothing.
  *
- * The structure identifier is written as `0` (undefined) throughout rather than guessed. neuPrint
+ * The structure identifier is the skeleton's own compartment where its source labelled one
+ * (`SkeletonGeometry.compartments`), and `0` (undefined) otherwise rather than guessed. neuPrint
  * publishes no soma/axon/dendrite labelling with its skeletons, and inventing one — marking the
  * root as soma, say — would be a claim about the neuron's anatomy that nothing in the data
  * supports.
@@ -154,7 +155,7 @@ export function skeletonToSwc(skeleton: SkeletonGeometry): string {
     lines.push(
       [
         i + 1,
-        0,
+        skeleton.compartments?.[i] ?? 0,
         skeleton.positions[i * 3] ?? 0,
         skeleton.positions[i * 3 + 1] ?? 0,
         skeleton.positions[i * 3 + 2] ?? 0,

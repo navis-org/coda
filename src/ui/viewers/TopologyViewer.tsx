@@ -26,6 +26,7 @@
  * it is the one thing here behind a ~10 MB download.
  */
 
+import { axonDendriteInk } from '../compartmentInk'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { idText } from '../../core/ids'
@@ -179,18 +180,12 @@ type LayerParam = 'showMesh' | 'showSkeleton' | 'showSynapses'
  */
 type SplitParam = 'flowThresh' | 'splitVal'
 
-/**
- * The compartment palette, and why it is not `seriesColor`.
- *
- * navis's own convention — a warm axon, a cool dendrite — because anybody who has looked at a
- * split neuron before reads it without a legend. Ranked colours would put the *commonest*
- * compartment in slot 0, so the axon would change colour between two neurons; here the meaning is
- * fixed and the legend names it anyway.
- */
+/** The compartment palette: `axonDendriteInk`, and a muted linker. Why not `seriesColor` is there. */
 function compartmentColors(mode: ReturnType<typeof currentMode>): Record<number, string> {
+  const { axon, dendrite } = axonDendriteInk(mode)
   return {
-    [CODE_DENDRITE]: cycleColor(0, mode),
-    [CODE_AXON]: cycleColor(1, mode),
+    [CODE_DENDRITE]: dendrite,
+    [CODE_AXON]: axon,
     [CODE_LINKER]: CHART_INK[mode].muted,
   }
 }

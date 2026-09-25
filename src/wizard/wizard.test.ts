@@ -29,7 +29,7 @@ import { deserializeGraph, serializeGraph } from '../core/graph'
 import { inferGraph } from '../core/inference'
 import { findParam } from '../core/node'
 import { getNodeDef, isAnnotation, packOfType, requireNodeDef } from '../core/registry'
-import { effectiveOff, offeredType } from '../core/packs'
+import { effectiveOff, offeredType, packsOffByDefault } from '../core/packs'
 import { ROW_TRACKS } from '../core/dashboard'
 import { Scheduler } from '../core/scheduler'
 import { attributeSchema, columnNames, tableSchema } from '../core/types'
@@ -1000,7 +1000,7 @@ describe('a dataset that needs an annotation chain', () => {
     )
 
   it('covers more than one family, or these rules are one dataset’s', () => {
-    expect(chained.map((family) => family.key).sort()).toEqual(['banc', 'flywire'])
+    expect(chained.map((family) => family.key).sort()).toEqual(['banc', 'flywire', 'minnie65'])
   })
 
   it.each(chained)('builds $key’s chain and wires it into the annotations port', (family) => {
@@ -1526,7 +1526,7 @@ describe('switched-off packs', () => {
    * ones whose every node is offered.
    */
   const datasets = ['mock.opticlobe']
-  const offered = offeredType(effectiveOff(new Set(['connectome'])))!
+  const offered = offeredType(effectiveOff(new Set([...packsOffByDefault(), 'connectome'])))!
   const builds = (answers: WizardAnswers) =>
     buildWorkflow(answers).nodes.some((n) => packOfType(n.type) === 'connectome')
 

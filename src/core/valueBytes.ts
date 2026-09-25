@@ -42,6 +42,7 @@
  */
 
 import type { ColumnData, TableValue, Value } from './values'
+import { skeletonBuffers } from './values'
 
 /** How results are grouped in the readout, in display order, with what the readout calls each. */
 export const MEMORY_CATEGORIES = [
@@ -210,8 +211,7 @@ export class ByteLedger {
       case 'skeletons': {
         let bytes = this.table(value.attributes) + this.items(value.items)
         for (const item of value.items) {
-          bytes +=
-            this.buffer(item.positions) + this.buffer(item.radii) + this.buffer(item.parents)
+          for (const buffer of skeletonBuffers(item)) bytes += this.buffer(buffer)
         }
         return bytes
       }

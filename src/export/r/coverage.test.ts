@@ -14,6 +14,11 @@ import './exporter'
 import { getEmitter, registeredEmitterTypes } from './registry'
 
 const NO_EMITTER: Record<string, string> = {
+  'cortex:gallery':
+    'A browsing widget whose wall is the point, and whose depth and layer come from a cortical ' +
+    'frame (`packs/cortex/frames.ts`) no notebook library carries. Its Selected table is the ' +
+    'picked ids; exporting it well means emitting the frame, which is worth doing once the ' +
+    'gallery has settled rather than twice.',
   'out.neuronbridge':
     'NeuronBridge matches, and a viewer whose picture is a gallery of images read from Janelia\u2019s ' +
     'bucket for the neuron on screen. The faithful route is `neuronbridger`, which reads the ' +

@@ -918,6 +918,23 @@ rule belongs to one area, its record is in that area's doc.
   allowlisted origin, compared exactly — `127.0.0.1` is not `localhost:5173`, and registering
   `navis-org.github.io` alone missed the `coda.science` custom domain the site actually runs on — and
   answers any other with `"badorigin"`, which is a refusal of its own rather than a closed window.
+- **A geometry is the morphology of exactly the id asked for, at the materialization asked for —
+  never an id mapped to another timepoint.** MICrONS' v661 SWC release was a route once, reached by
+  walking today's root id through its nucleus to the root it had at 661: every file came back under
+  today's id, and it was a different, older segment — median 49% of the current cable across 40
+  proofread cells, 23 of them with no axon where the id's own segment has a proofread one. It
+  looked like data, not like a bug. Removed; a published product keyed by other ids is usable only
+  where its ids *are* the requested ones. And **a skeleton's compartments are the source's**:
+  SWC codes where the source labels them, absent otherwise, never `out.topology`'s computed codes;
+  minnie65's service sends them as `uint8`, which a float-only reader skipped in silence. See
+  [docs/backends.md](docs/backends.md) and [docs/cortex.md](docs/cortex.md).
+- **A lookup that failed has not answered "none", and a shared request carries nobody's signal.**
+  Three CAVE lookups read a cancel, a 5xx or a `429` as "no level-2 cache", "no service" or "not
+  cached" and kept it for the session — so a gallery that cancels as its wall moves drew half its
+  cells from the level-2 route, unlabelled, on a datastack whose service held every one. Only a
+  404 is a verdict. The skeleton service's `exists` is rate-limited (100/minute), so a caller
+  fetching neuron by neuron names the set first (`DataSource.planSkeletons`). See
+  [docs/backends.md](docs/backends.md).
 - **CAVE's row cap is a per-deployment number, and a reference table has no root id.**
   `CAVE_MAX_ROWS` is one server's limit, so truncation is tested against the server's own `COUNT`,
   never the constant and never with `>=`. A reference table carries `target_id` and no root id:
@@ -1372,6 +1389,8 @@ in a CLAUDE.md *imports* the file, pulling all 1.2 MB back into every session.
 - [docs/packs.md](docs/packs.md) — node packs, the Plugins dialog, shortcuts, `requires` and parts,
   Connectome and its backend parts. **Read before adding a pack, a shortcut, or moving nodes into
   one.**
+- [docs/cortex.md](docs/cortex.md) — the Cortex pack and the gallery: MICrONS cell typing, the
+  depth frame and layer bounds, compartment labels, what is deferred and why.
 - [docs/zoo.md](docs/zoo.md) — the Coda Zoo, and why its index is a committed file rather
   than an API listing. Read before changing `ZooIndex`.
 - [docs/analytics.md](docs/analytics.md) — the GoatCounter beacon: what it collects, the two

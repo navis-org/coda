@@ -51,6 +51,9 @@ import { segmentationLayerIndex } from '../neuroglancer/scene'
 import { SYNAPSE_UNITS } from '../synapseUnits'
 import { registerDatastackSpec, specFor } from './spec'
 import { ID_COLUMN_NAME } from '../../core/ids'
+import { CAVE_TABLE_PROVIDER } from '../annotations/caveTable'
+import { annotationProvider } from '../annotations/registry'
+import '../annotations/index'
 import { cableLength } from '../../core/values'
 import type { RestoreFetch } from '../../test/precomputedStubs'
 import { serveDracoWasmFromDisk } from '../../test/precomputedStubs'
@@ -512,6 +515,9 @@ describe.skipIf(!TOKEN)('CAVE, live — the skeleton service', () => {
       expect(item.parents.length).toBeGreaterThan(1000)
       expect(item.radii.some((r) => r > 0)).toBe(true)
       expect(item.positions.length).toBe(item.parents.length * 3)
+      // And the service's `compartment` attribute, kept: one soma vertex, axon and dendrite.
+      const codes = new Set(item.compartments)
+      expect(codes.has(1) && codes.has(2) && codes.has(3)).toBe(true)
     }
     /*
      * And the route list agrees with what the fetch did, which is what the dropdown shows.
@@ -522,6 +528,52 @@ describe.skipIf(!TOKEN)('CAVE, live — the skeleton service', () => {
      */
     expect(await l2SourceFor('minnie65_public', ON_DEFAULT)).toBeTruthy()
     expect(cave.skeletonSourcesFor!(dataset)?.map((r) => r.id)).toEqual(['service', 'l2'])
+  }, 300_000)
+
+  it('draws a neuron as it is at the materialization asked for, never an older self', async () => {
+    /*
+     * A skeleton is the morphology of exactly the id requested. MICrONS' v661 SWC release was a
+     * route here once, reached by mapping today's id through its nucleus to the root it had at
+     * 661 — and this cell came back 2.9 mm of dendrite with no axon, where the segment the id
+     * names is 22.9 mm with a proofread axon. Across 40 doubly-proofread cells the release held a
+     * median 49% of the current cable. See `docs/backends.md`.
+     */
+    setToken(DEFAULT_CAVE_SERVER, TOKEN!)
+    const cave = new CaveSource()
+    const skeletons = await cave.fetchSkeletons!({
+      datasetId: 'minnie65_public:1822',
+      neuronIds: ['864691136314078013'],
+    })
+    const [item] = skeletons.items
+    expect(item!.id).toBe('864691136314078013')
+    expect(item!.parents.length).toBeGreaterThan(10_000)
+    expect(item!.compartments?.some((code) => code === 2)).toBe(true)
+  }, 300_000)
+})
+
+describe.skipIf(!TOKEN)('CAVE, live — cell typing from a view', () => {
+  it("reads minnie65's aibs_cell_info through the view endpoint, whole", async () => {
+    // The chain the minnie65 family declares. A view is a different endpoint from a table, and
+    // asked as a table it 404s; 144,120 rows, one per nucleus, measured at ~6 s for 30 MB.
+    setToken(DEFAULT_CAVE_SERVER, TOKEN!)
+    const version = (await materializationsFor('minnie65_public', ON_DEFAULT))[0]
+    const table = await annotationProvider(CAVE_TABLE_PROVIDER)!.fetch(
+      {
+        provider: CAVE_TABLE_PROVIDER,
+        config: {
+          dataset: `minnie65_public:${version}`,
+          table: 'aibs_cell_info',
+          idColumn: 'pt_root_id',
+          pivotOn: '',
+          valueColumn: '',
+          columns: 'cell_type',
+        },
+      },
+      {},
+    )
+    expect(table.data[ID_COLUMN_NAME]!.length).toBeGreaterThan(100_000)
+    // `cell_type` arrives as Coda's `type`, in the EM vocabulary as published.
+    expect(new Set(table.data['type'])).toContain('5P-ET')
   }, 300_000)
 })
 
@@ -679,7 +731,13 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
    * that still exercises graphene, and its flat bucket is deliberately not listed: it publishes
    * legacy meshes at 28.4 MB and 60.8 MB for two neurons this answers in ~200 kB of Draco.
    */
-  it('decimates an arriving graphene mesh to the triangle budget it was given', async () => {
+  it('downsamples an arriving graphene mesh by the factor asked, and says what it achieved', async () => {
+    /*
+     * Graphene publishes one resolution, so `triangleBudget` — which picks among published levels
+     * — is deliberately not read on this route; `downsample` is the control that reduces it
+     * (`GeometryRequest.downsample`). This test asked for a triangle budget until it measured the
+     * full mesh (1,359,336 triangles against 150,000): stale since downsampling was made explicit.
+     */
     const ids = (
       await new CaveSource().findNeurons({ datasetId: `${BANC}:${version}`, limit: 8 })
     ).data[ID_COLUMN_NAME] as string[]
@@ -688,15 +746,13 @@ describe.skipIf(!TOKEN)('CAVE, live — a reference table on another deployment'
       // The first row of `backbone_proofread` is sometimes a fragment with no mesh at all; a
       // handful of candidates is what makes this about decimation rather than about luck.
       neuronIds: ids.slice(0, 4),
-      triangleBudget: 150_000,
+      downsample: 10,
     })
     const triangles = low.items[0]!.indices.length / 3
-    expect(triangles).toBeLessThanOrEqual(150_000)
     // Not so aggressive that the arbor goes — `MIN_DECIMATE_GRID` is the floor under it.
     expect(triangles).toBeGreaterThan(5_000)
-
-    // And it says so: a source with no levels reports that it simplified, not "level 0 of 0".
-    expect(low.detail?.downsample).toBeUndefined()
+    // And it says so, with the factor achieved: clustering is approximate, so near ten, not ten.
+    expect(low.detail?.downsample).toBeGreaterThan(5)
   }, 600_000)
 
   /*

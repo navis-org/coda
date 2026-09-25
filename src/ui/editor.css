@@ -2200,7 +2200,9 @@ input.field--combo {
   display: flex;
   flex-direction: column;
 }
-.coda-node[data-sized]:not([data-collapsed]) .coda-node__preview {
+/* A resizable body (`NodeBodyEntry.resizable`) absorbs the height the way a preview does. */
+.coda-node[data-sized]:not([data-collapsed]) .coda-node__preview,
+.coda-node[data-sized]:not([data-collapsed]) .coda-node__body {
   flex: 1;
   max-height: none;
   min-height: 0;
@@ -4776,7 +4778,8 @@ input.field--combo {
   color: var(--text-primary);
 }
 /* A selected chip carries the category's own tint, matching node headers. */
-.chip-filter[aria-selected='true'] {
+.chip-filter[aria-selected='true'],
+.chip-filter[aria-pressed='true'] {
   color: var(--text-primary);
   border-color: transparent;
   background: var(--accent-soft);
@@ -13200,4 +13203,108 @@ details[open] > summary.tile__label {
 .recipe-save__actions {
   justify-content: flex-end;
   margin-top: 12px;
+}
+
+/* ── Cortex gallery ─────────────────────────────────────────────────────────── */
+.gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  min-width: 0;
+  /* Shrinkable, so the wall below is what gives way to the card's or the overlay's height. */
+  min-height: 0;
+}
+.gallery__note {
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.gallery__note--error {
+  color: var(--status-error);
+}
+.gallery__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.gallery__control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.gallery__control input {
+  width: 4.5em;
+}
+.gallery__count {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+.gallery__types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.gallery__legend {
+  padding: 0;
+}
+/*
+ * The wall takes whatever height is left and scrolls. The gutter is reserved so a scrollbar
+ * arriving never narrows the rows that made it necessary, which would re-pack them and could
+ * take it away again.
+ */
+.gallery__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+/* Every cell and ruler is placed absolutely (`layoutWall`), so a cell moving row is a style. */
+.gallery__wall {
+  position: relative;
+  min-width: 0;
+}
+.gallery__band,
+.gallery__cell,
+.gallery__label {
+  position: absolute;
+}
+/* A section's name over its first row, in rows and compare mode. */
+.gallery__label {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+/* A cell is a button: the whole column is the target, and the pressed state is the pick. */
+.gallery__cell {
+  display: flex;
+  flex-direction: column;
+  /* A canvas is its arbour's own width; an even column narrower than that clips it here. */
+  overflow: hidden;
+  padding: 0;
+  border: none;
+  outline: 1px solid transparent;
+  background: none;
+  cursor: pointer;
+}
+.gallery__cell[aria-pressed='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.gallery__stripe {
+  display: block;
+  height: 6px;
+}
+/* An arbour's own width, centred in a button that may be wider on a justified row. */
+.gallery__canvas {
+  align-self: center;
+}
+.gallery__canvas[data-state='missing'] {
+  opacity: 0.4;
 }

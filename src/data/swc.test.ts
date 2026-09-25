@@ -45,6 +45,19 @@ describe('parsing DVID’s SWC', () => {
     expect([...skeleton.parents]).toEqual([-1, 0, 1, 2])
   })
 
+  it('keeps the type column as compartments where the file labels something', () => {
+    // MICrONS' published SWCs: 1 soma, 2 axon, 3 basal, 4 apical. Listed child-first, so the
+    // labels have to follow their rows into parent-before-child order.
+    const text = ['3 2 20 0 0 1 2', '1 1 0 0 0 5 -1', '2 4 10 0 0 2 1'].join('\n')
+    const skeleton = parseSwcText('7', text)
+    expect([...skeleton.positions].filter((_, i) => i % 3 === 0)).toEqual([0, 10, 20])
+    expect([...skeleton.compartments!]).toEqual([1, 4, 2])
+  })
+
+  it('carries no compartments for a file whose types are all undefined', () => {
+    expect(parseSwcText('1010', SWC).compartments).toBeUndefined()
+  })
+
   it('keeps the file’s voxels, leaving the scale to whoever knows the voxel size', () => {
     const skeleton = parseSwcText('1010', SWC)
     expect([...skeleton.positions.subarray(0, 3)]).toEqual([3078, 8702, 8696])

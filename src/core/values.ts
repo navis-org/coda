@@ -252,6 +252,28 @@ export interface SkeletonGeometry {
   readonly radii: Float32Array
   /** Parent index per point; -1 for a root. Defines the tree. */
   readonly parents: Int32Array
+  /**
+   * What each point is part of, as SWC's structure codes — 1 soma, 2 axon, 3 basal and 4 apical
+   * dendrite, 0 for a point the source left unlabelled. The vocabulary every source that labels
+   * compartments already speaks: CAVE's skeleton service and every SWC file.
+   *
+   * **Absent means the source publishes no labels**, which is most of them — neuPrint, CATMAID and
+   * level-2 skeletons carry none. Never inferred here: a split computed from synapses is a
+   * *result* (`out.topology`), and one written into the geometry would be indistinguishable from
+   * one the source measured. Where present it is exactly as long as `radii`.
+   */
+  readonly compartments?: Uint8Array
+}
+
+/**
+ * Every array a skeleton holds — the one list, so a field added above is counted by the cache's
+ * budget (`skeletonBytes`) and the memory readout (`ByteLedger`) alike, rather than by whichever
+ * somebody remembered to edit.
+ */
+export function skeletonBuffers(s: Omit<SkeletonGeometry, 'id'>): ArrayBufferView[] {
+  return s.compartments
+    ? [s.positions, s.radii, s.parents, s.compartments]
+    : [s.positions, s.radii, s.parents]
 }
 
 /**
