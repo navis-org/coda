@@ -28,7 +28,7 @@ import { resetCredentials, setToken } from '../../data/cave/credentials'
 import { resetCaveState, tableListFor } from '../../data/cave/tables'
 import { installCaveFetch } from '../../test/caveStubs'
 import '../index'
-import { defaultParams, findParam, makeInferContext } from '../../core/node'
+import { defaultParams, findParam, makeInferContext, validationMessage } from '../../core/node'
 import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 
 const DATASET = 'flywire_fafb_public:783'
@@ -62,7 +62,9 @@ function run(
 /** The edit-time half, with only the two things these nodes read off it. */
 function issues(type: string, params: ParamValues, dataset?: CodaType): string[] {
   const def = requireNodeDef(type)
-  return def.validate?.(makeInferContext(def, params, { dataset })) ?? []
+  return (def.validate?.(makeInferContext(def, params, { dataset })) ?? []).map(
+    validationMessage,
+  )
 }
 
 beforeEach(() => {

@@ -18,7 +18,8 @@
  * class of silent load-order bug.
  */
 
-import type { PopulationFilter } from '../../core/types'
+import type { CodaType, PopulationFilter } from '../../core/types'
+import type { ValidationLine } from '../../core/node'
 import type { AnnotationChain } from './annotationChain'
 import { ID_COLUMN_NAME } from '../../core/ids'
 import { aggColumnName } from './tableOps'
@@ -33,6 +34,7 @@ import type { DatasetInfo } from '../../data/source'
 import { getSource } from '../../data/source'
 import { L1_CATMAID_SOURCE_ID, normaliseCatmaidServer } from '../../data/catmaid/registry'
 import { caveServerLabel } from '../../data/cave/deployments'
+import { shippedSpecFor } from '../../data/cave/spec'
 import { serverLabel } from '../../data/neuprint/servers'
 
 /**
@@ -594,6 +596,11 @@ const FLYWIRE_CHAIN: AnnotationChain = {
     'This datastack publishes its own cell typing, and it is an outdated cut: the current ' +
     'hierarchical annotations are a file in the flywire_annotations repository, and the ' +
     'community annotations are a separate CAVE table.',
+  // `hierarchical_neuron_annotations` is an older cut of the file the chain fetches (see the
+  // note above), and the community tags are `neuron_information_v2`, which it never held.
+  staleBuiltin:
+    'an outdated cut of the FlyWire annotations: later typing and corrections are missing, and ' +
+    'it has no community tags',
 }
 
 /**
@@ -854,6 +861,42 @@ export function familyForNodeType(type: string): DatasetFamily | undefined {
     ? datasetFamily(type.slice(DATASET_NODE_PREFIX.length))
     : undefined
 }
+
+/**
+ * The family node's warning that it is reading labels its annotation chain exists to replace, with
+ * the button that attaches the chain, or `undefined`. See `AnnotationChain.staleBuiltin`.
+ *
+ * One function for `validate`, which is what the card and the inspector draw, so a button cannot
+ * appear without its warning. **Any** wire on the Annotations port stands it down, not only the
+ * chain's: a table somebody wired in on purpose is their decision.
+ *
+ * It names where the labels come from and says that source is stale. "Might be outdated" says
+ * nothing a reader can check; naming the table does. The table is read off the shipped datastack
+ * spec, the one the backend actually queries, so the warning cannot name a table other than the
+ * one being read. Only a CAVE datastack has such a spec, which is what makes "CAVE table" true.
+ */
+export function familyStaleLabels(
+  family: DatasetFamily | undefined,
+  annotations: CodaType | undefined,
+): ValidationLine | undefined {
+  const chain = family?.annotationChain
+  if (!family || !chain?.staleBuiltin || annotations) return undefined
+  const table = shippedSpecFor(undefined, family.family)?.annotations?.table
+  if (!table) return undefined
+  return {
+    message:
+      `Cell types come from the ${table} CAVE table, ${chain.staleBuiltin}. ` +
+      `Click button below to wire in the recommended ${chain.title}.`,
+    fix: {
+      label: ATTACH_CHAIN_LABEL,
+      title: `Add ${chain.title} in front of this dataset`,
+      action: 'attachAnnotationChain',
+    },
+  }
+}
+
+/** What `familyStaleLabels`' button says. */
+export const ATTACH_CHAIN_LABEL = 'Use current annotations'
 
 // ---------------------------------------------------------------------------
 // Versions

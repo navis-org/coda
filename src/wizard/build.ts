@@ -1599,7 +1599,10 @@ function overviewNote(answers: WizardAnswers): GraphNode {
  * box stands in for — which is what lets an arrange carry the caption with its chain rather than
  * leave it behind; see `layout/companions.ts`' `captionView`.
  */
-function withChainCaptions(graph: CodaGraph, chains: readonly AnnotationChain[]): CodaGraph {
+export function withChainCaptions(
+  graph: CodaGraph,
+  chains: readonly AnnotationChain[],
+): CodaGraph {
   const { boxes } = collapsedView(graph)
   const notes = chains.flatMap((chain): GraphNode[] => {
     const about = chain.output.id

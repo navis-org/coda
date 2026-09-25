@@ -7,6 +7,7 @@
  */
 
 import { useMemo } from 'react'
+import { IssueFixButton } from '../IssueFixButton'
 import { IssueText } from '../IssueText'
 
 import { makeInferContext, visibleParams } from '../../core/node'
@@ -153,7 +154,10 @@ export function Inspector() {
                   <span className="issue__glyph">{issue.severity === 'error' ? '×' : '!'}</span>
                   {/* The one surface with room for the button, which is why the card does
                       without one: the same sentence, ranked identically, one click away. */}
-                  <IssueText message={issue.message} copyable />
+                  <div className="issue__body">
+                    <IssueText message={issue.message} copyable />
+                    {issue.fix && <IssueFixButton nodeId={node.id} fix={issue.fix} />}
+                  </div>
                 </div>
               ))}
             </div>

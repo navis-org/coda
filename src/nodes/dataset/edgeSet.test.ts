@@ -14,7 +14,7 @@ import { IDBFactory } from 'fake-indexeddb'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ParamValues } from '../../core/node'
-import { defaultParams, makeInferContext } from '../../core/node'
+import { defaultParams, makeInferContext, validationMessage } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
@@ -148,7 +148,9 @@ describe('validate', () => {
   it('says nothing before the catalogue has been read', () => {
     // Otherwise every dataset node in a loaded graph warns for the instant before the read
     // lands — the unknown-versus-empty distinction, and a check that cries wolf.
-    const issues = requireNodeDef(FAMILY).validate!(ctxFor(FAMILY, { edgeSetId: 'missing' }))
+    const issues = requireNodeDef(FAMILY).validate!(
+      ctxFor(FAMILY, { edgeSetId: 'missing' }),
+    ).map(validationMessage)
     expect(issues.filter((i) => /edge set/i.test(i))).toEqual([])
   })
 
@@ -170,7 +172,7 @@ describe('validate', () => {
     await listEdgeSets()
     const issues = requireNodeDef(FAMILY).validate!(
       ctxFor(FAMILY, { edgeSetId: 'missing', edgeSetName: 'FlyWire 783' }),
-    )
+    ).map(validationMessage)
     expect(issues.some((i) => i.includes('FlyWire 783'))).toBe(true)
     // Recoverable, and the message has to say how: the id is the file's contents.
     expect(issues.some((i) => /same file/.test(i))).toBe(true)
@@ -179,7 +181,9 @@ describe('validate', () => {
   it('is quiet about a set that is here', async () => {
     const meta = await importSet()
     await listEdgeSets()
-    const issues = requireNodeDef(FAMILY).validate!(ctxFor(FAMILY, { edgeSetId: meta.id }))
+    const issues = requireNodeDef(FAMILY).validate!(ctxFor(FAMILY, { edgeSetId: meta.id })).map(
+      validationMessage,
+    )
     expect(issues.filter((i) => /edge set/i.test(i))).toEqual([])
   })
 })

@@ -11,8 +11,10 @@
  *
  * So the chain is declared here, on the family, and **placed** by whoever is building: the
  * starter has hand-tuned coordinates and a folded frame, the wizard lays out in columns, and
- * neither is a fact about the annotations. What is shared is the part that has to agree —
- * which nodes, which params, which wires, and which column the fold produces.
+ * neither is a fact about the annotations. A third builder attaches it to a dataset node already
+ * on a canvas (`wizard/attachChain.ts`), which is what a bare FlyWire card's button does. What is
+ * shared is the part that has to agree — which nodes, which params, which wires, and which column
+ * the fold produces.
  *
  * **Generated, not transcribed, is the rule this exists to keep.** `datasetChainNote` renders
  * the same declaration for the assistant catalogue, so a chain that changes cannot leave a
@@ -94,6 +96,18 @@ export interface AnnotationChain {
    * longer fetches the replacement, is the drift this whole module exists to stop.
    */
   why: string
+  /**
+   * What the dataset's own labels lack, as a clause, where it has labels of its own that this
+   * chain *replaces*. Absent where the dataset has none, which is BANC's and Minnie's case.
+   *
+   * **The difference is whether a bare node looks right.** A datastack with no labels shows a
+   * column of root ids, so its reader can see something is missing. FlyWire answers with a
+   * table that looks exactly like the one the chain gives: plausible types on most neurons.
+   * What is wrong only shows up later, when a type turns out to be missing. So the bare node
+   * warns (`familyStaleLabels`) and its card offers to attach the chain, on every path a node
+   * arrives by: the palette, the **+**, a plan, a paste, a file saved before this.
+   */
+  staleBuiltin?: string
 }
 
 /**

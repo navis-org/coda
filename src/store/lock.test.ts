@@ -233,6 +233,16 @@ describe('a locked canvas', () => {
     expect(graph().nodes).toHaveLength(2)
   })
 
+  it("refuses to attach a dataset's annotation chain", () => {
+    store().loadGraph({
+      ...emptyGraph('fly'),
+      nodes: [{ id: 'fly', type: 'dataset.flywire', position: { x: 0, y: 0 }, params: {} }],
+    })
+    store().attachAnnotationChain('fly')
+    expect(graph().nodes.map((n) => n.id)).toEqual(['fly'])
+    expect(graph().edges).toHaveLength(0)
+  })
+
   it('still opens another graph — a document load is not a canvas gesture', () => {
     store().loadGraph(emptyGraph('another'))
     expect(graph().meta?.name).toBe('another')
@@ -264,6 +274,8 @@ describe('every store action is on one side of the lock', () => {
     'pasteFragment',
     // A recipe is a paste with its wires attached; saving one is on the live side, as copy is.
     'insertRecipe',
+    // Six cards and their wires in front of a dataset: an add, whichever button asked for it.
+    'attachAnnotationChain',
     'groupSelection',
     'ungroup',
     'deleteNodes',

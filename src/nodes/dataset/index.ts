@@ -17,7 +17,7 @@
 
 import type { CompanionSpec } from '../../core/companion'
 import { packNode, registerNode } from '../../core/registry'
-import type { NodeDefinition } from '../../core/node'
+import type { InferContext, NodeDefinition } from '../../core/node'
 import { DATASET_CARD_WIDTH } from './description'
 import { T } from '../../core/types'
 import type { DatasetValue } from '../../core/values'
@@ -39,6 +39,7 @@ import {
   DATASET_FAMILIES,
   catmaidServerLabel,
   familyLabel,
+  familyStaleLabels,
   resolveDatasetId,
   versionsFor,
 } from '../lib/datasetFamilies'
@@ -108,6 +109,42 @@ const DESCRIPTION_COMPANION: CompanionSpec = {
  */
 const DATASET_CARD_HEIGHTS: Record<string, number> = { neuprint: 326, cave: 282, catmaid: 249 }
 
+/**
+ * A family dataset node's `validate` lines, apart from the stale-labels warning `validate` adds.
+ * Most wait on the version listing, which is why the early returns are here.
+ */
+function datasetIssues(family: DatasetFamily, ctx: InferContext): string[] {
+  const source = getSource(family.sourceId)
+  if (!source) return [`Data source "${family.sourceId}" is not registered`]
+  // Once: `resolveDatasetId` runs `versionsFor`, which peeks the listing and sorts it, and
+  // `validate` runs on every graph mutation for every dataset node on the canvas.
+  const datasetId = resolveDatasetId(family, ctx.params.version)
+  const versions = versionsFor(family)
+  /*
+   * Empty is two states and only one of them is silent. The listing not having arrived is
+   * the connection panel's story to tell, not a per-node error on every dataset node in the
+   * graph — but a listing that *has* run and dropped this datastack knows why, and that is
+   * this node's story: it is the node nobody can run, and waiting for a Run to say so costs
+   * a press and produces the least actionable message in the app.
+   */
+  if (versions.length === 0) {
+    const why = source.whyDatasetMissing?.(family.family)
+    return why ? [why] : []
+  }
+  const chosen = String(ctx.params.version)
+  if (chosen && !versions.some((v) => v.version === chosen)) {
+    return [
+      `${familyLabel(family)} ${chosen} is not on this server — it offers ${versions.map((v) => v.version).join(', ')}`,
+    ]
+  }
+  return [
+    ...annotationIssues(ctx.inputs.annotations),
+    ...edgeSetIssues(ctx.params),
+    ...populationIssues(discoveredNeuronSchema(source, datasetId), ctx.params, datasetId),
+    ...rootDriftIssues(family.sourceId, datasetId),
+  ]
+}
+
 function buildDatasetNode(family: DatasetFamily) {
   return packNode({
     type: `dataset.${family.key}`,
@@ -176,35 +213,15 @@ function buildDatasetNode(family: DatasetFamily) {
     }),
 
     validate: (ctx) => {
-      const source = getSource(family.sourceId)
-      if (!source) return [`Data source "${family.sourceId}" is not registered`]
-      // Once: `resolveDatasetId` runs `versionsFor`, which peeks the listing and sorts it, and
-      // `validate` runs on every graph mutation for every dataset node on the canvas.
-      const datasetId = resolveDatasetId(family, ctx.params.version)
-      const versions = versionsFor(family)
       /*
-       * Empty is two states and only one of them is silent. The listing not having arrived is
-       * the connection panel's story to tell, not a per-node error on every dataset node in the
-       * graph — but a listing that *has* run and dropped this datastack knows why, and that is
-       * this node's story: it is the node nobody can run, and waiting for a Run to say so costs
-       * a press and produces the least actionable message in the app.
+       * Beside the listing's issues rather than among them: this one is asked of the wiring alone,
+       * so it is said before the listing has arrived as well as after, where every other line
+       * waits for it. The sibling of `annotationIssues`, which is about the same port once wired.
+       * See `AnnotationChain.staleBuiltin`.
        */
-      if (versions.length === 0) {
-        const why = source.whyDatasetMissing?.(family.family)
-        return why ? [why] : []
-      }
-      const chosen = String(ctx.params.version)
-      if (chosen && !versions.some((v) => v.version === chosen)) {
-        return [
-          `${familyLabel(family)} ${chosen} is not on this server — it offers ${versions.map((v) => v.version).join(', ')}`,
-        ]
-      }
-      return [
-        ...annotationIssues(ctx.inputs.annotations),
-        ...edgeSetIssues(ctx.params),
-        ...populationIssues(discoveredNeuronSchema(source, datasetId), ctx.params, datasetId),
-        ...rootDriftIssues(family.sourceId, datasetId),
-      ]
+      const stale = familyStaleLabels(family, ctx.inputs.annotations)
+      const issues = datasetIssues(family, ctx)
+      return stale ? [...issues, stale] : issues
     },
 
     evaluate: async (ctx) => {

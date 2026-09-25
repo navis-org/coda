@@ -797,6 +797,35 @@ export type ParamValues = Record<string, ParamValue>
 // Contexts
 // ---------------------------------------------------------------------------
 
+/**
+ * A remedy a warning offers as a button, drawn directly under its sentence on the card and in the
+ * inspector.
+ *
+ * **A store action by name, never a callback**, for two reasons. A node definition is headless
+ * and frozen, so it cannot hold a closure over the store. And a fix is an edit, and every edit is
+ * a store action that `lock.test.ts` has put on one side of the lock, so the list of things a
+ * button here can do is closed and every one of them is already refused under the lock. The
+ * action takes the node id and nothing else.
+ */
+export interface IssueFix {
+  /** What the button says. */
+  label: string
+  /** Its tooltip: what pressing it will do. */
+  title?: string
+  action: 'attachAnnotationChain'
+}
+
+/** One line of `validate` carrying its fix. A bare string is the same line with none. */
+export interface ValidationLine {
+  message: string
+  fix?: IssueFix
+}
+
+/** A `validate` line's sentence, whichever shape it came in. */
+export function validationMessage(line: string | ValidationLine): string {
+  return typeof line === 'string' ? line : line.message
+}
+
 /** Edit-time context: types only, never values. */
 export interface InferContext<P extends ParamValues = ParamValues> {
   params: P
@@ -1250,8 +1279,11 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    * it costs a re-inference each time the node's result changes shape.
    */
   observesOutputSchema?: boolean
-  /** Edit-time problems shown on the node (missing column, incompatible dtype, ...). */
-  validate?(ctx: InferContext<P>): string[]
+  /**
+   * Edit-time problems shown on the node (missing column, incompatible dtype, ...). A line is a
+   * sentence, or a sentence with the button that fixes it (`ValidationLine`).
+   */
+  validate?(ctx: InferContext<P>): (string | ValidationLine)[]
   evaluate(ctx: EvalContext<P>): Promise<Record<string, Value>> | Record<string, Value>
 }
 

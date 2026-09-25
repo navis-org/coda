@@ -1808,6 +1808,29 @@ input.field--combo {
 }
 
 /*
+ * The fix a warning carries (`NodeIssue.fix`), on its own line under the sentence, on the card and
+ * in the inspector. Outlined in the text colour rather than a status hue: the band around it
+ * already says which kind of issue this is.
+ */
+.issue-fix {
+  display: block;
+  margin-top: 4px;
+  padding: 1px 6px;
+  font: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.issue-fix:hover {
+  background: var(--surface-hover);
+}
+.issue__body {
+  min-width: 0;
+}
+
+/*
  * Node hints: an author's guidance, docked to a card's edge.
  *
  * A sibling of the card inside React Flow's wrapper, so `bottom: 100%` / `top: 100%` resolve

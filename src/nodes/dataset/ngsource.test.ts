@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
 import type { ParamValues } from '../../core/node'
-import { defaultParams, makeInferContext } from '../../core/node'
+import { defaultParams, makeInferContext, validationMessage } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { attributeSchema, datasetRef } from '../../core/types'
@@ -47,7 +47,7 @@ function ctxFor(params: ParamValues) {
 }
 
 function issues(params: ParamValues): string[] {
-  return requireNodeDef(TYPE).validate?.(ctxFor(params)) ?? []
+  return (requireNodeDef(TYPE).validate?.(ctxFor(params)) ?? []).map(validationMessage)
 }
 
 beforeEach(() => {

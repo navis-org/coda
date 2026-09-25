@@ -16,6 +16,7 @@ import { deserializeGraph } from '../../core/graph'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
 import '../../nodes'
+import { ATTACH_CHAIN_LABEL } from '../../nodes/lib/datasetFamilies'
 import { useGraphStore } from '../../store/graphStore'
 import { clearStorage, installJsdomStubs } from '../../test/jsdomStubs'
 
@@ -252,5 +253,74 @@ describe('the population summary', () => {
       useGraphStore.getState().loadGraph(hemibrainGraph({ version: '', refresh: 0 }))
     })
     expect(line(await waitFor(datasetCard))).toBeUndefined()
+  })
+})
+
+/**
+ * The fix for a bare FlyWire node's stale labels, on the card that warns about them.
+ *
+ * Silent when wrong both ways: a button missing from the lone node leaves the warning naming a
+ * control that is not there, and a button on a node that is already fed offers to add a second
+ * chain beside the first. See `AnnotationChain.staleBuiltin`.
+ */
+describe('the stale-labels fix', () => {
+  function flywireGraph() {
+    return deserializeGraph(
+      JSON.stringify({
+        version: 1,
+        nodes: [{ id: 'ds', type: 'dataset.flywire', position: { x: 600, y: 40 }, params: {} }],
+        edges: [],
+      }),
+    ).graph
+  }
+
+  function attachButton(card: HTMLElement): HTMLElement | null {
+    return card.querySelector('.coda-node__issue .issue-fix')
+  }
+
+  it('is offered on a lone node, and attaching removes it', async () => {
+    render(<App />)
+    act(() => {
+      useGraphStore.getState().loadGraph(flywireGraph())
+    })
+    const card = await waitFor(datasetCard)
+    const button = attachButton(card)!
+    expect(button.textContent).toBe(ATTACH_CHAIN_LABEL)
+    // Under the sentence it answers, in the card's issue line, rather than in the body above it.
+    const issue = card.querySelector('.coda-node__issue')!
+    expect(issue.textContent).toContain('hierarchical_neuron_annotations')
+    expect(
+      card.querySelector('.dataset-body')!.compareDocumentPosition(button) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+
+    act(() => {
+      fireEvent.click(button)
+    })
+    const { graph } = useGraphStore.getState()
+    expect(graph.edges.some((e) => e.target === 'ds' && e.targetHandle === 'annotations')).toBe(
+      true,
+    )
+    await waitFor(() => expect(attachButton(datasetCard())).toBeNull())
+
+    // One undo step takes the whole chain back, and the offer with it.
+    act(() => {
+      useGraphStore.getState().undo()
+    })
+    expect(useGraphStore.getState().graph.nodes.map((n) => n.id)).toEqual(['ds'])
+    await waitFor(() => expect(attachButton(datasetCard())).toBeTruthy())
+  })
+
+  it('is not offered under the lock', async () => {
+    render(<App />)
+    act(() => {
+      useGraphStore.getState().loadGraph(flywireGraph())
+      if (!useGraphStore.getState().locked) useGraphStore.getState().toggleLocked()
+    })
+    const card = await waitFor(datasetCard)
+    expect(attachButton(card)).toBeNull()
+    act(() => {
+      useGraphStore.getState().toggleLocked()
+    })
   })
 })

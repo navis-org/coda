@@ -692,6 +692,61 @@ That path is also why a chain is built for *every* dataset in a comparison rathe
 being browsed. `Match Cell Types` takes a **Dataset** and reads its whole annotated table, so a
 FlyWire node without its chain has no type column for the mapper to match on.
 
+### A bare node that looks right says where its labels came from
+
+Both builders put the chain in, but a FlyWire node arrives on its own by every other route: the
+palette, the canvas **+**, the command palette, an assistant or MCP plan that skipped the catalogue
+note, a paste, a file saved earlier. That node does not *look* broken. With nothing on its
+Annotations port the backend reads the datastack's own `hierarchical_neuron_annotations`, an
+outdated cut of the file the chain fetches, so the table shows plausible types on most neurons.
+What it lacks only shows up when somebody goes looking for a type that is not there. BANC and
+minnie65 are the other case: a bare node there shows root ids with no names, which is visibly
+incomplete. So the difference is declared, as `AnnotationChain.staleBuiltin` (what the built-in
+labels lack, as a clause), and only FlyWire declares it.
+
+Three options were weighed against that and not taken:
+
+- **Bringing the chain in on every add**, as a companion. It still misses plans, pastes and
+  saved files, and it drops six cards, two of them `expensive`, on every drag.
+- **Reading nothing when unwired.** That trades a plausible wrong answer for an obvious empty
+  one, but it takes the table away from people who use it on purpose.
+- **Changing the fallback to fetch the file.** The node would hide the work, which is the
+  reason the chain is not baked into the node (above).
+
+What was built is a warning worked out from the wiring, so it reaches every route including old
+files, plus a fix on the same card:
+
+- **`familyStaleLabels` is the one predicate.** It returns a `validate` line carrying its fix
+  (`ValidationLine`, `NodeIssue.fix`), so a button cannot appear without its warning, and one
+  wire removes both. `validate` is the right channel: its lines are `warning` severity and block
+  nothing. The line is said on **every** return of `validate`, including before the version
+  listing has arrived: it depends only on the wiring, and a warning that shows up a second after
+  the card is one people learn to distrust.
+- **The button is drawn under the sentence, not in the body.** The first version put it in
+  `DatasetBody`, and a card draws its issue line *after* the body, so the fix sat above the
+  problem it answered. `NodeIssue.fix` is general: a store action by name (`IssueFix.action`),
+  never a callback, since a definition is headless and frozen and every edit is already a store
+  action classified in `lock.test.ts`. `IssueFixButton` draws it on the card and in the inspector.
+- **The warning names the table**, read off the shipped datastack spec rather than typed a second
+  time, and says it is outdated. "Might be stale" gives a reader nothing to check.
+- **Any wire on the port stands it down**, not only this chain's. A table somebody wired in on
+  purpose is their decision.
+- **The fix is `attachChain`** (`wizard/attachChain.ts`). It uses the builders' own `chainLinks`,
+  `foldChain` and `withChainCaptions`, with ids from `prefixChain` under a fresh prefix, since the
+  canvas may already hold a chain. It is one undo step and frozen under the lock.
+- **It places the folded frame, not the cards.** The first version put the cards in their columns
+  ending one gap left of the dataset, so that unfolding would cover nothing. A folded box is drawn
+  at its members' top-left, so that put the box four columns out, with a long wire across empty
+  canvas. Now the frame and its caption go one card gap left of the dataset, level with it, which
+  is where the wizard's own layout pass puts the frame. Unfolding then spreads the cards over the
+  dataset, as it does in a wizard graph, and an Arrange tidies it. Where the frame would land on
+  something, it moves *down* (`dodgeDelta`). **Nothing already on the canvas moves**, and it does
+  not arrange: a button that re-lays somebody's graph to add six cards is a button pressed once.
+
+Not measured yet: the warning line and its button make a bare FlyWire card taller than the 282
+`DATASET_CARD_HEIGHTS` records for CAVE. That number places the Description companion on add, so
+it wants re-measuring in a browser.
+
 ## The type columns a family publishes
 
 `DatasetFamily.typeColumns`: every column naming a cell type, **including the ones written in

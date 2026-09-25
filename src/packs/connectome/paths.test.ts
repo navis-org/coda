@@ -19,7 +19,12 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
 import type { CodaGraph } from '../../core/graph'
 import { inferGraph } from '../../core/inference'
-import { availableColumns, defaultParams, makeInferContext } from '../../core/node'
+import {
+  availableColumns,
+  defaultParams,
+  makeInferContext,
+  validationMessage,
+} from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { T } from '../../core/types'
 import { Scheduler } from '../../core/scheduler'
@@ -76,7 +81,11 @@ describe('the capability gate', () => {
      */
     const def = requireNodeDef('neuron.paths')
     const ctx = makeInferContext(def, defaultParams(def), { dataset: T.dataset() })
-    expect(def.validate!(ctx).filter((i) => /trace paths/.test(i))).toEqual([])
+    expect(
+      def.validate!(ctx)
+        .map(validationMessage)
+        .filter((i) => /trace paths/.test(i)),
+    ).toEqual([])
   })
 })
 

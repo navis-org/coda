@@ -16,7 +16,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { addEdge, addNode, emptyGraph } from '../../core/graph'
-import { defaultParams } from '../../core/node'
+import { defaultParams, validationMessage } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { inferGraph } from '../../core/inference'
 import { column, tableSchema } from '../../core/types'
@@ -108,7 +108,7 @@ function validateWith(
     columns: () => [],
     inputPorts: () => [],
     outputPorts: () => [],
-  } as never)
+  } as never).map(validationMessage)
 }
 
 /** Points as `[x, y]`, in row order. */

@@ -1226,7 +1226,12 @@ rule belongs to one area, its record is in that area's doc.
   it; it is **not baked into the node**, some links being `expensive`; **a demo build leaves it off,
   except where the demoed node *is* the dataset** (cost is not an inference issue, and a dataset
   node's demo is the graph the wizard would have built); and **the reason lives on the chain**, or a
-  note saying the built-in typing is stale outlives the chain that replaced it.
+  note saying the built-in typing is stale outlives the chain that replaced it. Fifth: **a chain
+  replacing labels the dataset already has declares `staleBuiltin`**. A bare FlyWire node looks
+  right on an outdated table, so it warns, worked out from the wiring rather than set at add time
+  (every route and old files included), with the fix on the warning itself (`NodeIssue.fix`, drawn
+  under the sentence) running `attachChain`, which places the folded **frame**, not its cards. Any
+  wire on the port stands it down.
   See [docs/datasets.md](docs/datasets.md).
 - **A link in a static page names a thing; it never carries one — and the search that resolves the
   name runs at build time.** Every node guide entry opens a real workflow through a `demo://`

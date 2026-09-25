@@ -9,7 +9,7 @@
 
 import type { CodaGraph, GraphNode } from './graph'
 import { inboundIndex, nodePort, nodesById, portKey, topoSort, wouldCreateCycle } from './graph'
-import type { InferContext, NodeDefinition } from './node'
+import type { InferContext, IssueFix, NodeDefinition } from './node'
 import { makeInferContext, validateColumnParams } from './node'
 import { missingMessage, unknownTypeOf } from './missing'
 import { getNodeDef } from './registry'
@@ -40,6 +40,8 @@ export interface NodeIssue {
    * A flag rather than a second array, so nothing that renders issues has to learn about it.
    */
   aboutColumns?: true
+  /** The button that fixes it, where the node knows one. See `IssueFix`. */
+  fix?: IssueFix
 }
 
 export interface NodeTypes {
@@ -233,7 +235,10 @@ export function inferGraph(graph: CodaGraph, options: InferOptions = {}): Infere
       )
       if (def.validate) {
         issues.push(
-          ...def.validate(ctx).map((message): NodeIssue => ({ severity: 'warning', message })),
+          ...def.validate(ctx).map((line): NodeIssue => ({
+            severity: 'warning',
+            ...(typeof line === 'string' ? { message: line } : line),
+          })),
         )
       }
     } catch (err) {

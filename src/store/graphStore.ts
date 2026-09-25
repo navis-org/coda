@@ -95,6 +95,8 @@ import { subscribeAnnotationsLearned } from '../data/annotations'
 import { subscribeRootCheck } from '../data/cave/rootIds'
 import type { StarterSpec } from '../wizard/starters'
 import { buildStarter } from '../wizard/starters'
+import { attachChain } from '../wizard/attachChain'
+import { familyForNodeType } from '../nodes/lib/datasetFamilies'
 import type { WorkflowSummary } from './library'
 import type { RecipeSummary } from './recipes'
 import {
@@ -1052,6 +1054,12 @@ export interface GraphState {
 
   // --- editing -------------------------------------------------------------
   addNode(type: string, position: { x: number; y: number }): string
+  /**
+   * Put a dataset family's annotation chain in front of the dataset node `nodeId`, which is what
+   * its card's "Use current annotations" button does. One undo step. Does nothing where the node
+   * is no family with a chain, or its Annotations port is already fed. See `wizard/attachChain.ts`.
+   */
+  attachAnnotationChain(nodeId: string): void
   /**
    * End a drag by inserting the dragged node into the wire it was dropped on.
    *
@@ -2848,6 +2856,16 @@ export const useGraphStore = create<GraphState>((set, get) => {
     openRecipes: (open) => set({ recipesOpen: open }),
 
     // --- editing -----------------------------------------------------------
+
+    attachAnnotationChain: (nodeId) => {
+      if (frozen()) return
+      const node = get().graph.nodes.find((n) => n.id === nodeId)
+      const chain = node ? familyForNodeType(node.type)?.annotationChain : undefined
+      if (!chain) return
+      const before = get().graph
+      commit((g) => attachChain(g, nodeId, chain).graph)
+      if (get().graph !== before) set({ notice: `Added ${chain.title}. Run to load them.` })
+    },
 
     addNode: (type, position) => {
       // The empty id says "nothing was added". Every caller is gated on `locked` before it asks,

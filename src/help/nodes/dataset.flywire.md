@@ -10,7 +10,7 @@ Two sets exist:
 2. Free-form community annotations.
 
 > [!WARNING] On its own, this node uses `hierarchical_neuron_annotations`
-> That CAVE table holds a by now **outdated** version of the hierarchical annotations.
+> That CAVE table holds a by now **outdated** version of the hierarchical annotations. Until something is wired to its Annotations port, the card says so and offers **Use current annotations**, which puts the chain described below in front of it.
 
 You do not have to wire the current ones up by hand. **New ▸ FlyWire FAFB public** and the **Workflow Wizard** both open this dataset with the full setup in front of it: the latest hierarchical annotations from the [flywire_annotations](https://github.com/flyconnectome/flywire_annotations) repository, root ids repaired, and the community annotations joined in as tags. It arrives as one folded frame called *FlyWire annotations* — open it to see the six cards, or leave it alone.
 
