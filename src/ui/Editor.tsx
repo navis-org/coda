@@ -89,6 +89,7 @@ import { useArrange } from './useArrange'
 import { useDownloads } from './useDownloads'
 import { useRunNotify } from './notify'
 import { useForEach } from './useForEach'
+import { usePinchToCanvas } from './usePinchToCanvas'
 
 /**
  * Minimap size.
@@ -225,6 +226,7 @@ function EditorCanvas() {
   // card expanded at all.
   useRunNotify()
   const wrapperRef = useRef<HTMLDivElement>(null)
+  usePinchToCanvas(wrapperRef)
   const pointerRef = useRef({ x: 0, y: 0 })
   const draggingRef = useRef(false)
   // The wire a drop would insert the dragged card into; drawn highlighted while it is set.

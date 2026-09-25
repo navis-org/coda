@@ -294,6 +294,11 @@ Six reports from the first person to use it, each a thing no probe had asked.
   ratio of 3**, because every cell on a card's wall has a canvas mounted whether scrolled into view
   or not and memory grows with the square: sharp at ordinary zooms, soft again past about 1.5× on a
   2× display. Lifting that means drawing only the rows in view at the high ratio.
+  **The step follows the zoom only once it settles** (`SETTLE_MS`, 200 ms, through a store
+  subscription rather than a selector). Following it live made a pinch over the card jittery:
+  each step resizes and redraws every cell canvas at once, ~20–30 ms for 70 cells of 8,000
+  segments in headless Chrome, and a pinch hovering at a boundary crossed it back and forth.
+  During the gesture the transform stretches the old backing store; it sharpens once, after.
 
 - **The wall downloads as SVG and PNG** through the viewers' own `ViewerActions` — a body had no
   export at all, only `out.*` viewers did. `wallToSvg` (`ui/cortex/wallSvg.ts`) synthesises the
