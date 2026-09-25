@@ -778,6 +778,35 @@ export function triangleArea(positions: Float32Array, a: number, b: number, c: n
 export type Boxes = Float64Array
 
 /**
+ * The volume a closed triangle mesh encloses, **signed by its winding**: positive when the faces'
+ * normals point out, negative when the mesh is wound inside-out.
+ *
+ * The divergence theorem, one tetrahedron per face against the origin. The sign is the useful half
+ * for anything reading a face's facing as "leaving" or "entering" — `Points in Volumes` does, and
+ * the synthetic region meshes were once wound inward, which read every point inside as outside.
+ */
+export function signedVolume(positions: Float32Array, indices: Uint32Array): number {
+  let sum = 0
+  const triangles = Math.floor(indices.length / 3)
+  for (let t = 0; t < triangles; t++) {
+    const a = indices[t * 3]! * 3
+    const b = indices[t * 3 + 1]! * 3
+    const c = indices[t * 3 + 2]! * 3
+    const ax = positions[a]!
+    const ay = positions[a + 1]!
+    const az = positions[a + 2]!
+    const bx = positions[b]!
+    const by = positions[b + 1]!
+    const bz = positions[b + 2]!
+    const cx = positions[c]!
+    const cy = positions[c + 1]!
+    const cz = positions[c + 2]!
+    sum += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)
+  }
+  return sum / 6
+}
+
+/**
  * Each mesh's own bounding box, which is what makes the whole thing affordable.
  *
  * A dataset's primary set tiles the volume, so a point is in one region and its box is in two

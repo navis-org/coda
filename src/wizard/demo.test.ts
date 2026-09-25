@@ -18,6 +18,7 @@ import { defaultInputPorts } from '../core/ports'
 import { getNodeDef, listableNodeDefs } from '../core/registry'
 import { serializeGraph, deserializeGraph, type CodaGraph } from '../core/graph'
 import { demoFragment, parseShareFragment } from '../data/share/fragment'
+import { CURATED } from './curated'
 import { demoGraph, demoPlan, demoPlans } from './demo'
 import { DEMO_DATASET } from './build'
 import { DATASET_FAMILIES } from '../nodes/lib/datasetFamilies'
@@ -55,8 +56,11 @@ describe('coverage', () => {
     expect([...DEMOS.keys()].sort()).toEqual([...TYPES].sort())
   })
 
+  // Every type is searched or curated, and never both: the guide links a curated one bare.
   it('agrees with the set the node guide asks for', () => {
-    expect([...demoPlans().keys()].sort()).toEqual([...TYPES].sort())
+    const curated = CURATED.flatMap((spec) => spec.types)
+    for (const type of curated) expect(demoPlans().has(type), type).toBe(false)
+    expect([...demoPlans().keys(), ...curated].sort()).toEqual([...TYPES].sort())
   })
 
   it('puts the node it is about in the graph', () => {

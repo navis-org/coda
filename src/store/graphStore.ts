@@ -693,6 +693,14 @@ export interface GraphState {
   openPlugins(): void
   closePlugins(): void
   /**
+   * Whether the What's New card is up. In the store because three surfaces need the answer: the
+   * card itself, the `?` menu that opens it by hand, and the feedback nudge, which shares its
+   * corner and stands down while it is showing. Whether it is *due* is `ui/whatsNew.ts`' call.
+   */
+  whatsNewOpen: boolean
+  openWhatsNew(): void
+  closeWhatsNew(): void
+  /**
    * Whether the Workflow Wizard is up.
    *
    * A plain boolean owned by the store, like `zooOpen`: three unrelated surfaces open it — the
@@ -2371,6 +2379,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
     pluginsOpen: false,
     openPlugins: () => set({ pluginsOpen: true }),
     closePlugins: () => set({ pluginsOpen: false }),
+    whatsNewOpen: false,
+    openWhatsNew: () => set({ whatsNewOpen: true }),
+    closeWhatsNew: () => set({ whatsNewOpen: false }),
 
     // Closes the start page on the way in, for `openZoo`'s reason: two full-screen modals is one
     // too many, and the wizard is reached *from* that page.

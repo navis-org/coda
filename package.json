@@ -44,6 +44,7 @@
     "probe:helpers": "python3 scripts/probe-py-helpers.py",
     "probe:r-helpers": "Rscript scripts/probe-r-helpers.R",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
+    "changelog:shots": "vite-node scripts/changelog-shots.mjs",
     "og:card": "rsvg-convert -w 1200 -h 630 scripts/og-card.svg -o public/og.png",
     "lint": "eslint .",
     "knip:check": "node scripts/knip-check.mjs",

@@ -13,6 +13,7 @@ import { menuShift, submenuPlacement, useMenuFit } from './placement'
 export function Dropdown({
   label,
   title,
+  badge,
   onOpen,
   tour,
   flyouts,
@@ -22,6 +23,11 @@ export function Dropdown({
   label: string
   /** Accessible name and tooltip, for a trigger whose label is a glyph rather than a word. */
   title?: string
+  /**
+   * Draws a dot on the trigger, and these words after its name — the dot is colour and shape, so
+   * the words are what a screen reader and a tooltip get. Omitted or empty draws nothing.
+   */
+  badge?: string
   /** Fired on the transition to open — the seam for a menu whose contents have to be fetched. */
   onOpen?: () => void
   /** `data-tour` name, for a menu the Guided Tour points at. See `tour/steps.ts`. */
@@ -53,14 +59,16 @@ export function Dropdown({
   const shift = menuShift(useMenuFit(ref, open, '.dropdown__panel'))
 
   useDismissOnOutside(ref, close, { enabled: open })
+  // One name for the trigger, carrying the badge's words, since the dot itself is `aria-hidden`.
+  const name = badge ? `${title ?? label} — ${badge}` : title
 
   return (
     <div className="dropdown" ref={ref} data-tour={tour}>
       <button
         type="button"
         className="btn btn--ghost"
-        title={title}
-        aria-label={title}
+        title={name}
+        aria-label={name}
         onClick={() => {
           // Not inside the state updater: React may call that twice under StrictMode, which
           // would fire the fetch twice for one click.
@@ -69,7 +77,7 @@ export function Dropdown({
           if (next) onOpen?.()
         }}
       >
-        {label} ▾
+        {label} ▾{badge && <span className="dropdown__badge" aria-hidden="true" />}
       </button>
       {open && (
         <div

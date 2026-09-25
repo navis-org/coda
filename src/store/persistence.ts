@@ -1004,9 +1004,18 @@ export function savePackChoices(choices: Readonly<Record<string, boolean>>): voi
  * `watchTabIdentity`.
  */
 export function watchPackChoices(onChange: () => void): void {
+  watchLocalKey(PACK_CHOICES_KEY, onChange)
+}
+
+/**
+ * Call back when another tab writes (or clears) one `localStorage` key — `null` being the event a
+ * whole-storage clear sends. For a value this tab caches at load and another tab can change: the
+ * pack switches above, the changelog's seen date. Never unsubscribed, like `watchTabIdentity`.
+ */
+export function watchLocalKey(key: string, onChange: () => void): void {
   try {
     window.addEventListener('storage', (event) => {
-      if (event.key === PACK_CHOICES_KEY || event.key === null) onChange()
+      if (event.key === key || event.key === null) onChange()
     })
   } catch {
     // No `window`: a suite under plain Node, with no other tab to hear from.

@@ -32,6 +32,7 @@ import { buildStarter, starterFor } from '../wizard/starters'
 import { arrangeHeadless } from '../test/arrange'
 import { GROWING_CROSS_SETS } from '../test/crossSets'
 import { DEMO_DATASET, buildWorkflow } from '../wizard/build'
+import { CURATED, exampleGraph } from '../wizard/curated'
 import { demoGraph, demoPlans } from '../wizard/demo'
 import {
   analysisOptions,
@@ -181,6 +182,12 @@ describe('the node guide demo workflows', () => {
   for (const [type, plan] of demoPlans()) {
     it(`lays the ${type} demo out with no card on top of another`, () => {
       expect(clashesIn(demoGraph(type, plan)!.nodes)).toEqual([])
+    })
+  }
+  // The hand-written ones carry no plan, so the sweep above does not reach them.
+  for (const spec of CURATED) {
+    it(`lays the curated ${spec.title} demo out with no card on top of another`, () => {
+      expect(clashesIn(exampleGraph(spec).nodes)).toEqual([])
     })
   }
 })

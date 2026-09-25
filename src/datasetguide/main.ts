@@ -2,7 +2,7 @@
  * The Dataset Guide's script, which is a stylesheet and a theme read.
  *
  * Everything on the page is rendered at build time by `render.ts` and spliced into
- * `datasets.html` by `vite/datasetGuideData.ts` — see that module for why. So this file has
+ * `datasets.html` by `vite/renderedPages.ts` — see that module for why. So this file has
  * nothing to draw, and what is left is the one thing a static document cannot do from markup:
  * follow the theme the editor was last left in.
  *

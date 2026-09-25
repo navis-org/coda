@@ -299,9 +299,7 @@ export class MockSource implements DataSource {
     const neuron = connectome.byId.get(neuronId)
     if (!neuron) return undefined
     await delay(this.latencyMs / 4, req.signal)
-    const rois = connectome.roiCounts
-      .filter((rc) => rc.neuronId === neuronId && rc.pre + rc.post > 0)
-      .map((rc) => rc.roi)
+    const rois = skeletonRois(connectome, neuronId)
     const fine = req.detail === 'fine'
     const skeleton = generateSkeleton(neuronId, rois, { targetPoints: fine ? 640 : 160 })
     const mesh = skeletonToTubeMesh(skeleton, fine ? 5 : 3)
@@ -774,12 +772,7 @@ export class MockSource implements DataSource {
       throwIfAborted(req.signal)
       const neuron = connectome.byId.get(neuronId)
       if (!neuron) continue
-      const rois = connectome.roiCounts
-        .filter((rc) => rc.neuronId === neuronId)
-        .sort((a, b) => b.pre + b.post - (a.pre + a.post))
-        .map((rc) => rc.roi)
-
-      const skeleton = generateSkeleton(neuronId, rois)
+      const skeleton = generateSkeleton(neuronId, skeletonRois(connectome, neuronId))
       items.push(skeleton)
       rows.push({
         neuronId: publishedId(neuronId),
@@ -846,10 +839,7 @@ export class MockSource implements DataSource {
       if (!neuron) continue
       // The skeleton is regenerated here rather than cached, because it is seeded and
       // therefore identical — synapses land on the same arbor the 3D viewer draws.
-      const rois = connectome.roiCounts
-        .filter((rc) => rc.neuronId === neuronId)
-        .map((rc) => rc.roi)
-      const skeleton = generateSkeleton(neuronId, rois)
+      const skeleton = generateSkeleton(neuronId, skeletonRois(connectome, neuronId))
 
       let index = 0
       const emit = (partnerId: number, weight: number, polarity: 'pre' | 'post') => {
@@ -900,10 +890,7 @@ export class MockSource implements DataSource {
     const skeletonOf = (neuronId: number) => {
       let skeleton = skeletons.get(neuronId)
       if (!skeleton) {
-        const rois = connectome.roiCounts
-          .filter((rc) => rc.neuronId === neuronId)
-          .map((rc) => rc.roi)
-        skeleton = generateSkeleton(neuronId, rois)
+        skeleton = generateSkeleton(neuronId, skeletonRois(connectome, neuronId))
         skeletons.set(neuronId, skeleton)
       }
       return skeleton
@@ -1254,4 +1241,20 @@ function roiCountIndex(connectome: MockConnectome): Map<number, Map<string, RoiP
   }
   roiCountMemo.set(connectome, index)
   return index
+}
+
+/**
+ * The regions a neuron's synthetic skeleton is grown from, busiest first: the soma goes in the
+ * first and the arbor in the second (`generateSkeleton`).
+ *
+ * One function for every route that grows a skeleton, because the skeleton is regenerated rather
+ * than cached and the region *order* is part of its seed. The skeleton route sorted and the three
+ * synapse routes did not, so for a neuron like T4a (more synapses in the lobula plate than the
+ * medulla) the synapses sat on a mirror-image arbor the 3D view never drew.
+ */
+export function skeletonRois(connectome: MockConnectome, neuronId: number): string[] {
+  return connectome.roiCounts
+    .filter((rc) => rc.neuronId === neuronId && rc.pre + rc.post > 0)
+    .sort((a, b) => b.pre + b.post - (a.pre + a.post))
+    .map((rc) => rc.roi)
 }

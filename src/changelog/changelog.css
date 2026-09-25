@@ -1,0 +1,783 @@
+/*
+ * The changelog.
+ *
+ * Tokens come from the app's own `theme.css`, like every other published page, and the masthead,
+ * footer and base rules are the dataset guide's so the set reads as one publication. It follows
+ * `prefers-color-scheme` and the stored preference `main.ts` reads, being a page somebody opens
+ * from the editor and keeps beside it.
+ *
+ * **Kinds are told apart by shape and word, never by colour alone.** Each tag carries its label
+ * and a mark (disc, triangle, square, diamond, warning triangle); the hue is the socket family the
+ * editor already uses for the nearest thing, so this page adds no colour of its own.
+ */
+
+@import '../ui/theme.css';
+
+:root {
+  --gutter: clamp(1rem, 4vw, 3rem);
+  --tl-width: 210px;
+}
+
+[data-k='node'] {
+  --kc: var(--socket-table);
+}
+[data-k='chart'] {
+  --kc: var(--socket-matrix);
+}
+[data-k='data'] {
+  --kc: var(--socket-dataset);
+}
+[data-k='editor'] {
+  --kc: var(--socket-geometry);
+}
+[data-k='changed'] {
+  --kc: var(--status-warn);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: auto;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  text-wrap: balance;
+  letter-spacing: -0.028em;
+  font-weight: 800;
+  line-height: 1.12;
+}
+p {
+  margin: 0;
+}
+a {
+  color: inherit;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+}
+a:hover {
+  text-decoration-color: currentColor;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--surface-3);
+  border-radius: 4px;
+  padding: 0.08em 0.34em;
+}
+[hidden] {
+  display: none !important;
+}
+
+.shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding-inline: var(--gutter);
+}
+
+/* --------------------------------------------------------------------------
+   Masthead — the dataset guide's
+   -------------------------------------------------------------------------- */
+.top {
+  position: relative;
+  border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(
+      900px 380px at 82% 10%,
+      color-mix(in srgb, var(--accent) 9%, transparent),
+      transparent 68%
+    ),
+    var(--canvas);
+  overflow: hidden;
+}
+.top__dots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+  background-size: 22px 22px;
+  opacity: 0.8;
+  pointer-events: none;
+}
+.top__inner {
+  position: relative;
+  display: grid;
+  gap: 1.1rem;
+  padding-block: clamp(1.6rem, 4vw, 2.9rem) clamp(1.4rem, 3vw, 2rem);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.brand svg {
+  color: var(--text-primary);
+  flex: none;
+}
+.brand__tag {
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.1em 0.7em;
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+}
+.brand__spacer {
+  flex: 1;
+}
+.brand a {
+  color: var(--text-muted);
+}
+.brand a:hover {
+  color: var(--text-primary);
+}
+.top h1 {
+  font-size: clamp(1.9rem, 4.4vw, 3.1rem);
+  max-width: 20ch;
+  letter-spacing: -0.035em;
+}
+.top__sub {
+  max-width: 62ch;
+  color: var(--text-secondary);
+  font-size: clamp(1rem, 1.5vw, 1.12rem);
+}
+
+/* --------------------------------------------------------------------------
+   Layout: the timeline beside the entries
+   -------------------------------------------------------------------------- */
+.layout {
+  display: grid;
+  grid-template-columns: var(--tl-width) minmax(0, 1fr);
+  gap: 40px;
+  padding-block: 0 4rem;
+}
+.content {
+  min-width: 0;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-block: 1.6rem 0.4rem;
+}
+.chip {
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+.chip:hover {
+  background: var(--surface-hover);
+}
+.chip[aria-pressed='true'] {
+  background: var(--text-primary);
+  border-color: var(--text-primary);
+  color: var(--canvas);
+}
+.chip__n {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* --------------------------------------------------------------------------
+   Kind tags
+   -------------------------------------------------------------------------- */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--kc, var(--text-muted));
+  white-space: nowrap;
+}
+.tag::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background: currentColor;
+  flex: none;
+}
+.tag[data-k='node']::before {
+  border-radius: 50%;
+}
+.tag[data-k='chart']::before {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.tag[data-k='data']::before {
+  border-radius: 1px;
+}
+.tag[data-k='editor']::before {
+  transform: rotate(45deg) scale(0.85);
+}
+.tag[data-k='changed']::before {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  width: 10px;
+  height: 9px;
+  box-shadow: inset 0 -3px 0 0 var(--canvas);
+}
+
+/* --------------------------------------------------------------------------
+   Entries
+   -------------------------------------------------------------------------- */
+.release {
+  display: grid;
+  gap: 20px;
+  padding-block: 2.2rem;
+  border-top: 1px solid var(--border);
+  scroll-margin-top: 1rem;
+}
+.filters + .release {
+  border-top: 0;
+}
+.release__date {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin-bottom: -8px;
+}
+.release__date time {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.release__new {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.release h2 {
+  font-size: clamp(1.5rem, 2.6vw, 1.85rem);
+}
+.release__intro {
+  margin-top: -8px;
+  max-width: 64ch;
+  color: var(--text-secondary);
+}
+.release__label {
+  margin-bottom: -10px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.feature {
+  display: grid;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  scroll-margin-top: 1rem;
+}
+/*
+ * Captures are taken at twice the density (`scripts/changelog-shots.mjs`) and served as `2x`, so
+ * an image draws at the size it had on screen: a full viewer fills the card, a small panel sits
+ * centred on the editor's dotted canvas rather than being blown up to the card's width.
+ */
+.feature__fig {
+  display: flex;
+  justify-content: center;
+  margin: 0;
+  padding: clamp(12px, 3vw, 28px);
+  background-color: var(--canvas);
+  background-image: radial-gradient(var(--canvas-dot) 1px, transparent 1px);
+  background-size: 22px 22px;
+  border-bottom: 1px solid var(--border);
+}
+.feature__fig img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  box-shadow: var(--shadow-panel);
+}
+.feature__txt {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px 20px;
+}
+.feature h3 {
+  font-size: 1.2rem;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+.feature p {
+  max-width: 66ch;
+  color: var(--text-secondary);
+}
+.feature p strong {
+  color: var(--text-primary);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.3;
+  text-decoration: none;
+}
+.btn:hover {
+  background: var(--surface-hover);
+}
+.btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn--primary:hover {
+  background: color-mix(in srgb, var(--accent) 86%, #000);
+}
+
+.items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+.items li {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 4px 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  scroll-margin-top: 1rem;
+}
+.items li .tag {
+  padding-top: 4px;
+}
+.items li b {
+  font-weight: 650;
+}
+.items li p {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 15px;
+}
+.items li.changed {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--status-warn) 14%, transparent),
+    transparent 70%
+  );
+  padding-inline: 10px;
+  margin-inline: -10px;
+}
+.try {
+  color: var(--accent);
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.fixes {
+  font-size: 15px;
+  color: var(--text-secondary);
+}
+.fixes summary {
+  cursor: pointer;
+  color: var(--text-primary);
+  font-weight: 550;
+}
+.fixes ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.flash {
+  animation: flash 1.2s ease-out;
+}
+@keyframes flash {
+  from {
+    background-color: var(--accent-soft);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Timeline
+
+   Every mark is placed by `--t`, its distance from the newest end as a fraction of the span,
+   which `render.ts` writes. Beside the page it runs down; on a phone it runs across, oldest on
+   the left, and the same numbers place it. `main.ts` sets `--t` on the axis itself for the
+   marker and the fill, and thins labels that collide.
+   -------------------------------------------------------------------------- */
+.tl {
+  position: relative;
+}
+.tl__inner {
+  position: sticky;
+  top: 24px;
+  height: calc(100vh - 48px);
+  max-height: 900px;
+  min-height: 420px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  padding-top: 1.6rem;
+}
+.tl__head {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.tl__foot {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.axis {
+  position: relative;
+  margin: 8px 0 8px 7px;
+}
+.axis__line,
+.axis__fill {
+  position: absolute;
+  left: 0;
+  width: 2px;
+  transform: translateX(-1px);
+}
+.axis__line {
+  top: 0;
+  bottom: 0;
+  background: var(--border-strong);
+}
+.axis__fill {
+  top: 0;
+  height: calc(var(--t, 0) * 100%);
+  background: var(--accent);
+}
+.axis__day {
+  position: absolute;
+  left: 0;
+  top: calc(var(--t) * 100%);
+  width: 4px;
+  height: 1px;
+  background: var(--border-strong);
+  transform: translateX(-2px);
+}
+.axis.is-dense .axis__day {
+  display: none;
+}
+.axis__tick {
+  position: absolute;
+  left: calc(6px + var(--row, 0) * 9px);
+  top: calc(var(--t) * 100%);
+  width: 7px;
+  height: 3px;
+  border-radius: 2px;
+  transform: translateY(-50%);
+  background: var(--text-muted);
+  opacity: 0.45;
+  transition:
+    opacity 0.2s,
+    width 0.2s,
+    background 0.2s;
+}
+.axis__tick:hover,
+.axis__tick:focus-visible {
+  opacity: 1;
+}
+.axis__tick.is-inview {
+  opacity: 1;
+  background: var(--accent);
+  width: 12px;
+}
+.axis__tick.is-off {
+  opacity: 0.12;
+}
+.axis__entry {
+  position: absolute;
+  left: -7px;
+  top: calc(var(--t) * 100%);
+  transform: translateY(-50%);
+  display: grid;
+  grid-template-columns: 14px auto;
+  align-items: start;
+  gap: 0 56px;
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+.axis__dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--canvas);
+  border: 2px solid var(--border-strong);
+  transition:
+    background 0.2s,
+    border-color 0.2s;
+}
+.axis__lbl {
+  display: grid;
+  max-width: 130px;
+  margin-top: -2px;
+  line-height: 1.25;
+}
+.axis__entry.is-crowded .axis__lbl {
+  visibility: hidden;
+}
+.axis__lbl time {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.axis__title {
+  font-size: 12px;
+}
+.axis__new {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.axis__entry.is-current .axis__dot {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.axis__entry.is-past .axis__dot {
+  border-color: var(--accent);
+}
+.axis__entry.is-current .axis__title {
+  color: var(--text-primary);
+}
+.axis__entry:hover .axis__title {
+  text-decoration: underline;
+}
+.axis__here {
+  position: absolute;
+  left: 0;
+  top: calc(var(--t, 0) * 100%);
+  width: 22px;
+  height: 2px;
+  background: var(--accent);
+  transform: translate(-11px, -1px);
+  pointer-events: none;
+}
+.axis__here b {
+  position: absolute;
+  right: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--accent);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .axis__fill,
+  .axis__here {
+    transition:
+      top 0.12s linear,
+      height 0.12s linear,
+      left 0.12s linear,
+      width 0.12s linear;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flash {
+    animation: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Footer
+   -------------------------------------------------------------------------- */
+.foot {
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+}
+.foot__inner {
+  display: grid;
+  gap: 1rem;
+  padding-block: 1.4rem 1.8rem;
+}
+.foot__ask {
+  max-width: 62ch;
+  font-size: 0.94rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.foot__ask strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.foot__ask a {
+  color: var(--accent);
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.foot__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Narrow: the timeline becomes a bar across the top, oldest on the left
+   -------------------------------------------------------------------------- */
+@media (max-width: 860px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .tl {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    margin-inline: calc(-1 * var(--gutter));
+  }
+  .tl__inner {
+    position: static;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    display: block;
+    padding: 8px calc(var(--gutter) + 12px);
+    background: color-mix(in srgb, var(--canvas) 92%, transparent);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--border);
+  }
+  .tl__head,
+  .tl__foot {
+    display: none;
+  }
+  .axis {
+    height: 40px;
+    margin: 0;
+  }
+  .axis__line,
+  .axis__fill {
+    top: 12px;
+    bottom: auto;
+    left: 0;
+    right: 0;
+    width: auto;
+    height: 2px;
+    transform: none;
+  }
+  .axis__fill {
+    left: auto;
+    right: 0;
+    width: calc(var(--t, 0) * 100%);
+  }
+  .axis__day {
+    top: 12px;
+    left: calc((1 - var(--t)) * 100%);
+    width: 1px;
+    height: 5px;
+    transform: translate(0, -2px);
+  }
+  .axis__tick {
+    top: auto;
+    bottom: calc(8px + min(var(--row, 0), 1) * 7px);
+    left: calc((1 - var(--t)) * 100%);
+    width: 3px;
+    height: 6px;
+    transform: translateX(-1px);
+  }
+  .axis__tick.is-inview {
+    width: 3px;
+    height: 8px;
+  }
+  .axis__entry {
+    top: 13px;
+    left: calc((1 - var(--t)) * 100%);
+    transform: translate(-50%, -50%);
+    grid-template-columns: 12px;
+  }
+  .axis__dot {
+    width: 12px;
+    height: 12px;
+  }
+  .axis__lbl {
+    position: absolute;
+    top: -13px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: none;
+  }
+  .axis__lbl time {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .axis__title,
+  .axis__new {
+    display: none;
+  }
+  .axis__here {
+    top: 13px;
+    left: calc((1 - var(--t, 0)) * 100%);
+    width: 2px;
+    height: 20px;
+    transform: translate(-1px, -10px);
+  }
+  .axis__here b {
+    display: none;
+  }
+  .items li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

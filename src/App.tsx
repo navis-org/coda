@@ -17,6 +17,7 @@ import { ShortcutsDialog } from './ui/panels/ShortcutsDialog'
 import { SharedLinkGate } from './ui/panels/SharedLinkGate'
 import { GuidesDialog } from './ui/panels/GuidesDialog'
 import { WizardDialog } from './ui/panels/WizardDialog'
+import { WhatsNew } from './ui/panels/WhatsNew'
 import { StartPage } from './ui/panels/StartPage'
 import { SmallScreenGate } from './ui/panels/SmallScreenGate'
 import { ZooGate } from './ui/panels/ZooGate'
@@ -165,6 +166,11 @@ export function App() {
          * never competes with the one modal that already asks for attention on load.
          */}
         <FeedbackNudge />
+        {/*
+         * The same corner as the nudge, which stands down while this is up. Waits for the launch
+         * sequence by itself; see `ui/whatsNew.ts` for who is shown it at all.
+         */}
+        <WhatsNew />
         {/*
          * Last of all, and over every other dialog including the share gate: on a viewport this
          * small nothing behind it can be used, so anything drawn on top of it would be a question

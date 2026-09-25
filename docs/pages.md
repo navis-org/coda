@@ -1,7 +1,7 @@
-# The five published pages
+# The six published pages
 
-The overview, tutorial, node guide, dataset guide and the MCP page — extra vite entries that
-ship beside the app.
+The overview, tutorial, node guide, dataset guide, the MCP page and the changelog — extra vite
+entries that ship beside the app.
 
 ## The overview page
 
@@ -211,7 +211,7 @@ thirteen dataset names with nothing to choose between them.
 The node guide draws its grid in the browser and splices a static index in at build time, because
 it has a search box and 102 tiles. This page has a card per dataset, no filter and no state, so
 the split would buy nothing — and the static half is the half that matters. `render.ts` builds the
-entire document body and `vite/datasetGuideData.ts` splices it into `datasets.html` in place of
+entire document body and `vite/renderedPages.ts` splices it into `datasets.html` in place of
 `<!--@dataset-guide-->`; `main.ts` carries the stylesheet and the stored-theme read, and is the
 whole of the client script. Measured: **76 kB of HTML, 0.28 kB of JS, 19 kB of CSS** (nearly all
 of it `theme.css`), and `dist/datasets.html` references no `main-*` chunk.
@@ -405,6 +405,16 @@ The link is also the only one of the three a reader can *read*:
 `#!demo://core.filterTable/mock.opticlobe/partners/table/0` — node, dataset, analysis, viewer, and
 which pass of the wiring search won. See [persistence.md](persistence.md) for the grammar and
 `src/wizard/demo.ts` for why the plan is in the link rather than derived on the click.
+
+**A few demos are written by hand, and the link says so by carrying no plan.** The search asks
+what a node type-checks in, never what it is *for*, and for a node that transforms something those
+differ — it found Select Neurons a workflow in which it selected the list its own skeletons were
+fetched with. `wizard/curated.ts` holds a workflow per such type, `demoGraph` asks it before any
+plan or search, `demoPlan` does not search for one, and the guide writes a bare `demo://<type>`
+for them (`isCurated`). They arrive through `demoGraph`, so `demo.test.ts` holds them to the
+inference checks every demo meets and `placeGuards.test.ts` sweeps them for overlap alongside the
+searched ones; `curated.test.ts` adds the one the search failed, running each and refusing an
+empty focus card.
 
 **The synthetic dataset card carries a dismissable hint**, docked to it the way the wizard docks
 its three stage hints: *the data here is synthetic — swap this card for a real connectome and run
@@ -721,4 +731,108 @@ credentials already are, because those two are the ones somebody would otherwise
 `src/mcp/`: a change to the contract moves what the server can do, not what this document says
 about it, and a `lastmod` off it would report the page as edited on every deploy that touched an
 export.
+
+## The changelog
+
+A **sixth** entry — `changelog.html` at the root, `src/changelog/` — plus the What's New card in
+the editor, which reads the same table. User-facing: what changed, in words somebody who uses
+Coda would use. The commit history is linked from its footer for everything else. It starts at the public launch on
+1 September 2026 (the `0.2.0-beta.0` bump, right after analytics and the `coda.science` canonicals
+went in); what came before was a prototype nobody outside was using, so it has no entries.
+
+**The table is the page, and it is written by hand.** `entries.ts` is typed data, rendered to
+static HTML at build time by `render.ts` for the dataset guide's reason (a crawler gets the whole
+document). The commits feed a draft; which changes a reader needs to hear about, and in what
+words, is editorial. The grouping follows from that: an entry is an *update* — a batch somebody
+would describe in one sentence — dated the day it was written up, and each change under it
+carries the day it actually landed. A mock-up grouped by week first, and the question that
+killed it was "what determines the grouping?": nothing did. The site deploys on every push, so
+there is no release boundary to borrow either.
+
+**`vite/renderedPages.ts` is the dataset guide's plugin, generalised.** Its header had predicted
+a third build-time page would be the moment to merge; this was the second of that shape, and a
+table of slots cost less than a copy. The node guide's plugin stays apart, its shared module
+graph being the part worth keeping separate.
+
+**The timeline is to scale, and the marker walks by section, not by item.** Every mark is placed
+by `--t`, its distance from the newest end as a fraction of the span, so the stylesheet lays the
+same numbers down the side of the page or across the top on a phone (oldest left). Entries are
+dots, changes are ticks on the day they landed, and a busy day stacks its ticks sideways. The
+marker interpolates from an entry's date to the next older one as that section crosses a reading
+line: the items *inside* an update are ordered by importance, so a marker following them would
+jump back and forth. Labels that collide are hidden, the current entry's first; the span is at
+least a fortnight, so one entry is not a dot on a bar of nothing.
+
+**A captured image carries its display size, because `srcset="… 2x"` alone does not.** Captures
+are taken at twice the density. With only a `2x` candidate a browser on an ordinary screen treats
+the plain `src` as the 1x candidate and draws the file at full size — seen in a browser, a panel
+at double its size. `render.ts` reads the WebP/PNG header and writes half the pixel size as
+`width`/`height`, which also holds the box before the image loads so the page does not grow under
+the marker. `changelog.test.ts` checks every such image gets them.
+
+**Images come from `pnpm changelog:shots`.** Each `ChangelogImage.capture` names a demo workflow
+and what to do to it (params, expand a node, call a store action, crop); the script drives the dev
+server through the store module the app itself uses, so an action named in an entry is the action
+the app runs. It is `.mjs` run through `vite-node` so it can import the entries table rather than
+keep a second list. Demos run on the synthetic dataset. Two traps, both declared once in `changelog/images.ts`: a picture *of* the What's New card
+would appear as its own entry's thumbnail inside the card it depicts, and it pictures the other
+entries' thumbnails — so `depictsCard` keeps it off the card and makes the script take it last.
+The card draws a **thumbnail** the script writes beside each capture (`thumbFile`), not the capture
+itself: two viewer shots were ~200 kB and ~25 MB of decoded bitmap for two 72×48 tiles. A demo
+link carries no params, so a picture that needs one says in its body how to set it.
+
+**Every example is a `demo://` link, and some demos are written by hand.** Audited, the demo search
+was right where the node *is* the wizard's end — a Sankey, a Heatmap — and wrong for a node that
+transforms something, because it asks what type-checks rather than what the node is for: Select
+Neurons selected the very list its skeletons came from, Split Neurons had no rule so everything
+went to Rest, Points in Volumes tested synapses against the neurons' own meshes, and four more
+were bolted onto unrelated chains. The first fix was changelog-only — hand-written graphs packed
+into the link — and it fixed one surface of four, the node guide, the in-app `?` and any typed
+link still opening the bad ones. So the hand-written workflows live in `wizard/curated.ts`,
+`demoGraph` asks it first, and an entry names the node type: `demo: 'neuron.selectNeurons'`.
+See the node guide section above for what that changed there.
+
+**Points in Volumes needed the synthetic data fixed first, and the cause was two bugs, not the
+obvious one.** Only ~5% of any type's synthetic synapses tested inside any synthetic region. The
+arbours did wander past their shells (the steer toward a region's centre was 0.12 against 0.7 of
+persistence and 0.55 of jitter — `ARBOR_PULL`, now 0.4), but raising that alone made it *worse*,
+1% for T4a: the shells were **wound inward**, so the containment test — which reads "inside" off
+the facing of the first surface a ray meets — found the centre of every region outside it. The
+generator is wound outward now, and the test itself reads each mesh's winding from its signed
+volume (`signedVolume`, `core/values.ts`), since a real region exported inside-out would answer
+every point backwards with nothing to say so. And the
+synapse routes grew each skeleton from its regions in a different order from the skeleton route,
+so synapses sat on a mirror-image arbor the 3D view never drew. With all three fixed, 94–100% of
+every type's synapses land in a region; `morphology.test.ts` pins the winding and the placement.
+
+**Who is told what's new (`ui/whatsNew.ts`).** Three answers. A **first visit** announces nothing
+and silently records today as seen — the whole history is not news to somebody who never saw the
+old behaviour — and fetches no entries at all. A **returning** reader with a *highlighted* update newer than the last one
+seen gets the card once, in the feedback nudge's corner, which stands down while it is up.
+Anything newer that is not highlighted puts a dot on `?` and waits. Two things that were not
+obvious:
+
+- **"Returning" cannot be read off the changelog's own key**, which did not exist before the
+  changelog did — everyone who used Coda before it shipped has no record and is not new. It is
+  read off the flags earlier visits leave (guides seen, start page dismissed, feedback nudge),
+  **once, at module load**: the guides dialog records itself in an effect a moment later, and
+  asking after that makes every first visit look like a return. The first visit is *written* in
+  the same step. It was written when the entries chunk arrived at first, which left a gap: a
+  visit closed in that second kept the guides flag and no date, and the next visit announced the
+  entire history.
+- **The seen date is one key both surfaces write** (`changelog/seen.ts`, no imports, so the
+  static page can afford it). Opening the page clears the editor's dot through the `storage`
+  event, and the date **never moves backwards**, so a stale tab closing an old card cannot
+  un-see a newer entry.
+
+A visit that arrives by share or demo link shows no card and records nothing, so a returning
+reader who followed a link still hears about the update next time. The entries load as their own
+chunk after a pause; the editor's first paint carries none of the prose.
+
+**Checked by `changelog.test.ts`:** entries newest first with unique dates, every change dated on
+or before its entry, `summary` plain text (the card renders no markup), every named image on
+disk with alt text, every demo link naming a registered node *with its plan surviving the parse*
+(`parseShareFragment` and `demoGraph` both drop a bad plan without a word, so a typo would open
+*some* workflow), and every capture naming nodes, params and store actions that exist. The
+timeline's geometry is browser-only, as for the other pages.
 

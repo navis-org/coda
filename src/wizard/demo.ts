@@ -46,6 +46,14 @@
  * `demo://<type>` with no plan still works, for a link somebody typed, and falls back to the
  * synthetic dataset alone — where the same search costs no request at all.
  *
+ * ## Some nodes are answered by hand
+ *
+ * The search asks what a node type-checks in, never what it is *for*, and for a node that
+ * transforms something those differ: it found Select Neurons a workflow in which it selected the
+ * list its own skeletons were fetched with. `curated.ts` holds workflows written for those
+ * types, and `demoGraph` asks it first. Their links carry no plan — there is nothing to search for — so
+ * the node guide writes a bare `demo://<type>` for them (`isCurated`).
+ *
  * ## A dataset node is its own workflow
  *
  * Asked about `dataset.hemibrain`, this builds a *hemibrain* workflow rather than a synthetic one
@@ -86,6 +94,7 @@ import { datasetOptions, everyCombination, resolveOption, startOptions } from '.
 import { CARD_GAP } from '../layout/columns'
 import { boundsOf } from '../layout/place'
 import { graphNode } from './assemble'
+import { curatedGraph, isCurated } from './curated'
 
 /** A place a wire can come from: a node already in the graph, and one of its output ports. */
 interface Source {
@@ -120,7 +129,10 @@ export interface DemoPlan extends DemoPlanRef {
  * node reaches it today. It stays a return value rather than a throw because the node guide has
  * to decide whether to draw a link at all.
  */
-export const demoPlan = keyed((type: string): DemoPlan | undefined => search(type)?.plan)
+export const demoPlan = keyed((type: string): DemoPlan | undefined =>
+  // A curated type has nothing to search for; its link names the node and `demoGraph` answers.
+  isCurated(type) ? undefined : search(type)?.plan,
+)
 
 /**
  * Build the workflow a plan names, and put the node in it. What a `demo://` link opens, and what
@@ -143,8 +155,12 @@ export const demoPlan = keyed((type: string): DemoPlan | undefined => search(typ
 export function demoGraph(stored: string, plan?: DemoPlanRef): CodaGraph | undefined {
   // A link is a stored id like any other, so one written before a rename still opens.
   const type = liveType(stored)
+  // A hand-written workflow wins over any plan: a link to one made before it was curated still
+  // opens the better graph, which is `replay`'s own rule that a plan is a hint about a build.
   const graph =
-    (plan && replay(type, plan)) ?? search(type, demoDatasets(), [DEMO_DATASET])?.graph
+    curatedGraph(type) ??
+    (plan && replay(type, plan)) ??
+    search(type, demoDatasets(), [DEMO_DATASET])?.graph
   return graph && withSwapHint(graph)
 }
 

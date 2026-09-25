@@ -51,6 +51,7 @@ import { HiddenDatasetsNote } from './HiddenDatasetsNote'
 import type { TourAnchor } from '../tour/anchors'
 import { TOURS, startTour } from '../tour/tourState'
 import { restoreHints, useDismissedHints } from '../hints'
+import { useWhatsNewUnseen } from '../whatsNew'
 import { shortcutKeys } from '../shortcuts'
 import { useNarrowShell } from '../smallScreen'
 import { Dropdown, Submenu } from '../menu/Dropdown'
@@ -77,6 +78,8 @@ export function Toolbar() {
   const runAll = useGraphStore((s) => s.runAll)
   const cancelRun = useGraphStore((s) => s.cancelRun)
   const openStartPage = useGraphStore((s) => s.openStartPage)
+  const openWhatsNew = useGraphStore((s) => s.openWhatsNew)
+  const whatsNewUnseen = useWhatsNewUnseen()
   const requestShare = useGraphStore((s) => s.requestShare)
   const requestShortcuts = useGraphStore((s) => s.requestShortcuts)
   // The set itself rather than a boolean: `useSyncExternalStore` compares snapshots by identity
@@ -328,7 +331,7 @@ export function Toolbar() {
        * and both tours. A menu rather than a bare button because a lone "?" says nothing about
        * what it does until you press it.
        *
-       * **Six rows, two of which open a submenu — and six whatever the reader has done.** Flat,
+       * **Seven rows, two of which open a submenu — and seven whatever the reader has done.** Flat,
        * it was nine — and nine two-line rows is a wall you read rather than scan, in the one menu
        * whose whole job is to be scannable by somebody who is already lost. Which is also why
        * **Show Hints Again** sits at the foot of Guides rather than here: a conditional seventh
@@ -344,7 +347,17 @@ export function Toolbar() {
        * `flyouts` turns off the panel's own `overflow-y`, which would otherwise clip the
        * submenus — see the note on `Dropdown`.
        */}
-      <Dropdown label="?" title="Help" tour="help" flyouts>
+      {/*
+       * The dot is What's New's: something in the changelog this reader has not seen, whether or
+       * not it was worth the card. It goes when the card is closed or the page opened.
+       */}
+      <Dropdown
+        label="?"
+        title="Help"
+        badge={whatsNewUnseen ? 'new in the changelog' : undefined}
+        tour="help"
+        flyouts
+      >
         {(close) => (
           <>
             {/*
@@ -361,6 +374,27 @@ export function Toolbar() {
             >
               <strong>Welcome Dialog</strong>
               <span>Quick start plus a few useful links.</span>
+            </button>
+            {/*
+             * Second, because it is the row the dot on this menu points at, and a dot that sends
+             * somebody hunting down a menu for its reason is a dot they learn to ignore. Opens the
+             * card rather than the page: the card says what changed in three lines and links to
+             * the page for the rest. A permanent row, so the menu does not reshuffle when there is
+             * something new — the dot says that.
+             */}
+            <button
+              type="button"
+              className="dropdown__item"
+              onClick={() => {
+                openWhatsNew()
+                close()
+              }}
+            >
+              <strong>
+                What’s New
+                {whatsNewUnseen && <span className="dropdown__badge" aria-hidden="true" />}
+              </strong>
+              <span>Recent features, nodes and fixes.</span>
             </button>
             {/*
              * The two "teach me" groups, adjacent and in the order somebody meets them: the

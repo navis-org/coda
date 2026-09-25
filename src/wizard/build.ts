@@ -48,7 +48,7 @@ import { collapsedView } from '../layout/collapse'
 import { CAPTION_GAP } from '../layout/companions'
 import { GRID_ORIGIN, placeInColumns } from '../layout/columns'
 import { resolveSize } from '../layout/elkGraph'
-import { noteNode } from './notes'
+import { SYNTHETIC_NOTE, noteNode } from './notes'
 import type { DatasetFamily } from '../nodes/lib/datasetFamilies'
 import { datasetFamily } from '../nodes/lib/datasetFamilies'
 import { ID_COLUMN_NAME } from '../core/ids'
@@ -136,7 +136,7 @@ function selfFetching(visualisation: VisualisationId): boolean {
  * What stays is the row, which the wires cannot say: which dataset's band an arm is on, and which
  * arm of an annotation chain.
  */
-interface Placement {
+export interface Placement {
   id: string
   type: string
   /** Row, in `ROW_HEIGHT`s. Absent is 0. Cards on one row of one column sit side by side. */
@@ -1568,7 +1568,7 @@ function overviewNote(answers: WizardAnswers): GraphNode {
    * most needs it for.
    */
   const synthetic = answers.datasets.some((key) => datasetFamily(key)?.synthetic)
-    ? '\n\n*The dataset is synthetic, generated in your browser from a seed. The pipeline is the point; the numbers are not a finding.*'
+    ? `\n\n${SYNTHETIC_NOTE}`
     : ''
   return noteNode({
     id: 'note-overview',

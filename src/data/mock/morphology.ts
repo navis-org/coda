@@ -99,8 +99,11 @@ export function generateRoiMesh(roi: string, options: RoiMeshOptions = {}): Mesh
       const b = a + stride
       // The pole rows collapse to a point, so one triangle of each quad is degenerate there
       // and is skipped — a zero-area face is valid OBJ and a nuisance to every consumer.
-      if (i !== 0) indices.push(a, b, a + 1)
-      if (i !== rings - 1) indices.push(a + 1, b, b + 1)
+      // Wound so the normals face **out**. They faced in once, and `Points in Volumes` — which
+      // reads "inside" off the facing of the first surface a ray meets — found the centre of every
+      // synthetic region outside it; `morphology.test.ts` pins the direction now.
+      if (i !== 0) indices.push(a, a + 1, b)
+      if (i !== rings - 1) indices.push(a + 1, b + 1, b)
     }
   }
 
@@ -159,6 +162,20 @@ interface Branch {
   /** Target the arbor drifts toward — the ROI this compartment innervates. */
   target: [number, number, number]
 }
+
+/**
+ * How hard an arbor steers back toward its region's centre, against 0.7 of persistence and 0.55
+ * of jitter.
+ *
+ * It was 0.12, and at that the walk wandered several µm while `generateRoiMesh`'s shells have
+ * radii of 1.3–2.8 µm — so the claim there that the shells enclose the arbors was false, and
+ * `Points in Volumes` on synthetic data found ~5% of any type's synapses inside any region. Arbor
+ * points inside their regions' ellipsoids, measured on the walk: ~22% at 0.12, ~72% at 0.25,
+ * ~97% at 0.4. Larger shells were the other way to close the gap and the worse one: the
+ * optic-lobe centres are ~3.9 µm apart and the mushroom-body lobes 0.6 µm, so shells big enough
+ * would overlap everywhere and first-in-order would decide most labels.
+ */
+const ARBOR_PULL = 0.4
 
 /**
  * Grow one neuron.
@@ -247,17 +264,17 @@ export function generateSkeleton(
       const py = positions[parent * 3 + 1]!
       const pz = positions[parent * 3 + 2]!
 
-      // Steer gently toward the compartment centre so arbors stay localised, with noise so
-      // they don't collapse into a straight line.
+      // Steer toward the compartment centre so arbors stay inside their region, with noise so
+      // they don't collapse into a straight line. See `ARBOR_PULL` for why it is not gentler.
       const toTarget = normalize([
         branch.target[0] - px,
         branch.target[1] - py,
         branch.target[2] - pz,
       ])
       direction = normalize([
-        direction[0] * 0.7 + toTarget[0] * 0.12 + jitter(0.55),
-        direction[1] * 0.7 + toTarget[1] * 0.12 + jitter(0.55),
-        direction[2] * 0.7 + toTarget[2] * 0.12 + jitter(0.55),
+        direction[0] * 0.7 + toTarget[0] * ARBOR_PULL + jitter(0.55),
+        direction[1] * 0.7 + toTarget[1] * ARBOR_PULL + jitter(0.55),
+        direction[2] * 0.7 + toTarget[2] * ARBOR_PULL + jitter(0.55),
       ])
 
       const step = 260 + rand() * 260

@@ -337,6 +337,9 @@ describe('every store action is on one side of the lock', () => {
     // Plugins switches what is offered for new work; nothing in the document changes.
     'openPlugins',
     'closePlugins',
+    // What's New is a card about the app, not the document.
+    'openWhatsNew',
+    'closeWhatsNew',
     // The wizard opens a dialog and remembers a preference; it only touches the canvas through
     // `loadGraph`, which is a document load and is classified as one.
     'openWizard',

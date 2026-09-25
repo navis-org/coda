@@ -1,12 +1,13 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  // The five pages besides index.html (which knip's vite plugin finds), and the scripts and vite plugins run by name.
+  // The six pages besides index.html (which knip's vite plugin finds), and the scripts and vite plugins run by name.
   "entry": [
     "src/overview/main.ts",
     "src/tutorial/main.ts",
     "src/nodeguide/main.ts",
     "src/datasetguide/main.ts",
     "src/mcppage/main.ts",
+    "src/changelog/main.ts",
     "scripts/**/*.{ts,mjs}",
     "vite/**/*.ts"
   ],

@@ -38,7 +38,7 @@
  */
 
 import type { MeshGeometry } from '../../core/values'
-import { triangleArea } from '../../core/values'
+import { triangleArea, signedVolume } from '../../core/values'
 import type { XY } from '../raster'
 import { fillTriangle, simplifyClosed, traceOutlines } from '../raster'
 
@@ -962,24 +962,7 @@ export function panRoiWindow(
  * and every source here publishes closed shells.
  */
 export function meshVolume(positions: Float32Array, indices: Uint32Array): number {
-  let sum = 0
-  const triangles = Math.floor(indices.length / 3)
-  for (let t = 0; t < triangles; t++) {
-    const a = indices[t * 3]! * 3
-    const b = indices[t * 3 + 1]! * 3
-    const c = indices[t * 3 + 2]! * 3
-    const ax = positions[a]!
-    const ay = positions[a + 1]!
-    const az = positions[a + 2]!
-    const bx = positions[b]!
-    const by = positions[b + 1]!
-    const bz = positions[b + 2]!
-    const cx = positions[c]!
-    const cy = positions[c + 1]!
-    const cz = positions[c + 2]!
-    sum += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)
-  }
-  return Math.abs(sum) / 6
+  return Math.abs(signedVolume(positions, indices))
 }
 
 /** Total triangle area. Reported beside the volume, where a shell's roughness is worth seeing. */

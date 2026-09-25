@@ -25,7 +25,7 @@ const HTML = readFileSync(new URL('../../mcp.html', import.meta.url), 'utf8')
  *
  * An import would be the obvious thing and TypeScript refuses it: `tsconfig.app.json` includes
  * `src` only, `tsconfig.node.json` the vite half, and nothing may reach across — which is also
- * why no plugin in `vite/` imports a `src` module (`datasetGuideData.ts`'s header argues that
+ * why no plugin in `vite/` imports a `src` module (`renderedPages.ts`' header argues that
  * boundary at length). A constant in `src/` for the two of them to share would be a module the
  * app never loads, existing only so this line could be an import.
  *

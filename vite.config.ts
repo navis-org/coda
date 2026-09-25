@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 import type { PluginOption } from 'vite'
 // vitest's re-export of defineConfig is the one that types the `test` block.
 import { defineConfig } from 'vitest/config'
-import { datasetGuideData } from './vite/datasetGuideData'
+import { renderedPages } from './vite/renderedPages'
 import { goatCounter } from './vite/goatcounter'
 import { nodeGuideData } from './vite/nodeGuideData'
 import { seo } from './vite/seo'
@@ -302,7 +302,7 @@ export default defineConfig({
     reactTracksOff(),
     deploymentProxy(),
     nodeGuideData(),
-    datasetGuideData(),
+    renderedPages(),
     goatCounter(),
     seo(),
     shortcutPages(),
@@ -326,14 +326,15 @@ export default defineConfig({
   worker: { format: 'es' },
 
   /*
-   * The editor, and five documents beside it. `overview.html` is the front
+   * The editor, and six documents beside it. `overview.html` is the front
    * door, `tutorial.html` the scroll-through introduction, `nodes.html` the
-   * node guide, `datasets.html` the dataset guide and `mcp.html` the MCP
-   * server's page — every one of them plain TypeScript and CSS, importing
-   * nothing from `src/ui` but `theme.css`, so they share the editor's palette
-   * without pulling React, sigma or three into documents that draw none of
-   * them. Naming each here is what stops vite treating `index.html` as the
-   * only root and silently dropping the rest: they build green and 404 in
+   * node guide, `datasets.html` the dataset guide, `mcp.html` the MCP
+   * server's page and `changelog.html` what changed — every one of them
+   * plain TypeScript and CSS, importing nothing from `src/ui` but
+   * `theme.css`, so they share the editor's palette without pulling React,
+   * sigma or three into documents that draw none of them. Naming each here is
+   * what stops vite treating `index.html` as the only root and silently
+   * dropping the rest: they build green and 404 in
    * production.
    */
   build: {
@@ -345,6 +346,7 @@ export default defineConfig({
         nodes: fileURLToPath(new URL('./nodes.html', import.meta.url)),
         datasets: fileURLToPath(new URL('./datasets.html', import.meta.url)),
         mcp: fileURLToPath(new URL('./mcp.html', import.meta.url)),
+        changelog: fileURLToPath(new URL('./changelog.html', import.meta.url)),
       },
     },
   },

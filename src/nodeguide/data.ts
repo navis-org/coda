@@ -33,6 +33,7 @@ import '../nodes'
 import { registerBuiltinSources } from '../data/builtins'
 import { demoFragment } from '../data/share/fragment'
 import { type DemoPlan, demoPlans } from '../wizard/demo'
+import { isCurated } from '../wizard/curated'
 import { DEMO_DATASET, buildWorkflow } from '../wizard/build'
 import { analysisOption, analysisOptions, everyCombination } from '../wizard/options'
 import type { NodeCategory, NodeDefinition, ParamDef, ResolvedPort } from '../core/node'
@@ -218,6 +219,8 @@ function glyphOf(type: string): { datasetGlyph?: DatasetGlyph } {
  * JSON is inlined into a page every reader downloads.
  */
 function demoLink(plan: DemoPlan | undefined, type: string): { demo?: string } {
+  // A hand-written workflow needs no plan: the link names the node and `demoGraph` answers.
+  if (isCurated(type)) return { demo: demoFragment(type) }
   return plan ? { demo: demoFragment(type, plan) } : {}
 }
 

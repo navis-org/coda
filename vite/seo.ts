@@ -145,6 +145,17 @@ const PAGES: Record<string, Page> = {
     sources: ['mcp.html', 'src/mcppage/'],
     schema: 'WebPage',
   },
+  /*
+   * Last: nobody should meet the changelog before the pages that explain what it is changing.
+   * `sources` is the directory for the dataset guide's reason — an entry is edited in
+   * `src/changelog/entries.ts`, and the images it names live in `public/changelog/`.
+   */
+  'changelog.html': {
+    url: '/changelog.html',
+    order: 6,
+    sources: ['changelog.html', 'src/changelog/', 'public/changelog/'],
+    schema: 'WebPage',
+  },
 }
 
 /** Absolute URL for a site-relative path. */

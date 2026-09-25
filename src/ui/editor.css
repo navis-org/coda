@@ -5009,6 +5009,20 @@ input.field--combo {
 .dropdown {
   position: relative;
 }
+/*
+ * The dot What's New puts on the `?` trigger and on its own row. The accent, so it reads as the
+ * app's rather than as a status; the words are in the trigger's accessible name (`Dropdown`'s
+ * `badge`). Selector specific enough to beat `.dropdown__item span`'s `display: block`.
+ */
+.dropdown .dropdown__badge {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 0.15em;
+}
 .dropdown__panel {
   position: absolute;
   top: calc(100% + 4px);
@@ -7380,11 +7394,14 @@ p.sources__hint {
  * gap nobody sees, erring low covers the one control a first session needs with a beta nudge,
  * and both are at their most likely on a first visit.
  */
-.feedback-nudge {
+.feedback-nudge,
+.whats-new {
   position: fixed;
   right: 16px;
   bottom: 106px;
   z-index: 50;
+}
+.feedback-nudge {
   max-width: 280px;
   padding: 10px 12px;
   border: 1px solid var(--border);
@@ -7402,6 +7419,134 @@ p.sources__hint {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* --------------------------------------------------------------------------
+ * What's New
+ * -------------------------------------------------------------------------- */
+
+/*
+ * The feedback nudge's corner and offset, declared with it above; the nudge stands down while this
+ * is up, so the two never overlap. Wider, because it carries rows. Capped in height and scrolled
+ * rather than grown past the window.
+ */
+.whats-new {
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 170px);
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-panel);
+  animation: whats-new-rise 0.24s ease-out;
+}
+@keyframes whats-new-rise {
+  from {
+    transform: translateY(10px);
+    opacity: 0.2;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .whats-new {
+    animation: none;
+  }
+}
+.whats-new__close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+.whats-new__head {
+  display: grid;
+  gap: 2px;
+  padding: 12px 40px 8px 14px;
+}
+.whats-new__kicker {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.whats-new__head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+.whats-new__head p {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.whats-new__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px;
+  display: grid;
+  gap: 2px;
+}
+.whats-new__rows a {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  text-decoration: none;
+}
+/* No image: the text takes the whole row rather than leaving a gap where one would be. */
+.whats-new__rows a > span:only-child {
+  grid-column: 1 / -1;
+}
+.whats-new__rows a:hover {
+  background: var(--accent-soft);
+}
+.whats-new__rows img {
+  width: 72px;
+  height: 48px;
+  object-fit: cover;
+  object-position: top left;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+}
+.whats-new__rows strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.whats-new__rows small {
+  display: block;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.whats-new__rows time {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.whats-new__more {
+  margin: 4px 14px 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.whats-new__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px 12px;
+  font-size: 12px;
+}
+.whats-new__foot a {
+  color: var(--accent);
 }
 
 /* Multiline param/text fields — Cypher, tokens. */

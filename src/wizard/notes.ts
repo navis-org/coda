@@ -15,6 +15,14 @@ import { requireNodeDef } from '../core/registry'
 const NOTE_TYPE = 'note.text'
 
 /**
+ * The sentence every note above a workflow on synthetic data ends with: the generated wizard
+ * graphs and the curated demos (`curated.ts`). About the numbers rather than the workflow, because the
+ * workflow is real and only the numbers are not.
+ */
+export const SYNTHETIC_NOTE =
+  '*The dataset is synthetic, generated in your browser from a seed. The pipeline is the point; the numbers are not a finding.*'
+
+/**
  * Strip the source indentation off a note written as an indented template literal.
  *
  * Not cosmetic: the markdown parser recognises a heading only at the start of a line, so a `###`

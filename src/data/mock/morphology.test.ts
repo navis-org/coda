@@ -9,10 +9,10 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 
-import { boundsOf, skeletonPointCount } from '../../core/values'
+import { boundsOf, signedVolume, skeletonPointCount } from '../../core/values'
 import { SYNAPSE_UNITS } from '../synapseUnits'
 import { registerSource } from '../source'
-import { MockSource } from './MockSource'
+import { MockSource, skeletonRois } from './MockSource'
 import { getConnectome } from './generate'
 import {
   generateRoiMesh,
@@ -376,10 +376,7 @@ describe('mock region meshes', () => {
 
     const connectome = getConnectome('optic-lobe-mini')!
     const neuronId = connectome.neurons[0]!.neuronId
-    const rois = connectome.roiCounts
-      .filter((rc) => rc.neuronId === neuronId)
-      .map((rc) => rc.roi)
-    const skeleton = generateSkeleton(neuronId, rois)
+    const skeleton = generateSkeleton(neuronId, skeletonRois(connectome, neuronId))
 
     let inside = 0
     const points = skeleton.positions.length / 3
@@ -404,5 +401,57 @@ describe('mock region meshes', () => {
   it('advertises the capability, and a source without it offers no method', () => {
     expect(source.capabilities.roiMeshes).toBe(true)
     expect(typeof source.fetchRoiMeshes).toBe('function')
+  })
+})
+
+describe('synthetic regions and the synapses in them', () => {
+  /** The `i`th vertex of a flat xyz array. */
+  const vertex = (positions: Float32Array, i: number): [number, number, number] => [
+    positions[i * 3]!,
+    positions[i * 3 + 1]!,
+    positions[i * 3 + 2]!,
+  ]
+
+  /*
+   * They were wound inward once, and `Points in Volumes` — which reads "inside" off the facing of
+   * the first surface a ray meets — found the centre of every region outside it. Nothing that
+   * draws a mesh noticed.
+   */
+  it('winds every region shell with its normals facing out', () => {
+    for (const roi of getConnectome('optic-lobe-mini')!.rois) {
+      const mesh = generateRoiMesh(roi)
+      expect(signedVolume(mesh.positions, mesh.indices), roi).toBeGreaterThan(0)
+    }
+  })
+
+  /*
+   * The skeleton is regenerated per route and the region order is part of its seed, so a route
+   * ordering the regions differently grows a different neuron. The synapse routes did, and a T4a
+   * cell's synapses sat on a mirror-image arbor the 3D view never drew.
+   */
+  it('puts synapses on the skeleton the skeleton route draws', async () => {
+    const neuronIds = getConnectome('optic-lobe-mini')!
+      .neurons.filter((n) => n.type === 'T4a')
+      .slice(0, 3)
+      .map((n) => String(n.neuronId))
+    const [skeletons, points] = await Promise.all([
+      source.fetchSkeletons({ datasetId: 'optic-lobe-mini', neuronIds }),
+      source.fetchSynapses({
+        datasetId: 'optic-lobe-mini',
+        neuronIds,
+        unit: SYNAPSE_UNITS.links,
+      }),
+    ])
+    const nodes = skeletons.items.flatMap((s) =>
+      Array.from({ length: s.positions.length / 3 }, (_, i) => vertex(s.positions, i)),
+    )
+    for (let p = 0; p < points.positions.length / 3; p++) {
+      const [x, y, z] = vertex(points.positions, p)
+      let nearest = Infinity
+      for (const [a, b, c] of nodes)
+        nearest = Math.min(nearest, Math.hypot(a - x, b - y, c - z))
+      // `synapsePosition` jitters a site by up to 45 nm on each axis off its node.
+      expect(nearest).toBeLessThan(80)
+    }
   })
 })

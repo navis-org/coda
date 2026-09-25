@@ -224,6 +224,29 @@ describe('the ray', () => {
     items.forEach((item, i) => expect([...item.indices]).toEqual([...before[i]!]))
   })
 
+  /*
+   * Winding is whoever exported the mesh's choice, and the test reads "inside" off a face's facing.
+   * Inside-out, it answered every point backwards — how the synthetic regions once found their own
+   * centres outside them — so the same cube turned inside out must answer the same.
+   */
+  it('answers the same for a mesh wound inside out', async () => {
+    const outward = cube('a', [0, 0, 0])
+    // Each triangle's last two corners swapped: the same surface, every normal pointing in.
+    const indices = Uint32Array.from(outward.indices)
+    for (let t = 0; t < indices.length; t += 3)
+      [indices[t + 1], indices[t + 2]] = [indices[t + 2]!, indices[t + 1]!]
+    for (const mesh of [outward, { ...outward, id: 'a-inward', indices }]) {
+      const tests = await buildInsideTests([mesh])
+      const hits: number[] = []
+      tests.containing(0, 0, 0, hits)
+      tests.containing(0, 0, 0.9, hits)
+      expect(hits, `${mesh.id}: two points inside`).toEqual([0, 0])
+      hits.length = 0
+      tests.containing(0, 0, 1.5, hits)
+      expect(hits, `${mesh.id}: one outside`).toEqual([])
+    }
+  })
+
   it('finds a point on the far side of a wall outside', async () => {
     const tests = await buildInsideTests(volumes().items)
     const hits: number[] = []

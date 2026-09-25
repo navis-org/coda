@@ -15,7 +15,11 @@
  * ## The ray is deliberately not axis-aligned
  *
  * Containment is one ray plus the sign of the face normal it first meets, which is
- * three-mesh-bvh's own recipe and is exact for a closed, consistently wound surface. Its
+ * three-mesh-bvh's own recipe and is exact for a closed, consistently wound surface — wound
+ * **either way**: the facing only means "leaving" for outward normals, so each mesh's winding is
+ * read once from its signed volume and the comparison flipped for one wound inward. Without that
+ * an inside-out mesh answers every point backwards, which is how the synthetic regions once found
+ * their own centres outside them; winding is whoever exported the mesh's choice. Its
  * failure mode is a ray that grazes an edge shared by two triangles, and region meshes are
  * marching-cubes surfaces over voxel masks — walls of axis-aligned faces, met by synapse
  * coordinates that are themselves integers on the voxel grid. An axis-aligned probe ray would
@@ -26,7 +30,7 @@
 
 import type { Slicer } from '../../core/slice'
 import type { Boxes, MeshGeometry } from '../../core/values'
-import { boxesOf } from '../../core/values'
+import { boxesOf, signedVolume } from '../../core/values'
 import { buildMeshTrees } from './meshTrees'
 
 /**
@@ -101,6 +105,8 @@ export async function buildInsideTests(
   const { DoubleSide, Ray, Vector3 } = three
 
   const { boxes } = prefilter
+  // Per mesh, once: does a face's normal point out of it? See the module note.
+  const outward = items.map((mesh) => signedVolume(mesh.positions, mesh.indices) >= 0)
 
   // One ray and one direction for the whole run: `raycastFirst` reads them and keeps nothing.
   const direction = new Vector3(PROBE[0], PROBE[1], PROBE[2]).normalize()
@@ -111,10 +117,13 @@ export async function buildInsideTests(
     const hit = built[index]!.raycastFirst(ray, DoubleSide)
     /*
      * A hit whose normal points *along* the ray is a face being left, so the origin was inside
-     * it. `DoubleSide` is what makes the back faces visible to the cast at all; with the
-     * default the first hit from inside is the far wall's outside and every point reads as out.
+     * it — for an outward-wound mesh; `outward` turns it round for the other kind. `DoubleSide`
+     * is what makes the back faces visible to the cast at all; with the default the first hit
+     * from inside is the far wall's outside and every point reads as out.
      */
-    return !!hit && !!hit.face && hit.face.normal.dot(direction) > 0
+    if (!hit?.face) return false
+    const leaving = hit.face.normal.dot(direction) > 0
+    return outward[index] ? leaving : !leaving
   }
 
   return {

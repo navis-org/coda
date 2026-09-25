@@ -15,7 +15,7 @@
  *
  * ## It never reaches the browser
  *
- * `vite/datasetGuideData.ts` calls `datasetGuideHTML()` in Node during the build and splices the
+ * `vite/renderedPages.ts` calls `datasetGuideHTML()` in Node during the build and splices the
  * result into `datasets.html` in place of `<!--@dataset-guide-->`. That is the same arrangement
  * `src/nodeguide/appendix.ts` uses, minus the reason that one needs an SSR server: nothing here
  * imports the node registry. `datasets.ts` is plain data with one type-only import, and
@@ -92,7 +92,7 @@ export function inline(md: string): string {
 }
 
 /** Blank-line-separated paragraphs, each run through `inline`. */
-function paragraphs(md: string): string {
+export function paragraphs(md: string): string {
   return md
     .split(/\n{2,}/)
     .map((p) => p.trim())
@@ -118,7 +118,7 @@ function silhouette(entry: DatasetGuideEntry, size: number): string {
 }
 
 /** Where the editor is from here. `base` is `'./'`, like every other cross-page link. */
-const appHref = (fragment: string): string => `./index.html${fragment}`
+export const appHref = (fragment: string): string => `./index.html${fragment}`
 
 // ---------------------------------------------------------------------------
 // Blocks
