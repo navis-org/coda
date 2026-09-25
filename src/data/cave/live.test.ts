@@ -575,6 +575,31 @@ describe.skipIf(!TOKEN)('CAVE, live — cell typing from a view', () => {
     // `cell_type` arrives as Coda's `type`, in the EM vocabulary as published.
     expect(new Set(table.data['type'])).toContain('5P-ET')
   }, 300_000)
+
+  it("answers minnie65's connectivity from connections_with_nuclei, cut on the server", async () => {
+    setToken(DEFAULT_CAVE_SERVER, TOKEN!)
+    const cave = new CaveSource()
+    const version = (await materializationsFor('minnie65_public', ON_DEFAULT))[0]
+    const dataset = `minnie65_public:${version}`
+    // A proofread neuron off the neuron table rather than a literal, root ids changing with edits.
+    const neurons = await cave.findNeurons({ datasetId: dataset, limit: 1 })
+    const seed = String(neurons.data[ID_COLUMN_NAME]?.[0])
+
+    const all = await cave.fetchConnectivity({
+      datasetId: dataset,
+      neuronIds: [seed],
+      direction: 'outputs',
+    })
+    const strong = await cave.fetchConnectivity({
+      datasetId: dataset,
+      neuronIds: [seed],
+      direction: 'outputs',
+      minWeight: 3,
+    })
+    expect(all.length).toBeGreaterThan(strong.length)
+    expect(Math.min(...strong.data.weight!.map(Number))).toBeGreaterThanOrEqual(3)
+    expect(new Set(strong.data[ID_COLUMN_NAME])).toEqual(new Set([seed]))
+  }, 300_000)
 })
 
 /**

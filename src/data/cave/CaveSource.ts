@@ -161,6 +161,7 @@ import type { NgScene } from '../neuroglancer/scene'
 import type { DatastackSpec, NeuronTableSpec, SynapseTableSpec } from './spec'
 import {
   STANDARD_SYNAPSE_COLUMNS,
+  connectionViewAt,
   datasetIdFor,
   endPositionColumn,
   specFor,
@@ -1085,8 +1086,8 @@ export class CaveSource implements DataSource {
     const server = await this.serverFor(spec)
     const options = this.options(signal)
 
-    if (spec.connections) {
-      const links = spec.connections
+    const links = connectionViewAt(spec, version)
+    if (links) {
       const rows = await queryView(
         server,
         spec.datastack,
@@ -2629,10 +2630,11 @@ function codaReads(spec: DatastackSpec, version: number, info: DatastackInfo): s
   // The same precedence `synapsesFor` applies, said in the same order: the spec wins, then the
   // datastack's own declaration — which is what makes 7 of the 13 work with no configuration.
   const synapses = spec.synapses?.table ?? info.synapse_table ?? undefined
+  const view = connectionViewAt(spec, version)
   rows.push(
     `- Connectivity — ${
-      spec.connections
-        ? `\`${spec.connections.view}\` (a view, aggregated server-side)`
+      view
+        ? `\`${view.view}\` (a view, aggregated server-side)`
         : synapses
           ? `counted from \`${synapses}\`, since this datastack publishes no roll-up view`
           : 'unavailable: no roll-up view and no synapse table'

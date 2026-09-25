@@ -76,6 +76,25 @@ export interface ConnectionViewSpec {
   preColumn: string
   postColumn: string
   weightColumn: string
+  /**
+   * The first materialization that publishes the view. Absent means every one.
+   *
+   * **A view is per materialization, like everything else there.** minnie65's v117 predates views
+   * altogether — its `/views` listing is a 500, the server having no view table to read — while
+   * v943 onwards all carry `connections_with_nuclei`. A version before this counts the synapses
+   * instead, which is the path a datastack with no view takes, so an old materialization still
+   * answers rather than failing on its first Run. Read through `connectionViewAt`.
+   */
+  since?: number
+}
+
+/** The roll-up view a materialization publishes, if it publishes one. */
+export function connectionViewAt(
+  spec: DatastackSpec,
+  version: number,
+): ConnectionViewSpec | undefined {
+  const view = spec.connections
+  return view && version >= (view.since ?? 0) ? view : undefined
 }
 
 /**
@@ -319,6 +338,21 @@ export const DATASTACK_SPECS: readonly DatastackSpec[] = [
       'This is the second alignment of the IARPA "minnie65" dataset, completed in the spring of 2020 that used the seamless approach.',
     neurons: { table: 'proofreading_status_and_strategy', idColumn: 'pt_root_id' },
     nuclei: { table: 'nucleus_detection_v0' },
+    /*
+     * `synapses_pni_2` grouped by (pre, post), with `sum_size` and each end's nucleus id beside
+     * `n_syn`. It is the same count and not a filtered one: checked on v1621 for root
+     * 864691135163673901, `n_syn` and `sum_size` equal a local count of the raw table on all
+     * 1,454 output and 2,514 input partners. The one difference is that the view **leaves out
+     * autapses** — the neuron's single self-pair was the only row the count had and the view did
+     * not. Measured on the same neuron: 1.6 s against 6.4 s for its outputs.
+     */
+    connections: {
+      view: 'connections_with_nuclei',
+      preColumn: 'pre_pt_root_id',
+      postColumn: 'post_pt_root_id',
+      weightColumn: 'n_syn',
+      since: 943,
+    },
     synapses: {
       table: 'synapses_pni_2',
       preColumn: 'pre_pt_root_id',

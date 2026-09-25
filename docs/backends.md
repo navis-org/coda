@@ -981,7 +981,17 @@ aggregation once: one row per ordered (pre, post) pair with `n_syn`, filterable 
 by `n_syn`, so a minimum weight is applied before anything is sent — on one neuron's outputs,
 4,818 rows / 410 kB unfiltered against 183 / 16 kB at `n_syn >= 5`.
 
-Where there is no such view — **which is most datastacks; FlyWire's is the exception** — the
+minnie65 publishes one too, `connections_with_nuclei`, and for a while nobody had noticed: the
+Description said Connectivity was counted from `synapses_pni_2`. It is the same count rather than a
+filtered one — on v1621, `n_syn` and `sum_size` equal a local count of the raw table on every one
+of a neuron's 1,454 output and 2,514 input partners, the only difference being that **the view
+leaves out autapses** — and it answered that neuron's outputs in 1.6 s against 6.4 s. **A view is
+per materialization**: v117 predates views altogether (its `/views` listing is a server error), so
+`ConnectionViewSpec.since` names the first version that has it and `connectionViewAt` is the one
+reading of it, for the edge list and the Description line alike. A version before it counts
+synapses, which is what it did before.
+
+Where there is no such view — **which is most datastacks; FlyWire and minnie65 are the exceptions** — the
 edge list is built by asking the synapse table for its two id columns and counting locally. The
 query API has no `GROUP BY`, so neither the grouping nor the weight cut can be pushed down: every
 synapse of every queried neuron is transferred, and `minWeight` is applied *after* counting.

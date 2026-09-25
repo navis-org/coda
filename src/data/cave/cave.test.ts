@@ -36,7 +36,7 @@ import {
   tableFactsFor,
   tableListFor,
 } from './tables'
-import { registerDatastackSpec, resetRuntimeSpecs, specFor } from './spec'
+import { connectionViewAt, registerDatastackSpec, resetRuntimeSpecs, specFor } from './spec'
 import { caveScene } from './scene'
 import { readL2Skeletons } from './l2'
 import { l2SourceFor, peekDatastacks } from './datastack'
@@ -532,6 +532,24 @@ describe('datasets and versions', () => {
     )
     // And the synapse fallback named, since it is why connectivity here is slower than FlyWire's.
     expect(banc.description).toMatch(/- Connectivity — counted from `synapses_v3`/)
+  })
+
+  it('names a roll-up view only from the materialization that publishes it', async () => {
+    installFetch()
+    const datasets = await new CaveSource().listDatasets()
+    const minnie = datasets.find((d) => d.id === 'minnie65_public:1822')!
+
+    // minnie65 aggregates `synapses_pni_2` server-side; the Description said it was counted.
+    expect(minnie.description).toMatch(/- Connectivity — `connections_with_nuclei` \(a view/)
+
+    // v117 predates views; see `ConnectionViewSpec.since`.
+    const spec = specFor(DEFAULT_CAVE_SERVER, 'minnie65_public')!
+    expect(connectionViewAt(spec, 117)).toBeUndefined()
+    expect(connectionViewAt(spec, 943)?.view).toBe('connections_with_nuclei')
+    // No `since` means every materialization, which is FlyWire's.
+    expect(
+      connectionViewAt(specFor(DEFAULT_CAVE_SERVER, 'flywire_fafb_public')!, 1),
+    ).toBeTruthy()
   })
 
   it('takes the species from the spec, which is why a mouse is not a fly', async () => {
