@@ -1782,6 +1782,44 @@ describe('connectivity with no connection view', () => {
     expect(table.data.weight).toEqual([3, 1])
     expect(captured.some((c) => c.url.includes('/table/synapses/query'))).toBe(true)
   })
+
+  /*
+   * The listing holds specced datastacks only, so a hand-named one used to be absent from
+   * `peekDataset` for good — and the Description card under a Custom CAVE node said "has not
+   * listed its datasets yet" forever, never naming the synapse table the queries were reading.
+   */
+  it('describes a hand-named datastack, naming the synapse table it declares', async () => {
+    registerDatastackSpec({
+      datastack: 'handnamed',
+      label: 'handnamed',
+      description: 'by hand',
+    })
+    installFetch({
+      '/info/api/v2/datastack/full/handnamed': JSON.stringify({
+        local_server: 'https://x',
+        synapse_table: 'synapses_v1',
+      }),
+      '/datastack/handnamed/metadata': materializations('handnamed', [7]),
+    })
+    const source = new CaveSource()
+    // The first peek starts the load and cannot answer; once it lands, a peek can.
+    expect(source.peekDataset('handnamed:7')).toBeUndefined()
+    const info = await vi.waitFor(() => {
+      const found = source.peekDataset('handnamed:7')
+      expect(found).toBeDefined()
+      return found!
+    })
+    expect(info.description).toContain('Synapses — `synapses_v1`')
+    // Held by identity, even across a re-registration of an equal spec — some readers compare.
+    registerDatastackSpec({
+      datastack: 'handnamed',
+      label: 'handnamed',
+      description: 'by hand',
+    })
+    expect(source.peekDataset('handnamed:7')).toBe(info)
+    // A materialization the datastack does not list is not described.
+    expect(source.peekDataset('handnamed:8')).toBeUndefined()
+  })
 })
 
 // ---------------------------------------------------------------------------

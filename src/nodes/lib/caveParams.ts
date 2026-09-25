@@ -237,9 +237,21 @@ export function caveTableSuggestions(
   ctx: InferContext,
   { views }: { views: boolean },
 ): string[] {
-  const where = caveTargetOfType(ctx.inputs.dataset, ctx.params)
-  const entries = where
+  return caveTablesAt(caveTargetOfType(ctx.inputs.dataset, ctx.params), { views }) ?? []
+}
+
+/**
+ * The same names for a target however it was arrived at — `undefined` until the listing lands,
+ * `peekTableList`'s contract. `Custom CAVE` names its datastack in its own params rather than on
+ * a wire, so it asks here directly.
+ */
+export function caveTablesAt(
+  where: CaveTarget | undefined,
+  { views }: { views: boolean },
+): string[] | undefined {
+  return where
     ? peekTableList(where.deployment, where.datastack, where.version)
+        ?.filter((e) => views || e.kind === 'table')
+        .map((e) => e.name)
     : undefined
-  return (entries ?? []).filter((e) => views || e.kind === 'table').map((e) => e.name)
 }

@@ -105,19 +105,16 @@ function datastackField(card: HTMLElement): {
 }
 
 describe('the Custom CAVE card', () => {
-  it('asks for the neuron table and its id column on the card, and the rest in the inspector', async () => {
+  it('asks for the neuron table on the card, and the rest in the inspector', async () => {
     render(<App />)
     const card = await customCaveCard()
 
     /*
-     * The card's own `validate` says "name a table listing this datastack's neurons" — so with
-     * that field in the inspector, which is closed by default, the card was asking for something
-     * it did not show. The connection view is deliberately still inspector-only: not naming one
-     * is an ordinary configuration, and its whole consequence is that Connectivity declines. So
-     * is the global server: nearly every datastack is on the default deployment, so on the card it
+     * Why this split: the comment above `customCaveNode`. The global server is inspector-only for
+     * its own reason — nearly every datastack is on the default deployment, so on the card it
      * would be a row that almost never changes.
      */
-    expect(rows(card)).toEqual(['Datastack', 'Materialization', 'Neuron table', 'ID column'])
+    expect(rows(card)).toEqual(['Datastack', 'Materialization', 'Neuron table'])
   })
 
   it('completes the datastack name once a token can list them', async () => {

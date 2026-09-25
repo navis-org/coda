@@ -1013,10 +1013,17 @@ counts what `valid_connection_v2`'s weights count: the raw `synapses_nt_v1` held
 weight on a neuron's top partners, and 1.3× even at `cleft_score >= 50`. The view matched `n_syn`
 on every one of 4,818 output and 1,072 input partners. See [nodes-morphology.md](nodes-morphology.md), Synapses Between. Otherwise the datastack's **own declaration**, which is what makes a
 hand-named datastack work with no configuration at all: 7 of the 13 the info service lists set
-it, `wclee_aedes_brain` among them. Its columns are `STANDARD_SYNAPSE_COLUMNS`, which is a
-definition rather than a guess — a table whose registered schema is `synapse` has
-`pre_pt_root_id`, `post_pt_root_id` and `ctr_pt_position` by `emannotationschemas`, checked
-against both a declared and a configured table. `fetchSynapses` resolves the same way, so a
+it, `wclee_aedes_brain` among them — and a Custom CAVE node's **Synapse table** picks another where
+that declaration is wrong. Its columns are `STANDARD_SYNAPSE_COLUMNS`, which is a definition
+rather than a guess — every synapse schema in `emannotationschemas` derives from
+`BaseSynapseSchema`, which defines `pre_pt` and `post_pt`, so `pre_pt_root_id`,
+`post_pt_root_id` and `pre_pt_position` are on every one. **The cleft centre is not**:
+`ctr_pt_position` was the default once, checked against a `synapse`-schema table, but `ctr_pt`
+belongs to that schema alone (`NoCleftSynapse`, `NoCenterSynapse` and the Buhmann schemas have
+none). The one table that default was ever read for, Aedes' declared `synapses`, has it; the
+Synapse table picker made a table of any other schema one click away. What CAVE answers for a
+missing name in `select_columns` was not measured. Only a spec that knows its table's schema
+names it (BANC, minnie65). `fetchSynapses` resolves the same way, so a
 datastack that can answer connectivity by aggregation can also draw the synapses it aggregated;
 `positionColumn` is a *stem* the API splits into `_x`/`_y`/`_z`, verified to behave identically
 on both.

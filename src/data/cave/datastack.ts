@@ -114,10 +114,14 @@ export function materializationsFor(
     key,
     () =>
       load(key, datastack, options).then((versions) => {
+        const before = materializations.get(key)
         materializations.set(key, versions)
         // Not a data-changed event: nothing cached is invalidated and no run is scheduled. It
-        // only tells inference that a dropdown it drew empty can be filled in.
-        reportSourceLearned(caveSourceId(options.deployment))
+        // only tells inference that a dropdown it drew empty can be filled in — so only when the
+        // list changed. The CAVE listing awaits this once per specced datastack on every relist,
+        // and each report is a whole-graph re-inference.
+        if (before?.join() !== versions.join())
+          reportSourceLearned(caveSourceId(options.deployment))
         return versions
       }),
     { keep: 'inflight' },
@@ -134,7 +138,7 @@ async function load(
   // Kept whole rather than reduced to numbers: the same reply carries each version's
   // `time_stamp`, which is what a root id is judged against, and asking for it separately would
   // be a second round trip for something already in hand.
-  versionInfo.set(key, usable)
+  loaded.set(key, { record: info, versions: usable })
   return usable.map((v) => v.version)
 }
 
@@ -180,18 +184,68 @@ export function versionFrozenAt(
   datastack: string,
   version: number,
 ): number | undefined {
-  const stamp = versionInfo
+  const stamp = loaded
     .get(deploymentKey(deployment, datastack))
-    ?.find((v) => v.version === version)?.time_stamp
+    ?.versions.find((v) => v.version === version)?.time_stamp
   return stamp ? parseCaveTimestamp(stamp) : undefined
+}
+
+/** What one `load` read: the datastack's record and its usable materializations, whole. */
+export interface LoadedDatastack {
+  record: DatastackInfo
+  versions: VersionInfo[]
+}
+
+/**
+ * The last `load` of a datastack, if one has landed. **Never starts a fetch** — `CaveSource`'s
+ * listing reads it straight after awaiting `materializationsFor`, and a peek goes through
+ * `peekMaterialization`, which does start one.
+ */
+export function loadedDatastack(
+  deployment: string,
+  datastack: string,
+): LoadedDatastack | undefined {
+  return loaded.get(deploymentKey(deployment, datastack))
+}
+
+/**
+ * A datastack's info record, synchronously, once its materializations have loaded — starting
+ * that load through `peekMaterializations` if nobody has.
+ */
+export function peekDatastackRecord(
+  deployment: string,
+  datastack: string,
+): DatastackInfo | undefined {
+  return peekMaterializations(deployment, datastack)
+    ? loadedDatastack(deployment, datastack)?.record
+    : undefined
+}
+
+/**
+ * One materialization of a datastack, with the record it belongs to — synchronously, if known.
+ *
+ * What `CaveSource.peekDataset` answers a hand-named datastack from, since the source's listing
+ * holds only the specced ones. From the same `load` as the listing and the Custom CAVE dropdown,
+ * so a dataset the card can describe is exactly one the dropdown offers. Starts that load through
+ * `peekMaterializations`, with its once-per-datastack rule.
+ */
+export function peekMaterialization(
+  deployment: string,
+  datastack: string,
+  version: number,
+): { record: DatastackInfo; version: VersionInfo } | undefined {
+  if (!peekMaterializations(deployment, datastack)) return undefined
+  const known = loadedDatastack(deployment, datastack)
+  const entry = known?.versions.find((v) => v.version === version)
+  return known && entry ? { record: known.record, version: entry } : undefined
 }
 
 /**
  * The materializations worth offering, newest first.
  *
  * One statement because two surfaces read it and they must not part company: this feeds the
- * Custom CAVE dropdown and `evaluate`'s "latest", while `CaveSource.listOne` feeds every family
- * dataset node's dropdown and *its* "latest". An expired or invalid materialization is one a
+ * Custom CAVE dropdown and `evaluate`'s "latest", and `CaveSource.listOne` builds every family
+ * dataset node's dropdown and *its* "latest" from the same `load`. An expired or invalid materialization is one a
  * query against it would fail on, so offering it is offering a broken choice — and two nodes on
  * one datastack disagreeing about which versions exist is the shape nothing type-checks.
  */
@@ -202,7 +256,7 @@ export function usableVersions(versions: readonly VersionInfo[]): VersionInfo[] 
 }
 
 const materializations = new Map<string, number[]>()
-const versionInfo = new Map<string, VersionInfo[]>()
+const loaded = new Map<string, LoadedDatastack>()
 const loading = new Map<string, Promise<number[]>>()
 const asked = new Set<string>()
 
@@ -292,7 +346,7 @@ const listings = new Map<string, Listing>()
 export function resetDatastackRecords(): void {
   records.clear()
   materializations.clear()
-  versionInfo.clear()
+  loaded.clear()
   loading.clear()
   asked.clear()
   listings.clear()

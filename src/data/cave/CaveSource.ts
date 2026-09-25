@@ -127,15 +127,9 @@ import {
 } from './skeletonService'
 import { SKELETON_ROUTES, route } from '../skeletonRoutes'
 import type { CaveRequestOptions, CaveRow } from './client'
-import type { DatastackInfo } from './api'
+import type { DatastackInfo, VersionInfo } from './api'
 import { CaveError } from './client'
-import {
-  queryTableChecked,
-  queryView,
-  queryViewChecked,
-  uniqueStringValues,
-  versionsMetadata,
-} from './api'
+import { queryTableChecked, queryView, queryViewChecked, uniqueStringValues } from './api'
 import type { CaveQuery } from './api'
 import { reportAuthFailure } from './credentials'
 import {
@@ -150,7 +144,9 @@ import {
   datastacksFor,
   l2SourceFor,
   peekL2Cache,
-  usableVersions,
+  loadedDatastack,
+  materializationsFor,
+  peekMaterialization,
 } from './datastack'
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
@@ -164,6 +160,7 @@ import {
   connectionViewAt,
   datasetIdFor,
   endPositionColumn,
+  runtimeSpecFor,
   specFor,
   splitDatasetId,
   specsOn,
@@ -534,8 +531,48 @@ export class CaveSource implements DataSource {
     return this.listing.peek()
   }
 
+  /**
+   * The listing's entry, or — for a datastack a Custom CAVE node named — one built from that
+   * datastack's own record.
+   *
+   * The listing holds only specced datastacks, deliberately (see `runListing`), so a hand-named
+   * one was never in it and every reader of this peek waited on it forever: the Description card
+   * said "has not listed its datasets yet" for the life of the node, and never named the synapse
+   * table the queries were already reading. Built from `peekMaterialization`, the same load that
+   * fills the node's dropdown, rather than by widening the listing — which is also every CAVE
+   * picker's option list.
+   *
+   * Memoised per dataset on what it is built from, because some readers hold the answer by
+   * identity. Both halves compare by identity: `registerDatastackSpec` keeps an unchanged spec,
+   * and every `load` of the datastack mints fresh version entries.
+   */
   peekDataset(datasetId: string): DatasetInfo | undefined {
-    return this.listing.find(datasetId)
+    return this.listing.find(datasetId) ?? this.peekHandNamed(datasetId)
+  }
+
+  private readonly handNamed = new Map<
+    string,
+    { spec: DatastackSpec; version: VersionInfo; info: DatasetInfo }
+  >()
+
+  private peekHandNamed(datasetId: string): DatasetInfo | undefined {
+    const parsed = splitDatasetId(datasetId)
+    const spec = parsed && runtimeSpecFor(this.deployment, parsed.datastack)
+    if (!spec) return undefined
+    const known = peekMaterialization(this.deployment, spec.datastack, parsed.version)
+    if (!known) return undefined
+    const { record, version } = known
+    const memo = this.handNamed.get(datasetId)
+    if (memo?.spec === spec && memo.version === version) return memo.info
+    const info = datasetInfoFor(
+      spec,
+      version.version,
+      record,
+      version.time_stamp,
+      version.expires_on,
+    )
+    this.handNamed.set(datasetId, { spec, version, info })
+    return info
   }
 
   /**
@@ -634,11 +671,13 @@ export class CaveSource implements DataSource {
     spec: DatastackSpec,
     options: CaveRequestOptions,
   ): Promise<DatasetInfo[]> {
-    const info = await datastackRecord(spec.datastack, options)
-    const versions = await versionsMetadata(info.local_server, spec.datastack, options)
-    // The same filter the materialization dropdown applies — see `usableVersions`.
-    return usableVersions(versions).map((v) =>
-      datasetInfoFor(spec, v.version, info, v.time_stamp, v.expires_on),
+    // The same load as the Custom CAVE dropdown and a hand-named `peekDataset`, so the versions
+    // offered here and there cannot disagree — and one `/metadata` request serves all three.
+    await materializationsFor(spec.datastack, options)
+    const loaded = loadedDatastack(this.deployment, spec.datastack)
+    if (!loaded) return []
+    return loaded.versions.map((v) =>
+      datasetInfoFor(spec, v.version, loaded.record, v.time_stamp, v.expires_on),
     )
   }
 

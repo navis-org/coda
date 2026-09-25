@@ -19,6 +19,7 @@ Annotations come from whatever you wire to the **Annotations** socket. A CAVE da
 - **Materialization**: which version to query; empty tracks the newest the server reports.
 - **Neuron table** (optional): a CAVE table with one row per neuron (e.g. `proofread_neurons`). Leave empty if the datastack has none and you are wiring annotations instead.
 - **ID column** (optional): which column holds root IDs, usually `pt_root_id`.
+- **Synapse table** (optional): which table holds the synapses. Empty uses the one the datastack declares, and the option says which; pick another if that declaration is missing or out of date.
 - **Connection view** (optional): a server-side roll-up of synapses, if published.
 
 > [!NOTE] Connectivity views

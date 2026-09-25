@@ -34,6 +34,7 @@ import { DEFAULT_CATMAID_SERVER } from '../../data/catmaid/credentials'
 import { resetCredentials as resetCaveCredentials, setToken } from '../../data/cave/credentials'
 import { peekRootCheck, resetRootChecks } from '../../data/cave/rootIds'
 import { resetCache } from '../../data/cache'
+import { installRouteFetch, materializations } from '../../test/caveStubs'
 import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 import '../index'
 
@@ -394,19 +395,14 @@ describe('Custom CAVE', () => {
     expect(issues).toEqual([])
   })
 
-  it('puts the neuron table and its id column on the card, not in the inspector', () => {
+  it('puts only the neuron table on the card', () => {
     const params = requireNodeDef('dataset.cave').params ?? []
     const advanced = (id: string) => params.find((p) => p.id === id)?.advanced === true
 
-    /*
-     * `validate` complains "name a table listing this datastack's neurons" until the first of
-     * these is set, and the inspector is closed by default — so as `advanced` these were a card
-     * asking for something that had no field on it. The id column comes with it because the two
-     * are one decision. The connection view stays inspector-only: not naming one is an ordinary
-     * configuration whose only consequence is that Connectivity declines, said on that node.
-     */
+    // Why this split: the comment above `customCaveNode`.
     expect(advanced('neuronTable')).toBe(false)
-    expect(advanced('idColumn')).toBe(false)
+    expect(advanced('idColumn')).toBe(true)
+    expect(advanced('synapseTable')).toBe(true)
     expect(advanced('connectionView')).toBe(true)
     // Nearly every datastack is on the default deployment, so the server is not a card row.
     expect(advanced('server')).toBe(true)
@@ -446,6 +442,58 @@ describe('Custom CAVE', () => {
     const value = scheduler.output('ds', 'dataset')
     if (!isDatasetValue(value)) throw new Error(scheduler.info('ds').error ?? 'no dataset')
     expect(value.datasetId).toBe('somewhere:91')
+    vi.unstubAllGlobals()
+    resetCaveCredentials()
+  })
+
+  it('reads a chosen synapse table, and the datastack’s own declaration otherwise', () => {
+    const def = requireNodeDef('dataset.cave')
+    // Chosen: the spec names it, so every reader of `specFor` — the queries, the Description
+    // card, the notebook — takes it over whatever the datastack declares.
+    def.inferOutputs?.(
+      ctxFor('dataset.cave', {
+        datastack: 'syn_stack',
+        version: '3',
+        synapseTable: 'synapses_v2',
+      }),
+    )
+    expect(specFor(DEFAULT_CAVE_SERVER, 'syn_stack')?.synapses?.table).toBe('synapses_v2')
+    // Empty: no override, so `synapsesFor` falls through to the info record's declaration.
+    def.inferOutputs?.(ctxFor('dataset.cave', { datastack: 'syn_stack', version: '3' }))
+    expect(specFor(DEFAULT_CAVE_SERVER, 'syn_stack')?.synapses).toBeUndefined()
+  })
+
+  it('names the declared synapse table on the empty option, and keeps a chosen one', async () => {
+    const param = requireNodeDef('dataset.cave').params?.find((p) => p.id === 'synapseTable')
+    if (param?.kind !== 'enum' || typeof param.options !== 'function')
+      throw new Error('no enum')
+    const options = param.options
+    const synapseOptions = (params: ParamValues) =>
+      options(ctxFor('dataset.cave', params)) as EnumOption[]
+    setToken(DEFAULT_CAVE_SERVER, 'test-token')
+    installRouteFetch({
+      '/info/api/v2/datastack/full/': {
+        body: JSON.stringify({
+          local_server: 'https://local.example',
+          synapse_table: 'synapses_v1',
+        }),
+      },
+      '/datastack/syn_stack/metadata': { body: materializations('syn_stack', [3]) },
+    })
+    expect(synapseOptions({ datastack: 'syn_stack' })[0]?.label).toBe(
+      'Declared by the datastack',
+    )
+    await vi.waitFor(() =>
+      expect(synapseOptions({ datastack: 'syn_stack' })[0]?.label).toBe(
+        'Declared (synapses_v1)',
+      ),
+    )
+    // Kept before the table listing can confirm it — which it never does here, unrouted.
+    expect(
+      synapseOptions({ datastack: 'syn_stack', synapseTable: 'synapses_v2' }).map(
+        (o) => o.value,
+      ),
+    ).toContain('synapses_v2')
     vi.unstubAllGlobals()
     resetCaveCredentials()
   })

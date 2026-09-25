@@ -43,7 +43,12 @@ import {
   resolveDatasetId,
   versionsFor,
 } from '../lib/datasetFamilies'
-import { datasetIdFor, registerDatastackSpec, shippedSpecFor } from '../../data/cave/spec'
+import {
+  STANDARD_SYNAPSE_COLUMNS,
+  datasetIdFor,
+  registerDatastackSpec,
+  shippedSpecFor,
+} from '../../data/cave/spec'
 import {
   DEFAULT_CAVE_SERVER,
   caveServerLabel,
@@ -51,14 +56,22 @@ import {
   caveSourceId,
 } from '../../data/cave/deployments'
 import { publishedCaveSourceId } from '../../data/cave/registry'
-import { DEFAULT_CAVE_ID_COLUMN, caveIdColumn, customCaveServer } from '../lib/caveParams'
+import type { CaveTarget } from '../lib/caveParams'
+import {
+  DEFAULT_CAVE_ID_COLUMN,
+  caveIdColumn,
+  caveTablesAt,
+  customCaveServer,
+} from '../lib/caveParams'
 import { DEFAULT_CATMAID_SERVER } from '../../data/catmaid/credentials'
 import { catmaidSourceFor } from '../../data/catmaid/registry'
 import {
   materializationsFor,
+  peekDatastackRecord,
   peekDatastacks,
   peekMaterializations,
 } from '../../data/cave/datastack'
+import { kindOf, peekTableList } from '../../data/cave/tables'
 import {
   ANNOTATIONS_INPUT,
   annotationIssues,
@@ -274,17 +287,14 @@ function buildDatasetNode(family: DatasetFamily) {
  * refusal into a 404. That one stays an `advanced` param rather than absent, because somebody who
  * knows their datastack publishes one should not need a code change.
  *
- * **The neuron table and its id column are on the card; the connection view is not**, and the
- * line between them is `validate`'s. This node refuses to say anything useful — "name a table
- * listing this datastack's neurons, or wire an Annotations source" — until the first of them is
- * set, and an inspector-only control cannot be the answer to a complaint the *card* is making:
- * the inspector is closed by default, so a first-time reader is looking at a card asking for
- * something that has no field on it. The id column comes with it because the two are one
- * decision, which the node's own guide already spells as one sentence — a table, and the column
- * its root ids are in — and because a card that asks for half of a pair reads as finished when it
- * is not. Nothing similar is true of the connection view: not naming one is an ordinary
- * configuration whose whole consequence is that Connectivity declines, said elsewhere, on the
- * node that declines.
+ * **The neuron table is on the card; its id column, the synapse table and the connection view
+ * are not**, and the line between them is `validate`'s. This node refuses to say anything useful
+ * — "name a table listing this datastack's neurons, or wire an Annotations source" — until the
+ * table is set, and an inspector-only control cannot be the answer to a complaint the *card* is
+ * making: the inspector is closed by default, so a first-time reader is looking at a card asking
+ * for something that has no field on it. The rest ask for nothing: the id column arrives filled
+ * in (`pt_root_id`, on every CAVE table Coda has seen), an empty synapse table means the one the
+ * datastack declares, and an empty connection view means Connectivity declines, on its own node.
  */
 const customCaveNode = packNode({
   type: 'dataset.cave',
@@ -296,9 +306,9 @@ const customCaveNode = packNode({
    * under it. `DATASET_CARD_WIDTH` says why one constant rather than two equal numbers.
    */
   cardWidth: DATASET_CARD_WIDTH,
-  // Measured in a browser on a cold session, as `DATASET_CARD_HEIGHTS` is for the families. It
-  // was 231 while this node had no body of its own and drew the generic param band.
-  cardHeight: 371,
+  // Measured in a browser on a cold session, as `DATASET_CARD_HEIGHTS` is for the families, so a
+  // change to the card's rows means measuring it again.
+  cardHeight: 345,
   description: 'Any CAVE datastack configured by hand.',
   guide:
     'For CAVE datastacks Coda ships no node for. Name the global server that lists the ' +
@@ -368,28 +378,18 @@ const customCaveNode = packNode({
         const datastack = String(ctx.params.datastack).trim()
         const chosen = String(ctx.params.version).trim()
         if (!datastack) return [{ value: '', label: 'Name a datastack first' }]
-        const known = peekMaterializations(customCaveServer(ctx.params), datastack)
-        if (!known) {
-          return [
-            { value: '', label: 'Latest' },
-            // The stored value is kept as an option while the list is unknown, which the family
-            // nodes do not need to do: their listing is one call that every dataset node shares,
-            // where this is per-datastack and so is absent on *every* reload. Without it a
-            // pinned materialization shows an empty select for a second and reads as having been
-            // forgotten.
-            ...(chosen ? [{ value: chosen, label: chosen }] : []),
-          ]
-        }
+        const known = peekMaterializations(customCaveServer(ctx.params), datastack)?.map(String)
         return [
           // Named rather than blank, for `resolveDatasetId`'s reason: a "Latest" that does not
           // say which one is a provenance question mark on every graph anyone shares.
-          { value: '', label: known[0] ? `Latest (${known[0]})` : 'Latest' },
-          ...known.map((v) => ({ value: String(v), label: String(v) })),
-          // A pinned materialization the datastack no longer lists is kept rather than silently
-          // dropped, so the select still shows what the graph says. `validate` reports it.
-          ...(chosen && !known.includes(Number(chosen))
-            ? [{ value: chosen, label: `${chosen} (not listed)` }]
-            : []),
+          { value: '', label: known?.[0] ? `Latest (${known[0]})` : 'Latest' },
+          ...(known ?? []).map((v) => ({ value: v, label: v })),
+          // The stored value is kept while the list is unknown, which the family nodes do not
+          // need to do: their listing is one call every dataset node shares, where this is
+          // per-datastack and so absent on *every* reload — without it a pinned materialization
+          // reads as forgotten for a second. Kept once the list is known too, so the select still
+          // shows what the graph says; `validate` reports it.
+          ...keptChoice(chosen, known),
         ]
       },
     },
@@ -397,24 +397,34 @@ const customCaveNode = packNode({
       id: 'neuronTable',
       kind: 'string',
       label: 'Neuron table',
-      placeholder: 'proofread_neurons',
-      help: 'Any table with one row per neuron carrying a root id — a proofreading list, a nuclei table. Nothing in CAVE marks one, so it has to be named. Leave empty where the datastack has none.',
+      placeholder: '',
+      help: 'Any table with one row per neuron carrying a root id — a proofreading list, a nuclei table, an annotation table. Leave empty where the datastack has none.',
       default: '',
     },
     {
       id: 'idColumn',
       kind: 'string',
       label: 'ID column',
-      placeholder: 'pt_root_id',
+      placeholder: DEFAULT_CAVE_ID_COLUMN,
       help: 'Column holding the root id. "pt_root_id" on every CAVE table Coda has seen.',
       default: DEFAULT_CAVE_ID_COLUMN,
+      advanced: true,
+    },
+    {
+      id: 'synapseTable',
+      kind: 'enum',
+      label: 'Synapse table',
+      help: 'Table holding the synapses. Empty uses the one the datastack declares itself. Must use one of the standard CAVE synapse schemas.',
+      default: '',
+      advanced: true,
+      options: (ctx) => synapseTableOptions(ctx.params),
     },
     {
       id: 'connectionView',
       kind: 'string',
       label: 'Connection view',
-      placeholder: 'valid_connection_v2',
-      help: 'A server-side roll-up of synapses into connections, if this datastack publishes one. Without it, Connectivity declines.',
+      placeholder: '',
+      help: 'A server-side roll-up of synapses into connections. Can dramatically speed up connectivity queries.',
       default: '',
       advanced: true,
     },
@@ -487,6 +497,7 @@ const customCaveNode = packNode({
       ]
     }
     return [
+      ...synapseTableIssues(ctx.params),
       ...annotationIssues(ctx.inputs.annotations),
       ...edgeSetIssues(ctx.params),
       // Through the same resolver the node's own id goes through, unpinned case included — a
@@ -611,17 +622,32 @@ function rootDriftIssues(sourceId: string, datasetId: string | undefined): strin
  * node publishes a Dataset type with no id for a moment and `reportSourceLearned` re-infers.
  */
 function customCaveDatasetId(params: Record<string, unknown>): string | undefined {
-  const datastack = String(params.datastack).trim()
-  if (!datastack) return undefined
-  const pinned = String(params.version).trim()
-  const version = pinned
-    ? Number(pinned)
-    : peekMaterializations(customCaveServer(params), datastack)?.[0]
+  const where = customCaveTarget(params)
   // Through `datasetIdFor`, which `splitDatasetId` is the reader for — a third spelling of the
   // `datastack:materialization` grammar is a third place it can drift.
+  return where ? datasetIdFor(where.datastack, where.version) : undefined
+}
+
+/** The same resolution, unspelled: which datastack, where, at which materialization. */
+function customCaveTarget(params: Record<string, unknown>): CaveTarget | undefined {
+  const datastack = String(params.datastack).trim()
+  if (!datastack) return undefined
+  const deployment = customCaveServer(params)
+  const pinned = String(params.version).trim()
+  const version = pinned ? Number(pinned) : peekMaterializations(deployment, datastack)?.[0]
   return version !== undefined && Number.isInteger(version)
-    ? datasetIdFor(datastack, version)
+    ? { deployment, datastack, version }
     : undefined
+}
+
+/**
+ * A stored choice the options do not list, kept as an option of its own so the select still
+ * shows what the graph says — marked once the list is known, plain while it is not.
+ */
+function keptChoice(chosen: string, listed: readonly string[] | undefined) {
+  return chosen && !listed?.includes(chosen)
+    ? [{ value: chosen, label: listed ? `${chosen} (not listed)` : chosen }]
+    : []
 }
 
 function registerCustomCaveSpec(params: Record<string, unknown>): void {
@@ -629,6 +655,7 @@ function registerCustomCaveSpec(params: Record<string, unknown>): void {
   if (!datastack) return
   const table = String(params.neuronTable).trim()
   const view = String(params.connectionView).trim()
+  const synapses = String(params.synapseTable).trim()
   registerDatastackSpec({
     datastack,
     server: customCaveServer(params),
@@ -655,7 +682,51 @@ function registerCustomCaveSpec(params: Record<string, unknown>): void {
           },
         }
       : {}),
+    // Absent where none was chosen, so the datastack's own declaration answers — `synapsesFor`.
+    ...(synapses ? { synapses: { table: synapses, ...STANDARD_SYNAPSE_COLUMNS } } : {}),
   })
+}
+
+/**
+ * The Synapse table dropdown: the datastack's own declaration first, then its tables.
+ *
+ * Empty is labelled with what it resolves to, so a wrong declaration is visible from the control
+ * that overrides it. Tables only — the standard synapse columns are a table schema's, and a view
+ * would need its `kind` carried into the spec. A chosen table the listing lacks is kept, as the
+ * Materialization dropdown keeps a pinned version; `validate` says so.
+ */
+function synapseTableOptions(params: Record<string, unknown>) {
+  // No target yet means no materializations yet, and the record arrives in the same load.
+  const where = customCaveTarget(params)
+  const record = where ? peekDatastackRecord(where.deployment, where.datastack) : undefined
+  const tables = caveTablesAt(where, { views: false })
+  return [
+    {
+      value: '',
+      label: record?.synapse_table
+        ? `Declared (${record.synapse_table})`
+        : record
+          ? 'None declared'
+          : 'Declared by the datastack',
+    },
+    ...(tables ?? []).map((name) => ({ value: name, label: name })),
+    ...keptChoice(String(params.synapseTable).trim(), tables),
+  ]
+}
+
+/** A chosen synapse table the landed listing lacks, in `CAVE table`'s words. */
+function synapseTableIssues(params: Record<string, unknown>): string[] {
+  const name = String(params.synapseTable).trim()
+  const where = name ? customCaveTarget(params) : undefined
+  const entries = where
+    ? peekTableList(where.deployment, where.datastack, where.version)
+    : undefined
+  if (!where || !entries || kindOf(entries, name) === 'table') return []
+  const tables = entries.filter((e) => e.kind === 'table').map((e) => e.name)
+  return [
+    `"${name}" is not a table in ${where.datastack}:${where.version}. ` +
+      `Available: ${tables.join(', ')}`,
+  ]
 }
 
 /**

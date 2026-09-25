@@ -107,20 +107,22 @@ export function connectionViewAt(
  * failing, because the cloud is internally consistent either way.
  */
 /**
- * The column names of CAVE's standard `synapse` schema.
+ * The columns every CAVE synapse table has, whatever its schema — what a table Coda has no spec
+ * for (declared by the datastack, or picked on a Custom CAVE node) is read with.
  *
- * Not a guess: a table whose registered schema is `synapse` has these by *definition* —
- * `emannotationschemas` defines the type — and both a declared table (`wclee_aedes_brain`'s
- * `synapses`) and a configured one (`flywire_fafb_public`'s `synapses_nt_v1`) were checked
- * against it live. `ctr_pt_position` is the cleft centre, which is the honest place to draw a
- * synapse; FlyWire's spec picks `pre_pt_position` instead, which is a choice rather than a
- * correction. `scoreColumn` is deliberately absent — a confidence column is per-table
- * (`cleft_score` on FlyWire, nothing comparable on Aedes, which has `size`).
+ * Not a guess: `emannotationschemas` derives every synapse schema from `BaseSynapseSchema`, which
+ * defines exactly two bound points, `pre_pt` and `post_pt`. **The cleft centre is not among them**:
+ * `ctr_pt` belongs to `SynapseSchema` (registered as `synapse`) alone, and `NoCleftSynapse`,
+ * `NoCenterSynapse` and the Buhmann schemas have none — so only a spec that knows its table's
+ * schema names it (BANC, minnie65); `docs/backends.md` has why it stopped being the default.
+ * `scoreColumn` is
+ * deliberately absent — a confidence column is per-schema (`cleft_score` on FlyWire, nothing
+ * comparable on Aedes, which has `size`).
  */
 export const STANDARD_SYNAPSE_COLUMNS = {
   preColumn: 'pre_pt_root_id',
   postColumn: 'post_pt_root_id',
-  positionColumn: 'ctr_pt_position',
+  positionColumn: 'pre_pt_position',
 } as const
 
 /**
@@ -307,9 +309,7 @@ export const DATASTACK_SPECS: readonly DatastackSpec[] = [
     synapses: {
       table: 'valid_synapses_nt_v2_view',
       kind: 'view',
-      preColumn: 'pre_pt_root_id',
-      postColumn: 'post_pt_root_id',
-      positionColumn: 'pre_pt_position',
+      ...STANDARD_SYNAPSE_COLUMNS,
       scoreColumn: 'cleft_score',
     },
   },
@@ -324,8 +324,8 @@ export const DATASTACK_SPECS: readonly DatastackSpec[] = [
     neurons: { table: 'backbone_proofread', idColumn: 'pt_root_id' },
     synapses: {
       table: 'synapses_v3',
-      preColumn: 'pre_pt_root_id',
-      postColumn: 'post_pt_root_id',
+      // A `synapse`-schema table, so it has the cleft centre the standard columns cannot assume.
+      ...STANDARD_SYNAPSE_COLUMNS,
       positionColumn: 'ctr_pt_position',
     },
   },
@@ -355,8 +355,7 @@ export const DATASTACK_SPECS: readonly DatastackSpec[] = [
     },
     synapses: {
       table: 'synapses_pni_2',
-      preColumn: 'pre_pt_root_id',
-      postColumn: 'post_pt_root_id',
+      ...STANDARD_SYNAPSE_COLUMNS,
       positionColumn: 'ctr_pt_position',
     },
   },
@@ -395,8 +394,16 @@ export function specDeployments(): string[] {
   return [...new Set(DATASTACK_SPECS.map(specDeployment))]
 }
 
+/**
+ * Register a hand-named datastack's spec. An equal one already held is kept, not replaced:
+ * `Custom CAVE` re-registers on every inference pass, and a reader holding the spec by identity
+ * (`CaveSource.peekDataset`'s memo) should see a new object only when a setting changed.
+ */
 export function registerDatastackSpec(spec: DatastackSpec): DatastackSpec {
-  runtimeSpecs.set(deploymentKey(spec.server, spec.datastack), spec)
+  const key = deploymentKey(spec.server, spec.datastack)
+  const held = runtimeSpecs.get(key)
+  if (held && JSON.stringify(held) === JSON.stringify(spec)) return held
+  runtimeSpecs.set(key, spec)
   return spec
 }
 
@@ -411,6 +418,19 @@ export function specFor(deployment: string, datastack: string): DatastackSpec | 
     shippedSpecFor(deployment, datastack) ??
     runtimeSpecs.get(deploymentKey(deployment, datastack))
   )
+}
+
+/**
+ * A hand-registered spec, and only where the static table has none — which `specFor` would
+ * answer first, so a registered spec it shadows is never one anybody reads.
+ */
+export function runtimeSpecFor(
+  deployment: string,
+  datastack: string,
+): DatastackSpec | undefined {
+  return shippedSpecFor(deployment, datastack)
+    ? undefined
+    : runtimeSpecs.get(deploymentKey(deployment, datastack))
 }
 
 /**
