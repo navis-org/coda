@@ -6344,6 +6344,17 @@ p.sources__hint {
   line-height: 1.5;
   color: var(--text-muted);
 }
+/*
+ * In the New menu: the menu's own hint size and inset. `contain: inline-size` takes the sentence
+ * out of the panel's shrink-to-fit width, so it wraps to the rows rather than widening the menu.
+ */
+.hidden-datasets--menu {
+  contain: inline-size;
+  margin: 3px 0 0;
+  padding: 4px 8px 2px;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
 .hidden-datasets__open {
   border: none;
   background: none;

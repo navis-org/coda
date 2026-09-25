@@ -529,11 +529,11 @@ describe('the New menu', () => {
     try {
       const panel = openNew()
       expect(panel.querySelector('.dropdown__item--parent')).toBeNull()
-      const row = [...panel.querySelectorAll('.dropdown__item')].find((el) =>
-        el.textContent?.includes('Some datasets are hidden'),
+      const note = panel.querySelector('.hidden-datasets')
+      expect(note?.textContent).toContain(
+        'Some datasets are hidden because Connectome is switched off',
       )
-      expect(row?.textContent).toContain('Connectome is switched off')
-      fireEvent.click(row!)
+      fireEvent.click(note!.querySelector('button')!)
       expect(useGraphStore.getState().pluginsOpen).toBe(true)
     } finally {
       act(() => {

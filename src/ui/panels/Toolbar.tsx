@@ -46,8 +46,8 @@ import {
 import { EdgeSetPanel } from './EdgeSetPanel'
 import { SourcesPanel } from './SourcesPanel'
 import { PluginsDialog } from './PluginsDialog'
-import { useDatasetsHiddenBy, useOfferedForNewWork } from '../packSwitches'
-import { hiddenDatasetsBlurb } from './HiddenDatasetsNote'
+import { useOfferedForNewWork } from '../packSwitches'
+import { HiddenDatasetsNote } from './HiddenDatasetsNote'
 import type { TourAnchor } from '../tour/anchors'
 import { TOURS, startTour } from '../tour/tourState'
 import { restoreHints, useDismissedHints } from '../hints'
@@ -1039,7 +1039,6 @@ function NewMenu({
     ],
     [],
   )
-  const hiddenBy = useDatasetsHiddenBy(datasetTypes)
   const groups = useMemo(() => {
     /*
      * Grouped by **backend**, not by source id, and the difference only shows on CATMAID.
@@ -1131,14 +1130,11 @@ function NewMenu({
       </div>
 
       {/* Why this list is shorter than it was, with the way back — see `HiddenDatasetsNote`. */}
-      {hiddenBy.length > 0 && (
-        <div className="dropdown__group">
-          <button type="button" className="dropdown__item" onClick={onPlugins}>
-            <strong>Some datasets are hidden</strong>
-            <span>{hiddenDatasetsBlurb(hiddenBy)}</span>
-          </button>
-        </div>
-      )}
+      <HiddenDatasetsNote
+        types={datasetTypes}
+        onOpen={onPlugins}
+        className="hidden-datasets--menu"
+      />
     </>
   )
 }

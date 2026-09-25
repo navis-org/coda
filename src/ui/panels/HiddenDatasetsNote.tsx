@@ -18,23 +18,28 @@ export function hiddenByText(packs: readonly PackDefinition[]): string {
   return `${listed(packs.map((p) => p.label))} ${packs.length > 1 ? 'are' : 'is'} switched off`
 }
 
-/** New's form, below the "Some datasets are hidden" heading of a row that opens Plugins. */
-export function hiddenDatasetsBlurb(packs: readonly PackDefinition[]): string {
-  return `${hiddenByText(packs)}. Open Plugins to switch ${packs.length > 1 ? 'them' : 'it'} back on.`
-}
-
 /**
- * The wizard's form: a line under the options, with a button that opens Plugins. `types` are the
- * dataset node types the list above it filters.
+ * One muted line under the options, with a button that opens Plugins — the wizard's and New's
+ * alike, so a footnote does not outweigh the rows it explains. `types` are the dataset node types
+ * the list above it filters; `onOpen` replaces the plain open where the surface must also close
+ * (a menu).
  */
-export function HiddenDatasetsNote({ types }: { types: readonly string[] }) {
+export function HiddenDatasetsNote({
+  types,
+  onOpen,
+  className,
+}: {
+  types: readonly string[]
+  onOpen?: () => void
+  className?: string
+}) {
   const packs = useDatasetsHiddenBy(types)
   const openPlugins = useGraphStore((s) => s.openPlugins)
   if (packs.length === 0) return null
   return (
-    <p className="hidden-datasets">
+    <p className={className ? `hidden-datasets ${className}` : 'hidden-datasets'}>
       Some datasets are hidden because {hiddenByText(packs)}.{' '}
-      <button type="button" className="hidden-datasets__open" onClick={openPlugins}>
+      <button type="button" className="hidden-datasets__open" onClick={onOpen ?? openPlugins}>
         Open Plugins
       </button>
     </p>
