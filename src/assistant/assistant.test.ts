@@ -1358,7 +1358,8 @@ describe('what a run produced', () => {
     const { graph, ids } = seeded()
     const text = describeGraph(graph, reader(ids.find!, neurons(), false))
 
-    expect(text).not.toContain('ran:')
+    // Anchored: a random node id can spell `ran:` in a wire line (`n32_dfran:dataset`).
+    expect(text).not.toMatch(/^\s*ran: /m)
     expect(text).not.toContain('LC4 (3)')
   })
 
@@ -1553,7 +1554,7 @@ describe('what a run produced', () => {
   it('is absent entirely when the caller has no results to read', () => {
     // Every headless caller, and a graph nobody has run. The same fallback `inference` takes.
     const { graph } = seeded()
-    expect(describeGraph(graph)).not.toContain('ran:')
+    expect(describeGraph(graph)).not.toMatch(/^\s*ran: /m)
   })
 })
 
