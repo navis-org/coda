@@ -32,11 +32,11 @@ import {
 } from './cells'
 import {
   cellTypeAnnotations,
-  cellTypeOptions,
   cellTypeRefs,
+  cellTypeSourceParam,
   cellTypesSchema,
 } from './cellTypes'
-import { CORTICAL_FRAMES, frameOf } from './frames'
+import { frameIssue, frameOf } from './frames'
 
 /**
  * The cells' columns before the frame adds depth and layer: the Dataset's, with the chosen
@@ -79,15 +79,9 @@ export const galleryNode = packNode({
       help: 'Cells selected on the wall. Saved into the workflow.',
       default: [],
     },
-    {
-      // Not presentational: the chosen table's columns are what `Selected` carries.
-      id: 'cellTypes',
-      kind: 'enum',
-      label: 'Cell type source',
-      help: 'The table cell types are read from. The default combines the published typings; the others are single typings, including m-types. None reads only what the Dataset carries, such as a table wired into it. Proofreading is read either way.',
-      options: (ctx) => cellTypeOptions(frameOf(datasetRef(ctx.inputs.dataset))),
-      default: '',
-    },
+    cellTypeSourceParam(
+      'The table cell types are read from. The default combines the published typings; the others are single typings, including m-types. None reads only what the Dataset carries, such as a table wired into it. Proofreading is read either way.',
+    ),
     {
       // A column rather than the literal `type`, so a dataset naming its typing otherwise — or a
       // reader wanting m-types — groups by it (invariant 5). Presentational: it only regroups the
@@ -245,13 +239,8 @@ export const galleryNode = packNode({
     // A width that is not one is ignored rather than refused; said, so the card is not mysterious.
     const { problem } = readColumnWidths(ctx.params)
     if (problem) issues.push(problem)
-    const ref = datasetRef(ctx.inputs.dataset)
-    if (ref?.sourceId && ref.datasetId && !frameOf(ref)) {
-      issues.push(
-        'No cortical frame is declared for this dataset, so there is no depth or layer to ' +
-          `draw a cell at. Declared for: ${CORTICAL_FRAMES.map((f) => f.dataset).join(', ')}.`,
-      )
-    }
+    const noFrame = frameIssue(datasetRef(ctx.inputs.dataset))
+    if (noFrame) issues.push(noFrame)
     return issues
   },
 
@@ -259,7 +248,7 @@ export const galleryNode = packNode({
     const dataset = requireDataset(ctx.input('dataset'))
     const source = ctx.resolveSource(dataset.sourceId)
     const frame = frameOf(dataset)
-    if (!frame) throw new Error('No cortical frame is declared for this dataset.')
+    if (!frame) throw new Error(frameIssue(dataset))
     if (!source.neuronIndex || !source.somaPositions) {
       throw new Error(`${source.label} cannot list this dataset's cells with their somata.`)
     }

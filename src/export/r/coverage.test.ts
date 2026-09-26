@@ -14,6 +14,15 @@ import './exporter'
 import { getEmitter, registeredEmitterTypes } from './registry'
 
 const NO_EMITTER: Record<string, string> = {
+  'cortex:depth':
+    'Depth, layer and lateral position through a cortical frame (`packs/cortex/frames.ts`), the ' +
+    'gallery\u2019s own reason: no notebook library carries the frame. The arithmetic is a ' +
+    'rotation and an offset and would emit in a few lines, but it should be emitted once, as ' +
+    'the frame, for this node and the gallery together \u2014 not restated per node.',
+  'cortex:laminarProfile':
+    'A picture of a depth column against a cortical frame\u2019s layers; the frame is the ' +
+    'obstacle, as for `cortex:depth`. Its Selected port is ordinary depth ranges and would ' +
+    'follow once the frame is emitted.',
   'cortex:gallery':
     'A browsing widget whose wall is the point, and whose depth and layer come from a cortical ' +
     'frame (`packs/cortex/frames.ts`) no notebook library carries. Its Selected table is the ' +

@@ -19,8 +19,9 @@
  */
 
 import type { TableValue } from '../../core/values'
-import { markLabel, numericCell } from '../../nodes/lib/chartSelection'
+import { MISSING_LABEL, markLabel, numericCell } from '../../nodes/lib/chartSelection'
 import type { ValueRange } from '../../nodes/lib/chartSelection'
+import type { RankedFold } from '../colors'
 import { foldByRank } from '../colors'
 import { MAX_SERIES, OTHER_LABEL } from '../colors'
 import { quantileSorted } from '../../core/stats'
@@ -35,7 +36,28 @@ export interface HistogramOptions {
   log?: boolean
   normalize?: Normalize
   cumulative?: boolean
+  /**
+   * Bins exactly this wide, at multiples of it — `0, 20, 40…` — in place of a count over the
+   * data's extent. Where the axis is a measurement with a meaning of its own (depth below the pia,
+   * `cortex:laminarProfile`) and a bin edge has to be a round number of it, not wherever the data
+   * happened to start. Linear only; ignored under `log`.
+   */
+  width?: number
+  /**
+   * Stack the series of rows with no value (`MISSING_LABEL`) last, outside the ranking, with
+   * `colorIndex` `MISSING_SLOT`. An absence is not a category: ranked, the untyped partners of a
+   * synapse cloud — most of them — took the first hue and buried every typed one.
+   */
+  missingLast?: boolean
+  /**
+   * The series ranking to colour by, in place of this scan's own — so the panels of a faceted
+   * chart give one series one colour. `seriesFold` of the whole table's scan.
+   */
+  fold?: RankedFold
 }
+
+/** The `colorIndex` of the series `missingLast` sets apart; the viewer draws it in muted ink. */
+export const MISSING_SLOT = -1
 
 export interface HistogramSegment {
   series: string
@@ -214,6 +236,8 @@ export function scanValues(
   valueColumn: string,
   seriesColumn: string | undefined,
   log = false,
+  /** Only these rows, in this order — one panel of a faceted chart. Every row when absent. */
+  rows?: readonly number[],
 ): ValueScan {
   const values = table.data[valueColumn]
   if (!values) return EMPTY_SCAN
@@ -226,7 +250,9 @@ export function scanValues(
   let dropped = 0
   let loT = Infinity
   let hiT = -Infinity
-  for (let row = 0; row < table.length; row++) {
+  const count = rows ? rows.length : table.length
+  for (let i = 0; i < count; i++) {
+    const row = rows ? rows[i]! : i
     const value = numericCell(values[row])
     // A log axis has nothing to say about zero or a negative count, and the caption reports
     // how many went — nothing about flipping a switch suggests rows would leave the picture.
@@ -257,40 +283,58 @@ export function binScan(scan: ValueScan, options: HistogramOptions = {}): Histog
    * Measured on 165,122 heavy-tailed values: copy-and-sort 20.6 ms against 0.2 ms for the
    * min/max scan it replaced.
    */
-  const count =
-    binMode === 'fixed'
-      ? Math.min(MAX_BINS, Math.max(1, Math.round(bins) || 1))
-      : chooseBinCount([...kept].sort((a, b) => a - b))
-
-  /*
-   * A column with one distinct value is a single bar rather than an empty picture. `hiT === loT`
-   * makes every width zero, so the scale below would divide by it; special-casing here keeps
-   * every consumer downstream free of the check.
-   */
-  const spanT = hiT > loT ? hiT - loT : 0
-  const widthT = spanT > 0 ? spanT / count : 0
-  const barCount = spanT > 0 ? count : 1
-
   const back = (t: number): number => (log ? 10 ** t : t)
   const edges: number[] = []
-  for (let i = 0; i <= barCount; i++) edges.push(back(loT + widthT * i))
-  // The last edge is the maximum itself rather than an accumulation of `barCount` additions,
-  // which would leave the largest value a hair outside the bar that counts it.
-  edges[barCount] = back(hiT)
+  let startT = loT
+  let widthT: number
+  let barCount: number
+  const fixedWidth = options.width ?? 0
+  const aligned = !log && fixedWidth > 0
+  if (aligned) {
+    /*
+     * Edges at multiples of the width, and the last bar **half-open like the rest**: a value on
+     * an edge opens the bar above it, so the maximum sits inside a bar rather than on its closing
+     * bound. Doubled past `MAX_BINS` rather than refused — a picture, not a failure.
+     */
+    widthT = alignedWidth(fixedWidth, loT, hiT)
+    startT = Math.floor(loT / widthT) * widthT
+    barCount = Math.floor((hiT - startT) / widthT) + 1
+    for (let i = 0; i <= barCount; i++) edges.push(startT + widthT * i)
+  } else {
+    const count =
+      binMode === 'fixed'
+        ? Math.min(MAX_BINS, Math.max(1, Math.round(bins) || 1))
+        : chooseBinCount([...kept].sort((a, b) => a - b))
 
+    /*
+     * A column with one distinct value is a single bar rather than an empty picture. `hiT ===
+     * loT` makes every width zero, so the scale below would divide by it; special-casing here
+     * keeps every consumer downstream free of the check.
+     */
+    const spanT = hiT > loT ? hiT - loT : 0
+    widthT = spanT > 0 ? spanT / count : 0
+    barCount = spanT > 0 ? count : 1
+
+    for (let i = 0; i <= barCount; i++) edges.push(back(loT + widthT * i))
+    // The last edge is the maximum itself rather than an accumulation of `barCount` additions,
+    // which would leave the largest value a hair outside the bar that counts it.
+    edges[barCount] = back(hiT)
+  }
+
+  const missingApart = hasSeries && options.missingLast === true
+  let hasMissing = false
   const perBar: Map<string, number>[] = Array.from({ length: barCount }, () => new Map())
-  const seriesTotals = new Map<string, number>()
   for (let i = 0; i < kept.length; i++) {
     const t = kept[i]!
     const index =
-      widthT > 0 ? Math.min(barCount - 1, Math.max(0, Math.floor((t - loT) / widthT))) : 0
+      widthT > 0 ? Math.min(barCount - 1, Math.max(0, Math.floor((t - startT) / widthT))) : 0
     const name = hasSeries ? keptSeries[i]! : ''
     const bucket = perBar[index]!
     bucket.set(name, (bucket.get(name) ?? 0) + 1)
-    seriesTotals.set(name, (seriesTotals.get(name) ?? 0) + 1)
+    if (missingApart && name === MISSING_LABEL) hasMissing = true
   }
 
-  const fold = foldByRank(seriesTotals)
+  const fold = options.fold ?? seriesFold(scan, missingApart)
 
   // Cumulative runs per series, so a stack of running totals is still a stack of the same
   // series. Carried outside the bar loop because that is what makes it cumulative.
@@ -300,7 +344,7 @@ export function binScan(scan: ValueScan, options: HistogramOptions = {}): Histog
   for (let index = 0; index < barCount; index++) {
     const lo = edges[index]!
     const hi = edges[index + 1]!
-    const closed = index === barCount - 1
+    const closed = !aligned && index === barCount - 1
     const width = hi - lo
     const bucket = perBar[index]!
 
@@ -315,6 +359,12 @@ export function binScan(scan: ValueScan, options: HistogramOptions = {}): Histog
       for (const name of fold.tail) other += bucket.get(name) ?? 0
       if (other > 0 || cumulative) {
         raw.push({ series: OTHER_LABEL, count: other, colorIndex: MAX_SERIES })
+      }
+    }
+    if (hasMissing) {
+      const missing = bucket.get(MISSING_LABEL) ?? 0
+      if (missing > 0 || cumulative) {
+        raw.push({ series: MISSING_LABEL, count: missing, colorIndex: MISSING_SLOT })
       }
     }
 
@@ -352,6 +402,42 @@ export function binScan(scan: ValueScan, options: HistogramOptions = {}): Histog
     lo: back(loT),
     hi: back(hiT),
   }
+}
+
+/**
+ * A scan's series ranked — the one statement of the rule, which `binScan` applies to its own scan
+ * and a faceted chart takes over the whole table (`HistogramOptions.fold`), so every panel gives a
+ * series one colour. Under `missingLast` the no-value series is kept out of the ranking and named
+ * last in the legend, where it is present; its slot is `MISSING_SLOT`, never `slotOf`'s.
+ */
+export function seriesFold(scan: ValueScan, missingLast = false): RankedFold {
+  const totals = new Map<string, number>()
+  // Unsplit, every value is the one series `''`, which `binScan` buckets under that name.
+  if (!scan.hasSeries) {
+    if (scan.kept.length > 0) totals.set('', scan.kept.length)
+    return foldByRank(totals)
+  }
+  let missing = false
+  for (const name of scan.keptSeries) {
+    if (missingLast && name === MISSING_LABEL) {
+      missing = true
+      continue
+    }
+    totals.set(name, (totals.get(name) ?? 0) + 1)
+  }
+  const fold = foldByRank(totals)
+  return missing ? { ...fold, legend: [...fold.legend, MISSING_LABEL] } : fold
+}
+
+/**
+ * The bin width `binScan` draws at under `HistogramOptions.width`: the one asked for, doubled
+ * until the extent takes fewer than `MAX_BINS` — a picture, not a failure. Exported so a faceted
+ * chart decides it once over the whole table, every panel then sharing one grid.
+ */
+export function alignedWidth(width: number, lo: number, hi: number): number {
+  let out = width
+  while ((hi - lo) / out >= MAX_BINS) out *= 2
+  return out
 }
 
 /**

@@ -1607,11 +1607,14 @@ fine at half that.
 
 Two things about that measurement, both of which broke it first:
 
-- **The measured box wraps `Loadable`, never the other way round.** `useElementSize` observes
-  once, on mount, and bails when the ref is empty — so a box rendered inside the loading branch is
-  null exactly when the observer is set up, and is never seen again. The chart then keeps the
-  fallback page size for the session, which reads as a chart that simply chose a small number
-  rather than as a measurement that never happened.
+- **The measured box wraps `Loadable`, never the other way round.** `useElementSize` observed
+  once, on mount, and bailed when the ref was empty — so a box rendered inside the loading branch
+  was null exactly when the observer was set up, and was never seen again. The chart then kept the
+  fallback page size for the session, which read as a chart that simply chose a small number
+  rather than as a measurement that never happened. The hook now observes whichever element is
+  under the ref after every commit (it was found again in Laminar Profile, and every chart viewer
+  returning its empty state before the measured box had the same trap), so this ordering is no
+  longer load-bearing; it is kept because it is still the simpler tree.
 - **The wrapper is measured, not the plot.** Measuring the element whose child count the
   measurement decides is a feedback loop.
 

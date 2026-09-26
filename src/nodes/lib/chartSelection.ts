@@ -20,7 +20,9 @@
  * *means*, which is why the column params these charts resolve a selection against are **not
  * `presentational`** — exactly the call `out.scatter` makes for its `idColumn`. Marking one
  * presentational would let a stale downstream result survive a change to the very thing that
- * decides which rows `Selected` carries (invariant 4).
+ * decides which rows `Selected` carries (invariant 4). **The one way out is to store the column in
+ * the entry** — then the param no longer decides anything and may be presentational. Laminar
+ * Profile's `Facet by` does that (`packs/cortex/profileSelection.ts`); its `Depth` does not.
  *
  * Both halves live here rather than in the viewers because the label a viewer writes and the
  * label a node matches have to be the same string. Two agreeing implementations drift the
@@ -112,6 +114,11 @@ export interface ValueRange {
  */
 export function encodeRange(range: ValueRange): string {
   return `${range.lo}:${range.hi}${range.closed ? ':c' : ''}`
+}
+
+/** Whether a value falls in a range: `lo` inclusive, `hi` exclusive unless the range is closed. */
+export function inRange(range: ValueRange, value: number): boolean {
+  return value >= range.lo && (range.closed ? value <= range.hi : value < range.hi)
 }
 
 export function decodeRange(text: unknown): ValueRange | undefined {
@@ -280,12 +287,7 @@ export function rowsInRanges(
     for (let row = 0; row < table.length; row++) {
       const value = numericCell(data[row])
       if (value === undefined) continue
-      for (const range of ranges) {
-        if (value >= range.lo && (range.closed ? value <= range.hi : value < range.hi)) {
-          rows.push(row)
-          break
-        }
-      }
+      if (ranges.some((range) => inRange(range, value))) rows.push(row)
     }
   }
   // Not `rowsMatching`: a range is a *test* rather than a name, so there is no string to

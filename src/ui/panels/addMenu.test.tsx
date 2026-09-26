@@ -25,6 +25,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { App } from '../../App'
 import type { NodeDefinition } from '../../core/node'
+import { effectiveOff, offeredType, packsOffByDefault } from '../../core/packs'
 import { nodeDefsByCategory } from '../../core/registry'
 import { MockSource } from '../../data/mock/MockSource'
 import { registerSource } from '../../data/source'
@@ -144,7 +145,9 @@ describe('the add menu', () => {
 
   it('shows every node in the category it was asked for', async () => {
     await ready()
-    const transforms = nodeDefsByCategory().find((g) => g.category === 'transform')!
+    // What a fresh session offers: a pack off by default (Cortex) hides its nodes here.
+    const offered = offeredType(effectiveOff(packsOffByDefault()))
+    const transforms = nodeDefsByCategory(offered).find((g) => g.category === 'transform')!
     const panel = await openCategory('Transform nodes')
 
     const names = within(panel)

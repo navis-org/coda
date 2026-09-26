@@ -16,7 +16,7 @@ import { makeTable } from '../../core/values'
 import { readLimit } from '../../nodes/lib/heatmapParams'
 import { foldColumns, sampleRowIndices } from '../../nodes/lib/tableOps'
 import type { CorticalFrame } from './frames'
-import { layerOf, projector } from './frames'
+import { placeAll } from './frames'
 
 /** Micrometres below the pia, of the soma. Null where the source has no single soma for it. */
 export const DEPTH_COLUMN = 'soma_depth'
@@ -34,16 +34,15 @@ export function cellsTable(
   somata: ReadonlyMap<NeuronId, readonly [number, number, number]>,
   frame: CorticalFrame,
 ): TableValue {
-  const project = projector(frame)
   const ids = index.data[ID_COLUMN_NAME] ?? []
-  const depth: (number | null)[] = []
-  const layer: (string | null)[] = []
-  for (let i = 0; i < index.length; i++) {
-    const soma = somata.get(String(ids[i]))
-    const d = soma ? project.depth(soma[0], soma[1]) : undefined
-    depth.push(d ?? null)
-    layer.push(d === undefined ? null : (layerOf(frame, d) ?? null))
-  }
+  // Each soma looked up once; `NaN` is the one with none, which places as null.
+  const at = Array.from({ length: index.length }, (_, i) => somata.get(String(ids[i])))
+  const { depth, layer } = placeAll(
+    frame,
+    index.length,
+    (i) => at[i]?.[0] ?? NaN,
+    (i) => at[i]?.[1] ?? NaN,
+  )
   const data: Record<string, ColumnData> = {
     ...index.data,
     [DEPTH_COLUMN]: depth,

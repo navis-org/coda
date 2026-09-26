@@ -17,7 +17,7 @@
  * `ScatterViewer`'s.
  */
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 
 import { useStable } from './useStable'
 
@@ -68,8 +68,18 @@ export function useMarkSelection(
     [selected],
   )
 
+  /*
+   * The callback read through a ref. Every host passes an inline arrow, so as a dependency it made
+   * `toggle`, `clear` and the returned object new on each render of the card — every graph edit and
+   * every frame of a drag — and a viewer memoising its marks on this object redrew them all.
+   */
+  const latest = useRef(onSelectionChange)
+  latest.current = onSelectionChange
+  const writable = !!onSelectionChange
+
   const toggle = useCallback(
     (names: readonly string[], additive: boolean) => {
+      const onSelectionChange = latest.current
       if (!onSelectionChange || names.length === 0) return
       const already = names.every((name) => selected.has(name))
       if (additive) {
@@ -83,10 +93,10 @@ export function useMarkSelection(
       }
       onSelectionChange(already && selected.size === names.length ? [] : [...names])
     },
-    [onSelectionChange, selected],
+    [selected],
   )
 
-  const clear = useCallback(() => onSelectionChange?.([]), [onSelectionChange])
+  const clear = useCallback(() => latest.current?.([]), [])
 
   /*
    * Memoised, because the *container* is what a consumer's `memo` compares.
@@ -104,8 +114,8 @@ export function useMarkSelection(
       hasAny,
       toggle,
       clear,
-      writable: !!onSelectionChange,
+      writable,
     }),
-    [selected, has, hasAny, toggle, clear, onSelectionChange],
+    [selected, has, hasAny, toggle, clear, writable],
   )
 }

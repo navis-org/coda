@@ -21,6 +21,7 @@ import {
   formatCompact,
   formatMeasure,
   formatNumber,
+  niceTicks,
   printsExact,
 } from './format'
 
@@ -199,5 +200,16 @@ describe('a measurement in the unit somebody reads it in', () => {
 
   it('degrades rather than printing a scaled NaN', () => {
     expect(formatMeasure(Number.NaN, 'nm')).toBe('—')
+  })
+})
+
+describe('niceTicks', () => {
+  it('ends at or past the maximum, so the last tick can end an axis', () => {
+    // 120 in four steps is a step of 50: stopping short left the longest bar past the axis.
+    expect(niceTicks(120, 4)).toEqual([0, 50, 100, 150])
+    expect(niceTicks(1400, 4)).toEqual([0, 500, 1000, 1500])
+    // A maximum on a tick is its own end.
+    expect(niceTicks(100, 4)).toEqual([0, 50, 100])
+    expect(niceTicks(0)).toEqual([0])
   })
 })

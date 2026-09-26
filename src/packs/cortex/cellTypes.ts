@@ -15,8 +15,9 @@
  * (invariant 3).
  */
 
-import type { EnumOption } from '../../core/node'
+import type { EnumOption, ParamDef } from '../../core/node'
 import type { TableSchema } from '../../core/types'
+import { datasetRef } from '../../core/types'
 import type { DatasetAnnotations } from '../../core/values'
 import { peekRefColumns, requireAnnotationProvider } from '../../data/annotations/registry'
 import type { AnnotationFetchOptions, AnnotationRef } from '../../data/annotations/types'
@@ -25,6 +26,7 @@ import { joinAnnotations, joinedSchema } from '../../nodes/lib/annotationOps'
 import type { DatasetIdentity } from '../../nodes/lib/caveParams'
 import { caveTableRef } from '../../nodes/lib/caveParams'
 import type { CellTypeSource, CorticalFrame } from './frames'
+import { frameOf } from './frames'
 
 /** The dropdown's "read no typing table": the Dataset's own columns, and whatever is wired. */
 export const NO_CELL_TYPES = 'none'
@@ -45,14 +47,36 @@ export function cellTypeOptions(frame: CorticalFrame | undefined): EnumOption[] 
 }
 
 /**
+ * The `Cell type source` dropdown, one declaration for every Cortex node that reads a typing.
+ * **Never presentational**: the chosen table's columns are part of what the node outputs, so the
+ * pickers' schema, inference and `evaluate` all go through `cellTypeRefs`. `help` is the node's,
+ * since what a type is *for* differs per node.
+ */
+export function cellTypeSourceParam(help: string): ParamDef {
+  return {
+    id: 'cellTypes',
+    kind: 'enum',
+    label: 'Cell type source',
+    help,
+    options: (ctx) => cellTypeOptions(frameOf(datasetRef(ctx.inputs.dataset))),
+    default: '',
+  }
+}
+
+/**
  * The tables a choice reads, in join order: proofreading first, then the typing, which wins a
  * column both carry. A table name the frame no longer lists — a graph saved against an older
  * declaration — is still read, keeping every column, rather than silently becoming the default.
+ *
+ * `proofreading: false` is for a reader wanting types alone (Cortical Depth): the flags' own
+ * table is then not read — but where one table carries both, the read keeps the flag columns, so
+ * it stays the one cache entry the gallery and the dataset's annotation chain share.
  */
 export function cellTypeRefs(
   frame: CorticalFrame | undefined,
   { sourceId, datasetId }: DatasetIdentity,
   choice: string,
+  { proofreading = true }: { proofreading?: boolean } = {},
 ): AnnotationRef[] {
   if (!frame || !datasetId || frame.scope !== 'cave') return []
   const typing: CellTypeSource | undefined =
@@ -81,7 +105,7 @@ export function cellTypeRefs(
     return [ref(typing.table, columns)]
   }
   return [
-    ...(flags ? [ref(flags.table, flagColumns.join(', '))] : []),
+    ...(flags && proofreading ? [ref(flags.table, flagColumns.join(', '))] : []),
     ...(typing ? [ref(typing.table, typing.columns)] : []),
   ]
 }

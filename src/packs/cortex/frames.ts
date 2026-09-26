@@ -31,6 +31,7 @@
  */
 
 import { NM_PER_UM } from '../../data/transforms/landmarks'
+import { inRange } from '../../nodes/lib/chartSelection'
 import type { DatasetBinding } from '../../data/transforms/spaces'
 import { bindingFor } from '../../data/transforms/spaces'
 import type { DatasetIdentity } from '../../nodes/lib/caveParams'
@@ -209,12 +210,97 @@ export function projector(frame: CorticalFrame): {
 }
 
 /**
- * The layer a depth falls in, or undefined above the frame's allowance — see the module note for
- * why a depth far above the pia is not simply L1.
+ * The bottom of the deepest layer. It has none — white matter runs on — and a depth range stored
+ * as a selection must be finite (`decodeRange`), so a depth no cortex reaches stands in.
  */
+const DEEPEST_UM = 1e6
+
+/** One layer's depths, `lo` inclusive and `hi` exclusive, µm. */
+export interface LayerRange {
+  name: string
+  lo: number
+  hi: number
+}
+
+const RANGES = new WeakMap<CorticalFrame, readonly LayerRange[]>()
+
+/**
+ * Each layer's depths, shallowest first — the one statement of the bounds, which `layerOf` reads
+ * and a laminar profile stores as a layer's selection, so a clicked layer selects exactly what it
+ * counted. The first layer reaches up to the frame's allowance above the pia (see the module note
+ * for why no further). Worked out once per frame: `layerOf` runs per point.
+ */
+export function layerRanges(frame: CorticalFrame): readonly LayerRange[] {
+  let ranges = RANGES.get(frame)
+  if (!ranges) {
+    ranges = frame.layers.map((band, i) => ({
+      name: band.name,
+      lo: i === 0 ? -frame.aboveTolerance : band.top,
+      hi: frame.layers[i + 1]?.top ?? DEEPEST_UM,
+    }))
+    RANGES.set(frame, ranges)
+  }
+  return ranges
+}
+
+/** The layer a depth falls in, or undefined beyond `layerRanges`. */
 export function layerOf(frame: CorticalFrame, depth: number): string | undefined {
-  if (depth < -frame.aboveTolerance) return undefined
-  let layer = frame.layers[0]!.name
-  for (const band of frame.layers) if (depth >= band.top) layer = band.name
-  return layer
+  for (const range of layerRanges(frame)) {
+    if (inRange(range, depth)) return range.name
+  }
+  return undefined
+}
+
+/** Where a set of positions sits in a frame, one entry per position: µm, and null where unknown. */
+export interface Placed {
+  lateral: (number | null)[]
+  depth: (number | null)[]
+  layer: (string | null)[]
+  /** Positions with a depth and no layer — too far above the pia to be read as the first. */
+  outside: number
+}
+
+/**
+ * `count` positions placed in a frame — the one walk the gallery's somata and Cortical Depth's
+ * points both take, so a soma and a synapse at one place cannot come out at two depths. `x` and
+ * `y` are nanometres by index; `NaN` is a position the source did not have, which places as null
+ * rather than at the pia.
+ */
+export function placeAll(
+  frame: CorticalFrame,
+  count: number,
+  x: (i: number) => number,
+  y: (i: number) => number,
+): Placed {
+  const project = projector(frame)
+  const placed: Placed = { lateral: [], depth: [], layer: [], outside: 0 }
+  for (let i = 0; i < count; i++) {
+    const px = x(i)
+    const py = y(i)
+    if (!Number.isFinite(px) || !Number.isFinite(py)) {
+      placed.lateral.push(null)
+      placed.depth.push(null)
+      placed.layer.push(null)
+      continue
+    }
+    const depth = project.depth(px, py)
+    const layer = layerOf(frame, depth)
+    if (layer === undefined) placed.outside++
+    placed.lateral.push(project.lateral(px, py))
+    placed.depth.push(depth)
+    placed.layer.push(layer ?? null)
+  }
+  return placed
+}
+
+/**
+ * What a node says of a Dataset no frame is declared for — and nothing while the Dataset has not
+ * said which it is, an unresolved wire not being a dataset without a frame.
+ */
+export function frameIssue(dataset: DatasetIdentity | undefined): string | undefined {
+  if (!dataset?.sourceId || !dataset.datasetId || frameOf(dataset)) return undefined
+  return (
+    'No cortical frame is declared for this dataset, so there is no depth or layer to place ' +
+    `anything at. Declared for: ${CORTICAL_FRAMES.map((f) => f.dataset).join(', ')}.`
+  )
 }

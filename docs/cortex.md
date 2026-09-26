@@ -22,6 +22,9 @@ could draw anything (phase A), because most of that was not.
 - **D — `/cortex`.** Done. The pack is off by default; `coda.science/cortex` switches it on (and
   CAVE with it) through a redirect page and a query parameter, since GitHub Pages never runs the
   main entry at a path it has no file for ([packs.md](packs.md#shortcuts)).
+- **E — laminar profiles.** Done: `cortex:depth` places any point cloud in the frame and types
+  both ends of a synapse; `cortex:laminarProfile` draws a depth column down the cortex against the
+  layers. See *Cortical Depth and Laminar Profile*.
 
 Decided with the user: EM cell-type names as published, never a transcriptomic mapping; the rigid
 depth transform with the column's layer bounds; proofread cells by default; **a CAVE token is
@@ -329,6 +332,89 @@ Six reports from the first person to use it, each a thing no probe had asked.
   up to 50 µm, so a filling wall re-lays itself out at a few steps rather than on every arrival,
   and loading cells take the even width at once. A 150 µm floor keeps a loading or tiny cell a
   clickable column in fit mode.
+
+## Cortical Depth and Laminar Profile
+
+Two nodes that make the frame reachable from the rest of the canvas, chosen with the user as the
+first step past the gallery: a laminar input profile, split by partner type.
+
+- **`cortex:depth` places points, not cells.** It adds `depth` (`POINT_DEPTH_COLUMN`; the
+  gallery's is `soma_depth`), `lateral` and `layer` to any
+  point cloud through `placeAll` (`frames.ts`), the one walk `cellsTable` now takes too — so a soma
+  and a synapse at one place cannot come out at two depths (`pointDepth.test.ts` holds them to a
+  nanometre, the cloud's positions being float32). Two outputs, the cloud and its attributes as a
+  table, because a point cloud reaches the 3D View and no chart.
+- **Types are a lookup per end, never a join.** A synapse row carries `neuronId` and `partnerId`;
+  the chosen typing (the gallery's `Cell type source`, now `cellTypeSourceParam`, one declaration)
+  is read once, keyed through `displayLabels` (the shared reader: first row per id wins), and looked
+  up for both, filling `type` and `partnerType`. The read is
+  `cellTypeRefs(…, { proofreading: false })`: the flags' own table is skipped, but where one table
+  carries both the union is kept, so it stays the cache entry the gallery and the annotation chain
+  share. **`expensive` because of that read**, not the arithmetic — a `cheap` node runs on being
+  wired, and upstream is a Synapses fetch that needs a Run anyway.
+- **Measured on minnie65** (864691136314078013, a neurogliaform cell): 5,891 input synapses, 43% in
+  L1 and 57% in L2/3, placed and typed in 3.5 s, nearly all of it the first read of
+  `aibs_cell_info`. **95% of partners are untyped** — fragments and unproofread segments — which is
+  what shaped the viewer.
+- **`cortex:laminarProfile` is a Histogram turned down the cortex**, and the binning is the
+  Histogram's (`binScan`) with two options added rather than a second binner: `width`, edges at
+  multiples of the bin so a bar starts at a round depth; and `missingLast`, which takes the
+  no-value series out of the colour ranking and stacks it last in muted ink. Without the second,
+  the untyped 95% took the first hue and every typed partner was a sliver at the far end of its
+  bar. The layers need the Dataset wired — the frame is a fact about a dataset and a table carries
+  none — read off the wire's *type*, so they draw with the first result.
+- **A layer's count is a selection too**, stored as the layer's depth range from `layerRanges`
+  (`frames.ts`), the one statement of the bounds that `layerOf` also reads (the first layer
+  reaching up to the allowance; the deepest ending at a stand-in 1 m, since a stored range must be
+  finite). `laminarProfile.test.ts` holds that clicking a count
+  selects exactly the rows it counted.
+- **`niceTicks` stopped within half a step of the maximum**, so its last tick — which three
+  charts take as the axis end — could fall short of the longest bar: a histogram peaking at 120
+  drew its tallest bar a fifth past the plot. Seen on this viewer in a browser, and fixed at the
+  helper (`format.ts`): ticks now run to the first at or past the maximum.
+- **The demo builder picks a viewer by two rules** (`demo.ts`, `addViewer`). It took the first
+  viewer that accepted the type, and Laminar Profile — any table, registered first with its pack —
+  ended the demo of every table-producing node with its Depth picker substituted onto `size`: 24
+  new warnings against `demo.test.ts`' ceiling. First, **only what a fresh session offers**, plus
+  the node's own pack: calling the registry directly ignores the pack switches (the rule in
+  CLAUDE.md), which is the actual cause. Second, **the first that raises no issue of its own**,
+  else the first at all. The second alone was not enough: before a table's schema arrives a picker
+  on its declared default raises nothing, and seven demos (Google Sheet, Upload Table…) still ended
+  on Laminar Profile. The check's inference is handed on to the scorer rather than run twice.
+
+- **Faceting is small multiples on one picture.** `Facet by` (`type`, or `neuronId` for a panel
+  per neuron) gives each value a panel — one depth axis, one bin grid, one count scale — and **one
+  series ranking over the whole table** (`seriesFold`, passed to each panel's `binScan` as `fold`):
+  ranked per panel, a partner type changed colour from one neuron to the next. `percent` is per
+  panel, which is the point of it. Panels are largest first, capped by `Panels`, the no-value
+  panel last (faceted by `partnerType`, the untyped panel would open the chart). A faceted panel
+  names each layer and its share inside its own right edge: at the left, the first panel's bars
+  covered the names — seen in a browser.
+- **A faceted selection names its column**, `lo:hi|column|label` (`profileSelection.ts`). A bar in
+  a panel is "these depths within this facet", so a bare range would have selected them in every
+  panel; and with the column in the entry, `evaluate` never reads `Facet by`, which is therefore
+  presentational — in the full view's rail, and regrouping re-runs nothing. The first cut read the
+  param in `evaluate`, which kept it out of the rail (the rail shows presentational params only).
+  Two consequences, both deliberate: an entry whose column has gone upstream **selects nothing**
+  (`rowsWithLabels`' rule — matching every row at those depths would widen a panel's bar into the
+  population), and an entry made under another grouping still selects its rows but draws in no
+  panel, so the caption counts it (`N not in these panels`) rather than every bar dimming with
+  nothing lit. `chartSelection.ts`' header names this as the one way out of its rule.
+- **Faceted, one decision each, taken once.** The bin width is decided over the whole table
+  (`alignedWidth`, the doubling past `MAX_BINS` that each panel used to decide for itself), and
+  panels and series rank through one `foldByRank` (`facetGroups`, `seriesFold`). The panels are
+  memoised apart from the hover — a pointer move draws one highlight over them — and the grouping,
+  each facet's scan (cached by label, so raising `Panels` scans only the new ones), the layer counts
+  and the bins are memoised on what each actually reads.
+
+- **Two shared hooks were fixed at their root, found through this viewer.** `useElementSize`
+  observed once, on mount, so a chart whose first render was its empty state — every chart viewer
+  returns that before the measured box — stayed blank once it had something to draw, until
+  remounted; it now observes whichever element is under the ref after every commit
+  (`laminarProfileViewer.test.tsx` rerenders from empty to drawable, and fails on the old hook).
+  And `useMarkSelection` took the host's inline `onSelectionChange` as a dependency, so its object
+  was new on every render of the card — every graph edit, every drag frame — and a viewer memoising
+  its marks on it redrew them all; the callback is read through a ref now.
 
 ## What is deferred, and why
 

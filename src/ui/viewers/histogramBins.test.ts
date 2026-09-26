@@ -13,6 +13,10 @@ import { column, tableSchema } from '../../core/types'
 import { tableFromRows } from '../../core/values'
 import {
   MAX_AUTO_BINS,
+  MISSING_SLOT,
+  binScan,
+  scanValues,
+  seriesFold,
   buildHistogram,
   chooseBinCount,
   columnStats,
@@ -197,5 +201,62 @@ describe('columnStats', () => {
     // Nine quantile definitions, and two of them differ on an even-length run. `boxStats` is
     // the one this and `describeOps` share; a second copy here is how they come to disagree.
     expect(columnStats(tableOf([1, 2, 3, 4, 5, 6]), 'pre')?.median).toBe(3.5)
+  })
+})
+
+describe('bins of a fixed width', () => {
+  it('puts edges at multiples of the width, wherever the data starts', () => {
+    const { bars } = buildHistogram(tableOf([-15, 3, 47, 60]), 'pre', undefined, { width: 20 })
+    expect(bars.map((b) => [b.lo, b.hi])).toEqual([
+      [-20, 0],
+      [0, 20],
+      [20, 40],
+      [40, 60],
+      [60, 80],
+    ])
+    // A value on an edge opens the bar above it, the maximum included: every bar is half-open.
+    expect(bars.map((b) => b.count)).toEqual([1, 1, 0, 1, 1])
+    expect(bars.some((b) => b.closed)).toBe(false)
+  })
+
+  it('widens past the bar ceiling rather than drawing thousands', () => {
+    const { bars } = buildHistogram(tableOf([0, 10_000]), 'pre', undefined, { width: 1 })
+    expect(bars.length).toBeLessThanOrEqual(200)
+    expect(bars[0]!.hi - bars[0]!.lo).toBe(64)
+  })
+})
+
+describe('the missing series set apart', () => {
+  it('keeps rows with no value out of the ranking, stacked last and counted', () => {
+    // Mostly untyped, as a synapse cloud's partners are: ranked, the absence would take slot 0.
+    const table = tableFromRows(
+      SCHEMA,
+      [1, 1, 1, 1, 2].map((pre, i) => ({ pre, type: i < 3 ? null : 'a' })),
+    )
+    const histogram = buildHistogram(table, 'pre', 'type', { missingLast: true })
+    expect(histogram.series).toEqual(['a', '—'])
+    const first = histogram.bars[0]!
+    expect(first.segments.map((s) => [s.series, s.colorIndex, s.count])).toEqual([
+      ['a', 0, 1],
+      ['—', MISSING_SLOT, 3],
+    ])
+    expect(histogram.bars.reduce((sum, bar) => sum + bar.count, 0)).toBe(5)
+  })
+})
+
+describe('one panel of many', () => {
+  it('bins only the rows asked for, coloured by a ranking taken over them all', () => {
+    // `b` is the commoner series overall and rarer in the panel: the panel keeps `b`'s slot.
+    const table = tableFromRows(
+      SCHEMA,
+      [1, 1, 1, 1, 1].map((pre, i) => ({ pre, type: i === 0 ? 'a' : 'b' })),
+    )
+    const fold = seriesFold(scanValues(table, 'pre', 'type'))
+    const panel = binScan(scanValues(table, 'pre', 'type', false, [0, 1]), { fold })
+    expect(panel.used).toBe(2)
+    const slots = Object.fromEntries(
+      panel.bars[0]!.segments.map((s) => [s.series, s.colorIndex]),
+    )
+    expect(slots).toEqual({ b: 0, a: 1 })
   })
 })

@@ -8,7 +8,9 @@
  */
 
 import type { PackDefinition } from '../../core/registry'
+import { depthNode } from './depth'
 import { galleryNode } from './gallery'
+import { laminarProfileNode } from './laminarProfile'
 
 export const cortex: PackDefinition = {
   id: 'cortex',
@@ -17,5 +19,5 @@ export const cortex: PackDefinition = {
   defaultOn: false,
   requires: ['cave'],
   glyph: 'cortex:gallery',
-  nodes: [galleryNode],
+  nodes: [galleryNode, depthNode, laminarProfileNode],
 }

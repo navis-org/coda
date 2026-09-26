@@ -81,9 +81,11 @@ import type { Socket } from '../core/sockets'
 import { socketAccepts, socketOriginates } from '../core/sockets'
 import type { CodaType } from '../core/types'
 import { uniqueName } from '../core/types'
+import type { InferenceResult } from '../core/inference'
 import { inferGraph, nodeTypes } from '../core/inference'
+import { effectiveOff, packsOffByDefault } from '../core/packs'
 import { typeStem } from '../core/nodeType'
-import { getNodeDef, listableNodeDefs, liveType } from '../core/registry'
+import { getNodeDef, listableNodeDefs, liveType, packOfType } from '../core/registry'
 import { defaultInputPorts, defaultOutputPorts } from '../core/ports'
 import type { NodeDefinition, ResolvedPort } from '../core/node'
 import { familyForNodeType } from '../nodes/lib/datasetFamilies'
@@ -336,7 +338,7 @@ function bestAppend(
         const built = append(graph, def, rank)
         if (!built) break
         const found = { plan: { ...partial, rank }, graph: built.graph }
-        const score = issueScore(built.graph, built.id)
+        const score = issueScore(built.graph, built.id, built.inferred)
         if (score === 0) return found
         if (!best || score < best.score) best = { ...found, score }
       }
@@ -392,9 +394,13 @@ const demoDatasets = once(() => [
  * complaint left was a column picker on the viewer downstream. Both scored 1; the first won on
  * arrival order, and the demo was of the refusal.
  */
-function issueScore(graph: CodaGraph, subject: string): number {
+function issueScore(
+  graph: CodaGraph,
+  subject: string,
+  inferred: InferenceResult = inferGraph(graph),
+): number {
   let score = 0
-  for (const [id, types] of Object.entries(inferGraph(graph).nodes)) {
+  for (const [id, types] of Object.entries(inferred.nodes)) {
     for (const issue of types.issues) {
       score += issue.severity === 'error' ? 1000 : id === subject ? 10 : 1
     }
@@ -515,7 +521,7 @@ function append(
   graph: CodaGraph,
   def: NodeDefinition,
   rank: number,
-): { graph: CodaGraph; id: string } | undefined {
+): { graph: CodaGraph; id: string; inferred?: InferenceResult } | undefined {
   let out = graph
   let fresh = rank === 0
   const wires = new Map<string, Source>()
@@ -559,9 +565,11 @@ function append(
    * non-viewer that produces anything gets a viewer, chosen by the same rule as everything else
    * here. A node that produces nothing (a Download, a viewer of its own) is already the end.
    */
-  const named =
-    (def.category === 'visualisation' ? undefined : addViewer(out, def, added.id)) ?? out
+  const viewed = def.category === 'visualisation' ? undefined : addViewer(out, def, added.id)
+  const named = viewed?.graph ?? out
   return {
+    // Checked already, where a clean viewer was found; a `meta` edit changes no inference.
+    ...(viewed?.inferred ? { inferred: viewed.inferred } : {}),
     graph: {
       ...named,
       meta: {
@@ -644,14 +652,25 @@ function requiredWires(
  * that scored the correct wiring worse than the wrong one it was meant to beat. `inferOutputs`
  * is what knows, so it is what is asked.
  */
-function addViewer(graph: CodaGraph, def: NodeDefinition, from: string): CodaGraph | undefined {
+function addViewer(
+  graph: CodaGraph,
+  def: NodeDefinition,
+  from: string,
+): { graph: CodaGraph; inferred?: InferenceResult } | undefined {
   const declared = defaultOutputPorts(def)[0]
   if (!declared) return undefined
   const produced = nodeTypes(inferGraph(graph), from).outputs[declared.id] ?? declared.type
 
-  const all = viewers()
+  // What a fresh session offers, and the node's own pack: a demo of a Google Sheet does not end
+  // on a viewer from a pack that is off, and a Cortex node's demo may end on Cortex's own.
+  const pack = packOfType(def.type)
+  const all = viewers().filter((d) => {
+    const own = packOfType(d.type)
+    return own === undefined || own === pack || !offByDefault().has(own)
+  })
   const exact = all.filter((d) => defaultInputPorts(d)[0]?.type.kind === produced.kind)
-  for (const viewer of [...exact, ...all]) {
+  let fallback: { graph: CodaGraph } | undefined
+  for (const viewer of new Set([...exact, ...all])) {
     const ports = defaultInputPorts(viewer)
     const port = ports.find((p) => socketAccepts({ type: produced }, p))
     if (!port) continue
@@ -667,9 +686,19 @@ function addViewer(graph: CodaGraph, def: NodeDefinition, from: string): CodaGra
     )
     if (!wires) continue
     wires.set(port.id, { node: from, port: declared.id, type: produced })
-    return attach(graph, viewer, wires).graph
+    /*
+     * **The first viewer that has nothing to say about its own settings, else the first at all** —
+     * built and checked, this file's rule, rather than taken on order. A viewer that accepts a
+     * table can still want a particular column: Laminar Profile, registered first with its pack,
+     * ended the demo of every table-producing node with its Depth picker substituted onto `size`.
+     */
+    const built = attach(graph, viewer, wires)
+    const inferred = inferGraph(built.graph)
+    if (nodeTypes(inferred, built.id).issues.length === 0)
+      return { graph: built.graph, inferred }
+    fallback ??= { graph: built.graph }
   }
-  return undefined
+  return fallback
 }
 
 /**
@@ -799,6 +828,9 @@ const producers = once((): NodeDefinition[] => {
 
 /** Every viewer, memoised on `producers`' reasoning: `addViewer` runs once per scored candidate. */
 const viewers = once(() => listableNodeDefs().filter((def) => def.category === 'visualisation'))
+
+/** The packs a fresh session has switched off — requirements and parts applied. */
+const offByDefault = once(() => effectiveOff(packsOffByDefault()))
 
 /**
  * A node id that is not taken, derived from the type so a saved demo reads as itself.

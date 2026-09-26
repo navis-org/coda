@@ -226,8 +226,14 @@ export function niceTicks(max: number, count = 4): number[] {
   const normalized = rawStep / magnitude
   const stepMultiple = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
   const step = stepMultiple * magnitude
+  // Up to the first tick at or past the maximum, so the last tick can end an axis: stopping within
+  // half a step of it instead left the longest bar a fifth past the axis on a histogram at 120.
   const ticks: number[] = []
-  for (let t = 0; t <= max + step * 0.5; t += step) ticks.push(Math.round(t * 1e6) / 1e6)
+  for (let t = 0; ; t += step) {
+    const tick = Math.round(t * 1e6) / 1e6
+    ticks.push(tick)
+    if (tick >= max) break
+  }
   return ticks
 }
 

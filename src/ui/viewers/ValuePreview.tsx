@@ -5,7 +5,7 @@ import type { GraphNode } from '../../core/graph'
 import type { InferContext, ParamValue, ParamValues } from '../../core/node'
 import { enumValue } from '../../core/node'
 import { filledParams, getNodeDef } from '../../core/registry'
-import { schemaOf } from '../../core/types'
+import { datasetRef, schemaOf } from '../../core/types'
 import type { Value } from '../../core/values'
 import type { PartnerGrouping } from '../../nodes/lib/profileStats'
 import {
@@ -70,6 +70,8 @@ import { decodeClauses, encodeClauses } from '../../nodes/lib/tableFilter'
 import { describeTable } from '../../nodes/lib/describeOps'
 import { TableSummary } from './TableSummary'
 import { TableViewer } from './TableViewer'
+import { LaminarProfileViewer } from '../cortex/LaminarProfileViewer'
+import { frameOf } from '../../packs/cortex/frames'
 import { ViewerEmpty } from './ViewerEmpty'
 
 export interface ValuePreviewProps {
@@ -1039,6 +1041,35 @@ const VIEWERS: Record<string, ViewerEntry> = {
           log={params.logX === true}
           normalize={choice<Normalize>('normalize')}
           cumulative={params.cumulative === true}
+          selection={selection}
+          {...(onSelectionChange ? { onSelectionChange } : {})}
+          {...shared}
+        />
+      )
+    },
+  },
+  /*
+   * The Cortex pack's viewer. The frame is read off the Dataset wire's *type* — identity, known
+   * before anything runs — so the layers draw with the first result rather than after a second.
+   */
+  'cortex:laminarProfile': {
+    render: ({ value, ctx, params, choice, shared, onSelectionChange, selection }) => {
+      if (!isTableValue(value)) return undefined
+      const depth = ctx.column('depth')
+      if (!depth) return <NoColumns known={!!schemaOf(ctx.inputs.in)} what="a depth column" />
+      const series = ctx.column('series')
+      const facet = ctx.column('facet')
+      const frame = frameOf(datasetRef(ctx.inputs.dataset))
+      return (
+        <LaminarProfileViewer
+          table={value}
+          depthColumn={depth}
+          {...(series && series !== depth ? { seriesColumn: series } : {})}
+          {...(facet && facet !== depth ? { facetColumn: facet } : {})}
+          facetMax={Number(params.facetMax)}
+          {...(frame ? { frame } : {})}
+          binUm={Number(params.binUm)}
+          normalize={choice<'count' | 'percent'>('normalize')}
           selection={selection}
           {...(onSelectionChange ? { onSelectionChange } : {})}
           {...shared}
