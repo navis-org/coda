@@ -420,15 +420,30 @@ Five places implement it, and each was mutation-checked because every failure he
   `GatheredInputs.refusal`. Four decisions in it. The **reason is the referenced node's inference
   issues**, because that is where the diagnosis already lives — first issue that is not
   `aboutColumns`, a column picker on the dataset node having nothing to do with whether it resolved
-  an id. **No reason means the listing has not arrived**, which is the ordinary state of a cold
-  session and something no dataset node reports (`validate`'s two-state rule), so that sentence
-  says *Run again once it has* rather than implying breakage. Its **position** in `executeNode` is
+  an id. **No reason means the listing has not arrived** — which a full run first waits for (below),
+  so what reaches it is a listing that failed quietly or outlasted the wait — and no dataset node
+  reports that (`validate`'s two-state rule), so the sentence says *Run again once it has* rather
+  than implying breakage. Its **position** in `executeNode` is
   three decisions: after `blocked`, since a node still waiting on an ordinary input cannot run for a
   reason of its own and a second error on top is noise; after the **auto-pass deferral**, since this
   replaces a refusal the node threw from `evaluate` and both readers it exists for are `expensive` —
   fired ahead of the deferral it reddens two cards on every keystroke of a cold session; and before
   `evaluate`, which is the whole point. And it is the scheduler's to write because this is the only
   layer that can see both halves: the edge, and the type that did not resolve.
+
+  **A full run waits for a referenced dataset to name itself before it infers.** Every fresh
+  session's first Run of a CAVE chain on "Latest" — the wizard's minnie65, FlyWire and BANC
+  workflows all — was refused here and the second worked, because a run takes its inference once,
+  at its start, while the listing was still on its way. `NodeDefinition.settle` is the fetch a node
+  names itself from (the family dataset node and the picker their listing, Custom CAVE its
+  materializations), and `Scheduler.settle` awaits it for every node an in-scope reader references
+  **and inference found unnamed** — the refusal's own predicate, so no hook repeats its node's
+  resolution rule to decide whether to wait (three did, once, and each could drift from its
+  `inferOutputs` in either direction: a run waiting for nothing, or the refusal back). A run
+  re-infers only if it waited. Full runs only (an auto pass defers those `expensive` readers first), abortable and capped
+  (`SETTLE_CEILING_MS`). Only the identity: the schemas and columns inference reads next were
+  measured not to move a first run's keys, so they stay with `reportSourceLearned` — a data-layer
+  registry of in-flight peeks, awaited in rounds, is the general form if one ever does.
 
   One thing this made visible downstream: the sentence now travels onto two more cards, and CAVE's
   `explain` was slicing 300 characters of an nginx error *document* into it — `CAVE returned 503:

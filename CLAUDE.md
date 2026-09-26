@@ -1176,8 +1176,9 @@ rule belongs to one area, its record is in that area's doc.
   *upstream* of the dataset node, so the run stopped there and the dataset node's own accurate
   sentence was never reached. So `gatherInputs` composes `GatheredInputs.refusal` from the
   **referenced node's** inference issues, checked after `blocked`, **after the auto-pass deferral**
-  and before `evaluate`; no reason at all means a cold listing, which is not an error, so that
-  sentence says *Run again*.
+  and before `evaluate`. A full run first awaits a referenced node's `settle` (the listing it names
+  itself from), so no reason at all means a listing that failed or outlasted that wait, which is
+  not an error, and that sentence says *Run again*.
 - **A loop is one number in a hash, and the region is derived from the wires.** `For Each` has no
   sub-graph: `Scheduler.loopIndex` is folded into the begin node's provenance key, so advancing it
   re-keys every descendant and invariant 4 re-runs the region. Hence: the loop executes at the

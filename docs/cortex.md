@@ -22,6 +22,11 @@ could draw anything (phase A), because most of that was not.
 - **D — `/cortex`.** Done. The pack is off by default; `coda.science/cortex` switches it on (and
   CAVE with it) through a redirect page and a query parameter, since GitHub Pages never runs the
   main entry at a path it has no file for ([packs.md](packs.md#shortcuts)).
+- **G — examples on real data.** Done: the gallery's and Laminar Profile's demos are curated on
+  minnie65 (`wizard/curated.ts`), since no synthetic dataset has a frame — each surface that opens a
+  node's demo (node guide, `?`, changelog) opens them. Making them showed that a CAVE workflow on
+  "Latest" refused its first Run; a run now settles the listing before it infers
+  ([core.md](core.md), `NodeDefinition.settle`).
 - **F — in the Workflow Wizard.** Done: the gallery is a way of choosing neurons and the laminar
   synapse profile a technique, both gated on a cortical frame (`packs/cortex/wizard.ts`) — the
   first pack to add wizard answers, which is what built the seam ([wizard.md](wizard.md#a-pack-adds-answers)).
@@ -419,16 +424,15 @@ first step past the gallery: a laminar input profile, split by partner type.
   was new on every render of the card — every graph edit, every drag frame — and a viewer memoising
   its marks on it redrew them all; the callback is read through a ref now.
 
-## What is deferred, and why
+- **The gallery's skeletons carry its cells' rows.** A 3D View on `Skeletons` drew one colour under
+  a legend of `—`: the skeletons' attributes were the source's morphology table, which on CAVE
+  carries no typing, while the typing the wall is grouped by lives on `Selected`. So the skeletons
+  now carry every column of `Selected` — the chosen typing, proofreading, `soma_depth`, `layer` —
+  through `Carry fields`' own join (`carriedSchema`/`carriedGeometry`), inferred as well as run so
+  a colour picker offers them on an idle graph. The empty collection takes the dataset's morphology
+  schema, so its columns match what was promised.
 
-- **A CAVE workflow on "latest" refuses its first Run.** Found making the changelog's MICrONS
-  example: the wizard leaves minnie65's version on latest, the version list has not arrived when a
-  run starts, and every reader wired to the Dataset by reference is refused with *Run again once it
-  has* — `Scheduler.gatherInputs` reads the run's inference once, before the listing lands. A second
-  Run works. The curated Laminar Profile example (`wizard/curated.ts`) pins 1822 for that reason,
-  and so must any curated example on a published dataset; the general fix is a
-  scheduler change — await the listing for a cold "latest" dataset in scope before inferring a full
-  run (runs may fetch; invariant 2 binds inference) — and would retire the pin.
+## What is deferred, and why
 
 - **V1DD** is served from `globalv1.em.brain.allentech.org`, behind an Allen sign-in Coda has no
   credential for; nothing was scanned.

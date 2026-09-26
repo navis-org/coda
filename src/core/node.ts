@@ -1300,6 +1300,20 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    */
   inferOutputs?(ctx: InferContext<P>): Record<string, CodaType>
   /**
+   * The fetch `inferOutputs` is waiting on to **name what this node is** — a dataset node on
+   * "Latest" reads its id off a listing a fresh session has not got — or undefined when there is
+   * nothing to fetch. A run infers once, at its start, so a node read *by reference* with no
+   * id refused its readers on the first Run and let the second through. A full run awaits this for
+   * every node an in-scope reader references, then infers (`Scheduler.settle`).
+   *
+   * The run's, never inference's (invariant 2), and only for the node's identity: the schemas and
+   * columns inference reads next are left to `reportSourceLearned`, measured not to move a first
+   * run's keys. Asked only of a node inference found unnamed, so the hook is the fetch alone and
+   * never re-derives whether it resolved; a warm session pays nothing. A failure is the node's own
+   * to report, in `validate` or `evaluate`.
+   */
+  settle?(ctx: Pick<InferContext<P>, 'params'>): Promise<unknown> | undefined
+  /**
    * Feed this node's last observed output schema back into `inferOutputs` via
    * `ctx.observed`. Set it only when the shape genuinely cannot be known before running —
    * it costs a re-inference each time the node's result changes shape.

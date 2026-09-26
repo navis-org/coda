@@ -23,6 +23,7 @@ import {
   mayHaveLoops,
   nodesById,
   portKey,
+  referenceEdgeIds,
   topoSort,
 } from './graph'
 import { hashValue } from './hash'
@@ -243,6 +244,13 @@ interface CacheEntry {
 
 /** Shared instance for nodes with no recorded state — see `Scheduler.info`. */
 const IDLE: NodeRunInfo = Object.freeze({ state: 'idle' })
+
+/**
+ * The longest a full run waits for a referenced node to name itself (`Scheduler.settle`) before
+ * going on without it — a cold CAVE listing is every datastack's materializations, measured at a
+ * few seconds, and a server that never answers must not hold every Run behind it.
+ */
+const SETTLE_CEILING_MS = 20_000
 
 export interface SchedulerHost {
   /** Resolve a DataSource id from a DatasetValue to the live source object. */
@@ -744,6 +752,53 @@ export class Scheduler {
   }
 
   /**
+   * `NodeDefinition.settle`, for every node an in-scope reader references and inference found
+   * unnamed — exactly the wires `unresolvedReference` would refuse, asked of the same inference,
+   * so no node repeats its own resolution rule to decide whether to wait. Not on an auto pass,
+   * whose reference readers (`expensive`, every one) are deferred before they could be refused.
+   * Abandoned at the run's abort or after `SETTLE_CEILING_MS`, when the run goes on and the
+   * refusal applies. Says whether it waited, since only then is inference worth redoing.
+   */
+  private async settle(
+    pass: Pick<RunPass, 'graph' | 'nodes' | 'scope' | 'inference'>,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    const { graph, nodes, scope, inference } = pass
+    const references = referenceEdgeIds(graph)
+    if (references.size === 0) return false
+    const unnamed = new Set(
+      graph.edges
+        .filter(
+          (e) =>
+            references.has(e.id) &&
+            scope.has(e.target) &&
+            !nodes.get(e.target)?.disabled &&
+            !datasetIdentity(inference.nodes[e.target]?.inputs[e.targetHandle]),
+        )
+        .map((e) => e.source),
+    )
+    const waits = [...unnamed].flatMap((id) => {
+      const node = nodes.get(id)
+      const wait = node && getNodeDef(node.type)?.settle?.({ params: node.params })
+      return wait ? [wait] : []
+    })
+    if (waits.length === 0) return false
+    let ceiling: ReturnType<typeof setTimeout> | undefined
+    let stop = () => {}
+    await Promise.race([
+      Promise.allSettled(waits),
+      new Promise<void>((done) => {
+        ceiling = setTimeout(done, SETTLE_CEILING_MS)
+        stop = () => done()
+        signal.addEventListener('abort', stop, { once: true })
+      }),
+    ])
+    clearTimeout(ceiling)
+    signal.removeEventListener('abort', stop)
+    return true
+  }
+
+  /**
    * Everything one run carries, so the node-level step can be shared by the ordinary walk and
    * by the loop driver without either re-deriving it.
    *
@@ -758,11 +813,16 @@ export class Scheduler {
     const controller = new AbortController()
     this.abort = controller
 
-    const inference = inferGraph(graph)
     const { order } = topoSort(graph)
     const nodes = nodesById(graph)
     const inbound = inboundIndex(graph)
     const scope = this.resolveScope(graph, order, options.targets)
+    let inference = inferGraph(graph)
+    if (
+      options.mode === 'full' &&
+      (await this.settle({ graph, nodes, scope, inference }, controller.signal))
+    )
+      inference = inferGraph(graph)
 
     const summary: RunSummary = {
       executed: [],
@@ -1260,9 +1320,9 @@ export class Scheduler {
    * `aboutColumns` issues are skipped: a column picker on the dataset node has nothing to do with
    * whether it resolved an id, and `RULES` excuses them elsewhere for the same reason.
    *
-   * With no reason at all the listing simply has not arrived, which is the ordinary state of a
-   * cold session and *not* an error the dataset node reports — so the sentence says what to do
-   * about it rather than implying something is broken.
+   * With no reason at all the listing has not arrived. A full run waits for it first (`settle`), so
+   * this is a listing that failed quietly or outlasted the wait — still not an error the dataset
+   * node reports, so the sentence says what to do about it rather than implying breakage.
    */
   private unresolvedReference(pass: RunPass, port: PortDef, edge: GraphEdge): string {
     const source = pass.nodes.get(edge.source)

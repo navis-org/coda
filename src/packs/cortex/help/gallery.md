@@ -60,7 +60,7 @@ cortex:gallery: cellTypes, groupBy, stripe, proofread, columnMode, columnUm, per
 Click a cell to select it, and again to deselect it. Click "N selected" beside the cell count to clear the selection. The selection is saved in the workflow.
 
 - `Selected` is the selected cells' rows of the neuron table, with the chosen cell-type columns and two more: `soma_depth` in µm below the pia, and `layer`. A cell with no single nucleus has neither.
-- `Skeletons` are the selected cells' reconstructions, with their compartment labels. They are read at the Dataset's materialization, so each is the neuron as it is there, including any proofreading since earlier releases.
+- `Skeletons` are the selected cells' reconstructions, with their compartment labels. They are read at the Dataset's materialization, so each is the neuron as it is there, including any proofreading since earlier releases. Each skeleton carries its cell's row from `Selected` (cell type, depth, layer), so a [3D View](#out.viewer3d) can colour by any of them.
 
 ## Data and credit
 

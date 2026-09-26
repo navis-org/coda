@@ -32,6 +32,7 @@ import {
   sourceIdForServer,
 } from '../../data/neuprint/servers'
 import type { DatasetFamily } from '../lib/datasetFamilies'
+import { settleListing } from '../lib/datasetParam'
 import { datasetChainNote } from '../lib/annotationChain'
 import {
   BACKENDS,
@@ -210,6 +211,9 @@ function buildDatasetNode(family: DatasetFamily) {
       // `DatasetBackend.population`. The *defaults* are the family's, not the backend's.
       ...(BACKENDS[family.backend]?.population ? populationParams(family.population) : []),
     ],
+
+    // "Latest" is the listing's newest: see `NodeDefinition.settle`.
+    settle: () => settleListing(family.sourceId),
 
     inferOutputs: (ctx) => ({
       dataset: T.dataset(
@@ -432,6 +436,15 @@ const customCaveNode = packNode({
     ...EDGE_SET_PARAMS,
   ],
 
+  // "Latest" is the datastack's newest materialization: see `NodeDefinition.settle`.
+  settle: (ctx) => {
+    const where = customCaveStack(ctx.params)
+    return (
+      where &&
+      materializationsFor(where.datastack, { deployment: where.deployment, quiet: true })
+    )
+  },
+
   inferOutputs: (ctx) => {
     const datasetId = customCaveDatasetId(ctx.params)
     // Registers the source for a non-default deployment and the spec for this datastack, if this
@@ -628,11 +641,19 @@ function customCaveDatasetId(params: Record<string, unknown>): string | undefine
   return where ? datasetIdFor(where.datastack, where.version) : undefined
 }
 
+/** Which datastack, and where — the half of `customCaveTarget` that needs no listing. */
+function customCaveStack(
+  params: Record<string, unknown>,
+): Omit<CaveTarget, 'version'> | undefined {
+  const datastack = String(params.datastack).trim()
+  return datastack ? { datastack, deployment: customCaveServer(params) } : undefined
+}
+
 /** The same resolution, unspelled: which datastack, where, at which materialization. */
 function customCaveTarget(params: Record<string, unknown>): CaveTarget | undefined {
-  const datastack = String(params.datastack).trim()
-  if (!datastack) return undefined
-  const deployment = customCaveServer(params)
+  const stack = customCaveStack(params)
+  if (!stack) return undefined
+  const { datastack, deployment } = stack
   const pinned = String(params.version).trim()
   const version = pinned ? Number(pinned) : peekMaterializations(deployment, datastack)?.[0]
   return version !== undefined && Number.isInteger(version)

@@ -18,10 +18,16 @@ import { ID_COLUMN_NAME } from '../../core/ids'
 import type { ParamValues } from '../../core/node'
 import { packNode } from '../../core/registry'
 import type { CodaType, TableSchema } from '../../core/types'
-import { column, datasetRef, T, tableSchema } from '../../core/types'
+import { columnNames, datasetRef, T } from '../../core/types'
 import type { SkeletonsValue } from '../../core/values'
-import { EMPTY_BOUNDS, makeTable } from '../../core/values'
-import { datasetRequest, requireDataset, schemasFromType } from '../../nodes/lib/datasetParam'
+import { EMPTY_BOUNDS, emptyTable } from '../../core/values'
+import {
+  datasetRequest,
+  requireDataset,
+  schemasForDataset,
+  schemasFromType,
+} from '../../nodes/lib/datasetParam'
+import { carriedGeometry, carriedSchema } from '../../nodes/lib/carryParams'
 import { idColumn, rowsWithIds } from '../../nodes/lib/tableOps'
 import {
   cellsSchema,
@@ -229,10 +235,20 @@ export const galleryNode = packNode({
   // The cell index is `loadCachedTable`'s, kept for a month: Clear Cache reads it afresh.
   dataCache: true,
 
-  inferOutputs: (ctx) => ({
-    selected: T.neurons(cellsSchema(galleryNeurons(ctx.inputs.dataset, ctx.params))),
-    skeletons: T.skeletons(),
-  }),
+  inferOutputs: (ctx) => {
+    const selected = cellsSchema(galleryNeurons(ctx.inputs.dataset, ctx.params))
+    return {
+      selected: T.neurons(selected),
+      skeletons: T.skeletons(
+        carriedSchema(
+          schemasFromType(ctx.inputs.dataset).morphology,
+          selected,
+          columnNames(selected),
+          ID_COLUMN_NAME,
+        ),
+      ),
+    }
+  },
 
   validate: (ctx) => {
     const issues: string[] = []
@@ -274,32 +290,40 @@ export const galleryNode = packNode({
     const picked = rowsWithIds(index, ctx.params.selection)
     const ids = idColumn(picked)
 
-    ctx.progress(0.6, 'somata')
-    const somata = await source.somaPositions({
-      ...datasetRequest(dataset),
-      neuronIds: ids,
-      signal: ctx.signal,
-    })
-    const selected = cellsTable(picked, somata, frame)
-
-    // The picked cells' skeletons — already in the geometry cache from the wall, as a rule. None
-    // picked is an empty collection rather than no output, so nothing downstream reads "not run".
-    ctx.progress(0.7, 'skeletons')
-    const skeletons: SkeletonsValue =
+    /*
+     * The somata and the picked cells' skeletons, together — neither reads the other. The
+     * skeletons are already in the geometry cache from the wall, as a rule. None picked is an
+     * empty collection rather than no output, so nothing downstream reads "not run".
+     */
+    ctx.progress(0.6, 'somata and skeletons')
+    const [somata, fetched] = await Promise.all([
+      source.somaPositions({ ...datasetRequest(dataset), neuronIds: ids, signal: ctx.signal }),
       ids.length > 0 && source.fetchSkeletons
-        ? await source.fetchSkeletons({
+        ? source.fetchSkeletons({
             ...datasetRequest(dataset),
             neuronIds: ids,
             signal: ctx.signal,
           })
-        : {
+        : ({
             kind: 'skeletons',
             items: [],
-            attributes: makeTable(tableSchema(column(ID_COLUMN_NAME, 'str')), {
-              [ID_COLUMN_NAME]: [],
-            }),
+            attributes: emptyTable(schemasForDataset(source, dataset).morphology),
             bounds: EMPTY_BOUNDS,
-          }
+          } satisfies SkeletonsValue),
+    ])
+    const selected = cellsTable(picked, somata, frame)
+    /*
+     * Each skeleton carries its cell's row — the typing the wall is grouped by, the proofreading
+     * flags, the soma's depth and layer — so a 3D View can colour by type or layer with nothing
+     * wired between. `Carry fields`' own join, and so its rules: a carried column wins its name
+     * and keeps its slot, and the id is never carried.
+     */
+    const skeletons = carriedGeometry(
+      fetched,
+      selected,
+      columnNames(selected.schema),
+      ID_COLUMN_NAME,
+    )
     return { selected, skeletons }
   },
 })

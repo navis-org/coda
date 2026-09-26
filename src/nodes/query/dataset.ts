@@ -2,7 +2,7 @@ import { registerNode } from '../../core/registry'
 import { T } from '../../core/types'
 import type { DatasetValue } from '../../core/values'
 import { allSources, getSource } from '../../data/source'
-import { resolveDatasetId, resolveSourceId } from '../lib/datasetParam'
+import { resolveDatasetId, resolveSourceId, settleListing } from '../lib/datasetParam'
 
 /**
  * The original generic dataset picker: choose a backend, then a dataset within it.
@@ -51,6 +51,9 @@ registerNode({
       internal: true,
     },
   ],
+
+  // An empty dataset is the listing's first: see `NodeDefinition.settle`.
+  settle: (ctx) => settleListing(resolveSourceId(ctx.params.source)),
 
   inferOutputs: (ctx) => {
     const sourceId = resolveSourceId(ctx.params.source)

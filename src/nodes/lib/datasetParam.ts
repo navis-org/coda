@@ -353,6 +353,16 @@ export function resolveSourceId(raw: unknown): string {
 }
 
 /**
+ * A source's listing, for `NodeDefinition.settle` — the fetch a dataset node naming itself off
+ * `peekDatasets()` waits on, or undefined once it has landed. Through `getSource`, the registry
+ * inference reads, so what is settled is what is then inferred from.
+ */
+export function settleListing(sourceId: string): Promise<unknown> | undefined {
+  const source = getSource(sourceId)
+  return source && !source.peekDatasets() ? source.listDatasets() : undefined
+}
+
+/**
  * Resolve the `dataset` param. An empty value means "first dataset of this source",
  * resolved identically at infer and eval time so cache keys stay stable.
  */

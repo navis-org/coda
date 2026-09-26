@@ -18,10 +18,10 @@
  * demo meets, and `placeGuards.test.ts` sweeps them for overlapping cards.
  *
  * Every example runs on the synthetic dataset, so it opens without an account and reaches no
- * server — **except one whose node has nothing to show there.** A Cortex node needs a cortical
+ * server — **except those whose node has nothing to show there.** A Cortex node needs a cortical
  * frame, which only a published dataset has, and the demo search's own answer for it was a
- * MICrONS chain on "latest" with an empty search. Such an example sets its own `ds` card (a
- * version pinned, or its first Run waits on the version list) and says what it needs in
+ * MICrONS chain on "latest" with an empty search. Such an example sets its own `ds` card — a
+ * version pinned, so the picture does not move as the dataset does — and says what it needs in
  * `published`, which replaces the synthetic note. `curated.test.ts` runs only the synthetic ones;
  * every example meets the inference and placement sweeps alike.
  */
@@ -317,11 +317,49 @@ const EXAMPLES: readonly ExampleSpec[] = [
   },
 ]
 
+/**
+ * MICrONS minnie65 as the published examples use it: one materialization, so the two cannot drift
+ * apart or away from the note naming it, and three cells whose inputs sit in different layers — a
+ * neurogliaform cell (L1), a bipolar interneuron (L2/3) and a layer-4 pyramidal cell.
+ */
+const MINNIE_VERSION = '1822'
+const MINNIE = {
+  card: { id: 'ds', type: 'dataset.minnie65', params: { version: MINNIE_VERSION } },
+  cells: ['864691136314078013', '864691135119630813', '864691135274968337'],
+  // Italic like `SYNTHETIC_NOTE`, whose place it takes — and so nothing bold inside it, which
+  // would render as literal asterisks.
+  note: `*Real data from MICrONS minnie65, pinned to materialization ${MINNIE_VERSION}. It needs a CAVE sign-in, under Connections (the branch icon in the toolbar).*`,
+} as const
+
 /*
- * Last, being the one on a published dataset: the Cortex pack's two, which have nothing to show on
- * synthetic data — neither has a frame to place a point in.
+ * Last, being the ones on a published dataset: the Cortex pack's, which have nothing to show on
+ * synthetic data — no synthetic dataset has a cortical frame.
  */
 const PUBLISHED: readonly ExampleSpec[] = [
+  {
+    types: ['cortex:gallery'],
+    focus: 'gallery',
+    title: 'Cortex Gallery',
+    about:
+      'Every MICrONS cell with a proofread arbour, drawn side by side against depth with the layers behind them, grouped by type. Three are selected already — a neurogliaform cell, a bipolar interneuron and a layer-4 pyramidal cell — and go on as a table and as skeletons.\n\n' +
+      'Click cells on the wall to change the selection, or open the card full size to browse by type.',
+    published: MINNIE.note,
+    cards: [
+      MINNIE.card,
+      {
+        id: 'gallery',
+        type: 'cortex:gallery',
+        params: { selection: [...MINNIE.cells] },
+      },
+      { id: 'table', type: 'out.table' },
+      // The skeletons carry the gallery's typing, so the scene colours by the type the wall shows.
+      { id: 'view', type: 'out.viewer3d', row: UNDER_TALL, params: BY_TYPE },
+    ],
+    wires: [
+      ['gallery', 'selected', 'table', 'in'],
+      ['gallery', 'skeletons', 'view', 'skeletons'],
+    ],
+  },
   {
     types: ['cortex:laminarProfile', 'cortex:depth'],
     focus: 'depth',
@@ -329,14 +367,13 @@ const PUBLISHED: readonly ExampleSpec[] = [
     about:
       'Three MICrONS cells whose inputs sit in different layers: a neurogliaform cell, a bipolar interneuron and a layer-4 pyramidal cell. **Synapses** fetches their inputs, **Cortical Depth** places each one below the pia and types its partner, and **Laminar Profile** draws them against the layers, one panel per cell type.\n\n' +
       'Paste other root ids into **Input IDs**, or set **Facet by** to `neuronId` for a panel per neuron.',
-    published:
-      '*Real data from MICrONS minnie65, pinned to materialization 1822. It needs a CAVE sign-in: **Connections**, the branch icon in the toolbar.*',
+    published: MINNIE.note,
     cards: [
-      { id: 'ds', type: 'dataset.minnie65', params: { version: '1822' } },
+      MINNIE.card,
       {
         id: 'ids',
         type: 'neuron.inputIds',
-        params: { ids: '864691136314078013\n864691135119630813\n864691135274968337' },
+        params: { ids: MINNIE.cells.join('\n') },
       },
       { id: 'syn', type: 'neuron.synapses', params: { polarity: 'post' } },
       { id: 'depth', type: 'cortex:depth' },

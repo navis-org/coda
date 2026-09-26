@@ -34,6 +34,9 @@ import type { Value } from './values'
 /** What the reader saw on its reference port, once per run. An array, so nothing narrows it. */
 const captured: Array<Value | undefined> = []
 let ran: string[] = []
+/** The stand-in "listing" `test.ref.dataset.latest` names its dataset from, and its fetches. */
+let listed: string | undefined
+let listings = 0
 
 beforeAll(() => {
   // A stand-in for a dataset: an identity from its params, plus a schema from its input — the
@@ -78,6 +81,29 @@ beforeAll(() => {
     validate: () => ['stack:7 is not listed — the server said 503'],
     evaluate: () => {
       throw new Error('never runs in these tests')
+    },
+  })
+  /*
+   * A dataset on "Latest": its identity is read off a listing inference cannot fetch, which a run
+   * waits for through `settle` before it infers — the case that refused every reader on a fresh
+   * session's first Run and let the second through.
+   */
+  registerNode({
+    type: 'test.ref.dataset.latest',
+    label: 'dataset',
+    category: 'dataset',
+    cost: 'cheap',
+    outputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
+    // No guard of its own: whether to wait is the scheduler's, asked of inference.
+    settle: () =>
+      Promise.resolve().then(() => {
+        listings++
+        listed = 'stack:9'
+      }),
+    inferOutputs: () => ({ dataset: T.dataset('mock', listed) }),
+    evaluate: () => {
+      ran.push('dataset')
+      return { dataset: { kind: 'dataset', sourceId: 'mock', datasetId: listed!, label: 'ds' } }
     },
   })
   // The same reader at the cost both CAVE readers actually declare, for the auto pass: a refusal
@@ -282,7 +308,7 @@ describe('a reference that resolves to nothing', () => {
     expect(sched.info('rd').error).toContain('the server said 503')
   })
 
-  it('says what to do when there is no reason, because a cold listing is not an error', async () => {
+  it('says what to do when there is no reason, a listing that never arrived not being an error', async () => {
     const sched = scheduler()
     await sched.run(unresolved(), { mode: 'full' })
     expect(sched.info('rd').error).toContain('Run again')
@@ -312,6 +338,47 @@ describe('a reference that resolves to nothing', () => {
     // And a full run still says why.
     await sched.run(g, { mode: 'full' })
     expect(sched.info('rd').error).toContain('has not resolved a dataset')
+  })
+
+  it('waits for what a referenced dataset names itself from, so the first Run is not refused', async () => {
+    listed = undefined
+    listings = 0
+    ran = []
+    captured.length = 0
+    let g = emptyGraph('latest')
+    g = addNode(g, node('ds', 'test.ref.dataset.latest'))
+    g = addNode(g, node('rd', 'test.ref.reader'))
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'rd',
+      targetHandle: 'dataset',
+    })
+    const sched = scheduler()
+    // Only the reader in scope: the dataset feeds it by reference and is settled all the same.
+    const summary = await sched.run(g, { mode: 'full', targets: ['rd'] })
+    expect(summary.failed).toEqual([])
+    expect(ran).toContain('reader')
+    expect((captured[0] as { datasetId?: string } | undefined)?.datasetId).toBe('stack:9')
+    // Warm: nothing left to wait for, so nothing is fetched again.
+    await sched.run(g, { mode: 'full' })
+    expect(listings).toBe(1)
+  })
+
+  it('does not wait on an auto pass, whose reference readers are deferred anyway', async () => {
+    listed = undefined
+    listings = 0
+    let g = emptyGraph('latest-auto')
+    g = addNode(g, node('ds', 'test.ref.dataset.latest'))
+    g = addNode(g, node('rd', 'test.ref.reader.expensive'))
+    g = addEdge(g, {
+      source: 'ds',
+      sourceHandle: 'dataset',
+      target: 'rd',
+      targetHandle: 'dataset',
+    })
+    await scheduler().run(g, { mode: 'auto' })
+    expect(listings).toBe(0)
   })
 
   it('leaves an unwired reference alone, which is an ordinary state', async () => {
