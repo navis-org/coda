@@ -104,10 +104,17 @@ export interface AnnotationChain {
    * column of root ids, so its reader can see something is missing. FlyWire answers with a
    * table that looks exactly like the one the chain gives: plausible types on most neurons.
    * What is wrong only shows up later, when a type turns out to be missing. So the bare node
-   * warns (`familyStaleLabels`) and its card offers to attach the chain, on every path a node
+   * warns (`familyChainHint`) and its card offers to attach the chain, on every path a node
    * arrives by: the palette, the **+**, a plan, a paste, a file saved before this.
    */
   staleBuiltin?: string
+  /**
+   * Where the dataset has **no** labels of its own, the clause saying where its cells are typed
+   * instead — and the opt-in to the same warning and button `staleBuiltin` gets, for the reason
+   * that the chain cannot be found from a bare node. Not with `staleBuiltin`. `docs/datasets.md`
+   * has why it is opt-in.
+   */
+  unlabelled?: string
 }
 
 /**

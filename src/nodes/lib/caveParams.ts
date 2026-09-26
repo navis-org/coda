@@ -19,7 +19,7 @@
  * going dark for a reason no test spanning two nodes would catch.
  */
 
-import type { InferContext, ParamDef, PortDef } from '../../core/node'
+import type { InferContext, ParamDef, PortDef, Suggestion } from '../../core/node'
 import type { CodaType } from '../../core/types'
 import { T, datasetRef } from '../../core/types'
 import type { Value } from '../../core/values'
@@ -30,7 +30,8 @@ import {
   caveServerOfSource,
   normaliseCaveServer,
 } from '../../data/cave/deployments'
-import { peekTableList } from '../../data/cave/tables'
+import { byName, peekTableList } from '../../data/cave/tables'
+import type { CaveTableEntry } from '../../data/cave/tables'
 import { CAVE_TABLE_PROVIDER } from '../../data/annotations/caveTable'
 import type { AnnotationRef } from '../../data/annotations/types'
 import { foreignBackend } from './datasetParam'
@@ -224,34 +225,27 @@ export function caveDatastackIssues(
 }
 
 /**
- * The names a `Table` field can offer: the datastack's listing, once it has landed.
+ * The names a `Table` field can offer: the datastack's listing, once it has landed, in one
+ * alphabetical run with each entry marked `t` or `v`. Shared by `CAVE table` and `CAVE table info`,
+ * which both read either kind; `docs/annotations.md` has why views are listed and marked.
  *
- * Shared by `CAVE table` and `CAVE table info`, which differ in one thing. `CAVE table` reads
- * through the table query route, where a view is a 404, so it takes `views: false`. `CAVE table
- * info` accepts either. The listing already puts tables before views, each half sorted.
- *
- * Through `peekTableList`, which is gated on a credential and quiet, so an unsigned card asks
- * nothing and the field is a plain text field until the list arrives.
+ * Re-sorted here rather than in the listing, which keeps tables before views because it is also
+ * `List CAVE tables`' output. A picker is searched by name, and a name's kind is what the mark is
+ * for.
  */
-export function caveTableSuggestions(
-  ctx: InferContext,
-  { views }: { views: boolean },
-): string[] {
-  return caveTablesAt(caveTargetOfType(ctx.inputs.dataset, ctx.params), { views }) ?? []
+export function caveTableSuggestions(ctx: InferContext): Suggestion[] {
+  const entries = caveTablesAt(caveTargetOfType(ctx.inputs.dataset, ctx.params)) ?? []
+  return [...entries]
+    .sort((a, b) => byName(a.name, b.name))
+    .map((e) => ({ value: e.name, label: e.name, mark: { text: e.kind[0]!, kind: e.kind } }))
 }
 
 /**
- * The same names for a target however it was arrived at — `undefined` until the listing lands,
- * `peekTableList`'s contract. `Custom CAVE` names its datastack in its own params rather than on
- * a wire, so it asks here directly.
+ * The listing for a target however it was arrived at — `undefined` until it lands,
+ * `peekTableList`'s contract, which is gated on a credential and quiet, so an unsigned card asks
+ * nothing. `Custom CAVE` names its datastack in its own params rather than on a wire, so it asks
+ * here directly.
  */
-export function caveTablesAt(
-  where: CaveTarget | undefined,
-  { views }: { views: boolean },
-): string[] | undefined {
-  return where
-    ? peekTableList(where.deployment, where.datastack, where.version)
-        ?.filter((e) => views || e.kind === 'table')
-        .map((e) => e.name)
-    : undefined
+export function caveTablesAt(where: CaveTarget | undefined): CaveTableEntry[] | undefined {
+  return where ? peekTableList(where.deployment, where.datastack, where.version) : undefined
 }

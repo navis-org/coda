@@ -196,9 +196,19 @@ reason: unwiring has to leave the field as it was left, and writing the wire's a
 would make wiring an edit, an undo step and a change to the provenance key. Only a wire that has
 *resolved* answers, because `caveTarget` itself reads the typed name until then.
 
-**`Table` lists the datastack's tables, and stays a text field.** It is `StringParam.suggestions`
-over `peekTableList`, **tables only** because the provider reads through the table query route and
-a view there is a 404. The widget is `ComboField`, which replaced the `datalist` those suggestions
+**`Table` lists the datastack's tables and views, and stays a text field.** It is
+`StringParam.suggestions` over `peekTableList`. It was **tables only** at first, because the
+provider then read through the table query route, where a view is a 404. The provider later learned
+to ask the listing which a name is and take the view route (for MICrONS' `aibs_cell_info`), and the
+filter stayed: a view read fine when typed and was missing from the list, which is exactly the
+state that gets reported as a bug. The two kinds are now **one alphabetical run**, each row carrying
+a muted `t` or `v` before the name (`SuggestionOption.mark`, drawing only, never written or
+matched; the word it stands for is the row's tooltip and accessible name). A trailing `(view)` note
+came first and was replaced: once views are interleaved, a kind at the ragged end of each row is
+read last, where a mark down the left edge is one column. It is re-sorted in the *suggestions*, not
+in the listing, which keeps tables before views because it is also `List CAVE tables`' output. The
+kind is worth showing because the two are not interchangeable: a view gets no edit-time column
+sample (below) and `Pivot on` refuses one. The widget is `ComboField`, which replaced the `datalist` those suggestions
 used to draw, for two reasons. A datastack holds hundreds of tables, and a `datalist` filters on
 what the field already holds, so a field showing a chosen table offered only that table. Free text
 stays because the listing needs a token and may not have landed, and a name missing from it may

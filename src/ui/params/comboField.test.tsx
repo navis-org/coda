@@ -14,9 +14,10 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { defaultParams, makeInferContext } from '../../core/node'
-import type { NodeDefinition, StringParam } from '../../core/node'
+import type { NodeDefinition, StringParam, Suggestion } from '../../core/node'
 import { installJsdomStubs } from '../../test/jsdomStubs'
 import { registerNode } from '../../core/registry'
+import { suggestionOption } from '../../core/node'
 import { ComboField, filterOptions } from './ComboField'
 import { ParamField } from './ParamField'
 
@@ -31,7 +32,7 @@ afterEach(() => {
 
 const TABLES = ['nuclei_v1', 'neuron_information_v2', 'proofread_neurons', 'synapses_nt_v1']
 
-function draw(value: string, options: readonly string[] = TABLES) {
+function draw(value: string, options: readonly Suggestion[] = TABLES) {
   const onChange = vi.fn()
   render(<ComboField label="Table" value={value} options={options} onChange={onChange} />)
   const input = screen.getByLabelText<HTMLInputElement>('Table')
@@ -42,12 +43,11 @@ const shown = () => screen.queryAllByRole('option').map((o) => o.textContent)
 
 describe('filterOptions', () => {
   it('matches every term, anywhere, ignoring case', () => {
-    expect(filterOptions(TABLES, 'NEURON')).toEqual([
-      'neuron_information_v2',
-      'proofread_neurons',
-    ])
-    expect(filterOptions(TABLES, 'v2 info')).toEqual(['neuron_information_v2'])
-    expect(filterOptions(TABLES, '  ')).toEqual(TABLES)
+    const options = TABLES.map(suggestionOption)
+    const names = (query: string) => filterOptions(options, query).map((o) => o.value)
+    expect(names('NEURON')).toEqual(['neuron_information_v2', 'proofread_neurons'])
+    expect(names('v2 info')).toEqual(['neuron_information_v2'])
+    expect(names('  ')).toEqual(TABLES)
   })
 })
 
@@ -131,6 +131,37 @@ describe('ComboField', () => {
       fireEvent.keyDown(input, { key: 'Escape' })
     })
     expect(input.hasAttribute('data-owns-escape')).toBe(false)
+  })
+
+  /*
+   * A mark before the name is drawing only: a pick writes the bare name, typing does not match
+   * it, and its glyph is replaced by its word for a screen reader.
+   */
+  it('draws a mark, and never writes or matches it', () => {
+    const { input, onChange } = draw('', [
+      'nuclei_v1',
+      {
+        value: 'aibs_cell_info',
+        label: 'aibs_cell_info',
+        mark: { text: 'v', kind: 'view' },
+      },
+    ])
+    act(() => {
+      fireEvent.focus(input)
+    })
+    expect(shown()).toEqual(['nuclei_v1', 'vaibs_cell_info'])
+    expect(screen.getByRole('option', { name: 'aibs_cell_info, view' })).toBeTruthy()
+    act(() => {
+      fireEvent.change(input, { target: { value: 'view' } })
+    })
+    expect(shown()).toEqual([])
+    act(() => {
+      fireEvent.change(input, { target: { value: 'aibs' } })
+    })
+    act(() => {
+      fireEvent.click(screen.getByRole('option'))
+    })
+    expect(onChange).toHaveBeenLastCalledWith('aibs_cell_info')
   })
 
   it('opens nothing while there is nothing to list', () => {

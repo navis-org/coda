@@ -109,12 +109,29 @@ export interface CaveTableConfig extends Record<string, string> {
  */
 const discovery = new Map<string, string[] | undefined>()
 
-/** One key per (deployment, dataset, table, pivot column) — what a set of kinds is a fact about. */
-function kindKey(config: CaveTableConfig): string {
-  return deploymentKey(
-    config['deployment'],
-    `${config.dataset}|${config.table}|${config.pivotOn}`,
-  )
+/**
+ * The columns a read keeping every column came back with, keyed on (table, id column) — what
+ * `everyColumn` falls back on where there is no one-row sample, which is every **view**.
+ *
+ * A view is never sampled at edit time (`cave/tables.ts`: an aggregating one can take minutes to
+ * answer one row), so without this a view read keeping every column had no schema at edit time
+ * *ever*, before a Run or after. Learned from any read that resolves, the persistent cache's
+ * included, so a reloaded session learns it from whatever reads first. The Google Sheet
+ * provider's `discovery` is the same move for a source with no sample at all.
+ */
+const learnedColumns = new Map<string, TableSchema>()
+
+/**
+ * One key per (deployment, dataset, table, column) — `pivotOn` for a set of kinds, `idColumn` for
+ * a learned schema.
+ */
+function tableKey(config: CaveTableConfig, column: string): string {
+  return deploymentKey(config['deployment'], `${config.dataset}|${config.table}|${column}`)
+}
+
+/** A wide read naming no columns: the one `everyColumn` answers for and `learn` keeps. */
+function readsEveryColumn(config: CaveTableConfig): boolean {
+  return !config.pivotOn && namedColumns(config.columns, config.idColumn).length === 0
 }
 
 /** What every read of a ref carries: its deployment, and the caller's signal where there is one. */
@@ -139,11 +156,8 @@ class CaveTableProvider implements AnnotationProvider {
     const config = ref.config as CaveTableConfig
     if (!config.dataset || !config.table) return undefined
 
-    if (!config.pivotOn) {
-      const named = namedColumns(config.columns, config.idColumn)
-      if (named.length === 0) return this.everyColumn(config)
-      return annotationSchema(named)
-    }
+    if (readsEveryColumn(config)) return this.everyColumn(config)
+    if (!config.pivotOn) return annotationSchema(namedColumns(config.columns, config.idColumn))
 
     const kinds = this.kindsFor(config)
     return kinds && annotationSchema(kinds)
@@ -163,7 +177,8 @@ class CaveTableProvider implements AnnotationProvider {
       parsed.version,
       config.table,
     )?.filter((c) => c.name !== config.idColumn)
-    if (!sampled) return undefined
+    // The sample wins where there is one, so a table's schema does not move when a read lands.
+    if (!sampled) return learnedColumns.get(tableKey(config, config.idColumn))
     const dtypes = new Map(sampled.map((c) => [c.name, c.dtype]))
     return annotationSchema(
       sampled.map((c) => c.name),
@@ -172,7 +187,7 @@ class CaveTableProvider implements AnnotationProvider {
   }
 
   private kindsFor(config: CaveTableConfig): string[] | undefined {
-    const key = kindKey(config)
+    const key = tableKey(config, config.pivotOn)
     if (discovery.has(key)) return discovery.get(key)
     discovery.set(key, undefined)
     const parsed = splitDatasetId(config.dataset)
@@ -190,9 +205,23 @@ class CaveTableProvider implements AnnotationProvider {
   }
 
   fetch(ref: AnnotationRef, options: AnnotationFetchOptions): Promise<TableValue> {
-    return cachedAnnotationTable(ref, options, () =>
-      this.read(ref.config as CaveTableConfig, options),
+    const config = ref.config as CaveTableConfig
+    return cachedAnnotationTable(ref, options, () => this.read(config, options)).then(
+      (table) => {
+        this.learn(config, table)
+        return table
+      },
     )
+  }
+
+  /** Keep the columns a read naming none came back with. See `learnedColumns`. */
+  private learn(config: CaveTableConfig, table: TableValue): void {
+    // No rows is no columns (`wideRows` reads them off row zero), which is not a schema to keep.
+    if (!readsEveryColumn(config) || table.length === 0) return
+    const key = tableKey(config, config.idColumn)
+    if (learnedColumns.has(key)) return
+    learnedColumns.set(key, table.schema)
+    reportAnnotationsLearned()
   }
 
   private async read(
@@ -239,7 +268,7 @@ class CaveTableProvider implements AnnotationProvider {
         uniqueStringValues(server, datastack, config.table, request),
       ])
       const kinds = [...(values[config.pivotOn] ?? [])].sort()
-      discovery.set(kindKey(config), kinds)
+      discovery.set(tableKey(config, config.pivotOn), kinds)
       const withId = idColumns(config, reference)
 
       /*
@@ -507,4 +536,5 @@ registerAnnotationProvider(new CaveTableProvider())
 /** Test seam: drop discovered kinds between suites. In-flight reads are `resetIndexLoads`'. */
 export function resetCaveTableState(): void {
   discovery.clear()
+  learnedColumns.clear()
 }

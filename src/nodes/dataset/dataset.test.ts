@@ -17,7 +17,7 @@ import {
   emptyGraph,
 } from '../../core/graph'
 import type { EnumOption, ParamValues } from '../../core/node'
-import { defaultParams, makeInferContext } from '../../core/node'
+import { defaultParams, makeInferContext, suggestionOption } from '../../core/node'
 import { getNodeDef, requireNodeDef } from '../../core/registry'
 import { Scheduler } from '../../core/scheduler'
 import { T, datasetRef } from '../../core/types'
@@ -73,7 +73,9 @@ function versionOptions(type: string, params: ParamValues = {}): EnumOption[] {
 function datastackSuggestions(): string[] {
   const param = (requireNodeDef('dataset.cave').params ?? []).find((p) => p.id === 'datastack')
   if (!param || param.kind !== 'string') throw new Error('no datastack string param')
-  return param.suggestions?.(ctxFor('dataset.cave')) ?? []
+  return (param.suggestions?.(ctxFor('dataset.cave')) ?? []).map(
+    (s) => suggestionOption(s).value,
+  )
 }
 
 describe('per-dataset nodes', () => {
@@ -252,7 +254,8 @@ describe('a dataset node whose datastack refused', () => {
     // The node nobody can run, marked before anybody presses Run: `validate` used to stay silent
     // whenever the listing was empty, because it could not tell "not arrived" from "refused".
     const def = requireNodeDef('dataset.minnie65')
-    expect(def.validate?.(ctxFor('dataset.minnie65'))).toEqual([REASON])
+    // First, ahead of the chain hint (`AnnotationChain.unlabelled`), which is about the wiring.
+    expect(def.validate?.(ctxFor('dataset.minnie65'))?.[0]).toBe(REASON)
   })
 
   it('fails a run with the reason rather than with somebody else’s datasets', async () => {

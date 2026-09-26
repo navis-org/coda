@@ -52,6 +52,7 @@ import {
   annotationProvider,
   cachedAnnotationTable,
   peekRefColumns,
+  subscribeAnnotationsLearned,
 } from './registry'
 import { refKey } from './types'
 import { DEFAULT_CAVE_SERVER } from '../cave/deployments'
@@ -613,8 +614,14 @@ describe('what a CAVE reference table needs', () => {
     })
   })
 
-  it('reads a view through the view endpoint, which a table query would 404', async () => {
-    // MICrONS publishes its cell typing as the view `aibs_cell_info`.
+  /**
+   * MICrONS' `aibs_cell_info`, which is a view: the datastack, a listing naming it as one, and
+   * `rows` to every query. `count: 'hang'` never answers the count, as an aggregating view does not.
+   */
+  function installMinnieViewFetch(
+    rows: Record<string, unknown>[],
+    { count = 'answer' }: { count?: 'answer' | 'hang' } = {},
+  ): CaveCall[] {
     const calls: CaveCall[] = []
     vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
       const text = String(url)
@@ -632,10 +639,21 @@ describe('what a CAVE reference table needs', () => {
         return answer({ local_server: SERVER, aligned_volume: { name: 'minnie65' } })
       if (text.endsWith('/views')) return answer({ aibs_cell_info: { description: 'types' } })
       if (text.endsWith('/tables')) return answer([])
-      const rows = [{ pt_root_id: '864691135292991414', cell_type: '23P' }]
-      if (text.includes('count=true')) return answer([{ count: rows.length }])
+      if (text.includes('count=true')) {
+        return count === 'hang'
+          ? new Promise<Response>(() => undefined)
+          : answer([{ count: rows.length }])
+      }
       return answer(rows)
     })
+    return calls
+  }
+
+  it('reads a view through the view endpoint, which a table query would 404', async () => {
+    // MICrONS publishes its cell typing as the view `aibs_cell_info`.
+    const calls = installMinnieViewFetch([
+      { pt_root_id: '864691135292991414', cell_type: '23P' },
+    ])
     const table = await provider().fetch(
       {
         provider: CAVE_TABLE_PROVIDER,
@@ -650,30 +668,33 @@ describe('what a CAVE reference table needs', () => {
     expect(table.data.type).toEqual(['23P'])
   })
 
+  // See `learnedColumns`.
+  it('learns a view’s columns from its first read, where no sample will ever answer', async () => {
+    installMinnieViewFetch([
+      { pt_root_id: '864691135292991414', cell_type: '23P', mtype: 'L2a' },
+    ])
+    const ref = {
+      provider: CAVE_TABLE_PROVIDER,
+      config: config({ table: 'aibs_cell_info', columns: '' }),
+    }
+    expect(provider().peekColumns(ref)).toBeUndefined()
+
+    const learned = vi.fn()
+    const stop = subscribeAnnotationsLearned(learned)
+    await provider().fetch(ref, {})
+    stop()
+
+    // Said once, so inference asks again; and the same names the read's own table carries.
+    expect(learned).toHaveBeenCalledTimes(1)
+    expect(columnNames(provider().peekColumns(ref)!)).toEqual(['neuronId', 'type', 'mtype'])
+  })
+
   it('does not wait on a view whose count never answers, as an aggregating one does not', async () => {
     vi.useFakeTimers()
-    // MICrONS publishes its cell typing as the view `aibs_cell_info`.
-    const calls: CaveCall[] = []
-    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
-      const text = String(url)
-      const body = init?.body
-        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
-        : undefined
-      calls.push({ url: text, ...(body ? { body } : {}) })
-      const answer = (payload: unknown) =>
-        Promise.resolve({
-          ok: true,
-          status: 200,
-          text: () => Promise.resolve(JSON.stringify(payload)),
-        } as Response)
-      if (text.includes('/info/api/v2/datastack/full/'))
-        return answer({ local_server: SERVER, aligned_volume: { name: 'minnie65' } })
-      if (text.endsWith('/views')) return answer({ aibs_cell_info: { description: 'types' } })
-      if (text.endsWith('/tables')) return answer([])
-      const rows = [{ pt_root_id: '864691135292991414', cell_type: '23P' }]
-      if (text.includes('count=true')) return new Promise<Response>(() => undefined)
-      return answer(rows)
-    })
+    const calls = installMinnieViewFetch(
+      [{ pt_root_id: '864691135292991414', cell_type: '23P' }],
+      { count: 'hang' },
+    )
     const pending = provider().fetch(
       {
         provider: CAVE_TABLE_PROVIDER,

@@ -39,7 +39,7 @@ import {
   DATASET_FAMILIES,
   catmaidServerLabel,
   familyLabel,
-  familyStaleLabels,
+  familyChainHint,
   resolveDatasetId,
   versionsFor,
 } from '../lib/datasetFamilies'
@@ -230,11 +230,11 @@ function buildDatasetNode(family: DatasetFamily) {
        * Beside the listing's issues rather than among them: this one is asked of the wiring alone,
        * so it is said before the listing has arrived as well as after, where every other line
        * waits for it. The sibling of `annotationIssues`, which is about the same port once wired.
-       * See `AnnotationChain.staleBuiltin`.
+       * See `AnnotationChain.staleBuiltin` and `unlabelled`.
        */
-      const stale = familyStaleLabels(family, ctx.inputs.annotations)
+      const hint = familyChainHint(family, ctx.inputs.annotations)
       const issues = datasetIssues(family, ctx)
-      return stale ? [...issues, stale] : issues
+      return hint ? [...issues, hint] : issues
     },
 
     evaluate: async (ctx) => {
@@ -699,7 +699,9 @@ function synapseTableOptions(params: Record<string, unknown>) {
   // No target yet means no materializations yet, and the record arrives in the same load.
   const where = customCaveTarget(params)
   const record = where ? peekDatastackRecord(where.deployment, where.datastack) : undefined
-  const tables = caveTablesAt(where, { views: false })
+  const tables = caveTablesAt(where)
+    ?.filter((e) => e.kind === 'table')
+    .map((e) => e.name)
   return [
     {
       value: '',

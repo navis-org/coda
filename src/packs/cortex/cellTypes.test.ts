@@ -27,8 +27,9 @@ describe('which tables a choice reads', () => {
   it('reads the default typing and the proofreading flags in one read of one table', () => {
     const refs = cellTypeRefs(MINNIE, DATASET, '')
     expect(tables(refs)).toEqual(['aibs_cell_info'])
-    const columns = refs[0]!.config['columns']!.split(', ')
-    expect(columns).toEqual(expect.arrayContaining(['cell_type', 'mtype', 'dendrite_cleaned']))
+    // Every column, the flags among them: the chain names none, and a union with nothing named
+    // would narrow the read to the flags alone.
+    expect(refs[0]!.config['columns']).toBe('')
   })
 
   it('reads exactly what the dataset’s annotation chain reads, so the two share one cache entry', () => {
@@ -71,15 +72,10 @@ describe('the dropdown', () => {
 })
 
 describe('the schema half', () => {
-  it('names the grouping and proofreading columns before any read lands', () => {
+  // A view keeping every column joins on once the gallery's own read lands (`learnedColumns`).
+  it('is the Dataset’s own columns until the typing’s read lands', () => {
     const neurons = tableSchema(column('neuronId', 'str'))
-    const names = cellTypesSchema(neurons, cellTypeRefs(MINNIE, DATASET, '')).columns.map(
-      (c) => c.name,
-    )
-    // `cell_type` arrives as `type`, which is what `Group by` defaults to.
-    expect(names).toEqual(
-      expect.arrayContaining(['neuronId', 'type', 'mtype', 'dendrite_cleaned', 'axon_cleaned']),
-    )
+    expect(cellTypesSchema(neurons, cellTypeRefs(MINNIE, DATASET, ''))).toEqual(neurons)
   })
 })
 

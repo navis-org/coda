@@ -21,9 +21,10 @@ import { CARD_GAP } from '../layout/columns'
 import { resolveSize } from '../layout/elkGraph'
 import { chainLinks } from '../nodes/lib/annotationChain'
 import {
+  ADD_CHAIN_LABEL,
   ATTACH_CHAIN_LABEL,
   datasetFamily,
-  familyStaleLabels,
+  familyChainHint,
 } from '../nodes/lib/datasetFamilies'
 import '../nodes'
 import { graphNode } from './assemble'
@@ -51,11 +52,11 @@ function loneDataset(): CodaGraph {
   )
 }
 
-describe('familyStaleLabels', () => {
+describe('familyChainHint', () => {
   it('names the table the backend reads, and the button that fixes it', () => {
     const table = shippedSpecFor(undefined, flywire.family)?.annotations?.table
     expect(table).toBe('hierarchical_neuron_annotations')
-    const warning = familyStaleLabels(flywire, undefined)
+    const warning = familyChainHint(flywire, undefined)
     // Pinned whole: this is the wording that was asked for, assembled from three declarations.
     expect(warning?.message).toBe(
       'Cell types come from the hierarchical_neuron_annotations CAVE table, an outdated cut of ' +
@@ -68,14 +69,26 @@ describe('familyStaleLabels', () => {
   })
 
   it('stands down for any wire on the Annotations port, not only the chain', () => {
-    expect(familyStaleLabels(flywire, T.table())).toBeUndefined()
+    expect(familyChainHint(flywire, T.table())).toBeUndefined()
   })
 
-  it('is silent where a dataset has no labels of its own to be stale', () => {
-    // BANC and Minnie carry chains too, but a bare node there shows root ids and nothing
-    // plausible, so there is nothing misleading to warn about.
-    for (const key of ['banc', 'minnie65', 'hemibrain']) {
-      expect(familyStaleLabels(datasetFamily(key), undefined), key).toBeUndefined()
+  it('offers the chain where a dataset has no labels of its own and its chain opts in', () => {
+    const minnie = datasetFamily('minnie65')
+    const hint = familyChainHint(minnie, undefined)
+    expect(hint?.message).toBe(
+      'No cell types without annotations: MICrONS types its cells in CAVE tables rather than on ' +
+        'the neuron. Click button below to wire in the recommended MICrONS cell types.',
+    )
+    expect(hint?.fix).toEqual(
+      expect.objectContaining({ label: ADD_CHAIN_LABEL, action: 'attachAnnotationChain' }),
+    )
+    expect(familyChainHint(minnie, T.table())).toBeUndefined()
+  })
+
+  it('is silent where a chain declares neither reason, or there is no chain', () => {
+    // BANC is Minnie's case and has not opted in (`AnnotationChain.unlabelled`).
+    for (const key of ['banc', 'hemibrain']) {
+      expect(familyChainHint(datasetFamily(key), undefined), key).toBeUndefined()
     }
   })
 
@@ -91,7 +104,7 @@ describe('familyStaleLabels', () => {
     const ds = graph.nodes.find((node) => node.type === 'dataset.flywire')!
     const annotations = inferGraph(graph).nodes[ds.id]?.inputs.annotations
     expect(annotations).toBeDefined()
-    expect(familyStaleLabels(flywire, annotations)).toBeUndefined()
+    expect(familyChainHint(flywire, annotations)).toBeUndefined()
   })
 })
 
@@ -124,7 +137,7 @@ describe('attachChain', () => {
 
     // And the warning it was pressed for is gone.
     const annotations = inferGraph(graph).nodes['ds']?.inputs.annotations
-    expect(familyStaleLabels(flywire, annotations)).toBeUndefined()
+    expect(familyChainHint(flywire, annotations)).toBeUndefined()
   })
 
   /*

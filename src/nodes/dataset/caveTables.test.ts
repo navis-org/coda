@@ -18,7 +18,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ParamValues } from '../../core/node'
+import type { ParamValues, Suggestion } from '../../core/node'
 import { requireNodeDef } from '../../core/registry'
 import { T } from '../../core/types'
 import type { CodaType } from '../../core/types'
@@ -28,7 +28,13 @@ import { resetCredentials, setToken } from '../../data/cave/credentials'
 import { resetCaveState, tableListFor } from '../../data/cave/tables'
 import { installCaveFetch } from '../../test/caveStubs'
 import '../index'
-import { defaultParams, findParam, makeInferContext, validationMessage } from '../../core/node'
+import {
+  defaultParams,
+  findParam,
+  makeInferContext,
+  suggestionOption,
+  validationMessage,
+} from '../../core/node'
 import { DEFAULT_CAVE_SERVER } from '../../data/cave/deployments'
 
 const DATASET = 'flywire_fafb_public:783'
@@ -255,8 +261,8 @@ describe('which datastack, refused on the card', () => {
  * is `ui/params/comboField.test.tsx`'s; this is what each node feeds it.
  */
 describe('the CAVE fields’ lists', () => {
-  /** A field's list as the card would ask for it now. */
-  function listFor(type: string, param: string, table = ''): string[] {
+  /** A field's list as the card would ask for it now, entries and marks as drawn. */
+  function entriesFor(type: string, param: string, table = ''): Suggestion[] {
     const def = requireNodeDef(type)
     const found = findParam(def, param)
     const params = { ...defaultParams(def), datastack: DATASET, table }
@@ -265,24 +271,36 @@ describe('the CAVE fields’ lists', () => {
       : []
   }
 
-  /*
-   * One lookup, two answers: `CAVE table info` samples a view as readily as a table, where
-   * `CAVE table` reads through the table query route and a view there is a 404.
-   */
-  it('offers views on CAVE table info, after the tables, and not on CAVE table', async () => {
-    installCaveFetch()
-    await tableListFor('flywire_fafb_public', 783, { deployment: DEFAULT_CAVE_SERVER })
+  /** The names alone — what a pick would write. */
+  function listFor(type: string, param: string, table = ''): string[] {
+    return entriesFor(type, param, table).map((s) => suggestionOption(s).value)
+  }
 
-    const info = listFor('cave.tableInfo', 'table')
-    expect(info).toContain('nuclei_v1')
-    expect(info).toContain('valid_connection_v2')
-    expect(info.indexOf('nuclei_v1')).toBeLessThan(info.indexOf('valid_connection_v2'))
+  /* Both nodes read a view, so both list them — `docs/annotations.md` on why this was missed. */
+  it.each(['cave.tableInfo', 'annotation.caveTable'])(
+    'offers tables and views on %s in one alphabetical run, each marked with its kind',
+    async (type) => {
+      installCaveFetch()
+      await tableListFor('flywire_fafb_public', 783, { deployment: DEFAULT_CAVE_SERVER })
 
-    const tables = listFor('annotation.caveTable', 'table')
-    expect(tables).toContain('nuclei_v1')
-    expect(tables).not.toContain('valid_connection_v2')
-    expect([...tables]).toEqual([...tables].sort())
-  })
+      const names = listFor(type, 'table')
+      expect(names).toEqual([...names].sort())
+      // Interleaved, not tables-then-views: a view sorts in among the tables by its name.
+      expect(names.indexOf('nt_summary_view')).toBeLessThan(names.indexOf('nuclei_v1'))
+
+      const entries = entriesFor(type, 'table')
+      expect(entries).toContainEqual({
+        value: 'nt_summary_view',
+        label: 'nt_summary_view',
+        mark: { text: 'v', kind: 'view' },
+      })
+      expect(entries).toContainEqual({
+        value: 'nuclei_v1',
+        label: 'nuclei_v1',
+        mark: { text: 't', kind: 'table' },
+      })
+    },
+  )
 
   it("offers the table's own columns for Pivot on", async () => {
     installCaveFetch()

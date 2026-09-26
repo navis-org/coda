@@ -1594,6 +1594,14 @@ input.field--combo {
 .combo-list__option[data-current] {
   font-weight: 600;
 }
+/* A kind drawn before the name (`SuggestionOption.mark`): one monospace column down the left. */
+.combo-list__mark {
+  display: inline-block;
+  min-width: 1.5ch;
+  margin-right: 0.5ch;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
 .combo-list__empty,
 .combo-list__more {
   padding: 3px 6px;

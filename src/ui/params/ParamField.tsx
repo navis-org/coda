@@ -10,7 +10,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { EnumOption, InferContext, ParamDef, ParamValue } from '../../core/node'
-import { availableColumns, columnsKnown, listEntries, optionText } from '../../core/node'
+import {
+  availableColumns,
+  columnsKnown,
+  listEntries,
+  optionText,
+  suggestionOption,
+} from '../../core/node'
 import { ComboField } from './ComboField'
 import { useDraftText } from './useDraftText'
 
@@ -96,12 +102,12 @@ export function ParamField({ param, value, ctx, onChange, variant = 'node' }: Pa
         param.id.includes('Pattern')
       if (param.chips) {
         const selected = listEntries(text)
-        const options = param.suggestions?.(ctx) ?? []
+        const options = (param.suggestions?.(ctx) ?? []).map(suggestionOption)
         const write = (next: string[]) => onChange(next.join(', '))
         return (
           <ChipsField
             label={label}
-            available={options.map((name) => ({ value: name, label: name }))}
+            available={options}
             known={options.length > 0}
             selected={selected}
             emptyChip="all"

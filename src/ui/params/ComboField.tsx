@@ -29,6 +29,8 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
+import { suggestionOption } from '../../core/node'
+import type { Suggestion, SuggestionOption } from '../../core/node'
 import { layoutViewport, menuShift } from '../menu/placement'
 import { useListNav } from '../useListNav'
 import { useDraftText } from './useDraftText'
@@ -41,7 +43,7 @@ const MIN_WIDTH = 220
 export interface ComboFieldProps {
   label: string
   value: string
-  options: readonly string[]
+  options: readonly Suggestion[]
   placeholder?: string | undefined
   mono?: boolean | undefined
   title?: string | undefined
@@ -60,13 +62,19 @@ export interface ComboFieldProps {
  * Case-insensitive substring match on every whitespace-separated term, in any order.
  *
  * Deliberately not the palette's `fuzzyRank`, which reorders by score: the lists here arrive in an
- * order that means something (a datastack's tables before its views), and a filter keeps it.
+ * order that means something (a source's own ordering, which the caller chose), and a filter keeps
+ * it.
+ *
+ * Matches the value only, never a `mark` (`Suggestion`).
  */
-export function filterOptions(options: readonly string[], query: string): readonly string[] {
+export function filterOptions(
+  options: readonly SuggestionOption[],
+  query: string,
+): readonly SuggestionOption[] {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (terms.length === 0) return options
   return options.filter((option) => {
-    const lower = option.toLowerCase()
+    const lower = option.value.toLowerCase()
     return terms.every((term) => lower.includes(term))
   })
 }
@@ -118,7 +126,7 @@ export function ComboField({
   const query = typed ? draft.text : ''
   // Only while open: a card renders far more often than anybody opens its list.
   const matches = useMemo(
-    () => (showing ? filterOptions(options, query) : []),
+    () => (showing ? filterOptions(options.map(suggestionOption), query) : []),
     [showing, options, query],
   )
   const shown = matches.length > MAX_SHOWN ? matches.slice(0, MAX_SHOWN) : matches
@@ -162,7 +170,7 @@ export function ComboField({
       return
     }
     if (event.key === 'Enter') {
-      const active = showing ? shown[nav.activeIndex] : undefined
+      const active = showing ? shown[nav.activeIndex]?.value : undefined
       const typedName = draft.text.trim()
       if (active !== undefined) {
         event.preventDefault()
@@ -256,18 +264,26 @@ export function ComboField({
             {shown.length === 0 ? (
               <div className="combo-list__empty">No match — the typed name is kept as is</div>
             ) : (
-              shown.map((option, i) => (
+              shown.map(({ value: name, label: text, mark }, i) => (
                 <div
-                  key={option}
+                  key={name}
                   id={`${listId}-${i}`}
                   role="option"
                   aria-selected={i === nav.activeIndex}
-                  data-current={option === value || undefined}
+                  // The mark is a glyph; the word it stands for is what is heard and hovered.
+                  aria-label={mark ? `${text}, ${mark.kind}` : undefined}
+                  title={mark ? `${text} (${mark.kind})` : undefined}
+                  data-current={name === value || undefined}
                   className="combo-list__option"
                   onMouseEnter={() => nav.setActiveIndex(i)}
-                  onClick={() => pick(option)}
+                  onClick={() => pick(name)}
                 >
-                  {option}
+                  {mark && (
+                    <span className="combo-list__mark" aria-hidden="true">
+                      {mark.text}
+                    </span>
+                  )}
+                  {text}
                 </div>
               ))
             )}

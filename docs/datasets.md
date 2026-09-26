@@ -704,6 +704,12 @@ minnie65 are the other case: a bare node there shows root ids with no names, whi
 incomplete. So the difference is declared, as `AnnotationChain.staleBuiltin` (what the built-in
 labels lack, as a clause), and only FlyWire declares it.
 
+**minnie65 later opted in for the other reason**, as `AnnotationChain.unlabelled`: nothing on a
+bare node there misleads, but nothing on it says that one card fixes it either — the chain is a
+declaration nobody can find from the node. The same line and button, worded for absence ("No cell
+types without annotations: …"). Opt-in, because a warning on every drop claims a bare node is
+wrong, which is a per-dataset call; BANC is the same case and has not opted in.
+
 Three options were weighed against that and not taken:
 
 - **Bringing the chain in on every add**, as a companion. It still misses plans, pastes and
@@ -716,7 +722,7 @@ Three options were weighed against that and not taken:
 What was built is a warning worked out from the wiring, so it reaches every route including old
 files, plus a fix on the same card:
 
-- **`familyStaleLabels` is the one predicate.** It returns a `validate` line carrying its fix
+- **`familyChainHint` (was `familyStaleLabels`) is the one predicate.** It returns a `validate` line carrying its fix
   (`ValidationLine`, `NodeIssue.fix`), so a button cannot appear without its warning, and one
   wire removes both. `validate` is the right channel: its lines are `warning` severity and block
   nothing. The line is said on **every** return of `validate`, including before the version
@@ -836,10 +842,21 @@ predictions, proofreading status — and the AIBS view `aibs_cell_info` already 
 precedence, one row per nucleus (144,120 at v1822, ~30 MB and ~6 s whole). So the chain is one
 `CAVE table` card, and two things were needed for it. `annotation.caveTable` now reads a view
 through the **view endpoint** — asked as a table it 404s, which reads as a missing table — and
-refuses `Pivot on` there, which only a table supports. And the **columns are named** (`broad_type,
-cell_type, mtype, visual_area, dendrite_cleaned, axon_cleaned, axon_strategy`), because a view is
-never sampled at edit time (`cave/tables.ts`: an aggregating one can take minutes to answer one row),
-so naming them is what gives the pickers a schema before the Run. The labels are the **EM names as
+refuses `Pivot on` there, which only a table supports. **Every column is kept** (`Columns` empty),
+and the view's columns are **learned from its first read**. They were named at first
+(`broad_type, cell_type, mtype, visual_area, dendrite_cleaned, axon_cleaned, axon_strategy`),
+because a view is never sampled at edit time (`cave/tables.ts`: an aggregating one can take minutes
+to answer one row), so naming them was the only way the pickers had a schema. Two costs retired
+that. The seven chips wrap the card to **396 px** against the 265 its `cardHeight` floor declares,
+and the starter's one arrange measures it before they have wrapped, so the caption landed **46 px
+inside** the card (268 and 13 px clear with none, measured in headless Chrome). And the selection
+was one somebody had to know to widen. Emptying the list alone was measured wrong: `everyColumn`
+asked only for the sample a view never gets, so the schema stayed unknown **after** a Run too, and
+`type` and `mtype` never reached a picker. `learnedColumns` (`annotations/caveTable.ts`) keeps the
+columns any read naming none comes back with — the persistent cache's included — and announces
+them through `reportAnnotationsLearned`. The sample still wins where there is one, so a table's
+schema does not move under its pickers when a read lands. The price is pickers empty until the
+first read: a Run for the dataset, the gallery's own read for the gallery. The labels are the **EM names as
 published** (`23P`, `5P-ET`, `BC`, `MC`…) — never mapped onto transcriptomic subclasses, a claim no
 MICrONS table makes. The booleans arrive as `'t'`/`'f'` text. `typeColumns` is `type` and `mtype`.
 See [cortex.md](cortex.md).

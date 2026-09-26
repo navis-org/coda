@@ -228,7 +228,7 @@ export function resetCaveState(): void {
  * orders agree anyway — so the locale can only ever be a source of disagreement here, never of
  * correctness.
  */
-const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+export const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
 function namesFor(
   datastack: string,

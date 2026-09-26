@@ -489,8 +489,10 @@ export interface StringParam extends ParamBase {
    *
    * **No identity contract**: a fresh array per call is fine. The widget filters only while its
    * list is open, over a few hundred names at most.
+   *
+   * An entry may be a `SuggestionOption`, which says more than its name. See `Suggestion`.
    */
-  suggestions?: (ctx: InferContext) => string[]
+  suggestions?: (ctx: InferContext) => Suggestion[]
   /**
    * The value a wire supplies in place of this field, when one does.
    *
@@ -522,6 +524,30 @@ export interface StringParam extends ParamBase {
    * empty list is one that has not landed.
    */
   chips?: boolean
+}
+
+/**
+ * A `StringParam.suggestions` entry that says more than its name.
+ *
+ * `mark` is a one- or two-character kind drawn muted *before* the label, so a list mixing two
+ * kinds of thing reads as a column down the left edge rather than a word at the ragged end of each
+ * row. `kind` is the word it abbreviates: the row's tooltip, and what a screen reader hears in
+ * place of the glyph. Drawn by the combo list only; a chip list draws the inherited `note`
+ * instead, and ignores `mark`.
+ */
+export interface SuggestionOption extends EnumOption {
+  mark?: { text: string; kind: string }
+}
+
+/**
+ * One `StringParam.suggestions` entry: a bare name, or an option when it needs a mark or a note.
+ * **Both are drawing only** — a pick writes `value` and the filter matches `value` alone.
+ */
+export type Suggestion = string | SuggestionOption
+
+/** A `Suggestion` as the option it stands for; a bare name is its own label. */
+export function suggestionOption(entry: Suggestion): SuggestionOption {
+  return typeof entry === 'string' ? { value: entry, label: entry } : entry
 }
 
 /**

@@ -138,10 +138,10 @@ export const caveAnnotationNode = packNode({
       kind: 'string',
       label: 'Table',
       placeholder: 'nuclei_v1',
-      help: 'Annotation table in this datastack. The list is the datastack’s tables once it has been read, which needs a CAVE token; any name can still be typed.',
+      help: 'Annotation table or view in this datastack. The list is the datastack’s tables and views (marked t and v), once it has been read, which needs a CAVE token; any name can still be typed.',
       default: '',
-      // Tables only: this reads through the table query route, where a view is a 404.
-      suggestions: (ctx) => caveTableSuggestions(ctx, { views: false }),
+      // Views too: the read asks the listing which a name is and takes the view route for one.
+      suggestions: caveTableSuggestions,
     },
     {
       id: 'columns',

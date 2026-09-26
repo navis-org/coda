@@ -658,9 +658,12 @@ const BANC_CHAIN: AnnotationChain = {
  * corrections, the column census, the m-type predictions, the proofreading status — and the view
  * `aibs_cell_info` (AIBS) is the one that already applies their precedence, one row per nucleus.
  * Read as published: EM names (`23P`, `5P-ET`, `BC`, `MC`…), never mapped onto transcriptomic
- * subclasses, which would be a claim no table here makes. The columns are named rather than left
- * empty because a view is never sampled at edit time (`cave/tables.ts`), so naming them is what
- * gives every picker downstream a schema before the Run. `cell_type` arrives as `type`.
+ * subclasses, which would be a claim no table here makes. `cell_type` arrives as `type`.
+ *
+ * **Every column is kept**, `Columns` left empty, so the pickers downstream fill from the first
+ * read (`learnedColumns`); `docs/datasets.md` has why they are no longer named. The Cortex
+ * gallery's default typing reads this same declaration (`chainTyping`), which needs `columns` to
+ * be a string — hence `''` rather than absent.
  */
 const MINNIE_CHAIN: AnnotationChain = {
   nodes: [
@@ -669,8 +672,7 @@ const MINNIE_CHAIN: AnnotationChain = {
       type: 'annotation.caveTable',
       params: {
         table: 'aibs_cell_info',
-        columns:
-          'broad_type, cell_type, mtype, visual_area, dendrite_cleaned, axon_cleaned, axon_strategy',
+        columns: '',
       },
     },
   ],
@@ -689,6 +691,7 @@ const MINNIE_CHAIN: AnnotationChain = {
     'This datastack keeps its cell typing in CAVE tables rather than on the neuron, so on its own ' +
     'it answers with root ids and no names. One view, aibs_cell_info, already combines those ' +
     'tables by precedence.',
+  unlabelled: 'MICrONS types its cells in CAVE tables rather than on the neuron',
 }
 
 const CAVE_FAMILIES: DatasetFamily[] = [
@@ -863,8 +866,8 @@ export function familyForNodeType(type: string): DatasetFamily | undefined {
 }
 
 /**
- * The family node's warning that it is reading labels its annotation chain exists to replace, with
- * the button that attaches the chain, or `undefined`. See `AnnotationChain.staleBuiltin`.
+ * The family node's warning that its labels are stale (`AnnotationChain.staleBuiltin`) or absent
+ * (`AnnotationChain.unlabelled`), with the button that attaches the chain, or `undefined`.
  *
  * One function for `validate`, which is what the card and the inspector draw, so a button cannot
  * appear without its warning. **Any** wire on the Annotations port stands it down, not only the
@@ -875,28 +878,39 @@ export function familyForNodeType(type: string): DatasetFamily | undefined {
  * spec, the one the backend actually queries, so the warning cannot name a table other than the
  * one being read. Only a CAVE datastack has such a spec, which is what makes "CAVE table" true.
  */
-export function familyStaleLabels(
+export function familyChainHint(
   family: DatasetFamily | undefined,
   annotations: CodaType | undefined,
 ): ValidationLine | undefined {
   const chain = family?.annotationChain
-  if (!family || !chain?.staleBuiltin || annotations) return undefined
-  const table = shippedSpecFor(undefined, family.family)?.annotations?.table
-  if (!table) return undefined
-  return {
-    message:
-      `Cell types come from the ${table} CAVE table, ${chain.staleBuiltin}. ` +
-      `Click button below to wire in the recommended ${chain.title}.`,
+  if (!family || !chain || annotations) return undefined
+  const line = (reason: string, label: string): ValidationLine => ({
+    message: `${reason} Click button below to wire in the recommended ${chain.title}.`,
     fix: {
-      label: ATTACH_CHAIN_LABEL,
+      label,
       title: `Add ${chain.title} in front of this dataset`,
       action: 'attachAnnotationChain',
     },
+  })
+  if (chain.staleBuiltin) {
+    const table = shippedSpecFor(undefined, family.family)?.annotations?.table
+    return table
+      ? line(
+          `Cell types come from the ${table} CAVE table, ${chain.staleBuiltin}.`,
+          ATTACH_CHAIN_LABEL,
+        )
+      : undefined
   }
+  // "Current" is a claim about replacing something; with nothing to replace it is an add.
+  if (chain.unlabelled) {
+    return line(`No cell types without annotations: ${chain.unlabelled}.`, ADD_CHAIN_LABEL)
+  }
+  return undefined
 }
 
-/** What `familyStaleLabels`' button says. */
+/** What `familyChainHint`'s button says, replacing stale labels and adding absent ones. */
 export const ATTACH_CHAIN_LABEL = 'Use current annotations'
+export const ADD_CHAIN_LABEL = 'Add cell types'
 
 // ---------------------------------------------------------------------------
 // Versions
