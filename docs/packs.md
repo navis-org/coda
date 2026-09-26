@@ -23,6 +23,7 @@ src/packs/
     cells.ts            anything the nodes share
     glyphs.ts           default export: type → drawing, merged into NODE_GLYPHS
     seeAlso.ts          default export: See also groups, merged by help/seeAlso.ts
+    wizard.ts           default export: Workflow Wizard answers, merged by wizard/contribute.ts
     help/traces.md      the document for zapbench:traces
   connectome/           twelve node modules and a manifest; keeps built-in ids
   neuprint/ cave/ catmaid/
@@ -32,8 +33,9 @@ src/packs/
 **Two kinds of seam, and which is which is not taste.** The nodes are *registered*:
 `registerPack` takes the manifest and registers each node, and `src/packs/index.ts` lists every
 pack explicitly, for the reason `nodes/index.ts` gives — an analysable bundle and a deterministic
-order. Everything else is *found by file*: `ui/glyphs.ts`, `help/seeAlso.ts` and
-`help/registry.ts` each glob the one file they need out of every pack directory. The split is
+order. Everything else is *found by file*: `ui/glyphs.ts`, `help/seeAlso.ts`,
+`help/registry.ts` and `wizard/contribute.ts` each glob the one file they need out of every pack
+directory. The split is
 forced by `nodes.html`, which draws the glyph table and holds **no node definitions at all** — a
 glyph table that imported the manifest would pull every pack's nodes, and their data layers, in
 behind a static page. The help registry already worked this way (a document exists because its
@@ -371,10 +373,19 @@ built one by hand from nothing, and read Cortex as on. Its card body is register
 `ui/nodes/nodeBodies.ts` like any other, the pack directory being imported by the headless MCP
 build.
 
+## Wizard answers
+
+A pack adds to the Workflow Wizard through `wizard.ts`: ways to choose neurons, single-dataset
+analyses with the viewers they end on, and the dialog rows for its own viewers. Cortex was the first
+— the gallery as a start, the laminar synapse profile as an analysis ([cortex.md](cortex.md)). The
+rules a pack author meets are stated once, in the header of `wizard/contribute.ts`, and refused at
+load; why they are those, and what a pack cannot add yet, is in
+[wizard.md](wizard.md#a-pack-adds-answers).
+
 ## What a pack does not do yet
 
-- **No card bodies, emitters, dataset families of its own, wizard options or toolbar entries** from
-  a pack.
+- **No card bodies, emitters, dataset families of its own or toolbar entries** from a pack.
+  Wizard answers it has — see *Wizard answers*, above.
 - **No extension points** on existing nodes, and so no slot conflicts to refuse — both wait for a
   pack that needs one.
 - **No revival** of placeholders when a pack's node appears mid-session — see

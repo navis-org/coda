@@ -593,6 +593,76 @@ corollary applies to an unresolved column picker. Splitting that check — no `n
 mistake, zero **rows** is an empty result — would make every one of these graphs land quiet. A change
 to a shipped node's contract, so left for its own decision.
 
+## A pack adds answers
+
+The option space was closed: typed ids, tables in `options.ts`, and a `switch` in `build.ts` with an
+arm per analysis. The Cortex pack needed two answers in it — the gallery as a way of choosing neurons,
+the laminar synapse profile as a technique — and the user asked for the seam to be built for the
+packs after it rather than for Cortex alone. `wizard/contribute.ts` is that seam; `packs.md` has the
+author's rules and this is why they are those.
+
+**Found by file, like every pack seam but the nodes.** A pack's `wizard.ts` default-exports a
+`WizardContribution` and `contribute.ts` globs them — `glyphs.ts`' and `seeAlso.ts`' mechanism, so a
+pack adds an answer by adding a file. Every importer of the wizard runs under Vite (the app, the MCP
+build, the node guide's SSR, `vite-node` probes), which is what a glob needs, and the glob adds no
+weight: everything a pack's `wizard.ts` imports is already loaded by `import '../nodes'`.
+
+**Add, never modify.** The tempting generality is a hook that may hide or reword a built-in answer.
+It was refused: a switched-off pack must leave the built-in wizard exactly as it was, and the things
+that read the option space — the node guide's credits, the demo plans a `demo://` link replays, the
+share links, the sweeps in `wizard.test.ts` — would each have to know which packs were on to mean
+anything. It reaches one place a declaration could slip past: `VIEWS_BY_ID` is keyed by viewer, so a
+pack analysis ending on `table` as anything but `out.table` would redraw and rewire the built-in
+table everywhere. `viewsById` refuses that at load, and holds a pack's own viewer to one node, its
+own pack, a dialog row and some analysis that ends on it — what an id *means*, where `contribute.ts`
+checks only its grammar and uniqueness. A refused file stops the app from booting, on purpose: in
+this tree that is a failure that cannot ship, where dropping one answer would hide it.
+
+**Ids are `<pack>:<name>`, and the type says so.** `StartId`, `AnalysisId` and `VisualisationId` are
+each a built-in union or `ContributedId`, a `${string}:${string}` template literal — so a contributed
+id can never be spelled as a built-in one, the `switch` over built-ins keeps its exhaustive literals,
+and an id in a saved share link says whose answer it was. The load check adds what a type cannot:
+`core/nodeType.ts`' full grammar (`cortex:` alone is not an id), the prefix is the pack's own
+directory, and one id names one answer across starts, analyses and viewers.
+
+**The builders are the arms' own vocabulary.** A contributed start returns `HeadPart`, which is what
+`headOf` returns less the dataset it already knows; a contributed analysis gets the helpers every arm
+in `bodyOf` uses — `neurons`, `datasetId`, and `views`, which places the ticked viewers from the
+analysis' own `views` table — and returns `BodyPart`, the arms' own return type. So nothing downstream
+of the builder knows the answer came from a pack: the annotation chain in front of the dataset, the
+hints, the overview note, the dashboard layout and the one-pass arrange are the wizard's, identically.
+
+**A fourth gate, `when`.** `requires` asks a source, `requiresTemplateSpace` and
+`requiresNeuronBridge` ask about coordinates and coverage; a cortical frame is another fact about
+*which dataset*, and the next pack's will be a fact nobody here can predict. So `when` is a predicate
+on **one** family key, which `available` asks of every chosen dataset exactly as it asks the other
+three — a pack cannot write an `any` rule where the wizard means `every`.
+
+**The pack switch needs no gate of its own in the dialog**: `offeredCombinations` already builds every
+combination and keeps those whose nodes are all offered, so an answer built of a switched-off pack's
+nodes disappears with nothing in the contribution saying so — `wizard.test.ts` pins that, and that the
+built-in combinations come back unchanged. That gate is the dialog's. A node guide demo link opens
+whatever the plan search found regardless of switches, as a pack node's own demo always has: Cortical
+Depth's and Laminar Profile's now open the minnie65 laminar workflow they were built for, where they
+used to be appended to a MaleCNS one and refuse for want of a frame. The gallery's still is, demos
+starting from a structured search.
+
+**What a pack cannot add yet, and what each would need.** Measured against the arms rather than
+guessed, and removed from the first cut rather than shipped unused:
+
+- **A viewer on a built-in analysis.** Every built-in arm wires its viewers with a per-viewer ternary
+  (`matrix`'s table off the links and its heatmap off the matrix, a linkage arm's dendrogram off the
+  tree), and a viewer none of them names gets the arm's catch-all port — plausible, and often wrong,
+  with nothing a contributed viewer could declare to correct it. It needs each arm to *declare* the
+  ports its viewers may read, and a contributed viewer to name one; that is a refactor of every arm,
+  wanted once a pack wants it.
+- **A cross-dataset analysis.** The built-in ones meet every dataset on one variadic `Stack Neurons`,
+  and that rule — and the qualified ids and prefixed chains behind it — would have to be offered to a
+  builder rather than rewritten by one.
+- **The built-in answers are not contributions**, and stay a `switch`: the arms use `targetNeurons`,
+  `scene`, `fromLinkage`, the stacking helpers and `familyCan`, and expressing them through the
+  contribution shape would make all of that public before any pack needs it.
+
 ## Where it is reachable from
 
 Three surfaces, all through `openWizard`: the start page's doors rail (first card), the toolbar's

@@ -65,15 +65,18 @@ import {
   foldChain,
   prefixChain,
 } from '../nodes/lib/annotationChain'
+import type { BodyPart, HeadPart } from './contribute'
 import type { AnalysisId, VisualisationId, WizardAnswers, WizardHint } from './options'
 import {
   STACK_SOURCE_COLUMN,
-  VIEWS,
   VIEWS_BY_ID,
   analysisOption,
+  contributedAnalysis,
+  contributedStart,
   everyCombination,
   familyCan,
   startOption,
+  viewsOf,
   visualisationOption,
 } from './options'
 
@@ -491,11 +494,8 @@ function suffixed(base: string, which: number): string {
   return which === 1 ? base : `${base}${which}`
 }
 
-/** The node the neurons come from, what its outgoing port is called, and where it reads from. */
-interface Head {
-  node: Placement
-  port: [string, string]
-  links: Wire[]
+/** A head as a pack's start builds it (`HeadPart`), plus the dataset it reads from. */
+interface Head extends HeadPart {
   /**
    * The dataset node this head reads from.
    *
@@ -538,6 +538,11 @@ function headOf(
 ): Head {
   const synthetic = Boolean(family?.synthetic)
   const id = (base: string) => suffixed(base, which)
+  // A pack's start builds its own card (`contribute.ts`); everything around it is the wizard's.
+  const contributed = contributedStart(answers.start)
+  if (contributed) {
+    return { ...contributed.head({ id, datasetId, row }), datasetId }
+  }
   if (answers.start === 'browse') {
     /*
      * `Additional tags`, where the dataset's chain folds community text into a column of its own.
@@ -604,10 +609,10 @@ function seedFilters(synthetic: boolean): { filters?: string[] } {
 }
 
 /**
- * The node one chosen viewer ends on, read from the one table that pairs a viewer with an
- * analysis.
+ * The node one chosen viewer ends on, read through `viewsOf` — the one reader of which viewer
+ * ends which chain.
  *
- * `VIEWS` is `options.ts`'s, and it is what the dialog offered from — so the viewer built here
+ * `viewsOf` is `options.ts`'s, and it is what the dialog offered from — so the viewer built here
  * cannot be one the reader was not shown, and its params cannot disagree with the claim that made
  * the pair legal. This used to be a nested ternary per arm; see `VIEWS` for how those drifted.
  *
@@ -621,7 +626,7 @@ function viewNode(
   index: number,
   row: number,
 ): Placement {
-  const spec = VIEWS[answers.analysis][visualisation]
+  const spec = viewsOf(answers.analysis)[visualisation]
   return {
     id: index === 0 ? 'view' : `view${index + 1}`,
     type: spec?.type ?? 'out.table',
@@ -797,7 +802,7 @@ function bodyOf(
   /** One head per dataset, in the order they were chosen. */
   heads: readonly Head[],
   targets?: [string, string],
-): { nodes: Placement[]; links: Wire[]; viewId: string | undefined } {
+): BodyPart {
   /**
    * The nth dataset's neurons. The fallback is reachable: the dialog previews a graph while the
    * datasets question is still open, which is `datasets: []` and so no heads at all.
@@ -845,7 +850,7 @@ function bodyOf(
   const views = (
     baseRow: number,
     wire: (visualisation: VisualisationId, id: string) => Wire[],
-  ): { nodes: Placement[]; links: Wire[]; viewId: string | undefined } => {
+  ): BodyPart => {
     /*
      * **Side by side, and stepped by each card's real width** rather than stacked.
      *
@@ -878,7 +883,7 @@ function bodyOf(
    * else. A Neuroglancer cell draws the published scene; a Neuron Topology card pulls the one
    * skeleton it is showing. Neither wants geometry an arm fetched for somebody else.
    *
-   * `VIEWS` is what stops either being reachable from an analysis that does not offer it.
+   * `viewsOf` is what stops either being reachable from an analysis that does not offer it.
    */
   const scene = (id: string): Wire[] => [
     ['ds', 'dataset', id, 'dataset'],
@@ -897,6 +902,12 @@ function bodyOf(
     visualisation === 'dendrogram'
       ? [['linkage', 'tree', id, 'in']]
       : [['linkage', 'ordered', id, 'in']]
+
+  // A pack's analysis builds its own chain, from the same helpers every arm below uses.
+  const contributed = contributedAnalysis(answers.analysis)
+  if (contributed) {
+    return contributed.body({ datasetId: datasetAt(0), neurons, views })
+  }
 
   switch (answers.analysis) {
     case 'partners': {
@@ -1679,10 +1690,10 @@ export const DEMO_DATASET = 'mock.opticlobe'
  */
 export function demoWorkflow(analysis: AnalysisId = 'partners', notes = true): CodaGraph {
   /*
-   * The viewer this analysis offers first, read off `VIEWS` rather than listed. It was a third
+   * The viewer this analysis offers first, read off `viewsOf` rather than listed. It was a third
    * table saying "the first one that analysis offers" and naming a different one; see `VIEWS`.
    */
-  const [visualisation] = Object.keys(VIEWS[analysis]) as VisualisationId[]
+  const [visualisation] = Object.keys(viewsOf(analysis)) as VisualisationId[]
   return buildWorkflow({
     datasets: [DEMO_DATASET],
     start: 'search',

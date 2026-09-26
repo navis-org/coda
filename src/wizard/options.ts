@@ -2,8 +2,9 @@
  * What the Workflow Wizard asks, and which answers are available.
  *
  * Four questions — dataset, how to choose neurons, what to work out, how to look at it — and the
- * whole option space is this file. `build.ts` turns one set of answers into a graph; nothing
- * there decides what may be asked, and nothing here builds anything.
+ * whole built-in option space is this file, with what node packs add merged in from
+ * `contribute.ts`. `build.ts` turns one set of answers into a graph; nothing there decides what
+ * may be asked, and nothing here builds anything.
  *
  * ## Why the options are gated rather than merely offered
  *
@@ -32,6 +33,9 @@
  */
 
 import type { NodeHint } from '../core/graph'
+import { packOf } from '../core/nodeType'
+import type { ContributedId } from './contribute'
+import { CONTRIBUTIONS } from './contribute'
 import type { SourceCapabilities } from '../data/source'
 import { capabilityAnywhere, getSource } from '../data/source'
 import { compareDatasetName } from '../nodes/lib/edgeComparison'
@@ -55,18 +59,20 @@ export const WIZARD_LABEL = 'Workflow Wizard'
 export const WIZARD_BLURB = 'Basic workflows tailored to your question.'
 
 /** How the neurons the workflow is about get chosen. */
-export type StartId = 'search' | 'browse' | 'ids'
+export type BuiltinStartId = 'search' | 'browse' | 'ids'
+/** A built-in start, or one a pack adds (`contribute.ts`) — `<pack>:<name>`, so never one of these. */
+export type StartId = BuiltinStartId | ContributedId
 
 /**
  * What the workflow works out about them.
  *
- * Two disjoint sets, and which one the third question offers is decided by the *first* answer:
- * the ten single-dataset techniques, and the four that only mean anything with more than one
- * connectome in the graph. They are one type because everything downstream of the question —
- * `VIEWS`, `bodyOf`, the graph's own name — reads an analysis without caring which list it came
- * off, and a second union would be a second `VIEWS`.
+ * Two disjoint built-in sets, and which one the third question offers is decided by the *first*
+ * answer: the ten single-dataset techniques, and the four that only mean anything with more than
+ * one connectome in the graph. They are one type because everything downstream of the question —
+ * `viewsOf`, `bodyOf`, the graph's own name — reads an analysis without caring which list it came
+ * off. A pack's (`AnalysisId`, below) joins the single-dataset list.
  */
-export type AnalysisId =
+export type BuiltinAnalysisId =
   | 'partners'
   | 'matrix'
   | 'influence'
@@ -83,8 +89,11 @@ export type AnalysisId =
   | 'xmorphology'
   | 'xnblast'
 
+/** A built-in analysis, or one a pack adds. */
+export type AnalysisId = BuiltinAnalysisId | ContributedId
+
 /** How the answer is drawn. */
-export type VisualisationId =
+export type BuiltinVisualisationId =
   | 'table'
   | 'dendrogram'
   | 'bar'
@@ -100,6 +109,9 @@ export type VisualisationId =
   | 'neuroglancer'
   | 'scatter'
   | 'neuronbridge'
+
+/** A built-in viewer, or one a pack adds. */
+export type VisualisationId = BuiltinVisualisationId | ContributedId
 
 /**
  * One complete set of answers — everything `buildWorkflow` needs.
@@ -225,6 +237,13 @@ export interface WizardOption<Id extends string> {
    * does not.
    */
   requiresNeuronBridge?: boolean
+  /**
+   * A gate none of the three above answers — the fourth kind, for a fact a pack knows and the
+   * wizard does not: that a dataset has a cortical frame, say. Asked of **each** chosen family key,
+   * as the others are, so it answers before any version is chosen and an answer is offered only
+   * where every chosen dataset can serve it.
+   */
+  when?: (key: string) => boolean
 }
 
 /**
@@ -245,7 +264,8 @@ function available<Id extends string>(
     return (
       (!capability || datasets.every((key) => familyCan(key, capability))) &&
       (!option.requiresTemplateSpace || datasets.every(familyBridges)) &&
-      (!option.requiresNeuronBridge || datasets.every(familyInNeuronBridge))
+      (!option.requiresNeuronBridge || datasets.every(familyInNeuronBridge)) &&
+      (!option.when || datasets.every(option.when))
     )
   })
 }
@@ -466,8 +486,11 @@ const STARTS: WizardOption<StartId>[] = [
   },
 ]
 
+/** Every start: the built-in ones, then each pack's (`contribute.ts`), in pack order. */
+const ALL_STARTS: readonly WizardOption<StartId>[] = [...STARTS, ...CONTRIBUTIONS.starts]
+
 export function startOptions(datasets: readonly string[]): WizardOption<StartId>[] {
-  return available(datasets, STARTS)
+  return available(datasets, ALL_STARTS)
 }
 
 // ---------------------------------------------------------------------------
@@ -659,9 +682,15 @@ const CROSS_ANALYSES: WizardOption<AnalysisId>[] = [
   },
 ]
 
+/** The single-dataset techniques: the built-in ten, then each pack's, in pack order. */
+const SINGLE_ANALYSES: readonly WizardOption<AnalysisId>[] = [
+  ...ANALYSES,
+  ...CONTRIBUTIONS.analyses,
+]
+
 /**
  * The third question's answers: the cross-dataset four where more than one dataset was chosen,
- * the ten single-dataset techniques otherwise.
+ * the single-dataset techniques otherwise.
  *
  * The list is decided by the first answer and then narrowed by `available` against **every**
  * dataset in it — so a comparison between one connectome with skeletons and one without offers
@@ -674,7 +703,7 @@ const CROSS_ANALYSES: WizardOption<AnalysisId>[] = [
  * serve, which is the thing this whole file exists to prevent.
  */
 export function analysisOptions(datasets: readonly string[]): WizardOption<AnalysisId>[] {
-  return available(datasets, isMulti(datasets) ? CROSS_ANALYSES : ANALYSES)
+  return available(datasets, isMulti(datasets) ? CROSS_ANALYSES : SINGLE_ANALYSES)
 }
 
 // ---------------------------------------------------------------------------
@@ -820,8 +849,8 @@ export interface ViewSpec {
 }
 
 /**
- * Which viewers can end which chain, **and the node each one is** — one table, read by both
- * halves of the wizard.
+ * Which viewers can end which built-in chain, **and the node each one is** — one table, read by
+ * both halves of the wizard through `viewsOf`, which also answers for a pack's analyses.
  *
  * A viewer takes what the analysis produces: a heatmap wants a matrix, a network diagram wants a
  * network, a table wants a table. Offering one that cannot be wired is how a wizard produces a
@@ -852,7 +881,7 @@ export interface ViewSpec {
  */
 export const STACK_SOURCE_COLUMN = 'dataset'
 
-export const VIEWS: Record<AnalysisId, Partial<Record<VisualisationId, ViewSpec>>> = {
+export const VIEWS: Record<BuiltinAnalysisId, Partial<Record<VisualisationId, ViewSpec>>> = {
   partners: {
     table: { type: 'out.table' },
     bar: { type: 'out.barChart', params: { category: 'postType', value: 'sum_weight' } },
@@ -1036,21 +1065,85 @@ export const VIEWS: Record<AnalysisId, Partial<Record<VisualisationId, ViewSpec>
   },
 }
 
-/**
- * Every viewer's node spec, by id — `VIEWS` inverted once rather than searched per lookup.
- *
- * A viewer means the same node whichever analysis offers it, which is the property that makes
- * this safe to flatten: `out.neuroglancer` under `morphology` and under `neurons` are the same
- * entry. Built at module scope because the answer is a fact about the table, not about a graph.
- *
- * Two readers, and they want it for opposite halves of one node: `build.ts` asks the registry
- * whether the type has a `dataset` port, and `glyphNodeOf` asks what it draws as.
- */
-export const VIEWS_BY_ID: ReadonlyMap<VisualisationId, ViewSpec> = new Map(
+/** Built-in viewers' specs, by id — what a pack's analysis may reuse only as the same node. */
+const BUILTIN_VIEWS_BY_ID: ReadonlyMap<VisualisationId, ViewSpec> = new Map(
   Object.values(VIEWS).flatMap(
     (byView) => Object.entries(byView) as [VisualisationId, ViewSpec][],
   ),
 )
+
+/**
+ * Every viewer's node spec, by id — `VIEWS` and each pack analysis' `views`, inverted once rather
+ * than searched per lookup.
+ *
+ * A viewer means the same node whichever analysis offers it, which is the property that makes
+ * this safe to flatten: `out.neuroglancer` under `morphology` and under `neurons` are the same
+ * entry. **Held, not assumed, for a pack**: an analysis ending on a built-in viewer as some other
+ * node would redraw that viewer's row and rewire it for every analysis, which is a pack modifying
+ * the built-in wizard (`contribute.ts`) — so it is refused here, at load. Built at module scope
+ * because the answer is a fact about the tables, not about a graph.
+ *
+ * Two readers, and they want it for opposite halves of one node: `build.ts` asks the registry
+ * whether the type has a `dataset` port, and `glyphNodeOf` asks what it draws as.
+ */
+export function viewsById(
+  analyses: readonly { id: string; views: Partial<Record<VisualisationId, ViewSpec>> }[],
+  rows: readonly { id: string }[],
+): ReadonlyMap<VisualisationId, ViewSpec> {
+  const byId = new Map(BUILTIN_VIEWS_BY_ID)
+  const named = new Set<string>()
+  for (const analysis of analyses) {
+    for (const [id, spec] of Object.entries(analysis.views) as [VisualisationId, ViewSpec][]) {
+      const builtIn = BUILTIN_VIEWS_BY_ID.get(id)
+      const refuse = (why: string) => {
+        throw new Error(`${analysis.id} ends on "${id}" as ${spec.type}: ${why}`)
+      }
+      if (builtIn) {
+        if (builtIn.type !== spec.type) {
+          refuse(
+            `the wizard's "${id}" is ${builtIn.type}. A pack may reuse a built-in viewer, never redefine it.`,
+          )
+        }
+        continue
+      }
+      // A pack's own viewer, with a row in the dialog and one node wherever it is offered.
+      if (packOf(id) !== packOf(analysis.id)) refuse('a viewer is its own pack’s to offer.')
+      if (!rows.some((row) => row.id === id)) refuse('no `visualisations` row names it.')
+      const other = byId.get(id)
+      if (other && other.type !== spec.type)
+        refuse(`another analysis ends on it as ${other.type}.`)
+      byId.set(id, spec)
+      named.add(id)
+    }
+  }
+  const unused = rows.find((row) => !named.has(row.id))
+  if (unused) throw new Error(`The viewer "${unused.id}" is ended on by no analysis.`)
+  return byId
+}
+
+export const VIEWS_BY_ID: ReadonlyMap<VisualisationId, ViewSpec> = viewsById(
+  CONTRIBUTIONS.analyses,
+  CONTRIBUTIONS.visualisations,
+)
+
+/** A pack's analysis, by id — undefined for a built-in one. */
+export function contributedAnalysis(id: AnalysisId) {
+  return CONTRIBUTIONS.analyses.find((analysis) => analysis.id === id)
+}
+
+/** A pack's start, by id — undefined for a built-in one. */
+export function contributedStart(id: StartId) {
+  return CONTRIBUTIONS.starts.find((start) => start.id === id)
+}
+
+/**
+ * The viewers an analysis can end on and the node each is, in offer order: a built-in analysis'
+ * `VIEWS` entry, or a pack analysis' own `views`. The one reader of "which viewer ends which
+ * chain", for the dialog and the builder alike.
+ */
+export function viewsOf(analysis: AnalysisId): Partial<Record<VisualisationId, ViewSpec>> {
+  return contributedAnalysis(analysis)?.views ?? VIEWS[analysis as BuiltinAnalysisId] ?? {}
+}
 
 /**
  * The node whose drawing names an answer — the icon on its row.
@@ -1082,7 +1175,7 @@ export function visualisationOptions(
   datasets: readonly string[],
   analysis: AnalysisId,
 ): WizardOption<VisualisationId>[] {
-  const offered = Object.keys(VIEWS[analysis]) as VisualisationId[]
+  const offered = Object.keys(viewsOf(analysis)) as VisualisationId[]
   return available(
     datasets,
     offered.flatMap((id) => {
@@ -1138,23 +1231,34 @@ export function resolveVisualisations(
 }
 
 export const startOption = (id: StartId): WizardOption<StartId> | undefined =>
-  STARTS.find((o) => o.id === id)
+  ALL_STARTS.find((o) => o.id === id)
 /**
- * Both lists, flattened once at module scope — `VIEWS_BY_ID`'s rule a few functions up, and for
- * the same reason: the answer is a fact about the tables rather than about a graph.
+ * Every analysis — the single-dataset list (built-in, then each pack's) and the cross-dataset one —
+ * flattened once at module scope, `VIEWS_BY_ID`'s rule a few functions up and for its reason: the
+ * answer is a fact about the tables rather than about a graph.
  *
  * A lookup by id is asked *after* the question has been answered and the caller no longer has
  * the dataset count to hand — the note above the chain and the graph's own name both read an
- * analysis without knowing which list it came off. The two are disjoint by construction, which
- * `wizard.test.ts` pins, so a single `find` across both cannot be ambiguous.
+ * analysis without knowing which list it came off. The built-in lists are disjoint by
+ * construction, which `wizard.test.ts` pins, and a pack's ids by their `<pack>:` namespace
+ * (`contribute.ts`), so a single `find` across them cannot be ambiguous.
  */
-const ALL_ANALYSES: readonly WizardOption<AnalysisId>[] = [...ANALYSES, ...CROSS_ANALYSES]
+const ALL_ANALYSES: readonly WizardOption<AnalysisId>[] = [
+  ...SINGLE_ANALYSES,
+  ...CROSS_ANALYSES,
+]
+
+/** Every viewer row: the built-in ones, then each pack's. */
+const ALL_VISUALISATIONS: readonly WizardOption<VisualisationId>[] = [
+  ...VISUALISATIONS,
+  ...CONTRIBUTIONS.visualisations,
+]
 
 export const analysisOption = (id: AnalysisId): WizardOption<AnalysisId> | undefined =>
   ALL_ANALYSES.find((o) => o.id === id)
 export const visualisationOption = (
   id: VisualisationId,
-): WizardOption<VisualisationId> | undefined => VISUALISATIONS.find((o) => o.id === id)
+): WizardOption<VisualisationId> | undefined => ALL_VISUALISATIONS.find((o) => o.id === id)
 
 /**
  * Every combination the wizard can reach for one dataset, **one viewer at a time**.

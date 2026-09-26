@@ -10,6 +10,7 @@
  *
  * - `glyphs.ts` — the pack's card drawings, merged into `NODE_GLYPHS` by `ui/glyphs.ts`;
  * - `seeAlso.ts` — its "See also" groups, merged by `help/seeAlso.ts`;
+ * - `wizard.ts` — its Workflow Wizard answers, merged by `wizard/contribute.ts`;
  * - `help/<name>.md` — the document for `<pack>:<name>`, found by `help/registry.ts`.
  *
  * Found by glob rather than listed, because the glyph table is drawn by `nodes.html`, which has no

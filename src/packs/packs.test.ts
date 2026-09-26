@@ -3,7 +3,9 @@
  * keeping to its own pack. Plus the rename that moving ZapBench into one cost, read back.
  *
  * The files are found by the same globs the surfaces use, so a pack that drops a file in the
- * right place is checked without anybody adding it here.
+ * right place is checked without anybody adding it here. The one exception is `wizard.ts`, whose
+ * ownership is refused at load by `wizard/contribute.ts` — a wizard file is code a dialog runs, so
+ * a mis-owned id should not survive to be offered — and tested in `contribute.test.ts`.
  */
 
 import { describe, expect, it } from 'vitest'

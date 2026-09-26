@@ -30,6 +30,7 @@ import { inferGraph } from '../core/inference'
 import { findParam } from '../core/node'
 import { getNodeDef, isAnnotation, packOfType, requireNodeDef } from '../core/registry'
 import { effectiveOff, offeredType, packsOffByDefault } from '../core/packs'
+import { packOf } from '../core/nodeType'
 import { ROW_TRACKS } from '../core/dashboard'
 import { Scheduler } from '../core/scheduler'
 import { attributeSchema, columnNames, tableSchema } from '../core/types'
@@ -1550,5 +1551,51 @@ describe('switched-off packs', () => {
     ).toBe(false)
     expect(canReach(kept, { start: connected.start })).toBe(true)
     expect(canReach(undefined, { visualisation: 'anything' })).toBe(true)
+  })
+})
+
+describe('answers a pack adds', () => {
+  /*
+   * The Cortex pack's two, as the first real contribution: gated on a cortical frame, which only
+   * minnie65 has, and on the pack being switched on — the second through the same build-and-look
+   * gate every switched-off pack goes through, with nothing in the contribution saying so.
+   */
+  const ids = (options: readonly { id: string }[]) => options.map((option) => option.id)
+
+  it('offers the Cortex answers where every dataset has a cortical frame, and nowhere else', () => {
+    expect(ids(startOptions(['minnie65']))).toContain('cortex:gallery')
+    expect(ids(analysisOptions(['minnie65']))).toContain('cortex:laminar')
+    for (const key of ['flywire', 'hemibrain', 'mock.opticlobe']) {
+      expect(ids(startOptions([key]))).not.toContain('cortex:gallery')
+      expect(ids(analysisOptions([key]))).not.toContain('cortex:laminar')
+    }
+  })
+
+  it('hides them while the pack is off, and leaves the built-in answers as they were', () => {
+    const off = offeredType(effectiveOff(packsOffByDefault()))!
+    const kept = offeredCombinations(['minnie65'], off)
+    const cortex = (a: WizardAnswers) =>
+      packOf(a.start) === 'cortex' || packOf(a.analysis) === 'cortex'
+    expect(kept.some(cortex)).toBe(false)
+    const builtIn = everyCombination(['minnie65']).filter((a) => !cortex(a))
+    expect(kept).toEqual(builtIn)
+  })
+
+  it('ends the laminar profile on the Laminar Profile, fed the placed synapses and the Dataset', () => {
+    const graph = buildWorkflow({
+      datasets: ['minnie65'],
+      start: 'cortex:gallery',
+      analysis: 'cortex:laminar',
+      visualisations: ['cortex:laminarProfile'],
+      notes: false,
+      dashboard: false,
+    })
+    const into = (id: string) =>
+      graph.edges
+        .filter((e) => e.target === id)
+        .map((e) => `${e.source}.${e.sourceHandle}>${e.targetHandle}`)
+    expect(into('view').sort()).toEqual(['depth.table>in', 'ds.dataset>dataset'])
+    expect(into('syn')).toContain('gallery.selected>neurons')
+    expect(graph.nodes.find((n) => n.id === 'view')?.type).toBe('cortex:laminarProfile')
   })
 })

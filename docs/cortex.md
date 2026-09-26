@@ -22,6 +22,9 @@ could draw anything (phase A), because most of that was not.
 - **D — `/cortex`.** Done. The pack is off by default; `coda.science/cortex` switches it on (and
   CAVE with it) through a redirect page and a query parameter, since GitHub Pages never runs the
   main entry at a path it has no file for ([packs.md](packs.md#shortcuts)).
+- **F — in the Workflow Wizard.** Done: the gallery is a way of choosing neurons and the laminar
+  synapse profile a technique, both gated on a cortical frame (`packs/cortex/wizard.ts`) — the
+  first pack to add wizard answers, which is what built the seam ([wizard.md](wizard.md#a-pack-adds-answers)).
 - **E — laminar profiles.** Done: `cortex:depth` places any point cloud in the frame and types
   both ends of a synapse; `cortex:laminarProfile` draws a depth column down the cortex against the
   layers. See *Cortical Depth and Laminar Profile*.
