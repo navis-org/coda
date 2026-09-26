@@ -22,7 +22,7 @@
 
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
@@ -401,24 +401,69 @@ export function deleteProfileOnExit(profile, close) {
   })
 }
 
-/** Hand the token to the page's neuPrint credentials. Exits 1 if the page did not take it. */
-export async function handNeuprintToken(send, token) {
+/**
+ * Hand a token to one of the page's credential modules, through a function run in the page that
+ * stores it and answers whether it took. The reply is checked, never printed: it carries a boolean,
+ * but an exception detail is not somewhere to take chances. One function for every backend, so the
+ * never-print rule has one spelling.
+ */
+async function handToken(send, store, token) {
   const global = await send('Runtime.evaluate', { expression: 'globalThis' })
   const reply = await send('Runtime.callFunctionOn', {
     objectId: global.result.result.objectId,
-    functionDeclaration: `async function (t) {
-      const m = await import('/src/data/neuprint/credentials.ts')
-      m.setToken(t)
-      return !!m.getToken()
-    }`,
+    functionDeclaration: store,
     arguments: [{ value: token }],
     awaitPromise: true,
     returnByValue: true,
   })
-  // The reply is checked, never printed: it carries a boolean, but an exception detail is not
-  // somewhere to take chances.
-  if (reply.result?.exceptionDetails || reply.result?.result?.value !== true) {
+  return !reply.result?.exceptionDetails && reply.result?.result?.value === true
+}
+
+/** Hand the token to the page's neuPrint credentials. Exits 1 if the page did not take it. */
+export async function handNeuprintToken(send, token) {
+  const took = await handToken(
+    send,
+    `async function (t) {
+      const m = await import('/src/data/neuprint/credentials.ts')
+      m.setToken(t)
+      return !!m.getToken()
+    }`,
+    token,
+  )
+  if (!took) {
     console.error('Could not hand the token to the page.')
     process.exit(1)
   }
+}
+
+// ── A CAVE token, for a run whose graph reads a CAVE datastack ──────────────────────────────────
+
+/**
+ * The token, from `CAVE_TOKEN` or `~/.cloudvolume/secrets/cave-secret.json` (caveclient's own
+ * file), or undefined where there is neither — the caller decides whether that ends the run.
+ * Never printed.
+ */
+export function readCaveToken() {
+  if (process.env.CAVE_TOKEN) return process.env.CAVE_TOKEN.trim()
+  const file = `${homedir()}/.cloudvolume/secrets/cave-secret.json`
+  if (!existsSync(file)) return undefined
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')).token || undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Hand the token to the page's CAVE credentials for the default deployment. Answers whether it took. */
+export function handCaveToken(send, token) {
+  return handToken(
+    send,
+    `async function (t) {
+      const m = await import('/src/data/cave/credentials.ts')
+      const d = await import('/src/data/cave/deployments.ts')
+      m.setToken(d.DEFAULT_CAVE_SERVER, t)
+      return !!m.getToken(d.DEFAULT_CAVE_SERVER)
+    }`,
+    token,
+  )
 }

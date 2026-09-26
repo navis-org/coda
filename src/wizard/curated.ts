@@ -18,7 +18,12 @@
  * demo meets, and `placeGuards.test.ts` sweeps them for overlapping cards.
  *
  * Every example runs on the synthetic dataset, so it opens without an account and reaches no
- * server.
+ * server — **except one whose node has nothing to show there.** A Cortex node needs a cortical
+ * frame, which only a published dataset has, and the demo search's own answer for it was a
+ * MICrONS chain on "latest" with an empty search. Such an example sets its own `ds` card (a
+ * version pinned, or its first Run waits on the version list) and says what it needs in
+ * `published`, which replaces the synthetic note. `curated.test.ts` runs only the synthetic ones;
+ * every example meets the inference and placement sweeps alike.
  */
 
 import type { CodaGraph, GraphNode, Wire } from '../core/graph'
@@ -52,6 +57,11 @@ export interface ExampleSpec {
   focus: string
   cards: Placement[]
   wires: Wire[]
+  /**
+   * For an example on a published dataset (its `ds` card is not the synthetic one): what it needs
+   * to open, said in the note where the synthetic one says its data is made up. Markdown.
+   */
+  published?: string
 }
 
 const DS = { id: 'ds', type: `dataset.${DEMO_DATASET}` }
@@ -70,6 +80,9 @@ const find = (id: string, filter: FilterRow, row?: number): Placement => ({
 })
 
 const BY_TYPE = { skeletonColorMode: 'categorical', skeletonColorBy: 'type' }
+
+/** Whether an example runs on the synthetic dataset — every one without its own `published`. */
+export const isSynthetic = (spec: ExampleSpec): boolean => spec.published === undefined
 
 const EXAMPLES: readonly ExampleSpec[] = [
   {
@@ -304,11 +317,48 @@ const EXAMPLES: readonly ExampleSpec[] = [
   },
 ]
 
+/*
+ * Last, being the one on a published dataset: the Cortex pack's two, which have nothing to show on
+ * synthetic data — neither has a frame to place a point in.
+ */
+const PUBLISHED: readonly ExampleSpec[] = [
+  {
+    types: ['cortex:laminarProfile', 'cortex:depth'],
+    focus: 'depth',
+    title: 'Laminar Profile',
+    about:
+      'Three MICrONS cells whose inputs sit in different layers: a neurogliaform cell, a bipolar interneuron and a layer-4 pyramidal cell. **Synapses** fetches their inputs, **Cortical Depth** places each one below the pia and types its partner, and **Laminar Profile** draws them against the layers, one panel per cell type.\n\n' +
+      'Paste other root ids into **Input IDs**, or set **Facet by** to `neuronId` for a panel per neuron.',
+    published:
+      '*Real data from MICrONS minnie65, pinned to materialization 1822. It needs a CAVE sign-in: **Connections**, the branch icon in the toolbar.*',
+    cards: [
+      { id: 'ds', type: 'dataset.minnie65', params: { version: '1822' } },
+      {
+        id: 'ids',
+        type: 'neuron.inputIds',
+        params: { ids: '864691136314078013\n864691135119630813\n864691135274968337' },
+      },
+      { id: 'syn', type: 'neuron.synapses', params: { polarity: 'post' } },
+      { id: 'depth', type: 'cortex:depth' },
+      {
+        id: 'view',
+        type: 'cortex:laminarProfile',
+        params: { facet: 'type', normalize: 'percent' },
+      },
+    ],
+    wires: [
+      ['ids', 'neurons', 'syn', 'neurons'],
+      ['syn', 'points', 'depth', 'points'],
+      ['depth', 'table', 'view', 'in'],
+    ],
+  },
+]
+
 /** Every example, for the tests. */
-export const CURATED: readonly ExampleSpec[] = EXAMPLES
+export const CURATED: readonly ExampleSpec[] = [...EXAMPLES, ...PUBLISHED]
 
 /** Which example answers for each node type. */
-const BY_NODE_TYPE = new Map(EXAMPLES.flatMap((spec) => spec.types.map((type) => [type, spec])))
+const BY_NODE_TYPE = new Map(CURATED.flatMap((spec) => spec.types.map((type) => [type, spec])))
 
 /** Whether a node type's demo is written by hand here rather than found by the search. */
 export const isCurated = (type: string): boolean => BY_NODE_TYPE.has(type)
@@ -351,7 +401,7 @@ export function exampleGraph(spec: ExampleSpec): CodaGraph {
       y: GRID_ORIGIN.y,
       width: NOTE.width,
       height: NOTE.height,
-      text: `### ${spec.title}\n\n${spec.about}\n\n${SYNTHETIC_NOTE}`,
+      text: `### ${spec.title}\n\n${spec.about}\n\n${spec.published ?? SYNTHETIC_NOTE}`,
     }),
   )
   return assembleGraph(`Example · ${spec.title}`, spec.about, nodes, wires)

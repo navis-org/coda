@@ -2,22 +2,24 @@
  * The hand-written demos, run for real.
  *
  * They exist because the searched demos type-checked and showed nothing — Split Neurons with no
- * rule sent every neuron to Rest — so type-checking is not the standard here. Each is run on the
- * synthetic dataset and its focus card must produce something on every output. Inference is
+ * rule sent every neuron to Rest — so type-checking is not the standard here. Each synthetic one
+ * is run and its focus card must produce something on every output; one on a published dataset
+ * cannot be run here, and is held to its declarations instead. Inference is
  * `demo.test.ts`', which reaches these through `demoGraph`, and overlap `placeGuards.test.ts`'.
  */
 
 import { describe, expect, it } from 'vitest'
 
 import '../nodes'
-import { listableNodeDefs } from '../core/registry'
+import { findParam } from '../core/node'
+import { listableNodeDefs, requireNodeDef } from '../core/registry'
 import type { Value } from '../core/values'
 import { registerBuiltinSources } from '../data/builtins'
 import { MockSource } from '../data/mock/MockSource'
 import { registerSource } from '../data/source'
 import { elementCount, isIterableValue } from '../nodes/lib/iterables'
 import { mockScheduler } from '../test/scheduler'
-import { CURATED, curatedGraph, exampleGraph } from './curated'
+import { CURATED, curatedGraph, exampleGraph, isSynthetic } from './curated'
 import { demoGraph } from './demo'
 
 registerBuiltinSources()
@@ -45,14 +47,32 @@ describe('curated demos', () => {
     expect(demoGraph(type)?.meta?.name).toBe(curatedGraph(type)?.meta?.name)
   })
 
-  it.each(CURATED)('$title runs, and its focus produces something', async (spec) => {
-    const sched = mockScheduler(source)
-    await sched.run(exampleGraph(spec), { mode: 'full' })
-    expect(sched.info(spec.focus).state, spec.focus).toBe('ok')
-    const outputs = sched.outputs(spec.focus) ?? {}
-    expect(Object.keys(outputs).length).toBeGreaterThan(0)
-    for (const [port, value] of Object.entries(outputs)) {
-      expect(sizeOf(value), `${spec.focus}.${port} is empty`).toBeGreaterThan(0)
+  /*
+   * A param a card sets that its node no longer declares is dropped by `normalizeParams` in
+   * silence, and the example then opens on the default — plausible, and not the example.
+   */
+  it('sets only params its cards declare', () => {
+    for (const spec of CURATED) {
+      for (const card of spec.cards) {
+        const def = requireNodeDef(card.type)
+        for (const param of Object.keys(card.params ?? {})) {
+          expect(findParam(def, param), `${spec.title}: ${card.type}.${param}`).toBeDefined()
+        }
+      }
     }
   })
+
+  it.each(CURATED.filter(isSynthetic))(
+    '$title runs, and its focus produces something',
+    async (spec) => {
+      const sched = mockScheduler(source)
+      await sched.run(exampleGraph(spec), { mode: 'full' })
+      expect(sched.info(spec.focus).state, spec.focus).toBe('ok')
+      const outputs = sched.outputs(spec.focus) ?? {}
+      expect(Object.keys(outputs).length).toBeGreaterThan(0)
+      for (const [port, value] of Object.entries(outputs)) {
+        expect(sizeOf(value), `${spec.focus}.${port} is empty`).toBeGreaterThan(0)
+      }
+    },
+  )
 })

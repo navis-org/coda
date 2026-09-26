@@ -774,7 +774,9 @@ the marker. `changelog.test.ts` checks every such image gets them.
 and what to do to it (params, expand a node, call a store action, crop); the script drives the dev
 server through the store module the app itself uses, so an action named in an entry is the action
 the app runs. It is `.mjs` run through `vite-node` so it can import the entries table rather than
-keep a second list. Demos run on the synthetic dataset. Two traps, both declared once in `changelog/images.ts`: a picture *of* the What's New card
+keep a second list. Demos run on the synthetic dataset, except one curated on a published dataset
+(below), whose capture names the `signIn` it needs — read from the machine the script runs on, never
+printed, the profile holding it deleted on exit, the shot skipped without it. Two traps, both declared once in `changelog/images.ts`: a picture *of* the What's New card
 would appear as its own entry's thumbnail inside the card it depicts, and it pictures the other
 entries' thumbnails — so `depictsCard` keeps it off the card and makes the script take it last.
 The card draws a **thumbnail** the script writes beside each capture (`thumbFile`), not the capture
@@ -791,6 +793,15 @@ into the link — and it fixed one surface of four, the node guide, the in-app `
 link still opening the bad ones. So the hand-written workflows live in `wizard/curated.ts`,
 `demoGraph` asks it first, and an entry names the node type: `demo: 'neuron.selectNeurons'`.
 See the node guide section above for what that changed there.
+
+**The same move happened a second time, for a node the synthetic dataset cannot show.** Laminar
+Profile needs a cortical frame, which only a published dataset has, so its changelog example began
+as a packed MICrONS graph in the entry, then as a declaration built into one at render time — and
+both reached one surface of four again, while the node guide and `?` opened the search's MICrONS
+chain on "latest" with an empty search, which refuses its first Run. It is a curated example now,
+on minnie65 pinned to 1822 with three chosen cells: `ExampleSpec.published` says what it needs in
+place of the synthetic note, `curated.test.ts` runs only the synthetic examples and checks every
+example's params against its nodes' declarations, and the entry names the type.
 
 **Points in Volumes needed the synthetic data fixed first, and the cause was two bugs, not the
 obvious one.** Only ~5% of any type's synthetic synapses tested inside any synthetic region. The

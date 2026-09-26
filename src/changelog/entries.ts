@@ -23,6 +23,9 @@
  *   own demo — hand-written for the nodes in `wizard/curated.ts`, searched for the rest. Demos run
  *   on the synthetic dataset, so they open without an account and reach no server.
  *   `changelog.test.ts` checks each one names a registered node.
+ * - A demo whose node has nothing to show on the synthetic dataset is curated on a published one
+ *   (`wizard/curated.ts`); its capture names the `signIn` it needs, which `pnpm changelog:shots`
+ *   reads from the machine it runs on.
  * - An `image` is a file under `public/changelog/`. Give it a `capture` and
  *   `pnpm changelog:shots` produces it from the running app; the test refuses a declared image
  *   that is not on disk.
@@ -38,7 +41,7 @@ export type ChangeKind = 'node' | 'chart' | 'data' | 'editor' | 'changed'
 
 /**
  * How `pnpm changelog:shots` produces an image: open the editor on the feature's own `demo` (or
- * an empty canvas), run it, optionally set params and expand a node or open a dialog, then crop
+ * the first visit's canvas), run it, optionally set params and expand a node or open a dialog, then crop
  * to the dialog that is up — or the whole window if none is. It also writes a small
  * thumbnail beside the image (`images.ts`), which is what the What's New card draws.
  */
@@ -53,6 +56,12 @@ export interface Capture {
   expand?: string
   /** A store action taking no arguments, e.g. `openPlugins` or `openWhatsNew`. */
   open?: string
+  /**
+   * The credential the demo needs, handed to the page before it opens — for a demo curated on a
+   * published dataset. `pnpm changelog:shots` reads it from the machine it runs on (see that
+   * script), never prints it, and skips the shot where there is none.
+   */
+  signIn?: 'cave'
 }
 
 export interface ChangelogImage {
@@ -102,6 +111,53 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
+  {
+    date: '2026-09-26',
+    title: 'Laminar profiles, and Cortex in the Workflow Wizard',
+    summary:
+      'See where a neuron’s synapses land against the cortical layers, split by partner type. The Cortex Gallery and the new profile are now in the Workflow Wizard.',
+    highlight: true,
+    features: [
+      {
+        kind: 'node',
+        date: '2026-09-26',
+        title: 'Laminar Profile: synapses against the layers',
+        body:
+          'Two new nodes in the **Cortex** plugin. **Cortical Depth** takes coordinates (princpially from synapses) and assigns depth below the pia, its layer. **Laminar Profile** draws that depth with the layers marked behind it.\n\n' +
+          'Can be facetted to e.g. compare types. Click a bar or a layer’s share to pass those synapses on. ' +
+          'Works on MICrONS minnie65. **Open example** loads three cells whose inputs sit in different layers; it needs a CAVE sign-in.',
+        image: {
+          file: 'laminar-profile.webp',
+          alt: 'Laminar Profile of three MICrONS cells, one panel per cell type: each panel shows where the cell’s input synapses sit against the cortical layers, split by partner type.',
+          capture: { expand: 'cortex:laminarProfile', signIn: 'cave' },
+        },
+        // The node's own curated demo (`wizard/curated.ts`): three minnie65 cells whose inputs
+        // sit in different layers, one panel per type — what the node guide and `?` open too.
+        demo: 'cortex:laminarProfile',
+      },
+      {
+        kind: 'editor',
+        date: '2026-09-26',
+        title: 'Cortex in the Workflow Wizard',
+        body: 'With the Cortex plugin switched on, **Cortex Gallery** and **Laminar synapse profile** show up as options in the Workflow Wizard.',
+        link: { href: './cortex/', label: 'Open Coda with Cortex switched on' },
+      },
+    ],
+    items: [
+      {
+        kind: 'data',
+        date: '2026-09-26',
+        title: 'CAVE table reads views.',
+        body: 'Previously the `CAVE table` node listed only tables. Now it also lists views and picks up their columns. A bare MICrONS Minnie65 node now has a button that adds the recommended cell-type annotations.',
+      },
+    ],
+    fixes: [
+      'Pinch-to-zoom works over widgets that scroll, and zooming a Cortex Gallery card is smoother.',
+      'A chart that first had nothing to draw (a Sankey before its columns are picked, say) now draws once it has, instead of staying blank until reopened.',
+      'The tallest bar of a Histogram or Bar Chart no longer runs past the top of its axis.',
+      'Charts with a selection no longer redraw on every edit elsewhere in the graph, or while their card is dragged.',
+    ],
+  },
   {
     date: '2026-09-25',
     title: 'Plugins, Recipes and a changelog',

@@ -421,6 +421,15 @@ first step past the gallery: a laminar input profile, split by partner type.
 
 ## What is deferred, and why
 
+- **A CAVE workflow on "latest" refuses its first Run.** Found making the changelog's MICrONS
+  example: the wizard leaves minnie65's version on latest, the version list has not arrived when a
+  run starts, and every reader wired to the Dataset by reference is refused with *Run again once it
+  has* — `Scheduler.gatherInputs` reads the run's inference once, before the listing lands. A second
+  Run works. The curated Laminar Profile example (`wizard/curated.ts`) pins 1822 for that reason,
+  and so must any curated example on a published dataset; the general fix is a
+  scheduler change — await the listing for a cold "latest" dataset in scope before inferring a full
+  run (runs may fetch; invariant 2 binds inference) — and would retire the pin.
+
 - **V1DD** is served from `globalv1.em.brain.allentech.org`, behind an Allen sign-in Coda has no
   credential for; nothing was scanned.
 - **Light-level reconstructions** (Gouwens 2020, Scala 2021, Sorensen 2026) are on the Brain Image

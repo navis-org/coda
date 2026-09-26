@@ -19,6 +19,7 @@ import { registerBuiltinSources } from '../data/builtins'
 import { getNodeDef } from '../core/registry'
 import { demoFragment, parseShareFragment } from '../data/share/fragment'
 import { useGraphStore } from '../store/graphStore'
+import { CURATED, isSynthetic } from '../wizard/curated'
 import { demoGraph } from '../wizard/demo'
 import { DAY_MS } from './dates'
 import { CHANGELOG, type ChangelogEntry } from './entries'
@@ -100,6 +101,17 @@ describe('the changelog table', () => {
       expect(ref.plan, `${demo}: the plan did not parse`).toBeDefined()
     const graph = demoGraph(ref.type, ref.plan)
     expect(graph?.nodes.some((n) => n.type === ref.type)).toBe(true)
+  })
+
+  // A demo on real data is one the node guide and `?` open too, curated on a published dataset.
+  it('takes a capture needing a sign-in only on a demo curated on a published dataset', () => {
+    for (const e of CHANGELOG) {
+      for (const f of e.features ?? []) {
+        if (!f.image?.capture?.signIn) continue
+        const spec = CURATED.find((c) => f.demo && c.types.includes(f.demo))
+        expect(spec && !isSynthetic(spec), f.title).toBe(true)
+      }
+    }
   })
 
   it('captures only with things that exist', () => {
