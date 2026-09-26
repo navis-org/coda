@@ -760,6 +760,19 @@ const BUILT_IN_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['circle', { cx: '14.6', cy: '13.4', r: '1.3', fill: 'currentColor', stroke: 'none' }],
     ['circle', { cx: '20.4', cy: '6.4', r: '1.3' }],
   ],
+  /*
+   * Clean Skeletons' arbour, drawn as the discs it becomes: the same branching stroke faint
+   * underneath, and a point at the middle of each piece of it.
+   */
+  'neuron.skeletonPoints': [
+    ['path', { d: 'M12 20.4v-7.2L6.4 6.4M12 13.2l5.6-6', strokeOpacity: '.4' }],
+    ['circle', { cx: '12', cy: '18.6', r: '1.3', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '12', cy: '14.8', r: '1.3', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '9.2', cy: '9.8', r: '1.3', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '14.8', cy: '10.2', r: '1.3', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '6.9', cy: '7', r: '1.3', fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: '17.2', cy: '7.6', r: '1.3', fill: 'currentColor', stroke: 'none' }],
+  ],
   'out.rois': [
     ['circle', { cx: '12', cy: '12', r: '7.6' }],
     ['path', { d: 'M12 4.4v15.2' }],

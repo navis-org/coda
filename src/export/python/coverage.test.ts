@@ -39,6 +39,13 @@ const NO_EMITTER: Record<string, string> = {
     'frame (`packs/cortex/frames.ts`) no notebook library carries. Its Selected table is the ' +
     'picked ids; exporting it well means emitting the frame, which is worth doing once the ' +
     'gallery has settled rather than twice.',
+  'neuron.skeletonPoints':
+    'Skeleton to Points. `navis.resample_skeleton` and the resampled `nodes` table are the nearest thing, and a ' +
+    'different placement: nodes laid every Spacing from the root, with no `cable` weight, so ' +
+    'a sum over them is not the cable length and a laminar profile drawn from them is not ' +
+    'this one. A faithful emitter is the per-run midpoint walk in ' +
+    '`nodes/lib/skeletonPoints.ts`, about thirty lines, and it waits on being checked by ' +
+    '*running* it against the node, `out.topology`\u2019s rule.',
   'out.neuronbridge':
     'NeuronBridge matches, and a viewer whose picture is a gallery of images read from Janelia\u2019s ' +
     'bucket for the neuron on screen. The faithful route is `neuronbridge-python`, which reads the ' +

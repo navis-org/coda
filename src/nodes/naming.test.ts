@@ -49,6 +49,7 @@ const MINTED: Record<string, string[]> = {
   // The name is a param, so the fragment is the default the description quotes plus the
   // overwrite rule — the half that is not obvious, since a cloud can already carry a `roi`.
   'neuron.pointsInVolumes': ['`roi`', 'written over'],
+  'neuron.skeletonPoints': ['`compartment`', '`cable`', '`rootDistance`'],
   // Every column is minted, and with nothing wired the node publishes a bare `T.table()` — so
   // the catalogue gets no `carries:` line and this description is the only prose a planning
   // model sees. The partner clause is here for the same reason: a cloud without one is this

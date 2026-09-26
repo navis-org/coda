@@ -266,6 +266,21 @@ export interface SkeletonGeometry {
 }
 
 /**
+ * `SkeletonGeometry.compartments`' codes as words, for a column a Split by or a Filter reads. 0 is
+ * unlabelled and reads null; a code past SWC's standard four keeps its number rather than being
+ * guessed at. A table so those `swc N` fallbacks are built once rather than once per point.
+ */
+const SWC_NAMES: readonly (string | null)[] = Array.from({ length: 256 }, (_, code) =>
+  code === 0
+    ? null
+    : (['soma', 'axon', 'basal dendrite', 'apical dendrite'][code - 1] ?? `swc ${code}`),
+)
+
+export function compartmentName(code: number): string | null {
+  return SWC_NAMES[code] ?? null
+}
+
+/**
  * Every array a skeleton holds — the one list, so a field added above is counted by the cache's
  * budget (`skeletonBytes`) and the memory readout (`ByteLedger`) alike, rather than by whichever
  * somebody remembered to edit.

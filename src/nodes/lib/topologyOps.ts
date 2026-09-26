@@ -261,20 +261,28 @@ export function maxRootDistance(
   tree = skeletonTree(skeleton),
   distances = parentDistances(skeleton),
 ): number {
-  const depth = new Float64Array(skeleton.parents.length)
   let max = 0
+  for (const d of rootDistances(skeleton, tree, distances)) if (d > max) max = d
+  return max
+}
+
+/** Path length from its root to every node, in the skeleton's own units. */
+export function rootDistances(
+  skeleton: SkeletonGeometry,
+  tree = skeletonTree(skeleton),
+  distances = parentDistances(skeleton),
+): Float64Array {
+  const depth = new Float64Array(skeleton.parents.length)
   // Pre-order: a parent's depth is always resolved before its children are read.
   const stack = [...tree.roots]
   while (stack.length > 0) {
     const i = stack.pop()!
     for (const child of tree.children[i]!) {
-      const d = depth[i]! + distances[child]!
-      depth[child] = d
-      if (d > max) max = d
+      depth[child] = depth[i]! + distances[child]!
       stack.push(child)
     }
   }
-  return max
+  return depth
 }
 
 /** Everything the Morphology tab reports about one neuron. Lengths are micrometres. */

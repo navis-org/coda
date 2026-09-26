@@ -145,6 +145,13 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
     ],
     items: [
       {
+        kind: 'node',
+        date: '2026-09-26',
+        title: 'Skeleton to Points.',
+        body: 'Turns skeletons into a point cloud, with one point per piece of cable at a spacing you choose. Each point carries its neuron, compartment (where the source labels one), cable, radius, Strahler order and distance to root. Feed it to **Cortical Depth** and **Laminar Profile** to see where an arbour sits in the layers, or to **Points in Volumes** for cable per region.',
+        demo: 'neuron.skeletonPoints',
+      },
+      {
         kind: 'data',
         date: '2026-09-26',
         title: 'CAVE table reads views.',

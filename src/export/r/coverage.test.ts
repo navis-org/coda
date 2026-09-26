@@ -97,6 +97,13 @@ const NO_EMITTER: Record<string, string> = {
     'cloudvolume route named in the Python note, and it is blocked on the same thing rather ' +
     'than on the language: this document is built on neuprintr, so the Meshes node downstream ' +
     'has nothing to emit against a bucket either.',
+  'neuron.skeletonPoints':
+    'Skeleton to Points. `nat::resample` and the resampled neuron\u2019s point table are the nearest thing, and a ' +
+    'different placement: nodes laid every Spacing from the root, with no `cable` weight, so ' +
+    'a sum over them is not the cable length and a laminar profile drawn from them is not ' +
+    'this one. A faithful emitter is the per-run midpoint walk in ' +
+    '`nodes/lib/skeletonPoints.ts`, about thirty lines, and it waits on being checked by ' +
+    '*running* it against the node, `out.topology`\u2019s rule.',
   'neuron.mirror':
     '`nat.templatebrains::mirror_brain` is the exact counterpart of the function Python emits, ' +
     'and the obstacle is the *template*, not the verb. Python has one registry \u2014 ' +
