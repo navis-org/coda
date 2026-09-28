@@ -98,6 +98,28 @@ registerEmitter('net.build', (ctx) => {
 })
 
 // ---------------------------------------------------------------------------
+// DotMotif
+// ---------------------------------------------------------------------------
+
+// Build Network's export currently preserves fewer edge attributes than the canvas and does
+// not normalise node keys to Coda's string IDs. A direct executor call on that graph could
+// silently answer a different attributed query, so keep both outputs unbound until the whole
+// path has a faithful translation. The exact query is a JSON string in a comment: wrapping a
+// DSL string as prose can change quoted whitespace, and inserting it as code would execute it.
+registerEmitter('net.dotmotif', (ctx) => [
+  ...ctx.todo(
+    'DotMotif notebook execution is not emitted yet: the exported Network may not preserve ' +
+      "Coda's edge attributes and string IDs. To reproduce manually, use DotMotif 0.19.0 " +
+      'from its GitHub release (https://github.com/aplbrain/dotmotif/releases/tag/v0.19.0), ' +
+      'with an equivalent attributed graph and the same match limit, then build the ' +
+      'matchId/variable/nodeId table and induced union network. Download the Matches table ' +
+      'from Coda to reuse the browser result directly.',
+  ),
+  `# DotMotif query (JSON string): ${JSON.stringify(String(ctx.params.query))}`,
+  `# Max matches: ${JSON.stringify(ctx.params.maxMatches)}`,
+])
+
+// ---------------------------------------------------------------------------
 // Network Metrics
 // ---------------------------------------------------------------------------
 

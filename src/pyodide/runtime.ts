@@ -29,6 +29,7 @@
  * that moves the ABI needs a wheel built against it, which is why `sources.json` pins both.
  */
 
+import DOTMOTIF_PY from './dotmotif.py?raw'
 import LINKAGE_PY from './linkage.py?raw'
 import MATCHES_PY from './matches.py?raw'
 import MESHES_PY from './meshes.py?raw'
@@ -37,6 +38,7 @@ import SKELETONS_PY from './skeletons.py?raw'
 import TOPOLOGY_PY from './topology.py?raw'
 import WARP_PY from './warp.py?raw'
 import sources from './sources.json'
+import { packageUrls } from './packageUrls'
 import type { PyArg, PyResult } from './types'
 
 /** How far along, and what is happening. Both halves reach the node's status bar. */
@@ -64,6 +66,13 @@ interface PyModule {
 }
 
 const MODULES: Record<string, PyModule> = {
+  dotmotif: {
+    source: DOTMOTIF_PY,
+    // Pure Python wheels only: Pyodide's networkx bundle also pulls plotting dependencies.
+    // Resolve our vendored wheels against the deployment base, not the worker's assets/ URL.
+    packages: packageUrls(sources.dotmotifPackages, import.meta.url, import.meta.env.DEV),
+    label: `DotMotif ${sources.dotmotifVersion} · NetworkX`,
+  },
   nblast: {
     source: NBLAST_PY,
     packages: ['numpy', sources.fastcoreWheel],

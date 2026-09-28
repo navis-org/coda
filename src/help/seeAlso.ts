@@ -108,6 +108,8 @@ const RELATED: readonly (readonly string[])[] = [
   ['neuron.connectivity', 'neuron.paths', 'neuron.influence', 'neuron.partnerVectors'],
   // An edge list, the graph it becomes, and the two things worth asking that graph.
   ['net.build', 'net.centrality', 'net.metrics', 'out.network'],
+  // A local motif query needs the built graph and the membership table beside its picture.
+  ['net.dotmotif', 'net.build', 'out.network', 'out.table'],
   // The two ways to draw a network, and the two nodes whose result is small enough for the
   // second one. The pair a reader most needs is the first: they draw the same material and the
   // choice between them is about how many nodes there are, which is exactly the fact no
