@@ -38,6 +38,24 @@ export type NodeCost = 'cheap' | 'expensive'
 export type NodeCategory =
   'dataset' | 'query' | 'transform' | 'analysis' | 'visualisation' | 'utility'
 
+/** One entry of `PortDef.feeds`. */
+export interface PortFeed {
+  /** The consumer's node type. */
+  type: string
+  /** The consumer's input. Defaults to its only input; the registry test refuses the ambiguity. */
+  port?: string
+  /** What the pairing is for, as a clause: "to rank downstream partner types by synapses". */
+  when: string
+  /** The consumer's params, set as a plan would set them. */
+  params: Readonly<Record<string, ParamValue>>
+  /**
+   * This node's params the entry applies under, where it depends on them — Connectivity's
+   * partner column is `post*` downstream and `pre*` upstream. Rendered after `when` and checked
+   * against this node's declared options, where prose in `when` is checked by nothing.
+   */
+  ifParams?: Readonly<Record<string, ParamValue>>
+}
+
 export interface PortDef {
   id: string
   label?: string
@@ -99,6 +117,28 @@ export interface PortDef {
    * since a producer may register after its consumer.
    */
   producedBy?: { type: string; port?: string }
+  /**
+   * Outputs only: a node this output is commonly wired into, what for, and how to set it up.
+   *
+   * `producedBy` from the other end, and for the other half of the same gap. That one names the
+   * node an *input* needs; this names what a general-purpose consumer should be told about *this*
+   * output's columns — which the consumer cannot say itself without learning about every
+   * producer. Found on Bar Chart: a model charting "top partner types" off Connectivity counted
+   * rows through a Group By, and the fix that measured (`weight` straight into the chart) named
+   * `postType` and `weight` in Bar Chart's own description, where a table of anything arrives.
+   * So the pairing lives here, on the node whose columns it names.
+   *
+   * Not a constraint and not a default — nothing is wired or set because of it. The assistant
+   * catalogue renders each entry as a sentence under the ports (`feedLines`), and
+   * `assistant.test.ts` checks it against the registry: the consumer and its input exist, every
+   * param is one it declares, and every column-valued param names a column this port carries.
+   *
+   * **Declare the other reading of the request too.** With only the ranking entry, a request to
+   * count rows per partner type charted `weight` 5 of 5 — one recipe on the page beats the
+   * request, conditioned or not. Adding the count as a Group By entry beside it made that 5 of 5
+   * `n` with the ranking still 10 of 10. Numbers in `docs/assistant.md`.
+   */
+  feeds?: readonly PortFeed[]
   /**
    * Inputs only: this port and the others naming the same group are **alternatives**, and at
    * most one of them may be wired.

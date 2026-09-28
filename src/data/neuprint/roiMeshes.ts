@@ -44,7 +44,7 @@ import { objProblem, parseObj } from '../obj'
 import { decimateMesh } from '../meshDecimate'
 import type { MeshGeometry } from '../../core/values'
 import type { RequestOptions } from './client'
-import { NeuPrintError, getText } from './client'
+import { NeuPrintError, getText, isNotFound } from './client'
 import type { VoxelScale } from '../units'
 import { scalePositions } from '../units'
 
@@ -109,7 +109,7 @@ export async function fetchRoiMeshSet(
          * real problem and is rethrown, so `mapWithConcurrency`'s "every item failed" rule can
          * still tell a patchy dataset from a broken request.
          */
-        if (error instanceof NeuPrintError && (error.status === 400 || error.status === 404)) {
+        if (isNotFound(error) || (error instanceof NeuPrintError && error.status === 400)) {
           missing.push(roi)
           done++
           options.onProgress?.(done / Math.max(1, rois.length), roi)

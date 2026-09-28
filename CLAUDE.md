@@ -99,7 +99,9 @@ rule belongs to one area, its record is in that area's doc.
   decision and stays one. **A multi-column picker keeps an unseen list untouched.**
 - **Both peeks start the fetch they cannot answer** (`peekDatasets`, `schemasFor`), once per
   instance, or the first Run of a session behaves differently from the second. **A peek whose
-  fetch needs a credential is gated on having one**, and re-armed by the credential *changing* —
+  fetch needs a credential is gated on having one** (`PeekGate`, `src/data/peekGate.ts`), and
+  re-armed by the credential *changing* — `src/data/peeks.test.ts` sweeps every one, and a new
+  one goes in its list —
   an ungated peek puts an auth failure in the status bar at somebody who has only dragged a node
   onto the canvas. A per-account listing is not reusable across accounts.
   See [docs/backends.md](docs/backends.md).
@@ -317,6 +319,13 @@ rule belongs to one area, its record is in that area's doc.
   own input check, which stays `isAssignable`. **Absence means unaudited**, so a port that really
   is `any` says `anyKind: true` and a registry sweep refuses anything saying neither. See also
   [docs/canvas.md](docs/canvas.md).
+- **Advice about one producer's columns lives on that producer's port, never on a general
+  consumer.** Steering the assistant from Connectivity to a Bar Chart by naming `postType` and
+  `weight` in Bar Chart's description put one node's columns on a card every table reaches.
+  `PortDef.feeds` is the declaration — consumer, clause, params — rendered by `feedLines` and
+  checked against the registry. **A port declaring one reading of a request must declare the
+  other**: with only the ranking stated, an explicit count request charted `weight` 5 of 5.
+  See [docs/assistant.md](docs/assistant.md).
 - **Optional input ports normally compose, and an exclusive set does not.** Every automatic wiring
   pass fills each port with a compatible source, which is right for Connectivity's `neurons` and
   `labels` and wrong for three ports that are three ways of writing one input down.
@@ -932,7 +941,8 @@ rule belongs to one area, its record is in that area's doc.
   Three CAVE lookups read a cancel, a 5xx or a `429` as "no level-2 cache", "no service" or "not
   cached" and kept it for the session — so a gallery that cancels as its wall moves drew half its
   cells from the level-2 route, unlabelled, on a datastack whose service held every one. Only a
-  404 is a verdict. The skeleton service's `exists` is rate-limited (100/minute), so a caller
+  404 is a verdict — neuPrint's `ngState` had the same bug (`isNotFound`, and a proxy's 404 is not
+  neuPrint's). The skeleton service's `exists` is rate-limited (100/minute), so a caller
   fetching neuron by neuron names the set first (`DataSource.planSkeletons`). See
   [docs/backends.md](docs/backends.md).
 - **CAVE's row cap is a per-deployment number, and a reference table has no root id.**

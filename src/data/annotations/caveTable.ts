@@ -49,9 +49,11 @@ import {
   tableColumnsFor,
   tableListFor,
 } from '../cave/tables'
+import { getToken } from '../cave/credentials'
 import { caveServerFor } from '../cave/datastack'
 import { deploymentKey, normaliseCaveServer } from '../cave/deployments'
 import { splitDatasetId } from '../cave/spec'
+import { PeekGates } from '../peekGate'
 import {
   cachedAnnotationTable,
   registerAnnotationProvider,
@@ -101,13 +103,10 @@ export interface CaveTableConfig extends Record<string, string> {
   columns: string
 }
 
-/**
- * Distinct values of `pivotOn` for a long table, keyed by (dataset, table, column).
- *
- * `has()` means asked, the value means landed — see the twin in `seaTable.ts` for why that is
- * one Map rather than a flag beside a field.
- */
-const discovery = new Map<string, string[] | undefined>()
+/** Distinct values of `pivotOn` for a long table, keyed by (dataset, table, column), once landed. */
+const discovery = new Map<string, string[]>()
+/** Whether a peek may ask for them — once per CAVE token, never without one (`PeekGate`). */
+const asked = new PeekGates()
 
 /**
  * The columns a read keeping every column came back with, keyed on (table, id column) — what
@@ -188,13 +187,15 @@ class CaveTableProvider implements AnnotationProvider {
 
   private kindsFor(config: CaveTableConfig): string[] | undefined {
     const key = tableKey(config, config.pivotOn)
-    if (discovery.has(key)) return discovery.get(key)
-    discovery.set(key, undefined)
+    const known = discovery.get(key)
+    if (known) return known
     const parsed = splitDatasetId(config.dataset)
     if (!parsed) return undefined
-    // Once per ref, never once per peek: inference runs on every graph mutation. Swallowed, and
-    // never retried from here — the rule `peekDatasets` follows.
-    const request = requestFor(config)
+    const deployment = normaliseCaveServer(config['deployment'])
+    if (!asked.open(key, () => getToken(deployment))) return undefined
+    // Swallowed and `quiet`: a peek has no caller waiting, so a refusal is no reason to open
+    // Connections. The Run that needs the kinds reads them loudly.
+    const request = { ...requestFor(config), quiet: true }
     void (async () => {
       const server = await caveServerFor(parsed.datastack, request)
       const values = await uniqueStringValues(server, parsed.datastack, config.table, request)
@@ -536,5 +537,6 @@ registerAnnotationProvider(new CaveTableProvider())
 /** Test seam: drop discovered kinds between suites. In-flight reads are `resetIndexLoads`'. */
 export function resetCaveTableState(): void {
   discovery.clear()
+  asked.clear()
   learnedColumns.clear()
 }

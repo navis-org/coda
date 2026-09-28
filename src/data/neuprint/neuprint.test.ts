@@ -24,6 +24,7 @@ import {
   datasetSegment,
   forgetRoutes,
   get,
+  isNotFound,
   neuPrintRoutes,
   runCypher,
   tagQuery,
@@ -1384,6 +1385,18 @@ describe('failure diagnosis', () => {
     ).rejects.toThrow(/Nothing is serving \/neuprint/)
   })
 
+  it('does not let a missing proxy answer "not found" for neuPrint', async () => {
+    // `isNotFound` is what lets a lookup cache "none", so the 404 a host with no proxy rule sends
+    // has to fail it — or a dev server started without `pnpm dev` settles every dataset as
+    // publishing no neuroglancer state, for the session.
+    stubFetch({ status: 404 })
+    const unreached = await get('/api/x', { token: 't', baseUrl: '/neuprint' }).catch((e) => e)
+    expect(isNotFound(unreached)).toBe(false)
+    stubFetch({ status: 404, text: '{"error":"no store found"}' })
+    const answered = await get('/api/x', { token: 't', baseUrl: '/neuprint' }).catch((e) => e)
+    expect(isNotFound(answered)).toBe(true)
+  })
+
   it('still reports a real neuPrint 404, which carries a body', async () => {
     stubFetch({ status: 404, text: '{"error":"no store found"}' })
     await expect(get('/api/x', { token: 't', baseUrl: '/neuprint' })).rejects.toThrow(
@@ -1976,18 +1989,24 @@ describe('thumbnail byte ceiling', () => {
  * offered the canonical seven neuron properties and every *discovered* one looked deleted.
  * The first Run fetched a listing as a side effect and the second then worked.
  */
+/** One macrotask: long enough for a chain of settled fetches to run through. */
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+
 describe('warming what inference reads', () => {
   const original = globalThis.fetch
 
   beforeEach(() => setToken('warm-test-token'))
 
-  function countingFetch() {
+  /** `refuse` answers every request with that status instead of leaving it pending. */
+  function countingFetch(refuse?: number) {
     const urls: string[] = []
     globalThis.fetch = ((input: RequestInfo | URL) => {
       urls.push(String(input))
-      // Never resolves: this is about what gets *asked for*, and a reply would pull the whole
-      // discovery cascade into a test about its first link.
-      return new Promise<Response>(() => {})
+      // Never resolves by default: this is about what gets *asked for*, and a reply would pull
+      // the whole discovery cascade into a test about its first link.
+      return refuse === undefined
+        ? new Promise<Response>(() => {})
+        : Promise.resolve(new Response('', { status: refuse }))
     }) as typeof fetch
     return urls
   }
@@ -2025,15 +2044,51 @@ describe('warming what inference reads', () => {
     expect(urls.some((u) => u.includes('custom'))).toBe(true)
   })
 
-  it('asks for nothing at all without a token, rather than a request per peek', () => {
+  it('asks for nothing at all without a token, rather than a request per peek', async () => {
     // An unconfigured source must not turn every graph mutation into a rejected request.
     // Recovery is the Sources panel's explicit `listDatasets()`, which is not gated on this.
     resetCredentials()
     const urls = countingFetch()
+    /*
+     * The auth channel as well as `fetch`, and it is the half that was broken: the client
+     * refuses a tokenless request *before* fetching, so `urls` stayed empty while the refusal
+     * went to the channel that opens the Connections dialog — in front of somebody who had
+     * only asked the assistant a question. `DatasetListing`'s rule 4.
+     */
+    const raised: string[] = []
+    const unsubscribe = subscribeAuthFailure((message) => raised.push(message))
     const source = new NeuPrintSource()
     source.peekDatasets()
     source.schemasFor('male-cns:v1.0')
+    await Promise.resolve()
+    unsubscribe()
     expect(urls).toEqual([])
+    expect(raised).toEqual([])
+  })
+
+  it('starts the listing on the first peek after a token arrives, and again for a new one', async () => {
+    // Returning early spends nothing, so signing in is what arms it — and a listing that failed
+    // under one token is asked again under the next rather than never.
+    resetCredentials()
+    // Refused rather than pending, so the first token's request settles: one still in flight
+    // would be shared with the second (rule 1) and say nothing about re-arming.
+    const urls = countingFetch(401)
+    const source = new NeuPrintSource()
+    const listings = () => urls.filter((u) => u.includes('/api/dbmeta/datasets')).length
+    source.peekDatasets()
+    expect(listings()).toBe(0)
+
+    setToken('first-token')
+    source.peekDatasets()
+    expect(listings()).toBe(1)
+    // The refusal settles, and a peek under the same token does not retry it.
+    await tick()
+    source.peekDatasets()
+    expect(listings()).toBe(1)
+
+    setToken('second-token')
+    source.peekDatasets()
+    expect(listings()).toBe(2)
   })
 
   it('a peek at the skeleton routes starts the two reads it cannot answer from', () => {
@@ -2070,20 +2125,112 @@ describe('warming what inference reads', () => {
      * why it leads. What the published one is worth is no token and about half the bytes.
      */
     setToken('test-token')
+    publishedFetch('ok')
+    const source = new NeuPrintSource()
+    // The peek starts the reads and cannot wait for them, so this test does — two chained
+    // requests, which is more than a microtask.
+    expect(source.skeletonSourcesFor!('male-cns:v1.0')).toBeUndefined()
+    expect(await settledRoutes(source)).toEqual(['neuprint', 'published'])
+  })
+
+  it('starts neither geometry read without a token, and reports nothing', async () => {
+    /*
+     * Both peeks reach the nglayers endpoint through the neuPrint client, which refuses a
+     * tokenless request by reporting it to the channel that opens the Connections dialog — so
+     * inferring a Skeletons or Meshes card put that dialog in front of somebody who had not
+     * asked for anything. `PeekGate`: gated, and armed by the token.
+     */
+    resetCredentials()
+    const urls = countingFetch()
+    const source = new NeuPrintSource()
+    const raised = await authFailuresDuring(() => {
+      source.skeletonSourcesFor!('male-cns:v1.0')
+      source.meshLevelsFor!('male-cns:v1.0')
+    })
+    expect(urls).toEqual([])
+    expect(raised).toEqual([])
+
+    setToken('test-token')
+    source.skeletonSourcesFor!('male-cns:v1.0')
+    expect(urls.some((u) => u.includes('/nglayers/'))).toBe(true)
+  })
+
+  it('asks nothing after signing out', async () => {
+    /*
+     * The other way in: a token-keyed memo alone reads the change as a new credential and asks
+     * again, without one. Watched on the auth channel, since the client refuses a tokenless
+     * request before `fetch` — and with a scene read that *settles*, or the second peek joins the
+     * first one's request and asks nothing either way.
+     */
+    setToken('test-token')
+    publishedFetch(500)
+    const source = new NeuPrintSource()
+    source.meshLevelsFor!('male-cns:v1.0')
+    source.skeletonSourcesFor!('male-cns:v1.0')
+    await tick()
+    resetCredentials()
+    const raised = await authFailuresDuring(() => {
+      source.meshLevelsFor!('male-cns:v1.0')
+      source.skeletonSourcesFor!('male-cns:v1.0')
+    })
+    expect(raised).toEqual([])
+  })
+
+  it('does not keep a failed scene read as "publishes nothing"', async () => {
+    /*
+     * A 5xx, a cancel or a missing token used to be cached as `scene: null`, and both geometry
+     * lookups cached their own null on top: the Skeletons card offered one route for the rest of
+     * the session after a single blip, with nothing to say it was guessing. Unknown stays
+     * unknown — and the next token asks again.
+     */
+    setToken('test-token')
+    publishedFetch(500)
+    const source = new NeuPrintSource()
+    expect(await settledRoutes(source)).toBeUndefined()
+
+    publishedFetch('ok')
+    setToken('another-token')
+    expect(await settledRoutes(source)).toEqual(['neuprint', 'published'])
+  })
+
+  it('replays a failed scene read for a while rather than asking per caller', async () => {
+    // Not kept as an answer, so without the window a server that is down is asked once per
+    // thumbnail and once per restyle of a Neuroglancer card for as long as it stays down.
+    setToken('test-token')
+    const urls = publishedFetch(500)
+    const source = new NeuPrintSource()
+    const scenes = () => urls.filter((u) => u.includes('/nglayers/')).length
+    expect(await source.fetchViewerScene({ datasetId: 'male-cns:v1.0' })).toBeUndefined()
+    expect(await source.fetchViewerScene({ datasetId: 'male-cns:v1.0' })).toBeUndefined()
+    expect(scenes()).toBe(1)
+    // A new token is a new question.
+    setToken('another-token')
+    await source.fetchViewerScene({ datasetId: 'male-cns:v1.0' })
+    expect(scenes()).toBe(2)
+  })
+
+  it('keeps neuPrint’s own 404 as the answer', async () => {
+    // The one failure that says something about the dataset: it publishes no state, so the
+    // SWC route is the only one, and asking again would be a request per inference pass.
+    setToken('test-token')
+    publishedFetch(404)
+    const source = new NeuPrintSource()
+    expect(await settledRoutes(source)).toEqual(['neuprint'])
+  })
+
+  /**
+   * The published bucket as male-CNS lays it out, with the nglayers endpoint answering `scene`:
+   * the state naming its segmentation volume, neuPrint's own 404, or a 500. Returns the URLs.
+   */
+  function publishedFetch(scene: 'ok' | 404 | 500): string[] {
+    const urls: string[] = []
+    const json = (doc: unknown, status = 200) =>
+      Promise.resolve(new Response(JSON.stringify(doc), { status }))
     globalThis.fetch = ((input: RequestInfo | URL) => {
       const url = String(input)
-      const json = (doc: unknown) =>
-        Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve(doc),
-          text: () => Promise.resolve(JSON.stringify(doc)),
-          arrayBuffer: () =>
-            Promise.resolve(
-              new TextEncoder().encode(JSON.stringify(doc)).buffer as ArrayBuffer,
-            ),
-        } as Response)
-      if (url.includes('/nglayers/'))
+      urls.push(url)
+      if (url.includes('/nglayers/')) {
+        if (scene !== 'ok') return json({ error: 'no state' }, scene)
         return json({
           layers: [
             {
@@ -2093,6 +2240,7 @@ describe('warming what inference reads', () => {
             },
           ],
         })
+      }
       if (url.endsWith('/v1.0/segmentation/info'))
         return json({
           '@type': 'neuroglancer_multiscale_volume',
@@ -2102,25 +2250,26 @@ describe('warming what inference reads', () => {
         })
       if (url.endsWith('/skeletons-precomputed/info'))
         return json({ '@type': 'neuroglancer_skeletons' })
-      return Promise.resolve({
-        ok: false,
-        status: 404,
-        text: () => Promise.resolve(''),
-      } as Response)
+      return Promise.resolve(new Response('', { status: 404 }))
     }) as typeof fetch
+    return urls
+  }
 
-    const source = new NeuPrintSource()
-    // The peek starts the reads and cannot wait for them, so this test does — two chained
-    // requests, which is more than a microtask.
-    expect(source.skeletonSourcesFor!('male-cns:v1.0')).toBeUndefined()
-    for (let i = 0; i < 20 && !source.skeletonSourcesFor!('male-cns:v1.0'); i++) {
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    }
-    expect(source.skeletonSourcesFor!('male-cns:v1.0')?.map((r) => r.id)).toEqual([
-      'neuprint',
-      'published',
-    ])
-  })
+  /** Peek until the routes land, or give up after the chained reads have had their turns. */
+  async function settledRoutes(source: NeuPrintSource): Promise<string[] | undefined> {
+    for (let i = 0; i < 20 && !source.skeletonSourcesFor!('male-cns:v1.0'); i++) await tick()
+    return source.skeletonSourcesFor!('male-cns:v1.0')?.map((r) => r.id)
+  }
+
+  /** What reached the channel that opens the Connections dialog while `act` and its reads ran. */
+  async function authFailuresDuring(act: () => void): Promise<string[]> {
+    const raised: string[] = []
+    const unsubscribe = subscribeAuthFailure((message) => raised.push(message))
+    act()
+    await tick()
+    unsubscribe()
+    return raised
+  }
 
   it('hands back the canonical schema meanwhile, rather than nothing', () => {
     // Degrade, never block — a column picker with the seven columns every dataset has beats

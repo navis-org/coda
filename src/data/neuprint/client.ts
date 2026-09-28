@@ -26,11 +26,28 @@ import { bodyExcerpt, looksLikeHtml } from '../errorBody'
 
 export class NeuPrintError extends Error {
   readonly status: number
-  constructor(message: string, status: number) {
+  /**
+   * The request never reached neuPrint — a same-origin path nothing proxies answers 404 too,
+   * which is the one status `isNotFound` must not read as neuPrint's answer.
+   */
+  readonly unreached: boolean
+  constructor(message: string, status: number, options: { unreached?: boolean } = {}) {
     super(message)
     this.name = 'NeuPrintError'
     this.status = status
+    this.unreached = options.unreached ?? false
   }
+}
+
+/**
+ * Whether neuPrint itself said this does not exist — the one failure that is an *answer*.
+ *
+ * Anything else (no token, a 401, a 5xx, a cancel, a proxy that is not there) says nothing about
+ * the dataset, and a lookup that caches it as "none" keeps that for the session: CLAUDE.md's
+ * *a lookup that failed has not answered "none"*, learned on CAVE first.
+ */
+export function isNotFound(error: unknown): boolean {
+  return error instanceof NeuPrintError && error.status === 404 && !error.unreached
 }
 
 /** Everything a query needs to reach the server, resolved at call time. */
@@ -203,6 +220,7 @@ async function readResponse<T>(
           `static deploy does not. Where the deployment sends CORS headers no proxy is needed ` +
           `at all; where it does not, put one in front and name it in Connections → Base URL.`,
         404,
+        { unreached: true },
       )
     }
     throw new NeuPrintError(

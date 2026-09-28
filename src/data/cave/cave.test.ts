@@ -733,6 +733,26 @@ describe('the neuron schema', () => {
     expect(captured.some((c) => c.url.includes('/unique_string_values'))).toBe(true)
     expect(captured.some((c) => c.url.includes('/query'))).toBe(false)
   })
+
+  it('keeps a refused discovery from inference off the auth channel, and a Run on it', async () => {
+    /*
+     * A token that this datastack refuses is the ordinary state of a new account (see
+     * `quiet`): a peek has no caller waiting on it, so the refusal is not a reason to open the
+     * Connections dialog. A Run is somebody waiting — that one still reports.
+     */
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(new Response('{"error":"forbidden"}', { status: 403 })),
+    )
+    const { raised, stop } = failures()
+    const source = new CaveSource()
+    source.schemasFor(DATASET)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(raised).toEqual([])
+
+    await expect(source.neuronIndex({ datasetId: DATASET })).rejects.toThrow()
+    expect(raised.length).toBeGreaterThan(0)
+    stop()
+  })
 })
 
 // ---------------------------------------------------------------------------

@@ -45,6 +45,7 @@ import { bodyExcerpt } from '../errorBody'
 import type { RouteKind } from '../routeMemory'
 import { makeRouteMemory } from '../routeMemory'
 import { getToken, normaliseHost, reportAuthFailure } from './credentials'
+import { PeekGates } from '../peekGate'
 import {
   cachedAnnotationTable,
   registerAnnotationProvider,
@@ -488,14 +489,10 @@ function keptColumns(config: SeaTableConfig, available: SeaTableTable | undefine
 // The provider
 // ---------------------------------------------------------------------------
 
-/**
- * Base metadata, keyed by base.
- *
- * `has()` means asked, the value means landed — one Map rather than a record with a `requested`
- * flag beside a `tables` field, which was a boolean that had to agree with the map's own
- * membership and was written in four places.
- */
-const discovery = new Map<string, SeaTableTable[] | undefined>()
+/** Base metadata, keyed by base, once landed. */
+const discovery = new Map<string, SeaTableTable[]>()
+/** Whether a peek may ask for it — once per base and host token, never without one (`PeekGate`). */
+const asked = new PeekGates()
 
 /**
  * What a base's metadata is a fact about — **not** including the workspace as typed.
@@ -535,10 +532,10 @@ class SeaTableProvider implements AnnotationProvider {
   /** The base's metadata, asked for once per base per instance. See invariant 2's corollary. */
   private tablesFor(config: SeaTableConfig): SeaTableTable[] | undefined {
     const key = baseKey(config)
-    if (discovery.has(key)) return discovery.get(key)
-    discovery.set(key, undefined)
-    // Swallowed: a peek has no caller to report to, and a 401 already travels on its own
-    // channel. Never retried from here — inference runs on every graph mutation.
+    const known = discovery.get(key)
+    if (known) return known
+    // Swallowed; a 401 with a token still travels on its own channel.
+    if (!asked.open(key, () => getToken(config.host))) return undefined
     void readMetadata(config.host, config.workspace, config.base)
       .then((tables) => {
         discovery.set(key, tables)
@@ -652,6 +649,7 @@ registerAnnotationProvider(new SeaTableProvider())
 /** Test seam: drop discovered metadata between suites. In-flight reads are `resetIndexLoads`'. */
 export function resetSeaTableState(): void {
   discovery.clear()
+  asked.clear()
   listings.clear()
   listed.clear()
 }

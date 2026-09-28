@@ -99,7 +99,41 @@ export const connectivityNode = packNode({
    * exporter would bind it as `connectivity_neurons`.
    */
   outputs: [
-    { id: 'connections', label: 'Connections', type: T.table() },
+    {
+      id: 'connections',
+      label: 'Connections',
+      type: T.table(),
+      /*
+       * A partner ranking is by synapses, and a Bar Chart sums its value per category, so
+       * `weight` goes straight in; the count is declared beside it, or it loses to the ranking
+       * on a request for one. Per direction because the partner's column is the other end's.
+       * See `PortDef.feeds`.
+       */
+      feeds: [
+        {
+          type: 'out.barChart',
+          when: 'to rank downstream partner types by synapses',
+          params: { category: 'postType', value: 'weight' },
+        },
+        {
+          type: 'out.barChart',
+          when: 'to rank upstream partner types by synapses',
+          ifParams: { direction: 'inputs' },
+          params: { category: 'preType', value: 'weight' },
+        },
+        {
+          type: 'core.groupBy',
+          when: 'to count connections per downstream partner type',
+          params: { by: ['postType'], agg: 'count' },
+        },
+        {
+          type: 'core.groupBy',
+          when: 'to count connections per upstream partner type',
+          ifParams: { direction: 'inputs' },
+          params: { by: ['preType'], agg: 'count' },
+        },
+      ],
+    },
     { id: 'neuronSet', label: 'Neuron Set', type: T.neurons() },
   ],
   params: [

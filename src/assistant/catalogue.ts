@@ -227,11 +227,9 @@ function renderParam(
     if (param.max !== undefined) bits.push(`max=${param.max}`)
   }
 
-  const value = (param as { default?: unknown }).default
-  if (Array.isArray(value)) {
-    if (value.length) bits.push(`default=[${value.join(',')}]`)
-  } else if (value !== undefined && value !== '') {
-    bits.push(`default=${String(value)}`)
+  const value = (param as { default?: ParamValue }).default
+  if (Array.isArray(value) ? value.length : value !== undefined && value !== '') {
+    bits.push(`default=${paramValueText(value!)}`)
   }
 
   const line = bits.join(' ') + readsFrom(param, optionalInputs) + gateNote(def, param)
@@ -370,6 +368,17 @@ export function optionLines(
   return lines
 }
 
+/** A param value as every line the model reads spells it: a list as `[a,b]`, the rest bare. */
+export function paramValueText(value: ParamValue): string {
+  return Array.isArray(value) ? `[${value.join(',')}]` : String(value)
+}
+
+/** `compare.matchTypes (Match Cell Types)` — a type id with its label, where it is registered. */
+function nodeName(type: string): string {
+  const def = getNodeDef(type)
+  return def ? `${type} (${def.label})` : type
+}
+
 /**
  * `labels1 comes from compare.matchTypes (Match Cell Types): …` — which node fills this port.
  *
@@ -405,11 +414,40 @@ function producerLines(inputs: readonly PortDef[]): string[] {
   for (const port of inputs) {
     if (!port.producedBy) continue
     const { type, port: source = port.id } = port.producedBy
-    const def = getNodeDef(type)
     lines.push(
-      `${port.id} comes from ${type}${def ? ` (${def.label})` : ''}: ` +
+      `${port.id} comes from ${nodeName(type)}: ` +
         `add one and wire its ${source} output here.`,
     )
+  }
+  return lines
+}
+
+/**
+ * `connections feeds out.barChart (Bar Chart) when asked …: wire …` — `PortDef.feeds`.
+ *
+ * `producerLines` from the output side, in its measured shape: a whole sentence on its own line,
+ * saying what to *do*. After the `carries:` lines because it names their columns. Why it exists
+ * and what it measured is on `PortDef.feeds`.
+ */
+function feedLines(outputs: readonly PortDef[]): string[] {
+  const lines: string[] = []
+  for (const port of outputs) {
+    for (const feed of port.feeds ?? []) {
+      // The registry test holds the consumer registered and its input unambiguous.
+      const def = getNodeDef(feed.type)
+      const input = feed.port ?? (def && defaultInputPorts(def)[0]?.id)
+      const condition = Object.entries(feed.ifParams ?? {})
+        .map(([id, value]) => ` (${id} = ${paramValueText(value)})`)
+        .join('')
+      const settings = Object.entries(feed.params)
+        .map(([id, value]) => `${id} = ${paramValueText(value)}`)
+        .join(', ')
+      lines.push(
+        `${port.id} feeds ${nodeName(feed.type)} when asked ${feed.when}${condition}: ` +
+          `wire this output to its ${input} and set ${settings}. ` +
+          `Asked for anything else, follow the request instead.`,
+      )
+    }
   }
   return lines
 }
@@ -451,7 +489,28 @@ export function carriesLines(outputs: Readonly<Record<string, CodaType>>): strin
   return lines
 }
 
+/**
+ * The `carries:` lines a fresh, unwired node of this type would print.
+ *
+ * **A node whose every output is a `Dataset` is not probed**, and that is a safety property
+ * rather than a saving. A Dataset carries no columns, so the probe could only ever come back
+ * empty — and inferring a dataset node is exactly what starts its listing (`resolveDatasetId`
+ * and its `validate` both read `peekDatasets`, invariant 2's peek). Probing them put a
+ * neuPrint, a CAVE and three CATMAID listings on the wire whenever somebody asked the assistant
+ * anything, with a missing-token report from one of them opening the Connections dialog.
+ * `optionsWithoutPeek` is the same rule for `options:`; the pin watching both is in
+ * `assistant.test.ts`.
+ */
 function producedColumns(def: NodeDefinition): string[] {
+  return carriesLines(probeOutputs(def))
+}
+
+/**
+ * The output types a fresh, unwired node of this type infers, at its defaults. Empty for a node
+ * whose every output is a `Dataset` — see `producedColumns` for why that one must not be probed.
+ */
+export function probeOutputs(def: NodeDefinition): Record<string, CodaType> {
+  if (defaultOutputPorts(def).every((port) => port.type.kind === 'dataset')) return {}
   const probe: CodaGraph = {
     version: GRAPH_FORMAT_VERSION,
     nodes: [
@@ -459,7 +518,7 @@ function producedColumns(def: NodeDefinition): string[] {
     ],
     edges: [],
   }
-  return carriesLines(nodeTypes(inferGraph(probe), 'probe').outputs)
+  return nodeTypes(inferGraph(probe), 'probe').outputs
 }
 
 /** One node's catalogue entry. Exported for `src/mcp`, which serves a single entry at `full`. */
@@ -480,6 +539,7 @@ export function renderNode(def: NodeDefinition, detail: CatalogueDetail): string
   lines.push(...producerLines(inputs))
   lines.push(...exclusiveLines(inputs))
   lines.push(...producedColumns(def))
+  lines.push(...feedLines(outputs))
   // See `NodeDefinition.catalogueNote`: what this node needs *around* it, which nothing else
   // printed here can say. After the ports and columns, in the line-per-fact block the rules
   // teach the model to read.

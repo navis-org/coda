@@ -7,7 +7,10 @@ registerNode({
   type: 'out.barChart',
   label: 'Bar Chart',
   category: 'visualisation',
-  description: 'Bar chart of one numeric column, grouped by a category and optional series.',
+  description:
+    'Bar chart of one numeric column, summed per category, with an optional series. Because it ' +
+    'sums, a total per category needs no Group By in front; for a count of rows instead, put a ' +
+    'Group By with `agg: count` in front and chart its `n`.',
   guide:
     'One numeric column, grouped by a category, optionally split into a series. The ordinary end of a Group By, and the fastest way to turn “synapses per partner type” into something you can read. Every knob on it is presentational, so restyling never marks anything stale.',
   cost: 'cheap',

@@ -13,6 +13,7 @@
  */
 
 import { DatasetListing } from '../datasetListing'
+import { PeekGate } from '../peekGate'
 import type { TableSchema } from '../../core/types'
 import type {
   ColumnData,
@@ -98,12 +99,14 @@ import {
   fetchRoiCompleteness,
   fetchRoiConnectivity,
   fetchSkeleton,
+  isNotFound,
   runCypher,
 } from './client'
 import { roiCompletenessFromResponse, roiConnectivityFromResponse } from './roiSummary'
 import { openDvidMeshSource } from '../dvid/meshes'
 import { parseDvidRef } from '../dvid/refs'
 import { DEFAULT_SERVER, normaliseServer, serverLabel, sourceIdForServer } from './servers'
+import { getToken } from './credentials'
 import {
   adjacencyCypher,
   connectivityCypher,
@@ -179,6 +182,16 @@ const PUBLISHED_ROUTE = route(
  * ~500ms of latency. Six at a time keeps a 50-neuron fetch to a few seconds without opening
  * fifty sockets against a server other people are using.
  */
+/**
+ * How long a read that just failed is answered from its failure rather than asked again.
+ *
+ * For the reads that are asked per item rather than once — the edge sample per hop, the
+ * neuroglancer state per neuron's thumbnail and per restyle of a Neuroglancer card. A failure is
+ * never kept as an answer (`isNotFound`), so without this a server that is down is asked once per
+ * item for as long as it stays down.
+ */
+const RETRY_AFTER_MS = 60_000
+
 const SKELETON_CONCURRENCY = 6
 
 /**
@@ -263,18 +276,23 @@ interface DatasetState {
    */
   publishedSkeletons?: SkeletonSource | null
   publishedResolving?: Promise<SkeletonSource | null>
-  /** Whether an edit-time peek has already started the two reads it could not answer from. */
-  skeletonsPeeked?: boolean
+  /** Whether an edit-time peek may start the two reads it could not answer from. */
+  skeletonsPeek?: PeekGate
   /** The same, for the mesh source — asked by `meshLevelsFor`, which may not await. */
-  meshPeeked?: boolean
-  /** The published neuroglancer state, from the same endpoint. Null when there is none. */
+  meshPeek?: PeekGate
+  /**
+   * The published neuroglancer state, from the same endpoint. Null when neuPrint says there is
+   * none — and *only* then: see `ngState`.
+   */
   scene?: NgScene | null
   sceneResolving?: Promise<NgScene | null>
+  /** The last failed read of it, answered from for `RETRY_AFTER_MS` under the same token. */
+  sceneFailed?: { at: number; token: string | undefined; error: unknown }
   /** In flight, so two nodes inferring at once don't each trigger discovery. */
   discovering?: Promise<void>
   /** The same for the edge-property sample, which nothing but a property-asking query waits on. */
   discoveringEdges?: Promise<void>
-  /** When the edge sample last failed — see `EDGE_RETRY_MS`. */
+  /** When the edge sample last failed — see `RETRY_AFTER_MS`. */
   edgesFailedAt?: number
 }
 
@@ -355,6 +373,9 @@ export class NeuPrintSource implements DataSource {
         : `neuPrint at ${host}. Needs a token and a same-origin proxy.`
     this.listing = new DatasetListing(this.id, (signal) => this.loadDatasets(signal), {
       keep: 'inflight',
+      // Every neuPrint request needs one, and the client reports its absence to the channel
+      // that opens the Connections dialog — so a peek without one is gated. See rule 4 there.
+      credential: getToken,
     })
   }
 
@@ -483,8 +504,13 @@ export class NeuPrintSource implements DataSource {
      * itself. This used to bail, and a *pinned* dataset never recovered: a saved graph naming
      * `male-cns:v1.0` has a concrete id at edit time and needs no listing, so nothing else was
      * ever going to ask, and every column picker downstream stayed on the canonical seven.
+     *
+     * Gated on a token, `peekDatasets`' rule (`DatasetListing` rule 4): without one every query
+     * discovery sends is refused by the client, each refusal reported to the channel that opens
+     * the Connections dialog. Saving a token re-lists (`SourcesPanel`), and the
+     * `reportSourceLearned` that listing fires re-infers, which asks again.
      */
-    void this.discover(datasetId)
+    if (getToken()) void this.discover(datasetId)
     return this.schemas
   }
 
@@ -516,8 +542,10 @@ export class NeuPrintSource implements DataSource {
     if (state.info.edgeProperties) return Promise.resolve()
     // A sample that just failed is not re-sent for a minute: a traversal asks once per hop per
     // direction, and a server that timed out on the first would be asked again on every one.
-    const EDGE_RETRY_MS = 60_000
-    if (state.edgesFailedAt !== undefined && Date.now() - state.edgesFailedAt < EDGE_RETRY_MS) {
+    if (
+      state.edgesFailedAt !== undefined &&
+      Date.now() - state.edgesFailedAt < RETRY_AFTER_MS
+    ) {
       return Promise.resolve()
     }
     state.discoveringEdges ??= this.runEdgeDiscovery(state, datasetId).finally(() => {
@@ -1046,16 +1074,16 @@ export class NeuPrintSource implements DataSource {
    *
    * `undefined` until both reads have landed, which is `capabilitiesFor`'s contract and is what
    * keeps this legal to call from `inferOutputs` (invariant 2). Both are started here, once per
-   * dataset, and `reportSourceLearned` is what makes the dropdown grow a second entry when they
-   * arrive rather than at the next reload.
+   * dataset and token — never without one, the client reporting a missing token to the channel
+   * that opens the Connections dialog — and `reportSourceLearned` is what makes the dropdown grow
+   * a second entry when they arrive rather than at the next reload.
    */
   skeletonSourcesFor(datasetId: string): readonly SkeletonProvenance[] | undefined {
     const state = this.stateFor(datasetId)
     if (state.publishedSkeletons !== undefined) {
       return state.publishedSkeletons ? [SWC_PROVENANCE, PUBLISHED_ROUTE] : [SWC_PROVENANCE]
     }
-    if (!state.skeletonsPeeked) {
-      state.skeletonsPeeked = true
+    if ((state.skeletonsPeek ??= new PeekGate(getToken)).open()) {
       // Swallowed for `peekDatasets`' reason: a peek has no caller to report to, and whoever
       // actually asks for geometry gets the failure.
       void this.publishedSkeletonsFor(datasetId)
@@ -1076,8 +1104,7 @@ export class NeuPrintSource implements DataSource {
   meshLevelsFor(datasetId: string): boolean | undefined {
     const state = this.stateFor(datasetId)
     if (state.meshSource === undefined) {
-      if (!state.meshPeeked) {
-        state.meshPeeked = true
+      if ((state.meshPeek ??= new PeekGate(getToken)).open()) {
         // The same arrangement `skeletonSourcesFor` makes, and swallowed for the same reason: a
         // peek has no caller to report to, and whoever asks for geometry gets the failure.
         void this.meshSourceFor(datasetId)
@@ -1122,10 +1149,11 @@ export class NeuPrintSource implements DataSource {
         ))
       )
     })()
-      .then((resolved) => {
-        state.publishedSkeletons = resolved
-        return resolved
-      })
+      .then(
+        (resolved) => (state.publishedSkeletons = resolved),
+        // A failed scene read (`ngState`): no answer this time, and nothing kept.
+        () => null,
+      )
       .finally(() => {
         state.publishedResolving = undefined
       })
@@ -1653,13 +1681,13 @@ export class NeuPrintSource implements DataSource {
   /**
    * The dataset's published neuroglancer state.
    *
-   * Cached per dataset, the failure included, because the node that asks is `cheap`: it
-   * re-runs on every restyle, and a dataset with no state would otherwise re-request on
-   * every colour change. `null` is stored for "asked, there isn't one" and returned as
-   * `undefined`, which is what the interface promises.
+   * The node that asks is `cheap` and re-runs on every restyle, so `ngState` keeps neuPrint's
+   * "there isn't one" for the session and replays any other failure for `RETRY_AFTER_MS` —
+   * either way a colour change does not re-request. Both come back as `undefined`, which is what
+   * the interface promises.
    */
   async fetchViewerScene(req: ViewerSceneRequest): Promise<NgScene | undefined> {
-    return (await this.ngState(req.datasetId, req.signal)) ?? undefined
+    return (await this.ngState(req.datasetId, req.signal).catch(() => null)) ?? undefined
   }
 
   /**
@@ -1672,13 +1700,29 @@ export class NeuPrintSource implements DataSource {
   private async ngState(datasetId: string, signal?: AbortSignal): Promise<NgScene | null> {
     const state = this.stateFor(datasetId)
     if (state.scene !== undefined) return state.scene
-
+    /*
+     * Null only when neuPrint says there is no state, and **rejects** on anything else — CAVE's
+     * `caveGetOr404`, so no reader can cache a failure as "publishes nothing" by accident. That
+     * was the bug: a missing token, a 5xx or a cancel kept as `null`, and `publishedSkeletonsFor`
+     * and `meshSourceFor` caching their own null on top — one skeleton route and no mesh levels
+     * for the session, after signing in, until a reload. A recent failure is replayed rather than
+     * re-asked, per token, since thumbnails ask per neuron and a restyle asks again.
+     */
+    const token = getToken()
+    const failed = state.sceneFailed
+    if (failed && failed.token === token && Date.now() - failed.at < RETRY_AFTER_MS) {
+      throw failed.error
+    }
     state.sceneResolving ??= fetchNgState(datasetId, this.options(signal))
-      .catch(() => null)
-      .then((resolved) => {
-        state.scene = resolved
-        return resolved
-      })
+      .then(
+        (resolved) => (state.scene = resolved),
+        (error: unknown) => {
+          if (isNotFound(error)) return (state.scene = null)
+          // A cancel says nothing about the server, so it holds nobody else back.
+          if (!signal?.aborted) state.sceneFailed = { at: Date.now(), token, error }
+          throw error
+        },
+      )
       .finally(() => {
         state.sceneResolving = undefined
       })
@@ -1710,10 +1754,11 @@ export class NeuPrintSource implements DataSource {
       }
       return openMeshSource(ref.url, options).catch(() => null)
     })()
-      .then((resolved) => {
-        state.meshSource = resolved
-        return resolved
-      })
+      .then(
+        (resolved) => (state.meshSource = resolved),
+        // `publishedSkeletonsFor`'s rule: a failed scene read is no answer, and is not kept.
+        () => null,
+      )
       .finally(() => {
         state.meshResolving = undefined
       })

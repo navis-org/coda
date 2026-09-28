@@ -49,7 +49,8 @@ registerNode({
   description:
     'Collapse rows into groups and aggregate one or more value columns. The result carries the ' +
     'group columns, a row count named `n`, and one aggregate per value column renamed ' +
-    '`<agg>_<column>` — so summing `weight` gives `sum_weight`, not `weight`.',
+    '`<agg>_<column>` — so summing `weight` gives `sum_weight`, not `weight`. `agg: count` ' +
+    'adds no aggregate column — its result is `n`, never `count` or `count_<column>`.',
   guide:
     'Collapse rows into groups and aggregate — synapses per cell type, mean size per class. Pick several value columns and you get one aggregate each, sum_pre beside sum_post; the aggregation itself is one choice for all of them. The output schema is computed rather than copied, so switching sum to mean renames every aggregate and downstream pickers follow before anything re-runs. n rides along.',
   cost: 'cheap',

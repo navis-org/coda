@@ -23,6 +23,7 @@
  */
 
 import { DatasetListing } from '../datasetListing'
+import { PeekGate } from '../peekGate'
 import { errorMessage } from '../../core/errors'
 import { describeDuration } from '../../core/limits'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
@@ -275,18 +276,15 @@ interface DatastackState {
   systems?: string[]
   discovering?: Promise<void>
   /**
-   * Whether inference has already asked for discovery. Never cleared on failure.
-   *
-   * The same rule, and the same reason, as `DatasetListing.peek`: inference runs on every graph
-   * mutation, so a discovery that failed and was retried from there is a request per keystroke —
-   * or, with no token, an auth-failure popup per keystroke. `runDiscovery` sets `schemas` only
-   * on the success path, so without this flag every failure is retried forever.
+   * Whether inference may ask for discovery — once per token, never without one (`PeekGate`).
+   * `runDiscovery` sets `schemas` only on the success path, so a failure is asked again under the
+   * next token.
    *
    * The *Run* path (`neuronSchema`) deliberately calls `discover` regardless, so pressing Run is
-   * still what retries. That is the same shape as the Sources panel being the recovery for a
-   * failed listing.
+   * still what retries under the same one. That is the same shape as the Sources panel being the
+   * recovery for a failed listing.
    */
-  discoveryRequested?: boolean
+  discoveryPeek?: PeekGate
 }
 
 /**
@@ -510,6 +508,7 @@ export class CaveSource implements DataSource {
         `deployment; every dataset is pinned to a materialization.`
     this.listing = new DatasetListing(this.id, (signal) => this.runListing(signal), {
       keep: 'inflight',
+      credential: () => getToken(this.deployment),
     })
   }
 
@@ -527,13 +526,11 @@ export class CaveSource implements DataSource {
   }
 
   /**
-   * `DatasetListing.peek`: starts the listing once per instance, and answers what has landed.
-   * Gated on this deployment's token, `peekDatastacks`' rule and for its reason — see
-   * docs/backends.md. Returning before `listing.peek` spends nothing, so the first peek after
-   * signing in is still the one that starts it.
+   * `DatasetListing.peek`: starts the listing once per token, and answers what has landed. Gated
+   * on this deployment's token through the listing's `credential`, `peekDatastacks`' rule and for
+   * its reason — see docs/backends.md.
    */
   peekDatasets(): DatasetInfo[] | undefined {
-    if (!getToken(this.deployment)) return undefined
     return this.listing.peek()
   }
 
@@ -744,11 +741,10 @@ export class CaveSource implements DataSource {
     if (!spec) return this.schemas
     const state = this.state(spec.datastack)
     if (state.schemas) return state.schemas
-    if (!state.discoveryRequested) {
-      state.discoveryRequested = true
-      // Swallowed: inference has no caller to report to, and a 401 already travels on its own
-      // channel to the Connections panel.
-      void this.discover(spec).catch(() => undefined)
+    if ((state.discoveryPeek ??= new PeekGate(() => getToken(this.deployment))).open()) {
+      // Swallowed and `quiet`: a peek has no caller waiting, so a refusal is no reason to open
+      // Connections. A Run discovers loudly.
+      void this.discover(spec, true).catch(() => undefined)
     }
     return this.schemas
   }
@@ -760,24 +756,34 @@ export class CaveSource implements DataSource {
    * which is what lets this run from inference while the index waits until something actually
    * asks for neurons.
    */
-  private discover(spec: DatastackSpec): Promise<void> {
+  private discover(spec: DatastackSpec, quiet = false): Promise<void> {
     const state = this.state(spec.datastack)
     if (state.schemas) return Promise.resolve()
-    state.discovering ??= this.runDiscovery(spec, state).finally(() => {
+    /*
+     * A loud caller arriving while a quiet discovery is in flight inherits the silence —
+     * `CaveRequestOptions.quiet`'s memo nuance, self-healing for the same reason: a failed
+     * discovery sets nothing, so the next Run asks again and reports.
+     */
+    state.discovering ??= this.runDiscovery(spec, state, quiet).finally(() => {
       state.discovering = undefined
     })
     return state.discovering
   }
 
-  private async runDiscovery(spec: DatastackSpec, state: DatastackState): Promise<void> {
-    const server = await this.serverFor(spec)
+  private async runDiscovery(
+    spec: DatastackSpec,
+    state: DatastackState,
+    quiet: boolean,
+  ): Promise<void> {
+    const options = { ...this.options(), quiet }
+    const server = await this.serverFor(spec, options)
     let systems: string[] = []
     if (spec.annotations) {
       const values = await uniqueStringValues(
         server,
         spec.datastack,
         spec.annotations.table,
-        this.options(),
+        options,
       )
       systems = [...(values[spec.annotations.systemColumn] ?? [])].sort()
     }
@@ -2448,8 +2454,8 @@ export class CaveSource implements DataSource {
   }
 
   /** The server a datastack is served from. */
-  private serverFor(spec: DatastackSpec): Promise<string> {
-    return caveServerFor(spec.datastack, this.options())
+  private serverFor(spec: DatastackSpec, options = this.options()): Promise<string> {
+    return caveServerFor(spec.datastack, options)
   }
 }
 

@@ -33,12 +33,22 @@
  * against the empty listing it was meant to replace. There is no reset: a source is one server for
  * its whole life (CAVE's included, one per deployment), so no listing can land as another's.
  *
+ * 4. **A peek whose fetch needs a credential is gated on having one** (`credential`), and re-armed
+ *    by the credential *changing*. Without a token the fetch can only fail, and neuPrint's client
+ *    reports a missing token straight to the channel that opens the Connections dialog — so an
+ *    ungated peek put that dialog in front of somebody who had only dragged a card onto the
+ *    canvas, or asked the assistant a question. Returning early spends nothing, so the first
+ *    peek after signing in is still the one that starts it; and a listing that failed under one
+ *    token is asked again under the next, rule 2's once-per-instance being once per credential.
+ *    Rules 2 and 4 together are `PeekGate`, which the sources' own peeks share.
+ *
  * What stays in each source is what is genuinely its own: the loaders, neuPrint's merge-on-relist
  * (which keeps what discovery learned) and its `peekDataset`, which answers from per-dataset state
  * that exists before any listing; CAVE's kept failures.
  */
 
 import { memoPromise, type Keep } from './memoPromise'
+import { PeekGate } from './peekGate'
 import { reportSourceLearned, type DatasetInfo } from './source'
 
 export class DatasetListing {
@@ -48,17 +58,25 @@ export class DatasetListing {
   private list: DatasetInfo[] | undefined
   /** The request in flight. */
   private readonly pending = new Map<'listing', Promise<DatasetInfo[]>>()
-  /** Whether a peek has already asked. See rule 2 in the header. */
-  private requested = false
+  /** Rules 2 and 4 in the header. */
+  private readonly gate: PeekGate
+  /** The credential the listing needs, where it needs one. */
+  private readonly credential: (() => string | undefined) | undefined
 
   constructor(
     sourceId: string,
     load: (signal?: AbortSignal) => Promise<DatasetInfo[]>,
-    options: { keep: Keep },
+    options: {
+      keep: Keep
+      /** The credential the listing request needs, where it needs one. See rule 4. */
+      credential?: () => string | undefined
+    },
   ) {
     this.sourceId = sourceId
     this.load = load
     this.keep = options.keep
+    this.gate = new PeekGate(options.credential)
+    this.credential = options.credential
   }
 
   /** The listing, awaited. Retries after a failure; see `keep` for what it does after a success. */
@@ -86,10 +104,9 @@ export class DatasetListing {
    * channel to the Connections panel.
    */
   peek(): DatasetInfo[] | undefined {
-    if (!this.list && !this.requested) {
-      this.requested = true
-      void this.get().catch(() => undefined)
-    }
+    // A landed listing is one account's, so it is not answered while signed out.
+    if (this.credential && !this.credential()) return undefined
+    if (!this.list && this.gate.open()) void this.get().catch(() => undefined)
     return this.list
   }
 

@@ -41,6 +41,7 @@ import type { NeuronId } from '../../core/ids'
 import type { SkeletonGeometry } from '../../core/values'
 import { mapWithConcurrency } from '../concurrency'
 import { memoPromise } from '../memoPromise'
+import { PeekGates } from '../peekGate'
 import { reportSourceLearned } from '../source'
 import type { CaveRequestOptions } from './client'
 import {
@@ -52,6 +53,7 @@ import {
   sharedRequestOptions,
 } from './client'
 import { datastackRecord } from './datastack'
+import { getToken } from './credentials'
 import { caveSourceId, deploymentKey } from './deployments'
 import type { RawSkeletonInfo, SkeletonSource } from '../precomputed/skeletons'
 import { parseSkeleton, skeletonSourceFromInfo } from '../precomputed/skeletons'
@@ -125,16 +127,15 @@ const services = new Map<string, SkeletonService | null>()
 const loading = new Map<string, Promise<SkeletonService | undefined>>()
 
 /**
- * Datastacks a **peek** has already asked about, so a failure is not re-asked once per keystroke.
+ * Whether a **peek** may ask about a datastack — once per token, never without one (`PeekGate`).
  *
  * `peekL2Cache`'s gate is `l2Sources.has(...)`, which a rejected resolve never fills — and this
  * chain is the more expensive of the two (a datastack record, a version list and an `info`).
  * Without this a deployment that answers 404 for `/skeletoncache` turns every graph mutation into
- * three requests against a shared production server, forever. `peekMaterializations` keeps a set
- * for exactly this and says so; `skeletonServiceFor` still retries, because its caller asked for
- * geometry and has somewhere to report to.
+ * three requests against a shared production server, forever. `skeletonServiceFor` still retries,
+ * because its caller asked for geometry and has somewhere to report to.
  */
-const asked = new Set<string>()
+const asked = new PeekGates()
 
 /**
  * Datastacks whose service answered for **none** of a set it was asked about.
@@ -179,10 +180,9 @@ export function peekSkeletonService(
 ): boolean | undefined {
   const key = deploymentKey(deployment, datastack)
   if (services.has(key)) return services.get(key) !== null
-  if (!datastack || asked.has(key)) return undefined
-  asked.add(key)
-  // Swallowed: a peek has no caller to report to, and a 401 travels on its own channel.
-  void skeletonServiceFor(datastack, { deployment }).catch(() => undefined)
+  if (!datastack || !asked.open(key, () => getToken(deployment))) return undefined
+  // `quiet`: a peek has no caller waiting, so a refusal is no reason to open Connections.
+  void skeletonServiceFor(datastack, { deployment, quiet: true }).catch(() => undefined)
   return undefined
 }
 
