@@ -597,6 +597,15 @@ keystroke (`asked`'s rule, reached by comparing the credential instead of by a s
 signing in is what fills a field that was drawn bare — with no listing button anywhere, because
 there is nowhere sensible to put one on a card.
 
+**The source's own listing peek is gated the same way**, and was not until the assistant found
+it. `CaveSource.peekDatasets` started `runListing`, whose first request is this one, with no token
+check, so any code that merely *inferred* a CAVE dataset node raised "No CAVE token". The
+assistant's system prompt infers a one-card graph for every node type it describes, CAVE datasets
+included, so every first question put the Connections dialog over an answer about a neuPrint
+dataset — for anybody without a CAVE token, which is most people. `peekDatasets` now returns before
+`listing.peek` without one, so nothing is spent and the first peek after signing in still starts
+it; `cave.test.ts` pins both halves.
+
 **One memo, two readers.** `CaveSource.runListing` narrows the very same list to the datastacks
 with a spec, so `datastacksFor` in `datastack.ts` is what both go through — one fact, one request,
 one invalidation rule. Written as a second call it was two round trips per session cached two ways

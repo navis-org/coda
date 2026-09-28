@@ -131,7 +131,7 @@ import type { DatastackInfo, VersionInfo } from './api'
 import { CaveError } from './client'
 import { queryTableChecked, queryView, queryViewChecked, uniqueStringValues } from './api'
 import type { CaveQuery } from './api'
-import { reportAuthFailure } from './credentials'
+import { getToken, reportAuthFailure } from './credentials'
 import {
   DEFAULT_CAVE_SERVER,
   caveServerLabel,
@@ -526,8 +526,14 @@ export class CaveSource implements DataSource {
     return this.listing.get(signal)
   }
 
-  /** `DatasetListing.peek`: starts the listing once per instance, and answers what has landed. */
+  /**
+   * `DatasetListing.peek`: starts the listing once per instance, and answers what has landed.
+   * Gated on this deployment's token, `peekDatastacks`' rule and for its reason — see
+   * docs/backends.md. Returning before `listing.peek` spends nothing, so the first peek after
+   * signing in is still the one that starts it.
+   */
   peekDatasets(): DatasetInfo[] | undefined {
+    if (!getToken(this.deployment)) return undefined
     return this.listing.peek()
   }
 

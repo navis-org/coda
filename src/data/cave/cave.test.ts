@@ -659,6 +659,27 @@ describe('the datastacks a token can see', () => {
     stop()
   })
 
+  // The source's own listing peek, which is the one inference reaches (docs/backends.md).
+  it('keeps the source’s listing peek silent too when there is no token', async () => {
+    const captured = installFetch()
+    setToken(DEFAULT_CAVE_SERVER, undefined)
+    const { raised, stop } = failures()
+    const source = new CaveSource()
+
+    expect(source.peekDatasets()).toBeUndefined()
+    await Promise.resolve()
+    expect(captured).toHaveLength(0)
+    expect(raised).toEqual([])
+
+    // Signing in is what arms it: nothing was spent while there was no token.
+    setToken(DEFAULT_CAVE_SERVER, 'a-token')
+    source.peekDatasets()
+    await vi.waitFor(() =>
+      expect(rowQueries(captured, '/info/api/v2/datastacks')).toHaveLength(1),
+    )
+    stop()
+  })
+
   it('re-asks when the token changes, and does not keep the other account’s list', async () => {
     const captured = installFetch()
     await vi.waitFor(() => expect(peekDatastacks(DEFAULT_CAVE_SERVER)).toBeDefined())
