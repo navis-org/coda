@@ -435,11 +435,24 @@ async function handToken(send, store, token) {
 }
 
 /** Hand the token to the page's neuPrint credentials. Exits 1 if the page did not take it. */
+/**
+ * A page-side function, as source, that imports one of the app's own modules — the instance the
+ * app is running, not a copy. Once vite has hot-reloaded a module the app holds it under
+ * `?t=<timestamp>`, and a bare `import('/src/…')` is a different URL and so a second, fresh
+ * module: a token handed to it is held by a credentials module the app never reads. So the URL is
+ * read off what the page loaded, falling back to the bare path for a module nothing has loaded yet.
+ */
+export const APP_MODULE = `(path) => {
+  const loaded = performance.getEntriesByType('resource').map((e) => e.name)
+    .filter((name) => new URL(name).pathname === path)
+  return import(loaded.at(-1) ?? path)
+}`
+
 export async function handNeuprintToken(send, token) {
   const took = await handToken(
     send,
     `async function (t) {
-      const m = await import('/src/data/neuprint/credentials.ts')
+      const m = await (${APP_MODULE})('/src/data/neuprint/credentials.ts')
       m.setToken(t)
       return !!m.getToken()
     }`,
@@ -474,8 +487,9 @@ export function handCaveToken(send, token) {
   return handToken(
     send,
     `async function (t) {
-      const m = await import('/src/data/cave/credentials.ts')
-      const d = await import('/src/data/cave/deployments.ts')
+      const appModule = ${APP_MODULE}
+      const m = await appModule('/src/data/cave/credentials.ts')
+      const d = await appModule('/src/data/cave/deployments.ts')
       m.setToken(d.DEFAULT_CAVE_SERVER, t)
       return !!m.getToken(d.DEFAULT_CAVE_SERVER)
     }`,

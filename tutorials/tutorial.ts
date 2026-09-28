@@ -43,8 +43,18 @@ export interface Driver {
   moveTo(target: Target, options?: { ms?: number }): Promise<void>
   /** Glide there and rest the pointer for `ms`, so a hover panel has time to open and be read. */
   hover(target: Target, ms: number): Promise<void>
-  /** Glide there and click. */
-  click(target: Target): Promise<void>
+  /**
+   * Glide there and click; `holding` presses that key around the click, as a person would —
+   * `Meta` is how the canvas adds a card to a selection.
+   */
+  click(target: Target, options?: { holding?: 'Meta' | 'Shift' }): Promise<void>
+  /**
+   * Glide there and show the click without making it: for a link that opens a new tab, which a
+   * recording of this one cannot follow. Follow it with `navigate`, which is the cut to that page.
+   */
+  clickOpensTab(target: Target): Promise<void>
+  /** Glide there and right-click, which is what opens a card's context menu. */
+  rightClick(target: Target): Promise<void>
   /** Click it if it is on screen within half a second, and say whether it was. */
   clickIf(target: Target): Promise<boolean>
   /**
@@ -66,14 +76,29 @@ export interface Driver {
   choose(target: Target, value: string): Promise<void>
   /** Click into a field and type, one character at a time. */
   type(target: Target, text: string, options?: { enter?: boolean }): Promise<void>
-  press(key: 'Enter' | 'Escape' | 'Tab'): Promise<void>
+  press(key: 'Enter' | 'Escape' | 'Tab' | 'Backspace' | 'Space'): Promise<void>
   /** Poll a page expression until it is truthy. `what` names it in the timeout error. */
   waitFor(expression: string, what: string): Promise<void>
   /** Wait until the first node of this type has a result. Throws on an error state. */
   waitForResult(type: string): Promise<void>
   /** Point the camera at these cards, by type, and wait for the move to finish. */
   frame(types: readonly string[], maxZoom?: number): Promise<void>
+  /** The same for every card on the canvas, for a step whose cards somebody else chose. */
+  frameAll(maxZoom?: number): Promise<void>
+  /**
+   * Wait until no card is running, stale or blocked. An error does not throw: it is printed, so a
+   * take whose cards came back with one can be judged and re-recorded rather than aborted.
+   */
+  waitSettled(): Promise<void>
   pause(ms: number): Promise<void>
+  /** Scroll the page smoothly until the target sits mid-screen: for a document, not the canvas. */
+  scrollTo(target: Target): Promise<void>
+  /**
+   * Load a page — a workflow link's `#!…` fragment, or another page of the site such as
+   * `mcp.html` — and ready it for filming as setup does. A reload, so do it off camera, which is
+   * what a `clip` step playing at the same moment is for.
+   */
+  navigate(path: string): Promise<void>
 }
 
 export interface Step {
@@ -91,6 +116,14 @@ export interface Step {
    * mid-thought, with the second half's actions starting on its first word.
    */
   gapBefore?: number
+  /**
+   * Outside footage shown for this step instead of the browser: a screen recording of another
+   * app, cut to `from`..`to` seconds, cropped to `crop` (`[x, y, width, height]` in its own
+   * pixels), played at `speed`, and fitted to the video's frame. The step lasts as long as the
+   * longer of the narration and the footage, and `do` still runs — off camera, which is where a
+   * reload belongs.
+   */
+  clip?: { file: string; from: number; to: number; speed?: number; crop?: [number, number, number, number] }
   do?: (t: Driver) => Promise<void>
 }
 
@@ -105,9 +138,15 @@ export interface Tutorial {
   /**
    * A credential the tutorial's dataset needs, read from this machine and handed to the page
    * before anything opens: `neuprint` reads `NEUPRINT_APPLICATION_CREDENTIALS` (a token, or a
-   * file holding one). The recording's browser profile is deleted when the run ends.
+   * file holding one), `cave` reads `CAVE_TOKEN` or caveclient's own secret file. The
+   * recording's browser profile is deleted when the run ends.
    */
-  signIn?: 'neuprint'
+  signIn?: 'neuprint' | 'cave'
+  /**
+   * A line under "Coda" on the title card, naming what this video is about ("Recipes"). Absent,
+   * the card is the name alone — which is what an introduction to the whole app wants.
+   */
+  topic?: string
   /** Runs before recording starts. The start page and guides are already closed. */
   setup(t: Driver): Promise<void>
   steps: readonly Step[]

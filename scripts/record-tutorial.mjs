@@ -41,7 +41,16 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 
-import { deleteProfileOnExit, launchChrome, probeArgs, readNeuprintToken } from './lib/browserProbe.mjs'
+import {
+  APP_MODULE,
+  deleteProfileOnExit,
+  handCaveToken,
+  handNeuprintToken,
+  launchChrome,
+  probeArgs,
+  readCaveToken,
+  readNeuprintToken,
+} from './lib/browserProbe.mjs'
 import { renderCards } from './lib/tutorialCards.mjs'
 import { clock as fmt, MUSIC_LUFS, renderTake } from './lib/tutorialRender.mjs'
 
@@ -111,7 +120,7 @@ if (args.all.includes('--remix')) {
     fps: FPS,
     music,
     musicLufs,
-    cards: await renderCards(OUT, take.view),
+    cards: await renderCards(OUT, take.view, { topic: tutorial.topic }),
   })
   console.log(`✓ ${video} (remixed${music ? `, music at ${musicLufs} LUFS` : ', no music'})`)
   process.exit(0)
@@ -153,6 +162,29 @@ const clips = tutorial.steps.map((step, i) => {
 })
 console.log(`narration: ${clips.length} lines, ${sum(clips.map((c) => c.duration)).toFixed(1)} s (${voice})`)
 
+/*
+ * Outside footage for `clip` steps, cut, cropped, sped up and resampled to the video's own frame
+ * rate and size before the browser starts — so a step's frames are ready the instant it begins.
+ * PNG, like the browser's, because the concat demuxer wants one codec across the whole list.
+ */
+const footage = tutorial.steps.map((step, i) => {
+  if (!step.clip) return undefined
+  const { file, from, to, speed = 1, crop } = step.clip
+  const [w, h] = [VIEW.width * VIEW.dpr, VIEW.height * VIEW.dpr]
+  const filters = [
+    ...(crop ? [`crop=${crop[2]}:${crop[3]}:${crop[0]}:${crop[1]}`] : []),
+    `setpts=(PTS-STARTPTS)/${speed}`,
+    `fps=${FPS}`,
+    `scale=${w}:${h}:force_original_aspect_ratio=decrease:flags=lanczos`,
+    `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black`,
+  ]
+  const pattern = `clip${String(i).padStart(2, '0')}-%05d.png`
+  execFileSync('ffmpeg', ['-y', '-v', 'error', '-ss', String(from), '-to', String(to), '-i', file, '-vf', filters.join(','), '-an', FRAMES + pattern])
+  const files = readdirSync(FRAMES).filter((f) => f.startsWith(pattern.slice(0, 7))).sort()
+  return { files }
+})
+if (footage.some(Boolean)) console.log(`footage: ${footage.filter(Boolean).length} clips`)
+
 // ---------------------------------------------------------------------------
 // The browser and the driver.
 // ---------------------------------------------------------------------------
@@ -173,27 +205,20 @@ const browser = await launchChrome({
 const { send, on, evaluate, waitFor } = browser
 deleteProfileOnExit(PROFILE, browser.close)
 
-/**
- * Import one of the app's own modules — the **instance the app is running**, not a copy.
- *
- * Once a dev server has hot-reloaded a module, the app holds it under `?t=<timestamp>`, and an
- * import of the bare path is a different URL and therefore a second, fresh module: a second
- * store, in which closing the guides dialog closes nothing on screen and a node added is added
- * nowhere. So the URL is read off what the page actually loaded, falling back to the bare path
- * for a module nothing has loaded yet — which vite then serves with its own imports already
- * pointing at the current instances.
- */
-const APP_MODULE = `(path) => {
-  const loaded = performance.getEntriesByType('resource').map((e) => e.name)
-    .filter((name) => new URL(name).pathname === path)
-  return import(loaded.at(-1) ?? path)
-}`
+// `APP_MODULE` (browserProbe.mjs): the app's own module instance, not a hot-reload copy.
 const STORE = `(await (${APP_MODULE})('/src/store/graphStore.ts')).useGraphStore`
 const inPage = (body) =>
   evaluate(`(async () => { const appModule = ${APP_MODULE}; const s = ${STORE}; ${body} })()`)
 
 /** Seconds since recording started, on the same clock the screencast stamps frames with. */
 let t0 = 0
+/** Every frame of the video, in order: the browser's, footage's, and screenshots. */
+const frames = []
+/**
+ * True while something other than the browser's live picture is on screen — a `clip` step's
+ * footage, or the last frame held over a page load — and the browser's frames are dropped.
+ */
+let showingFootage = false
 const now = () => Date.now() / 1000 - t0
 /** Every action, where it pointed, and when — `timings.json`'s second half. */
 const actions = []
@@ -212,9 +237,11 @@ const RESOLVE = `(spec) => {
     const all = [...document.querySelectorAll(spec.css)]
     // An element whose own text is the given text, or which holds one that is: a result row carries its
     // description beside its name, and the name is what a script knows it by.
-    const named = (el) => el.textContent.trim() === spec.text ||
-      [...el.querySelectorAll('*')].some((child) => child.textContent.trim() === spec.text)
-    return box(spec.text === undefined ? all[0] : all.find(named))
+    // An exact match first, so a broad selector finds the label itself, not the first container
+    // that happens to hold it.
+    const exact = (el) => el.textContent.trim() === spec.text
+    const holds = (el) => [...el.querySelectorAll('*')].some(exact)
+    return box(spec.text === undefined ? all[0] : (all.find(exact) ?? all.find(holds)))
   }
   const nodes = window.__codaStore.getState().graph.nodes.filter((n) => n.type === spec.node)
   const node = nodes[spec.nth ?? 0]
@@ -234,6 +261,15 @@ async function locate(target, what = describe(target), tries = 50) {
     await sleep(100)
   }
   throw new Error(`nothing on screen for ${what}`)
+}
+
+
+/** Put the browser's current picture on the timeline as a frame, for when the screencast is held. */
+async function holdScreenshot() {
+  const shot = await send('Page.captureScreenshot', { format: 'png' })
+  const file = `${String(frames.length).padStart(6, '0')}.png`
+  writeFileSync(FRAMES + file, Buffer.from(shot.result.data, 'base64'))
+  frames.push({ file, t: Date.now() / 1000 })
 }
 
 // Off to the lower right, not the centre: the title card is centred over the opening seconds.
@@ -269,20 +305,29 @@ async function glide(x, y, { ms, buttons = 0 } = {}) {
   }
 }
 
-const mouse = (type, buttons) =>
+const mouse = (type, buttons, { button = 'left', modifiers = 0 } = {}) =>
   send('Input.dispatchMouseEvent', {
     type,
     x: cursor.x,
     y: cursor.y,
-    button: 'left',
+    button,
     buttons,
     clickCount: 1,
+    modifiers,
   })
+
+/** A key held around a click: CDP's modifier bit, and the key event that goes with it. */
+const MODIFIERS = {
+  Meta: { bit: 4, code: 'MetaLeft', windowsVirtualKeyCode: 91 },
+  Shift: { bit: 8, code: 'ShiftLeft', windowsVirtualKeyCode: 16 },
+}
 
 const KEYS = {
   Enter: { code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' },
   Escape: { code: 'Escape', windowsVirtualKeyCode: 27 },
   Tab: { code: 'Tab', windowsVirtualKeyCode: 9 },
+  Backspace: { code: 'Backspace', windowsVirtualKeyCode: 8 },
+  Space: { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, text: ' ' },
 }
 
 const driver = {
@@ -299,15 +344,45 @@ const driver = {
     await sleep(ms)
   },
 
-  async click(target) {
+  async click(target, { holding } = {}) {
     const { rect, x, y } = await locate(target)
     log('click', rect)
     await glide(x, y)
     await sleep(120)
-    await mouse('mousePressed', 1)
+    /*
+     * A real key-down around the press, not only the modifier bit on it: React Flow reads its
+     * multi-select key through a key-press listener of its own, so a click carrying the Meta bit
+     * alone replaced the selection instead of adding to it.
+     */
+    const held = holding ? MODIFIERS[holding] : undefined
+    const modifiers = held ? held.bit : 0
+    const keyEvent = held && { key: holding, code: held.code, windowsVirtualKeyCode: held.windowsVirtualKeyCode }
+    if (held) await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...keyEvent, modifiers })
+    await mouse('mousePressed', 1, { modifiers })
     await sleep(70)
-    await mouse('mouseReleased', 0)
+    await mouse('mouseReleased', 0, { modifiers })
+    if (held) await send('Input.dispatchKeyEvent', { type: 'keyUp', ...keyEvent })
     await sleep(150)
+  },
+
+  async clickOpensTab(target) {
+    const { rect, x, y } = await locate(target)
+    log('click', rect)
+    await glide(x, y)
+    await sleep(120)
+    await evaluate('window.__tutorialCursor.press()')
+    await sleep(300)
+  },
+
+  async rightClick(target) {
+    const { rect, x, y } = await locate(target)
+    log('rightClick', rect)
+    await glide(x, y)
+    await sleep(120)
+    await mouse('mousePressed', 2, { button: 'right' })
+    await sleep(70)
+    await mouse('mouseReleased', 0, { button: 'right' })
+    await sleep(200)
   },
 
   async clickIf(target) {
@@ -411,9 +486,30 @@ const driver = {
     }
   },
 
+  frameAll: (maxZoom = 1) => driver.frame(null, maxZoom),
+
+  async waitSettled() {
+    const deadline = Date.now() + 90_000
+    for (;;) {
+      const states = await inPage(`
+        const st = s.getState()
+        return st.graph.nodes.map((n) => [n.type, st.nodeInfo(n.id).state, st.nodeInfo(n.id).error])
+      `)
+      if (!states.some(([, state]) => ['running', 'stale', 'blocked'].includes(state))) {
+        for (const [type, state, error] of states) {
+          if (state === 'error') console.warn(`  ! ${type} ended in an error: ${error}`)
+        }
+        return
+      }
+      if (Date.now() > deadline) throw new Error('cards still running after a minute and a half')
+      await sleep(200)
+    }
+  },
+
   async frame(types, maxZoom = 1) {
     await inPage(`
-      const ids = s.getState().graph.nodes.filter((n) => ${JSON.stringify(types)}.includes(n.type)).map((n) => n.id)
+      const types = ${JSON.stringify(types)}
+      const ids = s.getState().graph.nodes.filter((n) => types === null || types.includes(n.type)).map((n) => n.id)
       ;(await appModule('/src/ui/tour/steps.ts')).frameNodes(ids, ${maxZoom})
     `)
     // Until the viewport stops moving: the fit is animated.
@@ -431,6 +527,28 @@ const driver = {
   },
 
   pause: (ms) => sleep(ms),
+
+  async scrollTo(target) {
+    const { rect } = await locate(target)
+    log('scroll', rect)
+    /*
+     * Filmed by screenshot, one per step, with the screencast held: its frames during a scroll
+     * arrived before the newly exposed part of the page was drawn — a heading twice, paragraphs
+     * over their own copies — smooth or stepped alike. A screenshot is taken of a finished frame.
+     */
+    const from = await evaluate('window.scrollY')
+    const by = Math.round(rect.top + rect.height / 2 - VIEW.height / 2)
+    const steps = 16
+    showingFootage = true
+    for (let k = 1; k <= steps; k++) {
+      await evaluate(`window.scrollTo(0, ${Math.round(from + by * ease(k / steps))})`)
+      await sleep(30)
+      await holdScreenshot()
+    }
+    await sleep(300)
+    await holdScreenshot()
+    showingFootage = false
+  },
 }
 
 // ---------------------------------------------------------------------------
@@ -473,24 +591,60 @@ const CURSOR = `(() => {
   window.__tutorialCursor = { press: () => { ripple(); el.classList.add('down'); setTimeout(() => el.classList.remove('down'), 140) } }
 })()`
 
-await send('Page.navigate', { url: base })
-await waitFor('document.querySelector(".react-flow__pane") !== null', 'the canvas')
-await inPage(`
-  window.__codaStore = s
-  s.getState().closeStartPage()
-  s.getState().closeGuides()
-`)
-await evaluate(CURSOR)
-if (tutorial.signIn === 'neuprint') {
-  // Through `appModule`, for the store's reason: after a hot reload the bare path is a second
-  // credentials module, which would hold the token while the one the app reads stays empty.
-  // Never printed; `deleteProfileOnExit` removes the profile that stores it.
-  const took = await inPage(`
-    const m = await appModule('/src/data/neuprint/credentials.ts')
-    m.setToken(${JSON.stringify(readNeuprintToken())})
-    return Boolean(m.getToken())
-  `)
-  if (!took) throw new Error('the page did not take the neuPrint token')
+/**
+ * Load a page and make it ready to film: the app's launch sequence closed and the store exposed
+ * for `RESOLVE`, and the drawn cursor injected — on every load, the page being new each time. A
+ * page that is not the app (`mcp.html`) gets the cursor alone.
+ */
+async function openPage(path = '') {
+  /*
+   * Off camera while it loads: the last frame before holds until the new page is ready. Filmed,
+   * a navigation is a black frame (the blank page below) and then the page *unstyled* — in the dev
+   * server a stylesheet arrives by script after the first paint, so for one frame the MCP page was
+   * white serif text under an icon drawn the width of the screen.
+   */
+  const filming = t0 > 0 && !showingFootage
+  if (filming) showingFootage = true
+  // Through a blank page: a URL that differs only in its `#` is a same-document jump, and the
+  // app reads its link when it loads — so a workflow link opened from the canvas changed nothing.
+  await send('Page.navigate', { url: 'about:blank' })
+  await sleep(150)
+  await send('Page.navigate', { url: base + path })
+  const app = !/\.html(?:[?#]|$)/.test(path)
+  if (app) {
+    await waitFor('document.querySelector(".react-flow__pane") !== null', 'the canvas')
+    await inPage(`
+      window.__codaStore = s
+      s.getState().closeStartPage()
+      s.getState().closeGuides()
+    `)
+  } else {
+    // Loaded is not styled: wait for the page's own background, which only its stylesheet sets.
+    await waitFor(
+      `document.readyState === "complete" && getComputedStyle(document.body).backgroundColor !== "rgba(0, 0, 0, 0)"`,
+      path,
+    )
+  }
+  await evaluate(CURSOR)
+  await glide(cursor.x, cursor.y, { ms: 50 })
+  if (filming) {
+    await sleep(250)
+    await holdScreenshot()
+    showingFootage = false
+  }
+}
+driver.navigate = openPage
+
+await openPage()
+/*
+ * The shared helpers, which pass the token as a DevTools argument rather than in the evaluated
+ * source, and never print it. `deleteProfileOnExit` removes the profile that stores it.
+ */
+if (tutorial.signIn === 'neuprint') await handNeuprintToken(send, readNeuprintToken())
+if (tutorial.signIn === 'cave') {
+  const token = readCaveToken()
+  if (!token) throw new Error('no CAVE token: set CAVE_TOKEN, or sign in with caveclient once')
+  if (!(await handCaveToken(send, token))) throw new Error('the page did not take the CAVE token')
 }
 await tutorial.setup(driver)
 await glide(cursor.x, cursor.y, { ms: 50 })
@@ -500,8 +654,11 @@ await sleep(600)
 // Record.
 // ---------------------------------------------------------------------------
 
-const frames = []
 on('Page.screencastFrame', ({ data, metadata, sessionId }) => {
+  if (showingFootage) {
+    send('Page.screencastFrameAck', { sessionId })
+    return
+  }
   const file = `${String(frames.length).padStart(6, '0')}.png`
   writeFileSync(FRAMES + file, Buffer.from(data, 'base64'))
   frames.push({ file, t: metadata.timestamp })
@@ -518,6 +675,14 @@ await send('Page.startScreencast', {
 })
 await sleep(LEAD_IN_S * 1000)
 
+// A tutorial that opens on footage opens on it from the first frame, lead-in included, rather
+// than on the canvas it cuts away from 0.8 s later.
+if (footage[0]) {
+  showingFootage = true
+  frames.length = 0
+  frames.push({ file: footage[0].files[0], t: t0 })
+}
+
 const marks = []
 let failed
 /** When the previous step's line and actions had both finished. */
@@ -530,6 +695,12 @@ for (const [i, step] of tutorial.steps.entries()) {
   const clip = clips[i]
   marks.push({ start: round(start), audio: round(clip.duration), say: step.say, chapter: step.chapter })
   console.log(`${fmt(start)}  ${step.say.slice(0, 72)}${step.say.length > 72 ? '…' : ''}`)
+  // Footage goes on the timeline at once; the browser's own frames are dropped until it ends.
+  const shown = footage[i]
+  if (shown) {
+    showingFootage = true
+    shown.files.forEach((file, k) => frames.push({ file, t: t0 + start + k / FPS }))
+  }
   try {
     await sleep((step.lead ?? 0.4) * 1000)
     await step.do?.(driver)
@@ -538,7 +709,16 @@ for (const [i, step] of tutorial.steps.entries()) {
     console.error(`✗ step ${i + 1}: ${error.message}`)
     break
   }
-  previousEnd = Math.max(start + clip.duration, now())
+  previousEnd = Math.max(start + clip.duration, now(), shown ? start + shown.files.length / FPS : 0)
+  // Back to the browser only when the next step is not footage too: returning between two clips
+  // put one frame of the canvas on screen in the pause between them — a flicker of the wrong app.
+  if (shown && !footage[i + 1]) {
+    await sleep(Math.max(0, previousEnd - now()) * 1000)
+    // The browser only sends a frame when its page changes, so the footage's last frame would
+    // otherwise stand until something moved. A screenshot is the browser's picture as of now.
+    await holdScreenshot()
+    showingFootage = false
+  }
 }
 await sleep(Math.max(0, previousEnd - now()) * 1000)
 await sleep(TAIL_S * 1000)
@@ -582,7 +762,7 @@ const video = renderTake({
   fps: FPS,
   music,
   musicLufs,
-  cards: await renderCards(OUT, VIEW),
+  cards: await renderCards(OUT, VIEW, { topic: tutorial.topic }),
 })
 console.log(`✓ ${video} (${fmt(total)}, ${frames.length} frames captured${music ? ', with music' : ''})`)
 
