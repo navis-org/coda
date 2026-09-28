@@ -132,6 +132,12 @@ export interface NeuroglancerViewerProps {
    * profile tile — should do.
    */
   viewerId?: string | undefined
+  /**
+   * What the caption says, for a caller that hands its segments over inside the scene rather than
+   * as a `neurons` table. Counting `neurons` there answers "no neurons connected" underneath a
+   * neuron that is plainly drawn — which the profile's 3D tile did until this existed.
+   */
+  summary?: string | undefined
   compact?: boolean
   baseName?: string
   onExpand?: () => void
@@ -276,6 +282,7 @@ export function NeuroglancerViewer({
   datasetId,
   extraLayers = 0,
   viewerId,
+  summary: givenSummary,
   compact = false,
   baseName,
   onExpand,
@@ -504,7 +511,9 @@ export function NeuroglancerViewer({
    * untouched Explore selection), and neurons on screen. "0 neurons" for the first would read
    * as a failed fetch rather than as a scene nobody has asked anything of yet.
    */
-  const summary = !neurons ? 'dataset scene · no neurons connected' : plural(count, 'neuron')
+  const summary =
+    givenSummary ??
+    (!neurons ? 'dataset scene · no neurons connected' : plural(count, 'neuron'))
 
   const copyLink = () => {
     void copyText(url).catch((err: unknown) => onError?.(errorMessage(err)))

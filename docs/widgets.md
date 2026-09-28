@@ -1369,7 +1369,13 @@ nothing else. The `min-height` on that rule is the half that actually does the w
 auto-sized, so spanning two of them beside tiles that are five lines of text tall resolves to
 roughly one card's height, and the span alone would make the tile wider and no taller — which
 looks like it worked. `profileViewer.test.tsx` asserts the declaration, since jsdom does no
-layout. (`uiScale` is the other lever for the same complaint; the frame does not use it yet.) Each frame is a full WebGL application that starts fetching EM on mount and a canvas can
+layout. **The floor belongs to the viewer, and the tile has to keep its automatic minimum** — a
+`min-height: 0` on the tile itself stopped the rows growing at all, and the frame hung out of the
+bottom of its tile instead: measured in a 625px dashboard cell, 236px of it over Top input types,
+Top output types and both partner lists. Nothing clips a grid item's overflow, so it read as the
+frame being drawn on top of the card; the test now refuses that declaration too. The frame also
+passes `NeuroglancerViewer` a `summary`, because its segments travel in the scene rather than as a
+`neurons` table, and the viewer's own count captioned a drawn neuron "no neurons connected". (`uiScale` is the other lever for the same complaint; the frame does not use it yet.) Each frame is a full WebGL application that starts fetching EM on mount and a canvas can
 hold a dozen profile cards. The card carries an `Open 3D` control inside the tile, because a
 difference the user cannot see is a bug. `NeuroglancerProfileFrame` wraps `NeuroglancerViewer`
 rather than reimplementing it — the `#!+` merge is what keeps the camera across a page turn, and

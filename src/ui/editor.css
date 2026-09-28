@@ -9451,6 +9451,13 @@ p.sources__hint {
  *
  * A span wider than the grid is clamped by the auto-placement algorithm, so a narrow card
  * degrades to one column on its own and needs no breakpoint.
+ *
+ * The tile itself must **not** say `min-height: 0`. It did, and that removed the tile's
+ * automatic minimum — the only thing that makes the two rows it spans grow to the viewer's
+ * floor. The rows kept their text height, and the frame hung out of the bottom of its tile over
+ * whatever came next: measured in a 625px dashboard cell, 236px of it over Top input types, Top
+ * output types and both partner lists, with neuroglancer's caption printed across a heading.
+ * Nothing clips a grid item's overflow, so it looked like the frame was simply drawn on top.
  */
 .tile[data-span='2'] {
   grid-column: span 2;
@@ -9459,7 +9466,6 @@ p.sources__hint {
      sitting at its floor with dead space beneath it. */
   display: flex;
   flex-direction: column;
-  min-height: 0;
 }
 .tile[data-span='2'] > .viewer {
   flex: 1 1 auto;

@@ -841,6 +841,14 @@ describe('the caption', () => {
     expect(screen.getByText(/0 neurons/)).toBeTruthy()
   })
 
+  it('says what a caller hands it, for segments that travel in the scene', () => {
+    // The profile's 3D tile puts its neurons in the URL and wires no table, so a count of
+    // `neurons` would claim nothing is connected under a neuron that is drawn.
+    render(<NeuroglancerViewer url={URL_A} color={CATEGORICAL} summary="2 neurons" />)
+    expect(screen.getByText('2 neurons')).toBeTruthy()
+    expect(screen.queryByText(/no neurons connected/)).toBeNull()
+  })
+
   it('still shows the scene when only a dataset is wired', () => {
     const { container } = render(<NeuroglancerViewer url={URL_A} color={CATEGORICAL} />)
     expect(frameScene(container)).toEqual(parseSceneUrl(URL_A))

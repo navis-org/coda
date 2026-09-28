@@ -172,6 +172,8 @@ export function NeuroglancerProfileFrame({
         // This frame builds its own scene from the same `buildScene` and adds no extra layers, so
         // the one layer it owns is the dataset's own segmentation.
         datasetId={datasetId}
+        // The segments travel in the scene, not as a table, so the viewer cannot count them.
+        summary={plural(shown.length, 'neuron')}
         compact
         onError={onError}
       />

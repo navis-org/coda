@@ -440,6 +440,13 @@ describe('the 3D tile rule', () => {
     // tile gets wider and no taller, which is the exact complaint the span was meant to fix.
     expect(spanRule()).toMatch(/min-height:\s*4\d\dpx/)
   })
+
+  it('leaves the tile its automatic minimum, or the floor overflows instead of growing the rows', () => {
+    // `min-height: 0` on the tile itself let the rows keep their text height while the frame's
+    // 440px floor hung out of the tile over the partner lists below — measured in a browser.
+    const tileRule = spanRule().slice(0, spanRule().indexOf('}'))
+    expect(tileRule).not.toMatch(/min-height:\s*0\b/)
+  })
 })
 
 describe('loading', () => {
