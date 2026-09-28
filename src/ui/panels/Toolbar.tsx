@@ -50,6 +50,7 @@ import { useOfferedForNewWork } from '../packSwitches'
 import { HiddenDatasetsNote } from './HiddenDatasetsNote'
 import type { TourAnchor } from '../tour/anchors'
 import { TOURS, startTour } from '../tour/tourState'
+import { CHANNEL_URL, FIRST_WORKFLOW, watchUrl } from '../videos'
 import { restoreHints, useDismissedHints } from '../hints'
 import { useWhatsNewUnseen } from '../whatsNew'
 import { shortcutKeys } from '../shortcuts'
@@ -420,6 +421,20 @@ export function Toolbar() {
                 </button>
               ))}
               {/*
+               * After the tours and before the hint row: the one guide that is not in place on
+               * this canvas, so it opens a tab rather than starting anything here.
+               */}
+              <a
+                className="dropdown__item"
+                href={CHANNEL_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+                onClick={close}
+              >
+                <strong>Visit YouTube Channel</strong>
+                <span>Video tutorials, watched rather than walked.</span>
+              </a>
+              {/*
                * Last row, under a rule, because it is the one entry here that starts no tour:
                * this is the way back to something a reader put away, and a hint is dismissed
                * **for good** — keyed on its own text so a new workflow does not re-teach the
@@ -467,6 +482,21 @@ export function Toolbar() {
               >
                 <strong>Overview</strong>
                 <span>The highlights reel.</span>
+              </a>
+              {/*
+               * Second, beside the overview it complements: the same first look, as two minutes
+               * of somebody using it. A link out, not the embed — this menu stays free of any
+               * request to YouTube, the same rule `VideoEmbed` keeps for the guides dialog.
+               */}
+              <a
+                className="dropdown__item"
+                href={watchUrl(FIRST_WORKFLOW)}
+                target="_blank"
+                rel="noreferrer noopener"
+                onClick={close}
+              >
+                <strong>Video: {FIRST_WORKFLOW.title}</strong>
+                <span>Two minutes, start to finish, on YouTube.</span>
               </a>
               <a
                 className="dropdown__item"

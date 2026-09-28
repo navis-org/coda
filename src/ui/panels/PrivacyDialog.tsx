@@ -134,6 +134,14 @@ function Dialog({ onClose }: { onClose: () => void }) {
                 . Nothing tracks what you build.
               </dd>
             </div>
+            <div className="privacy__row">
+              <dt>Videos</dt>
+              <dd>
+                The tutorial video loads from YouTube, on its privacy-enhanced player, only when
+                you press play — until then it is a picture stored with Coda, and nothing is
+                requested from YouTube.
+              </dd>
+            </div>
           </dl>
         </section>
       </div>

@@ -27,7 +27,7 @@ import { dismissHint, resetHintsForTest } from '../hints'
 import { resetDocuments } from '../../test/storeReset'
 import { StartPage } from './StartPage'
 import { buildCommandItems } from './paletteItems'
-import { DOOR_CARDS, WIZARD_CARD, ZOO_CARD, datasetCards } from './startCards'
+import { DOOR_CARDS, VIDEO_CARD, WIZARD_CARD, ZOO_CARD, datasetCards } from './startCards'
 import { doorGlyph } from './startGlyphs'
 import type * as TourState from '../tour/tourState'
 import { TOURS } from '../tour/tourState'
@@ -125,16 +125,33 @@ describe('Start page', () => {
      *
      * The wizard leads, because it is the one that produces *their* graph.
      */
-    it('gathers the doors on one rail: the wizard, the tours, then the Zoo', () => {
+    it('gathers the doors on one rail: the wizard, the video, the tours, then the Zoo', () => {
       render(<StartPage />)
       expect(deckNames('Start & learn')).toEqual([
         WIZARD_CARD.title,
+        VIDEO_CARD.title,
         ...TOURS.map((tour) => tour.label),
         ZOO_CARD.title,
       ])
       // And none of them is also sitting on a rail that loads a graph.
       const datasets = datasetCards().map((c) => c.title)
       for (const door of DOOR_CARDS) expect(datasets).not.toContain(door.title)
+    })
+
+    it('opens the video on YouTube in a new tab, leaving the page where it is', () => {
+      const open = vi.spyOn(window, 'open').mockReturnValue(null)
+      render(<StartPage />)
+      fireEvent.click(card(VIDEO_CARD.title))
+      expect(open).toHaveBeenCalledWith(
+        'https://youtu.be/4s2zeBkXudo',
+        '_blank',
+        'noopener,noreferrer',
+      )
+      // The tile is the local still: this page requests nothing from YouTube to draw it.
+      expect(card(VIDEO_CARD.title).querySelector('img')?.getAttribute('src')).toMatch(
+        /^\/.*video\/first-workflow\.jpg$/,
+      )
+      open.mockRestore()
     })
 
     /*
@@ -597,6 +614,22 @@ describe('Start page', () => {
       openHelp('Guides')
       expect(screen.getByRole('button', { name: /Basics/ })).toBeTruthy()
       expect(screen.getByRole('button', { name: /Learn to Build/ })).toBeTruthy()
+    })
+
+    it('links the YouTube channel under Guides and the video under Documentation, in new tabs', () => {
+      act(() => useGraphStore.getState().closeStartPage())
+      render(<App />)
+
+      openHelp('Guides')
+      const channel = screen.getByRole('link', { name: /Visit YouTube Channel/ })
+      expect(channel.getAttribute('href')).toBe('https://www.youtube.com/@coda-science')
+      expect(channel.getAttribute('target')).toBe('_blank')
+
+      // The menu is still open, so the sibling submenu is one press away; `openHelp` would close it.
+      fireEvent.click(screen.getByRole('button', { name: /Documentation/ }))
+      const video = screen.getByRole('link', { name: /Video: Your first workflow/ })
+      expect(video.getAttribute('href')).toBe('https://youtu.be/4s2zeBkXudo')
+      expect(video.getAttribute('target')).toBe('_blank')
     })
 
     /*

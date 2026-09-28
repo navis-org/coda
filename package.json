@@ -54,6 +54,7 @@
     "probe:points-in-volumes": "vite-node scripts/probe-points-in-volumes.ts",
     "probe:upload-mesh": "node scripts/probe-upload-mesh.mjs",
     "test": "vitest run",
+    "tutorial": "vite-node scripts/record-tutorial.mjs --",
     "test:watch": "vitest",
     "typecheck": "tsc -b --noEmit && tsc -p tsconfig.scripts.json --noEmit",
     "zoo:index": "vite-node scripts/zoo-index.ts --",

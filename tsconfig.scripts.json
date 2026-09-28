@@ -19,5 +19,5 @@
     "composite": false,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.scripts.tsbuildinfo"
   },
-  "include": ["scripts/**/*.ts", "src/**/*.d.ts"]
+  "include": ["scripts/**/*.ts", "tutorials/**/*.ts", "src/**/*.d.ts"]
 }

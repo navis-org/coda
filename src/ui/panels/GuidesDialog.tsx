@@ -30,6 +30,11 @@
  *
  * The list itself is `TOURS`, for the reason that table exists: four surfaces now launch these
  * and none of them writes its own name for one.
+ *
+ * **The video sits beside the guides, not above them.** It is the other way to meet the app —
+ * watched rather than walked — and the guides stay the recommended answer, the first of them
+ * keeping the focus. It is a `VideoEmbed`, so this dialog, which every first visit sees, loads
+ * nothing from YouTube unless somebody presses play.
  */
 
 import { useEffect, useRef } from 'react'
@@ -40,6 +45,8 @@ import { TOURS, startTour } from '../tour/tourState'
 import { useLaunchStage } from './launchStage'
 import { useSmallScreenNotice } from '../smallScreen'
 import { Modal, ModalHeader } from '../Modal'
+import { VideoEmbed } from '../VideoEmbed'
+import { FIRST_WORKFLOW } from '../videos'
 
 export function GuidesDialog() {
   const stage = useLaunchStage()
@@ -92,47 +99,60 @@ function Dialog() {
       </ModalHeader>
 
       <div className="guides__body">
-        <p className="guides__lede">
-          Coda has {TOURS.length} short guides that run <strong>inside the editor</strong>,
-          pointing at things in place. If you only take one, take the first — it is twenty
-          seconds, and it names every control the other three talk about.
-        </p>
+        <div className="guides__walk">
+          <p className="guides__lede">
+            Coda has {TOURS.length} short guides that run <strong>inside the editor</strong>,
+            pointing at things in place. If you only take one, take the first — it is twenty
+            seconds, and it names every control the other three talk about.
+          </p>
 
-        <ul className="guides__list">
-          {TOURS.map((tour, index) => {
-            const done = completed.includes(tour.id)
-            return (
-              <li key={tour.id}>
-                <button
-                  type="button"
-                  className="guides__row"
-                  ref={tour.id === next?.id ? startRef : undefined}
-                  onClick={() => start(tour.id)}
-                  /* The mark is a glyph; `data-done` is what the checkmark and the muted
+          <ul className="guides__list">
+            {TOURS.map((tour, index) => {
+              const done = completed.includes(tour.id)
+              return (
+                <li key={tour.id}>
+                  <button
+                    type="button"
+                    className="guides__row"
+                    ref={tour.id === next?.id ? startRef : undefined}
+                    onClick={() => start(tour.id)}
+                    /* The mark is a glyph; `data-done` is what the checkmark and the muted
                        title hang off, so the state is not carried by colour alone. */
-                  data-done={done ? '' : undefined}
-                >
-                  <span className="guides__mark" aria-hidden="true">
-                    {done ? '✓' : index + 1}
-                  </span>
-                  <span className="guides__text">
-                    <span className="guides__name">
-                      {tour.label}
-                      {index === 0 && !done && (
-                        <span className="guides__badge">Start here</span>
-                      )}
-                      {done && <span className="guides__done">Completed</span>}
+                    data-done={done ? '' : undefined}
+                  >
+                    <span className="guides__mark" aria-hidden="true">
+                      {done ? '✓' : index + 1}
                     </span>
-                    <span className="guides__blurb">{tour.blurb}</span>
-                  </span>
-                  <span className="guides__go" aria-hidden="true">
-                    {done ? 'Again' : 'Start'}
-                  </span>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
+                    <span className="guides__text">
+                      <span className="guides__name">
+                        {tour.label}
+                        {index === 0 && !done && (
+                          <span className="guides__badge">Start here</span>
+                        )}
+                        {done && <span className="guides__done">Completed</span>}
+                      </span>
+                      <span className="guides__blurb">{tour.blurb}</span>
+                    </span>
+                    <span className="guides__go" aria-hidden="true">
+                      {done ? 'Again' : 'Start'}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+
+        <section className="guides__watch" aria-labelledby="guides-watch-title">
+          <h3 id="guides-watch-title" className="guides__watch-title">
+            Prefer to watch?
+          </h3>
+          <VideoEmbed video={FIRST_WORKFLOW} />
+          <p className="guides__watch-blurb">
+            Two minutes, one workflow, start to finish: a real connectome, a search, two views
+            and a dashboard.
+          </p>
+        </section>
       </div>
 
       <div className="guides__foot">

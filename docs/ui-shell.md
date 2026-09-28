@@ -1259,6 +1259,35 @@ loads. The full loop (first visit → Guided Tour → Done → dialog back with 
 `coda.guidesDone.v1` written) was walked in headless Chrome over CDP, which is the only place
 `onDestroyed` and the real library are in the picture at all.
 
+### The video beside the guides, and why it loads nothing until play
+
+The dialog's second column is the first video tutorial (`VideoEmbed`, from the table in
+`ui/videos.ts`), and the same table feeds the `?` menu (Guides → Visit YouTube Channel,
+Documentation → the video) and the welcome page's "Watch" door card. One table, for `TOURS`'
+reason: several surfaces offer it, and a link typed into each is how one comes to point at last
+year's upload.
+
+**Click to play is a privacy decision, not a style.** Data & Privacy says Coda counts page views
+and nothing else — no cookies, nothing kept in the browser. An ordinary embed breaks that on
+sight: the player is Google's code and arrives with its cookies the moment the frame mounts,
+which on a dialog every first visit sees means every newcomer, watching or not. So before the
+press it is a local still (`public/video/first-workflow.jpg`, taken from the video — YouTube's
+own thumbnail is a request to `i.ytimg.com`) and a button; the press mounts the privacy-enhanced
+player (`youtube-nocookie.com`) with `autoplay`, the press being the request to play. The
+menus and the welcome card link out rather than embed, so they request nothing either. The
+Data & Privacy dialog says all of this in a row of its own, and `guides.test.tsx` holds the
+no-request half: no `src` in the dialog names YouTube until play. Measured in a browser as well
+— no request to YouTube or Google before play (a filter on `google` matches the app's own
+`googleSheet.ts`, which is not one).
+
+**Beside, not above.** The guides stay the recommended answer and the Screen Map keeps the
+focus; the video is the other way in — watched rather than walked. Two columns at 900px, and one
+below 860px, where the video stacks under the guides and the body scrolls.
+
+**The welcome card was the first to carry an image,** and `.start-card__img` had never drawn
+one: the tile centres its children, so `height: 100%` resolved to the picture's own height and
+nothing clipped it — the still ran under the card's title. Now stretched and clipped.
+
 ## The small-screen notice
 
 The one thing Coda says on a phone. `src/ui/smallScreen.ts` decides when, `SmallScreenGate.tsx`

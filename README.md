@@ -20,6 +20,9 @@
 
 Just go to https://coda.science/.
 
+New to Coda? Watch the two-minute video [Your first Coda workflow](https://youtu.be/4s2zeBkXudo),
+and find more on the [YouTube channel](https://www.youtube.com/@coda-science).
+
 Other useful links:
 - ["Feature Overview"](https://coda.science/overview.html)
 - ["Field Guide"](https://coda.science/tutorial.html)

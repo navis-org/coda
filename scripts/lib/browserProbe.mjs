@@ -95,8 +95,14 @@ export async function launchChrome({
 
   let nextId = 0
   const pending = new Map()
+  /** DevTools *events* (a message with a `method` and no `id`), by method name. */
+  const listeners = new Map()
   ws.onmessage = (event) => {
     const message = JSON.parse(event.data)
+    if (message.method && message.id === undefined) {
+      for (const listener of listeners.get(message.method) ?? []) listener(message.params)
+      return
+    }
     const settle = pending.get(message.id)
     if (settle) {
       pending.delete(message.id)
@@ -233,6 +239,15 @@ export async function launchChrome({
 
   return {
     send,
+    /**
+     * Listen for a DevTools event, e.g. `Page.screencastFrame`. Returns the unsubscribe. The
+     * domain must be enabled for the event to arrive; `Page` and `Runtime` already are.
+     */
+    on(method, listener) {
+      const set = listeners.get(method) ?? new Set()
+      listeners.set(method, set.add(listener))
+      return () => set.delete(listener)
+    },
     evaluate,
     waitFor,
     screenshot,

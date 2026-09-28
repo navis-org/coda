@@ -133,6 +133,27 @@ describe('the guides dialog', () => {
     expect(dialog()).toBeNull()
     expect(welcome()).toBeTruthy()
   })
+  /*
+   * Every first visit sees this dialog, so an ordinary embed would load Google's player — and
+   * its cookies — for every newcomer, against the Data & Privacy dialog's "no cookies". The frame
+   * is mounted by the press of play and not before.
+   */
+  it('offers the video beside the guides, and loads nothing from YouTube until play', () => {
+    render(<App />)
+    const box = dialog()!
+    expect(box.querySelector('iframe')).toBeNull()
+    for (const el of box.querySelectorAll('[src]')) {
+      expect(el.getAttribute('src')).not.toMatch(/youtube|ytimg|google/)
+    }
+    // The guides stay the recommended answer: the focus is still on the first of them.
+    expect(document.activeElement).toBe(row(TOURS[0].label))
+
+    fireEvent.click(screen.getByRole('button', { name: /^Play video: Your first workflow/ }))
+    const player = box.querySelector('iframe')
+    expect(player?.getAttribute('src')).toBe(
+      'https://www.youtube-nocookie.com/embed/4s2zeBkXudo?autoplay=1&rel=0',
+    )
+  })
 })
 
 describe('taking a guide', () => {

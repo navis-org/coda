@@ -142,6 +142,11 @@ export function StartPage() {
       void startTour(card.tour)
       return
     }
+    // A new tab, and the page stays: the reader is coming back to it.
+    if (card.kind === 'video') {
+      window.open(card.url, '_blank', 'noopener,noreferrer')
+      return
+    }
     /*
      * No confirmation: both routes below open into a document of their own, so the card takes
      * nothing away from whatever is already on the canvas.

@@ -29,6 +29,7 @@ import { formatAgo, plural } from '../format'
 import type { TourId } from '../tour/tourState'
 import { TOURS } from '../tour/tourState'
 import { WIZARD_BLURB, WIZARD_LABEL } from '../../wizard/options'
+import { FIRST_WORKFLOW, watchUrl } from '../videos'
 
 interface CardBase {
   id: string
@@ -73,6 +74,16 @@ export interface WizardCard extends CardBase {
   kind: 'wizard'
 }
 
+/**
+ * A video tutorial, opened on YouTube in a new tab. The one door whose tile is a real picture —
+ * the video's own still, from `public/` — and the one that leaves the app, which is why it links
+ * out rather than embedding: this page loads nothing from YouTube, `VideoEmbed`'s rule.
+ */
+export interface VideoCard extends CardBase {
+  kind: 'video'
+  url: string
+}
+
 /** A graph the user saved in this browser. See `store/library.ts`. */
 export interface WorkflowCard extends CardBase {
   kind: 'workflow'
@@ -81,7 +92,7 @@ export interface WorkflowCard extends CardBase {
   category: NodeCategory
 }
 
-export type StartCard = DatasetCard | WorkflowCard | ZooCard | TourCard | WizardCard
+export type StartCard = DatasetCard | WorkflowCard | ZooCard | TourCard | WizardCard | VideoCard
 
 /**
  * A card that opens a *surface* rather than handing over a graph.
@@ -95,8 +106,13 @@ export type StartCard = DatasetCard | WorkflowCard | ZooCard | TourCard | Wizard
  * A type predicate, so the *other* branch narrows too: what is left is a card standing for a
  * graph, which is the branch that reads `category` and a node type off it.
  */
-export function isDoor(card: StartCard): card is ZooCard | TourCard | WizardCard {
-  return card.kind === 'zoo' || card.kind === 'tour' || card.kind === 'wizard'
+export function isDoor(card: StartCard): card is ZooCard | TourCard | WizardCard | VideoCard {
+  return (
+    card.kind === 'zoo' ||
+    card.kind === 'tour' ||
+    card.kind === 'wizard' ||
+    card.kind === 'video'
+  )
 }
 
 /**
@@ -165,6 +181,15 @@ export const WIZARD_CARD: WizardCard = {
   blurb: WIZARD_BLURB,
 }
 
+export const VIDEO_CARD: VideoCard = {
+  kind: 'video',
+  id: 'video:first-workflow',
+  title: `Watch: ${FIRST_WORKFLOW.title}`,
+  blurb: `A ${FIRST_WORKFLOW.duration} video: a real connectome, a search, two views and a dashboard.`,
+  image: FIRST_WORKFLOW.poster,
+  url: watchUrl(FIRST_WORKFLOW),
+}
+
 export const ZOO_CARD: ZooCard = {
   kind: 'zoo',
   id: 'zoo',
@@ -200,9 +225,10 @@ const TOUR_CARDS: TourCard[] = TOURS.map((tour) => ({
 /**
  * The doors, in the order a first-time reader wants them: build something, be shown around,
  * borrow somebody else's. The wizard leads because it is the one that produces *their* graph —
- * the tours explain the app and the Zoo opens a stranger's workflow.
+ * the video and the tours explain the app and the Zoo opens a stranger's workflow. The video
+ * before the tours, being the one that asks nothing of the reader but two minutes.
  */
-export const DOOR_CARDS: StartCard[] = [WIZARD_CARD, ...TOUR_CARDS, ZOO_CARD]
+export const DOOR_CARDS: StartCard[] = [WIZARD_CARD, VIDEO_CARD, ...TOUR_CARDS, ZOO_CARD]
 
 /**
  * One card per workflow saved in this browser, newest first — the order `listWorkflows` returns.

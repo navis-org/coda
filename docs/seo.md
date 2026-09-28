@@ -33,7 +33,8 @@ which is why the static content came first and the file the ask started with cam
 ## The static content
 
 **`index.html` gets a `<noscript>` hero** — an `h1`, what Coda is, which backends it reads, and
-links to the three document pages. `noscript` rather than markup inside `#root`, because
+links to the document pages and to the video tutorial on YouTube (a link, not an embed, so the
+hero stays free of third-party code). `noscript` rather than markup inside `#root`, because
 `createRoot().render()` clears the container: a static hero in there is a flash of unstyled
 content on every load, paid by every real visitor, to serve a crawler. It is also the honest
 version of the claim, since it *is* what the page offers with no script. Its styles are inline

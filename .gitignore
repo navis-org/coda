@@ -12,3 +12,8 @@ coverage/
 _TODOs.md
 compare-catalogue.log
 __pycache__/
+
+# Recorded tutorials: frames, narration and renders. Rebuilt by `pnpm tutorial <name>`.
+tutorials/out/
+# Background music. Licences rarely allow redistributing the file, and this repository is public.
+tutorials/music/
