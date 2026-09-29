@@ -192,6 +192,43 @@ export function buildScene(published: NgScene | undefined, options: SceneOptions
   return scene
 }
 
+/**
+ * The scene with neuroglancer's layer bar — the strip of layer chips along the top — shown or
+ * hidden.
+ *
+ * Which one is a fact about the *surface*, not the scene: a compact one (a node card, the Neuron
+ * Profile tile) cannot spare the strip, the overlay can. Hence not a `buildScene` option — the scene
+ * is also the link ↗ and ⧉ hand out, and whoever opens that in a tab of its own has the room. So
+ * `NeuroglancerViewer` applies this to what it points the *frame* at and nothing else, and a kept
+ * frame moving between surfaces is flipped with `layerPanelPatch`.
+ *
+ * Shown means the key is *removed*, not set to true: a full navigation resets first, so absent is
+ * neuroglancer's own default, and an untouched scene comes back as itself. That matters for a state
+ * resumed from a card, which carries the card's `false`.
+ *
+ * `showLayerPanel` is the only entry `uiControlVisibility` has in the viewer state (the other
+ * `show*` controls are constructor options). Checked against the deployed bundles: the demo
+ * deployment and spelunker restore it as state; `ngl.flywire.ai` has the control only as a
+ * constructor option, so there the key is ignored and the bar stays. That is the whole of the
+ * degrade — an unknown top-level key is skipped, not refused.
+ */
+export function withLayerPanel(scene: NgScene, shown: boolean): NgScene {
+  const { uiControlVisibility: ui, ...rest } = scene
+  if (shown && ui === undefined) return scene
+  const others = ui && typeof ui === 'object' && !Array.isArray(ui) ? { ...ui } : {}
+  if (!shown) return { ...rest, uiControlVisibility: { ...others, showLayerPanel: false } }
+  delete (others as Record<string, unknown>)['showLayerPanel']
+  return Object.keys(others).length > 0 ? { ...rest, uiControlVisibility: others } : rest
+}
+
+/**
+ * The layer bar's setting as `#!+` patch content. Explicit either way, unlike `withLayerPanel`: a
+ * merge leaves an absent key alone, so omitting it would keep a card's hidden bar in the overlay.
+ */
+export function layerPanelPatch(shown: boolean): NgScene {
+  return { uiControlVisibility: { showLayerPanel: shown } }
+}
+
 /** `segmentColors` with any key the viewer could not parse dropped. Undefined stays undefined. */
 function pickSegmentColors(
   colors: Readonly<Record<string, string>> | undefined,
@@ -455,6 +492,8 @@ export function scenePatchUrl(
   viewerBase: string | undefined,
   scene: NgScene,
   kind: ViewerKind = viewerKind(viewerBase),
+  /** Keys sent verbatim beside the owned ones — `layerPanelPatch`, riding along with a selection. */
+  extra?: NgScene,
 ): string {
   // Through the same rewrite as a full navigation: `layers` is the one key a patch carries, so
   // it carries the sources, and a merge sending the wrong prefix breaks the segmentation exactly
@@ -464,6 +503,11 @@ export function scenePatchUrl(
   for (const key of SCENE_PATCH_KEYS) {
     if (state[key] !== undefined) patch[key] = state[key]
   }
+  return patchUrl(viewerBase, { ...patch, ...extra })
+}
+
+/** A `#!+` merge URL carrying exactly `patch` — no key picking, no source rewrite. */
+export function patchUrl(viewerBase: string | undefined, patch: NgScene): string {
   return `${viewerRoot(viewerBase)}/#!+${encodeURIComponent(JSON.stringify(patch))}`
 }
 

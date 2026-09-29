@@ -18,6 +18,8 @@ import {
   spliceSegments,
   parseSceneUrl,
   sceneIdentity,
+  layerPanelPatch,
+  withLayerPanel,
   scenePatchUrl,
   sceneUrl,
   segmentationLayerIndex,
@@ -245,6 +247,67 @@ describe('defaults a published scene gets wrong for an embed', () => {
     const before = JSON.stringify(MANC)
     buildScene(MANC, { datasetId: 'manc:v1.2.3', segments: [1] })
     expect(JSON.stringify(MANC)).toBe(before)
+  })
+})
+
+describe("the layer bar, which is the surface's choice", () => {
+  const MANC_SCENE = buildScene(MANC, { datasetId: 'manc:v1.2.3', segments: [1] })
+
+  it('turns the bar off and keeps whatever else the state said about the controls', () => {
+    const scene = withLayerPanel(
+      { ...MANC, uiControlVisibility: { showLocation: false, showLayerPanel: true } },
+      false,
+    )
+    expect(scene['uiControlVisibility']).toEqual({ showLocation: false, showLayerPanel: false })
+  })
+
+  it('supplies the key for a state that published none', () => {
+    const scene = withLayerPanel(
+      buildScene(HEMIBRAIN, { datasetId: 'hemibrain:v1.2.1', segments: [1] }),
+      false,
+    )
+    expect(scene['uiControlVisibility']).toEqual({ showLayerPanel: false })
+  })
+
+  it('shows it by removing the key, so an untouched scene comes back as itself', () => {
+    // A full navigation resets first, so absent is neuroglancer's own default.
+    expect(withLayerPanel(MANC_SCENE, true)).toBe(MANC_SCENE)
+  })
+
+  it('shows it again on a state resumed from a card that hid it', () => {
+    const fromCard = withLayerPanel(MANC_SCENE, false)
+    expect(withLayerPanel(fromCard, true)['uiControlVisibility']).toBeUndefined()
+    expect(
+      withLayerPanel(
+        { ...fromCard, uiControlVisibility: { showLayerPanel: false, x: 1 } },
+        true,
+      )['uiControlVisibility'],
+    ).toEqual({ x: 1 })
+  })
+
+  it('is not a buildScene default, because the scene is also the link opened in a tab', () => {
+    // Whoever opens the scene outside the embed has the room, and wants the bar back.
+    expect(MANC_SCENE['uiControlVisibility']).toBeUndefined()
+  })
+
+  it('stays out of a selection patch unless it is sent on purpose', () => {
+    const scene = withLayerPanel(MANC_SCENE, false)
+    expect(
+      parseSceneUrl(scenePatchUrl(undefined, scene))!['uiControlVisibility'],
+    ).toBeUndefined()
+    const sent = parseSceneUrl(
+      scenePatchUrl(undefined, scene, undefined, layerPanelPatch(true)),
+    )!
+    expect(sent['uiControlVisibility']).toEqual({ showLayerPanel: true })
+    expect(sent['layers']).toBeDefined()
+  })
+
+  it('does not mutate the scene it is handed', () => {
+    const scene = { ...MANC, uiControlVisibility: { showLayerPanel: false, x: 1 } }
+    const before = JSON.stringify(scene)
+    withLayerPanel(scene, true)
+    withLayerPanel(scene, false)
+    expect(JSON.stringify(scene)).toBe(before)
   })
 })
 
