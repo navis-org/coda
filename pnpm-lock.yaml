@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  hyparquet@1.29.1:
+    hash: 2ad3398d8e6bf8ed4a3fe50c9c446290e9e8bde499dd3318e108d5a4b4db729a
+    path: patches/hyparquet@1.29.1.patch
+
 importers:
 
   .:
@@ -45,8 +50,11 @@ importers:
         specifier: ^0.10.1
         version: 0.10.1(graphology-types@0.24.8)
       hyparquet:
-        specifier: ^1.29.1
-        version: 1.29.1
+        specifier: 1.29.1
+        version: 1.29.1(patch_hash=2ad3398d8e6bf8ed4a3fe50c9c446290e9e8bde499dd3318e108d5a4b4db729a)
+      hysnappy:
+        specifier: 1.1.1
+        version: 1.1.1
       lz4js:
         specifier: ^0.2.0
         version: 0.2.0
@@ -1468,6 +1476,9 @@ packages:
 
   hyparquet@1.29.1:
     resolution: {integrity: sha512-Wa57A2KxGFtRTeDTJp4pT0TaqN8btb7/XTrMs17iM+xJxsbBxRyzaGaRRPQ4lOPbmso/qohDafJD7b+cFMZq8A==}
+
+  hysnappy@1.1.1:
+    resolution: {integrity: sha512-/V9XcN2NtRyWjR4LYMfvnvasVVF8jbT/ej0eofBQjZel91E3D813FQ3mQC6gDSMMTCq/FJh28XHeyqr3I/oBRw==}
 
   iconv-lite@0.6.3:
     resolution: {integrity: sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==}
@@ -3499,7 +3510,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  hyparquet@1.29.1: {}
+  hyparquet@1.29.1(patch_hash=2ad3398d8e6bf8ed4a3fe50c9c446290e9e8bde499dd3318e108d5a4b4db729a): {}
+
+  hysnappy@1.1.1: {}
 
   iconv-lite@0.6.3:
     dependencies:

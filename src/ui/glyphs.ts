@@ -276,6 +276,27 @@ const BUILT_IN_GLYPHS: Readonly<Record<string, readonly GlyphShape[]>> = {
     ['rect', { x: '4.4', y: '12.6', width: '15.2', height: '6.9', rx: '1.4' }],
     ['path', { d: 'M4.4 15.7h15.2' }],
   ],
+  /*
+   * A table under a chain link: `core.tableFromUrl`'s table with a link where its globe is, since
+   * what the node holds is a reference to a file rather than its rows. The link is scaled into the
+   * top half with its stroke put back (`GLYPH_STROKE_WIDTH / 0.55`), `core.uploadMesh`'s rule.
+   */
+  'core.linkTable': [
+    ['g', { transform: 'translate(5.4 -.5) scale(0.55)', strokeWidth: '2.91' }, [
+      ['path', { d: 'M9 17H7A5 5 0 0 1 7 7h2' }],
+      ['path', { d: 'M15 7h2a5 5 0 1 1 0 10h-2' }],
+      ['path', { d: 'M8 12h8' }],
+    ]],
+    ['rect', { x: '4.4', y: '12.6', width: '15.2', height: '6.9', rx: '1.4' }],
+    ['path', { d: 'M4.4 15.7h15.2' }],
+  ],
+  // A table with one of its rows drawn out past its edge: the rows a lookup keeps, as a table.
+  'core.readRows': [
+    ['rect', { x: '3.5', y: '4.5', width: '11', height: '15', rx: '1.5' }],
+    ['path', { d: 'M3.5 8.5h11' }],
+    ['path', { d: 'M5.8 15.5h6.4' }],
+    ['path', { d: 'M5.8 12h14.4M18.1 9.9l2.1 2.1-2.1 2.1' }],
+  ],
   'cave.updateRootIds': [
     ['rect', { x: '3.5', y: '5', width: '11', height: '14', rx: '1.5' }],
     ['path', { d: 'M3.5 9h11' }],

@@ -951,3 +951,87 @@ box's width, BANC's under its CAVE table card, 16 units below each. Two findings
   and on a dataset node added by hand, so it was never a starter's doing. It is placed a gap under
   the card's height now, floored by the declared one
   ([canvas.md](canvas.md#a-companion-is-placed-with-its-host-not-after-it)).
+
+## Custom Dataset: a dataset assembled from parts
+
+`connectome:customDataset` (`src/packs/connectome/customDataset.ts`). A neuron table, an edge list,
+a synapse table and geometry, each wired from wherever it lives — a sheet, a local Parquet file, a
+public bucket — and published as one `Dataset` that every query node reads as it reads neuPrint's.
+The source behind it is `CompositeSource` (`src/data/custom/`), which answers each question from
+the part that can. The help page, `src/packs/connectome/help/customDataset.md`, is the reader's
+side of what follows.
+
+### Two ids, because inference cannot see content
+
+Every cache, capability gate and reference port keys on `(sourceId, datasetId)`, and two neuron
+tables with the same columns are indistinguishable to inference. So the type carries a **layout
+id** — which sockets are wired and where each geometry part delegates, nothing about content —
+registered from `inferOutputs` and answered by `capabilitiesFor`, so a capability is right before
+a Run. `evaluate` mints a **build id**, `<layout id>/<hash of the inputs' provenance keys>` — the
+neuron table's key hashed with its id column, and the card's Name alongside, since the same
+table keyed by two columns is two tables and the same parts under two names are two datasets —
+and that is what queries are answered for. A `reference` port reads the type, sees a layout id, and is
+refused: what a Custom Dataset holds is only known once it has run. `data/custom/layout.ts` holds
+the argument in full.
+
+### The neuron table is the annotations channel
+
+The table, its id column renamed `neuronId` and read as text, travels on the value as
+`annotations` — the channel a CAVE datastack's wired chain already uses — so Find Neurons, Explore
+and every label downstream work with nothing learning this dataset is different. With no table,
+the neurons are every id the edge list mentions (`edgeListNeurons`, cached per loaded set, since
+the connectivity funnel asks for the index on every hop).
+
+### Geometry is borrowed, by an ordinary wire
+
+Meshes and Skeletons take any `Dataset` and delegate under **its** dataset id, the ids passed
+through. An ordinary wire rather than a reference, because a reference hands over a type, which
+for a family node on "Latest" names no dataset until its listing lands. What it costs is two
+dataset producers on the canvas, so a query node added later is not auto-wired, and
+`autoWireDataset` leaves this node's own sockets alone. The attribute table is **rebuilt** from the
+neuron table (`morphologyAttributes`), never passed through: a delegate's `type` beside a neuron
+table's `cell_type` breaks invariant 3. A thumbnail walks the parts in socket order, on past one
+that answers nothing and never asking the same source twice — which is also why
+`PrecomputedSource` gained `fetchCoarseGeometry`: a Neuroglancer Source never needed one alone,
+having no neuron list for Explore to browse, and as a Custom Dataset's part every tile was blank.
+
+### Edge lists and synapse tables are read by the question, not the node
+
+The node reads nothing, so it stays `cheap`. A wired edge list is **registered** as a loader
+(`data/edges/wired.ts` → `provideEdgeSet`) under an id minted from the input's provenance key and
+the columns, and the connectivity funnel builds it on the first question — whole, into the same
+compact edge set an import makes, then held for the tab. Three rules:
+
+- **A loader holds only what a rebuild reads.** V8 gives every closure made in one scope the same
+  context, so each loader is built in a function of its own — a file's reference, a table's three
+  columns. Built where the whole input was in scope, it pinned the whole table.
+- **A shared build carries nobody's signal.** Two nodes asking at once share one read; each
+  caller's Cancel stops its own wait, and the read is aborted when nobody is left (`WiredBuild`).
+- **The store owns "load or refuse"** (`requireEdgeSet`), because only the store knows which tier
+  an id names and the two refusals differ in remedy: re-import, or run the node again.
+
+A synapse table is **never read whole**: a question reads the rows naming its neurons, from a
+table file through Read Rows' own lookup with the lookup column's block index built automatically
+(`data/custom/synapses.ts`). With no edge list, connectivity is the synapse table's rows counted
+per pair — the one whole read a synapse table gets, two id columns, warned about above ten million
+rows. A row is one connection (`links`). There is no template space and no confidence, a table
+being able to say neither, and one position per synapse, so Synapses Between leaves `polarity`
+empty rather than claim the end `Location` asked for.
+
+### The card is the generic band, and `whenWired` is what keeps it short
+
+There is no body. Each socket's pickers are drawn only once it is wired — `ParamBase.whenWired`,
+whose rules are in [adding-a-node.md](adding-a-node.md), the Custom Dataset being its first user —
+and pickers are optional, defaulting to `pre`/`post`/`weight` on the edge list and CAVE's names on
+the synapse table, asking with a guess (`suggestEdgeColumns`, an axis's name) rather than
+substituting. Voxel size and Carry columns are inspector-only.
+
+**No imported edge set**: the Edge data button is a body's, and a wired Link Table file covers the
+same need while saying where it came from on the canvas. Its demo is curated
+(`wizard/curated.ts`), since the search fills every optional socket from one table.
+
+### In a notebook
+
+Python only: the node becomes a `CodaCustomDataset` and every query below it calls a method on
+it, the table files `CodaTableFile`s read by row group, a Neuroglancer Source a `CodaPrecomputed`.
+R lists the types in `NO_EMITTER`. See *The Custom Dataset half* in [export.md](export.md).

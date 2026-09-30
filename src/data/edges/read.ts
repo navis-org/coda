@@ -17,7 +17,7 @@
 import type { Delimiter } from '../csv'
 import { RowSplitter, parseDelimited } from '../csv'
 import type { EncodedEdges } from './encode'
-import { EdgeSetBuilder } from './encode'
+import { EdgeSetBuilder, edgeIdCell, edgeWeightCell } from './encode'
 
 /** How much of a file to read for the preview. Enough for a header and a few dozen rows. */
 export const PREVIEW_BYTES = 64 * 1024
@@ -174,15 +174,13 @@ export async function readEdges(
       return
     }
     rows++
-    // A weight column that is absent means an unweighted edge list; one that is *blank* on this
-    // row is missing data, and `Number('')` is 0 — a zero-weight edge, which is a connection
-    // nobody recorded. `NaN` sends it to the builder's dropped count instead.
-    let value = 1
-    if (weight !== undefined) {
-      const text = (row[weight] ?? '').trim()
-      value = text === '' ? Number.NaN : Number(text)
-    }
-    builder.add(row[pre] ?? '', row[post] ?? '', value)
+    // A weight column that is absent means an unweighted edge list; a blank cell in one is
+    // missing data — `edgeWeightCell`'s rule, shared with every other reader.
+    builder.add(
+      edgeIdCell(row[pre]),
+      edgeIdCell(row[post]),
+      weight === undefined ? 1 : edgeWeightCell(row[weight]),
+    )
   }
 
   try {

@@ -716,4 +716,35 @@ describe('auto-wiring a repeated Dataset input', () => {
     const wired = autoWireDataset(g, node)
     expect(wired.edges.map((e) => e.targetHandle)).toEqual(['dataset1'])
   })
+
+  /*
+   * A node publishing a Dataset is assembling one, so its Dataset inputs are its parts — and
+   * the single dataset on the canvas is a guess about those, not the workspace arriving.
+   */
+  it('leaves a node that publishes a Dataset unwired', () => {
+    registerNode({
+      type: 'test.ports.assemble',
+      label: 'Assemble (test)',
+      category: 'dataset',
+      cost: 'cheap',
+      inputs: [{ id: 'meshes', label: 'Meshes', type: T.dataset(), required: false }],
+      outputs: [{ id: 'dataset', label: 'Dataset', type: T.dataset() }],
+      evaluate: () => ({ dataset: tableFromRows(SCHEMA, []) }),
+    })
+    let g = emptyGraph('autowire')
+    g = addNode(g, {
+      id: 'ds',
+      type: 'test.ports.source',
+      position: { x: 0, y: 0 },
+      params: {},
+    })
+    const node = {
+      id: 'a',
+      type: 'test.ports.assemble',
+      position: { x: 200, y: 0 },
+      params: {},
+    }
+    g = addNode(g, node)
+    expect(autoWireDataset(g, node).edges).toEqual([])
+  })
 })

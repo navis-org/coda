@@ -1,6 +1,6 @@
 /**
- * Driving an edge-list import from the page: a worker where there is one, this thread where
- * there is not.
+ * Driving the edge-list worker from the page — an import, and a table file's whole edge list for a
+ * wired Edges socket — in a worker where there is one, on this thread where there is not.
  *
  * The fallback is not a courtesy — it is what makes any of this testable. jsdom has no `Worker`,
  * exactly as it has none for elkjs, so without a direct path nothing in `pnpm test` would
@@ -9,14 +9,18 @@
  * is that it carries nothing IndexedDB-shaped into a context that has its own copy of the store.
  */
 
+import type { JobRunOptions } from '../workerJob'
+import { runWorkerJob } from '../workerJob'
 import type { Delimiter } from '../csv'
 import type { EncodedEdges } from './encode'
 import type { EdgeFormat } from './formats'
 import { SNIFF_BYTES, sniffEdgeFormat } from './formats'
 import type { EdgeColumnChoice } from './read'
 import { PREVIEW_BYTES, previewEdges, suggestEdgeColumns } from './read'
-import type { EdgeImportMessage, EdgeImportRequest } from './worker'
-import { readRequest } from './worker'
+import type { EdgeImportRequest, EdgeJob } from './worker'
+import { readEdgeJob } from './worker'
+import type { FileSpec } from '../files/bytes'
+import type { ReadEdgesRequest } from './tableFile'
 
 export interface EdgeSourcePreview {
   format: EdgeFormat
@@ -84,64 +88,33 @@ export async function previewEdgeSource(source: {
   return { format, ...preview, ...(suggestion ? { suggestion } : {}) }
 }
 
-export interface ImportEdgesOptions extends EdgeImportRequest {
-  onProgress?: (fraction: number, note?: string) => void
-  signal?: AbortSignal
+export interface ImportEdgesOptions extends EdgeImportRequest, JobRunOptions {}
+
+/** One of this worker's jobs, run where it can be — see the module note. */
+function runEdgeJob(job: EdgeJob, options: JobRunOptions): Promise<EncodedEdges> {
+  return runWorkerJob<EdgeJob, EncodedEdges>(
+    // Written out here, where vite can see it — see `workerJob.ts`.
+    () => new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' }),
+    job,
+    { ...options, label: 'edge-list reader', here: readEdgeJob },
+  )
 }
 
+/**
+ * In a worker where there is one, on this thread where there is not — correct there, and it blocks;
+ * see the module note.
+ */
 export function importEdges(options: ImportEdgesOptions): Promise<EncodedEdges> {
-  return typeof Worker === 'undefined' ? here(options) : offThread(options)
+  // The job is the request alone: a callback and a signal cannot cross `postMessage`.
+  const { onProgress, signal, ...request } = options
+  return runEdgeJob(request, { signal, onProgress })
 }
 
-/** No worker: parse on this thread. Correct, and it blocks — see the module note. */
-function here(options: ImportEdgesOptions): Promise<EncodedEdges> {
-  return readRequest(options, {
-    ...(options.onProgress ? { onProgress: options.onProgress } : {}),
-    ...(options.signal ? { signal: options.signal } : {}),
-  })
-}
-
-function offThread(options: ImportEdgesOptions): Promise<EncodedEdges> {
-  return new Promise((resolve, reject) => {
-    /*
-     * `new URL(..., import.meta.url)` rather than a `?worker` import, the form `src/pyodide`
-     * settled on: it is what lets vite serve the module directly in dev and emit its own chunk
-     * in a build, without the specifier being resolved and inlined.
-     */
-    const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
-    /*
-     * Cancel terminates rather than asks. There is no interrupt point inside a tight parse loop
-     * that a message could reach — the same conclusion `src/pyodide` came to for Python — and
-     * an import has nothing worth salvaging half-done.
-     */
-    const stop = () => {
-      worker.terminate()
-      reject(new DOMException('Aborted', 'AbortError'))
-    }
-    options.signal?.addEventListener('abort', stop, { once: true })
-
-    worker.onmessage = (event: MessageEvent<EdgeImportMessage>) => {
-      const message = event.data
-      if (message.type === 'progress')
-        return options.onProgress?.(message.fraction, message.note)
-      options.signal?.removeEventListener('abort', stop)
-      worker.terminate()
-      if (message.type === 'done') resolve(message.encoded)
-      else reject(new Error(message.message))
-    }
-    worker.onerror = (event) => {
-      options.signal?.removeEventListener('abort', stop)
-      worker.terminate()
-      reject(new Error(event.message || 'The edge-list reader failed to start'))
-    }
-
-    const request: EdgeImportRequest = {
-      ...(options.file ? { file: options.file } : {}),
-      ...(options.url ? { url: options.url } : {}),
-      format: options.format,
-      columns: options.columns,
-      ...(options.text ? { text: options.text } : {}),
-    }
-    worker.postMessage(request)
-  })
+/** A table file's whole edge list, encoded — the same worker, its second job. */
+export function readTableFileEdges(
+  spec: FileSpec,
+  request: ReadEdgesRequest,
+  options: JobRunOptions = {},
+): Promise<EncodedEdges> {
+  return runEdgeJob({ tableFile: { spec, request } }, options)
 }

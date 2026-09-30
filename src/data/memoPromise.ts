@@ -56,3 +56,22 @@ export function memoPromise<K, V>(
   held.set(key, pending)
   return pending
 }
+
+/**
+ * `promise`, or a rejection as soon as `signal` aborts — leaving `promise` itself running.
+ *
+ * The other half of sharing a request: the shared work carries nobody's signal, since the first
+ * caller's Cancel must not become every caller's, and each caller stops *waiting* on its own.
+ */
+export function untilAborted<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (!signal) return promise
+  if (signal.aborted) return Promise.reject(signal.reason)
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
+}

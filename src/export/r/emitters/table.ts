@@ -135,7 +135,7 @@ export function rFilterPredicate(comparison: FilterComparison): FilterPredicate 
     case 'endsWith':
       return ok(`endsWith(as.character(${c}), ${rStr(raw)})`)
     case 'matches':
-      // A missing cell is tested as the empty string, which is `makePredicate`'s reading — so a
+      // A missing cell is tested as the empty string, which is `rowPredicate`'s reading — so a
       // pattern that matches "" keeps it, as on the card, where a bare `grepl` answers FALSE.
       return ok(`grepl(${rStr(raw)}, coalesce(as.character(${c}), ""), perl = TRUE)`, [
         REGEX_FLAVOUR_NOTE,

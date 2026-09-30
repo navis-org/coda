@@ -56,6 +56,9 @@ import type { TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
 import type {
   AdjacencyRequest,
+  CoarseGeometry,
+  CoarseGeometryRequest,
+  CoarseRefusal,
   ConnectivityRequest,
   DataSource,
   DatasetInfo,
@@ -78,6 +81,7 @@ import type { NgSourceRef } from '../neuroglancer/sourceUrl'
 import type { MeshResult, MeshSource } from './index'
 import {
   DEFAULT_TRIANGLE_BUDGET,
+  fetchCoarseMesh,
   fetchMeshes,
   meshFormatHasLevels,
   meshProgress,
@@ -724,6 +728,42 @@ export class PrecomputedSource implements DataSource {
       ...(detail ? { detail } : {}),
       ...this.frame(),
     }
+  }
+
+  /**
+   * The cheapest drawing of one segment, for a list row — Explore's tiles, where this source is the
+   * Meshes or Skeletons part of a Custom Dataset. A Neuroglancer Source never needed one on its
+   * own, having no neuron list for Explore to browse, and a Custom Dataset asks its parts in turn
+   * and got nothing from here: every tile blank over a bucket full of geometry.
+   *
+   * The mesh first, at its coarsest level: `fetchCoarseMesh`, the call neuPrint makes of the very
+   * same kind of bucket, which refuses a directory with no pyramid rather than downloading a whole
+   * neuron per row, and turns a pathological body down without fetching it. The skeleton where the
+   * mesh cannot answer — no mesh directory, a legacy one, a segment the mesh store lacks — since a
+   * skeleton is one small read whatever the format.
+   */
+  async fetchCoarseGeometry(
+    req: CoarseGeometryRequest,
+  ): Promise<CoarseGeometry | CoarseRefusal | undefined> {
+    const signal = req.signal ? { signal: req.signal } : {}
+    const source = await this.describe(signal)
+    if (source.meshUrl) {
+      const mesh = await fetchCoarseMesh(
+        await this.meshDir(req.signal),
+        req.neuronId,
+        signal,
+        req.detail,
+      )
+      if (mesh) return mesh
+    }
+    if (!source.skeletonUrl) return undefined
+    const { skeletons } = await fetchSkeletons(
+      await this.skeletonDir(req.signal),
+      [req.neuronId],
+      signal,
+    )
+    const skeleton = skeletons[0]
+    return skeleton && { kind: 'skeleton', ...skeleton }
   }
 
   async fetchSkeletons(req: GeometryRequest): Promise<SkeletonsValue> {

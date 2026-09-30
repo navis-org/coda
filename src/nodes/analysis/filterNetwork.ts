@@ -27,7 +27,7 @@ import type { InferContext } from '../../core/node'
 import type { DType } from '../../core/types'
 import { getColumn, isNetworkValue, isTableValue } from '../../core/values'
 import { collectLabels } from '../lib/labelLookup'
-import type { FilterOp } from '../lib/tableOps'
+import type { FilterOp } from '../../core/rowPredicate'
 import {
   FILTER_NETWORK_DEFAULT_OP,
   filterConditionIssues,

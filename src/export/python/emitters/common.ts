@@ -11,6 +11,7 @@ import { datasetRef } from '../../../core/types'
 import { backendOf } from '../../../data/source'
 import { TRACED_STATUS, populationColumns } from '../../../data/neuronFilter'
 import { ID_COLUMN_NAME } from '../../../core/ids'
+import { CUSTOM_SOURCE_ID } from '../../../data/custom/layout'
 import { carryable } from '../../../nodes/lib/carryParams'
 import { pyIdList, pyList, pyStr } from '../py'
 import type { EmitContext } from '../types'
@@ -210,18 +211,38 @@ export function codaSynapses(ctx: EmitContext, frame: string): string {
  */
 export function isCaveDataset(ctx: EmitContext, portId = 'dataset'): boolean {
   // Any deployment's: `cave` is only the default one's id (`caveSourceId`).
-  return backendOf(datasetRef(ctx.inputType(portId))?.sourceId ?? '') === 'cave'
+  return datasetBackend(ctx, portId) === 'cave'
+}
+
+/** Is it a Custom Dataset — a `CodaCustomDataset`? The same reading, and the same declaration. */
+export function isCustomDataset(ctx: EmitContext, portId = 'dataset'): boolean {
+  return datasetBackend(ctx, portId) === CUSTOM_SOURCE_ID
 }
 
 /**
- * The neuron table a CAVE dataset labels its neurons with — Coda's index, one row per neuron.
+ * Does the dataset hold its neuron index as a frame, `.labels`? A CAVE datastack's is fetched and
+ * a Custom Dataset's is its Neurons table, and every node that searches the index locally reads
+ * either the same way.
+ */
+export function hasLabelsFrame(ctx: EmitContext, portId = 'dataset'): boolean {
+  return isCaveDataset(ctx, portId) || isCustomDataset(ctx, portId)
+}
+
+/** The backend of the dataset on this port — `backendOf` its resolved source id. */
+export function datasetBackend(ctx: EmitContext, portId = 'dataset'): string {
+  return backendOf(datasetRef(ctx.inputType(portId))?.sourceId ?? '')
+}
+
+/**
+ * The neuron table a CAVE or Custom dataset labels its neurons with — Coda's index, one row per neuron.
  *
  * `CodaCaveDataset.labels`, which is fetched on first use and is exactly what `CaveSource`
  * builds: the datastack's neuron table joined to its annotations, or whatever an Annotations
  * source supplied instead. Every node that would otherwise download an index goes through this,
- * so a graph with three of them pays for one.
+ * so a graph with three of them pays for one. `CodaCustomDataset.labels` is the same frame for a
+ * Custom Dataset: its Neurons table keyed by text `neuronId` (`hasLabelsFrame`).
  */
-export function caveLabels(dataset: string): string {
+export function datasetLabels(dataset: string): string {
   return `${dataset}.labels`
 }
 

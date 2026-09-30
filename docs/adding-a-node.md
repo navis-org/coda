@@ -197,6 +197,13 @@ Two flags worth knowing:
 - `visibleIf: (params) => boolean` for conditional params. Hidden params are **excluded
   from the cache key**, so toggling an aggregation from `sum` to `count` doesn't leave a
   stale value column influencing freshness.
+- `whenWired: '<port>'` (or `true`, meaning a column picker's own `from`) draws the param only
+  while that input carries a wire — for a node with several optional sockets, each with settings
+  that mean nothing until it is wired (the Custom Dataset's). `visibleIf` cannot say this, seeing
+  params and never wiring. **Display only**: the param stays in the cache key, which costs
+  nothing since an unwired socket's settings reach no `evaluate`. Read by the card, its `… N more`
+  count and the inspector — **not by a node body**, which is handed no wiring, so
+  `paramFold.test.tsx` refuses the flag on a type with one.
 
 ### Always resolve column params through the context
 

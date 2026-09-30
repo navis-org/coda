@@ -1505,8 +1505,18 @@
 .param--wide {
   grid-template-columns: minmax(0, 1fr);
 }
+/* A checkbox draws its own label, so the row's would say it twice. */
 .param--wide .param__label {
   display: none;
+}
+/*
+ * A chips picker takes the card's full width too, but draws no label of its own — so its row keeps
+ * the label, above the chips rather than beside them. It used to share `.param--wide`, and every
+ * multi-column picker on a card was a row of chips with nothing saying what they were for.
+ */
+.param--stacked {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
 }
 
 .field {
@@ -10692,6 +10702,9 @@ details[open] > summary.tile__label {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* The card's own inset, as `.dataset-body` has — without it the buttons and the status line
+     sat flush against the card's left border. */
+  padding: 6px;
   min-width: 0;
 }
 .upload-body__actions {

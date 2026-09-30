@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 import type { ParamValues } from '../../core/node'
 import type { TableSchema } from '../../core/types'
 import { rawFileUrl } from '../../data/rawFileUrl'
-import type { FilterOp } from '../../nodes/lib/tableOps'
+import type { FilterOp } from '../../core/rowPredicate'
 import {
   FILTER_TABLE_DEFAULT_OP,
   NORMALIZE_OPTIONS,
@@ -116,7 +116,7 @@ describe('the values the table plans resolve', () => {
   })
 
   /*
-   * `makePredicate` reads a null through `Number`, so on a numeric column it is 0 — the Filter
+   * `rowPredicate` reads a null through `Number`, so on a numeric column it is 0 — the Filter
    * nodes' own rule, which the plan takes from the canvas rather than restating.
    */
   it('keeps a null on a numeric column exactly where the canvas reads it as 0', () => {

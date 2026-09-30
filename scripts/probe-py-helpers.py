@@ -7,7 +7,8 @@ parses and its module attributes resolve, but **nothing executes a line of it**.
 pandas, which is exactly where the mistakes are.
 
 It reads two generated cells: `caveHelpers.ts`' out of the CAVE golden, and the general helper
-cell out of `everything.ipynb`. It does *not* claim to cover every helper in the latter — what is
+cell out of `everything.ipynb` — and runs the Custom Dataset golden whole, every cell after its
+helpers, against synthetic files. It does *not* claim to cover every helper in the latter — what is
 exercised is listed below, and a helper nobody probes is still a helper nobody has run.
 
 It earned its place immediately. `coda_update_root_ids` read its id columns with
@@ -1095,6 +1096,14 @@ knn_rows = pd.DataFrame({
     "score":   [0.9,  0.9,  0.2,  0.8,  0.8,  0.1,  0.2,  0.1,  0.4],
 })
 labels, idx, dists = umns["coda_umap_knn"](knn_rows, "queryId", "targetId", "score", k=3)
+
+# A score column named but absent — what an export taken before a run writes from the picker's
+# default — counts every neighbour as one, as the canvas does, rather than raising KeyError.
+_unscored = knn_rows.drop(columns=["score"])
+_, _named, _named_d = umns["coda_umap_knn"](_unscored, "queryId", "targetId", "score", k=3)
+_, _none, _none_d = umns["coda_umap_knn"](_unscored, "queryId", "targetId", None, k=3)
+check("umap knn: a score column that is not there counts every neighbour as one",
+      (_named == _none).all() and (_named_d == _none_d).all())
 check("umap knn: the rows are the queries, in first-appearance order",
       labels == ["a", "b", "c", "d"], str(labels))
 check("umap knn: row i names itself first, at distance 0",
@@ -1102,9 +1111,11 @@ check("umap knn: row i names itself first, at distance 0",
       f"{idx[:, 0]} {dists[:, 0]}")
 # a→b is listed twice, at 0.9 and at 0.4. Coda keeps the *closest*, where `dict(zip(...))` and
 # `match()` both keep whichever came first in the table.
+# At float32's precision, which is what the helper stores (umap-learn's own dtype): `1 - 0.9`
+# comes back as 0.10000000149, and a 1e-9 tolerance failed on that and nothing else.
 check("umap knn: a repeated pair keeps its smallest distance",
-      abs(dists[0, 1] - (1 - 0.9)) < 1e-9, str(dists[0, 1]))
-check("umap knn: similarities become distances", abs(dists[2, 1] - (1 - 0.8)) < 1e-9,
+      dists[0, 1] == np.float32(1 - 0.9), str(dists[0, 1]))
+check("umap knn: similarities become distances", dists[2, 1] == np.float32(1 - 0.8),
       str(dists[2, 1]))
 check("umap knn: every row is exactly k wide", idx.shape == (4, 3), str(idx.shape))
 
@@ -1415,6 +1426,227 @@ else:
                                                   within=2.0, symmetry='query').iloc[0, 0])
     check('distance: navis cable_overlap is close but not equal, as the note says',
           0 < abs(_ol - _ours) / _ol < 0.05, f'navis {_ol:.2f} vs ours {_ours:.2f}')
+
+# ---- coda_traverse_connectivity, over a stub neuPrint -------------------------
+# The neuPrint half of `coda_walk`: one hop is `fetch_adjacencies`, stubbed over a five-edge
+# graph, so the walk's three rules are checked on the same code the Custom Dataset's walk runs.
+walk_ns = load_cell(FIXTURES / "everything.ipynb", "def coda_traverse_connectivity(", {"pd": pd})
+_E = pd.DataFrame({'bodyId_pre': [1, 1, 2, 3], 'bodyId_post': [2, 3, 4, 1], 'weight': [5, 2, 5, 7]})
+_T = {1: 'A', 2: 'B', 3: 'C', 4: None}
+
+class _Criteria:
+    def __init__(self, bodyId=None, label=None, client=None): self.ids = bodyId
+
+def _adjacencies(sources, targets, min_total_weight, omit_rois, client):
+    e = _E[_E.weight >= min_total_weight]
+    if sources is not None: e = e[e.bodyId_pre.isin(sources.ids)]
+    if targets is not None: e = e[e.bodyId_post.isin(targets.ids)]
+    ids = pd.unique(pd.concat([e.bodyId_pre, e.bodyId_post]))
+    return pd.DataFrame({'bodyId': ids, 'type': [_T[i] for i in ids]}), e.reset_index(drop=True)
+
+def _merge(neurons, conn, props):
+    types = dict(zip(neurons.bodyId, neurons.type))
+    return conn.assign(type_pre=conn.bodyId_pre.map(types), type_post=conn.bodyId_post.map(types))
+
+walk_ns.update(NeuronCriteria=_Criteria, fetch_adjacencies=_adjacencies,
+               merge_neuron_properties=_merge)
+_walked = walk_ns['coda_traverse_connectivity'](['1'], 'both', 2, 1, False, None)
+check('walk: two hops both ways, each edge at the hop it was first found',
+      set(zip(_walked.preId, _walked.postId, _walked.hop))
+      == {('1', '2', 1), ('1', '3', 1), ('3', '1', 1), ('2', '4', 2)}, _walked.to_string())
+check('walk: an edge keeps the direction it was first found in',
+      dict(zip(zip(_walked.preId, _walked.postId), _walked.direction))[('3', '1')] == 'upstream')
+_none = walk_ns['coda_traverse_connectivity'](['9'], 'outputs', 1, 1, False, None)
+check('walk: nothing found is an empty edge list with every column',
+      len(_none) == 0 and list(_none.columns)[:5] == ['preId', 'preType', 'postId', 'postType', 'weight'])
+
+# ---- the Custom Dataset golden, run end to end -------------------------------
+# Every cell of `custom.ipynb` after its helpers, executed in order against synthetic parts: the
+# neuron table a frame, the edge list a Feather file and the synapse table a Parquet one, written
+# here so the notebook's own reads open them. The two geometry cells would reach a bucket, so the
+# bucket is a stub answering under the ids it is asked for — what is checked there is the
+# delegation, not cloudvolume.
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pyarrow.feather as feather
+import pyarrow.compute as pc
+
+CUSTOM = FIXTURES / 'custom.ipynb'
+with tempfile.TemporaryDirectory() as tmp:
+    edges_path, syn_path = f'{tmp}/edges.feather', f'{tmp}/synapses.parquet'
+    feather.write_feather(pa.table({
+        'pre': pa.array([1, 1, 1, 2, 3], pa.int64()),
+        'post': pa.array([2, 3, 2, 4, 1], pa.int64()),
+        'weight': [3, 2, 1, 5, 7],
+    }), edges_path)
+    # Sorted by the presynaptic id in row groups of two, so the lookup has groups to skip.
+    pq.write_table(pa.table({
+        'pre_pt_root_id': pa.array([1, 1, 2, 2, 3, 3], pa.int64()),
+        'post_pt_root_id': pa.array([2, 3, 1, 4, 1, 2], pa.int64()),
+        'x': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        'y': [0.0] * 6,
+        'z': [0.0] * 6,
+        # The golden's Filter Table keeps score >= 0.5: the last row, 3 -> 2, is below it.
+        'score': [0.9, 0.9, 0.9, 0.9, 0.9, 0.1],
+    }), syn_path, row_group_size=2)
+    types = pd.DataFrame({'neuronId': [1, 2, 3, 4], 'type': ['LC4', 'LC6', 'T4', None]})
+
+    class StubBucket:
+        """`CodaPrecomputed`'s surface, answering one navis neuron per id without a network."""
+        def __init__(self, url): self.url = url
+        def _list(self, ids):
+            import navis
+            return navis.NeuronList([navis.TreeNeuron(None, id=i, units='nm') for i in ids])
+        meshes = skeletons = _list
+
+    custom_ns = {'copy': __import__('copy'), 'pd': pd, 'np': np, 'pa': pa, 'pq': pq, 'feather': feather, 'pc': pc,
+                 'fsspec': None, 'CloudVolume': None}
+    cells = [''.join(c['source']) for c in json.loads(CUSTOM.read_text())['cells']
+             if c['cell_type'] == 'code']
+    helpers = next(i for i, src in enumerate(cells) if 'class CodaCustomDataset' in src)
+    exec(cells[helpers], custom_ns)  # noqa: S102
+    custom_ns['CodaPrecomputed'] = StubBucket
+    for src in cells[helpers + 1:]:
+        src = (src.replace("pd.read_csv('https://example.org/cell_types.csv')", 'types')
+                  .replace("'edges.feather'", repr(edges_path))
+                  .replace("'synapses.parquet'", repr(syn_path)))
+        custom_ns['types'] = types
+        try:
+            exec(src, custom_ns)  # noqa: S102
+        except Exception as err:  # noqa: BLE001 - reported, and the run goes on
+            check(f'custom: cell runs — {src.splitlines()[0]}', False, repr(err))
+
+    g = custom_ns.get
+    found = g('find_neurons')
+    check('custom: Find Neurons filters the neuron table, ids as text',
+          found is not None and list(found['neuronId']) == ['1', '2'],
+          None if found is None else str(list(found['neuronId'])))
+    conn = g('connectivity_connections')
+    if conn is not None:
+        pairs = {(r.preId, r.postId): r.weight for r in conn.itertuples()}
+        check('custom: Connectivity sums a repeated pair and keeps each seed\'s outputs',
+              pairs == {('1', '2'): 4, ('1', '3'): 2, ('2', '4'): 5}, str(pairs))
+        check('custom: Connectivity types each end from the neuron table',
+              dict(zip(conn['postId'], conn['postType'])).get('3') == 'T4')
+    neuron_set = g('connectivity_neuron_set')
+    check('custom: full neuron rows are the table\'s, for every endpoint',
+          neuron_set is not None and sorted(neuron_set['neuronId']) == ['1', '2', '3', '4'])
+    walk = g('connectivity_2_connections')
+    check('custom: the two-hop walk both ways reaches the edge back into a seed',
+          walk is not None and ('3', '1') in set(zip(walk['preId'], walk['postId'])))
+    syn = g('synapses')
+    check('custom: Synapses answers the rows at the end asked about',
+          syn is not None and sorted(syn['x']) == [1.0, 2.0, 3.0, 4.0]
+          and set(syn['polarity']) == {'pre'}, None if syn is None else syn.to_string())
+    between = g('synapses_between')
+    check('custom: Synapses Between keeps a target set, oriented pre to post',
+          between is not None
+          and sorted(zip(between['neuronId'], between['partnerId']))
+          == [('1', '2'), ('1', '3'), ('2', '1')],
+          None if between is None else between.to_string())
+    filtered = g('filter_table')
+    check('custom: a Filter Table on a file reads nothing, and its reads keep only rows passing it',
+          filtered is not None
+          and sorted(filtered.read(columns=['x'])['x']) == [1.0, 2.0, 3.0, 4.0, 5.0]
+          and len(filtered.read(columns=['x'], where={'pre_pt_root_id': ['3']})) == 1,
+          None if filtered is None else filtered.read().to_string())
+    three_out = g('custom_dataset').synapses(['3'], polarity='pre') if g('custom_dataset') else None
+    check('custom: the dataset looks a neuron up in the filtered file, then drops what fails',
+          three_out is not None and three_out['partnerId'].tolist() == ['1'],
+          None if three_out is None else three_out.to_string())
+    # The first row fails, so a cap counted before the condition would hand back one row, not two.
+    past_first = custom_ns['CodaTableFile'](syn_path).where(['x'], lambda df: df['x'] > 1)
+    capped = past_first.read(columns=['x'], limit=2)
+    check('custom: a capped read of a filtered file counts the rows kept',
+          capped['x'].tolist() == [2.0, 3.0], capped.to_string())
+    rows = g('read_rows')
+    check('custom: Read Rows reads only the matching rows of the Parquet file',
+          rows is not None and sorted(rows['pre_pt_root_id'].tolist()) == ['1', '1', '2', '2']
+          and list(rows.columns) == ['pre_pt_root_id', 'x', 'y', 'z'],
+          None if rows is None else rows.to_string())
+    skel = g('skeletons')
+    check('custom: geometry goes to the part wired for it, under integer ids',
+          skel is not None and sorted(int(n.id) for n in skel) == [1, 2])
+
+    # No neuron table: the ids pass as given, and nothing reads the synapse table whole to find
+    # the neurons there are — which on a real file was six minutes spent learning there is no type.
+    bare = custom_ns['CodaCustomDataset'](synapses={
+        'source': custom_ns['CodaTableFile'](syn_path), 'pre': 'pre_pt_root_id',
+        'post': 'post_pt_root_id', 'position': ['x', 'y', 'z'], 'voxel': [1, 1, 1], 'carry': []})
+    bare.edge_list = lambda: (_ for _ in ()).throw(AssertionError('read whole'))
+    check('custom: with no neuron table, Input IDs pass as given',
+          bare.lookup([1, 999])['neuronId'].tolist() == ['1', '999'])
+    try:
+        pair = bare.synapses_between(sources=['1'], targets=['2'])
+        check('custom: with no neuron table, Synapses Between reads no whole table',
+              len(pair) == 1, pair.to_string())
+    except AssertionError as err:
+        check('custom: with no neuron table, Synapses Between reads no whole table', False, repr(err))
+
+    # With a neuron table that leaves out 4: a fragment, which only include_fragments keeps.
+    three = custom_ns['CodaCustomDataset'](
+        neurons=pd.DataFrame({'neuronId': ['1', '2', '3']}), synapses={
+            'source': custom_ns['CodaTableFile'](syn_path), 'pre': 'pre_pt_root_id',
+            'post': 'post_pt_root_id', 'position': ['x', 'y', 'z'], 'voxel': [10, 1, 1],
+            'carry': ['x']})
+    kept = three.synapses_between(sources=['2'], include_fragments=False)
+    check('custom: Synapses Between keeps the open end to the neuron table unless told',
+          kept['partnerId'].tolist() == ['1']
+          and len(three.synapses_between(sources=['2'])) == 2, kept.to_string())
+    rows = three.synapses(['2'], polarity='pre')
+    check('custom: a carried column named x does not overwrite the nanometre x',
+          sorted(rows['x'].tolist()) == [30.0, 40.0], rows.to_string())
+
+    # A cap with nothing to match reads the first blocks, not the file.
+    table_file = custom_ns['CodaTableFile'](syn_path)
+    head = table_file.read(columns=['pre_pt_root_id'], limit=3)
+    check('custom: a capped read with no match column stops at the cap',
+          len(head) == 3 and head['pre_pt_root_id'].tolist() == ['1', '1', '2'], head.to_string())
+    feather_head = custom_ns['CodaTableFile'](edges_path, format='feather').read(
+        columns=['post'], limit=2)
+    check('custom: a capped Feather read decodes only the columns asked for',
+          list(feather_head.columns) == ['post'] and len(feather_head) >= 2, feather_head.to_string())
+    repeated = pd.Series([720575940600000001, None, 720575940600000001, 7, 7, 7], dtype=object)
+    check('custom: a column that repeats its ids is cast once per id, the same answer',
+          custom_ns['coda_id_column'](repeated).tolist()
+          == ['720575940600000001', pd.NA, '720575940600000001', '7', '7', '7'],
+          str(custom_ns['coda_id_column'](repeated).tolist()))
+    check('custom: a whole-number float names the id, as idText reads it',
+          custom_ns['coda_typed_ids']([10003.0, 1.5, float('nan')], True) == [10003])
+    # A Feather lookup on a float column and on a dictionary one.
+    odd_path = f'{tmp}/odd.feather'
+    feather.write_feather(pa.table({
+        'bodyId': pa.array([1.0, 2.0, 3.0]),
+        'kind': pa.array(['a', 'b', 'a']).dictionary_encode(),
+    }), odd_path)
+    odd = custom_ns['CodaTableFile'](odd_path, format='feather')
+    check('custom: a Feather lookup on a float column',
+          odd.read(where={'bodyId': ['2']})['bodyId'].tolist() == [2.0])
+    check('custom: a Feather lookup on a dictionary column',
+          len(odd.read(where={'kind': ['a']})) == 2)
+    no_parts = custom_ns['CodaCustomDataset'](neurons=pd.DataFrame({'neuronId': ['1']}))
+    try:
+        no_parts.edge_list()
+        check('custom: no connectivity is said in words', False)
+    except ValueError as err:
+        check('custom: no connectivity is said in words', 'no connectivity' in str(err), str(err))
+
+    # A table file read by id: an 18-digit id survives the round trip as text, and an empty id
+    # list reads nothing rather than everything.
+    big = 720575940628857210
+    pq.write_table(pa.table({'root_id': pa.array([big, big + 1], pa.int64()), 'v': [1, 2]}),
+                   f'{tmp}/big.parquet')
+    tf = custom_ns['CodaTableFile'](f'{tmp}/big.parquet', text_columns=['root_id'])
+    hit = tf.read(where={'root_id': [str(big)]})
+    check('custom: an eighteen-digit id is matched and returned exactly, as text',
+          list(hit['root_id']) == [str(big)], str(list(hit['root_id'])))
+    # Exported before the canvas read the footer: no text_columns, so the name rule decides.
+    unnamed = custom_ns['CodaTableFile'](f'{tmp}/big.parquet').read()
+    check('custom: an id column is text with no text_columns given, by its name',
+          unnamed['root_id'].tolist() == [str(big), str(big + 1)] and unnamed['v'].dtype.kind == 'i',
+          str(unnamed.dtypes.to_dict()))
+    check('custom: a lookup with no ids reads nothing',
+          len(tf.read(where={'root_id': []})) == 0)
 
 print()
 print(f'{len(fails)} failed' if fails else 'all passed')

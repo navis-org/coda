@@ -25,7 +25,7 @@
 
 import type { MatrixValue, NetworkValue, TableValue, Value } from '../../core/values'
 import { describeValue } from '../../core/values'
-import { formatCell, truncateLabel } from '../format'
+import { formatBytes, formatCell, truncateLabel } from '../format'
 
 /**
  * The most fields drawn down the panel, across every table in it.
@@ -254,6 +254,18 @@ export function portPreview(value: Value): PortPreview {
     case 'transform':
     case 'layers':
       return { headline, facts: [], tables: [] }
+
+    // The headline says what is in the file; what it costs to read and how wide it is are the
+    // two things it does not.
+    case 'tableFile':
+      return {
+        headline,
+        facts: [
+          { label: 'Size', value: formatBytes(value.bytes) },
+          { label: 'Columns', value: value.schema.columns.length.toLocaleString() },
+        ],
+        tables: [],
+      }
 
     default: {
       // A scalar, whose headline *is* the value — so there is nothing to add unless it is a

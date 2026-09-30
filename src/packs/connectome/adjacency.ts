@@ -112,6 +112,7 @@ export const adjacencyNode = packNode({
       // the request it still makes.
       ...(weight ? { weight } : {}),
       signal: ctx.signal,
+      onWarn: ctx.warn,
     })
 
     return { matrix, links: matrixToLinks(matrix) }

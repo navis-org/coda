@@ -25,7 +25,13 @@ import { parseDelimited } from '../../data/csv'
 import { putUpload } from '../../data/uploads'
 import { formatBytes, formatNumber } from '../format'
 import type { NodeBodyProps } from './nodeBodies'
-import { UploadAbsent, UploadFields, checkUploadSize, useUploadState } from './uploadCard'
+import {
+  SchemaListing,
+  UploadAbsent,
+  UploadFields,
+  checkUploadSize,
+  useUploadState,
+} from './uploadCard'
 
 /** Big enough that a header and a few rows are legible; small enough not to own the card. */
 const PASTE_ROWS = 4
@@ -156,24 +162,7 @@ export function UploadBody({ node, ctx, compact, setParam, onError }: NodeBodyPr
 
       {state === 'ready' && <UploadFields node={node} ctx={ctx} setParam={setParam} />}
 
-      {!compact && state === 'ready' && meta && (
-        <table className="upload-body__schema">
-          <thead>
-            <tr>
-              <th>Column</th>
-              <th>Type</th>
-            </tr>
-          </thead>
-          <tbody>
-            {meta.schema.columns.map((c) => (
-              <tr key={c.name}>
-                <td>{c.name}</td>
-                <td>{c.dtype}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      {!compact && state === 'ready' && meta && <SchemaListing schema={meta.schema} />}
     </div>
   )
 }

@@ -14,6 +14,7 @@ import type { PackDefinition } from '../../core/registry'
 import { adjacencyNode } from './adjacency'
 import { compareConnectivityNode } from './compareConnectivity'
 import { connectivityNode } from './connectivity'
+import { customDatasetNode } from './customDataset'
 import { influenceNode } from './influence'
 import { matchTypesNode } from './matchTypes'
 import { partnerVectorsNode } from './partnerVectors'
@@ -44,5 +45,7 @@ export const connectome: PackDefinition = {
     partnerVectorsNode,
     matchTypesNode,
     compareConnectivityNode,
+    // The first node added to this pack rather than moved into it, so a `connectome:` id.
+    customDatasetNode,
   ],
 }

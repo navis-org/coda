@@ -84,7 +84,6 @@ import { geometryFrame } from '../transforms/spaces'
 import { fetchRoiMeshSet } from './roiMeshes'
 import { superRoisFrom } from './roiHierarchy'
 import type { MeshResult, MeshSource } from '../precomputed'
-import { OVERSIZE } from '../precomputed/transport'
 import {
   DEFAULT_TRIANGLE_BUDGET,
   fetchCoarseMesh,
@@ -793,14 +792,12 @@ export class NeuPrintSource implements DataSource {
   ): Promise<CoarseGeometry | CoarseRefusal | undefined> {
     const source = await this.meshSourceFor(req.datasetId, req.signal)
     if (!source) return undefined
-    const mesh = await fetchCoarseMesh(
+    return fetchCoarseMesh(
       source,
       req.neuronId,
       req.signal ? { signal: req.signal } : {},
       req.detail,
     )
-    if (mesh === OVERSIZE) return { kind: 'refused', reason: 'too-large' }
-    return mesh && { kind: 'mesh', ...mesh }
   }
 
   async fetchConnectivity(req: ConnectivityRequest): Promise<TableValue> {

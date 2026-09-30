@@ -312,16 +312,17 @@ function ValuePreviewInner({
   }
 
   /*
-   * Scalars print themselves. A layout, a linkage, a transform and a layer set have nothing to
-   * draw on their own — an arrangement for someone else's nodes, a tree wired to no Dendrogram, a
-   * mapping with nothing passing through it, a layer with no scene to sit in — so all four fall
-   * back to the summary the footer shows.
+   * Scalars print themselves. A layout, a linkage, a transform, a layer set and a table file have
+   * nothing to draw on their own — an arrangement for someone else's nodes, a tree wired to no
+   * Dendrogram, a mapping with nothing passing through it, a layer with no scene to sit in, rows
+   * nobody has read yet — so all five fall back to the summary the footer shows.
    */
   const summarised =
     value.kind === 'layout' ||
     value.kind === 'linkage' ||
     value.kind === 'transform' ||
-    value.kind === 'layers'
+    value.kind === 'layers' ||
+    value.kind === 'tableFile'
   return <ViewerEmpty>{summarised ? describeValue(value) : String(value.value)}</ViewerEmpty>
 }
 

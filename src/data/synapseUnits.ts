@@ -171,11 +171,20 @@ export function resolveSynapseUnit(
  * What a source says when `minConfidence` reaches it and it has nothing to apply it to.
  *
  * One sentence rather than each backend's own, which is the half of `requireSkeletonRoute`'s
- * docstring that is about *wording* — "two wordings of it in the two that did". Two callers
- * today: a CAVE datastack whose synapse table declares no score column, and the mock. Silence was
- * defensible only while the node's default was 1 and excluded nothing; a control that starts at
- * off is one somebody has set by the time it arrives here.
+ * docstring that is about *wording* — "two wordings of it in the two that did". Said by a CAVE
+ * datastack whose synapse table declares no score column, by the mock, and by a Custom Dataset's
+ * synapse table (`warnIfConfidenceIgnored`, below, for the two that have no score at all).
+ * Silence was defensible only while the node's default was 1 and excluded nothing; a control that
+ * starts at off is one somebody has set by the time it arrives here.
  */
 export function confidenceIgnoredWarning(subject: string): string {
   return `${subject} has no per-synapse confidence, so Min confidence was ignored — every synapse is in the result.`
+}
+
+/** Say `confidenceIgnoredWarning` where a request set a floor — for a source with no score at all. */
+export function warnIfConfidenceIgnored(
+  subject: string,
+  req: { minConfidence?: number; onWarn?: (message: string) => void },
+): void {
+  if ((req.minConfidence ?? 0) > 0) req.onWarn?.(confidenceIgnoredWarning(subject))
 }

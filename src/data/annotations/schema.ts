@@ -45,13 +45,17 @@ export function withAnnotations(
     schemas.neurons.columns.find((c) => c.name === ID_COLUMN_NAME) ??
     column(ID_COLUMN_NAME, 'str')
   const labels = annotations.columns.filter((c) => c.name !== ID_COLUMN_NAME)
+  const points = schemas.morphology.columns.filter((c) => c.name === 'points')
   return {
     ...schemas,
     neurons: tableSchema(idColumn, ...labels),
+    // A label called `points` — a Skeletons table fed back in as the annotations — gives way to
+    // the count of the geometry fetched, which is what the row carries; two columns of one name
+    // are a table nothing can build.
     morphology: tableSchema(
       idColumn,
-      ...labels,
-      ...schemas.morphology.columns.filter((c) => c.name === 'points'),
+      ...labels.filter((c) => !points.some((p) => p.name === c.name)),
+      ...points,
     ),
   }
 }

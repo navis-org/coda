@@ -45,8 +45,24 @@ const BUILD_INPUTS = ['package.json', 'pnpm-lock.yaml', 'vite.mcp.config.ts']
  *
  * Raise it deliberately, with a reason — this is the only thing standing between the bundle and
  * the next library that reaches it. See `sizeBudget` below.
+ *
+ * 2,700 → 2,750 on 2026-09-29, for growth that is real rather than a library: the bundle measured
+ * 2,691 kB before the Custom Dataset and the table-file nodes (Link Table, Read Rows) and
+ * 2,740 kB after, the difference being their definitions, `CompositeSource` and the `data/files`
+ * glue the catalogue reaches. The readers (`apache-arrow`, `hyparquet`, `lz4js`) are external
+ * below; without that it was 3,216 kB.
+ *
+ * 2,750 → 2,800 the same day, for the help pages of Link Table and Read Rows (the node documents
+ * ride in the bundle for `coda_node_details`), which took it to 2,757 kB. Prose, not a library.
+ *
+ * 2,800 → 2,850 on 2026-09-29, for the Custom Dataset's edge list and synapse table — the wired
+ * edge sets, the synapse lookups and the node's params, which the catalogue reaches — at 2,801 kB.
+ * Code of ours; the readers they call stay external.
+ *
+ * 2,850 → 2,900 the same day, having measured 2,837 kB once the rest of that work had landed:
+ * the 2,801 above was taken part way through it, and 13 kB of headroom is not a loose budget.
  */
-const SIZE_BUDGET_KB = 2_700
+const SIZE_BUDGET_KB = 2_900
 
 /**
  * Fail the build if the bundle outgrows its budget.
@@ -61,6 +77,46 @@ const SIZE_BUDGET_KB = 2_700
  * later run byte-compare it. The budget is deliberately loose — headroom for ordinary growth, not
  * a ratchet — so it fires on a renderer-sized arrival and on nothing else.
  */
+/** The packages this bundle leaves out — see the `external` comment below for each one's reason. */
+const EXTERNAL = [
+  'three',
+  'three-mesh-bvh',
+  'apache-arrow',
+  'hyparquet',
+  'hyparquet/src/constants.js',
+  'hyparquet/src/thrift.js',
+  'hysnappy',
+  'lz4js',
+] as const
+
+/**
+ * Fail the build if an external is imported statically.
+ *
+ * An external is only safe as a *dynamic* import: the server that downloads this file installs
+ * none of them, so a static one makes the whole module fail to load — every tool, not just the
+ * node that needed the package. A module reached through `import()` is inlined here
+ * (`inlineDynamicImports`), and its own top-level import of an external is hoisted to the top of
+ * the bundle, so the rule is easy to break from three directories away.
+ */
+function importCheck(): Plugin {
+  return {
+    name: 'coda-mcp-import-check',
+    generateBundle(_options, bundle) {
+      const chunk = bundle['coda.js']
+      if (!chunk || chunk.type !== 'chunk') return
+      const external: readonly string[] = EXTERNAL
+      const statics = chunk.imports.filter((id) => external.includes(id))
+      if (statics.length === 0) return
+      this.error(
+        `dist/mcp/v1/coda.js imports ${statics.join(', ')} statically, so it cannot load where ` +
+          'those packages are not installed — which is every deployed MCP server. Load them ' +
+          "through `import('…')` at the point of use (`src/data/libraries.ts`), never at a " +
+          "module's top.",
+      )
+    },
+  }
+}
+
 function sizeBudget(): Plugin {
   return {
     name: 'coda-mcp-size-budget',
@@ -113,7 +169,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(version),
     __BUILD_ID__: JSON.stringify(BUILD_ID_PLACEHOLDER),
   },
-  plugins: [buildId(), sizeBudget()],
+  plugins: [buildId(), sizeBudget(), importCheck()],
   // Everything bundled: the file is fetched on its own, so there is no node_modules beside it.
   ssr: { noExternal: true, target: 'node' },
   build: {
@@ -147,11 +203,21 @@ export default defineConfig({
        * predate this list and moving them changes the artifact for nodes nobody was looking at,
        * so they are recorded here rather than done quietly.
        *
+       * `apache-arrow`, `hyparquet` and `lz4js` are the table-file readers (`src/data/files`),
+       * reached from Link Table's and Read Rows' `evaluate` — they took the file past its budget,
+       * **2,700 kB → 3,216 kB**, on arrival. `hysnappy` and the two `hyparquet/src/…` modules are
+       * the Parquet fast path's (`src/data/files/pages.ts`), each subpath named, a bare
+       * `'hyparquet'` matching only the package's root. **All of them are loaded through
+       * `src/data/libraries.ts`, never imported at a module's top**: an external that a lazily
+       * reached *module* imports statically is hoisted into a static import of this whole file,
+       * which then fails to load on every server that has not installed the package — shipped
+       * that way once, and found by an audit. `importCheck` below refuses it.
+       *
        * Left as a bare `import("three")` in the output rather than stubbed, so a future path that
        * really did reach one fails loudly at the call — `docs/mcp.md`'s terms, where a breaking
        * change is a `v2` directory and a silent wrong answer is the thing to avoid.
        */
-      external: ['three', 'three-mesh-bvh'],
+      external: [...EXTERNAL],
       output: {
         format: 'es',
         entryFileNames: 'coda.js',

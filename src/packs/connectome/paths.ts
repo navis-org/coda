@@ -360,6 +360,7 @@ export const pathsNode = packNode({
           collapseTypes,
           minWeight,
           signal: ctx.signal,
+          onWarn: ctx.warn,
         }),
       /*
        * A second query per hop, asked about the keys that hop returned. Not one query at the

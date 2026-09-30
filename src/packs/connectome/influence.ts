@@ -530,6 +530,7 @@ export const influenceNode = packNode({
           direction: hopDirection,
           minWeight,
           signal: ctx.signal,
+          onWarn: ctx.warn,
         }),
       FRONTIER_BATCH,
     )

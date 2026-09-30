@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { EdgeCsr } from './encode'
 import { EDGE_FORMAT, EdgeSetBuilder, edgeSetBytes } from './encode'
+import { splitWords } from '../files/reader'
 
 /** Every (source, target, weight) triple in one direction, for asserting against by hand. */
 function edgesOf(csr: EdgeCsr) {
@@ -28,6 +29,30 @@ function build(rows: [string, string, number][]) {
 }
 
 describe('EdgeSetBuilder', () => {
+  it('builds the same set from 64-bit words as from text, one route or both', () => {
+    const rows: [string, string, number][] = [
+      ['720575940628857210', '720575940626838909', 5],
+      ['720575940626838909', '720575940628857210', 2],
+      ['-5', '720575940628857210', 7],
+      ['720575940628857210', '720575940626838909', 1],
+    ]
+    const words = new EdgeSetBuilder()
+    rows.forEach(([pre, post, w], i) => {
+      // Half the rows each way, so an id first met as text is found again by its words.
+      if (i % 2) words.add(pre, post, w)
+      else
+        words.addWords(...splitWords(BigInt(pre)), ...splitWords(BigInt(post)), w, true, true)
+    })
+    expect(words.finish()).toEqual(build(rows))
+  })
+
+  it('reads one pair of words as two ids where one end is signed and the other is not', () => {
+    // All ones: -1 as an int64, 2^64 - 1 as a uint64.
+    const builder = new EdgeSetBuilder()
+    builder.addWords(0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 1, true, false)
+    expect(builder.finish().ids).toEqual(['-1', String(2n ** 64n - 1n)])
+  })
+
   it('keeps an eighteen-digit id exactly, which is the whole point of the dictionary', () => {
     // 720575940628857210 as a double is ...344 — a different neuron, invariant 8.
     const wide = '720575940628857210'

@@ -265,6 +265,11 @@ export interface DatasetRequest {
  */
 export interface EdgeAnswerableRequest extends DatasetRequest {
   edges?: DatasetEdges
+  /**
+   * Where an attached edge list says what it had to leave out — rows with a blank id or a weight
+   * that is not a number. Honoured by the funnel in `data/queries.ts`, never by a source.
+   */
+  onWarn?: (message: string) => void
 }
 
 export interface ConnectivityRequest extends EdgeAnswerableRequest {

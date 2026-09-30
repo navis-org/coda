@@ -326,6 +326,20 @@ describe('resolveColumn against a schema that has not arrived', () => {
     expect(resolveColumn(named(), { col: '' }, { in: T.table(SCHEMA) })).toBe('neuronId')
   })
 
+  it('keeps an optional picker’s chosen column too, the same before and after', () => {
+    /*
+     * An optional picker holding a column used to read as *off* until the schema arrived, so a
+     * node below anything that learns its columns by running — a table file, a URL — answered
+     * its first Run without the column and its second with it, re-keyed in between. The case
+     * was Read Rows' match column: the first Run read the whole file.
+     */
+    const optional = named({ optional: true })
+    const before = resolveColumn(optional, { col: 'type' }, { in: T.table() })
+    const after = resolveColumn(optional, { col: 'type' }, { in: T.table(SCHEMA) })
+    expect(before).toBe('type')
+    expect(before).toBe(after)
+  })
+
   it('leaves an optional picker off, because there empty is a choice', () => {
     /*
      * `out.scatter`'s `idColumn: ''` means "identify points by row index rather than by neuron

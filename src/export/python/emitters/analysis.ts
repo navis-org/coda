@@ -1564,6 +1564,7 @@ registerEmitter('neuron.cleanMeshes', (ctx) => {
   ctx.require('fastcore')
   ctx.require('numpy')
   ctx.require('navis')
+  ctx.helper('coda_mesh')
 
   const out = ctx.output('out')
   const p = meshCleanParamsFrom(ctx.params)
@@ -1623,7 +1624,7 @@ registerEmitter('neuron.cleanMeshes', (ctx) => {
     `_cleaned = []`,
     `for _neuron in navis.NeuronList(${src}):`,
     ...body,
-    `    _cleaned.append(navis.Mesh((v, f), id=_neuron.id, units=_neuron.units))`,
+    `    _cleaned.append(coda_mesh((v, f), id=_neuron.id, units=_neuron.units))`,
     `${out} = navis.NeuronList(_cleaned)`,
   ]
 })

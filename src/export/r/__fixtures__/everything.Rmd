@@ -1856,6 +1856,7 @@ google_sheet <- coda_join_annotations(upload_table, google_sheet)
   table_from_url,
   query = "queryId",
   target = "targetId",
+  score = "score",
   scores_are = "similarity",
   k = 5
 )

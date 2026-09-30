@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest'
 
 import '../nodes'
-import { findParam } from '../core/node'
+import { findParam, validateParamValue } from '../core/node'
 import { listableNodeDefs, requireNodeDef } from '../core/registry'
 import type { Value } from '../core/values'
 import { registerBuiltinSources } from '../data/builtins'
@@ -72,6 +72,29 @@ describe('curated demos', () => {
       expect(Object.keys(outputs).length).toBeGreaterThan(0)
       for (const [port, value] of Object.entries(outputs)) {
         expect(sizeOf(value), `${spec.focus}.${port} is empty`).toBeGreaterThan(0)
+      }
+    },
+  )
+})
+
+describe('the curated demos, param by param', () => {
+  /*
+   * An enum param holding a value outside its options still runs where the node falls back — which
+   * is how `direction: 'downstream'` on a Connectivity card survived, the options being
+   * `outputs | inputs | both`. Asked of every written param through the registry's own check,
+   * since a node's fallback is no promise.
+   */
+  it.each(CURATED.map((spec) => [spec.focus, spec] as const))(
+    '%s writes only values its params accept',
+    (_, spec) => {
+      for (const node of exampleGraph(spec).nodes) {
+        const def = requireNodeDef(node.type)
+        for (const [id, value] of Object.entries(node.params ?? {})) {
+          const param = findParam(def, id)
+          // The registry's own rule for a param's value, `multiEnum` and computed options included.
+          if (param)
+            expect(validateParamValue(param, value), `${node.type}.${id}`).toBeUndefined()
+        }
       }
     },
   )

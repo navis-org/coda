@@ -22,8 +22,8 @@ import type { ParamDef, ParamValues } from '../../core/node'
 import {
   changedParams,
   configurableParams,
-  hiddenParams,
   makeInferContext,
+  shownWhenWired,
 } from '../../core/node'
 import { getNodeDef } from '../../core/registry'
 import { hasHelp } from '../../help/registry'
@@ -46,7 +46,9 @@ import { CacheAge } from './CacheAge'
 import { DatasetCacheAge } from './DatasetCacheAge'
 import { nodeBody } from './nodeBodies'
 import { nodeIssues } from './nodeIssues'
+import { readerHints } from '../hints'
 import { NodeHints } from './NodeHints'
+import { useWiredInputs } from './useWiredInputs'
 import { OutputPort } from './OutputPort'
 import { NodeRunRing } from './NodeRunRing'
 import { STATE_GLYPH, STATE_TEXT } from './runState'
@@ -205,7 +207,17 @@ function CodaNodeViewImpl({
    * cannot draw either and the inspector is closed by default, so without this a node fetching
    * five times what its neighbour does looks identical to it.
    */
-  const hidden = useMemo(() => (def ? hiddenParams(def, node.params) : []), [def, node.params])
+  // The input ports carrying a wire, for the params drawn only then (`whenWired`).
+  const wired = useWiredInputs(id, def)
+  // The params this card could draw at all — `configurableParams`, less those whose socket is
+  // unwired (`whenWired`) — which the "hidden"/"more" wording below compares the hidden ones to.
+  const shown = useMemo(
+    () =>
+      def ? configurableParams(def, node.params).filter((p) => shownWhenWired(p, wired)) : [],
+    [def, node.params, wired],
+  )
+  // `hiddenParams`' rule — the advanced ones — read off `shown`, so the wiring rule is said once.
+  const hidden = useMemo(() => shown.filter((p) => p.advanced === true), [shown])
   /*
    * True when the inspector-only params are *all* this node has, which is what makes the hint
    * say "hidden" rather than "more" — Neuroglancer's nine, Skeletons' one. "More" is a claim
@@ -213,14 +225,10 @@ function CodaNodeViewImpl({
    *
    * Asked of the definition rather than of `visibleParams`, because a node with a body of its
    * own draws no generic rows while its body renders controls all the same: Explore's search
-   * box is on the card, so its advanced params are "more". Both sides come from
-   * `configurableParams`, or a node whose only other param is a nonce would say "more" while
-   * drawing nothing.
+   * box is on the card, so its advanced params are "more". Both sides come from `shown`, or a
+   * node whose only other param is a nonce would say "more" while drawing nothing.
    */
-  const onlyHidden = useMemo(
-    () => def !== undefined && hidden.length === configurableParams(def, node.params).length,
-    [def, hidden, node.params],
-  )
+  const onlyHidden = def !== undefined && hidden.length === shown.length
   const hiddenChanged = useMemo(
     () => changedParams(hidden, node.params).length,
     [hidden, node.params],
@@ -242,8 +250,9 @@ function CodaNodeViewImpl({
    * markup, but which tab a param is in is one answer in one place.
    */
   const buckets = useMemo(
-    () => (def ? bucketParams(def, node.params, (p) => !p.advanced) : []),
-    [def, node.params],
+    () =>
+      def ? bucketParams(def, node.params, (p) => !p.advanced && shownWhenWired(p, wired)) : [],
+    [def, node.params, wired],
   )
   const [tabId, setTabId] = useState<string | undefined>(undefined)
 
@@ -428,9 +437,10 @@ function CodaNodeViewImpl({
        * reader has dismissed, and this component is mounted once per card — the note on
        * `draggable` above states the rule that follows: a subscription here costs a call on
        * every write, per card. Almost no node carries a hint (a wizard graph has three), so
-       * mounting it everywhere would buy a live subscription per card to render nothing.
+       * mounting it everywhere would buy a live subscription per card to render nothing. A hint
+       * derived from this browser (`NodeDefinition.readerHints`) counts, and asking allocates nothing.
        */}
-      {node.hints?.length ? <NodeHints node={node} /> : null}
+      {node.hints?.length || readerHints(node).length ? <NodeHints node={node} /> : null}
       {/*
        * A sibling for the same reason the ring is: `.coda-node` clips with
        * `overflow: hidden`, and the resize handles straddle the card's edge. Inside, they
@@ -758,7 +768,7 @@ function CodaNodeViewImpl({
               bandParams.map((param) => (
                 <div
                   key={param.id}
-                  className={`param${param.kind === 'boolean' || param.kind === 'columns' ? ' param--wide' : ''}`}
+                  className={`param${param.kind === 'boolean' ? ' param--wide' : param.kind === 'columns' ? ' param--stacked' : ''}`}
                 >
                   <span className="param__label" title={param.help ?? param.label}>
                     {param.label}
@@ -880,6 +890,13 @@ function CodaNodeViewImpl({
                 void runNode(id)
               }}
             />
+            {/* A body's own foot control — Link Table's re-read — beside the age it belongs with. */}
+            {body?.Footer && (
+              <body.Footer
+                ctx={ctx}
+                setParam={(paramId, value) => setParam(id, paramId, value)}
+              />
+            )}
             {/*
              * The same clause for a dataset card, reading the cache rather than the run.
              *

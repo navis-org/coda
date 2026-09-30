@@ -44,6 +44,7 @@ import { SelectOneBody } from './SelectOneBody'
 import { SplitNeuronsBody } from './SplitNeuronsBody'
 import { ForEachBody } from './ForEachBody'
 import { UploadBody } from './UploadBody'
+import { LinkTableBody, LinkTableFooter } from './LinkTableBody'
 import { UploadMeshBody } from './UploadMeshBody'
 
 export interface NodeBodyProps {
@@ -66,8 +67,17 @@ export interface NodeBodyProps {
   onError: (message: string) => void
 }
 
+/** What a body's footer control is handed: the body's own, less what only a body draws with. */
+export type NodeFooterProps = Pick<NodeBodyProps, 'ctx' | 'setParam'>
+
 export interface NodeBodyEntry {
   Component: ComponentType<NodeBodyProps>
+  /**
+   * A control this body adds to the card's foot, beside the run state and the cache age — for a
+   * body whose re-read belongs where every other card's does. Link Table's ⟳ sat in the body,
+   * where no other card has one; the dataset cards' is in the foot.
+   */
+  Footer?: ComponentType<NodeFooterProps>
   /**
    * Whether the node offers the full-size overlay.
    *
@@ -178,6 +188,11 @@ export const NODE_BODIES: Record<string, NodeBodyEntry> = {
    * them does not belong on a canvas.
    */
   'core.uploadMesh': { Component: UploadMeshBody, expandable: true },
+  /*
+   * `expandable` for the upload cards' reason: the column listing is what somebody checks after
+   * opening a file, and a wide synapse table's does not belong on a canvas.
+   */
+  'core.linkTable': { Component: LinkTableBody, Footer: LinkTableFooter, expandable: true },
   /*
    * Not `expandable`: the whole widget is a row of buttons and a checkbox, so an overlay of it is
    * whitespace, and what is worth looking at full size is whatever the Item port is wired to.

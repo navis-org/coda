@@ -19,13 +19,8 @@ import type { DType } from '../../core/types'
 import { isNumericDType } from '../../core/types'
 import { tableFromRows } from '../../core/values'
 import { rawFileUrl } from '../../data/rawFileUrl'
-import type {
-  AggFn,
-  FilterOp,
-  JoinHow,
-  NormalizeMode,
-  SampleMode,
-} from '../../nodes/lib/tableOps'
+import type { FilterOp } from '../../core/rowPredicate'
+import type { AggFn, JoinHow, NormalizeMode, SampleMode } from '../../nodes/lib/tableOps'
 import {
   FILTER_TABLE_DEFAULT_OP,
   NORMALIZE_OPTIONS,
@@ -60,7 +55,7 @@ export type FilterComparison = {
   | {
       numeric: true
       /**
-       * Whether a missing cell passes the comparison, as the canvas answers it: `makePredicate`
+       * Whether a missing cell passes the comparison, as the canvas answers it: `rowPredicate`
        * reads a null through `Number`, so on a numeric column it is **0** — kept by `== 0` and by
        * `!= 5`, dropped by `!= 0` and by every ordering. Each renderer spells it only where its
        * library's default for a missing value disagrees.
@@ -78,7 +73,7 @@ export type FilterComparison = {
  * The canvas's own `filterTable` over a single null cell: whether it keeps the row, or the error
  * it throws.
  *
- * Asked of the node's code rather than restated, because both answers are in `makePredicate` and
+ * Asked of the node's code rather than restated, because both answers are in `rowPredicate` and
  * a copy of either is how a document comes to filter differently from its card. It throws
  * before it reads a row, so one row is enough for both questions.
  */

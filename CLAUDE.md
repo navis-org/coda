@@ -198,6 +198,22 @@ rule belongs to one area, its record is in that area's doc.
   of one scope drift into a guard that passes while `pnpm format` still rewrites the tree. One
   documented exception goes the other way: a `<!-- prettier-ignore -->` pinning each
   `<meta name="description">` onto one line, a wrapped tag being one `grep` reports missing.
+- **A table file is a reference, and only a reader may take one.** `tableFile` is its own kind and
+  deliberately not assignable to `table`, or a node taking a table would read a multi-gigabyte file
+  whole. Link Table reads the footer; Read Rows and the Custom Dataset read blocks. **Filter Table
+  is the one exception and reads nothing**: its condition rides on the file and every reader
+  applies it to the rows it fetched (`readFileRows` takes it off the value) — sound only because a
+  row filter is row-local, so nothing else may be deferred this way. A block index is saved only
+  when every block's range was seen. **hyparquet is patched** (`patches/`, keyed to its version,
+  so an upgrade drops it silently) — without it an optional int64 column decodes a BigInt per
+  row, half of a scan's time; a keyed read is split over workers and both synapse ends are one
+  pass. **A keyed Parquet read bypasses the library where it can** (`pages.ts`) and must refuse
+  (`Unsupported`) anything it does not read exactly — slower, never different. See
+  [docs/nodes-io.md](docs/nodes-io.md).
+- **A long-lived closure keeps its whole creating scope alive.** V8 gives every closure made in one
+  scope the same context, so anything kept past its build — a loader, a tree — is made in a
+  function holding only what it reads. It pinned whole tables once and a build's arrays once; see
+  the distances rule below and [docs/datasets.md](docs/datasets.md).
 
 ### Canvas, cards and layout — [docs/canvas.md](docs/canvas.md)
 
@@ -280,7 +296,8 @@ rule belongs to one area, its record is in that area's doc.
   hint's text** — in the document it would be an undo step, a dirty file, and a share link arriving
   pre-dismissed for the person being shown the workflow. Cost: reworded copy comes back for
   everybody, hence **Show Hints** and **Show Hints Again**. *Writing* one is an edit, live under
-  the lock like a rename. See also [docs/wizard.md](docs/wizard.md).
+  the lock like a rename. A sentence true of the **reader's browser** rather than the workflow is
+  **derived** (`NodeDefinition.readerHints`), never written. See also [docs/wizard.md](docs/wizard.md).
 - **A group frame is not a React Flow node — and a *folded* one is, the same argument reaching the
   opposite answer.** Expanded: `ViewportPortal` at `z-index: -1`, `pointer-events: stroke` on the
   rect alone, `nopan` because panning is d3-zoom's *native* listener; membership is node ids and the
@@ -343,6 +360,10 @@ rule belongs to one area, its record is in that area's doc.
   The empty table carries the **dataset's own** neuron schema, or every column picker downstream
   empties on Run and reads as a broken dataset. The *order* of a deletion and a rename is
   load-bearing: delete the params first and an old file becomes a silent whole-connectome query.
+- **`whenWired` hides a param while its socket is unwired — on the card and in the inspector, never
+  in a node body**, which is handed no wiring (`paramFold.test.tsx` refuses the flag there). Display
+  only, so it stays in the provenance key; `true` means a column picker's own `from`. See
+  [docs/adding-a-node.md](docs/adding-a-node.md).
 - **A dataset-level filter is not a filter row, the row wins, and the filters OR.** The population
   checkboxes on a neuPrint dataset node are **OR-ed** — a second ticked box lets *more* rows
   through. `typed` matches column names **ending** in `type`. `findNeuronsCypher` drops the

@@ -17,7 +17,7 @@ import { addEdge, addNode, emptyGraph } from './graph'
 import { node } from '../test/graph'
 import { checkConnection, inferGraph } from './inference'
 import { resolvedSocket, socketAccepts, socketLabel, socketTier } from './sockets'
-import { GEOMETRY_KINDS, T } from './types'
+import { GEOMETRY_KINDS, T, TABLE_OR_FILE_KINDS } from './types'
 import { listableNodeDefs, registerNode, requireNodeDef } from './registry'
 import { allInputPorts, allOutputPorts } from './ports'
 
@@ -109,8 +109,18 @@ describe('socketTier', () => {
     const wire = { type: T.neurons() }
     expect(socketTier({ type: T.neurons() }, wire)).toBe(0)
     expect(socketTier({ type: T.table() }, wire)).toBe(1)
-    expect(socketTier({ type: T.any(), kinds: ['table', 'neurons'] }, wire)).toBe(2)
+    expect(socketTier({ type: T.any(), kinds: ['table', 'neurons', 'skeletons'] }, wire)).toBe(
+      2,
+    )
     expect(socketTier({ type: T.any() }, wire)).toBe(3)
+  })
+
+  it('ranks a table port that also takes its file form as the table port it is', () => {
+    const tableOrFile = { type: T.any(), kinds: TABLE_OR_FILE_KINDS }
+    expect(socketTier(tableOrFile, { type: T.table() })).toBe(0)
+    expect(socketTier(tableOrFile, { type: T.neurons() })).toBe(1)
+    expect(socketTier(tableOrFile, { type: T.tableFile() })).toBe(1)
+    expect(socketLabel(tableOrFile)).toBe('Table')
   })
 
   /*

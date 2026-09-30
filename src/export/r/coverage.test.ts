@@ -14,6 +14,17 @@ import './exporter'
 import { getEmitter, registeredEmitterTypes } from './registry'
 
 const NO_EMITTER: Record<string, string> = {
+  'core.linkTable':
+    '`arrow::open_dataset` in R. The Python exporter emits it as a `CodaTableFile` beside Read ' +
+    'Rows and the Custom Dataset; R waits on a port of that helper, so the three agree about ' +
+    'which columns are read as text.',
+  'core.readRows':
+    'A `dplyr::filter` over `arrow::open_dataset`, emitted with Link Table, whose path and ' +
+    'text columns it needs.',
+  'connectome:customDataset':
+    'Assembled from parts, with an object standing in for `CompositeSource` so downstream ' +
+    'chunks have something to call. The Python exporter has one (`CodaCustomDataset`); an R ' +
+    'port, and the Custom branches of the query emitters beside it, is the next step.',
   'cortex:depth':
     'Depth, layer and lateral position through a cortical frame (`packs/cortex/frames.ts`), the ' +
     'gallery\u2019s own reason: no notebook library carries the frame. The arithmetic is a ' +
@@ -94,9 +105,8 @@ const NO_EMITTER: Record<string, string> = {
     'the same absent client.',
   'dataset.ngsource':
     'A neuroglancer datasource. `fafbseg::read_cloudvolume_meshes` is the R counterpart of the ' +
-    'cloudvolume route named in the Python note, and it is blocked on the same thing rather ' +
-    'than on the language: this document is built on neuprintr, so the Meshes node downstream ' +
-    'has nothing to emit against a bucket either.',
+    'Python exporter\u2019s `CodaPrecomputed`, and it waits on the same thing: this document is ' +
+    'built on neuprintr, so the Meshes node downstream has no bucket branch to emit.',
   'neuron.skeletonPoints':
     'Skeleton to Points. `nat::resample` and the resampled neuron\u2019s point table are the nearest thing, and a ' +
     'different placement: nodes laid every Spacing from the root, with no `cable` weight, so ' +

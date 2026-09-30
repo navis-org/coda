@@ -860,10 +860,13 @@ describe('oversize accounting', () => {
     // has to turn `oversize` back into an answer its caller can tell from "there is no mesh".
     // Distinct bases rather than `refresh`, which `fetchCoarseMesh` does not take: the cache key
     // carries the base, so a fresh one is a cold cache.
-    expect(await fetchCoarseMesh(flatSource('mem://d'), 'huge')).toBe(OVERSIZE)
+    expect(await fetchCoarseMesh(flatSource('mem://d'), 'huge')).toEqual({
+      kind: 'refused',
+      reason: 'too-large',
+    })
     expect(await fetchCoarseMesh(flatSource('mem://e'), 'absent')).toBeUndefined()
     const mesh = await fetchCoarseMesh(flatSource('mem://f'), 'ok')
-    if (!mesh || mesh === OVERSIZE) throw new Error('expected a mesh')
+    if (mesh?.kind !== 'mesh') throw new Error('expected a mesh')
     expect(mesh.indices.length).toBe(3)
   })
 

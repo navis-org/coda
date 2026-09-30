@@ -859,6 +859,22 @@ sentence about **the graph** is a note. What is left is four rules.
 Wizard hints are ordinary hints here — editable, deletable — which is what somebody tidying a
 generated workflow for colleagues wants, and why there is no "authored by" flag to keep true.
 
+**A sentence true of the reader's browser is derived, never written.** Link Table in Firefox or
+Safari cannot keep a local file across a reload (no File System Access picker, so no handle to
+remember), and the card says so in a hint. Written into the node when a Firefox user added it, that
+sentence would ride a share link to a Chrome user, for whom it is false, and never appear on the
+same card opened in Firefox from somebody else's file — the document is the wrong home for a fact
+about whoever is reading it, which is the same argument that put dismissal in `localStorage`. So
+the definition answers per card from its params and the browser (`NodeDefinition.readerHints`, on
+the definition rather than in a UI table so the type is declared in one place), and `splitHints`
+folds the answer in after the document's own: the same box, the same ×, dismissal on the same text
+key, and **Show Hints** / **Show Hints Again** bring it back. What it lacks is the ✎ — a box gets one
+only when its hint is in `node.hints`. The answer must be a module constant or an empty one,
+because `CodaNodeView` asks on every render to decide whether to mount `NodeHints` at all. Whether
+the browser remembers is `remembersLocalFiles` in `data/files/registry.ts`, the one statement the
+card's picker and the missing-file sentence read too. It appears only once a *local* file is
+chosen: a URL survives a reload everywhere.
+
 ## Groups
 
 One box around a set of cards, with an optional title above its top-left corner. Made from the

@@ -577,6 +577,7 @@ export const connectivityNode = packNode({
           // `collect` copies it with the rest of the row.
           ...(properties.length ? { edgeProperties: properties } : {}),
           signal: ctx.signal,
+          onWarn: ctx.warn,
         }),
     })
 

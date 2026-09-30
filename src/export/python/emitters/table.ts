@@ -17,6 +17,7 @@
  */
 
 import {
+  FILTER_TABLE_DEFAULT_OP,
   LABEL_COLUMN_NAME,
   aggColumnName,
   combineLayout,
@@ -36,6 +37,7 @@ import { asFrame } from '../../neutral'
 import type { ReduceStat } from '../../../nodes/lib/matrixReduce'
 import { readReduceOptions, reduceColumnName } from '../../../nodes/lib/matrixReduce'
 import type { AggFn } from '../../../nodes/lib/tableOps'
+import type { ParamValues } from '../../../core/node'
 import type { CellValue } from '../../../core/values'
 import type { DType } from '../../../core/types'
 import { NUMERIC_DTYPES } from '../../../core/types'
@@ -51,6 +53,7 @@ import type { StackPlan } from '../../plans/stack'
 import { stackPlan } from '../../plans/stack'
 import type { FilterComparison, SortNote } from '../../plans/table'
 import {
+  filterComparison,
   filterTablePlan,
   groupByPlan,
   joinPlan,
@@ -205,6 +208,25 @@ export function pyFilterMask(frame: string, comparison: FilterComparison): Filte
   }
 }
 
+/**
+ * A condition whose column's type was not known at export — an upstream that had not run, a file
+ * whose footer the canvas had not read — which is what decides whether `≥ 2` compares numbers or
+ * text. The cell asks the column itself when it runs, the one place the answer is: a numeric
+ * threshold compared as text keeps plausible, wrong rows and says nothing.
+ */
+function unknownDtypeMask(frame: string, params: ParamValues, column: string): FilterMask {
+  const [asNumber, asText] = (['f64', 'str'] as const).map((dtype) =>
+    pyFilterMask(frame, filterComparison(params, column, dtype, FILTER_TABLE_DEFAULT_OP)),
+  )
+  // One mask where the two readings agree — `is empty` asks the same of either.
+  if (asNumber!.mask === undefined || asNumber!.mask === asText!.mask) return asText!
+  if (asText!.mask === undefined) return asNumber!
+  return {
+    mask: `(${asNumber!.mask}) if pd.api.types.is_numeric_dtype(${frame}[${pyStr(column)}]) else (${asText!.mask})`,
+    notes: asText!.notes,
+  }
+}
+
 registerEmitter('core.filterTable', (ctx) => {
   const src = ctx.wired('in')
   const plan = filterTablePlan(ctx)
@@ -212,11 +234,21 @@ registerEmitter('core.filterTable', (ctx) => {
 
   ctx.require('pandas')
   const out = ctx.output('out')
-  const built = pyFilterMask(src, plan)
+  // Below a Link Table nothing is read here: `CodaTableFile.where` carries the same mask to the
+  // file's reads (`data/files/filters.ts` on the canvas).
+  const file = ctx.inputType('in')?.kind === 'tableFile'
+  const frame = file ? 'df' : src
+  const built = dtypeOf(ctx, 'in', plan.column)
+    ? pyFilterMask(frame, plan)
+    : unknownDtypeMask(frame, ctx.params, plan.column)
   if (built.mask === undefined) return ctx.todo(built.reason)
 
   const lines = built.notes.flatMap((note) => ctx.note(note))
-  lines.push(`${out} = ${src}[${built.mask}]`)
+  lines.push(
+    file
+      ? `${out} = ${src}.where([${pyStr(plan.column)}], lambda df: ${built.mask})`
+      : `${out} = ${src}[${built.mask}]`,
+  )
   return lines
 })
 

@@ -69,3 +69,78 @@ export class LruMap<K, V> {
     if (!oldest.done) this.entries.delete(oldest.value)
   }
 }
+
+/**
+ * An `LruMap` keyed by string whose entries also stay for as long as an **owner** holds them.
+ *
+ * For a handle a value carries by id — a Custom Dataset's wired edge list, synapse table and build
+ * — whose registry entry the value cannot answer without. Bounded by recency alone, a sixteenth
+ * edit elsewhere evicted the entry behind a dataset value still in the scheduler's cache, and a
+ * question on it failed with advice (run the node again) that could not work: the cached result
+ * was fresh, so Run skipped it. `pin` ties an entry's life to the value itself — a
+ * `FinalizationRegistry` lets go once the owner is collected — and the recency bound goes on
+ * sweeping everything nothing has pinned yet. A `get` is a use, so it refreshes recency.
+ */
+export class PinnedLru<V> {
+  private readonly recent: LruMap<string, V>
+  /** Pinned entries, out of `recent` so they take no slot there, with how many owners hold each. */
+  private readonly pinned = new Map<string, { value: V; owners: number }>()
+  /**
+   * Bumped by `clear`, which forgets every pin: an owner collected afterwards must not release a
+   * pin made since under the same key.
+   */
+  private generation = 0
+  private readonly registry = new FinalizationRegistry<{ key: string; generation: number }>(
+    ({ key, generation }) => {
+      if (generation === this.generation) this.release(key)
+    },
+  )
+
+  constructor(max: number) {
+    this.recent = new LruMap(max)
+  }
+
+  get(key: string): V | undefined {
+    const held = this.pinned.get(key)
+    if (held) return held.value
+    const value = this.recent.get(key)
+    if (value !== undefined) this.recent.set(key, value)
+    return value
+  }
+
+  set(key: string, value: V): void {
+    const held = this.pinned.get(key)
+    if (held) held.value = value
+    else this.recent.set(key, value)
+  }
+
+  /** Keep `key`'s entry for as long as `owner` is reachable. Nothing where there is no entry. */
+  pin(owner: object, key: string): void {
+    const held = this.pinned.get(key)
+    if (held) held.owners++
+    else {
+      const value = this.recent.get(key)
+      if (value === undefined) return
+      this.recent.delete(key)
+      this.pinned.set(key, { value, owners: 1 })
+    }
+    this.registry.register(owner, { key, generation: this.generation })
+  }
+
+  clear(): void {
+    this.recent.clear()
+    this.pinned.clear()
+    this.generation++
+  }
+
+  /**
+   * The last owner gone: forgotten at once. Nothing can ask for it again — a key is a value's
+   * provenance, and the value is what has gone — while an entry may hold a whole in-memory table,
+   * which sent back to recency stayed alive through the next sixteen edits.
+   */
+  private release(key: string): void {
+    const held = this.pinned.get(key)
+    if (!held || --held.owners > 0) return
+    this.pinned.delete(key)
+  }
+}

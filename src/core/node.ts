@@ -15,6 +15,7 @@
 
 import type { DataSource } from '../data/source'
 import type { CompanionSpec } from './companion'
+import type { NodeHint } from './graph'
 import { ID_COLUMN_NAME } from './ids'
 import type { AttributePart, CodaType, DType, Kind, TableSchema } from './types'
 import { attributeSchema, columnsOfType, schemaOf } from './types'
@@ -348,6 +349,26 @@ interface ParamBase {
   internal?: boolean
   /** Conditional visibility, evaluated against the node's current params. */
   visibleIf?: (params: ParamValues) => boolean
+  /**
+   * Drawn only while this input port carries a wire — on the card and in the inspector alike.
+   *
+   * For a node with several optional sockets, each with its own settings: the Custom Dataset's
+   * synapse pickers mean nothing until a synapse table is wired, and drawn beside every other
+   * socket's they made a card taller than the graph around it. `visibleIf` cannot say this — it
+   * sees params, never wiring — and a node body would be a whole card to say one thing.
+   *
+   * **Display only, and deliberately not `visibleIf`'s other half:** a param hidden this way stays
+   * in the provenance key (`normalizeParams` knows nothing of wiring), which costs nothing — an
+   * unwired socket's settings reach no `evaluate` — and keeps the key a function of params alone.
+   * `registerNode` refuses a port the node does not declare. `true` names a column picker's own
+   * `from` port, which is nearly always the one meant.
+   *
+   * Read by the card, its `… N more` count and the inspector. Not by a node **body**, which is
+   * handed no wiring — `paramFold.test.tsx` refuses the flag on a type with one — nor by the
+   * readers that list params rather than draw them (the assistant catalogue, help figures, a
+   * frame's exposed params), which is deliberate: a hidden control is still a setting.
+   */
+  whenWired?: string | true
   /**
    * Affects only how a result is *displayed*, never what `evaluate` returns.
    *
@@ -1334,6 +1355,17 @@ export interface NodeDefinition<P extends ParamValues = ParamValues> {
    */
   formerTypes?: readonly string[]
   /**
+   * Hints true of the **reader's browser** rather than of the workflow — Link Table's "this browser
+   * cannot keep a local file across a reload". Drawn on the card beside the document's own hints
+   * (`NodeHint`) with the same box and the same dismissal, and never written to the document: a
+   * sentence saved when a Firefox user added the node would ride a share link to a Chrome user,
+   * for whom it is false. See "Hints on a card" in `docs/canvas.md`.
+   *
+   * **Return a module-level constant**, or an empty one: the card asks on every render to decide
+   * whether to mount its hint stack at all.
+   */
+  readerHints?(params: P): readonly NodeHint[]
+  /**
    * Output types given input types and params. Omit for nodes whose outputs are fully
    * described by their static `outputs[].type`. Must not throw — return the static type
    * when inputs are missing or inconsistent.
@@ -1619,6 +1651,21 @@ export function hiddenParams(def: NodeDefinition, values: ParamValues): ParamDef
   return configurableParams(def, values).filter((p) => p.advanced === true)
 }
 
+/** The port a param's `whenWired` names — its own `from` for `true` — or undefined for none. */
+export function whenWiredPort(param: ParamDef): string | undefined {
+  if (param.whenWired !== true) return param.whenWired
+  return 'from' in param && typeof param.from === 'string' ? param.from : undefined
+}
+
+/**
+ * Whether a param is drawn, given which input ports carry a wire — `ParamBase.whenWired`'s rule,
+ * once, for the card, its "… N more" count and the inspector.
+ */
+export function shownWhenWired(param: ParamDef, wired: ReadonlySet<string>): boolean {
+  const port = whenWiredPort(param)
+  return port === undefined || wired.has(port)
+}
+
 /**
  * Of `params`, those carrying a value somebody chose.
  *
@@ -1671,7 +1718,9 @@ function differsFromDefault(value: ParamValue | undefined, fallback: ParamValue 
  * about the column you picked beats a quiet success on one you did not.
  *
  * `optional` still answers *off*, and before rule 2 — that is what optional means, and a
- * decoration pointed at a missing column has a sensible nothing to do.
+ * decoration pointed at a missing column has a sensible nothing to do. But only against a schema
+ * that is *known*: while it is not, an optional picker holding a column keeps it like any other
+ * (below), since off needs a schema to be off against.
  *
  * **Rule 3 is skipped entirely when the schema is unknown**, which is `resolveColumns`' guard in
  * the form that fits the singular and was missing here. "The first compatible column" is an
@@ -1714,11 +1763,17 @@ export function resolveColumn(
    */
   const chosen = saved || columnAbsence(param)
   if (chosen && available.includes(chosen)) return chosen
+  /*
+   * A schema this picker cannot see is not a schema without this column in it, so there is
+   * nothing here to pick a first compatible column *from* — and nothing to turn an optional one
+   * off over. Asked before the optional rule, which it used to follow: an optional picker holding
+   * a column read as *off* until its upstream had run, so a node below a table file answered its
+   * first Run without its match column and its second with it, re-keyed in between. Empty on an
+   * optional picker is still a choice — `chosen` is `''` there and this answers undefined.
+   */
+  if (!columnsKnown(param, inputs, params)) return chosen || undefined
   if (param.optional) return undefined
   if (chosen && chosen !== param.default) return chosen
-  // A schema this picker cannot see is not a schema without this column in it, so there is
-  // nothing here to pick a first compatible column *from*.
-  if (!columnsKnown(param, inputs, params)) return chosen || undefined
   // Undefined when there is nothing to offer, which every caller already handles.
   return available[0]
 }

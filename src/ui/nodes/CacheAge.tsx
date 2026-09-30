@@ -19,7 +19,7 @@
  * makes the number believable the day it says `28d`.
  */
 
-import { useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 
 import { formatAge } from '../format'
 
@@ -72,18 +72,42 @@ export function CacheAge({ fetchedAt, onRefresh, empty, title }: CacheAgeProps) 
   }
   const age = formatAge(Date.now() - fetchedAt)
   return (
+    <RefreshButton
+      title={`Data read ${age} ago — click to fetch it again${title ? `. ${title}` : ''}`}
+      onRefresh={onRefresh}
+    >
+      cached {age} ago
+    </RefreshButton>
+  )
+}
+
+/**
+ * The clause as a button: its words and a ⟳. Exported for a foot control whose words are not an
+ * age — Link Table's "read again" after a failed read, the one case where no age still wants the
+ * button `empty` withholds on purpose.
+ */
+export function RefreshButton({
+  title,
+  onRefresh,
+  children,
+}: {
+  title: string
+  onRefresh: () => void
+  children: ReactNode
+}) {
+  return (
     <button
       type="button"
       className="coda-node__cache nodrag"
       // `nodrag` because the foot sits on a draggable card, and a control that pans the canvas
       // when you press it is not a control.
-      title={`Data read ${age} ago — click to fetch it again${title ? `. ${title}` : ''}`}
+      title={title}
       onClick={(event) => {
         event.stopPropagation()
         onRefresh()
       }}
     >
-      cached {age} ago <span aria-hidden="true">⟳</span>
+      {children} <span aria-hidden="true">⟳</span>
     </button>
   )
 }

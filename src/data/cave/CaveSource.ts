@@ -102,7 +102,6 @@ import {
 } from './meshes'
 import { achievedDownsample, reductionFor, reductionKey } from '../meshDecimate'
 import type { MeshResult, MeshSource } from '../precomputed'
-import { OVERSIZE } from '../precomputed/transport'
 import {
   DEFAULT_TRIANGLE_BUDGET,
   fetchCoarseMesh,
@@ -151,6 +150,7 @@ import {
 } from './datastack'
 import { codaColumn, defaultSchemas, neuronSchemaFor, schemasFor } from './schema'
 import { withAnnotations } from '../annotations/schema'
+import { annotationIndex, morphologyAttributes } from '../annotations/labels'
 import { L2_SKELETON_WARN, readL2Skeletons } from './l2'
 import { byteLengthOf, skeletonBytes, cachedGeometry } from '../geometryCache'
 import { caveScene } from './scene'
@@ -2175,9 +2175,7 @@ export class CaveSource implements DataSource {
 
     const pyramid = await this.flatMeshDir(spec, parsed.version, req.signal)
     if (pyramid) {
-      const mesh = await fetchCoarseMesh(pyramid, req.neuronId, options, req.detail)
-      if (mesh === OVERSIZE) return { kind: 'refused', reason: 'too-large' }
-      return mesh && { kind: 'mesh', ...mesh }
+      return fetchCoarseMesh(pyramid, req.neuronId, options, req.detail)
     }
 
     const cached = await this.serviceThumbnail(spec.datastack, req.neuronId, options)
@@ -2364,25 +2362,19 @@ export class CaveSource implements DataSource {
   }
 
   /**
-   * The table itself, synchronous, so a partial answer can be assembled inside a callback.
-   *
-   * Only the id and the point count are read, which both geometry kinds carry — so meshes and
-   * skeletons share this rather than each building an attribute table that could disagree about
-   * which columns a morphology row has.
+   * The table itself, synchronous, so a partial answer can be assembled inside a callback — the
+   * shared row (`morphologyAttributes`), with this datastack's `type` where no chain supplies one.
    */
   private morphologyTable(
     req: GeometryRequest,
     items: ReadonlyArray<{ id: string; positions: Float32Array }>,
     types: Map<string, string> | undefined,
   ): TableValue {
-    return tableFromRows(
-      withAnnotations(this.schemasFor(req.datasetId), req.annotations?.table.schema).morphology,
-      items.map((item) => ({
-        [ID_COLUMN_NAME]: item.id,
-        ...labelsFor(req.annotations, item.id),
-        ...(types ? { type: types.get(item.id) ?? null } : {}),
-        points: item.positions.length / 3,
-      })),
+    return morphologyAttributes(
+      this.schemasFor(req.datasetId),
+      req.annotations,
+      items,
+      types ? (id) => ({ type: types.get(id) ?? null }) : undefined,
     )
   }
 
@@ -2545,45 +2537,6 @@ function joinIndex(
     }
   }
   return makeTable(schema, data, 'neurons')
-}
-
-/** One neuron's labels out of a chain, by id. */
-function labelsFor(
-  annotations: DatasetAnnotations | undefined,
-  id: string,
-): Record<string, CellValue> {
-  if (!annotations) return {}
-  const index = annotationIndex(annotations.table)
-  const row = index.get(id)
-  if (row === undefined) return {}
-  const labels: Record<string, CellValue> = {}
-  for (const col of annotations.table.schema.columns) {
-    if (col.name === ID_COLUMN_NAME) continue
-    labels[col.name] = annotations.table.data[col.name]?.[row] ?? null
-  }
-  return labels
-}
-
-/**
- * Row index of an annotation table, built once per table.
- *
- * A `WeakMap` on the table itself, `typesOf`'s idiom: `labelsFor` is called per item, and
- * rebuilding a 58,000-entry map twenty times over to place twenty meshes is the case that memo
- * exists for.
- */
-const annotationRows = new WeakMap<TableValue, Map<string, number>>()
-
-function annotationIndex(table: TableValue): Map<string, number> {
-  const cached = annotationRows.get(table)
-  if (cached) return cached
-  const index = new Map<string, number>()
-  const ids = table.data[ID_COLUMN_NAME] ?? []
-  for (let i = 0; i < table.length; i++) {
-    const id = String(ids[i] ?? '')
-    if (id && !index.has(id)) index.set(id, i)
-  }
-  annotationRows.set(table, index)
-  return index
 }
 
 /**

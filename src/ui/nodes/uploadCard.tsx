@@ -32,6 +32,7 @@
 import { useSyncExternalStore } from 'react'
 
 import { getNodeDef } from '../../core/registry'
+import type { TableSchema } from '../../core/types'
 import { ParamField } from '../params/ParamField'
 import { cardParams } from '../params/paramGroups'
 import type { NodeBodyProps } from './nodeBodies'
@@ -169,5 +170,30 @@ export function UploadAbsent({
 }) {
   return (
     <span className="upload-body__absent">⚠ {uploadMissingReason(fileName, kind, 'card')}</span>
+  )
+}
+
+/**
+ * A file's columns and their types, which is what somebody checks after bringing one in — drawn
+ * the same way on every card that brings a file in, so a third card does not grow a third copy.
+ */
+export function SchemaListing({ schema }: { schema: TableSchema }) {
+  return (
+    <table className="upload-body__schema">
+      <thead>
+        <tr>
+          <th>Column</th>
+          <th>Type</th>
+        </tr>
+      </thead>
+      <tbody>
+        {schema.columns.map((c) => (
+          <tr key={c.name}>
+            <td>{c.name}</td>
+            <td>{c.dtype}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }

@@ -1,0 +1,49 @@
+diff --git a/src/column.js b/src/column.js
+index 4af7fa575ab4e8327fba6cad96810ee7c62ec266..0717f1fafbf68d3386c6d7293c021706e249884d 100644
+--- a/src/column.js
++++ b/src/column.js
+@@ -108,6 +108,12 @@ export function readPage(reader, header, columnDecoder, dictionary, previousChun
+ 
+     // convert types, dereference dictionary, and assemble lists
+     const values = convertWithDictionary(dataPage, dictionary, daph.encoding, columnDecoder)
++    // A flat column whose page holds no nulls needs no assembly: its values are the page, as
++    // the typed array they were decoded into. (Coda patch: assembleLists otherwise pushes every
++    // value of an optional column into a plain array, one BigInt at a time for int64.)
++    if (!definitionLevels.length && !repetitionLevels.length && isFlatColumn(schemaPath)) {
++      return { skipped: 0, data: values }
++    }
+     const output = Array.isArray(previousChunk) ? previousChunk : []
+     const assembled = assembleLists(output, definitionLevels, repetitionLevels, values, schemaPath)
+     return { skipped: 0, data: assembled }
+@@ -125,6 +131,12 @@ export function readPage(reader, header, columnDecoder, dictionary, previousChun
+ 
+     // convert types, dereference dictionary, and assemble lists
+     const values = convertWithDictionary(dataPage, dictionary, daph2.encoding, columnDecoder)
++    // A flat column whose page holds no nulls needs no assembly: its values are the page, as
++    // the typed array they were decoded into. (Coda patch: assembleLists otherwise pushes every
++    // value of an optional column into a plain array, one BigInt at a time for int64.)
++    if (!definitionLevels.length && !repetitionLevels.length && isFlatColumn(schemaPath)) {
++      return { skipped: 0, data: values }
++    }
+     const output = Array.isArray(previousChunk) ? previousChunk : []
+     const assembled = assembleLists(output, definitionLevels, repetitionLevels, values, schemaPath)
+     return { skipped: 0, data: assembled }
+diff --git a/src/convert.js b/src/convert.js
+index f3a524d2d4a5504e38b270f635f87feeafbffef4..94c3419ba4089be8d8ee208538107d8904060ab8 100644
+--- a/src/convert.js
++++ b/src/convert.js
+@@ -54,7 +54,13 @@ export const DEFAULT_PARSERS = {
+ export function convertWithDictionary(data, dictionary, encoding, columnDecoder) {
+   if (dictionary && encoding.endsWith('_DICTIONARY')) {
+     let output = data
+-    if (data instanceof Uint8Array && !(dictionary instanceof Uint8Array)) {
++    // Coda patch: also upgrade when the dictionary is a typed array and the indices are not of its
++    // type. The indices arrive as a plain array, and writing a BigInt64Array's values back into it
++    // made a plain array holding a BigInt per row — for every dictionary-encoded int64 column.
++    if (
++      !(data instanceof dictionary.constructor) &&
++      (data instanceof Uint8Array || ArrayBuffer.isView(dictionary))
++    ) {
+       // @ts-expect-error upgrade data to match dictionary type with fancy constructor
+       output = new dictionary.constructor(data.length)
+     }

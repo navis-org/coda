@@ -328,9 +328,10 @@ export function exportNotebook(graph: CodaGraph, options: ExportOptions = {}): E
        */
       const named = backendName(foreign)
       warnings.push(`${def.label} has no ${named} equivalent yet.`)
+      const written = listed(emitterBackends(def.type).map(backendName))
       body = ctx.todo(
         `"${def.label}" is wired to a ${named} dataset, but its notebook cell has only ` +
-          `been written for neuPrint. The dataset itself is a real client, so fill this ` +
+          `been written for ${written}. The dataset is bound above, so fill this ` +
           `step in by hand.`,
       )
     } else {
@@ -404,7 +405,11 @@ function setupCell(modules: Map<PyModule, Set<string>>): Cell {
 
   const pip = entries.map(([m]) => MODULES[m].pip).filter((p): p is string => !!p)
   const lines: string[] = []
-  if (pip.length > 0) lines.push(`# pip install ${[...new Set(pip)].sort().join(' ')}`, '')
+  // A spec with extras is quoted, or zsh reads its brackets as a glob and refuses the paste.
+  const shellQuoted = (name: string) => (/[[\]]/.test(name) ? `'${name}'` : name)
+  if (pip.length > 0) {
+    lines.push(`# pip install ${[...new Set(pip)].sort().map(shellQuoted).join(' ')}`, '')
+  }
 
   for (const [module, names] of entries) {
     const spec = MODULES[module]

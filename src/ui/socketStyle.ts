@@ -127,6 +127,12 @@ function styleForKind(kind: Kind | undefined): SocketStyle {
      */
     case 'layers':
       return { family: 'layers', shape: 'ring' }
+    /*
+     * A table file is a table in the table hue — its rows are rows — and square, the one shape the
+     * family has not used, since it is not a table any table socket will take (`types.ts`).
+     */
+    case 'tableFile':
+      return { family: 'table', shape: 'square' }
     case 'number':
     case 'string':
     case 'boolean':

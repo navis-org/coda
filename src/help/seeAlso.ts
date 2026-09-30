@@ -64,6 +64,10 @@ const RELATED: readonly (readonly string[])[] = [
   ['neuron.rawCypher', 'neuron.findNeurons', 'neuron.connectivity'],
   // A table from somewhere that is not a connectome, and the way back out.
   ['core.uploadTable', 'core.tableFromUrl', 'out.download'],
+  // A linked file and the one node that turns it into rows.
+  ['core.linkTable', 'core.readRows'],
+  // Where a Custom Dataset's parts come from: a table or a file, linked or copied.
+  ['connectome:customDataset', 'core.linkTable', 'core.uploadTable', 'core.tableFromUrl'],
   // The four annotation sources are alternatives in the plainest sense: same socket, same job.
   [
     'annotation.seaTable',

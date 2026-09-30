@@ -28,28 +28,13 @@ import type { CellValue, ColumnData, MatrixValue, TableValue } from '../../core/
 import { JOIN_SEPARATOR, getColumn, makeMatrix, makeTable, selectRows } from '../../core/values'
 import { ID_COLUMN_NAME, idText } from '../../core/ids'
 import { TYPE_COLUMN_NAME } from '../../data/annotations/types'
+import type { FilterOp } from '../../core/rowPredicate'
+import { rowPredicate } from '../../core/rowPredicate'
 import type { Rename } from './renames'
 
 // ---------------------------------------------------------------------------
 // Filter
 // ---------------------------------------------------------------------------
-
-export type FilterOp =
-  | 'eq'
-  | 'ne'
-  | 'gt'
-  | 'ge'
-  | 'lt'
-  | 'le'
-  | 'contains'
-  | 'notContains'
-  | 'matches'
-  | 'startsWith'
-  | 'endsWith'
-  | 'isEmpty'
-  | 'notEmpty'
-  | 'isTrue'
-  | 'isFalse'
 
 const NUMERIC_OPS: Array<{ value: FilterOp; label: string }> = [
   { value: 'eq', label: '=' },
@@ -132,7 +117,7 @@ export function operatorVocabulary(): string {
  * resolve the same param, and a default spelled privately in a node was re-spelled as a literal
  * at each of them. Change one and the export keeps resolving against the old string — a notebook
  * filtering on a different condition from the card, which is the failure going through one
- * function exists to prevent. Beside `FilterOp` and `opsForDType`, which they are about.
+ * function exists to prevent. Beside `opsForDType`, which it is about.
  */
 export const FILTER_TABLE_DEFAULT_OP: FilterOp = 'ge'
 export const FILTER_NETWORK_DEFAULT_OP: FilterOp = 'contains'
@@ -184,7 +169,7 @@ export function resolveFilterOp(
  * They had converged on the same three checks — the operator applies to this dtype, a value is
  * needed and present, and a numeric column got a number — written twice, and had already drifted:
  * one said `"x" is not a number` and the other `"x" is not a number — this column is i64`. The
- * second check is not decoration either: `makePredicate` *throws* on a non-numeric value against
+ * second check is not decoration either: `rowPredicate` *throws* on a non-numeric value against
  * a numeric column, so without it the node goes red at Run with a raw error where the card could
  * have said it while there was still something to change.
  *
@@ -214,14 +199,7 @@ export function opNeedsValue(op: FilterOp): boolean {
   return !['isEmpty', 'notEmpty', 'isTrue', 'isFalse'].includes(op)
 }
 
-/**
- * Keep the rows matching one condition.
- *
- * Note that this does **not** agree with the Table viewer's header filters, which borrow
- * Explore's grammar instead: text compares here are case-*sensitive*, and `Number(null)` is 0
- * so a null matches `== 0`. Neither is wrong on its own and the divergence is recorded in
- * `tableFilter.ts`; the point is that a graph can hold both an inch apart.
- */
+/** Keep the rows matching one condition — `rowPredicate`'s, which a file's readers apply too. */
 export function filterTable(
   table: TableValue,
   columnName: string,
@@ -231,74 +209,13 @@ export function filterTable(
   const col = findColumn(table.schema, columnName)
   if (!col) throw new Error(`Filter column "${columnName}" not found`)
   const data = getColumn(table, columnName)
-  const predicate = makePredicate(col.dtype, op, rawValue)
+  const predicate = rowPredicate(col.dtype, op, rawValue)
 
   const keep: number[] = []
   for (let i = 0; i < table.length; i++) {
     if (predicate(data[i] ?? null)) keep.push(i)
   }
   return selectRows(table, keep)
-}
-
-function makePredicate(
-  dtype: DType,
-  op: FilterOp,
-  rawValue: string,
-): (cell: CellValue) => boolean {
-  if (op === 'isTrue') return (c) => c === true || c === 1
-  if (op === 'isFalse') return (c) => c === false || c === 0
-  if (op === 'isEmpty') return (c) => c === null || c === ''
-  if (op === 'notEmpty') return (c) => c !== null && c !== ''
-
-  if (isNumericDType(dtype)) {
-    const target = Number(rawValue)
-    if (!Number.isFinite(target)) {
-      throw new Error(`"${rawValue}" is not a number`)
-    }
-    switch (op) {
-      case 'eq':
-        return (c) => Number(c) === target
-      case 'ne':
-        return (c) => Number(c) !== target
-      case 'gt':
-        return (c) => c !== null && Number(c) > target
-      case 'ge':
-        return (c) => c !== null && Number(c) >= target
-      case 'lt':
-        return (c) => c !== null && Number(c) < target
-      case 'le':
-        return (c) => c !== null && Number(c) <= target
-      default:
-        throw new Error(`Operator "${op}" does not apply to numeric columns`)
-    }
-  }
-
-  const needle = rawValue
-  switch (op) {
-    case 'eq':
-      return (c) => String(c ?? '') === needle
-    case 'ne':
-      return (c) => String(c ?? '') !== needle
-    case 'contains':
-      return (c) => String(c ?? '').includes(needle)
-    case 'notContains':
-      return (c) => !String(c ?? '').includes(needle)
-    case 'startsWith':
-      return (c) => String(c ?? '').startsWith(needle)
-    case 'endsWith':
-      return (c) => String(c ?? '').endsWith(needle)
-    case 'matches': {
-      let re: RegExp
-      try {
-        re = new RegExp(needle)
-      } catch (err) {
-        throw new Error(`Invalid regex /${needle}/: ${(err as Error).message}`)
-      }
-      return (c) => re.test(String(c ?? ''))
-    }
-    default:
-      throw new Error(`Operator "${op}" does not apply to text columns`)
-  }
 }
 
 // ---------------------------------------------------------------------------

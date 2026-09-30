@@ -223,6 +223,7 @@ const NO_CREDENTIAL: Record<string, string> = {
   peekBases: 'starts nothing — reads a map',
   peekDatastackRecord: '`peekMaterializations`, which is swept',
   peekRefColumns: "each provider's `peekColumns`, which are swept",
+  peekTableFile: "reads a URL's footer by Range request, which carries no credential",
 }
 
 it('sweeps every exported peek, or says why it need not', () => {

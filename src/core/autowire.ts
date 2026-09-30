@@ -52,6 +52,15 @@ function datasetOutput(node: GraphNode): string | undefined {
  * here unconditionally.
  */
 export function autoWireDataset(graph: CodaGraph, node: GraphNode): CodaGraph {
+  /*
+   * A node that *publishes* a Dataset is assembling one, so its Dataset inputs are parts of it —
+   * "take the meshes from here" — rather than the workspace's dataset arriving. The single
+   * dataset on the canvas is the right guess for a query node and a guess about the parts for
+   * this one: a Custom Dataset added beside hemibrain would take hemibrain's meshes *and*
+   * skeletons without anybody having said so, and draw them under a neuron table from somewhere
+   * else entirely.
+   */
+  if (datasetOutput(node)) return graph
   const def = getNodeDef(node.type)
   const open = (def ? inputPorts(def, node.params) : []).filter(
     (port) => port.type.kind === 'dataset' && !edgeInto(graph, node.id, port.id),

@@ -9,8 +9,16 @@
  */
 
 import { pyStr } from '../py'
+import { CUSTOM_SOURCE_ID } from '../../../data/custom/layout'
 import { registerEmitter, registerHelper } from '../registry'
-import { caveLabels, codaNeurons, isCaveDataset, pyPopulationMask, pySelection } from './common'
+import {
+  datasetLabels,
+  codaNeurons,
+  hasLabelsFrame,
+  isCaveDataset,
+  pyPopulationMask,
+  pySelection,
+} from './common'
 import { schemasFromType } from '../../../nodes/lib/datasetParam'
 import { populationFromType } from '../../../nodes/lib/populationParams'
 import { explorePlan } from '../../plans/explore'
@@ -32,6 +40,7 @@ registerEmitter(
   (ctx) => {
     const c = ctx.wired('dataset')
     const cave = isCaveDataset(ctx)
+    const labelled = hasLabelsFrame(ctx)
 
     const all = ctx.output('all')
     const hits = ctx.output('hits')
@@ -52,15 +61,18 @@ registerEmitter(
 
     // `All` is the index handed on unchanged, and it is the download every other port is sliced
     // out of — one read rather than one per port.
-    const lines: string[] = cave
+    const lines: string[] = labelled
       ? [
           ...ctx.note(
-            'Explore Dataset searches the whole neuron table locally. This is the datastack\u2019s own ' +
-              'index — its neuron table joined to its annotations, or whatever is wired to the ' +
-              'Dataset\u2019s Annotations socket — fetched the first time anything asks for it. ' +
-              'On FlyWire that is 139,255 rows and takes a few seconds.',
+            cave
+              ? 'Explore Dataset searches the whole neuron table locally. This is the datastack\u2019s own ' +
+                  'index — its neuron table joined to its annotations, or whatever is wired to the ' +
+                  'Dataset\u2019s Annotations socket — fetched the first time anything asks for it. ' +
+                  'On FlyWire that is 139,255 rows and takes a few seconds.'
+              : 'Explore Dataset searches the whole neuron table locally: here the Custom ' +
+                  'Dataset\u2019s Neurons table, or every id its edge list names where none is wired.',
           ),
-          `${all} = ${caveLabels(c)}`,
+          `${all} = ${datasetLabels(c)}`,
         ]
       : [
           ...ctx.note(
@@ -76,7 +88,7 @@ registerEmitter(
           `${all}, _ = fetch_neurons(NeuronCriteria(client=${c}), client=${c})`,
           codaNeurons(ctx, all),
         ]
-    if (!cave) ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
+    if (!labelled) ctx.require('neuprint', 'NeuronCriteria', 'fetch_neurons')
     // No length guard: `pyPopulationMask` answers an empty population with no lines.
     lines.push(
       ...pyPopulationMask(all, population, schemasFromType(ctx.inputType('dataset')).neurons),
@@ -125,7 +137,7 @@ registerEmitter(
 
     return lines
   },
-  { backends: ['neuprint', 'cave'] },
+  { backends: ['neuprint', 'cave', CUSTOM_SOURCE_ID] },
 )
 
 /**
@@ -235,8 +247,10 @@ registerHelper({
     '    String columns and neuronId only -- so a bare "1200" finds a neuron id and does not',
     '    also match every neuron with 1200 synapses.',
     '    """',
+    '    # Both tests: pandas 3 gives text its own `str` dtype, which is not `object`.',
     '    return [c for c in df.columns',
-    '            if df[c].dtype == object or str(c) == "neuronId"]',
+    '            if pd.api.types.is_object_dtype(df[c]) or pd.api.types.is_string_dtype(df[c])',
+    '            or str(c) == "neuronId"]',
     '',
     '',
     'def _coda_haystack(df):',

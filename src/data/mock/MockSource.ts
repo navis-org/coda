@@ -67,7 +67,7 @@ import { schemaFingerprint } from '../cache'
 import { loadCachedTable, neuronIndexKey } from '../neuronIndex'
 import { compileLabelMatch, preparedRows } from '../neuronFilter'
 import { SKELETON_ROUTES, route } from '../skeletonRoutes'
-import { SYNAPSE_UNITS, confidenceIgnoredWarning } from '../synapseUnits'
+import { SYNAPSE_UNITS, warnIfConfidenceIgnored } from '../synapseUnits'
 import { fieldTermsMatch } from '../terms'
 import type { MockConnection, MockConnectome } from './generate'
 import { getConnectome, mockDatasetIds, mockDatasetMeta } from './generate'
@@ -826,9 +826,7 @@ export class MockSource implements DataSource {
   async fetchSynapses(req: SynapseRequest): Promise<PointsValue> {
     await delay(this.latencyMs, req.signal)
     const connectome = this.require(req.datasetId)
-    if ((req.minConfidence ?? 0) > 0) {
-      req.onWarn?.(confidenceIgnoredWarning('The mock connectome'))
-    }
+    warnIfConfidenceIgnored('The mock connectome', req)
 
     const positions: number[] = []
     const rows: Array<Record<string, number | string>> = []
@@ -882,9 +880,7 @@ export class MockSource implements DataSource {
   async fetchSynapsesBetween(req: SynapsesBetweenRequest): Promise<PointsValue> {
     await delay(this.latencyMs, req.signal)
     const connectome = this.require(req.datasetId)
-    if ((req.minConfidence ?? 0) > 0) {
-      req.onWarn?.(confidenceIgnoredWarning('The mock connectome'))
-    }
+    warnIfConfidenceIgnored('The mock connectome', req)
 
     const skeletons = new Map<number, ReturnType<typeof generateSkeleton>>()
     const skeletonOf = (neuronId: number) => {

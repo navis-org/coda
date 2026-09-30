@@ -30,7 +30,7 @@
  */
 
 import type { CodaType, Kind } from './types'
-import { T, isAssignable, kindSetLabel, typeLabel } from './types'
+import { T, isAssignable, kindSetLabel, nominalType, typeLabel } from './types'
 
 /**
  * Anything with a socket's two declarations. `PortDef` satisfies it structurally, and so does
@@ -98,6 +98,9 @@ export function socketAccepts(from: Socket, to: Socket): boolean {
  * is what somebody dropping a wire meant.
  */
 export function socketTier(socket: Socket, other: Socket): number {
+  // A set standing for a concrete type ranks as that type: a table-or-file port is a table port.
+  const nominal = socket.type.kind === 'any' ? nominalType(socket.kinds) : undefined
+  if (nominal) return socketTier({ type: nominal }, other)
   if (socket.type.kind !== 'any') {
     const theirs = socketKinds(other)
     return theirs?.includes(socket.type.kind) ? 0 : 1

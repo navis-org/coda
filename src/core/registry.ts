@@ -5,7 +5,7 @@
 
 import { MISSING_TYPE, missingNodeDef } from './missing'
 import type { NodeCategory, NodeDefinition, ParamValues } from './node'
-import { findParam, withDefaults } from './node'
+import { findParam, whenWiredPort, withDefaults } from './node'
 import { nodeTypeProblem, packIdProblem, packOf, typeKey } from './nodeType'
 import { allInputPorts, allOutputPorts, isPortGroup } from './ports'
 
@@ -217,6 +217,7 @@ function register<P extends ParamValues>(
   }
   checkPortGroups(def as unknown as NodeDefinition)
   checkFormerParamIds(def as unknown as NodeDefinition)
+  checkWhenWired(def as unknown as NodeDefinition)
   checkPortKinds(def as unknown as NodeDefinition)
   checkStringDrawing(def as unknown as NodeDefinition)
   freezeDeep(def)
@@ -413,6 +414,23 @@ function checkFormerParamIds(def: NodeDefinition): void {
       )
     }
     claimed.add(former)
+  }
+}
+
+/**
+ * `ParamBase.whenWired` naming a port the node declares — a misspelt one would hide its param for
+ * good, the card never drawing a control nothing can switch back on.
+ */
+function checkWhenWired(def: NodeDefinition): void {
+  const ports = new Set(allInputPorts(def).map((port) => port.id))
+  for (const param of def.params ?? []) {
+    if (param.whenWired === undefined) continue
+    const port = whenWiredPort(param)
+    if (port === undefined || !ports.has(port)) {
+      throw new Error(
+        `"${def.type}" param "${param.id}" is drawn \`whenWired\` ${port === undefined ? 'with no `from` port to mean' : `"${port}"`}, which is not one of its input ports.`,
+      )
+    }
   }
 }
 

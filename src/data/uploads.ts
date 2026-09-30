@@ -267,8 +267,10 @@ const learnedListeners = new Set<() => void>()
  *
  * Not a data-changed event: nothing here invalidates a cached result. It says only that
  * inference ran against "I do not know yet" and can now do better. Fired once per id when an
- * upload's meta lands, and by `core.tableFromUrl` when a fetch fills its own schema mirror —
- * exported for that second caller, which holds the same kind of fact in a different place.
+ * upload's meta lands, by `core.tableFromUrl` when a fetch fills its own schema mirror, and by
+ * the table-file registry (`data/files/registry.ts`) when a footer is read — exported for those
+ * callers, which hold the same kind of fact in a different place. A shared channel, then, rather
+ * than an upload one.
  */
 export function reportUploadLearned(): void {
   revision++

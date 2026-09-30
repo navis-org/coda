@@ -142,7 +142,7 @@ live('DVID meshes, live', () => {
      * 16 kB, p90 92 kB, max 487 kB — a page of 25 is about 0.4 MB.
      */
     const mesh = await fetchCoarseMesh(source, BIGGER)
-    if (!mesh || mesh === OVERSIZE) throw new Error(`no coarse mesh: ${String(mesh)}`)
+    if (mesh?.kind !== 'mesh') throw new Error(`no coarse mesh: ${JSON.stringify(mesh)}`)
     expect(mesh.positions.length / 3).toBe(2966)
     /*
      * And a body over the ceiling draws a placeholder rather than downloading itself. The flat

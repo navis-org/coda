@@ -282,6 +282,11 @@ export interface FetchOptions {
    */
   headers?: Readonly<Record<string, string>> | undefined
   /**
+   * The request's `cache` mode. Unset for every object store, whose chunks gain from the HTTP
+   * cache; a table file's reads set `no-store` (`data/files/bytes.ts` says why).
+   */
+  cache?: RequestCache | undefined
+  /**
    * Abandon the response past this many bytes, reporting **413**.
    *
    * For a store that publishes no size in advance. A precomputed pyramid names each level's byte
@@ -348,6 +353,7 @@ async function attempt(url: string, options: FetchOptions): Promise<ArrayBuffer>
   const response = await fetch(url, {
     headers,
     ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.cache ? { cache: options.cache } : {}),
   })
   if (!response.ok) {
     throw new PrecomputedFetchError(`${response.status} from ${url}`, url, response.status)

@@ -7,7 +7,8 @@
  * Nodes must treat columns as immutable — always build new arrays.
  */
 
-import type { CodaType, PopulationFilter, TableSchema } from './types'
+import type { FilterOp } from './rowPredicate'
+import type { CodaType, DType, PopulationFilter, TableSchema } from './types'
 import { datasetRef } from './types'
 
 export type CellValue = number | string | boolean | null
@@ -536,6 +537,76 @@ export interface LayersValue {
   readonly items: ReadonlyArray<Readonly<Record<string, unknown>>>
 }
 
+/**
+ * A table held in a file rather than in memory — what `tableFile` sockets carry.
+ *
+ * **Plain data, deliberately**: where the bytes are, what they hold, and a fingerprint of them,
+ * with no open reader, handle or promise on it. A value is hashed, exported as JSON, previewed and
+ * measured by code that knows nothing about files, and a reader object riding on one would leak
+ * into all of those. Whoever reads rows opens the file from `ref` (`data/files/`) and refuses one
+ * whose fingerprint no longer matches, which is how a file edited on disk since it was opened is
+ * caught rather than read as if nothing had changed.
+ */
+export interface TableFileValue {
+  readonly kind: 'tableFile'
+  readonly ref: TableFileRef
+  readonly format: 'parquet' | 'feather'
+  /** The columns rows come out in, as this file's node types them. */
+  readonly schema: TableSchema
+  /**
+   * How each column is *stored* — what a reader needs to decode it, where `schema` says only what
+   * it is read as. On the value rather than looked up by `ref`, so whoever reads rows has the
+   * facts from the wire, the way it has everything else.
+   */
+  readonly columns: readonly TableFileColumn[]
+  /**
+   * The columns whose block index a lookup should use, building it the first time. On the value,
+   * and so in the key, because it is how a reader learns it — ticking one re-runs the lookups
+   * below once, which is when the index gets built. It changes how fast, never what.
+   */
+  readonly indexColumns: readonly string[]
+  /** Undefined where the file does not say without reading every block (Feather). */
+  readonly rows: number | undefined
+  /** Row groups (Parquet) or record batches (Feather): the unit a read skips or takes. */
+  readonly blocks: number
+  readonly bytes: number
+  readonly fingerprint: string
+  /**
+   * Row conditions a Filter Table left on the file for its readers, ANDed, in the order added —
+   * applied to the rows a reader fetched rather than by reading the file for them, so a lookup
+   * by id stays a lookup by id (`data/files/filters.ts`). Absent is no condition.
+   */
+  readonly filters?: readonly TableFileFilter[]
+}
+
+/** One `Filter Table` condition, carried on a file for its readers: plain data, so it crosses to a worker. */
+export interface TableFileFilter {
+  readonly column: string
+  readonly op: FilterOp
+  readonly value: string
+}
+
+/** One column of a table file, as its footer declares it — plain data, so a value can carry it. */
+export interface TableFileColumn {
+  readonly name: string
+  /** The type it is read as when nothing overrides it. A 64-bit integer column says `i64` here. */
+  readonly dtype: DType
+  /** A 64-bit integer — the one kind whose dtype the file's node decides. */
+  readonly int64?: true
+  /** Parquet statistics show a value past 2^53, so it cannot be a number column. */
+  readonly overflow?: true
+  /** A timestamp or date, read as ISO text. */
+  readonly time?: true
+}
+
+/**
+ * Where a table file's bytes are. `local` names a file on this machine by the id the registry
+ * holds it under — never the file itself, which cannot be hashed or saved.
+ */
+export type TableFileRef =
+  | { readonly kind: 'local'; readonly id: string; readonly name: string }
+  | { readonly kind: 'url'; readonly url: string }
+
 export type Value =
   | TableValue
   | MatrixValue
@@ -549,6 +620,7 @@ export type Value =
   | LinkageValue
   | TransformValue
   | LayersValue
+  | TableFileValue
 
 // ---------------------------------------------------------------------------
 // Constructors
@@ -926,6 +998,10 @@ export function isLinkageValue(v: Value | undefined): v is LinkageValue {
   return !!v && v.kind === 'linkage'
 }
 
+export function isTableFileValue(v: Value | undefined): v is TableFileValue {
+  return !!v && v.kind === 'tableFile'
+}
+
 /** How many merges. `merges` is four numbers each, so this is not its length. */
 export function linkageMergeCount(v: LinkageValue): number {
   return v.merges.length / 4
@@ -1053,6 +1129,11 @@ export function describeValue(v: Value | undefined): string {
       return `${v.count.toLocaleString()} landmarks${v.targetSpace ? ` → ${v.targetSpace}` : ''}`
     case 'layers':
       return `${v.items.length} layer${v.items.length === 1 ? '' : 's'}`
+    case 'tableFile': {
+      // The file's own row count is before any condition: said so, rather than read as the answer.
+      const on = [...new Set(v.filters?.map((f) => f.column))].join(', ')
+      return on ? `${describeTableFile(v)} · filtered on ${on}` : describeTableFile(v)
+    }
     case 'linkage': {
       const cut = v.clusters ? ` · ${new Set(v.clusters).size} clusters` : ''
       return `${v.labels.length} leaves${v.method ? ` · ${v.method}` : ''}${cut}`
@@ -1066,6 +1147,23 @@ export function describeValue(v: Value | undefined): string {
     default:
       return String(v.value)
   }
+}
+
+/** What a table file is called wherever it is named: the file's name, or its URL. */
+export function tableFileName(ref: TableFileRef): string {
+  return ref.kind === 'local' ? ref.name : ref.url
+}
+
+/** `Parquet · 1,234 rows · 3 row groups`, or `Feather · 3 batches` where rows are not known. */
+export function describeTableFile(
+  v: Pick<TableFileValue, 'format' | 'rows' | 'blocks'>,
+): string {
+  const blocks =
+    v.format === 'parquet'
+      ? `${v.blocks.toLocaleString()} row group${v.blocks === 1 ? '' : 's'}`
+      : `${v.blocks.toLocaleString()} batch${v.blocks === 1 ? '' : 'es'}`
+  const rows = v.rows === undefined ? '' : ` · ${v.rows.toLocaleString()} rows`
+  return `${v.format === 'parquet' ? 'Parquet' : 'Feather'}${rows} · ${blocks}`
 }
 
 /**
