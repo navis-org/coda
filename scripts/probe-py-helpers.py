@@ -1499,8 +1499,14 @@ with tempfile.TemporaryDirectory() as tmp:
             return navis.NeuronList([navis.TreeNeuron(None, id=i, units='nm') for i in ids])
         meshes = skeletons = _list
 
+    from deltalake import DeltaTable, QueryBuilder, write_deltalake
+    # The same edges as a Delta table, in two commits, as the golden's edge list now is.
+    delta_path = f'{tmp}/edges_delta'
+    edges_table = feather.read_table(edges_path)
+    write_deltalake(delta_path, edges_table.slice(0, 3))
+    write_deltalake(delta_path, edges_table.slice(3), mode='append')
     custom_ns = {'copy': __import__('copy'), 'pd': pd, 'np': np, 'pa': pa, 'pq': pq, 'feather': feather, 'pc': pc,
-                 'fsspec': None, 'CloudVolume': None}
+                 'fsspec': None, 'CloudVolume': None, 'DeltaTable': DeltaTable, 'QueryBuilder': QueryBuilder}
     cells = [''.join(c['source']) for c in json.loads(CUSTOM.read_text())['cells']
              if c['cell_type'] == 'code']
     helpers = next(i for i, src in enumerate(cells) if 'class CodaCustomDataset' in src)
@@ -1508,7 +1514,7 @@ with tempfile.TemporaryDirectory() as tmp:
     custom_ns['CodaPrecomputed'] = StubBucket
     for src in cells[helpers + 1:]:
         src = (src.replace("pd.read_csv('https://example.org/cell_types.csv')", 'types')
-                  .replace("'edges.feather'", repr(edges_path))
+                  .replace("'gs://example-bucket/connectome/edges'", repr(delta_path))
                   .replace("'synapses.parquet'", repr(syn_path)))
         custom_ns['types'] = types
         try:
@@ -1630,6 +1636,19 @@ with tempfile.TemporaryDirectory() as tmp:
         check('custom: no connectivity is said in words', False)
     except ValueError as err:
         check('custom: no connectivity is said in words', 'no connectivity' in str(err), str(err))
+
+    # Delta tables whose reading needs delta-rs' engine: deleted rows left out, logical names read.
+    fixtures = ROOT / 'src/data/files/__fixtures__/delta'
+    dv = custom_ns['CodaTableFile'](str(fixtures / 'table-with-dv-small'), format='delta').read()
+    check('custom: a Delta table leaves out the rows its deletion vector marks',
+          sorted(dv['value']) == list(range(1, 9)), dv.to_string())
+    mapped = custom_ns['CodaTableFile'](str(fixtures / 'table_with_column_mapping'), format='delta').read(
+        columns=['Super Name'], where={'Company Very Short': ['BME']})
+    check('custom: a Delta table with column mapping is read by its own names',
+          mapped['Super Name'].tolist() == ['Timothy Lamb'], mapped.to_string())
+    # The probe's own edge list, written in two commits: version 0 holds the first three rows.
+    pinned = custom_ns['CodaTableFile'](delta_path, format='delta', version=0).read()
+    check('custom: a Delta table is read at the version the canvas read', len(pinned) == 3, str(len(pinned)))
 
     # A table file read by id: an 18-digit id survives the round trip as text, and an empty id
     # list reads nothing rather than everything.

@@ -33,24 +33,35 @@ function load<T>(key: string, run: () => Promise<T>): Promise<T> {
 }
 
 /**
- * `apache-arrow`, with the lz4 codec registered.
+ * `apache-arrow`, with both of Arrow IPC's codecs registered — it ships neither.
  *
- * `write_feather` compresses with **lz4 by default**, and `apache-arrow` ships no codec for it —
- * a default-written Feather file fails outright with "Record batch is compressed but codec not
- * found" — which is the whole reason `lz4js` is a dependency (2.2 kB gzipped, measured). `encode`
- * is declared and never used: the registry validates a codec by round-tripping it, so a
- * decode-only codec throws at registration. `lz4js` was last published years ago, and only its
- * block decoder is trusted: its frame walk misreads block checksums, so that half is `lz4Frame`.
+ * `write_feather` compresses with **lz4 by default**, and without a codec a default-written
+ * Feather file fails outright with "Record batch is compressed but codec not found" — which is
+ * the whole reason `lz4js` is a dependency (2.2 kB gzipped, measured). `lz4js` was last published
+ * years ago, and only its block decoder is trusted: its frame walk misreads block checksums, so
+ * that half is `lz4Frame`. ZSTD is `fzstd`, which polars writes IPC with on request.
+ *
+ * Both are decode-only: the registry validates an encoder where it is given one, and nothing here
+ * writes an Arrow file.
  */
 export function arrow(): Promise<Arrow> {
   return load('apache-arrow', async () => {
-    const [library, { default: lz4 }] = await Promise.all([
+    const [library, { default: lz4 }, fzstd] = await Promise.all([
       import('apache-arrow'),
       import('lz4js'),
+      import('fzstd'),
     ])
     library.compressionRegistry.set(library.CompressionType.LZ4_FRAME, {
-      encode: (bytes: Uint8Array) => lz4.compress(bytes),
       decode: (bytes: Uint8Array) => lz4Frame(lz4, bytes, arrowLength(bytes)),
+    })
+    library.compressionRegistry.set(library.CompressionType.ZSTD, {
+      decode: (bytes: Uint8Array) => {
+        const length = arrowLength(bytes)
+        return fzstd.decompress(
+          bytes,
+          length === undefined ? undefined : new Uint8Array(length),
+        )
+      },
     })
     return library
   })
@@ -126,9 +137,21 @@ export interface PageLibraries {
   readonly Encodings: typeof HyparquetConstants.Encodings
   readonly PageTypes: typeof HyparquetConstants.PageTypes
   readonly deserializeTCompactProtocol: typeof HyparquetThrift.deserializeTCompactProtocol
-  /** Snappy through `hysnappy`'s WASM — for the library's own reads as well. */
-  readonly snappy: (input: Uint8Array, length: number) => Uint8Array
+  /** A column chunk's page locations, where the file wrote a page index. */
+  readonly readOffsetIndex: typeof HyparquetLibrary.readOffsetIndex
+  /**
+   * The compressed codecs a Parquet file may use, by the footer's name for them — Snappy through
+   * `hysnappy`'s WASM, ZSTD through `fzstd` — for the fast path and the library's own reads alike.
+   * `UNCOMPRESSED` is not in it: nothing to do.
+   */
+  readonly codecs: Readonly<Record<string, (input: Uint8Array, length: number) => Uint8Array>>
 }
+
+/**
+ * The names of `PageLibraries.codecs`, which a footer is checked against before that is loaded —
+ * static, and held to the codecs themselves by the compiler.
+ */
+export const PARQUET_CODEC_NAMES = ['SNAPPY', 'ZSTD'] as const
 
 /**
  * Loaded when a block is read, never for a footer: the WASM codec is instantiated on the thread
@@ -136,16 +159,23 @@ export interface PageLibraries {
  */
 export function pageLibraries(): Promise<PageLibraries> {
   return load('pages', async () => {
-    const [constants, thrift, { snappyUncompressor }] = await Promise.all([
+    const [constants, thrift, { snappyUncompressor }, fzstd, library] = await Promise.all([
       import('hyparquet/src/constants.js'),
       import('hyparquet/src/thrift.js'),
       import('hysnappy'),
+      import('fzstd'),
+      hyparquet(),
     ])
     return {
       Encodings: constants.Encodings,
       PageTypes: constants.PageTypes,
       deserializeTCompactProtocol: thrift.deserializeTCompactProtocol,
-      snappy: snappyUncompressor(),
+      readOffsetIndex: library.readOffsetIndex,
+      codecs: {
+        SNAPPY: snappyUncompressor(),
+        // Written into a buffer of the page's declared size, so a short frame is a short page.
+        ZSTD: (input, length) => fzstd.decompress(input, new Uint8Array(length)),
+      } satisfies Record<(typeof PARQUET_CODEC_NAMES)[number], PageLibraries['codecs'][string]>,
     }
   })
 }

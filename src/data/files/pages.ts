@@ -5,12 +5,13 @@
  * Measured on a 192M-row FlyWire synapse table, a lookup of six neurons spent its time in the
  * library decoding every value of every column it asked for — the three coordinate columns whole,
  * to keep 376 rows of each million. This path decodes what the answer needs, and nothing it
- * cannot read exactly: a flat column of plain integers, floats or text, v1 data pages with no
- * nulls, PLAIN or dictionary encoded, Snappy or uncompressed. Anything else — a v2 page, a null,
- * a date, a decimal, another codec — throws `Unsupported`, and `parquet.ts` hands the block to
- * hyparquet, so a file this path does not understand is slower and never wrong.
+ * cannot read exactly: a flat column of plain integers, floats or text, v1 data pages, PLAIN or
+ * dictionary encoded, in a codec `pageLibraries` holds or none. Anything else — a v2 page, a null
+ * in a *key* column's page, a date, a decimal, another codec — throws `Unsupported`, and
+ * `parquet.ts` hands the block to hyparquet, so a file this path does not understand is slower and
+ * never wrong.
  *
- * Three things it does that the library does not, each measured:
+ * Four things it does that the library does not, each measured:
  *  - **A key is matched in place.** A 64-bit id on a PLAIN page is tested by its two 32-bit words
  *    (`IdProbe.words`, behind the 16-bit bitmap) off the page's own bytes, never a `bigint`; on a
  *    dictionary page the dictionary is tested once and only the index stream is scanned — and a
@@ -18,13 +19,15 @@
  *  - **Everything else is gathered.** A page with no matched row is skipped undecompressed; on one
  *    with matches, only those rows' values are read — a PLAIN value by its offset, a dictionary
  *    index by its bit position in the run holding it.
+ *  - **Only the pages holding a match are fetched**, where the file wrote a page index
+ *    (`pagesHolding`): the library reads a chunk whole to keep three rows of it.
  *  - **Snappy is WASM** (`hysnappy`), the library's JavaScript codec having been half its time.
  *
  * Values come out as hyparquet would give them — `bigint` for INT64, a number for INT32 and the
  * floats, text for BYTE_ARRAY — so `decoderFor` reads either route alike.
  */
 
-import type { FileMetaData, SchemaElement } from 'hyparquet'
+import type { ColumnChunk, FileMetaData, SchemaElement } from 'hyparquet'
 import type { PageLibraries } from '../libraries'
 
 import type { ByteSource } from './bytes'
@@ -36,7 +39,7 @@ import { pushWordHits, unionRows } from './reader'
  * A page or column this path does not read; the block goes to the library instead. `fileWide`
  * where the reason is how the file was written — a codec, a v2 page, an encoding — so every block
  * would refuse the same way, and `parquet.ts` stops asking rather than fetch each chunk twice. A
- * null is per block.
+ * null in a key's page is per block.
  */
 export class Unsupported extends Error {
   readonly fileWide: boolean
@@ -64,14 +67,14 @@ export interface PlainColumn {
 export function plainColumns(
   metadata: FileMetaData,
   /** Each column's position among a row group's chunks — `parquet.ts`' own map. */
-  chunkOf: ReadonlyMap<string, number>,
+  chunkIndex: ReadonlyMap<string, number>,
 ): Map<string, PlainColumn> | undefined {
   const [root, ...elements] = metadata.schema
   if (!root || elements.some((e) => e.num_children)) return undefined
   const out = new Map<string, PlainColumn>()
   for (const element of elements) {
     const physical = physicalOf(element)
-    const chunk = chunkOf.get(element.name)
+    const chunk = chunkIndex.get(element.name)
     if (!physical || chunk === undefined || element.repetition_type === 'REPEATED') continue
     out.set(element.name, { physical, optional: element.repetition_type === 'OPTIONAL', chunk })
   }
@@ -109,31 +112,145 @@ export async function readMatches(
   const rowGroup = metadata.row_groups[group]
   if (!rowGroup) throw new Unsupported()
   const rowCount = Number(rowGroup.num_rows)
-  const chunkOf = async (name: string): Promise<Chunk> => {
+  const located = (name: string): Located => {
     const column = columns.get(name)
-    const meta = column && rowGroup.columns[column.chunk]?.meta_data
+    const chunk = column && rowGroup.columns[column.chunk]
+    const meta = chunk?.meta_data
     if (!column || !meta || meta.path_in_schema.join('.') !== name) throw new Unsupported(true)
-    if (meta.codec !== 'SNAPPY' && meta.codec !== 'UNCOMPRESSED') throw new Unsupported(true)
+    const inflate = meta.codec === 'UNCOMPRESSED' ? undefined : library.codecs[meta.codec]
+    if (meta.codec !== 'UNCOMPRESSED' && !inflate) throw new Unsupported(true)
+    return { column, chunk, meta, inflate }
+  }
+  // Everything the footer can refuse is refused here, before a byte is read: a refusal found
+  // after the key chunks were fetched has the library fetch them again.
+  const keyed = keys.map(located)
+  for (const { column, meta } of keyed) {
+    if (column.physical !== 'INT64' && column.physical !== 'INT32') throw new Unsupported(true)
+    // A null in a key column is a page the scan does not read (`matchRows`).
+    if (meta.statistics?.null_count) throw new Unsupported()
+  }
+  const others = outputs.filter((name) => !keys.includes(name)).map(located)
+
+  const whole = async ({ column, meta, inflate }: Located): Promise<Chunk> => {
     // `||`, as hyparquet reads it: a writer's 0 means no dictionary page, not one at byte 0.
     const start = Number(meta.dictionary_page_offset || meta.data_page_offset)
     const raw = await bytes.read(start, start + Number(meta.total_compressed_size))
-    return new Chunk(library, raw, column, meta.codec === 'SNAPPY', rowCount)
+    return new Chunk(library, [{ bytes: raw, firstRow: 0 }], column, inflate, rowCount)
   }
 
-  const keyChunks = await Promise.all(keys.map(chunkOf))
+  const keyChunks = await Promise.all(keyed.map(whole))
   const hits = keyChunks.map((chunk) => chunk.matchRows(probe))
   const rows = unionRows(hits)
   if (rows.length === 0)
     return { rows, values: Object.fromEntries(outputs.map((n) => [n, []])) }
 
   // A key column that is also an output is gathered from its own chunk, already decompressed.
-  const byName = new Map(keys.map((name, i) => [name, keyChunks[i]!]))
-  const others = outputs.filter((name) => !byName.has(name))
-  const otherChunks = await Promise.all(others.map(chunkOf))
-  others.forEach((name, i) => byName.set(name, otherChunks[i]!))
+  // Every other is read where the matches are: only the pages holding them, through its offset
+  // index, or whole where the file wrote none.
+  const indexes = await offsetIndexes(
+    bytes,
+    others.map((other) => other.chunk),
+  )
+  const otherChunks = await Promise.all(
+    others.map(async (other, i) => {
+      const index = indexes[i]
+      const pages =
+        index && (await pagesHolding(library, bytes, other.meta, index, rows, rowCount))
+      return pages ? new Chunk(library, pages, other.column, other.inflate) : whole(other)
+    }),
+  )
+  const byName = new Map<string, Chunk>()
+  keys.forEach((name, i) => byName.set(name, keyChunks[i]!))
+  others.forEach((other, i) => byName.set(other.meta.path_in_schema.join('.'), otherChunks[i]!))
   const values: Record<string, unknown[]> = {}
   for (const name of outputs) values[name] = byName.get(name)!.gather(rows)
   return { rows, values }
+}
+
+/** A column's chunk in one row group, as the footer describes it, and its codec where compressed. */
+interface Located {
+  readonly column: PlainColumn
+  readonly chunk: ColumnChunk
+  readonly meta: NonNullable<ColumnChunk['meta_data']>
+  readonly inflate: PageLibraries['codecs'][string] | undefined
+}
+
+/** Pages read together: the bytes of one or more consecutive pages, and the row the first begins at. */
+interface Segment {
+  readonly bytes: Uint8Array
+  readonly firstRow: number
+}
+
+/** Pages this far apart are read as one request, the gap with them. */
+const PAGE_GAP = 64 << 10
+
+/**
+ * Each chunk's offset index, or undefined where the file wrote none. A row group's are written
+ * side by side, so the ones wanted are one read and the little between them, not one each.
+ */
+async function offsetIndexes(
+  bytes: ByteSource,
+  chunks: readonly ColumnChunk[],
+): Promise<(Uint8Array | undefined)[]> {
+  const spans = chunks.map((chunk) => {
+    const from = chunk.offset_index_offset
+    const length = chunk.offset_index_length
+    return from === undefined || !length
+      ? undefined
+      : { from: Number(from), to: Number(from) + length }
+  })
+  const held = spans.flatMap((span) => (span ? [span] : []))
+  if (held.length === 0) return spans.map(() => undefined)
+  const from = Math.min(...held.map((span) => span.from))
+  const raw = await bytes.read(from, Math.max(...held.map((span) => span.to)))
+  return spans.map((span) => span && raw.subarray(span.from - from, span.to - from))
+}
+
+/**
+ * The dictionary page and the data pages holding `rows`, read through the chunk's offset index —
+ * or undefined where the pages wanted are most of the chunk and one read of the whole is fewer
+ * requests for nearly the same bytes. On a table of million-row groups, gathering a few hundred
+ * rows is a page or two per column of a chunk tens of megabytes long: the difference between a
+ * lookup that downloads the table and one that does not.
+ */
+async function pagesHolding(
+  library: PageLibraries,
+  bytes: ByteSource,
+  meta: NonNullable<ColumnChunk['meta_data']>,
+  index: Uint8Array,
+  rows: readonly number[],
+  rowCount: number,
+): Promise<Segment[] | undefined> {
+  const locations = library.readOffsetIndex({
+    view: new DataView(index.buffer, index.byteOffset, index.byteLength),
+    offset: 0,
+  }).page_locations
+  const ranges: { from: number; to: number; firstRow: number }[] = []
+  // The dictionary page first, which every data page read needs; a first data page near it joins.
+  const dictionary = Number(meta.dictionary_page_offset || 0)
+  if (dictionary && locations[0]) {
+    ranges.push({ from: dictionary, to: Number(locations[0].offset), firstRow: 0 })
+  }
+  let r = 0
+  locations.forEach((page, i) => {
+    const start = Number(page.first_row_index)
+    const end = Number(locations[i + 1]?.first_row_index ?? rowCount)
+    if (r >= rows.length || rows[r]! >= end) return
+    while (r < rows.length && rows[r]! < end) r++
+    const from = Number(page.offset)
+    const to = from + page.compressed_page_size
+    const last = ranges.at(-1)
+    if (last && from - last.to <= PAGE_GAP) last.to = to
+    else ranges.push({ from, to, firstRow: start })
+  })
+  const wanted = ranges.reduce((n, range) => n + range.to - range.from, 0)
+  if (wanted > Number(meta.total_compressed_size) / 2) return undefined
+  return Promise.all(
+    ranges.map(async ({ from, to, firstRow }) => ({
+      bytes: await bytes.read(from, to),
+      firstRow,
+    })),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -163,29 +280,48 @@ interface Decoded {
   readonly at: number
   /** Bit width of a dictionary page's indices; 0 on a PLAIN page. */
   readonly width: number
+  /**
+   * Where a page holding nulls has them: each row's place among the values the page stores, or -1
+   * for a null. Absent where every row has a value, which is every page of a non-null column.
+   */
+  readonly slots: Int32Array | undefined
 }
 
 class Chunk {
   private readonly column: PlainColumn
-  /** Snappy, where the chunk is compressed. */
-  private readonly snappy: PageLibraries['snappy'] | undefined
+  /** The chunk's codec, where it is compressed. */
+  private readonly codec: PageLibraries['codecs'][string] | undefined
   private readonly pages: PageRef[] = []
   private readonly decoded: (Decoded | undefined)[] = []
   private dictionary: Dictionary | undefined
   private dictionaryWords: Uint32Array | undefined
 
+  /**
+   * From the chunk's pages, read as segments: the whole chunk as one starting at row 0 with `rows`
+   * its row count, or only some of its pages, each segment saying the row it starts at — and then
+   * no count to check them against, since the pages between were never read.
+   */
   constructor(
     library: PageLibraries,
-    raw: Uint8Array,
+    segments: readonly Segment[],
     column: PlainColumn,
-    compressed: boolean,
-    rows: number,
+    codec: PageLibraries['codecs'][string] | undefined,
+    rows?: number,
   ) {
-    const { Encodings, PageTypes, deserializeTCompactProtocol } = library
     this.column = column
-    this.snappy = compressed ? library.snappy : undefined
-    const reader = { view: new DataView(raw.buffer, raw.byteOffset, raw.byteLength), offset: 0 }
+    this.codec = codec
     let row = 0
+    for (const segment of segments) row = this.readSegment(library, segment)
+    // Flat, so a value is a row; anything else is a chunk this path has misread.
+    if (rows !== undefined && row !== rows) throw new Unsupported()
+  }
+
+  /** A segment's pages, noted where they lie; the row its last one ends at. */
+  private readSegment(library: PageLibraries, { bytes: raw, firstRow }: Segment): number {
+    const { Encodings, PageTypes, deserializeTCompactProtocol } = library
+    const { column } = this
+    let row = firstRow
+    const reader = { view: new DataView(raw.buffer, raw.byteOffset, raw.byteLength), offset: 0 }
     while (reader.offset < raw.byteLength) {
       const header = deserializeTCompactProtocol(reader)
       const type = PageTypes[header.field_1 as number]
@@ -219,8 +355,7 @@ class Chunk {
         throw new Unsupported(true)
       }
     }
-    // Flat, so a value is a row; anything else is a chunk this path has misread.
-    if (row !== rows) throw new Unsupported()
+    return row
   }
 
   /** The rows holding a probed id, ascending. Only an INT64 or INT32 column can be a key here. */
@@ -238,6 +373,8 @@ class Chunk {
       // A dictionary page whose dictionary holds none of the ids cannot match: never decompressed.
       if (page.dictionary && !anyFlag) return
       const d = this.page(i)
+      // A key page with nulls in it: the scan below reads one value per row.
+      if (d.slots) throw new Unsupported()
       const before = rows.length
       if (page.dictionary) {
         const indices = new Hybrid(d.bytes, d.at, d.bytes.byteLength, d.width)
@@ -284,8 +421,16 @@ class Chunk {
     this.pages.forEach((page, i) => {
       const end = page.start + page.count
       if (r >= rows.length || rows[r]! >= end) return
-      const at = valueReader(this.page(i), page, this.column.physical, this.dictionary)
-      for (; r < rows.length && rows[r]! < end; r++) out[r] = at(rows[r]! - page.start)
+      // A row before this page is in a page that was not read: never a value read from elsewhere.
+      if (rows[r]! < page.start) throw new Unsupported()
+      const d = this.page(i)
+      const at = valueReader(d, page, this.column.physical, this.dictionary)
+      const { slots } = d
+      for (; r < rows.length && rows[r]! < end; r++) {
+        const k = rows[r]! - page.start
+        if (!slots) out[r] = at(k)
+        else out[r] = slots[k]! < 0 ? null : at(slots[k]!)
+      }
     })
     return out
   }
@@ -297,26 +442,24 @@ class Chunk {
     const bytes = this.inflate(page.body, page.size)
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
     let at = 0
+    let slots: Int32Array | undefined
     if (this.column.optional) {
       // v1 definition levels: a 4-byte length and an RLE/bit-packed run of 1-bit levels. A page
-      // whose statistics say no nulls is taken at its word; one that says nothing is checked.
+      // whose statistics say no nulls is taken at its word; any other is read, and where it holds
+      // a null each row is given its place among the values — they are stored for rows with one.
       const length = view.getUint32(0, true)
-      const defined =
-        page.nulls === undefined
-          ? allDefined(bytes, 4, 4 + length, page.count)
-          : page.nulls === 0
-      if (!defined) throw new Unsupported()
+      if (page.nulls !== 0) slots = valueSlots(bytes, 4, 4 + length, page.count)
       at = 4 + length
     }
     const width = page.dictionary ? bytes[at++]! : 0
     if (page.dictionary && !this.dictionary) throw new Unsupported()
-    const decoded = { bytes, view, at, width }
+    const decoded = { bytes, view, at, width, slots }
     this.decoded[i] = decoded
     return decoded
   }
 
   private inflate(body: Uint8Array, size: number): Uint8Array {
-    return this.snappy ? this.snappy(body, size) : body
+    return this.codec ? this.codec(body, size) : body
   }
 
   /** A PLAIN dictionary page's values, typed as hyparquet types them. */
@@ -533,13 +676,33 @@ function unpack(bytes: Uint8Array, start: number, bit: number, width: number): n
   return value
 }
 
-/** Whether a 1-bit definition-level stream says every one of `count` values is present. */
-function allDefined(bytes: Uint8Array, start: number, end: number, count: number): boolean {
+/**
+ * Each row's place among a page's stored values, -1 for a null — or undefined where no row is null.
+ * Levels this path cannot read are a page it has misread.
+ */
+function valueSlots(
+  bytes: Uint8Array,
+  start: number,
+  end: number,
+  count: number,
+): Int32Array | undefined {
   const levels = new Hybrid(bytes, start, end, 1)
+  // Most pages of a nullable column hold no null, so nothing is allocated until one is met: up to
+  // there a row's place is its own number.
+  let slots: Int32Array | undefined
+  let stored = 0
   try {
-    for (let k = 0; k < count; k++) if (levels.at(k) !== 1) return false
+    for (let k = 0; k < count; k++) {
+      if (levels.at(k) === 1) {
+        if (slots) slots[k] = stored
+        stored++
+      } else {
+        slots ??= Int32Array.from({ length: count }, (_, i) => i)
+        slots[k] = -1
+      }
+    }
   } catch {
-    return false
+    throw new Unsupported()
   }
-  return true
+  return slots
 }

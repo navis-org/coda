@@ -1,0 +1,173 @@
+{
+ "edges": {
+  "columns": [
+   "pre_pt_root_id",
+   "post_pt_root_id",
+   "n_syn",
+   "score",
+   "nt",
+   "pre_partition"
+  ],
+  "rows": [
+   {
+    "n_syn": 9,
+    "nt": "gaba",
+    "post_pt_root_id": "720575940600001012",
+    "pre_partition": 0,
+    "pre_pt_root_id": "720575940600000005",
+    "score": 0.85
+   },
+   {
+    "n_syn": 8,
+    "nt": "gaba",
+    "post_pt_root_id": "720575940600001010",
+    "pre_partition": 0,
+    "pre_pt_root_id": "720575940600000004",
+    "score": 0.95
+   },
+   {
+    "n_syn": 5,
+    "nt": "gaba",
+    "post_pt_root_id": "720575940600001001",
+    "pre_partition": 0,
+    "pre_pt_root_id": "720575940600000001",
+    "score": 0.9
+   },
+   {
+    "n_syn": 3,
+    "nt": "gaba",
+    "post_pt_root_id": "720575940600001003",
+    "pre_partition": 0,
+    "pre_pt_root_id": "720575940600000002",
+    "score": 0.5
+   },
+   {
+    "n_syn": 2,
+    "nt": "gaba",
+    "post_pt_root_id": "720575940600001005",
+    "pre_partition": 0,
+    "pre_pt_root_id": "720575940600000003",
+    "score": 0.4
+   },
+   {
+    "n_syn": 2,
+    "nt": "ach",
+    "post_pt_root_id": "720575940600001011",
+    "pre_partition": 2,
+    "pre_pt_root_id": "720575940600000023",
+    "score": 0.55
+   },
+   {
+    "n_syn": 4,
+    "nt": "ach",
+    "post_pt_root_id": "720575940600001006",
+    "pre_partition": 1,
+    "pre_pt_root_id": "720575940600000013",
+    "score": 0.6
+   },
+   {
+    "n_syn": 6,
+    "nt": "gaba",
+    "post_pt_root_id": "720575940600001008",
+    "pre_partition": 2,
+    "pre_pt_root_id": "720575940600000021",
+    "score": 0.7
+   },
+   {
+    "n_syn": 3,
+    "nt": "ach",
+    "post_pt_root_id": "720575940600001009",
+    "pre_partition": 2,
+    "pre_pt_root_id": "720575940600000022",
+    "score": 0.3
+   },
+   {
+    "n_syn": 7,
+    "nt": "ach",
+    "post_pt_root_id": "720575940600001004",
+    "pre_partition": 1,
+    "pre_pt_root_id": "720575940600000012",
+    "score": 0.8
+   }
+  ],
+  "version": 8
+ },
+ "table-with-dv-small": {
+  "columns": [
+   "value"
+  ],
+  "rows": [
+   {
+    "value": 1
+   },
+   {
+    "value": 2
+   },
+   {
+    "value": 3
+   },
+   {
+    "value": 4
+   },
+   {
+    "value": 5
+   },
+   {
+    "value": 6
+   },
+   {
+    "value": 7
+   },
+   {
+    "value": 8
+   }
+  ],
+  "version": 1
+ },
+ "table_with_column_mapping": {
+  "columns": [
+   "Company Very Short",
+   "Super Name"
+  ],
+  "rows": [
+   {
+    "Company Very Short": "BMS",
+    "Super Name": "Mr. Daniel Ferguson MD"
+   },
+   {
+    "Company Very Short": "BMS",
+    "Super Name": "Stephanie Mcgrath"
+   },
+   {
+    "Company Very Short": "BMS",
+    "Super Name": "Anthony Johnson"
+   },
+   {
+    "Company Very Short": "BMS",
+    "Super Name": "Nathan Bennett"
+   },
+   {
+    "Company Very Short": "BME",
+    "Super Name": "Timothy Lamb"
+   }
+  ],
+  "version": 0
+ },
+ "table_with_partitioning_mapping": {
+  "columns": [
+   "newid",
+   "description"
+  ],
+  "rows": [
+   {
+    "description": "Additional data",
+    "newid": 2
+   },
+   {
+    "description": "Initial data",
+    "newid": 1
+   }
+  ],
+  "version": 4
+ }
+}

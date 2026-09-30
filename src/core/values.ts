@@ -550,7 +550,9 @@ export interface LayersValue {
 export interface TableFileValue {
   readonly kind: 'tableFile'
   readonly ref: TableFileRef
-  readonly format: 'parquet' | 'feather'
+  readonly format: 'parquet' | 'feather' | 'delta'
+  /** A Delta table's version: what this value and every read below it are pinned to. */
+  readonly version?: number
   /** The columns rows come out in, as this file's node types them. */
   readonly schema: TableSchema
   /**
@@ -1154,16 +1156,29 @@ export function tableFileName(ref: TableFileRef): string {
   return ref.kind === 'local' ? ref.name : ref.url
 }
 
-/** `Parquet · 1,234 rows · 3 row groups`, or `Feather · 3 batches` where rows are not known. */
+const BLOCK_NOUNS = {
+  parquet: ['row group', 'row groups'],
+  feather: ['batch', 'batches'],
+  delta: ['file', 'files'],
+} as const
+
+/** What a format's blocks are called — the unit a read skips or reads whole — for `count` of them. */
+export function tableFileBlocks(format: TableFileValue['format'], count: number): string {
+  return BLOCK_NOUNS[format][count === 1 ? 0 : 1]
+}
+
+/**
+ * `Parquet · 1,234 rows · 3 row groups`, `Feather · 3 batches` where rows are not known, or
+ * `Delta · version 596 · 76,460,814 rows · 33 files`.
+ */
 export function describeTableFile(
-  v: Pick<TableFileValue, 'format' | 'rows' | 'blocks'>,
+  v: Pick<TableFileValue, 'format' | 'rows' | 'blocks' | 'version'>,
 ): string {
-  const blocks =
-    v.format === 'parquet'
-      ? `${v.blocks.toLocaleString()} row group${v.blocks === 1 ? '' : 's'}`
-      : `${v.blocks.toLocaleString()} batch${v.blocks === 1 ? '' : 'es'}`
+  const blocks = `${v.blocks.toLocaleString()} ${tableFileBlocks(v.format, v.blocks)}`
   const rows = v.rows === undefined ? '' : ` · ${v.rows.toLocaleString()} rows`
-  return `${v.format === 'parquet' ? 'Parquet' : 'Feather'}${rows} · ${blocks}`
+  const name = { parquet: 'Parquet', feather: 'Feather', delta: 'Delta' }[v.format]
+  const version = v.version === undefined ? '' : ` · version ${v.version}`
+  return `${name}${version}${rows} · ${blocks}`
 }
 
 /**

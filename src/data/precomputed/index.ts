@@ -23,7 +23,7 @@ import {
   fragmentsUrl,
 } from './multires'
 import type { FetchOptions, Oversize } from './transport'
-import { OVERSIZE, PrecomputedFetchError, fetchBytes, fetchInfo } from './transport'
+import { OVERSIZE, fetchBytes, fetchInfo, isNotFound } from './transport'
 import { mapWithConcurrency } from '../concurrency'
 import type { CoarseGeometry, CoarseRefusal, GeometryDetail } from '../source'
 import { byteLengthOf, cachedGeometry } from '../geometryCache'
@@ -173,7 +173,7 @@ export async function openMeshDir(
 ): Promise<MeshSource> {
   const base = url.replace(/\/+$/, '')
   const info = await fetchInfo<RawInfo>(base, options).catch((error: unknown) => {
-    if (error instanceof PrecomputedFetchError && error.status === 404) return {} as RawInfo
+    if (isNotFound(error)) return {} as RawInfo
     throw error
   })
   if (info['@type'] === 'neuroglancer_multilod_draco') {

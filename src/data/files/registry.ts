@@ -1,5 +1,6 @@
 /**
- * The table files this tab knows about: the local ones it holds, and what every one's footer said.
+ * The table files this tab knows about: the local ones it holds, and what every one's footer — or,
+ * for a Delta table, its log — said.
  *
  * Imported by the nodes and their cards, so it imports nothing heavy — `client.ts` reaches the
  * format libraries only through `import()` and its worker (`libraries.ts`).
@@ -43,7 +44,10 @@ import type { TableFileRef } from '../../core/values'
 import { memoPromise, untilAborted } from '../memoPromise'
 import { reportUploadLearned } from '../uploads'
 import type { FileSpec } from './bytes'
-import { urlHead } from './bytes'
+import { ARROW_MAGIC, PARQUET_MAGIC, bytesOf, endsWith, httpUrl, urlHead } from './bytes'
+import type { DeltaSnapshot } from './delta/log'
+import { readDeltaSnapshot } from './delta/log'
+import { httpDeltaStore } from './delta/store'
 import type { FileSummary } from './columns'
 import { loadHandle, resetFileStore, saveHandle } from './store'
 
@@ -211,6 +215,9 @@ export function readTableFileSummary(
       try {
         // ⟳ on a local file: the held `File` is a snapshot, which a rewrite on disk makes unreadable.
         if (held && ref.kind === 'local') await reacquireLocalFile(ref.id)
+        // ⟳ on a URL: what was learned of it let go, so a Delta table's log is read again —
+        // which is how a new commit is taken up.
+        if (held && ref.kind === 'url') tables.delete(tableRoot(ref.url))
         const spec = await fileSpec(ref)
         const summary = await readSummary(spec)
         summaries.set(key, { summary, refresh, readAt: Date.now() })
@@ -250,10 +257,88 @@ async function reacquireLocalFile(id: string): Promise<void> {
 const heads = new Map<string, Promise<{ size: number; modified?: string }>>()
 
 /**
- * Where a file's bytes are, for a reader: the held `File`, or a URL with its size and modification
- * time — asked of the server every time, one HEAD shared by the readers asking at once, so a file
- * rewritten there is read at its new size and refused by its fingerprint (`requireFingerprint`),
- * rather than read at stale offsets and misreported as a CSV or a server ignoring Range.
+ * What is at a URL with no table file's extension, by its root: a Delta table's snapshot, or
+ * `'file'` where the address turned out to be one file. Read once and kept, which **pins every
+ * read to the version the Link Table saw** until ⟳ reads it again (`readTableFileSummary`). A
+ * commit landing meanwhile changes nothing under anybody — the pinning is the point, a table
+ * under active writes being where a number would otherwise move between two runs of a workflow.
+ */
+const tables = new Map<string, Promise<DeltaSnapshot | 'file'>>()
+
+const EXTENSIONS = {
+  parquet: ['parquet', 'parq', 'pq'],
+  feather: ['feather', 'arrow', 'ipc'],
+} as const
+
+/** Every extension a table file goes by — the picker's list, and what a Delta folder lacks. */
+export const TABLE_FILE_EXTENSIONS: readonly string[] = [
+  ...EXTENSIONS.parquet,
+  ...EXTENSIONS.feather,
+]
+
+/**
+ * What a reference's name says it is, before anything is read: a table file by its extension, and
+ * a URL with none a Delta table's folder. **A hint, never the answer** — it decides which is asked
+ * for first (`fileSpec`) and what an export writes before a footer has landed; what a thing *is*
+ * comes from its bytes (`openTableFile`) or its log, and is `FileSummary.format` from then on.
+ *
+ * A URL with a query string is a file whatever its path: a folder has objects *under* it, and
+ * `…/datafile/123?format=original/_delta_log/…` is the same file asked for again, whole.
+ */
+export function formatByName(ref: TableFileRef): FileSummary['format'] {
+  const byExtension = (path: string) => {
+    const extension = /\.([a-z0-9]+)\/*$/i.exec(path)?.[1]?.toLowerCase() ?? ''
+    if ((EXTENSIONS.feather as readonly string[]).includes(extension)) return 'feather'
+    return (EXTENSIONS.parquet as readonly string[]).includes(extension) ? 'parquet' : undefined
+  }
+  if (ref.kind === 'local') return byExtension(ref.name) ?? 'parquet'
+  try {
+    const url = new URL(httpUrl(ref.url))
+    return byExtension(url.pathname) ?? (url.search ? 'parquet' : 'delta')
+  } catch {
+    // Not a URL yet: read as typed.
+    return byExtension(ref.url.trim()) ?? 'delta'
+  }
+}
+
+/** A URL as the key a table is kept under: what is fetched, with no trailing slash. */
+function tableRoot(url: string): string {
+  return httpUrl(url).replace(/\/+$/, '')
+}
+
+/**
+ * What is at an address whose name says folder. The log is asked first; where that fails — there
+ * is none, or the server answers a missing object with something other than a clean 404, as a
+ * bucket without list permission (403), a server sending no CORS header on its errors, and one
+ * answering every path with a page all do — **the bytes at the address decide**: a table file
+ * ends in its magic, and a download endpoint names a Parquet file with no extension at all.
+ * Where it is neither, the table's own refusal is the one worth showing.
+ */
+async function tableAt(url: string, root: string): Promise<DeltaSnapshot | 'file'> {
+  try {
+    return await readDeltaSnapshot(httpDeltaStore(root))
+  } catch (error) {
+    if (await endsAsTableFile(url).catch(() => false)) return 'file'
+    throw error
+  }
+}
+
+async function endsAsTableFile(url: string): Promise<boolean> {
+  const { size } = await urlHead(url)
+  const tail = await bytesOf({ kind: 'url', url, size }).read(Math.max(0, size - 8), size)
+  return endsWith(tail, PARQUET_MAGIC) || endsWith(tail, ARROW_MAGIC)
+}
+
+/**
+ * Where a table's bytes are, for a reader.
+ *
+ *  - **A local file**: the held `File`.
+ *  - **A file at a URL**: its size and modification time, asked of the server every time, one HEAD
+ *    shared by the readers asking at once — so a file rewritten there is read at its new size and
+ *    refused by its fingerprint (`requireFingerprint`), rather than read at stale offsets and
+ *    misreported as a CSV or a server ignoring Range.
+ *  - **A Delta table**: its snapshot, read once and kept until ⟳ (`tables`) — the opposite rule,
+ *    a version being the one thing about a table that may not move under a workflow.
  */
 export async function fileSpec(ref: TableFileRef, signal?: AbortSignal): Promise<FileSpec> {
   if (ref.kind === 'local') {
@@ -262,6 +347,12 @@ export async function fileSpec(ref: TableFileRef, signal?: AbortSignal): Promise
     const file = localFiles.get(ref.id)
     if (!file) throw new Error(localFileProblem(ref.id, ref.name))
     return { kind: 'blob', blob: file }
+  }
+  if (formatByName(ref) === 'delta') {
+    const root = tableRoot(ref.url)
+    const found = memoPromise(tables, root, () => tableAt(ref.url, root), { keep: 'resolved' })
+    const table = await untilAborted(found, signal)
+    if (table !== 'file') return { kind: 'delta', snapshot: table }
   }
   const head = memoPromise(heads, ref.url, () => urlHead(ref.url), { keep: 'inflight' })
   return { kind: 'url', url: ref.url, ...(await untilAborted(head, signal)) }
@@ -302,5 +393,6 @@ export function resetTableFiles(): void {
   summaries.clear()
   pending.clear()
   heads.clear()
+  tables.clear()
   resetFileStore()
 }

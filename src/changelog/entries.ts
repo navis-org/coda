@@ -139,7 +139,7 @@ export const CHANGELOG: readonly ChangelogEntry[] = [
         title: 'Link Table and Read Rows: files too large to load',
         body:
           '**Link Table** points at a Parquet or Feather file, on your disk or at a URL, and reads only its footer, so its columns are in every picker below it at once. **Read Rows** pulls out the columns and the rows you ask for, for example by neuron id, and a Custom Dataset reads its Edges and Synapses from a Link Table the same way.\n\n' +
-          'A lookup of a few neurons in a 190-million-row synapse table takes about a second when the file is sorted by the id column. In Chrome and Edge a local file comes back after a reload; in other browsers you choose it again.',
+          'A lookup of a few neurons in a 190-million-row synapse table takes about a second when the file is sorted by the id column. In Chrome and Edge a local file comes back after a reload; in other browsers you choose it again. It also takes the URL of a Delta Lake table’s folder, such as CAVE’s exports.',
       },
     ],
     items: [

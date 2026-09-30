@@ -8,11 +8,11 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { blobBytes } from './bytes'
-import { fileTableSchema, textColumnsFor } from './columns'
 import type { ReadRowsJob, ReadRowsRequest } from './read'
 import { openTableFile, readRowsJob } from './read'
 import type { BlockRange } from './reader'
 import { mergeParts, partCount, splitBlocks } from './split'
+import { readRequest } from '../../test/tableFiles'
 
 const BASE = 720575940600000000n
 const IDS = [BASE, BASE + 2n, BASE + 3n].map(String)
@@ -20,16 +20,11 @@ const IDS = [BASE, BASE + 2n, BASE + 3n].map(String)
 async function setup(name: string, rest: Partial<ReadRowsRequest> = {}, only?: string) {
   const blob = new Blob([readFileSync(`src/data/files/__fixtures__/${name}`)])
   const { summary } = await openTableFile(blobBytes(blob))
-  const schema = fileTableSchema(summary, textColumnsFor(summary, true, []))
-  const request: ReadRowsRequest = {
-    fingerprint: summary.fingerprint,
-    columns: summary.columns
-      .map((column, i) => ({ column, dtype: schema.columns[i]!.dtype }))
-      .filter(({ column }) => !only || column.name === only),
-    key: { names: ['pre_pt_root_id'], ids: IDS },
-    limit: Infinity,
-    ...rest,
-  }
+  const request = readRequest(
+    summary,
+    { key: { names: ['pre_pt_root_id'], ids: IDS }, ...rest },
+    only ? [only] : undefined,
+  )
   const job = (blocks?: BlockRange): ReadRowsJob => ({
     spec: { kind: 'blob', blob },
     request: blocks ? { ...request, blocks } : request,

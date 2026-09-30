@@ -20,7 +20,14 @@
  */
 
 import { unreachable } from '../fetchText'
-import { PrecomputedFetchError, fetchBytes, objectStoreUrl } from '../precomputed/transport'
+import type { DeltaSnapshot } from './delta/log'
+import {
+  PrecomputedFetchError,
+  fetchBytes,
+  fetchJson,
+  gcsMetadataUrl,
+  objectStoreUrl,
+} from '../precomputed/transport'
 
 /**
  * A file rewritten since its Link Table read it — `requireFingerprint`'s sentence, and a local
@@ -62,10 +69,22 @@ export function blobBytes(blob: Blob): ByteSource {
 }
 
 /**
+ * A view's bytes as an `ArrayBuffer` of exactly that length, which is what hyparquet takes: the
+ * view's own buffer where it is the whole of it, and a copy only otherwise — a column chunk or a
+ * checkpoint is tens of megabytes to double for nothing.
+ */
+export function exactBuffer(view: Uint8Array): ArrayBuffer {
+  const whole = view.byteOffset === 0 && view.byteLength === view.buffer.byteLength
+  return (
+    whole ? view.buffer : view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)
+  ) as ArrayBuffer
+}
+
+/**
  * The URL a browser actually fetches: `gs://` and `s3://` mapped to their HTTP hosts, anything
  * else as written. One place, so the size probe and every range read agree.
  */
-function httpUrl(url: string): string {
+export function httpUrl(url: string): string {
   const trimmed = url.trim()
   return objectStoreUrl(trimmed) ?? trimmed
 }
@@ -82,6 +101,10 @@ export async function urlHead(url: string): Promise<{ size: number; modified?: s
   try {
     response = await fetch(httpUrl(url), { method: 'HEAD' })
   } catch {
+    // A public bucket with no CORS at its direct address still answers its JSON API — the
+    // fallback its reads take too (`transport.ts`). CAVE's Delta exports are such a bucket.
+    const meta = await gcsObjectMeta(httpUrl(url))
+    if (meta) return meta
     throw unreachable(url)
   }
   if (!response.ok) throw new Error(`${url} answered ${response.status}`)
@@ -97,11 +120,30 @@ export async function urlHead(url: string): Promise<{ size: number; modified?: s
 }
 
 /**
+ * A GCS object's size and modification time through the JSON API, or undefined for a URL that is
+ * not a GCS object or a call that fails as well.
+ */
+async function gcsObjectMeta(
+  url: string,
+): Promise<{ size: number; modified?: string } | undefined> {
+  const api = gcsMetadataUrl(url)
+  if (!api) return undefined
+  try {
+    const { size, updated } = await fetchJson<{ size?: string; updated?: string }>(api)
+    const bytes = Number(size)
+    if (!Number.isSafeInteger(bytes) || bytes <= 0) return undefined
+    return updated ? { size: bytes, modified: updated } : { size: bytes }
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * A URL of known size, read by Range request — each read capped at the length it asked for. Its
  * `Last-Modified` is its identity.
  */
 function urlBytes(
-  { url, size, modified }: Extract<FileSpec, { kind: 'url' }>,
+  { url, size, modified }: Extract<ByteSpec, { kind: 'url' }>,
   signal?: AbortSignal,
 ): ByteSource {
   const target = httpUrl(url)
@@ -137,6 +179,18 @@ function ignoresRange(url: string): Error {
   return new Error(
     `${url} does not answer range requests, so reading part of it would mean downloading all ` +
       `of it. Download the file and open it locally instead.`,
+  )
+}
+
+/** What a Parquet file ends in, and an Arrow IPC (Feather v2) file. */
+export const PARQUET_MAGIC = 'PAR1'
+export const ARROW_MAGIC = 'ARROW1'
+
+/** Whether bytes end in a magic — a file's last few, where both formats keep theirs. */
+export function endsWith(tail: Uint8Array, magic: string): boolean {
+  return (
+    tail.byteLength >= magic.length &&
+    String.fromCharCode(...tail.subarray(tail.byteLength - magic.length)) === magic
   )
 }
 
@@ -186,9 +240,13 @@ export function withTail(bytes: ByteSource): ByteSource {
 /**
  * Where to read from, as something a worker can be handed: a `Blob` (a `File` is one) crosses
  * `postMessage` as a reference to the same bytes, and a URL is plain fields — its size and, where
- * the host sends one, its `Last-Modified`.
+ * the host sends one, its `Last-Modified`. A Delta table is its log read once on the page, so its
+ * live files travel as data rather than being replayed by every worker (`delta/log.ts`).
  */
-export type FileSpec =
+export type FileSpec = ByteSpec | { readonly kind: 'delta'; readonly snapshot: DeltaSnapshot }
+
+/** One file's bytes — every spec but a Delta table's, which is many files (`openTableSpec`). */
+export type ByteSpec =
   | { readonly kind: 'blob'; readonly blob: Blob }
   | {
       readonly kind: 'url'
@@ -197,6 +255,6 @@ export type FileSpec =
       readonly modified?: string
     }
 
-export function bytesOf(spec: FileSpec, signal?: AbortSignal): ByteSource {
+export function bytesOf(spec: ByteSpec, signal?: AbortSignal): ByteSource {
   return spec.kind === 'blob' ? blobBytes(spec.blob) : urlBytes(spec, signal)
 }

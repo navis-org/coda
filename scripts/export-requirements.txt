@@ -47,3 +47,5 @@ rtree
 pyarrow
 fsspec[http]
 cloud-volume
+# Delta tables, which a Link Table can name (CAVE publishes its exports as them).
+deltalake

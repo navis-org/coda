@@ -797,6 +797,10 @@ Five decisions, each checked by running rather than by reading:
   nothing, Read Rows' rule. The footer is read once. A wired *table* goes through
   `CodaFrameTable`, the same surface over a frame, so no method asks which it was handed. An `https://` file goes through fsspec — pyarrow's own filesystems speak `gs://`/`s3://`
   and not HTTP — which needs its `http` extra (aiohttp), hence `fsspec[http]` on the install line.
+  A Delta table (`format='delta'`, at the `version` the canvas read) goes through delta-rs'
+  `QueryBuilder`, the lookup an SQL `IN`: `to_pyarrow_dataset` refuses deletion vectors and reads
+  a column-mapped table as nulls, and `deltalake` is on the install line only where one is linked
+  (`docs/nodes-io.md`, Delta tables).
 - **Text columns come from the footer the canvas read** (`peekEntry`, already asked by inference on
   this export), so an id column Coda reads as `str` is cast by Arrow, digit for digit. A cold
   export has no footer, casts nothing, and says so. Every other id goes through `coda_id_column` —

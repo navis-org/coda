@@ -90,16 +90,23 @@ registerHelper({
 })
 
 /**
- * A Link Table file: a reference, read the way Coda reads it.
+ * A Link Table's file or Delta table: a reference, read the way Coda reads it.
  *
  * `read(columns, where, limit, any_of)` takes only the columns asked for and, with `where`
- * ({column: ids}, ANDed — or, with `any_of`, either), only the rows holding one of the ids — Parquet
- * by its row-group statistics through `pq.read_table(..., filters=)`, which is the notebook's half
- * of Coda's block skipping, and Feather by a filter over a memory-mapped read, Feather keeping no
- * statistics. A lookup naming no ids answers an empty frame, the canvas' rule that an
- * unconfigured lookup reads nothing; a cap with no lookup reads only the first blocks. The schema is the footer
- * alone, read once. Text columns are cast by Arrow before pandas sees them, digit for digit
- * (invariant 8). Checked against the three pyarrow fixtures `data/files` tests with.
+ * ({column: ids}, ANDed — or, with `any_of`, either), only the rows holding one of the ids:
+ *
+ *  - **Parquet** by its row-group statistics through `pq.read_table(..., filters=)`, which is the
+ *    notebook's half of Coda's block skipping;
+ *  - **Feather** by a filter over a memory-mapped read, Feather keeping no statistics;
+ *  - **Delta** as SQL through delta-rs' `QueryBuilder`, pinned to the `version` the canvas read.
+ *    Not `to_pyarrow_dataset`, which refuses a table with deletion vectors and reads a
+ *    column-mapped one as nulls.
+ *
+ * A lookup naming no ids answers an empty frame, the canvas' rule that an unconfigured lookup
+ * reads nothing; a cap with no lookup reads only the first blocks. The schema is the footer's — a
+ * Delta table's its log's — read once. Text columns are cast by Arrow before pandas sees them,
+ * digit for digit (invariant 8). Checked by `scripts/probe-py-helpers.py` against the fixtures
+ * `data/files` tests with, the Delta tables among them.
  */
 registerHelper({
   name: 'CodaTableFile',
@@ -115,22 +122,26 @@ registerHelper({
   ],
   source: [
     'class CodaTableFile:',
-    '    """A Parquet or Feather file, read the way Coda\'s Link Table reads it.',
+    '    """A Parquet or Feather file, or a Delta table, read the way Coda\'s Link Table reads it.',
     '',
     '    `read` fetches only the columns asked for and, given `where` ({column: ids}, ANDed, or',
     '    with any_of=True either), only the rows holding one of the ids — from Parquet by its',
-    '    row-group statistics, so a lookup in a sorted synapse table reads a fraction of the file.',
+    '    row-group statistics and from a Delta table by the statistics in its log, so a lookup in',
+    '    a sorted synapse table reads a fraction of it. A Delta table is read at `version`.',
     '    A lookup naming no ids gets an empty frame, never the whole file; text=False leaves id',
     '    columns as stored. Columns Coda reads as text come back as exact',
     '    decimal text: an eighteen-digit id through a float is a different neuron.',
     '    """',
     '',
-    "    def __init__(self, location, format='parquet', text_columns=None):",
+    "    def __init__(self, location, format='parquet', text_columns=None, version=None):",
     '        self.location = location',
     '        self.format = format',
+    "        # A Delta table's version, the one the canvas read — so a commit since changes nothing.",
+    '        self.version = version',
     '        self.text_columns = None if text_columns is None else set(text_columns)',
     '        self._schema = None',
     '        self._remote = None',
+    '        self._table = None',
     "        # A Filter Table's conditions: (columns, keep), keep a function from a frame to a mask.",
     '        self.conditions = []',
     '',
@@ -152,12 +163,37 @@ registerHelper({
     '        return self.location',
     '',
     '    def schema(self):',
-    "        # The footer alone, and once: Feather is Arrow's IPC file format, whose schema is in it.",
+    "        # Once, and without a row read: a Delta table's is in its log, a file's in its footer —",
+    "        # Feather being Arrow's IPC file format.",
     '        if self._schema is None:',
-    '            source = self._open()',
-    "            self._schema = (pq.read_schema(source) if self.format == 'parquet'",
-    '                            else pa.ipc.open_file(source).schema)',
+    "            if self.format == 'delta':",
+    '                self._schema = pa.schema(self._delta().schema().to_arrow())',
+    "            elif self.format == 'parquet':",
+    '                self._schema = pq.read_schema(self._open())',
+    '            else:',
+    '                self._schema = pa.ipc.open_file(self._open()).schema',
     '        return self._schema',
+    '',
+    '    def _delta(self):',
+    '        # A public bucket read anonymously, as the canvas reads it; delta-rs names GCS gs://.',
+    '        if self._table is None:',
+    "            uri = self.location.replace('https://storage.googleapis.com/', 'gs://', 1)",
+    "            public = uri.startswith(('gs://', 's3://'))",
+    '            self._table = DeltaTable(uri, version=self.version,',
+    "                                     storage_options={'skip_signature': 'true'} if public else None)",
+    '        return self._table',
+    '',
+    '    def _delta_batches(self, columns, clauses, any_of, limit=None):',
+    '        # SQL over the table, a lookup as an IN so delta-rs skips files on their stats.',
+    "        quote = lambda name: '\"' + name.replace('\"', '\"\"') + '\"'",
+    '        literal = lambda v: str(v) if isinstance(v, int) else "\'" + str(v).replace("\'", "\'\'") + "\'"',
+    "        sql = 'SELECT ' + (', '.join(map(quote, columns)) if columns else '*') + ' FROM t'",
+    '        tests = [f\'{quote(name)} IN ({", ".join(map(literal, values))})\' for name, _, values in clauses if values]',
+    '        if tests:',
+    "            sql += ' WHERE ' + (' OR ' if any_of else ' AND ').join(tests)",
+    '        if limit:',
+    "            sql += f' LIMIT {int(limit)}'",
+    "        return pa.RecordBatchReader.from_stream(QueryBuilder().register('t', self._delta()).execute(sql))",
     '',
     '    def names(self):',
     '        return self.schema().names',
@@ -177,6 +213,8 @@ registerHelper({
     '        elif not clauses and limit:',
     '            # A cap with nothing to match: the first blocks, as the canvas reads, not the file.',
     '            table = self._head(needed, limit)',
+    "        elif self.format == 'delta':",
+    '            table = self._kept(self._delta_batches(needed, clauses, any_of).read_all())',
     "        elif self.format == 'parquet':",
     '            filters = [[c] for c in clauses if c[2]] if any_of else clauses',
     '            table = self._kept(pq.read_table(self._open(), columns=needed, filters=filters or None))',
@@ -212,7 +250,11 @@ registerHelper({
     '',
     '    def _head(self, columns, limit):',
     '        batches, held = [], 0',
-    "        if self.format == 'parquet':",
+    "        if self.format == 'delta':",
+    "            # The cap is the query's own where no condition drops rows after it, so the scan",
+    '            # stops there rather than starting on every file at once.',
+    '            source = self._delta_batches(columns, [], False, None if self.conditions else limit)',
+    "        elif self.format == 'parquet':",
     '            source = pq.ParquetFile(self._open()).iter_batches(columns=columns)',
     '        else:',
     '            # Only the columns asked for are decoded, and over a URL only they are fetched.',

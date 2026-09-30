@@ -13,6 +13,7 @@
 import { parseNgSource, PRECOMPUTED } from '../../../data/neuroglancer/sourceUrl'
 import { objectStoreUrl } from '../../../data/precomputed/transport'
 import { peekEntry, tableFileRef, tableFileSchema } from '../../../nodes/table/linkTable'
+import { formatByName } from '../../../data/files/registry'
 import { parseIdList } from '../../../nodes/lib/idList'
 import { pickIdColumn } from '../../../nodes/table/readRows'
 import {
@@ -35,11 +36,13 @@ import { backendName } from '../../../nodes/lib/datasetFamilies'
 /**
  * Link Table: a `CodaTableFile` naming the file, its format and the columns read as text.
  *
- * The format and the text columns come from the footer the canvas already read (`peekEntry`,
- * which inference has asked on this same export), so a Feather file is opened as Feather and an
- * id column Coda reads as text is text here too — invariant 8 at a seam the notebook would
- * otherwise hand pyarrow's `int64`. Before a footer has landed the extension decides the format
- * and nothing is cast, which the cell says.
+ * The format and the text columns come from the footer — or a Delta table's log — the canvas
+ * already read (`peekEntry`, which inference has asked on this same export), so a Feather file is
+ * opened as Feather and an id column Coda reads as text is text here too — invariant 8 at a seam
+ * the notebook would otherwise hand pyarrow's `int64`. A Delta table carries the `version` that
+ * read saw, so the notebook reads the table the workflow was built on (through delta-rs, required
+ * only here). Before anything has landed the name decides the format (`formatByName`), nothing is
+ * cast and no version is pinned, which the cell says.
  */
 registerEmitter('core.linkTable', (ctx) => {
   const ref = tableFileRef(ctx.params)
@@ -47,9 +50,16 @@ registerEmitter('core.linkTable', (ctx) => {
   ctx.helper('CodaTableFile')
   const out = ctx.output('file')
   const summary = peekEntry(ctx.params).entry?.summary
-  const location = ref.kind === 'local' ? ref.name : (objectStoreUrl(ref.url) ?? ref.url)
-  const format =
-    summary?.format ?? (/\.(feather|arrow|ipc)$/i.test(location) ? 'feather' : 'parquet')
+  // What the canvas read it as, and what its name says before a footer or a log has landed.
+  const format = summary?.format ?? formatByName(ref)
+  // A Delta table by the URI delta-rs takes (`gs://`, `s3://`); a file by one pyarrow can open.
+  const location =
+    ref.kind === 'local'
+      ? ref.name
+      : format === 'delta'
+        ? ref.url.trim().replace(/\/+$/, '')
+        : (objectStoreUrl(ref.url) ?? ref.url)
+  if (format === 'delta') ctx.require('deltalake', 'DeltaTable', 'QueryBuilder')
   const text = summary
     ? tableFileSchema(summary, ctx.params, ctx.columns)
         .columns.filter((c) => c.dtype === 'str')
@@ -65,9 +75,13 @@ registerEmitter('core.linkTable', (ctx) => {
     ...(summary
       ? []
       : ctx.note(
-          'The canvas had not read this file’s footer at export, so the columns read as text are ' +
-            'the integer ones whose names say they hold ids — Coda’s own rule. Name any other id ' +
-            'column in text_columns: an eighteen-digit id read as a number is a different neuron.',
+          `The canvas had not read this ${format === 'delta' ? 'table’s log' : 'file’s footer'} at ` +
+            'export, so the columns read as text are the integer ones whose names say they hold ' +
+            'ids — Coda’s own rule. Name any other id column in text_columns: an eighteen-digit ' +
+            'id read as a number is a different neuron.' +
+            (format === 'delta'
+              ? ' No version is pinned either, so this reads the table as it is when the cell runs.'
+              : ''),
         )),
     ...(format === 'feather'
       ? ctx.note(
@@ -81,6 +95,8 @@ registerEmitter('core.linkTable', (ctx) => {
     // Whenever the footer was read, even empty: an empty list is the canvas' answer, where no list
     // at all hands the choice to the name rule — reading as text an id column somebody declined.
     ...(summary ? [`    text_columns=${pyList(text)},`] : []),
+    // The version the canvas read, so the notebook reads the table the workflow was built on.
+    ...(summary?.version === undefined ? [] : [`    version=${summary.version},`]),
     `)`,
   ]
 })

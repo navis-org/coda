@@ -12,18 +12,30 @@ import type { DType } from '../../core/types'
 import type { CellValue, TableFileColumn } from '../../core/values'
 import type { JobHandler, JobRunOptions } from '../workerJob'
 import type { ByteSource, FileSpec } from './bytes'
-import { FILE_CHANGED, TAIL_READ, bytesOf, withTail } from './bytes'
+import {
+  ARROW_MAGIC,
+  FILE_CHANGED,
+  PARQUET_MAGIC,
+  TAIL_READ,
+  bytesOf,
+  endsWith,
+  withTail,
+} from './bytes'
 import { decoderFor } from './columns'
 import type { RowCondition } from './filters'
 import { rowTest, withConditionColumns } from './filters'
+import { openDelta } from './delta/reader'
 import { openFeather } from './feather'
 import { openParquet } from './parquet'
-import type { BlockIndex, BlockRange, RawBlock, TableFileReader } from './reader'
-import { blockMayHold, idProbe, matchingRows, unionRows } from './reader'
+import type { BlockIndex, BlockRange, TableFileReader } from './reader'
+import { blockMayHold, idProbe, matchesByColumns } from './reader'
 import { indexedReader } from './blockIndex'
 
-const PARQUET_MAGIC = 'PAR1'
-const ARROW_MAGIC = 'ARROW1'
+/** A reader for whatever a spec names: one file's bytes, or a Delta table's live files. */
+export function openTableSpec(spec: FileSpec, signal?: AbortSignal): Promise<TableFileReader> {
+  if (spec.kind !== 'delta') return openTableFile(bytesOf(spec, signal))
+  return openDelta(spec.snapshot, (url, size) => bytesOf({ kind: 'url', url, size }, signal))
+}
 
 /**
  * A reader for whatever is at `bytes`, decided by the magic its tail ends in rather than its name
@@ -40,9 +52,7 @@ const ARROW_MAGIC = 'ARROW1'
 export async function openTableFile(source: ByteSource): Promise<TableFileReader> {
   const bytes = withTail(source)
   const tail = await bytes.read(Math.max(0, bytes.size - TAIL_READ), bytes.size)
-  const ending = (magic: string) =>
-    tail.byteLength >= magic.length &&
-    String.fromCharCode(...tail.subarray(tail.byteLength - magic.length)) === magic
+  const ending = (magic: string) => endsWith(tail, magic)
   if (ending(PARQUET_MAGIC)) return openParquet(bytes)
   if (ending(ARROW_MAGIC)) return openFeather(bytes)
   // Two relatives of the formats read here, told apart so neither is sent to convert a CSV.
@@ -130,7 +140,7 @@ export interface ReadRowsJob {
 /** The one body the worker serves and the no-worker fallback runs. */
 export const readRowsJob: JobHandler<ReadRowsJob, ReadRowsResult> = async (job, options) => {
   const { key, blocks } = job.request
-  const reader = await openTableFile(bytesOf(job.spec, options.signal))
+  const reader = await openTableSpec(job.spec, options.signal)
   if (!key?.indexed) return readRows(reader, job.request, options)
   // Each key column skipped by its stored index, which the page handed over, and built where there
   // is none. Saving is the page's: a part of a split read builds only its own blocks.
@@ -204,8 +214,6 @@ export async function readRows(
   const outputNames = outputs.map((o) => o.name)
   // Read beside the outputs, never output: a condition's column is the reader's business.
   const wanted = withConditionColumns(outputNames, conditions)
-  // The key columns, where they are also outputs, are taken from the key read rather than read again.
-  const others = wanted.filter((name) => !names.includes(name))
   const width = Math.max(1, outputs.length)
 
   const { from, to } = request.blocks ?? { from: 0, to: summary.blocks }
@@ -220,16 +228,16 @@ export async function readRows(
     if (!probe && kept >= request.limit) return result(true)
     blocksRead++
 
-    // The block's kept cells, by their place among the kept rows: through the format's own keyed
-    // path where it has one for this block (`pages.ts`), and otherwise its key columns read and
-    // matched first, then the rest.
-    const matches =
-      probe && reader.readMatches
-        ? await reader.readMatches(block, names, probe, wanted)
-        : undefined
+    // The block's kept cells, by their place among the kept rows. With a key: through the format's
+    // own keyed path where it has one for this block (`pages.ts`), and otherwise its key columns
+    // read and matched first, then the rest. Without one: every row, and a reader may stop at the
+    // cap — and one row past it, which is what says the read was cut short.
     let count: number
     let cellsAt: (name: string) => (i: number) => unknown
-    if (matches) {
+    if (probe) {
+      const matches =
+        (await reader.readMatches?.(block, names, probe, wanted)) ??
+        (await matchesByColumns(reader, block, names, probe, wanted))
       count = matches.rows.length
       // With a key, only a match left to keep is a row left to read.
       if (kept >= request.limit && count > 0) return result(true)
@@ -238,22 +246,10 @@ export async function readRows(
         return (i) => values[i] ?? null
       }
     } else {
-      // The rows of this block to keep: any key column's matches, or every one.
-      let rows: readonly number[] | undefined
-      let keyBlock: RawBlock | undefined
-      if (probe) {
-        keyBlock = await reader.readBlock(block, names)
-        const hits = names.map((name) => matchingRows(keyBlock!, name, probe))
-        rows = unionRows(hits)
-        if (kept >= request.limit && rows.length > 0) return result(true)
-      }
-      const raw = rows?.length === 0 ? undefined : await reader.readBlock(block, others)
-      count = rows?.length ?? raw?.rows ?? 0
-      cellsAt = (name) => {
-        const get =
-          (names.includes(name) ? keyBlock?.columns[name] : raw?.columns[name]) ?? nothing
-        return rows ? (i) => get(rows[i]!) : get
-      }
+      const head = conditions.length ? undefined : request.limit - kept + 1
+      const raw = await reader.readBlock(block, wanted, head)
+      count = raw.rows
+      cellsAt = (name) => raw.columns[name] ?? nothing
     }
 
     const cells = outputs.map(({ name, into, decode }) => ({

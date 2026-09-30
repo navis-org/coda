@@ -8,7 +8,6 @@
 import type { JobRunOptions } from '../workerJob'
 import { runWorkerJob } from '../workerJob'
 import type { FileSpec } from './bytes'
-import { bytesOf } from './bytes'
 import type { FileSummary } from './columns'
 import type { ReadRowsJob, ReadRowsRequest, ReadRowsResult } from './read'
 import { mergeParts, partCount, splitBlocks } from './split'
@@ -22,8 +21,8 @@ import { loadIndex, saveIndex } from './store'
  * cost more to start than the read takes.
  */
 export async function readSummary(spec: FileSpec, signal?: AbortSignal): Promise<FileSummary> {
-  const { openTableFile } = await import('./read')
-  return (await openTableFile(bytesOf(spec, signal))).summary
+  const { openTableSpec } = await import('./read')
+  return (await openTableSpec(spec, signal)).summary
 }
 
 /** How a read is run: the job's own options, and how many blocks the file holds. */
@@ -88,13 +87,9 @@ async function splitRanges(
   const { key } = request
   if (!key || !options.blocks || typeof Worker === 'undefined') return undefined
   if (partCount(options.blocks, cores) === 1) return undefined
-  const { openTableFile } = await import('./read')
+  const { openTableSpec } = await import('./read')
   // Wrapped as the workers wrap it, so the blocks counted live are the blocks they will read.
-  const { indexed } = indexedReader(
-    await openTableFile(bytesOf(spec, options.signal)),
-    key.names,
-    held,
-  )
+  const { indexed } = indexedReader(await openTableSpec(spec, options.signal), key.names, held)
   const probe = idProbe(key.ids)
   const live: number[] = []
   for (let block = 0; block < indexed.summary.blocks; block++) {

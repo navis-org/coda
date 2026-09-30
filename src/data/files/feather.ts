@@ -84,12 +84,8 @@ export async function openFeather(bytes: ByteSource): Promise<TableFileReader> {
         extent.offset + extent.metaDataLength + extent.bodyLength,
       )
     }
-    let batch: RecordBatch | null
-    try {
-      batch = (await reader.readRecordBatch(block)) ?? null
-    } catch (error) {
-      refuseCodec(error)
-    }
+    // Arrow IPC has two codecs, lz4 and ZSTD, and `arrow()` registers both.
+    const batch = (await reader.readRecordBatch(block)) ?? null
     last = { block, batch }
     return batch
   }
@@ -140,21 +136,6 @@ function runsOf({ DataType, Precision }: Arrow, vector: Vector): ColumnRun[] | u
     start += data.length
   }
   return runs
-}
-
-/**
- * A batch in a codec there is no decoder for, in words that say what to do. Only at the first
- * batch: an Arrow footer does not say how its batches are compressed.
- */
-function refuseCodec(error: unknown): never {
-  if (error instanceof Error && /codec not found/i.test(error.message)) {
-    throw new Error(
-      'This Feather file is compressed with a codec Coda cannot read (ZSTD, most likely). ' +
-        'Rewrite it with lz4, the default: pyarrow.feather.write_feather(table, path), or ' +
-        "polars' df.write_ipc(path, compression='lz4').",
-    )
-  }
-  throw error
 }
 
 /** Scalar Arrow types only; a list, struct, map or union is left out and named. */

@@ -28,6 +28,7 @@ rows -> table
   — too big to upload.
 - A **public release on a bucket** (`https://`, `gs://`, `s3://`) that a shared workflow should
   read without anybody downloading it first.
+- A **Delta table** — CAVE's exports, for one: paste the table's folder, below.
 
 For a table of a few thousand rows, [Upload Table](#core.uploadTable) is simpler: its output is an
 ordinary table every node accepts.
@@ -49,6 +50,23 @@ the node keeps hold of it:
 > the same file on their machine. A URL has no such step, which makes it the reproducible choice
 > for anything already published.
 
+## Delta tables
+
+Paste the URL of a Delta table's folder — the one holding `_delta_log/`, such as
+`gs://mat_dbs/public/deltalake_exports/flywire_fafb_production/v783/valid_connection_v2/pre_pt_root_id`
+— and the card reads its transaction log rather than a footer: which data files currently make up
+the table, and what each one holds. The card shows `Delta · version 596 · 76,460,814 rows · 33 files`.
+
+- **A lookup opens only the files that can hold the ids.** Each file's smallest and largest id is
+  in the log, so a lookup of one neuron in a table of dozens of files reads one of them.
+- **The version is pinned.** Everything below the card reads the version it showed, however many
+  commits land afterwards. Press ⟳ to move to the newest.
+- **Deleted and updated rows are left out** the way Delta records them (deletion vectors), and
+  renamed columns carry their current names.
+- A table using a Delta feature Coda does not read yet is refused by name rather than read as if
+  it were plain. A Delta table on your own disk is not supported: publish it, or export it once as
+  a Parquet file.
+
 ## Filtering
 
 A [Filter Table](#core.filterTable) between this and its reader drops rows as they are read, from
@@ -61,7 +79,7 @@ the rows each lookup fetched — never by scanning the file.
 | The data | stays on disk or on the server | copied into this browser's storage |
 | Read | only the blocks a lookup needs | all of it, into memory, on every run |
 | Size | many gigabytes | warns at 50 MB, refuses above 200 MB |
-| Formats | Parquet, Feather | CSV, TSV |
+| Formats | Parquet, Feather, Delta tables | CSV, TSV |
 | After a reload | see above | always there, in any browser |
 | Output | a table file, which only Read Rows reads | an ordinary table |
 
@@ -98,8 +116,8 @@ like `pre` is where that happens — the message says which setting fixes it.
 
 ## Limits
 
-- **Parquet compressed with SNAPPY or not at all.** pandas and pyarrow write SNAPPY by default;
-  polars writes ZSTD, which is refused with the line that rewrites it.
+- **Parquet compressed with SNAPPY, ZSTD or not at all** — the defaults of pandas, pyarrow,
+  polars and Delta. GZIP, LZ4 and BROTLI are refused with the line that rewrites the file.
 - **A CSV is refused.** It has no footer to find a row in, so every lookup would read all of it.
   Convert it to Parquet once, sorted by the column you look ids up in.
 - **Columns holding lists, structs or maps are left out**, and the card names them.

@@ -430,15 +430,16 @@ every page header: most of each id column is **not** dictionary-encoded (the wri
 dictionary fills at ~131K ids and the chunk falls back to PLAIN — 62% of `pre`, 84% of `post`), the
 coordinate columns do not compress at all, and every page's statistics say `null_count = 0`.
 
-`pages.ts` is the result: for a flat column of plain integers, floats or text on v1 pages with no
-nulls, it matches a key on the page as it lies (a PLAIN id by its two words, a dictionary page by
+`pages.ts` is the result: for a flat column of plain integers, floats or text on v1 pages, it
+matches a key on the page as it lies (a PLAIN id by its two words, a dictionary page by
 testing the dictionary once and scanning only its indices, never decompressing a page whose
 dictionary holds no id), and **gathers** every other column — a page with no matched row is never
 decompressed, and on one with matches only those values are read, a dictionary index by its bit
 position in its run. Snappy is `hysnappy`'s WASM, for the library's reads too. Three rules:
 
-- **It refuses rather than guesses.** A v2 page, a null, a date, a decimal, an unsigned integer,
-  another codec or a nested file throws `Unsupported`, and that block goes to hyparquet — so the
+- **It refuses rather than guesses.** A v2 page, a null in a key column's page (an output
+  column's are read, below), a date, a decimal, an unsigned integer, a codec `pageLibraries` does
+  not hold or a nested file throws `Unsupported`, and that block goes to hyparquet — so the
   failure mode is *slower*, never *different*. `pages.test.ts` holds both routes cell for cell,
   and also counts the blocks the fast path answered, since one that silently fell back everywhere
   passes every equality test there is.
@@ -485,6 +486,114 @@ takes that route where both ends arrive as integer runs.
 **An optional picker keeps a column while its schema has not arrived** — `resolveColumn` asks
 about an unknown schema before the optional rule. Read Rows' match column used to resolve to
 nothing on a first run, which read the whole file.
+
+### Delta tables: a log replayed, never a folder listed
+
+CAVE publishes its exports as Delta tables (`gs://mat_dbs/public/deltalake_exports/…`), so a Link
+Table takes a table's folder as well as a file. **The name is a hint and the bytes are the
+answer** (`registry.ts`' `formatByName`): a URL with no table file's extension is asked for as a
+Delta table first, and where that fails the address itself is asked: a table file ends in its
+magic (`PAR1`, `ARROW1`), a repository's download endpoint names a Parquet file with no extension
+at all, and `openTableFile` has always decided by magic bytes. Only where it is neither is it
+refused, by the table's own error. Three rounds to get here. The first decided on the extension
+alone and refused such a URL. The second fell back only where the log was *cleanly* absent, which
+is a 404 on every probe — and a bucket without list permission answers a missing key 403, a server
+sending no CORS header on its errors answers nothing a page can read, and one serving a page for
+every path answers 200, so the case the fallback existed for failed on ordinary servers. And a URL
+with a **query string is a file whatever its path**: a folder has objects under it, and
+`…/123?format=original/_delta_log/…` is the same file asked for again, whole — which is also why
+`_last_checkpoint` is read under a byte cap.
+The code is `src/data/files/delta/`: `log.ts` reads the log into a `DeltaSnapshot`, `reader.ts`
+turns that into a `TableFileReader`, `deletionVectors.ts` decodes the one binary format involved,
+`store.ts` reads over HTTP. The first real table — `valid_connection_v2`, 596 versions — replays
+to 33 live files, 4.6 GB, 76.5M rows; a lookup of one neuron reads one file and returns polars'
+174 rows.
+
+**The live files are replayed, never listed.** A delete or a compaction leaves the old files on
+disk until somebody vacuums, so a listing counts rows the table no longer holds. The newest
+checkpoint (a Parquet file of the live actions; hyparquet reads its nested columns as plain
+objects) and every JSON commit after it are applied in order, a file keyed by its path *and* its
+deletion vector, since an update to a vector is a remove and an add of the same path. Read one
+commit at a time that was 23 s; read sixteen at once it is 4 s. On GCS the commits and the newest
+checkpoint are found by one listing through the JSON API; elsewhere they are asked for a batch at
+a time from `_last_checkpoint`, since a web server cannot say what is in a folder — and asking is
+reading, so the bytes that answered are what the replay uses rather than a second fetch.
+
+**A snapshot is built once, on the page, and travels to every worker as data**, a few kB per file:
+re-reading the log per worker would be a hundred requests each. It is kept by root until ⟳, which
+is also what **pins the version** — a commit landing between two runs of a workflow changes
+nothing until somebody asks for it. The fingerprint is the root, the version and the live files,
+so a stale value is refused by the same `requireFingerprint` a rewritten file is.
+
+**A block is a file, and a file's row groups are skipped inside it.** Each `add` carries its
+file's min/max in the log, so a lookup rules out whole files with no request; only a surviving
+file's footer is opened, and its own statistics rule out the rest. Opening every footer up front
+would be a request per file per worker before a row is read. Everything above `TableFileReader` —
+the worker split, block indexes, a Filter Table's conditions — is unchanged, because this is one.
+Three things follow from a block being *several* reads, each of which the first version got wrong.
+A **capped read with no key** stops once it has its rows (`readBlock`'s `head`, which the caller
+sets one past the cap so it can still say the read was cut short), where a file was otherwise read
+whole to keep its first thousand. The Parquet reader is what honours it — `rowEnd`, and hyparquet's
+`useOffsetIndex` so only a group's leading pages are fetched where the file has a page index — so a
+plain Parquet file of million-row groups gains the same (the first thousand rows of CAVE's table:
+7.3 MB in 1.5 s, measured, of a file over a hundred megabytes); the Delta reader passes on what is
+left of the cap, and only a file with a deletion vector stops at a whole group instead. The block-index
+wrapper deliberately never forwards `head`: it takes a block's range from what it reads. A row
+group the page path declines is read **keys first**, the other columns only where a key matched —
+`matchesByColumns` in `reader.ts`, one function for `readRows` and the Delta reader, which were
+two copies for a round. And
+**one file is held open at a time**: every reader walks blocks in ascending order, and a footer
+and its kept tail per file ever opened is what a whole-table read would hold to its end. A
+deletion vector is fetched only for a file a lookup matched in.
+
+**The stats are parsed without rounding.** They are a JSON string, and CAVE's ids are eighteen
+digits: `JSON.parse` turns `720575940638257498` into another number, and file skipping built on
+it would skip the file holding the id. `parseStats` quotes every integer a double cannot hold
+before parsing, through `quoteWideIntegers` — CAVE's own JSON has the same problem, and that scan
+is string-aware for the reason that applies here too: a text column's min or max is free text, and
+a one-line pattern (which this was, first) splices quotes into a string holding `,<digits>,`.
+
+**What a reader must understand is read exactly or refused.** `deletionVectors` (rows a writer
+marked deleted without rewriting the file — Z85 in the log, a RoaringBitmapArray in a file beside
+the table, checked against the cardinality the log states), `columnMapping` (names in the files,
+the stats and the partition values are *physical*; the table's are in the schema),
+`timestampNtz` and `vacuumProtocolCheck` are read. Anything else is refused by name — a table read
+as plain when it is not returns wrong rows without a word. Partition columns are not in the files
+at all: one value per file, from the log, typed as the column is. The tests read four tables
+against delta-rs' own answers (`expected.json`): a synthetic edge list reaching every log path,
+and three of delta-rs' Spark-written test tables for what delta-rs cannot write.
+
+**The bucket allows no cross-origin reads at its direct address**, which is ordinary for a data
+bucket. Reads were already falling back to the JSON API (`transport.ts`), which every public
+object answers; the size check (`urlHead`) had no fallback and now asks the JSON API for size and
+`Last-Modified`, and the listing goes through it too. A key with a percent-escape in it is decoded
+once before the JSON API encodes it, or a space in a partition folder is asked for as `%2520`.
+
+**A compacted table's files are ZSTD**, which is also polars' Parquet default, so `fzstd` (the
+decoder hyparquet's own compressor package uses) joined Snappy in `pageLibraries().codecs`, read
+by the fast path and the library alike, and in apache-arrow's registry for Feather. A decode-only
+codec registers there: the registry validates an encoder only where one is given.
+
+**The fast path reads pages, not chunks, where a file has a page index.** The first lookup read
+77 MB in 9.9 s for 174 rows: each output column's whole chunk, and then — because the page it
+needed held a null — the library's read of the whole row group again. Two changes: `pagesHolding`
+reads a column's offset index (a row group's are written side by side, so the output columns'
+are one read) and fetches the dictionary page and only the data pages holding the matched rows,
+neighbours merged into one request, the whole chunk where that would be most of it;
+and a page with nulls is read rather than refused, each row given its place among the page's
+stored values (`valueSlots`). The same lookup is 14 MB in 1.8–2.4 s, nearly all of it dictionary
+pages, which a dictionary-encoded page cannot be read without. A key column with nulls is still
+refused — its scan reads one value per row. **What the footer can refuse is refused before a byte
+is read** (a key that is not an integer, an output this path does not read, a codec, a key chunk
+whose statistics count a null): found after the key chunks were fetched, a refusal has the library
+fetch them again, and on a Delta table that is once per file.
+
+**The notebook reads through delta-rs' SQL engine** (`QueryBuilder`), at the pinned version.
+`DeltaTable.to_pyarrow_dataset()` is the obvious route and is wrong twice: it refuses deletion
+vectors, and on a column-mapped table it reads every column as null. polars' `scan_delta` gives
+the same nulls. The lookup is an SQL `IN`, so delta-rs skips files on the same stats — measured
+rather than assumed, DataFusion being said to stop pruning on a long list: thirty ids took the
+1.8 s one id took, against the same table (deltalake 1.6.6).
 
 ## Upload Mesh: somebody else's regions
 

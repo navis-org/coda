@@ -26,6 +26,7 @@ import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
 import { errorMessage } from '../../core/errors'
 import { describeTableFile, tableFileName } from '../../core/values'
 import {
+  TABLE_FILE_EXTENSIONS,
   grantLocalFile,
   holdLocalFile,
   localFileState,
@@ -40,7 +41,7 @@ import { CacheAge, RefreshButton } from './CacheAge'
 import type { NodeBodyProps, NodeFooterProps } from './nodeBodies'
 import { SchemaListing, UploadFields } from './uploadCard'
 
-const ACCEPT = '.parquet,.parq,.pq,.feather,.arrow,.ipc'
+const ACCEPT = TABLE_FILE_EXTENSIONS.map((extension) => `.${extension}`).join(',')
 
 export function LinkTableBody({ node, ctx, compact, setParam, onError }: NodeBodyProps) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -56,7 +57,7 @@ export function LinkTableBody({ node, ctx, compact, setParam, onError }: NodeBod
     (file: File, handle?: FileSystemFileHandle) => {
       const id = holdLocalFile(file, handle)
       setBusy(true)
-      // Read before the node is pointed at it, so a CSV or a ZSTD file is refused on the spot
+      // Read before the node is pointed at it, so a CSV is refused on the spot
       // rather than turning the card red a moment later. The node's `evaluate` reuses this read.
       void readTableFileSummary(
         { kind: 'local', id, name: file.name },

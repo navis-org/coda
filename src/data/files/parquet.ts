@@ -14,39 +14,40 @@
  * of it being read. That pays only when the file is sorted by the id column — shuffled, every
  * group spans every id — which is why the node says so.
  *
- * **SNAPPY or uncompressed only**, because that is what `hyparquet` decodes without a compressor
- * module this build does not carry. `pandas` and `pyarrow` write SNAPPY by default; `polars`
- * writes ZSTD, so its files are refused at open with the one line that rewrites them.
+ * **SNAPPY, ZSTD or uncompressed** — `pandas` and `pyarrow` write SNAPPY by default, `polars` and
+ * a compacted Delta table ZSTD. Anything else (GZIP, LZ4, BROTLI) is refused at open with the one
+ * line that rewrites it.
  */
 
 import type { FileMetaData, Statistics } from 'hyparquet'
 import type * as Hyparquet from 'hyparquet'
-import { hyparquet, pageLibraries } from '../libraries'
+import { PARQUET_CODEC_NAMES, hyparquet, pageLibraries } from '../libraries'
 
 import type { DType } from '../../core/types'
 import type { TableFileColumn } from '../../core/values'
 import type { ByteSource } from './bytes'
-import { TAIL_READ } from './bytes'
+import { TAIL_READ, exactBuffer } from './bytes'
 import type { FileSummary } from './columns'
-import { pastSafe } from './columns'
+import { pastSafe, wideDecimal } from './columns'
 import type { ColumnRun, IdProbe, RawBlock, TableFileReader } from './reader'
 import { footerFingerprint, mayHoldRange, runGetter } from './reader'
 import { Unsupported, plainColumns, readMatches } from './pages'
 
-const READABLE_CODECS = new Set(['UNCOMPRESSED', 'SNAPPY'])
+const PARQUET_CODECS = new Set<string>(['UNCOMPRESSED', ...PARQUET_CODEC_NAMES])
 
 type SchemaTree = ReturnType<typeof Hyparquet.parquetSchema>
 
-export async function openParquet(bytes: ByteSource): Promise<TableFileReader> {
+/** A Parquet file's reader, and what a reader built over several of them places rows by. */
+export interface ParquetReader extends TableFileReader {
+  /** A row group's row count, from the footer, without reading it. */
+  rowsIn(block: number): number
+}
+
+export async function openParquet(bytes: ByteSource): Promise<ParquetReader> {
   const file = {
     byteLength: bytes.size,
     slice: async (start: number, end?: number) => {
-      const view = await bytes.read(start, end ?? bytes.size)
-      // Handed over as is where the view is its whole buffer — a copy of every column chunk,
-      // otherwise, which briefly doubles a group's worth of memory for nothing.
-      return view.byteOffset === 0 && view.byteLength === view.buffer.byteLength
-        ? (view.buffer as ArrayBuffer)
-        : (view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer)
+      return exactBuffer(await bytes.read(start, end ?? bytes.size))
     },
   }
   const { parquetMetadataAsync, parquetRead, parquetSchema } = await hyparquet()
@@ -84,6 +85,8 @@ export async function openParquet(bytes: ByteSource): Promise<TableFileReader> {
   return {
     summary,
 
+    rowsIn: (block: number) => Number(metadata.row_groups[block]?.num_rows ?? 0),
+
     mayHold(block: number, name: string, probe: IdProbe): boolean {
       const stats = statsOf(block, name)
       return stats ? mayHoldRange(...bounds(stats), probe) : true
@@ -110,18 +113,25 @@ export async function openParquet(bytes: ByteSource): Promise<TableFileReader> {
       }
     },
 
-    async readBlock(block: number, wanted: readonly string[]): Promise<RawBlock> {
+    async readBlock(
+      block: number,
+      wanted: readonly string[],
+      head?: number,
+    ): Promise<RawBlock> {
       const group = metadata.row_groups[block]
-      const rows = Number(group?.num_rows ?? 0)
+      // A capped read decodes the group's leading pages and stops — and fetches only those, where
+      // the file wrote a page index — rather than a million rows to keep a thousand.
+      const rows = Math.min(Number(group?.num_rows ?? 0), head ?? Infinity)
       if (!group || rows === 0 || wanted.length === 0) return { rows, columns: {} }
       const chunks = new Map<string, ColumnRun[]>()
       await parquetRead({
         file,
         metadata: { ...metadata, row_groups: [group], num_rows: group.num_rows },
         columns: [...wanted],
-        compressors: { SNAPPY: (await pageLibraries()).snappy },
+        compressors: (await pageLibraries()).codecs,
         rowStart: 0,
         rowEnd: rows,
+        ...(head === undefined ? {} : { useOffsetIndex: true }),
         onChunk: (chunk) => {
           const list = chunks.get(chunk.columnName) ?? []
           list.push({ start: chunk.rowStart, values: chunk.columnData })
@@ -201,11 +211,8 @@ function describe(node: SchemaTree): TableFileColumn | undefined {
   const logical = element.logical_type?.type
   const converted = element.converted_type
   if (logical === 'DECIMAL' || converted === 'DECIMAL') {
-    // A whole-number decimal is how a SQL export spells a root id, and past fifteen digits a
-    // float rounds it into a different neuron — left out and named, as Feather leaves every
-    // decimal (invariant 8). One with a fraction is a measurement, where a float is the answer.
-    const wide = !element.scale && (element.precision ?? Infinity) > 15
-    return wide ? undefined : { name, dtype: 'f64' }
+    // Left out and named where a float would round it, as Feather leaves every decimal.
+    return wideDecimal(element.precision, element.scale) ? undefined : { name, dtype: 'f64' }
   }
   // Read as the library decodes it — a number, which the text decoder would only stringify.
   if (logical === 'FLOAT16') return { name, dtype: 'f64' }
@@ -255,11 +262,11 @@ function refuseCodecs(metadata: FileMetaData): void {
   for (const group of metadata.row_groups) {
     for (const chunk of group.columns) {
       const codec = chunk.meta_data?.codec
-      if (codec && !READABLE_CODECS.has(codec)) {
+      if (codec && !PARQUET_CODECS.has(codec)) {
         throw new Error(
           `This Parquet file is compressed with ${codec}, which Coda cannot read yet. Rewrite ` +
-            `it with SNAPPY — in pandas, df.to_parquet(path, compression="snappy"); in polars, ` +
-            `df.write_parquet(path, compression="snappy").`,
+            `it with ZSTD or SNAPPY — in pandas, df.to_parquet(path, compression="zstd"); in ` +
+            `polars, df.write_parquet(path), whose default is ZSTD.`,
         )
       }
     }

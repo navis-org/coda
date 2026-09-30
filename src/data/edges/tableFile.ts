@@ -22,8 +22,7 @@ import type { EdgeColumns, EncodedEdges } from './encode'
 import { EdgeSetBuilder, edgeIdCell, edgeWeightCell } from './encode'
 import type { JobHandler } from '../workerJob'
 import type { FileSpec } from '../files/bytes'
-import { bytesOf } from '../files/bytes'
-import { openTableFile, requireFingerprint } from '../files/read'
+import { openTableSpec, requireFingerprint } from '../files/read'
 import type { RowCondition } from '../files/filters'
 import { rowTest, withConditionColumns } from '../files/filters'
 import type { ColumnRun } from '../files/reader'
@@ -46,7 +45,7 @@ export const readTableFileEdgesJob: JobHandler<ReadEdgesJob, EncodedEdges> = asy
   options,
 ) => {
   const { fingerprint, pre, post, weight, filters = [] } = job.request
-  const reader = await openTableFile(bytesOf(job.spec, options.signal))
+  const reader = await openTableSpec(job.spec, options.signal)
   requireFingerprint(reader, fingerprint)
   const { blocks } = reader.summary
   const builder = new EdgeSetBuilder()

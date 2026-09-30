@@ -56,7 +56,7 @@ beforeEach(() => resetTableFiles())
 describe('Link Table', () => {
   it('asks for a file, and names the one this browser does not have', async () => {
     expect(issues(graph({}), 'f')).toContain(
-      'Choose a Parquet or Feather file, or paste a URL to one.',
+      'Choose a Parquet or Feather file, or paste a URL to one or to the folder of a Delta table.',
     )
     const forgotten = graph({ fileId: 'file-gone', fileName: 'synapses.parquet' })
     // Silent while remembered handles are looked through — a moment later it may be found.
@@ -165,10 +165,19 @@ describe('a URL', () => {
   let ranges = 0
   let caches: (RequestCache | undefined)[] = []
 
-  /** A server holding one file that answers HEAD and Range — or, with `ignoreRange`, sends it all. */
-  function serve(bytes: Uint8Array, ignoreRange = false) {
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit = {}) => {
+  /**
+   * A server holding one file that answers HEAD and Range — or, with `ignoreRange`, sends it all.
+   * `first` answers a request before the file does, or throws as a refused request would.
+   */
+  function serve(
+    bytes: Uint8Array,
+    ignoreRange = false,
+    first?: (url: string) => Response | undefined,
+  ) {
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
       caches.push(init.cache)
+      const answered = first?.(url)
+      if (answered) return answered
       if (init.method === 'HEAD') {
         return new Response(null, { headers: { 'content-length': String(bytes.byteLength) } })
       }
@@ -212,6 +221,72 @@ describe('a URL', () => {
     // The Link Table still holds the footer it read, so the next run's read is refused by it.
     serve(new Uint8Array(readFileSync(FIXTURES + 'synapses.feather')))
     expect((await run(g)).info('r').error).toMatch(/has changed since it was opened/)
+  })
+
+  it('reads a gs:// file from a bucket that allows no cross-origin reads at its address', async () => {
+    // What a browser does there: every request to the direct address fails, and the JSON API —
+    // which every public object answers — gives the size, the modification time and the bytes.
+    const bytes = new Uint8Array(readFileSync(FIXTURES + 'synapses.parquet'))
+    serve(bytes, false, (url) => {
+      if (!url.includes('/storage/v1/')) throw new TypeError('Failed to fetch')
+      if (!url.includes('fields=size')) return undefined
+      return Response.json({ size: String(bytes.byteLength), updated: '2026-09-30T00:00:00Z' })
+    })
+    const scheduler = await run(
+      graph(
+        { url: 'gs://no-cors-bucket/synapses.parquet' },
+        { columns: ['size'], matchColumn: 'pre_pt_root_id', ids: String(BASE) },
+      ),
+    )
+    const out = scheduler.output('r', 'out')
+    expect(isTableValue(out) ? out.data.size : undefined).toEqual([10, 11, 12])
+  })
+
+  // A repository's download endpoint: a file at an address with no extension, so it is asked for
+  // as a Delta table first. What answers for the log that is not there differs by server, and the
+  // bytes at the address itself say what it is whichever it was.
+  const NO_LOG: Record<string, () => Response> = {
+    'a 404': () => new Response(null, { status: 404 }),
+    'a 403, as a bucket that may not be listed answers': () =>
+      new Response(null, { status: 403 }),
+    'a page, as a server answering every path does': () => new Response('<!doctype html>'),
+  }
+  for (const [answer, respond] of Object.entries(NO_LOG)) {
+    it(`reads a file at an address with no extension, its missing log answered by ${answer}`, async () => {
+      const probes: string[] = []
+      serve(new Uint8Array(readFileSync(FIXTURES + 'synapses.parquet')), false, (url) => {
+        if (!url.includes('_delta_log')) return undefined
+        probes.push(url)
+        return respond()
+      })
+      const g = graph(
+        { url: 'https://example.org/api/access/datafile/123' },
+        { columns: ['size'], matchColumn: 'pre_pt_root_id', ids: String(BASE) },
+      )
+      const out = (await run(g)).output('r', 'out')
+      expect(isTableValue(out) ? out.data.size : undefined).toEqual([10, 11, 12])
+      // Learned once: the read below the Link Table does not ask for a log again.
+      expect(probes.filter((url) => url.includes('_last_checkpoint'))).toHaveLength(1)
+    })
+  }
+
+  it('reads an address with a query string as a file, never as a folder', async () => {
+    const asked: string[] = []
+    serve(new Uint8Array(readFileSync(FIXTURES + 'synapses.parquet')), false, (url) => {
+      asked.push(url)
+      return undefined
+    })
+    const scheduler = await run(
+      graph({ url: 'https://example.org/datafile/123?format=original' }),
+    )
+    expect(scheduler.info('f').error).toBeUndefined()
+    expect(asked.some((url) => url.includes('_delta_log'))).toBe(false)
+  })
+
+  it('refuses an address that is neither, in the words that name both', async () => {
+    vi.stubGlobal('fetch', async () => new Response(null, { status: 404 }))
+    const scheduler = await run(graph({ url: 'https://example.org/tables/edges' }))
+    expect(scheduler.info('f').error).toMatch(/no Delta table .* Parquet or Feather file/)
   })
 
   it('reads a URL’s footer when peeked, so a reloaded graph’s pickers fill without a Run', async () => {

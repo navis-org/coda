@@ -26,11 +26,13 @@
 import { isIdentifierColumn } from '../../core/ids'
 import type { DType, TableSchema } from '../../core/types'
 import { column, tableSchema } from '../../core/types'
-import type { CellValue, TableFileColumn } from '../../core/values'
+import type { CellValue, TableFileColumn, TableFileValue } from '../../core/values'
 
 /** What a reader learns from a file's footer, before reading a row. Plain data, cacheable. */
 export interface FileSummary {
-  readonly format: 'parquet' | 'feather'
+  readonly format: TableFileValue['format']
+  /** A Delta table's version, the one this summary and every read of it are pinned to. */
+  readonly version?: number
   readonly columns: readonly TableFileColumn[]
   /** Columns left out because Coda has no cell for them — lists, structs, maps. */
   readonly skipped: readonly string[]
@@ -105,6 +107,15 @@ export function indexableSchema(summary: FileSummary): TableSchema {
       .filter((c) => !c.time && (c.dtype === 'i64' || c.dtype === 'str'))
       .map((c) => column(c.name, c.dtype)),
   )
+}
+
+/**
+ * Whether a decimal is a whole number too wide for a float: how a SQL export spells a root id, and
+ * past fifteen digits a float rounds it into a different neuron (invariant 8). Left out and named
+ * by every reader; one with a fraction is a measurement, where a float is the answer.
+ */
+export function wideDecimal(precision: number | undefined, scale: number | undefined): boolean {
+  return !scale && (precision ?? Infinity) > 15
 }
 
 const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER)

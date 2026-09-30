@@ -97,8 +97,15 @@ export interface TableFileReader {
    * statistics rule every one of them out. Always `true` where there are no statistics.
    */
   mayHold(block: number, column: string, probe: IdProbe): boolean
-  /** One block's cells for the named columns. Blocks are read one at a time by design. */
-  readBlock(block: number, columns: readonly string[]): Promise<RawBlock>
+  /**
+   * One block's cells for the named columns. Blocks are read one at a time by design.
+   *
+   * `head` is a caller that will keep no more than that many of the block's leading rows: a reader
+   * whose block is more than one read (`delta/reader.ts`, a file of row groups) may stop once it
+   * has them, and the block it hands back is then that long or longer, never the block cut short
+   * of `head`.
+   */
+  readBlock(block: number, columns: readonly string[], head?: number): Promise<RawBlock>
   /**
    * A keyed read of one block in one step, where the format has a path faster than reading its
    * columns whole (`pages.ts`): the rows where a `keys` column holds a probed id, and each
@@ -117,6 +124,32 @@ export interface TableFileReader {
 export interface Matches {
   readonly rows: readonly number[]
   readonly values: Readonly<Record<string, readonly unknown[]>>
+}
+
+/**
+ * A block's matches read through its columns, where the format has no keyed path or declines the
+ * block: the key columns **alone** first, and the other columns only where a key matched — which
+ * in Parquet is bytes never fetched, and everywhere is cells never decoded. A key that is also an
+ * output is taken from the key read rather than read again.
+ */
+export async function matchesByColumns(
+  reader: TableFileReader,
+  block: number,
+  keys: readonly string[],
+  probe: IdProbe,
+  outputs: readonly string[],
+): Promise<Matches> {
+  const keyed = await reader.readBlock(block, keys)
+  const rows = unionRows(keys.map((key) => matchingRows(keyed, key, probe)))
+  const others = outputs.filter((name) => !keys.includes(name))
+  const rest = rows.length && others.length ? await reader.readBlock(block, others) : undefined
+  const values = Object.fromEntries(
+    outputs.map((name) => {
+      const get = keyed.columns[name] ?? rest?.columns[name]
+      return [name, rows.map((row) => get?.(row) ?? null)]
+    }),
+  )
+  return { rows, values }
 }
 
 /** The ids a lookup asks about, prepared once for every block's range test and every row's. */
@@ -310,7 +343,10 @@ function textBound(bound: unknown): string | undefined {
 }
 
 /** The first index whose element is not below `target`. */
-function lowerBound<T extends bigint | string>(sorted: readonly T[], target: T): number {
+export function lowerBound<T extends bigint | string | number>(
+  sorted: ArrayLike<T>,
+  target: T,
+): number {
   let lo = 0
   let hi = sorted.length
   while (lo < hi) {

@@ -2033,12 +2033,13 @@ export function customGraph(): CodaGraph {
       col: 0,
       params: { url: 'https://example.org/cell_types.csv' },
     },
+    // A Delta table's folder, as CAVE publishes an edge list: the notebook reads it with deltalake.
     {
       id: 'edgeFile',
       type: 'core.linkTable',
       col: 0,
       row: 1,
-      params: { fileId: 'file-edges', fileName: 'edges.feather' },
+      params: { url: 'gs://example-bucket/connectome/edges' },
     },
     {
       id: 'synFile',

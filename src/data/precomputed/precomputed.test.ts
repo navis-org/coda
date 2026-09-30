@@ -417,6 +417,8 @@ describe('transport', () => {
   })
 
   it('refuses to restate what the JSON API cannot represent', () => {
+    // A bare `%` in an object's name is not an escape: no form, rather than a throw inside a read.
+    expect(gcsJsonApiUrl('https://storage.googleapis.com/bucket/100%/info')).toBeUndefined()
     // Not Google's.
     expect(gcsJsonApiUrl('https://example.org/bucket/info')).toBeUndefined()
     expect(gcsJsonApiUrl('https://b.s3.amazonaws.com/info')).toBeUndefined()

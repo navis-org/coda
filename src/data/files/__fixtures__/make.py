@@ -9,6 +9,11 @@ Twelve synapse-like rows in three blocks of four, written three ways:
 - synapses-unsorted.parquet  the same rows shuffled, so every group spans every id and nothing
                              can be skipped — the case the card warns about
 - synapses.feather           lz4, the pyarrow default, in three record batches
+- synapses-zstd.feather      the same Feather ZSTD-compressed, read through the codec `libraries.ts` registers
+- synapses-paged.parquet     20,000 rows in one row group of 2 kB pages with a page index, so a
+                             lookup reads the pages holding its rows rather than whole chunks
+- synapses-zstd.parquet      the sorted rows ZSTD-compressed — polars' default, and a compacted
+                             Delta table's
 - synapses-polars.feather    the same rows as polars writes them: lz4 frames carrying block
                              checksums (arrow-rs sets the flag, pyarrow does not), and strings
                              as Utf8View
@@ -46,6 +51,20 @@ table = pa.table(
 )
 
 pq.write_table(table, "synapses.parquet", row_group_size=4)
+pq.write_table(table, "synapses-zstd.parquet", row_group_size=4, compression="zstd")
+# Twenty thousand rows, past the 64 kB tail a reader opens with, or every read is served from it.
+rnd = random.Random(7)
+paged = pa.table(
+    {
+        "pre_pt_root_id": pa.array([BASE + i // 20 for i in range(20000)], pa.int64()),
+        "post_pt_root_id": pa.array([BASE + 10_000 + rnd.randrange(5000) for _ in range(20000)], pa.int64()),
+        "size": pa.array([rnd.randrange(1, 500) for _ in range(20000)], pa.int64()),
+        "score": pa.array([rnd.random() for _ in range(20000)], pa.float64()),
+        "region": pa.array([None if i % 7 == 0 else f"R{i % 13}" for i in range(20000)], pa.string()),
+    }
+)
+pq.write_table(paged, "synapses-paged.parquet", row_group_size=20000, data_page_size=2048,
+               write_page_index=True, compression="zstd")
 
 order = list(range(12))
 random.Random(4).shuffle(order)
@@ -53,6 +72,7 @@ pq.write_table(table.take(order), "synapses-unsorted.parquet", row_group_size=4)
 
 feather.write_feather(table, "synapses.feather", chunksize=4)
 pl.from_arrow(table).write_ipc("synapses-polars.feather", compression="lz4")
+feather.write_feather(table, "synapses-zstd.feather", compression="zstd", chunksize=4)
 
 required = pa.table(
     {name: table[name] for name in ["pre_pt_root_id", "post_pt_root_id", "size", "score"]},

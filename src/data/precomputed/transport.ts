@@ -224,6 +224,16 @@ export function proxied(url: string): string | undefined {
  *    what it did before this route existed.
  */
 export function gcsJsonApiUrl(url: string): string | undefined {
+  const object = gcsObject(url)
+  return object && `${gcsObjectsUrl(object.bucket)}/${encodeURIComponent(object.key)}?alt=media`
+}
+
+/**
+ * The bucket and object name a GCS URL addresses, under `gcsJsonApiUrl`'s three refusals — the one
+ * parse behind every JSON API address built here, so the media, metadata and listing forms cannot
+ * come to read a URL three ways.
+ */
+export function gcsObject(url: string): { bucket: string; key: string } | undefined {
   let parsed: URL
   try {
     parsed = new URL(url)
@@ -234,9 +244,48 @@ export function gcsJsonApiUrl(url: string): string | undefined {
   if (parsed.pathname.startsWith(GCS_API_PREFIX)) return undefined
   if (parsed.search) return undefined
   const [bucket, ...rest] = parsed.pathname.split('/').filter(Boolean)
-  const key = rest.join('/')
-  if (!bucket || !key) return undefined
-  return `https://${GCS_HOST}${GCS_API_PREFIX}b/${bucket}/o/${encodeURIComponent(key)}?alt=media`
+  // A pathname keeps its percent-encoding; the object's name is the decoded text, encoded once
+  // by whoever builds a URL from it — or a space in a Delta table's partition folder is asked for
+  // as `%2520`.
+  let key: string
+  try {
+    key = decodeURIComponent(rest.join('/'))
+  } catch {
+    // A bare `%` in an object's name: no JSON API form, and the direct address is read as written.
+    return undefined
+  }
+  return bucket && key ? { bucket, key } : undefined
+}
+
+const gcsObjectsUrl = (bucket: string) => `https://${GCS_HOST}${GCS_API_PREFIX}b/${bucket}/o`
+
+/** An object's size and modification time through the JSON API: `{ size, updated }`. */
+export function gcsMetadataUrl(url: string): string | undefined {
+  const object = gcsObject(url)
+  return (
+    object &&
+    `${gcsObjectsUrl(object.bucket)}/${encodeURIComponent(object.key)}?fields=size,updated`
+  )
+}
+
+/**
+ * One page of the object names under a folder, from `startOffset` on: `{ items: [{ name }],
+ * nextPageToken }`. A web server cannot say what a folder holds; a bucket's JSON API can, and it
+ * answers a browser where the bucket's own address allows no cross-origin read.
+ */
+export function gcsListUrl(
+  folder: { bucket: string; key: string },
+  startOffset: string,
+  pageToken?: string,
+): string {
+  const query = new URLSearchParams({
+    prefix: `${folder.key}/`,
+    startOffset,
+    fields: 'items(name),nextPageToken',
+    maxResults: '1000',
+    ...(pageToken ? { pageToken } : {}),
+  })
+  return `${gcsObjectsUrl(folder.bucket)}?${query}`
 }
 
 /**
@@ -264,6 +313,11 @@ export class PrecomputedFetchError extends Error {
     this.url = url
     this.status = status
   }
+}
+
+/** Whether a failure is the server saying there is nothing there — the one refusal that is a verdict. */
+export function isNotFound(error: unknown): boolean {
+  return error instanceof PrecomputedFetchError && error.status === 404
 }
 
 export interface FetchOptions {

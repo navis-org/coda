@@ -98,7 +98,8 @@ export function tableFileSchema(
   )
 }
 
-const NOTHING_CHOSEN = 'Choose a Parquet or Feather file, or paste a URL to one.'
+const NOTHING_CHOSEN =
+  'Choose a Parquet or Feather file, or paste a URL to one or to the folder of a Delta table.'
 
 registerNode({
   type: 'core.linkTable',
@@ -134,7 +135,7 @@ registerNode({
       kind: 'string',
       label: 'URL',
       placeholder: 'https://… or gs://…/table.parquet',
-      help: 'A Parquet or Feather file on a server that allows cross-origin range requests. Ignored while a local file is chosen.',
+      help: 'A Parquet or Feather file, or the folder of a Delta table, on a server that allows cross-origin range requests (a public gs:// bucket always does). Ignored while a local file is chosen.',
       default: '',
     },
     {
@@ -235,6 +236,7 @@ registerNode({
       kind: 'tableFile',
       ref,
       format: summary.format,
+      ...(summary.version === undefined ? {} : { version: summary.version }),
       schema: tableFileSchema(summary, ctx.params, ctx.columns),
       columns: summary.columns,
       rows: summary.rows,

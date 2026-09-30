@@ -71,6 +71,8 @@ export function withBlockIndex(
       return !(held && name === column) || indexMayHold(held, block, probe)
     },
 
+    // Whole, whatever `head` a caller passes: a block's range is taken from what is read here,
+    // and a block cut short would be indexed by the range of its first rows.
     async readBlock(block: number, columns: readonly string[]): Promise<RawBlock> {
       const raw = await reader.readBlock(block, columns)
       const cell = raw.columns[column]

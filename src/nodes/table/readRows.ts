@@ -22,7 +22,7 @@ import { registerNode } from '../../core/registry'
 import type { TableSchema } from '../../core/types'
 import { T, attributeSchema, findColumn } from '../../core/types'
 import type { TableFileValue } from '../../core/values'
-import { isTableFileValue, isTableValue, makeTable } from '../../core/values'
+import { isTableFileValue, isTableValue, makeTable, tableFileBlocks } from '../../core/values'
 import { fileColumn } from '../../data/files/columns'
 import { readFileRows } from '../../data/files/fileReads'
 import type { OutputColumn, ReadRowsRequest } from '../../data/files/read'
@@ -174,11 +174,12 @@ registerNode({
       )
     }
     /*
-     * A lookup that could have skipped blocks and skipped none: the file is not sorted by the
-     * column, which no statistics and no index can help. Parquet can always skip; Feather only by
-     * its index, and not on the run that builds it — that run reads everything by definition.
+     * A lookup that could have skipped blocks and skipped none: the table is not sorted by the
+     * column, which no statistics and no index can help. Parquet and a Delta table can always
+     * skip; Feather only by its index, and not on the run that builds it — that run reads
+     * everything by definition.
      */
-    const couldSkip = file.format === 'parquet' || result.index === 'used'
+    const couldSkip = file.format !== 'feather' || result.index === 'used'
     // Not after the cap stopped it: "Read all" would be false, and beside the cap's own warning
     // the two contradicted each other.
     if (
@@ -189,9 +190,10 @@ registerNode({
       result.blocksSkipped === 0 &&
       result.blocksRead > 0
     ) {
-      const blocks = file.format === 'parquet' ? 'row groups' : 'batches'
+      const blocks = tableFileBlocks(file.format, file.blocks)
+      const what = file.format === 'delta' ? 'table' : 'file'
       ctx.warn(
-        `Read all ${file.blocks.toLocaleString()} ${blocks}: none could be skipped, so the file ` +
+        `Read all ${file.blocks.toLocaleString()} ${blocks}: none could be skipped, so the ${what} ` +
           `is probably not sorted by "${matching}". Sorting it by that column once makes every ` +
           `lookup like this one read only the ${blocks} that hold the ids.`,
       )

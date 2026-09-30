@@ -15,7 +15,6 @@ import { describe, expect, it } from 'vitest'
 
 import type { ByteSource } from './bytes'
 import { blobBytes } from './bytes'
-import type { FileSummary } from './columns'
 import { fileTableSchema, textColumnsFor } from './columns'
 import { withBlockIndex } from './blockIndex'
 import { readTableFileRows } from './client'
@@ -23,6 +22,7 @@ import type { ReadRowsRequest } from './read'
 import { openTableFile, readRows } from './read'
 import type { BlockIndex } from './reader'
 import { resetFileStore } from './store'
+import { readRequest } from '../../test/tableFiles'
 
 const BASE = 720575940600000000n
 
@@ -30,17 +30,47 @@ function fixture(name: string): ByteSource {
   return blobBytes(new Blob([readFileSync(`src/data/files/__fixtures__/${name}`)]))
 }
 
-/** Every column, typed by the automatic rule — what the file node publishes by default. */
-function request(summary: FileSummary, rest: Partial<ReadRowsRequest> = {}): ReadRowsRequest {
-  const text = textColumnsFor(summary, true, [])
-  const schema = fileTableSchema(summary, text)
-  return {
-    fingerprint: summary.fingerprint,
-    columns: summary.columns.map((column, i) => ({ column, dtype: schema.columns[i]!.dtype })),
-    limit: Infinity,
-    ...rest,
+describe('a capped read with no key', () => {
+  const FILES = [
+    'synapses.parquet',
+    'synapses-unsorted.parquet',
+    'synapses-zstd.parquet',
+    'synapses-paged.parquet',
+    'synapses.feather',
+  ]
+  for (const name of FILES) {
+    it(`keeps the first rows of ${name}, the same ones a whole read starts with`, async () => {
+      const reader = await openTableFile(fixture(name))
+      // Without `hash`, which is past 2^53 in the Feather fixture and refused as a number.
+      const names = reader.summary.columns.map((c) => c.name).filter((n) => n !== 'hash')
+      const whole = await readRows(reader, readRequest(reader.summary, {}, names))
+      const capped = await readRows(reader, readRequest(reader.summary, { limit: 5 }, names))
+      expect(capped.rows).toBe(5)
+      expect(capped.truncated).toBe(true)
+      for (const [column, values] of Object.entries(whole.data)) {
+        expect(capped.data[column]).toEqual(values.slice(0, 5))
+      }
+    })
   }
-}
+
+  it('reads a group’s leading pages rather than the group, where the file has a page index', async () => {
+    // 20,000 rows in one row group of 2 kB pages: five rows are in the first page of each column.
+    // Not a fraction of the whole here — the library joins neighbouring ranges, and in a file this
+    // small most columns are neighbours.
+    const read = async (limit: number) => {
+      const source = fixture('synapses-paged.parquet')
+      let bytes = 0
+      const counted: ByteSource = {
+        ...source,
+        read: (from, to) => ((bytes += to - from), source.read(from, to)),
+      }
+      const reader = await openTableFile(counted)
+      await readRows(reader, readRequest(reader.summary, { limit }))
+      return bytes
+    }
+    expect(await read(5)).toBeLessThan(await read(Infinity))
+  })
+})
 
 describe('a fingerprint', () => {
   it('tells apart two Feather files whose footers agree, and two copies of one', async () => {
@@ -129,7 +159,7 @@ describe('readRows', () => {
     const id = String(BASE)
     const out = await readRows(
       reader,
-      request(reader.summary, { key: { names: ['pre_pt_root_id'], ids: [id] } }),
+      readRequest(reader.summary, { key: { names: ['pre_pt_root_id'], ids: [id] } }),
     )
     expect(out).toMatchObject({ rows: 3, blocksRead: 1, blocksSkipped: 2, truncated: false })
     // Exact at eighteen digits, and typed as the schema says.
@@ -144,10 +174,12 @@ describe('readRows', () => {
     const reader = await openTableFile(fixture('synapses-required.parquet'))
     const across = await readRows(
       reader,
-      request(reader.summary, { key: { names: ['pre_pt_root_id'], ids: [String(BASE + 1n)] } }),
+      readRequest(reader.summary, {
+        key: { names: ['pre_pt_root_id'], ids: [String(BASE + 1n)] },
+      }),
     )
     expect(across.data.size).toEqual([13, 14, 15])
-    const all = await readRows(reader, request(reader.summary))
+    const all = await readRows(reader, readRequest(reader.summary))
     expect(all.data.size).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21])
     expect(all.data.score?.[11]).toBeCloseTo(1.1)
   })
@@ -156,7 +188,7 @@ describe('readRows', () => {
     const reader = await openTableFile(fixture('synapses-unsorted.parquet'))
     const out = await readRows(
       reader,
-      request(reader.summary, { key: { names: ['pre_pt_root_id'], ids: [String(BASE)] } }),
+      readRequest(reader.summary, { key: { names: ['pre_pt_root_id'], ids: [String(BASE)] } }),
     )
     expect(out).toMatchObject({ rows: 3, blocksRead: 3, blocksSkipped: 0 })
     expect([...(out.data.size ?? [])].sort()).toEqual([10, 11, 12])
@@ -167,14 +199,17 @@ describe('readRows', () => {
     // bytes short per block, and ids that were real numbers and wrong. Its strings are Utf8View.
     const everything = async (name: string) => {
       const reader = await openTableFile(fixture(name))
-      const all = request(reader.summary)
+      const all = readRequest(reader.summary)
       return readRows(reader, {
         ...all,
         columns: all.columns.filter((c) => c.column.name !== 'hash'),
       })
     }
     const polars = await everything('synapses-polars.feather')
-    expect(polars.data).toEqual((await everything('synapses.feather')).data)
+    const pyarrow = await everything('synapses.feather')
+    expect(polars.data).toEqual(pyarrow.data)
+    // And ZSTD, which apache-arrow ships no codec for (`libraries.ts` registers one).
+    expect((await everything('synapses-zstd.feather')).data).toEqual(pyarrow.data)
     expect(polars.data.pre_pt_root_id?.[0]).toBe(String(BASE))
   })
 
@@ -182,7 +217,7 @@ describe('readRows', () => {
     const reader = await openTableFile(fixture('synapses.feather'))
     const summary = reader.summary
     // `hash` would be refused as a number here, so leave it out.
-    const all = request(summary)
+    const all = readRequest(summary)
     const out = await readRows(reader, {
       ...all,
       columns: all.columns.filter((c) => c.column.name !== 'hash'),
@@ -194,7 +229,7 @@ describe('readRows', () => {
 
   it('refuses a 64-bit value past 2^53 in a number column rather than rounding it', async () => {
     const reader = await openTableFile(fixture('synapses.feather'))
-    await expect(readRows(reader, request(reader.summary))).rejects.toThrow(
+    await expect(readRows(reader, readRequest(reader.summary))).rejects.toThrow(
       /untick Detect id columns and choose "hash" under Read as text — with every other id column/,
     )
   })
@@ -203,17 +238,17 @@ describe('readRows', () => {
     const reader = await openTableFile(fixture('synapses.parquet'))
     const none = await readRows(
       reader,
-      request(reader.summary, { key: { names: ['pre_pt_root_id'], ids: [] } }),
+      readRequest(reader.summary, { key: { names: ['pre_pt_root_id'], ids: [] } }),
     )
     expect(none).toMatchObject({ rows: 0, blocksRead: 0 })
-    const capped = await readRows(reader, request(reader.summary, { limit: 5 }))
+    const capped = await readRows(reader, readRequest(reader.summary, { limit: 5 }))
     expect(capped).toMatchObject({ rows: 5, truncated: true })
   })
 
   it('refuses a file whose fingerprint no longer matches', async () => {
     const reader = await openTableFile(fixture('synapses.parquet'))
     await expect(
-      readRows(reader, request(reader.summary, { fingerprint: 'parquet:1:stale' })),
+      readRows(reader, readRequest(reader.summary, { fingerprint: 'parquet:1:stale' })),
     ).rejects.toThrow(/changed since it was opened/)
   })
 })
@@ -237,7 +272,7 @@ describe('decoded runs', () => {
 /** A lookup of one id's `size` in the Feather fixture, asking for the key's block index. */
 async function featherLookup(id: bigint, rest: Partial<ReadRowsRequest> = {}) {
   const reader = await openTableFile(fixture('synapses.feather'))
-  const all = request(reader.summary)
+  const all = readRequest(reader.summary)
   const lookup: ReadRowsRequest = {
     ...all,
     columns: all.columns.filter((c) => c.column.name === 'size'),

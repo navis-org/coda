@@ -203,7 +203,10 @@ rule belongs to one area, its record is in that area's doc.
   whole. Link Table reads the footer; Read Rows and the Custom Dataset read blocks. **Filter Table
   is the one exception and reads nothing**: its condition rides on the file and every reader
   applies it to the rows it fetched (`readFileRows` takes it off the value) — sound only because a
-  row filter is row-local, so nothing else may be deferred this way. A block index is saved only
+  row filter is row-local, so nothing else may be deferred this way. **A Delta table is a
+  folder read through its log, never listed** (`files/delta/`): its live files are the blocks, the
+  log's per-file stats are parsed without rounding eighteen-digit ids, the version is pinned until
+  ⟳, and a reader feature it does not know is refused by name. A block index is saved only
   when every block's range was seen. **hyparquet is patched** (`patches/`, keyed to its version,
   so an upgrade drops it silently) — without it an optional int64 column decodes a BigInt per
   row, half of a scan's time; a keyed read is split over workers and both synapse ends are one

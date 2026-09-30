@@ -71,6 +71,7 @@ export type PyModule =
   | 'pyarrowFeather'
   | 'pyarrowCompute'
   | 'fsspec'
+  | 'deltalake'
   | 'cloudvolume'
 
 export interface ModuleSpec {
@@ -219,6 +220,10 @@ export const MODULES: Record<PyModule, ModuleSpec> = {
    * own `info`, which is the frame Coda holds geometry in.
    */
   cloudvolume: { from: 'cloudvolume', pip: 'cloud-volume' },
+  // A Delta table read the way delta-rs reads it: `QueryBuilder` is its SQL engine, the one route
+  // that applies deletion vectors and column mapping — `to_pyarrow_dataset` refuses the first and
+  // reads the second's columns as nulls. Required only by a notebook that links one.
+  deltalake: { from: 'deltalake', pip: 'deltalake' },
 }
 
 // ---------------------------------------------------------------------------

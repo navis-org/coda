@@ -61,8 +61,12 @@ const BUILD_INPUTS = ['package.json', 'pnpm-lock.yaml', 'vite.mcp.config.ts']
  *
  * 2,850 → 2,900 the same day, having measured 2,837 kB once the rest of that work had landed:
  * the 2,801 above was taken part way through it, and 13 kB of headroom is not a loose budget.
+ *
+ * 2,900 → 2,950 on 2026-09-30, at 2,874 kB, for Delta tables — the log replay, the reader over
+ * many files and the deletion-vector decoder, which the catalogue's Link Table reaches. `fzstd`,
+ * the ZSTD decoder, stays external with the other readers.
  */
-const SIZE_BUDGET_KB = 2_900
+const SIZE_BUDGET_KB = 2_950
 
 /**
  * Fail the build if the bundle outgrows its budget.
@@ -86,6 +90,7 @@ const EXTERNAL = [
   'hyparquet/src/constants.js',
   'hyparquet/src/thrift.js',
   'hysnappy',
+  'fzstd',
   'lz4js',
 ] as const
 

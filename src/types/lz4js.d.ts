@@ -2,9 +2,9 @@
  * `lz4js` ships no types.
  *
  * Only the block decoder and its size bound are used — `libraries.ts` walks the frame itself,
- * `lz4js`' own frame walk misreading block checksums — plus `compress`, to satisfy
- * `apache-arrow`'s compression registry, which validates a codec by round-tripping it, even though
- * nothing here ever writes an Arrow file. See `arrow()` in `data/libraries.ts`.
+ * `lz4js`' own frame walk misreading block checksums — plus `compress`, which only
+ * `libraries.test.ts` calls, to hold that walk to a frame `lz4js` wrote. See `arrow()` in
+ * `data/libraries.ts`.
  */
 declare module 'lz4js' {
   export function compress(data: Uint8Array): Uint8Array
