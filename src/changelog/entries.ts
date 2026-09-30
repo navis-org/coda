@@ -112,6 +112,52 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    date: '2026-09-30',
+    title: 'Your own connectome, from your own files',
+    summary:
+      'Assemble a dataset from your own tables and files, and query it with the same nodes you use on a published one. Parquet and Feather files of any size are read where they are, never loaded whole.',
+    highlight: true,
+    features: [
+      {
+        kind: 'node',
+        date: '2026-09-30',
+        title: 'Custom Dataset: a connectome from parts',
+        body:
+          'Wire in whichever parts you have: a neuron table, an edge list, a synapse table, and meshes or skeletons borrowed from any other dataset (a Neuroglancer Source, neuPrint, CAVE). **Find Neurons**, **Explore Dataset**, **Connectivity**, **Paths**, **Synapses** and the rest then work on it as on a published dataset.\n\n' +
+          'With a synapse table and no edge list, connectivity is counted from the synapses. **Open example** builds one out of the synthetic connectome; swap any part for your own.',
+        // Taken from a FlyWire workflow on local files, which no capture can reproduce: no
+        // `capture`, so `pnpm changelog:shots` leaves it alone.
+        image: {
+          file: 'custom-dataset.webp',
+          alt: 'A Custom Dataset assembled from FlyWire parts: a cell-type table as Neurons, two Link Table files as the edge list and the 192-million-row synapse table, and a Neuroglancer Source lending meshes and skeletons. Explore Dataset lists its neurons, and a Synapses node returns 124,747 synapses for the 25 selected.',
+        },
+        demo: 'connectome:customDataset',
+      },
+      {
+        kind: 'node',
+        date: '2026-09-30',
+        title: 'Link Table and Read Rows: files too large to load',
+        body:
+          '**Link Table** points at a Parquet or Feather file, on your disk or at a URL, and reads only its footer, so its columns are in every picker below it at once. **Read Rows** pulls out the columns and the rows you ask for, for example by neuron id, and a Custom Dataset reads its Edges and Synapses from a Link Table the same way.\n\n' +
+          'A lookup of a few neurons in a 190-million-row synapse table takes about a second when the file is sorted by the id column. In Chrome and Edge a local file comes back after a reload; in other browsers you choose it again.',
+      },
+    ],
+    items: [
+      {
+        kind: 'node',
+        date: '2026-09-30',
+        title: '**Filter Table** works on a Link Table file.',
+        body: 'Between a Link Table and whatever reads it, it drops rows as they are read, a confidence threshold on a synapse file for example, without scanning the whole file.',
+      },
+      {
+        kind: 'data',
+        date: '2026-09-30',
+        title: 'Notebook export for the new nodes.',
+        body: 'A Python notebook exported from a workflow with a Custom Dataset reads the same files with pyarrow. The R export does not cover them yet.',
+      },
+    ],
+  },
+  {
     date: '2026-09-26',
     title: 'Laminar profiles, and Cortex in the Workflow Wizard',
     summary:

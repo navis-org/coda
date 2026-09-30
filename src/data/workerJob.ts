@@ -38,10 +38,24 @@ export interface JobRunOptions {
 export type JobHandler<J, R> = (job: J, options: JobRunOptions) => Promise<R>
 
 export interface JobOptions<J, R> extends JobRunOptions {
-  /** What failed to start, for the one message nobody else can word: "The … failed to start". */
+  /** What failed to start, for the one message nobody else can word: "The … could not be loaded". */
   readonly label: string
   /** The handler the worker serves, for running here where there is no `Worker`. */
   readonly here: JobHandler<J, R>
+}
+
+/**
+ * A worker's error with no message is its code failing to load — a browser says nothing more about
+ * a module it could not fetch or link. What does that to a page that loaded fine is the app moving
+ * under it: a deploy that removed the old worker's file, or files edited while it was open. The
+ * page's own modules are the old ones and keep working; a new worker fetches the new ones. So the
+ * remedy is the one thing the sentence can offer.
+ */
+function notLoaded(label: string): string {
+  return (
+    `The ${label} could not be loaded — the app has likely changed since this page was opened. ` +
+    `Reload the page and run again.`
+  )
 }
 
 /** The page half: run `job` in the worker `spawn` makes, and settle with its result. */
@@ -77,7 +91,7 @@ export function runWorkerJob<J, R>(
     }
     worker.onerror = (event) => {
       finish()
-      reject(new Error(event.message || `The ${options.label} failed to start`))
+      reject(new Error(event.message || notLoaded(options.label)))
     }
     // A result the page cannot deserialise arrives as neither a message nor an error.
     worker.onmessageerror = () => {

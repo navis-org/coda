@@ -76,6 +76,12 @@ describe('a worker job', () => {
     expect(spawned[0]!.terminated).toBe(true)
   })
 
+  it('says to reload where the worker could not be loaded, which a browser gives no words for', async () => {
+    const result = runWorkerJob(spawn, 'job', options)
+    spawned[0]!.onerror!({ message: '' })
+    await expect(result).rejects.toThrow(/test worker could not be loaded.*Reload the page/)
+  })
+
   it('fails with the handler’s own message when the job threw inside the worker', async () => {
     const result = runWorkerJob(spawn, 'job', options)
     spawned[0]!.onmessage!({ data: { type: 'error', message: 'no such column' } })
